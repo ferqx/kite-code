@@ -50,18 +50,6 @@ export type ToolRequest =
       };
       reason: string;
       protectedCommand: string;
-    }
-  | {
-      type: "tool_call";
-      id?: string;
-      name: "remember";
-      args: {
-        namespace: string;
-        key: string;
-        value: string;
-      };
-      reason: string;
-      protectedCommand: string;
     };
 
 export interface AgentEvent {

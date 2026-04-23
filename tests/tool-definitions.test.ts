@@ -17,10 +17,8 @@ describe("code agent tool definitions", () => {
     expect(tools.map((item) => item.name)).toEqual([
       "shell_execute",
       "apply_patch",
-      "remember",
     ]);
     expect(tools[0].schema).toBeDefined();
     expect(tools[1].schema).toBeDefined();
-    expect(tools[2].schema).toBeDefined();
   });
 });

@@ -11,7 +11,6 @@ describe("model context protocol", () => {
       workspace: "D:\\workspace",
       modelName: "deepseek-chat",
       threadMode: "builder",
-      memories: "prefers concise output",
       roles: ["planner"],
       toolRequest: null,
       toolResults: ["patch ok"],
@@ -31,7 +30,6 @@ describe("model context protocol", () => {
     expect(String(messages[2].content)).not.toContain("Tool result summary:");
     expect(String(messages[2].content)).toContain("Configured model: deepseek-chat");
     expect(String(messages[2].content)).toContain("Verification: verification passed");
-    expect(String(messages[2].content)).toContain("Memory: prefers concise output");
   });
 
   test("preserves tool-call message chain outside dynamic SystemMessage", () => {
@@ -56,7 +54,6 @@ describe("model context protocol", () => {
       userId: "user-a",
       workspace: "D:\\workspace",
       threadMode: "builder",
-      memories: "",
       roles: ["coder"],
       toolRequest: null,
       toolResults: ["tool summary only"],
@@ -75,14 +72,13 @@ describe("model context protocol", () => {
     expect(String(messages[4].content)).not.toContain("{\"ok\":true");
   });
 
-  test("keeps volatile dynamic context after reusable conversation prefix for DeepSeek cache", () => {
+  test("keeps dynamic context after reusable conversation prefix for DeepSeek cache", () => {
     const task = "Create hello.txt";
     const messages = buildModelMessages("agent", {
       task,
       userId: "user-a",
       workspace: "D:\\workspace",
       threadMode: "builder",
-      memories: "volatile memory",
       roles: ["agent", "tools"],
       toolRequest: null,
       toolResults: ["volatile tool result summary"],

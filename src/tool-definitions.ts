@@ -47,25 +47,5 @@ export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
     },
   );
 
-  const remember = tool(
-    async ({ namespace, key, value }) =>
-      JSON.stringify({
-        ok: true,
-        namespace,
-        key,
-        value,
-      }),
-    {
-      name: "remember",
-      description:
-        "Store a long-term memory when the user explicitly asks you to remember something for future conversations.",
-      schema: z.object({
-        namespace: z.string().default("task").describe("Memory namespace."),
-        key: z.string().describe("Short stable key for the memory."),
-        value: z.string().describe("Memory value to store."),
-      }),
-    },
-  );
-
-  return [shellExecute, applyPatch, remember];
+  return [shellExecute, applyPatch];
 }

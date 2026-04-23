@@ -13,7 +13,6 @@ interface ContinueInput {
   threadId: string;
   workspace: string;
   checkpointPath: string;
-  memoryPath: string;
   config: AgentConfig;
   shellExecutor?: (input: ShellInput) => Promise<ShellResult>;
 }
@@ -83,17 +82,15 @@ describe("real DeepSeek LangGraph code agent", () => {
   );
 
   test(
-    "builder mode runs a ReAct tool loop with persisted checkpoints and long-term memory",
+    "builder mode runs a ReAct tool loop with persisted checkpoints",
     async () => {
       const env = createRealTestEnv("openpx-langgraph-react-agent");
-      const secondThreadId = "real-thread-2";
       const fileName = "agent-output.txt";
       const fileContent = "hello from real deepseek langgraph agent";
-      const memoryToken = "langgraph-sqlite-memory-token";
 
       const startEvents = [];
       for await (const event of streamCodeAgent({
-        task: `Create ${fileName} with exact content "${fileContent}". Remember this token for me: ${memoryToken}.`,
+        task: `Create ${fileName} with exact content "${fileContent}".`,
         threadMode: "builder",
         ...env,
       })) {
@@ -112,15 +109,6 @@ describe("real DeepSeek LangGraph code agent", () => {
       expect(existsSync(join(env.workspace, fileName))).toBe(true);
       expect(readFileSync(join(env.workspace, fileName), "utf8")).toContain(fileContent);
       expect(existsSync(env.checkpointPath)).toBe(true);
-
-      const recallEvents = await runToFinal({
-        ...env,
-        threadId: secondThreadId,
-        task: "What token should you remember for me? Do not edit files.",
-        threadMode: "builder",
-      });
-      const final = recallEvents.find((event) => event.type === "final");
-      expect(JSON.stringify(final)).toContain(memoryToken);
     },
     120_000,
   );
@@ -139,26 +127,9 @@ function createRealTestEnv(name: string): ContinueInput & { task?: string; threa
     threadId: `${name}-thread`,
     workspace,
     checkpointPath: join(dataDir, "checkpoints.sqlite"),
-    memoryPath: join(dataDir, "memory.sqlite"),
     config: loadAgentConfig(),
     shellExecutor: createTestShellExecutor(),
   };
-}
-
-async function runToFinal(
-  input: ContinueInput & { task: string; threadMode: "plan" | "builder" },
-): Promise<AgentEvent[]> {
-  const events: AgentEvent[] = [];
-  for await (const event of streamCodeAgent(input)) {
-    events.push(event);
-    if (event.type === "final") {
-      return events;
-    }
-    if (event.type === "interrupt") {
-      break;
-    }
-  }
-  return events.concat(await continueApproving(input, { approved: true }));
 }
 
 async function continueApproving(

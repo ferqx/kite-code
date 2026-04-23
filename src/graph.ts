@@ -13,7 +13,6 @@ import type { AgentConfig } from "./config";
 import { extractPromptCacheMetrics, type PromptCacheMetrics } from "./cache-metrics";
 import { buildModelMessages } from "./context";
 import { BunSqliteSaver } from "./checkpoint";
-import { SqliteLongTermMemory } from "./memory";
 import { createDeepSeekModel } from "./model";
 import { createCodeAgentTools } from "./tool-definitions";
 import {
@@ -38,10 +37,6 @@ const AgentState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
     reducer: messagesStateReducer,
     default: () => [],
-  }),
-  memories: Annotation<string>({
-    reducer: (_left, right) => right,
-    default: () => "",
   }),
   roles: Annotation<string[]>({
     reducer: (left, right) => left.concat(right),
@@ -74,17 +69,14 @@ export type CodeAgentState = typeof AgentState.State;
 export interface BuildCodeAgentGraphInput {
   config: AgentConfig;
   checkpointPath: string;
-  memoryPath: string;
   shellExecutor?: ShellExecutor;
 }
 
 export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const model = createDeepSeekModel(input.config);
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
-  const memory = new SqliteLongTermMemory(input.memoryPath);
 
   const agent = async (state: CodeAgentState) => {
-    const memories = memory.recallText(state.userId);
     const initializedMessages =
       state.messages.length > 0 ? state.messages : [new HumanMessage(state.task)];
 
@@ -93,12 +85,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         buildModelMessages("agent", {
           ...state,
           modelName: input.config.modelName,
-          memories,
           messages: initializedMessages,
         }),
       );
       return {
-        memories,
         final: messageText(response),
         messages: state.messages.length > 0 ? [response] : [initializedMessages[0], response],
         cacheMetrics: extractPromptCacheMetrics(response),
@@ -121,7 +111,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         buildModelMessages("agent", {
           ...state,
           modelName: input.config.modelName,
-          memories,
           messages: initializedMessages,
         }),
       );
@@ -130,7 +119,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     if (request) {
       const toolCallMessage = messageWithSingleToolCall(response, request.id);
       return {
-        memories,
         messages:
           state.messages.length > 0
             ? [toolCallMessage]
@@ -142,7 +130,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
 
     return {
-      memories,
       final: messageText(response),
       messages: state.messages.length > 0 ? [response] : [initializedMessages[0], response],
       cacheMetrics: extractPromptCacheMetrics(response),
@@ -228,15 +215,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       status: result?.ok === false ? "error" : "success",
     });
 
-    if (state.toolRequest.name === "remember") {
-      memory.put({
-        userId: state.userId,
-        namespace: state.toolRequest.args.namespace,
-        key: state.toolRequest.args.key,
-        value: state.toolRequest.args.value,
-      });
-    }
-
     return {
       toolRequest: null,
       toolResults: [JSON.stringify(result)],
@@ -255,7 +233,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     .addEdge("tools", "agent")
     .compile({ checkpointer });
 
-  return { graph, checkpointer, memory };
+  return { graph, checkpointer };
 }
 
 function routeAfterAgent(state: CodeAgentState): "approval" | typeof END {
@@ -291,15 +269,6 @@ async function runApprovedTool(
       shellExecutor,
     });
   }
-  if (request.name === "remember") {
-    return {
-      ok: true,
-      command: request.protectedCommand,
-      exitCode: 0,
-      stdout: request.args.value,
-      stderr: "",
-    };
-  }
   return (shellExecutor ?? shellTool)({
     workspace,
     command: request.args.command,
@@ -310,7 +279,7 @@ function toolRequestFromMessage(
   message: AIMessage,
   state: CodeAgentState,
 ): Extract<ToolRequest, { type: "tool_call" }> | null {
-  const call = message.tool_calls?.find((item) => item.name === "remember") ?? message.tool_calls?.[0];
+  const call = message.tool_calls?.[0];
   if (!call) {
     return null;
   }
@@ -338,21 +307,6 @@ function toolRequestFromMessage(
       args: { command: args.command || "pwd" },
       reason: "Model requested shell_execute tool call",
       protectedCommand: args.command || "pwd",
-    };
-  }
-
-  if (call.name === "remember") {
-    const args = call.args as { namespace?: string; key?: string; value?: string };
-    const namespace = args.namespace || "task";
-    const key = args.key || "memory";
-    const value = args.value || "";
-    return {
-      type: "tool_call",
-      id: call.id,
-      name: "remember",
-      args: { namespace, key, value },
-      reason: "Model requested long-term memory storage",
-      protectedCommand: `remember ${namespace}/${key}`,
     };
   }
 

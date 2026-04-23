@@ -6,7 +6,6 @@ This is a standalone Bun/TypeScript code-agent reference built with LangGraph.js
 
 - LangGraph `StateGraph` with planner, coder, tool-review, and reviewer roles.
 - Bun-native SQLite checkpointer for short-term thread persistence.
-- Bun-native SQLite long-term memory store keyed by `user_id`.
 - Streaming graph updates with normalized interrupt and final events.
 - Human-in-the-loop approval through LangGraph `interrupt()` and `Command({ resume })`.
 - Workspace-safe file patch tool and structured shell tool results.
@@ -59,14 +58,14 @@ When the stream emits an `interrupt` event, approve and resume:
 bun run agent resume --thread demo --user local --approve
 ```
 
-By default, the CLI writes SQLite files under `.openpx/` in the current workspace. You can override paths with `--checkpoints` and `--memory`.
+By default, the CLI writes the checkpoint SQLite file under `.openpx/` in the current workspace. You can override the path with `--checkpoints`.
 
 ## Test
 
 Unit-level tests:
 
 ```bash
-bun test tests/config.test.ts tests/memory.test.ts tests/tools.test.ts tests/checkpoint.test.ts
+bun test tests/config.test.ts tests/tools.test.ts tests/checkpoint.test.ts
 ```
 
 Real DeepSeek end-to-end test:
@@ -75,4 +74,4 @@ Real DeepSeek end-to-end test:
 bun run test:real
 ```
 
-The real test calls `deepseek-chat`, streams to an interrupt, resumes approval, writes a file, checks the checkpoint database, and verifies long-term memory across a second thread.
+The real test calls `deepseek-chat`, streams to an interrupt, resumes approval, writes a file, and checks the checkpoint database.

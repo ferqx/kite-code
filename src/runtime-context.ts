@@ -16,10 +16,8 @@ export interface RuntimeContextInput {
   userId: string;
   workspace: string;
   checkpointPath?: string;
-  memoryPath?: string;
   modelName?: string;
   threadMode: ThreadMode;
-  memories: string;
   verification: string;
   now?: Date;
   timezone?: string;
@@ -28,7 +26,6 @@ export interface RuntimeContextInput {
 export function getRuntimeSystemInfo(input: {
   workspace: string;
   checkpointPath?: string;
-  memoryPath?: string;
   now?: Date;
   timezone?: string;
 }): RuntimeSystemInfo {
@@ -63,9 +60,6 @@ export function buildRuntimeContext(input: RuntimeContextInput): string {
 
   if (input.verification) {
     lines.push(`Verification: ${input.verification}`);
-  }
-  if (input.memories) {
-    lines.push(`Memory: ${input.memories}`);
   }
 
   return lines.join("\n");

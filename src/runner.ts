@@ -11,7 +11,6 @@ export interface StreamCodeAgentInput {
   threadId: string;
   workspace: string;
   checkpointPath: string;
-  memoryPath: string;
   config: AgentConfig;
   shellExecutor?: ShellExecutor;
 }
@@ -23,7 +22,7 @@ export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task">
 export async function* streamCodeAgent(
   input: StreamCodeAgentInput,
 ): AsyncGenerator<AgentEvent> {
-  const { graph, memory, checkpointer } = buildCodeAgentGraph(input);
+  const { graph, checkpointer } = buildCodeAgentGraph(input);
   const directive = parsePlanDirective(input.task);
   try {
     const stream = await graph.stream(
@@ -38,7 +37,6 @@ export async function* streamCodeAgent(
 
     yield* normalizeGraphStream(stream);
   } finally {
-    memory.close();
     checkpointer.close();
   }
 }
@@ -46,7 +44,7 @@ export async function* streamCodeAgent(
 export async function* resumeCodeAgent(
   input: ResumeCodeAgentInput,
 ): AsyncGenerator<AgentEvent> {
-  const { graph, memory, checkpointer } = buildCodeAgentGraph(input);
+  const { graph, checkpointer } = buildCodeAgentGraph(input);
   try {
     const stream = await graph.stream(
       new Command({ resume: input.resume }),
@@ -55,7 +53,6 @@ export async function* resumeCodeAgent(
 
     yield* normalizeGraphStream(stream);
   } finally {
-    memory.close();
     checkpointer.close();
   }
 }

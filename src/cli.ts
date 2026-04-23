@@ -9,7 +9,6 @@ export interface ParsedArgs {
   userId: string;
   workspace: string;
   checkpointPath: string;
-  memoryPath: string;
   approve: boolean;
 }
 
@@ -29,7 +28,6 @@ export async function main(): Promise<void> {
           threadId: args.threadId,
           workspace: args.workspace,
           checkpointPath: args.checkpointPath,
-          memoryPath: args.memoryPath,
           config,
         })
       : resumeCodeAgent({
@@ -37,7 +35,6 @@ export async function main(): Promise<void> {
           threadId: args.threadId,
           workspace: args.workspace,
           checkpointPath: args.checkpointPath,
-          memoryPath: args.memoryPath,
           config,
           resume: { approved: args.approve },
         });
@@ -65,7 +62,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
     checkpointPath: resolve(
       value("--checkpoints", join(cwd, ".openpx", "checkpoints.sqlite")),
     ),
-    memoryPath: resolve(value("--memory", join(cwd, ".openpx", "memory.sqlite"))),
     approve: argv.includes("--approve"),
   };
 }
@@ -81,7 +77,6 @@ function positionalTask(argv: string[]): string {
     "--user",
     "--workspace",
     "--checkpoints",
-    "--memory",
   ]);
   const parts: string[] = [];
   for (let index = 1; index < argv.length; index++) {
@@ -110,10 +105,9 @@ function printHelp(): void {
 Options:
   --task <text>          Task for run
   --thread <id>          LangGraph thread id
-  --user <id>            Long-term memory user id
+  --user <id>            User id for the run
   --workspace <path>     Tool workspace
   --checkpoints <path>   SQLite checkpoint path
-  --memory <path>        SQLite long-term memory path
   --approve             Resume an interrupt with approval`);
 }
 
