@@ -1,0 +1,14 @@
+{
+        "provider": {
+          "deepseek": {
+            "apiKey": "sk-test",
+            "baseURL": "https://api.deepseek.com/v1"
+          }
+        },
+        "model": {
+          "default": {
+            "provider": "deepseek",
+            "name": "deepseek-chat"
+          }
+        }
+      }

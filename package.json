@@ -1,0 +1,26 @@
+{
+  "name": "openpx-langgraph-code-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "agent": "bun run src/cli.ts",
+    "test": "bun test",
+    "test:real": "bun test tests/real-agent.test.ts --timeout 120000",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.0.0",
+    "@langchain/deepseek": "^1.0.0",
+    "@langchain/langgraph": "^1.0.0",
+    "@langchain/langgraph-checkpoint": "^1.0.1",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.0",
+    "jsonc-parser": "^3.3.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  }
+}
