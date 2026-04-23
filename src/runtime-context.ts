@@ -1,5 +1,6 @@
 import { platform, release, type } from "node:os";
-import type { ThreadMode } from "./graph";
+import type { BaseMessage } from "@langchain/core/messages";
+import { deriveModeFromMessages, derivePlanFromMessages } from "./plan-state";
 
 export interface RuntimeSystemInfo {
   currentTimeIso: string;
@@ -15,17 +16,14 @@ export interface RuntimeSystemInfo {
 export interface RuntimeContextInput {
   userId: string;
   workspace: string;
-  checkpointPath?: string;
   modelName?: string;
-  threadMode: ThreadMode;
-  verification: string;
+  messages: BaseMessage[];
   now?: Date;
   timezone?: string;
 }
 
 export function getRuntimeSystemInfo(input: {
   workspace: string;
-  checkpointPath?: string;
   now?: Date;
   timezone?: string;
 }): RuntimeSystemInfo {
@@ -44,6 +42,8 @@ export function getRuntimeSystemInfo(input: {
 
 export function buildRuntimeContext(input: RuntimeContextInput): string {
   const info = getRuntimeSystemInfo(input);
+  const mode = deriveModeFromMessages(input.messages);
+  const plan = derivePlanFromMessages(input.messages);
   const lines = [
     "Dynamic runtime context:",
     `Time: ${info.currentTimeIso}`,
@@ -54,20 +54,25 @@ export function buildRuntimeContext(input: RuntimeContextInput): string {
     `Workspace: ${info.workspace}`,
     `User ID: ${input.userId}`,
     ...(input.modelName ? [`Configured model: ${input.modelName}`] : []),
-    `Thread mode: ${input.threadMode}`,
-    `Tool policy: ${toolPolicy(input.threadMode)}`,
+    `Thread mode: ${mode}`,
+    `Plan state: ${plan ? "active" : "inactive"}`,
+    `Tool policy: ${toolPolicy(mode)}`,
   ];
 
-  if (input.verification) {
-    lines.push(`Verification: ${input.verification}`);
+  if (plan?.items.length) {
+    lines.push(
+      `Plan items: ${plan.items
+        .map((item) => `${item.status}:${item.step}`)
+        .join(" | ")}`,
+    );
   }
 
   return lines.join("\n");
 }
 
-function toolPolicy(mode: ThreadMode): string {
+function toolPolicy(mode: "plan" | "builder"): string {
   if (mode === "plan") {
-    return "read-only planning; do not edit, delete, execute tests, or mutate workspace";
+    return "read-only planning; may read files/search/list/git inspect through shell_read and update_plan; must not write, delete, run tests, install dependencies, execute project code, or mutate workspace";
   }
   return "execute mode; write/delete/execute tools require approval before running";
 }

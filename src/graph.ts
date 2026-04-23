@@ -10,57 +10,33 @@ import {
   messagesStateReducer,
 } from "@langchain/langgraph";
 import type { AgentConfig } from "./config";
-import { extractPromptCacheMetrics, type PromptCacheMetrics } from "./cache-metrics";
 import { buildModelMessages } from "./context";
 import { BunSqliteSaver } from "./checkpoint";
 import { createDeepSeekModel } from "./model";
-import { createCodeAgentTools } from "./tool-definitions";
+import { deriveModeFromMessages, derivePlanFromMessages, SWITCH_TO_BUILDER_MESSAGE } from "./plan-state";
+import {
+  createCodeAgentTools,
+  createPlanAgentTools,
+  isPlanReadOnlyShellCommand,
+} from "./tool-definitions";
 import {
   applyPatchTool,
   buildApplyPatchCommand,
   shellTool,
   type ShellExecutor,
 } from "./tools";
-import type { ToolRequest } from "./types";
-
-export type ThreadMode = "plan" | "builder";
-export type ThreadModeInput = ThreadMode | "execute";
+import type { AgentPlan } from "./types";
 
 const AgentState = Annotation.Root({
-  task: Annotation<string>,
   userId: Annotation<string>,
   workspace: Annotation<string>,
-  threadMode: Annotation<ThreadMode>({
-    reducer: (_left, right) => right,
-    default: () => "builder",
-  }),
   messages: Annotation<BaseMessage[]>({
     reducer: messagesStateReducer,
-    default: () => [],
-  }),
-  roles: Annotation<string[]>({
-    reducer: (left, right) => left.concat(right),
-    default: () => [],
-  }),
-  toolRequest: Annotation<ToolRequest | null>({
-    reducer: (_left, right) => right,
-    default: () => null,
-  }),
-  toolResults: Annotation<string[]>({
-    reducer: (left, right) => left.concat(right),
     default: () => [],
   }),
   final: Annotation<string>({
     reducer: (_left, right) => right,
     default: () => "",
-  }),
-  verification: Annotation<string>({
-    reducer: (_left, right) => right,
-    default: () => "",
-  }),
-  cacheMetrics: Annotation<PromptCacheMetrics | null>({
-    reducer: (_left, right) => right,
-    default: () => null,
   }),
 });
 
@@ -77,104 +53,70 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
 
   const agent = async (state: CodeAgentState) => {
-    const initializedMessages =
-      state.messages.length > 0 ? state.messages : [new HumanMessage(state.task)];
+    const mode = deriveModeFromMessages(state.messages);
+    const tools =
+      mode === "plan"
+        ? createPlanAgentTools({
+            workspace: state.workspace,
+            shellExecutor: input.shellExecutor,
+          })
+        : createCodeAgentTools({
+            workspace: state.workspace,
+            shellExecutor: input.shellExecutor,
+          });
 
-    if (state.threadMode === "plan") {
-      const response = await model.invoke(
-        buildModelMessages("agent", {
-          ...state,
-          modelName: input.config.modelName,
-          messages: initializedMessages,
-        }),
-      );
-      return {
-        final: messageText(response),
-        messages: state.messages.length > 0 ? [response] : [initializedMessages[0], response],
-        cacheMetrics: extractPromptCacheMetrics(response),
-        roles: ["agent"],
-        toolRequest: {
-          type: "mode_change",
-          targetMode: "builder",
-          reason: "Plan mode completed and requires user confirmation before edits.",
-        } satisfies ToolRequest,
-      };
-    }
-
-    const tools = createCodeAgentTools({
-      workspace: state.workspace,
-      shellExecutor: input.shellExecutor,
-    });
     const response = await model
       .bindTools(tools, { tool_choice: "auto" })
       .invoke(
         buildModelMessages("agent", {
           ...state,
           modelName: input.config.modelName,
-          messages: initializedMessages,
         }),
       );
 
-    const request = toolRequestFromMessage(response, state);
+    const request = toolRequestFromMessage(response, state.workspace);
     if (request) {
       const toolCallMessage = messageWithSingleToolCall(response, request.id);
       return {
-        messages:
-          state.messages.length > 0
-            ? [toolCallMessage]
-            : [initializedMessages[0], toolCallMessage],
-        cacheMetrics: extractPromptCacheMetrics(response),
-        toolRequest: request,
-        roles: ["agent"],
+        messages: [toolCallMessage],
       };
     }
 
     return {
       final: messageText(response),
-      messages: state.messages.length > 0 ? [response] : [initializedMessages[0], response],
-      cacheMetrics: extractPromptCacheMetrics(response),
-      roles: ["agent"],
+      messages: [response],
     };
   };
 
   const approval = async (state: CodeAgentState) => {
-    if (!state.toolRequest) {
-      return {};
-    }
+    const mode = deriveModeFromMessages(state.messages);
+    const request = getPendingToolRequest(state.messages, state.workspace);
 
-    if (state.toolRequest.type === "mode_change") {
+    if (mode === "plan" && state.final && !request) {
       const resume = interrupt({
         kind: "mode_confirmation",
-        targetMode: state.toolRequest.targetMode,
+        targetMode: "builder",
         plan: state.final,
-      }) as boolean | { approved?: boolean; nextMode?: ThreadModeInput; reason?: string };
+      }) as boolean | { approved?: boolean; reason?: string };
       const approved =
         resume === true ||
         (typeof resume === "object" && resume !== null && resume.approved === true);
-      return {
-        threadMode: approved
-          ? typeof resume === "object" && resume.nextMode
-            ? normalizeThreadMode(resume.nextMode)
-            : state.toolRequest.targetMode
-          : state.threadMode,
-        final: approved ? "" : state.final,
-        messages: approved
-          ? [
-              new HumanMessage(
-                state.toolRequest.targetMode === "plan"
-                  ? "Plan mode confirmed. Create a concise plan for the original user request. Do not edit files."
-                  : "Plan confirmed. Switch to builder mode and complete the original user request using tools as needed.",
-              ),
-            ]
-          : [],
-        toolRequest: null,
-        roles: ["approval"],
-      };
+
+      return approved
+        ? {
+            final: "",
+            messages: [new HumanMessage(SWITCH_TO_BUILDER_MESSAGE)],
+          }
+        : {};
+    }
+
+    if (!request) {
+      return {};
     }
 
     const approved = interrupt({
       kind: "tool_approval",
-      request: state.toolRequest,
+      request,
     }) as boolean | { approved?: boolean; reason?: string };
     const allowed =
       approved === true ||
@@ -182,44 +124,47 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     if (!allowed) {
       return {
-        toolRequest: null,
-        toolResults: [
-          `Rejected: ${
-            typeof approved === "object" && approved !== null
-              ? approved.reason ?? "not approved"
-              : "not approved"
-          }`,
+        messages: [
+          new ToolMessage({
+            content: JSON.stringify({
+              ok: false,
+              rejected: true,
+              reason:
+                typeof approved === "object" && approved !== null
+                  ? approved.reason ?? "not approved"
+                  : "not approved",
+            }),
+            tool_call_id: request.id ?? "missing-tool-call-id",
+            status: "error",
+          }),
         ],
-        roles: ["approval"],
       };
     }
 
-    return {
-      roles: ["approval"],
-    };
+    return {};
   };
 
   const tools = async (state: CodeAgentState) => {
-    if (!state.toolRequest || state.toolRequest.type !== "tool_call") {
+    const request = getPendingToolRequest(state.messages, state.workspace);
+    if (!request) {
       return {};
     }
 
     const result = await runApprovedTool(
       state.workspace,
-      state.toolRequest,
+      request,
       input.shellExecutor,
+      deriveModeFromMessages(state.messages),
     );
-    const toolMessage = new ToolMessage({
-      content: JSON.stringify(result),
-      tool_call_id: state.toolRequest.id ?? "missing-tool-call-id",
-      status: result?.ok === false ? "error" : "success",
-    });
 
     return {
-      toolRequest: null,
-      toolResults: [JSON.stringify(result)],
-      messages: [toolMessage],
-      roles: ["tools"],
+      messages: [
+        new ToolMessage({
+          content: JSON.stringify(result),
+          tool_call_id: request.id ?? "missing-tool-call-id",
+          status: result.ok === false ? "error" : "success",
+        }),
+      ],
     };
   };
 
@@ -236,22 +181,66 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   return { graph, checkpointer };
 }
 
-function routeAfterAgent(state: CodeAgentState): "approval" | typeof END {
-  return state.toolRequest ? "approval" : END;
+export function routeAfterAgent(state: CodeAgentState): "approval" | "tools" | typeof END {
+  const request = getPendingToolRequest(state.messages, state.workspace);
+  if (!request) {
+    return deriveModeFromMessages(state.messages) === "plan" && state.final ? "approval" : END;
+  }
+  return deriveModeFromMessages(state.messages) === "plan" || request.name === "update_plan"
+    ? "tools"
+    : "approval";
 }
 
 export function routeAfterApproval(state: CodeAgentState): "tools" | "agent" | typeof END {
-  if (state.toolRequest?.type === "tool_call") {
-    return "tools";
-  }
-  return "agent";
+  return getPendingToolRequest(state.messages, state.workspace) ? "tools" : "agent";
 }
 
-async function runApprovedTool(
+export async function runApprovedTool(
   workspace: string,
-  request: Extract<ToolRequest, { type: "tool_call" }>,
+  request: PendingToolRequest,
   shellExecutor?: ShellExecutor,
+  mode: "plan" | "builder" = "builder",
 ) {
+  if (request.name === "update_plan") {
+    return {
+      ok: true,
+      command: "update_plan",
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      plan: {
+        explanation: request.args.explanation,
+        items: request.args.items,
+      },
+    };
+  }
+
+  if (request.name === "shell_read") {
+    if (!isPlanReadOnlyShellCommand(request.args.command)) {
+      return {
+        ok: false,
+        command: request.args.command,
+        exitCode: -1,
+        stdout: "",
+        stderr: "Rejected: plan mode allows read-only shell commands only.",
+      };
+    }
+    return (shellExecutor ?? shellTool)({
+      workspace,
+      command: request.args.command,
+    });
+  }
+
+  if (mode === "plan") {
+    return {
+      ok: false,
+      command: request.protectedCommand,
+      exitCode: -1,
+      stdout: "",
+      stderr: "Rejected: Plan mode allows read-only shell commands only.",
+    };
+  }
+
   if (request.name === "apply_patch") {
     if (!request.args.path || !request.args.content) {
       return {
@@ -269,16 +258,63 @@ async function runApprovedTool(
       shellExecutor,
     });
   }
+
   return (shellExecutor ?? shellTool)({
     workspace,
     command: request.args.command,
   });
 }
 
+export function isPlanMode(messages: BaseMessage[]): boolean {
+  return deriveModeFromMessages(messages) === "plan";
+}
+
+type PendingToolRequest =
+  | {
+      id?: string;
+      name: "apply_patch";
+      args: {
+        path: string;
+        content: string;
+      };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
+      id?: string;
+      name: "shell_execute" | "shell_read";
+      args: {
+        command: string;
+      };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
+      id?: string;
+      name: "update_plan";
+      args: {
+        explanation?: string;
+        items: AgentPlan["items"];
+      };
+      reason: string;
+      protectedCommand: string;
+    };
+
+function getPendingToolRequest(
+  messages: BaseMessage[],
+  workspace: string,
+): PendingToolRequest | null {
+  const lastMessage = messages.at(-1);
+  if (!(lastMessage instanceof AIMessage)) {
+    return null;
+  }
+  return toolRequestFromMessage(lastMessage, workspace);
+}
+
 function toolRequestFromMessage(
   message: AIMessage,
-  state: CodeAgentState,
-): Extract<ToolRequest, { type: "tool_call" }> | null {
+  workspace: string,
+): PendingToolRequest | null {
   const call = message.tool_calls?.[0];
   if (!call) {
     return null;
@@ -286,27 +322,50 @@ function toolRequestFromMessage(
 
   if (call.name === "apply_patch") {
     const args = call.args as { path?: string; content?: string };
-    const path = normalizePatchPath(state.workspace, args.path || "");
+    const path = normalizePatchPath(workspace, args.path || "");
     const content = args.content || "";
     return {
-      type: "tool_call",
       id: call.id,
       name: "apply_patch",
       args: { path, content },
       reason: "Model requested apply_patch tool call",
-      protectedCommand: buildApplyPatchCommand(assertPreviewPath(state.workspace, path), content),
+      protectedCommand: buildApplyPatchCommand(assertPreviewPath(workspace, path), content),
     };
   }
 
   if (call.name === "shell_execute") {
     const args = call.args as { command?: string };
     return {
-      type: "tool_call",
       id: call.id,
       name: "shell_execute",
       args: { command: args.command || "pwd" },
       reason: "Model requested shell_execute tool call",
       protectedCommand: args.command || "pwd",
+    };
+  }
+
+  if (call.name === "shell_read") {
+    const args = call.args as { command?: string };
+    return {
+      id: call.id,
+      name: "shell_read",
+      args: { command: args.command || "pwd" },
+      reason: "Model requested read-only shell command",
+      protectedCommand: args.command || "pwd",
+    };
+  }
+
+  if (call.name === "update_plan") {
+    const args = call.args as Partial<AgentPlan>;
+    return {
+      id: call.id,
+      name: "update_plan",
+      args: {
+        explanation: args.explanation,
+        items: Array.isArray(args.items) ? args.items : [],
+      },
+      reason: "Model requested plan state update",
+      protectedCommand: "update_plan",
     };
   }
 
@@ -361,17 +420,9 @@ function assertPreviewPath(workspace: string, path: string): string {
 }
 
 function messageText(message: AIMessage): string {
-  if (typeof message.content === "string") {
-    return message.content;
-  }
-  return JSON.stringify(message.content);
-}
-
-export function normalizeThreadMode(mode: ThreadModeInput | undefined): ThreadMode {
-  if (mode === "plan") {
-    return "plan";
-  }
-  return "builder";
+  return typeof message.content === "string"
+    ? message.content
+    : JSON.stringify(message.content);
 }
 
 export { Command };

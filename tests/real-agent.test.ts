@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { loadAgentConfig } from "../src/config";
 import { resumeCodeAgent, streamCodeAgent } from "../src/runner";
+import { shellTool } from "../src/tools";
 import type { AgentConfig } from "../src/config";
 import type { ShellInput, ShellResult } from "../src/types";
 import type { AgentEvent } from "../src/types";
@@ -26,7 +27,6 @@ describe("real DeepSeek LangGraph code agent", () => {
       const events: AgentEvent[] = [];
       for await (const event of streamCodeAgent({
         task: "你当前是什么模型？上下文有多长",
-        threadMode: "builder",
         ...env,
       })) {
         events.push(event);
@@ -74,7 +74,6 @@ describe("real DeepSeek LangGraph code agent", () => {
 
       expect(JSON.stringify(executeEvents)).toContain("tool_approval");
       expect(JSON.stringify(executeEvents)).toContain("tool_call_id");
-      expect(hasCacheMetrics(executeEvents)).toBe(true);
       expect(existsSync(join(env.workspace, fileName))).toBe(true);
       expect(readFileSync(join(env.workspace, fileName), "utf8")).toContain(fileContent);
     },
@@ -91,7 +90,6 @@ describe("real DeepSeek LangGraph code agent", () => {
       const startEvents = [];
       for await (const event of streamCodeAgent({
         task: `Create ${fileName} with exact content "${fileContent}".`,
-        threadMode: "builder",
         ...env,
       })) {
         startEvents.push(event);
@@ -105,7 +103,6 @@ describe("real DeepSeek LangGraph code agent", () => {
       const resumedEvents = await continueApproving(env, { approved: true });
 
       expect(JSON.stringify(resumedEvents)).toContain("tool_call_id");
-      expect(hasCacheMetrics(startEvents.concat(resumedEvents))).toBe(true);
       expect(existsSync(join(env.workspace, fileName))).toBe(true);
       expect(readFileSync(join(env.workspace, fileName), "utf8")).toContain(fileContent);
       expect(existsSync(env.checkpointPath)).toBe(true);
@@ -114,7 +111,7 @@ describe("real DeepSeek LangGraph code agent", () => {
   );
 });
 
-function createRealTestEnv(name: string): ContinueInput & { task?: string; threadMode?: "plan" | "builder" } {
+function createRealTestEnv(name: string): ContinueInput & { task?: string } {
   const root = join(tmpdir(), name);
   const workspace = join(root, "workspace");
   const dataDir = join(root, "data");
@@ -163,15 +160,13 @@ async function continueApproving(
   return events;
 }
 
-function hasCacheMetrics(events: AgentEvent[]): boolean {
-  return events.some((event) => {
-    const data = event.data as { agent?: { cacheMetrics?: unknown } } | undefined;
-    return Boolean(data?.agent?.cacheMetrics);
-  });
-}
-
 function createTestShellExecutor() {
   return async (input: ShellInput): Promise<ShellResult> => {
+    const bunWrite = parseBunWriteCommand(input.command);
+    if (bunWrite) {
+      mkdirSync(dirname(bunWrite.path), { recursive: true });
+      await Bun.write(bunWrite.path, bunWrite.content);
+    }
     const encoded = input.command.match(/\$encoded = '([^']+)'/)?.[1];
     const path = input.command.match(/Set-Content -LiteralPath '((?:''|[^'])+)'/)?.[1];
     if (encoded && path) {
@@ -191,7 +186,7 @@ function createTestShellExecutor() {
       input.command.match(/cat\s+([^"\s]+)/i) ??
       input.command.match(/type\s+([^"\s]+)/i);
     if (readMatch) {
-      const target = join(input.workspace, readMatch[1]);
+      const target = isAbsolute(readMatch[1]) ? readMatch[1] : join(input.workspace, readMatch[1]);
       return {
         ok: true,
         command: input.command,
@@ -201,14 +196,31 @@ function createTestShellExecutor() {
       };
     }
 
-    return {
-      ok: true,
-      command: input.command,
-      exitCode: 0,
-      stdout: "ok",
-      stderr: "",
-    };
+    return shellTool(input);
   };
+}
+
+function parseBunWriteCommand(command: string): { path: string; content: string } | null {
+  if (!command.includes("fs.writeFileSync")) {
+    return null;
+  }
+  const args = command.match(/'((?:'\\''|[^'])*)'/g)?.map((arg) =>
+    unescapePosixShellArg(arg.slice(1, -1)),
+  ) ?? [];
+  const encoded = args.at(-1);
+  const path = args.at(-2);
+  if (!path || !encoded || !/^[A-Za-z0-9+/=]+$/.test(encoded)) {
+    return null;
+  }
+
+  return {
+    path,
+    content: Buffer.from(encoded, "base64").toString("utf8"),
+  };
+}
+
+function unescapePosixShellArg(value: string): string {
+  return value.replaceAll("'\\''", "'");
 }
 
 function parsePlainWriteCommand(command: string): { path: string; content: string } | null {

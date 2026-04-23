@@ -6,17 +6,11 @@ describe("model context protocol", () => {
   test("keeps user input as the only HumanMessage and places run context in SystemMessage", () => {
     const task = "Create hello.txt with exact content \"hi\".";
     const messages = buildModelMessages("agent", {
-      task,
       userId: "user-a",
       workspace: "D:\\workspace",
       modelName: "deepseek-chat",
-      threadMode: "builder",
-      roles: ["planner"],
-      toolRequest: null,
-      toolResults: ["patch ok"],
       messages: [new HumanMessage(task)],
       final: "",
-      verification: "verification passed",
     });
 
     expect(messages).toHaveLength(3);
@@ -29,7 +23,6 @@ describe("model context protocol", () => {
     expect(String(messages[2].content)).not.toContain("Plan draft:");
     expect(String(messages[2].content)).not.toContain("Tool result summary:");
     expect(String(messages[2].content)).toContain("Configured model: deepseek-chat");
-    expect(String(messages[2].content)).toContain("Verification: verification passed");
   });
 
   test("preserves tool-call message chain outside dynamic SystemMessage", () => {
@@ -50,16 +43,10 @@ describe("model context protocol", () => {
       status: "success",
     });
     const messages = buildModelMessages("agent", {
-      task,
       userId: "user-a",
       workspace: "D:\\workspace",
-      threadMode: "builder",
-      roles: ["coder"],
-      toolRequest: null,
-      toolResults: ["tool summary only"],
       messages: [new HumanMessage(task), ai, tool],
       final: "",
-      verification: "verification passed",
     });
 
     expect(messages[1]).toBeInstanceOf(HumanMessage);
@@ -75,13 +62,8 @@ describe("model context protocol", () => {
   test("keeps dynamic context after reusable conversation prefix for DeepSeek cache", () => {
     const task = "Create hello.txt";
     const messages = buildModelMessages("agent", {
-      task,
       userId: "user-a",
       workspace: "D:\\workspace",
-      threadMode: "builder",
-      roles: ["agent", "tools"],
-      toolRequest: null,
-      toolResults: ["volatile tool result summary"],
       messages: [
         new HumanMessage(task),
         new AIMessage({
@@ -100,7 +82,6 @@ describe("model context protocol", () => {
         }),
       ],
       final: "",
-      verification: "",
     });
 
     expect(messages.slice(0, 4).map((message) => message.getType())).toEqual([

@@ -47,5 +47,139 @@ export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
     },
   );
 
-  return [shellExecute, applyPatch];
+  return [shellExecute, applyPatch, createUpdatePlanTool()];
+}
+
+export function createPlanAgentTools(input: CreateCodeAgentToolsInput) {
+  const shellRead = tool(
+    async ({ command }) => {
+      if (!isPlanReadOnlyShellCommand(command)) {
+        return JSON.stringify({
+          ok: false,
+          command,
+          exitCode: -1,
+          stdout: "",
+          stderr: "Rejected: plan mode allows read-only shell commands only.",
+        });
+      }
+
+      return JSON.stringify(
+        await (input.shellExecutor ?? shellTool)({
+          workspace: input.workspace,
+          command,
+        }),
+      );
+    },
+    {
+      name: "shell_read",
+      description:
+        "Read-only shell command for plan mode. Use it only to inspect files, list directories, search text, and read git status/diff/log/show. It must not write, delete, run tests, install dependencies, or execute project code.",
+      schema: z.object({
+        command: z.string().describe("Read-only shell command to execute in the workspace"),
+      }),
+    },
+  );
+
+  return [shellRead, createUpdatePlanTool()];
+}
+
+function createUpdatePlanTool() {
+  return tool(
+    async ({ explanation, items }) =>
+      JSON.stringify({
+        ok: true,
+        plan: {
+          explanation,
+          items,
+        },
+      }),
+    {
+      name: "update_plan",
+      description:
+        "Update the current plan state. In plan mode use it to create or revise a concise implementation plan; it must not edit files, run commands, install dependencies, or mutate the workspace.",
+      schema: z.object({
+        explanation: z.string().optional().describe("Optional short context for the plan"),
+        items: z
+          .array(
+            z.object({
+              step: z.string().describe("Plan step"),
+              status: z
+                .enum(["pending", "in_progress", "completed"])
+                .describe("Current status for this step"),
+            }),
+          )
+          .describe("Ordered plan items"),
+      }),
+    },
+  );
+}
+
+const PLAN_READ_ONLY_COMMANDS = new Set([
+  "awk",
+  "cat",
+  "du",
+  "file",
+  "find",
+  "grep",
+  "head",
+  "ls",
+  "nl",
+  "pwd",
+  "rg",
+  "sed",
+  "stat",
+  "tail",
+  "test",
+  "wc",
+]);
+
+const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
+  "branch",
+  "diff",
+  "grep",
+  "log",
+  "ls-files",
+  "show",
+  "status",
+]);
+
+export function isPlanReadOnlyShellCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed || /(^|[^>])>{1,2}($|[^>])/.test(trimmed)) {
+    return false;
+  }
+
+  return splitShellSegments(trimmed).every(isPlanReadOnlySegment);
+}
+
+function splitShellSegments(command: string): string[] {
+  return command
+    .split(/\s*(?:\|\||&&|[|;])\s*/g)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function isPlanReadOnlySegment(segment: string): boolean {
+  const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  const command = stripQuotes(tokens[0] ?? "");
+  if (!command) {
+    return false;
+  }
+
+  if (command === "git") {
+    return PLAN_READ_ONLY_GIT_SUBCOMMANDS.has(stripQuotes(tokens[1] ?? ""));
+  }
+
+  if (command === "sed") {
+    return (
+      PLAN_READ_ONLY_COMMANDS.has(command) &&
+      !tokens.some((token) => /^-.*i/.test(stripQuotes(token)))
+    );
+  }
+
+  return PLAN_READ_ONLY_COMMANDS.has(command);
+}
+
+function stripQuotes(value: string): string {
+  return value.replace(/^["']|["']$/g, "");
 }

@@ -5,8 +5,7 @@ import { buildRuntimeContext } from "./runtime-context";
 export type AgentRole =
   | "agent";
 
-export type ModelContextState = Omit<CodeAgentState, "cacheMetrics"> & {
-  cacheMetrics?: CodeAgentState["cacheMetrics"];
+export type ModelContextState = CodeAgentState & {
   modelName?: string;
 };
 
@@ -59,8 +58,11 @@ export function buildStaticSystemPrompt(role: AgentRole): string {
 
     如果具备工具能力，还必须遵循：
     - 在 builder 模式下你会看到可调用工具；是否调用工具由你根据用户意图自行判断
-    - 如果你判断任务需要先规划，不要切换模式；请自主创建简短任务列表，并按照任务列表继续完成任务
-    - 只有用户在输入开头显式标记 /plan 时，宿主才会进入 plan 模式
+    - 如果用户消息以 /plan 开头，应把它视为“先进入计划流程再执行”的明确要求；先使用 update_plan 建立计划，不要直接修改代码
+    - 如果你判断任务需要先规划，请使用 update_plan 创建计划状态；计划状态存在时宿主会进入 plan 模式
+    - 用户消息如果表达“先计划/只计划/不要先改代码”等语义，也应优先使用 update_plan 进入计划流程
+    - 在 plan 模式下，只允许使用 shell_read 读取文件、列目录、搜索文本、查看 git 状态/差异，以及使用 update_plan 更新计划
+    - 在 plan 模式下禁止写入、删除、移动文件，禁止运行测试、安装依赖、执行项目代码或任何会改变工作区/环境的命令
     - 如果用户询问当前模型，直接基于动态上下文中的 Configured model 精确回答，并包含原始模型名
     - 修改前先阅读相关文件，不要只凭经验改
     - 跨文件修改前先确认调用链和影响范围
@@ -102,5 +104,5 @@ export function buildDynamicSystemContext(state: ModelContextState): string {
 }
 
 function conversationMessages(state: ModelContextState): BaseMessage[] {
-  return state.messages.length > 0 ? state.messages : [new HumanMessage(state.task)];
+  return state.messages.length > 0 ? state.messages : [new HumanMessage("")];
 }

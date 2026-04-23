@@ -1,12 +1,12 @@
+import { HumanMessage } from "@langchain/core/messages";
 import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import type { AgentConfig } from "./config";
-import { buildCodeAgentGraph, normalizeThreadMode, type ThreadModeInput } from "./graph";
+import { buildCodeAgentGraph } from "./graph";
 import type { ShellExecutor } from "./tools";
 import type { AgentEvent } from "./types";
 
 export interface StreamCodeAgentInput {
   task: string;
-  threadMode?: ThreadModeInput;
   userId: string;
   threadId: string;
   workspace: string;
@@ -16,19 +16,17 @@ export interface StreamCodeAgentInput {
 }
 
 export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task"> {
-  resume: boolean | { approved?: boolean; reason?: string; nextMode?: ThreadModeInput };
+  resume: boolean | { approved?: boolean; reason?: string };
 }
 
 export async function* streamCodeAgent(
   input: StreamCodeAgentInput,
 ): AsyncGenerator<AgentEvent> {
   const { graph, checkpointer } = buildCodeAgentGraph(input);
-  const directive = parsePlanDirective(input.task);
   try {
     const stream = await graph.stream(
       {
-        task: directive.task,
-        threadMode: normalizeThreadMode(input.threadMode ?? directive.threadMode),
+        messages: [new HumanMessage(input.task)],
         userId: input.userId,
         workspace: input.workspace,
       },
@@ -55,17 +53,6 @@ export async function* resumeCodeAgent(
   } finally {
     checkpointer.close();
   }
-}
-
-export function parsePlanDirective(task: string): { task: string; threadMode: "plan" | "builder" } {
-  const match = task.match(/^\s*\/plan(?:\s+|$)([\s\S]*)$/i);
-  if (!match) {
-    return { task, threadMode: "builder" };
-  }
-  return {
-    task: match[1].trim(),
-    threadMode: "plan",
-  };
 }
 
 function graphConfig(threadId: string) {

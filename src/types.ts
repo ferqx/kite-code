@@ -24,33 +24,17 @@ export interface ShellResult {
   stderr: string;
 }
 
-export type ToolRequest =
-  | {
-      type: "mode_change";
-      targetMode: "plan" | "builder";
-      reason: string;
-    }
-  | {
-      type: "tool_call";
-      id?: string;
-      name: "apply_patch";
-      args: {
-        path: string;
-        content: string;
-      };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      type: "tool_call";
-      id?: string;
-      name: "shell_execute";
-      args: {
-        command: string;
-      };
-      reason: string;
-      protectedCommand: string;
-    };
+export type PlanItemStatus = "pending" | "in_progress" | "completed";
+
+export interface PlanItem {
+  step: string;
+  status: PlanItemStatus;
+}
+
+export interface AgentPlan {
+  explanation?: string;
+  items: PlanItem[];
+}
 
 export interface AgentEvent {
   type: string;
