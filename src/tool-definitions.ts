@@ -19,9 +19,9 @@ export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
     {
       name: "shell_execute",
       description:
-        "Execute a PowerShell command in the local workspace. Use this for reading, deleting, listing, testing, and running local commands. Commands are reviewed before execution.",
+        "Execute a platform shell command in the local workspace. Use this for reading, deleting, listing, testing, and running local commands. Commands are reviewed before execution.",
       schema: z.object({
-        command: z.string().describe("PowerShell command to execute in the workspace"),
+        command: z.string().describe("Shell command to execute in the workspace"),
       }),
     },
   );

@@ -5,6 +5,22 @@ import { join } from "node:path";
 import { applyPatchTool, assertInsideWorkspace, shellTool } from "../src/tools";
 
 describe("tool safety", () => {
+  test("allows paths inside the workspace", () => {
+    const workspace = join(tmpdir(), "openpx-langgraph-tools-safe");
+
+    expect(assertInsideWorkspace(workspace, "inside.txt")).toBe(
+      join(workspace, "inside.txt"),
+    );
+  });
+
+  test("allows workspace files whose names start with dots", () => {
+    const workspace = join(tmpdir(), "openpx-langgraph-tools-safe");
+
+    expect(assertInsideWorkspace(workspace, "..notes.txt")).toBe(
+      join(workspace, "..notes.txt"),
+    );
+  });
+
   test("rejects paths outside the workspace", () => {
     const workspace = join(tmpdir(), "openpx-langgraph-tools-safe");
 
@@ -61,7 +77,7 @@ describe("tool safety", () => {
 
     expect(result.ok).toBe(true);
     expect(commands).toHaveLength(1);
-    expect(commands[0]).toContain("Set-Content");
+    expect(commands[0]).toContain(process.platform === "win32" ? "Set-Content" : "bun -e");
   });
 
   test("returns structured shell command results", async () => {
@@ -71,7 +87,9 @@ describe("tool safety", () => {
     const result = await shellTool({ workspace, command: "pwd" });
 
     expect(result.command).toBe("pwd");
-    expect(typeof result.ok).toBe("boolean");
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.length).toBeGreaterThan(0);
     expect(typeof result.stdout).toBe("string");
     expect(typeof result.stderr).toBe("string");
   });

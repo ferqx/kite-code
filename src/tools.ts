@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
   ApplyPatchInput,
   ApplyPatchResult,
@@ -11,12 +11,18 @@ export type ShellExecutor = (input: ShellInput) => Promise<ShellResult>;
 
 export function assertInsideWorkspace(workspace: string, targetPath: string): string {
   const workspaceRoot = resolve(workspace);
-  const absoluteTarget = resolve(workspaceRoot, targetPath);
-  const normalizedRoot = workspaceRoot.endsWith("\\")
-    ? workspaceRoot
-    : `${workspaceRoot}\\`;
+  const absoluteTarget = resolve(
+    workspaceRoot,
+    targetPath.replace(/[\\/]+/g, "/"),
+  );
+  const relativeTarget = relative(workspaceRoot, absoluteTarget);
 
-  if (absoluteTarget !== workspaceRoot && !absoluteTarget.startsWith(normalizedRoot)) {
+  if (
+    relativeTarget &&
+    (relativeTarget === ".." ||
+      relativeTarget.startsWith(`..${sep}`) ||
+      isAbsolute(relativeTarget))
+  ) {
     throw new Error(`Refusing path outside workspace: ${targetPath}`);
   }
 
@@ -43,7 +49,7 @@ export async function applyPatchTool(
 export async function shellTool(input: ShellInput): Promise<ShellResult> {
   try {
     const proc = Bun.spawn(
-      ["powershell.exe", "-NoProfile", "-Command", input.command],
+      buildShellInvocation(input.command),
       {
         cwd: input.workspace,
         stdout: "pipe",
@@ -76,6 +82,14 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
   }
 }
 
+function buildShellInvocation(command: string): string[] {
+  if (process.platform === "win32") {
+    return ["powershell.exe", "-NoProfile", "-Command", command];
+  }
+
+  return [process.env.SHELL || "/bin/sh", "-lc", command];
+}
+
 function tryGeneratedSetContentFallback(
   input: ShellInput,
   error: unknown,
@@ -104,6 +118,22 @@ function tryGeneratedSetContentFallback(
 
 export function buildApplyPatchCommand(target: string, content: string): string {
   const encoded = Buffer.from(content, "utf8").toString("base64");
+  if (process.platform !== "win32") {
+    const script = [
+      "const fs = require('node:fs')",
+      "const content = Buffer.from(process.argv[2], 'base64').toString('utf8')",
+      "fs.writeFileSync(process.argv[1], content)",
+    ].join("; ");
+    return [
+      "bun",
+      "-e",
+      escapePosixShellArg(script),
+      "--",
+      escapePosixShellArg(target),
+      escapePosixShellArg(encoded),
+    ].join(" ");
+  }
+
   return [
     `$encoded = '${encoded}'`,
     "$text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))",
@@ -113,4 +143,8 @@ export function buildApplyPatchCommand(target: string, content: string): string 
 
 function escapePowerShellSingleQuoted(value: string): string {
   return value.replaceAll("'", "''");
+}
+
+function escapePosixShellArg(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
