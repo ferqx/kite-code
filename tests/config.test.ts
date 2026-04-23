@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { loadAgentConfig } from "../src/config";
+import { defaultConfigPath, loadAgentConfig } from "../src/config";
 
 describe("loadAgentConfig", () => {
+  test("uses a user-home default config path across operating systems", () => {
+    expect(defaultConfigPath()).toBe(join(homedir(), ".openpx", "openpx.jsonc"));
+  });
+
   test("loads DeepSeek provider and default model from JSONC", () => {
     const dir = join(import.meta.dir, ".tmp-config");
     mkdirSync(dir, { recursive: true });

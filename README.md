@@ -19,11 +19,13 @@ Install dependencies:
 bun install
 ```
 
-The default model config is read from:
+The default model config is read from the current user's home directory:
 
 ```text
-C:\Users\Administrator\.openpx\openpx.jsonc
+~/.openpx/openpx.jsonc
 ```
+
+Examples: `C:\Users\<user>\.openpx\openpx.jsonc` on Windows, `/Users/<user>/.openpx/openpx.jsonc` on macOS, and `/home/<user>/.openpx/openpx.jsonc` on Linux.
 
 The expected config shape is:
 
