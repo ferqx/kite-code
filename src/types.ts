@@ -26,6 +26,36 @@ export interface ShellResult {
 
 export type AgentMode = "plan" | "builder";
 
+export type AgentRunMode = "auto" | AgentMode;
+
+export interface ContextBudget {
+  maxMessages: number;
+  maxToolOutputChars: number;
+}
+
+export interface AgentEvidence {
+  commands: string[];
+  files: string[];
+  verification: string[];
+}
+
+export interface AgentHeartbeat {
+  goal: string;
+  findings: string[];
+  nextAction: string;
+  blockers: string[];
+  verification: string[];
+}
+
+export interface AgentProgressLedger {
+  toolCallCount: number;
+  stagnantStepCount: number;
+  repeatedCallCount: number;
+  lastToolSignature: string;
+  recentOutputSignatures: string[];
+  heartbeat: AgentHeartbeat;
+}
+
 export type PlanStatus = "pending" | "in_progress" | "completed";
 
 export interface AgentPlanStep {

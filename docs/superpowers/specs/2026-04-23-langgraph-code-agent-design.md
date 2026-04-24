@@ -18,6 +18,8 @@ Long-term memory is implemented as a small SQLite table using Bun's built-in `bu
 
 ## Graph Flow
 
+Phase 1 keeps the production graph intentionally small: a single `agent` node routes to either `approval` or `tools`, and `tools` loops back to `agent`. This hardened loop owns mode state, plan state, context summaries, evidence, interrupts, and tool execution. The four-role graph below is the target direction for a later phase, not the current implementation shape.
+
 The graph has four role nodes:
 
 1. `planner`: uses DeepSeek to produce a concise plan.

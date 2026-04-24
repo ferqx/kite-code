@@ -1,9 +1,15 @@
 import { AIMessage } from "@langchain/core/messages";
+import type { AgentMode } from "./types";
 
 export interface PromptCacheMetrics {
   inputTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  hitRate: number;
+}
+
+export interface PromptCacheMetricsByMode extends PromptCacheMetrics {
+  mode: AgentMode;
 }
 
 export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics | null {
@@ -41,5 +47,35 @@ export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics 
     inputTokens,
     cacheHitTokens,
     cacheMissTokens,
+    hitRate: inputTokens > 0 ? cacheHitTokens / inputTokens : 0,
+  };
+}
+
+export function summarizePromptCacheMetricsByMode(
+  items: PromptCacheMetricsByMode[],
+): Record<AgentMode, PromptCacheMetrics> {
+  const summary: Record<AgentMode, PromptCacheMetrics> = {
+    plan: emptyPromptCacheMetrics(),
+    builder: emptyPromptCacheMetrics(),
+  };
+
+  for (const item of items) {
+    const bucket = summary[item.mode];
+    bucket.inputTokens += item.inputTokens;
+    bucket.cacheHitTokens += item.cacheHitTokens;
+    bucket.cacheMissTokens += item.cacheMissTokens;
+    bucket.hitRate =
+      bucket.inputTokens > 0 ? bucket.cacheHitTokens / bucket.inputTokens : 0;
+  }
+
+  return summary;
+}
+
+function emptyPromptCacheMetrics(): PromptCacheMetrics {
+  return {
+    inputTokens: 0,
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+    hitRate: 0,
   };
 }

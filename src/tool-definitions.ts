@@ -126,16 +126,25 @@ const PLAN_READ_ONLY_COMMANDS = new Set([
   "du",
   "file",
   "find",
+  "gc",
+  "gci",
+  "get-childitem",
+  "get-content",
+  "get-location",
   "grep",
   "head",
   "ls",
   "nl",
   "pwd",
   "rg",
+  "select-object",
+  "select-string",
   "sed",
+  "sls",
   "stat",
   "tail",
   "test",
+  "type",
   "wc",
 ]);
 
@@ -167,13 +176,13 @@ function splitShellSegments(command: string): string[] {
 
 function isPlanReadOnlySegment(segment: string): boolean {
   const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
-  const command = stripQuotes(tokens[0] ?? "");
+  const command = stripQuotes(tokens[0] ?? "").toLowerCase();
   if (!command) {
     return false;
   }
 
   if (command === "git") {
-    return PLAN_READ_ONLY_GIT_SUBCOMMANDS.has(stripQuotes(tokens[1] ?? ""));
+    return PLAN_READ_ONLY_GIT_SUBCOMMANDS.has(stripQuotes(tokens[1] ?? "").toLowerCase());
   }
 
   if (command === "sed") {
@@ -181,6 +190,17 @@ function isPlanReadOnlySegment(segment: string): boolean {
       PLAN_READ_ONLY_COMMANDS.has(command) &&
       !tokens.some((token) => /^-.*i/.test(stripQuotes(token)))
     );
+  }
+
+  if (command === "find") {
+    return (
+      PLAN_READ_ONLY_COMMANDS.has(command) &&
+      !tokens.some((token) => ["-exec", "-execdir", "-delete"].includes(stripQuotes(token)))
+    );
+  }
+
+  if (command === "awk") {
+    return PLAN_READ_ONLY_COMMANDS.has(command) && !/\bsystem\s*\(/.test(segment);
   }
 
   return PLAN_READ_ONLY_COMMANDS.has(command);

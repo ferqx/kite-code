@@ -81,6 +81,31 @@ describe("real DeepSeek LangGraph code agent", () => {
   );
 
   test(
+    "natural-language planning request produces a plan without editing",
+    async () => {
+      const env = createRealTestEnv("openpx-langgraph-natural-plan-agent");
+      const fileName = "natural-plan-output.txt";
+
+      const planEvents = [];
+      for await (const event of streamCodeAgent({
+        task: `Plan first and do not edit files yet. Later create ${fileName}.`,
+        ...env,
+      })) {
+        planEvents.push(event);
+        if (event.type === "interrupt") {
+          break;
+        }
+      }
+
+      const modeInterrupt = planEvents.find((event) => event.type === "interrupt");
+      expect(JSON.stringify(modeInterrupt)).toContain("mode_confirmation");
+      expect(JSON.stringify(planEvents)).not.toContain("tool_approval");
+      expect(existsSync(join(env.workspace, fileName))).toBe(false);
+    },
+    120_000,
+  );
+
+  test(
     "builder mode runs a ReAct tool loop with persisted checkpoints",
     async () => {
       const env = createRealTestEnv("openpx-langgraph-react-agent");

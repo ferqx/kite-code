@@ -65,6 +65,15 @@ describe("code agent tool definitions", () => {
     expect(isPlanReadOnlyShellCommand("ls src")).toBe(true);
     expect(isPlanReadOnlyShellCommand("rg -n \"Plan\" src tests")).toBe(true);
     expect(isPlanReadOnlyShellCommand("cat package.json | head -n 20")).toBe(true);
+    expect(
+      isPlanReadOnlyShellCommand(
+        'Get-ChildItem -Path "D:\\app\\openpx-new" -Recurse -Depth 2 -Name | Select-Object -First 100',
+      ),
+    ).toBe(true);
+    expect(isPlanReadOnlyShellCommand('Get-Content "package.json" -Raw')).toBe(true);
+    expect(isPlanReadOnlyShellCommand('Select-String -Path "src\\*.ts" -Pattern graph')).toBe(
+      true,
+    );
     expect(isPlanReadOnlyShellCommand("git status --short")).toBe(true);
     expect(isPlanReadOnlyShellCommand("git diff -- src/runner.ts")).toBe(true);
   });
@@ -76,5 +85,9 @@ describe("code agent tool definitions", () => {
     expect(isPlanReadOnlyShellCommand("bun test")).toBe(false);
     expect(isPlanReadOnlyShellCommand("git add -A")).toBe(false);
     expect(isPlanReadOnlyShellCommand("mkdir -p tmp")).toBe(false);
+    expect(isPlanReadOnlyShellCommand("find . -exec rm {} ;")).toBe(false);
+    expect(isPlanReadOnlyShellCommand("awk 'BEGIN { system(\"rm hello.txt\") }'")).toBe(
+      false,
+    );
   });
 });

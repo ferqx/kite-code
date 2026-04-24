@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path";
 import { loadAgentConfig } from "./config";
 import { resumeCodeAgent, streamCodeAgent } from "./runner";
+import type { AgentRunMode } from "./types";
 
 export interface ParsedArgs {
   command: "run" | "resume" | "help";
@@ -9,6 +10,7 @@ export interface ParsedArgs {
   userId: string;
   workspace: string;
   checkpointPath: string;
+  mode: AgentRunMode;
   approve: boolean;
 }
 
@@ -29,6 +31,7 @@ export async function main(): Promise<void> {
           workspace: args.workspace,
           checkpointPath: args.checkpointPath,
           config,
+          mode: args.mode,
         })
       : resumeCodeAgent({
           userId: args.userId,
@@ -52,6 +55,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
   };
   const explicitThread = value("--thread", "");
+  const mode = parseMode(value("--mode", "auto"));
 
   return {
     command,
@@ -62,6 +66,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     checkpointPath: resolve(
       value("--checkpoints", join(cwd, ".openpx", "checkpoints.sqlite")),
     ),
+    mode,
     approve: argv.includes("--approve"),
   };
 }
@@ -77,6 +82,7 @@ function positionalTask(argv: string[]): string {
     "--user",
     "--workspace",
     "--checkpoints",
+    "--mode",
   ]);
   const parts: string[] = [];
   for (let index = 1; index < argv.length; index++) {
@@ -91,6 +97,10 @@ function positionalTask(argv: string[]): string {
     parts.push(item);
   }
   return parts.join(" ").trim();
+}
+
+function parseMode(value: string): AgentRunMode {
+  return value === "plan" || value === "builder" ? value : "auto";
 }
 
 function freshThreadId(): string {
@@ -108,6 +118,7 @@ Options:
   --user <id>            User id for the run
   --workspace <path>     Tool workspace
   --checkpoints <path>   SQLite checkpoint path
+  --mode <mode>          auto, builder, or plan
   --approve             Resume an interrupt with approval`);
 }
 

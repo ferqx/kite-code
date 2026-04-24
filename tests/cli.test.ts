@@ -27,4 +27,10 @@ describe("cli argument parsing", () => {
 
     expect(args.threadId).toBe("default-thread");
   });
+
+  test("run accepts an explicit mode flag", () => {
+    const args = parseArgs(["run", "--mode", "plan", "--task", "Create hello.txt"]);
+
+    expect(args.mode).toBe("plan");
+  });
 });

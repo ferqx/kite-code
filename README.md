@@ -4,7 +4,10 @@ This is a standalone Bun/TypeScript code-agent reference built with LangGraph.js
 
 ## Features
 
-- LangGraph `StateGraph` with planner, coder, tool-review, and reviewer roles.
+- LangGraph `StateGraph` with a phase-1 hardened `agent -> approval/tools -> agent` loop.
+- Plan mode with read-only tools, human confirmation, and builder-mode handoff.
+- Context budgeting with compacted history summaries and execution evidence.
+- Prompt cache metric extraction from streamed model responses.
 - Bun-native SQLite checkpointer for short-term thread persistence.
 - Streaming graph updates with normalized interrupt and final events.
 - Human-in-the-loop approval through LangGraph `interrupt()` and `Command({ resume })`.
@@ -52,6 +55,12 @@ Start a task:
 
 ```bash
 bun run agent run --thread demo --user local --task "Create hello.txt with exact content \"hello\""
+```
+
+Force planning mode, or leave the default `auto` mode to detect explicit planning requests:
+
+```bash
+bun run agent run --mode plan --thread demo --user local --task "Inspect the change and propose a plan"
 ```
 
 When the stream emits an `interrupt` event, approve and resume:

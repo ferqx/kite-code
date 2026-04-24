@@ -1,6 +1,6 @@
 import { platform, release, type } from "node:os";
 import type { BaseMessage } from "@langchain/core/messages";
-import type { AgentMode, AgentPlan } from "./types";
+import type { AgentEvidence, AgentMode, AgentPlan, AgentProgressLedger } from "./types";
 
 export interface RuntimeSystemInfo {
   currentTimeIso: string;
@@ -20,6 +20,9 @@ export interface RuntimeContextInput {
   messages: BaseMessage[];
   mode?: AgentMode;
   plan?: AgentPlan | null;
+  contextSummary?: string;
+  evidence?: AgentEvidence;
+  progress?: AgentProgressLedger;
   now?: Date;
   timezone?: string;
 }
@@ -70,7 +73,81 @@ export function buildRuntimeContext(input: RuntimeContextInput): string {
     );
   }
 
+  if (input.contextSummary?.trim()) {
+    lines.push("Context summary:");
+    lines.push(input.contextSummary.trim());
+  }
+
+  if (input.evidence) {
+    if (input.evidence.commands.length) {
+      lines.push(`Evidence commands: ${input.evidence.commands.join(" | ")}`);
+    }
+    if (input.evidence.files.length) {
+      lines.push(`Evidence files: ${input.evidence.files.join(" | ")}`);
+    }
+    if (input.evidence.verification.length) {
+      lines.push(`Evidence verification: ${input.evidence.verification.join(" | ")}`);
+    }
+  }
+
+  appendProgressHeartbeat(lines, input.progress);
+
   return lines.join("\n");
+}
+
+export function buildCacheableRuntimeContext(input: RuntimeContextInput): string {
+  const mode = input.mode ?? "builder";
+  const lines = [
+    "Cacheable runtime context:",
+    `Workspace: ${input.workspace}`,
+    `User ID: ${input.userId}`,
+    ...(input.modelName ? [`Configured model: ${input.modelName}`] : []),
+    `Thread mode: ${mode}`,
+    `Plan state: ${input.plan ? "active" : "inactive"}`,
+    `Tool policy: ${toolPolicy(mode)}`,
+  ];
+
+  if (input.plan) {
+    lines.push(`Plan name: ${input.plan.name}`);
+    lines.push(`Plan description: ${input.plan.description}`);
+    lines.push(`Plan status: ${input.plan.status}`);
+    lines.push(
+      `Plan steps: ${input.plan.steps.map((step) => `${step.status}:${step.step}`).join(" | ")}`,
+    );
+  }
+
+  if (input.contextSummary?.trim()) {
+    lines.push("Context summary:");
+    lines.push(input.contextSummary.trim());
+  }
+
+  appendProgressHeartbeat(lines, input.progress);
+
+  return lines.join("\n");
+}
+
+function appendProgressHeartbeat(lines: string[], progress?: AgentProgressLedger): void {
+  const heartbeat = progress?.heartbeat;
+  if (!heartbeat) {
+    return;
+  }
+
+  lines.push("Progress heartbeat:");
+  if (heartbeat.goal) {
+    lines.push(`Goal: ${heartbeat.goal}`);
+  }
+  if (heartbeat.findings.length) {
+    lines.push(`Findings: ${heartbeat.findings.join(" | ")}`);
+  }
+  if (heartbeat.nextAction) {
+    lines.push(`Next action: ${heartbeat.nextAction}`);
+  }
+  if (heartbeat.blockers.length) {
+    lines.push(`Blockers: ${heartbeat.blockers.join(" | ")}`);
+  }
+  if (heartbeat.verification.length) {
+    lines.push(`Verification: ${heartbeat.verification.join(" | ")}`);
+  }
 }
 
 function toolPolicy(mode: AgentMode): string {
