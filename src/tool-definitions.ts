@@ -85,12 +85,14 @@ export function createPlanAgentTools(input: CreateCodeAgentToolsInput) {
 
 function createUpdatePlanTool() {
   return tool(
-    async ({ explanation, items }) =>
+    async ({ name, description, status, steps }) =>
       JSON.stringify({
         ok: true,
         plan: {
-          explanation,
-          items,
+          name,
+          description,
+          status,
+          steps,
         },
       }),
     {
@@ -98,8 +100,12 @@ function createUpdatePlanTool() {
       description:
         "Update the current plan state. In plan mode use it to create or revise a concise implementation plan; it must not edit files, run commands, install dependencies, or mutate the workspace.",
       schema: z.object({
-        explanation: z.string().optional().describe("Optional short context for the plan"),
-        items: z
+        name: z.string().describe("Short plan name"),
+        description: z.string().describe("Short plan description"),
+        status: z
+          .enum(["pending", "in_progress", "completed"])
+          .describe("Current status for the plan"),
+        steps: z
           .array(
             z.object({
               step: z.string().describe("Plan step"),
@@ -108,7 +114,7 @@ function createUpdatePlanTool() {
                 .describe("Current status for this step"),
             }),
           )
-          .describe("Ordered plan items"),
+          .describe("Ordered plan steps"),
       }),
     },
   );

@@ -3,7 +3,7 @@ import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import type { AgentConfig } from "./config";
 import { buildCodeAgentGraph } from "./graph";
 import type { ShellExecutor } from "./tools";
-import type { AgentEvent } from "./types";
+import type { AgentEvent, AgentMode } from "./types";
 
 export interface StreamCodeAgentInput {
   task: string;
@@ -27,6 +27,8 @@ export async function* streamCodeAgent(
     const stream = await graph.stream(
       {
         messages: [new HumanMessage(input.task)],
+        mode: initialModeForTask(input.task),
+        plan: null,
         userId: input.userId,
         workspace: input.workspace,
       },
@@ -37,6 +39,10 @@ export async function* streamCodeAgent(
   } finally {
     checkpointer.close();
   }
+}
+
+export function initialModeForTask(task: string): AgentMode {
+  return task.trimStart().startsWith("/plan") ? "plan" : "builder";
 }
 
 export async function* resumeCodeAgent(

@@ -28,6 +28,28 @@ describe("code agent tool definitions", () => {
     expect(tools[2].schema).toBeDefined();
   });
 
+  test("requires full state-first plan fields in update_plan schema", () => {
+    const tools = createPlanAgentTools({
+      workspace: "D:\\workspace",
+    });
+    const updatePlanTool = tools[1];
+    const parsed = updatePlanTool.schema.safeParse({
+      name: "State-first refactor",
+      description: "Persist mode and plan in graph state.",
+      status: "in_progress",
+      steps: [{ step: "Update graph state", status: "pending" }],
+    });
+    const missingName = updatePlanTool.schema.safeParse({
+      description: "Persist mode and plan in graph state.",
+      status: "in_progress",
+      steps: [{ step: "Update graph state", status: "pending" }],
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(missingName.success).toBe(false);
+    expect(String(updatePlanTool.description)).toContain("plan mode");
+  });
+
   test("exposes read-only shell and update_plan in plan mode", () => {
     const tools = createPlanAgentTools({
       workspace: "D:\\workspace",

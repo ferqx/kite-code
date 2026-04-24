@@ -1,6 +1,6 @@
 import { platform, release, type } from "node:os";
 import type { BaseMessage } from "@langchain/core/messages";
-import { deriveModeFromMessages, derivePlanFromMessages } from "./plan-state";
+import type { AgentMode, AgentPlan } from "./types";
 
 export interface RuntimeSystemInfo {
   currentTimeIso: string;
@@ -18,6 +18,8 @@ export interface RuntimeContextInput {
   workspace: string;
   modelName?: string;
   messages: BaseMessage[];
+  mode?: AgentMode;
+  plan?: AgentPlan | null;
   now?: Date;
   timezone?: string;
 }
@@ -42,8 +44,8 @@ export function getRuntimeSystemInfo(input: {
 
 export function buildRuntimeContext(input: RuntimeContextInput): string {
   const info = getRuntimeSystemInfo(input);
-  const mode = deriveModeFromMessages(input.messages);
-  const plan = derivePlanFromMessages(input.messages);
+  const plan = input.plan ?? null;
+  const mode = input.mode ?? "builder";
   const lines = [
     "Dynamic runtime context:",
     `Time: ${info.currentTimeIso}`,
@@ -59,18 +61,19 @@ export function buildRuntimeContext(input: RuntimeContextInput): string {
     `Tool policy: ${toolPolicy(mode)}`,
   ];
 
-  if (plan?.items.length) {
+  if (plan) {
+    lines.push(`Plan name: ${plan.name}`);
+    lines.push(`Plan description: ${plan.description}`);
+    lines.push(`Plan status: ${plan.status}`);
     lines.push(
-      `Plan items: ${plan.items
-        .map((item) => `${item.status}:${item.step}`)
-        .join(" | ")}`,
+      `Plan steps: ${plan.steps.map((step) => `${step.status}:${step.step}`).join(" | ")}`,
     );
   }
 
   return lines.join("\n");
 }
 
-function toolPolicy(mode: "plan" | "builder"): string {
+function toolPolicy(mode: AgentMode): string {
   if (mode === "plan") {
     return "read-only planning; may read files/search/list/git inspect through shell_read and update_plan; must not write, delete, run tests, install dependencies, execute project code, or mutate workspace";
   }

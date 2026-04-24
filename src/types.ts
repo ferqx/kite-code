@@ -24,16 +24,20 @@ export interface ShellResult {
   stderr: string;
 }
 
-export type PlanItemStatus = "pending" | "in_progress" | "completed";
+export type AgentMode = "plan" | "builder";
 
-export interface PlanItem {
+export type PlanStatus = "pending" | "in_progress" | "completed";
+
+export interface AgentPlanStep {
   step: string;
-  status: PlanItemStatus;
+  status: PlanStatus;
 }
 
 export interface AgentPlan {
-  explanation?: string;
-  items: PlanItem[];
+  name: string;
+  description: string;
+  status: PlanStatus;
+  steps: AgentPlanStep[];
 }
 
 export interface AgentEvent {

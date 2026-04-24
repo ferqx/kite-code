@@ -13,7 +13,6 @@ import type { AgentConfig } from "./config";
 import { buildModelMessages } from "./context";
 import { BunSqliteSaver } from "./checkpoint";
 import { createDeepSeekModel } from "./model";
-import { deriveModeFromMessages, derivePlanFromMessages, SWITCH_TO_BUILDER_MESSAGE } from "./plan-state";
 import {
   createCodeAgentTools,
   createPlanAgentTools,
@@ -25,11 +24,22 @@ import {
   shellTool,
   type ShellExecutor,
 } from "./tools";
-import type { AgentPlan } from "./types";
+import type { AgentMode, AgentPlan, PlanStatus } from "./types";
+
+const CONTINUE_IN_BUILDER_MESSAGE =
+  "Plan approved. Continue in builder mode and complete the original user request using tools as needed.";
 
 const AgentState = Annotation.Root({
   userId: Annotation<string>,
   workspace: Annotation<string>,
+  mode: Annotation<AgentMode>({
+    reducer: (_left, right) => right,
+    default: () => "builder",
+  }),
+  plan: Annotation<AgentPlan | null>({
+    reducer: (_left, right) => right,
+    default: () => null,
+  }),
   messages: Annotation<BaseMessage[]>({
     reducer: messagesStateReducer,
     default: () => [],
@@ -53,9 +63,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
 
   const agent = async (state: CodeAgentState) => {
-    const mode = deriveModeFromMessages(state.messages);
     const tools =
-      mode === "plan"
+      state.mode === "plan"
         ? createPlanAgentTools({
             workspace: state.workspace,
             shellExecutor: input.shellExecutor,
@@ -89,14 +98,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   };
 
   const approval = async (state: CodeAgentState) => {
-    const mode = deriveModeFromMessages(state.messages);
     const request = getPendingToolRequest(state.messages, state.workspace);
 
-    if (mode === "plan" && state.final && !request) {
+    if (state.mode === "plan" && state.plan && state.final && !request) {
       const resume = interrupt({
         kind: "mode_confirmation",
         targetMode: "builder",
-        plan: state.final,
+        plan: state.plan,
+        summary: state.final,
       }) as boolean | { approved?: boolean; reason?: string };
       const approved =
         resume === true ||
@@ -105,7 +114,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       return approved
         ? {
             final: "",
-            messages: [new HumanMessage(SWITCH_TO_BUILDER_MESSAGE)],
+            mode: "builder" as AgentMode,
+            messages: [new HumanMessage(CONTINUE_IN_BUILDER_MESSAGE)],
           }
         : {};
     }
@@ -154,8 +164,21 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       state.workspace,
       request,
       input.shellExecutor,
-      deriveModeFromMessages(state.messages),
+      state.mode,
     );
+
+    if ("plan" in result) {
+      return {
+        plan: result.plan,
+        messages: [
+          new ToolMessage({
+            content: JSON.stringify(result),
+            tool_call_id: request.id ?? "missing-tool-call-id",
+            status: result.ok === false ? "error" : "success",
+          }),
+        ],
+      };
+    }
 
     return {
       messages: [
@@ -184,9 +207,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 export function routeAfterAgent(state: CodeAgentState): "approval" | "tools" | typeof END {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) {
-    return deriveModeFromMessages(state.messages) === "plan" && state.final ? "approval" : END;
+    return state.mode === "plan" && state.plan && state.final ? "approval" : END;
   }
-  return deriveModeFromMessages(state.messages) === "plan" || request.name === "update_plan"
+  return state.mode === "plan" || request.name === "update_plan"
     ? "tools"
     : "approval";
 }
@@ -199,7 +222,7 @@ export async function runApprovedTool(
   workspace: string,
   request: PendingToolRequest,
   shellExecutor?: ShellExecutor,
-  mode: "plan" | "builder" = "builder",
+  mode: AgentMode = "builder",
 ) {
   if (request.name === "update_plan") {
     return {
@@ -208,10 +231,7 @@ export async function runApprovedTool(
       exitCode: 0,
       stdout: "",
       stderr: "",
-      plan: {
-        explanation: request.args.explanation,
-        items: request.args.items,
-      },
+      plan: request.args,
     };
   }
 
@@ -265,8 +285,8 @@ export async function runApprovedTool(
   });
 }
 
-export function isPlanMode(messages: BaseMessage[]): boolean {
-  return deriveModeFromMessages(messages) === "plan";
+export function isPlanMode(state: Pick<CodeAgentState, "mode">): boolean {
+  return state.mode === "plan";
 }
 
 type PendingToolRequest =
@@ -292,10 +312,7 @@ type PendingToolRequest =
   | {
       id?: string;
       name: "update_plan";
-      args: {
-        explanation?: string;
-        items: AgentPlan["items"];
-      };
+      args: AgentPlan;
       reason: string;
       protectedCommand: string;
     };
@@ -360,16 +377,32 @@ function toolRequestFromMessage(
     return {
       id: call.id,
       name: "update_plan",
-      args: {
-        explanation: args.explanation,
-        items: Array.isArray(args.items) ? args.items : [],
-      },
+      args: normalizeAgentPlan(args),
       reason: "Model requested plan state update",
       protectedCommand: "update_plan",
     };
   }
 
   return null;
+}
+
+function normalizeAgentPlan(value: Partial<AgentPlan>): AgentPlan {
+  const rawSteps: unknown[] = Array.isArray(value.steps) ? (value.steps as unknown[]) : [];
+  return {
+    name: typeof value.name === "string" ? value.name : "",
+    description: typeof value.description === "string" ? value.description : "",
+    status: normalizePlanStatus(value.status),
+    steps: rawSteps
+      .filter((step): step is Record<string, unknown> => !!step && typeof step === "object")
+      .map((step) => ({
+        step: typeof step.step === "string" ? step.step : "",
+        status: normalizePlanStatus(step.status),
+      })),
+  };
+}
+
+function normalizePlanStatus(status: unknown): PlanStatus {
+  return status === "in_progress" || status === "completed" ? status : "pending";
 }
 
 function messageWithSingleToolCall(message: AIMessage, toolCallId?: string): AIMessage {

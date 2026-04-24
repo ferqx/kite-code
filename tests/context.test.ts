@@ -9,6 +9,8 @@ describe("model context protocol", () => {
       userId: "user-a",
       workspace: "D:\\workspace",
       modelName: "deepseek-chat",
+      mode: "builder",
+      plan: null,
       messages: [new HumanMessage(task)],
       final: "",
     });
@@ -45,6 +47,8 @@ describe("model context protocol", () => {
     const messages = buildModelMessages("agent", {
       userId: "user-a",
       workspace: "D:\\workspace",
+      mode: "builder",
+      plan: null,
       messages: [new HumanMessage(task), ai, tool],
       final: "",
     });
@@ -64,6 +68,8 @@ describe("model context protocol", () => {
     const messages = buildModelMessages("agent", {
       userId: "user-a",
       workspace: "D:\\workspace",
+      mode: "builder",
+      plan: null,
       messages: [
         new HumanMessage(task),
         new AIMessage({

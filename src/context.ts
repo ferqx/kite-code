@@ -96,7 +96,17 @@ export function buildStaticSystemPrompt(role: AgentRole): string {
     `
   };
 
-  return `${rolePrompt[role]}`;
+  return `${rolePrompt[role]}
+
+State Policy
+
+- graph.state.mode is the only source of truth for the current thread mode.
+- graph.state.plan is the only source of truth for the persisted plan.
+- Never infer mode or plan from HumanMessage, AIMessage, or ToolMessage content.
+- In plan mode, use read-only tools plus update_plan to maintain graph.state.plan.
+- In plan mode, once graph.state.plan is ready, stop making tool calls and answer with a concise plan summary so the host can request confirmation before switching to builder mode.
+- In builder mode, keep reading graph.state.plan when present and you may update it with update_plan while executing.
+`;
 }
 
 export function buildDynamicSystemContext(state: ModelContextState): string {

@@ -1,31 +1,35 @@
 import { describe, expect, test } from "bun:test";
-import { AIMessage, ToolMessage } from "@langchain/core/messages";
-import { isPlanMode, routeAfterApproval, routeAfterAgent, runApprovedTool, type CodeAgentState } from "../src/graph";
-import type { ShellResult } from "../src/types";
+import { AIMessage } from "@langchain/core/messages";
+import {
+  isPlanMode,
+  routeAfterApproval,
+  routeAfterAgent,
+  runApprovedTool,
+  type CodeAgentState,
+} from "../src/graph";
+import type { AgentPlan, ShellResult } from "../src/types";
+
+const activePlan: AgentPlan = {
+  name: "Implement state-first plan flow",
+  description: "Persist mode and plan in graph state.",
+  status: "in_progress",
+  steps: [{ step: "Inspect graph state", status: "in_progress" }],
+};
 
 describe("graph local tool routing", () => {
   test("stays in agent when approval has no pending tool call", () => {
     expect(routeAfterApproval({ messages: [] } as unknown as CodeAgentState)).toBe("agent");
   });
 
-  test("uses message-derived plan state as the plan mode source of truth", () => {
-    expect(
-      isPlanMode([
-        new ToolMessage({
-          content: JSON.stringify({
-            ok: true,
-            plan: { items: [{ step: "Draft plan", status: "pending" }] },
-          }),
-          tool_call_id: "call-1",
-        }),
-      ]),
-    ).toBe(true);
-    expect(isPlanMode([])).toBe(false);
+  test("uses graph state mode as the plan mode source of truth", () => {
+    expect(isPlanMode({ mode: "plan" } as CodeAgentState)).toBe(true);
+    expect(isPlanMode({ mode: "builder" } as CodeAgentState)).toBe(false);
   });
 
-  test("routes update_plan tool calls directly to tools without approval", () => {
+  test("routes update_plan tool calls directly to tools without approval in builder mode", () => {
     expect(
       routeAfterAgent({
+        mode: "builder",
         workspace: "/tmp/workspace",
         messages: [
           new AIMessage({
@@ -34,7 +38,12 @@ describe("graph local tool routing", () => {
               {
                 id: "call-1",
                 name: "update_plan",
-                args: { items: [{ step: "Inspect context", status: "pending" }] },
+                args: {
+                  name: activePlan.name,
+                  description: activePlan.description,
+                  status: activePlan.status,
+                  steps: activePlan.steps,
+                },
               },
             ],
           }),
@@ -46,15 +55,10 @@ describe("graph local tool routing", () => {
   test("routes plan read-only shell calls directly to tools without approval", () => {
     expect(
       routeAfterAgent({
+        mode: "plan",
+        plan: activePlan,
         workspace: "/tmp/workspace",
         messages: [
-          new ToolMessage({
-            content: JSON.stringify({
-              ok: true,
-              plan: { items: [{ step: "Inspect", status: "pending" }] },
-            }),
-            tool_call_id: "call-0",
-          }),
           new AIMessage({
             content: "",
             tool_calls: [
@@ -70,19 +74,13 @@ describe("graph local tool routing", () => {
     ).toBe("tools");
   });
 
-  test("routes plan completion to approval when final exists and plan is active", () => {
+  test("routes plan completion to approval when final exists and plan mode is active", () => {
     expect(
       routeAfterAgent({
+        mode: "plan",
+        plan: activePlan,
         workspace: "/tmp/workspace",
-        messages: [
-          new ToolMessage({
-            content: JSON.stringify({
-              ok: true,
-              plan: { items: [{ step: "Inspect", status: "completed" }] },
-            }),
-            tool_call_id: "call-0",
-          }),
-        ],
+        messages: [],
         final: "Plan ready",
       } as unknown as CodeAgentState),
     ).toBe("approval");
@@ -91,15 +89,10 @@ describe("graph local tool routing", () => {
   test("routes unexpected plan write tool calls to tools for rejection instead of approval", () => {
     expect(
       routeAfterAgent({
+        mode: "plan",
+        plan: activePlan,
         workspace: "/tmp/workspace",
         messages: [
-          new ToolMessage({
-            content: JSON.stringify({
-              ok: true,
-              plan: { items: [{ step: "Inspect", status: "pending" }] },
-            }),
-            tool_call_id: "call-0",
-          }),
           new AIMessage({
             content: "",
             tool_calls: [
@@ -121,10 +114,7 @@ describe("graph local tool routing", () => {
       {
         id: "call-1",
         name: "update_plan",
-        args: {
-          explanation: "Need a short implementation plan",
-          items: [{ step: "Change runner", status: "pending" }],
-        },
+        args: activePlan,
         reason: "Create plan",
         protectedCommand: "update_plan",
       },
@@ -133,7 +123,11 @@ describe("graph local tool routing", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect("plan" in result && result.plan ? result.plan.items[0].step : "").toBe("Change runner");
+    expect("plan" in result && result.plan ? result.plan.name : "").toBe(activePlan.name);
+    expect("plan" in result && result.plan ? result.plan.status : "").toBe("in_progress");
+    expect("plan" in result && result.plan ? result.plan.steps[0]?.step : "").toBe(
+      "Inspect graph state",
+    );
   });
 
   test("allows read-only shell commands when the thread is in plan mode", async () => {

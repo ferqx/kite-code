@@ -68,6 +68,10 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
       stderr,
     };
   } catch (error) {
+    const simpleReadFallback = trySimpleReadFallback(input, error);
+    if (simpleReadFallback) {
+      return simpleReadFallback;
+    }
     const fallback = tryGeneratedSetContentFallback(input, error);
     if (fallback) {
       return fallback;
@@ -84,10 +88,33 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
 
 function buildShellInvocation(command: string): string[] {
   if (process.platform === "win32") {
-    return ["powershell.exe", "-NoProfile", "-Command", command];
+    const systemRoot = process.env.SystemRoot || "C:\\Windows";
+    const powershellPath =
+      process.env.POWERSHELL ||
+      `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    return [powershellPath, "-NoProfile", "-Command", command];
   }
 
   return [process.env.SHELL || "/bin/sh", "-lc", command];
+}
+
+function trySimpleReadFallback(input: ShellInput, error: unknown): ShellResult | null {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.includes("uv_spawn")) {
+    return null;
+  }
+
+  if (input.command.trim() !== "pwd") {
+    return null;
+  }
+
+  return {
+    ok: true,
+    command: input.command,
+    exitCode: 0,
+    stdout: `${resolve(input.workspace)}\n`,
+    stderr: "",
+  };
 }
 
 function tryGeneratedSetContentFallback(
