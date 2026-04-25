@@ -1,6 +1,12 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { applyPatchTool, shellTool, type ShellExecutor } from "./tools";
+import { shellTool, type ShellExecutor } from "./tools";
+import {
+  readFile,
+  editFile,
+  writeFile,
+  search,
+} from "./file-tools";
 
 /** 创建代码 Agent 工具集输入 / Input for creating code agent tools */
 export interface CreateCodeAgentToolsInput {
@@ -10,8 +16,91 @@ export interface CreateCodeAgentToolsInput {
   shellExecutor?: ShellExecutor;
 }
 
-/** 创建 builder 模式的工具集（shell_execute, apply_patch, update_plan）/ Create builder mode tool set (shell_execute, apply_patch, update_plan) */
+/** 创建 builder 模式的工具集（read_file, edit_file, write_file, search, shell_execute, update_plan） */
 export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
+  const readFileTool = tool(
+    async ({ path, offset, limit }) =>
+      JSON.stringify(
+        readFile({ workspace: input.workspace, path, offset, limit }),
+      ),
+    {
+      name: "read_file",
+      description:
+        "Read a file from the workspace. Returns the file content with line numbers. Use this BEFORE edit_file to see the current content and pick precise old_string values.",
+      schema: z.object({
+        path: z.string().describe("Relative path to the file"),
+        offset: z.number().optional().describe("Starting line number (1-indexed, default 1)"),
+        limit: z.number().optional().describe("Maximum number of lines to read"),
+      }),
+    },
+  );
+
+  const editFileTool = tool(
+    async ({ path, old_string, new_string, replace_all }) =>
+      JSON.stringify(
+        editFile({
+          workspace: input.workspace,
+          path,
+          oldString: old_string,
+          newString: new_string,
+          replaceAll: replace_all,
+        }),
+      ),
+    {
+      name: "edit_file",
+      description:
+        "Edit a file by replacing old_string with new_string. Use read_file first to get the exact text to replace. The old_string MUST exactly match the file content — include all whitespace, indentation, and surrounding lines for uniqueness. If the same text appears multiple times, set replace_all: true or make old_string longer to be unique.",
+      schema: z.object({
+        path: z.string().describe("Relative path to the file to edit"),
+        old_string: z.string().describe("The exact text to replace. Must match the file content exactly, including whitespace."),
+        new_string: z.string().describe("The new text to replace old_string with"),
+        replace_all: z.boolean().optional().describe("Replace all occurrences (default: false, fails if multiple matches found)"),
+      }),
+    },
+  );
+
+  const writeFileTool = tool(
+    async ({ path, content }) =>
+      JSON.stringify(
+        writeFile({ workspace: input.workspace, path, content }),
+      ),
+    {
+      name: "write_file",
+      description:
+        "Create a new file or overwrite an existing file with new content. Use this for creating new files or completely rewriting existing files. For editing existing files, prefer edit_file.",
+      schema: z.object({
+        path: z.string().describe("Relative path to the file"),
+        content: z.string().describe("Complete file content to write"),
+      }),
+    },
+  );
+
+  const searchTool = tool(
+    async ({ pattern, path, context_lines, case_sensitive, max_results }) =>
+      JSON.stringify(
+        await search({
+          workspace: input.workspace,
+          pattern,
+          globPath: path,
+          contextLines: context_lines,
+          caseSensitive: case_sensitive,
+          maxResults: max_results,
+        }),
+      ),
+    {
+      name: "search",
+      description:
+        "Search for a pattern in workspace files. Use this to find function definitions, variable usages, imports, or any text pattern. Returns matching lines with file paths and line numbers. Supports regex patterns wrapped in / /.",
+      schema: z.object({
+        pattern: z.string().describe("Text or regex pattern to search for. Use /pattern/flags for regex (e.g. '/function\\s+\\w+/')"),
+        path: z.string().optional().describe("Glob pattern to filter files (e.g. 'src/**/*.ts', default: all source files)"),
+        context_lines: z.number().optional().describe("Number of context lines around each match (default: 0)"),
+        case_sensitive: z.boolean().optional().describe("Case sensitive search (default: false)"),
+        max_results: z.number().optional().describe("Maximum number of results (default: 50)"),
+      }),
+    },
+  );
+
   const shellExecute = tool(
     async ({ command }) =>
       JSON.stringify(
@@ -30,28 +119,7 @@ export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
     },
   );
 
-  const applyPatch = tool(
-    async ({ path, content }) =>
-      JSON.stringify(
-        await applyPatchTool({
-          workspace: input.workspace,
-          path,
-          content,
-          shellExecutor: input.shellExecutor,
-        }),
-      ),
-    {
-      name: "apply_patch",
-      description:
-        "Write complete UTF-8 file content to a path inside the workspace. This is implemented on top of shell_execute and is reviewed before execution.",
-      schema: z.object({
-        path: z.string().describe("Workspace-relative file path to write"),
-        content: z.string().describe("Complete file content to write"),
-      }),
-    },
-  );
-
-  return [shellExecute, applyPatch, createUpdatePlanTool()];
+  return [readFileTool, editFileTool, writeFileTool, searchTool, shellExecute, createUpdatePlanTool()];
 }
 
 /** 创建 plan 模式的工具集（shell_read, update_plan）/ Create plan mode tool set (read-only: shell_read, update_plan) */
