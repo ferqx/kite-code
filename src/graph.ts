@@ -426,6 +426,17 @@ export function recordToolProgress(input: RecordToolProgressInput): AgentProgres
   };
 }
 
+/**
+ * Guardrail that decides whether a model-produced `final` answer is actually ready
+ * to leave the graph.
+ *
+ * The agent can emit `state.final` too early: for example before creating a plan,
+ * before finishing every planned step, or after changing files without any
+ * verification evidence. In those cases we clear `final` and inject a human
+ * message so the graph routes back to `agent` and the model continues working.
+ *
+ * Returning `{}` means the final answer is acceptable and routing may continue.
+ */
 export function evaluateStopCheck(
   state: CodeAgentState,
 ): Partial<Pick<CodeAgentState, "final" | "messages" | "progress">> {
@@ -438,6 +449,8 @@ export function evaluateStopCheck(
   const reportsVerificationGap = mentionsVerificationGap(finalText);
   const reportsFailure = mentionsFailure(finalText);
 
+  // In plan mode, a plain natural-language "done" is not enough. The agent must
+  // either persist a real plan via `update_plan` or explicitly say planning is blocked.
   if (state.mode === "plan" && !state.plan && !reportsBlocker) {
     return continueFromStopCheck(
       state,
@@ -445,6 +458,8 @@ export function evaluateStopCheck(
     );
   }
 
+  // In builder mode, an unfinished plan means the implementation is still in
+  // progress unless the final answer clearly reports a blocker.
   if (
     state.mode === "builder" &&
     state.plan?.steps.some((step) => step.status !== "completed") &&
@@ -456,6 +471,8 @@ export function evaluateStopCheck(
     );
   }
 
+  // If the agent modified files, it must also record verification evidence or
+  // explicitly admit verification did not run / could not run.
   if (
     state.mode === "builder" &&
     (state.evidence?.files.length ?? 0) > 0 &&
@@ -469,6 +486,8 @@ export function evaluateStopCheck(
     );
   }
 
+  // If verification already recorded a failure, the final answer must surface
+  // that failure instead of silently claiming completion.
   if (
     state.mode === "builder" &&
     (state.evidence?.verification.some((item) => /failed/i.test(item)) ?? false) &&
