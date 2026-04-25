@@ -19,11 +19,14 @@ import {
   isPlanReadOnlyShellCommand,
 } from "./tool-definitions";
 import {
-  applyPatchTool,
-  buildApplyPatchCommand,
   shellTool,
   type ShellExecutor,
 } from "./tools";
+import {
+  readFile,
+  editFile,
+  writeFile,
+} from "./file-tools";
 import type { AgentMode, AgentPlan, PlanStatus } from "./types";
 import type {
   AgentEvidence,
@@ -104,47 +107,58 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const model = createDeepSeekModel(input.config);
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
 
-  /** Agent 节点：调用模型生成下一步动作 / Agent node: invoke model to generate next action */
-  const agent = async (state: CodeAgentState) => {
-    const tools =
-      state.mode === "plan"
-        ? createPlanAgentTools({
-            workspace: state.workspace,
-            shellExecutor: input.shellExecutor,
-          })
-        : createCodeAgentTools({
-            workspace: state.workspace,
-            shellExecutor: input.shellExecutor,
-          });
-
-    const prepared = prepareModelContext("agent", {
-      ...state,
-      modelName: input.config.modelName,
+  /** Plan Agent 节点：使用只读工具进行代码检查和计划 / Plan Agent node: use read-only tools for inspection and planning */
+  const agentPlan = async (state: CodeAgentState) => {
+    const tools = createPlanAgentTools({
+      workspace: state.workspace,
+      shellExecutor: input.shellExecutor,
     });
+    return invokeModel(model, state, tools, "agent_plan", input.config.modelName);
+  };
 
-    const response = await model
-      .bindTools(tools, { tool_choice: "auto" })
-      .invoke(prepared.messages);
+  /** Build Agent 节点：使用读写工具执行计划步骤 / Build Agent node: use read-write tools to execute plan steps */
+  const agentBuild = async (state: CodeAgentState) => {
+    const tools = createCodeAgentTools({
+      workspace: state.workspace,
+      shellExecutor: input.shellExecutor,
+    });
+    return invokeModel(model, state, tools, "agent_build", input.config.modelName);
+  };
 
-    const request = toolRequestFromMessage(response, state.workspace);
-    if (request) {
-      // 模型请求了工具调用，只保留被选中的那一个 / Model requested a tool call, keep only the selected one
-      const toolCallMessage = messageWithSingleToolCall(response, request.id);
-      return {
-        mode: state.mode,
-        contextSummary: prepared.contextSummary,
-        messages: [toolCallMessage],
-      };
-    }
+/** 共享的模型调用逻辑 / Shared model invocation logic */
+async function invokeModel(
+  model: ReturnType<typeof createDeepSeekModel>,
+  state: CodeAgentState,
+  tools: ReturnType<typeof createPlanAgentTools> | ReturnType<typeof createCodeAgentTools>,
+  role: "agent_plan" | "agent_build",
+  modelName: string,
+) {
+  const prepared = prepareModelContext(role, {
+    ...state,
+    modelName,
+  });
 
-    // 模型没有请求工具调用，视为最终回答 / Model did not request a tool call, treat as final answer
+  const response = await model
+    .bindTools(tools, { tool_choice: "auto" })
+    .invoke(prepared.messages);
+
+  const request = toolRequestFromMessage(response, state.workspace);
+  if (request) {
+    const toolCallMessage = messageWithSingleToolCall(response, request.id);
     return {
       mode: state.mode,
       contextSummary: prepared.contextSummary,
-      final: messageText(response),
-      messages: [response],
+      messages: [toolCallMessage],
     };
+  }
+
+  return {
+    mode: state.mode,
+    contextSummary: prepared.contextSummary,
+    final: messageText(response),
+    messages: [response],
   };
+}
 
   /** 审批节点：中断等待人工批准 / Approval node: interrupt for human approval */
   const approval = async (state: CodeAgentState) => {
@@ -156,7 +170,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         kind: "mode_confirmation",
         targetMode: "builder",
         plan: state.plan,
-        summary: state.final,
+        summary: state.plan ? planConfirmationSummary(state.plan) : state.final,
       }) as boolean | { approved?: boolean; reason?: string };
       const approved =
         resume === true ||
@@ -235,23 +249,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       previousPlan: state.plan,
       nextPlan,
     });
-    // 加入看门狗信号 / Add watchdog signal to result
-    const toolResult = addWatchdogResult(result, progress);
-
     // update_plan 返回：更新计划并可能切换模式 / update_plan result: update plan and possibly switch mode
     if ("plan" in result) {
       const nextMode = "mode" in result ? result.mode : state.mode;
-      const final =
-        nextMode === "plan" ? planConfirmationSummary(result.plan) : state.final;
+      // final 不由 tools 设置，留给 agent 节点生成自然语言回答 / final not set by tools, left for agent to produce natural language answer
       return {
         plan: result.plan,
         ...("mode" in result ? { mode: result.mode } : {}),
-        ...(final ? { final } : {}),
         evidence,
         progress,
         messages: [
           new ToolMessage({
-            content: JSON.stringify(toolResult),
+            content: JSON.stringify(result),
             tool_call_id: request.id ?? "missing-tool-call-id",
             status: result.ok === false ? "error" : "success",
           }),
@@ -264,7 +273,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       progress,
       messages: [
         new ToolMessage({
-          content: JSON.stringify(toolResult),
+          content: JSON.stringify(result),
           tool_call_id: request.id ?? "missing-tool-call-id",
           status: result.ok === false ? "error" : "success",
         }),
@@ -272,79 +281,156 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     };
   };
 
+  /** 反思节点：评估工具执行结果，注入看门狗或失败指导 / Reflect node: evaluate tool results, inject watchdog or failure guidance */
+  const reflect = async (state: CodeAgentState) => {
+    const progress = state.progress;
+    if (!progress) return {};
+
+    const watchdogTriggered =
+      progress.stagnantStepCount >= WATCHDOG_STAGNANT_LIMIT;
+
+    if (watchdogTriggered) {
+      return {
+        messages: [
+          new HumanMessage(
+            `No progress detected across ${progress.stagnantStepCount} consecutive tool step(s). Change strategy, inspect a different signal, update the plan, or report a blocker.`,
+          ),
+        ],
+      };
+    }
+
+    const lastMessage = state.messages.at(-1);
+    if (lastMessage instanceof ToolMessage && lastMessage.status === "error") {
+      let detail = "unknown error";
+      try {
+        const parsed = JSON.parse(
+          typeof lastMessage.content === "string" ? lastMessage.content : "{}",
+        );
+        if (typeof parsed.stderr === "string" && parsed.stderr) {
+          detail = parsed.stderr.slice(0, 200);
+        }
+      } catch {
+        /* ignore parse failure */
+      }
+      return {
+        messages: [
+          new HumanMessage(
+            `Tool execution failed: ${detail}. Inspect the failure and choose a different approach.`,
+          ),
+        ],
+      };
+    }
+
+    return {};
+  };
+
   /** 停止检查节点：收口守卫，验证最终回答是否真正可以结束 / Stop check node: guardrail that verifies final answer is ready */
   const stopCheck = async (state: CodeAgentState) => evaluateStopCheck(state);
 
   // 图拓扑 / Graph topology:
-  // START -> agent <-> approval <-> tools -> stop_check -> (agent | approval | END)
+  // START -> agent_entry -> agent_plan/agent_build -> (approval | tools | stop_check)
+  // tools -> reflect -> agent_plan/agent_build
   const graph = new StateGraph(AgentState)
-    .addNode("agent", agent)
+    .addNode("agent_plan", agentPlan)
+    .addNode("agent_build", agentBuild)
     .addNode("approval", approval)
     .addNode("tools", tools)
+    .addNode("reflect", reflect)
     .addNode("stop_check", stopCheck)
-    .addEdge(START, "agent")
-    .addConditionalEdges("agent", routeAfterAgent)
+    .addConditionalEdges(START, routeEntry)
+    .addConditionalEdges("agent_plan", routeAfterAgentPlan)
+    .addConditionalEdges("agent_build", routeAfterAgentBuild)
     .addConditionalEdges("approval", routeAfterApproval)
     .addConditionalEdges("tools", routeAfterTools)
+    .addConditionalEdges("reflect", routeAfterReflect)
     .addConditionalEdges("stop_check", routeAfterStopCheck)
     .compile({ checkpointer });
 
   return { graph, checkpointer };
 }
 
-/** agent 节点后的路由逻辑 / Routing after agent node:
- *  - 无工具请求 + 有 final -> stop_check / No tool request + has final -> stop_check
- *  - 无工具请求 + 无 final -> END / No tool request + no final -> END
- *  - plan 模式或 update_plan -> 直接 tools（跳过审批） / Plan mode or update_plan -> tools directly (skip approval)
- *  - 否则 -> approval / Otherwise -> approval
- */
-export function routeAfterAgent(
-  state: CodeAgentState,
-): "stop_check" | "approval" | "tools" | typeof END {
+/** START 入口路由：根据 mode 选择 agent_plan 或 agent_build / Entry routing: choose agent based on mode */
+function routeEntry(state: CodeAgentState): "agent_plan" | "agent_build" {
+  return state.mode === "plan" ? "agent_plan" : "agent_build";
+}
+
+/** plan agent 节点后的路由: tools | stop_check | END / Routing after plan agent */
+export function routeAfterAgentPlan(state: CodeAgentState): "tools" | "stop_check" | typeof END {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) {
     return state.final ? "stop_check" : END;
   }
-  return state.mode === "plan" || request.name === "update_plan"
-    ? "tools"
-    : "approval";
+  return "tools";
+}
+
+/** build agent 节点后的路由: approval | tools | stop_check | END / Routing after build agent */
+export function routeAfterAgentBuild(state: CodeAgentState): "approval" | "tools" | "stop_check" | typeof END {
+  const request = getPendingToolRequest(state.messages, state.workspace);
+  if (!request) {
+    return state.final ? "stop_check" : END;
+  }
+  // update_plan 和只读/搜索工具跳过审批 / update_plan and read-only/search tools skip approval
+  if (request.name === "update_plan" || request.name === "read_file" || request.name === "search") {
+    return "tools";
+  }
+  // edit_file 和 write_file 需要审批 / edit_file and write_file need approval
+  return "approval";
 }
 
 /** approval 节点后的路由逻辑 / Routing after approval node:
  *  - 仍有待处理工具请求 -> tools / Still has pending tool request -> tools
- *  - 否则 -> agent / Otherwise -> agent
+ *  - plan 模式 -> agent_plan / plan mode -> agent_plan
+ *  - 否则 -> agent_build / otherwise -> agent_build
  */
-export function routeAfterApproval(state: CodeAgentState): "tools" | "agent" {
-  return getPendingToolRequest(state.messages, state.workspace) ? "tools" : "agent";
+export function routeAfterApproval(state: CodeAgentState): "tools" | "agent_plan" | "agent_build" {
+  if (getPendingToolRequest(state.messages, state.workspace)) {
+    return "tools";
+  }
+  return state.mode === "plan" ? "agent_plan" : "agent_build";
 }
 
-/** tools 节点后的路由逻辑 / Routing after tools node:
+/** tools 节点后的路由逻辑 / Routing after tools node: 总是进入 reflect / Always enter reflect */
+export function routeAfterTools(_state: CodeAgentState): "reflect" {
+  return "reflect";
+}
+
+/** reflect 节点后的路由逻辑 / Routing after reflect node:
  *  - 有 final -> stop_check / Has final -> stop_check
- *  - 否则 -> agent / Otherwise -> agent
+ *  - plan 模式且已有 plan -> stop_check（计划就绪）/ plan mode with plan -> stop_check (plan ready)
+ *  - plan 模式 -> agent_plan / plan mode -> agent_plan
+ *  - 否则 -> agent_build / otherwise -> agent_build
  */
-export function routeAfterTools(state: CodeAgentState): "stop_check" | "agent" {
-  return state.final ? "stop_check" : "agent";
+export function routeAfterReflect(state: CodeAgentState): "stop_check" | "agent_plan" | "agent_build" {
+  if (state.final) {
+    return "stop_check";
+  }
+  if (state.mode === "plan" && state.plan) {
+    return "stop_check";
+  }
+  return state.mode === "plan" ? "agent_plan" : "agent_build";
 }
 
 /** stop_check 节点后的路由逻辑 / Routing after stop check node:
- *  - 无 final -> agent（继续工作） / No final -> agent (continue working)
+ *  - 无 final -> agent_plan（plan 模式）或 agent_build（builder 模式）/ No final -> agent_plan/agent_build (continue working)
  *  - plan 模式 -> approval（确认切换模式） / Plan mode -> approval (confirm mode switch)
  *  - 否则 -> END / Otherwise -> END
  */
 export function routeAfterStopCheck(
   state: CodeAgentState,
-): "approval" | "agent" | typeof END {
+): "approval" | "agent_plan" | "agent_build" | typeof END {
   if (!state.final) {
-    return "agent";
+    return state.mode === "plan" ? "agent_plan" : "agent_build";
   }
   return state.mode === "plan" ? "approval" : END;
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call
  *  - update_plan：直接修改状态 plan，builder 模式下可能切换到 plan / Directly update state.plan, may switch to plan mode in builder
+ *  - read_file：读取文件内容 / Read file content
+ *  - edit_file：精确字符串替换 / Exact string replacement
+ *  - write_file：创建或覆写文件 / Create or overwrite file
  *  - shell_read：plan 模式下仅允许只读命令 / In plan mode only read-only shell commands are allowed
  *  - plan 模式且非 shell_read/update_plan：拒绝 / Plan mode with non-read-only tool: rejected
- *  - apply_patch：校验参数后执行补丁 / Validate params then apply patch
  *  - 死循环检测：连续 3 次相同工具调用会被拦截 / Doom-loop detection: 3 consecutive identical calls are blocked
  */
 export async function runApprovedTool(
@@ -404,25 +490,78 @@ export async function runApprovedTool(
     };
   }
 
-  // apply_patch 工具：校验路径和内容参数后执行 / apply_patch tool: validate path and content then execute
-  if (request.name === "apply_patch") {
-    if (!request.args.path || !request.args.content) {
-      return {
-        ok: false,
-        command: request.protectedCommand,
-        exitCode: -1,
-        stdout: "",
-        stderr: "apply_patch requires explicit path and content arguments from the model.",
-      };
-    }
-    return applyPatchTool({
+  // search 工具：搜索文件内容 / search tool: search file contents
+  if (request.name === "search") {
+    return (shellExecutor ?? shellTool)({
       workspace,
-      path: request.args.path,
-      content: request.args.content,
-      shellExecutor,
+      command: buildSearchShellCommand(request.args.pattern, request.args.path),
     });
   }
 
+  // read_file 工具：从文件系统读取 / read_file tool: read from filesystem
+  if (request.name === "read_file") {
+    const result = readFile({
+      workspace,
+      path: request.args.path ?? "",
+      offset: request.args.offset,
+      limit: request.args.limit,
+    });
+    return {
+      ok: result.ok,
+      command: `read_file ${request.args.path ?? ""}`,
+      exitCode: result.ok ? 0 : -1,
+      stdout: result.content,
+      stderr: result.error ?? "",
+      path: request.args.path,
+    };
+  }
+
+  // edit_file 工具：精确字符串替换 / edit_file tool: exact string replacement
+  if (request.name === "edit_file") {
+    if (!request.args.old_string) {
+      return {
+        ok: false,
+        command: `edit_file ${request.args.path ?? ""}`,
+        exitCode: -1,
+        stdout: "",
+        stderr: "edit_file requires old_string to locate the text to replace.",
+      };
+    }
+    const result = editFile({
+      workspace,
+      path: request.args.path ?? "",
+      oldString: request.args.old_string,
+      newString: request.args.new_string ?? "",
+      replaceAll: request.args.replace_all,
+    });
+    return {
+      ok: result.ok,
+      command: `edit_file ${request.args.path ?? ""}`,
+      exitCode: result.ok ? 0 : -1,
+      stdout: result.ok ? `Replaced ${result.replacements ?? 1} occurrence(s) at line ${result.fromLine}-${result.toLine}` : "",
+      stderr: result.error ?? "",
+      path: request.args.path,
+    };
+  }
+
+  // write_file 工具：创建或覆写 / write_file tool: create or overwrite
+  if (request.name === "write_file") {
+    const result = writeFile({
+      workspace,
+      path: request.args.path ?? "",
+      content: request.args.content ?? "",
+    });
+    return {
+      ok: result.ok,
+      command: `write_file ${request.args.path ?? ""}`,
+      exitCode: result.ok ? 0 : -1,
+      stdout: result.ok ? `Wrote ${result.lines ?? 0} line(s) to ${request.args.path}` : "",
+      stderr: result.error ?? "",
+      path: request.args.path,
+    };
+  }
+
+  // shell_execute 默认路径 / Fallback: shell_execute
   return (shellExecutor ?? shellTool)({
     workspace,
     command: request.args.command,
@@ -591,18 +730,31 @@ export function evaluateStopCheck(
 /** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
 export type PendingToolRequest =
   | {
-      /** 工具调用 ID / Tool call ID */
       id?: string;
-      name: "apply_patch";
-      args: {
-        /** 目标文件路径 / Target file path */
-        path: string;
-        /** 补丁内容 / Patch content */
-        content: string;
-      };
-      /** 调用原因 / Call reason */
+      name: "read_file";
+      args: { path: string; offset?: number; limit?: number };
       reason: string;
-      /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
+    }
+  | {
+      id?: string;
+      name: "edit_file";
+      args: { path: string; old_string: string; new_string: string; replace_all?: boolean };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
+      id?: string;
+      name: "write_file";
+      args: { path: string; content: string };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
+      id?: string;
+      name: "search";
+      args: { pattern: string; path?: string; context_lines?: number; case_sensitive?: boolean; max_results?: number };
+      reason: string;
       protectedCommand: string;
     }
   | {
@@ -655,16 +807,47 @@ function toolRequestFromMessage(
     return null;
   }
 
-  if (call.name === "apply_patch") {
-    const args = call.args as { path?: string; content?: string };
-    const path = normalizePatchPath(workspace, args.path || "");
-    const content = args.content || "";
+  if (call.name === "read_file") {
+    const args = call.args as { path?: string; offset?: number; limit?: number };
     return {
       id: call.id,
-      name: "apply_patch",
-      args: { path, content },
-      reason: "Model requested apply_patch tool call",
-      protectedCommand: buildApplyPatchCommand(assertPreviewPath(workspace, path), content),
+      name: "read_file",
+      args: { path: args.path || "", offset: args.offset, limit: args.limit },
+      reason: "Model requested read_file",
+      protectedCommand: `read_file ${args.path || ""}`,
+    };
+  }
+
+  if (call.name === "edit_file") {
+    const args = call.args as { path?: string; old_string?: string; new_string?: string; replace_all?: boolean };
+    return {
+      id: call.id,
+      name: "edit_file",
+      args: { path: args.path || "", old_string: args.old_string || "", new_string: args.new_string || "", replace_all: args.replace_all },
+      reason: "Model requested edit_file",
+      protectedCommand: `edit_file ${args.path || ""}`,
+    };
+  }
+
+  if (call.name === "write_file") {
+    const args = call.args as { path?: string; content?: string };
+    return {
+      id: call.id,
+      name: "write_file",
+      args: { path: args.path || "", content: args.content || "" },
+      reason: "Model requested write_file",
+      protectedCommand: `write_file ${args.path || ""}`,
+    };
+  }
+
+  if (call.name === "search") {
+    const args = call.args as { pattern?: string; path?: string; context_lines?: number; case_sensitive?: boolean; max_results?: number };
+    return {
+      id: call.id,
+      name: "search",
+      args: { pattern: args.pattern || "", path: args.path, context_lines: args.context_lines, case_sensitive: args.case_sensitive, max_results: args.max_results },
+      reason: "Model requested search",
+      protectedCommand: `search ${args.pattern || ""}`,
     };
   }
 
@@ -743,12 +926,17 @@ function messageWithSingleToolCall(message: AIMessage, toolCallId?: string): AIM
       )
     : message.additional_kwargs.tool_calls;
 
+  // 保留 reasoning_content 以支持 DeepSeek thinking 模型
+  // Preserve reasoning_content for DeepSeek thinking model compatibility
+  const reasoningContent = message.additional_kwargs.reasoning_content as string | undefined;
+
   return new AIMessage({
     id: message.id,
     content: message.content,
     additional_kwargs: {
       ...message.additional_kwargs,
       tool_calls: rawToolCalls,
+      ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
     },
     response_metadata: message.response_metadata,
     tool_calls: [selectedCall],
@@ -788,6 +976,13 @@ function planConfirmationSummary(plan: AgentPlan): string {
   return [`Plan ready: ${plan.name}`, plan.description, steps].filter(Boolean).join("\n");
 }
 
+/** 构建 search 工具的 shell 命令 / Build shell command for search tool */
+function buildSearchShellCommand(pattern: string, globPath?: string): string {
+  const escaped = pattern.replace(/'/g, "'\\''");
+  const pathArg = globPath ? `--glob '${globPath.replace(/'/g, "'\\''")}'` : "";
+  return `rg -n --no-heading ${pathArg} '${escaped}'`;
+}
+
 /** 更新执行证据记录 / Update execution evidence records */
 function updateEvidence(
   current: AgentEvidence | undefined,
@@ -809,8 +1004,11 @@ function updateEvidence(
     }
   }
 
-  if (request.name === "apply_patch" && "path" in result && result.ok) {
-    next.files.push(result.path);
+  if (request.name === "read_file" || request.name === "edit_file" || request.name === "write_file") {
+    const filePath = "path" in result ? result.path : undefined;
+    if (filePath && result.ok) {
+      next.files.push(filePath);
+    }
   }
 
   return {

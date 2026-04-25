@@ -5,9 +5,11 @@ import {
   recordToolProgress,
   isPlanMode,
   routeAfterApproval,
-  routeAfterAgent,
+  routeAfterAgentPlan,
+  routeAfterAgentBuild,
   routeAfterStopCheck,
   routeAfterTools,
+  routeAfterReflect,
   runApprovedTool,
   type CodeAgentState,
 } from "../src/graph";
@@ -22,9 +24,9 @@ const activePlan: AgentPlan = {
 
 // 图路由单元测试 / Graph routing unit tests — 验证 agent 主循环中各节点的路由逻辑、stop check 守卫和工具审批流
 describe("graph local tool routing", () => {
-  // 无待审批工具调用时，审批节点直接回到 agent / When no pending tool call exists, approval node returns to agent immediately
-  test("stays in agent when approval has no pending tool call", () => {
-    expect(routeAfterApproval({ messages: [] } as unknown as CodeAgentState)).toBe("agent");
+  // 无待审批工具调用时，审批节点根据 mode 路由回对应 agent / When no pending tool call exists, approval routes to correct agent by mode
+  test("routes to agent_build when approval has no pending tool call", () => {
+    expect(routeAfterApproval({ messages: [] } as unknown as CodeAgentState)).toBe("agent_build");
   });
 
   // 验证 graph state 中的 mode 字段是判断 plan 模式的唯一权威来源 / Graph state mode field is the single source of truth for plan mode detection
@@ -36,7 +38,7 @@ describe("graph local tool routing", () => {
   // 验证 builder 模式下 update_plan 工具调用直接路由到 tools，无需审批 / update_plan tool calls skip approval and go directly to tools in builder mode
   test("routes update_plan tool calls directly to tools without approval in builder mode", () => {
     expect(
-      routeAfterAgent({
+      routeAfterAgentBuild({
         mode: "builder",
         workspace: "/tmp/workspace",
         messages: [
@@ -63,7 +65,7 @@ describe("graph local tool routing", () => {
   // 验证 plan 模式下只读 shell 调用直接路由到 tools，无需审批 / Read-only shell calls in plan mode are routed directly to tools without approval
   test("routes plan read-only shell calls directly to tools without approval", () => {
     expect(
-      routeAfterAgent({
+      routeAfterAgentPlan({
         mode: "plan",
         plan: activePlan,
         workspace: "/tmp/workspace",
@@ -86,7 +88,7 @@ describe("graph local tool routing", () => {
   // 验证 plan 模式下有 final 文本且有有效 plan 时，路由到 stop_check 进行最终守卫检查 / When plan mode has final text AND a valid plan, route to stop_check for final guard evaluation
   test("routes plan completion through stop check when final exists and plan mode is active", () => {
     expect(
-      routeAfterAgent({
+      routeAfterAgentPlan({
         mode: "plan",
         plan: activePlan,
         workspace: "/tmp/workspace",
@@ -99,7 +101,7 @@ describe("graph local tool routing", () => {
   // 验证 plan 模式下无结构化 plan 但有 final 文本时，同样路由到 stop_check / Even without structured plan, final text in plan mode still routes to stop_check
   test("routes unstructured plan-mode final text through stop check", () => {
     expect(
-      routeAfterAgent({
+      routeAfterAgentPlan({
         mode: "plan",
         plan: null,
         workspace: "/tmp/workspace",
@@ -109,8 +111,8 @@ describe("graph local tool routing", () => {
     ).toBe("stop_check"); // 无 plan 但有 final → 仍需 stop_check 判定 / no plan but has final → still needs stop_check to evaluate
   });
 
-  // 验证工具执行完成后，plan 模式下已完成的 plan 同样路由到 stop_check / After tools complete, completed plan updates route to stop_check in plan mode
-  test("routes completed plan tool updates through stop check", () => {
+  // 验证工具执行完成后，始终路由到 reflect 节点进行评估 / After tools complete, always route to reflect node for evaluation
+  test("routes completed plan tool updates to reflect for evaluation", () => {
     expect(
       routeAfterTools({
         mode: "plan",
@@ -119,7 +121,7 @@ describe("graph local tool routing", () => {
         messages: [],
         final: "Plan ready",
       } as unknown as CodeAgentState),
-    ).toBe("stop_check");
+    ).toBe("reflect");
   });
 
   // 验证 stop_check 守卫阻止"读预算耗尽"的 final 文本提前结束流程 / Stop check guard rejects "read budget reached" finals without a valid plan
@@ -151,7 +153,7 @@ describe("graph local tool routing", () => {
   // 验证 plan 模式下写入工具调用不路由到审批，而是直接到 tools 节点以拒绝执行 / Non-read tool calls in plan mode route to tools (for rejection) instead of approval
   test("routes unexpected plan write tool calls to tools for rejection instead of approval", () => {
     expect(
-      routeAfterAgent({
+      routeAfterAgentPlan({
         mode: "plan",
         plan: activePlan,
         workspace: "/tmp/workspace",
@@ -161,7 +163,7 @@ describe("graph local tool routing", () => {
             tool_calls: [
               {
                 id: "call-1",
-                name: "apply_patch",
+                name: "write_file",
                 args: { path: "hello.txt", content: "hi" },
               },
             ],
@@ -258,16 +260,16 @@ describe("graph local tool routing", () => {
     expect((result as ShellResult).stderr).toContain("shell_read");
   });
 
-  // 验证 plan 模式下拒绝非只读工具（如 apply_patch）的调用 / Non-read tools (e.g., apply_patch) are rejected in plan mode
+  // 验证 plan 模式下拒绝非只读工具（如 write_file）的调用 / Non-read tools (e.g., write_file) are rejected in plan mode
   test("rejects non-read tools when the thread is in plan mode", async () => {
     const result = await runApprovedTool(
       "/tmp/workspace",
       {
         id: "call-1",
-        name: "apply_patch",
+        name: "write_file",
         args: { path: "hello.txt", content: "hi" },
         reason: "Unexpected write",
-        protectedCommand: "write hello.txt",
+        protectedCommand: "write_file hello.txt",
       },
       undefined,
       "plan",
@@ -446,5 +448,42 @@ describe("graph local tool routing", () => {
 
     expect(update.final).toBe("");
     expect(update.messages?.[0]?.content).toContain("verification");
+  });
+
+  // 验证 reflect 路由在无 final 时返回 agent_build / reflect routes to agent_build when no final is set (builder is default)
+  test("reflect routes to agent_build when no final is set", () => {
+    expect(
+      routeAfterReflect({
+        mode: "builder",
+        workspace: "/tmp/workspace",
+        messages: [],
+        final: "",
+      } as unknown as CodeAgentState),
+    ).toBe("agent_build");
+  });
+
+  // 验证 reflect 路由在有 plan + plan 模式时直接到 stop_check / reflect routes to stop_check when plan exists in plan mode
+  test("reflect routes to stop_check when plan is set in plan mode", () => {
+    expect(
+      routeAfterReflect({
+        mode: "plan",
+        plan: activePlan,
+        workspace: "/tmp/workspace",
+        messages: [],
+        final: "",
+      } as unknown as CodeAgentState),
+    ).toBe("stop_check");
+  });
+
+  // 验证 reflect 路由在有 final 时返回 stop_check，覆盖 plan plan 信号 / reflect routes to stop_check when final is set
+  test("reflect routes to stop_check when final is set", () => {
+    expect(
+      routeAfterReflect({
+        mode: "builder",
+        workspace: "/tmp/workspace",
+        messages: [],
+        final: "All tasks completed.",
+      } as unknown as CodeAgentState),
+    ).toBe("stop_check");
   });
 });
