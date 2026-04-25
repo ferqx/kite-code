@@ -11,7 +11,7 @@ describe("model context protocol", () => {
   // 验证用户输入作为唯一的 HumanMessage，运行上下文放在 SystemMessage 中 / Verify user input stays as sole HumanMessage, runtime context in SystemMessage
   test("keeps user input as the only HumanMessage and places run context in SystemMessage", () => {
     const task = "Create hello.txt with exact content \"hi\".";
-    const messages = buildModelMessages("agent", {
+    const messages = buildModelMessages("agent_build", {
       userId: "user-a",
       workspace: "D:\\workspace",
       modelName: "deepseek-chat",
@@ -50,7 +50,7 @@ describe("model context protocol", () => {
       tool_call_id: "call-1",
       status: "success",
     });
-    const messages = buildModelMessages("agent", {
+    const messages = buildModelMessages("agent_build", {
       userId: "user-a",
       workspace: "D:\\workspace",
       mode: "builder",
@@ -71,7 +71,7 @@ describe("model context protocol", () => {
   // 验证动态上下文放在可复用对话前缀之后，以利用 DeepSeek 缓存 / Verify dynamic context sits after reusable prefix for DeepSeek cache hit
   test("keeps dynamic context after reusable conversation prefix for DeepSeek cache", () => {
     const task = "Create hello.txt";
-    const messages = buildModelMessages("agent", {
+    const messages = buildModelMessages("agent_build", {
       userId: "user-a",
       workspace: "D:\\workspace",
       mode: "builder",
@@ -108,12 +108,12 @@ describe("model context protocol", () => {
 
   // 验证静态系统提示足够大且稳定，以利用提供商前缀缓存 / Verify static system prompt is substantial and stable for provider prefix caching
   test("keeps a substantial stable static prompt for provider prefix caching", () => {
-    const prompt = buildStaticSystemPrompt("agent");
+    const prompt = buildStaticSystemPrompt("agent_build");
 
-    expect(prompt).toContain("Local Code Agent Contract");
-    expect(prompt).toContain("Tool Policy");
-    expect(prompt).toContain("Message Policy");
-    expect(prompt).toContain("Completion Policy");
+    expect(prompt).toContain("Builder Agent Contract");
+    expect(prompt).toContain("Tool policy");
+    expect(prompt).toContain("Message policy");
+    expect(prompt).toContain("Completion policy");
     expect(prompt).toContain("Respond in Chinese by default"); // 默认中文回复 / Default Chinese response
     expect(prompt).toContain("If the user asks about the current model");
     expect(prompt).not.toContain("浣犳槸"); // 不含乱码 / No garbled text
@@ -139,7 +139,7 @@ describe("model context protocol", () => {
       status: "success",
     });
 
-    const prepared = prepareModelContext("agent", {
+    const prepared = prepareModelContext("agent_build", {
       userId: "user-a",
       workspace: "D:\\workspace",
       mode: "builder",
@@ -178,7 +178,7 @@ describe("model context protocol", () => {
 
   // 验证可缓存的运行时上下文中包含进度心跳信息 / Verify cacheable runtime context includes progress heartbeat
   test("includes progress heartbeat in cacheable runtime context", () => {
-    const messages = buildModelMessages("agent", {
+    const messages = buildModelMessages("agent_build", {
       userId: "user-a",
       workspace: "D:\\workspace",
       mode: "builder",

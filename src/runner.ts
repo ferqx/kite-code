@@ -172,7 +172,7 @@ function graphConfig(threadId: string) {
   return {
     configurable: { thread_id: threadId },
     streamMode: "updates" as const,
-    recursionLimit: 40,
+    recursionLimit: 60,
   };
 }
 
@@ -266,10 +266,12 @@ function findFinal(chunk: unknown): string | null {
     return null;
   }
   const record = chunk as Record<string, unknown>;
-  // 查找 agent 节点中的 final 字段 / Find final field in agent node
-  const agent = record.agent as { final?: unknown } | undefined;
-  if (typeof agent?.final === "string") {
-    return agent.final;
+  // 查找 agent_plan 或 agent_build 节点中的 final 字段 / Find final field in agent_plan or agent_build node
+  for (const key of ["agent_plan", "agent_build"]) {
+    const node = record[key] as { final?: unknown } | undefined;
+    if (typeof node?.final === "string") {
+      return node.final;
+    }
   }
   return null;
 }
