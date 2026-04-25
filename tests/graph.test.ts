@@ -255,7 +255,7 @@ describe("graph local tool routing", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect((result as ShellResult).stderr).toContain("read-only");
+    expect((result as ShellResult).stderr).toContain("shell_read");
   });
 
   // 验证 plan 模式下拒绝非只读工具（如 apply_patch）的调用 / Non-read tools (e.g., apply_patch) are rejected in plan mode

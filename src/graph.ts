@@ -314,7 +314,7 @@ export function routeAfterAgent(
  *  - 仍有待处理工具请求 -> tools / Still has pending tool request -> tools
  *  - 否则 -> agent / Otherwise -> agent
  */
-export function routeAfterApproval(state: CodeAgentState): "tools" | "agent" | typeof END {
+export function routeAfterApproval(state: CodeAgentState): "tools" | "agent" {
   return getPendingToolRequest(state.messages, state.workspace) ? "tools" : "agent";
 }
 
@@ -383,11 +383,11 @@ export async function runApprovedTool(
         command: request.args.command,
         exitCode: -1,
         stdout: "",
-        stderr: "Rejected: plan mode allows read-only shell commands only.",
+        stderr: "Rejected: shell_read only accepts read-only shell commands.",
       };
     }
-  // shell_execute 默认路径 / Fallback: shell_execute
-  return (shellExecutor ?? shellTool)({
+    // 执行只读命令 / Execute read-only shell command
+    return (shellExecutor ?? shellTool)({
       workspace,
       command: request.args.command,
     });
