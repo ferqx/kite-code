@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyPatchTool, assertInsideWorkspace, shellTool } from "../src/tools";
 
+// 工具安全与执行单元测试 / Tool safety & execution unit tests — 验证 workspace 边界约束和 shell/patch 工具行为
 describe("tool safety", () => {
+  // 验证工作区内部路径被允许 / Paths inside the workspace are allowed by the safety boundary check
   test("allows paths inside the workspace", () => {
     const workspace = join(tmpdir(), "openpx-langgraph-tools-safe");
 
@@ -13,6 +15,7 @@ describe("tool safety", () => {
     );
   });
 
+  // 验证以点号开头的文件名（如 ..notes.txt）不会被误判为路径穿越 / Dot-prefixed filenames (e.g., ..notes.txt) are not falsely flagged as path traversal
   test("allows workspace files whose names start with dots", () => {
     const workspace = join(tmpdir(), "openpx-langgraph-tools-safe");
 
@@ -21,6 +24,7 @@ describe("tool safety", () => {
     );
   });
 
+  // 验证工作区外部路径被拒绝以防止路径穿越攻击 / Paths outside the workspace are rejected to prevent path traversal attacks
   test("rejects paths outside the workspace", () => {
     const workspace = join(tmpdir(), "openpx-langgraph-tools-safe");
 
@@ -29,6 +33,7 @@ describe("tool safety", () => {
     );
   });
 
+  // 验证 apply_patch 工具能在工作区内创建文件 / apply_patch tool successfully creates files inside the workspace
   test("creates files inside the workspace", async () => {
     const workspace = join(tmpdir(), "openpx-langgraph-tools-patch");
     rmSync(workspace, { recursive: true, force: true });
@@ -57,6 +62,7 @@ describe("tool safety", () => {
     );
   });
 
+  // 验证 apply_patch 通过 shell executor 委托执行文件编辑，而非直接写文件 / apply_patch delegates file edits through shell executor rather than writing directly
   test("apply_patch delegates edits through shell execution", async () => {
     const commands: string[] = [];
     const result = await applyPatchTool({
@@ -80,6 +86,7 @@ describe("tool safety", () => {
     expect(commands[0]).toContain(process.platform === "win32" ? "Set-Content" : "bun -e");
   });
 
+  // 验证 shellTool 返回结构化的命令执行结果（command, exitCode, stdout, stderr） / shellTool returns structured command execution results with command, exitCode, stdout, and stderr
   test("returns structured shell command results", async () => {
     const workspace = join(tmpdir(), "openpx-langgraph-tools-shell");
     mkdirSync(workspace, { recursive: true });

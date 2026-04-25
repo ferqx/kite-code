@@ -1,17 +1,25 @@
 import { AIMessage } from "@langchain/core/messages";
 import type { AgentMode } from "./types";
 
+/** 提示缓存命中指标 / Prompt cache hit metrics */
 export interface PromptCacheMetrics {
+  /** 输入 token 数 / Input token count */
   inputTokens: number;
+  /** 缓存命中 token 数 / Cache hit token count */
   cacheHitTokens: number;
+  /** 缓存未命中 token 数 / Cache miss token count */
   cacheMissTokens: number;
+  /** 缓存命中率 / Cache hit rate (0-1) */
   hitRate: number;
 }
 
+/** 按模式分组的缓存指标 / Cache metrics grouped by mode */
 export interface PromptCacheMetricsByMode extends PromptCacheMetrics {
+  /** 运行模式 / Run mode */
   mode: AgentMode;
 }
 
+/** 从 AIMessage 元数据中提取 DeepSeek 缓存指标 / Extract DeepSeek cache metrics from AIMessage metadata */
 export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics | null {
   if (!AIMessage.isInstance(message)) {
     return null;
@@ -39,6 +47,7 @@ export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics 
       Math.max(0, inputTokens - cacheHitTokens),
   );
 
+  // 三项均为零视为无效（非 LLM 消息） / Return null if all three are zero (not an LLM message)
   if (!inputTokens && !cacheHitTokens && !cacheMissTokens) {
     return null;
   }
@@ -47,10 +56,12 @@ export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics 
     inputTokens,
     cacheHitTokens,
     cacheMissTokens,
+    // 避免除零 / Avoid division by zero
     hitRate: inputTokens > 0 ? cacheHitTokens / inputTokens : 0,
   };
 }
 
+/** 按模式汇总缓存指标 / Summarize cache metrics by mode */
 export function summarizePromptCacheMetricsByMode(
   items: PromptCacheMetricsByMode[],
 ): Record<AgentMode, PromptCacheMetrics> {
@@ -64,6 +75,7 @@ export function summarizePromptCacheMetricsByMode(
     bucket.inputTokens += item.inputTokens;
     bucket.cacheHitTokens += item.cacheHitTokens;
     bucket.cacheMissTokens += item.cacheMissTokens;
+    // 聚合后重新计算命中率 / Recalculate hit rate after aggregation
     bucket.hitRate =
       bucket.inputTokens > 0 ? bucket.cacheHitTokens / bucket.inputTokens : 0;
   }
@@ -71,6 +83,7 @@ export function summarizePromptCacheMetricsByMode(
   return summary;
 }
 
+/** 生成空的缓存指标对象 / Generate empty cache metrics object */
 function emptyPromptCacheMetrics(): PromptCacheMetrics {
   return {
     inputTokens: 0,

@@ -14,43 +14,66 @@ import {
   type PendingWrite,
 } from "@langchain/langgraph-checkpoint";
 
+/** checkpoint 表行数据类型 / Checkpoint table row data type */
 interface CheckpointRow {
+  /** 线程 ID / Thread ID */
   thread_id: string;
+  /** 检查点命名空间 / Checkpoint namespace */
   checkpoint_ns: string;
+  /** 检查点 ID / Checkpoint ID */
   checkpoint_id: string;
+  /** 父检查点 ID / Parent checkpoint ID */
   parent_checkpoint_id: string | null;
+  /** 序列化类型 / Serialization type */
   type: string | null;
+  /** 序列化的检查点数据 / Serialized checkpoint data */
   checkpoint: string | Uint8Array;
+  /** 序列化的元数据 / Serialized metadata */
   metadata: string | Uint8Array;
 }
 
+/** 待写入表行数据类型 / Pending write table row data type */
 interface PendingWriteRow {
+  /** 任务 ID / Task ID */
   task_id: string;
+  /** 通道名称 / Channel name */
   channel: string;
+  /** 序列化类型 / Serialization type */
   type: string | null;
+  /** 序列化的值 / Serialized value */
   value: string | Uint8Array | null;
 }
 
+/** 待发送表行数据类型 / Pending send table row data type */
 interface PendingSendRow {
+  /** 序列化类型 / Serialization type */
   type: string | null;
+  /** 序列化的值 / Serialized value */
   value: string | Uint8Array | null;
 }
 
+/** 基于 Bun SQLite 的 LangGraph Checkpoint 持久化器 / LangGraph checkpoint persistence using Bun SQLite */
 export class BunSqliteSaver extends BaseCheckpointSaver {
+  /** 数据库实例 / Database instance */
   private readonly db: Database;
+  /** 是否已初始化表结构 / Whether tables have been set up */
   private isSetup = false;
 
+  /** 创建实例并初始化数据库 / Create instance and initialize database */
   constructor(private readonly dbPath: string) {
     super();
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
   }
 
+  /** 创建 checkpoint 和 writes 表，开启 WAL 模式 / Create checkpoint and writes tables, enable WAL mode */
   setup(): void {
+    // 已初始化则跳过 / Skip if already set up
     if (this.isSetup) {
       return;
     }
 
+    // WAL 模式提升并发读写性能 / WAL mode improves concurrent read/write performance
     this.db.run("pragma journal_mode = wal");
     this.db.run(`
       create table if not exists checkpoints (
@@ -80,6 +103,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     this.isSetup = true;
   }
 
+  /** 获取单个检查点元组 / Get single checkpoint tuple */
   async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
     this.setup();
     const threadId = config.configurable?.thread_id;
@@ -89,6 +113,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
       return undefined;
     }
 
+    // 指定 checkpoint_id 则精确查询，否则取最新 / Query by checkpoint_id if specified, otherwise get latest
     const row = checkpointId
       ? this.db
           .query<CheckpointRow, [string, string, string]>(selectCheckpointSql(true))
@@ -101,6 +126,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
       return undefined;
     }
 
+    // 未指定 checkpoint_id 时回退为查询结果中的最新记录 / Fallback to latest when checkpoint_id not specified
     const finalConfig = checkpointId
       ? config
       : {
@@ -115,6 +141,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
       row.type ?? "json",
       row.checkpoint,
     );
+    // v3 到 v4 待发送数据迁移 / Migrate pending sends from v3 to v4
     if (checkpoint.v < 4 && row.parent_checkpoint_id != null) {
       await this.migratePendingSends(checkpoint, row.thread_id, row.parent_checkpoint_id);
     }
@@ -140,6 +167,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     };
   }
 
+  /** 列出检查点，支持分页和过滤 / List checkpoints with pagination and filtering */
   async *list(
     config: RunnableConfig,
     options: CheckpointListOptions = {},
@@ -204,6 +232,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     }
   }
 
+  /** 存储检查点和元数据 / Store checkpoint and metadata */
   async put(
     config: RunnableConfig,
     checkpoint: Checkpoint,
@@ -253,6 +282,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     };
   }
 
+  /** 存储待写入数据 / Store pending writes */
   async putWrites(
     config: RunnableConfig,
     writes: PendingWrite[],
@@ -294,6 +324,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     })();
   }
 
+  /** 删除整个线程的检查点 / Delete all checkpoints for a thread */
   async deleteThread(threadId: string): Promise<void> {
     this.setup();
     this.db.transaction(() => {
@@ -302,10 +333,12 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     })();
   }
 
+  /** 关闭数据库连接 / Close database connection */
   close(): void {
     this.db.close();
   }
 
+  /** 获取检查点的待写入数据 / Get pending writes for a checkpoint */
   private async getPendingWrites(
     threadId: string,
     checkpointNs: string,
@@ -329,6 +362,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     return parsed as [string, string, unknown][];
   }
 
+  /** v3 到 v4 待发送数据迁移 / v3 to v4 pending sends migration */
   private async migratePendingSends(
     checkpoint: Checkpoint,
     threadId: string,
@@ -353,12 +387,14 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
   }
 }
 
+/** 构建 checkpoint 查询 SQL / Build checkpoint query SQL */
 function selectCheckpointSql(withCheckpointId: boolean): string {
   return `${selectCheckpointColumns()} from checkpoints
     where thread_id = ? and checkpoint_ns = ?
     ${withCheckpointId ? "and checkpoint_id = ?" : "order by checkpoint_id desc limit 1"}`;
 }
 
+/** 构建 checkpoint 查询列名 / Build checkpoint query column names */
 function selectCheckpointColumns(): string {
   return `
     select

@@ -19,21 +19,30 @@ const configSchema = z.object({
   }),
 });
 
+/** Agent 配置 / Agent configuration */
 export interface AgentConfig {
+  /** API 密钥 / API key */
   apiKey: string;
+  /** API 基础 URL / API base URL */
   baseURL: string;
+  /** 模型名称 / Model name */
   modelName: string;
+  /** 提供商名称 / Provider name */
   providerName: string;
 }
 
+/** 加载配置选项 / Configuration loading options */
 export interface LoadAgentConfigOptions {
+  /** 配置文件路径 / Configuration file path */
   configPath?: string;
 }
 
+/** 获取默认配置路径 / Get default configuration path */
 export function defaultConfigPath(): string {
   return join(homedir(), ".openpx", "openpx.jsonc");
 }
 
+/** 加载并解析 Agent 配置 / Load and parse agent configuration */
 export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConfig {
   const configPath = options.configPath ?? defaultConfigPath();
   if (!existsSync(configPath)) {

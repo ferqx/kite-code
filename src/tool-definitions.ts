@@ -2,11 +2,15 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { applyPatchTool, shellTool, type ShellExecutor } from "./tools";
 
+/** 创建代码 Agent 工具集输入 / Input for creating code agent tools */
 export interface CreateCodeAgentToolsInput {
+  /** 工作目录 / Workspace directory */
   workspace: string;
+  /** 可选 Shell 执行器 / Optional shell executor */
   shellExecutor?: ShellExecutor;
 }
 
+/** 创建 builder 模式的工具集（shell_execute, apply_patch, update_plan）/ Create builder mode tool set (shell_execute, apply_patch, update_plan) */
 export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
   const shellExecute = tool(
     async ({ command }) =>
@@ -50,9 +54,11 @@ export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
   return [shellExecute, applyPatch, createUpdatePlanTool()];
 }
 
+/** 创建 plan 模式的工具集（shell_read, update_plan）/ Create plan mode tool set (read-only: shell_read, update_plan) */
 export function createPlanAgentTools(input: CreateCodeAgentToolsInput) {
   const shellRead = tool(
     async ({ command }) => {
+      // 拒绝非只读命令 / Reject non-read-only commands
       if (!isPlanReadOnlyShellCommand(command)) {
         return JSON.stringify({
           ok: false,
@@ -83,6 +89,7 @@ export function createPlanAgentTools(input: CreateCodeAgentToolsInput) {
   return [shellRead, createUpdatePlanTool()];
 }
 
+/** 创建 update_plan 工具定义，用于创建或更新执行计划 / Create update_plan tool definition for creating/updating execution plans */
 function createUpdatePlanTool() {
   return tool(
     async ({ name, description, status, steps }) =>
@@ -120,6 +127,7 @@ function createUpdatePlanTool() {
   );
 }
 
+/** Plan 模式允许的只读命令白名单 / Read-only command allowlist for plan mode */
 const PLAN_READ_ONLY_COMMANDS = new Set([
   "awk",
   "cat",
@@ -148,6 +156,7 @@ const PLAN_READ_ONLY_COMMANDS = new Set([
   "wc",
 ]);
 
+/** Plan 模式允许的 Git 只读子命令白名单 / Read-only git subcommand allowlist for plan mode */
 const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
   "branch",
   "diff",
@@ -158,15 +167,19 @@ const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
   "status",
 ]);
 
+/** 检查命令是否在 plan 模式只读白名单中 / Check if command is in plan mode read-only allowlist */
 export function isPlanReadOnlyShellCommand(command: string): boolean {
   const trimmed = command.trim();
+  // 拒绝对空命令和包含输出重定向的命令 / Reject empty commands and commands with output redirection
   if (!trimmed || /(^|[^>])>{1,2}($|[^>])/.test(trimmed)) {
     return false;
   }
 
+  // 拆分为多个命令段并逐一检查 / Split into multiple command segments and check each one
   return splitShellSegments(trimmed).every(isPlanReadOnlySegment);
 }
 
+/** 将 Shell 命令按分隔符拆分为多个段 / Split shell command into segments by separators */
 function splitShellSegments(command: string): string[] {
   return command
     .split(/\s*(?:\|\||&&|[|;])\s*/g)
@@ -174,17 +187,22 @@ function splitShellSegments(command: string): string[] {
     .filter(Boolean);
 }
 
+/** 检查单个命令段是否为 plan 模式允许的只读命令 / Check if individual command segment is plan mode read-only */
 function isPlanReadOnlySegment(segment: string): boolean {
+  // 将命令段解析为 token 数组，支持引号 / Parse segment into token array, supporting quotes
   const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  // 第一个 token 为命令名，去除引号后转小写 / First token is the command name, strip quotes and lower-case
   const command = stripQuotes(tokens[0] ?? "").toLowerCase();
   if (!command) {
     return false;
   }
 
+  // git 命令需额外检查子命令白名单 / Git command requires additional subcommand allowlist check
   if (command === "git") {
     return PLAN_READ_ONLY_GIT_SUBCOMMANDS.has(stripQuotes(tokens[1] ?? "").toLowerCase());
   }
 
+  // sed 命令禁止 -i 原地编辑标志 / sed command forbids -i in-place edit flag
   if (command === "sed") {
     return (
       PLAN_READ_ONLY_COMMANDS.has(command) &&
@@ -192,6 +210,7 @@ function isPlanReadOnlySegment(segment: string): boolean {
     );
   }
 
+  // find 命令禁止 -exec、-execdir、-delete 等危险选项 / find command forbids dangerous options: -exec, -execdir, -delete
   if (command === "find") {
     return (
       PLAN_READ_ONLY_COMMANDS.has(command) &&
@@ -199,6 +218,7 @@ function isPlanReadOnlySegment(segment: string): boolean {
     );
   }
 
+  // awk 命令禁止 system() 调用 / awk command forbids system() call
   if (command === "awk") {
     return PLAN_READ_ONLY_COMMANDS.has(command) && !/\bsystem\s*\(/.test(segment);
   }
@@ -206,6 +226,7 @@ function isPlanReadOnlySegment(segment: string): boolean {
   return PLAN_READ_ONLY_COMMANDS.has(command);
 }
 
+/** 去除字符串首尾引号 / Strip surrounding quotes from string */
 function stripQuotes(value: string): string {
   return value.replace(/^["']|["']$/g, "");
 }

@@ -5,7 +5,9 @@ import {
   isPlanReadOnlyShellCommand,
 } from "../src/tool-definitions";
 
+// Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe("code agent tool definitions", () => {
+  // 验证 builder 模式公开 shell_execute、apply_patch 和 update_plan 三个工具 / Builder mode exposes shell_execute, apply_patch, and update_plan tools
   test("exposes builder tools plus update_plan", () => {
     const tools = createCodeAgentTools({
       workspace: "D:\\workspace",
@@ -28,6 +30,7 @@ describe("code agent tool definitions", () => {
     expect(tools[2].schema).toBeDefined();
   });
 
+  // 验证 update_plan 的 Zod schema 要求完整的 state-first plan 字段（name 必填） / update_plan Zod schema requires full state-first plan fields with name as required
   test("requires full state-first plan fields in update_plan schema", () => {
     const tools = createPlanAgentTools({
       workspace: "D:\\workspace",
@@ -50,6 +53,7 @@ describe("code agent tool definitions", () => {
     expect(String(updatePlanTool.description)).toContain("plan mode");
   });
 
+  // 验证 plan 模式只公开 shell_read 和 update_plan 两个工具，不包含写入工具 / Plan mode only exposes shell_read and update_plan, no write tools
   test("exposes read-only shell and update_plan in plan mode", () => {
     const tools = createPlanAgentTools({
       workspace: "D:\\workspace",
@@ -60,6 +64,7 @@ describe("code agent tool definitions", () => {
     expect(String(tools[1].description)).toContain("plan mode");
   });
 
+  // 验证常见只读 shell 命令（ls, cat, rg, git status 等）被正确分类为只读 / Common read-only shell commands (ls, cat, rg, git status, etc.) are correctly classified as read-only
   test("classifies conservative plan shell commands as read-only", () => {
     expect(isPlanReadOnlyShellCommand("pwd")).toBe(true);
     expect(isPlanReadOnlyShellCommand("ls src")).toBe(true);
@@ -78,6 +83,7 @@ describe("code agent tool definitions", () => {
     expect(isPlanReadOnlyShellCommand("git diff -- src/runner.ts")).toBe(true);
   });
 
+  // 验证可能写入、删除或执行项目代码的 shell 命令被拒绝（sed -i, rm -rf, git add, mkdir 等） / Shell commands that can write, delete, or execute project code (sed -i, rm -rf, git add, mkdir, etc.) are rejected
   test("rejects plan shell commands that can write, delete, or execute project code", () => {
     expect(isPlanReadOnlyShellCommand("echo hi > hello.txt")).toBe(false);
     expect(isPlanReadOnlyShellCommand("sed -i 's/a/b/' src/a.ts")).toBe(false);

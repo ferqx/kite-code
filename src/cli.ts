@@ -3,25 +3,39 @@ import { loadAgentConfig } from "./config";
 import { resumeCodeAgent, streamCodeAgent } from "./runner";
 import type { AgentRunMode } from "./types";
 
+/** CLI 解析后的参数 / CLI parsed arguments */
 export interface ParsedArgs {
+  /** 命令（run/resume/help）/ Command */
   command: "run" | "resume" | "help";
+  /** 任务文本 / Task text */
   task?: string;
+  /** 线程 ID / Thread ID */
   threadId: string;
+  /** 用户 ID / User ID */
   userId: string;
+  /** 工作目录路径 / Workspace path */
   workspace: string;
+  /** Checkpoint 路径 / Checkpoint path */
   checkpointPath: string;
+  /** Agent 运行模式 / Agent run mode */
   mode: AgentRunMode;
+  /** 恢复时是否审批通过 / Whether approved on resume */
   approve: boolean;
 }
 
+/** CLI 入口函数 / CLI entry point */
 export async function main(): Promise<void> {
+  // 解析命令行参数 / Parse command line arguments
   const args = parseArgs(process.argv.slice(2));
+  // 帮助命令直接打印并返回 / Print help and return for help command
   if (args.command === "help") {
     printHelp();
     return;
   }
 
+  // 加载 Agent 配置 / Load agent configuration
   const config = loadAgentConfig();
+  // 根据命令类型发起流 / Start stream based on command type
   const events =
     args.command === "run"
       ? streamCodeAgent({
@@ -42,14 +56,19 @@ export async function main(): Promise<void> {
           resume: { approved: args.approve },
         });
 
+  // 逐行输出事件 JSON / Output events as JSON lines
   for await (const event of events) {
     console.log(JSON.stringify(event));
   }
 }
 
+/** 解析命令行参数 / Parse command line arguments */
 export function parseArgs(argv: string[]): ParsedArgs {
+  // 确定命令类型 / Determine command type
   const command = argv[0] === "resume" ? "resume" : argv[0] === "run" ? "run" : "help";
+  // 获取当前工作目录 / Get current working directory
   const cwd = process.cwd();
+  // 辅助函数：提取选项值 / Helper: extract option value
   const value = (name: string, fallback: string) => {
     const index = argv.indexOf(name);
     return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
@@ -71,11 +90,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
   };
 }
 
+/** 提取非选项参数拼接为任务文本 / Extract non-option args as task text */
 function positionalTask(argv: string[]): string {
   if (argv[0] !== "run") {
     return "";
   }
 
+  // 需要值的选项名称集合 / Set of option names that require values
   const optionNamesWithValues = new Set([
     "--task",
     "--thread",
@@ -85,6 +106,7 @@ function positionalTask(argv: string[]): string {
     "--mode",
   ]);
   const parts: string[] = [];
+  // 收集非选项位置参数 / Collect non-option positional args
   for (let index = 1; index < argv.length; index++) {
     const item = argv[index];
     if (optionNamesWithValues.has(item)) {
@@ -99,14 +121,19 @@ function positionalTask(argv: string[]): string {
   return parts.join(" ").trim();
 }
 
+/** 解析模式参数 / Parse mode argument */
 function parseMode(value: string): AgentRunMode {
+  // 仅接受 plan/builder，其他统一为 auto / Only accept plan/builder, others default to auto
   return value === "plan" || value === "builder" ? value : "auto";
 }
 
+/** 生成新线程 ID / Generate fresh thread ID */
 function freshThreadId(): string {
+  // 生成包含时间戳和随机数的线程 ID / Generate thread ID with timestamp and random part
   return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** 打印帮助信息 / Print help information */
 function printHelp(): void {
   console.log(`Usage:
   bun run agent run --task "Create hello.txt with exact content \\"hi\\""
