@@ -7,7 +7,7 @@ import {
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe("code agent tool definitions", () => {
-  // 验证 builder 模式公开 shell_execute、apply_patch 和 update_plan 三个工具 / Builder mode exposes shell_execute, apply_patch, and update_plan tools
+  // 验证 builder 模式包含所有工具 / Builder mode includes all tools
   test("exposes builder tools plus update_plan", () => {
     const tools = createCodeAgentTools({
       workspace: "D:\\workspace",
@@ -21,8 +21,11 @@ describe("code agent tool definitions", () => {
     });
 
     expect(tools.map((item) => item.name)).toEqual([
+      "read_file",
+      "edit_file",
+      "write_file",
+      "search",
       "shell_execute",
-      "apply_patch",
       "update_plan",
     ]);
     expect(tools[0].schema).toBeDefined();
