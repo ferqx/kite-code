@@ -1,6 +1,6 @@
 import { platform, release, type } from "node:os";
 import type { BaseMessage } from "@langchain/core/messages";
-import type { AgentEvidence, AgentMode, AgentPlan, AgentProgressLedger } from "./types";
+import type { AgentEvidence, AgentMode, AgentPlan, AgentProgressLedger } from "../shared/types";
 
 /** 运行时系统信息 / Runtime system information */
 export interface RuntimeSystemInfo {

@@ -4,7 +4,7 @@ import {
   buildModelMessages,
   buildStaticSystemPrompt,
   prepareModelContext,
-} from "../src/context";
+} from "../src/model/context";
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
 describe("model context protocol", () => {

@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { ShellInput, ShellResult } from "./types";
+import type { ShellInput, ShellResult } from "../shared/types";
 
 /** Shell 执行器函数签名 / Shell executor function signature */
 export type ShellExecutor = (input: ShellInput) => Promise<ShellResult>;

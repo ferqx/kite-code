@@ -3,7 +3,7 @@ import {
   initialModeForTask,
   runtimeQuestionAnswer,
   taskMessageForInitialMode,
-} from "../src/runner";
+} from "../src/app/runner";
 
 // 测试 runner 的初始模式选择逻辑 / Test runner initial mode selection logic
 describe("runner initial mode selection", () => {

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { defaultConfigPath, loadAgentConfig } from "../src/config";
+import { defaultConfigPath, loadAgentConfig } from "../src/config/index";
 
 // 验证 loadAgentConfig 配置加载功能 / Verify loadAgentConfig configuration loading
 describe("loadAgentConfig", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseArgs } from "../src/cli";
+import { parseArgs } from "../src/app/cli";
 
 // 测试 CLI 命令行参数解析逻辑 / Test CLI argument parsing logic
 describe("cli argument parsing", () => {

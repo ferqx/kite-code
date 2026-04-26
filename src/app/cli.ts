@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
-import { loadAgentConfig } from "./config";
+import { loadAgentConfig } from "../config/index";
 import { resumeCodeAgent, streamCodeAgent } from "./runner";
-import type { AgentRunMode } from "./types";
+import type { AgentRunMode } from "../shared/types";
 
 /** CLI 解析后的参数 / CLI parsed arguments */
 export interface ParsedArgs {

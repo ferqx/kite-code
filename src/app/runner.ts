@@ -1,11 +1,11 @@
 import { HumanMessage } from "@langchain/core/messages";
 import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
-import type { AgentConfig } from "./config";
-import { buildCodeAgentGraph } from "./graph";
-import type { ShellExecutor } from "./tools";
-import { extractPromptCacheMetrics } from "./cache-metrics";
-import type { AgentEvent, AgentMode, AgentRunMode, ContextBudget } from "./types";
+import type { AgentConfig } from "../config/index";
+import { buildCodeAgentGraph } from "../harness/graph";
+import type { ShellExecutor } from "../tools/shell";
+import { extractPromptCacheMetrics } from "../shared/cache-metrics";
+import type { AgentEvent, AgentMode, AgentRunMode, ContextBudget } from "../shared/types";
 
 /** 流式运行 Agent 输入 / Stream agent input */
 export interface StreamCodeAgentInput {

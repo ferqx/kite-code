@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
-import { loadAgentConfig } from "../src/config";
-import { resumeCodeAgent, streamCodeAgent } from "../src/runner";
-import { shellTool } from "../src/tools";
-import type { AgentConfig } from "../src/config";
-import type { ShellInput, ShellResult } from "../src/types";
-import type { AgentEvent } from "../src/types";
+import { HumanMessage } from "@langchain/core/messages";
+import { loadAgentConfig } from "../src/config/index";
+import { resumeCodeAgent, streamCodeAgent } from "../src/app/runner";
+import { createDeepSeekModel } from "../src/model/deepseek";
+import { shellTool } from "../src/tools/shell";
+import type { AgentConfig } from "../src/config/index";
+import type { ShellInput, ShellResult } from "../src/shared/types";
+import type { AgentEvent } from "../src/shared/types";
 
 // ============================================================================
 // 真实 DeepSeek API 端到端测试，从简到难分为 7 个层级
@@ -31,14 +33,58 @@ interface ContinueInput {
   shellExecutor?: (input: ShellInput) => Promise<ShellResult>;
 }
 
+let realModelPreflight: Promise<void> | null = null;
+
+async function ensureRealModelAvailable(): Promise<void> {
+  realModelPreflight ??= runRealModelPreflight();
+  return realModelPreflight;
+}
+
+async function runRealModelPreflight(): Promise<void> {
+  const config = loadAgentConfig();
+  try {
+    const response = await createDeepSeekModel(config).invoke([
+      new HumanMessage("Reply with ok only"),
+    ]);
+    expect(String(response.content).toLowerCase()).toContain("ok");
+  } catch (error) {
+    throw new Error(
+      [
+        `DeepSeek real-test preflight failed for ${config.modelName} at ${config.baseURL}.`,
+        `Proxy env: ${proxyEnvSummary()}`,
+        `Error: ${error instanceof Error ? error.message : String(error)}`,
+      ].join("\n"),
+      { cause: error },
+    );
+  }
+}
+
+function proxyEnvSummary(): string {
+  return [
+    "all_proxy",
+    "http_proxy",
+    "https_proxy",
+    "ALL_PROXY",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+  ]
+    .map((name) => `${name}=${process.env[name] ?? "<unset>"}`)
+    .join(" ");
+}
+
 // ============================================================================
 // L1–L4: 基础场景 / Basic scenarios
 // ============================================================================
 describe("L1-L4: basic real agent scenarios", () => {
+  test("preflight: DeepSeek model is reachable", async () => {
+    await ensureRealModelAvailable();
+  }, 120_000);
+
   // L1: 元问题直接回答，不触发工具审批 / Meta question answered directly without tool approval
   test(
     "L1: answers model and context questions directly without tool approval",
     async () => {
+      await ensureRealModelAvailable();
       const env = createEnv("l1-direct");
       const events: AgentEvent[] = [];
       for await (const event of streamCodeAgent({
@@ -54,13 +100,14 @@ describe("L1-L4: basic real agent scenarios", () => {
       expect(String(final?.data)).toContain(env.config.modelName);
       expect(String(final?.data)).toContain("上下文");
     },
-    60_000,
+    120_000,
   );
 
   // L2: 单文件创建，触发一次审批 / Single file creation, one approval
   test(
     "L2: creates a single file with one approval cycle",
     async () => {
+      await ensureRealModelAvailable();
       const env = createEnv("l2-single-file");
       const content = "hello from real deepseek langgraph agent";
       const events = await runApprovalLoop({
@@ -80,6 +127,7 @@ describe("L1-L4: basic real agent scenarios", () => {
   test(
     "L3: /plan produces a plan, blocks edits, and switches to builder after approval",
     async () => {
+      await ensureRealModelAvailable();
       const env = createEnv("l3-plan");
       const fileName = "plan-mode-output.txt";
       const fileContent = "plan mode should not edit before confirmation";
@@ -109,6 +157,7 @@ describe("L1-L4: basic real agent scenarios", () => {
   test(
     "L4: creates multiple files and verifies all of them",
     async () => {
+      await ensureRealModelAvailable();
       const env = createEnv("l4-multi-file");
       const files = [
         { name: "a.txt", content: "AAA" },
@@ -138,6 +187,7 @@ describe("L5: code modification with verification", () => {
   test(
     "L5: creates a TypeScript file and verifies with typecheck",
     async () => {
+      await ensureRealModelAvailable();
       const env = createEnv("l5-code-verify");
 
       // 预置 tsconfig.json，使 tsc 能工作 / Pre-create tsconfig.json so tsc works
@@ -172,6 +222,7 @@ describe("L5: code modification with verification", () => {
   test(
     "L5b: creates a file and verifies it passes linting",
     async () => {
+      await ensureRealModelAvailable();
       const env = createEnv("l5-lint-verify");
 
       const events = await runApprovalLoop({
@@ -202,6 +253,7 @@ describe("L6: error recovery scenarios", () => {
   test(
     "L6: recovers from a malformed command by inspecting and retrying",
     async () => {
+      await ensureRealModelAvailable();
       const env = createEnv("l6-error-recovery");
 
       const events = await runApprovalLoop({
@@ -223,6 +275,7 @@ describe("L6: error recovery scenarios", () => {
   test(
     "L6b: adapts when a non-read command is rejected in plan mode",
     async () => {
+      await ensureRealModelAvailable();
       const env = createEnv("l6-plan-reject");
 
       const planEvents: AgentEvent[] = [];
@@ -253,6 +306,7 @@ describe("L7: long-running multi-file project", () => {
   test(
     "L7: builds a small multi-file utility project with iterative verification",
     async () => {
+      await ensureRealModelAvailable();
       const env = createEnv("l7-long-run");
 
       const events = await runApprovalLoop({

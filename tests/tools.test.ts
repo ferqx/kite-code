@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertInsideWorkspace, shellTool } from "../src/tools";
-import { writeFile, editFile, readFile } from "../src/file-tools";
+import { assertInsideWorkspace, shellTool } from "../src/tools/shell";
+import { writeFile, editFile, readFile } from "../src/tools/file";
 
 describe("tool safety", () => {
   test("allows paths inside the workspace", () => {
@@ -43,6 +43,25 @@ describe("tool safety", () => {
     expect(existsSync(join(workspace, "hello.txt"))).toBe(true);
     expect(readFileSync(join(workspace, "hello.txt"), "utf8")).toBe(
       "hello from write_file\n",
+    );
+  });
+
+  test("write_file accepts absolute paths inside the workspace", () => {
+    const workspace = join(tmpdir(), "openpx-langgraph-tools-write-absolute");
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    const absolutePath = join(workspace, "nested", "hello.txt");
+
+    const result = writeFile({
+      workspace,
+      path: absolutePath,
+      content: "hello from absolute path\n",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(existsSync(absolutePath)).toBe(true);
+    expect(existsSync(join(workspace, workspace.slice(1), "nested", "hello.txt"))).toBe(
+      false,
     );
   });
 

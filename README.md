@@ -14,6 +14,16 @@ This is a standalone Bun/TypeScript code-agent reference built with LangGraph.js
 - Workspace-safe file patch tool and structured shell tool results.
 - Real DeepSeek end-to-end test.
 
+## Source Layout
+
+- `src/app/`: CLI entrypoint, run/resume orchestration, and streamed event normalization.
+- `src/harness/`: LangGraph control loop, state, routes, approval, tool dispatch, evidence, progress, and stop-check guardrails.
+- `src/model/`: DeepSeek adapter, static prompts, runtime context, and context compaction.
+- `src/tools/`: model tool definitions plus file, shell, and patch tool implementations.
+- `src/persistence/`: Bun SQLite LangGraph checkpointer.
+- `src/config/`: local `~/.openpx/openpx.jsonc` configuration loader.
+- `src/shared/`: shared types and prompt cache metrics.
+
 ## Setup
 
 Install dependencies:

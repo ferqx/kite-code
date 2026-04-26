@@ -24,19 +24,27 @@
 
 ## 进入仓库后优先看哪里
 
-- `src/graph.ts`
-  这是核心文件。包含状态定义、节点、路由、stop check、审批流和工具执行主循环。
-- `src/runner.ts`
+- `src/harness/graph.ts`
+  负责 LangGraph 节点组装和主循环拓扑。
+- `src/harness/routes.ts`
+  负责 agent / approval / tools / reflect / stop_check 之间的路由。
+- `src/harness/stop-check.ts`
+  负责最终答案收口守卫。
+- `src/harness/tool-runner.ts`
+  负责执行经过审批或允许直通的工具请求。
+- `src/harness/evidence.ts` 和 `src/harness/progress.ts`
+  负责命令、文件、验证证据以及进度账本。
+- `src/app/runner.ts`
   负责 run / resume 编排与事件流输出。
-- `src/cli.ts`
+- `src/app/cli.ts`
   负责 CLI 参数解析和入口行为。
-- `src/tool-definitions.ts`
-  负责 plan 模式下的工具暴露和只读限制。
-- `src/tools.ts`
-  负责 shell / patch 工具实现。
-- `src/context.ts`
+- `src/tools/definitions.ts`
+  负责 plan/builder 模式下的工具暴露和只读限制。
+- `src/tools/shell.ts`、`src/tools/file.ts`、`src/tools/apply-patch.ts`
+  负责底层 shell、文件和 patch 工具实现。
+- `src/model/context.ts` 和 `src/model/runtime-context.ts`
   负责模型上下文整理、压缩和证据注入。
-- `src/config.ts`
+- `src/config/index.ts`
   负责读取本地 `~/.openpx/openpx.jsonc` 配置。
 - `tests/`
   测试是理解行为约束的重要来源，不只是回归验证。
@@ -63,7 +71,7 @@
 
 ## 特别说明
 
-- `src/graph.ts` 里的 `evaluateStopCheck` 是“收口守卫”，不是业务逻辑。
+- `src/harness/stop-check.ts` 里的 `evaluateStopCheck` 是“收口守卫”，不是业务逻辑。
   它的职责是阻止 agent 过早输出最终答案。
 - 当出现以下情况时，它会清空 `state.final`，并注入一条新的消息，让图回到 `agent` 继续执行：
   - `plan` 模式下还没有真正写入 plan，却直接声称完成。
@@ -186,4 +194,4 @@ bun run test:real
 
 - 不要把 `tests/.tmp-*` 下的文件当成正式源码或稳定夹具。
 - 这个仓库很多“真实约束”不是写在 README，而是写在测试里；遇到不确定行为时，优先读测试。
-- 如果某个改动涉及“是否允许结束流程”，优先检查 `evaluateStopCheck`、`routeAfter*` 和 evidence 记录链路是否一致。
+- 如果某个改动涉及“是否允许结束流程”，优先检查 `src/harness/stop-check.ts`、`src/harness/routes.ts` 和 evidence 记录链路是否一致。

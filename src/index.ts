@@ -1,6 +1,7 @@
 /** 模块入口，导出所有公共 API / Module entry point, exports all public API */
-export { loadAgentConfig } from "./config";
-export { streamCodeAgent, resumeCodeAgent } from "./runner";
-export { BunSqliteSaver } from "./checkpoint";
-export { shellTool } from "./tools";
-export { readFile, editFile, writeFile, search } from "./file-tools";
+export { loadAgentConfig } from "./config/index";
+export { streamCodeAgent, resumeCodeAgent } from "./app/runner";
+export { BunSqliteSaver } from "./persistence/checkpoint";
+export { shellTool } from "./tools/shell";
+export { readFile, editFile, writeFile, search } from "./tools/file";
+export type * from "./shared/types";

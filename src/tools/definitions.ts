@@ -1,12 +1,12 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { shellTool, type ShellExecutor } from "./tools";
+import { shellTool, type ShellExecutor } from "./shell";
 import {
   readFile,
   editFile,
   writeFile,
   search,
-} from "./file-tools";
+} from "./file";
 
 /** 创建代码 Agent 工具集输入 / Input for creating code agent tools */
 export interface CreateCodeAgentToolsInput {

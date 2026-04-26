@@ -3,7 +3,7 @@ import {
   createCodeAgentTools,
   createPlanAgentTools,
   isPlanReadOnlyShellCommand,
-} from "../src/tool-definitions";
+} from "../src/tools/definitions";
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe("code agent tool definitions", () => {
@@ -83,7 +83,7 @@ describe("code agent tool definitions", () => {
       true,
     );
     expect(isPlanReadOnlyShellCommand("git status --short")).toBe(true);
-    expect(isPlanReadOnlyShellCommand("git diff -- src/runner.ts")).toBe(true);
+    expect(isPlanReadOnlyShellCommand("git diff -- src/app/runner.ts")).toBe(true);
   });
 
   // 验证可能写入、删除或执行项目代码的 shell 命令被拒绝（sed -i, rm -rf, git add, mkdir 等） / Shell commands that can write, delete, or execute project code (sed -i, rm -rf, git add, mkdir, etc.) are rejected

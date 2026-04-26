@@ -3,8 +3,8 @@ import { AIMessage } from "@langchain/core/messages";
 import {
   extractPromptCacheMetrics,
   summarizePromptCacheMetricsByMode,
-} from "../src/cache-metrics";
-import { normalizeGraphStream } from "../src/runner";
+} from "../src/shared/cache-metrics";
+import { normalizeGraphStream } from "../src/app/runner";
 
 // 验证从 AIMessage 响应中提取 prompt cache 指标 / Verify extracting prompt cache metrics from AIMessage responses
 describe("extractPromptCacheMetrics", () => {

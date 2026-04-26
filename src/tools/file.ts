@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { Glob } from "bun";
 
 // ============================================================================
@@ -7,9 +7,15 @@ import { Glob } from "bun";
 // ============================================================================
 
 function safePath(workspace: string, filePath: string): string {
-  const resolved = join(resolve(workspace), filePath);
   const wsResolved = resolve(workspace);
-  if (!resolved.startsWith(wsResolved + "/") && resolved !== wsResolved) {
+  const resolved = resolve(wsResolved, filePath.replace(/[\\/]+/g, sep));
+  const relativePath = relative(wsResolved, resolved);
+  if (
+    relativePath &&
+    (relativePath === ".." ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath))
+  ) {
     throw new Error(`Refusing path outside workspace: ${filePath}`);
   }
   return resolved;

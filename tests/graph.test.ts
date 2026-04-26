@@ -1,19 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { AIMessage } from "@langchain/core/messages";
 import {
-  evaluateStopCheck,
-  recordToolProgress,
-  isPlanMode,
   routeAfterApproval,
   routeAfterAgentPlan,
   routeAfterAgentBuild,
   routeAfterStopCheck,
   routeAfterTools,
   routeAfterReflect,
-  runApprovedTool,
-  type CodeAgentState,
-} from "../src/graph";
-import type { AgentPlan, AgentProgressLedger, ShellResult } from "../src/types";
+} from "../src/harness/routes";
+import { evaluateStopCheck } from "../src/harness/stop-check";
+import { recordToolProgress } from "../src/harness/progress";
+import { runApprovedTool } from "../src/harness/tool-runner";
+import { isPlanMode } from "../src/harness/state";
+import type { CodeAgentState } from "../src/harness/state";
+import type { AgentPlan, AgentProgressLedger, ShellResult } from "../src/shared/types";
 
 const activePlan: AgentPlan = {
   name: "Implement state-first plan flow",
@@ -338,22 +338,22 @@ describe("graph local tool routing", () => {
     const next = recordToolProgress({
       previous,
       requestName: "shell_read",
-      requestArgs: { command: "cat src/graph.ts" },
+      requestArgs: { command: "cat src/harness/graph.ts" },
       result: {
         ok: true,
-        command: "cat src/graph.ts",
+        command: "cat src/harness/graph.ts",
         exitCode: 0,
         stdout: "graph",
         stderr: "",
       },
       previousEvidence: { commands: ["cat package.json"], files: [], verification: [] },
-      nextEvidence: { commands: ["cat package.json", "cat src/graph.ts"], files: [], verification: [] },
+      nextEvidence: { commands: ["cat package.json", "cat src/harness/graph.ts"], files: [], verification: [] },
       previousPlan: null,
       nextPlan: null,
     });
 
     expect(next.repeatedCallCount).toBe(1);
-    expect(next.lastToolSignature).toBe('shell_read:{"command":"cat src/graph.ts"}');
+    expect(next.lastToolSignature).toBe('shell_read:{"command":"cat src/harness/graph.ts"}');
   });
 
   // 验证停滞看门狗在连续5次无进展工具调用后介入，注入阻塞信息提示换策略 / Stagnant watchdog intervenes after 5 consecutive unproductive tool calls, injecting blocker info and suggesting strategy change

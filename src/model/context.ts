@@ -11,7 +11,7 @@ import type {
   AgentPlan,
   AgentProgressLedger,
   ContextBudget,
-} from "./types";
+} from "../shared/types";
 
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = "agent_plan" | "agent_build";

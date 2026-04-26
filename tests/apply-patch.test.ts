@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parsePatch, applyPatch } from "../src/apply-patch";
+import { parsePatch, applyPatch } from "../src/tools/apply-patch";
 
 function createWorkspace(): string {
   const dir = join(tmpdir(), `openpx-patch-${Math.random().toString(36).slice(2, 8)}`);
