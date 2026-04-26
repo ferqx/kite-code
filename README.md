@@ -4,20 +4,20 @@ This is a standalone Bun/TypeScript code-agent reference built with LangGraph.js
 
 ## Features
 
-- LangGraph `StateGraph` with a phase-1 hardened `agent -> approval/tools -> agent` loop.
-- Plan mode with read-only tools, human confirmation, and builder-mode handoff.
-- Context budgeting with compacted history summaries and execution evidence.
+- LangGraph `StateGraph` with an `agent -> approval/tools -> reflect -> agent` loop.
+- Plan mode with read-only tools and no non-dangerous confirmation gate.
+- Context budgeting with compacted history summaries plus internal evidence/progress state.
 - Prompt cache metric extraction from streamed model responses.
 - Bun-native SQLite checkpointer for short-term thread persistence.
 - Streaming graph updates with normalized interrupt and final events.
-- Human-in-the-loop approval through LangGraph `interrupt()` and `Command({ resume })`.
+- Human-in-the-loop approval for protected tool execution through LangGraph `interrupt()` and `Command({ resume })`.
 - Workspace-safe file patch tool and structured shell tool results.
 - Real DeepSeek end-to-end test.
 
 ## Source Layout
 
 - `src/app/`: CLI entrypoint, run/resume orchestration, and streamed event normalization.
-- `src/harness/`: LangGraph control loop, state, routes, approval, tool dispatch, evidence, progress, and stop-check guardrails.
+- `src/harness/`: LangGraph control loop, state, routes, approval, tool dispatch, evidence, progress, and reflection.
 - `src/model/`: DeepSeek adapter, static prompts, runtime context, and context compaction.
 - `src/tools/`: model tool definitions plus file, shell, and patch tool implementations.
 - `src/persistence/`: Bun SQLite LangGraph checkpointer.
@@ -73,7 +73,11 @@ Force planning mode, or leave the default `auto` mode to detect explicit plannin
 bun run agent run --mode plan --thread demo --user local --task "Inspect the change and propose a plan"
 ```
 
-When the stream emits an `interrupt` event, approve and resume:
+Plan mode ends after the model returns its plan summary. It does not prompt for
+a non-dangerous builder handoff; protected builder tools still require approval
+when a later builder run requests them.
+
+When the stream emits a protected-tool `interrupt` event, approve and resume:
 
 ```bash
 bun run agent resume --thread demo --user local --approve
@@ -95,4 +99,4 @@ Real DeepSeek end-to-end test:
 bun run test:real
 ```
 
-The real test calls `deepseek-chat`, streams to an interrupt, resumes approval, writes a file, and checks the checkpoint database.
+The real test calls `deepseek-chat`, exercises approval for protected tools, writes a file, and checks the checkpoint database.

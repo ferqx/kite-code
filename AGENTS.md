@@ -27,9 +27,7 @@
 - `src/harness/graph.ts`
   负责 LangGraph 节点组装和主循环拓扑。
 - `src/harness/routes.ts`
-  负责 agent / approval / tools / reflect / stop_check 之间的路由。
-- `src/harness/stop-check.ts`
-  负责最终答案收口守卫。
+  负责 agent / approval / tools / reflect 之间的路由。
 - `src/harness/tool-runner.ts`
   负责执行经过审批或允许直通的工具请求。
 - `src/harness/evidence.ts` 和 `src/harness/progress.ts`
@@ -48,19 +46,20 @@
   负责读取本地 `~/.openpx/openpx.jsonc` 配置。
 - `tests/`
   测试是理解行为约束的重要来源，不只是回归验证。
+- `docs/space/index.md`
+  跨会话项目知识索引。`AGENTS.md` 只做入口地图；进入 `docs/space` 后先读索引，再按任务范围读取被索引的 active / understanding / reference 记录。
 
 ## 关键行为约束
 
 - 优先做最小改动，不要无谓重构图结构。
 - 除非任务本身就是修改 plan 规则，否则不要绕过 plan 模式的只读限制。
-- 如果改了路由、stop check、approval、tool gating，必须同步看 `tests/graph.test.ts`。
+- 如果改了路由、approval、tool gating，必须同步看 `tests/graph.test.ts`。
 - 如果改了 CLI 行为或参数，必须同步更新 `README.md` 和相关测试。
 - 如果改了工具行为，必须确认 `state.evidence` 的记录逻辑仍然真实反映执行结果。
 - 注释只写在“不看上下文就难以理解”的地方，避免把显而易见的代码翻译成注释。
 
 ## 禁止事项
 
-- 不要跳过或弱化 `evaluateStopCheck`，除非任务明确要求重新设计最终答案守卫。
 - 不要为了让流程更快结束而清空、伪造或忽略 `state.evidence`。
 - 不要让 plan 模式执行写文件、改文件、安装依赖、启动服务等非只读操作。
 - 不要把工具失败包装成成功结果；失败应进入 tool result、verification 或最终说明。
@@ -71,13 +70,11 @@
 
 ## 特别说明
 
-- `src/harness/stop-check.ts` 里的 `evaluateStopCheck` 是“收口守卫”，不是业务逻辑。
-  它的职责是阻止 agent 过早输出最终答案。
-- 当出现以下情况时，它会清空 `state.final`，并注入一条新的消息，让图回到 `agent` 继续执行：
-  - `plan` 模式下还没有真正写入 plan，却直接声称完成。
-  - `builder` 模式下 plan 还有未完成步骤，却直接结束。
-  - 已修改文件，但没有验证记录，也没有明确说明无法验证。
-  - 验证记录里已经出现失败，但最终回答没有明确说明失败或阻塞。
+- 当前图不再使用最终答案 stop-check 守卫。模型是否结束主要由 prompt 约束决定。
+- Harness 只在工具层强制安全边界：
+  - plan 模式只能执行只读工具；越权写入或执行会被 tools 节点拒绝。
+  - builder 模式的写入、删除、执行类工具需要 approval 中断。
+  - 重复工具调用和停滞检测仍由 progress / reflect 处理，用于提示模型换策略，而不是拦截 final。
 
 ## 常用命令
 
@@ -128,7 +125,7 @@ bun run test:real
 改动完成后，优先跑和改动最接近的测试，不要一开始就全量跑。
 
 常见对应关系：
-- 图路由、stop check、审批流改动：`bun test tests/graph.test.ts`
+- 图路由、审批流改动：`bun test tests/graph.test.ts`
 - 工具实现或工具限制改动：`bun test tests/tools.test.ts tests/tool-definitions.test.ts`
 - CLI 改动：`bun test tests/cli.test.ts`
 - 上下文整理改动：`bun test tests/context.test.ts`
@@ -194,4 +191,5 @@ bun run test:real
 
 - 不要把 `tests/.tmp-*` 下的文件当成正式源码或稳定夹具。
 - 这个仓库很多“真实约束”不是写在 README，而是写在测试里；遇到不确定行为时，优先读测试。
-- 如果某个改动涉及“是否允许结束流程”，优先检查 `src/harness/stop-check.ts`、`src/harness/routes.ts` 和 evidence 记录链路是否一致。
+- `docs/space/` 是仓库内记录系统，不是聊天记录归档。修改模型上下文、plan 状态注入、缓存友好布局等语义前，先读 `docs/space/index.md`，再读取索引中与当前任务匹配的 active 记录。
+- 如果某个改动涉及“是否允许工具执行”，优先检查 `src/harness/routes.ts`、`src/harness/tool-runner.ts` 和 approval / tool gating 是否一致。

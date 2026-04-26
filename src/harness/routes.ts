@@ -7,24 +7,22 @@ export function routeEntry(state: CodeAgentState): "agent_plan" | "agent_build" 
   return state.mode === "plan" ? "agent_plan" : "agent_build";
 }
 
-/** plan agent 节点后的路由: tools | stop_check | END / Routing after plan agent */
-export function routeAfterAgentPlan(
-  state: CodeAgentState,
-): "tools" | "stop_check" | typeof END {
+/** plan agent 节点后的路由: tools | END / Routing after plan agent */
+export function routeAfterAgentPlan(state: CodeAgentState): "tools" | typeof END {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) {
-    return state.final ? "stop_check" : END;
+    return END;
   }
   return "tools";
 }
 
-/** build agent 节点后的路由: approval | tools | stop_check | END / Routing after build agent */
+/** build agent 节点后的路由: approval | tools | END / Routing after build agent */
 export function routeAfterAgentBuild(
   state: CodeAgentState,
-): "approval" | "tools" | "stop_check" | typeof END {
+): "approval" | "tools" | typeof END {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) {
-    return state.final ? "stop_check" : END;
+    return END;
   }
   if (
     request.name === "update_plan" ||
@@ -54,22 +52,9 @@ export function routeAfterTools(_state: CodeAgentState): "reflect" {
 /** reflect 节点后的路由逻辑 / Routing after reflect node */
 export function routeAfterReflect(
   state: CodeAgentState,
-): "stop_check" | "agent_plan" | "agent_build" {
+): "agent_plan" | "agent_build" | typeof END {
   if (state.final) {
-    return "stop_check";
-  }
-  if (state.mode === "plan" && state.plan) {
-    return "stop_check";
+    return END;
   }
   return state.mode === "plan" ? "agent_plan" : "agent_build";
-}
-
-/** stop_check 节点后的路由逻辑 / Routing after stop check node */
-export function routeAfterStopCheck(
-  state: CodeAgentState,
-): "approval" | "agent_plan" | "agent_build" | typeof END {
-  if (!state.final) {
-    return state.mode === "plan" ? "agent_plan" : "agent_build";
-  }
-  return state.mode === "plan" ? "approval" : END;
 }

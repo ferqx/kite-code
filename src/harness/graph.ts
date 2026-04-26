@@ -8,13 +8,12 @@ import type { AgentConfig } from "../config/index";
 import { prepareModelContext } from "../model/context";
 import { createDeepSeekModel } from "../model/deepseek";
 import { BunSqliteSaver } from "../persistence/checkpoint";
-import type { AgentMode } from "../shared/types";
 import {
   createCodeAgentTools,
   createPlanAgentTools,
 } from "../tools/definitions";
 import type { ShellExecutor } from "../tools/shell";
-import { CONTINUE_IN_BUILDER_MESSAGE, WATCHDOG_STAGNANT_LIMIT } from "./constants";
+import { WATCHDOG_STAGNANT_LIMIT } from "./constants";
 import { updateEvidence } from "./evidence";
 import { recordToolProgress } from "./progress";
 import {
@@ -22,17 +21,14 @@ import {
   routeAfterAgentPlan,
   routeAfterApproval,
   routeAfterReflect,
-  routeAfterStopCheck,
   routeAfterTools,
   routeEntry,
 } from "./routes";
 import { AgentState, type CodeAgentState } from "./state";
-import { evaluateStopCheck } from "./stop-check";
 import {
   getPendingToolRequest,
   messageText,
   messageWithSingleToolCall,
-  planConfirmationSummary,
   toolRequestFromMessage,
 } from "./tool-requests";
 import { runApprovedTool } from "./tool-runner";
@@ -73,26 +69,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   /** 审批节点：中断等待人工批准 / Approval node */
   const approval = async (state: CodeAgentState) => {
     const request = getPendingToolRequest(state.messages, state.workspace);
-
-    if (state.mode === "plan" && state.final && !request) {
-      const resume = interrupt({
-        kind: "mode_confirmation",
-        targetMode: "builder",
-        plan: state.plan,
-        summary: state.plan ? planConfirmationSummary(state.plan) : state.final,
-      }) as boolean | { approved?: boolean; reason?: string };
-      const approved =
-        resume === true ||
-        (typeof resume === "object" && resume !== null && resume.approved === true);
-
-      return approved
-        ? {
-            final: "",
-            mode: "builder" as AgentMode,
-            messages: [new HumanMessage(CONTINUE_IN_BUILDER_MESSAGE)],
-          }
-        : {};
-    }
 
     if (!request) {
       return {};
@@ -218,23 +194,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     return {};
   };
 
-  /** 停止检查节点：收口守卫 / Stop check node */
-  const stopCheck = async (state: CodeAgentState) => evaluateStopCheck(state);
-
   const graph = new StateGraph(AgentState)
     .addNode("agent_plan", agentPlan)
     .addNode("agent_build", agentBuild)
     .addNode("approval", approval)
     .addNode("tools", tools)
     .addNode("reflect", reflect)
-    .addNode("stop_check", stopCheck)
     .addConditionalEdges(START, routeEntry)
     .addConditionalEdges("agent_plan", routeAfterAgentPlan)
     .addConditionalEdges("agent_build", routeAfterAgentBuild)
     .addConditionalEdges("approval", routeAfterApproval)
     .addConditionalEdges("tools", routeAfterTools)
     .addConditionalEdges("reflect", routeAfterReflect)
-    .addConditionalEdges("stop_check", routeAfterStopCheck)
     .compile({ checkpointer });
 
   return { graph, checkpointer };

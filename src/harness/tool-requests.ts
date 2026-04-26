@@ -238,12 +238,6 @@ export function messageText(message: AIMessage): string {
     : JSON.stringify(message.content);
 }
 
-/** 生成计划确认摘要文本 / Generate plan confirmation summary text */
-export function planConfirmationSummary(plan: AgentPlan): string {
-  const steps = plan.steps.map((step, index) => `${index + 1}. ${step.step}`).join("\n");
-  return [`Plan ready: ${plan.name}`, plan.description, steps].filter(Boolean).join("\n");
-}
-
 /** 规范化 Agent 计划结构，填充默认值 / Normalize Agent plan structure */
 function normalizeAgentPlan(value: Partial<AgentPlan>): AgentPlan {
   const rawSteps: unknown[] = Array.isArray(value.steps) ? (value.steps as unknown[]) : [];

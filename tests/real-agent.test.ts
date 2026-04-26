@@ -123,9 +123,9 @@ describe("L1-L4: basic real agent scenarios", () => {
     120_000,
   );
 
-  // L3: /plan 完整流程 / Full /plan pipeline
+  // L3: /plan 只产出计划，不触发非危险确认 / /plan produces a plan without non-dangerous confirmation
   test(
-    "L3: /plan produces a plan, blocks edits, and switches to builder after approval",
+    "L3: /plan produces a plan and blocks edits without mode confirmation",
     async () => {
       await ensureRealModelAvailable();
       const env = createEnv("l3-plan");
@@ -141,14 +141,10 @@ describe("L1-L4: basic real agent scenarios", () => {
         if (event.type === "interrupt") break;
       }
 
-      expect(JSON.stringify(planEvents)).toContain("mode_confirmation");
+      expect(planEvents.some((event) => event.type === "final")).toBe(true);
+      expect(JSON.stringify(planEvents)).not.toContain("mode_confirmation");
       expect(JSON.stringify(planEvents)).not.toContain("tool_approval");
       expect(existsSync(join(env.workspace, fileName))).toBe(false);
-
-      const builderEvents = await continueApproving(env, { approved: true });
-      expect(JSON.stringify(builderEvents)).toContain("tool_approval");
-      expect(existsSync(join(env.workspace, fileName))).toBe(true);
-      expect(readFileSync(join(env.workspace, fileName), "utf8")).toContain(fileContent);
     },
     120_000,
   );
@@ -289,8 +285,8 @@ describe("L6: error recovery scenarios", () => {
 
       // Plan 模式中不应有文件被创建 / No file should be created in plan mode
       expect(existsSync(join(env.workspace, "plan-reject.txt"))).toBe(false);
-      // 应产生 mode_confirmation 中断 / Should produce mode_confirmation interrupt
-      expect(JSON.stringify(planEvents)).toContain("mode_confirmation");
+      // 不应产生 mode_confirmation 中断 / Should not produce mode_confirmation interrupt
+      expect(JSON.stringify(planEvents)).not.toContain("mode_confirmation");
       // 不应有 tool_approval（plan 模式跳过审批直接进入 tools 拒绝） / No tool_approval (plan mode skips approval, tools node rejects)
       expect(JSON.stringify(planEvents)).not.toContain("tool_approval");
     },

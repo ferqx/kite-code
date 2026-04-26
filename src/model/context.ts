@@ -4,7 +4,11 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import { buildCacheableRuntimeContext, buildRuntimeContext } from "./runtime-context";
+import {
+  buildCacheableRuntimeContext,
+  buildRuntimeContext,
+  formatPlanStateReminder,
+} from "./runtime-context";
 import type {
   AgentEvidence,
   AgentMode,
@@ -78,6 +82,10 @@ export function prepareModelContext(
       new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary })),
       // 压缩后的对话消息 / Compacted conversation messages
       ...compacted.messages,
+      // 当前计划状态提醒放在尾部，并以用户侧合成消息承载，避免 provider 特殊处理 system role / Trail current plan state as a synthetic user-side message to avoid provider-specific system-role handling
+      ...(state.plan
+        ? [new HumanMessage(formatPlanStateReminder(state.plan))]
+        : []),
     ],
   };
 }
