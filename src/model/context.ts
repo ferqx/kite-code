@@ -16,8 +16,6 @@ export type AgentRole = "agent_plan" | "agent_build";
 
 /** 模型上下文状态输入 / Model context state input */
 export interface ModelContextState {
-  /** 用户 ID / User ID */
-  userId: string;
   /** 工作目录 / Workspace path */
   workspace: string;
   /** 对话消息列表 / Conversation messages */
@@ -28,8 +26,6 @@ export interface ModelContextState {
   mode?: AgentMode;
   /** 执行计划 / Execution plan */
   plan?: AgentPlan | null;
-  /** 模型名称 / Model name */
-  modelName?: string;
   /** 上下文预算 / Context budget */
   contextBudget?: ContextBudget;
   /** 上下文摘要 / Context summary */
@@ -131,7 +127,7 @@ Tool policy:
 - Use shell_execute for read/write/delete/list/test commands. Write operations require approval.
 - Use apply_patch for writing file content. Requires approval.
 - Use update_plan to update plan progress when a step is completed or blocked.
-- If the user asks about the current model, context, runtime, workspace, time, or shell, answer directly from Dynamic runtime context without calling tools.
+- If the user asks about the workspace, runtime mode, or tool policy, answer directly from runtime context without calling tools.
 - If the task needs planning before execution, call update_plan to create a plan. The graph will switch to plan mode.
 
 Message policy:

@@ -1,8 +1,8 @@
 # Active Rule: Plan State Reminder
 
 Status: active
-Last updated: 2026-04-26
-Last verified: 2026-04-26
+Last updated: 2026-04-27
+Last verified: 2026-04-27
 Scope:
 
 - `src/model/context.ts`
@@ -64,5 +64,6 @@ The plan reminder must:
 `tests/context.test.ts` should assert that plan state is the final synthetic
 `HumanMessage`.
 
-`tests/runtime-context.test.ts` should assert that runtime context contains mode
-and tool policy but excludes plan details and context summaries.
+`tests/runtime-context.test.ts` should assert that runtime context contains the
+mode-qualified tool policy, but excludes plan details, context summaries, user
+identity, and configured model details.

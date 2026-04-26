@@ -51,7 +51,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       workspace: state.workspace,
       shellExecutor: input.shellExecutor,
     });
-    return invokeModel(model, state, tools, "agent_plan", input.config.modelName);
+    return invokeModel(model, state, tools, "agent_plan");
   };
 
   /** Build Agent 节点：使用读写工具执行计划步骤 / Build Agent node */
@@ -60,7 +60,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       workspace: state.workspace,
       shellExecutor: input.shellExecutor,
     });
-    return invokeModel(model, state, tools, "agent_build", input.config.modelName);
+    return invokeModel(model, state, tools, "agent_build");
   };
 
   /** 审批节点：中断等待人工批准 / Approval node */
@@ -184,12 +184,8 @@ async function invokeModel(
   state: CodeAgentState,
   tools: ReturnType<typeof createPlanAgentTools> | ReturnType<typeof createCodeAgentTools>,
   role: "agent_plan" | "agent_build",
-  modelName: string,
 ) {
-  const prepared = prepareModelContext(role, {
-    ...state,
-    modelName,
-  });
+  const prepared = prepareModelContext(role, state);
 
   const response = await model
     .bindTools(tools, { tool_choice: "auto" })

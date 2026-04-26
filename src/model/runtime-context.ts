@@ -24,12 +24,8 @@ export interface RuntimeSystemInfo {
 
 /** 运行时上下文输入参数 / Runtime context input parameters */
 export interface RuntimeContextInput {
-  /** 用户 ID / User ID */
-  userId: string;
   /** 工作目录 / Workspace path */
   workspace: string;
-  /** 模型名称 / Model name */
-  modelName?: string;
   /** 对话消息 / Conversation messages */
   messages: BaseMessage[];
   /** 运行模式 / Run mode */
@@ -75,10 +71,7 @@ export function buildRuntimeContext(input: RuntimeContextInput): string {
     `Shell: ${info.shell}`,
     `CWD: ${info.cwd}`,
     `Workspace: ${info.workspace}`,
-    `User ID: ${input.userId}`,
-    ...(input.modelName ? [`Configured model: ${input.modelName}`] : []),
-    `Thread mode: ${mode}`,
-    `Tool policy: ${toolPolicy(mode)}`,
+    `Tool policy (${mode} mode): ${toolPolicy(mode)}`,
   ];
 
   return lines.join("\n");
@@ -90,10 +83,7 @@ export function buildCacheableRuntimeContext(input: RuntimeContextInput): string
   const lines = [
     "Cacheable runtime context:",
     `Workspace: ${input.workspace}`,
-    `User ID: ${input.userId}`,
-    ...(input.modelName ? [`Configured model: ${input.modelName}`] : []),
-    `Thread mode: ${mode}`,
-    `Tool policy: ${toolPolicy(mode)}`,
+    `Tool policy (${mode} mode): ${toolPolicy(mode)}`,
   ];
 
   return lines.join("\n");

@@ -9,12 +9,10 @@ import {
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
 describe("model context protocol", () => {
   // 验证用户输入作为唯一的 HumanMessage，运行上下文放在 SystemMessage 中 / Verify user input stays as sole HumanMessage, runtime context in SystemMessage
-  test("keeps user input as the only HumanMessage and places run context in SystemMessage", () => {
+  test("keeps user input as the only HumanMessage and places useful run context in SystemMessage", () => {
     const task = "Create hello.txt with exact content \"hi\".";
     const messages = buildModelMessages("agent_build", {
-      userId: "user-a",
       workspace: "D:\\workspace",
-      modelName: "deepseek-chat",
       mode: "builder",
       plan: null,
       messages: [new HumanMessage(task)],
@@ -28,8 +26,11 @@ describe("model context protocol", () => {
     expect(messages[2].content).toBe(task);
     expect(String(messages[2].content)).not.toContain("Plan:"); // 上下文信息不混入用户消息 / Context not mixed into user message
     expect(String(messages[2].content)).not.toContain("Tool results:");
-    expect(String(messages[1].content)).toContain("Configured model: deepseek-chat");
     expect(String(messages[1].content)).toContain("Cacheable runtime context:");
+    expect(String(messages[1].content)).toContain("Tool policy (builder mode):");
+    expect(String(messages[1].content)).not.toContain("Configured model:");
+    expect(String(messages[1].content)).not.toContain("User ID:");
+    expect(String(messages[1].content)).not.toContain("Thread mode:");
   });
 
   // 验证工具调用链保留在动态 SystemMessage 外部，不混入运行时上下文 / Verify tool-call chain stays outside dynamic SystemMessage, not mixed into runtime context
@@ -51,7 +52,6 @@ describe("model context protocol", () => {
       status: "success",
     });
     const messages = buildModelMessages("agent_build", {
-      userId: "user-a",
       workspace: "D:\\workspace",
       mode: "builder",
       plan: null,
@@ -72,7 +72,6 @@ describe("model context protocol", () => {
   test("keeps dynamic context after reusable conversation prefix for DeepSeek cache", () => {
     const task = "Create hello.txt";
     const messages = buildModelMessages("agent_build", {
-      userId: "user-a",
       workspace: "D:\\workspace",
       mode: "builder",
       plan: null,
@@ -115,7 +114,7 @@ describe("model context protocol", () => {
     expect(prompt).toContain("Message policy");
     expect(prompt).toContain("Completion policy");
     expect(prompt).toContain("Respond in Chinese by default"); // 默认中文回复 / Default Chinese response
-    expect(prompt).toContain("If the user asks about the current model");
+    expect(prompt).not.toContain("current model");
     expect(prompt).not.toContain("浣犳槸"); // 不含乱码 / No garbled text
     expect(prompt.length).toBeGreaterThan(1200); // 提示词应足够长以触发缓存 / Prompt must be long enough for cache threshold
   });
@@ -140,7 +139,6 @@ describe("model context protocol", () => {
     });
 
     const prepared = prepareModelContext("agent_build", {
-      userId: "user-a",
       workspace: "D:\\workspace",
       mode: "builder",
       plan: null,
@@ -192,7 +190,6 @@ describe("model context protocol", () => {
       ],
     };
     const messages = buildModelMessages("agent_build", {
-      userId: "user-a",
       workspace: "D:\\workspace",
       mode: "builder",
       plan,
