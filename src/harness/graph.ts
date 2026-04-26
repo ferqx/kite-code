@@ -6,7 +6,7 @@ import {
 } from "@langchain/langgraph";
 import type { AgentConfig } from "../config/index";
 import { prepareModelContext } from "../model/context";
-import { createDeepSeekModel } from "../model/deepseek";
+import { createChatModel } from "../model/factory";
 import { BunSqliteSaver } from "../persistence/checkpoint";
 import {
   createCodeAgentTools,
@@ -42,7 +42,7 @@ export interface BuildCodeAgentGraphInput {
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
 export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
-  const model = createDeepSeekModel(input.config);
+  const model = createChatModel(input.config);
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
 
   /** Plan Agent 节点：使用只读工具进行代码检查和计划 / Plan Agent node */
@@ -180,7 +180,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
 /** 共享的模型调用逻辑 / Shared model invocation logic */
 async function invokeModel(
-  model: ReturnType<typeof createDeepSeekModel>,
+  model: ReturnType<typeof createChatModel>,
   state: CodeAgentState,
   tools: ReturnType<typeof createPlanAgentTools> | ReturnType<typeof createCodeAgentTools>,
   role: "agent_plan" | "agent_build",

@@ -77,9 +77,13 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
           continue;
         }
         const reasoning = (original.additional_kwargs as Record<string, unknown>)?.reasoning_content;
-        if (typeof reasoning === "string" && reasoning) {
+        if (typeof reasoning === "string") {
           const mapped = request.messages[mappedIndex];
-          if (mapped && mapped.role === "assistant" && !mapped.reasoning_content) {
+          if (
+            mapped &&
+            mapped.role === "assistant" &&
+            (!("reasoning_content" in mapped) || mapped.reasoning_content === undefined)
+          ) {
             mapped.reasoning_content = reasoning;
           }
         }

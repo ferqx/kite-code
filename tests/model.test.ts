@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { withTransientModelRetry } from "../src/model/deepseek";
+import { ChatDeepSeek } from "@langchain/deepseek";
+import { ChatOpenAI } from "@langchain/openai";
+import { AIMessage } from "@langchain/core/messages";
+import type { AgentConfig } from "../src/config/index";
+import { createDeepSeekModel, withTransientModelRetry } from "../src/model/deepseek";
+import { createChatModel } from "../src/model/factory";
 
 describe("model transient retry", () => {
   test("retries transient socket errors before succeeding", async () => {
@@ -99,5 +104,101 @@ describe("model transient retry", () => {
       ),
     ).rejects.toBe(errors[2]);
     expect(attempts).toBe(3);
+  });
+
+  test("passes back empty DeepSeek reasoning content when the provider returns it", async () => {
+    const model = createDeepSeekModel({
+      providerName: "deepseek",
+      providerType: "deepseek",
+      apiKey: "sk-test",
+      baseURL: "https://api.deepseek.com/v1",
+      modelName: "deepseek-v4-flash",
+    }) as any;
+    const rawToolCall = {
+      id: "call-empty-reasoning",
+      type: "function" as const,
+      function: {
+        name: "shell_execute",
+        arguments: JSON.stringify({ command: "pwd" }),
+      },
+    };
+    let capturedRequest: any;
+
+    model._originalMessages = [
+      new AIMessage({
+        content: "",
+        additional_kwargs: {
+          reasoning_content: "",
+          tool_calls: [rawToolCall],
+        },
+        tool_calls: [
+          {
+            id: "call-empty-reasoning",
+            name: "shell_execute",
+            args: { command: "pwd" },
+          },
+        ],
+      }),
+    ];
+    model.client = {
+      chat: {
+        completions: {
+          create: async (request: any) => {
+            capturedRequest = request;
+            return {
+              id: "chatcmpl-test",
+              object: "chat.completion",
+              created: 0,
+              model: "deepseek-v4-flash",
+              choices: [],
+            };
+          },
+        },
+      },
+    };
+
+    await model.completionWithRetry({
+      model: "deepseek-v4-flash",
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [rawToolCall],
+        },
+      ],
+    });
+
+    expect(capturedRequest.messages[0]).toHaveProperty("reasoning_content", "");
+  });
+});
+
+describe("model provider factory", () => {
+  test("uses the DeepSeek LangChain adapter for deepseek providers", () => {
+    const model = createChatModel({
+      providerName: "deepseek",
+      providerType: "deepseek",
+      apiKey: "sk-test",
+      baseURL: "https://api.deepseek.com/v1",
+      modelName: "deepseek-chat",
+    });
+
+    expect(model).toBeInstanceOf(ChatDeepSeek);
+    expect(model.model).toBe("deepseek-chat");
+  });
+
+  test("uses ChatOpenAI for OpenAI-compatible providers", () => {
+    const config: AgentConfig = {
+      providerName: "siliconflow",
+      providerType: "openai-compatible",
+      apiKey: "sk-compatible",
+      baseURL: "https://api.siliconflow.cn/v1",
+      modelName: "Qwen/Qwen3-Coder",
+    };
+
+    const model = createChatModel(config);
+
+    expect(model).toBeInstanceOf(ChatOpenAI);
+    expect(model.model).toBe("Qwen/Qwen3-Coder");
+    expect(model.clientConfig.baseURL).toBe("https://api.siliconflow.cn/v1");
   });
 });

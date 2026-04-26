@@ -22,9 +22,14 @@ describe("test discovery boundaries", () => {
       .filter(isBunDefaultTestFile)
       .filter((path) => path !== "tests/test-discovery.test.ts");
     const realDefaultTests = defaultTests.filter((path) => path.includes("real"));
-    const liveModelDefaultTests = defaultTests.filter((path) =>
-      readFileSync(join(repoRoot, path), "utf8").includes("createDeepSeekModel("),
-    );
+    const liveModelDefaultTests = defaultTests.filter((path) => {
+      const source = readFileSync(join(repoRoot, path), "utf8");
+      return (
+        /createDeepSeekModel\([\s\S]*?\)\.invoke\(/.test(source) ||
+        /createChatModel\([\s\S]*?\)\.invoke\(/.test(source) ||
+        source.includes("ensureRealModelAvailable(")
+      );
+    });
 
     expect(realDefaultTests).toEqual([]);
     expect(liveModelDefaultTests).toEqual([]);

@@ -41,7 +41,7 @@ longer limits for multi-step agent flows. Do not rely on a package-level
 
 ## Rationale
 
-Default tests should be deterministic and local. The real DeepSeek suite needs
+Default tests should be deterministic and local. The real configured-model suite needs
 local credentials, reachable network, and a working proxy configuration. When
 it used the `*.test.ts` suffix, Bun's default discovery included it in `bun
 test`, so ordinary verification failed for environment reasons unrelated to the
@@ -51,6 +51,6 @@ code under test.
 
 `tests/test-discovery.test.ts` asserts that files containing `real` are not
 using Bun's default `*.test.*` / `*.spec.*` naming pattern, that default
-discovered tests do not directly call `createDeepSeekModel(...)`, and that the
+discovered tests do not directly invoke configured chat models, and that the
 explicit real-test script points at `tests/real-agent.real.ts` without proxy
 rewrites.

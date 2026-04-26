@@ -5,6 +5,7 @@ import { parse } from "jsonc-parser";
 import { z } from "zod";
 
 const providerSchema = z.object({
+  type: z.enum(["deepseek", "openai", "openai-compatible"]).optional(),
   apiKey: z.string().min(1),
   baseURL: z.string().url(),
 });
@@ -19,6 +20,8 @@ const configSchema = z.object({
   }),
 });
 
+export type ModelProviderType = "deepseek" | "openai" | "openai-compatible";
+
 /** Agent 配置 / Agent configuration */
 export interface AgentConfig {
   /** API 密钥 / API key */
@@ -29,6 +32,8 @@ export interface AgentConfig {
   modelName: string;
   /** 提供商名称 / Provider name */
   providerName: string;
+  /** LangChain adapter 类型 / LangChain adapter type */
+  providerType: ModelProviderType;
 }
 
 /** 加载配置选项 / Configuration loading options */
@@ -58,10 +63,17 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     throw new Error(`Model provider '${providerName}' is not configured`);
   }
 
+  const providerType = provider.type ?? inferProviderType(providerName);
+
   return {
     apiKey: provider.apiKey,
     baseURL: provider.baseURL,
     modelName: parsed.model.default.name,
     providerName,
+    providerType,
   };
+}
+
+function inferProviderType(providerName: string): ModelProviderType {
+  return providerName === "deepseek" ? "deepseek" : "openai-compatible";
 }

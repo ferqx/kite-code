@@ -5,15 +5,15 @@ import { dirname, isAbsolute, join } from "node:path";
 import { HumanMessage } from "@langchain/core/messages";
 import { loadAgentConfig } from "../src/config/index";
 import { resumeCodeAgent, streamCodeAgent } from "../src/app/runner";
-import { createDeepSeekModel } from "../src/model/deepseek";
+import { createChatModel } from "../src/model/factory";
 import { shellTool } from "../src/tools/shell";
 import type { AgentConfig } from "../src/config/index";
 import type { ShellInput, ShellResult } from "../src/shared/types";
 import type { AgentEvent } from "../src/shared/types";
 
 // ============================================================================
-// 真实 DeepSeek API 端到端测试，从简到难分为 7 个层级
-// Real DeepSeek API end-to-end tests, 7 levels from simple to complex
+// 真实模型 API 端到端测试，从简到难分为 7 个层级
+// Real model API end-to-end tests, 7 levels from simple to complex
 //
 // L1: 直接回答 – 元问题，零工具调用
 // L2: 单工具执行 – 简单文件创建
@@ -43,14 +43,14 @@ async function ensureRealModelAvailable(): Promise<void> {
 async function runRealModelPreflight(): Promise<void> {
   const config = loadAgentConfig();
   try {
-    const response = await createDeepSeekModel(config).invoke([
+    const response = await createChatModel(config).invoke([
       new HumanMessage("Reply with ok only"),
     ]);
     expect(String(response.content).toLowerCase()).toContain("ok");
   } catch (error) {
     throw new Error(
       [
-        `DeepSeek real-test preflight failed for ${config.modelName} at ${config.baseURL}.`,
+        `Real model preflight failed for ${config.providerName}/${config.modelName} at ${config.baseURL}.`,
         `Proxy env: ${proxyEnvSummary()}`,
         `Error: ${error instanceof Error ? error.message : String(error)}`,
       ].join("\n"),
@@ -76,7 +76,7 @@ function proxyEnvSummary(): string {
 // L1–L4: 基础场景 / Basic scenarios
 // ============================================================================
 describe("L1-L4: basic real agent scenarios", () => {
-  test("preflight: DeepSeek model is reachable", async () => {
+  test("preflight: configured model is reachable", async () => {
     await ensureRealModelAvailable();
   }, 120_000);
 
@@ -109,7 +109,7 @@ describe("L1-L4: basic real agent scenarios", () => {
     async () => {
       await ensureRealModelAvailable();
       const env = createEnv("l2-single-file");
-      const content = "hello from real deepseek langgraph agent";
+      const content = "hello from real langgraph agent";
       const events = await runApprovalLoop({
         ...env,
         task: `Create agent-output.txt with exact content "${content}". Do not create any other files.`,

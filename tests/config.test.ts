@@ -42,5 +42,39 @@ describe("loadAgentConfig", () => {
     expect(config.baseURL).toBe("https://api.deepseek.com/v1");
     // 检查模型名称正确解析 / Verify model name parsed correctly
     expect(config.modelName).toBe("deepseek-chat");
+    expect(config.providerName).toBe("deepseek");
+    expect(config.providerType).toBe("deepseek");
+  });
+
+  test("loads an explicitly typed OpenAI-compatible provider", () => {
+    const dir = join(import.meta.dir, ".tmp-config");
+    mkdirSync(dir, { recursive: true });
+    const configPath = join(dir, "openai-compatible.jsonc");
+    writeFileSync(
+      configPath,
+      `{
+        "provider": {
+          "siliconflow": {
+            "type": "openai-compatible",
+            "apiKey": "sk-compatible",
+            "baseURL": "https://api.siliconflow.cn/v1"
+          }
+        },
+        "model": {
+          "default": {
+            "provider": "siliconflow",
+            "name": "Qwen/Qwen3-Coder"
+          }
+        }
+      }`,
+    );
+
+    const config = loadAgentConfig({ configPath });
+
+    expect(config.apiKey).toBe("sk-compatible");
+    expect(config.baseURL).toBe("https://api.siliconflow.cn/v1");
+    expect(config.modelName).toBe("Qwen/Qwen3-Coder");
+    expect(config.providerName).toBe("siliconflow");
+    expect(config.providerType).toBe("openai-compatible");
   });
 });
