@@ -23,6 +23,7 @@ Status meanings:
 | --- | --- | --- | --- |
 | `execution/active/plan-state-reminder.md` | active | Model context construction, plan projection, cache-sensitive prompt layout | Editing `src/model/context.ts`, `src/model/runtime-context.ts`, or tests for plan/context projection. |
 | `execution/active/tool-gated-autonomy.md` | active | Graph routing, approval boundaries, tool gating, final-answer autonomy | Editing `src/harness/graph.ts`, `src/harness/routes.ts`, `src/harness/tool-runner.ts`, or tests for approval/final routing. |
+| `execution/active/real-model-test-boundary.md` | active | Test discovery, real model end-to-end suites, package test scripts | Editing test naming, `package.json` test scripts, or real model suites. |
 
 ## Understanding Records
 
@@ -37,6 +38,8 @@ Status meanings:
 | --- | --- | --- |
 | `execution/completed/2026-04-26-plan-state-reminder.md` | completed | Records the implementation and verification for moving plan state into a trailing synthetic user-side reminder. |
 | `execution/completed/2026-04-26-remove-stop-check.md` | completed | Records removal of the final-answer stop-check and non-dangerous mode confirmation gate. |
+| `execution/completed/2026-04-26-remove-internal-ledgers.md` | completed | Records removal of evidence/progress ledgers and watchdog-style progress inference. |
+| `execution/completed/2026-04-26-real-model-test-boundary.md` | completed | Records isolation of real model tests from default Bun discovery and fixes explicit real-test scripts. |
 
 ## References
 

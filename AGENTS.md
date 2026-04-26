@@ -30,8 +30,6 @@
   负责 agent / approval / tools / reflect 之间的路由。
 - `src/harness/tool-runner.ts`
   负责执行经过审批或允许直通的工具请求。
-- `src/harness/evidence.ts` 和 `src/harness/progress.ts`
-  负责命令、文件、验证证据以及进度账本。
 - `src/app/runner.ts`
   负责 run / resume 编排与事件流输出。
 - `src/app/cli.ts`
@@ -55,12 +53,10 @@
 - 除非任务本身就是修改 plan 规则，否则不要绕过 plan 模式的只读限制。
 - 如果改了路由、approval、tool gating，必须同步看 `tests/graph.test.ts`。
 - 如果改了 CLI 行为或参数，必须同步更新 `README.md` 和相关测试。
-- 如果改了工具行为，必须确认 `state.evidence` 的记录逻辑仍然真实反映执行结果。
 - 注释只写在“不看上下文就难以理解”的地方，避免把显而易见的代码翻译成注释。
 
 ## 禁止事项
 
-- 不要为了让流程更快结束而清空、伪造或忽略 `state.evidence`。
 - 不要让 plan 模式执行写文件、改文件、安装依赖、启动服务等非只读操作。
 - 不要把工具失败包装成成功结果；失败应进入 tool result、verification 或最终说明。
 - 不要为了让测试通过而删除关键断言或降低原有安全约束。
@@ -74,7 +70,7 @@
 - Harness 只在工具层强制安全边界：
   - plan 模式只能执行只读工具；越权写入或执行会被 tools 节点拒绝。
   - builder 模式的写入、删除、执行类工具需要 approval 中断。
-  - 重复工具调用和停滞检测仍由 progress / reflect 处理，用于提示模型换策略，而不是拦截 final。
+  - 不再维护 evidence/progress 账本；循环边界主要依赖 LangGraph recursion limit 和工具结果反馈。
 
 ## 常用命令
 
@@ -96,7 +92,7 @@ bun run agent run --thread demo --user local --task "Create hello.txt with exact
 bun run agent resume --thread demo --user local --approve
 ```
 
-运行全部测试：
+运行默认测试（不含真实模型 / 网络端到端测试）：
 
 ```bash
 bun test
@@ -120,6 +116,9 @@ bun run typecheck
 bun run test:real
 ```
 
+真实模型测试文件必须避免 Bun 默认测试发现后缀；当前入口文件是
+`tests/real-agent.real.ts`，只能通过 `bun run test:real` 显式运行。
+
 ## 验证建议
 
 改动完成后，优先跑和改动最接近的测试，不要一开始就全量跑。
@@ -131,6 +130,7 @@ bun run test:real
 - 上下文整理改动：`bun test tests/context.test.ts`
 - 运行时编排改动：`bun test tests/runner.test.ts`
 - 跨模块改动或不确定影响范围时：`bun test` + `bun run typecheck`
+- 真实模型链路改动或用户明确要求时：`bun run test:real`
 
 ## 提交与变更规范
 
@@ -186,6 +186,10 @@ bun run test:real
 ```
 
 - 如果需要跑真实模型相关流程，先确认本地 DeepSeek 配置可用。
+- `bun run test:real` 应尊重调用者的代理环境；不要在项目脚本里默认
+  unset `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。
+- 不要把真实模型测试命名为 `*.test.ts` / `*.spec.ts`；否则裸
+  `bun test` 会在无网络或代理异常时失败。
 
 ## 对后续 Agent 的提醒
 

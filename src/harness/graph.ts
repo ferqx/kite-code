@@ -13,9 +13,6 @@ import {
   createPlanAgentTools,
 } from "../tools/definitions";
 import type { ShellExecutor } from "../tools/shell";
-import { WATCHDOG_STAGNANT_LIMIT } from "./constants";
-import { updateEvidence } from "./evidence";
-import { recordToolProgress } from "./progress";
 import {
   routeAfterAgentBuild,
   routeAfterAgentPlan,
@@ -117,20 +114,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       input.shellExecutor,
       state.mode,
       state.plan,
-      state.progress,
     );
-    const evidence = updateEvidence(state.evidence, request, result);
-    const nextPlan = "plan" in result ? result.plan ?? null : state.plan;
-    const progress = recordToolProgress({
-      previous: state.progress,
-      requestName: request.name,
-      requestArgs: request.args,
-      result,
-      previousEvidence: state.evidence,
-      nextEvidence: evidence,
-      previousPlan: state.plan,
-      nextPlan,
-    });
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
       tool_call_id: request.id ?? "missing-tool-call-id",
@@ -141,34 +125,17 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       return {
         plan: result.plan,
         ...("mode" in result ? { mode: result.mode } : {}),
-        evidence,
-        progress,
         messages: [toolMessage],
       };
     }
 
     return {
-      evidence,
-      progress,
       messages: [toolMessage],
     };
   };
 
-  /** 反思节点：评估工具执行结果，注入看门狗或失败指导 / Reflect node */
+  /** 反思节点：评估工具执行结果，注入失败指导 / Reflect node */
   const reflect = async (state: CodeAgentState) => {
-    const progress = state.progress;
-    if (!progress) return {};
-
-    if (progress.stagnantStepCount >= WATCHDOG_STAGNANT_LIMIT) {
-      return {
-        messages: [
-          new HumanMessage(
-            `No progress detected across ${progress.stagnantStepCount} consecutive tool step(s). Change strategy, inspect a different signal, update the plan, or report a blocker.`,
-          ),
-        ],
-      };
-    }
-
     const lastMessage = state.messages.at(-1);
     if (lastMessage instanceof ToolMessage && lastMessage.status === "error") {
       let detail = "unknown error";

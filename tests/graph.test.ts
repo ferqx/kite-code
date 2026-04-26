@@ -7,11 +7,10 @@ import {
   routeAfterTools,
   routeAfterReflect,
 } from "../src/harness/routes";
-import { recordToolProgress } from "../src/harness/progress";
 import { runApprovedTool } from "../src/harness/tool-runner";
 import { isPlanMode } from "../src/harness/state";
 import type { CodeAgentState } from "../src/harness/state";
-import type { AgentPlan, AgentProgressLedger, ShellResult } from "../src/shared/types";
+import type { AgentPlan, ShellResult } from "../src/shared/types";
 
 const activePlan: AgentPlan = {
   name: "Implement state-first plan flow",
@@ -273,8 +272,8 @@ describe("graph local tool routing", () => {
     expect((result as ShellResult).stderr).toContain("Plan mode");
   });
 
-  // 验证第三连续相同工具调用被死循环守卫拦截 / Third consecutive identical tool call is blocked by the doom-loop guard to prevent infinite loops
-  test("intercepts the third consecutive identical read-only tool request", async () => {
+  // 验证重复工具调用不再由工具执行层拦截，循环边界交给图递归限制 / Repeated tool calls are not blocked by tool runner; graph recursion owns loop bounds
+  test("does not intercept repeated read-only tool requests", async () => {
     const request = {
       id: "call-1",
       name: "shell_read" as const,
@@ -282,151 +281,22 @@ describe("graph local tool routing", () => {
       reason: "Read package",
       protectedCommand: "cat package.json",
     };
-    const ledger: AgentProgressLedger = {
-      toolCallCount: 2,
-      stagnantStepCount: 0,
-      repeatedCallCount: 2,
-      lastToolSignature: "shell_read:{\"command\":\"cat package.json\"}",
-      recentOutputSignatures: [],
-      heartbeat: {
-        goal: "",
-        findings: [],
-        nextAction: "",
-        blockers: [],
-        verification: [],
-      },
-    };
 
     const result = await runApprovedTool(
       "/tmp/workspace",
       request,
-      async () => {
-        throw new Error("doom-loop guard should prevent execution");
-      },
+      async (input) => ({
+        ok: true,
+        command: input.command,
+        exitCode: 0,
+        stdout: "package",
+        stderr: "",
+      }),
       "plan",
-      null,
-      ledger,
     );
 
-    expect(result.ok).toBe(false);
-    expect((result as ShellResult).stderr).toContain("Repeated tool request blocked");
-  });
-
-  // 验证不同命令会重置重复调用计数器 / Different commands reset the repeated-call counter, preventing false doom-loop detection
-  test("different commands reset the repeated-call counter", () => {
-    const previous: AgentProgressLedger = {
-      toolCallCount: 1,
-      stagnantStepCount: 0,
-      repeatedCallCount: 1,
-      lastToolSignature: "shell_read:{\"command\":\"cat package.json\"}",
-      recentOutputSignatures: [],
-      heartbeat: {
-        goal: "",
-        findings: [],
-        nextAction: "",
-        blockers: [],
-        verification: [],
-      },
-    };
-
-    const next = recordToolProgress({
-      previous,
-      requestName: "shell_read",
-      requestArgs: { command: "cat src/harness/graph.ts" },
-      result: {
-        ok: true,
-        command: "cat src/harness/graph.ts",
-        exitCode: 0,
-        stdout: "graph",
-        stderr: "",
-      },
-      previousEvidence: { commands: ["cat package.json"], files: [], verification: [] },
-      nextEvidence: { commands: ["cat package.json", "cat src/harness/graph.ts"], files: [], verification: [] },
-      previousPlan: null,
-      nextPlan: null,
-    });
-
-    expect(next.repeatedCallCount).toBe(1);
-    expect(next.lastToolSignature).toBe('shell_read:{"command":"cat src/harness/graph.ts"}');
-  });
-
-  // 验证停滞看门狗在连续5次无进展工具调用后介入，注入阻塞信息提示换策略 / Stagnant watchdog intervenes after 5 consecutive unproductive tool calls, injecting blocker info and suggesting strategy change
-  test("watchdog intervenes after five stagnant tool results without stopping", () => {
-    const previous: AgentProgressLedger = {
-      toolCallCount: 4,
-      stagnantStepCount: 4,
-      repeatedCallCount: 1,
-      lastToolSignature: "shell_read:{\"command\":\"cat a.txt\"}",
-      recentOutputSignatures: [
-        '{"exitCode":0,"ok":true,"stderr":"","stdout":"same-output"}',
-      ],
-      heartbeat: {
-        goal: "",
-        findings: [],
-        nextAction: "",
-        blockers: [],
-        verification: [],
-      },
-    };
-
-    const next = recordToolProgress({
-      previous,
-      requestName: "shell_read",
-      requestArgs: { command: "cat b.txt" },
-      result: {
-        ok: true,
-        command: "cat b.txt",
-        exitCode: 0,
-        stdout: "same-output",
-        stderr: "",
-      },
-      previousEvidence: { commands: ["cat a.txt"], files: [], verification: [] },
-      nextEvidence: { commands: ["cat a.txt"], files: [], verification: [] },
-      previousPlan: null,
-      nextPlan: null,
-    });
-
-    expect(next.stagnantStepCount).toBe(5);
-    expect(next.heartbeat.blockers.join("\n")).toContain("No progress detected");
-    expect(next.heartbeat.nextAction).toContain("change strategy");
-  });
-
-  // 验证新增验证证据会重置停滞计数器 / New verification evidence resets the stagnant step counter, recognizing real progress
-  test("new verification evidence resets stagnant progress count", () => {
-    const previous: AgentProgressLedger = {
-      toolCallCount: 3,
-      stagnantStepCount: 3,
-      repeatedCallCount: 1,
-      lastToolSignature: "shell_execute:{\"command\":\"bun test\"}",
-      recentOutputSignatures: ["old"],
-      heartbeat: {
-        goal: "",
-        findings: [],
-        nextAction: "",
-        blockers: [],
-        verification: [],
-      },
-    };
-
-    const next = recordToolProgress({
-      previous,
-      requestName: "shell_execute",
-      requestArgs: { command: "bun test" },
-      result: {
-        ok: true,
-        command: "bun test",
-        exitCode: 0,
-        stdout: "same",
-        stderr: "",
-      },
-      previousEvidence: { commands: ["bun test"], files: [], verification: [] },
-      nextEvidence: { commands: ["bun test"], files: [], verification: ["bun test: ok (0)"] },
-      previousPlan: null,
-      nextPlan: null,
-    });
-
-    expect(next.stagnantStepCount).toBe(0);
-    expect(next.heartbeat.verification).toContain("bun test: ok (0)");
+    expect(result.ok).toBe(true);
+    expect((result as ShellResult).stdout).toBe("package");
   });
 
   // 验证 reflect 路由在无 final 时返回 agent_build / reflect routes to agent_build when no final is set (builder is default)

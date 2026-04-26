@@ -56,46 +56,6 @@ export interface ContextBudget {
   maxToolOutputChars: number;
 }
 
-/** Agent 执行证据 / Agent execution evidence */
-export interface AgentEvidence {
-  /** 已执行的命令列表 / List of executed commands */
-  commands: string[];
-  /** 已修改的文件列表 / List of modified files */
-  files: string[];
-  /** 验证记录列表 / List of verification records */
-  verification: string[];
-}
-
-/** Agent 进度心跳 / Agent progress heartbeat */
-export interface AgentHeartbeat {
-  /** 当前目标 / Current goal */
-  goal: string;
-  /** 发现记录 / Findings */
-  findings: string[];
-  /** 下一步动作 / Next planned action */
-  nextAction: string;
-  /** 阻塞项 / Blockers */
-  blockers: string[];
-  /** 验证状态 / Verification status */
-  verification: string[];
-}
-
-/** Agent 进度账本 / Agent progress ledger */
-export interface AgentProgressLedger {
-  /** 工具调用计数 / Tool call count */
-  toolCallCount: number;
-  /** 停滞步数计数 / Stagnant step count */
-  stagnantStepCount: number;
-  /** 重复调用计数 / Repeated call count */
-  repeatedCallCount: number;
-  /** 上次工具调用签名 / Last tool call signature */
-  lastToolSignature: string;
-  /** 最近输出签名列表 / Recent output signatures */
-  recentOutputSignatures: string[];
-  /** 心跳状态 / Heartbeat state */
-  heartbeat: AgentHeartbeat;
-}
-
 /** 计划步骤状态 / Plan step status */
 export type PlanStatus = "pending" | "in_progress" | "completed";
 

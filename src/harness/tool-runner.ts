@@ -1,9 +1,7 @@
-import type { AgentMode, AgentPlan, AgentProgressLedger, ShellResult } from "../shared/types";
+import type { AgentMode, AgentPlan } from "../shared/types";
 import { editFile, readFile, writeFile } from "../tools/file";
 import { isPlanReadOnlyShellCommand } from "../tools/definitions";
 import { shellTool, type ShellExecutor } from "../tools/shell";
-import { DOOM_LOOP_REPEAT_LIMIT } from "./constants";
-import { buildToolSignature } from "./progress";
 import type { PendingToolRequest } from "./tool-requests";
 import type { ToolExecutionResult } from "./tool-result";
 
@@ -14,13 +12,7 @@ export async function runApprovedTool(
   shellExecutor?: ShellExecutor,
   mode: AgentMode = "builder",
   existingPlan: AgentPlan | null = null,
-  progress?: AgentProgressLedger,
 ): Promise<ToolExecutionResult> {
-  const repeatedToolBlock = repeatedToolBlockResult(request, progress);
-  if (repeatedToolBlock) {
-    return repeatedToolBlock;
-  }
-
   if (request.name === "update_plan") {
     return {
       ok: true,
@@ -132,43 +124,6 @@ export async function runApprovedTool(
     workspace,
     command: request.args.command,
   });
-}
-
-/** 检测死循环并返回拦截结果 / Detect doom-loop and return blocking result */
-function repeatedToolBlockResult(
-  request: PendingToolRequest,
-  progress?: AgentProgressLedger,
-): ShellResult | null {
-  if (!progress) {
-    return null;
-  }
-
-  const signature = buildToolSignature(request.name, request.args);
-  const repeatedCallCount =
-    progress.lastToolSignature === signature ? progress.repeatedCallCount + 1 : 1;
-  if (repeatedCallCount < DOOM_LOOP_REPEAT_LIMIT) {
-    return null;
-  }
-
-  return {
-    ok: false,
-    command: commandForRequest(request),
-    exitCode: -1,
-    stdout: "",
-    stderr:
-      "Repeated tool request blocked: same tool and input were requested 3 consecutive times. Change strategy before retrying.",
-  };
-}
-
-/** 从工具请求中提取命令字符串 / Extract command string from tool request */
-function commandForRequest(request: PendingToolRequest): string {
-  if ("command" in request.args) {
-    return request.args.command;
-  }
-  if (request.name === "update_plan") {
-    return "update_plan";
-  }
-  return request.protectedCommand;
 }
 
 /** 构建 search 工具的 shell 命令 / Build shell command for search tool */

@@ -7,8 +7,7 @@
   "scripts": {
     "agent": "bun run src/app/cli.ts",
     "test": "bun test",
-    "test:real": "bun test tests/real-agent.test.ts --timeout 120000",
-    "test:real:direct": "env -u all_proxy -u http_proxy -u https_proxy -u ALL_PROXY -u HTTP_PROXY -u HTTPS_PROXY bun test tests/real-agent.test.ts --timeout 120000",
+    "test:real": "bun test ./tests/real-agent.real.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -20,6 +20,7 @@ Read when:
 Related:
 
 - `../completed/2026-04-26-remove-stop-check.md`
+- `../completed/2026-04-26-remove-internal-ledgers.md`
 - `../../references/opencode-codex-plan-handling.md`
 
 Verification:
@@ -40,8 +41,8 @@ Human confirmation is reserved for protected tool execution:
 - Non-dangerous final answers, plan summaries, and mode completion do not trigger
   approval interrupts.
 
-Reflect/watchdog logic may inject guidance after tool failures or stagnant tool
-results, but it must not become a final-answer reviewer.
+Reflect logic may inject guidance after tool failures, but it must not become a
+final-answer reviewer or progress inference engine.
 
 ## Do Not
 
@@ -50,6 +51,8 @@ results, but it must not become a final-answer reviewer.
 - Do not move safety checks out of tool gating into prompt-only instructions for
   protected operations.
 - Do not silently weaken plan-mode read-only enforcement.
+- Do not reintroduce evidence/progress ledgers or watchdog-style progress
+  inference without a concrete tool-boundary need.
 
 ## Test Expectations
 
@@ -59,4 +62,5 @@ results, but it must not become a final-answer reviewer.
 - builder final routes directly to `END`;
 - plan-mode write attempts go to tools and are rejected;
 - protected builder tool calls still route through approval;
+- repeated read-only tool calls are not blocked by tool-runner progress state;
 - reflect returns to the active agent unless a final is already present.

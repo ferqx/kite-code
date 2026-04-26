@@ -54,6 +54,6 @@ Do not copy Opencode's plan-file mechanism into this LangGraph checkpoint
 architecture. Keep `graph.state.plan` as durable state, but project it to the
 model as a trailing harness-generated conversation item.
 
-Keep `state.evidence` and `state.progress` as internal harness state for routing,
-loop detection, and final-answer checks. Do not project them into model context
-unless a concrete prompt-level need is proven.
+Do not keep a separate evidence/progress ledger by default. Tool results,
+permission boundaries, plan state, and graph recursion limits are enough unless a
+concrete tool-boundary need is proven.

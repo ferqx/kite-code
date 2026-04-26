@@ -1,6 +1,6 @@
 import { platform, release, type } from "node:os";
 import type { BaseMessage } from "@langchain/core/messages";
-import type { AgentEvidence, AgentMode, AgentPlan, AgentProgressLedger } from "../shared/types";
+import type { AgentMode, AgentPlan } from "../shared/types";
 
 /** 运行时系统信息 / Runtime system information */
 export interface RuntimeSystemInfo {
@@ -38,10 +38,6 @@ export interface RuntimeContextInput {
   plan?: AgentPlan | null;
   /** 上下文摘要 / Context summary */
   contextSummary?: string;
-  /** 执行证据 / Execution evidence */
-  evidence?: AgentEvidence;
-  /** 进度跟踪 / Progress tracking */
-  progress?: AgentProgressLedger;
   /** 可注入的当前时间 / Injectable current time */
   now?: Date;
   /** 可注入的时区 / Injectable timezone */

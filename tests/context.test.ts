@@ -179,40 +179,6 @@ describe("model context protocol", () => {
     );
   });
 
-  // 验证可缓存上下文和模型消息都不注入内部进度心跳 / Verify internal progress heartbeat is not injected into model messages
-  test("keeps progress heartbeat out of model context", () => {
-    const messages = buildModelMessages("agent_build", {
-      userId: "user-a",
-      workspace: "D:\\workspace",
-      mode: "builder",
-      plan: null,
-      messages: [new HumanMessage("Create hello.txt")],
-      final: "",
-      progress: {
-        toolCallCount: 2,
-        stagnantStepCount: 0,
-        repeatedCallCount: 1,
-        lastToolSignature: "shell_execute:{\"command\":\"bun test\"}",
-        recentOutputSignatures: ["ok"],
-        heartbeat: {
-          goal: "Create hello.txt",
-          findings: ["Edited hello.txt"],
-          nextAction: "Run verification",
-          blockers: [],
-          verification: ["bun test: ok (0)"],
-        },
-      },
-    });
-
-    expect(String(messages[1].content)).not.toContain("Progress heartbeat:"); // 心跳不在运行时上下文中 / Heartbeat excluded from runtime context
-    expect(String(messages[1].content)).not.toContain("Goal: Create hello.txt");
-    expect(String(messages[1].content)).not.toContain("Next action: Run verification");
-    expect(messages.map((message) => message.getType())).toEqual(["system", "system", "human"]);
-    expect(messages.map((message) => String(message.content)).join("\n")).not.toContain(
-      '<runtime-state source="harness.runtime">',
-    );
-  });
-
   // 验证 plan 作为 harness 生成的用户侧状态提醒注入尾部，避免 provider 特殊处理 system role / Verify plan is injected as a trailing synthetic user-side state reminder
   test("injects plan as trailing synthetic user-side state reminder", () => {
     const plan = {

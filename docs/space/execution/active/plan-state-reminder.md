@@ -62,9 +62,7 @@ The plan reminder must:
 ## Test Expectations
 
 `tests/context.test.ts` should assert that plan state is the final synthetic
-`HumanMessage` and that internal progress heartbeat state is not projected into
-model messages.
+`HumanMessage`.
 
 `tests/runtime-context.test.ts` should assert that runtime context contains mode
-and tool policy but excludes plan details, context summaries, and progress
-heartbeat.
+and tool policy but excludes plan details and context summaries.

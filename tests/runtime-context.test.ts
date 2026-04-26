@@ -32,7 +32,6 @@ describe("buildRuntimeContext", () => {
     expect(context).toContain("Tool policy: read-only planning");
     expect(context).not.toContain("Plan state:"); // 动态计划状态不注入运行时上下文 / Plan state not injected into runtime context
     expect(context).not.toContain("Context summary:");
-    expect(context).not.toContain("Progress heartbeat:");
     expect(context.length).toBeLessThan(1200);
   });
 

@@ -9,13 +9,7 @@ import {
   buildRuntimeContext,
   formatPlanStateReminder,
 } from "./runtime-context";
-import type {
-  AgentEvidence,
-  AgentMode,
-  AgentPlan,
-  AgentProgressLedger,
-  ContextBudget,
-} from "../shared/types";
+import type { AgentMode, AgentPlan, ContextBudget } from "../shared/types";
 
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = "agent_plan" | "agent_build";
@@ -40,10 +34,6 @@ export interface ModelContextState {
   contextBudget?: ContextBudget;
   /** 上下文摘要 / Context summary */
   contextSummary?: string;
-  /** 执行证据 / Execution evidence */
-  evidence?: AgentEvidence;
-  /** 进度跟踪 / Progress tracking */
-  progress?: AgentProgressLedger;
 }
 
 /** 默认上下文预算（24 条消息，4000 字符工具输出） / Default context budget (24 messages, 4000 char tool output) */

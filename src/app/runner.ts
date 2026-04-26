@@ -65,7 +65,6 @@ export async function* streamCodeAgent(
         userId: input.userId,
         workspace: input.workspace,
         contextSummary: "",
-        evidence: { commands: [], files: [], verification: [] },
         contextBudget: input.contextBudget,
       },
       graphConfig(input.threadId),

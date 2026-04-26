@@ -19,8 +19,8 @@ Implementation shape:
   after compacted conversation messages.
 - `src/model/runtime-context.ts` formats the reminder as
   `<runtime-state source="graph.state.plan">`.
-- Internal state such as evidence and progress heartbeat remains in graph state
-  for harness routing and loop detection, not as a separate prompt projection.
+- Evidence/progress ledgers were later removed; tool results and graph state are
+  now the durable runtime record.
 - `tests/context.test.ts` locks the trailing synthetic user-side message shape.
 - `tests/runtime-context.test.ts` locks exclusion of dynamic plan state from
   runtime context.

@@ -1,13 +1,10 @@
 import { type BaseMessage } from "@langchain/core/messages";
 import { Annotation, messagesStateReducer } from "@langchain/langgraph";
 import type {
-  AgentEvidence,
   AgentMode,
   AgentPlan,
-  AgentProgressLedger,
   ContextBudget,
 } from "../shared/types";
-import { emptyProgressLedger } from "./progress";
 
 export const AgentState = Annotation.Root({
   /** 用户 ID / User ID */
@@ -29,20 +26,10 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => "",
   }),
-  /** 执行证据记录 / Execution evidence records */
-  evidence: Annotation<AgentEvidence>({
-    reducer: (_left, right) => right,
-    default: () => ({ commands: [], files: [], verification: [] }),
-  }),
   /** 上下文预算配置 / Context budget configuration */
   contextBudget: Annotation<ContextBudget | undefined>({
     reducer: (_left, right) => right,
     default: () => undefined,
-  }),
-  /** Agent 进度账本 / Agent progress ledger */
-  progress: Annotation<AgentProgressLedger>({
-    reducer: (_left, right) => right,
-    default: () => emptyProgressLedger(),
   }),
   /** 对话消息列表 / Conversation message list */
   messages: Annotation<BaseMessage[]>({

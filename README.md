@@ -6,7 +6,7 @@ This is a standalone Bun/TypeScript code-agent reference built with LangGraph.js
 
 - LangGraph `StateGraph` with an `agent -> approval/tools -> reflect -> agent` loop.
 - Plan mode with read-only tools and no non-dangerous confirmation gate.
-- Context budgeting with compacted history summaries plus internal evidence/progress state.
+- Context budgeting with compacted history summaries.
 - Prompt cache metric extraction from streamed model responses.
 - Bun-native SQLite checkpointer for short-term thread persistence.
 - Streaming graph updates with normalized interrupt and final events.
@@ -17,7 +17,7 @@ This is a standalone Bun/TypeScript code-agent reference built with LangGraph.js
 ## Source Layout
 
 - `src/app/`: CLI entrypoint, run/resume orchestration, and streamed event normalization.
-- `src/harness/`: LangGraph control loop, state, routes, approval, tool dispatch, evidence, progress, and reflection.
+- `src/harness/`: LangGraph control loop, state, routes, approval, tool dispatch, and reflection.
 - `src/model/`: DeepSeek adapter, static prompts, runtime context, and context compaction.
 - `src/tools/`: model tool definitions plus file, shell, and patch tool implementations.
 - `src/persistence/`: Bun SQLite LangGraph checkpointer.
@@ -87,10 +87,10 @@ By default, the CLI writes the checkpoint SQLite file under `.openpx/` in the cu
 
 ## Test
 
-Unit-level tests:
+Default tests, excluding real model/network suites:
 
 ```bash
-bun test tests/config.test.ts tests/tools.test.ts tests/checkpoint.test.ts
+bun test
 ```
 
 Real DeepSeek end-to-end test:
@@ -99,4 +99,8 @@ Real DeepSeek end-to-end test:
 bun run test:real
 ```
 
-The real test calls `deepseek-chat`, exercises approval for protected tools, writes a file, and checks the checkpoint database.
+The real suite lives at `tests/real-agent.real.ts` so it is not picked up by
+Bun's default test discovery. It calls `deepseek-chat`, exercises approval for
+protected tools, writes a file, and checks the checkpoint database. The script
+uses the current shell's proxy environment; configure or unset proxy variables
+outside the project script if your network requires it.
