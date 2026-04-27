@@ -1,9 +1,9 @@
 import { type BaseMessage } from "@langchain/core/messages";
 import { Annotation, messagesStateReducer } from "@langchain/langgraph";
 import type {
-  AgentMode,
   AgentPlan,
   ContextBudget,
+  WorkspaceAccess,
 } from "../shared/types";
 
 export const AgentState = Annotation.Root({
@@ -11,10 +11,10 @@ export const AgentState = Annotation.Root({
   userId: Annotation<string>,
   /** 工作目录路径 / Workspace path */
   workspace: Annotation<string>,
-  /** 当前运行模式 plan/builder / Current run mode (plan or builder) */
-  mode: Annotation<AgentMode>({
+  /** 工作区访问权限 read-only/write / Workspace access level (read-only/write) */
+  workspaceAccess: Annotation<WorkspaceAccess>({
     reducer: (_left, right) => right,
-    default: () => "builder",
+    default: () => "write",
   }),
   /** 持久化的执行计划 / Persisted execution plan */
   plan: Annotation<AgentPlan | null>({
@@ -45,7 +45,9 @@ export const AgentState = Annotation.Root({
 
 export type CodeAgentState = typeof AgentState.State;
 
-/** 检查当前是否为 plan 模式 / Check if current mode is plan mode */
-export function isPlanMode(state: Pick<CodeAgentState, "mode">): boolean {
-  return state.mode === "plan";
+/** 检查当前是否为只读工作区访问 / Check if current workspace access is read-only */
+export function isReadOnlyWorkspaceAccess(
+  state: Pick<CodeAgentState, "workspaceAccess">,
+): boolean {
+  return state.workspaceAccess === "read-only";
 }

@@ -33,10 +33,12 @@ describe("cli argument parsing", () => {
     expect(args.threadId).toBe("default-thread");
   });
 
-  // 验证 run 命令支持显式的 --mode 标志 / Verify run accepts explicit --mode flag
-  test("run accepts an explicit mode flag", () => {
-    const args = parseArgs(["run", "--mode", "plan", "--task", "Create hello.txt"]);
+  // 验证 run 命令支持新的 --mode read-only/write 值，并保留 plan/builder 兼容值 / Verify run accepts workspace access mode values
+  test("run accepts explicit workspace access mode values", () => {
+    const args = parseArgs(["run", "--mode", "read-only", "--task", "Create hello.txt"]);
+    const legacyArgs = parseArgs(["run", "--mode", "plan", "--task", "Create hello.txt"]);
 
-    expect(args.mode).toBe("plan");
+    expect(args.mode).toBe("read-only");
+    expect(legacyArgs.mode).toBe("plan");
   });
 });

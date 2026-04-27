@@ -42,11 +42,15 @@ export interface ShellResult {
   stderr: string;
 }
 
-/** Agent 运行模式 / Agent operation mode */
-export type AgentMode = "plan" | "builder";
+/** 工作区访问权限 / Workspace access level */
+export type WorkspaceAccess = "read-only" | "write";
 
-/** CLI 层面 Agent 运行模式（含 auto）/ CLI-facing agent run mode including auto */
-export type AgentRunMode = "auto" | AgentMode;
+/** CLI/API 层面的访问请求（含兼容 mode 值）/ CLI/API-facing workspace access request including legacy mode values */
+export type WorkspaceAccessRequest =
+  | "auto"
+  | WorkspaceAccess
+  | "plan"
+  | "builder";
 
 /** 上下文预算 / Context budget */
 export interface ContextBudget {

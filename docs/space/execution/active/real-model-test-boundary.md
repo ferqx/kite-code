@@ -44,8 +44,10 @@ bun run test:real
 因为 `.real.ts` 被有意排除在 Bun 默认发现模式外，package 脚本必须传入显式路径：
 
 ```bash
-bun test ./tests/real-agent.real.ts
+bun test --concurrent --max-concurrency 3 ./tests/real-agent.real.ts
 ```
+
+真实模型用例可以并发运行，但必须限制并发度。当前默认并发度为 3，用于减少等待时间，同时避免一次性把所有真实模型请求打到 provider。
 
 package 脚本应尊重调用者的代理环境。不要增加默认 `env -u ...proxy...` 变体；用户可按本地网络需要在项目脚本外 unset 或配置代理变量。
 
@@ -57,4 +59,4 @@ package 脚本应尊重调用者的代理环境。不要增加默认 `env -u ...
 
 ## 防护
 
-`tests/test-discovery.test.ts` 断言包含 `real` 的文件不使用 Bun 默认 `*.test.*` / `*.spec.*` 命名模式，默认发现的测试不会直接调用配置聊天模型，并且显式 real-test 脚本指向 `tests/real-agent.real.ts`，不重写代理环境。
+`tests/test-discovery.test.ts` 断言包含 `real` 的文件不使用 Bun 默认 `*.test.*` / `*.spec.*` 命名模式，默认发现的测试不会直接调用配置聊天模型，并且显式 real-test 脚本指向 `tests/real-agent.real.ts`，使用受限并发，不重写代理环境。

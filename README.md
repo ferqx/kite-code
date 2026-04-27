@@ -5,7 +5,7 @@
 ## 功能
 
 - 使用 LangGraph `StateGraph` 维护 `agent -> approval/tools -> reflect -> agent` 循环。
-- 支持 plan 模式，只暴露只读工具，不再为非危险操作增加确认门。
+- 支持 `read-only` / `write` 工作区访问权限；只读访问由工具执行层强制，静态系统提示和工具 schema 不随访问权限变化，以提升 provider 前缀缓存命中。
 - 支持上下文预算和历史消息压缩摘要。
 - 当 provider 元数据暴露缓存 token 计数时，从流式模型响应中提取 prompt cache 指标。
 - 使用 Bun 原生 SQLite checkpointer 持久化短期 thread 状态。
@@ -100,13 +100,13 @@ provider 专有逻辑应保持隔离。例如 DeepSeek 适配器保留 reasoning
 bun run agent run --thread demo --user local --task "Create hello.txt with exact content \"hello\""
 ```
 
-强制进入 plan 模式，或使用默认 `auto` 模式自动识别明确的规划请求：
+默认 `auto` 使用 `write` 工作区访问权限，由模型自主决定是否调用 `update_plan`。如需强制只读访问，可使用 `--mode read-only`，也可以继续使用兼容入口 `--mode plan` 或任务前缀 `/plan`：
 
 ```bash
-bun run agent run --mode plan --thread demo --user local --task "Inspect the change and propose a plan"
+bun run agent run --mode read-only --thread demo --user local --task "Inspect the change and propose a plan"
 ```
 
-plan 模式会在模型返回计划摘要后结束。它不会为非危险的 builder 交接额外请求确认；后续 builder 运行请求受保护工具时仍需要审批。
+`read-only` 访问状态会作为尾部合成运行时消息注入，而不是切换另一套 system prompt。只读访问下写入、删除和执行类工具即使被模型调用也会被工具执行层拒绝；`write` 访问下这些受保护工具仍需要审批。`--mode plan` / `--mode builder` 是兼容旧入口，内部会分别映射到 `read-only` / `write`。
 
 当事件流发出受保护工具的 `interrupt` 事件时，可以审批并恢复执行：
 
@@ -130,4 +130,4 @@ bun test
 bun run test:real
 ```
 
-真实测试套件位于 `tests/real-agent.real.ts`，因此不会被 Bun 默认测试发现机制拾取。它会调用配置的默认模型，覆盖受保护工具审批、文件写入和 checkpoint 数据库检查。脚本会沿用当前 shell 的代理环境；如果网络需要代理或需要取消代理，请在项目脚本外部配置环境变量。
+真实测试套件位于 `tests/real-agent.real.ts`，因此不会被 Bun 默认测试发现机制拾取。`test:real` 使用 `--concurrent --max-concurrency 3` 并发运行真实模型用例，以缩短等待时间并避免过高并发压到 provider。它会调用配置的默认模型，覆盖受保护工具审批、文件写入和 checkpoint 数据库检查。脚本会沿用当前 shell 的代理环境；如果网络需要代理或需要取消代理，请在项目脚本外部配置环境变量。

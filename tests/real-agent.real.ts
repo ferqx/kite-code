@@ -17,8 +17,8 @@ import type { AgentEvent } from "../src/shared/types";
 //
 // L1: 直接回答 – 元问题，零工具调用
 // L2: 单工具执行 – 简单文件创建
-// L3: Plan 模式 – 计划生成 + 模式切换
-// L4: 多步骤 Builder – 多个工具调用 + 验证
+// L3: 只读访问 – 计划生成 + 写入阻断
+// L4: 多步骤写入访问 – 多个工具调用 + 验证
 // L5: 代码修改 + 验证 – 代码编写 + 测试/类型检查
 // L6: 错误恢复 – 工具失败后的自我修复
 // L7: 长时间运行 – 多文件项目，5+ 步骤 + 计划迭代
@@ -125,12 +125,12 @@ describe("L1-L4: basic real agent scenarios", () => {
 
   // L3: /plan 只产出计划，不触发非危险确认 / /plan produces a plan without non-dangerous confirmation
   test(
-    "L3: /plan produces a plan and blocks edits without mode confirmation",
+    "L3: /plan produces a plan and blocks edits without access confirmation",
     async () => {
       await ensureRealModelAvailable();
       const env = createEnv("l3-plan");
-      const fileName = "plan-mode-output.txt";
-      const fileContent = "plan mode should not edit before confirmation";
+      const fileName = "read-only-output.txt";
+      const fileContent = "read-only access should not edit before confirmation";
 
       const planEvents: AgentEvent[] = [];
       for await (const event of streamCodeAgent({
@@ -142,7 +142,7 @@ describe("L1-L4: basic real agent scenarios", () => {
       }
 
       expect(planEvents.some((event) => event.type === "final")).toBe(true);
-      expect(JSON.stringify(planEvents)).not.toContain("mode_confirmation");
+      expect(JSON.stringify(planEvents)).not.toContain("access_confirmation");
       expect(JSON.stringify(planEvents)).not.toContain("tool_approval");
       expect(existsSync(join(env.workspace, fileName))).toBe(false);
     },
@@ -267,9 +267,9 @@ describe("L6: error recovery scenarios", () => {
     240_000,
   );
 
-  // Plan 模式下尝试非法操作应被拒绝，agent 应调整策略 / Illegal operations in plan mode should be rejected, agent adapts
+  // 只读访问下尝试非法操作应被拒绝，agent 应调整策略 / Illegal operations under read-only access should be rejected
   test(
-    "L6b: adapts when a non-read command is rejected in plan mode",
+    "L6b: adapts when a non-read command is rejected under read-only access",
     async () => {
       await ensureRealModelAvailable();
       const env = createEnv("l6-plan-reject");
@@ -283,11 +283,11 @@ describe("L6: error recovery scenarios", () => {
         if (event.type === "interrupt") break;
       }
 
-      // Plan 模式中不应有文件被创建 / No file should be created in plan mode
+      // 只读访问中不应有文件被创建 / No file should be created under read-only access
       expect(existsSync(join(env.workspace, "plan-reject.txt"))).toBe(false);
-      // 不应产生 mode_confirmation 中断 / Should not produce mode_confirmation interrupt
-      expect(JSON.stringify(planEvents)).not.toContain("mode_confirmation");
-      // 不应有 tool_approval（plan 模式跳过审批直接进入 tools 拒绝） / No tool_approval (plan mode skips approval, tools node rejects)
+      // 不应产生 access_confirmation 中断 / Should not produce access_confirmation interrupt
+      expect(JSON.stringify(planEvents)).not.toContain("access_confirmation");
+      // 不应有 tool_approval（只读访问跳过审批直接进入 tools 拒绝） / No tool_approval (read-only access skips approval, tools node rejects)
       expect(JSON.stringify(planEvents)).not.toContain("tool_approval");
     },
     120_000,
@@ -410,7 +410,7 @@ async function runApprovalLoop(
 /** 手动审批恢复循环 / Manual approval resume loop */
 async function continueApproving(
   input: ContinueInput,
-  initialResume: { approved?: boolean; nextMode?: "builder" } = { approved: true },
+  initialResume: { approved?: boolean } = { approved: true },
 ): Promise<AgentEvent[]> {
   const events: AgentEvent[] = [];
   let resume = initialResume;

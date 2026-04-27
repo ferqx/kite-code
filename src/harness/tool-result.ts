@@ -1,4 +1,4 @@
-import type { AgentMode, AgentPlan, ShellResult } from "../shared/types";
+import type { AgentPlan, ShellResult, WorkspaceAccess } from "../shared/types";
 
 /** 工具执行结果类型 / Tool execution result type */
 export type ToolExecutionResult = ShellResult & {
@@ -6,6 +6,6 @@ export type ToolExecutionResult = ShellResult & {
   path?: string;
   /** update_plan 返回的持久化计划 / Plan state returned by update_plan */
   plan?: AgentPlan;
-  /** update_plan 可能触发的模式切换 / Optional mode switch returned by update_plan */
-  mode?: AgentMode;
+  /** 保留给未来显式访问权限切换工具的更新 / Reserved for future explicit access-switch tool updates */
+  workspaceAccess?: WorkspaceAccess;
 };

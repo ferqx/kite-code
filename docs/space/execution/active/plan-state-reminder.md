@@ -1,8 +1,8 @@
 # 当前规则：计划状态提醒
 
 状态：active
-最后更新：2026-04-27
-最后验证：2026-04-27
+最后更新：2026-04-28
+最后验证：2026-04-28
 范围：
 
 - `src/model/context.ts`
@@ -14,7 +14,7 @@
 
 - 修改模型上下文组装。
 - 修改运行时上下文格式。
-- 修改 plan 模式或 builder 模式的 prompt 投影。
+- 修改 `read-only` / `write` 工作区访问权限的 prompt 投影。
 - 修改缓存敏感的消息顺序。
 
 相关：
@@ -38,8 +38,11 @@
 SystemMessage(static agent contract)
 SystemMessage(cacheable runtime context)
 ...compacted conversation messages
+HumanMessage(synthetic graph.state.workspaceAccess reminder, only when read-only access needs projection)
 HumanMessage(synthetic graph.state.plan reminder)
 ```
+
+静态系统提示必须使用单一 `agent` 合约。`buildCacheableRuntimeContext` 也必须跨 `read-only` / `write` 工作区访问权限保持一致；当前访问权限这类会变化的状态应放在尾部合成用户侧提醒中，而不是写入 system prompt 前缀。没有访问权限提醒时表示默认 `write` 访问。
 
 计划提醒必须：
 
@@ -54,11 +57,17 @@ HumanMessage(synthetic graph.state.plan reminder)
 
 - 不要把计划状态移回静态 system prompt。
 - 不要把计划状态放入 `buildCacheableRuntimeContext`。
+- 不要因为 `read-only` / `write` 访问权限变化生成不同的静态 system prompt。
+- 不要把当前 `graph.state.workspaceAccess` 写入可缓存运行时上下文；需要投影时使用尾部合成 `HumanMessage`。
 - 不要依赖 `update_plan` ToolMessage 历史作为当前计划。
 - 不要为该动态状态使用尾部 `SystemMessage`，除非某个 provider adapter 已证明它能保持语义和缓存行为。
 
 ## 测试期望
 
-`tests/context.test.ts` 应断言计划状态是最后一个合成 `HumanMessage`。
+`tests/context.test.ts` 应断言：
 
-`tests/runtime-context.test.ts` 应断言运行时上下文包含按模式限定的工具策略，但排除计划详情、上下文摘要、用户身份和已配置模型详情。
+- 单一 `agent` 使用一份静态 system prompt。
+- 当前 `read-only` 工作区访问权限使用尾部合成 `HumanMessage` 投影。
+- 计划状态是最后一个合成 `HumanMessage`。
+
+`tests/runtime-context.test.ts` 应断言运行时上下文包含跨访问权限稳定的工作区访问策略，且排除当前访问权限、计划详情、上下文摘要、用户身份和已配置模型详情。

@@ -5,7 +5,12 @@ import type { AgentConfig } from "../config/index";
 import { buildCodeAgentGraph } from "../harness/graph";
 import type { ShellExecutor } from "../tools/shell";
 import { extractPromptCacheMetrics } from "../shared/cache-metrics";
-import type { AgentEvent, AgentMode, AgentRunMode, ContextBudget } from "../shared/types";
+import type {
+  AgentEvent,
+  ContextBudget,
+  WorkspaceAccess,
+  WorkspaceAccessRequest,
+} from "../shared/types";
 
 /** 流式运行 Agent 输入 / Stream agent input */
 export interface StreamCodeAgentInput {
@@ -23,8 +28,8 @@ export interface StreamCodeAgentInput {
   config: AgentConfig;
   /** 可选 Shell 执行器 / Optional shell executor */
   shellExecutor?: ShellExecutor;
-  /** 运行模式 / Run mode */
-  mode?: AgentRunMode;
+  /** 兼容 CLI mode / 工作区访问请求 / Compatible CLI mode or workspace access request */
+  mode?: WorkspaceAccessRequest;
   /** 上下文预算 / Context budget */
   contextBudget?: ContextBudget;
 }
@@ -35,7 +40,7 @@ export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task">
   resume: boolean | { approved?: boolean; reason?: string };
 }
 
-/** 流式运行 Agent，处理直接回答和模式检测 / Stream agent execution, handle direct answers and mode detection */
+/** 流式运行 Agent，处理直接回答和访问权限检测 / Stream agent execution, handle direct answers and access detection */
 export async function* streamCodeAgent(
   input: StreamCodeAgentInput,
 ): AsyncGenerator<AgentEvent> {
@@ -54,13 +59,20 @@ export async function* streamCodeAgent(
   // 跟踪流是否正常完成 / Track if stream completed normally
   let streamCompleted = false;
   try {
-    // 检测初始运行模式 / Detect initial run mode
-    const initialMode = initialModeForTask(input.task, input.mode ?? "auto");
+    // 检测初始工作区访问权限 / Detect initial workspace access
+    const initialWorkspaceAccess = initialWorkspaceAccessForTask(
+      input.task,
+      input.mode ?? "auto",
+    );
     // 以初始状态启动图流 / Start graph stream with initial state
     const stream = await graph.stream(
       {
-        messages: [new HumanMessage(taskMessageForInitialMode(input.task, initialMode))],
-        mode: initialMode,
+        messages: [
+          new HumanMessage(
+            taskMessageForInitialAccess(input.task, initialWorkspaceAccess),
+          ),
+        ],
+        workspaceAccess: initialWorkspaceAccess,
         plan: null,
         userId: input.userId,
         workspace: input.workspace,
@@ -111,32 +123,34 @@ export function runtimeQuestionAnswer(
   ].join("\n");
 }
 
-/** 为初始模式准备任务消息 / Prepare task message for initial mode */
-export function taskMessageForInitialMode(task: string, mode: AgentMode): string {
-  // plan 模式或已包含 /plan 前缀时不需要修改 / No modification needed for plan mode or if already has /plan prefix
-  if (mode !== "plan" || task.trimStart().startsWith("/plan")) {
-    return task;
-  }
-  // 自动检测为 plan 模式时添加 /plan 前缀 / Add /plan prefix when auto-detected as plan mode
-  return `/plan ${task}`;
+/** 为初始工作区访问权限准备任务消息 / Prepare task message for initial workspace access */
+export function taskMessageForInitialAccess(
+  task: string,
+  _workspaceAccess: WorkspaceAccess,
+): string {
+  // 不改写用户输入；当前访问权限由图状态和尾部运行时状态提醒表达 / Do not rewrite user input; graph state carries access
+  return task;
 }
 
-/** 根据任务内容和用户指令检测初始运行模式 / Detect initial run mode from task and user instruction */
-export function initialModeForTask(
+/** 根据任务内容和用户指令检测初始工作区访问权限 / Detect initial workspace access from task and user instruction */
+export function initialWorkspaceAccessForTask(
   task: string,
-  requestedMode: AgentRunMode = "auto",
-): AgentMode {
-  // 用户明确指定模式时直接使用 / Use user-specified mode directly
-  if (requestedMode === "plan" || requestedMode === "builder") {
-    return requestedMode;
+  requestedAccess: WorkspaceAccessRequest = "auto",
+): WorkspaceAccess {
+  // 兼容旧 mode 值，并支持新的 read-only/write 值 / Map legacy mode values and new access values
+  if (requestedAccess === "plan" || requestedAccess === "read-only") {
+    return "read-only";
+  }
+  if (requestedAccess === "builder" || requestedAccess === "write") {
+    return "write";
   }
   const normalized = task.trimStart().toLowerCase();
-  // /plan 前缀强制使用 plan 模式 / /plan prefix forces plan mode
+  // /plan 前缀强制使用只读访问 / /plan prefix forces read-only access
   if (normalized.startsWith("/plan")) {
-    return "plan";
+    return "read-only";
   }
-  // 检测自然语言中的 plan 意图 / Detect plan intent in natural language
-  return isNaturalLanguagePlanRequest(normalized) ? "plan" : "builder";
+  // auto 不再用启发式进入只读；模型可自主调用 update_plan / Auto lets the model decide whether to call update_plan
+  return "write";
 }
 
 /** 恢复被中断的 Agent 执行 / Resume interrupted agent execution */
@@ -179,8 +193,8 @@ function graphConfig(threadId: string) {
 export async function* normalizeGraphStream(
   stream: AsyncIterable<unknown>,
 ): AsyncGenerator<AgentEvent> {
-  // 跟踪当前运行模式 / Track current run mode
-  let currentMode: AgentMode | null = null;
+  // 跟踪当前工作区访问权限 / Track current workspace access
+  let currentWorkspaceAccess: WorkspaceAccess | null = null;
   for await (const chunk of stream) {
     // 处理中断事件 / Handle interrupt events
     if (isInterrupted(chunk)) {
@@ -201,15 +215,18 @@ export async function* normalizeGraphStream(
       continue;
     }
 
-    // 查找并更新当前模式 / Find and update current mode
-    currentMode = findMode(chunk) ?? currentMode;
+    // 查找并更新当前工作区访问权限 / Find and update current workspace access
+    currentWorkspaceAccess = findWorkspaceAccess(chunk) ?? currentWorkspaceAccess;
     // 产出更新事件 / Yield update event
     yield { type: "update", data: chunk };
     // 提取缓存指标 / Extract cache metrics
     const metrics = findPromptCacheMetrics(chunk);
-    if (metrics && currentMode) {
+    if (metrics && currentWorkspaceAccess) {
       // 产出缓存指标事件 / Yield cache metrics event
-      yield { type: "cache_metrics", data: { mode: currentMode, ...metrics } };
+      yield {
+        type: "cache_metrics",
+        data: { workspaceAccess: currentWorkspaceAccess, ...metrics },
+      };
     }
     // 查找并产出最终答案 / Find and yield final answer
     const final = findFinal(chunk);
@@ -219,43 +236,18 @@ export async function* normalizeGraphStream(
   }
 }
 
-/** 从流块中查找模式值 / Find mode value from stream chunk */
-function findMode(chunk: unknown): AgentMode | null {
+/** 从流块中查找工作区访问权限 / Find workspace access value from stream chunk */
+function findWorkspaceAccess(chunk: unknown): WorkspaceAccess | null {
   for (const value of walkValues(chunk)) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       continue;
     }
-    const mode = (value as Record<string, unknown>).mode;
-    if (mode === "plan" || mode === "builder") {
-      return mode;
+    const workspaceAccess = (value as Record<string, unknown>).workspaceAccess;
+    if (workspaceAccess === "read-only" || workspaceAccess === "write") {
+      return workspaceAccess;
     }
   }
   return null;
-}
-
-/** 检测自然语言中的 plan 意图 / Detect natural language plan intent */
-function isNaturalLanguagePlanRequest(task: string): boolean {
-  // plan 意图关键词 / plan intent keywords
-  const planIntent =
-    task.includes("先计划") ||
-    task.includes("只计划") ||
-    task.includes("仅计划") ||
-    task.includes("不要改") ||
-    task.includes("不要写") ||
-    task.includes("别改") ||
-    task.includes("plan first") ||
-    task.includes("only plan") ||
-    task.includes("do not edit") ||
-    task.includes("don't edit") ||
-    task.includes("without editing");
-  // 执行意图关键词（覆盖 plan 意图） / execution intent keywords (overrides plan intent)
-  const executionIntent =
-    task.includes("直接改") ||
-    task.includes("开始实现") ||
-    task.includes("implement now") ||
-    task.includes("edit now");
-  // 有 plan 意图且没有执行意图时返回 true / Return true when plan intent exists without execution intent
-  return planIntent && !executionIntent;
 }
 
 /** 从流块中查找最终答案 / Find final answer from stream chunk */
@@ -265,8 +257,8 @@ function findFinal(chunk: unknown): string | null {
     return null;
   }
   const record = chunk as Record<string, unknown>;
-  // 查找 agent_plan 或 agent_build 节点中的 final 字段 / Find final field in agent_plan or agent_build node
-  for (const key of ["agent_plan", "agent_build"]) {
+  // 查找 agent 节点中的 final 字段，保留旧节点名兼容已有 checkpoint 流输出 / Find final field in agent nodes
+  for (const key of ["agent", "agent_plan", "agent_build"]) {
     const node = record[key] as { final?: unknown } | undefined;
     if (typeof node?.final === "string") {
       return node.final;

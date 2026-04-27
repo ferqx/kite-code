@@ -8,16 +8,16 @@ import {
   search,
 } from "./file";
 
-/** 创建代码 Agent 工具集输入 / Input for creating code agent tools */
-export interface CreateCodeAgentToolsInput {
+/** 创建 Agent 工具集输入 / Input for creating agent tools */
+export interface CreateAgentToolsInput {
   /** 工作目录 / Workspace directory */
   workspace: string;
   /** 可选 Shell 执行器 / Optional shell executor */
   shellExecutor?: ShellExecutor;
 }
 
-/** 创建 builder 模式的工具集（read_file, edit_file, write_file, search, shell_execute, update_plan） */
-export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
+/** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
+export function createAgentTools(input: CreateAgentToolsInput) {
   const readFileTool = tool(
     async ({ path, offset, limit }) =>
       JSON.stringify(
@@ -101,6 +101,36 @@ export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
     },
   );
 
+  const shellRead = tool(
+    async ({ command }) => {
+      // 拒绝非只读命令 / Reject non-read-only commands
+      if (!isReadOnlyShellCommand(command)) {
+        return JSON.stringify({
+          ok: false,
+          command,
+          exitCode: -1,
+          stdout: "",
+          stderr: "Rejected: shell_read allows read-only shell commands only.",
+        });
+      }
+
+      return JSON.stringify(
+        await (input.shellExecutor ?? shellTool)({
+          workspace: input.workspace,
+          command,
+        }),
+      );
+    },
+    {
+      name: "shell_read",
+      description:
+        "Read-only shell command. Use it to inspect files, list directories, search text, and read git status/diff/log/show. It must not write, delete, run tests, install dependencies, or execute project code.",
+      schema: z.object({
+        command: z.string().describe("Read-only shell command to execute in the workspace"),
+      }),
+    },
+  );
+
   const shellExecute = tool(
     async ({ command }) =>
       JSON.stringify(
@@ -119,42 +149,25 @@ export function createCodeAgentTools(input: CreateCodeAgentToolsInput) {
     },
   );
 
-  return [readFileTool, editFileTool, writeFileTool, searchTool, shellExecute, createUpdatePlanTool()];
+  return [
+    readFileTool,
+    editFileTool,
+    writeFileTool,
+    searchTool,
+    shellRead,
+    shellExecute,
+    createUpdatePlanTool(),
+  ];
 }
 
-/** 创建 plan 模式的工具集（shell_read, update_plan）/ Create plan mode tool set (read-only: shell_read, update_plan) */
-export function createPlanAgentTools(input: CreateCodeAgentToolsInput) {
-  const shellRead = tool(
-    async ({ command }) => {
-      // 拒绝非只读命令 / Reject non-read-only commands
-      if (!isPlanReadOnlyShellCommand(command)) {
-        return JSON.stringify({
-          ok: false,
-          command,
-          exitCode: -1,
-          stdout: "",
-          stderr: "Rejected: plan mode allows read-only shell commands only.",
-        });
-      }
+/** 兼容旧名称：创建代码 Agent 工具集 / Backward-compatible alias for agent tools */
+export function createCodeAgentTools(input: CreateAgentToolsInput) {
+  return createAgentTools(input);
+}
 
-      return JSON.stringify(
-        await (input.shellExecutor ?? shellTool)({
-          workspace: input.workspace,
-          command,
-        }),
-      );
-    },
-    {
-      name: "shell_read",
-      description:
-        "Read-only shell command for plan mode. Use it only to inspect files, list directories, search text, and read git status/diff/log/show. It must not write, delete, run tests, install dependencies, or execute project code.",
-      schema: z.object({
-        command: z.string().describe("Read-only shell command to execute in the workspace"),
-      }),
-    },
-  );
-
-  return [shellRead, createUpdatePlanTool()];
+/** 兼容旧名称：创建计划 Agent 工具集 / Backward-compatible alias for agent tools */
+export function createPlanAgentTools(input: CreateAgentToolsInput) {
+  return createAgentTools(input);
 }
 
 /** 创建 update_plan 工具定义，用于创建或更新执行计划 / Create update_plan tool definition for creating/updating execution plans */
@@ -173,7 +186,7 @@ function createUpdatePlanTool() {
     {
       name: "update_plan",
       description:
-        "Update the current plan state. In plan mode use it to create or revise a concise implementation plan; it must not edit files, run commands, install dependencies, or mutate the workspace.",
+        "Update the current plan state with concise ordered steps. Use it when planning or progress tracking materially helps; it must not edit files, run commands, install dependencies, or mutate the workspace.",
       schema: z.object({
         name: z.string().describe("Short plan name"),
         description: z.string().describe("Short plan description"),
@@ -195,7 +208,7 @@ function createUpdatePlanTool() {
   );
 }
 
-/** Plan 模式允许的只读命令白名单 / Read-only command allowlist for plan mode */
+/** 只读 shell 工具允许的命令白名单 / Read-only command allowlist for shell_read */
 const PLAN_READ_ONLY_COMMANDS = new Set([
   "awk",
   "cat",
@@ -224,7 +237,7 @@ const PLAN_READ_ONLY_COMMANDS = new Set([
   "wc",
 ]);
 
-/** Plan 模式允许的 Git 只读子命令白名单 / Read-only git subcommand allowlist for plan mode */
+/** shell_read 允许的 Git 只读子命令白名单 / Read-only git subcommand allowlist for shell_read */
 const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
   "branch",
   "diff",
@@ -235,8 +248,8 @@ const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
   "status",
 ]);
 
-/** 检查命令是否在 plan 模式只读白名单中 / Check if command is in plan mode read-only allowlist */
-export function isPlanReadOnlyShellCommand(command: string): boolean {
+/** 检查命令是否在 shell_read 只读白名单中 / Check if command is in shell_read allowlist */
+export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = command.trim();
   // 拒绝对空命令和包含输出重定向的命令 / Reject empty commands and commands with output redirection
   if (!trimmed || /(^|[^>])>{1,2}($|[^>])/.test(trimmed)) {
@@ -247,6 +260,9 @@ export function isPlanReadOnlyShellCommand(command: string): boolean {
   return splitShellSegments(trimmed).every(isPlanReadOnlySegment);
 }
 
+/** 兼容旧名称 / Backward-compatible alias */
+export const isPlanReadOnlyShellCommand = isReadOnlyShellCommand;
+
 /** 将 Shell 命令按分隔符拆分为多个段 / Split shell command into segments by separators */
 function splitShellSegments(command: string): string[] {
   return command
@@ -255,7 +271,7 @@ function splitShellSegments(command: string): string[] {
     .filter(Boolean);
 }
 
-/** 检查单个命令段是否为 plan 模式允许的只读命令 / Check if individual command segment is plan mode read-only */
+/** 检查单个命令段是否为 shell_read 允许的只读命令 / Check if individual segment is read-only */
 function isPlanReadOnlySegment(segment: string): boolean {
   // 将命令段解析为 token 数组，支持引号 / Parse segment into token array, supporting quotes
   const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];

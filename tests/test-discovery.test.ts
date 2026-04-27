@@ -41,7 +41,9 @@ describe("test discovery boundaries", () => {
     };
 
     expect(pkg.scripts?.test).toBe("bun test");
-    expect(pkg.scripts?.["test:real"]).toBe("bun test ./tests/real-agent.real.ts");
+    expect(pkg.scripts?.["test:real"]).toBe(
+      "bun test --concurrent --max-concurrency 3 ./tests/real-agent.real.ts",
+    );
     expect(pkg.scripts?.["test:real"]).not.toContain("proxy");
     expect(pkg.scripts?.["test:real:direct"]).toBeUndefined();
   });

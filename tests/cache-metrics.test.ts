@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { AIMessage } from "@langchain/core/messages";
 import {
   extractPromptCacheMetrics,
-  summarizePromptCacheMetricsByMode,
+  summarizePromptCacheMetricsByWorkspaceAccess,
 } from "../src/shared/cache-metrics";
 import { normalizeGraphStream } from "../src/app/runner";
 
@@ -43,9 +43,9 @@ describe("extractPromptCacheMetrics", () => {
       },
     });
 
-    // 模拟图流输出，包含 agent 模式信息和 AI 消息 / Simulate graph stream output with agent mode info and AI message
+    // 模拟图流输出，包含工作区访问权限信息和 AI 消息 / Simulate graph stream output with workspace access info and AI message
     async function* stream() {
-      yield { agent: { mode: "builder", messages: [ai], final: "done" } };
+      yield { agent: { workspaceAccess: "write", messages: [ai], final: "done" } };
     }
 
     const events = [];
@@ -53,11 +53,11 @@ describe("extractPromptCacheMetrics", () => {
       events.push(event);
     }
 
-    // 检查事件流中应包含按模式分类的 cache_metrics 事件 / Verify event stream contains mode-specific cache_metrics event
+    // 检查事件流中应包含按工作区访问权限分类的 cache_metrics 事件 / Verify event stream contains access-specific cache_metrics event
     expect(events).toContainEqual({
       type: "cache_metrics",
       data: {
-        mode: "builder",
+        workspaceAccess: "write",
         inputTokens: 100,
         cacheHitTokens: 80,
         cacheMissTokens: 20,
@@ -66,28 +66,28 @@ describe("extractPromptCacheMetrics", () => {
     });
   });
 
-  // 验证按 agent 模式（plan/builder）汇总多条缓存指标的聚合结果 / Verify aggregating multiple cache metrics entries by agent mode (plan/builder)
-  test("summarizes prompt cache hit rate by agent mode", () => {
-    // plan 模式两条记录：100+300=400 输入 token, 25+225=250 命中, 75+75=150 未命中 / Two plan entries: 100+300=400 input, 25+225=250 hit, 75+75=150 miss
-    // builder 模式一条记录：200 输入 token, 50 命中, 150 未命中 / One builder entry: 200 input, 50 hit, 150 miss
+  // 验证按工作区访问权限汇总多条缓存指标的聚合结果 / Verify aggregating cache metrics by workspace access
+  test("summarizes prompt cache hit rate by workspace access", () => {
+    // read-only 两条记录：100+300=400 输入 token, 25+225=250 命中, 75+75=150 未命中 / Two read-only entries
+    // write 一条记录：200 输入 token, 50 命中, 150 未命中 / One write entry
     expect(
-      summarizePromptCacheMetricsByMode([
+      summarizePromptCacheMetricsByWorkspaceAccess([
         {
-          mode: "plan",
+          workspaceAccess: "read-only",
           inputTokens: 100,
           cacheHitTokens: 25,
           cacheMissTokens: 75,
           hitRate: 0.25,
         },
         {
-          mode: "plan",
+          workspaceAccess: "read-only",
           inputTokens: 300,
           cacheHitTokens: 225,
           cacheMissTokens: 75,
           hitRate: 0.75,
         },
         {
-          mode: "builder",
+          workspaceAccess: "write",
           inputTokens: 200,
           cacheHitTokens: 50,
           cacheMissTokens: 150,
@@ -95,13 +95,13 @@ describe("extractPromptCacheMetrics", () => {
         },
       ]),
     ).toEqual({
-      plan: {
+      "read-only": {
         inputTokens: 400,
         cacheHitTokens: 250,
         cacheMissTokens: 150,
         hitRate: 0.625,
       },
-      builder: {
+      write: {
         inputTokens: 200,
         cacheHitTokens: 50,
         cacheMissTokens: 150,

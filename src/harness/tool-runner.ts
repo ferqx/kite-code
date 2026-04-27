@@ -1,6 +1,6 @@
-import type { AgentMode, AgentPlan } from "../shared/types";
+import type { AgentPlan, WorkspaceAccess } from "../shared/types";
 import { editFile, readFile, writeFile } from "../tools/file";
-import { isPlanReadOnlyShellCommand } from "../tools/definitions";
+import { isReadOnlyShellCommand } from "../tools/definitions";
 import { shellTool, type ShellExecutor } from "../tools/shell";
 import type { PendingToolRequest } from "./tool-requests";
 import type { ToolExecutionResult } from "./tool-result";
@@ -10,8 +10,8 @@ export async function runApprovedTool(
   workspace: string,
   request: PendingToolRequest,
   shellExecutor?: ShellExecutor,
-  mode: AgentMode = "builder",
-  existingPlan: AgentPlan | null = null,
+  workspaceAccess: WorkspaceAccess = "write",
+  _existingPlan: AgentPlan | null = null,
 ): Promise<ToolExecutionResult> {
   if (request.name === "update_plan") {
     return {
@@ -21,12 +21,11 @@ export async function runApprovedTool(
       stdout: "",
       stderr: "",
       plan: request.args,
-      ...(mode === "builder" && !existingPlan ? { mode: "plan" as AgentMode } : {}),
     };
   }
 
   if (request.name === "shell_read") {
-    if (!isPlanReadOnlyShellCommand(request.args.command)) {
+    if (!isReadOnlyShellCommand(request.args.command)) {
       return {
         ok: false,
         command: request.args.command,
@@ -39,16 +38,6 @@ export async function runApprovedTool(
       workspace,
       command: request.args.command,
     });
-  }
-
-  if (mode === "plan") {
-    return {
-      ok: false,
-      command: request.protectedCommand,
-      exitCode: -1,
-      stdout: "",
-      stderr: "Rejected: Plan mode allows read-only shell commands only.",
-    };
   }
 
   if (request.name === "search") {
@@ -72,6 +61,16 @@ export async function runApprovedTool(
       stdout: result.content,
       stderr: result.error ?? "",
       path: request.args.path,
+    };
+  }
+
+  if (workspaceAccess === "read-only") {
+    return {
+      ok: false,
+      command: request.protectedCommand,
+      exitCode: -1,
+      stdout: "",
+      stderr: "Rejected: read-only workspace access allows read-only tools only.",
     };
   }
 

@@ -8,14 +8,10 @@ import type { AgentConfig } from "../config/index";
 import { prepareModelContext } from "../model/context";
 import { createChatModel } from "../model/factory";
 import { BunSqliteSaver } from "../persistence/checkpoint";
-import {
-  createCodeAgentTools,
-  createPlanAgentTools,
-} from "../tools/definitions";
+import { createAgentTools } from "../tools/definitions";
 import type { ShellExecutor } from "../tools/shell";
 import {
-  routeAfterAgentBuild,
-  routeAfterAgentPlan,
+  routeAfterAgent,
   routeAfterApproval,
   routeAfterReflect,
   routeAfterTools,
@@ -45,22 +41,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const model = createChatModel(input.config);
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
 
-  /** Plan Agent 节点：使用只读工具进行代码检查和计划 / Plan Agent node */
-  const agentPlan = async (state: CodeAgentState) => {
-    const tools = createPlanAgentTools({
+  /** Agent 节点：使用稳定工具 schema，由执行层强制工作区访问边界 / Agent node */
+  const agent = async (state: CodeAgentState) => {
+    const tools = createAgentTools({
       workspace: state.workspace,
       shellExecutor: input.shellExecutor,
     });
-    return invokeModel(model, state, tools, "agent_plan");
-  };
-
-  /** Build Agent 节点：使用读写工具执行计划步骤 / Build Agent node */
-  const agentBuild = async (state: CodeAgentState) => {
-    const tools = createCodeAgentTools({
-      workspace: state.workspace,
-      shellExecutor: input.shellExecutor,
-    });
-    return invokeModel(model, state, tools, "agent_build");
+    return invokeModel(model, state, tools);
   };
 
   /** 审批节点：中断等待人工批准 / Approval node */
@@ -112,7 +99,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       state.workspace,
       request,
       input.shellExecutor,
-      state.mode,
+      state.workspaceAccess,
       state.plan,
     );
     const toolMessage = new ToolMessage({
@@ -124,7 +111,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     if ("plan" in result) {
       return {
         plan: result.plan,
-        ...("mode" in result ? { mode: result.mode } : {}),
+        ...("workspaceAccess" in result
+          ? { workspaceAccess: result.workspaceAccess }
+          : {}),
         messages: [toolMessage],
       };
     }
@@ -162,14 +151,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   };
 
   const graph = new StateGraph(AgentState)
-    .addNode("agent_plan", agentPlan)
-    .addNode("agent_build", agentBuild)
+    .addNode("agent", agent)
     .addNode("approval", approval)
     .addNode("tools", tools)
     .addNode("reflect", reflect)
     .addConditionalEdges(START, routeEntry)
-    .addConditionalEdges("agent_plan", routeAfterAgentPlan)
-    .addConditionalEdges("agent_build", routeAfterAgentBuild)
+    .addConditionalEdges("agent", routeAfterAgent)
     .addConditionalEdges("approval", routeAfterApproval)
     .addConditionalEdges("tools", routeAfterTools)
     .addConditionalEdges("reflect", routeAfterReflect)
@@ -182,10 +169,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 async function invokeModel(
   model: ReturnType<typeof createChatModel>,
   state: CodeAgentState,
-  tools: ReturnType<typeof createPlanAgentTools> | ReturnType<typeof createCodeAgentTools>,
-  role: "agent_plan" | "agent_build",
+  tools: ReturnType<typeof createAgentTools>,
 ) {
-  const prepared = prepareModelContext(role, state);
+  const prepared = prepareModelContext("agent", state);
 
   const response = await model
     .bindTools(tools, { tool_choice: "auto" })
@@ -195,14 +181,14 @@ async function invokeModel(
   if (request) {
     const toolCallMessage = messageWithSingleToolCall(response as AIMessage, request.id);
     return {
-      mode: state.mode,
+      workspaceAccess: state.workspaceAccess,
       contextSummary: prepared.contextSummary,
       messages: [toolCallMessage],
     };
   }
 
   return {
-    mode: state.mode,
+    workspaceAccess: state.workspaceAccess,
     contextSummary: prepared.contextSummary,
     final: messageText(response as AIMessage),
     messages: [response],

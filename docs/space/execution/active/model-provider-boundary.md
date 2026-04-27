@@ -48,5 +48,5 @@
 
 - 不要把 harness 描述成必须依赖 DeepSeek，除非主题就是 DeepSeek adapter。
 - provider-neutral 配置键足够时，不要新增 DeepSeek-only 配置键。
-- 不要把 DeepSeek 假设写入图路由、tool gating、plan 模式、上下文组装、CLI 行为或 checkpoint 行为。
+- 不要把 DeepSeek 假设写入图路由、tool gating、工作区访问权限、上下文组装、CLI 行为或 checkpoint 行为。
 - 不要在 README 示例、测试或未来 provider 工作中把 OpenAI-compatible provider 当成附带支持。

@@ -11,9 +11,9 @@ describe("model context protocol", () => {
   // 验证用户输入作为唯一的 HumanMessage，运行上下文放在 SystemMessage 中 / Verify user input stays as sole HumanMessage, runtime context in SystemMessage
   test("keeps user input as the only HumanMessage and places useful run context in SystemMessage", () => {
     const task = "Create hello.txt with exact content \"hi\".";
-    const messages = buildModelMessages("agent_build", {
+    const messages = buildModelMessages("agent", {
       workspace: "D:\\workspace",
-      mode: "builder",
+      workspaceAccess: "write",
       plan: null,
       messages: [new HumanMessage(task)],
       final: "",
@@ -27,7 +27,8 @@ describe("model context protocol", () => {
     expect(String(messages[2].content)).not.toContain("Plan:"); // 上下文信息不混入用户消息 / Context not mixed into user message
     expect(String(messages[2].content)).not.toContain("Tool results:");
     expect(String(messages[1].content)).toContain("Cacheable runtime context:");
-    expect(String(messages[1].content)).toContain("Tool policy (builder mode):");
+    expect(String(messages[1].content)).toContain("Workspace access policy:");
+    expect(String(messages[1].content)).not.toContain("Tool policy (builder mode):");
     expect(String(messages[1].content)).not.toContain("Configured model:");
     expect(String(messages[1].content)).not.toContain("User ID:");
     expect(String(messages[1].content)).not.toContain("Thread mode:");
@@ -51,9 +52,9 @@ describe("model context protocol", () => {
       tool_call_id: "call-1",
       status: "success",
     });
-    const messages = buildModelMessages("agent_build", {
+    const messages = buildModelMessages("agent", {
       workspace: "D:\\workspace",
-      mode: "builder",
+      workspaceAccess: "write",
       plan: null,
       messages: [new HumanMessage(task), ai, tool],
       final: "",
@@ -71,9 +72,9 @@ describe("model context protocol", () => {
   // 验证动态上下文放在可复用对话前缀之后，以利用 provider 前缀缓存 / Verify dynamic context sits after reusable conversation prefix for provider cache hit
   test("keeps dynamic context after reusable conversation prefix for provider cache", () => {
     const task = "Create hello.txt";
-    const messages = buildModelMessages("agent_build", {
+    const messages = buildModelMessages("agent", {
       workspace: "D:\\workspace",
-      mode: "builder",
+      workspaceAccess: "write",
       plan: null,
       messages: [
         new HumanMessage(task),
@@ -105,12 +106,14 @@ describe("model context protocol", () => {
     ]);
   });
 
-  // 验证静态系统提示足够大且稳定，以利用提供商前缀缓存 / Verify static system prompt is substantial and stable for provider prefix caching
-  test("keeps a substantial stable static prompt for provider prefix caching", () => {
-    const prompt = buildStaticSystemPrompt("agent_build");
+  // 验证单一静态系统提示足够大且稳定，避免访问权限变化破坏 provider 前缀缓存 / Verify one stable static prompt for provider prefix caching
+  test("uses one substantial stable static prompt for the agent", () => {
+    const prompt = buildStaticSystemPrompt("agent");
 
-    expect(prompt).toContain("Builder Agent Contract");
-    expect(prompt).toContain("Tool policy");
+    expect(prompt).toContain("Code Agent Contract");
+    expect(prompt).toContain("Planning policy");
+    expect(prompt).toContain("Execution policy");
+    expect(prompt).toContain("Workspace access policy");
     expect(prompt).toContain("Message policy");
     expect(prompt).toContain("Completion policy");
     expect(prompt).toContain("Respond in Chinese by default"); // 默认中文回复 / Default Chinese response
@@ -138,9 +141,9 @@ describe("model context protocol", () => {
       status: "success",
     });
 
-    const prepared = prepareModelContext("agent_build", {
+    const prepared = prepareModelContext("agent", {
       workspace: "D:\\workspace",
-      mode: "builder",
+      workspaceAccess: "write",
       plan: null,
       contextSummary: "",
       messages: [
@@ -189,9 +192,9 @@ describe("model context protocol", () => {
         { step: "Run tests", status: "pending" as const },
       ],
     };
-    const messages = buildModelMessages("agent_build", {
+    const messages = buildModelMessages("agent", {
       workspace: "D:\\workspace",
-      mode: "builder",
+      workspaceAccess: "write",
       plan,
       messages: [new HumanMessage("Create dark mode")],
       final: "",
@@ -214,10 +217,37 @@ describe("model context protocol", () => {
     expect(String(messages[3].content)).toContain("- [pending] Run tests");
 
     // system prompt 前缀不受 plan 状态影响 / system prompt prefix unchanged by plan state
-    expect(String(messages[0].content)).toContain("Builder Agent Contract");
+    expect(String(messages[0].content)).toContain("Code Agent Contract");
     expect(String(messages[0].content)).not.toContain("<runtime-state");
     expect(String(messages[1].content)).toContain("Cacheable runtime context:");
     expect(String(messages[1].content)).not.toContain("<runtime-state");
     expect(String(messages[1].content)).not.toContain("graph.state.plan:"); // plan 不在可缓存上下文中 / plan not in cacheable context
+  });
+
+  // 验证当前只读工作区访问作为尾部合成用户侧状态提醒注入，不改变 system prompt 前缀 / Verify read-only workspace access is projected as a trailing synthetic user-side reminder
+  test("projects read-only workspace access as trailing synthetic user-side state reminder", () => {
+    const messages = buildModelMessages("agent", {
+      workspace: "D:\\workspace",
+      workspaceAccess: "read-only",
+      plan: null,
+      messages: [new HumanMessage("Inspect before editing")],
+      final: "",
+    });
+
+    expect(messages.map((message) => message.getType())).toEqual([
+      "system",
+      "system",
+      "human",
+      "human",
+    ]);
+    expect(String(messages[0].content)).toContain("Code Agent Contract");
+    expect(String(messages[0].content)).not.toContain("Current workspace access: read-only");
+    expect(String(messages[1].content)).toContain("Cacheable runtime context:");
+    expect(String(messages[1].content)).not.toContain("Current workspace access:");
+    expect(String(messages[3].content)).toContain(
+      '<runtime-state source="graph.state.workspaceAccess">',
+    );
+    expect(String(messages[3].content)).toContain("Current workspace access: read-only");
+    expect(String(messages[3].content)).toContain("read-only");
   });
 });

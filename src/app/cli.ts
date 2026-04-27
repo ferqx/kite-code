@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { loadAgentConfig } from "../config/index";
 import { resumeCodeAgent, streamCodeAgent } from "./runner";
-import type { AgentRunMode } from "../shared/types";
+import type { WorkspaceAccessRequest } from "../shared/types";
 
 /** CLI 解析后的参数 / CLI parsed arguments */
 export interface ParsedArgs {
@@ -17,8 +17,8 @@ export interface ParsedArgs {
   workspace: string;
   /** Checkpoint 路径 / Checkpoint path */
   checkpointPath: string;
-  /** Agent 运行模式 / Agent run mode */
-  mode: AgentRunMode;
+  /** 兼容 mode 参数或工作区访问请求 / Compatible mode argument or workspace access request */
+  mode: WorkspaceAccessRequest;
   /** 恢复时是否审批通过 / Whether approved on resume */
   approve: boolean;
 }
@@ -121,10 +121,17 @@ function positionalTask(argv: string[]): string {
   return parts.join(" ").trim();
 }
 
-/** 解析模式参数 / Parse mode argument */
-function parseMode(value: string): AgentRunMode {
-  // 仅接受 plan/builder，其他统一为 auto / Only accept plan/builder, others default to auto
-  return value === "plan" || value === "builder" ? value : "auto";
+/** 解析访问权限参数，保留 plan/builder 兼容值 / Parse access argument, preserving legacy plan/builder values */
+function parseMode(value: string): WorkspaceAccessRequest {
+  if (
+    value === "read-only" ||
+    value === "write" ||
+    value === "plan" ||
+    value === "builder"
+  ) {
+    return value;
+  }
+  return "auto";
 }
 
 /** 生成新线程 ID / Generate fresh thread ID */
@@ -145,7 +152,7 @@ Options:
   --user <id>            User id for the run
   --workspace <path>     Tool workspace
   --checkpoints <path>   SQLite checkpoint path
-  --mode <mode>          auto, builder, or plan
+  --mode <mode>          auto, read-only, write, plan, or builder
   --approve             Resume an interrupt with approval`);
 }
 

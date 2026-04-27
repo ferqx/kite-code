@@ -2,32 +2,27 @@ import { END } from "@langchain/langgraph";
 import type { CodeAgentState } from "./state";
 import { getPendingToolRequest } from "./tool-requests";
 
-/** START 入口路由：根据 mode 选择 agent_plan 或 agent_build / Entry routing */
-export function routeEntry(state: CodeAgentState): "agent_plan" | "agent_build" {
-  return state.mode === "plan" ? "agent_plan" : "agent_build";
+/** START 入口路由：进入单一 agent / Entry routing to the single agent */
+export function routeEntry(_state: CodeAgentState): "agent" {
+  return "agent";
 }
 
-/** plan agent 节点后的路由: tools | END / Routing after plan agent */
-export function routeAfterAgentPlan(state: CodeAgentState): "tools" | typeof END {
-  const request = getPendingToolRequest(state.messages, state.workspace);
-  if (!request) {
-    return END;
-  }
-  return "tools";
-}
-
-/** build agent 节点后的路由: approval | tools | END / Routing after build agent */
-export function routeAfterAgentBuild(
+/** agent 节点后的路由: approval | tools | END / Routing after agent */
+export function routeAfterAgent(
   state: CodeAgentState,
 ): "approval" | "tools" | typeof END {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) {
     return END;
   }
+  if (state.workspaceAccess === "read-only") {
+    return "tools";
+  }
   if (
     request.name === "update_plan" ||
     request.name === "read_file" ||
-    request.name === "search"
+    request.name === "search" ||
+    request.name === "shell_read"
   ) {
     return "tools";
   }
@@ -37,11 +32,11 @@ export function routeAfterAgentBuild(
 /** approval 节点后的路由逻辑 / Routing after approval node */
 export function routeAfterApproval(
   state: CodeAgentState,
-): "tools" | "agent_plan" | "agent_build" {
+): "tools" | "agent" {
   if (getPendingToolRequest(state.messages, state.workspace)) {
     return "tools";
   }
-  return state.mode === "plan" ? "agent_plan" : "agent_build";
+  return "agent";
 }
 
 /** tools 节点后的路由逻辑 / Routing after tools node */
@@ -52,9 +47,9 @@ export function routeAfterTools(_state: CodeAgentState): "reflect" {
 /** reflect 节点后的路由逻辑 / Routing after reflect node */
 export function routeAfterReflect(
   state: CodeAgentState,
-): "agent_plan" | "agent_build" | typeof END {
+): "agent" | typeof END {
   if (state.final) {
     return END;
   }
-  return state.mode === "plan" ? "agent_plan" : "agent_build";
+  return "agent";
 }

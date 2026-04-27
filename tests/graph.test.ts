@@ -1,42 +1,45 @@
 import { describe, expect, test } from "bun:test";
 import { AIMessage } from "@langchain/core/messages";
 import {
+  routeAfterAgent,
   routeAfterApproval,
-  routeAfterAgentPlan,
-  routeAfterAgentBuild,
-  routeAfterTools,
   routeAfterReflect,
+  routeAfterTools,
 } from "../src/harness/routes";
 import { runApprovedTool } from "../src/harness/tool-runner";
-import { isPlanMode } from "../src/harness/state";
+import { isReadOnlyWorkspaceAccess } from "../src/harness/state";
 import type { CodeAgentState } from "../src/harness/state";
 import type { AgentPlan, ShellResult } from "../src/shared/types";
 
 const activePlan: AgentPlan = {
   name: "Implement state-first plan flow",
-  description: "Persist mode and plan in graph state.",
+  description: "Persist access and plan in graph state.",
   status: "in_progress",
   steps: [{ step: "Inspect graph state", status: "in_progress" }],
 };
 
 // 图路由单元测试 / Graph routing unit tests — 验证 agent 主循环中各节点的路由逻辑和工具审批流
 describe("graph local tool routing", () => {
-  // 无待审批工具调用时，审批节点根据 mode 路由回对应 agent / When no pending tool call exists, approval routes to correct agent by mode
-  test("routes to agent_build when approval has no pending tool call", () => {
-    expect(routeAfterApproval({ messages: [] } as unknown as CodeAgentState)).toBe("agent_build");
+  // 无待审批工具调用时，审批节点回到单一 agent / When no pending tool call exists, approval routes back to the single agent
+  test("routes to agent when approval has no pending tool call", () => {
+    expect(routeAfterApproval({ messages: [] } as unknown as CodeAgentState)).toBe("agent");
   });
 
-  // 验证 graph state 中的 mode 字段是判断 plan 模式的唯一权威来源 / Graph state mode field is the single source of truth for plan mode detection
-  test("uses graph state mode as the plan mode source of truth", () => {
-    expect(isPlanMode({ mode: "plan" } as CodeAgentState)).toBe(true); // plan 字符串应被识别为 plan 模式 / "plan" string should be recognized as plan mode
-    expect(isPlanMode({ mode: "builder" } as CodeAgentState)).toBe(false); // builder 字符串不应被识别为 plan 模式 / "builder" string should NOT be recognized as plan mode
-  });
-
-  // 验证 builder 模式下 update_plan 工具调用直接路由到 tools，无需审批 / update_plan tool calls skip approval and go directly to tools in builder mode
-  test("routes update_plan tool calls directly to tools without approval in builder mode", () => {
+  // 验证 graph state 中的 workspaceAccess 字段是只读执行边界的唯一权威来源 / workspaceAccess is the source of truth for read-only execution
+  test("uses graph state workspaceAccess as the read-only source of truth", () => {
     expect(
-      routeAfterAgentBuild({
-        mode: "builder",
+      isReadOnlyWorkspaceAccess({ workspaceAccess: "read-only" } as CodeAgentState),
+    ).toBe(true);
+    expect(isReadOnlyWorkspaceAccess({ workspaceAccess: "write" } as CodeAgentState)).toBe(
+      false,
+    );
+  });
+
+  // 验证 write 访问下 update_plan 工具调用直接路由到 tools，无需审批 / update_plan skips approval under write access
+  test("routes update_plan tool calls directly to tools without approval under write access", () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: "write",
         workspace: "/tmp/workspace",
         messages: [
           new AIMessage({
@@ -59,11 +62,33 @@ describe("graph local tool routing", () => {
     ).toBe("tools");
   });
 
-  // 验证 builder 模式下受保护的写入工具仍然进入 approval / Protected builder write tools still route through approval
-  test("routes protected builder tool calls through approval", () => {
+  // 验证 write 访问下 shell_read 只读工具调用直接路由到 tools，无需审批 / shell_read skips approval under write access
+  test("routes shell_read tool calls directly to tools without approval under write access", () => {
     expect(
-      routeAfterAgentBuild({
-        mode: "builder",
+      routeAfterAgent({
+        workspaceAccess: "write",
+        workspace: "/tmp/workspace",
+        messages: [
+          new AIMessage({
+            content: "",
+            tool_calls: [
+              {
+                id: "call-1",
+                name: "shell_read",
+                args: { command: "rg -n Plan src" },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe("tools");
+  });
+
+  // 验证 write 访问下受保护的写入工具仍然进入 approval / Protected write tools still route through approval under write access
+  test("routes protected write-access tool calls through approval", () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: "write",
         workspace: "/tmp/workspace",
         messages: [
           new AIMessage({
@@ -81,11 +106,11 @@ describe("graph local tool routing", () => {
     ).toBe("approval");
   });
 
-  // 验证 plan 模式下只读 shell 调用直接路由到 tools，无需审批 / Read-only shell calls in plan mode are routed directly to tools without approval
-  test("routes plan read-only shell calls directly to tools without approval", () => {
+  // 验证 read-only 访问下只读 shell 调用直接路由到 tools，无需审批 / Read-only shell calls route directly to tools under read-only access
+  test("routes read-only shell calls directly to tools without approval", () => {
     expect(
-      routeAfterAgentPlan({
-        mode: "plan",
+      routeAfterAgent({
+        workspaceAccess: "read-only",
         plan: activePlan,
         workspace: "/tmp/workspace",
         messages: [
@@ -104,11 +129,11 @@ describe("graph local tool routing", () => {
     ).toBe("tools");
   });
 
-  // 验证 plan 模式下有 final 文本时直接结束，不再经过 stop_check 或模式确认 / Plan final ends directly without stop_check or mode confirmation
-  test("ends plan completion directly when final exists", () => {
+  // 验证 read-only 访问下有 final 文本时直接结束，不再经过 stop_check 或模式确认 / Read-only final ends directly without stop_check or mode confirmation
+  test("ends read-only completion directly when final exists", () => {
     expect(
-      routeAfterAgentPlan({
-        mode: "plan",
+      routeAfterAgent({
+        workspaceAccess: "read-only",
         plan: activePlan,
         workspace: "/tmp/workspace",
         messages: [],
@@ -117,24 +142,11 @@ describe("graph local tool routing", () => {
     ).toBe("__end__");
   });
 
-  // 验证 plan 模式下即使没有结构化 plan，final 也由模型约束负责，不再由 stop_check 拦截 / Unstructured plan final also ends without stop_check
-  test("ends unstructured plan-mode final directly", () => {
-    expect(
-      routeAfterAgentPlan({
-        mode: "plan",
-        plan: null,
-        workspace: "/tmp/workspace",
-        messages: [],
-        final: "Plan text without update_plan",
-      } as unknown as CodeAgentState),
-    ).toBe("__end__");
-  });
-
   // 验证工具执行完成后，始终路由到 reflect 节点进行评估 / After tools complete, always route to reflect node for evaluation
-  test("routes completed plan tool updates to reflect for evaluation", () => {
+  test("routes completed tool updates to reflect for evaluation", () => {
     expect(
       routeAfterTools({
-        mode: "plan",
+        workspaceAccess: "read-only",
         plan: activePlan,
         workspace: "/tmp/workspace",
         messages: [],
@@ -143,11 +155,11 @@ describe("graph local tool routing", () => {
     ).toBe("reflect");
   });
 
-  // 验证 plan 模式下写入工具调用不路由到审批，而是直接到 tools 节点以拒绝执行 / Non-read tool calls in plan mode route to tools (for rejection) instead of approval
-  test("routes unexpected plan write tool calls to tools for rejection instead of approval", () => {
+  // 验证 read-only 访问下写入工具调用不路由到审批，而是直接到 tools 节点以拒绝执行 / Write tools under read-only access route to tools for rejection
+  test("routes unexpected read-only write tool calls to tools for rejection instead of approval", () => {
     expect(
-      routeAfterAgentPlan({
-        mode: "plan",
+      routeAfterAgent({
+        workspaceAccess: "read-only",
         plan: activePlan,
         workspace: "/tmp/workspace",
         messages: [
@@ -178,7 +190,7 @@ describe("graph local tool routing", () => {
         protectedCommand: "update_plan",
       },
       undefined,
-      "plan",
+      "read-only",
     );
 
     expect(result.ok).toBe(true);
@@ -189,8 +201,8 @@ describe("graph local tool routing", () => {
     );
   });
 
-  // 验证 builder 模式下 update_plan 会将图模式从 builder 切换为 plan / When update_plan is called in builder mode, it switches the graph mode to plan
-  test("builder update_plan switches the graph into plan mode before execution", async () => {
+  // 验证 write 访问下 update_plan 只更新计划，不自动切换访问权限 / update_plan updates plan without switching workspace access
+  test("write-access update_plan keeps workspace access unchanged", async () => {
     const result = await runApprovedTool(
       "/tmp/workspace",
       {
@@ -201,16 +213,17 @@ describe("graph local tool routing", () => {
         protectedCommand: "update_plan",
       },
       undefined,
-      "builder",
+      "write",
       null,
     );
 
     expect(result.ok).toBe(true);
-    expect("mode" in result ? result.mode : "").toBe("plan");
+    expect("plan" in result && result.plan ? result.plan.name : "").toBe(activePlan.name);
+    expect("workspaceAccess" in result ? result.workspaceAccess : undefined).toBeUndefined();
   });
 
-  // 验证 plan 模式下允许执行只读 shell 命令（如 cat）并返回正常结果 / Read-only shell commands (e.g., cat) are allowed in plan mode and return normal results
-  test("allows read-only shell commands when the thread is in plan mode", async () => {
+  // 验证 read-only 访问下允许执行只读 shell 命令（如 cat）并返回正常结果 / Read-only shell commands are allowed under read-only access
+  test("allows read-only shell commands under read-only access", async () => {
     const result = await runApprovedTool(
       "/tmp/workspace",
       {
@@ -227,15 +240,40 @@ describe("graph local tool routing", () => {
         stdout: "{}",
         stderr: "",
       }),
-      "plan",
+      "read-only",
     );
 
     expect(result.ok).toBe(true);
     expect((result as ShellResult).stdout).toBe("{}");
   });
 
-  // 验证 plan 模式下拒绝包含写入重定向的 shell 命令 / Shell commands with write redirects (e.g., echo > file) are rejected in plan mode
-  test("rejects write-like shell commands when the thread is in plan mode", async () => {
+  // 验证 read-only 访问下允许执行稳定工具 schema 中的只读 search 工具 / read-only access allows read-only search from the stable tool schema
+  test("allows search under read-only access", async () => {
+    const result = await runApprovedTool(
+      "/tmp/workspace",
+      {
+        id: "call-1",
+        name: "search",
+        args: { pattern: "Plan", path: "src/**/*.ts" },
+        reason: "Search code",
+        protectedCommand: "search Plan",
+      },
+      async (input) => ({
+        ok: true,
+        command: input.command,
+        exitCode: 0,
+        stdout: "src/model/context.ts:1:Plan",
+        stderr: "",
+      }),
+      "read-only",
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as ShellResult).stdout).toContain("src/model/context.ts");
+  });
+
+  // 验证 read-only 访问下拒绝包含写入重定向的 shell 命令 / Shell commands with write redirects are rejected under read-only access
+  test("rejects write-like shell commands under read-only access", async () => {
     const result = await runApprovedTool(
       "/tmp/workspace",
       {
@@ -246,15 +284,15 @@ describe("graph local tool routing", () => {
         protectedCommand: "echo hi > hello.txt",
       },
       undefined,
-      "plan",
+      "read-only",
     );
 
     expect(result.ok).toBe(false);
     expect((result as ShellResult).stderr).toContain("shell_read");
   });
 
-  // 验证 plan 模式下拒绝非只读工具（如 write_file）的调用 / Non-read tools (e.g., write_file) are rejected in plan mode
-  test("rejects non-read tools when the thread is in plan mode", async () => {
+  // 验证 read-only 访问下拒绝非只读工具（如 write_file）的调用 / Non-read tools are rejected under read-only access
+  test("rejects non-read tools under read-only access", async () => {
     const result = await runApprovedTool(
       "/tmp/workspace",
       {
@@ -265,11 +303,11 @@ describe("graph local tool routing", () => {
         protectedCommand: "write_file hello.txt",
       },
       undefined,
-      "plan",
+      "read-only",
     );
 
     expect(result.ok).toBe(false);
-    expect((result as ShellResult).stderr).toContain("Plan mode");
+    expect((result as ShellResult).stderr).toContain("read-only");
   });
 
   // 验证重复工具调用不再由工具执行层拦截，循环边界交给图递归限制 / Repeated tool calls are not blocked by tool runner; graph recursion owns loop bounds
@@ -292,43 +330,30 @@ describe("graph local tool routing", () => {
         stdout: "package",
         stderr: "",
       }),
-      "plan",
+      "read-only",
     );
 
     expect(result.ok).toBe(true);
     expect((result as ShellResult).stdout).toBe("package");
   });
 
-  // 验证 reflect 路由在无 final 时返回 agent_build / reflect routes to agent_build when no final is set (builder is default)
-  test("reflect routes to agent_build when no final is set", () => {
+  // 验证 reflect 路由在无 final 时返回单一 agent / reflect routes to agent when no final is set
+  test("reflect routes to agent when no final is set", () => {
     expect(
       routeAfterReflect({
-        mode: "builder",
+        workspaceAccess: "write",
         workspace: "/tmp/workspace",
         messages: [],
         final: "",
       } as unknown as CodeAgentState),
-    ).toBe("agent_build");
+    ).toBe("agent");
   });
 
-  // 验证 reflect 路由在 plan 模式下返回 agent_plan，让模型自行总结或继续 / reflect routes back to agent_plan in plan mode
-  test("reflect routes to agent_plan when plan is set in plan mode", () => {
+  // 验证 reflect 路由在有 final 时直接结束 / reflect routes to END when final is set
+  test("reflect routes to end when final is set", () => {
     expect(
       routeAfterReflect({
-        mode: "plan",
-        plan: activePlan,
-        workspace: "/tmp/workspace",
-        messages: [],
-        final: "",
-      } as unknown as CodeAgentState),
-    ).toBe("agent_plan");
-  });
-
-  // 验证 reflect 路由在 builder 有 final 时直接结束 / reflect routes to END when builder final is set
-  test("reflect routes to end when builder final is set", () => {
-    expect(
-      routeAfterReflect({
-        mode: "builder",
+        workspaceAccess: "write",
         workspace: "/tmp/workspace",
         messages: [],
         final: "All tasks completed.",

@@ -1,5 +1,5 @@
 import { AIMessage } from "@langchain/core/messages";
-import type { AgentMode } from "./types";
+import type { WorkspaceAccess } from "./types";
 
 /** 提示缓存命中指标 / Prompt cache hit metrics */
 export interface PromptCacheMetrics {
@@ -13,10 +13,10 @@ export interface PromptCacheMetrics {
   hitRate: number;
 }
 
-/** 按模式分组的缓存指标 / Cache metrics grouped by mode */
-export interface PromptCacheMetricsByMode extends PromptCacheMetrics {
-  /** 运行模式 / Run mode */
-  mode: AgentMode;
+/** 按工作区访问权限分组的缓存指标 / Cache metrics grouped by workspace access */
+export interface PromptCacheMetricsByWorkspaceAccess extends PromptCacheMetrics {
+  /** 工作区访问权限 / Workspace access */
+  workspaceAccess: WorkspaceAccess;
 }
 
 /** 从 AIMessage 元数据中提取 provider 缓存指标 / Extract provider cache metrics from AIMessage metadata */
@@ -61,17 +61,17 @@ export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics 
   };
 }
 
-/** 按模式汇总缓存指标 / Summarize cache metrics by mode */
-export function summarizePromptCacheMetricsByMode(
-  items: PromptCacheMetricsByMode[],
-): Record<AgentMode, PromptCacheMetrics> {
-  const summary: Record<AgentMode, PromptCacheMetrics> = {
-    plan: emptyPromptCacheMetrics(),
-    builder: emptyPromptCacheMetrics(),
+/** 按工作区访问权限汇总缓存指标 / Summarize cache metrics by workspace access */
+export function summarizePromptCacheMetricsByWorkspaceAccess(
+  items: PromptCacheMetricsByWorkspaceAccess[],
+): Record<WorkspaceAccess, PromptCacheMetrics> {
+  const summary: Record<WorkspaceAccess, PromptCacheMetrics> = {
+    "read-only": emptyPromptCacheMetrics(),
+    write: emptyPromptCacheMetrics(),
   };
 
   for (const item of items) {
-    const bucket = summary[item.mode];
+    const bucket = summary[item.workspaceAccess];
     bucket.inputTokens += item.inputTokens;
     bucket.cacheHitTokens += item.cacheHitTokens;
     bucket.cacheMissTokens += item.cacheMissTokens;
