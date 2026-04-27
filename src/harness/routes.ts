@@ -7,13 +7,16 @@ export function routeEntry(_state: CodeAgentState): "agent" {
   return "agent";
 }
 
-/** agent 节点后的路由: approval | tools | END / Routing after agent */
+/** agent 节点后的路由: approval | tools | user_input | END / Routing after agent */
 export function routeAfterAgent(
   state: CodeAgentState,
-): "approval" | "tools" | typeof END {
+): "approval" | "tools" | "user_input" | typeof END {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) {
     return END;
+  }
+  if (request.name === "ask_user") {
+    return "user_input";
   }
   if (state.workspaceAccess === "read-only") {
     return "tools";
@@ -41,6 +44,11 @@ export function routeAfterApproval(
 
 /** tools 节点后的路由逻辑 / Routing after tools node */
 export function routeAfterTools(_state: CodeAgentState): "reflect" {
+  return "reflect";
+}
+
+/** user_input 节点后的路由逻辑 / Routing after user_input node */
+export function routeAfterUserInput(_state: CodeAgentState): "reflect" {
   return "reflect";
 }
 

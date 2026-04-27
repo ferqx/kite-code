@@ -112,6 +112,8 @@ describe("model context protocol", () => {
 
     expect(prompt).toContain("Code Agent Contract");
     expect(prompt).toContain("Planning policy");
+    expect(prompt).toContain("Clarification policy");
+    expect(prompt).toContain("ask_user");
     expect(prompt).toContain("Execution policy");
     expect(prompt).toContain("Workspace access policy");
     expect(prompt).toContain("Message policy");

@@ -1,0 +1,48 @@
+import { ToolMessage } from "@langchain/core/messages";
+import type { AgentResumeValue } from "../shared/types";
+import type { PendingToolRequest } from "./tool-requests";
+
+/** 规范化用户输入恢复值 / Normalize user input resume value */
+export function normalizeUserInputResume(
+  resume: AgentResumeValue,
+): { answer: string } {
+  if (typeof resume === "string") {
+    return { answer: resume };
+  }
+
+  if (!resume || typeof resume !== "object") {
+    return { answer: "" };
+  }
+
+  for (const key of [
+    "answer",
+    "choice",
+    "option_id",
+    "optionId",
+    "free_text",
+    "freeText",
+    "text",
+  ]) {
+    const value = resume[key as keyof typeof resume];
+    if (typeof value === "string") {
+      return { answer: value };
+    }
+  }
+
+  return { answer: "" };
+}
+
+/** 为 ask_user 恢复值创建工具消息 / Create ToolMessage for ask_user resume value */
+export function userInputToolMessage(
+  request: Extract<PendingToolRequest, { name: "ask_user" }>,
+  resume: AgentResumeValue,
+): ToolMessage {
+  return new ToolMessage({
+    content: JSON.stringify({
+      ok: true,
+      ...normalizeUserInputResume(resume),
+    }),
+    tool_call_id: request.id ?? "missing-tool-call-id",
+    status: "success",
+  });
+}

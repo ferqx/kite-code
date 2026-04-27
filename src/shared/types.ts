@@ -52,6 +52,61 @@ export type WorkspaceAccessRequest =
   | "plan"
   | "builder";
 
+/** 用户澄清问题选项 / User clarification option */
+export interface UserInputOption {
+  /** 选项 ID / Option ID */
+  id: string;
+  /** 选项展示标签 / Option display label */
+  label: string;
+  /** 可选说明 / Optional description */
+  description?: string;
+}
+
+/** 用户澄清请求 / User clarification request */
+export interface UserInputRequest {
+  /** 要询问用户的问题 / Question to ask the user */
+  question: string;
+  /** 预置选项 / Suggested options */
+  options: UserInputOption[];
+  /** 是否允许自由文本输入 / Whether free-text input is allowed */
+  allow_free_text: boolean;
+  /** 可选上下文 / Optional context */
+  context?: string;
+}
+
+/** 工具审批恢复值 / Tool approval resume value */
+export type ToolApprovalResumeValue =
+  | boolean
+  | {
+      /** 是否审批通过 / Whether approved */
+      approved?: boolean;
+      /** 拒绝或审批原因 / Reason for approval or rejection */
+      reason?: string;
+    };
+
+/** 用户输入恢复值 / User input resume value */
+export type UserInputResumeValue =
+  | string
+  | {
+      /** 用户最终回答 / Final user answer */
+      answer?: string;
+      /** 选择的选项 ID 或标签 / Selected option id or label */
+      choice?: string;
+      /** 选择的选项 ID / Selected option id */
+      option_id?: string;
+      /** 选择的选项 ID / Selected option id */
+      optionId?: string;
+      /** 用户自由文本 / User free-text input */
+      free_text?: string;
+      /** 用户自由文本 / User free-text input */
+      freeText?: string;
+      /** 用户自由文本 / User free-text input */
+      text?: string;
+    };
+
+/** 恢复中断的值 / Resume value for graph interrupts */
+export type AgentResumeValue = ToolApprovalResumeValue | UserInputResumeValue;
+
 /** 上下文预算 / Context budget */
 export interface ContextBudget {
   /** 保留的最大消息数量 / Maximum number of messages to keep */

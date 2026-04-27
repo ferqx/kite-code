@@ -1,5 +1,10 @@
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
-import type { AgentPlan, PlanStatus } from "../shared/types";
+import type {
+  AgentPlan,
+  PlanStatus,
+  UserInputOption,
+  UserInputRequest,
+} from "../shared/types";
 
 /** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
 export type PendingToolRequest =
@@ -64,6 +69,17 @@ export type PendingToolRequest =
       /** 调用原因 / Call reason */
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
+    }
+  | {
+      /** 工具调用 ID / Tool call ID */
+      id?: string;
+      name: "ask_user";
+      /** 用户澄清请求 / User clarification request */
+      args: UserInputRequest;
+      /** 调用原因 / Call reason */
+      reason: string;
+      /** 用于事件展示的命令 / Command displayed in events */
       protectedCommand: string;
     };
 
@@ -188,6 +204,17 @@ export function toolRequestFromMessage(
     };
   }
 
+  if (call.name === "ask_user") {
+    const args = call.args as Partial<UserInputRequest>;
+    return {
+      id: call.id,
+      name: "ask_user",
+      args: normalizeUserInputRequest(args),
+      reason: "Model requested user clarification",
+      protectedCommand: "ask_user",
+    };
+  }
+
   return null;
 }
 
@@ -251,6 +278,41 @@ function normalizeAgentPlan(value: Partial<AgentPlan>): AgentPlan {
         step: typeof step.step === "string" ? step.step : "",
         status: normalizePlanStatus(step.status),
       })),
+  };
+}
+
+/** 规范化用户澄清请求 / Normalize user clarification request */
+function normalizeUserInputRequest(value: Partial<UserInputRequest>): UserInputRequest {
+  const rawOptions = Array.isArray(value.options) ? (value.options as unknown[]) : [];
+  const options = rawOptions
+    .filter((option): option is Partial<UserInputOption> => {
+      return !!option && typeof option === "object";
+    })
+    .map((option, index) => {
+      const id =
+        typeof option.id === "string" && option.id.trim()
+          ? option.id
+          : `option-${index + 1}`;
+      const label =
+        typeof option.label === "string" && option.label.trim()
+          ? option.label
+          : id;
+      return {
+        id,
+        label,
+        ...(typeof option.description === "string" && option.description.trim()
+          ? { description: option.description }
+          : {}),
+      };
+    });
+
+  return {
+    question: typeof value.question === "string" ? value.question : "",
+    options,
+    allow_free_text: value.allow_free_text !== false,
+    ...(typeof value.context === "string" && value.context.trim()
+      ? { context: value.context }
+      : {}),
   };
 }
 

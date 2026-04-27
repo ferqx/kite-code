@@ -8,6 +8,7 @@ import type { AgentConfig } from "../config/index";
 import { prepareModelContext } from "../model/context";
 import { createChatModel } from "../model/factory";
 import { BunSqliteSaver } from "../persistence/checkpoint";
+import type { AgentResumeValue } from "../shared/types";
 import { createAgentTools } from "../tools/definitions";
 import type { ShellExecutor } from "../tools/shell";
 import {
@@ -15,6 +16,7 @@ import {
   routeAfterApproval,
   routeAfterReflect,
   routeAfterTools,
+  routeAfterUserInput,
   routeEntry,
 } from "./routes";
 import { AgentState, type CodeAgentState } from "./state";
@@ -25,6 +27,7 @@ import {
   toolRequestFromMessage,
 } from "./tool-requests";
 import { runApprovedTool } from "./tool-runner";
+import { userInputToolMessage } from "./user-input";
 
 /** 构建代码 Agent 图的输入 / Build code agent graph input */
 export interface BuildCodeAgentGraphInput {
@@ -86,6 +89,24 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
 
     return {};
+  };
+
+  /** 用户输入节点：中断等待用户选择或自由文本 / User input node */
+  const userInput = async (state: CodeAgentState) => {
+    const request = getPendingToolRequest(state.messages, state.workspace);
+
+    if (!request || request.name !== "ask_user") {
+      return {};
+    }
+
+    const resume = interrupt({
+      kind: "user_input",
+      request,
+    }) as AgentResumeValue;
+
+    return {
+      messages: [userInputToolMessage(request, resume)],
+    };
   };
 
   /** 工具节点：执行已批准的工具调用 / Tools node */
@@ -153,11 +174,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const graph = new StateGraph(AgentState)
     .addNode("agent", agent)
     .addNode("approval", approval)
+    .addNode("user_input", userInput)
     .addNode("tools", tools)
     .addNode("reflect", reflect)
     .addConditionalEdges(START, routeEntry)
     .addConditionalEdges("agent", routeAfterAgent)
     .addConditionalEdges("approval", routeAfterApproval)
+    .addConditionalEdges("user_input", routeAfterUserInput)
     .addConditionalEdges("tools", routeAfterTools)
     .addConditionalEdges("reflect", routeAfterReflect)
     .compile({ checkpointer });

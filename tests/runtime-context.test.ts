@@ -29,6 +29,7 @@ describe("buildRuntimeContext", () => {
     expect(context).toContain("Shell:");
     expect(context).toContain("Workspace: D:\\workspace");
     expect(context).toContain("Workspace access policy:");
+    expect(context).toContain("ask_user when clarification is needed");
     expect(context).toContain("read-only access rejects write/delete/execute tools");
     expect(context).not.toContain("Tool policy (plan mode):");
     expect(context).not.toContain("Configured model:");
@@ -57,6 +58,7 @@ describe("buildRuntimeContext", () => {
     });
 
     expect(context).toContain("Workspace access policy:");
+    expect(context).toContain("ask_user when clarification is needed");
     expect(context).toContain("write access requires approval for write/delete/execute tools");
     expect(context).not.toContain("Tool policy (builder mode):");
     expect(context).not.toContain("User ID:");

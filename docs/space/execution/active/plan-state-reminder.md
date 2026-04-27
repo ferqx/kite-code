@@ -32,6 +32,8 @@
 
 `graph.state.plan` 必须作为尾部合成用户侧运行时状态提醒进行投影。
 
+静态系统提示可以包含稳定的规划澄清策略，例如何时调用 `ask_user`。具体澄清问题、选项和用户回答不属于可缓存运行时上下文；`ask_user` 的回答应作为对应 tool call 的 ToolMessage 保留在对话链中。
+
 要求的消息顺序：
 
 ```text
@@ -59,6 +61,7 @@ HumanMessage(synthetic graph.state.plan reminder)
 - 不要把计划状态放入 `buildCacheableRuntimeContext`。
 - 不要因为 `read-only` / `write` 访问权限变化生成不同的静态 system prompt。
 - 不要把当前 `graph.state.workspaceAccess` 写入可缓存运行时上下文；需要投影时使用尾部合成 `HumanMessage`。
+- 不要把某次 `ask_user` 的具体问题、选项或回答写入静态 system prompt 或可缓存运行时上下文。
 - 不要依赖 `update_plan` ToolMessage 历史作为当前计划。
 - 不要为该动态状态使用尾部 `SystemMessage`，除非某个 provider adapter 已证明它能保持语义和缓存行为。
 

@@ -5,9 +5,12 @@ import {
   routeAfterApproval,
   routeAfterReflect,
   routeAfterTools,
+  routeAfterUserInput,
 } from "../src/harness/routes";
+import { normalizeUserInputResume } from "../src/harness/user-input";
 import { runApprovedTool } from "../src/harness/tool-runner";
 import { isReadOnlyWorkspaceAccess } from "../src/harness/state";
+import { toolRequestFromMessage } from "../src/harness/tool-requests";
 import type { CodeAgentState } from "../src/harness/state";
 import type { AgentPlan, ShellResult } from "../src/shared/types";
 
@@ -129,6 +132,57 @@ describe("graph local tool routing", () => {
     ).toBe("tools");
   });
 
+  // 验证 ask_user 在 write 访问下不走工具审批，而是进入用户输入中断节点 / ask_user routes to user_input instead of approval under write access
+  test("routes ask_user calls to user input under write access", () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: "write",
+        workspace: "/tmp/workspace",
+        messages: [
+          new AIMessage({
+            content: "",
+            tool_calls: [
+              {
+                id: "call-ask",
+                name: "ask_user",
+                args: {
+                  question: "应该怎么处理缺失配置？",
+                  options: [{ id: "default", label: "使用默认配置" }],
+                  allow_free_text: true,
+                },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe("user_input");
+  });
+
+  // 验证 ask_user 在 read-only 访问下也不会被只读工具执行层拒绝 / ask_user is allowed under read-only access through the user_input node
+  test("routes ask_user calls to user input under read-only access", () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: "read-only",
+        workspace: "/tmp/workspace",
+        messages: [
+          new AIMessage({
+            content: "",
+            tool_calls: [
+              {
+                id: "call-ask",
+                name: "ask_user",
+                args: {
+                  question: "选择实现范围？",
+                  options: [{ id: "minimal", label: "最小实现" }],
+                },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe("user_input");
+  });
+
   // 验证 read-only 访问下有 final 文本时直接结束，不再经过 stop_check 或模式确认 / Read-only final ends directly without stop_check or mode confirmation
   test("ends read-only completion directly when final exists", () => {
     expect(
@@ -176,6 +230,63 @@ describe("graph local tool routing", () => {
         ],
       } as unknown as CodeAgentState),
     ).toBe("tools");
+  });
+
+  // 验证 ask_user 工具调用会解析为结构化用户输入请求 / ask_user tool call parses into a structured user input request
+  test("parses ask_user tool calls", () => {
+    const request = toolRequestFromMessage(
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          {
+            id: "call-ask",
+            name: "ask_user",
+            args: {
+              question: "选择方案？",
+              options: [
+                { id: "a", label: "方案 A", description: "最小改动" },
+                { id: "b", label: "方案 B" },
+              ],
+              allow_free_text: true,
+            },
+          },
+        ],
+      }),
+      "/tmp/workspace",
+    );
+
+    expect(request?.name).toBe("ask_user");
+    if (!request || request.name !== "ask_user") {
+      throw new Error("expected ask_user request");
+    }
+    expect(request?.protectedCommand).toBe("ask_user");
+    expect(request?.args.question).toBe("选择方案？");
+    expect(request?.args.options[0]?.id).toBe("a");
+    expect(request?.args.allow_free_text).toBe(true);
+  });
+
+  // 验证用户输入中断恢复后回到 reflect，再继续 agent 主循环 / user_input returns through reflect after resume
+  test("routes completed user input to reflect", () => {
+    expect(
+      routeAfterUserInput({
+        workspaceAccess: "write",
+        workspace: "/tmp/workspace",
+        messages: [],
+        final: "",
+      } as unknown as CodeAgentState),
+    ).toBe("reflect");
+  });
+
+  // 验证用户输入恢复值既支持字符串，也支持结构化 answer/choice / User input resume supports strings and structured answers
+  test("normalizes user input resume values", () => {
+    expect(normalizeUserInputResume("使用最小实现")).toEqual({
+      answer: "使用最小实现",
+    });
+    expect(normalizeUserInputResume({ answer: "A" })).toEqual({ answer: "A" });
+    expect(normalizeUserInputResume({ choice: "minimal" })).toEqual({
+      answer: "minimal",
+    });
+    expect(normalizeUserInputResume(true)).toEqual({ answer: "" });
   });
 
   // 验证 update_plan 工具执行后返回结构化的 plan 状态（名称、状态、步骤） / update_plan returns the structured plan state with name, status, and steps after execution

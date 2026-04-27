@@ -119,6 +119,16 @@ export async function runApprovedTool(
     };
   }
 
+  if (request.name === "ask_user") {
+    return {
+      ok: false,
+      command: "ask_user",
+      exitCode: -1,
+      stdout: "",
+      stderr: "ask_user must be handled by the user_input interrupt node.",
+    };
+  }
+
   return (shellExecutor ?? shellTool)({
     workspace,
     command: request.args.command,

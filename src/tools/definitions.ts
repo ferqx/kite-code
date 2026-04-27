@@ -157,6 +157,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     shellRead,
     shellExecute,
     createUpdatePlanTool(),
+    createAskUserTool(),
   ];
 }
 
@@ -203,6 +204,56 @@ function createUpdatePlanTool() {
             }),
           )
           .describe("Ordered plan steps"),
+      }),
+    },
+  );
+}
+
+/** 创建 ask_user 工具定义，用于规划时向用户澄清关键不确定性 / Create ask_user tool definition for user clarification */
+function createAskUserTool() {
+  return tool(
+    async ({ question, options, allow_free_text, context }) =>
+      JSON.stringify({
+        ok: false,
+        question,
+        options,
+        allow_free_text: allow_free_text ?? true,
+        context,
+        stderr: "ask_user is handled by the harness as a user_input interrupt.",
+      }),
+    {
+      name: "ask_user",
+      description:
+        "Ask the user one focused clarification question when planning is blocked by meaningful uncertainty. Provide concrete options and allow free-text input when appropriate.",
+      schema: z.object({
+        question: z
+          .string()
+          .min(1)
+          .describe("One concise question for the user to answer"),
+        options: z
+          .array(
+            z.object({
+              id: z
+                .string()
+                .optional()
+                .describe("Stable option id, e.g. 'minimal' or 'full'"),
+              label: z.string().min(1).describe("User-facing option label"),
+              description: z
+                .string()
+                .optional()
+                .describe("Short explanation of the trade-off for this option"),
+            }),
+          )
+          .min(1)
+          .describe("Suggested answer options for the user"),
+        allow_free_text: z
+          .boolean()
+          .optional()
+          .describe("Whether the user may type a custom answer; default true"),
+        context: z
+          .string()
+          .optional()
+          .describe("Short context explaining why this clarification is needed"),
       }),
     },
   );

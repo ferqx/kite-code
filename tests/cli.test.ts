@@ -33,6 +33,21 @@ describe("cli argument parsing", () => {
     expect(args.threadId).toBe("default-thread");
   });
 
+  // 验证 resume 支持用户输入回答，用于恢复 ask_user 中断 / Verify resume accepts user answers for ask_user interrupts
+  test("resume accepts a user answer for clarification interrupts", () => {
+    const args = parseArgs([
+      "resume",
+      "--thread",
+      "conversation-a",
+      "--answer",
+      "使用最小实现",
+    ]);
+
+    expect(args.threadId).toBe("conversation-a");
+    expect(args.answer).toBe("使用最小实现");
+    expect(args.approve).toBe(false);
+  });
+
   // 验证 run 命令支持新的 --mode read-only/write 值，并保留 plan/builder 兼容值 / Verify run accepts workspace access mode values
   test("run accepts explicit workspace access mode values", () => {
     const args = parseArgs(["run", "--mode", "read-only", "--task", "Create hello.txt"]);

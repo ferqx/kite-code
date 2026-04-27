@@ -4,13 +4,13 @@
 
 ## 功能
 
-- 使用 LangGraph `StateGraph` 维护 `agent -> approval/tools -> reflect -> agent` 循环。
+- 使用 LangGraph `StateGraph` 维护 `agent -> approval/user_input/tools -> reflect -> agent` 循环。
 - 支持 `read-only` / `write` 工作区访问权限；只读访问由工具执行层强制，静态系统提示和工具 schema 不随访问权限变化，以提升 provider 前缀缓存命中。
 - 支持上下文预算和历史消息压缩摘要。
 - 当 provider 元数据暴露缓存 token 计数时，从流式模型响应中提取 prompt cache 指标。
 - 使用 Bun 原生 SQLite checkpointer 持久化短期 thread 状态。
 - 输出标准化的图事件流，包括 interrupt 和 final 事件。
-- 通过 LangGraph `interrupt()` 和 `Command({ resume })` 为受保护工具执行提供人工审批。
+- 通过 LangGraph `interrupt()` 和 `Command({ resume })` 为受保护工具执行提供人工审批，并为规划不确定性提供用户澄清输入。
 - 提供工作区安全的文件 patch 工具和结构化 shell 工具结果。
 - 提供真实配置模型的端到端测试入口。
 
@@ -112,6 +112,12 @@ bun run agent run --mode read-only --thread demo --user local --task "Inspect th
 
 ```bash
 bun run agent resume --thread demo --user local --approve
+```
+
+当模型在规划时调用 `ask_user` 并发出 `kind: "user_input"` 的中断事件时，可以传入用户选择或自由文本恢复执行：
+
+```bash
+bun run agent resume --thread demo --user local --answer "使用最小实现，暂不支持批量配置"
 ```
 
 默认情况下，CLI 会把 checkpoint SQLite 文件写入当前工作区的 `.openpx/` 目录。可以用 `--checkpoints` 覆盖路径。

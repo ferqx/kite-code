@@ -7,6 +7,7 @@ import type { ShellExecutor } from "../tools/shell";
 import { extractPromptCacheMetrics } from "../shared/cache-metrics";
 import type {
   AgentEvent,
+  AgentResumeValue,
   ContextBudget,
   WorkspaceAccess,
   WorkspaceAccessRequest,
@@ -36,8 +37,8 @@ export interface StreamCodeAgentInput {
 
 /** 恢复执行 Agent 输入 / Resume agent input */
 export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task"> {
-  /** 恢复值（布尔或包含 approved 和 reason 的对象） / Resume value */
-  resume: boolean | { approved?: boolean; reason?: string };
+  /** 恢复值（工具审批或用户输入）/ Resume value for tool approval or user input */
+  resume: AgentResumeValue;
 }
 
 /** 流式运行 Agent，处理直接回答和访问权限检测 / Stream agent execution, handle direct answers and access detection */

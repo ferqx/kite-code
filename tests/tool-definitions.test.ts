@@ -7,7 +7,7 @@ import {
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe("code agent tool definitions", () => {
   // 验证 agent 暴露稳定工具 schema / Agent exposes the stable tool schema
-  test("exposes cache-stable agent tools plus update_plan", () => {
+  test("exposes cache-stable agent tools plus planning tools", () => {
     const tools = createAgentTools({
       workspace: "D:\\workspace",
       shellExecutor: async (input) => ({
@@ -27,10 +27,40 @@ describe("code agent tool definitions", () => {
       "shell_read",
       "shell_execute",
       "update_plan",
+      "ask_user",
     ]);
     expect(tools[0].schema).toBeDefined();
     expect(tools[1].schema).toBeDefined();
     expect(tools[2].schema).toBeDefined();
+  });
+
+  // 验证 ask_user 的 schema 支持预置选项和自由输入 / ask_user schema supports options and free-text input
+  test("requires a question and options for ask_user", () => {
+    const tools = createAgentTools({
+      workspace: "D:\\workspace",
+    });
+    const askUserTool = tools.find((item) => item.name === "ask_user")!;
+
+    expect(askUserTool).toBeDefined();
+    expect(
+      askUserTool.schema.safeParse({
+        question: "应该优先支持哪种恢复输入？",
+        options: [
+          {
+            id: "answer-flag",
+            label: "--answer 参数",
+            description: "CLI 直接传入用户选择或补充文本。",
+          },
+        ],
+        allow_free_text: true,
+      }).success,
+    ).toBe(true);
+    expect(
+      askUserTool.schema.safeParse({
+        options: [{ id: "a", label: "A" }],
+      }).success,
+    ).toBe(false);
+    expect(String(askUserTool.description)).toContain("Ask the user");
   });
 
   // 验证 update_plan 的 Zod schema 要求完整的 state-first plan 字段（name 必填） / update_plan Zod schema requires full state-first plan fields with name as required
@@ -71,12 +101,16 @@ describe("code agent tool definitions", () => {
       "shell_read",
       "shell_execute",
       "update_plan",
+      "ask_user",
     ]);
     expect(String(tools.find((item) => item.name === "shell_read")?.description)).toContain(
       "Read-only",
     );
     expect(String(tools.find((item) => item.name === "update_plan")?.description)).toContain(
       "current plan state",
+    );
+    expect(String(tools.find((item) => item.name === "ask_user")?.description)).toContain(
+      "uncertainty",
     );
   });
 

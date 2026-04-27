@@ -119,5 +119,5 @@ export function formatPlanStateReminder(plan: NonNullable<RuntimeContextInput["p
 
 /** 返回跨访问权限稳定的工作区访问策略 / Return cache-stable workspace access policy */
 function workspaceAccessPolicy(): string {
-  return "visible tool schemas are cache-stable; the model may call update_plan when planning helps; read-only access rejects write/delete/execute tools; write access requires approval for write/delete/execute tools";
+  return "visible tool schemas are cache-stable; the model may call update_plan when planning helps and ask_user when clarification is needed; read-only access rejects write/delete/execute tools; write access requires approval for write/delete/execute tools";
 }

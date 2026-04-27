@@ -21,6 +21,8 @@ export interface ParsedArgs {
   mode: WorkspaceAccessRequest;
   /** 恢复时是否审批通过 / Whether approved on resume */
   approve: boolean;
+  /** 恢复 ask_user 中断时传入的用户回答 / User answer for ask_user interrupt resume */
+  answer?: string;
 }
 
 /** CLI 入口函数 / CLI entry point */
@@ -53,7 +55,10 @@ export async function main(): Promise<void> {
           workspace: args.workspace,
           checkpointPath: args.checkpointPath,
           config,
-          resume: { approved: args.approve },
+          resume:
+            args.answer === undefined
+              ? { approved: args.approve }
+              : { answer: args.answer },
         });
 
   // 逐行输出事件 JSON / Output events as JSON lines
@@ -73,8 +78,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
     const index = argv.indexOf(name);
     return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
   };
+  const optionalValue = (name: string) => {
+    const index = argv.indexOf(name);
+    return index >= 0 ? argv[index + 1] ?? "" : undefined;
+  };
   const explicitThread = value("--thread", "");
   const mode = parseMode(value("--mode", "auto"));
+  const answer = optionalValue("--answer");
 
   return {
     command,
@@ -87,6 +97,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     ),
     mode,
     approve: argv.includes("--approve"),
+    answer,
   };
 }
 
@@ -104,6 +115,7 @@ function positionalTask(argv: string[]): string {
     "--workspace",
     "--checkpoints",
     "--mode",
+    "--answer",
   ]);
   const parts: string[] = [];
   // 收集非选项位置参数 / Collect non-option positional args
@@ -153,7 +165,8 @@ Options:
   --workspace <path>     Tool workspace
   --checkpoints <path>   SQLite checkpoint path
   --mode <mode>          auto, read-only, write, plan, or builder
-  --approve             Resume an interrupt with approval`);
+  --approve              Resume a tool approval interrupt with approval
+  --answer <text>        Resume a user input interrupt with an answer`);
 }
 
 if (import.meta.main) {
