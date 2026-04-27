@@ -19,7 +19,7 @@ export interface PromptCacheMetricsByMode extends PromptCacheMetrics {
   mode: AgentMode;
 }
 
-/** 从 AIMessage 元数据中提取 DeepSeek 缓存指标 / Extract DeepSeek cache metrics from AIMessage metadata */
+/** 从 AIMessage 元数据中提取 provider 缓存指标 / Extract provider cache metrics from AIMessage metadata */
 export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics | null {
   if (!AIMessage.isInstance(message)) {
     return null;

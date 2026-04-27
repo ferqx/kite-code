@@ -1,46 +1,76 @@
-# LangGraph Code Agent for Bun
+# Bun LangGraph 代码 Agent
 
-This is a standalone Bun/TypeScript code-agent reference built with LangGraph.js and LangChain chat model adapters.
+这是一个基于 Bun、TypeScript、LangGraph.js 和 LangChain 聊天模型适配器构建的独立代码 agent 参考实现。
 
-## Features
+## 功能
 
-- LangGraph `StateGraph` with an `agent -> approval/tools -> reflect -> agent` loop.
-- Plan mode with read-only tools and no non-dangerous confirmation gate.
-- Context budgeting with compacted history summaries.
-- Prompt cache metric extraction from streamed model responses.
-- Bun-native SQLite checkpointer for short-term thread persistence.
-- Streaming graph updates with normalized interrupt and final events.
-- Human-in-the-loop approval for protected tool execution through LangGraph `interrupt()` and `Command({ resume })`.
-- Workspace-safe file patch tool and structured shell tool results.
-- Real configured-model end-to-end test.
+- 使用 LangGraph `StateGraph` 维护 `agent -> approval/tools -> reflect -> agent` 循环。
+- 支持 plan 模式，只暴露只读工具，不再为非危险操作增加确认门。
+- 支持上下文预算和历史消息压缩摘要。
+- 当 provider 元数据暴露缓存 token 计数时，从流式模型响应中提取 prompt cache 指标。
+- 使用 Bun 原生 SQLite checkpointer 持久化短期 thread 状态。
+- 输出标准化的图事件流，包括 interrupt 和 final 事件。
+- 通过 LangGraph `interrupt()` 和 `Command({ resume })` 为受保护工具执行提供人工审批。
+- 提供工作区安全的文件 patch 工具和结构化 shell 工具结果。
+- 提供真实配置模型的端到端测试入口。
 
-## Source Layout
+## 源码结构
 
-- `src/app/`: CLI entrypoint, run/resume orchestration, and streamed event normalization.
-- `src/harness/`: LangGraph control loop, state, routes, approval, tool dispatch, and reflection.
-- `src/model/`: model adapter factory, DeepSeek-specific patch, static prompts, runtime context, and context compaction.
-- `src/tools/`: model tool definitions plus file, shell, and patch tool implementations.
-- `src/persistence/`: Bun SQLite LangGraph checkpointer.
-- `src/config/`: local `~/.openpx/openpx.jsonc` configuration loader.
-- `src/shared/`: shared types and prompt cache metrics.
+- `src/app/`：CLI 入口、run/resume 编排和事件流标准化。
+- `src/harness/`：LangGraph 控制循环、状态、路由、审批、工具分发和 reflect。
+- `src/model/`：模型适配器工厂、OpenAI-compatible provider 适配、DeepSeek 专用 patch、静态 prompt、运行时上下文和上下文压缩。
+- `src/tools/`：模型工具定义，以及文件、shell、patch 工具实现。
+- `src/persistence/`：Bun SQLite LangGraph checkpointer。
+- `src/config/`：本地 `~/.openpx/openpx.jsonc` 配置加载器。
+- `src/shared/`：共享类型和 prompt cache 指标。
 
-## Setup
+## 安装
 
-Install dependencies:
+安装依赖：
 
 ```bash
 bun install
 ```
 
-The default model config is read from the current user's home directory:
+默认模型配置从当前用户目录读取：
 
 ```text
 ~/.openpx/openpx.jsonc
 ```
 
-Examples: `C:\Users\<user>\.openpx\openpx.jsonc` on Windows, `/Users/<user>/.openpx/openpx.jsonc` on macOS, and `/home/<user>/.openpx/openpx.jsonc` on Linux.
+示例路径：Windows 为 `C:\Users\<user>\.openpx\openpx.jsonc`，macOS 为 `/Users/<user>/.openpx/openpx.jsonc`，Linux 为 `/home/<user>/.openpx/openpx.jsonc`。
 
-The expected config shape is:
+配置结构使用命名 provider 和默认模型：
+
+```jsonc
+{
+  "provider": {
+    "my-provider": {
+      "type": "openai-compatible",
+      "apiKey": "sk-...",
+      "baseURL": "https://example.com/v1"
+    }
+  },
+  "model": {
+    "default": {
+      "provider": "my-provider",
+      "name": "provider-model-name"
+    }
+  }
+}
+```
+
+本项目不是 DeepSeek-only。DeepSeek 只是一个受支持的 provider。除非正在处理 provider 专有行为，否则新的模型相关改动应保持通用 OpenAI-compatible 边界。
+
+支持的 provider `type` 值：
+
+- `deepseek`：使用 `@langchain/deepseek`，并保留 DeepSeek reasoning-content patch。
+- `openai`：使用 `@langchain/openai` 访问配置的 OpenAI API base URL。
+- `openai-compatible`：使用 `@langchain/openai` 访问任意兼容 OpenAI API 的 base URL。
+
+为了保持向后兼容，省略 `type` 时，provider 名称 `deepseek` 仍映射为 `deepseek`；其他 provider 名称默认映射为 `openai-compatible`。
+
+当需要 DeepSeek 适配器专有行为时，可以这样配置：
 
 ```jsonc
 {
@@ -60,57 +90,44 @@ The expected config shape is:
 }
 ```
 
-Supported provider `type` values are:
+provider 专有逻辑应保持隔离。例如 DeepSeek 适配器保留 reasoning-content 回传 patch，而普通 OpenAI-compatible provider 应走通用 OpenAI-compatible 适配器。
 
-- `deepseek`: uses `@langchain/deepseek` and keeps the DeepSeek reasoning-content patch.
-- `openai`: uses `@langchain/openai` against the configured OpenAI API base URL.
-- `openai-compatible`: uses `@langchain/openai` against any OpenAI-compatible API base URL.
+## 运行
 
-For backward compatibility, omitting `type` still maps provider name `deepseek`
-to `deepseek`; other provider names default to `openai-compatible`.
-
-## Run
-
-Start a task:
+启动一次任务：
 
 ```bash
 bun run agent run --thread demo --user local --task "Create hello.txt with exact content \"hello\""
 ```
 
-Force planning mode, or leave the default `auto` mode to detect explicit planning requests:
+强制进入 plan 模式，或使用默认 `auto` 模式自动识别明确的规划请求：
 
 ```bash
 bun run agent run --mode plan --thread demo --user local --task "Inspect the change and propose a plan"
 ```
 
-Plan mode ends after the model returns its plan summary. It does not prompt for
-a non-dangerous builder handoff; protected builder tools still require approval
-when a later builder run requests them.
+plan 模式会在模型返回计划摘要后结束。它不会为非危险的 builder 交接额外请求确认；后续 builder 运行请求受保护工具时仍需要审批。
 
-When the stream emits a protected-tool `interrupt` event, approve and resume:
+当事件流发出受保护工具的 `interrupt` 事件时，可以审批并恢复执行：
 
 ```bash
 bun run agent resume --thread demo --user local --approve
 ```
 
-By default, the CLI writes the checkpoint SQLite file under `.openpx/` in the current workspace. You can override the path with `--checkpoints`.
+默认情况下，CLI 会把 checkpoint SQLite 文件写入当前工作区的 `.openpx/` 目录。可以用 `--checkpoints` 覆盖路径。
 
-## Test
+## 测试
 
-Default tests, excluding real model/network suites:
+默认测试，不包含真实模型/网络套件：
 
 ```bash
 bun test
 ```
 
-Real configured-model end-to-end test:
+真实配置模型端到端测试：
 
 ```bash
 bun run test:real
 ```
 
-The real suite lives at `tests/real-agent.real.ts` so it is not picked up by
-Bun's default test discovery. It calls the configured default model, exercises
-approval for protected tools, writes a file, and checks the checkpoint database.
-The script uses the current shell's proxy environment; configure or unset proxy
-variables outside the project script if your network requires it.
+真实测试套件位于 `tests/real-agent.real.ts`，因此不会被 Bun 默认测试发现机制拾取。它会调用配置的默认模型，覆盖受保护工具审批、文件写入和 checkpoint 数据库检查。脚本会沿用当前 shell 的代理环境；如果网络需要代理或需要取消代理，请在项目脚本外部配置环境变量。

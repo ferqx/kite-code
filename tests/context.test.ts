@@ -68,8 +68,8 @@ describe("model context protocol", () => {
     expect(String(messages[1].content)).not.toContain("{\"ok\":true");
   });
 
-  // 验证动态上下文放在可复用对话前缀之后，以利用 DeepSeek 缓存 / Verify dynamic context sits after reusable prefix for DeepSeek cache hit
-  test("keeps dynamic context after reusable conversation prefix for DeepSeek cache", () => {
+  // 验证动态上下文放在可复用对话前缀之后，以利用 provider 前缀缓存 / Verify dynamic context sits after reusable conversation prefix for provider cache hit
+  test("keeps dynamic context after reusable conversation prefix for provider cache", () => {
     const task = "Create hello.txt";
     const messages = buildModelMessages("agent_build", {
       workspace: "D:\\workspace",

@@ -1,40 +1,35 @@
-# Completed: Remove Internal Ledgers
+# 完成记录：移除内部账本
 
-Date: 2026-04-26
-Status: completed
-Related active rule: `../active/tool-gated-autonomy.md`
-Related references:
+日期：2026-04-26
+状态：completed
+相关 active 规则：`../active/tool-gated-autonomy.md`
+相关参考：
 
 - `../../references/opencode-codex-plan-handling.md`
 
-## Change
+## 变更
 
-Removed the internal evidence/progress ledger mechanism.
+移除内部 evidence/progress 账本机制。
 
-Implementation shape:
+实现形态：
 
-- Removed `src/harness/evidence.ts`.
-- Removed `src/harness/progress.ts`.
-- Removed `state.evidence` and `state.progress`.
-- Removed stagnant watchdog and repeated-tool doom-loop guard logic.
-- Removed `AgentEvidence`, `AgentHeartbeat`, and `AgentProgressLedger` types.
-- Kept tool result messages as the model-visible record of tool execution.
-- Kept approval and plan-mode tool gating as the enforced safety boundary.
+- 移除 `src/harness/evidence.ts`。
+- 移除 `src/harness/progress.ts`。
+- 移除 `state.evidence` 和 `state.progress`。
+- 移除 stagnant watchdog 和重复工具 doom-loop guard 逻辑。
+- 移除 `AgentEvidence`、`AgentHeartbeat` 和 `AgentProgressLedger` 类型。
+- 保留 tool result message 作为模型可见的工具执行记录。
+- 保留 approval 和 plan-mode tool gating 作为强制安全边界。
 
-## Rationale
+## 理由
 
-After removing the final-answer stop-check, evidence/progress ledgers no longer
-serve a clear harness boundary. Their remaining role was progress inference, but
-that duplicates model judgment and diverges from the tool-boundary design used
-by Codex and Opencode.
+移除最终答案 stop-check 后，evidence/progress 账本不再服务清晰的 harness 边界。它们剩余的作用是进度推断，但这会重复模型判断，并偏离 Codex 和 Opencode 使用的工具边界设计。
 
-The harness should enforce dangerous actions at tool boundaries and otherwise
-let model behavior be shaped by instructions, tool results, and graph recursion
-limits.
+harness 应在工具边界强制危险操作检查，其余模型行为应由指令、工具结果和图 recursion limit 共同约束。
 
-## Verification
+## 验证
 
-Validated with:
+已验证：
 
 ```bash
 bun test tests/graph.test.ts tests/context.test.ts tests/runtime-context.test.ts

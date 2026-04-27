@@ -1,46 +1,36 @@
-# Completed: Real Model Test Boundary
+# 完成记录：真实模型测试边界
 
-Date: 2026-04-26
-Status: completed
-Related active rule: `../active/real-model-test-boundary.md`
+日期：2026-04-26
+状态：completed
+相关 active 规则：`../active/real-model-test-boundary.md`
 
-## Change
+## 变更
 
-Moved the real DeepSeek end-to-end suite out of Bun default test discovery and
-fixed the explicit real-test scripts.
+将真实配置模型端到端套件移出 Bun 默认测试发现范围，并修复显式真实测试脚本。记录写成时本地配置 provider 是 DeepSeek；当前 active 规则已经改为 provider-neutral。
 
-Implementation shape:
+实现形态：
 
-- Renamed `tests/real-agent.test.ts` to `tests/real-agent.real.ts`.
-- Updated `test:real` to pass the suite as an explicit Bun path:
-  `./tests/real-agent.real.ts`.
-- Removed the proxy-unsetting `test:real:direct` variant. Project scripts
-  should respect the caller's proxy environment.
-- Removed the package-level `--timeout`; the real suite sets per-test timeouts
-  next to the scenarios that need them.
-- Added `tests/test-discovery.test.ts` to assert:
-  - default test files do not include `real` suites;
-  - default test files do not directly call `createDeepSeekModel(...)`;
-  - explicit real-test scripts point at `./tests/real-agent.real.ts`.
-- Updated `README.md` and `AGENTS.md` so default tests and real model tests are
-  separate workflows.
+- 将 `tests/real-agent.test.ts` 重命名为 `tests/real-agent.real.ts`。
+- 更新 `test:real`，以显式 Bun 路径传入套件：`./tests/real-agent.real.ts`。
+- 移除会 unset 代理的 `test:real:direct` 变体。项目脚本应尊重调用者的代理环境。
+- 移除 package 级 `--timeout`；真实套件在需要更长时间的场景旁按测试设置 timeout。
+- 新增 `tests/test-discovery.test.ts` 断言：
+  - 默认测试文件不包含 `real` 套件。
+  - 默认测试文件不直接调用 `createDeepSeekModel(...)`。
+  - 显式真实测试脚本指向 `./tests/real-agent.real.ts`。
+- 更新 `README.md` 和 `AGENTS.md`，让默认测试和真实模型测试成为分离流程。
 
-## Rationale
+## 理由
 
-The real DeepSeek suite depends on credentials, network reachability, and local
-proxy behavior. It should never run as part of a bare `bun test`.
+真实配置模型套件依赖凭证、网络可达性和本地代理行为。它不应成为裸 `bun test` 的一部分。
 
-After renaming the file to `.real.ts`, Bun requires the package script to pass
-the file as an explicit path using `./tests/real-agent.real.ts`. Without the
-leading `./`, Bun treats it as a filter and reports that no test files match.
+文件重命名为 `.real.ts` 后，Bun 要求 package 脚本使用 `./tests/real-agent.real.ts` 显式路径传入文件。没有前导 `./` 时，Bun 会把它当作过滤器，并报告没有匹配测试文件。
 
-Proxy cleanup is an environment concern, not a project-script default. Some
-local and CI environments need proxies to reach DeepSeek; others need proxies
-disabled. The script should not force either choice.
+代理清理是环境问题，不是项目脚本默认行为。有些本地或 CI 环境需要代理才能访问配置的模型 provider，另一些环境则需要禁用代理。脚本不应强制任何一方。
 
-## Verification
+## 验证
 
-Validated with:
+已验证：
 
 ```bash
 bun test tests/test-discovery.test.ts

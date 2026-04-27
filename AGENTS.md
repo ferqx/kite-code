@@ -5,10 +5,10 @@
 这是一个基于 Bun + TypeScript + LangGraph.js 的代码代理参考实现，核心目标不是做业务功能，而是稳定维护一个可执行、可中断、可恢复、可验证的 agent 工作流。
 
 当前仓库重点：
-- 维护 `agent -> approval/tools -> agent` 的主循环。
+- 维护 `agent_plan` / `agent_build -> approval/tools -> reflect -> agent_*` 的主循环。
 - 支持 `plan` / `builder` 两种模式切换。
 - 支持基于 `interrupt()` 的人工审批与恢复执行。
-- 记录命令、文件变更、验证结果等执行证据。
+- 通过工具结果、事件流和最终汇报保留命令、文件变更、验证结果等执行事实。
 - 用 `bun test` 保证图路由、工具限制、CLI 和运行逻辑不回退。
 
 ## 技术栈
@@ -19,6 +19,7 @@
   - `@langchain/core`
   - `@langchain/langgraph`
   - `@langchain/deepseek`
+  - `@langchain/openai`
   - `@langchain/langgraph-checkpoint-sqlite`
 - 持久化：SQLite checkpoint
 
@@ -53,6 +54,10 @@
 - 除非任务本身就是修改 plan 规则，否则不要绕过 plan 模式的只读限制。
 - 如果改了路由、approval、tool gating，必须同步看 `tests/graph.test.ts`。
 - 如果改了 CLI 行为或参数，必须同步更新 `README.md` 和相关测试。
+- 如果改了模型配置、模型工厂、provider adapter 或真实模型测试，必须把
+  DeepSeek 视为 OpenAI-compatible provider 边界内的一个 provider，而不是
+  仓库唯一支持的模型服务；先读 `docs/space/execution/active/model-provider-boundary.md`。
+- 如果创建或修改 Markdown 文档，必须以中文为标准；先读 `docs/space/execution/active/documentation-language.md`。
 - 注释只写在“不看上下文就难以理解”的地方，避免把显而易见的代码翻译成注释。
 
 ## 禁止事项
@@ -63,6 +68,7 @@
 - 不要在未说明原因的情况下跳过相关测试。
 - 不要把真实模型端到端测试当成默认验证手段；只有改动涉及真实模型链路或用户明确要求时再运行。
 - 不要提交本地 checkpoint、临时文件、密钥配置或 `tests/.tmp-*` 下的运行产物。
+- 不要创建 `docs/superpowers/` 或 Superpowers 计划文档；需要持久项目规则时使用 `docs/space/`。
 
 ## 特别说明
 
@@ -185,7 +191,9 @@ bun run test:real
 ~/.openpx/openpx.jsonc
 ```
 
-- 如果需要跑真实模型相关流程，先确认本地 DeepSeek 配置可用。
+- 如果需要跑真实模型相关流程，先确认本地 `~/.openpx/openpx.jsonc`
+  中的默认 provider 配置可用；它可以是 DeepSeek，也可以是其他兼容
+  OpenAI API 的服务。
 - `bun run test:real` 应尊重调用者的代理环境；不要在项目脚本里默认
   unset `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。
 - 不要把真实模型测试命名为 `*.test.ts` / `*.spec.ts`；否则裸
@@ -195,5 +203,9 @@ bun run test:real
 
 - 不要把 `tests/.tmp-*` 下的文件当成正式源码或稳定夹具。
 - 这个仓库很多“真实约束”不是写在 README，而是写在测试里；遇到不确定行为时，优先读测试。
+- 即使使用了 Superpowers 相关技能，也只把它当作执行方法，不要把技能产物写入仓库；执行计划优先留在对话或任务计划里。
+- 模型服务方向不是 DeepSeek-only；修改 `src/config`、`src/model`、真实模型测试或 provider 文档前，先读 `docs/space/execution/active/model-provider-boundary.md`。
 - `docs/space/` 是仓库内记录系统，不是聊天记录归档。修改模型上下文、plan 状态注入、缓存友好布局等语义前，先读 `docs/space/index.md`，再读取索引中与当前任务匹配的 active 记录。
+- 仓库文档内容以中文为标准；命令、路径、配置键和 provider 类型等机器可读 token 可以保留原文。
+- 当某类知识反复出现、跨模块扩散，或 `docs/space` 记录开始难以导航时，应主动参考 `docs/space/understanding/space-system-design.md` 的文档晋升规则，提议或创建合适的顶层入口文档。
 - 如果某个改动涉及“是否允许工具执行”，优先检查 `src/harness/routes.ts`、`src/harness/tool-runner.ts` 和 approval / tool gating 是否一致。

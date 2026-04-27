@@ -1,66 +1,60 @@
-# Active Rule: Tool-Gated Autonomy
+# 当前规则：工具边界自治
 
-Status: active
-Last updated: 2026-04-26
-Last verified: 2026-04-26
-Scope:
+状态：active
+最后更新：2026-04-26
+最后验证：2026-04-26
+范围：
 
 - `src/harness/graph.ts`
 - `src/harness/routes.ts`
 - `src/harness/tool-runner.ts`
 - `tests/graph.test.ts`
 
-Read when:
+读取时机：
 
-- Editing graph routing.
-- Editing approval behavior.
-- Changing plan-mode or builder-mode tool permissions.
-- Reintroducing any final-answer guard or non-dangerous confirmation gate.
+- 修改图路由。
+- 修改审批行为。
+- 修改 plan 模式或 builder 模式的工具权限。
+- 重新引入任何最终答案守卫或非危险确认门。
 
-Related:
+相关：
 
 - `../completed/2026-04-26-remove-stop-check.md`
 - `../completed/2026-04-26-remove-internal-ledgers.md`
 - `../../references/opencode-codex-plan-handling.md`
 
-Verification:
+验证：
 
 - `bun test tests/graph.test.ts`
 - `bun run typecheck`
 
-## Rule
+## 规则
 
-The harness should not hard-block model final answers with a stop-check node.
-Model completion is governed by prompt constraints and ordinary graph routing.
+harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束主要由 prompt 约束和普通图路由控制。
 
-Human confirmation is reserved for protected tool execution:
+人工确认只保留给受保护工具执行：
 
-- Builder mode routes write/delete/execute-style tool requests through approval.
-- Plan mode only allows read-only tools and `update_plan`; write or execute
-  attempts are rejected by the tools layer.
-- Non-dangerous final answers, plan summaries, and mode completion do not trigger
-  approval interrupts.
+- builder 模式的写入、删除、执行类工具请求必须经过 approval。
+- plan 模式只允许只读工具和 `update_plan`；写入或执行尝试由 tools 层拒绝。
+- 非危险最终答案、计划摘要和模式完成不触发 approval interrupt。
 
-Reflect logic may inject guidance after tool failures, but it must not become a
-final-answer reviewer or progress inference engine.
+reflect 逻辑可以在工具失败后注入指导，但不能变成最终答案 reviewer 或进度推断引擎。
 
-## Do Not
+## 不要做
 
-- Do not reintroduce `stop_check` routing as a hard final-answer guard.
-- Do not add a non-dangerous `mode_confirmation` interrupt for plan completion.
-- Do not move safety checks out of tool gating into prompt-only instructions for
-  protected operations.
-- Do not silently weaken plan-mode read-only enforcement.
-- Do not reintroduce evidence/progress ledgers or watchdog-style progress
-  inference without a concrete tool-boundary need.
+- 不要重新引入 `stop_check` 路由作为最终答案硬守卫。
+- 不要为 plan 完成增加非危险 `mode_confirmation` interrupt。
+- 不要把受保护操作的安全检查从 tool gating 移到仅靠 prompt 指令。
+- 不要静默削弱 plan 模式只读约束。
+- 没有具体工具边界需求时，不要重新引入 evidence/progress 账本或 watchdog 式进度推断。
 
-## Test Expectations
+## 测试期望
 
-`tests/graph.test.ts` should assert:
+`tests/graph.test.ts` 应断言：
 
-- plan-mode final routes directly to `END`;
-- builder final routes directly to `END`;
-- plan-mode write attempts go to tools and are rejected;
-- protected builder tool calls still route through approval;
-- repeated read-only tool calls are not blocked by tool-runner progress state;
-- reflect returns to the active agent unless a final is already present.
+- plan 模式 final 直接路由到 `END`。
+- builder final 直接路由到 `END`。
+- plan 模式写入尝试进入 tools 并被拒绝。
+- 受保护 builder 工具调用仍经过 approval。
+- 重复只读工具调用不会被 tool-runner 进度状态阻断。
+- reflect 在没有 final 时回到当前 active agent。

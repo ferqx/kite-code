@@ -1,37 +1,32 @@
-# Completed: Remove Stop Check
+# 完成记录：移除 stop-check
 
-Date: 2026-04-26
-Status: completed
-Related active rule: `../active/tool-gated-autonomy.md`
+日期：2026-04-26
+状态：completed
+相关 active 规则：`../active/tool-gated-autonomy.md`
 
-## Change
+## 变更
 
-Removed the final-answer stop-check mechanism from the LangGraph loop.
+从 LangGraph 循环中移除最终答案 stop-check 机制。
 
-Implementation shape:
+实现形态：
 
-- Removed `src/harness/stop-check.ts`.
-- Removed the `stop_check` graph node and conditional edges.
-- Removed `routeAfterStopCheck`.
-- Plan-mode and builder-mode final answers now route directly to `END`.
-- Removed non-dangerous `mode_confirmation` interrupts for plan completion.
-- Kept approval for protected builder tool execution.
-- Kept plan-mode tool-layer rejection for write or execute attempts.
+- 移除 `src/harness/stop-check.ts`。
+- 移除 `stop_check` 图节点和条件边。
+- 移除 `routeAfterStopCheck`。
+- plan 模式和 builder 模式的最终答案现在直接路由到 `END`。
+- 移除 plan 完成时的非危险 `mode_confirmation` interrupt。
+- 保留受保护 builder 工具执行的 approval。
+- 保留 plan 模式 tools 层对写入或执行尝试的拒绝。
 
-## Rationale
+## 理由
 
-The harness should increasingly trust the model to follow prompt constraints and
-should only interrupt the user for dangerous or out-of-policy tool execution.
-Final-answer quality constraints belong in the agent contract and tests, not in a
-hard-coded post-final reviewer.
+harness 应更多信任模型遵循 prompt 约束，只在危险或越权工具执行时中断用户。最终答案质量约束应属于 agent contract 和测试，而不是硬编码的 post-final reviewer。
 
-This aligns local behavior with the principle that harnesses should enforce
-safety at tool boundaries while avoiding unnecessary control-flow gates around
-normal model output.
+这让本地行为符合 harness 设计原则：在工具边界强制安全，在普通模型输出周围避免不必要的控制流门。
 
-## Verification
+## 验证
 
-Validated with:
+已验证：
 
 ```bash
 bun test tests/graph.test.ts

@@ -77,7 +77,7 @@ export function buildRuntimeContext(input: RuntimeContextInput): string {
   return lines.join("\n");
 }
 
-/** 构建可缓存的运行时上下文（不含时间戳，适合 DeepSeek 前缀缓存）/ Build cacheable runtime context (no timestamps, cache-stable for DeepSeek prefix cache) */
+/** 构建可缓存的运行时上下文（不含时间戳，适合 provider 前缀缓存）/ Build cacheable runtime context (no timestamps, cache-stable for provider prefix caching) */
 export function buildCacheableRuntimeContext(input: RuntimeContextInput): string {
   const mode = input.mode ?? "builder";
   const lines = [
