@@ -41,7 +41,9 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - `ask_user` 是规划澄清工具，不读写工作区，也不是工具审批；无论 `read-only` 还是 `write` 访问，都应路由到 `user_input` 节点并触发 `kind: "user_input"` interrupt，恢复值作为对应 tool call 的 ToolMessage 交回模型。
 - 非危险最终答案、计划摘要和访问权限状态不触发 approval interrupt。
 
-reflect 逻辑可以在工具失败后注入指导，但不能变成最终答案 reviewer 或进度推断引擎。
+工具执行失败时，失败原因和正确用法应由工具结果自身返回，并作为 `ToolMessage` 进入模型上下文；失败结果应包含结构化的 `failure.reason` 和 `failure.guidance`。图不再通过 `reflect` 节点额外注入失败指导。
+
+底层调用 shell 的工具必须保留 shell 返回的 `stdout`、`stderr` 和 `exitCode`。非零退出或 shell executor 异常都应转换为 `ok: false` 的工具结果，不能抛出到图执行层并阻断 `ToolMessage` 返回。
 
 ## 不要做
 
@@ -63,4 +65,4 @@ reflect 逻辑可以在工具失败后注入指导，但不能变成最终答案
 - `write` 访问下受保护工具调用仍经过 approval。
 - `write` 访问下 `update_plan` 不自动切换工作区访问权限。
 - 重复只读工具调用不会被 tool-runner 进度状态阻断。
-- reflect 在没有 final 时回到单一 `agent`。
+- `tools` 和 `user_input` 完成后直接回到单一 `agent`。

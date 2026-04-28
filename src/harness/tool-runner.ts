@@ -1,4 +1,4 @@
-import type { AgentPlan, WorkspaceAccess } from "../shared/types";
+import type { AgentPlan, ShellResult, WorkspaceAccess } from "../shared/types";
 import { editFile, readFile, writeFile } from "../tools/file";
 import { isReadOnlyShellCommand } from "../tools/definitions";
 import { shellTool, type ShellExecutor } from "../tools/shell";
@@ -14,37 +14,41 @@ export async function runApprovedTool(
   _existingPlan: AgentPlan | null = null,
 ): Promise<ToolExecutionResult> {
   if (request.name === "update_plan") {
-    return {
+    return withFailureGuidance(request, {
       ok: true,
       command: "update_plan",
       exitCode: 0,
       stdout: "",
       stderr: "",
       plan: request.args,
-    };
+    });
   }
 
   if (request.name === "shell_read") {
     if (!isReadOnlyShellCommand(request.args.command)) {
-      return {
+      return withFailureGuidance(request, {
         ok: false,
         command: request.args.command,
         exitCode: -1,
         stdout: "",
         stderr: "Rejected: shell_read only accepts read-only shell commands.",
-      };
+      });
     }
-    return (shellExecutor ?? shellTool)({
-      workspace,
-      command: request.args.command,
-    });
+    return withFailureGuidance(
+      request,
+      await runShellForTool(workspace, request.args.command, shellExecutor),
+    );
   }
 
   if (request.name === "search") {
-    return (shellExecutor ?? shellTool)({
-      workspace,
-      command: buildSearchShellCommand(request.args.pattern, request.args.path),
-    });
+    return withFailureGuidance(
+      request,
+      await runShellForTool(
+        workspace,
+        buildSearchShellCommand(request.args.pattern, request.args.path),
+        shellExecutor,
+      ),
+    );
   }
 
   if (request.name === "read_file") {
@@ -54,35 +58,35 @@ export async function runApprovedTool(
       offset: request.args.offset,
       limit: request.args.limit,
     });
-    return {
+    return withFailureGuidance(request, {
       ok: result.ok,
       command: `read_file ${request.args.path ?? ""}`,
       exitCode: result.ok ? 0 : -1,
       stdout: result.content,
       stderr: result.error ?? "",
       path: request.args.path,
-    };
+    });
   }
 
   if (workspaceAccess === "read-only") {
-    return {
+    return withFailureGuidance(request, {
       ok: false,
       command: request.protectedCommand,
       exitCode: -1,
       stdout: "",
       stderr: "Rejected: read-only workspace access allows read-only tools only.",
-    };
+    });
   }
 
   if (request.name === "edit_file") {
     if (!request.args.old_string) {
-      return {
+      return withFailureGuidance(request, {
         ok: false,
         command: `edit_file ${request.args.path ?? ""}`,
         exitCode: -1,
         stdout: "",
         stderr: "edit_file requires old_string to locate the text to replace.",
-      };
+      });
     }
     const result = editFile({
       workspace,
@@ -91,7 +95,7 @@ export async function runApprovedTool(
       newString: request.args.new_string ?? "",
       replaceAll: request.args.replace_all,
     });
-    return {
+    return withFailureGuidance(request, {
       ok: result.ok,
       command: `edit_file ${request.args.path ?? ""}`,
       exitCode: result.ok ? 0 : -1,
@@ -100,7 +104,7 @@ export async function runApprovedTool(
         : "",
       stderr: result.error ?? "",
       path: request.args.path,
-    };
+    });
   }
 
   if (request.name === "write_file") {
@@ -109,30 +113,30 @@ export async function runApprovedTool(
       path: request.args.path ?? "",
       content: request.args.content ?? "",
     });
-    return {
+    return withFailureGuidance(request, {
       ok: result.ok,
       command: `write_file ${request.args.path ?? ""}`,
       exitCode: result.ok ? 0 : -1,
       stdout: result.ok ? `Wrote ${result.lines ?? 0} line(s) to ${request.args.path}` : "",
       stderr: result.error ?? "",
       path: request.args.path,
-    };
+    });
   }
 
   if (request.name === "ask_user") {
-    return {
+    return withFailureGuidance(request, {
       ok: false,
       command: "ask_user",
       exitCode: -1,
       stdout: "",
       stderr: "ask_user must be handled by the user_input interrupt node.",
-    };
+    });
   }
 
-  return (shellExecutor ?? shellTool)({
-    workspace,
-    command: request.args.command,
-  });
+  return withFailureGuidance(
+    request,
+    await runShellForTool(workspace, request.args.command, shellExecutor),
+  );
 }
 
 /** 构建 search 工具的 shell 命令 / Build shell command for search tool */
@@ -140,4 +144,70 @@ function buildSearchShellCommand(pattern: string, globPath?: string): string {
   const escaped = pattern.replace(/'/g, "'\\''");
   const pathArg = globPath ? `--glob '${globPath.replace(/'/g, "'\\''")}'` : "";
   return `rg -n --no-heading ${pathArg} '${escaped}'`;
+}
+
+/** 执行 shell 并把异常转换为工具失败结果，避免阻断 ToolMessage 返回 / Convert shell exceptions into failed tool results */
+async function runShellForTool(
+  workspace: string,
+  command: string,
+  shellExecutor?: ShellExecutor,
+): Promise<ShellResult> {
+  try {
+    return await (shellExecutor ?? shellTool)({ workspace, command });
+  } catch (error) {
+    return {
+      ok: false,
+      command,
+      exitCode: -1,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/** 给失败工具结果补充模型可直接使用的原因和正确用法 / Add model-facing failure guidance to failed tool results */
+function withFailureGuidance(
+  request: PendingToolRequest,
+  result: ToolExecutionResult,
+): ToolExecutionResult {
+  if (result.ok !== false) {
+    return result;
+  }
+
+  const reason =
+    result.stderr.trim() ||
+    result.stdout.trim() ||
+    `Tool ${request.name} failed with exit code ${result.exitCode}.`;
+
+  return {
+    ...result,
+    failure: {
+      message: "Tool execution failed.",
+      tool: request.name,
+      reason,
+      guidance: toolUsageGuidance(request),
+    },
+  };
+}
+
+/** 按工具类型生成失败后的正确使用提示 / Build per-tool usage guidance after failure */
+function toolUsageGuidance(request: PendingToolRequest): string {
+  switch (request.name) {
+    case "read_file":
+      return "Use read_file with a relative path inside the workspace. If the path is uncertain, use search or shell_read to locate the file first, then retry with the exact path.";
+    case "edit_file":
+      return "Use edit_file only after read_file. old_string must exactly match existing file content, including whitespace and indentation; if the same text appears multiple times, make old_string more specific or set replace_all: true.";
+    case "write_file":
+      return "Use write_file with a relative path and complete file content when creating or fully overwriting a file. For small changes to an existing file, prefer read_file followed by edit_file.";
+    case "search":
+      return "Use search with a non-empty text or regex pattern and an optional glob path such as src/**/*.ts. If the pattern contains regex characters you mean literally, escape them or use a simpler literal pattern.";
+    case "shell_read":
+      return "Use shell_read only for read-only inspection commands, such as ls, pwd, cat, sed -n, rg, git status, git diff, git log, or git show. Do not write files, delete files, install dependencies, run tests, or execute project code with shell_read.";
+    case "shell_execute":
+      return "Use shell_execute for commands that execute project code, run tests, build, install, write, or delete. Expect protected commands to require approval, and use stdout/stderr to adjust the next command if execution fails.";
+    case "update_plan":
+      return "Use update_plan with a complete plan object: name, description, status, and ordered steps with statuses. It must only update planning state and must not mutate the workspace.";
+    case "ask_user":
+      return "Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.";
+  }
 }

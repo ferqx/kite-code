@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 使用 LangGraph `StateGraph` 维护 `agent -> approval/user_input/tools -> reflect -> agent` 循环。
+- 使用 LangGraph `StateGraph` 维护 `agent -> approval/user_input/tools -> agent` 循环。
 - 支持 `read-only` / `write` 工作区访问权限；只读访问由工具执行层强制，静态系统提示和工具 schema 不随访问权限变化，以提升 provider 前缀缓存命中。
 - 支持上下文预算和历史消息压缩摘要。
 - 当 provider 元数据暴露缓存 token 计数时，从流式模型响应中提取 prompt cache 指标。
@@ -17,7 +17,7 @@
 ## 源码结构
 
 - `src/app/`：CLI 入口、run/resume 编排和事件流标准化。
-- `src/harness/`：LangGraph 控制循环、状态、路由、审批、工具分发和 reflect。
+- `src/harness/`：LangGraph 控制循环、状态、路由、审批和工具分发。
 - `src/model/`：模型适配器工厂、OpenAI-compatible provider 适配、DeepSeek 专用 patch、静态 prompt、运行时上下文和上下文压缩。
 - `src/tools/`：模型工具定义，以及文件、shell、patch 工具实现。
 - `src/persistence/`：Bun SQLite LangGraph checkpointer。

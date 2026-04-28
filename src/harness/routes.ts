@@ -43,21 +43,11 @@ export function routeAfterApproval(
 }
 
 /** tools 节点后的路由逻辑 / Routing after tools node */
-export function routeAfterTools(_state: CodeAgentState): "reflect" {
-  return "reflect";
+export function routeAfterTools(_state: CodeAgentState): "agent" {
+  return "agent";
 }
 
 /** user_input 节点后的路由逻辑 / Routing after user_input node */
-export function routeAfterUserInput(_state: CodeAgentState): "reflect" {
-  return "reflect";
-}
-
-/** reflect 节点后的路由逻辑 / Routing after reflect node */
-export function routeAfterReflect(
-  state: CodeAgentState,
-): "agent" | typeof END {
-  if (state.final) {
-    return END;
-  }
+export function routeAfterUserInput(_state: CodeAgentState): "agent" {
   return "agent";
 }

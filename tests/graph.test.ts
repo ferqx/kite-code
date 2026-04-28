@@ -3,7 +3,6 @@ import { AIMessage } from "@langchain/core/messages";
 import {
   routeAfterAgent,
   routeAfterApproval,
-  routeAfterReflect,
   routeAfterTools,
   routeAfterUserInput,
 } from "../src/harness/routes";
@@ -196,8 +195,8 @@ describe("graph local tool routing", () => {
     ).toBe("__end__");
   });
 
-  // 验证工具执行完成后，始终路由到 reflect 节点进行评估 / After tools complete, always route to reflect node for evaluation
-  test("routes completed tool updates to reflect for evaluation", () => {
+  // 验证工具执行完成后直接回到 agent，由工具消息自身携带成功或失败上下文 / Tool results route directly back to agent with ToolMessage context
+  test("routes completed tool updates back to agent", () => {
     expect(
       routeAfterTools({
         workspaceAccess: "read-only",
@@ -206,7 +205,7 @@ describe("graph local tool routing", () => {
         messages: [],
         final: "Plan ready",
       } as unknown as CodeAgentState),
-    ).toBe("reflect");
+    ).toBe("agent");
   });
 
   // 验证 read-only 访问下写入工具调用不路由到审批，而是直接到 tools 节点以拒绝执行 / Write tools under read-only access route to tools for rejection
@@ -265,8 +264,8 @@ describe("graph local tool routing", () => {
     expect(request?.args.allow_free_text).toBe(true);
   });
 
-  // 验证用户输入中断恢复后回到 reflect，再继续 agent 主循环 / user_input returns through reflect after resume
-  test("routes completed user input to reflect", () => {
+  // 验证用户输入中断恢复后直接回到 agent / user_input returns directly to agent after resume
+  test("routes completed user input back to agent", () => {
     expect(
       routeAfterUserInput({
         workspaceAccess: "write",
@@ -274,7 +273,7 @@ describe("graph local tool routing", () => {
         messages: [],
         final: "",
       } as unknown as CodeAgentState),
-    ).toBe("reflect");
+    ).toBe("agent");
   });
 
   // 验证用户输入恢复值既支持字符串，也支持结构化 answer/choice / User input resume supports strings and structured answers
@@ -421,6 +420,68 @@ describe("graph local tool routing", () => {
     expect((result as ShellResult).stderr).toContain("read-only");
   });
 
+  // 验证失败工具结果会把失败原因和正确用法一并交回模型 / Failed tool results include reason and tool guidance for the model
+  test("failed tool results include reason and usage guidance", async () => {
+    const result = await runApprovedTool(
+      "/tmp/workspace",
+      {
+        id: "call-1",
+        name: "shell_read",
+        args: { command: "rg -n Missing src" },
+        reason: "Search missing text",
+        protectedCommand: "rg -n Missing src",
+      },
+      async (input) => ({
+        ok: false,
+        command: input.command,
+        exitCode: 2,
+        stdout: "",
+        stderr: "rg: Missing: No such file or directory",
+      }),
+      "read-only",
+    );
+
+    const failure = (
+      result as ShellResult & {
+        failure?: { reason: string; guidance: string };
+      }
+    ).failure;
+
+    expect(result.ok).toBe(false);
+    expect(failure?.reason).toContain("rg: Missing");
+    expect(failure?.guidance).toContain("shell_read");
+    expect(failure?.guidance).toContain("read-only");
+  });
+
+  // 验证底层 shell 抛错也会转换成工具失败结果，不阻断 ToolMessage 返回 / Shell executor throws are converted to tool failure results
+  test("shell executor errors return failed tool results instead of throwing", async () => {
+    const result = await runApprovedTool(
+      "/tmp/workspace",
+      {
+        id: "call-1",
+        name: "shell_read",
+        args: { command: "rg -n Plan src" },
+        reason: "Search code",
+        protectedCommand: "rg -n Plan src",
+      },
+      async () => {
+        throw new Error("spawn failed");
+      },
+      "read-only",
+    );
+
+    const failure = (
+      result as ShellResult & {
+        failure?: { reason: string; guidance: string };
+      }
+    ).failure;
+
+    expect(result.ok).toBe(false);
+    expect((result as ShellResult).stderr).toContain("spawn failed");
+    expect(failure?.reason).toContain("spawn failed");
+    expect(failure?.guidance).toContain("shell_read");
+  });
+
   // 验证重复工具调用不再由工具执行层拦截，循环边界交给图递归限制 / Repeated tool calls are not blocked by tool runner; graph recursion owns loop bounds
   test("does not intercept repeated read-only tool requests", async () => {
     const request = {
@@ -448,27 +509,4 @@ describe("graph local tool routing", () => {
     expect((result as ShellResult).stdout).toBe("package");
   });
 
-  // 验证 reflect 路由在无 final 时返回单一 agent / reflect routes to agent when no final is set
-  test("reflect routes to agent when no final is set", () => {
-    expect(
-      routeAfterReflect({
-        workspaceAccess: "write",
-        workspace: "/tmp/workspace",
-        messages: [],
-        final: "",
-      } as unknown as CodeAgentState),
-    ).toBe("agent");
-  });
-
-  // 验证 reflect 路由在有 final 时直接结束 / reflect routes to END when final is set
-  test("reflect routes to end when final is set", () => {
-    expect(
-      routeAfterReflect({
-        workspaceAccess: "write",
-        workspace: "/tmp/workspace",
-        messages: [],
-        final: "All tasks completed.",
-      } as unknown as CodeAgentState),
-    ).toBe("__end__");
-  });
 });

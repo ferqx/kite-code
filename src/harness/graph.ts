@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import {
   START,
   StateGraph,
@@ -14,7 +14,6 @@ import type { ShellExecutor } from "../tools/shell";
 import {
   routeAfterAgent,
   routeAfterApproval,
-  routeAfterReflect,
   routeAfterTools,
   routeAfterUserInput,
   routeEntry,
@@ -144,45 +143,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     };
   };
 
-  /** 反思节点：评估工具执行结果，注入失败指导 / Reflect node */
-  const reflect = async (state: CodeAgentState) => {
-    const lastMessage = state.messages.at(-1);
-    if (lastMessage instanceof ToolMessage && lastMessage.status === "error") {
-      let detail = "unknown error";
-      try {
-        const parsed = JSON.parse(
-          typeof lastMessage.content === "string" ? lastMessage.content : "{}",
-        );
-        if (typeof parsed.stderr === "string" && parsed.stderr) {
-          detail = parsed.stderr.slice(0, 200);
-        }
-      } catch {
-        /* ignore parse failure */
-      }
-      return {
-        messages: [
-          new HumanMessage(
-            `Tool execution failed: ${detail}. Inspect the failure and choose a different approach.`,
-          ),
-        ],
-      };
-    }
-
-    return {};
-  };
-
   const graph = new StateGraph(AgentState)
     .addNode("agent", agent)
     .addNode("approval", approval)
     .addNode("user_input", userInput)
     .addNode("tools", tools)
-    .addNode("reflect", reflect)
     .addConditionalEdges(START, routeEntry)
     .addConditionalEdges("agent", routeAfterAgent)
     .addConditionalEdges("approval", routeAfterApproval)
     .addConditionalEdges("user_input", routeAfterUserInput)
     .addConditionalEdges("tools", routeAfterTools)
-    .addConditionalEdges("reflect", routeAfterReflect)
     .compile({ checkpointer });
 
   return { graph, checkpointer };

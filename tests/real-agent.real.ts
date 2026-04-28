@@ -8,8 +8,12 @@ import { resumeCodeAgent, streamCodeAgent } from "../src/app/runner";
 import { createChatModel } from "../src/model/factory";
 import { shellTool } from "../src/tools/shell";
 import type { AgentConfig } from "../src/config/index";
-import type { ShellInput, ShellResult } from "../src/shared/types";
-import type { AgentEvent } from "../src/shared/types";
+import type {
+  AgentEvent,
+  AgentResumeValue,
+  ShellInput,
+  ShellResult,
+} from "../src/shared/types";
 
 // ============================================================================
 // 真实模型 API 端到端测试，从简到难分为 7 个层级
@@ -134,7 +138,7 @@ describe("L1-L4: basic real agent scenarios", () => {
 
       const planEvents: AgentEvent[] = [];
       for await (const event of streamCodeAgent({
-        task: `/plan Create ${fileName} with exact content "${fileContent}".`,
+        task: `/plan Create ${fileName} with exact content "${fileContent}". Only produce the final plan and explain that read-only access blocks writing. Do not call ask_user and do not write or edit files.`,
         ...env,
       })) {
         planEvents.push(event);
@@ -292,6 +296,69 @@ describe("L6: error recovery scenarios", () => {
     },
     120_000,
   );
+
+  // 真实模型应能读取失败 ToolMessage 中的原因和用法提示，并继续恢复 / Real model should recover from failed tool guidance
+  test(
+    "L6c: recovers after a failed shell-backed tool result with guidance",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l6-tool-failure-guidance");
+      const outputPath = join(env.workspace, "recovered-after-tool-failure.txt");
+
+      const events = await runApprovalLoop({
+        ...env,
+        task: [
+          "First call shell_read with exactly this command: cat missing-real-input.txt",
+          "That command is expected to fail. Read the failed tool result, including failure.reason and failure.guidance.",
+          "Then create recovered-after-tool-failure.txt with exact content \"recovered after tool failure\".",
+          "After creating the file, verify it exists and report the result.",
+        ].join(" "),
+      });
+
+      const failure = findToolFailure(events);
+      expect(failure?.reason).toBeTruthy();
+      expect(failure?.guidance).toBeTruthy();
+      expect(existsSync(outputPath)).toBe(true);
+      expect(readFileSync(outputPath, "utf8")).toContain("recovered after tool failure");
+      expect(events.some((e) => e.type === "final")).toBe(true);
+    },
+    240_000,
+  );
+
+  // 真实模型应通过 ask_user 触发用户输入中断，并在恢复后继续执行 / Real model should ask, resume, and continue
+  test(
+    "L6d: resumes from an ask_user clarification interrupt",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l6-ask-user");
+      const outputPath = join(env.workspace, "user-choice.txt");
+      const answer = "chosen by real ask_user";
+
+      const initialEvents: AgentEvent[] = [];
+      for await (const event of streamCodeAgent({
+        task: [
+          "Before doing any file work, call ask_user to ask what exact content should be written.",
+          "Provide two concrete options and allow free text.",
+          "After the user answers, create user-choice.txt with exactly the user's answer as the file content.",
+        ].join(" "),
+        ...env,
+      })) {
+        initialEvents.push(event);
+        if (event.type === "interrupt" || event.type === "final") break;
+      }
+
+      const interrupt = initialEvents.find((event) => event.type === "interrupt");
+      expect(JSON.stringify(interrupt?.data)).toContain("user_input");
+
+      const resumedEvents = await continueWithResumes(env, { answer });
+      const events = [...initialEvents, ...resumedEvents];
+
+      expect(existsSync(outputPath)).toBe(true);
+      expect(readFileSync(outputPath, "utf8")).toContain(answer);
+      expect(events.some((event) => event.type === "final")).toBe(true);
+    },
+    240_000,
+  );
 });
 
 // ============================================================================
@@ -432,6 +499,94 @@ async function continueApproving(
   return events;
 }
 
+/** 用给定恢复值继续执行，遇到工具审批则自动批准 / Continue with a resume value and auto-approve tool interrupts */
+async function continueWithResumes(
+  input: ContinueInput,
+  initialResume: AgentResumeValue,
+): Promise<AgentEvent[]> {
+  const events: AgentEvent[] = [];
+  let resume = initialResume;
+
+  for (let i = 0; i < 12; i++) {
+    let interrupted = false;
+    for await (const event of resumeCodeAgent({ ...input, resume })) {
+      events.push(event);
+      if (event.type === "final") return events;
+      if (event.type === "interrupt") {
+        interrupted = true;
+        resume = JSON.stringify(event.data).includes("tool_approval")
+          ? { approved: true }
+          : initialResume;
+        break;
+      }
+    }
+    if (!interrupted) return events;
+  }
+
+  return events;
+}
+
+/** 从事件流中查找失败工具结果 / Find a failed tool result from streamed events */
+function findToolFailure(events: AgentEvent[]): { reason: string; guidance: string } | null {
+  for (const value of walkValues(events)) {
+    const content = messageContent(value);
+    if (!content) continue;
+    try {
+      const parsed = JSON.parse(content) as {
+        failure?: { reason?: unknown; guidance?: unknown };
+      };
+      if (
+        typeof parsed.failure?.reason === "string" &&
+        typeof parsed.failure.guidance === "string"
+      ) {
+        return {
+          reason: parsed.failure.reason,
+          guidance: parsed.failure.guidance,
+        };
+      }
+    } catch {
+      // 事件流里也包含普通文本消息 / Stream also contains plain text messages
+    }
+  }
+  return null;
+}
+
+/** 提取 LangChain 消息内容，兼容实例字段和序列化 kwargs / Extract LangChain message content */
+function messageContent(value: unknown): string | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.content === "string") {
+    return record.content;
+  }
+  const kwargs = record.kwargs;
+  if (kwargs && typeof kwargs === "object") {
+    const content = (kwargs as Record<string, unknown>).content;
+    if (typeof content === "string") {
+      return content;
+    }
+  }
+  return null;
+}
+
+/** 递归遍历事件对象值 / Recursively walk event values */
+function* walkValues(value: unknown): Generator<unknown> {
+  yield value;
+  if (!value || typeof value !== "object") {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      yield* walkValues(item);
+    }
+    return;
+  }
+  for (const item of Object.values(value as Record<string, unknown>)) {
+    yield* walkValues(item);
+  }
+}
+
 /** 创建测试 Shell 执行器，拦截文件读写 / Create test shell executor, intercept file reads/writes */
 function createTestShellExecutor() {
   return async (input: ShellInput): Promise<ShellResult> => {
@@ -464,9 +619,18 @@ function createTestShellExecutor() {
       input.command.match(/type\s+([^"\s]+)/i);
     if (readMatch) {
       const target = isAbsolute(readMatch[1]) ? readMatch[1] : join(input.workspace, readMatch[1]);
+      if (!existsSync(target)) {
+        return {
+          ok: false,
+          command: input.command,
+          exitCode: 1,
+          stdout: "",
+          stderr: `File not found: ${readMatch[1]}`,
+        };
+      }
       return {
         ok: true, command: input.command, exitCode: 0,
-        stdout: existsSync(target) ? readFileSync(target, "utf8") : "",
+        stdout: readFileSync(target, "utf8"),
         stderr: "",
       };
     }
