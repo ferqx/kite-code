@@ -115,8 +115,10 @@ Clarification policy:
 - After receiving an ask_user answer, incorporate it into the plan with update_plan or continue the task.
 
 Execution policy:
-- Use read tools to inspect before editing.
+- Use read_file for known file paths, and use shell_execute with intent="inspect" for directory listing, text lookup, git read-only checks, or other read-only shell inspection.
 - Use write and execution tools only when they are needed to complete the requested task.
+- Use shell_execute with intent="verify" when the intent is tests, typecheck, build, lint, or smoke verification.
+- For shell_execute, provide a concrete command and add objective, justification, expected_observation, failure_strategy, and grant_request when they help the user review the action.
 - For code changes, final answers must include changed scope and verification results.
 - If the next step needs tool approval, user confirmation, or more command output, do not present the current draft as final.
 - Only finish when the request is handled or when you can clearly explain why completion is blocked.

@@ -1,4 +1,10 @@
-import type { AgentPlan, ShellResult, WorkspaceAccess } from "../shared/types";
+import type {
+  AgentPlan,
+  ShellResult,
+  ShellGrantUsed,
+  ShellIntent,
+  WorkspaceAccess,
+} from "../shared/types";
 
 /** 工具失败时提供给模型的结构化原因和用法提示 / Structured tool failure guidance for the model */
 export interface ToolFailure {
@@ -14,12 +20,29 @@ export interface ToolFailure {
 
 /** 工具执行结果类型 / Tool execution result type */
 export type ToolExecutionResult = ShellResult & {
+  /** 执行该结果对应的工具名称 / Tool name that produced this result */
+  tool?: string;
   /** 失败时交给模型的结构化指导 / Structured guidance returned on failure */
   failure?: ToolFailure;
   /** 文件工具返回的相对路径 / Relative path returned by file tools */
   path?: string;
   /** update_plan 返回的持久化计划 / Plan state returned by update_plan */
   plan?: AgentPlan;
+  /** shell_execute 返回的 action envelope 元数据 / Action envelope metadata returned by shell_execute */
+  action?: {
+    /** 模型表达的命令意图 / Model-declared command intent */
+    intent?: ShellIntent;
+    /** 当前命令要达成的目标 / Objective for this command */
+    objective?: string;
+    /** 预期观察结果 / Expected observation */
+    expectedObservation?: string;
+    /** 失败后的处理策略 / Strategy if the command fails */
+    failureStrategy?: string;
+    /** 模型建议的 prefix 授权规则 / Suggested prefix grant rule */
+    prefixRule?: string[];
+    /** 实际使用的授权来源 / Actual grant source used */
+    grantUsed: ShellGrantUsed;
+  };
   /** 保留给未来显式访问权限切换工具的更新 / Reserved for future explicit access-switch tool updates */
   workspaceAccess?: WorkspaceAccess;
 };

@@ -48,6 +48,56 @@ describe("cli argument parsing", () => {
     expect(args.approve).toBe(false);
   });
 
+  // 验证工具审批恢复可以携带审批 hash 和替换命令 / Tool approval resume accepts approval hash and replacement command
+  test("resume accepts approval hash and replacement command", () => {
+    const args = parseArgs([
+      "resume",
+      "--thread",
+      "conversation-a",
+      "--approve",
+      "--approval-hash",
+      "hash-a",
+      "--replace-command",
+      "bun test tests/graph.test.ts",
+    ]);
+
+    expect(args.approvalHash).toBe("hash-a");
+    expect(args.replacementCommand).toBe("bun test tests/graph.test.ts");
+    expect(args.approvalGrant).toBe("approve_once");
+  });
+
+  // 验证 resume 支持同命令授权 / Verify resume accepts same-command approval grants
+  test("resume accepts approve-same-command grant", () => {
+    const args = parseArgs([
+      "resume",
+      "--thread",
+      "conversation-a",
+      "--approve-same-command",
+      "--approval-hash",
+      "hash-a",
+    ]);
+
+    expect(args.approve).toBe(true);
+    expect(args.approvalGrant).toBe("same_command");
+    expect(args.approvalHash).toBe("hash-a");
+  });
+
+  // 验证 resume 支持当前 thread 的 full_access 授权 / Verify resume accepts full-access grants
+  test("resume accepts full-access grant", () => {
+    const args = parseArgs([
+      "resume",
+      "--thread",
+      "conversation-a",
+      "--full-access",
+      "--approval-hash",
+      "hash-a",
+    ]);
+
+    expect(args.approve).toBe(true);
+    expect(args.approvalGrant).toBe("full_access");
+    expect(args.approvalHash).toBe("hash-a");
+  });
+
   // 验证 run 命令支持新的 --mode read-only/write 值，并保留 plan/builder 兼容值 / Verify run accepts workspace access mode values
   test("run accepts explicit workspace access mode values", () => {
     const args = parseArgs(["run", "--mode", "read-only", "--task", "Create hello.txt"]);

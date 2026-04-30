@@ -1,7 +1,18 @@
-import type { AgentPlan, ShellResult, WorkspaceAccess } from "../shared/types";
+import type {
+  AgentPhase,
+  AgentPlan,
+  ShellGrantUsed,
+  ShellResult,
+  ThreadAuthorizationState,
+  WorkspaceAccess,
+} from "../shared/types";
 import { editFile, readFile, writeFile } from "../tools/file";
-import { isReadOnlyShellCommand } from "../tools/definitions";
 import { shellTool, type ShellExecutor } from "../tools/shell";
+import {
+  defaultPhaseForWorkspaceAccess,
+  evaluateToolPolicy,
+  normalizeAuthorizationState,
+} from "./tool-policy";
 import type { PendingToolRequest } from "./tool-requests";
 import type { ToolExecutionResult } from "./tool-result";
 
@@ -12,7 +23,29 @@ export async function runApprovedTool(
   shellExecutor?: ShellExecutor,
   workspaceAccess: WorkspaceAccess = "write",
   _existingPlan: AgentPlan | null = null,
+  phase: AgentPhase = defaultPhaseForWorkspaceAccess(workspaceAccess),
+  authorization: ThreadAuthorizationState | null = null,
+  approvedGrant: ShellGrantUsed = "none",
+  threadId = "",
 ): Promise<ToolExecutionResult> {
+  const policy = evaluateToolPolicy({
+    request,
+    workspaceAccess,
+    phase,
+    workspace,
+    threadId,
+    authorization: normalizeAuthorizationState(authorization),
+  });
+  if (!policy.allowed) {
+    return withFailureGuidance(request, {
+      ok: false,
+      command: request.protectedCommand,
+      exitCode: -1,
+      stdout: "",
+      stderr: `Rejected by tool policy: ${policy.reason}`,
+    });
+  }
+
   if (request.name === "update_plan") {
     return withFailureGuidance(request, {
       ok: true,
@@ -22,33 +55,6 @@ export async function runApprovedTool(
       stderr: "",
       plan: request.args,
     });
-  }
-
-  if (request.name === "shell_read") {
-    if (!isReadOnlyShellCommand(request.args.command)) {
-      return withFailureGuidance(request, {
-        ok: false,
-        command: request.args.command,
-        exitCode: -1,
-        stdout: "",
-        stderr: "Rejected: shell_read only accepts read-only shell commands.",
-      });
-    }
-    return withFailureGuidance(
-      request,
-      await runShellForTool(workspace, request.args.command, shellExecutor),
-    );
-  }
-
-  if (request.name === "search") {
-    return withFailureGuidance(
-      request,
-      await runShellForTool(
-        workspace,
-        buildSearchShellCommand(request.args.pattern, request.args.path),
-        shellExecutor,
-      ),
-    );
   }
 
   if (request.name === "read_file") {
@@ -65,16 +71,6 @@ export async function runApprovedTool(
       stdout: result.content,
       stderr: result.error ?? "",
       path: request.args.path,
-    });
-  }
-
-  if (workspaceAccess === "read-only") {
-    return withFailureGuidance(request, {
-      ok: false,
-      command: request.protectedCommand,
-      exitCode: -1,
-      stdout: "",
-      stderr: "Rejected: read-only workspace access allows read-only tools only.",
     });
   }
 
@@ -133,17 +129,28 @@ export async function runApprovedTool(
     });
   }
 
-  return withFailureGuidance(
-    request,
-    await runShellForTool(workspace, request.args.command, shellExecutor),
-  );
-}
+  if (request.name === "shell_execute") {
+    const result = await runShellForTool(workspace, request.args.command, shellExecutor);
+    return withFailureGuidance(request, {
+      ...result,
+      action: {
+        intent: request.args.intent,
+        objective: request.args.objective,
+        expectedObservation: request.args.expected_observation,
+        failureStrategy: request.args.failure_strategy,
+        prefixRule: request.args.prefix_rule,
+        grantUsed: approvedGrant === "none" ? policy.grantUsed : approvedGrant,
+      },
+    });
+  }
 
-/** 构建 search 工具的 shell 命令 / Build shell command for search tool */
-function buildSearchShellCommand(pattern: string, globPath?: string): string {
-  const escaped = pattern.replace(/'/g, "'\\''");
-  const pathArg = globPath ? `--glob '${globPath.replace(/'/g, "'\\''")}'` : "";
-  return `rg -n --no-heading ${pathArg} '${escaped}'`;
+  return {
+    ok: false,
+    command: "unsupported_tool",
+    exitCode: -1,
+    stdout: "",
+    stderr: "Unsupported tool request.",
+  };
 }
 
 /** 执行 shell 并把异常转换为工具失败结果，避免阻断 ToolMessage 返回 / Convert shell exceptions into failed tool results */
@@ -170,8 +177,13 @@ function withFailureGuidance(
   request: PendingToolRequest,
   result: ToolExecutionResult,
 ): ToolExecutionResult {
+  const resultWithTool = {
+    ...result,
+    tool: request.name,
+  };
+
   if (result.ok !== false) {
-    return result;
+    return resultWithTool;
   }
 
   const reason =
@@ -180,7 +192,7 @@ function withFailureGuidance(
     `Tool ${request.name} failed with exit code ${result.exitCode}.`;
 
   return {
-    ...result,
+    ...resultWithTool,
     failure: {
       message: "Tool execution failed.",
       tool: request.name,
@@ -194,17 +206,13 @@ function withFailureGuidance(
 function toolUsageGuidance(request: PendingToolRequest): string {
   switch (request.name) {
     case "read_file":
-      return "Use read_file with a relative path inside the workspace. If the path is uncertain, use search or shell_read to locate the file first, then retry with the exact path.";
+      return "Use read_file with a relative path inside the workspace. If the path is uncertain, use shell_execute with intent inspect and a read-only command such as rg, ls, find, or git status to locate the file first, then retry with the exact path.";
     case "edit_file":
       return "Use edit_file only after read_file. old_string must exactly match existing file content, including whitespace and indentation; if the same text appears multiple times, make old_string more specific or set replace_all: true.";
     case "write_file":
       return "Use write_file with a relative path and complete file content when creating or fully overwriting a file. For small changes to an existing file, prefer read_file followed by edit_file.";
-    case "search":
-      return "Use search with a non-empty text or regex pattern and an optional glob path such as src/**/*.ts. If the pattern contains regex characters you mean literally, escape them or use a simpler literal pattern.";
-    case "shell_read":
-      return "Use shell_read only for read-only inspection commands, such as ls, pwd, cat, sed -n, rg, git status, git diff, git log, or git show. Do not write files, delete files, install dependencies, run tests, or execute project code with shell_read.";
     case "shell_execute":
-      return "Use shell_execute for commands that execute project code, run tests, build, install, write, or delete. Expect protected commands to require approval, and use stdout/stderr to adjust the next command if execution fails.";
+      return "Use shell_execute with a concrete command and action metadata. Set intent to inspect for read-only checks such as rg, ls, cat, or git status; set intent to verify for tests, typecheck, build, lint, or smoke checks. Provide objective, expected_observation, and failure_strategy when they help review and recovery.";
     case "update_plan":
       return "Use update_plan with a complete plan object: name, description, status, and ordered steps with statuses. It must only update planning state and must not mutate the workspace.";
     case "ask_user":

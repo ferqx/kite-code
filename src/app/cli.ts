@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { loadAgentConfig } from "../config/index";
 import { resumeCodeAgent, streamCodeAgent } from "./runner";
-import type { WorkspaceAccessRequest } from "../shared/types";
+import type { ShellApprovalGrant, WorkspaceAccessRequest } from "../shared/types";
 
 /** CLI 解析后的参数 / CLI parsed arguments */
 export interface ParsedArgs {
@@ -21,6 +21,12 @@ export interface ParsedArgs {
   mode: WorkspaceAccessRequest;
   /** 恢复时是否审批通过 / Whether approved on resume */
   approve: boolean;
+  /** 用户选择的 shell 授权粒度 / User-selected shell approval grant */
+  approvalGrant?: ShellApprovalGrant;
+  /** 审批请求 hash / Approval request hash */
+  approvalHash?: string;
+  /** 替换后审批执行的命令 / Replacement command to approve */
+  replacementCommand?: string;
   /** 恢复 ask_user 中断时传入的用户回答 / User answer for ask_user interrupt resume */
   answer?: string;
 }
@@ -57,7 +63,12 @@ export async function main(): Promise<void> {
           config,
           resume:
             args.answer === undefined
-              ? { approved: args.approve }
+              ? {
+                  approved: args.approve,
+                  grant: args.approvalGrant,
+                  approvalHash: args.approvalHash,
+                  replacementCommand: args.replacementCommand,
+                }
               : { answer: args.answer },
         });
 
@@ -85,6 +96,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const explicitThread = value("--thread", "");
   const mode = parseMode(value("--mode", "auto"));
   const answer = optionalValue("--answer");
+  const approvalHash = optionalValue("--approval-hash");
+  const replacementCommand = optionalValue("--replace-command");
+  const approvalGrant = parseApprovalGrant(argv);
 
   return {
     command,
@@ -96,9 +110,26 @@ export function parseArgs(argv: string[]): ParsedArgs {
       value("--checkpoints", join(cwd, ".openpx", "checkpoints.sqlite")),
     ),
     mode,
-    approve: argv.includes("--approve"),
+    approve: approvalGrant !== undefined,
+    approvalGrant,
+    approvalHash,
+    replacementCommand,
     answer,
   };
+}
+
+/** 解析审批授权粒度；--approve 保持 approve_once 兼容语义 / Parse approval grant flags */
+function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
+  if (argv.includes("--full-access")) {
+    return "full_access";
+  }
+  if (argv.includes("--approve-same-command")) {
+    return "same_command";
+  }
+  if (argv.includes("--approve")) {
+    return "approve_once";
+  }
+  return undefined;
 }
 
 /** 提取非选项参数拼接为任务文本 / Extract non-option args as task text */
@@ -116,6 +147,8 @@ function positionalTask(argv: string[]): string {
     "--checkpoints",
     "--mode",
     "--answer",
+    "--approval-hash",
+    "--replace-command",
   ]);
   const parts: string[] = [];
   // 收集非选项位置参数 / Collect non-option positional args
@@ -166,6 +199,10 @@ Options:
   --checkpoints <path>   SQLite checkpoint path
   --mode <mode>          auto, read-only, write, plan, or builder
   --approve              Resume a tool approval interrupt with approval
+  --approve-same-command Approve current command and future exact same shell command in this thread
+  --full-access          Allow all future shell_execute commands in this thread
+  --approval-hash <hash> Approval hash from the tool_approval interrupt
+  --replace-command <cmd> Replace the pending command and approve that command
   --answer <text>        Resume a user input interrupt with an answer`);
 }
 

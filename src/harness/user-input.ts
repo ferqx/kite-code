@@ -40,6 +40,7 @@ export function userInputToolMessage(
   return new ToolMessage({
     content: JSON.stringify({
       ok: true,
+      tool: request.name,
       ...normalizeUserInputResume(resume),
     }),
     tool_call_id: request.id ?? "missing-tool-call-id",

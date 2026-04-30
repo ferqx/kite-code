@@ -23,8 +23,6 @@ describe("code agent tool definitions", () => {
       "read_file",
       "edit_file",
       "write_file",
-      "search",
-      "shell_read",
       "shell_execute",
       "update_plan",
       "ask_user",
@@ -97,15 +95,10 @@ describe("code agent tool definitions", () => {
       "read_file",
       "edit_file",
       "write_file",
-      "search",
-      "shell_read",
       "shell_execute",
       "update_plan",
       "ask_user",
     ]);
-    expect(String(tools.find((item) => item.name === "shell_read")?.description)).toContain(
-      "Read-only",
-    );
     expect(String(tools.find((item) => item.name === "update_plan")?.description)).toContain(
       "current plan state",
     );
@@ -114,8 +107,35 @@ describe("code agent tool definitions", () => {
     );
   });
 
+  // 验证 shell_execute schema 收敛验证语义和授权建议字段 / shell_execute schema carries action envelope metadata and grant hints
+  test("shell_execute schema accepts action envelope fields", () => {
+    const tools = createAgentTools({
+      workspace: "D:\\workspace",
+    });
+    const shellExecute = tools.find((item) => item.name === "shell_execute")!;
+
+    expect(
+      shellExecute.schema.safeParse({
+        command: "bun test tests/graph.test.ts",
+        intent: "verify",
+        objective: "验证图路由行为",
+        justification: "改动涉及 approval 路由，需要运行相关测试。",
+        expected_observation: "graph tests pass",
+        failure_strategy: "读取失败输出并修正最小相关实现。",
+        prefix_rule: ["bun", "test"],
+        grant_request: "same_command",
+      }).success,
+    ).toBe(true);
+    expect(
+      shellExecute.schema.safeParse({
+        command: "bun test",
+        intent: "unsupported",
+      }).success,
+    ).toBe(false);
+  });
+
   // 验证常见只读 shell 命令（ls, cat, rg, git status 等）被正确分类为只读 / Common read-only shell commands (ls, cat, rg, git status, etc.) are correctly classified as read-only
-  test("classifies conservative shell_read commands as read-only", () => {
+  test("classifies conservative shell_execute inspect commands as read-only", () => {
     expect(isReadOnlyShellCommand("pwd")).toBe(true);
     expect(isReadOnlyShellCommand("ls src")).toBe(true);
     expect(isReadOnlyShellCommand("rg -n \"Plan\" src tests")).toBe(true);
@@ -133,8 +153,8 @@ describe("code agent tool definitions", () => {
     expect(isReadOnlyShellCommand("git diff -- src/app/runner.ts")).toBe(true);
   });
 
-  // 验证可能写入、删除或执行项目代码的 shell 命令被拒绝（sed -i, rm -rf, git add, mkdir 等） / Shell commands that can write, delete, or execute project code (sed -i, rm -rf, git add, mkdir, etc.) are rejected
-  test("rejects shell_read commands that can write, delete, or execute project code", () => {
+  // 验证可能写入、删除或执行项目代码的 shell 命令不会被分类为只读（sed -i, rm -rf, git add, mkdir 等） / Shell commands that can write, delete, or execute project code (sed -i, rm -rf, git add, mkdir, etc.) are not classified as read-only
+  test("does not classify mutating shell_execute commands as read-only", () => {
     expect(isReadOnlyShellCommand("echo hi > hello.txt")).toBe(false);
     expect(isReadOnlyShellCommand("sed -i 's/a/b/' src/a.ts")).toBe(false);
     expect(isReadOnlyShellCommand("rm -rf src")).toBe(false);

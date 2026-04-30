@@ -42,8 +42,58 @@ export interface ShellResult {
   stderr: string;
 }
 
+/** shell_execute 的模型意图 / Model intent for shell_execute */
+export type ShellIntent = "inspect" | "verify" | "build" | "test" | "git" | "other";
+
+/** shell_execute 的授权请求类型 / Shell approval grant requested or selected */
+export type ShellApprovalGrant = "approve_once" | "same_command" | "full_access";
+
+/** shell_execute 工具结果中的授权来源 / Grant source recorded in shell_execute results */
+export type ShellGrantUsed = "none" | ShellApprovalGrant;
+
+/** shell_execute action envelope / shell_execute action envelope */
+export interface ShellActionEnvelope {
+  /** shell 命令 / Shell command */
+  command: string;
+  /** 模型表达的命令意图 / Model-declared command intent */
+  intent?: ShellIntent;
+  /** 当前命令要达成的目标 / Objective for this command */
+  objective?: string;
+  /** 模型给出的执行理由 / Model-provided justification */
+  justification?: string;
+  /** 预期观察结果 / Expected observation */
+  expected_observation?: string;
+  /** 失败后的处理策略 / Strategy if the command fails */
+  failure_strategy?: string;
+  /** 模型建议的未来 prefix 授权规则，仅用于审计展示 / Suggested future prefix grant rule for audit only */
+  prefix_rule?: string[];
+  /** 模型建议的授权粒度，最终以用户 resume payload 为准 / Suggested grant, user resume decides */
+  grant_request?: ShellApprovalGrant;
+}
+
+/** 当前 thread 的 shell 授权状态 / Thread-scoped shell authorization state */
+export interface ThreadAuthorizationState {
+  /** 当前授权模式 / Current authorization mode */
+  mode: "default" | "full_access";
+  /** 已批准的 same_command 授权记录 / Approved exact-command grants */
+  commandGrants: Record<
+    string,
+    {
+      /** 工作目录路径 / Workspace path */
+      workspace: string;
+      /** LangGraph thread id / LangGraph thread id */
+      threadId: string;
+      /** command.trim() 后的精确命令 / Exact trimmed command */
+      command: string;
+    }
+  >;
+}
+
 /** 工作区访问权限 / Workspace access level */
 export type WorkspaceAccess = "read-only" | "write";
+
+/** Agent 执行阶段 / Agent execution phase */
+export type AgentPhase = "planning" | "building";
 
 /** CLI/API 层面的访问请求（含兼容 mode 值）/ CLI/API-facing workspace access request including legacy mode values */
 export type WorkspaceAccessRequest =
@@ -80,6 +130,12 @@ export type ToolApprovalResumeValue =
   | {
       /** 是否审批通过 / Whether approved */
       approved?: boolean;
+      /** 用户选择的授权粒度 / User-selected grant scope */
+      grant?: ShellApprovalGrant;
+      /** 当前审批请求 hash / Current approval request hash */
+      approvalHash?: string;
+      /** 用户替换后的命令 / User-provided replacement command */
+      replacementCommand?: string;
       /** 拒绝或审批原因 / Reason for approval or rejection */
       reason?: string;
     };

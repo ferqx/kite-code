@@ -1,6 +1,10 @@
 import { END } from "@langchain/langgraph";
 import type { CodeAgentState } from "./state";
 import { getPendingToolRequest } from "./tool-requests";
+import {
+  defaultPhaseForWorkspaceAccess,
+  evaluateToolPolicy,
+} from "./tool-policy";
 
 /** START 入口路由：进入单一 agent / Entry routing to the single agent */
 export function routeEntry(_state: CodeAgentState): "agent" {
@@ -18,18 +22,18 @@ export function routeAfterAgent(
   if (request.name === "ask_user") {
     return "user_input";
   }
-  if (state.workspaceAccess === "read-only") {
-    return "tools";
-  }
-  if (
-    request.name === "update_plan" ||
-    request.name === "read_file" ||
-    request.name === "search" ||
-    request.name === "shell_read"
-  ) {
-    return "tools";
-  }
-  return "approval";
+  const workspaceAccess = state.workspaceAccess ?? "write";
+  const decision = evaluateToolPolicy({
+    request,
+    workspaceAccess,
+    phase: state.phase ?? defaultPhaseForWorkspaceAccess(workspaceAccess),
+    workspace: state.workspace,
+    threadId: state.threadId,
+    authorization: state.authorization,
+  });
+
+  if (!decision.allowed) return "tools";
+  return decision.requiresApproval ? "approval" : "tools";
 }
 
 /** approval 节点后的路由逻辑 / Routing after approval node */

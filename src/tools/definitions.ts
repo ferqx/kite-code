@@ -5,7 +5,6 @@ import {
   readFile,
   editFile,
   writeFile,
-  search,
 } from "./file";
 
 /** 创建 Agent 工具集输入 / Input for creating agent tools */
@@ -75,66 +74,10 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     },
   );
 
-  const searchTool = tool(
-    async ({ pattern, path, context_lines, case_sensitive, max_results }) =>
-      JSON.stringify(
-        await search({
-          workspace: input.workspace,
-          pattern,
-          globPath: path,
-          contextLines: context_lines,
-          caseSensitive: case_sensitive,
-          maxResults: max_results,
-        }),
-      ),
-    {
-      name: "search",
-      description:
-        "Search for a pattern in workspace files. Use this to find function definitions, variable usages, imports, or any text pattern. Returns matching lines with file paths and line numbers. Supports regex patterns wrapped in / /.",
-      schema: z.object({
-        pattern: z.string().describe("Text or regex pattern to search for. Use /pattern/flags for regex (e.g. '/function\\s+\\w+/')"),
-        path: z.string().optional().describe("Glob pattern to filter files (e.g. 'src/**/*.ts', default: all source files)"),
-        context_lines: z.number().optional().describe("Number of context lines around each match (default: 0)"),
-        case_sensitive: z.boolean().optional().describe("Case sensitive search (default: false)"),
-        max_results: z.number().optional().describe("Maximum number of results (default: 50)"),
-      }),
-    },
-  );
-
-  const shellRead = tool(
-    async ({ command }) => {
-      // 拒绝非只读命令 / Reject non-read-only commands
-      if (!isReadOnlyShellCommand(command)) {
-        return JSON.stringify({
-          ok: false,
-          command,
-          exitCode: -1,
-          stdout: "",
-          stderr: "Rejected: shell_read allows read-only shell commands only.",
-        });
-      }
-
-      return JSON.stringify(
-        await (input.shellExecutor ?? shellTool)({
-          workspace: input.workspace,
-          command,
-        }),
-      );
-    },
-    {
-      name: "shell_read",
-      description:
-        "Read-only shell command. Use it to inspect files, list directories, search text, and read git status/diff/log/show. It must not write, delete, run tests, install dependencies, or execute project code.",
-      schema: z.object({
-        command: z.string().describe("Read-only shell command to execute in the workspace"),
-      }),
-    },
-  );
-
   const shellExecute = tool(
     async ({ command }) =>
       JSON.stringify(
-        await shellTool({
+        await (input.shellExecutor ?? shellTool)({
           workspace: input.workspace,
           command,
         }),
@@ -142,9 +85,31 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     {
       name: "shell_execute",
       description:
-        "Execute a platform shell command in the local workspace. Use this for reading, deleting, listing, testing, and running local commands. Commands are reviewed before execution.",
+        "Execute a shell command action envelope in the local workspace. Use intent='verify' for tests, typecheck, build, lint, or smoke checks. Provide objective, justification, expected_observation, failure_strategy, and optional grant_request when they help the user review the command. Commands are reviewed by the harness before execution.",
       schema: z.object({
         command: z.string().describe("Shell command to execute in the workspace"),
+        intent: z
+          .enum(["inspect", "verify", "build", "test", "git", "other"])
+          .optional()
+          .describe("Command intent"),
+        objective: z.string().optional().describe("What this command should accomplish"),
+        justification: z.string().optional().describe("Why this command is needed"),
+        expected_observation: z
+          .string()
+          .optional()
+          .describe("Expected stdout/stderr or observable result"),
+        failure_strategy: z
+          .string()
+          .optional()
+          .describe("How to proceed if the command fails"),
+        prefix_rule: z
+          .array(z.string())
+          .optional()
+          .describe("Suggested future prefix grant rule for audit only"),
+        grant_request: z
+          .enum(["approve_once", "same_command", "full_access"])
+          .optional()
+          .describe("Suggested approval grant; the user resume payload decides the actual grant"),
       }),
     },
   );
@@ -153,8 +118,6 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     readFileTool,
     editFileTool,
     writeFileTool,
-    searchTool,
-    shellRead,
     shellExecute,
     createUpdatePlanTool(),
     createAskUserTool(),
@@ -259,7 +222,7 @@ function createAskUserTool() {
   );
 }
 
-/** 只读 shell 工具允许的命令白名单 / Read-only command allowlist for shell_read */
+/** shell_execute inspect 允许直通的只读命令白名单 / Read-only command allowlist for shell_execute inspect */
 const PLAN_READ_ONLY_COMMANDS = new Set([
   "awk",
   "cat",
@@ -288,7 +251,7 @@ const PLAN_READ_ONLY_COMMANDS = new Set([
   "wc",
 ]);
 
-/** shell_read 允许的 Git 只读子命令白名单 / Read-only git subcommand allowlist for shell_read */
+/** shell_execute inspect 允许直通的 Git 只读子命令白名单 / Read-only git subcommand allowlist for shell_execute inspect */
 const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
   "branch",
   "diff",
@@ -299,7 +262,7 @@ const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
   "status",
 ]);
 
-/** 检查命令是否在 shell_read 只读白名单中 / Check if command is in shell_read allowlist */
+/** 检查命令是否可作为 shell_execute inspect 直通 / Check if command can bypass approval as shell_execute inspect */
 export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = command.trim();
   // 拒绝对空命令和包含输出重定向的命令 / Reject empty commands and commands with output redirection
@@ -322,7 +285,7 @@ function splitShellSegments(command: string): string[] {
     .filter(Boolean);
 }
 
-/** 检查单个命令段是否为 shell_read 允许的只读命令 / Check if individual segment is read-only */
+/** 检查单个命令段是否为允许直通的只读命令 / Check if individual segment is read-only */
 function isPlanReadOnlySegment(segment: string): boolean {
   // 将命令段解析为 token 数组，支持引号 / Parse segment into token array, supporting quotes
   const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];

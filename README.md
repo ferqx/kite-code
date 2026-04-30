@@ -10,8 +10,12 @@
 - 当 provider 元数据暴露缓存 token 计数时，从流式模型响应中提取 prompt cache 指标。
 - 使用 Bun 原生 SQLite checkpointer 持久化短期 thread 状态。
 - 输出标准化的图事件流，包括 interrupt 和 final 事件。
-- 通过 LangGraph `interrupt()` 和 `Command({ resume })` 为受保护工具执行提供人工审批，并为规划不确定性提供用户澄清输入。
+- 通过 LangGraph `interrupt()` 和 `Command({ resume })` 为受保护工具执行提供人工审批；审批 payload 由 harness 生成，包含风险、预期影响和 `approvalHash`。
 - 提供工作区安全的文件 patch 工具和结构化 shell 工具结果。
+- 模型可见工具表面固定为 `read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan` 和 `ask_user`。
+- `shell_execute` 使用 action envelope 表达命令、意图、目标、预期观察和失败策略；验证命令通过 `intent: "verify"` 表达。
+- 文件定位、文本检索、目录查看和 git 只读检查统一通过 `shell_execute` 的 `intent: "inspect"` 承载；没有独立的只读 shell 或文本检索工具。
+- 支持当前 thread 内的 shell 授权状态：默认可单次审批或授权同一命令，用户显式开启 `full_access` 后后续 `shell_execute` 不再请求确认。
 - 提供真实配置模型的端到端测试入口。
 
 ## 源码结构
@@ -114,6 +118,30 @@ bun run agent run --mode read-only --thread demo --user local --task "Inspect th
 bun run agent resume --thread demo --user local --approve
 ```
 
+推荐把 interrupt 中的 `approval.approvalHash` 一并带回，确保恢复时审批的是同一个工具请求：
+
+```bash
+bun run agent resume --thread demo --user local --approve --approval-hash "<hash-from-interrupt>"
+```
+
+如果需要调整待执行命令，可以在同一次恢复中替换命令。替换后的命令仍会经过工具安全策略判定：
+
+```bash
+bun run agent resume --thread demo --user local --approve --approval-hash "<hash-from-interrupt>" --replace-command "bun test tests/graph.test.ts"
+```
+
+如果希望当前 thread 后续重复执行完全相同的 shell 命令不再请求确认，可以使用同命令授权。匹配规则是同一 workspace/thread 下 `command.trim()` 完全一致，和模型解释文本或 `prefix_rule` 无关：
+
+```bash
+bun run agent resume --thread demo --user local --approve-same-command --approval-hash "<hash-from-interrupt>"
+```
+
+如果用户明确允许当前 thread 后续所有 `shell_execute` 命令直接执行，可以开启 `full_access`。该授权只保存在当前 thread checkpoint 中，新 thread 不继承；开启后包括原本 destructive 分类的 shell 命令也不会再进入审批或默认拒绝：
+
+```bash
+bun run agent resume --thread demo --user local --full-access --approval-hash "<hash-from-interrupt>"
+```
+
 当模型在规划时调用 `ask_user` 并发出 `kind: "user_input"` 的中断事件时，可以传入用户选择或自由文本恢复执行：
 
 ```bash
@@ -136,4 +164,4 @@ bun test
 bun run test:real
 ```
 
-真实测试套件位于 `tests/real-agent.real.ts`，因此不会被 Bun 默认测试发现机制拾取。`test:real` 使用 `--concurrent --max-concurrency 3` 并发运行真实模型用例，以缩短等待时间并避免过高并发压到 provider。它会调用配置的默认模型，覆盖受保护工具审批、文件写入和 checkpoint 数据库检查。脚本会沿用当前 shell 的代理环境；如果网络需要代理或需要取消代理，请在项目脚本外部配置环境变量。
+真实测试套件位于 `tests/real-agent.real.ts`，因此不会被 Bun 默认测试发现机制拾取。`test:real` 使用 `--concurrent --max-concurrency 3` 并发运行真实模型用例，以缩短等待时间并避免过高并发压到 provider。它会调用配置的默认模型，覆盖当前全部模型可见工具：`read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan` 和 `ask_user`，同时覆盖受保护工具审批、shell 授权和 checkpoint 数据库检查。脚本会沿用当前 shell 的代理环境；如果网络需要代理或需要取消代理，请在项目脚本外部配置环境变量。

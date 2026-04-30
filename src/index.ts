@@ -3,5 +3,5 @@ export { loadAgentConfig } from "./config/index";
 export { streamCodeAgent, resumeCodeAgent } from "./app/runner";
 export { BunSqliteSaver } from "./persistence/checkpoint";
 export { shellTool } from "./tools/shell";
-export { readFile, editFile, writeFile, search } from "./tools/file";
+export { readFile, editFile, writeFile } from "./tools/file";
 export type * from "./shared/types";

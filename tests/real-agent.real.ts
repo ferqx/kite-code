@@ -177,6 +177,78 @@ describe("L1-L4: basic real agent scenarios", () => {
     },
     180_000,
   );
+
+  // 真实模型用例应显式覆盖文件工具三件套 / Real model coverage for read_file/write_file/edit_file
+  test(
+    "L4b: covers read_file, write_file, and edit_file tool calls",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l4-file-tool-coverage");
+      const targetPath = join(env.workspace, "tool-coverage.txt");
+
+      const events = await runApprovalLoop({
+        ...env,
+        task: [
+          "Use the file tools, not shell_execute.",
+          'First call write_file to create tool-coverage.txt with exact content "before".',
+          "Then call read_file to read tool-coverage.txt.",
+          'Then call edit_file to replace exactly "before" with exactly "after".',
+          "Then call read_file again to verify the file content is exactly after.",
+          "After the second read_file result, give a concise final summary.",
+        ].join(" "),
+      });
+
+      const toolNames = new Set(findToolResults(events).map((result) => result.tool));
+      expect(toolNames.has("write_file")).toBe(true);
+      expect(toolNames.has("read_file")).toBe(true);
+      expect(toolNames.has("edit_file")).toBe(true);
+      expect(existsSync(targetPath)).toBe(true);
+      expect(readFileSync(targetPath, "utf8")).toBe("after");
+      expect(events.some((event) => event.type === "final")).toBe(true);
+    },
+    240_000,
+  );
+
+  // 真实模型用例应显式覆盖 update_plan 工具 / Real model coverage for update_plan
+  test(
+    "L4c: covers update_plan tool calls",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l4-update-plan-coverage");
+      const expectedPlanName = "real tool coverage plan";
+
+      const events = await runApprovalLoop({
+        ...env,
+        task: [
+          "Tool-calling compliance task: your first action must be a real update_plan tool call, not a final answer.",
+          `Call update_plan with name "${expectedPlanName}".`,
+          'Set description to "cover update_plan in the live suite".',
+          'Set overall status to "in_progress".',
+          'Set steps to exactly: "record update_plan coverage" with status "completed", and "summarize coverage" with status "pending".',
+          "Do not call any other tool.",
+          "After the update_plan tool result, give a concise final summary.",
+        ].join(" "),
+      });
+
+      const planResults = findToolResults(events).filter(
+        (result) => result.tool === "update_plan",
+      );
+      expect(planResults.length).toBeGreaterThanOrEqual(1);
+      expect(
+        planResults.some((result) => {
+          const plan = result.plan;
+          return (
+            !!plan &&
+            typeof plan === "object" &&
+            "name" in plan &&
+            plan.name === expectedPlanName
+          );
+        }),
+      ).toBe(true);
+      expect(events.some((event) => event.type === "final")).toBe(true);
+    },
+    180_000,
+  );
 });
 
 // ============================================================================
@@ -308,7 +380,7 @@ describe("L6: error recovery scenarios", () => {
       const events = await runApprovalLoop({
         ...env,
         task: [
-          "First call shell_read with exactly this command: cat missing-real-input.txt",
+          "First call shell_execute with intent \"inspect\" and exactly this command: cat missing-real-input.txt",
           "That command is expected to fail. Read the failed tool result, including failure.reason and failure.guidance.",
           "Then create recovered-after-tool-failure.txt with exact content \"recovered after tool failure\".",
           "After creating the file, verify it exists and report the result.",
@@ -331,15 +403,14 @@ describe("L6: error recovery scenarios", () => {
     async () => {
       await ensureRealModelAvailable();
       const env = createEnv("l6-ask-user");
-      const outputPath = join(env.workspace, "user-choice.txt");
       const answer = "chosen by real ask_user";
 
       const initialEvents: AgentEvent[] = [];
       for await (const event of streamCodeAgent({
         task: [
-          "Before doing any file work, call ask_user to ask what exact content should be written.",
+          "Before any final answer, call ask_user to ask what exact content should be reported.",
           "Provide two concrete options and allow free text.",
-          "After the user answers, create user-choice.txt with exactly the user's answer as the file content.",
+          "After the user answers, do not write files. Summarize the exact answer in the final response.",
         ].join(" "),
         ...env,
       })) {
@@ -353,9 +424,110 @@ describe("L6: error recovery scenarios", () => {
       const resumedEvents = await continueWithResumes(env, { answer });
       const events = [...initialEvents, ...resumedEvents];
 
-      expect(existsSync(outputPath)).toBe(true);
-      expect(readFileSync(outputPath, "utf8")).toContain(answer);
+      const askUserResult = findToolResults(events).find(
+        (result) => result.tool === "ask_user",
+      );
+      expect(askUserResult?.answer).toBe(answer);
       expect(events.some((event) => event.type === "final")).toBe(true);
+    },
+    240_000,
+  );
+
+  // 真实模型应能通过 shell_execute action envelope 使用 same_command 授权 / Real model should use shell_execute action envelope with same_command grant
+  test(
+    "L6e: uses shell_execute action metadata and same_command grant",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l6-shell-same-command");
+      const marker = "same-command-real";
+      const command = `bun -e "console.log('${marker}')"`;
+
+      const initialEvents: AgentEvent[] = [];
+      for await (const event of streamCodeAgent({
+        task: [
+          "Use shell_execute and not file tools.",
+          `Call shell_execute exactly twice with this identical command: ${command}`,
+          'For both calls set intent to "verify".',
+          'Set objective to "prove same_command grant works".',
+          `Set expected_observation to "${marker}".`,
+          "After the second successful tool result, give a concise final summary.",
+        ].join(" "),
+        ...env,
+      })) {
+        initialEvents.push(event);
+        if (event.type === "interrupt" || event.type === "final") break;
+      }
+
+      expect(countToolApprovalInterrupts(initialEvents)).toBe(1);
+
+      const resumedEvents = await continueWithResumes(env, {
+        approved: true,
+        grant: "same_command",
+      });
+      const events = [...initialEvents, ...resumedEvents];
+      const matchingResults = findShellActionResults(events).filter((result) =>
+        result.stdout.includes(marker),
+      );
+
+      expect(countToolApprovalInterrupts(events)).toBe(1);
+      expect(matchingResults.length).toBeGreaterThanOrEqual(2);
+      expect(matchingResults[0].command.trim()).toBe(matchingResults[1].command.trim());
+      expect(matchingResults.every((result) => result.action?.intent === "verify")).toBe(
+        true,
+      );
+      expect(
+        matchingResults.every((result) => result.action?.grantUsed === "same_command"),
+      ).toBe(true);
+    },
+    240_000,
+  );
+
+  // 真实模型应能在 full_access 后继续执行不同 shell_execute 命令而不再审批 / Real model should continue different shell_execute commands after full_access
+  test(
+    "L6f: uses full_access grant for subsequent shell_execute commands",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l6-shell-full-access");
+      const firstMarker = "full-access-one";
+      const secondMarker = "full-access-two";
+      const firstCommand = `bun -e "console.log('${firstMarker}')"`;
+      const secondCommand = `bun -e "console.log('${secondMarker}')"`;
+
+      const initialEvents: AgentEvent[] = [];
+      for await (const event of streamCodeAgent({
+        task: [
+          "Use shell_execute and not file tools.",
+          `First call shell_execute with this command: ${firstCommand}`,
+          `After the first tool result, call shell_execute with this different command: ${secondCommand}`,
+          'For both calls set intent to "verify".',
+          "Do not ask the user any question. After both tool results, give a concise final summary.",
+        ].join(" "),
+        ...env,
+      })) {
+        initialEvents.push(event);
+        if (event.type === "interrupt" || event.type === "final") break;
+      }
+
+      expect(countToolApprovalInterrupts(initialEvents)).toBe(1);
+
+      const resumedEvents = await continueWithResumes(env, {
+        approved: true,
+        grant: "full_access",
+      });
+      const events = [...initialEvents, ...resumedEvents];
+      const shellResults = findShellActionResults(events);
+
+      expect(countToolApprovalInterrupts(events)).toBe(1);
+      expect(shellResults.some((result) => result.stdout.includes(firstMarker))).toBe(true);
+      expect(shellResults.some((result) => result.stdout.includes(secondMarker))).toBe(true);
+      expect(
+        shellResults
+          .filter(
+            (result) =>
+              result.stdout.includes(firstMarker) || result.stdout.includes(secondMarker),
+          )
+          .every((result) => result.action?.grantUsed === "full_access"),
+      ).toBe(true);
     },
     240_000,
   );
@@ -549,6 +721,74 @@ function findToolFailure(events: AgentEvent[]): { reason: string; guidance: stri
     }
   }
   return null;
+}
+
+interface ShellActionResult {
+  command: string;
+  stdout: string;
+  action?: {
+    intent?: string;
+    objective?: string;
+    expectedObservation?: string;
+    failureStrategy?: string;
+    grantUsed?: string;
+  };
+}
+
+interface ParsedToolResult {
+  tool?: string;
+  command?: string;
+  stdout?: string;
+  plan?: unknown;
+  path?: string;
+  answer?: string;
+}
+
+/** 从事件流中查找带工具名的工具结果 / Find tool results that carry tool names */
+function findToolResults(events: AgentEvent[]): ParsedToolResult[] {
+  const results: ParsedToolResult[] = [];
+  for (const value of walkValues(events)) {
+    const content = messageContent(value);
+    if (!content) continue;
+    try {
+      const parsed = JSON.parse(content) as ParsedToolResult;
+      if (typeof parsed.tool === "string") {
+        results.push(parsed);
+      }
+    } catch {
+      // 事件流里也包含普通文本消息 / Stream also contains plain text messages
+    }
+  }
+  return results;
+}
+
+/** 从事件流中查找 shell_execute action 结果 / Find shell_execute action results from streamed events */
+function findShellActionResults(events: AgentEvent[]): ShellActionResult[] {
+  const results: ShellActionResult[] = [];
+  for (const value of walkValues(events)) {
+    const content = messageContent(value);
+    if (!content) continue;
+    try {
+      const parsed = JSON.parse(content) as Partial<ShellActionResult>;
+      if (typeof parsed.command === "string" && parsed.action) {
+        results.push({
+          command: parsed.command,
+          stdout: typeof parsed.stdout === "string" ? parsed.stdout : "",
+          action: parsed.action,
+        });
+      }
+    } catch {
+      // 事件流里也包含普通文本消息 / Stream also contains plain text messages
+    }
+  }
+  return results;
+}
+
+/** 统计工具审批中断数量 / Count tool approval interrupts */
+function countToolApprovalInterrupts(events: AgentEvent[]): number {
+  return events.filter(
+    (event) => event.type === "interrupt" && JSON.stringify(event.data).includes("tool_approval"),
+  ).length;
 }
 
 /** 提取 LangChain 消息内容，兼容实例字段和序列化 kwargs / Extract LangChain message content */

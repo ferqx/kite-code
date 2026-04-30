@@ -2,6 +2,9 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import type {
   AgentPlan,
   PlanStatus,
+  ShellActionEnvelope,
+  ShellApprovalGrant,
+  ShellIntent,
   UserInputOption,
   UserInputRequest,
 } from "../shared/types";
@@ -35,26 +38,10 @@ export type PendingToolRequest =
       protectedCommand: string;
     }
   | {
-      id?: string;
-      name: "search";
-      args: {
-        pattern: string;
-        path?: string;
-        context_lines?: number;
-        case_sensitive?: boolean;
-        max_results?: number;
-      };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
-      name: "shell_execute" | "shell_read";
-      args: {
-        /** shell 命令 / Shell command */
-        command: string;
-      };
+      name: "shell_execute";
+      args: ShellActionEnvelope;
       /** 调用原因 / Call reason */
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
@@ -148,48 +135,14 @@ export function toolRequestFromMessage(
     };
   }
 
-  if (call.name === "search") {
-    const args = call.args as {
-      pattern?: string;
-      path?: string;
-      context_lines?: number;
-      case_sensitive?: boolean;
-      max_results?: number;
-    };
-    return {
-      id: call.id,
-      name: "search",
-      args: {
-        pattern: args.pattern || "",
-        path: args.path,
-        context_lines: args.context_lines,
-        case_sensitive: args.case_sensitive,
-        max_results: args.max_results,
-      },
-      reason: "Model requested search",
-      protectedCommand: `search ${args.pattern || ""}`,
-    };
-  }
-
   if (call.name === "shell_execute") {
-    const args = call.args as { command?: string };
+    const args = normalizeShellActionEnvelope(call.args);
     return {
       id: call.id,
       name: "shell_execute",
-      args: { command: args.command || "pwd" },
+      args,
       reason: "Model requested shell_execute tool call",
-      protectedCommand: args.command || "pwd",
-    };
-  }
-
-  if (call.name === "shell_read") {
-    const args = call.args as { command?: string };
-    return {
-      id: call.id,
-      name: "shell_read",
-      args: { command: args.command || "pwd" },
-      reason: "Model requested read-only shell command",
-      protectedCommand: args.command || "pwd",
+      protectedCommand: args.command,
     };
   }
 
@@ -319,4 +272,60 @@ function normalizeUserInputRequest(value: Partial<UserInputRequest>): UserInputR
 /** 规范化计划状态值 / Normalize plan status value */
 function normalizePlanStatus(status: unknown): PlanStatus {
   return status === "in_progress" || status === "completed" ? status : "pending";
+}
+
+/** 规范化 shell_execute action envelope / Normalize shell_execute action envelope */
+function normalizeShellActionEnvelope(value: unknown): ShellActionEnvelope {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const command = typeof record.command === "string" && record.command.trim()
+    ? record.command
+    : "pwd";
+  return {
+    command,
+    ...(isShellIntent(record.intent) ? { intent: record.intent } : {}),
+    ...(typeof record.objective === "string" ? { objective: record.objective } : {}),
+    ...(typeof record.justification === "string"
+      ? { justification: record.justification }
+      : {}),
+    ...(typeof record.expected_observation === "string"
+      ? { expected_observation: record.expected_observation }
+      : {}),
+    ...(typeof record.failure_strategy === "string"
+      ? { failure_strategy: record.failure_strategy }
+      : {}),
+    ...(Array.isArray(record.prefix_rule)
+      ? { prefix_rule: record.prefix_rule.filter((item): item is string => typeof item === "string") }
+      : {}),
+    ...(isShellApprovalGrant(record.grant_request)
+      ? { grant_request: record.grant_request }
+      : {}),
+  };
+}
+
+function isShellIntent(value: unknown): value is ShellIntent {
+  switch (value) {
+    case "inspect":
+    case "verify":
+    case "build":
+    case "test":
+    case "git":
+    case "other":
+      return true;
+    default:
+      return false;
+  }
+}
+
+export function isShellApprovalGrant(value: unknown): value is ShellApprovalGrant {
+  switch (value) {
+    case "approve_once":
+    case "same_command":
+    case "full_access":
+      return true;
+    default:
+      return false;
+  }
 }

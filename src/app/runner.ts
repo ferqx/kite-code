@@ -6,6 +6,7 @@ import { buildCodeAgentGraph } from "../harness/graph";
 import type { ShellExecutor } from "../tools/shell";
 import { extractPromptCacheMetrics } from "../shared/cache-metrics";
 import type {
+  AgentPhase,
   AgentEvent,
   AgentResumeValue,
   ContextBudget,
@@ -65,6 +66,7 @@ export async function* streamCodeAgent(
       input.task,
       input.mode ?? "auto",
     );
+    const initialPhase = initialAgentPhaseForAccess(initialWorkspaceAccess);
     // 以初始状态启动图流 / Start graph stream with initial state
     const stream = await graph.stream(
       {
@@ -74,8 +76,10 @@ export async function* streamCodeAgent(
           ),
         ],
         workspaceAccess: initialWorkspaceAccess,
+        phase: initialPhase,
         plan: null,
         userId: input.userId,
+        threadId: input.threadId,
         workspace: input.workspace,
         contextSummary: "",
         contextBudget: input.contextBudget,
@@ -152,6 +156,11 @@ export function initialWorkspaceAccessForTask(
   }
   // auto 不再用启发式进入只读；模型可自主调用 update_plan / Auto lets the model decide whether to call update_plan
   return "write";
+}
+
+/** 根据工作区访问权限派生初始执行阶段 / Derive initial execution phase from workspace access */
+export function initialAgentPhaseForAccess(workspaceAccess: WorkspaceAccess): AgentPhase {
+  return workspaceAccess === "read-only" ? "planning" : "building";
 }
 
 /** 恢复被中断的 Agent 执行 / Resume interrupted agent execution */

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  initialAgentPhaseForAccess,
   initialWorkspaceAccessForTask,
   runtimeQuestionAnswer,
   taskMessageForInitialAccess,
@@ -20,6 +21,12 @@ describe("runner initial workspace access selection", () => {
     expect(initialWorkspaceAccessForTask("Create hello.txt", "read-only")).toBe("read-only");
     expect(initialWorkspaceAccessForTask("Create hello.txt", "write")).toBe("write");
     expect(initialWorkspaceAccessForTask("Create hello.txt", "auto")).toBe("write");
+  });
+
+  // 验证初始 phase 从工作区访问权限派生，规划阶段有独立状态 / Initial phase is derived from workspace access as explicit graph state
+  test("derives initial agent phase from workspace access", () => {
+    expect(initialAgentPhaseForAccess("read-only")).toBe("planning");
+    expect(initialAgentPhaseForAccess("write")).toBe("building");
   });
 
   // 验证 auto 模式不再用启发式切换到只读，让模型自主决定是否调用 update_plan / Verify auto mode no longer heuristically switches to read-only
