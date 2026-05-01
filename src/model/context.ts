@@ -42,6 +42,12 @@ const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   maxToolOutputChars: 4000,
 };
 
+/** 工具结果清理触发阈值（字符数，≈ 48K tokens）/ Tool result clearing trigger threshold (chars, ≈ 48K tokens) */
+const CLEAR_THRESHOLD_CHARS = 150000;
+
+/** 工具结果清理时保留的最近 ToolMessage 数量 / Number of recent ToolMessages to keep when clearing */
+const CLEAR_KEEP_RECENT = 6;
+
 /** 准备好的模型上下文 / Prepared model context */
 export interface PreparedModelContext {
   /** 组装好的消息列表 / Assembled message list */
@@ -55,16 +61,24 @@ export function buildModelMessages(role: AgentRole, state: ModelContextState) {
   return prepareModelContext(role, state).messages;
 }
 
-/** 准备模型上下文（组装系统提示词 + 对话消息，不做预判压缩） / Prepare model context (assemble system prompt + conversation, no proactive compaction) */
+/** 准备模型上下文（组装系统提示词 + 对话消息，接近阈值时清理旧工具结果） / Prepare model context (assemble, clear old tool results when near threshold) */
 export function prepareModelContext(
   role: AgentRole,
   state: ModelContextState,
 ): PreparedModelContext {
   const budget = state.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
   const maxToolOutputChars = Math.max(1, budget.maxToolOutputChars);
-  const msgs = state.messages.length > 0
-    ? state.messages.map((m) => truncateToolMessage(m, maxToolOutputChars))
+  let msgs = state.messages.length > 0
+    ? state.messages
     : [new HumanMessage("")];
+
+  // 工具结果清理：估计 token 接近窗口限制时清除旧工具结果 / Tool result clearing: clear old results when estimated tokens near window limit
+  if (estimatePromptChars(role, { ...state, messages: msgs }) > CLEAR_THRESHOLD_CHARS) {
+    msgs = clearOldToolResults(msgs, CLEAR_KEEP_RECENT);
+  }
+
+  // 截断长工具输出 / Truncate long tool outputs
+  msgs = msgs.map((m) => truncateToolMessage(m, maxToolOutputChars));
 
   return {
     contextSummary: state.contextSummary ?? "",
@@ -197,6 +211,45 @@ State Policy
 /** 构建动态系统上下文 / Build dynamic system context */
 export function buildDynamicSystemContext(state: ModelContextState): string {
   return buildRuntimeContext(state);
+}
+
+/** 估算完整 prompt 的字符数，用于触发清理阈值 / Estimate full prompt character count for clearing threshold */
+function estimatePromptChars(role: AgentRole, state: ModelContextState): number {
+  let total = buildStaticSystemPrompt(role).length;
+  total += buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "" }).length;
+  for (const msg of state.messages) {
+    total += textContent(msg.content).length;
+  }
+  if (state.workspaceAccess === "read-only") {
+    total += formatWorkspaceAccessReminder(state.workspaceAccess).length;
+  }
+  if (state.plan) {
+    total += formatPlanStateReminder(state.plan).length;
+  }
+  return total;
+}
+
+/** 清理旧工具结果，仅保留最近 N 条 ToolMessage 的完整内容 / Clear old tool results, keeping only the last N ToolMessages intact */
+export function clearOldToolResults(messages: BaseMessage[], keepRecent: number): BaseMessage[] {
+  const result = [...messages];
+  let kept = 0;
+
+  for (let i = result.length - 1; i >= 0; i--) {
+    if (result[i] instanceof ToolMessage) {
+      const tm = result[i] as ToolMessage;
+      if (kept < keepRecent) {
+        kept++;
+      } else {
+        result[i] = new ToolMessage({
+          content: "[tool result cleared to save context]",
+          tool_call_id: tm.tool_call_id,
+          status: tm.status,
+        });
+      }
+    }
+  }
+
+  return result;
 }
 
 /** 截断超出长度限制的工具消息 / Truncate tool message exceeding length limit */

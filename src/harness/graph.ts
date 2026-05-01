@@ -15,7 +15,7 @@ import {
   formatWorkspaceAccessReminder,
   formatPlanStateReminder,
 } from "../model/runtime-context";
-import { createChatModel } from "../model/factory";
+import { createChatModel, type SupportedChatModel } from "../model/factory";
 import { BunSqliteSaver } from "../persistence/checkpoint";
 import type { AgentResumeValue, ShellApprovalGrant } from "../shared/types";
 import { createAgentTools } from "../tools/definitions";
@@ -53,11 +53,13 @@ export interface BuildCodeAgentGraphInput {
   checkpointPath: string;
   /** 可选的自定义 Shell 执行器 / Optional custom shell executor */
   shellExecutor?: ShellExecutor;
+  /** 可选的自定义模型实例（用于 mock 测试）/ Optional custom model instance (for mock testing) */
+  model?: SupportedChatModel;
 }
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
 export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
-  const model = createChatModel(input.config);
+  const model = input.model ?? createChatModel(input.config);
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
 
   /** Agent 节点：使用稳定工具 schema，由执行层强制工作区访问边界 / Agent node */
@@ -279,17 +281,32 @@ async function invokeModel(
       .bindTools(tools, { tool_choice: "auto" })
       .invoke(prepared.messages) as AIMessage;
   } catch (error) {
-    if (isContextOverflowError(error)) {
-      // 模型报上下文溢出，强制压缩对话消息后重试一次 / Force compact conversation on context overflow and retry once
-      const budget = state.contextBudget ?? { maxToolOutputChars: 4000 };
-      const compacted = forceContextCompaction(state.messages, budget);
-      const retryMessages = rebuildMessages("agent", state, compacted.messages);
+    if (!isContextOverflowError(error)) throw error;
+
+    // 第一层：规则压缩 + 重试 / Layer 1: rules-based compaction + retry
+    const budget = state.contextBudget ?? { maxToolOutputChars: 4000 };
+    const compacted = forceContextCompaction(state.messages, budget);
+    const retryMessages = rebuildMessages("agent", state, compacted.messages);
+    try {
       response = await model
         .bindTools(tools, { tool_choice: "auto" })
         .invoke(retryMessages) as AIMessage;
       prepared = { ...prepared, contextSummary: mergeSummaries(state.contextSummary ?? "", compacted.summary) };
-    } else {
-      throw error;
+    } catch (retryError) {
+      if (!isContextOverflowError(retryError)) throw retryError;
+
+      // 第二层：LLM 自总结 + 重试 / Layer 2: LLM summarization + retry
+      const summaryMsg = await generateLLMSummary(model, state.messages);
+      const llmMessages = [new HumanMessage(summaryMsg), ...compacted.messages.slice(-8)];
+      const llmRetry = rebuildMessages("agent", state, llmMessages);
+      response = await model
+        .bindTools(tools, { tool_choice: "auto" })
+        .invoke(llmRetry) as AIMessage;
+      prepared = {
+        ...prepared,
+        contextSummary: mergeSummaries(state.contextSummary ?? "",
+          `Compacted conversation via LLM summary after repeated context overflow.`),
+      };
     }
   }
 
@@ -317,6 +334,34 @@ async function invokeModel(
     final: messageText(response),
     messages: [response],
   };
+}
+
+/** 使用 LLM 生成对话摘要 / Generate conversation summary using LLM */
+async function generateLLMSummary(
+  model: ReturnType<typeof createChatModel>,
+  messages: BaseMessage[],
+): Promise<string> {
+  const conversationText = messages
+    .map((m) => {
+      const role = m.type;
+      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      return `[${role}] ${content}`;
+    })
+    .join("\n\n")
+    .slice(-8000); // 只取最后 8000 字符作为摘要素材 / Use last 8000 chars as summary material
+
+  const prompt = [
+    "Summarize the following conversation for context compaction.",
+    "Preserve: files created/modified, verification results, errors, plan state, unresolved issues.",
+    "Keep it concise. Output only the summary, no preamble.",
+    "",
+    "<conversation>",
+    conversationText,
+    "</conversation>",
+  ].join("\n");
+
+  const summary = await model.invoke([new HumanMessage(prompt)]);
+  return `<summary>${typeof summary.content === "string" ? summary.content : JSON.stringify(summary.content)}</summary>`;
 }
 
 /** 检测 context overflow 错误 / Detect context overflow errors */
