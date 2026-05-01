@@ -9,7 +9,7 @@
 
 ## 摘要
 
-`graph.state.plan` 是持久运行时状态，不是普通对话历史。模型仍需要在每个相关轮次看到它，但该投影不应被当作静态 system 指令。
+`graph.state.plan` 是持久运行时状态，不是普通对话历史。模型仍需要在每个相关轮次看到它，但该投影不应进入静态 system prompt 或可缓存运行时上下文。
 
 ## 为什么 ToolMessage 不够
 
@@ -24,7 +24,7 @@ graph state 才是权威来源。prompt 投影只是为了让模型在当前轮�
 
 prefix/KV cache 系统通常更偏好稳定的前置 token。把动态状态放在 prompt 中段会降低其后内容的复用率。
 
-system message 也具有 provider 差异。有些 API 会合并、提升或分离 system 指令，因此动态状态不应依赖尾部 `SystemMessage` 语义。
+system message 也具有 provider 差异。有些 API 会合并、提升或分离 system 指令。真实 DeepSeek 多轮测试显示，高频变化的 plan 使用 `SystemMessage` 会在 plan 更新后破坏大段 prompt cache；read-only / write 在某些 thread 中也可能频繁切换，因此动态 runtime-state 投影统一使用独立尾部 `HumanMessage`。
 
 provider 友好的形态是：
 
@@ -32,6 +32,7 @@ provider 友好的形态是：
 system(static rules)
 system(cacheable runtime context)
 ...compacted conversation messages
+human(synthetic graph.state.workspaceAccess reminder, when read-only)
 human(synthetic graph.state.plan reminder)
 ```
 

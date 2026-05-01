@@ -230,4 +230,4 @@ space 记录不应膨胀成第二个 README。
 
 第一条 active 规则是 `execution/active/plan-state-reminder.md`。
 
-它记录了 `graph.state.plan` 必须作为尾部合成用户侧运行时状态提醒投影，而不是放入 system prompt 或可缓存运行时上下文。
+它记录了 `graph.state.plan` 必须作为真实会话之后的尾部合成运行时状态提醒投影，而不是放入静态 system prompt 或可缓存运行时上下文。
