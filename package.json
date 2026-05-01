@@ -8,6 +8,7 @@
     "agent": "bun run src/app/cli.ts",
     "test": "bun test",
     "test:real": "bun test --concurrent --max-concurrency 3 ./tests/real-agent.real.ts",
+    "test:mock": "bun test ./tests/mock-compaction.real.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

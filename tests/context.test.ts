@@ -5,6 +5,7 @@ import {
   buildStaticSystemPrompt,
   prepareModelContext,
   forceContextCompaction,
+  clearOldToolResults,
 } from "../src/model/context";
 import {
   summarizeMessages,
@@ -446,3 +447,51 @@ describe("forceContextCompaction", () => {
   });
 });
 
+// ============================================================================
+// clearOldToolResults 测试 / Tests for clearOldToolResults
+// ============================================================================
+describe("clearOldToolResults", () => {
+  test("clears old tool results while keeping recent ones", () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage("hi"),
+      new AIMessage({
+        content: "",
+        tool_calls: [{ id: "c1", name: "shell_execute", args: { command: "ls" } }],
+      }),
+      new ToolMessage({ content: "old result 1", tool_call_id: "c1", status: "success" }),
+      new AIMessage({
+        content: "",
+        tool_calls: [{ id: "c2", name: "shell_execute", args: { command: "pwd" } }],
+      }),
+      new ToolMessage({ content: "old result 2", tool_call_id: "c2", status: "success" }),
+      new AIMessage({
+        content: "",
+        tool_calls: [{ id: "c3", name: "read_file", args: { path: "a.txt" } }],
+      }),
+      new ToolMessage({ content: "recent result", tool_call_id: "c3", status: "success" }),
+    ];
+
+    const cleared = clearOldToolResults(msgs, 1);
+
+    // 最近 1 条保留 / Last 1 kept intact
+    expect(String(cleared[6].content)).toBe("recent result");
+    // 旧结果被清除 / Old results cleared
+    expect(String(cleared[2].content)).toContain("cleared to save context");
+    expect(String(cleared[4].content)).toContain("cleared to save context");
+    // AIMessage 不受影响 / AIMessages unaffected
+    expect(cleared[1]).toBeInstanceOf(AIMessage);
+  });
+
+  test("preserves tool_call_id and status on cleared messages", () => {
+    const msgs: BaseMessage[] = [
+      new ToolMessage({ content: "x", tool_call_id: "abc", status: "error" }),
+    ];
+
+    const cleared = clearOldToolResults(msgs, 0);
+    const tm = cleared[0] as ToolMessage;
+
+    expect(tm.tool_call_id).toBe("abc");
+    expect(tm.status).toBe("error");
+    expect(String(tm.content)).toContain("cleared");
+  });
+});
