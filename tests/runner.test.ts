@@ -57,6 +57,13 @@ describe("runner initial workspace access selection", () => {
     expect(runtimeQuestionAnswer("Create hello.txt", { modelName: "deepseek-chat" })).toBe(
       null, // 非模型问题返回 null / Non-model questions return null
     );
+    // 长任务即使包含 "model" 子串也不应被当作运行时问题 / Long tasks containing "model" substring are not runtime questions
+    expect(
+      runtimeQuestionAnswer(
+        "Build a TypeScript data model and service layer with multiple files including src/models.ts",
+        { modelName: "deepseek-chat" },
+      ),
+    ).toBe(null);
   });
 
   // 验证普通任务默认使用可写工作区访问 / Verify normal tasks default to write workspace access

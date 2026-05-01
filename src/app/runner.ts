@@ -4,7 +4,10 @@ import { AIMessage } from "@langchain/core/messages";
 import type { AgentConfig } from "../config/index";
 import { buildCodeAgentGraph } from "../harness/graph";
 import type { ShellExecutor } from "../tools/shell";
-import { extractPromptCacheMetrics } from "../shared/cache-metrics";
+import {
+  createPromptCacheStandardTracker,
+  extractPromptCacheMetrics,
+} from "../shared/cache-metrics";
 import type {
   AgentPhase,
   AgentEvent,
@@ -104,6 +107,10 @@ export function runtimeQuestionAnswer(
   task: string,
   input: { modelName: string },
 ): string | null {
+  // 仅对短任务启用运行时问答快捷路径，避免包含 model/context 子串的长任务被误拦截
+  // Only short tasks use the runtime shortcut; long tasks mentioning "model"/"context" are real work
+  if (task.length > 60) return null;
+
   const normalized = task.toLowerCase();
   // 检查是否询问模型信息 / Check if asking about model
   const asksModel =
@@ -205,6 +212,7 @@ export async function* normalizeGraphStream(
 ): AsyncGenerator<AgentEvent> {
   // 跟踪当前工作区访问权限 / Track current workspace access
   let currentWorkspaceAccess: WorkspaceAccess | null = null;
+  const cacheStandard = createPromptCacheStandardTracker();
   for await (const chunk of stream) {
     // 处理中断事件 / Handle interrupt events
     if (isInterrupted(chunk)) {
@@ -235,7 +243,11 @@ export async function* normalizeGraphStream(
       // 产出缓存指标事件 / Yield cache metrics event
       yield {
         type: "cache_metrics",
-        data: { workspaceAccess: currentWorkspaceAccess, ...metrics },
+        data: {
+          workspaceAccess: currentWorkspaceAccess,
+          ...metrics,
+          standard: cacheStandard.record(metrics),
+        },
       };
     }
     // 查找并产出最终答案 / Find and yield final answer

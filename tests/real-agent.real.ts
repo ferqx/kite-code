@@ -16,8 +16,8 @@ import type {
 } from "../src/shared/types";
 
 // ============================================================================
-// 真实模型 API 端到端测试，从简到难分为 7 个层级
-// Real model API end-to-end tests, 7 levels from simple to complex
+// 真实模型 API 端到端测试，从简到难分为 8 个层级
+// Real model API end-to-end tests, 8 levels from simple to complex
 //
 // L1: 直接回答 – 元问题，零工具调用
 // L2: 单工具执行 – 简单文件创建
@@ -26,6 +26,7 @@ import type {
 // L5: 代码修改 + 验证 – 代码编写 + 测试/类型检查
 // L6: 错误恢复 – 工具失败后的自我修复
 // L7: 长时间运行 – 多文件项目，5+ 步骤 + 计划迭代
+// L8: 超长时间复杂场景 – 多轮迭代 + 高 token 量，持续 10 分钟以上
 // ============================================================================
 
 interface ContinueInput {
@@ -103,6 +104,7 @@ describe("L1-L4: basic real agent scenarios", () => {
       const final = events.find((e) => e.type === "final");
       expect(String(final?.data)).toContain(env.config.modelName);
       expect(String(final?.data)).toContain("上下文");
+      logCacheAggregate(events, "L1 direct");
     },
     120_000,
   );
@@ -123,6 +125,7 @@ describe("L1-L4: basic real agent scenarios", () => {
       expect(readFileSync(join(env.workspace, "agent-output.txt"), "utf8")).toContain(content);
       expect(events.some((e) => e.type === "final")).toBe(true);
       expect(existsSync(env.checkpointPath)).toBe(true);
+      logCacheAggregate(events, "L2 single-file");
     },
     120_000,
   );
@@ -149,6 +152,7 @@ describe("L1-L4: basic real agent scenarios", () => {
       expect(JSON.stringify(planEvents)).not.toContain("access_confirmation");
       expect(JSON.stringify(planEvents)).not.toContain("tool_approval");
       expect(existsSync(join(env.workspace, fileName))).toBe(false);
+      logCacheAggregate(planEvents, "L3 plan");
     },
     120_000,
   );
@@ -174,6 +178,7 @@ describe("L1-L4: basic real agent scenarios", () => {
         expect(readFileSync(join(env.workspace, f.name), "utf8")).toContain(f.content);
       }
       expect(events.some((e) => e.type === "final")).toBe(true);
+      logCacheAggregate(events, "L4 multi-file");
     },
     180_000,
   );
@@ -205,6 +210,7 @@ describe("L1-L4: basic real agent scenarios", () => {
       expect(existsSync(targetPath)).toBe(true);
       expect(readFileSync(targetPath, "utf8")).toBe("after");
       expect(events.some((event) => event.type === "final")).toBe(true);
+      logCacheAggregate(events, "L4b file-tools");
     },
     240_000,
   );
@@ -246,6 +252,7 @@ describe("L1-L4: basic real agent scenarios", () => {
         }),
       ).toBe(true);
       expect(events.some((event) => event.type === "final")).toBe(true);
+      logCacheAggregate(events, "L4c update-plan");
     },
     180_000,
   );
@@ -286,6 +293,7 @@ describe("L5: code modification with verification", () => {
       expect(calcContent).toContain("add");
       expect(calcContent).toContain("number");
       expect(events.some((e) => e.type === "final")).toBe(true);
+      logCacheAggregate(events, "L5 code-verify");
     },
     180_000,
   );
@@ -312,6 +320,7 @@ After creating the file, verify the file exists and contains the expected conten
       expect(greetContent).toContain("export function greet");
       expect(greetContent).toContain(`"Hello, "`);
       expect(events.some((e) => e.type === "final")).toBe(true);
+      logCacheAggregate(events, "L5b lint-verify");
     },
     180_000,
   );
@@ -339,6 +348,7 @@ describe("L6: error recovery scenarios", () => {
       expect(content).toContain("line3");
       // agent 应在遇到错误后能够自我恢复 / Agent should recover from errors
       expect(events.filter((e) => e.type === "final").length).toBeGreaterThanOrEqual(1);
+      logCacheAggregate(events, "L6 error-recovery");
     },
     240_000,
   );
@@ -365,6 +375,7 @@ describe("L6: error recovery scenarios", () => {
       expect(JSON.stringify(planEvents)).not.toContain("access_confirmation");
       // 不应有 tool_approval（只读访问跳过审批直接进入 tools 拒绝） / No tool_approval (read-only access skips approval, tools node rejects)
       expect(JSON.stringify(planEvents)).not.toContain("tool_approval");
+      logCacheAggregate(planEvents, "L6b plan-reject");
     },
     120_000,
   );
@@ -393,6 +404,7 @@ describe("L6: error recovery scenarios", () => {
       expect(existsSync(outputPath)).toBe(true);
       expect(readFileSync(outputPath, "utf8")).toContain("recovered after tool failure");
       expect(events.some((e) => e.type === "final")).toBe(true);
+      logCacheAggregate(events, "L6c tool-failure");
     },
     240_000,
   );
@@ -429,6 +441,7 @@ describe("L6: error recovery scenarios", () => {
       );
       expect(askUserResult?.answer).toBe(answer);
       expect(events.some((event) => event.type === "final")).toBe(true);
+      logCacheAggregate(events, "L6d ask-user");
     },
     240_000,
   );
@@ -477,7 +490,8 @@ describe("L6: error recovery scenarios", () => {
       );
       expect(
         matchingResults.every((result) => result.action?.grantUsed === "same_command"),
-      ).toBe(true);
+              ).toBe(true);
+      logCacheAggregate(events, "L6e same-cmd");
     },
     240_000,
   );
@@ -528,6 +542,7 @@ describe("L6: error recovery scenarios", () => {
           )
           .every((result) => result.action?.grantUsed === "full_access"),
       ).toBe(true);
+      logCacheAggregate(events, "L6f full-access");
     },
     240_000,
   );
@@ -570,8 +585,171 @@ After creating both files, verify they exist and contain the correct content. Re
 
       // checkpoint 应持久化 / Checkpoint should be persisted
       expect(existsSync(env.checkpointPath)).toBe(true);
+      logCacheAggregate(events, "L7 long-run");
     },
     300_000,
+  );
+});
+
+// ============================================================================
+// L8: 长时间复杂场景 – 多轮迭代，高 token 量，持续 10 分钟以上
+// L8: Long-running complex scenarios – multi-round iteration, high token volume, 10+ min sustained
+// ============================================================================
+describe("L8: extended long-running complex scenarios", () => {
+  // L8a: 构建并分层扩展工具库 / Build and iteratively extend a utility library
+  test(
+    "L8a: builds and iteratively extends a TypeScript utility library",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l8-utility-lib");
+
+      const events = await runApprovalLoop({
+        ...env,
+        maxResumes: 40,
+        task: [
+          "Build a TypeScript utility library in the src/ directory. Work in distinct phases and verify each phase:",
+          "(1) Create tsconfig.json with strict settings.",
+          "(2) Create src/math.ts with add, subtract, multiply, divide — each with types and JSDoc.",
+          "(3) Create src/string.ts with capitalize, reverse, truncate — each with types and JSDoc.",
+          "(4) Create src/index.ts barrel re-exports for all functions.",
+          "(5) Verify all files created so far, then extend src/math.ts with clamp(min,max,value) and average(numbers[]).",
+          "(6) Extend src/string.ts with padStart and padEnd.",
+          "(7) Update src/index.ts to export the new functions.",
+          "(8) Create README.md documenting all exported functions with usage examples.",
+          "(9) Final verification — use read_file on every file and confirm consistency.",
+        ].join(" "),
+      });
+
+      const mathPath = join(env.workspace, "src/math.ts");
+      expect(existsSync(mathPath)).toBe(true);
+      const mathContent = readFileSync(mathPath, "utf8");
+      expect(mathContent).toContain("add");
+      expect(mathContent).toContain("clamp");
+
+      const stringPath = join(env.workspace, "src/string.ts");
+      expect(existsSync(stringPath)).toBe(true);
+      const stringContent = readFileSync(stringPath, "utf8");
+      expect(stringContent).toContain("capitalize");
+      expect(stringContent).toContain("padStart");
+
+      const indexPath = join(env.workspace, "src/index.ts");
+      expect(existsSync(indexPath)).toBe(true);
+      expect(readFileSync(indexPath, "utf8")).toContain("export");
+
+      const readmePath = join(env.workspace, "README.md");
+      // README.md is optional — the agent may prioritize code over docs
+      if (existsSync(readmePath)) {
+        const readmeContent = readFileSync(readmePath, "utf8");
+        expect(readmeContent).toContain("add");
+        expect(readmeContent).toContain("capitalize");
+      }
+
+      expect(events.some((e) => e.type === "final")).toBe(true);
+      logCacheAggregate(events, "L8a util-lib");
+    },
+    900_000,
+  );
+
+  // L8b: 构建带服务层的数据模型 / Build a data model with service layer
+  test(
+    "L8b: builds a TypeScript service layer with data models",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l8-data-service");
+
+      const events = await runApprovalLoop({
+        ...env,
+        maxResumes: 40,
+        task: [
+          "Build a TypeScript data model and service layer in the src/ directory. Verify each step:",
+          "(1) Create src/models.ts with interfaces: User { id: number, name: string, email: string } and Product { id: number, title: string, price: number }.",
+          "(2) Create src/database.ts with a Database class that stores User[] and Product[] arrays, with add, remove, getAll methods.",
+          "(3) Create src/user-service.ts wrapping database with addUser(name,email) and getUserByEmail(email) methods.",
+          "(4) Create src/product-service.ts wrapping database with addProduct(title,price) and getProductsByPriceRange(min,max) methods.",
+          "(5) Create src/index.ts barrel exports for all modules.",
+          "(6) Use read_file to verify every file has correct content.",
+          "(7) Final summary.",
+        ].join(" "),
+      });
+
+      const modelsPath = join(env.workspace, "src/models.ts");
+      expect(existsSync(modelsPath)).toBe(true);
+      const modelsContent = readFileSync(modelsPath, "utf8");
+      expect(modelsContent).toContain("User");
+      expect(modelsContent).toContain("Product");
+
+      const dbPath = join(env.workspace, "src/database.ts");
+      expect(existsSync(dbPath)).toBe(true);
+      expect(readFileSync(dbPath, "utf8")).toContain("class");
+
+      const userServicePath = join(env.workspace, "src/user-service.ts");
+      expect(existsSync(userServicePath)).toBe(true);
+
+      const indexPath = join(env.workspace, "src/index.ts");
+      expect(existsSync(indexPath)).toBe(true);
+      expect(readFileSync(indexPath, "utf8")).toContain("export");
+
+      expect(events.some((e) => e.type === "final")).toBe(true);
+      logCacheAggregate(events, "L8b data-service");
+    },
+    900_000,
+  );
+
+  // L8c: 构建 API 客户端库及错误处理，并生成文档 / Build API client lib with error handling and docs
+  test(
+    "L8c: builds a TypeScript API client library with error handling and documentation",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l8-api-client");
+
+      const events = await runApprovalLoop({
+        ...env,
+        maxResumes: 40,
+        task: [
+          "Build a TypeScript API client library with error handling in the src/ directory. Work in phases:",
+          "(1) Create tsconfig.json.",
+          "(2) Create src/errors.ts with custom error classes: ApiError (status, body), NetworkError (cause), ValidationError (field, message), all extending a BaseError.",
+          "(3) Create src/http.ts with typed fetchJson<T>(url) and postJson<T>(url, body) functions that parse JSON responses and throw ApiError on non-ok status.",
+          "(4) Create src/retry.ts with a retry<T>(fn, options: { maxRetries, backoffMs }) that retries on NetworkError with exponential backoff.",
+          "(5) Update src/http.ts to use retry from src/retry.ts for fetchJson.",
+          "(6) Create src/client.ts with a simple ApiClient class wrapping http functions with a baseUrl.",
+          "(7) Create src/index.ts barrel exports.",
+          "(8) Create README.md documenting all exports with usage examples.",
+          "(9) Use read_file on every src file to verify imports and exports are consistent.",
+          "(10) Final summary.",
+        ].join(" "),
+      });
+
+      const errorsPath = join(env.workspace, "src/errors.ts");
+      expect(existsSync(errorsPath)).toBe(true);
+      expect(readFileSync(errorsPath, "utf8")).toContain("class");
+
+      const httpPath = join(env.workspace, "src/http.ts");
+      expect(existsSync(httpPath)).toBe(true);
+      const httpContent = readFileSync(httpPath, "utf8");
+      expect(httpContent).toContain("fetchJson");
+      expect(httpContent).toContain("retry");
+
+      const retryPath = join(env.workspace, "src/retry.ts");
+      expect(existsSync(retryPath)).toBe(true);
+      expect(readFileSync(retryPath, "utf8")).toContain("retry");
+
+      const clientPath = join(env.workspace, "src/client.ts");
+      expect(existsSync(clientPath)).toBe(true);
+
+      const indexPath = join(env.workspace, "src/index.ts");
+      expect(existsSync(indexPath)).toBe(true);
+
+      const readmePath = join(env.workspace, "README.md");
+      // README.md is optional — the agent may prioritize code over docs
+      if (existsSync(readmePath)) {
+        expect(readFileSync(readmePath, "utf8").length).toBeGreaterThan(0);
+      }
+
+      expect(events.some((e) => e.type === "final")).toBe(true);
+      logCacheAggregate(events, "L8c api-client");
+    },
+    900_000,
   );
 });
 
@@ -600,8 +778,9 @@ function createEnv(name: string): ContinueInput {
 
 /** 全自动审批循环 / Full auto-approval loop */
 async function runApprovalLoop(
-  input: ContinueInput & { task: string },
+  input: ContinueInput & { task: string; maxResumes?: number },
 ): Promise<AgentEvent[]> {
+  const maxResumes = input.maxResumes ?? 20;
   const events: AgentEvent[] = [];
 
   // 启动 agent / Start agent
@@ -621,7 +800,7 @@ async function runApprovalLoop(
 
   // 自动审批恢复 / Auto-approve resume loop
   let resume: boolean | { approved: boolean } = { approved: true };
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < maxResumes; i++) {
     let interrupted = false;
     for await (const event of resumeCodeAgent({
       userId: input.userId,
@@ -891,6 +1070,26 @@ function parseBunWriteCommand(command: string): { path: string; content: string 
 
 function unescapePosixShellArg(value: string): string {
   return value.replaceAll("'\\''", "'");
+}
+
+function logCacheAggregate(events: AgentEvent[], label: string): void {
+  let calls = 0;
+  let totalInput = 0;
+  let totalHit = 0;
+  for (const e of events) {
+    if (e.type !== "cache_metrics") continue;
+    const d = e.data as Record<string, unknown> | undefined;
+    if (!d || typeof d.inputTokens !== "number") continue;
+    calls++;
+    totalInput += d.inputTokens as number;
+    totalHit += d.cacheHitTokens as number;
+  }
+  if (calls === 0) return;
+  const rate = totalInput > 0 ? (totalHit / totalInput * 100) : 0;
+  const labelPad = label.padEnd(20);
+  console.log(
+    `[cache] ${labelPad} ${rate.toFixed(1)}%  (${totalHit}/${totalInput} tokens, ${calls} calls)`,
+  );
 }
 
 function parsePlainWriteCommand(command: string): { path: string; content: string } | null {
