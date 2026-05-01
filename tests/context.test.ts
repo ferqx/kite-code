@@ -35,7 +35,7 @@ describe("model context protocol", () => {
   });
 
   // 验证工具调用链保留在动态 SystemMessage 外部，不混入运行时上下文 / Verify tool-call chain stays outside dynamic SystemMessage, not mixed into runtime context
-  test("preserves tool-call message chain outside dynamic SystemMessage", () => {
+  test("preserves completed tool-call message chain outside dynamic SystemMessage", () => {
     const task = "Create hello.txt";
     const ai = new AIMessage({
       content: "",
@@ -161,7 +161,8 @@ describe("model context protocol", () => {
       ],
       final: "",
       contextBudget: {
-        maxMessages: 3,
+        maxContextTokens: 30,
+        bufferTokens: 5,
         maxToolOutputChars: 20,
       },
     });
@@ -182,8 +183,8 @@ describe("model context protocol", () => {
     );
   });
 
-  // 验证 plan 作为 harness 生成的用户侧状态提醒注入尾部，避免 provider 特殊处理 system role / Verify plan is injected as a trailing synthetic user-side state reminder
-  test("injects plan as trailing synthetic user-side state reminder", () => {
+  // 验证 plan 作为高频动态状态注入尾部 HumanMessage，避免动态 SystemMessage 破坏 provider 缓存 / Verify plan is injected as trailing HumanMessage after conversation messages
+  test("injects plan as trailing synthetic HumanMessage after conversation messages", () => {
     const plan = {
       name: "Add dark mode",
       description: "Add dark mode toggle to settings",
@@ -202,7 +203,7 @@ describe("model context protocol", () => {
       final: "",
     });
 
-    // 消息顺序：system, system, human(user), human(synthetic state reminder) / Message order: system, system, human(user), human(synthetic state reminder)
+    // 消息顺序：system, system, human(user), human(synthetic plan reminder) / Message order: system, system, human(user), human(synthetic plan reminder)
     expect(messages).toHaveLength(4);
     expect(messages[0]).toBeInstanceOf(SystemMessage); // 静态提示 / Static prompt
     expect(messages[1]).toBeInstanceOf(SystemMessage); // 运行时上下文 / Runtime context
@@ -220,14 +221,15 @@ describe("model context protocol", () => {
 
     // system prompt 前缀不受 plan 状态影响 / system prompt prefix unchanged by plan state
     expect(String(messages[0].content)).toContain("Code Agent Contract");
-    expect(String(messages[0].content)).not.toContain("<runtime-state");
+    expect(String(messages[0].content)).not.toContain("Add dark mode");
+    expect(String(messages[0].content)).not.toContain("Create toggle component");
     expect(String(messages[1].content)).toContain("Cacheable runtime context:");
     expect(String(messages[1].content)).not.toContain("<runtime-state");
     expect(String(messages[1].content)).not.toContain("graph.state.plan:"); // plan 不在可缓存上下文中 / plan not in cacheable context
   });
 
-  // 验证当前只读工作区访问作为尾部合成用户侧状态提醒注入，不改变 system prompt 前缀 / Verify read-only workspace access is projected as a trailing synthetic user-side reminder
-  test("projects read-only workspace access as trailing synthetic user-side state reminder", () => {
+  // 验证当前只读工作区访问作为尾部合成 HumanMessage 注入，不改变真实会话前缀 / Verify read-only workspace access is projected as trailing HumanMessage
+  test("projects read-only workspace access as trailing HumanMessage after conversation messages", () => {
     const messages = buildModelMessages("agent", {
       workspace: "D:\\workspace",
       workspaceAccess: "read-only",
@@ -242,14 +244,56 @@ describe("model context protocol", () => {
       "human",
       "human",
     ]);
+    expect(messages[3]).toBeInstanceOf(HumanMessage);
     expect(String(messages[0].content)).toContain("Code Agent Contract");
     expect(String(messages[0].content)).not.toContain("Current workspace access: read-only");
     expect(String(messages[1].content)).toContain("Cacheable runtime context:");
     expect(String(messages[1].content)).not.toContain("Current workspace access:");
+    expect(String(messages[2].content)).toBe("Inspect before editing");
     expect(String(messages[3].content)).toContain(
       '<runtime-state source="graph.state.workspaceAccess">',
     );
     expect(String(messages[3].content)).toContain("Current workspace access: read-only");
     expect(String(messages[3].content)).toContain("read-only");
+  });
+
+  // 验证 plan 模式常见组合：read-only 和 plan 都用独立尾部 HumanMessage / Verify plan-mode combination keeps runtime states as separate trailing HumanMessages
+  test("projects read-only HumanMessage before plan HumanMessage when both trailing runtime states exist", () => {
+    const plan = {
+      name: "Inspect cache layout",
+      description: "Check prompt cache behavior before editing",
+      status: "in_progress" as const,
+      steps: [
+        { step: "Inspect context assembly", status: "completed" as const },
+        { step: "Run cache experiment", status: "in_progress" as const },
+      ],
+    };
+    const messages = buildModelMessages("agent", {
+      workspace: "D:\\workspace",
+      workspaceAccess: "read-only",
+      plan,
+      messages: [new HumanMessage("/plan inspect cache behavior")],
+      final: "",
+    });
+
+    expect(messages.map((message) => message.getType())).toEqual([
+      "system",
+      "system",
+      "human",
+      "human",
+      "human",
+    ]);
+    expect(messages[3]).toBeInstanceOf(HumanMessage);
+    expect(messages[4]).toBeInstanceOf(HumanMessage);
+    expect(String(messages[2].content)).toBe("/plan inspect cache behavior");
+    expect(String(messages[3].content)).toContain(
+      '<runtime-state source="graph.state.workspaceAccess">',
+    );
+    expect(String(messages[3].content)).toContain("Current workspace access: read-only");
+    expect(String(messages[4].content)).toContain('<runtime-state source="graph.state.plan">');
+    expect(String(messages[4].content)).toContain("Name: Inspect cache layout");
+    expect(String(messages[0].content)).not.toContain("Current workspace access: read-only");
+    expect(String(messages[0].content)).not.toContain("Inspect cache layout");
+    expect(String(messages[1].content)).not.toContain("<runtime-state");
   });
 });

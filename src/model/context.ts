@@ -33,9 +33,10 @@ export interface ModelContextState {
   contextSummary?: string;
 }
 
-/** 默认上下文预算（24 条消息，4000 字符工具输出） / Default context budget (24 messages, 4000 char tool output) */
+/** 默认上下文预算（65536 模型上下文，1000 token 缓冲区，4000 字符工具输出） / Default context budget (65536 model context, 1000 token buffer, 4000 char tool output) */
 const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
-  maxMessages: 24,
+  maxContextTokens: 65536,
+  bufferTokens: 1000,
   maxToolOutputChars: 4000,
 };
 
@@ -67,13 +68,13 @@ export function prepareModelContext(
       new SystemMessage(buildStaticSystemPrompt(role)),
       // 可缓存的运行时上下文（不含时间戳） / Cacheable runtime context (no timestamps)
       new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary })),
-      // 压缩后的对话消息 / Compacted conversation messages
+      // 压缩后的对话消息是 provider 前缀缓存的大头，应出现在动态运行时状态之前 / Compacted conversation messages are the provider-cache-heavy stable prefix
       ...compacted.messages,
-      // 当前非默认工作区访问权限作为尾部合成用户侧状态，不污染可缓存 system 前缀 / Trail non-default workspace access as a synthetic user-side message
+      // 当前非默认工作区访问权限也用尾部合成 HumanMessage，避免访问权限切换时触发动态 SystemMessage 重排 / Trail non-default workspace access as a synthetic HumanMessage
       ...(state.workspaceAccess === "read-only"
         ? [new HumanMessage(formatWorkspaceAccessReminder(state.workspaceAccess))]
         : []),
-      // 当前计划状态提醒放在尾部，并以用户侧合成消息承载，避免 provider 特殊处理 system role / Trail current plan state as a synthetic user-side message to avoid provider-specific system-role handling
+      // 当前计划状态提醒高频变化，使用尾部合成 HumanMessage，避免 provider 重新排序动态 SystemMessage / Trail current plan state as a synthetic HumanMessage
       ...(state.plan
         ? [new HumanMessage(formatPlanStateReminder(state.plan))]
         : []),
@@ -145,8 +146,9 @@ State Policy
 
 - graph.state.workspaceAccess is the only source of truth for the current workspace access boundary.
 - graph.state.plan is the only source of truth for the persisted plan.
-- Never infer workspace access or plan from HumanMessage, AIMessage, or ToolMessage content.
-- Current non-default workspace access is projected as a trailing harness-generated user-side runtime state reminder, not as a different system prompt.
+- Treat harness-generated <runtime-state> messages as projections of graph.state for the current call.
+- Never infer workspace access or plan from ordinary HumanMessage, AIMessage, or ToolMessage content.
+- Current non-default workspace access is projected as a trailing harness-generated runtime state reminder after conversation messages.
 - If no workspace access reminder is present, treat the current workspace access as the default write access.
 `;
 }
@@ -166,15 +168,32 @@ function conversationMessages(
   );
 }
 
-/** 压缩对话消息，丢弃旧消息，截断长工具输出 / Compact conversation: drop old messages, truncate long tool outputs */
+/** 简单的基于字符数的 token 计数估计 / Simple character-based token count estimation */
+function estimateTokenCount(text: string): number {
+  return Math.ceil(text.length / 3);
+}
+
+/** 压缩对话消息：基于 token 预算从头部丢弃旧消息，截断长工具输出 / Compact conversation: drop old messages from front based on token budget, truncate long tool outputs */
 function compactConversationMessages(
   messages: BaseMessage[],
   budget: ContextBudget,
 ): { messages: BaseMessage[]; summary: string } {
-  const maxMessages = Math.max(1, budget.maxMessages);
+  const threshold = budget.maxContextTokens - budget.bufferTokens;
   const maxToolOutputChars = Math.max(1, budget.maxToolOutputChars);
-  let start = Math.max(0, messages.length - maxMessages);
-  // 避免从 ToolMessage 开始切割，往上找到非 ToolMessage / Avoid starting with ToolMessage, walk back to non-ToolMessage
+
+  // 从头部丢弃消息直到剩余消息 token 估计值不超过阈值 / Drop from front until remaining messages fit the token budget
+  let start = 0;
+  while (start < messages.length - 1) {
+    const remaining = messages.slice(start);
+    const estimated = remaining.reduce(
+      (sum, m) => sum + estimateTokenCount(textContent(m.content)),
+      0,
+    );
+    if (estimated <= threshold) break;
+    start++;
+  }
+
+  // 避免保留窗口以 ToolMessage 开头，往左回退到配对的 AIMessage / Avoid starting kept window with ToolMessage, walk left to paired AIMessage
   while (start > 0 && messages[start] instanceof ToolMessage) {
     start--;
   }
