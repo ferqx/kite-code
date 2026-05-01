@@ -11,6 +11,10 @@ import {
   formatPlanStateReminder,
 } from "./runtime-context";
 import type { AgentPlan, ContextBudget, WorkspaceAccess } from "../shared/types";
+import {
+  summarizeMessages,
+  formatCompactedSummary,
+} from "./summarizer";
 
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = "agent";
@@ -33,10 +37,8 @@ export interface ModelContextState {
   contextSummary?: string;
 }
 
-/** 默认上下文预算（65536 模型上下文，1000 token 缓冲区，4000 字符工具输出） / Default context budget (65536 model context, 1000 token buffer, 4000 char tool output) */
+/** 默认上下文预算（4000 字符工具输出截断） / Default context budget (4000 char tool output truncation) */
 const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
-  maxContextTokens: 65536,
-  bufferTokens: 1000,
   maxToolOutputChars: 4000,
 };
 
@@ -53,32 +55,71 @@ export function buildModelMessages(role: AgentRole, state: ModelContextState) {
   return prepareModelContext(role, state).messages;
 }
 
-/** 准备模型上下文（系统提示词 + 缓存运行时上下文 + 压缩对话） / Prepare model context (system prompt + cached runtime context + compacted conversation) */
+/** 准备模型上下文（组装系统提示词 + 对话消息，不做预判压缩） / Prepare model context (assemble system prompt + conversation, no proactive compaction) */
 export function prepareModelContext(
   role: AgentRole,
   state: ModelContextState,
 ): PreparedModelContext {
-  const compacted = conversationMessages(state);
-  // 合并已有摘要和新生成的压缩摘要 / Merge existing summary with new compaction summary
-  const contextSummary = mergeSummaries(state.contextSummary ?? "", compacted.summary);
+  const budget = state.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
+  const maxToolOutputChars = Math.max(1, budget.maxToolOutputChars);
+  const msgs = state.messages.length > 0
+    ? state.messages.map((m) => truncateToolMessage(m, maxToolOutputChars))
+    : [new HumanMessage("")];
+
   return {
-    contextSummary,
+    contextSummary: state.contextSummary ?? "",
     messages: [
-      // 静态系统提示词（可缓存） / Static system prompt (cacheable)
       new SystemMessage(buildStaticSystemPrompt(role)),
-      // 可缓存的运行时上下文（不含时间戳） / Cacheable runtime context (no timestamps)
-      new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary })),
-      // 压缩后的对话消息是 provider 前缀缓存的大头，应出现在动态运行时状态之前 / Compacted conversation messages are the provider-cache-heavy stable prefix
-      ...compacted.messages,
-      // 当前非默认工作区访问权限也用尾部合成 HumanMessage，避免访问权限切换时触发动态 SystemMessage 重排 / Trail non-default workspace access as a synthetic HumanMessage
+      new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "" })),
+      ...msgs,
       ...(state.workspaceAccess === "read-only"
         ? [new HumanMessage(formatWorkspaceAccessReminder(state.workspaceAccess))]
         : []),
-      // 当前计划状态提醒高频变化，使用尾部合成 HumanMessage，避免 provider 重新排序动态 SystemMessage / Trail current plan state as a synthetic HumanMessage
       ...(state.plan
         ? [new HumanMessage(formatPlanStateReminder(state.plan))]
         : []),
     ],
+  };
+}
+
+/** 强制压缩对话消息（仅由 context overflow 触发）/ Force compaction of conversation messages (only triggered by context overflow) */
+export function forceContextCompaction(
+  messages: BaseMessage[],
+  budget: ContextBudget,
+): { messages: BaseMessage[]; summary: string } {
+  const maxToolOutputChars = Math.max(1, budget.maxToolOutputChars);
+  const KEEP_FULL = 8;
+
+  let fullStart = Math.max(0, messages.length - KEEP_FULL);
+  while (fullStart > 0 && messages[fullStart] instanceof ToolMessage) {
+    fullStart--;
+  }
+
+  const toSummarize = messages.slice(0, fullStart);
+  const keepFull = messages
+    .slice(fullStart)
+    .map((m) => truncateToolMessage(m, maxToolOutputChars));
+
+  if (toSummarize.length === 0) {
+    // Nothing to summarize, just truncate and return
+    return {
+      messages: messages.map((m) => truncateToolMessage(m, maxToolOutputChars)),
+      summary: "",
+    };
+  }
+
+  const summaries = summarizeMessages(toSummarize);
+  const compactedMessages: BaseMessage[] = [];
+
+  if (summaries.length > 0) {
+    const conciseText = formatCompactedSummary(summaries, "concise");
+    compactedMessages.push(new HumanMessage(conciseText));
+  }
+  compactedMessages.push(...keepFull);
+
+  return {
+    messages: compactedMessages,
+    summary: `Compacted ${toSummarize.length} earlier message(s) after context overflow.`,
   };
 }
 
@@ -158,80 +199,6 @@ export function buildDynamicSystemContext(state: ModelContextState): string {
   return buildRuntimeContext(state);
 }
 
-/** 获取并压缩对话消息 / Get and compact conversation messages */
-function conversationMessages(
-  state: ModelContextState,
-): { messages: BaseMessage[]; summary: string } {
-  return compactConversationMessages(
-    state.messages.length > 0 ? state.messages : [new HumanMessage("")],
-    state.contextBudget ?? DEFAULT_CONTEXT_BUDGET,
-  );
-}
-
-/** 简单的基于字符数的 token 计数估计 / Simple character-based token count estimation */
-function estimateTokenCount(text: string): number {
-  return Math.ceil(text.length / 3);
-}
-
-/** 压缩对话消息：基于 token 预算从头部丢弃旧消息，截断长工具输出 / Compact conversation: drop old messages from front based on token budget, truncate long tool outputs */
-function compactConversationMessages(
-  messages: BaseMessage[],
-  budget: ContextBudget,
-): { messages: BaseMessage[]; summary: string } {
-  const threshold = budget.maxContextTokens - budget.bufferTokens;
-  const maxToolOutputChars = Math.max(1, budget.maxToolOutputChars);
-
-  // 从头部丢弃消息直到剩余消息 token 估计值不超过阈值 / Drop from front until remaining messages fit the token budget
-  let start = 0;
-  while (start < messages.length - 1) {
-    const remaining = messages.slice(start);
-    const estimated = remaining.reduce(
-      (sum, m) => sum + estimateTokenCount(textContent(m.content)),
-      0,
-    );
-    if (estimated <= threshold) break;
-    start++;
-  }
-
-  // 避免保留窗口以 ToolMessage 开头，往左回退到配对的 AIMessage / Avoid starting kept window with ToolMessage, walk left to paired AIMessage
-  while (start > 0 && messages[start] instanceof ToolMessage) {
-    start--;
-  }
-
-  const dropped = messages.slice(0, start);
-  const kept = messages
-    .slice(start)
-    .map((message) => truncateToolMessage(message, maxToolOutputChars));
-  // 统计丢弃部分中被截断的 ToolMessage 数量 / Count truncated ToolMessages in dropped portion
-  const truncatedDroppedTools = dropped.filter(
-    (message) =>
-      message instanceof ToolMessage &&
-      textContent(message.content).length > maxToolOutputChars,
-  ).length;
-  // 统计保留部分中被截断的 ToolMessage 数量 / Count truncated ToolMessages in kept portion
-  const truncatedKeptTools = kept.filter(
-    (message, index) =>
-      message instanceof ToolMessage &&
-      textContent(messages[start + index]?.content).length > maxToolOutputChars,
-  ).length;
-
-  const summaryParts: string[] = [];
-  if (dropped.length) {
-    summaryParts.push(`Compacted ${dropped.length} earlier message(s).`);
-  }
-  const truncatedCount = truncatedDroppedTools + truncatedKeptTools;
-  if (truncatedCount) {
-    summaryParts.push(
-      `${truncatedCount} tool output truncated to ${maxToolOutputChars} character(s).`,
-    );
-  }
-
-  return {
-    messages: kept,
-    summary: summaryParts.join(" "),
-  };
-}
-
 /** 截断超出长度限制的工具消息 / Truncate tool message exceeding length limit */
 function truncateToolMessage(message: BaseMessage, maxChars: number): BaseMessage {
   if (!(message instanceof ToolMessage)) {
@@ -243,17 +210,11 @@ function truncateToolMessage(message: BaseMessage, maxChars: number): BaseMessag
     return message;
   }
 
-  // 截断内容并附加截断标记 / Truncate content and append truncation marker
   return new ToolMessage({
     content: `${content.slice(0, maxChars)}\n[truncated ${content.length - maxChars} chars]`,
     tool_call_id: message.tool_call_id,
     status: message.status,
   });
-}
-
-/** 合并已有和新生成的摘要 / Merge existing and new summaries */
-function mergeSummaries(existing: string, generated: string): string {
-  return [existing.trim(), generated.trim()].filter(Boolean).join("\n");
 }
 
 /** 提取消息文本内容 / Extract message text content */

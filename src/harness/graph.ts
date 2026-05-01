@@ -1,11 +1,20 @@
-import { AIMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import {
   START,
   StateGraph,
   interrupt,
 } from "@langchain/langgraph";
 import type { AgentConfig } from "../config/index";
-import { prepareModelContext } from "../model/context";
+import {
+  buildStaticSystemPrompt,
+  prepareModelContext,
+  forceContextCompaction,
+} from "../model/context";
+import {
+  buildCacheableRuntimeContext,
+  formatWorkspaceAccessReminder,
+  formatPlanStateReminder,
+} from "../model/runtime-context";
 import { createChatModel } from "../model/factory";
 import { BunSqliteSaver } from "../persistence/checkpoint";
 import type { AgentResumeValue, ShellApprovalGrant } from "../shared/types";
@@ -262,15 +271,31 @@ async function invokeModel(
   state: CodeAgentState,
   tools: ReturnType<typeof createAgentTools>,
 ) {
-  const prepared = prepareModelContext("agent", state);
+  let prepared = prepareModelContext("agent", state);
 
-  const response = await model
-    .bindTools(tools, { tool_choice: "auto" })
-    .invoke(prepared.messages);
+  let response: AIMessage;
+  try {
+    response = await model
+      .bindTools(tools, { tool_choice: "auto" })
+      .invoke(prepared.messages) as AIMessage;
+  } catch (error) {
+    if (isContextOverflowError(error)) {
+      // 模型报上下文溢出，强制压缩对话消息后重试一次 / Force compact conversation on context overflow and retry once
+      const budget = state.contextBudget ?? { maxToolOutputChars: 4000 };
+      const compacted = forceContextCompaction(state.messages, budget);
+      const retryMessages = rebuildMessages("agent", state, compacted.messages);
+      response = await model
+        .bindTools(tools, { tool_choice: "auto" })
+        .invoke(retryMessages) as AIMessage;
+      prepared = { ...prepared, contextSummary: mergeSummaries(state.contextSummary ?? "", compacted.summary) };
+    } else {
+      throw error;
+    }
+  }
 
-  const request = toolRequestFromMessage(response as AIMessage, state.workspace);
+  const request = toolRequestFromMessage(response, state.workspace);
   if (request) {
-    const toolCallMessage = messageWithSingleToolCall(response as AIMessage, request.id);
+    const toolCallMessage = messageWithSingleToolCall(response, request.id);
     return {
       workspaceAccess: state.workspaceAccess,
       phase: state.phase,
@@ -289,9 +314,41 @@ async function invokeModel(
     approvedToolGrant: state.approvedToolGrant,
     authorization: state.authorization,
     contextSummary: prepared.contextSummary,
-    final: messageText(response as AIMessage),
+    final: messageText(response),
     messages: [response],
   };
+}
+
+/** 检测 context overflow 错误 / Detect context overflow errors */
+function isContextOverflowError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return /context.*(?:length|limit|window|exceed|too\s+long)/i.test(msg) ||
+    /maximum.*(?:context|token|length)/i.test(msg) ||
+    /reduce.*(?:message|context|prompt)/i.test(msg);
+}
+
+/** 用压缩后的对话消息重建完整上下文 / Rebuild full context with compacted conversation messages */
+function rebuildMessages(
+  role: "agent",
+  state: CodeAgentState,
+  conversationMessages: BaseMessage[],
+): BaseMessage[] {
+  const messages: BaseMessage[] = [];
+  messages.push(new SystemMessage(buildStaticSystemPrompt(role)));
+  messages.push(new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "" })));
+  messages.push(...conversationMessages);
+  if (state.workspaceAccess === "read-only") {
+    messages.push(new HumanMessage(formatWorkspaceAccessReminder(state.workspaceAccess)));
+  }
+  if (state.plan) {
+    messages.push(new HumanMessage(formatPlanStateReminder(state.plan)));
+  }
+  return messages;
+}
+
+/** 合并已有和新生成的摘要 / Merge existing and new summaries */
+function mergeSummaries(existing: string, generated: string): string {
+  return [existing.trim(), generated.trim()].filter(Boolean).join("\n");
 }
 
 function approvalGrantFromResume(

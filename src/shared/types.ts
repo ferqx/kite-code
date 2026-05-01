@@ -165,10 +165,6 @@ export type AgentResumeValue = ToolApprovalResumeValue | UserInputResumeValue;
 
 /** 上下文预算 / Context budget */
 export interface ContextBudget {
-  /** 模型最大上下文 token 数 / Maximum model context tokens */
-  maxContextTokens: number;
-  /** 压缩前预留的安全缓冲区 token 数 / Safety buffer tokens before compaction */
-  bufferTokens: number;
   /** 工具输出最大字符数 / Maximum characters for tool output before truncation */
   maxToolOutputChars: number;
 }
