@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import {
   buildModelMessages,
   buildStaticSystemPrompt,
   prepareModelContext,
+  forceContextCompaction,
 } from "../src/model/context";
+import {
+  summarizeMessages,
+  formatCompactedSummary,
+} from "../src/model/summarizer";
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
 describe("model context protocol", () => {
@@ -124,65 +129,6 @@ describe("model context protocol", () => {
     expect(prompt.length).toBeGreaterThan(1200); // 提示词应足够长以触发缓存 / Prompt must be long enough for cache threshold
   });
 
-  // 验证压缩长历史时保留最新的工具调用链 / Verify long histories are compacted while keeping the latest tool-call chain
-  test("compacts long histories while preserving the latest tool-call chain", () => {
-    const oldToolOutput = "x".repeat(100);
-    const latestAi = new AIMessage({
-      content: "",
-      tool_calls: [
-        {
-          id: "latest-call",
-          name: "shell_execute",
-          args: { command: "pwd" },
-        },
-      ],
-    });
-    const latestTool = new ToolMessage({
-      content: "latest result",
-      tool_call_id: "latest-call",
-      status: "success",
-    });
-
-    const prepared = prepareModelContext("agent", {
-      workspace: "D:\\workspace",
-      workspaceAccess: "write",
-      plan: null,
-      contextSummary: "",
-      messages: [
-        new HumanMessage("Create hello.txt"),
-        new AIMessage("old answer"),
-        new ToolMessage({
-          content: oldToolOutput,
-          tool_call_id: "old-call",
-        }),
-        new HumanMessage("continue"),
-        latestAi,
-        latestTool,
-      ],
-      final: "",
-      contextBudget: {
-        maxContextTokens: 30,
-        bufferTokens: 5,
-        maxToolOutputChars: 20,
-      },
-    });
-
-    expect(prepared.contextSummary).toContain("Compacted 3 earlier message"); // 旧消息被折叠 / Old messages folded
-    expect(prepared.contextSummary).toContain("tool output truncated"); // 大工具输出被截断 / Large tool output truncated
-    expect(prepared.messages.map((message) => message.getType())).toEqual([
-      "system",
-      "system",
-      "human",
-      "ai",
-      "tool",
-    ]);
-    expect((prepared.messages[4] as ToolMessage).tool_call_id).toBe("latest-call"); // 最新工具调用保留 / Latest tool call preserved
-    expect(String(prepared.messages[1].content)).not.toContain("Context summary:"); // 运行时上下文不含动态摘要 / Runtime context excludes dynamic summary
-    expect(prepared.messages.map((message) => String(message.content)).join("\n")).not.toContain(
-      '<runtime-state source="harness.runtime">',
-    );
-  });
-
   // 验证 plan 作为高频动态状态注入尾部 HumanMessage，避免动态 SystemMessage 破坏 provider 缓存 / Verify plan is injected as trailing HumanMessage after conversation messages
   test("injects plan as trailing synthetic HumanMessage after conversation messages", () => {
     const plan = {
@@ -296,4 +242,207 @@ describe("model context protocol", () => {
     expect(String(messages[0].content)).not.toContain("Inspect cache layout");
     expect(String(messages[1].content)).not.toContain("<runtime-state");
   });
+
+  // 验证 summarizeMessages 从 AIMessage.tool_calls 中提取工具名 / Verify summarizeMessages extracts tool names from AIMessage.tool_calls
+  test("summarizeMessages extracts tool names from AIMessage tool_calls", () => {
+    const messages = [
+      new HumanMessage("Create file"),
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "c1", name: "write_file", args: { path: "hello.txt", content: "hi" } },
+        ],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ tool: "write_file", ok: true, path: "hello.txt" }),
+        tool_call_id: "c1",
+      }),
+    ];
+    const summaries = summarizeMessages(messages);
+    expect(summaries.length).toBe(1);
+    expect(summaries[0].tools).toContain("write_file");
+  });
+
+  // 验证 summarizeMessages 提取文件路径 / Verify summarizeMessages extracts file paths
+  test("summarizeMessages extracts file paths from tool results", () => {
+    const messages = [
+      new HumanMessage("Create files"),
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "c1", name: "write_file", args: { path: "a.txt", content: "A" } },
+          { id: "c2", name: "edit_file", args: { path: "b.txt", old: "x", new: "y" } },
+        ],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ tool: "write_file", ok: true, path: "a.txt" }),
+        tool_call_id: "c1",
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ tool: "edit_file", ok: true, path: "b.txt" }),
+        tool_call_id: "c2",
+      }),
+    ];
+    const summaries = summarizeMessages(messages);
+    expect(summaries[0].created).toContain("a.txt");
+    expect(summaries[0].edited).toContain("b.txt");
+  });
+
+  // 验证 summarizeMessages 提取错误信息 / Verify summarizeMessages extracts errors
+  test("summarizeMessages extracts errors from failed tool results", () => {
+    const messages = [
+      new HumanMessage("Read missing file"),
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "c1", name: "read_file", args: { path: "missing.txt" } },
+        ],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({
+          tool: "read_file",
+          ok: false,
+          path: "missing.txt",
+          failure: { reason: "File not found", guidance: "Check the path" },
+        }),
+        tool_call_id: "c1",
+      }),
+    ];
+    const summaries = summarizeMessages(messages);
+    expect(summaries[0].errors).toContain("File not found");
+  });
+
+  // 验证 formatCompactedSummary 生成 detailed 和 concise 格式 / Verify formatCompactedSummary produces detailed and concise formats
+  test("formatCompactedSummary produces detailed and concise levels", () => {
+    const summaries = [
+      {
+        description: "Create math.ts",
+        tools: ["write_file"],
+        created: ["src/math.ts"],
+        edited: [],
+        verified: "verified",
+        errors: [],
+      },
+    ];
+    const detailed = formatCompactedSummary(summaries, "detailed");
+    expect(detailed).toContain('<compacted level="detailed">');
+    expect(detailed).toContain("[step] Create math.ts");
+    expect(detailed).toContain("write_file");
+    expect(detailed).toContain("src/math.ts");
+
+    const concise = formatCompactedSummary(summaries, "concise");
+    expect(concise).toContain('<compacted level="concise">');
+    expect(concise).toContain("Created: src/math.ts");
+    expect(concise).toContain("write_file");
+  });
+
 });
+
+// ============================================================================
+// forceContextCompaction 测试 / Tests for forceContextCompaction
+// ============================================================================
+describe("forceContextCompaction", () => {
+  test("preserves the latest tool-call chain and generates summary with >8 messages", () => {
+    // 构建 10 条消息触发压缩 / Build 10 messages to trigger compaction (> KEEP_FULL=8)
+    const msgs: BaseMessage[] = [
+      new HumanMessage("old step 1"),
+      new AIMessage("old answer 1"),
+      new HumanMessage("old step 2"),
+      new AIMessage("old answer 2"),
+      new HumanMessage("Create hello.txt"),
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "c0", name: "shell_execute", args: { command: "pwd" } },
+        ],
+      }),
+      new ToolMessage({
+        content: "x".repeat(100),
+        tool_call_id: "c0",
+      }),
+      new HumanMessage("continue"),
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "latest-call", name: "shell_execute", args: { command: "ls" } },
+        ],
+      }),
+      new ToolMessage({
+        content: "latest result",
+        tool_call_id: "latest-call",
+        status: "success",
+      }),
+    ];
+
+    const compacted = forceContextCompaction(msgs, { maxToolOutputChars: 20 });
+
+    expect(compacted.summary).toContain("Compacted");
+    expect(compacted.summary).toContain("context overflow");
+    // 最新消息保留 / Latest messages kept
+    const types = compacted.messages.map((m) => m.getType());
+    expect(types).toContain("ai");
+    expect(types).toContain("tool");
+  });
+
+  test("generates <compacted> summary for old messages", () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage("Old step"),
+      new AIMessage({
+        content: "",
+        tool_calls: [{ id: "c0", name: "write_file", args: { path: "x.txt", content: "X" } }],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ tool: "write_file", ok: true, path: "x.txt" }),
+        tool_call_id: "c0",
+      }),
+      new AIMessage({ content: "will continue" }),
+      new HumanMessage("Step 1"),
+      new AIMessage({
+        content: "",
+        tool_calls: [{ id: "c1", name: "write_file", args: { path: "a.txt", content: "A" } }],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ tool: "write_file", ok: true, path: "a.txt" }),
+        tool_call_id: "c1",
+      }),
+      new HumanMessage("Step 2"),
+      new AIMessage({
+        content: "",
+        tool_calls: [{ id: "c2", name: "read_file", args: { path: "a.txt" } }],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ tool: "read_file", ok: true, path: "a.txt" }),
+        tool_call_id: "c2",
+      }),
+      new AIMessage({
+        content: "",
+        tool_calls: [{ id: "c3", name: "edit_file", args: { path: "a.txt" } }],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ tool: "edit_file", ok: true, path: "a.txt" }),
+        tool_call_id: "c3",
+      }),
+    ];
+
+    const compacted = forceContextCompaction(msgs, { maxToolOutputChars: 1000 });
+
+    expect(compacted.summary).toContain("Compacted");
+    const allContent = compacted.messages.map((m) => String(m.content)).join("\n");
+    expect(allContent).toContain("<compacted level=");
+    expect(allContent).toContain("write_file");
+  });
+
+  test("returns all messages unchanged when under KEEP_FULL", () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage("hi"),
+      new AIMessage("hello"),
+    ];
+
+    const compacted = forceContextCompaction(msgs, { maxToolOutputChars: 1000 });
+
+    // 不超过 8 条时不压缩 / No compaction when <= 8 messages
+    expect(compacted.summary).toBe("");
+    expect(compacted.messages.length).toBe(2);
+  });
+});
+

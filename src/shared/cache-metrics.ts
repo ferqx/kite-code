@@ -165,20 +165,27 @@ export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics 
   );
   const cacheMissTokens = Number(
     usage?.prompt_cache_miss_tokens ??
-      Math.max(0, inputTokens - cacheHitTokens),
+      (inputTokens > cacheHitTokens ? inputTokens - cacheHitTokens : 0),
   );
 
+  // 当 provider 同时返回 hit/miss 字段时，用两者之和作为总输入 token，绕过 prompt_tokens 在不同 provider 下含义不一致的问题
+  // Use hit+miss as authoritative total when both fields are present, avoiding provider-specific prompt_tokens semantics
+  const totalInputTokens =
+    usage?.prompt_cache_hit_tokens != null || usage?.prompt_cache_miss_tokens != null
+      ? cacheHitTokens + cacheMissTokens
+      : inputTokens;
+
   // 三项均为零视为无效（非 LLM 消息） / Return null if all three are zero (not an LLM message)
-  if (!inputTokens && !cacheHitTokens && !cacheMissTokens) {
+  if (!totalInputTokens && !cacheHitTokens && !cacheMissTokens) {
     return null;
   }
 
   return {
-    inputTokens,
+    inputTokens: totalInputTokens,
     cacheHitTokens,
     cacheMissTokens,
     // 避免除零 / Avoid division by zero
-    hitRate: inputTokens > 0 ? cacheHitTokens / inputTokens : 0,
+    hitRate: totalInputTokens > 0 ? cacheHitTokens / totalInputTokens : 0,
   };
 }
 
