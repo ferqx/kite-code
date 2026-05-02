@@ -5,9 +5,9 @@ import { parse } from "jsonc-parser";
 import { z } from "zod";
 
 const providerSchema = z.object({
-  type: z.enum(["deepseek", "openai", "openai-compatible"]).optional(),
-  apiKey: z.string().min(1),
-  baseURL: z.string().url(),
+  type: z.enum(["deepseek", "openai", "openai-compatible", "ollama"]).optional(),
+  apiKey: z.string().min(1).optional(),
+  baseURL: z.string().url().optional(),
 });
 
 const configSchema = z.object({
@@ -20,7 +20,7 @@ const configSchema = z.object({
   }),
 });
 
-export type ModelProviderType = "deepseek" | "openai" | "openai-compatible";
+export type ModelProviderType = "deepseek" | "openai" | "openai-compatible" | "ollama";
 
 /** Agent 配置 / Agent configuration */
 export interface AgentConfig {
@@ -40,6 +40,10 @@ export interface AgentConfig {
 export interface LoadAgentConfigOptions {
   /** 配置文件路径 / Configuration file path */
   configPath?: string;
+  /** 覆盖默认 provider 名称 / Override default provider name */
+  providerName?: string;
+  /** 覆盖默认模型名称 / Override default model name */
+  modelName?: string;
 }
 
 /** 获取默认配置路径 / Get default configuration path */
@@ -56,8 +60,8 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
 
   const raw = readFileSync(configPath, "utf8");
   const parsed = configSchema.parse(parse(raw));
-  const providerName = parsed.model.default.provider;
-  const provider = parsed.provider[providerName];
+  const providerName = options.providerName ?? parsed.model.default.provider;
+  const provider = parsed.provider[providerName] ?? builtInProvider(providerName);
 
   if (!provider) {
     throw new Error(`Model provider '${providerName}' is not configured`);
@@ -66,14 +70,57 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
   const providerType = provider.type ?? inferProviderType(providerName);
 
   return {
-    apiKey: provider.apiKey,
-    baseURL: provider.baseURL,
-    modelName: parsed.model.default.name,
+    apiKey: resolveProviderApiKey(providerName, providerType, provider.apiKey),
+    baseURL: resolveProviderBaseURL(providerName, providerType, provider.baseURL),
+    modelName: options.modelName ?? parsed.model.default.name,
     providerName,
     providerType,
   };
 }
 
 function inferProviderType(providerName: string): ModelProviderType {
-  return providerName === "deepseek" ? "deepseek" : "openai-compatible";
+  if (providerName === "deepseek") {
+    return "deepseek";
+  }
+  if (providerName === "ollama") {
+    return "ollama";
+  }
+  return "openai-compatible";
+}
+
+function builtInProvider(
+  providerName: string,
+): z.infer<typeof providerSchema> | null {
+  if (providerName === "ollama") {
+    return { type: "ollama" };
+  }
+  return null;
+}
+
+function resolveProviderApiKey(
+  providerName: string,
+  providerType: ModelProviderType,
+  apiKey: string | undefined,
+): string {
+  if (apiKey) {
+    return apiKey;
+  }
+  if (providerType === "ollama") {
+    return "";
+  }
+  throw new Error(`Model provider '${providerName}' requires apiKey`);
+}
+
+function resolveProviderBaseURL(
+  providerName: string,
+  providerType: ModelProviderType,
+  baseURL: string | undefined,
+): string {
+  if (baseURL) {
+    return baseURL;
+  }
+  if (providerType === "ollama") {
+    return "http://localhost:11434";
+  }
+  throw new Error(`Model provider '${providerName}' requires baseURL`);
 }

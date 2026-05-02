@@ -7,15 +7,16 @@
   "scripts": {
     "agent": "bun run src/app/cli.ts",
     "test": "bun test",
-    "test:real": "bun test --concurrent --max-concurrency 3 ./tests/real-agent.real.ts",
+    "test:real": "bun run src/app/real-test-cli.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@langchain/core": "^1.1.41",
+    "@langchain/core": "^1.1.42",
     "@langchain/deepseek": "^1.0.24",
     "@langchain/langgraph": "^1.2.9",
     "@langchain/langgraph-checkpoint": "^1.0.1",
     "@langchain/langgraph-checkpoint-sqlite": "^1.0.1",
+    "@langchain/ollama": "^1.2.7",
     "@langchain/openai": "^1.4.4",
     "jsonc-parser": "^3.3.1",
     "zod": "^4.3.6"

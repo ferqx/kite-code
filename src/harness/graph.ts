@@ -1,4 +1,5 @@
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
+import { ChatOllama } from "@langchain/ollama";
 import {
   START,
   StateGraph,
@@ -275,8 +276,7 @@ async function invokeModel(
 
   let response: AIMessage;
   try {
-    response = await model
-      .bindTools(tools, { tool_choice: "auto" })
+    response = await bindAgentTools(model, tools)
       .invoke(prepared.messages) as AIMessage;
   } catch (error) {
     if (isContextOverflowError(error)) {
@@ -284,8 +284,7 @@ async function invokeModel(
       const budget = state.contextBudget ?? { maxToolOutputChars: 4000 };
       const compacted = forceContextCompaction(state.messages, budget);
       const retryMessages = rebuildMessages("agent", state, compacted.messages);
-      response = await model
-        .bindTools(tools, { tool_choice: "auto" })
+      response = await bindAgentTools(model, tools)
         .invoke(retryMessages) as AIMessage;
       prepared = { ...prepared, contextSummary: mergeSummaries(state.contextSummary ?? "", compacted.summary) };
     } else {
@@ -344,6 +343,17 @@ function rebuildMessages(
     messages.push(new HumanMessage(formatPlanStateReminder(state.plan)));
   }
   return messages;
+}
+
+/** 绑定模型工具，按 provider adapter 传入其支持的调用参数 / Bind tools with provider-supported call options */
+function bindAgentTools(
+  model: ReturnType<typeof createChatModel>,
+  tools: ReturnType<typeof createAgentTools>,
+) {
+  if (model instanceof ChatOllama) {
+    return model.bindTools(tools);
+  }
+  return model.bindTools(tools, { tool_choice: "auto" });
 }
 
 /** 合并已有和新生成的摘要 / Merge existing and new summaries */

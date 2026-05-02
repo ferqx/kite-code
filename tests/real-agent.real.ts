@@ -7,6 +7,7 @@ import { loadAgentConfig } from "../src/config/index";
 import { resumeCodeAgent, streamCodeAgent } from "../src/app/runner";
 import { createChatModel } from "../src/model/factory";
 import { shellTool } from "../src/tools/shell";
+import { REAL_TEST_MODEL_ENV, REAL_TEST_PROVIDER_ENV } from "../src/app/real-test-options";
 import type { AgentConfig } from "../src/config/index";
 import type {
   AgentEvent,
@@ -40,13 +41,20 @@ interface ContinueInput {
 
 let realModelPreflight: Promise<void> | null = null;
 
+function loadRealModelConfig(): AgentConfig {
+  return loadAgentConfig({
+    providerName: process.env[REAL_TEST_PROVIDER_ENV],
+    modelName: process.env[REAL_TEST_MODEL_ENV],
+  });
+}
+
 async function ensureRealModelAvailable(): Promise<void> {
   realModelPreflight ??= runRealModelPreflight();
   return realModelPreflight;
 }
 
 async function runRealModelPreflight(): Promise<void> {
-  const config = loadAgentConfig();
+  const config = loadRealModelConfig();
   try {
     const response = await createChatModel(config).invoke([
       new HumanMessage("Reply with ok only"),
@@ -771,7 +779,7 @@ function createEnv(name: string): ContinueInput {
     threadId: `${name}-thread`,
     workspace,
     checkpointPath: join(dataDir, "checkpoints.sqlite"),
-    config: loadAgentConfig(),
+    config: loadRealModelConfig(),
     shellExecutor: createTestShellExecutor(),
   };
 }
