@@ -77,4 +77,103 @@ describe("loadAgentConfig", () => {
     expect(config.providerName).toBe("siliconflow");
     expect(config.providerType).toBe("openai-compatible");
   });
+
+  test("loads an Ollama provider with local defaults", () => {
+    const dir = join(import.meta.dir, ".tmp-config");
+    mkdirSync(dir, { recursive: true });
+    const configPath = join(dir, "ollama.jsonc");
+    writeFileSync(
+      configPath,
+      `{
+        "provider": {
+          "ollama": {}
+        },
+        "model": {
+          "default": {
+            "provider": "ollama",
+            "name": "qwen2.5-coder:7b"
+          }
+        }
+      }`,
+    );
+
+    const config = loadAgentConfig({ configPath });
+
+    expect(config.apiKey).toBe("");
+    expect(config.baseURL).toBe("http://localhost:11434");
+    expect(config.modelName).toBe("qwen2.5-coder:7b");
+    expect(config.providerName).toBe("ollama");
+    expect(config.providerType).toBe("ollama");
+  });
+
+  test("overrides the configured default provider and model", () => {
+    const dir = join(import.meta.dir, ".tmp-config");
+    mkdirSync(dir, { recursive: true });
+    const configPath = join(dir, "override-provider.jsonc");
+    writeFileSync(
+      configPath,
+      `{
+        "provider": {
+          "deepseek": {
+            "apiKey": "sk-test",
+            "baseURL": "https://api.deepseek.com/v1"
+          },
+          "ollama": {}
+        },
+        "model": {
+          "default": {
+            "provider": "deepseek",
+            "name": "deepseek-chat"
+          }
+        }
+      }`,
+    );
+
+    const config = loadAgentConfig({
+      configPath,
+      providerName: "ollama",
+      modelName: "gemma4:31b-cloud",
+    });
+
+    expect(config.apiKey).toBe("");
+    expect(config.baseURL).toBe("http://localhost:11434");
+    expect(config.modelName).toBe("gemma4:31b-cloud");
+    expect(config.providerName).toBe("ollama");
+    expect(config.providerType).toBe("ollama");
+  });
+
+  test("overrides to Ollama even when the provider is not configured", () => {
+    const dir = join(import.meta.dir, ".tmp-config");
+    mkdirSync(dir, { recursive: true });
+    const configPath = join(dir, "override-missing-ollama.jsonc");
+    writeFileSync(
+      configPath,
+      `{
+        "provider": {
+          "deepseek": {
+            "apiKey": "sk-test",
+            "baseURL": "https://api.deepseek.com/v1"
+          }
+        },
+        "model": {
+          "default": {
+            "provider": "deepseek",
+            "name": "deepseek-chat"
+          }
+        }
+      }`,
+    );
+
+    const config = loadAgentConfig({
+      configPath,
+      providerName: "ollama",
+      modelName: "gemma4:31b-cloud",
+    });
+
+    expect(config.apiKey).toBe("");
+    expect(config.baseURL).toBe("http://localhost:11434");
+    expect(config.modelName).toBe("gemma4:31b-cloud");
+    expect(config.providerName).toBe("ollama");
+    expect(config.providerType).toBe("ollama");
+  });
 });

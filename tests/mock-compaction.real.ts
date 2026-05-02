@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import type { CodeAgentState } from "../src/harness/state";
+import type { AgentPlan } from "../src/shared/types";
 import { clearOldToolResults, forceContextCompaction } from "../src/model/context";
 import {
   formatWorkspaceAccessReminder,
@@ -98,7 +99,7 @@ function estimatePromptChars(
   cacheableContext: string,
   messages: BaseMessage[],
   workspaceAccess?: string,
-  plan?: { name: string; description: string; status: string; steps: Array<{ step: string; status: string }> } | null,
+  plan?: AgentPlan | null,
 ): number {
   let total = systemPrompt.length + cacheableContext.length;
   for (const msg of messages) {

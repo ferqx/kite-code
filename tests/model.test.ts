@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ChatDeepSeek } from "@langchain/deepseek";
+import { ChatOllama } from "@langchain/ollama";
 import { ChatOpenAI } from "@langchain/openai";
 import { AIMessage } from "@langchain/core/messages";
 import type { AgentConfig } from "../src/config/index";
@@ -198,7 +199,29 @@ describe("model provider factory", () => {
     const model = createChatModel(config);
 
     expect(model).toBeInstanceOf(ChatOpenAI);
+    if (!(model instanceof ChatOpenAI)) {
+      throw new Error("Expected ChatOpenAI model");
+    }
     expect(model.model).toBe("Qwen/Qwen3-Coder");
     expect(model.clientConfig.baseURL).toBe("https://api.siliconflow.cn/v1");
+  });
+
+  test("uses ChatOllama for Ollama providers", () => {
+    const config: AgentConfig = {
+      providerName: "ollama",
+      providerType: "ollama",
+      apiKey: "",
+      baseURL: "http://localhost:11434",
+      modelName: "qwen2.5-coder:7b",
+    };
+
+    const model = createChatModel(config);
+
+    expect(model).toBeInstanceOf(ChatOllama);
+    if (!(model instanceof ChatOllama)) {
+      throw new Error("Expected ChatOllama model");
+    }
+    expect(model.model).toBe("qwen2.5-coder:7b");
+    expect(model.baseUrl).toBe("http://localhost:11434");
   });
 });

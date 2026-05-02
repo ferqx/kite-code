@@ -22,7 +22,7 @@
 
 - `src/app/`：CLI 入口、run/resume 编排和事件流标准化。
 - `src/harness/`：LangGraph 控制循环、状态、路由、审批和工具分发。
-- `src/model/`：模型适配器工厂、OpenAI-compatible provider 适配、DeepSeek 专用 patch、静态 prompt、运行时上下文和上下文压缩。
+- `src/model/`：模型适配器工厂、OpenAI-compatible provider 适配、Ollama provider 适配、DeepSeek 专用 patch、静态 prompt、运行时上下文和上下文压缩。
 - `src/tools/`：模型工具定义，以及文件、shell、patch 工具实现。
 - `src/persistence/`：Bun SQLite LangGraph checkpointer。
 - `src/config/`：本地 `~/.openpx/openpx.jsonc` 配置加载器。
@@ -71,8 +71,9 @@ bun install
 - `deepseek`：使用 `@langchain/deepseek`，并保留 DeepSeek reasoning-content patch。
 - `openai`：使用 `@langchain/openai` 访问配置的 OpenAI API base URL。
 - `openai-compatible`：使用 `@langchain/openai` 访问任意兼容 OpenAI API 的 base URL。
+- `ollama`：使用 `@langchain/ollama` 的 `ChatOllama` 访问 Ollama 原生 API；省略 `apiKey` 时不使用密钥，省略 `baseURL` 时使用 `http://localhost:11434`。
 
-为了保持向后兼容，省略 `type` 时，provider 名称 `deepseek` 仍映射为 `deepseek`；其他 provider 名称默认映射为 `openai-compatible`。
+为了保持向后兼容，省略 `type` 时，provider 名称 `deepseek` 仍映射为 `deepseek`，provider 名称 `ollama` 映射为 `ollama`；其他 provider 名称默认映射为 `openai-compatible`。
 
 当需要 DeepSeek 适配器专有行为时，可以这样配置：
 
@@ -94,7 +95,28 @@ bun install
 }
 ```
 
-provider 专有逻辑应保持隔离。例如 DeepSeek 适配器保留 reasoning-content 回传 patch，而普通 OpenAI-compatible provider 应走通用 OpenAI-compatible 适配器。
+provider 专有逻辑应保持隔离。例如 DeepSeek 适配器保留 reasoning-content 回传 patch，Ollama 适配器走 `@langchain/ollama`，普通 OpenAI-compatible provider 走通用 OpenAI-compatible 适配器。
+
+使用本地 Ollama 时，可以先拉取需要的模型，再用最小配置指向本地服务：
+
+```bash
+ollama pull qwen2.5-coder:7b
+ollama serve
+```
+
+```jsonc
+{
+  "provider": {
+    "ollama": {}
+  },
+  "model": {
+    "default": {
+      "provider": "ollama",
+      "name": "qwen2.5-coder:7b"
+    }
+  }
+}
+```
 
 ## 运行
 
@@ -176,4 +198,12 @@ bun test
 bun run test:real
 ```
 
-真实测试套件位于 `tests/real-agent.real.ts`，因此不会被 Bun 默认测试发现机制拾取。`test:real` 使用 `--concurrent --max-concurrency 3` 并发运行真实模型用例，以缩短等待时间并避免过高并发压到 provider。它会调用配置的默认模型，覆盖当前全部模型可见工具：`read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan` 和 `ask_user`，同时覆盖受保护工具审批、shell 授权和 checkpoint 数据库检查。脚本会沿用当前 shell 的代理环境；如果网络需要代理或需要取消代理，请在项目脚本外部配置环境变量。
+可以在运行真实测试时临时覆盖默认 provider 和模型。除内置 `ollama` provider 会使用本地默认连接参数外，provider 名称必须已经存在于 `~/.openpx/openpx.jsonc` 的 `provider` 配置中；命令行只覆盖选择哪个 provider 和哪个模型，不传递密钥：
+
+```bash
+bun run test:real --provider=ollama --model=gemma4:31b-cloud
+```
+
+`bun test` 本身不会把自定义 `--provider` / `--model` 参数暴露给测试文件，因此 provider/model 覆盖必须通过 `bun run test:real` 入口传入。
+
+真实测试套件位于 `tests/real-agent.real.ts`，因此不会被 Bun 默认测试发现机制拾取。`test:real` 入口会解析 `--provider` 和 `--model`，再用 `--concurrent --max-concurrency 3` 启动真实模型用例，以缩短等待时间并避免过高并发压到 provider。它默认调用配置的默认模型；传入 `--provider` 或 `--model` 时使用命令行覆盖后的模型。真实套件覆盖当前全部模型可见工具：`read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan` 和 `ask_user`，同时覆盖受保护工具审批、shell 授权和 checkpoint 数据库检查。脚本会沿用当前 shell 的代理环境；如果网络需要代理或需要取消代理，请在项目脚本外部配置环境变量。
