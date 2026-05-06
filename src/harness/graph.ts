@@ -17,8 +17,9 @@ import {
   formatPlanStateReminder,
 } from "../model/runtime-context";
 import { createChatModel, type SupportedChatModel } from "../model/factory";
+import { type ModelRetryListener } from "../model/deepseek";
 import { BunSqliteSaver } from "../persistence/checkpoint";
-import type { AgentResumeValue, ShellApprovalGrant } from "../shared/types";
+import type { AgentResumeValue, ModelRetryEvent, ShellApprovalGrant } from "../shared/types";
 import { createAgentTools } from "../tools/definitions";
 import type { ShellExecutor } from "../tools/shell";
 import {
@@ -69,7 +70,25 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       workspace: state.workspace,
       shellExecutor: input.shellExecutor,
     });
-    return invokeModel(model, state, tools);
+    const retryEvents: ModelRetryEvent[] = [];
+    const listener: ModelRetryListener = (attempt, error, delayMs) => {
+      retryEvents.push({
+        attempt,
+        error: typeof error === "string" ? error : String(error).slice(0, 200),
+        delayMs,
+      });
+    };
+    (model as unknown as Record<string, unknown>)._retryListener = listener;
+    try {
+      const { state: result, contextRetries } = await invokeModel(model, state, tools);
+      const allRetries = [...retryEvents, ...contextRetries];
+      if (allRetries.length > 0) {
+        return { ...result, modelRetries: allRetries };
+      }
+      return result;
+    } finally {
+      (model as unknown as Record<string, unknown>)._retryListener = null;
+    }
   };
 
   /** 审批节点：中断等待人工批准 / Approval node */
@@ -268,13 +287,22 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   return { graph, checkpointer };
 }
 
+/** invokeModel 返回值 / Return value of invokeModel */
+interface InvokeModelResult {
+  /** 图中其他节点可消费的状态更新（不含 modelRetries）/ State update consumed by other graph nodes (without modelRetries) */
+  state: Record<string, unknown>;
+  /** 上下文溢出重试事件（Layer 1/2），由 agent 节点合并到 modelRetries / Context overflow retry events, merged into modelRetries by agent node */
+  contextRetries: ModelRetryEvent[];
+}
+
 /** 共享的模型调用逻辑 / Shared model invocation logic */
 async function invokeModel(
   model: ReturnType<typeof createChatModel>,
   state: CodeAgentState,
   tools: ReturnType<typeof createAgentTools>,
-) {
+): Promise<InvokeModelResult> {
   let prepared = prepareModelContext("agent", state);
+  const contextRetries: ModelRetryEvent[] = [];
 
   let response: AIMessage;
   try {
@@ -284,6 +312,11 @@ async function invokeModel(
     if (!isContextOverflowError(error)) throw error;
 
     // 第一层：规则压缩 + 重试 / Layer 1: rules-based compaction + retry
+    contextRetries.push({
+      attempt: 1,
+      error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+      delayMs: 0,
+    });
     const budget = state.contextBudget ?? { maxToolOutputChars: 4000 };
     const compacted = forceContextCompaction(state.messages, budget);
     const retryMessages = rebuildMessages("agent", state, compacted.messages);
@@ -295,6 +328,11 @@ async function invokeModel(
       if (!isContextOverflowError(retryError)) throw retryError;
 
       // 第二层：LLM 自总结 + 重试 / Layer 2: LLM summarization + retry
+      contextRetries.push({
+        attempt: 2,
+        error: retryError instanceof Error ? retryError.message.slice(0, 200) : String(retryError).slice(0, 200),
+        delayMs: 0,
+      });
       const summaryMsg = await generateLLMSummary(model, state.messages);
       const llmMessages = [new HumanMessage(summaryMsg), ...compacted.messages.slice(-8)];
       const llmRetry = rebuildMessages("agent", state, llmMessages);
@@ -312,25 +350,31 @@ async function invokeModel(
   if (request) {
     const toolCallMessage = messageWithSingleToolCall(response, request.id);
     return {
+      state: {
+        workspaceAccess: state.workspaceAccess,
+        phase: state.phase,
+        approvedToolRequest: state.approvedToolRequest,
+        approvedToolGrant: state.approvedToolGrant,
+        authorization: state.authorization,
+        contextSummary: prepared.contextSummary,
+        messages: [toolCallMessage],
+      },
+      contextRetries,
+    };
+  }
+
+  return {
+    state: {
       workspaceAccess: state.workspaceAccess,
       phase: state.phase,
       approvedToolRequest: state.approvedToolRequest,
       approvedToolGrant: state.approvedToolGrant,
       authorization: state.authorization,
       contextSummary: prepared.contextSummary,
-      messages: [toolCallMessage],
-    };
-  }
-
-  return {
-    workspaceAccess: state.workspaceAccess,
-    phase: state.phase,
-    approvedToolRequest: state.approvedToolRequest,
-    approvedToolGrant: state.approvedToolGrant,
-    authorization: state.authorization,
-    contextSummary: prepared.contextSummary,
-    final: messageText(response),
-    messages: [response],
+      final: messageText(response),
+      messages: [response],
+    },
+    contextRetries,
   };
 }
 

@@ -1,11 +1,57 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatOllama } from "@langchain/ollama";
+import { BaseMessage } from "@langchain/core/messages";
+import { ChatResult } from "@langchain/core/outputs";
+import { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import type { AgentConfig } from "../config/index";
-import { createDeepSeekModel } from "./deepseek";
+import { createDeepSeekModel, withTransientModelRetry, type ModelRetryListener } from "./deepseek";
 
 const MODEL_REQUEST_TIMEOUT_MS = 30_000;
-const OLLAMA_RETRY_MAX = 2;
-const OLLAMA_RETRY_BASE_DELAY_MS = 2_000;
+
+/**
+ * ChatOpenAI with transient error retry.
+ *
+ * Overriding `_generate` rather than `completionWithRetry` because the latter
+ * is not part of the public ChatOpenAI type signature. The `_generate` path
+ * covers all current model invocations (the agent only uses `.invoke()`), but
+ * note that switching to `.stream()` would bypass this retry wrapper.
+ */
+class RetryingChatOpenAI extends ChatOpenAI {
+  _retryListener: ModelRetryListener | null = null;
+
+  override async _generate(
+    messages: BaseMessage[],
+    options: this["ParsedCallOptions"],
+    runManager?: CallbackManagerForLLMRun,
+  ): Promise<ChatResult> {
+    return withTransientModelRetry(
+      () => super._generate(messages, options, runManager),
+      { onRetry: this._retryListener ?? undefined },
+    );
+  }
+}
+
+/**
+ * ChatOllama with transient error retry.
+ *
+ * Using `_generate` override (same strategy as RetryingChatOpenAI)
+ * instead of a custom fetch wrapper so that all three providers use
+ * the same retry policy (`withTransientModelRetry`).
+ */
+class RetryingChatOllama extends ChatOllama {
+  _retryListener: ModelRetryListener | null = null;
+
+  override async _generate(
+    messages: BaseMessage[],
+    options: this["ParsedCallOptions"],
+    runManager?: CallbackManagerForLLMRun,
+  ): Promise<ChatResult> {
+    return withTransientModelRetry(
+      () => super._generate(messages, options, runManager),
+      { onRetry: this._retryListener ?? undefined },
+    );
+  }
+}
 
 /** 支持工具绑定的聊天模型 / Tool-bindable chat model */
 export type SupportedChatModel =
@@ -28,7 +74,7 @@ export function createChatModel(config: AgentConfig): SupportedChatModel {
 
 /** 创建 OpenAI 或 OpenAI-compatible 聊天模型 / Create an OpenAI-compatible chat model */
 export function createOpenAICompatibleModel(config: AgentConfig): ChatOpenAI {
-  return new ChatOpenAI({
+  return new RetryingChatOpenAI({
     apiKey: config.apiKey,
     maxRetries: 0,
     configuration: {
@@ -42,40 +88,11 @@ export function createOpenAICompatibleModel(config: AgentConfig): ChatOpenAI {
   });
 }
 
-/** 创建 Ollama 聊天模型，带 5xx 重试 / Create Ollama chat model with 5xx retry */
+/** 创建 Ollama 聊天模型 / Create an Ollama chat model */
 export function createOllamaModel(config: AgentConfig): ChatOllama {
-  return new ChatOllama({
+  return new RetryingChatOllama({
     baseUrl: config.baseURL,
     model: config.modelName,
     temperature: 0,
-    fetch: createRetryingFetch(OLLAMA_RETRY_MAX, OLLAMA_RETRY_BASE_DELAY_MS) as any,
   });
-}
-
-/** 创建带 5xx 重试的 fetch 函数 / Create fetch with 5xx retry */
-function createRetryingFetch(
-  maxRetries: number,
-  baseDelayMs: number,
-): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
-  return async (input, init) => {
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const response = await globalThis.fetch(input, init);
-        if (response.ok || response.status < 500 || attempt >= maxRetries) {
-          return response;
-        }
-        await sleep(baseDelayMs * (attempt + 1));
-      } catch (error) {
-        lastError = error;
-        if (attempt >= maxRetries) throw error;
-        await sleep(baseDelayMs * (attempt + 1));
-      }
-    }
-    throw lastError;
-  };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

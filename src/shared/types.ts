@@ -199,3 +199,13 @@ export interface AgentEvent {
   /** 事件数据 / Event data */
   data: unknown;
 }
+
+/** 模型重试事件 / Model retry event */
+export interface ModelRetryEvent {
+  /** 重试尝试次数 (1-indexed) / Retry attempt number */
+  attempt: number;
+  /** 错误信息摘要 / Error message summary */
+  error: string;
+  /** 重试前等待毫秒数 / Delay before retry in milliseconds */
+  delayMs: number;
+}

@@ -63,6 +63,28 @@ describe("model transient retry", () => {
     expect(attempts).toBe(2);
   });
 
+  test("retries 5xx server errors (502/503/504)", async () => {
+    let attempts = 0;
+
+    const result = await withTransientModelRetry(
+      async () => {
+        attempts++;
+        if (attempts < 3) {
+          throw Object.assign(new Error("Internal Server Error"), { status: 500 });
+        }
+        return "ok";
+      },
+      {
+        initialDelayMs: 1,
+        jitterMs: 0,
+        sleep: async () => {},
+      },
+    );
+
+    expect(result).toBe("ok");
+    expect(attempts).toBe(3);
+  });
+
   test("does not retry non-transient API errors", async () => {
     let attempts = 0;
     const error = Object.assign(new Error("Unauthorized"), { status: 401 });
@@ -105,6 +127,50 @@ describe("model transient retry", () => {
       ),
     ).rejects.toBe(errors[2]);
     expect(attempts).toBe(3);
+  });
+
+  test("calls onRetry callback with attempt, error, and delay on each retry", async () => {
+    let attempts = 0;
+    const retryCalls: Array<{ attempt: number; error: unknown; delayMs: number }> = [];
+
+    await withTransientModelRetry(
+      async () => {
+        attempts++;
+        if (attempts < 3) {
+          throw Object.assign(new Error("ECONNRESET"), { code: "ECONNRESET" });
+        }
+        return "ok";
+      },
+      {
+        initialDelayMs: 10,
+        jitterMs: 0,
+        sleep: async () => {},
+        onRetry: (attempt, error, delayMs) => {
+          retryCalls.push({ attempt, error, delayMs });
+        },
+      },
+    );
+
+    expect(retryCalls).toHaveLength(2);
+    expect(retryCalls[0]).toEqual({ attempt: 1, error: expect.any(Error), delayMs: 10 });
+    expect(retryCalls[1]).toEqual({ attempt: 2, error: expect.any(Error), delayMs: 20 });
+    // onRetry is NOT called for the successful final attempt
+    expect(attempts).toBe(3);
+  });
+
+  test("does not call onRetry when operation succeeds on first try", async () => {
+    let onRetryCalled = false;
+
+    await withTransientModelRetry(
+      async () => "ok",
+      {
+        onRetry: () => {
+          onRetryCalled = true;
+        },
+      },
+    );
+
+    expect(onRetryCalled).toBe(false);
   });
 
   test("passes back empty DeepSeek reasoning content when the provider returns it", async () => {

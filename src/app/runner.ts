@@ -13,6 +13,7 @@ import type {
   AgentEvent,
   AgentResumeValue,
   ContextBudget,
+  ModelRetryEvent,
   WorkspaceAccess,
   WorkspaceAccessRequest,
 } from "../shared/types";
@@ -237,6 +238,10 @@ export async function* normalizeGraphStream(
     currentWorkspaceAccess = findWorkspaceAccess(chunk) ?? currentWorkspaceAccess;
     // 产出更新事件 / Yield update event
     yield { type: "update", data: chunk };
+    // 提取模型重试事件 / Extract model retry events
+    for (const retry of findModelRetries(chunk)) {
+      yield { type: "model_retry", data: retry };
+    }
     // 提取缓存指标 / Extract cache metrics
     const metrics = findPromptCacheMetrics(chunk);
     if (metrics && currentWorkspaceAccess) {
@@ -301,6 +306,25 @@ function findPromptCacheMetrics(chunk: unknown) {
     }
   }
   return null;
+}
+
+/** 从流块中提取模型重试事件 / Extract model retry events from stream chunk */
+function findModelRetries(chunk: unknown): ModelRetryEvent[] {
+  const all: ModelRetryEvent[] = [];
+  for (const value of walkValues(chunk)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    const modelRetries = (value as Record<string, unknown>).modelRetries;
+    if (Array.isArray(modelRetries)) {
+      for (const item of modelRetries) {
+        if (item && typeof item === "object" && typeof (item as any).attempt === "number") {
+          all.push(item as ModelRetryEvent);
+        }
+      }
+    }
+  }
+  return all;
 }
 
 /** 递归遍历对象值生成器 / Recursively walk object values generator */

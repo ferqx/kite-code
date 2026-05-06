@@ -2,6 +2,9 @@ import { ChatDeepSeek } from "@langchain/deepseek";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import type { AgentConfig } from "../config/index";
 
+/** 模型重试监听器 / Model retry listener */
+export type ModelRetryListener = (attempt: number, error: unknown, delayMs: number) => void;
+
 /** 可重试模型连接错误配置 / Retry options for transient model connection errors */
 export interface TransientModelRetryOptions {
   /** 最大尝试次数，包含首次调用 / Max attempts including the first call */
@@ -14,9 +17,11 @@ export interface TransientModelRetryOptions {
   jitterMs?: number;
   /** 可注入 sleep，便于测试 / Injectable sleep for tests */
   sleep?: (delayMs: number) => Promise<void>;
+  /** 重试时调用的回调 / Callback invoked on each retry */
+  onRetry?: ModelRetryListener;
 }
 
-const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<TransientModelRetryOptions> = {
+const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<Omit<TransientModelRetryOptions, "onRetry">> = {
   maxAttempts: 3,
   initialDelayMs: 500,
   maxDelayMs: 4_000,
@@ -41,6 +46,9 @@ const MODEL_REQUEST_TIMEOUT_MS = 30_000;
 class PatchedChatDeepSeek extends ChatDeepSeek {
   /** @internal 暂存原始消息以便在 completionWithRetry 中回查 / Stash original messages for lookup in completionWithRetry */
   private _originalMessages: BaseMessage[] | null = null;
+
+  /** 当前调用的重试监听器 / Retry listener for the current invocation */
+  _retryListener: ModelRetryListener | null = null;
 
   /** @internal */
   override async _generate(
@@ -92,6 +100,7 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
     }
     return withTransientModelRetry(
       () => super.completionWithRetry(request, requestOptions),
+      { onRetry: this._retryListener ?? undefined },
     );
   }
 }
@@ -124,7 +133,10 @@ export async function withTransientModelRetry<T>(
         retryOptions.jitterMs > 0
           ? Math.floor(Math.random() * retryOptions.jitterMs)
           : 0;
-      await retryOptions.sleep(baseDelay + jitter);
+      const delayMs = baseDelay + jitter;
+      // attempt 即重试次数（1-indexed）：attempt=1 表示第 1 次重试 / attempt is the retry number (1-indexed): attempt=1 means first retry
+      retryOptions.onRetry?.(attempt, error, delayMs);
+      await retryOptions.sleep(delayMs);
     }
   }
 
@@ -138,8 +150,9 @@ export function isTransientModelConnectionError(error: unknown): boolean {
       ? (error as Record<string, unknown>)
       : {};
   const status = record.status;
-  if (typeof status === "number" && status >= 400 && status < 500) {
-    return false;
+  if (typeof status === "number") {
+    if (status >= 400 && status < 500) return false; // 4xx never retryable
+    if (status >= 500) return true; // 5xx always retryable (502/503/504 are transient server errors)
   }
 
   const combined = errorText(error);

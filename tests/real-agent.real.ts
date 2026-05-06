@@ -12,6 +12,7 @@ import type { AgentConfig } from "../src/config/index";
 import type {
   AgentEvent,
   AgentResumeValue,
+  ModelRetryEvent,
   ShellInput,
   ShellResult,
 } from "../src/shared/types";
@@ -758,6 +759,93 @@ describe("L8: extended long-running complex scenarios", () => {
       logCacheAggregate(events, "L8c api-client");
     },
     900_000,
+  );
+});
+
+// ============================================================================
+// Retry: 模型服务错误恢复 / Model service error recovery
+//
+// 通过本地 HTTP 代理模拟瞬时 5xx 错误，验证模型调用能自动重试并最终成功。
+// 覆盖链路：代理 503 → isTransientModelConnectionError → withTransientModelRetry → 真实 API
+// Use a local HTTP proxy to simulate transient 5xx errors, verifying retry recovery.
+// Covered: proxy 503 → isTransientModelConnectionError → withTransientModelRetry → real API.
+// ============================================================================
+describe("Retry: model service error recovery", () => {
+  test(
+    "recovers from transient 503 errors and reports retry events",
+    async () => {
+      await ensureRealModelAvailable();
+      const config = loadRealModelConfig();
+
+      // 启动本地 HTTP 代理：前 2 次请求返回 503，之后转发到真实 API
+      // Start local HTTP proxy: first 2 requests return 503, then forward to real API
+      let requestCount = 0;
+      const proxy = Bun.serve({
+        port: 0,
+        async fetch(req) {
+          requestCount++;
+          if (requestCount <= 2) {
+            return new Response(
+              JSON.stringify({ error: { message: "Service Unavailable" } }),
+              {
+                status: 503,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+          const url = new URL(req.url);
+          const targetUrl = `${config.baseURL}${url.pathname}${url.search}`;
+          const headers = new Headers(req.headers);
+          headers.delete("host");
+          try {
+            const body = await req.text();
+            return await fetch(targetUrl, {
+              method: req.method,
+              headers,
+              body: body || undefined,
+            });
+          } catch (_) {
+            return new Response("Bad Gateway", { status: 502 });
+          }
+        },
+      });
+
+      try {
+        const proxyConfig = {
+          ...config,
+          baseURL: `http://localhost:${proxy.port}`,
+        };
+        const model = createChatModel(proxyConfig);
+        const retryEvents: ModelRetryEvent[] = [];
+        (model as unknown as Record<string, unknown>)._retryListener = (
+          attempt: number,
+          error: unknown,
+          delayMs: number,
+        ) => {
+          retryEvents.push({
+            attempt,
+            error: String(error).slice(0, 200),
+            delayMs,
+          });
+        };
+
+        const response = await model.invoke([
+          new HumanMessage("Reply with 'hello' only"),
+        ]);
+
+        // 应有 2 次重试事件（前 2 次 503 失败触发重试，第 3 次成功）
+        // Should have 2 retry events (first 2 fail with 503, 3rd succeeds)
+        expect(retryEvents.length).toBe(2);
+        expect(retryEvents[0].attempt).toBe(1);
+        expect(retryEvents[1].attempt).toBe(2);
+        // 总共 3 次 HTTP 请求（2 失败 + 1 成功）/ 3 total HTTP requests (2 fail + 1 success)
+        expect(requestCount).toBe(3);
+        expect(String(response.content).toLowerCase()).toMatch(/hello/);
+      } finally {
+        proxy.stop();
+      }
+    },
+    120_000,
   );
 });
 

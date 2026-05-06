@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
   initialAgentPhaseForAccess,
   initialWorkspaceAccessForTask,
+  normalizeGraphStream,
   runtimeQuestionAnswer,
   taskMessageForInitialAccess,
 } from "../src/app/runner";
+import type { ModelRetryEvent } from "../src/shared/types";
 
 // 测试 runner 的初始工作区访问权限选择逻辑 / Test runner initial workspace access selection logic
 describe("runner initial workspace access selection", () => {
@@ -70,5 +72,73 @@ describe("runner initial workspace access selection", () => {
   test("starts non-plan tasks with write workspace access", () => {
     expect(initialWorkspaceAccessForTask("Create hello.txt")).toBe("write");
     expect(initialWorkspaceAccessForTask("")).toBe("write"); // 空任务也走 write / Empty task also uses write
+  });
+});
+
+describe("normalizeGraphStream model retry events", () => {
+  test("yields model_retry events when agent chunk contains modelRetries", async () => {
+    const retries: ModelRetryEvent[] = [
+      { attempt: 1, error: "ECONNRESET", delayMs: 500 },
+      { attempt: 2, error: "ECONNRESET", delayMs: 1000 },
+    ];
+
+    async function* mockStream() {
+      yield {
+        agent: {
+          messages: [{ type: "ai", content: "done" }],
+          modelRetries: retries,
+        },
+      };
+    }
+
+    const events: Array<{ type: string; data: unknown }> = [];
+    for await (const event of normalizeGraphStream(mockStream())) {
+      events.push(event);
+    }
+
+    const retryEvents = events.filter((e) => e.type === "model_retry");
+    expect(retryEvents).toHaveLength(2);
+    expect(retryEvents[0].data).toEqual(retries[0]);
+    expect(retryEvents[1].data).toEqual(retries[1]);
+  });
+
+  test("does not yield model_retry when chunk has no modelRetries", async () => {
+    async function* mockStream() {
+      yield {
+        agent: {
+          messages: [{ type: "ai", content: "done" }],
+        },
+      };
+    }
+
+    const events: Array<{ type: string; data: unknown }> = [];
+    for await (const event of normalizeGraphStream(mockStream())) {
+      events.push(event);
+    }
+
+    const retryEvents = events.filter((e) => e.type === "model_retry");
+    expect(retryEvents).toHaveLength(0);
+  });
+
+  test("yields model_retry events correctly ordered (before cache_metrics when applicable)", async () => {
+    const retries: ModelRetryEvent[] = [
+      { attempt: 1, error: "500 Internal Error", delayMs: 500 },
+    ];
+
+    async function* mockStream() {
+      yield {
+        agent: {
+          modelRetries: retries,
+        },
+      };
+    }
+
+    const events: Array<{ type: string }> = [];
+    for await (const event of normalizeGraphStream(mockStream())) {
+      events.push({ type: event.type });
+    }
+
+    // update always comes first, then model_retry
+    expect(events.map((e) => e.type)).toEqual(["update", "model_retry"]);
   });
 });
