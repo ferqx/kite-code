@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-05-02
+最后更新：2026-05-06
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -24,6 +24,7 @@
 | `execution/active/real-model-test-boundary.md` | active | 测试发现、真实模型端到端套件、package 脚本 | 修改测试命名、`package.json` 测试脚本或真实模型套件。 |
 | `execution/active/documentation-language.md` | active | 文档语言、Markdown 内容标准、文档测试 | 创建或修改 README、AGENTS、`docs/space` 或其他 Markdown 文档。 |
 | `execution/active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |
+| `execution/active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
 
 ## 理解记录
 
@@ -43,6 +44,7 @@
 | `execution/completed/2026-04-27-harness-engineering-doc-hygiene.md` | completed | 记录 `docs/space` 索引和生成文档边界的默认测试覆盖。 |
 | `execution/completed/2026-04-27-documentation-language-standard.md` | completed | 记录仓库 Markdown 文档以中文为标准，并增加中文元数据检查。 |
 | `execution/completed/2026-05-01-prompt-cache-runtime-state-research.md` | completed | 归档 DeepSeek prompt cache 标准、运行时状态投影实验、失败反例和最终消息布局结论。 |
+| `execution/completed/2026-05-06-tool-description-contracts.md` | completed | 记录工具描述从功能字符串升级为结构化 ACI 契约的实现和验证。 |
 
 ## 参考资料
 

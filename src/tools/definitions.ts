@@ -6,6 +6,14 @@ import {
   editFile,
   writeFile,
 } from "./file";
+import {
+  READ_FILE_CONTRACT,
+  EDIT_FILE_CONTRACT,
+  WRITE_FILE_CONTRACT,
+  SHELL_EXECUTE_CONTRACT,
+  UPDATE_PLAN_CONTRACT,
+  ASK_USER_CONTRACT,
+} from "./tool-contracts";
 
 /** 创建 Agent 工具集输入 / Input for creating agent tools */
 export interface CreateAgentToolsInput {
@@ -24,8 +32,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       ),
     {
       name: "read_file",
-      description:
-        "Read a file from the workspace. Returns the file content with line numbers. Use this BEFORE edit_file to see the current content and pick precise old_string values.",
+      description: READ_FILE_CONTRACT.description,
       schema: z.object({
         path: z.string().describe("Relative path to the file"),
         offset: z.number().optional().describe("Starting line number (1-indexed, default 1)"),
@@ -47,8 +54,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       ),
     {
       name: "edit_file",
-      description:
-        "Edit a file by replacing old_string with new_string. Use read_file first to get the exact text to replace. The old_string MUST exactly match the file content — include all whitespace, indentation, and surrounding lines for uniqueness. If the same text appears multiple times, set replace_all: true or make old_string longer to be unique.",
+      description: EDIT_FILE_CONTRACT.description,
       schema: z.object({
         path: z.string().describe("Relative path to the file to edit"),
         old_string: z.string().describe("The exact text to replace. Must match the file content exactly, including whitespace."),
@@ -65,8 +71,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       ),
     {
       name: "write_file",
-      description:
-        "Create a new file or overwrite an existing file with new content. Use this for creating new files or completely rewriting existing files. For editing existing files, prefer edit_file.",
+      description: WRITE_FILE_CONTRACT.description,
       schema: z.object({
         path: z.string().describe("Relative path to the file"),
         content: z.string().describe("Complete file content to write"),
@@ -84,8 +89,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       ),
     {
       name: "shell_execute",
-      description:
-        "Execute a shell command action envelope in the local workspace. Use intent='verify' for tests, typecheck, build, lint, or smoke checks. Provide objective, justification, expected_observation, failure_strategy, and optional grant_request when they help the user review the command. Commands are reviewed by the harness before execution.",
+      description: SHELL_EXECUTE_CONTRACT.description,
       schema: z.object({
         command: z.string().describe("Shell command to execute in the workspace"),
         intent: z
@@ -149,8 +153,7 @@ function createUpdatePlanTool() {
       }),
     {
       name: "update_plan",
-      description:
-        "Update the current plan state with concise ordered steps. Use it when planning or progress tracking materially helps; it must not edit files, run commands, install dependencies, or mutate the workspace.",
+      description: UPDATE_PLAN_CONTRACT.description,
       schema: z.object({
         name: z.string().describe("Short plan name"),
         description: z.string().describe("Short plan description"),
@@ -186,8 +189,7 @@ function createAskUserTool() {
       }),
     {
       name: "ask_user",
-      description:
-        "Ask the user one focused clarification question when planning is blocked by meaningful uncertainty. Provide concrete options and allow free-text input when appropriate.",
+      description: ASK_USER_CONTRACT.description,
       schema: z.object({
         question: z
           .string()
