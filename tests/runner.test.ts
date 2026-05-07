@@ -3,7 +3,6 @@ import {
   initialAgentPhaseForAccess,
   initialWorkspaceAccessForTask,
   normalizeGraphStream,
-  runtimeQuestionAnswer,
   taskMessageForInitialAccess,
 } from "../src/app/runner";
 import type { ModelRetryEvent } from "../src/shared/types";
@@ -47,25 +46,6 @@ describe("runner initial workspace access selection", () => {
     expect(taskMessageForInitialAccess("Create hello.txt", "write")).toBe(
       "Create hello.txt",
     );
-  });
-
-  // 验证运行时模型问题能根据配置确定性回答 / Verify runtime model questions are answered deterministically from config
-  test("answers runtime model questions deterministically from config", () => {
-    expect(
-      runtimeQuestionAnswer("你当前是什么模型？上下文有多长", {
-        modelName: "deepseek-chat",
-      }),
-    ).toContain("deepseek-chat"); // 应包含模型名 / Should include model name
-    expect(runtimeQuestionAnswer("Create hello.txt", { modelName: "deepseek-chat" })).toBe(
-      null, // 非模型问题返回 null / Non-model questions return null
-    );
-    // 长任务即使包含 "model" 子串也不应被当作运行时问题 / Long tasks containing "model" substring are not runtime questions
-    expect(
-      runtimeQuestionAnswer(
-        "Build a TypeScript data model and service layer with multiple files including src/models.ts",
-        { modelName: "deepseek-chat" },
-      ),
-    ).toBe(null);
   });
 
   // 验证普通任务默认使用可写工作区访问 / Verify normal tasks default to write workspace access

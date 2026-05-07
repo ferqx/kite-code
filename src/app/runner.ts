@@ -50,16 +50,6 @@ export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task">
 export async function* streamCodeAgent(
   input: StreamCodeAgentInput,
 ): AsyncGenerator<AgentEvent> {
-  // 检查是否为运行时问题，如果是则直接回答 / Check if runtime question, answer directly
-  const directAnswer = runtimeQuestionAnswer(input.task, {
-    modelName: input.config.modelName,
-  });
-  if (directAnswer) {
-    // 如果是运行时问题，直接返回答案并结束 / If it's a runtime question, return answer and end
-    yield { type: "final", data: directAnswer };
-    return;
-  }
-
   // 构建 Agent 图 / Build agent graph
   const { graph, checkpointer } = buildCodeAgentGraph(input);
   // 跟踪流是否正常完成 / Track if stream completed normally
@@ -101,39 +91,6 @@ export async function* streamCodeAgent(
       checkpointer.close();
     }
   }
-}
-
-/** 检查用户是否在询问运行时信息，如果是则直接回答 / Check if user asks about runtime info, answer directly if so */
-export function runtimeQuestionAnswer(
-  task: string,
-  input: { modelName: string },
-): string | null {
-  // 仅对短任务启用运行时问答快捷路径，避免包含 model/context 子串的长任务被误拦截
-  // Only short tasks use the runtime shortcut; long tasks mentioning "model"/"context" are real work
-  if (task.length > 60) return null;
-
-  const normalized = task.toLowerCase();
-  // 检查是否询问模型信息 / Check if asking about model
-  const asksModel =
-    task.includes("模型") ||
-    normalized.includes("model") ||
-    normalized.includes("configured model");
-  // 检查是否询问上下文信息 / Check if asking about context
-  const asksContext =
-    task.includes("上下文") ||
-    normalized.includes("context") ||
-    normalized.includes("context window");
-
-  // 如果不是询问运行时信息，返回 null / Return null if not asking about runtime info
-  if (!asksModel && !asksContext) {
-    return null;
-  }
-
-  // 返回模型名称和上下文长度说明 / Return model name and context length info
-  return [
-    `当前配置模型: ${input.modelName}`,
-    "上下文长度: 当前运行时未提供精确 token 窗口；请以模型提供商配置为准。",
-  ].join("\n");
 }
 
 /** 为初始工作区访问权限准备任务消息 / Prepare task message for initial workspace access */
