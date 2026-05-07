@@ -1,4 +1,29 @@
-# 项目约定
+# 当前规则：项目约定
+
+状态：active
+最后更新：2026-05-07
+最后验证：2026-05-07
+范围：
+
+- 所有 Markdown 文档与注释
+- 测试行为与纪律
+- CLI 接口与行为
+- Git 提交与仓库卫生
+
+读取时机：
+
+- 修改文档、注释、测试行为、CLI 或提交规范时。
+- CLAUDE.md 中引用本文件作为补充约定的场景。
+
+相关：
+
+- `model-provider-boundary.md`
+- `documentation-language.md`
+- `../completed/2026-04-27-harness-engineering-doc-hygiene.md`
+
+验证：
+
+- `bun test tests/docs-space.test.ts`
 
 > CLAUDE.md 之外的补充约定。需要时查阅，不占用每次会话的上下文。
 

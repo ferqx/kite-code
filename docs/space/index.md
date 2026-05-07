@@ -25,6 +25,7 @@
 | `execution/active/documentation-language.md` | active | 文档语言、Markdown 内容标准、文档测试 | 创建或修改 README、AGENTS、`docs/space` 或其他 Markdown 文档。 |
 | `execution/active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |
 | `execution/active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
+| `execution/active/project-conventions.md` | active | 文档语言、注释规范、测试纪律、CLI 行为、提交粒度、仓库卫生 | 修改 Markdown 文档、测试、CLI、提交规范或仓库布局约束时。 |
 
 ## 理解记录
 
