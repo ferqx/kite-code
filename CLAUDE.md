@@ -26,15 +26,17 @@ bun run agent resume --thread demo --user local --approve  # 审批后恢复执�
 
 ## 项目架构
 
-核心流程：`agent_plan` / `agent_build → approval/tools → reflect → agent_*` 主循环。
+核心流程：单一 `agent` 节点，条件路由到 `approval` / `tools` / `user_input`，完成后回到 `agent` 继续循环，无工具调用时结束。
 
 关键文件：
-- `src/harness/graph.ts` — LangGraph 节点组装和主循环拓扑
-- `src/harness/routes.ts` — agent / approval / tools / reflect 之间的路由
+- `src/harness/graph.ts` — LangGraph 节点组装和主循环拓扑（单 agent 节点）
+- `src/harness/routes.ts` — agent / approval / tools / user_input 之间的路由
 - `src/harness/tool-runner.ts` — 执行经过审批或允许直通的工具请求
+- `src/harness/tool-policy.ts` — 工具安全策略与审批决策
 - `src/app/runner.ts` — run / resume 编排与事件流输出
 - `src/app/cli.ts` — CLI 参数解析和入口行为
-- `src/tools/definitions.ts` — plan/builder 模式下的工具暴露和只读限制
+- `src/tools/definitions.ts` — 6 个 Agent 工具定义及只读命令分类
+- `src/tools/tool-contracts.ts` — 工具 ACI 契约（一等 UX 文档）
 - `src/tools/shell.ts`、`src/tools/file.ts`、`src/tools/apply-patch.ts` — 底层工具实现
 - `src/model/context.ts`、`src/model/runtime-context.ts` — 模型上下文整理、压缩和证据注入
 - `src/config/index.ts` — 读取本地 `~/.openpx/openpx.jsonc` 配置
@@ -65,9 +67,12 @@ bun run agent resume --thread demo --user local --approve  # 审批后恢复执�
 | 改动范围 | 验证命令 |
 |---------|---------|
 | 图路由、审批流 | `bun test tests/graph.test.ts` |
+| 全图集成（mock 模型） | `bun test tests/integration.test.ts` |
 | 工具实现或限制 | `bun test tests/tools.test.ts tests/tool-definitions.test.ts` |
+| 工具安全策略 | `bun test tests/tool-policy.test.ts` |
 | CLI | `bun test tests/cli.test.ts` |
 | 上下文整理 | `bun test tests/context.test.ts` |
 | 运行时编排 | `bun test tests/runner.test.ts` |
+| checkpoint 持久化 | `bun test tests/checkpoint.test.ts tests/integration.test.ts` |
 | 跨模块/不确定 | `bun test` + `bun run typecheck` |
 | 真实模型链路 | `bun run test:real` |
