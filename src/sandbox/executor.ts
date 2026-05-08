@@ -3,6 +3,7 @@ import type { ShellExecutor } from "../tools/shell";
 import { shellTool } from "../tools/shell";
 import { generateBwrapArgs } from "./bwrap";
 import { detectSandboxBackend, type SandboxBackend } from "./platform";
+import { findApplySeccomp } from "./seccomp";
 import { generateSandboxProfile } from "./profile";
 import {
   buildEnvStripSnippet,
@@ -60,10 +61,14 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
   const bwrapArgs = generateBwrapArgs(workspace);
   const bwrapPath = Bun.which("bwrap")!;
+  const seccomp = findApplySeccomp();
 
-  return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => ({
-    cmd: [bwrapPath, ...bwrapArgs, "/bin/sh", "-lc", wrappedCommand],
-  }));
+  return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => {
+    const innerCmd = seccomp
+      ? [seccomp, "/bin/sh", "-lc", wrappedCommand]
+      : ["/bin/sh", "-lc", wrappedCommand];
+    return { cmd: [bwrapPath, ...bwrapArgs, ...innerCmd] };
+  });
 }
 
 /**
