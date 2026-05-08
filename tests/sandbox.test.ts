@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { generateSandboxProfile } from "../src/sandbox/profile";
+import { generateBwrapArgs } from "../src/sandbox/bwrap";
 import {
   buildUlimitPreamble,
   buildHardenedEnv,
   buildEnvStripSnippet,
   buildEnvExportSnippet,
+  checkDangerousPaths,
 } from "../src/sandbox/shell-wrapper";
-import { isSandboxAvailable } from "../src/sandbox/platform";
+import { detectSandboxBackend, isSandboxAvailable } from "../src/sandbox/platform";
 import { createSandboxExecutor } from "../src/sandbox/executor";
 import { shellTool } from "../src/tools/shell";
 import { DEFAULT_RESOURCE_LIMITS } from "../src/sandbox/types";
@@ -63,6 +65,11 @@ describe("sandbox profile generation", () => {
   test("profile escapes backslashes in workspace path", () => {
     const profile = generateSandboxProfile("/tmp/test\\path");
     expect(profile).toContain("/tmp/test\\\\path");
+  });
+
+  test("profile includes move-blocking to prevent rename/symlink escape", () => {
+    const profile = generateSandboxProfile("/tmp/test-workspace");
+    expect(profile).toContain("(deny file-write-unlink file-write-create)");
   });
 });
 
@@ -132,11 +139,115 @@ describe("shell wrapper utilities", () => {
   });
 });
 
+// 验证危险文件路径检测 / Validate dangerous file path detection
+describe("dangerous path detection", () => {
+  test("detects shell config files in redirects", () => {
+    expect(checkDangerousPaths("echo 'alias ls=evil' >> .bashrc")).toBe(".bashrc");
+    expect(checkDangerousPaths("cat payload > ~/.zshrc")).toBe(".zshrc");
+    expect(checkDangerousPaths("tee -a .profile < payload")).toBe(".profile");
+  });
+
+  test("detects git hooks and config", () => {
+    expect(checkDangerousPaths("cp script .git/hooks/pre-commit")).toBe(".git/hooks/");
+    expect(checkDangerousPaths("echo '[user]' >> .git/config")).toBe(".git/config");
+  });
+
+  test("detects SSH authorized_keys tampering", () => {
+    expect(checkDangerousPaths("cat key.pub >> .ssh/authorized_keys")).toBe(".ssh/authorized_keys");
+    expect(checkDangerousPaths("echo key >> ~/.ssh/authorized_keys2")).toBe(".ssh/authorized_keys2");
+  });
+
+  test("detects IDE/agent config tampering", () => {
+    expect(checkDangerousPaths("rm .claude/settings.json")).toBe(".claude/settings.json");
+    expect(checkDangerousPaths("echo task >> .vscode/tasks.json")).toBe(".vscode/tasks.json");
+  });
+
+  test("detects credential file access", () => {
+    expect(checkDangerousPaths("cat .env")).toBe(".env");
+    expect(checkDangerousPaths("cp .env .env.local")).toBe(".env");
+    expect(checkDangerousPaths("cat ~/.aws/credentials")).toBe(".aws/credentials");
+    expect(checkDangerousPaths("cat .npmrc")).toBe(".npmrc");
+  });
+
+  test("detects system config tampering", () => {
+    expect(checkDangerousPaths("echo 'evil' >> /etc/crontab")).toBe("/etc/crontab");
+    expect(checkDangerousPaths("echo 'evil' >> /etc/passwd")).toBe("/etc/passwd");
+    expect(checkDangerousPaths("echo 'evil' >> /etc/sudoers")).toBe("/etc/sudoers");
+  });
+
+  test("allows safe commands with similar-looking paths", () => {
+    expect(checkDangerousPaths("cat package.json")).toBeNull();
+    expect(checkDangerousPaths("cat src/config/env.ts")).toBeNull();
+    expect(checkDangerousPaths("git status")).toBeNull();
+    expect(checkDangerousPaths("bun test")).toBeNull();
+    expect(checkDangerousPaths("echo 'hello world'")).toBeNull();
+  });
+
+  test("returns null for safe commands", () => {
+    expect(checkDangerousPaths("ls -la")).toBeNull();
+    expect(checkDangerousPaths("pwd")).toBeNull();
+    expect(checkDangerousPaths("cat README.md")).toBeNull();
+  });
+});
+
 // 验证平台检测 / Validate platform detection
 describe("sandbox platform detection", () => {
+  test("detectSandboxBackend returns a valid backend type", () => {
+    const backend = detectSandboxBackend();
+    expect(["seatbelt", "bubblewrap", "none"]).toContain(backend);
+  });
+
+  test("detectSandboxBackend returns seatbelt on macOS", () => {
+    const backend = detectSandboxBackend();
+    if (process.platform === "darwin") {
+      expect(backend).toBe("seatbelt");
+    }
+  });
+
   test("isSandboxAvailable returns a boolean", () => {
     const available = isSandboxAvailable();
     expect(typeof available).toBe("boolean");
+  });
+
+  test("isSandboxAvailable matches detectSandboxBackend !== 'none'", () => {
+    expect(isSandboxAvailable()).toBe(detectSandboxBackend() !== "none");
+  });
+});
+
+// 验证 Bubblewrap 参数生成 / Validate Bubblewrap argument generation
+describe("bwrap argument generation", () => {
+  test("includes workspace bind mount", () => {
+    const args = generateBwrapArgs("/tmp/test-ws");
+    expect(args).toContain("--bind");
+    expect(args).toContain("/tmp/test-ws");
+  });
+
+  test("includes essential isolation flags", () => {
+    const args = generateBwrapArgs("/tmp/test-ws");
+    expect(args).toContain("--unshare-net");
+    expect(args).toContain("--unshare-pid");
+    expect(args).toContain("--die-with-parent");
+    expect(args).toContain("--new-session");
+  });
+
+  test("includes minimal /dev and /proc", () => {
+    const args = generateBwrapArgs("/tmp/test-ws");
+    expect(args).toContain("--dev");
+    expect(args).toContain("--proc");
+  });
+
+  test("includes tmpfs /tmp", () => {
+    const args = generateBwrapArgs("/tmp/test-ws");
+    expect(args).toContain("--tmpfs");
+    expect(args).toContain("/tmp");
+  });
+
+  test("includes system paths as read-only", () => {
+    const args = generateBwrapArgs("/tmp/test-ws");
+    expect(args).toContain("--ro-bind");
+    // 至少包含 /usr 或 /bin（取决于系统）
+    const hasSystemPath = args.includes("/usr") || args.includes("/bin");
+    expect(hasSystemPath).toBe(true);
   });
 });
 

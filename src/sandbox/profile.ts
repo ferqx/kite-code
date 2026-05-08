@@ -29,6 +29,16 @@ export function generateSandboxProfile(workspace: string): string {
 
 ;; ── 默认断网 ──
 (deny network*)
+
+;; ── 防逃逸：全局禁止 unlink/create/symlink（仅工作区和临时目录可执行） ──
+(deny file-write-unlink file-write-create)
+;; sandwich: 工作区和临时目录 re-allow 覆盖上述 deny
+(allow file-write-unlink file-write-create
+  (subpath "${esc(workspace)}")
+  (subpath "/tmp")
+  (subpath "/private/tmp")
+  (subpath "/private/var/tmp")
+  (subpath "/private/var/folders"))
 `;
 }
 

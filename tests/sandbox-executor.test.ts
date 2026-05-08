@@ -131,6 +131,22 @@ describe("sandbox executor integration", () => {
     }
   });
 
+  test("rejects commands targeting dangerous file paths", async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: "echo alias ls=evil >> .bashrc",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.stderr).toContain("Rejected");
+      expect(result.stderr).toContain(".bashrc");
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
   test("disabled executor falls back to unsandboxed execution", async () => {
     const ws = setupWorkspace();
     try {

@@ -98,3 +98,92 @@ export function buildEnvExportSnippet(env: Record<string, string>): string {
     .map(([key, value]) => `export ${key}='${value.replace(/'/g, "'\\''")}'`)
     .join(" ; ") + " ; ";
 }
+
+/**
+ * 检测命令中是否引用了危险文件路径
+ * 防止 agent 修改 shell 配置、git hooks、SSH 密钥等持久化/提权文件
+ *
+ * Check if a command references dangerous file paths
+ * Prevents agent from modifying shell configs, git hooks, SSH keys, etc.
+ */
+export function checkDangerousPaths(command: string): string | null {
+  for (const pattern of DANGEROUS_PATH_PATTERNS) {
+    const match = command.match(pattern);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
+/** 危险文件路径模式 / Dangerous file path patterns */
+const DANGEROUS_PATHS = [
+  // Shell 配置文件（持久化入口）/ Shell config files (persistence entry point)
+  ".bashrc",
+  ".bash_profile",
+  ".bash_logout",
+  ".zshrc",
+  ".zprofile",
+  ".zlogout",
+  ".profile",
+  ".cshrc",
+  ".tcshrc",
+  ".kshrc",
+  ".config/fish/",
+  // Git 钩子和配置（代码执行钩子）/ Git hooks and config (code execution hooks)
+  ".git/config",
+  ".git/hooks/",
+  ".gitmodules",
+  // SSH 密钥和授权（横向移动）/ SSH keys and authorization (lateral movement)
+  ".ssh/authorized_keys",
+  ".ssh/authorized_keys2",
+  ".ssh/config",
+  ".ssh/id_",
+  ".ssh/known_hosts",
+  // IDE / Agent 配置文件（行为篡改）/ IDE / Agent config files (behavior tampering)
+  ".claude/settings.json",
+  ".claude/commands/",
+  ".claude/agents/",
+  ".vscode/settings.json",
+  ".vscode/tasks.json",
+  ".vscode/launch.json",
+  ".vscode/extensions.json",
+  ".idea/",
+  // 凭据和密钥文件（数据窃取）/ Credential and secret files (data exfiltration)
+  ".aws/credentials",
+  ".aws/config",
+  ".npmrc",
+  ".yarnrc",
+  ".netrc",
+  ".git-credentials",
+  ".env",
+  ".env.local",
+  ".env.production",
+  // 系统配置 / System configuration
+  "/etc/crontab",
+  "/etc/cron.d/",
+  "/etc/sudoers",
+  "/etc/sudoers.d/",
+  "/etc/passwd",
+  "/etc/shadow",
+  "/etc/group",
+  "/etc/hosts",
+  "/etc/resolv.conf",
+  "crontab",
+  "launchd",
+  "systemd",
+  ".service",
+  ".timer",
+];
+
+/** 从危险路径列表编译的正则模式 / Regex patterns compiled from dangerous path list */
+const DANGEROUS_PATH_PATTERNS: RegExp[] = DANGEROUS_PATHS.map((path) => {
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const prefix = `(?:\\s|>|>>|'|"|/|~|^)`;
+  if (path.endsWith("/")) {
+    // 目录模式：允许匹配子路径（如 .git/hooks/ 匹配 .git/hooks/pre-commit）
+    return new RegExp(`${prefix}(${escaped})`, "i");
+  }
+  // 文件模式：要求路径边界，防止部分匹配（如 .ssh/authorized_keys 不匹配 authorized_keys2）
+  return new RegExp(`${prefix}(${escaped})(?:\\s|'|"|$|/|>)`, "i");
+});
