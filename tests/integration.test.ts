@@ -720,6 +720,93 @@ describe("graph integration", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Sandbox executor integration — verify the graph passes custom shell executors
+// ---------------------------------------------------------------------------
+
+describe("sandbox executor in agent graph", () => {
+  let workspace: string;
+  let checkpointPath: string;
+
+  function setUp() {
+    workspace = fs.mkdtempSync(
+      path.join(os.tmpdir(), "openpx-sandbox-int-"),
+    );
+    checkpointPath = path.join(workspace, "checkpoint.db");
+  }
+
+  function tearDown() {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+
+  test("uses custom shell executor for shell_execute tool", async () => {
+    setUp();
+    try {
+      let calledWith: { command: string } | null = null;
+      const spyShell = async (input: { command: string; workspace: string }) => {
+        calledWith = { command: input.command };
+        return {
+          ok: true as const,
+          command: input.command,
+          exitCode: 0,
+          stdout: "sandboxed output",
+          stderr: "",
+        };
+      };
+
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        shellExecutor: spyShell,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: "",
+            tool_calls: [
+              {
+                id: "call-s1",
+                name: "shell_execute",
+                args: { intent: "inspect", command: "ls" },
+              },
+            ],
+          }),
+          new AIMessage({ content: "listed files via sandbox" }),
+        ]) as any,
+      });
+
+      const chunks = await collectChunks(
+        await graph.stream(
+          {
+            messages: [new HumanMessage("list files")],
+            workspaceAccess: "write",
+            phase: "building",
+            plan: null,
+            userId: "test",
+            threadId: "sbox-1",
+            workspace,
+            contextSummary: "",
+          },
+          {
+            configurable: { thread_id: "sbox-1" },
+            streamMode: "updates",
+            recursionLimit: 60,
+          },
+        ),
+      );
+
+      checkpointer.close();
+
+      // 验证 spy 被调用 / Verify spy was called
+      expect(calledWith).not.toBeNull();
+      expect(calledWith!.command).toBe("ls");
+
+      const final = findFinal(chunks);
+      expect(final).toBe("listed files via sandbox");
+    } finally {
+      tearDown();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Checkpoint recovery tests
 // ---------------------------------------------------------------------------
 

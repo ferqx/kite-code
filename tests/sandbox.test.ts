@@ -10,10 +10,11 @@ import {
 } from "../src/sandbox/shell-wrapper";
 import { detectSandboxBackend, isSandboxAvailable } from "../src/sandbox/platform";
 import { createSandboxExecutor } from "../src/sandbox/executor";
+import { findApplySeccomp, resolveSeccompPath } from "../src/sandbox/seccomp";
 import { shellTool } from "../src/tools/shell";
 import { DEFAULT_RESOURCE_LIMITS } from "../src/sandbox/types";
 import { parseArgs } from "../src/app/cli";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -283,5 +284,46 @@ describe("cli sandbox flag", () => {
   test("resume --no-sandbox disables sandbox", () => {
     const args = parseArgs(["resume", "--approve", "--no-sandbox"]);
     expect(args.sandbox).toBe(false);
+  });
+});
+
+// 验证 seccomp 二进制查找和路径解析 / Validate seccomp binary lookup and path resolution
+describe("seccomp resolution", () => {
+  test("findApplySeccomp returns a path on supported architectures", () => {
+    const path = findApplySeccomp();
+    // x64 / arm64 至少一个存在 / at least one is present
+    if (process.arch === "x64" || process.arch === "arm64") {
+      expect(path).toBeString();
+      expect(path).toContain("vendor/seccomp");
+    } else {
+      expect(path).toBeNull();
+    }
+  });
+
+  test("resolveSeccompPath returns null for null input", () => {
+    expect(resolveSeccompPath(null, "/tmp/ws")).toBeNull();
+  });
+
+  test("resolveSeccompPath returns same path when binary is within workspace", () => {
+    const ws = "/tmp/my-workspace";
+    const binary = "/tmp/my-workspace/vendor/seccomp/arm64/apply-seccomp";
+    expect(resolveSeccompPath(binary, ws)).toBe(binary);
+  });
+
+  test("resolveSeccompPath copies binary when outside workspace", () => {
+    const ws = mkdtempSync(join(tmpdir(), "seccomp-test-"));
+    const srcDir = mkdtempSync(join(tmpdir(), "seccomp-src-"));
+    try {
+      const srcBinary = join(srcDir, "apply-seccomp");
+      Bun.write(srcBinary, "#!/bin/sh\necho fake");
+      chmodSync(srcBinary, 0o755);
+
+      const resolved = resolveSeccompPath(srcBinary, ws);
+      expect(resolved).toBe(join(ws, ".sandbox-tmp", "apply-seccomp"));
+      expect(existsSync(resolved!)).toBe(true);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(srcDir, { recursive: true, force: true });
+    }
   });
 });
