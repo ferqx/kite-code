@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import { loadAgentConfig } from "../config/index";
+import { createSandboxExecutor } from "../sandbox/index";
 import { resumeCodeAgent, streamCodeAgent } from "./runner";
 import type { ShellApprovalGrant, WorkspaceAccessRequest } from "../shared/types";
 
@@ -29,6 +30,8 @@ export interface ParsedArgs {
   replacementCommand?: string;
   /** 恢复 ask_user 中断时传入的用户回答 / User answer for ask_user interrupt resume */
   answer?: string;
+  /** 是否启用沙箱（默认 true）/ Whether sandbox is enabled (default true) */
+  sandbox: boolean;
 }
 
 /** CLI 入口函数 / CLI entry point */
@@ -43,6 +46,12 @@ export async function main(): Promise<void> {
 
   // 加载 Agent 配置 / Load agent configuration
   const config = loadAgentConfig();
+  // 创建沙箱 Shell 执行器 / Create sandboxed shell executor
+  const shellExecutor = createSandboxExecutor({
+    enabled: args.sandbox,
+    workspace: args.workspace,
+  });
+
   // 根据命令类型发起流 / Start stream based on command type
   const events =
     args.command === "run"
@@ -54,6 +63,7 @@ export async function main(): Promise<void> {
           checkpointPath: args.checkpointPath,
           config,
           mode: args.mode,
+          shellExecutor,
         })
       : resumeCodeAgent({
           userId: args.userId,
@@ -61,6 +71,7 @@ export async function main(): Promise<void> {
           workspace: args.workspace,
           checkpointPath: args.checkpointPath,
           config,
+          shellExecutor,
           resume:
             args.answer === undefined
               ? {
@@ -93,6 +104,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     const index = argv.indexOf(name);
     return index >= 0 ? argv[index + 1] ?? "" : undefined;
   };
+  const noSandbox = argv.includes("--no-sandbox");
   const explicitThread = value("--thread", "");
   const mode = parseMode(value("--mode", "auto"));
   const answer = optionalValue("--answer");
@@ -115,6 +127,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     approvalHash,
     replacementCommand,
     answer,
+    sandbox: !noSandbox,
   };
 }
 
@@ -203,7 +216,8 @@ Options:
   --full-access          Allow all future shell_execute commands in this thread
   --approval-hash <hash> Approval hash from the tool_approval interrupt
   --replace-command <cmd> Replace the pending command and approve that command
-  --answer <text>        Resume a user input interrupt with an answer`);
+  --answer <text>        Resume a user input interrupt with an answer
+  --no-sandbox           Disable sandbox isolation (for debugging)`);
 }
 
 if (import.meta.main) {
