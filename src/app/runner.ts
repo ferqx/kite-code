@@ -12,6 +12,7 @@ import type {
   AgentPhase,
   AgentEvent,
   AgentResumeValue,
+  AuthorizationOverride,
   ContextBudget,
   ModelRetryEvent,
   WorkspaceAccess,
@@ -38,6 +39,8 @@ export interface StreamCodeAgentInput {
   mode?: WorkspaceAccessRequest;
   /** 上下文预算 / Context budget */
   contextBudget?: ContextBudget;
+  /** 可选的内存级授权覆盖 / Optional in-memory authorization override */
+  authorizationOverride?: AuthorizationOverride;
 }
 
 /** 恢复执行 Agent 输入 / Resume agent input */
@@ -51,7 +54,10 @@ export async function* streamCodeAgent(
   input: StreamCodeAgentInput,
 ): AsyncGenerator<AgentEvent> {
   // 构建 Agent 图 / Build agent graph
-  const { graph, checkpointer } = buildCodeAgentGraph(input);
+  const { graph, checkpointer } = buildCodeAgentGraph({
+    ...input,
+    authorizationOverride: input.authorizationOverride,
+  });
   // 跟踪流是否正常完成 / Track if stream completed normally
   let streamCompleted = false;
   try {
@@ -133,7 +139,10 @@ export async function* resumeCodeAgent(
   input: ResumeCodeAgentInput,
 ): AsyncGenerator<AgentEvent> {
   // 构建 Agent 图 / Build agent graph
-  const { graph, checkpointer } = buildCodeAgentGraph(input);
+  const { graph, checkpointer } = buildCodeAgentGraph({
+    ...input,
+    authorizationOverride: input.authorizationOverride,
+  });
   // 跟踪流是否正常完成 / Track if stream completed normally
   let streamCompleted = false;
   try {
