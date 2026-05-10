@@ -19,7 +19,7 @@ import {
 import { createChatModel, type SupportedChatModel } from "../model/factory";
 import { type ModelRetryListener } from "../model/deepseek";
 import { BunSqliteSaver } from "../persistence/checkpoint";
-import type { AgentResumeValue, ModelRetryEvent, ShellApprovalGrant } from "../shared/types";
+import type { AgentResumeValue, AuthorizationOverride, ModelRetryEvent, ShellApprovalGrant, ThreadAuthorizationState } from "../shared/types";
 import { createAgentTools } from "../tools/definitions";
 import type { ShellExecutor } from "../tools/shell";
 import {
@@ -57,12 +57,15 @@ export interface BuildCodeAgentGraphInput {
   shellExecutor?: ShellExecutor;
   /** 可选的自定义模型实例（用于 mock 测试）/ Optional custom model instance (for mock testing) */
   model?: SupportedChatModel;
+  /** 可选的内存级授权覆盖 / Optional in-memory authorization override */
+  authorizationOverride?: AuthorizationOverride;
 }
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
 export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const model = input.model ?? createChatModel(input.config);
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
+  const override = input.authorizationOverride;
 
   /** Agent 节点：使用稳定工具 schema，由执行层强制工作区访问边界 / Agent node */
   const agent = async (state: CodeAgentState) => {
@@ -278,7 +281,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     .addNode("user_input", userInput)
     .addNode("tools", tools)
     .addConditionalEdges(START, routeEntry)
-    .addConditionalEdges("agent", routeAfterAgent)
+    .addConditionalEdges("agent", (state: CodeAgentState) => routeAfterAgent(state, override))
     .addConditionalEdges("approval", routeAfterApproval)
     .addConditionalEdges("user_input", routeAfterUserInput)
     .addConditionalEdges("tools", routeAfterTools)

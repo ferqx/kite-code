@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type {
   AgentPhase,
+  AuthorizationMode,
+  AuthorizationOverride,
   ShellApprovalGrant,
   ShellGrantUsed,
   ThreadAuthorizationState,
@@ -164,9 +166,11 @@ export function evaluateToolPolicy(input: {
   workspace?: string;
   threadId?: string;
   authorization?: ThreadAuthorizationState | null;
+  override?: AuthorizationOverride;
 }): ToolPolicyDecision {
   const { request, workspaceAccess, phase } = input;
   const authorization = normalizeAuthorizationState(input.authorization);
+  const effectiveMode = input.override?.current ?? authorization.mode;
 
   if (request.name === "update_plan") {
     return allow({
@@ -195,12 +199,25 @@ export function evaluateToolPolicy(input: {
     });
   }
 
+  if (request.name === "set_authorization_mode") {
+    return allow({
+      risk: "plan",
+      reason: "Authorization mode changes do not mutate the workspace.",
+      userVisibleSummary: `Set authorization mode to: ${request.args.mode}`,
+      expectedEffects: [
+        "Changes thread authorization mode",
+        "Does not read or write workspace files",
+      ],
+    });
+  }
+
   if (request.name === "shell_execute") {
     const authorized = authorizedShellDecision({
       authorization,
       workspace: input.workspace ?? "",
       threadId: input.threadId ?? "",
       command: request.args.command,
+      effectiveMode,
     });
     if (authorized) {
       return authorized;
@@ -399,13 +416,14 @@ function authorizedShellDecision(input: {
   workspace: string;
   threadId: string;
   command: string;
+  effectiveMode: AuthorizationMode;
 }): ToolPolicyDecision | null {
   const trimmed = input.command.trim();
   if (!trimmed) {
     return null;
   }
 
-  if (input.authorization.mode === "full_access") {
+  if (input.effectiveMode === "full_access") {
     return allow({
       risk: classifyShellRisk(trimmed),
       reason: "full_access is enabled for this thread.",

@@ -1,4 +1,5 @@
 import { END } from "@langchain/langgraph";
+import type { AuthorizationOverride } from "../shared/types";
 import type { CodeAgentState } from "./state";
 import { getPendingToolRequest } from "./tool-requests";
 import {
@@ -14,6 +15,7 @@ export function routeEntry(_state: CodeAgentState): "agent" {
 /** agent 节点后的路由: approval | tools | user_input | END / Routing after agent */
 export function routeAfterAgent(
   state: CodeAgentState,
+  override?: AuthorizationOverride,
 ): "approval" | "tools" | "user_input" | typeof END {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) {
@@ -30,6 +32,7 @@ export function routeAfterAgent(
     workspace: state.workspace,
     threadId: state.threadId,
     authorization: state.authorization,
+    override,
   });
 
   if (!decision.allowed) return "tools";
