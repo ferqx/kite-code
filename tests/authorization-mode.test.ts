@@ -30,6 +30,25 @@ describe("authorization mode switch", () => {
     expect(decision.grantUsed).toBe("full_access");
   });
 
+  test("override full_access allows write_file without approval", () => {
+    const decision = evaluateToolPolicy({
+      request: {
+        id: "call-4",
+        name: "write_file",
+        args: { path: "hello.txt", content: "hi" },
+        reason: "create file",
+        protectedCommand: "write_file hello.txt",
+      },
+      workspaceAccess: "write",
+      phase: "building",
+      authorization: { mode: "default", commandGrants: {} },
+      override: { current: "full_access" },
+    });
+    expect(decision.allowed).toBe(true);
+    expect(decision.requiresApproval).toBe(false);
+    expect(decision.grantUsed).toBe("full_access");
+  });
+
   test("override does NOT affect read-only shell commands (still allowed, no approval)", () => {
     const decision = evaluateToolPolicy({
       request: {

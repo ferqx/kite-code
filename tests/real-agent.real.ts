@@ -139,6 +139,32 @@ describe("L1-L4: basic real agent scenarios", () => {
     120_000,
   );
 
+  // L2b: 启动时 full_access 覆盖，跳过审批直接创建 / Start with full_access override, skip approval
+  test(
+    "L2b: creates file without approval under startup full_access override",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l2b-full-access-startup");
+      const content = "hello from full access startup";
+      const events: AgentEvent[] = [];
+      for await (const event of streamCodeAgent({
+        task: `Create agent-output.txt with exact content "${content}". Do not create any other files.`,
+        ...env,
+        authorizationOverride: { current: "full_access" },
+      })) {
+        events.push(event);
+        if (event.type === "final") break;
+      }
+
+      expect(existsSync(join(env.workspace, "agent-output.txt"))).toBe(true);
+      expect(readFileSync(join(env.workspace, "agent-output.txt"), "utf8")).toContain(content);
+      expect(countToolApprovalInterrupts(events)).toBe(0);
+      expect(events.some((e) => e.type === "final")).toBe(true);
+      logCacheAggregate(events, "L2b full-access startup");
+    },
+    120_000,
+  );
+
   // L3: /plan 只产出计划，不触发非危险确认 / /plan produces a plan without non-dangerous confirmation
   test(
     "L3: /plan produces a plan and blocks edits without access confirmation",
@@ -552,6 +578,43 @@ describe("L6: error recovery scenarios", () => {
           .every((result) => result.action?.grantUsed === "full_access"),
       ).toBe(true);
       logCacheAggregate(events, "L6f full-access");
+    },
+    240_000,
+  );
+
+  // 真实模型应在用户要求"不需要确认"时调用 set_authorization_mode 工具 / Real model should call set_authorization_mode tool on user request
+  test(
+    "L6g: switches to full_access via set_authorization_mode tool on user request",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("l6g-set-auth-mode");
+      const filePath = "auto-output.txt";
+      const fileContent = "auto-executed without confirmation";
+
+      const events = await runApprovalLoop({
+        ...env,
+        task: [
+          `Create ${filePath} with exact content "${fileContent}".`,
+          "First, call set_authorization_mode to switch to full_access mode so that subsequent write_file operations do not require confirmation.",
+          "Then, write the file using write_file.",
+          "Do not ask the user any question.",
+        ].join(" "),
+      });
+
+      // set_authorization_mode should be in the tool results
+      const toolResults = findToolResults(events);
+      const authModeCall = toolResults.find(
+        (r) => r.tool === "set_authorization_mode",
+      );
+      expect(authModeCall).toBeDefined();
+
+      // No tool approval interrupts should occur after the initial authorization
+      expect(countToolApprovalInterrupts(events)).toBe(0);
+
+      // File should be created
+      expect(existsSync(join(env.workspace, filePath))).toBe(true);
+      expect(readFileSync(join(env.workspace, filePath), "utf8")).toContain(fileContent);
+      logCacheAggregate(events, "L6g set-auth-mode");
     },
     240_000,
   );

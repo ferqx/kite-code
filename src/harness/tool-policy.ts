@@ -243,6 +243,18 @@ export function evaluateToolPolicy(input: {
 
   if (request.name === "write_file" || request.name === "edit_file") {
     const path = request.args.path || "<unknown>";
+    if (effectiveMode === "full_access") {
+      return allow({
+        risk: "write_file",
+        reason: "full_access is enabled for this thread.",
+        userVisibleSummary: `Modify workspace file: ${path}`,
+        expectedEffects: [
+          "Modifies files inside the workspace",
+          "May overwrite existing content",
+        ],
+        grantUsed: "full_access",
+      });
+    }
     return requireApproval({
       risk: "write_file",
       reason: "This tool modifies workspace files.",
