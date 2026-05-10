@@ -41,6 +41,7 @@ import {
   defaultPhaseForWorkspaceAccess,
   evaluateToolPolicy,
   applyApprovalGrant,
+  normalizeAuthorizationState,
   replaceApprovalCommand,
   validateApprovalHash,
 } from "./tool-policy";
@@ -85,10 +86,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     try {
       const { state: result, contextRetries } = await invokeModel(model, state, tools);
       const allRetries = [...retryEvents, ...contextRetries];
+      const syncedAuth = authorizationForState(state, override);
       if (allRetries.length > 0) {
-        return { ...result, modelRetries: allRetries };
+        return { ...result, authorization: syncedAuth, modelRetries: allRetries };
       }
-      return result;
+      return { ...result, authorization: syncedAuth };
     } finally {
       (model as unknown as Record<string, unknown>)._retryListener = null;
     }
@@ -110,6 +112,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       workspace: state.workspace,
       threadId: state.threadId,
       authorization: state.authorization,
+      override,
     });
     const approvalPayload = buildToolApproval({
       workspace: state.workspace,
@@ -187,6 +190,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       workspace: state.workspace,
       threadId: state.threadId,
       authorization: nextAuthorization,
+      override,
     });
     if (!approvedPolicy.allowed) {
       return rejectedToolMessage(
@@ -249,6 +253,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       state.authorization,
       grantUsed,
       state.threadId,
+      override,
     );
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
@@ -256,21 +261,21 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       status: result.ok === false ? "error" : "success",
     });
 
+    const extra: Record<string, unknown> = {};
     if ("plan" in result) {
-      return {
-        plan: result.plan,
-        approvedToolRequest: null,
-        approvedToolGrant: null,
-        ...("workspaceAccess" in result
-          ? { workspaceAccess: result.workspaceAccess }
-          : {}),
-        messages: [toolMessage],
-      };
+      extra.plan = result.plan;
+    }
+    if ("workspaceAccess" in result) {
+      extra.workspaceAccess = result.workspaceAccess;
+    }
+    if ("authorization" in result) {
+      extra.authorization = result.authorization;
     }
 
     return {
       approvedToolRequest: null,
       approvedToolGrant: null,
+      ...extra,
       messages: [toolMessage],
     };
   };
@@ -288,6 +293,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     .compile({ checkpointer });
 
   return { graph, checkpointer };
+}
+
+/** 将 override 同步到 state.authorization / Sync override to state.authorization */
+function authorizationForState(
+  state: CodeAgentState,
+  override?: AuthorizationOverride,
+): ThreadAuthorizationState {
+  const base = normalizeAuthorizationState(state.authorization);
+  if (override && override.current !== base.mode) {
+    return { ...base, mode: override.current };
+  }
+  return base;
 }
 
 /** invokeModel 返回值 / Return value of invokeModel */

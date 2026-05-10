@@ -1,6 +1,7 @@
 import type {
   AgentPhase,
   AgentPlan,
+  AuthorizationOverride,
   ShellGrantUsed,
   ShellResult,
   ThreadAuthorizationState,
@@ -27,6 +28,7 @@ export async function runApprovedTool(
   authorization: ThreadAuthorizationState | null = null,
   approvedGrant: ShellGrantUsed = "none",
   threadId = "",
+  override?: AuthorizationOverride,
 ): Promise<ToolExecutionResult> {
   const policy = evaluateToolPolicy({
     request,
@@ -35,6 +37,7 @@ export async function runApprovedTool(
     workspace,
     threadId,
     authorization: normalizeAuthorizationState(authorization),
+    override,
   });
   if (!policy.allowed) {
     return withFailureGuidance(request, {
@@ -126,6 +129,24 @@ export async function runApprovedTool(
       exitCode: -1,
       stdout: "",
       stderr: "ask_user must be handled by the user_input interrupt node.",
+    });
+  }
+
+  if (request.name === "set_authorization_mode") {
+    if (override) {
+      override.current = request.args.mode;
+    }
+    const newAuth: ThreadAuthorizationState = {
+      mode: request.args.mode,
+      commandGrants: authorization?.commandGrants ?? {},
+    };
+    return withFailureGuidance(request, {
+      ok: true,
+      command: `set_authorization_mode ${request.args.mode}`,
+      exitCode: 0,
+      stdout: `Authorization mode set to: ${request.args.mode}`,
+      stderr: "",
+      authorization: newAuth,
     });
   }
 
