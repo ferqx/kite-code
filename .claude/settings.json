@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sandbox-exec --help)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:d[k] for k in ['exports','imports'] if k in d}, indent=2\\)\\)\")",
+      "Bash(sandbox-exec -f /dev/stdin /bin/sh -c \"echo 'shell started'; cat /etc/passwd 2>&1; cat /tmp/foo 2>&1; echo 'done'\")"
+    ]
+  }
+}
