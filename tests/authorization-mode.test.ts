@@ -130,7 +130,7 @@ describe("authorization mode switch", () => {
   // ---- tool execution ----
 
   test("set_authorization_mode updates override.current", async () => {
-    const override = { current: "default" as const };
+    const override: { current: "default" | "full_access" } = { current: "default" };
     const result = await runApprovedTool(
       "/tmp/workspace",
       {
