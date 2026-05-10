@@ -192,6 +192,30 @@ export const ASK_USER_CONTRACT: ToolContract = {
 };
 ASK_USER_CONTRACT.description = buildDescription(ASK_USER_CONTRACT.sections);
 
+export const SET_AUTHORIZATION_MODE_CONTRACT: ToolContract = {
+  name: "set_authorization_mode",
+  sections: {
+    whenToUse:
+      "Switch between default (require user confirmation for dangerous tools) and full_access " +
+      "(auto-execute all tools without confirmation) authorization modes. " +
+      "Call ONLY when the user explicitly requests a mode change, e.g. 'don't ask me for confirmation' or 'switch to auto mode'. " +
+      "Do NOT call this tool without an explicit user request to change authorization mode. " +
+      "This tool affects how other tools (shell_execute, write_file, edit_file) are authorized — " +
+      "it does not read or write workspace files itself.",
+    commonMistakes:
+      "Calling set_authorization_mode without the user explicitly asking for a mode change. " +
+      "Calling it excessively — one call is sufficient to change the mode for the entire thread.",
+    outputFormat:
+      "JSON with ok: true and the new mode value (default or full_access). " +
+      "This tool always succeeds — if mode is already the requested value, it is a no-op.",
+    failureHandling:
+      "This tool always succeeds. If the mode parameter is invalid, it defaults to 'default'. " +
+      "There is no error state to recover from.",
+  },
+  description: "",
+};
+SET_AUTHORIZATION_MODE_CONTRACT.description = buildDescription(SET_AUTHORIZATION_MODE_CONTRACT.sections);
+
 export const APPLY_PATCH_CONTRACT: ToolContract = {
   name: "apply_patch",
   sections: {
@@ -226,5 +250,6 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ["shell_execute", SHELL_EXECUTE_CONTRACT],
   ["update_plan", UPDATE_PLAN_CONTRACT],
   ["ask_user", ASK_USER_CONTRACT],
+  ["set_authorization_mode", SET_AUTHORIZATION_MODE_CONTRACT],
   ["apply_patch", APPLY_PATCH_CONTRACT],
 ]);

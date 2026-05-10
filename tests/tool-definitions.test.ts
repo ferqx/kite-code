@@ -27,6 +27,7 @@ describe("code agent tool definitions", () => {
       "shell_execute",
       "update_plan",
       "ask_user",
+      "set_authorization_mode",
     ]);
     expect(tools[0].schema).toBeDefined();
     expect(tools[1].schema).toBeDefined();
@@ -99,6 +100,7 @@ describe("code agent tool definitions", () => {
       "shell_execute",
       "update_plan",
       "ask_user",
+      "set_authorization_mode",
     ]);
     expect(String(tools.find((item) => item.name === "update_plan")?.description)).toContain(
       "current plan state",
@@ -178,6 +180,7 @@ describe("tool contracts (ACI)", () => {
     "shell_execute",
     "update_plan",
     "ask_user",
+    "set_authorization_mode",
   ];
 
   // 每个注册工具的契约必须存在 / Every registered tool must have a contract

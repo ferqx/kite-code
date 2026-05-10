@@ -13,6 +13,7 @@ import {
   SHELL_EXECUTE_CONTRACT,
   UPDATE_PLAN_CONTRACT,
   ASK_USER_CONTRACT,
+  SET_AUTHORIZATION_MODE_CONTRACT,
 } from "./tool-contracts";
 
 /** 创建 Agent 工具集输入 / Input for creating agent tools */
@@ -125,6 +126,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     shellExecute,
     createUpdatePlanTool(),
     createAskUserTool(),
+    createSetAuthorizationModeTool(),
   ];
 }
 
@@ -219,6 +221,26 @@ function createAskUserTool() {
           .string()
           .optional()
           .describe("Short context explaining why this clarification is needed"),
+      }),
+    },
+  );
+}
+
+/** 创建 set_authorization_mode 工具定义，用于切换授权模式 / Create set_authorization_mode tool definition */
+function createSetAuthorizationModeTool() {
+  return tool(
+    async ({ mode }) =>
+      JSON.stringify({
+        ok: true,
+        mode,
+      }),
+    {
+      name: "set_authorization_mode",
+      description: SET_AUTHORIZATION_MODE_CONTRACT.description,
+      schema: z.object({
+        mode: z
+          .enum(["default", "full_access"])
+          .describe("Target authorization mode: 'default' requires confirmation for dangerous tools, 'full_access' executes all tools automatically"),
       }),
     },
   );
