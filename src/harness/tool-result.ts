@@ -3,6 +3,7 @@ import type {
   ShellResult,
   ShellGrantUsed,
   ShellIntent,
+  ThreadAuthorizationState,
   WorkspaceAccess,
 } from "../shared/types";
 
@@ -45,4 +46,6 @@ export type ToolExecutionResult = ShellResult & {
   };
   /** 保留给未来显式访问权限切换工具的更新 / Reserved for future explicit access-switch tool updates */
   workspaceAccess?: WorkspaceAccess;
+  /** set_authorization_mode 返回的更新后的授权状态 / Updated authorization state from set_authorization_mode */
+  authorization?: ThreadAuthorizationState;
 };

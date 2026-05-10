@@ -217,5 +217,7 @@ function toolUsageGuidance(request: PendingToolRequest): string {
       return "Use update_plan with a complete plan object: name, description, status, and ordered steps with statuses. It must only update planning state and must not mutate the workspace.";
     case "ask_user":
       return "Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.";
+    case "set_authorization_mode":
+      return "Use set_authorization_mode only when the user explicitly requests a mode change. Choose 'full_access' for auto-execute without confirmation, or 'default' to restore confirmation requirements.";
   }
 }

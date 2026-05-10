@@ -68,6 +68,16 @@ export type PendingToolRequest =
       reason: string;
       /** 用于事件展示的命令 / Command displayed in events */
       protectedCommand: string;
+    }
+  | {
+      /** 工具调用 ID / Tool call ID */
+      id?: string;
+      name: "set_authorization_mode";
+      args: { mode: "default" | "full_access" };
+      /** 调用原因 / Call reason */
+      reason: string;
+      /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
     };
 
 /** 从消息列表中获取待处理的工具请求 / Get pending tool request from message list */
@@ -165,6 +175,18 @@ export function toolRequestFromMessage(
       args: normalizeUserInputRequest(args),
       reason: "Model requested user clarification",
       protectedCommand: "ask_user",
+    };
+  }
+
+  if (call.name === "set_authorization_mode") {
+    const args = call.args as { mode?: string };
+    const mode = args.mode === "full_access" ? "full_access" : "default";
+    return {
+      id: call.id,
+      name: "set_authorization_mode",
+      args: { mode },
+      reason: "Model requested authorization mode change",
+      protectedCommand: `set_authorization_mode ${mode}`,
     };
   }
 

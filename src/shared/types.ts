@@ -89,6 +89,14 @@ export interface ThreadAuthorizationState {
   >;
 }
 
+/** 授权模式 / Authorization mode */
+export type AuthorizationMode = "default" | "full_access";
+
+/** 内存级授权覆盖，优先级高于 state.authorization / In-memory authorization override */
+export interface AuthorizationOverride {
+  current: AuthorizationMode;
+}
+
 /** 工作区访问权限 / Workspace access level */
 export type WorkspaceAccess = "read-only" | "write";
 
