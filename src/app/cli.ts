@@ -2,7 +2,7 @@ import { join, resolve } from "node:path";
 import { loadAgentConfig } from "../config/index";
 import { createSandboxExecutor } from "../sandbox/index";
 import { resumeCodeAgent, streamCodeAgent } from "./runner";
-import type { ShellApprovalGrant, WorkspaceAccessRequest } from "../shared/types";
+import type { AuthorizationOverride, ShellApprovalGrant, WorkspaceAccessRequest } from "../shared/types";
 
 /** CLI 解析后的参数 / CLI parsed arguments */
 export interface ParsedArgs {
@@ -20,6 +20,8 @@ export interface ParsedArgs {
   checkpointPath: string;
   /** 兼容 mode 参数或工作区访问请求 / Compatible mode argument or workspace access request */
   mode: WorkspaceAccessRequest;
+  /** 授权模式 / Authorization mode */
+  authorizationMode?: "default" | "full_access";
   /** 恢复时是否审批通过 / Whether approved on resume */
   approve: boolean;
   /** 用户选择的 shell 授权粒度 / User-selected shell approval grant */
@@ -52,6 +54,12 @@ export async function main(): Promise<void> {
     workspace: args.workspace,
   });
 
+  // 创建授权覆盖 / Create authorization override
+  const authorizationOverride: AuthorizationOverride | undefined =
+    args.authorizationMode !== undefined
+      ? { current: args.authorizationMode }
+      : undefined;
+
   // 根据命令类型发起流 / Start stream based on command type
   const events =
     args.command === "run"
@@ -64,6 +72,7 @@ export async function main(): Promise<void> {
           config,
           mode: args.mode,
           shellExecutor,
+          authorizationOverride,
         })
       : resumeCodeAgent({
           userId: args.userId,
@@ -72,6 +81,7 @@ export async function main(): Promise<void> {
           checkpointPath: args.checkpointPath,
           config,
           shellExecutor,
+          authorizationOverride,
           resume:
             args.answer === undefined
               ? {
@@ -107,6 +117,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const noSandbox = argv.includes("--no-sandbox");
   const explicitThread = value("--thread", "");
   const mode = parseMode(value("--mode", "auto"));
+  const authorizationMode = parseAuthorizationMode(
+    optionalValue("--authorization-mode") ?? "",
+  );
   const answer = optionalValue("--answer");
   const approvalHash = optionalValue("--approval-hash");
   const replacementCommand = optionalValue("--replace-command");
@@ -122,6 +135,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       value("--checkpoints", join(cwd, ".openpx", "checkpoints.sqlite")),
     ),
     mode,
+    authorizationMode,
     approve: approvalGrant !== undefined,
     approvalGrant,
     approvalHash,
@@ -192,6 +206,17 @@ function parseMode(value: string): WorkspaceAccessRequest {
   return "auto";
 }
 
+/** 解析授权模式参数 / Parse authorization mode argument */
+function parseAuthorizationMode(value: string): "default" | "full_access" | undefined {
+  if (value === "full_access" || value === "full-access") {
+    return "full_access";
+  }
+  if (value === "default") {
+    return "default";
+  }
+  return undefined;
+}
+
 /** 生成新线程 ID / Generate fresh thread ID */
 function freshThreadId(): string {
   // 生成包含时间戳和随机数的线程 ID / Generate thread ID with timestamp and random part
@@ -217,6 +242,7 @@ Options:
   --approval-hash <hash> Approval hash from the tool_approval interrupt
   --replace-command <cmd> Replace the pending command and approve that command
   --answer <text>        Resume a user input interrupt with an answer
+  --authorization-mode <mode>  default or full-access; set initial authorization mode for the thread
   --no-sandbox           Disable sandbox isolation (for debugging)`);
 }
 
