@@ -1,0 +1,110 @@
+// ── 核心事件类型 / Core event types ──
+export type AgentEvent =
+  | { type: "step_begin" }
+  | { type: "step_end" }
+  | { type: "reason"; data: { text: string } }
+  | { type: "text"; data: { text: string } }
+  | { type: "tool_call"; data: ToolCallPayload }
+  | { type: "tool_done"; data: ToolResultPayload }
+  | { type: "need_approval"; data: ToolApprovalPayload }
+  | { type: "need_input"; data: UserInputPayload }
+  | { type: "state_change"; data: StateChangePayload }
+  | { type: "file_change"; data: { path: string; kind: "add" | "edit" | "delete" } }
+  | { type: "compact_begin"; data: { reason: string } }
+  | { type: "compact_end"; data: { summary: string } }
+  | { type: "cache_metrics"; data: CacheMetricsPayload }
+  | { type: "retry"; data: { attempt: number; reason: string } }
+  | { type: "error"; data: { message: string; recoverable: boolean } };
+
+// ── 基础类型 / Base types ──
+export type WorkspaceAccess = "read-only" | "write";
+export type AgentPhase = "planning" | "building";
+export type WorkspaceAccessRequest = "auto" | WorkspaceAccess | "plan" | "builder";
+export type AuthorizationMode = "default" | "full_access";
+export type ShellApprovalGrant = "approve_once" | "same_command" | "full_access";
+export type ShellGrantUsed = "none" | ShellApprovalGrant;
+export type PlanStatus = "pending" | "in_progress" | "completed";
+
+export interface AgentPlanStep {
+  step: string;
+  status: PlanStatus;
+}
+
+export interface AgentPlan {
+  name: string;
+  description: string;
+  status: PlanStatus;
+  steps: AgentPlanStep[];
+}
+
+export interface UserInputOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface UserInputRequest {
+  question: string;
+  options: UserInputOption[];
+  allow_free_text: boolean;
+  context?: string;
+}
+
+// ── Payload 类型 / Payload types ──
+export interface ToolCallPayload {
+  call_id: string;
+  name: "read_file" | "edit_file" | "write_file" | "shell_execute"
+      | "update_plan" | "ask_user" | "set_authorization_mode";
+  args: Record<string, unknown>;
+}
+
+export interface ToolResultPayload {
+  call_id: string;
+  name: string;
+  ok: boolean;
+  summary: string;
+}
+
+export interface UserInputPayload {
+  question: string;
+  options: { id: string; label: string; description?: string }[];
+  allow_free_text: boolean;
+  context?: string;
+}
+
+export interface StateChangePayload {
+  workspaceAccess?: WorkspaceAccess;
+  phase?: AgentPhase;
+  plan?: AgentPlan | null;
+  authorization?: { mode: AuthorizationMode };
+}
+
+export interface CacheMetricsPayload {
+  workspaceAccess: string;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  cacheWriteTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  standard: { label: string; value: number };
+}
+
+export interface ToolApprovalPayload {
+  scope: "once";
+  cwd: string;
+  threadId: string;
+  tool: ToolCallPayload["name"];
+  command: string;
+  risk: "read" | "plan" | "write_file" | "execute_code" | "destructive" | "network" | "vcs_mutation" | "unknown";
+  approvalHash: string;
+  summary: string;
+  reason: string;
+  expectedEffects: string[];
+  grantOptions: ShellApprovalGrant[];
+  recommendedGrant: ShellApprovalGrant;
+  modelJustification?: string;
+  objective?: string;
+  expectedObservation?: string;
+  failureStrategy?: string;
+  suggestedPrefixRule?: string[];
+}
