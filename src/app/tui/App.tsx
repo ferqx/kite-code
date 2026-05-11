@@ -4,6 +4,8 @@ import type { AgentEvent } from "../../protocol/events";
 import type { TuiState, OutputLine, ToolCardState, StatusState, InterruptState } from "./types";
 import OutputArea from "./OutputArea";
 import ToolCard from "./ToolCard";
+import ApprovalDialog from "./ApprovalDialog";
+import InputDialog from "./InputDialog";
 import StatusBar from "./StatusBar";
 
 type Action =
@@ -133,6 +135,12 @@ export default function App({ state, dispatch, onToggleReason, provider }: AppPr
     <Box flexDirection="column" height="100%">
       <OutputArea lines={state.output} onToggleReason={onToggleReason} />
       <ToolCard tools={state.tools} />
+      {state.interrupt?.kind === "approval" && state.interrupt.approval && (
+        <ApprovalDialog approval={state.interrupt.approval} provider={provider} />
+      )}
+      {state.interrupt?.kind === "input" && state.interrupt.question && (
+        <InputDialog question={state.interrupt.question} provider={provider} />
+      )}
       <StatusBar status={state.status} />
     </Box>
   );
