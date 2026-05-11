@@ -14,7 +14,11 @@ export type AgentEvent =
   | { type: "compact_end"; data: { summary: string } }
   | { type: "cache_metrics"; data: CacheMetricsPayload }
   | { type: "retry"; data: { attempt: number; reason: string } }
-  | { type: "error"; data: { message: string; recoverable: boolean } };
+  | { type: "error"; data: { message: string; recoverable: boolean } }
+  | { type: "interrupt"; data: unknown }
+  | { type: "update"; data: unknown }
+  | { type: "model_retry"; data: { attempt: number; error: string; delayMs: number } }
+  | { type: "final"; data: string };
 
 // ── 基础类型 / Base types ──
 export type WorkspaceAccess = "read-only" | "write";
@@ -83,10 +87,11 @@ export interface CacheMetricsPayload {
   workspaceAccess: WorkspaceAccess;
   cacheHitTokens: number;
   cacheMissTokens: number;
-  cacheWriteTokens: number;
+  cacheWriteTokens?: number;
   inputTokens: number;
-  outputTokens: number;
-  standard: { label: string; value: number };
+  outputTokens?: number;
+  hitRate?: number;
+  standard: Record<string, unknown>;
 }
 
 export interface ToolApprovalPayload {

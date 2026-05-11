@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertInsideWorkspace, shellTool } from "../src/tools/shell";
-import { writeFile, editFile, readFile } from "../src/tools/file";
+import { assertInsideWorkspace, shellTool } from "../src/core/tools/shell";
+import { writeFile, editFile, readFile } from "../src/core/tools/file";
 
 describe("tool safety", () => {
   test("allows paths inside the workspace", () => {

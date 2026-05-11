@@ -1,8 +1,9 @@
 import { join, resolve } from "node:path";
-import { loadAgentConfig } from "../config/index";
-import { createSandboxExecutor } from "../sandbox/index";
+import { loadAgentConfig } from "../core/config/index";
+import { createSandboxExecutor } from "../core/sandbox/index";
 import { resumeCodeAgent, streamCodeAgent } from "./runner";
-import type { AuthorizationOverride, ShellApprovalGrant, WorkspaceAccessRequest } from "../shared/types";
+import type { ShellApprovalGrant, WorkspaceAccessRequest } from "../protocol/index";
+import type { AuthorizationOverride } from "../core/types";
 
 /** CLI 解析后的参数 / CLI parsed arguments */
 export interface ParsedArgs {

@@ -5,18 +5,19 @@ import {
   routeAfterApproval,
   routeAfterTools,
   routeAfterUserInput,
-} from "../src/harness/routes";
-import { normalizeUserInputResume } from "../src/harness/user-input";
-import { runApprovedTool } from "../src/harness/tool-runner";
-import { isReadOnlyWorkspaceAccess } from "../src/harness/state";
-import { toolRequestFromMessage } from "../src/harness/tool-requests";
+} from "../src/core/harness/routes";
+import { normalizeUserInputResume } from "../src/core/harness/user-input";
+import { runApprovedTool } from "../src/core/harness/tool-runner";
+import { isReadOnlyWorkspaceAccess } from "../src/core/harness/state";
+import { toolRequestFromMessage } from "../src/core/harness/tool-requests";
 import {
   applyApprovalGrant,
   defaultAuthorizationState,
   grantSameCommand,
-} from "../src/harness/tool-policy";
-import type { CodeAgentState } from "../src/harness/state";
-import type { AgentPlan, ShellResult } from "../src/shared/types";
+} from "../src/core/harness/tool-policy";
+import type { CodeAgentState } from "../src/core/harness/state";
+import type { AgentPlan } from "../src/protocol/index";
+import type { ShellResult } from "../src/core/types";
 
 const activePlan: AgentPlan = {
   name: "Implement state-first plan flow",

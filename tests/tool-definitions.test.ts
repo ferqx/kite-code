@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   createAgentTools,
   isReadOnlyShellCommand,
-} from "../src/tools/definitions";
-import { TOOL_CONTRACTS } from "../src/tools/tool-contracts";
+} from "../src/core/tools/definitions";
+import { TOOL_CONTRACTS } from "../src/core/tools/tool-contracts";
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe("code agent tool definitions", () => {

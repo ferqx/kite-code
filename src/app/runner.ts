@@ -1,23 +1,25 @@
 import { HumanMessage } from "@langchain/core/messages";
 import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
-import type { AgentConfig } from "../config/index";
-import { buildCodeAgentGraph } from "../harness/graph";
-import type { ShellExecutor } from "../tools/shell";
+import type { AgentConfig } from "../core/config/index";
+import { buildCodeAgentGraph } from "../core/harness/graph";
+import type { ShellExecutor } from "../core/tools/shell";
 import {
   createPromptCacheStandardTracker,
   extractPromptCacheMetrics,
-} from "../shared/cache-metrics";
+} from "../core/cache-metrics";
 import type {
   AgentPhase,
   AgentEvent,
+  WorkspaceAccess,
+  WorkspaceAccessRequest,
+} from "../protocol/index";
+import type {
   AgentResumeValue,
   AuthorizationOverride,
   ContextBudget,
   ModelRetryEvent,
-  WorkspaceAccess,
-  WorkspaceAccessRequest,
-} from "../shared/types";
+} from "../core/types";
 
 /** 流式运行 Agent 输入 / Stream agent input */
 export interface StreamCodeAgentInput {
@@ -217,7 +219,7 @@ export async function* normalizeGraphStream(
         data: {
           workspaceAccess: currentWorkspaceAccess,
           ...metrics,
-          standard: cacheStandard.record(metrics),
+          standard: cacheStandard.record(metrics) as unknown as Record<string, unknown>,
         },
       };
     }

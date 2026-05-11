@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { AIMessage } from "@langchain/core/messages";
-import { routeAfterAgent } from "../src/harness/routes";
-import { runApprovedTool } from "../src/harness/tool-runner";
+import { routeAfterAgent } from "../src/core/harness/routes";
+import { runApprovedTool } from "../src/core/harness/tool-runner";
 import {
   evaluateToolPolicy,
   defaultAuthorizationState,
-} from "../src/harness/tool-policy";
-import type { CodeAgentState } from "../src/harness/state";
+} from "../src/core/harness/tool-policy";
+import type { CodeAgentState } from "../src/core/harness/state";
 
 describe("authorization mode switch", () => {
   // ---- evaluateToolPolicy with override ----

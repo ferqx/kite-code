@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Checkpoint } from "@langchain/langgraph-checkpoint";
-import { BunSqliteSaver } from "../src/persistence/checkpoint";
+import { BunSqliteSaver } from "../src/core/persistence/checkpoint";
 
 // 验证 BunSqliteSaver 的 checkpoint 持久化与读取功能 / Verify BunSqliteSaver checkpoint persistence and readback
 describe("BunSqliteSaver", () => {

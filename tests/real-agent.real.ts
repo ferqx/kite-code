@@ -3,19 +3,19 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { HumanMessage } from "@langchain/core/messages";
-import { loadAgentConfig } from "../src/config/index";
+import { loadAgentConfig } from "../src/core/config/index";
 import { resumeCodeAgent, streamCodeAgent } from "../src/app/runner";
-import { createChatModel } from "../src/model/factory";
-import { shellTool } from "../src/tools/shell";
+import { createChatModel } from "../src/core/model/factory";
+import { shellTool } from "../src/core/tools/shell";
 import { REAL_TEST_MODEL_ENV, REAL_TEST_PROVIDER_ENV } from "./real-test-options";
-import type { AgentConfig } from "../src/config/index";
+import type { AgentConfig } from "../src/core/config/index";
+import type { AgentEvent } from "../src/protocol/index";
 import type {
-  AgentEvent,
   AgentResumeValue,
   ModelRetryEvent,
   ShellInput,
   ShellResult,
-} from "../src/shared/types";
+} from "../src/core/types";
 
 // ============================================================================
 // 真实模型 API 端到端测试，从简到难分为 8 个层级
@@ -1237,7 +1237,7 @@ function logCacheAggregate(events: AgentEvent[], label: string): void {
   let totalHit = 0;
   for (const e of events) {
     if (e.type !== "cache_metrics") continue;
-    const d = e.data as Record<string, unknown> | undefined;
+    const d = e.data as unknown as Record<string, unknown> | undefined;
     if (!d || typeof d.inputTokens !== "number") continue;
     calls++;
     totalInput += d.inputTokens as number;

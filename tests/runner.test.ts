@@ -5,7 +5,8 @@ import {
   normalizeGraphStream,
   taskMessageForInitialAccess,
 } from "../src/app/runner";
-import type { ModelRetryEvent } from "../src/shared/types";
+import type { AgentEvent } from "../src/protocol/index";
+import type { ModelRetryEvent } from "../src/core/types";
 
 // 测试 runner 的初始工作区访问权限选择逻辑 / Test runner initial workspace access selection logic
 describe("runner initial workspace access selection", () => {
@@ -71,12 +72,12 @@ describe("normalizeGraphStream model retry events", () => {
       };
     }
 
-    const events: Array<{ type: string; data: unknown }> = [];
+    const events: AgentEvent[] = [];
     for await (const event of normalizeGraphStream(mockStream())) {
       events.push(event);
     }
 
-    const retryEvents = events.filter((e) => e.type === "model_retry");
+    const retryEvents = events.filter((e): e is AgentEvent & { type: "model_retry"; data: ModelRetryEvent } => e.type === "model_retry");
     expect(retryEvents).toHaveLength(2);
     expect(retryEvents[0].data).toEqual(retries[0]);
     expect(retryEvents[1].data).toEqual(retries[1]);
@@ -91,7 +92,7 @@ describe("normalizeGraphStream model retry events", () => {
       };
     }
 
-    const events: Array<{ type: string; data: unknown }> = [];
+    const events: AgentEvent[] = [];
     for await (const event of normalizeGraphStream(mockStream())) {
       events.push(event);
     }

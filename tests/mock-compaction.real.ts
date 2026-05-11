@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
-import type { CodeAgentState } from "../src/harness/state";
-import type { AgentPlan } from "../src/shared/types";
-import { clearOldToolResults, forceContextCompaction } from "../src/model/context";
+import type { CodeAgentState } from "../src/core/harness/state";
+import type { AgentPlan } from "../src/protocol/index";
+import { clearOldToolResults, forceContextCompaction } from "../src/core/model/context";
 import {
   formatWorkspaceAccessReminder,
   formatPlanStateReminder,
   buildCacheableRuntimeContext,
-} from "../src/model/runtime-context";
-import { buildStaticSystemPrompt } from "../src/model/context";
+} from "../src/core/model/runtime-context";
+import { buildStaticSystemPrompt } from "../src/core/model/context";
 
 // ============================================================================
 // Mock 模型 — 仅用于需要 model.invoke 的场景 / Mock model — only for model.invoke scenarios

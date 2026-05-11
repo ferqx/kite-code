@@ -6,7 +6,7 @@
  * These tests verify actual sandbox-exec isolation. Skipped on non-macOS platforms.
  */
 import { describe, expect, test } from "bun:test";
-import { createSandboxExecutor } from "../src/sandbox/executor";
+import { createSandboxExecutor } from "../src/core/sandbox/executor";
 import { homedir } from "node:os";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

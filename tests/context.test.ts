@@ -6,11 +6,11 @@ import {
   prepareModelContext,
   forceContextCompaction,
   clearOldToolResults,
-} from "../src/model/context";
+} from "../src/core/model/context";
 import {
   summarizeMessages,
   formatCompactedSummary,
-} from "../src/model/summarizer";
+} from "../src/core/model/summarizer";
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
 describe("model context protocol", () => {

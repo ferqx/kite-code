@@ -3,7 +3,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import {
   buildCacheableRuntimeContext,
   buildRuntimeContext,
-} from "../src/model/runtime-context";
+} from "../src/core/model/runtime-context";
 
 // 测试运行时上下文构建函数 / Test runtime context building function
 describe("buildRuntimeContext", () => {

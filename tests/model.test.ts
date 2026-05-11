@@ -3,9 +3,9 @@ import { ChatDeepSeek } from "@langchain/deepseek";
 import { ChatOllama } from "@langchain/ollama";
 import { ChatOpenAI } from "@langchain/openai";
 import { AIMessage } from "@langchain/core/messages";
-import type { AgentConfig } from "../src/config/index";
-import { createDeepSeekModel, withTransientModelRetry } from "../src/model/deepseek";
-import { createChatModel } from "../src/model/factory";
+import type { AgentConfig } from "../src/core/config/index";
+import { createDeepSeekModel, withTransientModelRetry } from "../src/core/model/deepseek";
+import { createChatModel } from "../src/core/model/factory";
 
 describe("model transient retry", () => {
   test("retries transient socket errors before succeeding", async () => {

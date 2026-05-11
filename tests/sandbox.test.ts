@@ -1,19 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { generateSandboxProfile } from "../src/sandbox/profile";
-import { generateBwrapArgs } from "../src/sandbox/bwrap";
+import { generateSandboxProfile } from "../src/core/sandbox/profile";
+import { generateBwrapArgs } from "../src/core/sandbox/bwrap";
 import {
   buildUlimitPreamble,
   buildHardenedEnv,
   buildEnvStripSnippet,
   buildEnvExportSnippet,
   checkDangerousPaths,
-} from "../src/sandbox/shell-wrapper";
-import { detectSandboxBackend, isSandboxAvailable } from "../src/sandbox/platform";
-import { createSandboxExecutor } from "../src/sandbox/executor";
-import { findApplySeccomp, resolveSeccompPath } from "../src/sandbox/seccomp";
-import { shellTool } from "../src/tools/shell";
-import { DEFAULT_RESOURCE_LIMITS } from "../src/sandbox/types";
-import { parseArgs } from "../src/app/cli";
+} from "../src/core/sandbox/shell-wrapper";
+import { detectSandboxBackend, isSandboxAvailable } from "../src/core/sandbox/platform";
+import { createSandboxExecutor } from "../src/core/sandbox/executor";
+import { findApplySeccomp, resolveSeccompPath } from "../src/core/sandbox/seccomp";
+import { shellTool } from "../src/core/tools/shell";
+import { DEFAULT_RESOURCE_LIMITS } from "../src/core/sandbox/types";
+import { parseArgs } from "../src/app/cli/index";
 import { mkdtempSync, rmSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

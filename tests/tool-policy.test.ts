@@ -9,8 +9,8 @@ import {
   hasSameCommandGrant,
   replaceApprovalCommand,
   validateApprovalHash,
-} from "../src/harness/tool-policy";
-import type { PendingToolRequest } from "../src/harness/tool-requests";
+} from "../src/core/harness/tool-policy";
+import type { PendingToolRequest } from "../src/core/harness/tool-requests";
 
 const shellExecuteRequest: PendingToolRequest = {
   id: "call-shell",
