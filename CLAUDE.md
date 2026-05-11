@@ -41,18 +41,7 @@ bun run agent resume --thread demo --user local --approve  # 审批后恢复执�
 - `src/model/context.ts`、`src/model/runtime-context.ts` — 模型上下文整理、压缩和证据注入
 - `src/config/index.ts` — 读取本地 `~/.openpx/openpx.jsonc` 配置
 - `tests/` — 测试是理解行为约束的重要来源
-
-## 关键行为约束
-
-- **plan 模式必须只读**：不能写文件、改文件、安装依赖、启动服务。
-- **不要绕过 plan 模式的只读限制**（除非任务本身就是修改 plan 规则）。
-- 工具失败应如实上报，**不要把失败包装成成功**。
-- 优先**最小改动**，不要无谓重构图结构。
-- 改路由/approval/tool gating 必须同步看 `tests/graph.test.ts`。
-- 不要为让测试通过而删除关键断言或降低安全约束。
-- 修改行为、路由、工具限制、CLI 参数或上下文拼装时必须补测试或更新现有测试。
-
-> 更多项目约定（文档语言、provider 边界、提交粒度、仓库卫生等）见 [docs/space/execution/active/project-conventions.md](docs/space/execution/active/project-conventions.md)。
+- `docs/` — 设计文档、决策记录和未来规划
 
 ## 提交流程
 
