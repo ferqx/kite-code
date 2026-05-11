@@ -39,6 +39,8 @@ export interface RunAgentInput {
   mode?: WorkspaceAccessRequest;
   contextBudget?: ContextBudget;
   authorizationOverride?: AuthorizationOverride;
+  /** 恢复值：提供时将直接从 checkpoint 恢复而非创建新 initial state / Resume value: if provided, resumes from checkpoint instead of creating new initial state */
+  resume?: AgentResumeValue;
 }
 
 export interface StreamCodeAgentInput {
@@ -86,7 +88,7 @@ export async function* runAgent(
       contextBudget: input.contextBudget,
     };
 
-    let resumeValue: AgentResumeValue | null = null;
+    let resumeValue: AgentResumeValue | null = input.resume ?? null;
 
     while (true) {
       const streamConfig = {

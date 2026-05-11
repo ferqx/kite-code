@@ -42,29 +42,6 @@ export async function main(): Promise<void> {
       ? { current: args.authorizationMode }
       : undefined;
 
-  if (args.command === "resume") {
-    // Resume uses the legacy path for now
-    const { resumeCodeAgent } = await import("../../core/runner-legacy");
-    const events = resumeCodeAgent({
-      userId: args.userId,
-      threadId: args.threadId,
-      workspace: args.workspace,
-      checkpointPath: args.checkpointPath,
-      config,
-      shellExecutor,
-      authorizationOverride,
-      resume:
-        args.answer === undefined
-          ? { approved: args.approve, grant: args.approvalGrant, approvalHash: args.approvalHash, replacementCommand: args.replacementCommand }
-          : { answer: args.answer },
-    });
-    for await (const event of events) {
-      console.log(JSON.stringify(event));
-    }
-    return;
-  }
-
-  // Run mode: use the new runAgent with UserInputProvider
   const provider = createCliProvider(args);
 
   const generator = runAgent(provider, {
@@ -77,11 +54,17 @@ export async function main(): Promise<void> {
     mode: args.mode,
     shellExecutor,
     authorizationOverride,
+    resume: args.command === "resume"
+      ? (
+        args.answer === undefined
+          ? { approved: args.approve, grant: args.approvalGrant, approvalHash: args.approvalHash, replacementCommand: args.replacementCommand }
+          : { answer: args.answer }
+      )
+      : undefined,
   });
 
-  for await (const event of generator) {
-    // Events are already handled by provider.onEvent
-    // This loop just drives the generator
+  for await (const _ of generator) {
+    // Events handled by provider.onEvent
   }
 }
 
