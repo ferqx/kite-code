@@ -75,6 +75,10 @@ function eventReducer(state: TuiState, action: Action): TuiState {
           const interrupt: InterruptState = { kind: "input", question: event.data };
           return { ...state, interrupt };
         }
+        case "error": {
+          const line: OutputLine = { id: nextId++, type: "text", content: `Error: ${event.data.message}`, folded: false };
+          return { ...state, output: [...state.output, line] };
+        }
         case "file_change": {
           return { ...state, fileChanges: [...state.fileChanges, { path: event.data.path, kind: event.data.kind }] };
         }

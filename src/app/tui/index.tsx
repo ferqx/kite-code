@@ -9,9 +9,13 @@ import App, { useTuiState } from "./App";
 function TuiBootstrap() {
   const { state, dispatch, onToggleReason } = useTuiState();
 
-  const provider = React.useMemo(() => new TuiUserInputProvider((event) => {
-    dispatch({ type: "EVENT", event });
-  }), []);
+  const provider = React.useMemo(
+    () =>
+      new TuiUserInputProvider((event) => {
+        dispatch({ type: "EVENT", event });
+      }),
+    [dispatch]
+  );
 
   React.useEffect(() => {
     const config = loadAgentConfig();
@@ -31,25 +35,32 @@ function TuiBootstrap() {
       shellExecutor,
     });
 
+    let aborted = false;
+
     (async () => {
       try {
         for await (const _ of generator) {
-          /* driven by provider.onEvent */
+          if (aborted) break;
         }
-        dispatch({ type: "SET_EXITED" });
-      } catch (error) {
+        if (!aborted) dispatch({ type: "SET_EXITED" });
+      } catch {
         dispatch({ type: "SET_EXITED" });
       }
     })();
 
     return () => {
+      aborted = true;
       provider.teardown?.();
     };
-  }, []);
+  }, [provider]);
 
   return <App state={state} dispatch={dispatch} onToggleReason={onToggleReason} provider={provider} />;
 }
 
 if (import.meta.main) {
-  render(<TuiBootstrap />);
+  const { unmount } = render(<TuiBootstrap />);
+  process.on("SIGINT", () => {
+    unmount();
+    process.exit(0);
+  });
 }

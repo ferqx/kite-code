@@ -313,9 +313,10 @@ function chunkToEvents(
     }
   }
 
-  for (const e of events) {
+  const existingEvents = events.slice();
+  for (const e of existingEvents) {
     if (e.type === "tool_done" && e.data.ok && (e.data.name === "write_file" || e.data.name === "edit_file")) {
-      const matchingCall = events.find(
+      const matchingCall = existingEvents.find(
         (ce) => ce.type === "tool_call" && ce.data.call_id === e.data.call_id
       ) as { type: "tool_call"; data: import("../protocol/events").ToolCallPayload } | undefined;
       if (matchingCall) {
