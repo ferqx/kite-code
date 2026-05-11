@@ -4,7 +4,7 @@ import {
   initialWorkspaceAccessForTask,
   normalizeGraphStream,
   taskMessageForInitialAccess,
-} from "../src/app/runner";
+} from "../src/core/runner";
 import type { AgentEvent } from "../src/protocol/index";
 import type { ModelRetryEvent } from "../src/core/types";
 

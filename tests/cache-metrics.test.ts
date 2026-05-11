@@ -5,7 +5,7 @@ import {
   extractPromptCacheMetrics,
   summarizePromptCacheMetricsByWorkspaceAccess,
 } from "../src/core/cache-metrics";
-import { normalizeGraphStream } from "../src/app/runner";
+import { normalizeGraphStream } from "../src/core/runner";
 
 // 验证从 AIMessage 响应中提取 prompt cache 指标 / Verify extracting prompt cache metrics from AIMessage responses
 describe("extractPromptCacheMetrics", () => {

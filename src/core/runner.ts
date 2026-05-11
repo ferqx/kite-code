@@ -1,5 +1,5 @@
 import { HumanMessage } from "@langchain/core/messages";
-import { Command } from "@langchain/langgraph";
+import { Command, isInterrupted, INTERRUPT } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
 import type { AgentConfig } from "./config/index";
 import { buildCodeAgentGraph } from "./harness/graph";
@@ -9,6 +9,7 @@ import {
   extractPromptCacheMetrics,
 } from "./cache-metrics";
 import type {
+  AgentPhase,
   AgentEvent,
   CacheMetricsPayload,
   StateChangePayload,
@@ -24,6 +25,7 @@ import type {
   AgentResumeValue,
   AuthorizationOverride,
   ContextBudget,
+  ModelRetryEvent,
 } from "./types";
 
 export interface RunAgentInput {
@@ -37,6 +39,23 @@ export interface RunAgentInput {
   mode?: WorkspaceAccessRequest;
   contextBudget?: ContextBudget;
   authorizationOverride?: AuthorizationOverride;
+}
+
+export interface StreamCodeAgentInput {
+  task: string;
+  userId: string;
+  threadId: string;
+  workspace: string;
+  checkpointPath: string;
+  config: AgentConfig;
+  shellExecutor?: ShellExecutor;
+  mode?: WorkspaceAccessRequest;
+  contextBudget?: ContextBudget;
+  authorizationOverride?: AuthorizationOverride;
+}
+
+export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task"> {
+  resume: AgentResumeValue;
 }
 
 export async function* runAgent(
@@ -328,13 +347,185 @@ function findCacheMetrics(chunk: unknown) {
   return null;
 }
 
-function initialWorkspaceAccessForTask(task: string, requested: WorkspaceAccessRequest): WorkspaceAccess {
+export function initialWorkspaceAccessForTask(task: string, requested: WorkspaceAccessRequest = "auto"): WorkspaceAccess {
   if (requested === "plan" || requested === "read-only") return "read-only";
   if (requested === "builder" || requested === "write") return "write";
   if (task.trimStart().toLowerCase().startsWith("/plan")) return "read-only";
   return "write";
 }
 
-function workspaceAccessToPhase(access: WorkspaceAccess): "planning" | "building" {
+export function workspaceAccessToPhase(access: WorkspaceAccess): AgentPhase {
   return access === "read-only" ? "planning" : "building";
+}
+
+export function initialAgentPhaseForAccess(workspaceAccess: WorkspaceAccess): AgentPhase {
+  return workspaceAccessToPhase(workspaceAccess);
+}
+
+export function taskMessageForInitialAccess(task: string, _workspaceAccess: WorkspaceAccess): string {
+  return task;
+}
+
+export async function* normalizeGraphStream(
+  stream: AsyncIterable<unknown>,
+): AsyncGenerator<AgentEvent> {
+  let currentWorkspaceAccess: WorkspaceAccess | null = null;
+  const cacheStandard = createPromptCacheStandardTracker();
+  for await (const chunk of stream) {
+    if (isInterrupted(chunk)) {
+      yield { type: "interrupt", data: chunk[INTERRUPT as unknown as keyof typeof chunk] };
+      continue;
+    }
+
+    const chunkRecord = chunk as Record<string, unknown>;
+    if (INTERRUPT in chunkRecord) {
+      yield { type: "interrupt", data: chunkRecord[String(INTERRUPT)] };
+      continue;
+    }
+
+    currentWorkspaceAccess = findWorkspaceAccess(chunk) ?? currentWorkspaceAccess;
+    yield { type: "update", data: chunk };
+
+    for (const retry of findModelRetries(chunk)) {
+      yield { type: "model_retry", data: retry };
+    }
+
+    const metrics = findPromptCacheMetrics(chunk);
+    if (metrics && currentWorkspaceAccess) {
+      yield {
+        type: "cache_metrics",
+        data: {
+          workspaceAccess: currentWorkspaceAccess,
+          ...metrics,
+          standard: cacheStandard.record(metrics) as unknown as Record<string, unknown>,
+        },
+      };
+    }
+
+    const final = findFinal(chunk);
+    if (final) {
+      yield { type: "final", data: final };
+    }
+  }
+}
+
+export async function* streamCodeAgent(
+  input: StreamCodeAgentInput,
+): AsyncGenerator<AgentEvent> {
+  const { graph, checkpointer } = buildCodeAgentGraph({
+    config: input.config,
+    checkpointPath: input.checkpointPath,
+    shellExecutor: input.shellExecutor,
+    authorizationOverride: input.authorizationOverride,
+  });
+
+  let streamCompleted = false;
+  try {
+    const initialWorkspaceAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? "auto");
+    const initialPhase = initialAgentPhaseForAccess(initialWorkspaceAccess);
+
+    const stream = await graph.stream(
+      {
+        messages: [new HumanMessage(taskMessageForInitialAccess(input.task, initialWorkspaceAccess))],
+        workspaceAccess: initialWorkspaceAccess,
+        phase: initialPhase,
+        plan: null,
+        userId: input.userId,
+        threadId: input.threadId,
+        workspace: input.workspace,
+        contextSummary: "",
+        contextBudget: input.contextBudget,
+      },
+      graphConfig(input.threadId),
+    );
+
+    yield* normalizeGraphStream(stream);
+    streamCompleted = true;
+  } finally {
+    if (streamCompleted) {
+      checkpointer.close();
+    }
+  }
+}
+
+export async function* resumeCodeAgent(
+  input: ResumeCodeAgentInput,
+): AsyncGenerator<AgentEvent> {
+  const { graph, checkpointer } = buildCodeAgentGraph({
+    config: input.config,
+    checkpointPath: input.checkpointPath,
+    shellExecutor: input.shellExecutor,
+    authorizationOverride: input.authorizationOverride,
+  });
+
+  let streamCompleted = false;
+  try {
+    const stream = await graph.stream(
+      new Command({ resume: input.resume }),
+      graphConfig(input.threadId),
+    );
+
+    yield* normalizeGraphStream(stream);
+    streamCompleted = true;
+  } finally {
+    if (streamCompleted) {
+      checkpointer.close();
+    }
+  }
+}
+
+function graphConfig(threadId: string) {
+  return {
+    configurable: { thread_id: threadId },
+    streamMode: "updates" as const,
+    recursionLimit: 60,
+  };
+}
+
+function findFinal(chunk: unknown): string | null {
+  if (!chunk || typeof chunk !== "object") return null;
+  const record = chunk as Record<string, unknown>;
+  for (const key of ["agent", "agent_plan", "agent_build"]) {
+    const node = record[key] as { final?: unknown } | undefined;
+    if (typeof node?.final === "string") return node.final;
+  }
+  return null;
+}
+
+function findModelRetries(chunk: unknown): ModelRetryEvent[] {
+  const all: ModelRetryEvent[] = [];
+  for (const value of walkValues(chunk)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const modelRetries = (value as Record<string, unknown>).modelRetries;
+    if (Array.isArray(modelRetries)) {
+      for (const item of modelRetries) {
+        if (item && typeof item === "object" && typeof (item as Record<string, unknown>).attempt === "number") {
+          all.push(item as ModelRetryEvent);
+        }
+      }
+    }
+  }
+  return all;
+}
+
+function findPromptCacheMetrics(chunk: unknown) {
+  for (const value of walkValues(chunk)) {
+    if (AIMessage.isInstance(value)) {
+      const metrics = extractPromptCacheMetrics(value);
+      if (metrics) return metrics;
+    }
+  }
+  return null;
+}
+
+function* walkValues(value: unknown): Generator<unknown> {
+  yield value;
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) yield* walkValues(item);
+    return;
+  }
+  for (const item of Object.values(value as Record<string, unknown>)) {
+    yield* walkValues(item);
+  }
 }

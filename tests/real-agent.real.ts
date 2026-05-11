@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { HumanMessage } from "@langchain/core/messages";
 import { loadAgentConfig } from "../src/core/config/index";
-import { resumeCodeAgent, streamCodeAgent } from "../src/app/runner";
+import { resumeCodeAgent, streamCodeAgent } from "../src/core/runner";
 import { createChatModel } from "../src/core/model/factory";
 import { shellTool } from "../src/core/tools/shell";
 import { REAL_TEST_MODEL_ENV, REAL_TEST_PROVIDER_ENV } from "./real-test-options";
