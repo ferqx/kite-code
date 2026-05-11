@@ -19,7 +19,8 @@ import {
 import { createChatModel, type SupportedChatModel } from "../model/factory";
 import { type ModelRetryListener } from "../model/deepseek";
 import { BunSqliteSaver } from "../persistence/checkpoint";
-import type { AgentResumeValue, AuthorizationOverride, ModelRetryEvent, ShellApprovalGrant, ThreadAuthorizationState } from "../shared/types";
+import type { ShellApprovalGrant } from "../../protocol/events";
+import type { AgentResumeValue, AuthorizationOverride, ModelRetryEvent, ThreadAuthorizationState } from "../types";
 import { createAgentTools } from "../tools/definitions";
 import type { ShellExecutor } from "../tools/shell";
 import {

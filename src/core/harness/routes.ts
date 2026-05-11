@@ -1,5 +1,5 @@
 import { END } from "@langchain/langgraph";
-import type { AuthorizationOverride } from "../shared/types";
+import type { AuthorizationOverride } from "../types";
 import type { CodeAgentState } from "./state";
 import { getPendingToolRequest } from "./tool-requests";
 import {

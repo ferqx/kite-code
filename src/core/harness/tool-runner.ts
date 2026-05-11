@@ -1,12 +1,14 @@
 import type {
   AgentPhase,
   AgentPlan,
-  AuthorizationOverride,
   ShellGrantUsed,
+  WorkspaceAccess,
+} from "../../protocol/events";
+import type {
+  AuthorizationOverride,
   ShellResult,
   ThreadAuthorizationState,
-  WorkspaceAccess,
-} from "../shared/types";
+} from "../types";
 import { editFile, readFile, writeFile } from "../tools/file";
 import { shellTool, type ShellExecutor } from "../tools/shell";
 import {

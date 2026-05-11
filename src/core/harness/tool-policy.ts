@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import type {
   AgentPhase,
   AuthorizationMode,
-  AuthorizationOverride,
   ShellApprovalGrant,
   ShellGrantUsed,
-  ThreadAuthorizationState,
   WorkspaceAccess,
-} from "../shared/types";
+} from "../../protocol/events";
+import type {
+  AuthorizationOverride,
+  ThreadAuthorizationState,
+} from "../types";
 import { isReadOnlyShellCommand } from "../tools/definitions";
 import type { PendingToolRequest } from "./tool-requests";
 

@@ -1,6 +1,6 @@
 import { platform, release, type } from "node:os";
 import type { BaseMessage } from "@langchain/core/messages";
-import type { AgentPlan, WorkspaceAccess } from "../shared/types";
+import type { AgentPlan, WorkspaceAccess } from "../../protocol/events";
 
 /** 运行时系统信息 / Runtime system information */
 export interface RuntimeSystemInfo {

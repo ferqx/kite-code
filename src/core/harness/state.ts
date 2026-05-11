@@ -3,11 +3,13 @@ import { Annotation, messagesStateReducer } from "@langchain/langgraph";
 import type {
   AgentPlan,
   AgentPhase,
-  ContextBudget,
   ShellGrantUsed,
-  ThreadAuthorizationState,
   WorkspaceAccess,
-} from "../shared/types";
+} from "../../protocol/events";
+import type {
+  ContextBudget,
+  ThreadAuthorizationState,
+} from "../types";
 import { defaultAuthorizationState } from "./tool-policy";
 import type { PendingToolRequest } from "./tool-requests";
 

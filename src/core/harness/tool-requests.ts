@@ -2,12 +2,14 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import type {
   AgentPlan,
   PlanStatus,
-  ShellActionEnvelope,
   ShellApprovalGrant,
-  ShellIntent,
   UserInputOption,
   UserInputRequest,
-} from "../shared/types";
+} from "../../protocol/events";
+import type {
+  ShellActionEnvelope,
+  ShellIntent,
+} from "../types";
 
 /** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
 export type PendingToolRequest =

@@ -1,5 +1,5 @@
 import { AIMessage } from "@langchain/core/messages";
-import type { WorkspaceAccess } from "./types";
+import type { WorkspaceAccess } from "../protocol/events";
 
 /** 提示缓存命中指标 / Prompt cache hit metrics */
 export interface PromptCacheMetrics {

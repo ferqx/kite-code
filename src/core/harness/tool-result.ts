@@ -1,11 +1,13 @@
 import type {
   AgentPlan,
-  ShellResult,
   ShellGrantUsed,
+  WorkspaceAccess,
+} from "../../protocol/events";
+import type {
+  ShellResult,
   ShellIntent,
   ThreadAuthorizationState,
-  WorkspaceAccess,
-} from "../shared/types";
+} from "../types";
 
 /** 工具失败时提供给模型的结构化原因和用法提示 / Structured tool failure guidance for the model */
 export interface ToolFailure {

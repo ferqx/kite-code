@@ -10,7 +10,8 @@ import {
   formatWorkspaceAccessReminder,
   formatPlanStateReminder,
 } from "./runtime-context";
-import type { AgentPlan, ContextBudget, WorkspaceAccess } from "../shared/types";
+import type { AgentPlan, WorkspaceAccess } from "../../protocol/events";
+import type { ContextBudget } from "../types";
 import {
   summarizeMessages,
   formatCompactedSummary,
