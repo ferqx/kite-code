@@ -169,14 +169,27 @@ function interruptToEvent(data: unknown): AgentEvent | null {
   if (!Array.isArray(arr)) return null;
   for (const item of arr) {
     if (item && typeof item === "object") {
-      const inner = item.__interrupt__;
-      if (Array.isArray(inner) && inner.length > 0) {
-        const v = inner[0] as Record<string, unknown> | undefined;
-        if (v?.kind === "tool_approval") {
-          return { type: "need_approval", data: v.payload as ToolApprovalPayload };
+      const inner = (item as Record<string, unknown>).value;
+      if (inner && typeof inner === "object") {
+        const v = inner as Record<string, unknown>;
+        if (v.kind === "tool_approval") {
+          const approval = v.approval as ToolApprovalPayload | undefined;
+          if (approval && typeof approval === "object") {
+            return { type: "need_approval", data: approval };
+          }
         }
-        if (v?.kind === "user_input") {
-          return { type: "need_input", data: v.payload as UserInputPayload };
+        if (v.kind === "user_input") {
+          const request = v.request as Record<string, unknown> | undefined;
+          if (request && typeof request === "object") {
+            const args = request.args as Record<string, unknown> | undefined;
+            const payload: UserInputPayload = {
+              question: (args?.question as string) ?? "User input required",
+              options: (args?.options as UserInputPayload["options"]) ?? [],
+              allow_free_text: (args?.allow_free_text as boolean) ?? true,
+              context: typeof args?.context === "string" ? args.context : undefined,
+            };
+            return { type: "need_input", data: payload };
+          }
         }
       }
     }
@@ -296,6 +309,11 @@ function chunkToEvents(
         }
       }
     }
+  }
+
+  const final = findFinal(chunk);
+  if (final) {
+    events.push({ type: "final", data: final });
   }
 
   const metrics = findCacheMetrics(chunk);
