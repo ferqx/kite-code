@@ -36,4 +36,12 @@ export class TuiUserInputProvider implements UserInputProvider {
       this.pendingResolve = resolve;
     });
   }
+
+  async teardown(): Promise<void> {
+    if (this.pendingResolve) {
+      this.pendingResolve({ type: "cancel" });
+      this.pendingResolve = null;
+      this.pendingInterrupt = null;
+    }
+  }
 }
