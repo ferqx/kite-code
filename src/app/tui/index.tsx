@@ -8,7 +8,10 @@ import App, { useTuiState } from "./App";
 
 function TuiBootstrap() {
   const { state, dispatch, onToggleReason } = useTuiState();
-  const providerRef = React.useRef<TuiUserInputProvider>(undefined!);
+
+  const provider = React.useMemo(() => new TuiUserInputProvider((event) => {
+    dispatch({ type: "EVENT", event });
+  }), []);
 
   React.useEffect(() => {
     const config = loadAgentConfig();
@@ -17,11 +20,6 @@ function TuiBootstrap() {
     const task = process.argv.slice(2).join(" ") || "No task provided";
     const threadId = `tui-${Date.now().toString(36)}`;
     const checkpointPath = `${workspace}/.openpx/checkpoints.sqlite`;
-
-    const provider = new TuiUserInputProvider((event) => {
-      dispatch({ type: "EVENT", event });
-    });
-    providerRef.current = provider;
 
     const generator = runAgent(provider, {
       task,
@@ -34,10 +32,14 @@ function TuiBootstrap() {
     });
 
     (async () => {
-      for await (const _ of generator) {
-        /* driven by provider.onEvent */
+      try {
+        for await (const _ of generator) {
+          /* driven by provider.onEvent */
+        }
+        dispatch({ type: "SET_EXITED" });
+      } catch (error) {
+        dispatch({ type: "SET_EXITED" });
       }
-      dispatch({ type: "SET_EXITED" });
     })();
 
     return () => {
@@ -45,7 +47,7 @@ function TuiBootstrap() {
     };
   }, []);
 
-  return <App state={state} dispatch={dispatch} onToggleReason={onToggleReason} provider={providerRef.current} />;
+  return <App state={state} dispatch={dispatch} onToggleReason={onToggleReason} provider={provider} />;
 }
 
 if (import.meta.main) {
