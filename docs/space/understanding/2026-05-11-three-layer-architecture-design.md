@@ -1,6 +1,7 @@
 # Three-Layer Architecture Design
 
-> 状态: approved | 日期: 2026-05-11
+> Status: completed
+> Created: 2026-05-11
 
 ## 1. 目标
 
