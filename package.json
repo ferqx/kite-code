@@ -9,6 +9,7 @@
     "test": "bun test",
     "test:real": "bun run tests/real-test-cli.ts",
     "test:mock": "bun test ./tests/mock-compaction.real.ts",
+    "tui": "bun run src/app/tui/index.tsx",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,7 +20,9 @@
     "@langchain/langgraph-checkpoint-sqlite": "^1.0.1",
     "@langchain/ollama": "^1.2.7",
     "@langchain/openai": "^1.4.4",
+    "ink": "^7.0.2",
     "jsonc-parser": "^3.3.1",
+    "react": "^19.2.6",
     "zod": "^4.3.6"
   },
   "devDependencies": {
