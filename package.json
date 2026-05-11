@@ -5,7 +5,7 @@
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
-    "agent": "bun run src/app/cli.ts",
+    "agent": "bun run src/app/cli/index.ts",
     "test": "bun test",
     "test:real": "bun run tests/real-test-cli.ts",
     "test:mock": "bun test ./tests/mock-compaction.real.ts",
