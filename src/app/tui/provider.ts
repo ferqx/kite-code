@@ -1,0 +1,39 @@
+import type { AgentEvent } from "../../protocol/events";
+import type { InterruptPayload, UserAction } from "../../protocol/actions";
+import type { UserInputProvider } from "../../protocol/provider";
+
+export class TuiUserInputProvider implements UserInputProvider {
+  private dispatch: (event: AgentEvent) => void;
+  private pendingResolve: ((action: UserAction) => void) | null = null;
+  private pendingInterrupt: InterruptPayload | null = null;
+
+  constructor(dispatch: (event: AgentEvent) => void) {
+    this.dispatch = dispatch;
+  }
+
+  onEvent(event: AgentEvent): void {
+    this.dispatch(event);
+  }
+
+  /** 获取当前待处理的中断负载 / Get current pending interrupt payload */
+  getPendingInterrupt(): InterruptPayload | null {
+    return this.pendingInterrupt;
+  }
+
+  /** 由 UI 调用，提交用户操作 / Called by UI to submit user action */
+  submitAction(action: UserAction): void {
+    this.pendingInterrupt = null;
+    if (this.pendingResolve) {
+      const resolve = this.pendingResolve;
+      this.pendingResolve = null;
+      resolve(action);
+    }
+  }
+
+  async requestAction(payload: InterruptPayload): Promise<UserAction> {
+    this.pendingInterrupt = payload;
+    return new Promise<UserAction>((resolve) => {
+      this.pendingResolve = resolve;
+    });
+  }
+}
