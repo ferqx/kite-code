@@ -4,6 +4,7 @@ import type { AgentEvent } from "../../protocol/events";
 import type { TuiState, OutputLine, ToolCardState, StatusState, InterruptState } from "./types";
 import OutputArea from "./OutputArea";
 import ToolCard from "./ToolCard";
+import DiffPreview from "./DiffPreview";
 import ApprovalDialog from "./ApprovalDialog";
 import InputDialog from "./InputDialog";
 import StatusBar from "./StatusBar";
@@ -135,6 +136,7 @@ export default function App({ state, dispatch, onToggleReason, provider }: AppPr
     <Box flexDirection="column" height="100%">
       <OutputArea lines={state.output} onToggleReason={onToggleReason} />
       <ToolCard tools={state.tools} />
+      <DiffPreview changes={state.fileChanges} />
       {state.interrupt?.kind === "approval" && state.interrupt.approval && (
         <ApprovalDialog approval={state.interrupt.approval} provider={provider} />
       )}

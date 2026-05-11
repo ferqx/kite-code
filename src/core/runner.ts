@@ -313,6 +313,21 @@ function chunkToEvents(
     }
   }
 
+  for (const e of events) {
+    if (e.type === "tool_done" && e.data.ok && (e.data.name === "write_file" || e.data.name === "edit_file")) {
+      const matchingCall = events.find(
+        (ce) => ce.type === "tool_call" && ce.data.call_id === e.data.call_id
+      ) as { type: "tool_call"; data: import("../protocol/events").ToolCallPayload } | undefined;
+      if (matchingCall) {
+        const path = matchingCall.data.args.path;
+        if (typeof path === "string") {
+          const kind = e.data.name === "write_file" ? "add" as const : "edit" as const;
+          events.push({ type: "file_change", data: { path, kind } });
+        }
+      }
+    }
+  }
+
   const final = findFinal(chunk);
   if (final) {
     events.push({ type: "final", data: final });
