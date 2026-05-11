@@ -67,7 +67,7 @@ export interface ToolResultPayload {
 
 export interface UserInputPayload {
   question: string;
-  options: { id: string; label: string; description?: string }[];
+  options: UserInputOption[];
   allow_free_text: boolean;
   context?: string;
 }
@@ -80,7 +80,7 @@ export interface StateChangePayload {
 }
 
 export interface CacheMetricsPayload {
-  workspaceAccess: string;
+  workspaceAccess: WorkspaceAccess;
   cacheHitTokens: number;
   cacheMissTokens: number;
   cacheWriteTokens: number;
