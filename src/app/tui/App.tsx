@@ -2,6 +2,9 @@ import React, { useReducer, type Dispatch } from "react";
 import { Box } from "ink";
 import type { AgentEvent } from "../../protocol/events";
 import type { TuiState, OutputLine, ToolCardState, StatusState, InterruptState } from "./types";
+import OutputArea from "./OutputArea";
+import ToolCard from "./ToolCard";
+import StatusBar from "./StatusBar";
 
 type Action =
   | { type: "EVENT"; event: AgentEvent }
@@ -128,7 +131,9 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
 export default function App({ state, dispatch, onToggleReason, provider }: AppProps) {
   return (
     <Box flexDirection="column" height="100%">
-      <Box>OpenPX TUI — skeleton ready</Box>
+      <OutputArea lines={state.output} onToggleReason={onToggleReason} />
+      <ToolCard tools={state.tools} />
+      <StatusBar status={state.status} />
     </Box>
   );
 }
