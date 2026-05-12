@@ -1,18 +1,44 @@
-import React, { useReducer, type Dispatch } from "react";
+import React, { useReducer, type Dispatch, type ReactNode } from "react";
 import { Box } from "ink";
 import type { AgentEvent } from "../../protocol/events";
 import type { TuiState, OutputLine, ToolCardState, StatusState, InterruptState } from "./types";
 import OutputArea from "./OutputArea";
 import ToolCard from "./ToolCard";
 import DiffPreview from "./DiffPreview";
-import ApprovalDialog from "./ApprovalDialog";
-import InputDialog from "./InputDialog";
+import ApprovalBlock from "./components/ApprovalBlock";
+import InputBlock from "./components/InputBlock";
+import HelpPanel from "./components/HelpPanel";
+import ModelSelector from "./components/ModelSelector";
 import StatusBar from "./StatusBar";
+import { useGlobalKeys, useLeaderKeys } from "./hooks/useGlobalKeys";
 
 type Action =
   | { type: "EVENT"; event: AgentEvent }
   | { type: "SET_EXITED" }
-  | { type: "TOGGLE_REASON"; id: number };
+  | { type: "SET_RUNNING" }
+  | { type: "SET_IDLE" }
+  | { type: "TOGGLE_REASON"; id: number }
+  | { type: "TOGGLE_THINKING" }
+  | { type: "CLEAR_OUTPUT" }
+  | { type: "CLEAR_INTERRUPT" }
+  | { type: "SHOW_HELP" }
+  | { type: "HIDE_HELP" }
+  | { type: "SET_PHASE"; phase: "planning" | "building" }
+  | { type: "LEADER_PENDING" }
+  | { type: "LEADER_CANCEL" }
+  | { type: "ESCAPE" }
+  | { type: "CTRL_C" }
+  | { type: "SWITCH_AUTH"; mode: string }
+  | { type: "COMPACT_CONTEXT" }
+  | { type: "UNDO" }
+  | { type: "REDO" }
+  | { type: "EXPORT_SESSION" }
+  | { type: "OPEN_EDITOR" }
+  | { type: "SHOW_MODEL_SELECTOR" }
+  | { type: "HIDE_MODEL_SELECTOR" }
+  | { type: "SHOW_MODEL_LIST" }
+  | { type: "SHOW_SESSIONS"; id?: string }
+  | { type: "SELECT_MODEL"; modelId: string };
 
 let nextId = 1;
 
@@ -56,6 +82,21 @@ function eventReducer(state: TuiState, action: Action): TuiState {
           if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
           return { ...state, status: next };
         }
+        case "retry": {
+          const line: OutputLine = {
+            id: nextId++,
+            type: "text",
+            content: `⚠ Retry #${event.data.attempt}: ${event.data.reason}`,
+            folded: false,
+          };
+          return { ...state, output: [...state.output, line] };
+        }
+        case "step_begin": {
+          return { ...state, status: { ...state.status, currentNode: event.data.node } };
+        }
+        case "step_end": {
+          return { ...state, status: { ...state.status, currentNode: null } };
+        }
         case "cache_metrics": {
           const d = event.data;
           return {
@@ -63,9 +104,14 @@ function eventReducer(state: TuiState, action: Action): TuiState {
             status: {
               ...state.status,
               cacheHitRate: d.hitRate ?? 0,
-              totalTokens: state.status.totalTokens + d.inputTokens,
+              totalTokens: state.status.totalTokens + d.inputTokens + (d.outputTokens ?? 0),
             },
           };
+        }
+        case "final": {
+          if (event.data.length === 0) return state;
+          const line: OutputLine = { id: nextId++, type: "text", content: event.data, folded: false };
+          return { ...state, output: [...state.output, line] };
         }
         case "need_approval": {
           const interrupt: InterruptState = { kind: "approval", approval: event.data };
@@ -91,12 +137,74 @@ function eventReducer(state: TuiState, action: Action): TuiState {
     }
     case "SET_EXITED":
       return { ...state, exited: true };
+    case "SET_RUNNING":
+      return { ...state, running: true, exited: false };
+    case "SET_IDLE":
+      return { ...state, running: false, exited: false, interrupt: null };
     case "TOGGLE_REASON": {
       const lines = state.output.map((l) =>
         l.id === action.id && l.type === "reason" ? { ...l, folded: !l.folded } : l
       );
       return { ...state, output: lines };
     }
+    case "TOGGLE_THINKING":
+      return { ...state, thinkingVisible: !state.thinkingVisible };
+    case "CLEAR_OUTPUT":
+      return { ...state, output: [], tools: [], fileChanges: [] };
+    case "CLEAR_INTERRUPT":
+      return { ...state, interrupt: null };
+    case "SHOW_HELP":
+      return { ...state, showHelp: true };
+    case "HIDE_HELP":
+      return { ...state, showHelp: false };
+    case "SET_PHASE":
+      return { ...state, status: { ...state.status, phase: action.phase } };
+    case "LEADER_PENDING":
+      return { ...state, leaderPending: true };
+    case "LEADER_CANCEL":
+      return { ...state, leaderPending: false };
+    case "ESCAPE":
+      if (state.showHelp) return { ...state, showHelp: false };
+      if (state.showModelSelector) return { ...state, showModelSelector: false };
+      if (state.leaderPending) return { ...state, leaderPending: false };
+      return state;
+    case "CTRL_C":
+      if (state.running) return { ...state, running: false, ctrlCPressed: true };
+      return state;
+    case "SWITCH_AUTH": {
+      const newMode = action.mode === "toggle"
+        ? (state.status.authorization === "full_access" ? "default" : "full_access")
+        : action.mode;
+      return { ...state, status: { ...state.status, authorization: newMode as "default" | "full_access" } };
+    }
+    case "COMPACT_CONTEXT":
+      return state;
+    case "UNDO":
+      return state;
+    case "REDO":
+      return state;
+    case "EXPORT_SESSION":
+      return state;
+    case "OPEN_EDITOR":
+      if (process.env.EDITOR) {
+        const { spawn } = require("node:child_process");
+        spawn(process.env.EDITOR, { stdio: "inherit", shell: true });
+      }
+      return state;
+    case "SHOW_MODEL_SELECTOR":
+      return { ...state, showModelSelector: true };
+    case "HIDE_MODEL_SELECTOR":
+      return { ...state, showModelSelector: false };
+    case "SHOW_MODEL_LIST":
+      return { ...state, showModelSelector: true };
+    case "SHOW_SESSIONS":
+      return state;
+    case "SELECT_MODEL":
+      return {
+        ...state,
+        showModelSelector: false,
+        status: { ...state.status, modelName: action.modelId },
+      };
     default:
       return state;
   }
@@ -114,8 +222,17 @@ const initialState: TuiState = {
     workspaceAccess: "write",
     cacheHitRate: 0,
     totalTokens: 0,
+    currentNode: null,
+    modelName: "deepseek-v4",
+    thinkingMode: "max",
   },
   exited: false,
+  running: false,
+  thinkingVisible: true,
+  leaderPending: false,
+  showHelp: false,
+  showModelSelector: false,
+  ctrlCPressed: false,
 };
 
 export function createInitialState(): TuiState {
@@ -127,6 +244,7 @@ export interface AppProps {
   dispatch: Dispatch<Action>;
   onToggleReason: (id: number) => void;
   provider: import("./provider").TuiUserInputProvider;
+  children?: ReactNode;
 }
 
 export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
@@ -135,19 +253,39 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
   return { state, dispatch, onToggleReason };
 }
 
-export default function App({ state, dispatch, onToggleReason, provider }: AppProps) {
+export default function App({ state, dispatch, onToggleReason, provider, children }: AppProps) {
+  useGlobalKeys(dispatch);
+  useLeaderKeys(dispatch, state.leaderPending);
+
   return (
     <Box flexDirection="column" height="100%">
       <OutputArea lines={state.output} onToggleReason={onToggleReason} />
       <ToolCard tools={state.tools} />
       <DiffPreview changes={state.fileChanges} />
+      {state.showHelp && <HelpPanel onClose={() => dispatch({ type: "HIDE_HELP" })} />}
+      {state.showModelSelector && (
+        <ModelSelector
+          currentModel={state.status.modelName}
+          onSelect={(modelId) => dispatch({ type: "SELECT_MODEL", modelId })}
+          onClose={() => dispatch({ type: "HIDE_MODEL_SELECTOR" })}
+        />
+      )}
       {state.interrupt?.kind === "approval" && state.interrupt.approval && (
-        <ApprovalDialog approval={state.interrupt.approval} provider={provider} />
+        <ApprovalBlock
+          approval={state.interrupt.approval}
+          provider={provider}
+          onResolved={() => dispatch({ type: "CLEAR_INTERRUPT" })}
+        />
       )}
       {state.interrupt?.kind === "input" && state.interrupt.question && (
-        <InputDialog question={state.interrupt.question} provider={provider} />
+        <InputBlock
+          question={state.interrupt.question}
+          provider={provider}
+          onResolved={() => dispatch({ type: "CLEAR_INTERRUPT" })}
+        />
       )}
-      <StatusBar status={state.status} />
+      {children}
+      <StatusBar status={state.status} thinkingVisible={state.thinkingVisible} />
     </Box>
   );
 }

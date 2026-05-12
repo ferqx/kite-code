@@ -1,7 +1,7 @@
 // ── 核心事件类型 / Core event types ──
 export type AgentEvent =
-  | { type: "step_begin" }
-  | { type: "step_end" }
+  | { type: "step_begin"; data: { node: string } }
+  | { type: "step_end"; data: { node: string } }
   | { type: "reason"; data: { text: string } }
   | { type: "text"; data: { text: string } }
   | { type: "tool_call"; data: ToolCallPayload }

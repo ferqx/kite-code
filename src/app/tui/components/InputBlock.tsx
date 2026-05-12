@@ -2,16 +2,17 @@ import React, { useState } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import TextInput from "ink-text-input";
-import type { TuiUserInputProvider } from "./provider";
 import type { UserInputPayload } from "../../protocol/events";
-import { darkTheme as t } from "./theme";
+import type { TuiUserInputProvider } from "../provider";
+import { darkTheme as t } from "../theme";
 
-interface InputDialogProps {
+interface InputBlockProps {
   question: UserInputPayload;
   provider: TuiUserInputProvider;
+  onResolved: (answer: string) => void;
 }
 
-export default function InputDialog({ question, provider }: InputDialogProps) {
+export default function InputBlock({ question, provider, onResolved }: InputBlockProps) {
   const [selected, setSelected] = useState(0);
   const [freeText, setFreeText] = useState("");
   const [mode, setMode] = useState<"select" | "type">(
@@ -19,7 +20,7 @@ export default function InputDialog({ question, provider }: InputDialogProps) {
   );
   const options = question.options;
 
-  useInput((input, key) => {
+  useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
     if (input === "\t" && question.allow_free_text) {
       setMode((m) => (m === "select" ? "type" : "select"));
       return;
@@ -29,34 +30,42 @@ export default function InputDialog({ question, provider }: InputDialogProps) {
       if (key.downArrow) setSelected((s) => Math.min(options.length - 1, s + 1));
       if (key.return && options.length > 0) {
         const opt = options[selected];
-        if (opt) provider.submitAction({ type: "input", text: opt.label });
+        if (opt) {
+          provider.submitAction({ type: "input", text: opt.label });
+          onResolved(opt.label);
+        }
       }
     }
   });
 
   const handleSubmit = (value: string) => {
-    provider.submitAction({ type: "input", text: value });
+    if (value.trim()) {
+      provider.submitAction({ type: "input", text: value });
+      onResolved(value);
+    }
   };
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
-      <Text bold color={t.primary}>
-        ? {question.question}
-      </Text>
+    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
+      <Text bold color={t.primary}>? {question.question}</Text>
+      {question.context && (
+        <Text color={t.dim}>{question.context}</Text>
+      )}
       {mode === "select" && options.length > 0 ? (
         <Box flexDirection="column" marginY={1}>
           {options.map((opt, i) => (
             <Text key={opt.id} color={i === selected ? t.primary : t.muted}>
-              {i === selected ? "❯" : " "} {opt.label}
+              {i === selected ? ">" : " "} {opt.label}
+              {opt.description ? ` — ${opt.description}` : ""}
             </Text>
           ))}
           {question.allow_free_text && (
-            <Text color={t.dim}>Press Tab to type custom answer</Text>
+            <Text color={t.dim} marginTop={1}>[Tab] type freely  [Enter] confirm</Text>
           )}
         </Box>
       ) : (
         <Box>
-          <Text color={t.primary}>❯ </Text>
+          <Text color={t.primary}>> </Text>
           <TextInput value={freeText} onChange={setFreeText} onSubmit={handleSubmit} />
         </Box>
       )}
