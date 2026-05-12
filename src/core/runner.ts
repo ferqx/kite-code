@@ -231,6 +231,8 @@ function chunkToEvents(
     const node = record[key] as Record<string, unknown> | undefined;
     if (!node || typeof node !== "object") continue;
 
+    events.push({ type: "step_begin", data: { node: key } });
+
     const msgs = node.messages;
     if (Array.isArray(msgs)) {
       for (const msg of msgs) {
@@ -285,7 +287,7 @@ function chunkToEvents(
     const sc: StateChangePayload = {};
     const ws = node.workspaceAccess as string | undefined;
     const phase = node.phase as string | undefined;
-    const plan = node.plan;
+    const plan = node.plan ?? (node.metadata as Record<string, unknown> | undefined)?.plan;
     const auth = node.authorization;
     if (ws === "read-only" || ws === "write") sc.workspaceAccess = ws;
     if (phase === "planning" || phase === "building") sc.phase = phase;
@@ -311,6 +313,8 @@ function chunkToEvents(
         }
       }
     }
+
+    events.push({ type: "step_end", data: { node: key } });
   }
 
   const existingEvents = events.slice();

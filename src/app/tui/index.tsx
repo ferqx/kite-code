@@ -5,9 +5,26 @@ import { createSandboxExecutor } from "../../core/sandbox/index";
 import { runAgent } from "../../core/runner";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState } from "./App";
+import InputLine from "./components/InputLine";
+import StartupScreen from "./components/StartupScreen";
+import { useSlashCommand } from "./hooks/useSlashCommand";
 
 function TuiBootstrap() {
   const { state, dispatch, onToggleReason } = useTuiState();
+  const workspace = process.cwd();
+  const config = React.useMemo(() => loadAgentConfig(), []);
+  const [initialized, setInitialized] = React.useState(false);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => setInitialized(true), 80);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleExit = React.useCallback(() => {
+    process.exit(0);
+  }, []);
+
+  const handleSlashCommand = useSlashCommand(dispatch, handleExit);
 
   const provider = React.useMemo(
     () =>
@@ -17,27 +34,26 @@ function TuiBootstrap() {
     [dispatch]
   );
 
-  React.useEffect(() => {
-    const config = loadAgentConfig();
-    const workspace = process.cwd();
-    const shellExecutor = createSandboxExecutor({ enabled: true, workspace });
-    const task = process.argv.slice(2).join(" ") || "No task provided";
-    const threadId = `tui-${Date.now().toString(36)}`;
-    const checkpointPath = `${workspace}/.openpx/checkpoints.sqlite`;
+  const runTask = React.useCallback(
+    async (task: string) => {
+      dispatch({ type: "SET_RUNNING" });
+      dispatch({ type: "CLEAR_INTERRUPT" });
 
-    const generator = runAgent(provider, {
-      task,
-      userId: "tui-user",
-      threadId,
-      workspace,
-      checkpointPath,
-      config,
-      shellExecutor,
-    });
+      const shellExecutor = createSandboxExecutor({ enabled: true, workspace });
+      const threadId = `tui-${Date.now().toString(36)}`;
 
-    let aborted = false;
+      const generator = runAgent(provider, {
+        task,
+        userId: "tui-user",
+        threadId,
+        workspace,
+        checkpointPath: `${workspace}/.openpx/checkpoints.sqlite`,
+        config,
+        shellExecutor,
+      });
 
-    (async () => {
+      let aborted = false;
+
       try {
         for await (const _ of generator) {
           if (aborted) break;
@@ -45,16 +61,52 @@ function TuiBootstrap() {
         if (!aborted) dispatch({ type: "SET_EXITED" });
       } catch {
         dispatch({ type: "SET_EXITED" });
+      } finally {
+        provider.reset();
+        dispatch({ type: "SET_IDLE" });
       }
-    })();
+    },
+    [provider, workspace, config, dispatch]
+  );
 
+  const handleInput = React.useCallback(
+    (value: string) => {
+      if (state.running) return;
+
+      if (value.startsWith("/")) {
+        handleSlashCommand(value);
+        return;
+      }
+
+      if (value.startsWith("!")) {
+        runTask(value);
+        return;
+      }
+
+      runTask(value);
+    },
+    [state.running, runTask, handleSlashCommand]
+  );
+
+  React.useEffect(() => {
     return () => {
-      aborted = true;
       provider.teardown?.();
     };
   }, [provider]);
 
-  return <App state={state} dispatch={dispatch} onToggleReason={onToggleReason} provider={provider} />;
+  if (!initialized) {
+    return <StartupScreen modelName={config.modelName ?? "deepseek-v4"} workspace={workspace} />;
+  }
+
+  return (
+    <App state={state} dispatch={dispatch} onToggleReason={onToggleReason} provider={provider}>
+      <InputLine
+        mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
+        onSubmit={handleInput}
+        disabled={state.running}
+      />
+    </App>
+  );
 }
 
 if (import.meta.main) {

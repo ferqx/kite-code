@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-05-06
+最后更新：2026-05-12
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -35,6 +35,7 @@
 | `understanding/2026-04-26-plan-state-context-projection.md` | understanding | 解释为什么将 `graph.state.plan` 作为运行时状态投影，而不是依赖工具消息历史或 system prompt。 |
 | `understanding/2026-05-10-authorization-mode-switch-design.md` | understanding | 授权模式切换（default/full_access）的设计规范，包含 AuthorizationOverride 内存覆盖和 set_authorization_mode 工具的设计决策。 |
 | `understanding/2026-05-11-three-layer-architecture-design.md` | understanding | 三层分离架构（protocol/core/app）设计规范，将 Agent 核心重构为纯逻辑库，支持 TUI/Desktop 多前端。 |
+| `understanding/2026-05-12-tui-overhaul-design.md` | understanding | TUI 全面重构设计 — 交互式对话循环、流式 markdown 渲染、快捷键体系、slash 命令等 9 维度改版。 |
 
 ## 完成执行记录
 
