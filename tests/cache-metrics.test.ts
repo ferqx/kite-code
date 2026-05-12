@@ -63,6 +63,8 @@ describe("extractPromptCacheMetrics", () => {
         cacheHitTokens: 80,
         cacheMissTokens: 20,
         hitRate: 0.8,
+        outputTokens: 0,
+        cacheWriteTokens: 0,
         standard: {
           callIndex: 1,
           isWarmup: true,
@@ -129,6 +131,8 @@ describe("extractPromptCacheMetrics", () => {
         cacheHitTokens: 0,
         cacheMissTokens: 100,
         hitRate: 0,
+        outputTokens: 0,
+        cacheWriteTokens: 0,
         standard: {
           callIndex: 1,
           isWarmup: true,
@@ -156,6 +160,8 @@ describe("extractPromptCacheMetrics", () => {
         cacheHitTokens: 285,
         cacheMissTokens: 15,
         hitRate: 0.95,
+        outputTokens: 0,
+        cacheWriteTokens: 0,
         standard: {
           callIndex: 2,
           isWarmup: false,

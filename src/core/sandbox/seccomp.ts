@@ -17,6 +17,7 @@ export function findApplySeccomp(): string | null {
     import.meta.dirname,
     "..",
     "..",
+    "..",
     "vendor",
     "seccomp",
     arch,

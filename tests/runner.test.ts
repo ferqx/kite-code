@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { AIMessage } from "@langchain/core/messages";
 import {
   initialAgentPhaseForAccess,
   initialWorkspaceAccessForTask,
   normalizeGraphStream,
   taskMessageForInitialAccess,
+  chunkToEvents,
 } from "../src/core/runner";
+import { createPromptCacheStandardTracker } from "../src/core/cache-metrics";
 import type { AgentEvent } from "../src/protocol/index";
 import type { ModelRetryEvent } from "../src/core/types";
 
@@ -121,5 +124,64 @@ describe("normalizeGraphStream model retry events", () => {
 
     // update always comes first, then model_retry
     expect(events.map((e) => e.type)).toEqual(["update", "model_retry"]);
+  });
+});
+
+describe("chunkToEvents final dedup", () => {
+  const cacheStandard = createPromptCacheStandardTracker();
+
+  test("does not emit final when it duplicates a text event", () => {
+    const ai = new AIMessage({ content: "hello world" });
+    const chunk = {
+      agent: {
+        messages: [ai],
+        final: "hello world",
+      },
+    };
+
+    const events = chunkToEvents(chunk, "write", cacheStandard);
+    expect(events.filter((e) => e.type === "text")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "final")).toHaveLength(0);
+  });
+
+  test("emits final when its content differs from text events", () => {
+    const ai = new AIMessage({ content: "actual response" });
+    const chunk = {
+      agent: {
+        messages: [ai],
+        final: "summary of the full conversation",
+      },
+    };
+
+    const events = chunkToEvents(chunk, "write", cacheStandard);
+    expect(events.filter((e) => e.type === "text")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "final")).toHaveLength(1);
+  });
+
+  test("emits final when there are no text events", () => {
+    const chunk = {
+      agent: {
+        final: "done",
+      },
+    };
+
+    const events = chunkToEvents(chunk, "write", cacheStandard);
+    expect(events.filter((e) => e.type === "final")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "final")[0].data).toBe("done");
+  });
+
+  test("emits final when text events have different content", () => {
+    const ai1 = new AIMessage({ content: "step 1" });
+    const ai2 = new AIMessage({ content: "step 2" });
+    const chunk = {
+      agent: {
+        messages: [ai1, ai2],
+        final: "unique summary",
+      },
+    };
+
+    const events = chunkToEvents(chunk, "write", cacheStandard);
+    expect(events.filter((e) => e.type === "text")).toHaveLength(2);
+    expect(events.filter((e) => e.type === "final")).toHaveLength(1);
   });
 });

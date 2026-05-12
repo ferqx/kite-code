@@ -1,52 +1,45 @@
 import type { ToolCallPayload, ToolApprovalPayload, UserInputPayload, AgentPhase, AgentPlan, AuthorizationMode, WorkspaceAccess } from "../../protocol/events";
 
 export type OutputBlock =
-  | { kind: "text"; id: number; content: string }
-  | { kind: "reason"; id: number; content: string; folded: boolean }
-  | { kind: "tool_card"; callId: string; name: string; args: Record<string, unknown>; status: "running" | "done" | "error"; summary: string; elapsed?: number }
-  | { kind: "file_change"; changes: FileChangeRecord[] }
-  | { kind: "approval"; approval: ToolApprovalPayload; resolved?: { action: string; grant?: string; pattern?: string } }
-  | { kind: "question"; question: UserInputPayload; resolved?: string };
+  | { id: number; kind: "user"; content: string }
+  | { id: number; kind: "text"; content: string; streaming?: boolean }
+  | { id: number; kind: "reason"; content: string; folded: boolean }
+  | { id: number; kind: "tool_card"; callId: string; name: string; args: Record<string, unknown>; status: "running" | "done" | "error"; summary: string; preview?: string; elapsedMs?: number }
+  | { id: number; kind: "file_change"; changes: FileChangeRecord[] }
+  | { id: number; kind: "approval"; approval: ToolApprovalPayload; resolved?: { action: string; grant?: string; pattern?: string } }
+  | { id: number; kind: "question"; question: UserInputPayload; resolved?: string };
 
 export interface FileChangeRecord {
   path: string;
   kind: "add" | "edit" | "delete";
+  linesAdded?: number;
+  linesRemoved?: number;
+  preview?: string;
 }
 
 export interface TuiState {
-  output: OutputLine[];
-  tools: ToolCardState[];
-  fileChanges: FileChangeRecord[];
+  blocks: OutputBlock[];
   interrupt: InterruptState | null;
+  toolStartTimes?: Map<string, number>;
   status: StatusState;
   exited: boolean;
   running: boolean;
+  compacting: boolean;
+  runCount: number;
+  runStartTime?: number;
   thinkingVisible: boolean;
   leaderPending: boolean;
   showHelp: boolean;
   showModelSelector: boolean;
   ctrlCPressed: boolean;
-}
-
-export interface OutputLine {
-  id: number;
-  type: "text" | "reason";
-  content: string;
-  folded: boolean;
-}
-
-export interface ToolCardState {
-  callId: string;
-  name: ToolCallPayload["name"];
-  args: Record<string, unknown>;
-  status: "pending" | "running" | "done" | "error";
-  summary: string;
+  sessionKey: number;
+  exitRequested: boolean;
+  editorRequested: boolean;
 }
 
 export interface InterruptState {
   kind: "approval" | "input";
-  approval?: ToolApprovalPayload;
-  question?: UserInputPayload;
+  blockId: number;
 }
 
 export interface StatusState {

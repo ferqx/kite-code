@@ -15,6 +15,7 @@ export type SlashAction =
   | { type: "redo" }
   | { type: "export" }
   | { type: "editor" }
+  | { type: "setting" }
   | { type: "help" }
   | { type: "exit" }
   | { type: "unknown"; raw: string };
@@ -40,6 +41,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case "redo": return { type: "redo" };
     case "export": return { type: "export" };
     case "editor": return { type: "editor" };
+    case "setting": case "config": return { type: "setting" };
     case "help": case "h": return { type: "help" };
     case "exit": case "quit": case "q": return { type: "exit" };
     default: return { type: "unknown", raw: input };
@@ -59,16 +61,18 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
         dispatch({ type: "SHOW_MODEL_SELECTOR" });
         break;
       case "model_list":
-        dispatch({ type: "SHOW_MODEL_LIST" });
+        dispatch({ type: "LIST_MODELS" });
         break;
       case "sessions":
         dispatch({ type: "SHOW_SESSIONS", id: action.id });
         break;
       case "plan":
         dispatch({ type: "SET_PHASE", phase: "planning" as const });
+        dispatch({ type: "SWITCH_AUTH", mode: "default" });
         break;
       case "code":
         dispatch({ type: "SET_PHASE", phase: "building" as const });
+        dispatch({ type: "SWITCH_AUTH", mode: "full_access" });
         break;
       case "auth":
         dispatch({ type: "SWITCH_AUTH", mode: action.mode ?? "toggle" });
@@ -90,6 +94,9 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
         break;
       case "editor":
         dispatch({ type: "OPEN_EDITOR" });
+        break;
+      case "setting":
+        dispatch({ type: "SHOW_SETTING" });
         break;
       case "help":
         dispatch({ type: "SHOW_HELP" });

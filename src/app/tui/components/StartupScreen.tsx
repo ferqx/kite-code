@@ -11,22 +11,38 @@ export default function StartupScreen({ modelName, workspace }: StartupScreenPro
   const projectName = workspace.split("/").pop() ?? workspace.split("\\").pop() ?? "unknown";
 
   return (
-    <Box flexDirection="column" paddingY={1}>
-      <Text bold color={t.primary}>openpx</Text>
-      <Text color={t.muted}>Interactive coding agent</Text>
-      <Box marginTop={1} flexDirection="column">
-        <Text>
-          Model: <Text color={t.primary}>{modelName}</Text>
+    <Box flexDirection="column" marginY={1}>
+      {/* Banner */}
+      <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={2} paddingY={1}>
+        <Text bold color={t.primary}>
+          ⚡ openpx
         </Text>
-        <Text>
-          Workspace: <Text color={t.muted}>{workspace}</Text>
-        </Text>
-        <Text>
-          Project: <Text>{projectName}</Text>
-        </Text>
+        <Text color={t.dim}>Interactive coding agent TUI</Text>
       </Box>
-      <Text color={t.dim} marginTop={1}>Type your task or /help for commands</Text>
-      <Text color={t.dim}>Ctrl+C to exit</Text>
+
+      {/* Info */}
+      <Box flexDirection="column" marginTop={1} paddingLeft={1}>
+        <Box gap={2}>
+          <Box>
+            <Text color={t.dim}>Model     </Text>
+            <Text color={t.primary} bold>{modelName}</Text>
+          </Box>
+          <Box>
+            <Text color={t.dim}>Project   </Text>
+            <Text color={t.warning}>{projectName}</Text>
+          </Box>
+        </Box>
+        <Box marginTop={0}>
+          <Text color={t.dim}>Workspace </Text>
+          <Text color={t.muted}>{workspace}</Text>
+        </Box>
+      </Box>
+
+      {/* Help tips */}
+      <Box flexDirection="column" marginTop={1}>
+        <Text color={t.muted}>  Type your task and press Enter to start</Text>
+        <Text color={t.muted}>  Type /help for commands · Ctrl+C to exit</Text>
+      </Box>
     </Box>
   );
 }

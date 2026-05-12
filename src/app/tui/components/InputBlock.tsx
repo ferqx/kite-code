@@ -65,7 +65,7 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
         </Box>
       ) : (
         <Box>
-          <Text color={t.primary}>> </Text>
+          <Text color={t.primary}>{"> "}</Text>
           <TextInput value={freeText} onChange={setFreeText} onSubmit={handleSubmit} />
         </Box>
       )}

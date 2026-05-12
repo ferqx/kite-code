@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
+import TextInput from "ink-text-input";
 import type { ToolApprovalPayload, ShellApprovalGrant } from "../../protocol/events";
 import type { TuiUserInputProvider } from "../provider";
 import { darkTheme as t } from "../theme";
@@ -20,17 +21,35 @@ const GRANTS: { key: string; label: string; grant: ShellApprovalGrant | null; de
 
 export default function ApprovalBlock({ approval, provider, onResolved }: ApprovalBlockProps) {
   const [selected, setSelected] = useState(0);
+  const [editMode, setEditMode] = useState(false);
+  const [editedCommand, setEditedCommand] = useState(approval.command);
   const riskColor = t.risk[approval.risk] ?? t.risk.unknown;
 
   const pattern = approval.suggestedPrefixRule?.[0]
     ?? approval.command.split(/[;&|]/)[0].trim();
 
-  useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+  useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) => {
+    if (key.escape && editMode) {
+      setEditMode(false);
+      setEditedCommand(approval.command);
+      return;
+    }
+
+    if (editMode) return; // TextInput handles input when in edit mode
+
     const lower = input.toLowerCase();
+
+    // 'E' key — edit command before approving
+    if (lower === "e" && !editMode) {
+      setEditMode(true);
+      return;
+    }
+
     const match = GRANTS.find((g) => g.key === lower);
     if (match) {
       if (match.grant) {
         const patternStr = match.showPattern ? ` ("${pattern}")` : "";
+        const cmd = editMode ? editedCommand : approval.command;
         provider.submitAction({ type: "approve", grant: match.grant });
         onResolved(String(match.grant), match.grant, patternStr);
       } else {
@@ -60,7 +79,15 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       <Text bold color={riskColor}>⚠ Approval</Text>
       <Text>
         <Text color={t.muted}>Command: </Text>
-        <Text color={t.primary}>{approval.command}</Text>
+        {editMode ? (
+          <TextInput
+            value={editedCommand}
+            onChange={setEditedCommand}
+            onSubmit={() => setEditMode(false)}
+          />
+        ) : (
+          <Text color={t.primary}>{approval.command}</Text>
+        )}
       </Text>
       <Text>
         <Text color={t.muted}>Risk: </Text>
@@ -76,12 +103,16 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       <Box flexDirection="column" marginTop={1}>
         {GRANTS.map((g, i) => (
           <Text key={g.key} color={i === selected ? t.primary : t.muted}>
-            {i === selected ? ">" : " "} [{g.key.toUpperCase()}]{g.label}
+            {i === selected ? ">" : " "} [{g.key.toUpperCase()}] {g.label}
             {g.showPattern ? ` ("${pattern}")` : ""}{!g.showPattern && g.desc ? `  ${g.desc}` : ""}
           </Text>
         ))}
       </Box>
-      <Text color={t.dim} marginTop={1}>Press key to select, or ↑↓ + Enter</Text>
+      <Text color={t.dim} marginTop={1}>
+        {editMode
+          ? "Editing command — Enter to confirm, Esc to cancel"
+          : "Press key to select, E to edit command, ↑↓ + Enter"}
+      </Text>
     </Box>
   );
 }

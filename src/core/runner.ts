@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { HumanMessage } from "@langchain/core/messages";
 import { Command, isInterrupted, INTERRUPT } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
@@ -218,7 +219,7 @@ function mapActionToResumeValue(action: UserAction): AgentResumeValue {
   }
 }
 
-function chunkToEvents(
+export function chunkToEvents(
   chunk: unknown,
   workspaceAccess: WorkspaceAccess,
   cacheStandard: ReturnType<typeof createPromptCacheStandardTracker>,
@@ -304,10 +305,11 @@ function chunkToEvents(
       for (const r of retries) {
         if (r && typeof r === "object" && typeof (r as Record<string, unknown>).attempt === "number") {
           events.push({
-            type: "retry",
+            type: "model_retry",
             data: {
               attempt: (r as Record<string, unknown>).attempt as number,
-              reason: ((r as Record<string, unknown>).error as string) ?? "unknown",
+              error: ((r as Record<string, unknown>).error as string) ?? "unknown",
+              delayMs: ((r as Record<string, unknown>).delayMs as number) ?? 0,
             },
           });
         }
@@ -327,19 +329,36 @@ function chunkToEvents(
         const path = matchingCall.data.args.path;
         if (typeof path === "string") {
           const kind = e.data.name === "write_file" ? "add" as const : "edit" as const;
-          events.push({ type: "file_change", data: { path, kind } });
+          let linesAdded: number | undefined;
+          let linesRemoved: number | undefined;
+          let preview: string | undefined;
+          try {
+            const content = readFileSync(path, "utf-8");
+            const allLines = content.split("\n");
+            const lineCount = allLines.length;
+            if (kind === "add") {
+              linesAdded = lineCount;
+            } else {
+              linesAdded = lineCount;
+            }
+            // Capture first 6 lines as preview
+            preview = allLines.slice(0, 6).join("\n");
+            if (allLines.length > 6) preview += "\n...";
+          } catch { /* file not readable */ }
+          events.push({ type: "file_change", data: { path, kind, linesAdded, linesRemoved, preview } });
         }
       }
     }
   }
 
   const final = findFinal(chunk);
-  if (final) {
+  if (final && !events.some((e) => e.type === "text" && e.data.text === final)) {
     events.push({ type: "final", data: final });
   }
 
   const metrics = findCacheMetrics(chunk);
   if (metrics) {
+    const outputTokens = findOutputTokens(chunk);
     events.push({
       type: "cache_metrics",
       data: {
@@ -348,7 +367,7 @@ function chunkToEvents(
         cacheMissTokens: metrics.cacheMissTokens,
         cacheWriteTokens: 0,
         inputTokens: metrics.inputTokens,
-        outputTokens: 0,
+        outputTokens,
         standard: {
           label: "cache_hit_rate",
           value: metrics.hitRate,
@@ -385,6 +404,18 @@ function findCacheMetrics(chunk: unknown) {
     if (AIMessage.isInstance(v)) return extractPromptCacheMetrics(v);
   }
   return null;
+}
+
+function findOutputTokens(chunk: unknown): number {
+  if (!chunk || typeof chunk !== "object") return 0;
+  for (const v of Object.values(chunk as Record<string, unknown>)) {
+    if (AIMessage.isInstance(v)) {
+      const um = v.usage_metadata as { output_tokens?: number } | undefined;
+      const ru = v.response_metadata?.usage as { completion_tokens?: number; output_tokens?: number } | undefined;
+      return um?.output_tokens ?? ru?.output_tokens ?? ru?.completion_tokens ?? 0;
+    }
+  }
+  return 0;
 }
 
 export function initialWorkspaceAccessForTask(task: string, requested: WorkspaceAccessRequest = "auto"): WorkspaceAccess {
@@ -437,6 +468,8 @@ export async function* normalizeGraphStream(
         data: {
           workspaceAccess: currentWorkspaceAccess,
           ...metrics,
+          outputTokens: findOutputTokens(chunk),
+          cacheWriteTokens: 0,
           standard: cacheStandard.record(metrics) as unknown as Record<string, unknown>,
         },
       };

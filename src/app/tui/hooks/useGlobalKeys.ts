@@ -1,7 +1,7 @@
 import { useInput } from "ink";
 import type { Dispatch } from "react";
 
-export function useGlobalKeys(dispatch: Dispatch<any>) {
+export function useGlobalKeys(dispatch: Dispatch<any>, running: boolean) {
   useInput((input: string, key: { ctrl?: boolean; escape?: boolean }) => {
     if (key.ctrl && input === "c") {
       dispatch({ type: "CTRL_C" });
@@ -19,12 +19,17 @@ export function useGlobalKeys(dispatch: Dispatch<any>) {
       dispatch({ type: "TOGGLE_THINKING" });
       return;
     }
-    if (key.ctrl && (input === "h")) {
+    if ((key.ctrl && input === "h") || input === "\x1bOP" || input === "\x1b[11~") {
       dispatch({ type: "SHOW_HELP" });
       return;
     }
     if (key.ctrl && input === "e") {
       dispatch({ type: "OPEN_EDITOR" });
+      return;
+    }
+    if (key.ctrl && input === "o") {
+      // Toggle output focus — clears any open overlays and resets navigation
+      dispatch({ type: "ESCAPE" });
       return;
     }
     if (key.ctrl && input === "x") {
@@ -63,7 +68,7 @@ export function useLeaderKeys(dispatch: Dispatch<any>, leaderPending: boolean) {
         dispatch({ type: "LEADER_CANCEL" });
         break;
       case "n":
-        dispatch({ type: "CLEAR_OUTPUT" });
+        dispatch({ type: "NEW_SESSION" });
         dispatch({ type: "LEADER_CANCEL" });
         break;
       case "q":
