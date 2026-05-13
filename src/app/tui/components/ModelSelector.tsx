@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import { darkTheme as t } from "../theme";
@@ -27,13 +27,15 @@ export default function ModelSelector({ models = DEFAULT_MODELS, currentModel, o
   const [selected, setSelected] = useState(
     Math.max(0, models.findIndex((m) => m.id === currentModel))
   );
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
 
   useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) => {
     if (key.escape) { onClose(); return; }
     if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
     if (key.downArrow) setSelected((s) => Math.min(models.length - 1, s + 1));
     if (key.return) {
-      const model = models[selected];
+      const model = models[selectedRef.current];
       if (model) onSelect(model.id);
       onClose();
     }

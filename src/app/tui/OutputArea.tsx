@@ -60,6 +60,8 @@ function resolveApprovalLabel(resolved?: { action: string; grant?: string; patte
 
 export default function OutputArea({ blocks, onToggleReason, thinkingVisible }: OutputAreaProps) {
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const focusedIndexRef = useRef(focusedIndex);
+  focusedIndexRef.current = focusedIndex;
   const autoScrollRef = useRef(true);
 
   const scrollToBottom = useCallback(() => { autoScrollRef.current = true; }, []);
@@ -74,7 +76,7 @@ export default function OutputArea({ blocks, onToggleReason, thinkingVisible }: 
     }
     if (key.downArrow || key.pagedown) {
       if (blocks.length > 0) {
-        const next = Math.min(blocks.length - 1, (focusedIndex ?? -1) + 1);
+        const next = Math.min(blocks.length - 1, (focusedIndexRef.current ?? -1) + 1);
         setFocusedIndex(next);
         if (next === blocks.length - 1) scrollToBottom();
       }
@@ -83,8 +85,8 @@ export default function OutputArea({ blocks, onToggleReason, thinkingVisible }: 
       setFocusedIndex(null);
       scrollToBottom();
     }
-    if (key.return && focusedIndex !== null && focusedIndex < blocks.length) {
-      const block = blocks[focusedIndex];
+    if (key.return && focusedIndexRef.current !== null && focusedIndexRef.current < blocks.length) {
+      const block = blocks[focusedIndexRef.current];
       if (block && block.kind === "reason") {
         onToggleReason(block.id);
       }

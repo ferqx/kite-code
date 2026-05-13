@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import TextInput from "ink-text-input";
@@ -18,6 +18,8 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
   const [mode, setMode] = useState<"select" | "type">(
     question.options.length > 0 ? "select" : "type"
   );
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
   const options = question.options;
 
   useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
@@ -29,7 +31,7 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
       if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
       if (key.downArrow) setSelected((s) => Math.min(options.length - 1, s + 1));
       if (key.return && options.length > 0) {
-        const opt = options[selected];
+        const opt = options[selectedRef.current];
         if (opt) {
           provider.submitAction({ type: "input", text: opt.label });
           onResolved(opt.label);

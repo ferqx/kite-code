@@ -12,8 +12,6 @@ import { useGlobalKeys, useLeaderKeys } from "./hooks/useGlobalKeys";
 
 const MemoOutputArea = React.memo(OutputArea);
 const MemoStatusBar = React.memo(StatusBar);
-const MemoHelpPanel = React.memo(HelpPanel);
-const MemoModelSelector = React.memo(ModelSelector);
 
 export type Action =
   | { type: "EVENT"; event: AgentEvent }
@@ -455,9 +453,9 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
   return (
     <Box flexDirection="column" height="100%">
       <MemoOutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
-      {state.showHelp && <MemoHelpPanel onClose={hideHelp} />}
+      {state.showHelp && <HelpPanel onClose={hideHelp} />}
       {state.showModelSelector && (
-        <MemoModelSelector
+        <ModelSelector
           currentModel={state.status.modelName}
           onSelect={selectModel}
           onClose={hideModelSelector}
