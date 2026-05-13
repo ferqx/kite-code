@@ -14,8 +14,6 @@ const MemoOutputArea = React.memo(OutputArea);
 const MemoStatusBar = React.memo(StatusBar);
 const MemoHelpPanel = React.memo(HelpPanel);
 const MemoModelSelector = React.memo(ModelSelector);
-const MemoApprovalBlock = React.memo(ApprovalBlock);
-const MemoInputBlock = React.memo(InputBlock);
 
 export type Action =
   | { type: "EVENT"; event: AgentEvent }
@@ -466,14 +464,14 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
         />
       )}
       {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
-        <MemoApprovalBlock
+        <ApprovalBlock
           approval={interruptBlock.approval}
           provider={provider}
           onResolved={resolveApproval}
         />
       )}
       {interruptBlock?.kind === "question" && !interruptBlock.resolved && (
-        <MemoInputBlock
+        <InputBlock
           question={interruptBlock.question}
           provider={provider}
           onResolved={resolveInput}

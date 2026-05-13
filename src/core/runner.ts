@@ -4,6 +4,7 @@ import { Command, isInterrupted, INTERRUPT } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
 import type { AgentConfig } from "./config/index";
 import { buildCodeAgentGraph } from "./harness/graph";
+import type { BunSqliteSaver } from "./persistence/checkpoint";
 import type { ShellExecutor } from "./tools/shell";
 import {
   createPromptCacheStandardTracker,
@@ -27,7 +28,9 @@ import type {
   AuthorizationOverride,
   ContextBudget,
   ModelRetryEvent,
+  ThreadAuthorizationState,
 } from "./types";
+import { defaultAuthorizationState } from "./harness/tool-policy";
 
 export interface RunAgentInput {
   task: string;
@@ -61,6 +64,26 @@ export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task">
   resume: AgentResumeValue;
 }
 
+/** 从上次 checkpoint 读取 thread 授权状态 / Read thread authorization state from last checkpoint */
+async function readLastAuthorization(
+  checkpointer: BunSqliteSaver,
+  threadId: string,
+): Promise<ThreadAuthorizationState | null> {
+  try {
+    const tuple = await checkpointer.getTuple({
+      configurable: { thread_id: threadId },
+    });
+    if (!tuple) return null;
+    const auth = tuple.checkpoint.channel_values?.authorization as
+      | ThreadAuthorizationState
+      | undefined;
+    if (!auth || typeof auth.mode !== "string") return null;
+    return auth;
+  } catch {
+    return null;
+  }
+}
+
 export async function* runAgent(
   provider: UserInputProvider,
   input: RunAgentInput,
@@ -77,6 +100,8 @@ export async function* runAgent(
     const initialAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? "auto");
     const initialPhase = workspaceAccessToPhase(initialAccess);
 
+    const prevAuth = await readLastAuthorization(checkpointer, input.threadId);
+
     const initialState = {
       messages: [new HumanMessage(input.task)],
       workspaceAccess: initialAccess,
@@ -85,6 +110,7 @@ export async function* runAgent(
       userId: input.userId,
       threadId: input.threadId,
       workspace: input.workspace,
+      authorization: prevAuth ?? defaultAuthorizationState(),
       contextSummary: "",
       contextBudget: input.contextBudget,
     };
@@ -497,6 +523,8 @@ export async function* streamCodeAgent(
     const initialWorkspaceAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? "auto");
     const initialPhase = initialAgentPhaseForAccess(initialWorkspaceAccess);
 
+    const prevAuth = await readLastAuthorization(checkpointer, input.threadId);
+
     const stream = await graph.stream(
       {
         messages: [new HumanMessage(taskMessageForInitialAccess(input.task, initialWorkspaceAccess))],
@@ -506,6 +534,7 @@ export async function* streamCodeAgent(
         userId: input.userId,
         threadId: input.threadId,
         workspace: input.workspace,
+        authorization: prevAuth ?? defaultAuthorizationState(),
         contextSummary: "",
         contextBudget: input.contextBudget,
       },

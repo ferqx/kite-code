@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import TextInput from "ink-text-input";
@@ -23,6 +23,8 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
   const [selected, setSelected] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [editedCommand, setEditedCommand] = useState(approval.command);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
   const riskColor = t.risk[approval.risk] ?? t.risk.unknown;
 
   const pattern = approval.suggestedPrefixRule?.[0]
@@ -62,7 +64,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
     if (key.downArrow) setSelected((s) => Math.min(GRANTS.length - 1, s + 1));
     if (key.return) {
-      const opt = GRANTS[selected];
+      const opt = GRANTS[selectedRef.current];
       if (opt.grant) {
         const patternStr = opt.showPattern ? ` ("${pattern}")` : "";
         provider.submitAction({ type: "approve", grant: opt.grant });

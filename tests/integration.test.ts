@@ -1000,6 +1000,84 @@ describe("checkpoint recovery", () => {
     }
   });
 
+  // 验证 TUI 实际使用的 resume 格式 { approved: true, grant: "full_access" } 也能正确持久化
+  test("full_access grant with approved=true persists and skips subsequent shell approvals", async () => {
+    setUp();
+    try {
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: "",
+            tool_calls: [
+              {
+                id: "call-f1b",
+                name: "shell_execute",
+                args: { command: "echo first > x.txt" },
+              },
+            ],
+          }),
+          new AIMessage({
+            content: "",
+            tool_calls: [
+              {
+                id: "call-f2b",
+                name: "shell_execute",
+                args: { command: "echo second > y.txt" },
+              },
+            ],
+          }),
+          new AIMessage({ content: "完成。" }),
+        ]),
+      });
+
+      const stream1 = await graph.stream(
+        {
+          messages: [new HumanMessage("创建两个文件，授予 full_access")],
+          workspaceAccess: "write",
+          phase: "building",
+          plan: null,
+          userId: "test",
+          threadId: "ck2b",
+          workspace,
+          contextSummary: "",
+        },
+        {
+          configurable: { thread_id: "ck2b" },
+          streamMode: "updates",
+          recursionLimit: 60,
+        },
+      );
+
+      const pre1: GraphChunk[] = [];
+      for await (const chunk of stream1) {
+        pre1.push(chunk);
+      }
+      expect(findInterrupt(pre1)).not.toBeNull();
+
+      // Use the EXACT resume format that mapActionToResumeValue produces in the TUI flow
+      const stream2 = await graph.stream(
+        new Command({ resume: { approved: true, grant: "full_access" } }),
+        {
+          configurable: { thread_id: "ck2b" },
+          streamMode: "updates",
+          recursionLimit: 60,
+        },
+      );
+
+      const allChunks = await collectChunks(stream2);
+      const interrupts = allChunks.filter((c) => isInterrupted(c));
+      expect(interrupts).toHaveLength(0);
+
+      checkpointer.close();
+
+      expect(findFinal(allChunks)).toBe("完成。");
+    } finally {
+      tearDown();
+    }
+  });
+
   test("plan state persists across interrupt and resume", async () => {
     setUp();
     try {
