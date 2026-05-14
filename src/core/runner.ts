@@ -425,11 +425,7 @@ function findWorkspaceAccess(chunk: unknown): WorkspaceAccess | null {
 }
 
 function findCacheMetrics(chunk: unknown) {
-  if (!chunk || typeof chunk !== "object") return null;
-  for (const v of Object.values(chunk as Record<string, unknown>)) {
-    if (AIMessage.isInstance(v)) return extractPromptCacheMetrics(v);
-  }
-  return null;
+  return findPromptCacheMetrics(chunk);
 }
 
 function findOutputTokens(chunk: unknown): number {

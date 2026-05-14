@@ -7,11 +7,11 @@ import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
 import HelpPanel from "./components/HelpPanel";
 import ModelSelector from "./components/ModelSelector";
-import StatusBar from "./StatusBar";
+import Header from "./Header";
+import Footer from "./Footer";
 import { useGlobalKeys, useLeaderKeys } from "./hooks/useGlobalKeys";
 
-const MemoOutputArea = React.memo(OutputArea);
-const MemoStatusBar = React.memo(StatusBar);
+const MemoHeader = React.memo(Header);
 
 export type Action =
   | { type: "EVENT"; event: AgentEvent }
@@ -206,7 +206,6 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       const changeCount = fcBlocks.reduce((sum, b) => sum + (b as Extract<OutputBlock, { kind: "file_change" }>).changes.length, 0);
       const summary = [
         `Completed in ${elapsedStr}`,
-        `Tokens: ${state.status.totalTokens.toLocaleString()}`,
         changeCount > 0 ? `Files changed: ${changeCount}` : null,
       ].filter(Boolean).join(" · ");
       const block: OutputBlock = { id: nextId++, kind: "text", content: `── ${summary} ──` };
@@ -452,7 +451,8 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
 
   return (
     <Box flexDirection="column" height="100%">
-      <MemoOutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
+      <MemoHeader status={state.status} running={state.running} timerKey={state.runCount} />
+      <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
       {state.showHelp && <HelpPanel onClose={hideHelp} />}
       {state.showModelSelector && (
         <ModelSelector
@@ -476,7 +476,7 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
         />
       )}
       {children}
-      <MemoStatusBar status={state.status} thinkingVisible={state.thinkingVisible} timerKey={state.runCount} running={state.running} />
+      <Footer />
     </Box>
   );
 }
