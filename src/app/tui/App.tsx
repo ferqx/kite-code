@@ -205,8 +205,8 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       const fcBlocks = state.blocks.filter((b) => b.kind === "file_change");
       const changeCount = fcBlocks.reduce((sum, b) => sum + (b as Extract<OutputBlock, { kind: "file_change" }>).changes.length, 0);
       const summary = [
-        `Completed in ${elapsedStr}`,
-        changeCount > 0 ? `Files changed: ${changeCount}` : null,
+        elapsedStr,
+        changeCount > 0 ? `${changeCount} files` : null,
       ].filter(Boolean).join(" · ");
       const block: OutputBlock = { id: nextId++, kind: "text", content: `── ${summary} ──` };
       return { ...state, exited: true, blocks: [...state.blocks, block] };
