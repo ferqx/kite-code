@@ -745,7 +745,7 @@ describe("OutputArea", () => {
       {
         id: 1, kind: "approval",
         approval: fakeApproval(),
-        resolved: { action: "approve", grant: "full_access" },
+        resolved: { action: "approve_once", grant: "full_access" },
       },
     ];
     const { lastFrame } = render(

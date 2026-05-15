@@ -1,13 +1,13 @@
 {
   "blocks": [
     {
-      "id": 12,
+      "id": 21,
       "kind": "text",
       "content": "Which approach should I use?",
       "streaming": false
     },
     {
-      "id": 13,
+      "id": 22,
       "kind": "question",
       "question": {
         "question": "Choose implementation approach:",
@@ -34,7 +34,7 @@
   ],
   "interrupt": {
     "kind": "input",
-    "blockId": 13
+    "blockId": 22
   },
   "status": {
     "phase": "building",

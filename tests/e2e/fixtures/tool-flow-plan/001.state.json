@@ -1,15 +1,15 @@
 {
   "blocks": [
     {
-      "id": 46,
+      "id": 55,
       "kind": "text",
       "content": "Let me plan this feature.",
       "streaming": false
     },
     {
-      "id": 47,
+      "id": 56,
       "kind": "tool_card",
-      "callId": "mock-1778825034117",
+      "callId": "mock-1778826405690",
       "name": "update_plan",
       "args": {
         "name": "add-auth",
@@ -28,7 +28,7 @@
       "status": "done",
       "summary": "Plan updated: add-auth (2 steps)",
       "preview": "add-auth",
-      "elapsedMs": 17
+      "elapsedMs": 15
     }
   ],
   "interrupt": null,

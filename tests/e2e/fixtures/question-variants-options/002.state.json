@@ -1,13 +1,13 @@
 {
   "blocks": [
     {
-      "id": 12,
+      "id": 21,
       "kind": "text",
       "content": "Which approach should I use?",
       "streaming": false
     },
     {
-      "id": 13,
+      "id": 22,
       "kind": "question",
       "question": {
         "question": "Choose implementation approach:",
@@ -30,7 +30,7 @@
         ],
         "allow_free_text": false
       },
-      "resolved": "[object Object]"
+      "resolved": "Use functional components"
     }
   ],
   "interrupt": null,

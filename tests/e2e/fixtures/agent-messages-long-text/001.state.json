@@ -1,25 +1,25 @@
 {
   "blocks": [
     {
-      "id": 23,
+      "id": 32,
       "kind": "text",
       "content": "Here is a summary of the project:",
       "streaming": false
     },
     {
-      "id": 24,
+      "id": 33,
       "kind": "text",
       "content": "- `src/core/`: Core logic and agent harness",
       "streaming": false
     },
     {
-      "id": 25,
+      "id": 34,
       "kind": "text",
       "content": "- `src/app/tui/`: Terminal UI built with Ink",
       "streaming": false
     },
     {
-      "id": 26,
+      "id": 35,
       "kind": "text",
       "content": "- `tests/`: Test suite with Bun",
       "streaming": false

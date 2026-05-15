@@ -1,9 +1,9 @@
 {
   "blocks": [
     {
-      "id": 3,
+      "id": 12,
       "kind": "tool_card",
-      "callId": "mock-1778825026307",
+      "callId": "mock-1778826398656",
       "name": "shell_execute",
       "args": {
         "command": "npm run build"
@@ -11,10 +11,10 @@
       "status": "done",
       "summary": "Build complete.",
       "preview": "npm run build",
-      "elapsedMs": 150
+      "elapsedMs": 143
     },
     {
-      "id": 4,
+      "id": 13,
       "kind": "approval",
       "approval": {
         "tool": "shell_execute",
@@ -35,7 +35,7 @@
         "recommendedGrant": "approve_once"
       },
       "resolved": {
-        "type": "approve",
+        "action": "approve_once",
         "grant": "same_command"
       }
     }

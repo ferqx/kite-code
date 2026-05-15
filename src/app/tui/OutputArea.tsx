@@ -44,9 +44,12 @@ function formatLines(added?: number, removed?: number): string {
 function resolveApprovalLabel(resolved?: { action: string; grant?: string; pattern?: string }): string {
   if (!resolved) return "";
   if (resolved.action === "denied") return "✗ Denied";
-  if (resolved.grant === "full_access") return "✓ Approved (full access)";
-  if (resolved.grant === "same_command") return `✓ Approved same command${resolved.pattern ? ` ("${resolved.pattern}")` : ""}`;
-  return "✓ Approved once";
+  if (resolved.action === "approve_once") {
+    if (resolved.grant === "full_access") return "✓ Approved (full access)";
+    if (resolved.grant === "same_command") return `✓ Approved same command${resolved.pattern ? ` ("${resolved.pattern}")` : ""}`;
+    return "✓ Approved once";
+  }
+  return `? ${resolved.action}`;
 }
 
 // Rough line count estimate for a block — used for viewport culling
@@ -58,7 +61,7 @@ function blockLineEstimate(block: OutputBlock, thinkingVisible: boolean): number
       if (!thinkingVisible || block.folded) return 1;
       return 1 + (block.content.split("\n").length || 1);
     }
-    case "tool_card": return 1;
+    case "tool_card": return block.status === "running" || !block.summary ? 1 : 2;
     case "file_change": return 2 + block.changes.length * 2 + block.changes.reduce((s, c) => s + (c.preview ? c.preview.split("\n").length : 0), 0);
     case "approval": return 1;
     case "question": return 1;

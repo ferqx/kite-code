@@ -1,9 +1,9 @@
 {
   "blocks": [
     {
-      "id": 5,
+      "id": 14,
       "kind": "tool_card",
-      "callId": "mock-1778825026859",
+      "callId": "mock-1778826399130",
       "name": "write_file",
       "args": {
         "path": "config.json",
@@ -14,7 +14,7 @@
       "preview": "config.json"
     },
     {
-      "id": 6,
+      "id": 15,
       "kind": "approval",
       "approval": {
         "tool": "write_file",
@@ -38,7 +38,7 @@
   ],
   "interrupt": {
     "kind": "approval",
-    "blockId": 6
+    "blockId": 15
   },
   "status": {
     "phase": "building",

@@ -1,21 +1,21 @@
 {
   "blocks": [
     {
-      "id": 41,
+      "id": 50,
       "kind": "reason",
       "content": "I need to create a utility file for the project.",
       "folded": true
     },
     {
-      "id": 42,
+      "id": 51,
       "kind": "text",
       "content": "Creating src/utils.ts...",
       "streaming": false
     },
     {
-      "id": 43,
+      "id": 52,
       "kind": "tool_card",
-      "callId": "mock-1778825033570",
+      "callId": "mock-1778826405180",
       "name": "write_file",
       "args": {
         "path": "src/utils.ts",
@@ -24,10 +24,10 @@
       "status": "done",
       "summary": "File written: src/utils.ts",
       "preview": "src/utils.ts",
-      "elapsedMs": 160
+      "elapsedMs": 139
     },
     {
-      "id": 44,
+      "id": 53,
       "kind": "approval",
       "approval": {
         "tool": "write_file",
@@ -48,12 +48,12 @@
         "recommendedGrant": "approve_once"
       },
       "resolved": {
-        "type": "approve",
+        "action": "approve_once",
         "grant": "approve_once"
       }
     },
     {
-      "id": 45,
+      "id": 54,
       "kind": "text",
       "content": "Done! The utility file is ready.",
       "streaming": false

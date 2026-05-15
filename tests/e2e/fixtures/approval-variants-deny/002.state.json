@@ -1,9 +1,9 @@
 {
   "blocks": [
     {
-      "id": 7,
+      "id": 16,
       "kind": "tool_card",
-      "callId": "mock-1778825027363",
+      "callId": "mock-1778826399562",
       "name": "shell_execute",
       "args": {
         "command": "rm -rf /"
@@ -13,7 +13,7 @@
       "preview": "rm -rf /"
     },
     {
-      "id": 8,
+      "id": 17,
       "kind": "approval",
       "approval": {
         "tool": "shell_execute",
@@ -34,7 +34,7 @@
         "recommendedGrant": "approve_once"
       },
       "resolved": {
-        "type": "reject"
+        "action": "denied"
       }
     }
   ],

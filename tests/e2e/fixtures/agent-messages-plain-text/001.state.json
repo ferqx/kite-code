@@ -1,13 +1,13 @@
 {
   "blocks": [
     {
-      "id": 18,
+      "id": 27,
       "kind": "text",
       "content": "Hello! I'm the coding assistant.",
       "streaming": false
     },
     {
-      "id": 19,
+      "id": 28,
       "kind": "text",
       "content": "I can help you with software engineering tasks.",
       "streaming": false

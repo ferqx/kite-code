@@ -1,13 +1,13 @@
 {
   "blocks": [
     {
-      "id": 16,
+      "id": 25,
       "kind": "text",
       "content": "I found a potential issue in the config.",
       "streaming": false
     },
     {
-      "id": 17,
+      "id": 26,
       "kind": "question",
       "question": {
         "question": "Should I fix this config value?",
@@ -27,7 +27,7 @@
   ],
   "interrupt": {
     "kind": "input",
-    "blockId": 17
+    "blockId": 26
   },
   "status": {
     "phase": "building",

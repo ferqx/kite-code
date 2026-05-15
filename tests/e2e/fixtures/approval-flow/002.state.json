@@ -9,7 +9,7 @@
     {
       "id": 5,
       "kind": "tool_card",
-      "callId": "mock-1778824821324",
+      "callId": "mock-1778826396885",
       "name": "write_file",
       "args": {
         "path": "src/test.ts",
@@ -18,7 +18,7 @@
       "status": "done",
       "summary": "File written successfully.",
       "preview": "src/test.ts",
-      "elapsedMs": 155
+      "elapsedMs": 154
     },
     {
       "id": 6,
@@ -42,7 +42,7 @@
         "recommendedGrant": "approve_once"
       },
       "resolved": {
-        "type": "approve",
+        "action": "approve_once",
         "grant": "approve_once"
       }
     }

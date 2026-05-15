@@ -1,9 +1,9 @@
 {
   "blocks": [
     {
-      "id": 1,
+      "id": 10,
       "kind": "tool_card",
-      "callId": "mock-1778825025468",
+      "callId": "mock-1778826398159",
       "name": "shell_execute",
       "args": {
         "command": "npm test"
@@ -13,7 +13,7 @@
       "preview": "npm test"
     },
     {
-      "id": 2,
+      "id": 11,
       "kind": "approval",
       "approval": {
         "tool": "shell_execute",
@@ -37,7 +37,7 @@
   ],
   "interrupt": {
     "kind": "approval",
-    "blockId": 2
+    "blockId": 11
   },
   "status": {
     "phase": "building",

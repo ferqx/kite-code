@@ -1,50 +1,52 @@
 {
   "blocks": [
     {
-      "id": 33,
+      "id": 42,
       "kind": "text",
       "content": "Let me analyze the project.",
       "streaming": false
     },
     {
-      "id": 34,
+      "id": 43,
       "kind": "tool_card",
-      "callId": "mock-1778825032380",
+      "callId": "mock-1778826403887",
       "name": "read_file",
       "args": {
         "path": "package.json"
       },
       "status": "done",
-      "summary": "tsconfig.json loaded.",
-      "preview": "package.json"
+      "summary": "package.json loaded.",
+      "preview": "package.json",
+      "elapsedMs": 20
     },
     {
-      "id": 35,
+      "id": 44,
       "kind": "tool_card",
-      "callId": "mock-1778825032471",
+      "callId": "mock-1778826403979",
       "name": "read_file",
       "args": {
         "path": "tsconfig.json"
       },
       "status": "done",
-      "summary": "src/index.ts loaded.",
+      "summary": "tsconfig.json loaded.",
       "preview": "tsconfig.json",
-      "elapsedMs": 60
+      "elapsedMs": 29
     },
     {
-      "id": 36,
+      "id": 45,
       "kind": "tool_card",
-      "callId": "mock-1778825032532",
+      "callId": "mock-1778826404071",
       "name": "read_file",
       "args": {
         "path": "src/index.ts"
       },
-      "status": "running",
-      "summary": "",
-      "preview": "src/index.ts"
+      "status": "done",
+      "summary": "src/index.ts loaded.",
+      "preview": "src/index.ts",
+      "elapsedMs": 37
     },
     {
-      "id": 37,
+      "id": 46,
       "kind": "text",
       "content": "I've read all three files. Ready to proceed.",
       "streaming": false

@@ -60,18 +60,22 @@ function takeSnapshot(
   };
 }
 
-function waitForToolCard(timeout: number): Promise<void> {
+function waitForToolCardCount(targetCount: number, timeout: number): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const start = Date.now();
     const poll = () => {
       const s = getState();
-      const hasToolCard = s?.blocks.some((b) => b.kind === "tool_card");
-      if (hasToolCard) { resolve(); return; }
-      if (Date.now() - start > timeout) { reject(new Error("Timeout waiting for tool_card")); return; }
+      const count = s?.blocks.filter((b) => b.kind === "tool_card").length ?? 0;
+      if (count >= targetCount) { resolve(); return; }
+      if (Date.now() - start > timeout) { reject(new Error(`Timeout waiting for ${targetCount} tool_cards (have ${count})`)); return; }
       setImmediate(poll);
     };
     poll();
   });
+}
+
+function countToolCards(): number {
+  return getState()?.blocks.filter((b) => b.kind === "tool_card").length ?? 0;
 }
 
 function waitForInterrupt(timeout: number): Promise<void> {
@@ -117,7 +121,8 @@ async function runStep(
       await tick();
       break;
 
-    case "tool-call":
+    case "tool-call": {
+      const prevCount = countToolCards();
       dispatch({
         type: "EVENT",
         event: {
@@ -125,8 +130,9 @@ async function runStep(
           data: { call_id: `mock-${Date.now()}`, name: step.tool as any, args: step.args },
         },
       });
-      await waitForToolCard(timeout);
+      await waitForToolCardCount(prevCount + 1, timeout);
       break;
+    }
 
     case "tool-result": {
       const state = getState();
@@ -306,14 +312,28 @@ async function runStep(
       await tick();
       break;
 
-    case "user-action":
+    case "user-action": {
+      const action = step.action;
+      let resolution: string | { action: string; grant?: string; pattern?: string };
+
+      if (action.type === "reject") {
+        resolution = { action: "denied" };
+      } else if (action.type === "approve") {
+        resolution = { action: "approve_once", grant: action.grant };
+      } else if (action.type === "input") {
+        resolution = action.text;
+      } else {
+        resolution = { action: "unknown" };
+      }
+
       dispatch({
         type: "RESOLVE_INTERRUPT",
         blockId: getState()!.interrupt!.blockId,
-        resolution: step.action,
+        resolution,
       });
       await tick();
       break;
+    }
 
     case "user-input":
       dispatch({ type: "USER_MESSAGE", text: step.text });

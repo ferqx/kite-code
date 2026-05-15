@@ -1,7 +1,7 @@
 {
   "blocks": [
     {
-      "id": 15,
+      "id": 24,
       "kind": "question",
       "question": {
         "question": "Choose or type a custom value:",
@@ -23,7 +23,7 @@
   ],
   "interrupt": {
     "kind": "input",
-    "blockId": 15
+    "blockId": 24
   },
   "status": {
     "phase": "building",

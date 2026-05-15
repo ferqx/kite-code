@@ -1,14 +1,14 @@
 {
   "blocks": [
     {
-      "id": 14,
+      "id": 23,
       "kind": "question",
       "question": {
         "question": "What should the filename be?",
         "options": [],
         "allow_free_text": true
       },
-      "resolved": "[object Object]"
+      "resolved": "my-utils.ts"
     }
   ],
   "interrupt": null,
