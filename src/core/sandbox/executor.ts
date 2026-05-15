@@ -141,6 +141,10 @@ function createWrappedExecutor(
   };
 }
 
+let sandboxWarned = false;
+
 function warn(message: string): void {
+  if (sandboxWarned) return;
+  sandboxWarned = true;
   console.warn(`[sandbox] ${message}`);
 }
