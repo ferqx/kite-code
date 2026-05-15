@@ -9,7 +9,7 @@
     {
       "id": 43,
       "kind": "tool_card",
-      "callId": "mock-1778829515362",
+      "callId": "mock-1778831525658",
       "name": "read_file",
       "args": {
         "path": "package.json"
@@ -17,12 +17,12 @@
       "status": "done",
       "summary": "package.json loaded.",
       "preview": "package.json",
-      "elapsedMs": 19
+      "elapsedMs": 40
     },
     {
       "id": 44,
       "kind": "tool_card",
-      "callId": "mock-1778829515437",
+      "callId": "mock-1778831525767",
       "name": "read_file",
       "args": {
         "path": "tsconfig.json"
@@ -30,12 +30,12 @@
       "status": "done",
       "summary": "tsconfig.json loaded.",
       "preview": "tsconfig.json",
-      "elapsedMs": 22
+      "elapsedMs": 27
     },
     {
       "id": 45,
       "kind": "tool_card",
-      "callId": "mock-1778829515528",
+      "callId": "mock-1778831525858",
       "name": "read_file",
       "args": {
         "path": "src/index.ts"
@@ -43,7 +43,7 @@
       "status": "done",
       "summary": "src/index.ts loaded.",
       "preview": "src/index.ts",
-      "elapsedMs": 32
+      "elapsedMs": 33
     },
     {
       "id": 46,

@@ -9,7 +9,7 @@
     {
       "id": 2,
       "kind": "tool_card",
-      "callId": "mock-1778829507998",
+      "callId": "mock-1778831518004",
       "name": "write_file",
       "args": {
         "path": "src/test.ts",

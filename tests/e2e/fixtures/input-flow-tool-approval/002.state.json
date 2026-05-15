@@ -1,28 +1,41 @@
 {
   "blocks": [
     {
-      "id": 12,
-      "kind": "tool_card",
-      "callId": "mock-1778831520311",
-      "name": "shell_execute",
-      "args": {
-        "command": "npm run build"
-      },
-      "status": "running",
-      "summary": "",
-      "preview": "npm run build"
+      "id": 67,
+      "kind": "user",
+      "content": "Create a config file config.json"
     },
     {
-      "id": 13,
+      "id": 68,
+      "kind": "text",
+      "content": "I'll create the config file.",
+      "streaming": false
+    },
+    {
+      "id": 69,
+      "kind": "tool_card",
+      "callId": "mock-1778831530035",
+      "name": "write_file",
+      "args": {
+        "path": "config.json",
+        "content": "{\"port\": 3000}"
+      },
+      "status": "done",
+      "summary": "File written.",
+      "preview": "config.json",
+      "elapsedMs": 153
+    },
+    {
+      "id": 70,
       "kind": "approval",
       "approval": {
-        "tool": "shell_execute",
+        "tool": "write_file",
         "scope": "once",
         "cwd": "D:\\app\\openpx-new",
         "threadId": "mock-thread",
-        "command": "npm run build",
-        "risk": "execute_code",
-        "summary": "Run build",
+        "command": "write config.json",
+        "risk": "write_file",
+        "summary": "Create config.json",
         "reason": "Test reason",
         "approvalHash": "mock-hash",
         "expectedEffects": [],
@@ -32,13 +45,14 @@
           "full_access"
         ],
         "recommendedGrant": "approve_once"
+      },
+      "resolved": {
+        "action": "approve_once",
+        "grant": "approve_once"
       }
     }
   ],
-  "interrupt": {
-    "kind": "approval",
-    "blockId": 13
-  },
+  "interrupt": null,
   "status": {
     "phase": "building",
     "plan": null,
@@ -53,7 +67,7 @@
   "exited": false,
   "running": false,
   "compacting": false,
-  "runCount": 0,
+  "runCount": 1,
   "thinkingVisible": true,
   "leaderPending": false,
   "showHelp": false,
@@ -62,5 +76,6 @@
   "sessionKey": 0,
   "exitRequested": false,
   "editorRequested": false,
+  "runStartTime": 1778831529898,
   "toolStartTimes": {}
 }

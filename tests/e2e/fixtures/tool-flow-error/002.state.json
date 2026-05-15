@@ -1,15 +1,15 @@
 {
   "blocks": [
     {
-      "id": 1,
+      "id": 47,
       "kind": "text",
       "content": "Let me run the tests.",
       "streaming": false
     },
     {
-      "id": 2,
+      "id": 48,
       "kind": "tool_card",
-      "callId": "mock-1778829859416",
+      "callId": "mock-1778831526272",
       "name": "shell_execute",
       "args": {
         "command": "npm test"
@@ -17,10 +17,10 @@
       "status": "error",
       "summary": "ERROR: 3 tests failed",
       "preview": "npm test",
-      "elapsedMs": 152
+      "elapsedMs": 155
     },
     {
-      "id": 3,
+      "id": 49,
       "kind": "approval",
       "approval": {
         "tool": "shell_execute",

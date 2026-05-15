@@ -1,34 +1,21 @@
 {
   "blocks": [
     {
-      "id": 55,
+      "id": 64,
+      "kind": "user",
+      "content": "Write a hello function in TypeScript"
+    },
+    {
+      "id": 65,
       "kind": "text",
-      "content": "Let me plan this feature.",
+      "content": "Here's a hello function:",
       "streaming": false
     },
     {
-      "id": 56,
-      "kind": "tool_card",
-      "callId": "mock-1778831527293",
-      "name": "update_plan",
-      "args": {
-        "name": "add-auth",
-        "description": "Add authentication",
-        "steps": [
-          {
-            "step": "Create login page",
-            "status": "pending"
-          },
-          {
-            "step": "Add JWT middleware",
-            "status": "pending"
-          }
-        ]
-      },
-      "status": "done",
-      "summary": "Plan updated: add-auth (2 steps)",
-      "preview": "add-auth",
-      "elapsedMs": 17
+      "id": 66,
+      "kind": "text",
+      "content": "```ts\nfunction hello(): void {\n  console.log('Hello, world!');\n}\n```",
+      "streaming": false
     }
   ],
   "interrupt": null,
@@ -46,7 +33,7 @@
   "exited": false,
   "running": false,
   "compacting": false,
-  "runCount": 0,
+  "runCount": 1,
   "thinkingVisible": true,
   "leaderPending": false,
   "showHelp": false,
@@ -55,5 +42,5 @@
   "sessionKey": 0,
   "exitRequested": false,
   "editorRequested": false,
-  "toolStartTimes": {}
+  "runStartTime": 1778831529438
 }

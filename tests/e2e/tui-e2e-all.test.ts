@@ -6,6 +6,7 @@ import * as QV from "./scenarios/question-variants";
 import * as AM from "./scenarios/agent-messages";
 import * as TF from "./scenarios/tool-flow";
 import * as SD from "./scenarios/state-display";
+import * as IF from "./scenarios/input-flow";
 
 const UPDATE = Bun.argv.includes("--update-snapshots") ||
   process.env.UPDATE_SNAPSHOTS === "true";
@@ -184,5 +185,27 @@ describe(`${label} Lifecycle events`, () => {
       ],
     });
     expect(result.pass).toBe(true);
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// Input flow (simulate-input via stdin)
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} Input flow`, () => {
+  test("basic input → reply", async () => {
+    await verifyScenario("input-flow-basic", IF.basicInputReply, 1).verifyAll();
+  });
+
+  test("input → tool call → approval", async () => {
+    await verifyScenario("input-flow-tool-approval", IF.inputToolApproval, 2).verifyAll();
+  });
+
+  test("multi-turn conversation", async () => {
+    await verifyScenario("input-flow-multi-turn", IF.multiTurn, 1).verifyAll();
+  });
+
+  test("Ctrl+C interrupt during running", async () => {
+    await verifyScenario("input-flow-ctrl-c", IF.ctrlCInterrupt, 1).verifyAll();
   });
 });

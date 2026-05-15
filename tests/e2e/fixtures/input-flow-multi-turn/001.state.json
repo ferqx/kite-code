@@ -1,23 +1,15 @@
 {
   "blocks": [
     {
-      "id": 40,
-      "kind": "text",
-      "content": "Let me read the config file.",
-      "streaming": false
+      "id": 71,
+      "kind": "user",
+      "content": "Hi"
     },
     {
-      "id": 41,
-      "kind": "tool_card",
-      "callId": "mock-1778831525286",
-      "name": "read_file",
-      "args": {
-        "path": "package.json"
-      },
-      "status": "done",
-      "summary": "package.json: 35 lines, project name: openpx-langgraph-code-agent",
-      "preview": "package.json",
-      "elapsedMs": 24
+      "id": 72,
+      "kind": "text",
+      "content": "Hello!",
+      "streaming": false
     }
   ],
   "interrupt": null,
@@ -35,7 +27,7 @@
   "exited": false,
   "running": false,
   "compacting": false,
-  "runCount": 0,
+  "runCount": 1,
   "thinkingVisible": true,
   "leaderPending": false,
   "showHelp": false,
@@ -44,5 +36,5 @@
   "sessionKey": 0,
   "exitRequested": false,
   "editorRequested": false,
-  "toolStartTimes": {}
+  "runStartTime": 1778831530513
 }

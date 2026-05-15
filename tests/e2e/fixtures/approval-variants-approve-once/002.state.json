@@ -3,7 +3,7 @@
     {
       "id": 10,
       "kind": "tool_card",
-      "callId": "mock-1778829509758",
+      "callId": "mock-1778831519831",
       "name": "shell_execute",
       "args": {
         "command": "npm test"
@@ -11,7 +11,7 @@
       "status": "done",
       "summary": "Tests passed.",
       "preview": "npm test",
-      "elapsedMs": 154
+      "elapsedMs": 151
     },
     {
       "id": 11,

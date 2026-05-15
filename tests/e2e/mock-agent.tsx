@@ -1,6 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import App from "../../src/app/tui/App";
+import InputLine from "../../src/app/tui/components/InputLine";
 import { useTuiState } from "../../src/app/tui/App";
 import type { Action as TuiAction } from "../../src/app/tui/App";
 import type { TuiState, OutputBlock } from "../../src/app/tui/types";
@@ -11,6 +12,7 @@ import { freezeAnsi, freezeState } from "./freeze";
 let dispatchRef: ((a: TuiAction) => void) | null = null;
 let stateRef: TuiState | null = null;
 let snapshotIdx = 0;
+let stdinRef: { write: (s: string) => void } | null = null;
 
 function TuiMockRoot() {
   const { state, dispatch, onToggleReason } = useTuiState();
@@ -22,12 +24,28 @@ function TuiMockRoot() {
     []
   );
 
+  const handleInput = React.useCallback(
+    (value: string) => {
+      if (value.trim()) {
+        dispatch({ type: "USER_MESSAGE", text: value });
+        dispatch({ type: "SET_RUNNING" });
+      }
+    },
+    [dispatch]
+  );
+
   return React.createElement(App, {
     state,
     dispatch,
     onToggleReason,
     provider,
-  });
+  },
+    React.createElement(InputLine, {
+      mode: state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt",
+      onSubmit: handleInput,
+      workspace: process.cwd(),
+    })
+  );
 }
 
 function dispatch(action: TuiAction): void {
@@ -76,6 +94,19 @@ function waitForToolCardCount(targetCount: number, timeout: number): Promise<voi
 
 function countToolCards(): number {
   return getState()?.blocks.filter((b) => b.kind === "tool_card").length ?? 0;
+}
+
+function waitForRunning(timeout: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const start = Date.now();
+    const poll = () => {
+      const s = getState();
+      if (s?.running) { resolve(); return; }
+      if (Date.now() - start > timeout) { reject(new Error("Timeout waiting for running state")); return; }
+      setImmediate(poll);
+    };
+    poll();
+  });
 }
 
 function waitForInterrupt(timeout: number): Promise<void> {
@@ -312,6 +343,23 @@ async function runStep(
       await tick();
       break;
 
+    case "simulate-input": {
+      if (!stdinRef) throw new Error("stdin not available");
+      stdinRef.write(step.text);
+      await tick();
+      stdinRef.write("\r");
+      await tick();
+      await waitForRunning(timeout);
+      break;
+    }
+
+    case "simulate-key": {
+      if (!stdinRef) throw new Error("stdin not available");
+      stdinRef.write(step.key);
+      await tick();
+      break;
+    }
+
     case "user-action": {
       const action = step.action;
       let resolution: string | { action: string; grant?: string; pattern?: string };
@@ -361,9 +409,11 @@ export async function runTuiE2E(scenario: Scenario): Promise<E2EResult> {
 
   dispatchRef = null;
   stateRef = null;
+  stdinRef = null;
   snapshotIdx = 0;
 
-  const { lastFrame, unmount } = render(React.createElement(TuiMockRoot));
+  const { lastFrame, unmount, stdin } = render(React.createElement(TuiMockRoot));
+  stdinRef = stdin;
 
   const snapshots: Snapshot[] = [];
   const stepTimeout = scenario.stepTimeout ?? 5000;
@@ -380,6 +430,7 @@ export async function runTuiE2E(scenario: Scenario): Promise<E2EResult> {
     error = e.message;
   } finally {
     unmount();
+    stdinRef = null;
     if (prevMock !== undefined) {
       process.env.OPENPX_MOCK = prevMock;
     } else {

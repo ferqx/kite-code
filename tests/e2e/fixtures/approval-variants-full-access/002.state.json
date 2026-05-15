@@ -3,7 +3,7 @@
     {
       "id": 14,
       "kind": "tool_card",
-      "callId": "mock-1778829510649",
+      "callId": "mock-1778831520812",
       "name": "write_file",
       "args": {
         "path": "config.json",
@@ -12,7 +12,7 @@
       "status": "done",
       "summary": "File written.",
       "preview": "config.json",
-      "elapsedMs": 152
+      "elapsedMs": 166
     },
     {
       "id": 15,
