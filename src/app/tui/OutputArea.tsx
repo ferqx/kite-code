@@ -43,11 +43,11 @@ function formatLines(added?: number, removed?: number): string {
 
 function resolveApprovalLabel(resolved?: { action: string; grant?: string; pattern?: string }): string {
   if (!resolved) return "";
-  if (resolved.action === "denied") return "✗ Denied";
+  if (resolved.action === "denied") return "× Denied";
   if (resolved.action === "approve_once") {
     if (resolved.grant === "full_access") return "✓ Approved (full access)";
-    if (resolved.grant === "same_command") return `✓ Approved same command${resolved.pattern ? ` ("${resolved.pattern}")` : ""}`;
-    return "✓ Approved once";
+    if (resolved.grant === "same_command") return `✓ Approved (same command)${resolved.pattern ? ` "${resolved.pattern}"` : ""}`;
+    return "✓ Approved (once)";
   }
   return `? ${resolved.action}`;
 }
@@ -169,9 +169,12 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
       return (
         <Box key={block.id} flexDirection="column">
           {block.resolved ? (
-            <Text color={t.primary}>? {block.resolved}</Text>
+            <Text>
+              <Text color={t.success}>✓ Answered: </Text>
+              <Text color={t.muted}>{block.resolved}</Text>
+            </Text>
           ) : (
-            <Text color={t.primary}>? {block.question.question} (awaiting response...)</Text>
+            <Text color={t.primary}>? Question</Text>
           )}
         </Box>
       );

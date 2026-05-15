@@ -9,7 +9,7 @@
     {
       "id": 56,
       "kind": "tool_card",
-      "callId": "mock-1778828521690",
+      "callId": "mock-1778828929769",
       "name": "update_plan",
       "args": {
         "name": "add-auth",
@@ -28,7 +28,7 @@
       "status": "done",
       "summary": "Plan updated: add-auth (2 steps)",
       "preview": "add-auth",
-      "elapsedMs": 27
+      "elapsedMs": 17
     }
   ],
   "interrupt": null,

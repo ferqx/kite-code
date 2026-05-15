@@ -62,13 +62,18 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
             </Text>
           ))}
           {question.allow_free_text && (
-            <Text color={t.dim} marginTop={1}>[Tab] type freely  [Enter] confirm</Text>
+            <Box height={1} />
+          )}
+          {question.allow_free_text && (
+            <Text color={t.dim}>[Tab] type freely  [Enter] confirm</Text>
           )}
         </Box>
       ) : (
-        <Box>
-          <Text color={t.primary}>{"> "}</Text>
-          <TextInput value={freeText} onChange={setFreeText} onSubmit={handleSubmit} />
+        <Box flexDirection="column">
+          <Box>
+            <Text color={t.primary}>{"> "}</Text>
+            <TextInput value={freeText} onChange={setFreeText} onSubmit={handleSubmit} placeholder="type your answer..." />
+          </Box>
         </Box>
       )}
     </Box>

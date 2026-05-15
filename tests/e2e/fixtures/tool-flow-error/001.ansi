@@ -15,7 +15,8 @@ Let me run the tests.
 │   [S] Same command ("npm test")                                                                  │
 │   [F] Full access  完整 shell 权限                                                               │
 │   [D] Deny  拒绝                                                                                 │
-│ Press key to select, E to edit command, ↑↓ + Enter                                               │
+│                                                                                                  │
+│ Press key to select, E to edit command, up/down + Enter                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 ?  shortcuts · Ctrl+C exit · / commands · ! shell

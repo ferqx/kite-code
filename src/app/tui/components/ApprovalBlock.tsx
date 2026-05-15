@@ -110,10 +110,11 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
           </Text>
         ))}
       </Box>
-      <Text color={t.dim} marginTop={1}>
+      <Box height={1} />
+      <Text color={t.dim}>
         {editMode
           ? "Editing command — Enter to confirm, Esc to cancel"
-          : "Press key to select, E to edit command, ↑↓ + Enter"}
+          : "Press key to select, E to edit command, up/down + Enter"}
       </Text>
     </Box>
   );

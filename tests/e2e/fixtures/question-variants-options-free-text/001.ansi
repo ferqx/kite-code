@@ -1,13 +1,14 @@
  ▐▛███▜▌   OpenPX
 ▝▜█████▛▘   deepseek-v4 · [safe] · rw · think:max
   ▘▘ ▝▝    D:\app\openpx-new
-? Choose or type a custom value: (awaiting response...)
+? Question
 
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ ? Choose or type a custom value:                                                                 │
 │                                                                                                  │
 │ > TypeScript — Use .ts extension                                                                 │
 │   JavaScript — Use .js extension                                                                 │
+│                                                                                                  │
 │ [Tab] type freely  [Enter] confirm                                                               │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

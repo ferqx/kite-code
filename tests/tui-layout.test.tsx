@@ -775,8 +775,7 @@ describe("OutputArea", () => {
     const { lastFrame } = render(
       <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
     );
-    expect(lastFrame()).toContain("Continue?");
-    expect(lastFrame()).toContain("awaiting response");
+    expect(lastFrame()).toContain("Question");
   });
 
   test("renders resolved question block", () => {

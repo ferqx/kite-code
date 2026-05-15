@@ -54,7 +54,8 @@ export default function ModelSelector({ models = DEFAULT_MODELS, currentModel, o
           </Box>
         ))}
       </Box>
-      <Text color={t.dim} marginTop={1}>↑↓ navigate  Enter select  Esc cancel</Text>
+      <Box height={1} />
+      <Text color={t.dim}>up/down navigate  Enter select  Esc cancel</Text>
     </Box>
   );
 }
