@@ -25,12 +25,14 @@ function planLabel(status: StatusState): string {
 
 export default function Header({ status, running, timerKey }: HeaderProps) {
   const [elapsed, setElapsed] = useState(0);
+  const isMock = process.env.OPENPX_MOCK === "true";
 
   useEffect(() => {
     if (!running) {
       setElapsed(0);
       return;
     }
+    if (isMock) { setElapsed(0); return; }
     setElapsed(0);
     const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(timer);
@@ -51,7 +53,7 @@ export default function Header({ status, running, timerKey }: HeaderProps) {
         </Text>
         {running && (
           <Text color={t.muted}>
-            {"  "}{formatDuration(elapsed)}
+            {"  "}{isMock ? "<TIMER>" : formatDuration(elapsed)}
           </Text>
         )}
       </Box>
