@@ -1,0 +1,75 @@
+{
+  "blocks": [
+    {
+      "id": 4,
+      "kind": "text",
+      "content": "I'll create a test file for you.",
+      "streaming": false
+    },
+    {
+      "id": 5,
+      "kind": "tool_card",
+      "callId": "mock-1778819330295",
+      "name": "write_file",
+      "args": {
+        "path": "src/test.ts",
+        "content": "export const hello = 'world';"
+      },
+      "status": "done",
+      "summary": "File written successfully.",
+      "preview": "src/test.ts",
+      "elapsedMs": 110
+    },
+    {
+      "id": 6,
+      "kind": "approval",
+      "approval": {
+        "tool": "write_file",
+        "scope": "once",
+        "cwd": "D:\\app\\openpx-new",
+        "threadId": "mock-thread",
+        "command": "write src/test.ts",
+        "risk": "write_file",
+        "summary": "Create test.ts with hello export",
+        "reason": "Test reason",
+        "approvalHash": "mock-hash",
+        "expectedEffects": [],
+        "grantOptions": [
+          "approve_once",
+          "same_command",
+          "full_access"
+        ],
+        "recommendedGrant": "approve_once"
+      },
+      "resolved": {
+        "type": "approve",
+        "grant": "approve_once"
+      }
+    }
+  ],
+  "interrupt": null,
+  "status": {
+    "phase": "building",
+    "plan": null,
+    "authorization": "default",
+    "workspaceAccess": "write",
+    "cacheHitRate": "<CACHE_HIT_RATE>",
+    "totalTokens": "<CACHE_TOKEN_COUNT>",
+    "currentNode": null,
+    "modelName": "deepseek-v4",
+    "thinkingMode": "max"
+  },
+  "exited": false,
+  "running": false,
+  "compacting": false,
+  "runCount": 0,
+  "thinkingVisible": true,
+  "leaderPending": false,
+  "showHelp": false,
+  "showModelSelector": false,
+  "ctrlCPressed": false,
+  "sessionKey": 0,
+  "exitRequested": false,
+  "editorRequested": false,
+  "toolStartTimes": {}
+}

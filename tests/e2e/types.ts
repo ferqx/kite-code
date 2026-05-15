@@ -4,7 +4,7 @@ export interface Scenario {
   terminalWidth: number;
   steps: Step[];
   stepTimeout?: number;
-  freeze?: Array<"timer" | "timestamp" | "cacheHitRate" | "cacheTokenCount">;
+  freeze?: Array<"timer" | "timestamp" | "cacheHitRate" | "cacheTokenCount" | "toolElapsed">;
 }
 
 export type Step =

@@ -3,6 +3,7 @@ const PLACEHOLDER: Record<string, string> = {
   timestamp: "<TIMESTAMP>",
   cacheHitRate: "<CACHE_HIT_RATE>",
   cacheTokenCount: "<CACHE_TOKEN_COUNT>",
+  toolElapsed: "<TOOL_ELAPSED>",
 };
 
 export function freezeAnsi(ansi: string, freezeKeys: string[]): string {
@@ -21,6 +22,9 @@ export function freezeAnsi(ansi: string, freezeKeys: string[]): string {
     }
     if (key === "timestamp") {
       result = result.replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g, p);
+    }
+    if (key === "toolElapsed") {
+      result = result.replace(/\(\d+(?:\.\d+)?(?:ms|s)\)/g, p);
     }
   }
   return result;

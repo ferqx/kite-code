@@ -22,10 +22,15 @@ describe("freezeAnsi", () => {
     expect(freezeAnsi("at 2025-01-15T10:30:00Z", ["timestamp"])).toContain("<TIMESTAMP>");
   });
 
+  test("replaces tool elapsed time", () => {
+    expect(freezeAnsi("done (150ms)", ["toolElapsed"])).toBe("done <TOOL_ELAPSED>");
+    expect(freezeAnsi("done (1.2s)", ["toolElapsed"])).toBe("done <TOOL_ELAPSED>");
+  });
+
   test("multiple freezes", () => {
-    const input = "t=00:42 cache=80% tokens=5,000";
-    expect(freezeAnsi(input, ["timer", "cacheHitRate", "cacheTokenCount"]))
-      .toBe("t=<TIMER> cache=<CACHE_HIT_RATE> tokens=<CACHE_TOKEN_COUNT>");
+    const input = "t=00:42 cache=80% tokens=5,000 took (100ms)";
+    expect(freezeAnsi(input, ["timer", "cacheHitRate", "cacheTokenCount", "toolElapsed"]))
+      .toBe("t=<TIMER> cache=<CACHE_HIT_RATE> tokens=<CACHE_TOKEN_COUNT> took <TOOL_ELAPSED>");
   });
 });
 

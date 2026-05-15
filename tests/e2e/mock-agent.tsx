@@ -39,7 +39,7 @@ function getState(): TuiState | null {
 }
 
 function tick(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
+  return new Promise((resolve) => setTimeout(resolve, 20));
 }
 
 function takeSnapshot(

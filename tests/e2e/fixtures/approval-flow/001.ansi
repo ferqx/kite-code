@@ -1,0 +1,21 @@
+ ▐▛███▜▌   OpenPX
+▝▜█████▛▘  deepseek-v4 · [safe] · rw · think:max
+  ▘▘ ▝▝    D:\app\openpx-new
+I'll create a test file for you.
+⏺ write_file src/test.ts ...
+⚠ Awaiting approval — write src/test.ts
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ⚠ Approval                                                                                       │
+│ Command: write src/test.ts                                                                       │
+│ Risk: write_file · Create test.ts with hello export                                              │
+│ Reason: Test reason                                                                              │
+│                                                                                                  │
+│ > [A] Approve once  仅批准本次                                                                   │
+│   [S] Same command ("write src/test.ts")                                                         │
+│   [F] Full access  完整 shell 权限                                                               │
+│   [D] Deny  拒绝                                                                                 │
+│ Press key to select, E to edit command, ↑↓ + Enter                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+? shortcuts · Ctrl+C exit · / commands · ! shell
