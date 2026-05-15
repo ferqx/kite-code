@@ -15,7 +15,7 @@
     {
       "id": 52,
       "kind": "tool_card",
-      "callId": "mock-1778826405180",
+      "callId": "mock-1778828521001",
       "name": "write_file",
       "args": {
         "path": "src/utils.ts",
@@ -24,7 +24,7 @@
       "status": "done",
       "summary": "File written: src/utils.ts",
       "preview": "src/utils.ts",
-      "elapsedMs": 139
+      "elapsedMs": 231
     },
     {
       "id": 53,

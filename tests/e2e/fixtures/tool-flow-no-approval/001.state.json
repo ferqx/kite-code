@@ -9,7 +9,7 @@
     {
       "id": 41,
       "kind": "tool_card",
-      "callId": "mock-1778826403559",
+      "callId": "mock-1778828519358",
       "name": "read_file",
       "args": {
         "path": "package.json"
@@ -17,7 +17,7 @@
       "status": "done",
       "summary": "package.json: 35 lines, project name: openpx-langgraph-code-agent",
       "preview": "package.json",
-      "elapsedMs": 19
+      "elapsedMs": 26
     }
   ],
   "interrupt": null,

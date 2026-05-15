@@ -3,7 +3,7 @@
     {
       "id": 16,
       "kind": "tool_card",
-      "callId": "mock-1778826399562",
+      "callId": "mock-1778828515025",
       "name": "shell_execute",
       "args": {
         "command": "rm -rf /"

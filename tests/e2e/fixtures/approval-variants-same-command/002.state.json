@@ -3,7 +3,7 @@
     {
       "id": 12,
       "kind": "tool_card",
-      "callId": "mock-1778826398656",
+      "callId": "mock-1778828514048",
       "name": "shell_execute",
       "args": {
         "command": "npm run build"
@@ -11,7 +11,7 @@
       "status": "done",
       "summary": "Build complete.",
       "preview": "npm run build",
-      "elapsedMs": 143
+      "elapsedMs": 138
     },
     {
       "id": 13,

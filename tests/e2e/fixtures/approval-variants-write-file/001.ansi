@@ -1,5 +1,5 @@
  ▐▛███▜▌   OpenPX
-▝▜█████▛▘  deepseek-v4 · [safe] · rw · think:max
+▝▜█████▛▘   deepseek-v4 · [safe] · rw · think:max
   ▘▘ ▝▝    D:\app\openpx-new
 Let me write the test file.
 ⏺ write_file src/app.ts ...
@@ -18,4 +18,4 @@ Let me write the test file.
 │ Press key to select, E to edit command, ↑↓ + Enter                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 
-? shortcuts · Ctrl+C exit · / commands · ! shell
+?  shortcuts · Ctrl+C exit · / commands · ! shell

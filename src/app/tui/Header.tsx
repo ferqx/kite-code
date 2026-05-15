@@ -59,7 +59,7 @@ export default function Header({ status, running, timerKey }: HeaderProps) {
       </Box>
       <Box>
         <Text color={t.primary}>
-          {"▝▜█████▛▘  "}
+          {"▝▜█████▛▘   "}
         </Text>
         <Text color={t.muted}>{status.modelName}</Text>
         <Text color={t.dim}> · </Text>

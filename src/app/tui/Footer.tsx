@@ -5,7 +5,7 @@ import { darkTheme as t } from "./theme";
 export default function Footer() {
   return (
     <Box>
-      <Text color={t.dim}>? shortcuts</Text>
+      <Text color={t.dim}>?  shortcuts</Text>
       <Text color={t.dim}> · </Text>
       <Text color={t.dim}>Ctrl+C exit</Text>
       <Text color={t.dim}> · </Text>
