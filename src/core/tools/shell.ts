@@ -66,10 +66,8 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
 function buildShellInvocation(command: string): string[] {
   if (process.platform === "win32") {
     const systemRoot = process.env.SystemRoot || "C:\\Windows";
-    const powershellPath =
-      process.env.POWERSHELL ||
-      `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
-    return [powershellPath, "-NoProfile", "-Command", command];
+    const cmdPath = `${systemRoot}\\System32\\cmd.exe`;
+    return [cmdPath, "/d", "/c", command];
   }
 
   return [process.env.SHELL || "/bin/sh", "-lc", command];

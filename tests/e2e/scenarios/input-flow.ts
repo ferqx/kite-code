@@ -13,7 +13,22 @@ export const basicInputReply: Scenario = {
   ],
 };
 
-/** Input triggers a tool call that needs approval */
+/** Input triggers tool call, user grants full_access */
+export const inputFullAccess: Scenario = {
+  terminalWidth: 120, stepTimeout: 5000, freeze: [...baseFreeze!, "toolElapsed"] as Scenario["freeze"],
+  steps: [
+    { type: "simulate-input", text: "Run dir /B to list files" },
+    { type: "tool-call", tool: "shell_execute", args: { command: "dir /B" } },
+    { type: "need-approval", approval: { tool: "shell_execute", command: "dir /B", risk: "execute_code", summary: "List directory files" } },
+    { type: "expect-mode", mode: "approval" },
+    { type: "user-action", action: { type: "approve", grant: "full_access" } },
+    { type: "tool-result", output: "package.json\ntsconfig.json\nsrc/" },
+    { type: "agent-text", text: "Here are the files in the directory:\n- package.json\n- tsconfig.json\n- src/" },
+    { type: "agent-done" },
+  ],
+};
+
+/** Input triggers tool call, user grants approve_once */
 export const inputToolApproval: Scenario = {
   terminalWidth: 120, stepTimeout: 5000, freeze: [...baseFreeze!, "toolElapsed"] as Scenario["freeze"],
   steps: [

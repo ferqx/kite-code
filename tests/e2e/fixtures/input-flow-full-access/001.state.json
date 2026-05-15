@@ -1,29 +1,33 @@
 {
   "blocks": [
     {
-      "id": 1,
+      "id": 3,
+      "kind": "user",
+      "content": "Run dir /B to list files"
+    },
+    {
+      "id": 4,
       "kind": "tool_card",
-      "callId": "mock-1778832471002",
-      "name": "write_file",
+      "callId": "mock-1778832471610",
+      "name": "shell_execute",
       "args": {
-        "path": "config.json",
-        "content": "{}"
+        "command": "dir /B"
       },
       "status": "running",
       "summary": "",
-      "preview": "config.json"
+      "preview": "dir /B"
     },
     {
-      "id": 2,
+      "id": 5,
       "kind": "approval",
       "approval": {
-        "tool": "write_file",
+        "tool": "shell_execute",
         "scope": "once",
         "cwd": "D:\\app\\openpx-new",
         "threadId": "mock-thread",
-        "command": "write config.json",
-        "risk": "write_file",
-        "summary": "Create config",
+        "command": "dir /B",
+        "risk": "execute_code",
+        "summary": "List directory files",
         "reason": "Test reason",
         "approvalHash": "mock-hash",
         "expectedEffects": [],
@@ -38,7 +42,7 @@
   ],
   "interrupt": {
     "kind": "approval",
-    "blockId": 2
+    "blockId": 5
   },
   "status": {
     "phase": "building",
@@ -52,9 +56,9 @@
     "thinkingMode": "max"
   },
   "exited": false,
-  "running": false,
+  "running": true,
   "compacting": false,
-  "runCount": 0,
+  "runCount": 1,
   "thinkingVisible": true,
   "leaderPending": false,
   "showHelp": false,
@@ -63,5 +67,6 @@
   "sessionKey": 0,
   "exitRequested": false,
   "editorRequested": false,
+  "runStartTime": 1778832471551,
   "toolStartTimes": {}
 }

@@ -201,6 +201,10 @@ describe(`${label} Input flow`, () => {
     await verifyScenario("input-flow-tool-approval", IF.inputToolApproval, 2).verifyAll();
   });
 
+  test("input → tool call → full_access", async () => {
+    await verifyScenario("input-flow-full-access", IF.inputFullAccess, 2).verifyAll();
+  });
+
   test("multi-turn conversation", async () => {
     await verifyScenario("input-flow-multi-turn", IF.multiTurn, 1).verifyAll();
   });
