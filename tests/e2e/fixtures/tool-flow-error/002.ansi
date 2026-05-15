@@ -3,7 +3,7 @@
   ▘▘ ▝▝    D:\app\openpx-new
 Let me run the tests.
 ⏺ shell_execute npm test <TOOL_ELAPSED>
-   ⎿ ERROR: 3 tests failed
+   ✕ ERROR: 3 tests failed
 
 ✓ Approved (once)
 ?  shortcuts · Ctrl+C exit · / commands · ! shell

@@ -38,7 +38,7 @@ export const toolError: Scenario = {
     { type: "need-approval", approval: { tool: "shell_execute", command: "npm test", risk: "execute_code", summary: "Run tests" } },
     { type: "expect-mode", mode: "approval" },
     { type: "user-action", action: { type: "approve", grant: "approve_once" } },
-    { type: "tool-result", output: "ERROR: 3 tests failed" },
+    { type: "tool-error", output: "ERROR: 3 tests failed" },
     { type: "agent-done" },
   ],
 };
