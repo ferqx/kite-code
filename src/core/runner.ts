@@ -288,8 +288,9 @@ export function chunkToEvents(
             }
           }
           const content = msg.content;
-          if (typeof content === "string" && content.length > 0) {
-            events.push({ type: "text", data: { text: content } });
+          const text = extractText(content);
+          if (text.length > 0) {
+            events.push({ type: "text", data: { text } });
           }
         }
 
@@ -426,6 +427,21 @@ function isToolMessage(msg: Record<string, unknown>): boolean {
     if (typeof msg._getType === "function") return (msg._getType as () => string).call(msg) === "tool";
   } catch { /* ignore */ }
   return false;
+}
+
+function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((block: unknown) => {
+        if (block && typeof block === "object" && "text" in (block as Record<string, unknown>)) {
+          return String((block as Record<string, unknown>).text);
+        }
+        return "";
+      })
+      .join("");
+  }
+  return String(content ?? "");
 }
 
 function findWorkspaceAccess(chunk: unknown): WorkspaceAccess | null {
