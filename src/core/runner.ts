@@ -3,6 +3,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { Command, isInterrupted, INTERRUPT } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
 import type { AgentConfig } from "./config/index";
+import type { SupportedChatModel } from "./model/factory";
 import { buildCodeAgentGraph } from "./harness/graph";
 import type { BunSqliteSaver } from "./persistence/checkpoint";
 import type { ShellExecutor } from "./tools/shell";
@@ -43,6 +44,8 @@ export interface RunAgentInput {
   mode?: WorkspaceAccessRequest;
   contextBudget?: ContextBudget;
   authorizationOverride?: AuthorizationOverride;
+  /** 测试用：注入自定义模型（mock）/ Inject custom model for testing mocks the LLM */
+  model?: SupportedChatModel;
   /** 恢复值：提供时将直接从 checkpoint 恢复而非创建新 initial state / Resume value: if provided, resumes from checkpoint instead of creating new initial state */
   resume?: AgentResumeValue;
 }
@@ -93,6 +96,7 @@ export async function* runAgent(
     checkpointPath: input.checkpointPath,
     shellExecutor: input.shellExecutor,
     authorizationOverride: input.authorizationOverride,
+    model: input.model,
   });
 
   let streamCompleted = false;
