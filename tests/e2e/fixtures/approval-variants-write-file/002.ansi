@@ -4,5 +4,6 @@
 Let me write the test file.
 ⏺ write_file src/app.ts <TOOL_ELAPSED>
    ⎿ File written.
+
 ✓ Approved (once)
 ?  shortcuts · Ctrl+C exit · / commands · ! shell

@@ -4,4 +4,5 @@
 Let me read the config file.
 ⏺ read_file package.json <TOOL_ELAPSED>
    ⎿ package.json: 35 lines, project name: openpx-langgraph-code-agent
+
 ?  shortcuts · Ctrl+C exit · / commands · ! shell

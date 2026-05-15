@@ -69,7 +69,7 @@ function blockLineEstimate(block: OutputBlock, thinkingVisible: boolean): number
   }
 }
 
-function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: boolean, _i: number) {
+function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: boolean, _i: number, prevBlock?: OutputBlock) {
   switch (block.kind) {
     case "user":
       return (
@@ -87,23 +87,30 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
         </Box>
       );
 
-    case "reason":
+    case "reason": {
+      const isConsecutive = prevBlock?.kind === "reason";
       return (
         <Box key={block.id} flexDirection="column">
-          <Text color={isFocused ? t.primary : t.dim}>
-            {!thinkingVisible || block.folded ? "▶ Thinking..." : "▼ Thinking"}
-          </Text>
+          {!isConsecutive && (
+            <Text color={isFocused ? t.primary : t.dim}>
+              {!thinkingVisible || block.folded ? "▶ Thinking..." : "▼ Thinking"}
+            </Text>
+          )}
           {thinkingVisible && !block.folded && (
             <Box paddingLeft={2}>
               <Text color={t.muted}>{block.content}</Text>
             </Box>
           )}
+          {isConsecutive && (block.folded || !thinkingVisible) && (
+            <Text color={t.dim}>  ...</Text>
+          )}
         </Box>
       );
+    }
 
     case "tool_card":
       return (
-        <Box key={block.id} flexDirection="column">
+        <Box key={block.id} flexDirection="column" marginBottom={1}>
           <Box>
             <Text color={toolColor(block.status)}>⏺ </Text>
             <Text color={t.primary}>{block.name}</Text>
@@ -119,7 +126,9 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
           </Box>
           {block.status !== "running" && block.summary ? (
             <Box paddingLeft={3}>
-              <Text color={t.dim}>⎿ {block.summary.slice(0, 200)}</Text>
+              <Text color={block.status === "error" ? t.error : t.dim}>
+                {block.status === "error" ? "✕ " : "⎿ "}{block.summary.slice(0, 200)}
+              </Text>
             </Box>
           ) : null}
         </Box>
@@ -268,7 +277,7 @@ export default function OutputArea({ blocks, onToggleReason, thinkingVisible }: 
       {visibleBlocks.map((block, i) => {
         const realIndex = visibleStart + i;
         const isFocused = realIndex === focusedIndex;
-        return renderBlock(block, isFocused, thinkingVisible, realIndex);
+        return renderBlock(block, isFocused, thinkingVisible, realIndex, blocks[realIndex - 1]);
       })}
     </Box>
   );
