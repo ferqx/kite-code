@@ -1,0 +1,78 @@
+{
+  "blocks": [
+    {
+      "id": 33,
+      "kind": "text",
+      "content": "Let me analyze the project.",
+      "streaming": false
+    },
+    {
+      "id": 34,
+      "kind": "tool_card",
+      "callId": "mock-1778825032380",
+      "name": "read_file",
+      "args": {
+        "path": "package.json"
+      },
+      "status": "done",
+      "summary": "tsconfig.json loaded.",
+      "preview": "package.json"
+    },
+    {
+      "id": 35,
+      "kind": "tool_card",
+      "callId": "mock-1778825032471",
+      "name": "read_file",
+      "args": {
+        "path": "tsconfig.json"
+      },
+      "status": "done",
+      "summary": "src/index.ts loaded.",
+      "preview": "tsconfig.json",
+      "elapsedMs": 60
+    },
+    {
+      "id": 36,
+      "kind": "tool_card",
+      "callId": "mock-1778825032532",
+      "name": "read_file",
+      "args": {
+        "path": "src/index.ts"
+      },
+      "status": "running",
+      "summary": "",
+      "preview": "src/index.ts"
+    },
+    {
+      "id": 37,
+      "kind": "text",
+      "content": "I've read all three files. Ready to proceed.",
+      "streaming": false
+    }
+  ],
+  "interrupt": null,
+  "status": {
+    "phase": "building",
+    "plan": null,
+    "authorization": "default",
+    "workspaceAccess": "write",
+    "cacheHitRate": "<CACHE_HIT_RATE>",
+    "totalTokens": "<CACHE_TOKEN_COUNT>",
+    "currentNode": null,
+    "modelName": "deepseek-v4",
+    "thinkingMode": "max"
+  },
+  "exited": false,
+  "running": false,
+  "compacting": false,
+  "runCount": 0,
+  "thinkingVisible": true,
+  "leaderPending": false,
+  "showHelp": false,
+  "showModelSelector": false,
+  "ctrlCPressed": false,
+  "sessionKey": 0,
+  "exitRequested": false,
+  "editorRequested": false,
+  "toolStartTimes": {}
+}

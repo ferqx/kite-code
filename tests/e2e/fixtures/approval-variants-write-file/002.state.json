@@ -1,35 +1,36 @@
 {
   "blocks": [
     {
-      "id": 1,
+      "id": 9,
       "kind": "text",
-      "content": "I'll create a test file for you.",
+      "content": "Let me write the test file.",
       "streaming": false
     },
     {
-      "id": 2,
+      "id": 10,
       "kind": "tool_card",
-      "callId": "mock-1778824820822",
+      "callId": "mock-1778825027835",
       "name": "write_file",
       "args": {
-        "path": "src/test.ts",
-        "content": "export const hello = 'world';"
+        "path": "src/app.ts",
+        "content": "// app"
       },
-      "status": "running",
-      "summary": "",
-      "preview": "src/test.ts"
+      "status": "done",
+      "summary": "File written.",
+      "preview": "src/app.ts",
+      "elapsedMs": 193
     },
     {
-      "id": 3,
+      "id": 11,
       "kind": "approval",
       "approval": {
         "tool": "write_file",
         "scope": "once",
         "cwd": "D:\\app\\openpx-new",
         "threadId": "mock-thread",
-        "command": "write src/test.ts",
+        "command": "write src/app.ts",
         "risk": "write_file",
-        "summary": "Create test.ts with hello export",
+        "summary": "Create app.ts",
         "reason": "Test reason",
         "approvalHash": "mock-hash",
         "expectedEffects": [],
@@ -39,13 +40,14 @@
           "full_access"
         ],
         "recommendedGrant": "approve_once"
+      },
+      "resolved": {
+        "type": "approve",
+        "grant": "approve_once"
       }
     }
   ],
-  "interrupt": {
-    "kind": "approval",
-    "blockId": 3
-  },
+  "interrupt": null,
   "status": {
     "phase": "building",
     "plan": null,

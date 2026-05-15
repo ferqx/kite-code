@@ -1,35 +1,29 @@
 {
   "blocks": [
     {
-      "id": 1,
-      "kind": "text",
-      "content": "I'll create a test file for you.",
-      "streaming": false
-    },
-    {
-      "id": 2,
+      "id": 5,
       "kind": "tool_card",
-      "callId": "mock-1778824820822",
+      "callId": "mock-1778825026859",
       "name": "write_file",
       "args": {
-        "path": "src/test.ts",
-        "content": "export const hello = 'world';"
+        "path": "config.json",
+        "content": "{}"
       },
       "status": "running",
       "summary": "",
-      "preview": "src/test.ts"
+      "preview": "config.json"
     },
     {
-      "id": 3,
+      "id": 6,
       "kind": "approval",
       "approval": {
         "tool": "write_file",
         "scope": "once",
         "cwd": "D:\\app\\openpx-new",
         "threadId": "mock-thread",
-        "command": "write src/test.ts",
+        "command": "write config.json",
         "risk": "write_file",
-        "summary": "Create test.ts with hello export",
+        "summary": "Create config",
         "reason": "Test reason",
         "approvalHash": "mock-hash",
         "expectedEffects": [],
@@ -44,7 +38,7 @@
   ],
   "interrupt": {
     "kind": "approval",
-    "blockId": 3
+    "blockId": 6
   },
   "status": {
     "phase": "building",

@@ -1,35 +1,34 @@
 {
   "blocks": [
     {
-      "id": 1,
+      "id": 38,
       "kind": "text",
-      "content": "I'll create a test file for you.",
+      "content": "Let me run the tests.",
       "streaming": false
     },
     {
-      "id": 2,
+      "id": 39,
       "kind": "tool_card",
-      "callId": "mock-1778824820822",
-      "name": "write_file",
+      "callId": "mock-1778825032979",
+      "name": "shell_execute",
       "args": {
-        "path": "src/test.ts",
-        "content": "export const hello = 'world';"
+        "command": "npm test"
       },
       "status": "running",
       "summary": "",
-      "preview": "src/test.ts"
+      "preview": "npm test"
     },
     {
-      "id": 3,
+      "id": 40,
       "kind": "approval",
       "approval": {
-        "tool": "write_file",
+        "tool": "shell_execute",
         "scope": "once",
         "cwd": "D:\\app\\openpx-new",
         "threadId": "mock-thread",
-        "command": "write src/test.ts",
-        "risk": "write_file",
-        "summary": "Create test.ts with hello export",
+        "command": "npm test",
+        "risk": "execute_code",
+        "summary": "Run tests",
         "reason": "Test reason",
         "approvalHash": "mock-hash",
         "expectedEffects": [],
@@ -44,7 +43,7 @@
   ],
   "interrupt": {
     "kind": "approval",
-    "blockId": 3
+    "blockId": 40
   },
   "status": {
     "phase": "building",

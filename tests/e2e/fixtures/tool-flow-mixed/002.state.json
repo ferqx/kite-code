@@ -1,35 +1,42 @@
 {
   "blocks": [
     {
-      "id": 1,
+      "id": 41,
+      "kind": "reason",
+      "content": "I need to create a utility file for the project.",
+      "folded": true
+    },
+    {
+      "id": 42,
       "kind": "text",
-      "content": "I'll create a test file for you.",
+      "content": "Creating src/utils.ts...",
       "streaming": false
     },
     {
-      "id": 2,
+      "id": 43,
       "kind": "tool_card",
-      "callId": "mock-1778824820822",
+      "callId": "mock-1778825033570",
       "name": "write_file",
       "args": {
-        "path": "src/test.ts",
-        "content": "export const hello = 'world';"
+        "path": "src/utils.ts",
+        "content": "export const add = (a:number,b:number)=>a+b"
       },
-      "status": "running",
-      "summary": "",
-      "preview": "src/test.ts"
+      "status": "done",
+      "summary": "File written: src/utils.ts",
+      "preview": "src/utils.ts",
+      "elapsedMs": 160
     },
     {
-      "id": 3,
+      "id": 44,
       "kind": "approval",
       "approval": {
         "tool": "write_file",
         "scope": "once",
         "cwd": "D:\\app\\openpx-new",
         "threadId": "mock-thread",
-        "command": "write src/test.ts",
+        "command": "write src/utils.ts",
         "risk": "write_file",
-        "summary": "Create test.ts with hello export",
+        "summary": "Create utils module",
         "reason": "Test reason",
         "approvalHash": "mock-hash",
         "expectedEffects": [],
@@ -39,13 +46,20 @@
           "full_access"
         ],
         "recommendedGrant": "approve_once"
+      },
+      "resolved": {
+        "type": "approve",
+        "grant": "approve_once"
       }
+    },
+    {
+      "id": 45,
+      "kind": "text",
+      "content": "Done! The utility file is ready.",
+      "streaming": false
     }
   ],
-  "interrupt": {
-    "kind": "approval",
-    "blockId": 3
-  },
+  "interrupt": null,
   "status": {
     "phase": "building",
     "plan": null,

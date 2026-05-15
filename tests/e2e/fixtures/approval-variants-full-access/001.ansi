@@ -1,0 +1,20 @@
+ ▐▛███▜▌   OpenPX
+▝▜█████▛▘  deepseek-v4 · [safe] · rw · think:max
+  ▘▘ ▝▝    D:\app\openpx-new
+⏺ write_file config.json ...
+⚠ Awaiting approval — write config.json
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ⚠ Approval                                                                                       │
+│ Command: write config.json                                                                       │
+│ Risk: write_file · Create config                                                                 │
+│ Reason: Test reason                                                                              │
+│                                                                                                  │
+│ > [A] Approve once  仅批准本次                                                                   │
+│   [S] Same command ("write config.json")                                                         │
+│   [F] Full access  完整 shell 权限                                                               │
+│   [D] Deny  拒绝                                                                                 │
+│ Press key to select, E to edit command, ↑↓ + Enter                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+? shortcuts · Ctrl+C exit · / commands · ! shell

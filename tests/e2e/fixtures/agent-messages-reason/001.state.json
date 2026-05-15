@@ -1,0 +1,46 @@
+{
+  "blocks": [
+    {
+      "id": 20,
+      "kind": "reason",
+      "content": "The user wants me to analyze this codebase. Let me start by reading the key files.",
+      "folded": true
+    },
+    {
+      "id": 21,
+      "kind": "reason",
+      "content": "I'll check package.json first, then the source directory structure.",
+      "folded": true
+    },
+    {
+      "id": 22,
+      "kind": "text",
+      "content": "I've analyzed the codebase structure.",
+      "streaming": false
+    }
+  ],
+  "interrupt": null,
+  "status": {
+    "phase": "building",
+    "plan": null,
+    "authorization": "default",
+    "workspaceAccess": "write",
+    "cacheHitRate": "<CACHE_HIT_RATE>",
+    "totalTokens": "<CACHE_TOKEN_COUNT>",
+    "currentNode": null,
+    "modelName": "deepseek-v4",
+    "thinkingMode": "max"
+  },
+  "exited": false,
+  "running": false,
+  "compacting": false,
+  "runCount": 0,
+  "thinkingVisible": true,
+  "leaderPending": false,
+  "showHelp": false,
+  "showModelSelector": false,
+  "ctrlCPressed": false,
+  "sessionKey": 0,
+  "exitRequested": false,
+  "editorRequested": false
+}

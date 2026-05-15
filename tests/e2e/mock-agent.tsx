@@ -39,7 +39,7 @@ function getState(): TuiState | null {
 }
 
 function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 20));
+  return new Promise((resolve) => setTimeout(resolve, 50));
 }
 
 function takeSnapshot(
@@ -58,6 +58,20 @@ function takeSnapshot(
     ansi: freezeKeys.length > 0 ? freezeAnsi(rawAnsi, freezeKeys) : rawAnsi,
     state: freezeKeys.length > 0 ? freezeState(rawState, freezeKeys) : rawState,
   };
+}
+
+function waitForToolCard(timeout: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const start = Date.now();
+    const poll = () => {
+      const s = getState();
+      const hasToolCard = s?.blocks.some((b) => b.kind === "tool_card");
+      if (hasToolCard) { resolve(); return; }
+      if (Date.now() - start > timeout) { reject(new Error("Timeout waiting for tool_card")); return; }
+      setImmediate(poll);
+    };
+    poll();
+  });
 }
 
 function waitForInterrupt(timeout: number): Promise<void> {
@@ -111,7 +125,7 @@ async function runStep(
           data: { call_id: `mock-${Date.now()}`, name: step.tool as any, args: step.args },
         },
       });
-      await tick();
+      await waitForToolCard(timeout);
       break;
 
     case "tool-result": {
@@ -126,6 +140,24 @@ async function runStep(
         event: {
           type: "tool_done",
           data: { call_id: tcBlock.callId, name: tcBlock.name, ok: true, summary: step.output },
+        },
+      });
+      await tick();
+      break;
+    }
+
+    case "tool-error": {
+      const state = getState();
+      if (!state) throw new Error("State not initialized");
+      const tcBlock = [...state.blocks].reverse().find(
+        (b): b is Extract<OutputBlock, { kind: "tool_card" }> => b.kind === "tool_card"
+      );
+      if (!tcBlock) throw new Error("No pending tool card for tool-error");
+      dispatch({
+        type: "EVENT",
+        event: {
+          type: "tool_done",
+          data: { call_id: tcBlock.callId, name: tcBlock.name, ok: false, summary: step.output },
         },
       });
       await tick();
@@ -194,6 +226,86 @@ async function runStep(
       snapshots.push(takeSnapshot("explicit", freezeKeys, lastFrame));
       break;
 
+    case "error":
+      dispatch({
+        type: "EVENT",
+        event: { type: "error", data: { message: step.message, recoverable: true } },
+      });
+      await tick();
+      break;
+
+    case "retry":
+      dispatch({
+        type: "EVENT",
+        event: { type: "retry", data: { attempt: step.attempt, reason: step.reason } },
+      });
+      await tick();
+      break;
+
+    case "file-change":
+      dispatch({
+        type: "EVENT",
+        event: {
+          type: "file_change",
+          data: {
+            path: step.path,
+            kind: step.kind,
+            linesAdded: step.linesAdded,
+            linesRemoved: step.linesRemoved,
+            preview: step.preview,
+          },
+        },
+      });
+      await tick();
+      break;
+
+    case "state-change":
+      dispatch({
+        type: "EVENT",
+        event: {
+          type: "state_change",
+          data: {
+            phase: step.phase,
+            authorization: step.authorization ? { mode: step.authorization } : undefined,
+            plan: step.plan,
+          },
+        },
+      });
+      await tick();
+      break;
+
+    case "cache-metrics":
+      dispatch({
+        type: "EVENT",
+        event: {
+          type: "cache_metrics",
+          data: {
+            workspaceAccess: "write" as const,
+            cacheHitTokens: step.hitRate === 0 ? 0 : 100,
+            cacheMissTokens: step.hitRate === 100 ? 0 : 100,
+            inputTokens: step.inputTokens,
+            outputTokens: step.outputTokens,
+            hitRate: step.hitRate,
+            standard: {},
+          },
+        },
+      });
+      await tick();
+      break;
+
+    case "compact":
+      dispatch({
+        type: "EVENT",
+        event: { type: "compact_begin", data: { reason: step.reason } },
+      });
+      await tick();
+      dispatch({
+        type: "EVENT",
+        event: { type: "compact_end", data: { summary: step.summary } },
+      });
+      await tick();
+      break;
+
     case "user-action":
       dispatch({
         type: "RESOLVE_INTERRUPT",
@@ -209,9 +321,10 @@ async function runStep(
       break;
 
     case "agent-done":
-      dispatch({ type: "SET_EXITED" });
       dispatch({ type: "SET_IDLE" });
       await waitForIdle(timeout);
+      await tick();
+      await tick();
       snapshots.push(takeSnapshot("terminal", freezeKeys, lastFrame));
       break;
 

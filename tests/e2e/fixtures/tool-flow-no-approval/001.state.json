@@ -1,0 +1,48 @@
+{
+  "blocks": [
+    {
+      "id": 31,
+      "kind": "text",
+      "content": "Let me read the config file.",
+      "streaming": false
+    },
+    {
+      "id": 32,
+      "kind": "tool_card",
+      "callId": "mock-1778825031982",
+      "name": "read_file",
+      "args": {
+        "path": "package.json"
+      },
+      "status": "done",
+      "summary": "package.json: 35 lines, project name: openpx-langgraph-code-agent",
+      "preview": "package.json",
+      "elapsedMs": 51
+    }
+  ],
+  "interrupt": null,
+  "status": {
+    "phase": "building",
+    "plan": null,
+    "authorization": "default",
+    "workspaceAccess": "write",
+    "cacheHitRate": "<CACHE_HIT_RATE>",
+    "totalTokens": "<CACHE_TOKEN_COUNT>",
+    "currentNode": null,
+    "modelName": "deepseek-v4",
+    "thinkingMode": "max"
+  },
+  "exited": false,
+  "running": false,
+  "compacting": false,
+  "runCount": 0,
+  "thinkingVisible": true,
+  "leaderPending": false,
+  "showHelp": false,
+  "showModelSelector": false,
+  "ctrlCPressed": false,
+  "sessionKey": 0,
+  "exitRequested": false,
+  "editorRequested": false,
+  "toolStartTimes": {}
+}

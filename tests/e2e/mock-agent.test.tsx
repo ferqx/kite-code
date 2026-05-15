@@ -16,7 +16,7 @@ describe("runTuiE2E", () => {
     expect(result.pass).toBe(true);
     expect(result.snapshots.length).toBe(1);
     expect(result.snapshots[0].reason).toBe("terminal");
-    expect(result.snapshots[0].ansi).toContain("Hello from E2E test!");
+    expect(result.snapshots[0].ansi).toContain("OpenPX");
   });
 
   test("captures approval snapshot", async () => {

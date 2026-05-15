@@ -1,0 +1,16 @@
+ ▐▛███▜▌   OpenPX
+▝▜█████▛▘  deepseek-v4 · [safe] · rw · think:max
+  ▘▘ ▝▝    D:\app\openpx-new
+Which approach should I use?
+? Choose implementation approach: (awaiting response...)
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ? Choose implementation approach:                                                                │
+│                                                                                                  │
+│ > Use class components — Traditional OOP approach                                                │
+│   Use functional components — Modern React style                                                 │
+│   Use hooks only — Minimal hook-based approach                                                   │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+? shortcuts · Ctrl+C exit · / commands · ! shell
