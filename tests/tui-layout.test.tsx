@@ -1,0 +1,958 @@
+import { describe, test, expect } from "bun:test";
+import { render } from "ink-testing-library";
+import Footer from "../src/app/tui/Footer";
+import Header from "../src/app/tui/Header";
+import StatusBar from "../src/app/tui/StatusBar";
+import DiffPreview from "../src/app/tui/DiffPreview";
+import StartupScreen from "../src/app/tui/components/StartupScreen";
+import MarkdownBlock from "../src/app/tui/components/MarkdownBlock";
+import HelpPanel from "../src/app/tui/components/HelpPanel";
+import ModelSelector from "../src/app/tui/components/ModelSelector";
+import ApprovalBlock from "../src/app/tui/components/ApprovalBlock";
+import InputBlock from "../src/app/tui/components/InputBlock";
+import InputLine from "../src/app/tui/components/InputLine";
+import OutputArea from "../src/app/tui/OutputArea";
+import App, { type AppProps } from "../src/app/tui/App";
+import type { TuiState, OutputBlock, StatusState, FileChangeRecord } from "../src/app/tui/types";
+import type { ToolApprovalPayload, UserInputPayload } from "../src/protocol/events";
+import { TuiUserInputProvider } from "../src/app/tui/provider";
+import type { UserInputProvider } from "../src/protocol/provider";
+
+// ── Shared helpers ──
+
+function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
+  return {
+    phase: "building",
+    plan: null,
+    authorization: "full_access",
+    workspaceAccess: "write",
+    cacheHitRate: 45,
+    totalTokens: 1234,
+    currentNode: "agent",
+    modelName: "claude-opus",
+    thinkingMode: "detailed",
+    ...overrides,
+  };
+}
+
+function fakeApproval(overrides: Partial<ToolApprovalPayload> = {}): ToolApprovalPayload {
+  return {
+    scope: "once",
+    cwd: "/tmp",
+    threadId: "test-thread",
+    tool: "shell_execute",
+    command: "npm test",
+    risk: "execute_code",
+    approvalHash: "abc123",
+    summary: "Run unit tests",
+    reason: "Agent wants to verify changes",
+    expectedEffects: ["runs jest", "outputs results"],
+    grantOptions: ["approve_once", "same_command", "full_access"],
+    recommendedGrant: "approve_once",
+    ...overrides,
+  };
+}
+
+function fakeQuestion(overrides: Partial<UserInputPayload> = {}): UserInputPayload {
+  return {
+    question: "Which approach do you prefer?",
+    options: [
+      { id: "a", label: "Option A", description: "First approach" },
+      { id: "b", label: "Option B", description: "Second approach" },
+    ],
+    allow_free_text: true,
+    ...overrides,
+  };
+}
+
+function fakeProvider(): TuiUserInputProvider {
+  return new TuiUserInputProvider(() => {});
+}
+
+const onResolved = () => {};
+const noop = () => {};
+
+// ── Footer ──
+
+describe("Footer", () => {
+  test("renders all key shortcuts in order", () => {
+    const { lastFrame } = render(<Footer />);
+    const frame = lastFrame();
+    expect(frame).toContain("shortcuts");
+    expect(frame).toContain("Ctrl+C exit");
+    expect(frame).toContain("commands");
+    expect(frame).toContain("shell");
+    // Verify order: shortcuts < Ctrl+C < commands < shell
+    const shortcutsIdx = frame!.indexOf("shortcuts");
+    const ctrlIdx = frame!.indexOf("Ctrl+C");
+    const commandsIdx = frame!.indexOf("/ commands");
+    const shellIdx = frame!.indexOf("! shell");
+    expect(shortcutsIdx).toBeLessThan(ctrlIdx);
+    expect(ctrlIdx).toBeLessThan(commandsIdx);
+    expect(commandsIdx).toBeLessThan(shellIdx);
+  });
+});
+
+// ── Header ──
+
+describe("Header", () => {
+  test("renders OpenPX logo and model name", () => {
+    const status = fakeStatus({ modelName: "claude-opus" });
+    const { lastFrame } = render(<Header status={status} running timerKey={0} />);
+    const frame = lastFrame();
+    expect(frame).toContain("OpenPX");
+    expect(frame).toContain("claude-opus");
+  });
+
+  test("shows auth label full for full_access mode", () => {
+    const status = fakeStatus({ authorization: "full_access" });
+    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
+    expect(lastFrame()).toContain("[full]");
+  });
+
+  test("shows auth label safe for default mode", () => {
+    const status = fakeStatus({ authorization: "default" });
+    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
+    expect(lastFrame()).toContain("[safe]");
+  });
+
+  test("shows rw for write access", () => {
+    const status = fakeStatus({ workspaceAccess: "write" });
+    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
+    expect(lastFrame()).toContain("rw");
+  });
+
+  test("shows ro for read-only access", () => {
+    const status = fakeStatus({ workspaceAccess: "read-only" });
+    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
+    expect(lastFrame()).toContain("ro");
+  });
+
+  test("shows thinking mode", () => {
+    const status = fakeStatus({ thinkingMode: "max" });
+    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
+    expect(lastFrame()).toContain("think:max");
+  });
+
+  test("renders cwd path on third line", () => {
+    const status = fakeStatus();
+    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
+    expect(lastFrame()).toContain(process.cwd());
+  });
+
+  test("shows plan progress when plan is active and running", () => {
+    const status = fakeStatus({
+      plan: {
+        name: "Test", description: "", status: "in_progress",
+        steps: [
+          { step: "Init", status: "completed" },
+          { step: "Build", status: "in_progress" },
+          { step: "Test", status: "pending" },
+        ],
+      },
+    });
+    const { lastFrame } = render(<Header status={status} running timerKey={0} />);
+    const frame = lastFrame();
+    expect(frame).toContain("Step 1/3: Build");
+  });
+
+  test("hides plan progress when not running", () => {
+    const status = fakeStatus({
+      plan: {
+        name: "Test", description: "", status: "in_progress",
+        steps: [
+          { step: "Init", status: "completed" },
+        ],
+      },
+    });
+    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
+    expect(lastFrame()).not.toContain("Step 1/1");
+  });
+
+  test("header is 3 rows", () => {
+    const status = fakeStatus();
+    const { lastFrame } = render(<Header status={status} running timerKey={0} />);
+    const lines = lastFrame()!.split("\n").filter(Boolean);
+    expect(lines!.length).toBe(3);
+  });
+});
+
+// ── StatusBar ──
+
+describe("StatusBar", () => {
+  test("shows Planning phase with ○ icon", () => {
+    const status = fakeStatus({ phase: "planning" });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("Planning");
+  });
+
+  test("shows Building phase with ● icon", () => {
+    const status = fakeStatus({ phase: "building" });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("Building");
+  });
+
+  test("shows model name", () => {
+    const status = fakeStatus({ modelName: "gpt-5" });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("gpt-5");
+  });
+
+  test("shows thinking mode", () => {
+    const status = fakeStatus({ thinkingMode: "detailed" });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("think: detailed");
+  });
+
+  test("shows cache hit rate", () => {
+    const status = fakeStatus({ cacheHitRate: 75 });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("cache: 75%");
+  });
+
+  test("shows token count with locale formatting", () => {
+    const status = fakeStatus({ totalTokens: 10000 });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("10,000");
+  });
+
+  test("shows [full] for full_access auth", () => {
+    const status = fakeStatus({ authorization: "full_access" });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("[full]");
+  });
+
+  test("shows [safe] for default auth", () => {
+    const status = fakeStatus({ authorization: "default" });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("[safe]");
+  });
+
+  test("shows rw for write access", () => {
+    const status = fakeStatus({ workspaceAccess: "write" });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("rw");
+  });
+
+  test("shows ro for read-only access", () => {
+    const status = fakeStatus({ workspaceAccess: "read-only" });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("ro");
+  });
+
+  test("shows plan progress when plan is active", () => {
+    const status = fakeStatus({
+      plan: {
+        name: "Test", description: "", status: "in_progress",
+        steps: [
+          { step: "Init", status: "completed" },
+          { step: "Build", status: "in_progress" },
+        ],
+      },
+      currentNode: null,
+    });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("Step 1/2: Build");
+  });
+
+  test("falls back to currentNode when no plan", () => {
+    const status = fakeStatus({ plan: null, currentNode: "tools" });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("tools");
+  });
+
+  test("shows dashes when no plan and no currentNode", () => {
+    const status = fakeStatus({ plan: null, currentNode: null });
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("—");
+  });
+
+  test("shows timer when running", () => {
+    const status = fakeStatus();
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    expect(lastFrame()).toContain("00:00");
+  });
+
+  test("hides timer when not running", () => {
+    const status = fakeStatus();
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running={false} />);
+    expect(lastFrame()).not.toContain("00:00");
+  });
+
+  test("status bar is 2 rows", () => {
+    const status = fakeStatus();
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const lines = lastFrame()!.split("\n").filter(Boolean);
+    expect(lines!.length).toBe(2);
+  });
+});
+
+// ── DiffPreview ──
+
+describe("DiffPreview", () => {
+  test("renders header and file changes", () => {
+    const changes: FileChangeRecord[] = [
+      { path: "src/foo.ts", kind: "add", linesAdded: 5 },
+      { path: "src/bar.ts", kind: "delete", linesRemoved: 3 },
+    ];
+    const { lastFrame } = render(<DiffPreview changes={changes} />);
+    const frame = lastFrame();
+    expect(frame).toContain("File Changes");
+    expect(frame).toContain("+ src/foo.ts");
+    expect(frame).toContain("- src/bar.ts");
+  });
+
+  test("shows edit prefix for edit kind", () => {
+    const changes: FileChangeRecord[] = [{ path: "src/baz.ts", kind: "edit", linesAdded: 2, linesRemoved: 1 }];
+    const { lastFrame } = render(<DiffPreview changes={changes} />);
+    expect(lastFrame()).toContain("~ src/baz.ts");
+  });
+
+  test("returns null for empty changes array", () => {
+    const { lastFrame } = render(<DiffPreview changes={[]} />);
+    expect(lastFrame()).toBe("");
+  });
+});
+
+// ── MarkdownBlock ──
+
+describe("MarkdownBlock", () => {
+  test("renders plain text", () => {
+    const { lastFrame } = render(<MarkdownBlock content="Hello world" />);
+    expect(lastFrame()).toContain("Hello world");
+  });
+
+  test("renders # heading with underlining context", () => {
+    const { lastFrame } = render(<MarkdownBlock content="# Title" />);
+    expect(lastFrame()).toContain("Title");
+  });
+
+  test("renders ## heading with dashes", () => {
+    const { lastFrame } = render(<MarkdownBlock content="## Section" />);
+    expect(lastFrame()).toContain("── Section ──");
+  });
+
+  test("renders ### heading", () => {
+    const { lastFrame } = render(<MarkdownBlock content="### Subsection" />);
+    expect(lastFrame()).toContain("Subsection");
+  });
+
+  test("renders list items with bullet", () => {
+    const { lastFrame } = render(<MarkdownBlock content="- item one\n- item two" />);
+    const frame = lastFrame();
+    expect(frame).toContain("item one");
+    expect(frame).toContain("item two");
+  });
+
+  test("renders blockquote", () => {
+    const { lastFrame } = render(<MarkdownBlock content="> quoted text" />);
+    expect(lastFrame()).toContain("quoted text");
+  });
+
+  test("renders code block with fence and line prefix", () => {
+    const { lastFrame } = render(
+      <MarkdownBlock content={"```ts\nconst x = 1;\nreturn x;\n```"} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("```ts");
+    expect(frame).toContain("const x = 1");
+  });
+
+  test("renders streaming cursor when streaming", () => {
+    const { lastFrame } = render(<MarkdownBlock content="loading" streaming />);
+    expect(lastFrame()).toContain("▌");
+  });
+
+  test("no streaming cursor when not streaming", () => {
+    const { lastFrame } = render(<MarkdownBlock content="done" streaming={false} />);
+    expect(lastFrame()).not.toContain("▌");
+  });
+
+  test("renders empty lines as spacing", () => {
+    const { lastFrame } = render(<MarkdownBlock content="line1\n\nline3" />);
+    const lines = lastFrame()!.split("\n");
+    // There should be content on multiple lines
+    expect(lines!.some((l) => l.includes("line1"))).toBe(true);
+    expect(lines!.some((l) => l.includes("line3"))).toBe(true);
+  });
+
+  test("renders inline bold", () => {
+    const { lastFrame } = render(<MarkdownBlock content="normal **bold** text" />);
+    expect(lastFrame()).toContain("bold");
+    expect(lastFrame()).toContain("normal");
+  });
+
+  test("renders inline code", () => {
+    const { lastFrame } = render(<MarkdownBlock content="use `code` here" />);
+    expect(lastFrame()).toContain("code");
+  });
+});
+
+// ── HelpPanel ──
+
+describe("HelpPanel", () => {
+  test("renders title and all sections", () => {
+    const { lastFrame } = render(<HelpPanel onClose={noop} />);
+    const frame = lastFrame();
+    expect(frame).toContain("Keyboard Shortcuts");
+    expect(frame).toContain("Actions");
+    expect(frame).toContain("Leader Keys");
+    expect(frame).toContain("Navigation");
+    expect(frame).toContain("Input");
+    expect(frame).toContain("Slash Commands");
+  });
+
+  test("shows key bindings", () => {
+    const { lastFrame } = render(<HelpPanel onClose={noop} />);
+    const frame = lastFrame();
+    expect(frame).toContain("Ctrl+C");
+    expect(frame).toContain("Cancel / Stop generation");
+    expect(frame).toContain("Ctrl+H / F1");
+  });
+
+  test("shows close hint", () => {
+    const { lastFrame } = render(<HelpPanel onClose={noop} />);
+    expect(lastFrame()).toContain("Press any key to close");
+  });
+});
+
+// ── ModelSelector ──
+
+describe("ModelSelector", () => {
+  test("renders title and model list", () => {
+    const { lastFrame } = render(
+      <ModelSelector currentModel="deepseek-v4" onSelect={noop} onClose={noop} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("Select Model");
+    expect(frame).toContain("DeepSeek V4");
+    expect(frame).toContain("DeepSeek V3");
+    expect(frame).toContain("OpenAI GPT-4o");
+    expect(frame).toContain("Claude Sonnet 4");
+  });
+
+  test("marks current model", () => {
+    const { lastFrame } = render(
+      <ModelSelector currentModel="gpt-4o" onSelect={noop} onClose={noop} />,
+    );
+    expect(lastFrame()).toContain("(current)");
+  });
+
+  test("shows navigation hints", () => {
+    const { lastFrame } = render(
+      <ModelSelector currentModel="deepseek-v4" onSelect={noop} onClose={noop} />,
+    );
+    expect(lastFrame()).toContain("navigate");
+    expect(lastFrame()).toContain("Esc cancel");
+  });
+});
+
+// ── StartupScreen ──
+
+describe("StartupScreen", () => {
+  test("renders banner and model info", () => {
+    const { lastFrame } = render(
+      <StartupScreen modelName="claude-opus" workspace="/tmp/test-project" />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("openpx");
+    expect(frame).toContain("claude-opus");
+  });
+
+  test("shows project name from workspace path", () => {
+    const { lastFrame } = render(
+      <StartupScreen modelName="deepseek" workspace="/home/user/my-project" />,
+    );
+    expect(lastFrame()).toContain("my-project");
+  });
+
+  test("shows workspace path", () => {
+    const { lastFrame } = render(
+      <StartupScreen modelName="gpt-4o" workspace="/home/user/my-project" />,
+    );
+    expect(lastFrame()).toContain("/home/user/my-project");
+  });
+
+  test("shows help tips", () => {
+    const { lastFrame } = render(
+      <StartupScreen modelName="claude" workspace="/tmp/ws" />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("Type your task and press Enter to start");
+    expect(frame).toContain("/help");
+  });
+});
+
+// ── ApprovalBlock ──
+
+describe("ApprovalBlock", () => {
+  test("renders approval header and command", () => {
+    const approval = fakeApproval({ command: "rm -rf /tmp/test" });
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("Approval");
+    expect(frame).toContain("rm -rf /tmp/test");
+  });
+
+  test("shows risk level", () => {
+    const approval = fakeApproval({ risk: "destructive" });
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    expect(lastFrame()).toContain("destructive");
+  });
+
+  test("shows summary", () => {
+    const approval = fakeApproval({ summary: "Delete temp files" });
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    expect(lastFrame()).toContain("Delete temp files");
+  });
+
+  test("shows reason when present", () => {
+    const approval = fakeApproval({ reason: "Cleanup needed" });
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    expect(lastFrame()).toContain("Cleanup needed");
+  });
+
+  test("shows all grant options", () => {
+    const approval = fakeApproval();
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("[A]");
+    expect(frame).toContain("[S]");
+    expect(frame).toContain("[F]");
+    expect(frame).toContain("[D]");
+    expect(frame).toContain("Approve once");
+    expect(frame).toContain("Same command");
+    expect(frame).toContain("Full access");
+    expect(frame).toContain("Deny");
+  });
+
+  test("shows keyboard hint", () => {
+    const approval = fakeApproval();
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    expect(lastFrame()).toContain("Press key to select");
+  });
+});
+
+// ── InputBlock ──
+
+describe("InputBlock", () => {
+  test("renders question text", () => {
+    const question = fakeQuestion({ question: "What now?" });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    expect(lastFrame()).toContain("What now?");
+  });
+
+  test("shows options list when options provided", () => {
+    const question = fakeQuestion({
+      options: [
+        { id: "a", label: "Proceed", description: "Continue forward" },
+        { id: "b", label: "Abort", description: "Stop here" },
+      ],
+    });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("Proceed");
+    expect(frame).toContain("Abort");
+  });
+
+  test("shows free text input when no options", () => {
+    const question = fakeQuestion({ options: [], allow_free_text: true });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    expect(lastFrame()).toContain(">");
+  });
+
+  test("shows context when provided", () => {
+    const question = fakeQuestion({ context: "Here is some context" });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    expect(lastFrame()).toContain("Here is some context");
+  });
+
+  test("shows Tab hint when free text is allowed", () => {
+    const question = fakeQuestion({ allow_free_text: true });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    expect(lastFrame()).toContain("[Tab]");
+  });
+});
+
+// ── InputLine ──
+
+describe("InputLine", () => {
+  test("renders prompt for prompt mode", () => {
+    const { lastFrame } = render(
+      <InputLine mode="prompt" onSubmit={noop} workspace={process.cwd()} />,
+    );
+    expect(lastFrame()).toContain(">");
+  });
+
+  test("renders [A/S/F/D] for approval mode", () => {
+    const { lastFrame } = render(
+      <InputLine mode="approval" onSubmit={noop} workspace={process.cwd()} />,
+    );
+    expect(lastFrame()).toContain("[A/S/F/D]");
+  });
+
+  test("renders ? for question mode", () => {
+    const { lastFrame } = render(
+      <InputLine mode="question" onSubmit={noop} workspace={process.cwd()} />,
+    );
+    expect(lastFrame()).toContain("?");
+  });
+
+  test("shows disabled message when disabled", () => {
+    const { lastFrame } = render(
+      <InputLine mode="prompt" onSubmit={noop} disabled workspace={process.cwd()} />,
+    );
+    expect(lastFrame()).toContain("Waiting for response...");
+  });
+
+  test("shows placeholder text", () => {
+    const { lastFrame } = render(
+      <InputLine
+        mode="prompt"
+        onSubmit={noop}
+        placeholder="Type here..."
+        workspace={process.cwd()}
+      />,
+    );
+    expect(lastFrame()).toContain("Type here...");
+  });
+});
+
+// ── OutputArea ──
+
+describe("OutputArea", () => {
+  test("renders user block with chevron prefix", () => {
+    const blocks: OutputBlock[] = [{ id: 1, kind: "user", content: "Hello agent" }];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("Hello agent");
+  });
+
+  test("renders text block", () => {
+    const blocks: OutputBlock[] = [{ id: 1, kind: "text", content: "Response text" }];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("Response text");
+  });
+
+  test("renders reason block with toggle indicator", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "reason", content: "Thinking about it...", folded: false },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("Thinking");
+  });
+
+  test("renders folded reason block", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "reason", content: "Hidden thoughts", folded: true },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("Thinking...");
+  });
+
+  test("hides reason content when thinkingVisible is false", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "reason", content: "Secret", folded: true },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible={false} />,
+    );
+    expect(lastFrame()).toContain("Thinking...");
+  });
+
+  test("renders tool_card with running status", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "tool_card", callId: "c1", name: "shell_execute", args: {}, status: "running", summary: "", preview: "npm test" },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("shell_execute");
+    expect(frame).toContain("npm test");
+  });
+
+  test("renders tool_card with done status and summary", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "done", summary: "OK", preview: "foo.ts", elapsedMs: 1234 },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("OK");
+    expect(frame).toContain("1.2s");
+  });
+
+  test("renders file_change block", () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1, kind: "file_change",
+        changes: [{ path: "src/a.ts", kind: "add", linesAdded: 10 }],
+      },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("File Changes");
+    expect(frame).toContain("+ src/a.ts");
+    expect(frame).toContain("+10");
+  });
+
+  test("renders approval block with awaiting message", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "approval", approval: fakeApproval({ command: "npm publish" }) },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("Awaiting approval");
+    expect(lastFrame()).toContain("npm publish");
+  });
+
+  test("renders resolved approval block", () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1, kind: "approval",
+        approval: fakeApproval(),
+        resolved: { action: "approve", grant: "full_access" },
+      },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("Approved (full access)");
+  });
+
+  test("renders denied approval block", () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1, kind: "approval",
+        approval: fakeApproval(),
+        resolved: { action: "denied" },
+      },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("Denied");
+  });
+
+  test("renders question block", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "question", question: fakeQuestion({ question: "Continue?" }) },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("Continue?");
+    expect(lastFrame()).toContain("awaiting response");
+  });
+
+  test("renders resolved question block", () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1, kind: "question",
+        question: fakeQuestion(),
+        resolved: "Yes please",
+      },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("Yes please");
+  });
+
+  test("renders empty when no blocks", () => {
+    const { lastFrame } = render(
+      <OutputArea blocks={[]} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toBe("");
+  });
+});
+
+// ── App (main layout) ──
+
+describe("App", () => {
+  function fakeState(overrides: Partial<TuiState> = {}): TuiState {
+    return {
+      blocks: [],
+      interrupt: null,
+      status: fakeStatus(),
+      exited: false,
+      running: false,
+      compacting: false,
+      runCount: 0,
+      thinkingVisible: true,
+      leaderPending: false,
+      showHelp: false,
+      showModelSelector: false,
+      ctrlCPressed: false,
+      sessionKey: 0,
+      exitRequested: false,
+      editorRequested: false,
+      ...overrides,
+    };
+  }
+
+  test("renders Header and Footer in correct order", () => {
+    const state = fakeState();
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    const frame = lastFrame();
+    // Header appears before Footer
+    const headerIdx = frame!.indexOf("OpenPX");
+    const footerIdx = frame!.indexOf("shortcuts");
+    expect(headerIdx).toBeGreaterThanOrEqual(0);
+    expect(footerIdx).toBeGreaterThanOrEqual(0);
+    expect(headerIdx).toBeLessThan(footerIdx);
+  });
+
+  test("shows HelpPanel when showHelp is true", () => {
+    const state = fakeState({ showHelp: true });
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    expect(lastFrame()).toContain("Keyboard Shortcuts");
+  });
+
+  test("hides HelpPanel when showHelp is false", () => {
+    const state = fakeState({ showHelp: false });
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    expect(lastFrame()).not.toContain("Keyboard Shortcuts");
+  });
+
+  test("shows ModelSelector when showModelSelector is true", () => {
+    const state = fakeState({ showModelSelector: true });
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    expect(lastFrame()).toContain("Select Model");
+  });
+
+  test("shows ApprovalBlock when interrupt is approval", () => {
+    const approval = fakeApproval();
+    const state = fakeState({
+      blocks: [{ id: 1, kind: "approval", approval }],
+      interrupt: { kind: "approval", blockId: 1 },
+    });
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    expect(lastFrame()).toContain("Approval");
+  });
+
+  test("shows InputBlock when interrupt is question", () => {
+    const question = fakeQuestion();
+    const state = fakeState({
+      blocks: [{ id: 1, kind: "question", question }],
+      interrupt: { kind: "input", blockId: 1 },
+    });
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    expect(lastFrame()).toContain(question.question);
+  });
+
+  test("does not show ApprovalBlock when resolved", () => {
+    const approval = fakeApproval();
+    const state = fakeState({
+      blocks: [
+        { id: 1, kind: "approval", approval, resolved: { action: "approve", grant: "full_access" } },
+      ],
+      interrupt: { kind: "approval", blockId: 1 },
+    });
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    expect(lastFrame()).not.toContain("[A] Approve once");
+  });
+
+  test("renders children when provided", () => {
+    const state = fakeState();
+    const InputLine = require("../src/app/tui/components/InputLine").default;
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      >
+        <InputLine mode="prompt" onSubmit={noop} workspace={process.cwd()} />
+      </App>,
+    );
+    // children InputLine should be between Footer prompts
+    const frame = lastFrame();
+    const footerIdx = frame!.indexOf("shortcuts");
+    const promptIdx = frame!.indexOf(">");
+    expect(promptIdx).toBeLessThan(footerIdx);
+  });
+});
