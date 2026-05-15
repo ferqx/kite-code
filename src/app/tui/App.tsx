@@ -264,7 +264,12 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       }
       return state;
     case "CTRL_C":
-      if (state.running) return { ...state, running: false, ctrlCPressed: true };
+      if (state.running) {
+        // When interrupt is active, also clear it so the provider is cancelled
+        const next = { ...state, running: false, ctrlCPressed: true };
+        if (state.interrupt) next.interrupt = null;
+        return next;
+      }
       if (state.ctrlCPressed) return { ...state, exitRequested: true };
       return { ...state, ctrlCPressed: true };
     case "SWITCH_AUTH": {

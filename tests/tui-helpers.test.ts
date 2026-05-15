@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { darkTheme } from "../src/app/tui/theme";
 import type { Theme } from "../src/app/tui/theme";
+import { parseInline, type InlineSegment } from "../src/app/tui/components/MarkdownBlock";
+import { changePrefix, toolColor } from "../src/app/tui/OutputArea";
+import { formatDuration } from "../src/app/tui/StatusBar";
 
 describe("darkTheme", () => {
   test("has all required color keys", () => {
@@ -20,17 +23,9 @@ describe("darkTheme", () => {
   });
 });
 
-// ── DiffPreview helpers ──
+// ── OutputArea changePrefix ──
 
-describe("DiffPreview prefix mapping", () => {
-  function changePrefix(kind: "add" | "edit" | "delete"): { prefix: string; color: string } {
-    switch (kind) {
-      case "add": return { prefix: "+", color: darkTheme.success };
-      case "edit": return { prefix: "~", color: darkTheme.warning };
-      case "delete": return { prefix: "-", color: darkTheme.error };
-    }
-  }
-
+describe("changePrefix", () => {
   test("add returns + with success color", () => {
     expect(changePrefix("add")).toEqual({ prefix: "+", color: darkTheme.success });
   });
@@ -44,43 +39,9 @@ describe("DiffPreview prefix mapping", () => {
   });
 });
 
-// ── Markdown inline parser ──
+// ── MarkdownBlock parseInline ──
 
-describe("MarkdownBlock inline parsing", () => {
-  interface InlineSegment {
-    text: string;
-    bold?: boolean;
-    italic?: boolean;
-    code?: boolean;
-  }
-
-  function parseInline(text: string): InlineSegment[] {
-    const allPatterns = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
-    const segments: InlineSegment[] = [];
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-
-    while ((match = allPatterns.exec(text)) !== null) {
-      if (match.index > lastIndex) {
-        segments.push({ text: text.slice(lastIndex, match.index) });
-      }
-      if (match[1].startsWith("**") && match[2] !== undefined) {
-        segments.push({ text: match[2], bold: true });
-      } else if (match[1].startsWith("*") && !match[1].startsWith("**") && match[3] !== undefined) {
-        segments.push({ text: match[3], italic: true });
-      } else if (match[4] !== undefined) {
-        segments.push({ text: match[4], code: true });
-      }
-      lastIndex = match.index + match[1].length;
-    }
-
-    if (lastIndex < text.length) {
-      segments.push({ text: text.slice(lastIndex) });
-    }
-
-    return segments;
-  }
-
+describe("parseInline", () => {
   test("plain text returns single segment", () => {
     const result = parseInline("hello world");
     expect(result).toEqual([{ text: "hello world" }]);
@@ -143,7 +104,6 @@ describe("MarkdownBlock inline parsing", () => {
   });
 
   test("bold spans content containing backticks (backtick is not special inside **...** match)", () => {
-    // the ** pattern wins over ` in the regex alternation
     const result = parseInline("**bold `code` here**");
     expect(result).toEqual([
       { text: "bold `code` here", bold: true },
@@ -161,15 +121,9 @@ describe("MarkdownBlock inline parsing", () => {
   });
 });
 
-// ── StatusBar helpers ──
+// ── formatDuration ──
 
-describe("StatusBar formatDuration", () => {
-  function formatDuration(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-
+describe("formatDuration", () => {
   test("0 seconds -> 00:00", () => {
     expect(formatDuration(0)).toBe("00:00");
   });
@@ -187,42 +141,14 @@ describe("StatusBar formatDuration", () => {
   });
 });
 
-// ── ToolCard helpers ──
+// ── OutputArea toolColor ──
 
-describe("ToolCard statusIcon", () => {
-  function statusIcon(status: string): string {
-    switch (status) {
-      case "pending": return "○";
-      case "running": return "⏳";
-      case "done": return "✓";
-      case "error": return "✗";
-      default: return "";
-    }
-  }
-
-  test("returns correct icon for each status", () => {
-    expect(statusIcon("pending")).toBe("○");
-    expect(statusIcon("running")).toBe("⏳");
-    expect(statusIcon("done")).toBe("✓");
-    expect(statusIcon("error")).toBe("✗");
-  });
-});
-
-describe("ToolCard statusColor", () => {
-  function statusColor(status: string): string {
-    switch (status) {
-      case "done": return darkTheme.success;
-      case "error": return darkTheme.error;
-      case "running": return darkTheme.warning;
-      default: return darkTheme.muted;
-    }
-  }
-
+describe("toolColor", () => {
   test("returns theme colors for each status", () => {
-    expect(statusColor("done")).toBe(darkTheme.success);
-    expect(statusColor("error")).toBe(darkTheme.error);
-    expect(statusColor("running")).toBe(darkTheme.warning);
-    expect(statusColor("pending")).toBe(darkTheme.muted);
-    expect(statusColor("unknown" as any)).toBe(darkTheme.muted);
+    expect(toolColor("done")).toBe(darkTheme.success);
+    expect(toolColor("error")).toBe(darkTheme.error);
+    expect(toolColor("running")).toBe(darkTheme.warning);
+    expect(toolColor("pending")).toBe(darkTheme.muted);
+    expect(toolColor("unknown")).toBe(darkTheme.muted);
   });
 });

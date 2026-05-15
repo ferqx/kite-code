@@ -308,7 +308,7 @@ describe("DiffPreview", () => {
     expect(lastFrame()).toContain("~ src/baz.ts");
   });
 
-  test("returns null for empty changes array", () => {
+  test("renders empty string for empty changes array", () => {
     const { lastFrame } = render(<DiffPreview changes={[]} />);
     expect(lastFrame()).toBe("");
   });
@@ -322,7 +322,7 @@ describe("MarkdownBlock", () => {
     expect(lastFrame()).toContain("Hello world");
   });
 
-  test("renders # heading with underlining context", () => {
+  test("renders # heading", () => {
     const { lastFrame } = render(<MarkdownBlock content="# Title" />);
     expect(lastFrame()).toContain("Title");
   });
@@ -687,6 +687,7 @@ describe("OutputArea", () => {
       <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible={false} />,
     );
     expect(lastFrame()).toContain("Thinking...");
+    expect(lastFrame()).not.toContain("Secret");
   });
 
   test("renders tool_card with running status", () => {
@@ -745,7 +746,7 @@ describe("OutputArea", () => {
       {
         id: 1, kind: "approval",
         approval: fakeApproval(),
-        resolved: { action: "approve_once", grant: "full_access" },
+        resolved: { action: "full_access", grant: "full_access" },
       },
     ];
     const { lastFrame } = render(

@@ -198,16 +198,15 @@ describe("sandbox platform detection", () => {
     expect(["seatbelt", "bubblewrap", "none"]).toContain(backend);
   });
 
-  test("detectSandboxBackend returns seatbelt on macOS", () => {
+  test("detectSandboxBackend matches platform", () => {
     const backend = detectSandboxBackend();
     if (process.platform === "darwin") {
       expect(backend).toBe("seatbelt");
+    } else if (process.platform === "linux") {
+      expect(["bubblewrap", "none"]).toContain(backend);
+    } else {
+      expect(backend).toBe("none");
     }
-  });
-
-  test("isSandboxAvailable returns a boolean", () => {
-    const available = isSandboxAvailable();
-    expect(typeof available).toBe("boolean");
   });
 
   test("isSandboxAvailable matches detectSandboxBackend !== 'none'", () => {

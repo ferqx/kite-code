@@ -7,7 +7,7 @@ interface MarkdownBlockProps {
   streaming?: boolean;
 }
 
-interface InlineSegment {
+export interface InlineSegment {
   text: string;
   bold?: boolean;
   italic?: boolean;
@@ -16,7 +16,7 @@ interface InlineSegment {
 
 // ── inline markdown parsing ──
 
-function parseInline(text: string): InlineSegment[] {
+export function parseInline(text: string): InlineSegment[] {
   const allPatterns = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
   const segments: InlineSegment[] = [];
   let lastIndex = 0;

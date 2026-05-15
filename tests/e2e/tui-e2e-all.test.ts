@@ -207,7 +207,7 @@ describe(`${label} Input flow`, () => {
   });
 
   test("multi-turn conversation", async () => {
-    await verifyScenario("input-flow-multi-turn", IF.multiTurn, 1).verifyAll();
+    await verifyScenario("input-flow-multi-turn", IF.multiTurn, 2).verifyAll();
   });
 
   test("Ctrl+C interrupt during running", async () => {

@@ -8,6 +8,8 @@ const PLACEHOLDER: Record<string, string> = {
 
 export function freezeAnsi(ansi: string, freezeKeys: string[]): string {
   let result = ansi;
+  // 跨平台：屏蔽 Header 中的工作目录路径 / Cross-platform: mask workspace path in Header
+  result = result.replace(/(▘▘ ▝▝ {4}).+/g, "$1<CWD>");
   for (const key of freezeKeys) {
     const p = PLACEHOLDER[key];
     if (!p) continue;

@@ -52,7 +52,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       if (match.grant) {
         const patternStr = match.showPattern ? ` ("${pattern}")` : "";
         provider.submitAction({ type: "approve", grant: match.grant });
-        onResolved("approve_once", match.grant, patternStr);
+        onResolved(match.grant, match.grant, patternStr);
       } else {
         provider.submitAction({ type: "reject" });
         onResolved("denied");

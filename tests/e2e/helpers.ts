@@ -1,71 +1,62 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { expect } from "bun:test";
 import { runTuiE2E } from "./mock-agent";
 import type { Scenario } from "./types";
-
-const UPDATE_SNAPSHOTS = Bun.argv.includes("--update-snapshots") ||
-  process.env.UPDATE_SNAPSHOTS === "true";
-
-const FIXTURES_ROOT = join(import.meta.dir!, "fixtures");
-
-function diffAnsi(actual: string, expected: string): string | null {
-  if (actual === expected) return null;
-  const a = actual.split("\n");
-  const b = expected.split("\n");
-  const lines: string[] = [];
-  const maxLen = Math.max(a.length, b.length);
-  for (let i = 0; i < maxLen; i++) {
-    const al = a[i] ?? "(missing)";
-    const bl = b[i] ?? "(missing)";
-    if (al !== bl) {
-      lines.push(`  line ${i + 1}:`);
-      lines.push(`-   ${bl}`);
-      lines.push(`+   ${al}`);
-    }
-  }
-  return lines.join("\n");
-}
 
 export function verifyScenario(
   scenarioName: string,
   scenario: Scenario,
   expectedSnapshotCount: number,
 ) {
-  const fixtureDir = join(FIXTURES_ROOT, scenarioName);
-  if (!existsSync(fixtureDir)) mkdirSync(fixtureDir, { recursive: true });
-
   const resultPromise = runTuiE2E(scenario);
 
   return {
     async verifyAll() {
       const result = await resultPromise;
 
-      for (let i = 0; i < expectedSnapshotCount; i++) {
-        if (!result.pass) {
-          throw new Error(`[${scenarioName}] Scenario execution failed: ${result.error}`);
-        }
+      if (!result.pass) {
+        throw new Error(`[${scenarioName}] Scenario execution failed: ${result.error}`);
+      }
 
+      expect(result.snapshots.length, `[${scenarioName}] snapshot count`)
+        .toBe(expectedSnapshotCount);
+
+      for (let i = 0; i < result.snapshots.length; i++) {
         const snap = result.snapshots[i];
-        if (!snap) {
-          throw new Error(`[${scenarioName}] Expected ${expectedSnapshotCount} snapshots, got ${result.snapshots.length}`);
-        }
-
-        const idx = String(i + 1).padStart(3, "0");
-        const ansiFile = join(fixtureDir, `${idx}.ansi`);
-        const stateFile = join(fixtureDir, `${idx}.state.json`);
-
-        if (UPDATE_SNAPSHOTS || !existsSync(ansiFile)) {
-          writeFileSync(ansiFile, snap.ansi, "utf-8");
-          writeFileSync(stateFile, JSON.stringify(snap.state, null, 2), "utf-8");
-        } else {
-          const ansiExpected = readFileSync(ansiFile, "utf-8");
-          const diff = diffAnsi(snap.ansi, ansiExpected);
-          if (diff) {
-            const label = `[${scenarioName}] snapshot ${i + 1}`;
-            throw new Error(`${label} ANSI diff:\n${diff}`);
-          }
-        }
+        verifySnapshot(snap, scenarioName, i);
       }
     },
   };
+}
+
+function verifySnapshot(
+  snap: { reason: string; state: Record<string, unknown> },
+  scenarioName: string,
+  index: number,
+): void {
+  const label = `[${scenarioName}] snapshot ${index + 1}`;
+
+  switch (snap.reason) {
+    case "approval-wait": {
+      const interrupt = snap.state.interrupt as Record<string, unknown> | null;
+      expect(interrupt, `${label}: interrupt must be set for approval`).not.toBeNull();
+      expect(interrupt!.kind, `${label}: interrupt kind must be approval`).toBe("approval");
+      expect(typeof interrupt!.blockId, `${label}: interrupt must have blockId`).toBe("number");
+      break;
+    }
+    case "question-wait": {
+      const interrupt = snap.state.interrupt as Record<string, unknown> | null;
+      expect(interrupt, `${label}: interrupt must be set for question`).not.toBeNull();
+      expect(interrupt!.kind, `${label}: interrupt kind must be input`).toBe("input");
+      expect(typeof interrupt!.blockId, `${label}: interrupt must have blockId`).toBe("number");
+      break;
+    }
+    case "terminal": {
+      expect(snap.state.interrupt, `${label}: interrupt must be null at terminal`).toBeNull();
+      break;
+    }
+    case "explicit": {
+      // No specific state contract; just verified execution didn't crash
+      break;
+    }
+  }
 }

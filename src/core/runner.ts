@@ -48,6 +48,8 @@ export interface RunAgentInput {
   model?: SupportedChatModel;
   /** 恢复值：提供时将直接从 checkpoint 恢复而非创建新 initial state / Resume value: if provided, resumes from checkpoint instead of creating new initial state */
   resume?: AgentResumeValue;
+  /** 外部中止信号 / External abort signal to cancel the agent loop */
+  signal?: AbortSignal;
 }
 
 export interface StreamCodeAgentInput {
@@ -99,7 +101,6 @@ export async function* runAgent(
     model: input.model,
   });
 
-  let streamCompleted = false;
   try {
     const initialAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? "auto");
     const initialPhase = workspaceAccessToPhase(initialAccess);
@@ -121,7 +122,11 @@ export async function* runAgent(
 
     let resumeValue: AgentResumeValue | null = input.resume ?? null;
 
+    const signal = input.signal;
+
     while (true) {
+      if (signal?.aborted) break;
+
       const streamConfig = {
         configurable: { thread_id: input.threadId },
         streamMode: "updates" as const,
@@ -134,43 +139,49 @@ export async function* runAgent(
 
       resumeValue = null;
 
-      const result = await processStream(provider, stream);
+      const result = await processStream(provider, stream, signal);
+
+      yield* result.events;
 
       if (result.kind === "done") break;
 
       resumeValue = mapActionToResumeValue(result.action);
     }
-
-    streamCompleted = true;
   } finally {
-    if (streamCompleted) {
-      checkpointer.close();
-    }
+    checkpointer.close();
   }
 }
 
 type StreamResult =
-  | { kind: "done" }
-  | { kind: "interrupt"; action: UserAction };
+  | { kind: "done"; events: AgentEvent[] }
+  | { kind: "interrupt"; action: UserAction; events: AgentEvent[] };
 
 async function processStream(
   provider: UserInputProvider,
   stream: AsyncIterable<unknown>,
+  signal?: AbortSignal,
 ): Promise<StreamResult> {
   const { isInterrupted, INTERRUPT } = await import("@langchain/langgraph");
   const cacheStandard = createPromptCacheStandardTracker();
   let currentAccess: WorkspaceAccess = "write";
+  const allEvents: AgentEvent[] = [];
+  const pendingToolCalls = new Map<string, { name: string; args: Record<string, unknown> }>();
 
   for await (const chunk of stream) {
+    if (signal?.aborted) {
+      return { events: allEvents, kind: "done" };
+    }
+
     const interruptData = extractInterrupt(chunk, isInterrupted, INTERRUPT as unknown as symbol);
     if (interruptData) {
       const event = interruptToEvent(interruptData);
       if (event) {
         provider.onEvent(event);
+        allEvents.push(event);
         const payload = eventToInterruptPayload(interruptData, event);
         if (payload) {
           const action = await provider.requestAction(payload);
-          return { kind: "interrupt", action };
+          return { events: allEvents, kind: "interrupt", action };
         }
       }
       continue;
@@ -180,10 +191,33 @@ async function processStream(
     if (acc) currentAccess = acc;
 
     const events = chunkToEvents(chunk, currentAccess, cacheStandard);
-    for (const e of events) provider.onEvent(e);
+
+    // Record tool calls for cross-chunk file_change matching
+    for (const e of events) {
+      if (e.type === "tool_call") {
+        pendingToolCalls.set(e.data.call_id, { name: e.data.name, args: e.data.args });
+      }
+    }
+    // Generate file_change events when a write/edit tool completes
+    for (const e of events) {
+      if (e.type === "tool_done" && e.data.ok && (e.data.name === "write_file" || e.data.name === "edit_file")) {
+        const call = pendingToolCalls.get(e.data.call_id);
+        if (call) {
+          const path = call.args.path;
+          if (typeof path === "string") {
+            produceFileChange(events, path, e.data.name);
+          }
+        }
+      }
+    }
+
+    for (const e of events) {
+      provider.onEvent(e);
+      allEvents.push(e);
+    }
   }
 
-  return { kind: "done" };
+  return { events: allEvents, kind: "done" };
 }
 
 function extractInterrupt(
@@ -268,7 +302,9 @@ export function chunkToEvents(
     if (Array.isArray(msgs)) {
       for (const msg of msgs) {
         if (AIMessage.isInstance(msg)) {
-          const rc = (msg as unknown as Record<string, unknown>).reasoning_content;
+          const rawMsg = msg as unknown as Record<string, unknown>;
+          const rc = (rawMsg.reasoning_content as string | undefined)
+            ?? (rawMsg.additional_kwargs as Record<string, unknown> | undefined)?.reasoning_content as string | undefined;
           if (typeof rc === "string" && rc.length > 0) {
             events.push({ type: "reason", data: { text: rc } });
           }
@@ -362,37 +398,6 @@ export function chunkToEvents(
     events.push({ type: "step_end", data: { node: key } });
   }
 
-  const existingEvents = events.slice();
-  for (const e of existingEvents) {
-    if (e.type === "tool_done" && e.data.ok && (e.data.name === "write_file" || e.data.name === "edit_file")) {
-      const matchingCall = existingEvents.find(
-        (ce) => ce.type === "tool_call" && ce.data.call_id === e.data.call_id
-      ) as { type: "tool_call"; data: import("../protocol/events").ToolCallPayload } | undefined;
-      if (matchingCall) {
-        const path = matchingCall.data.args.path;
-        if (typeof path === "string") {
-          const kind = e.data.name === "write_file" ? "add" as const : "edit" as const;
-          let linesAdded: number | undefined;
-          let linesRemoved: number | undefined;
-          let preview: string | undefined;
-          try {
-            const content = readFileSync(path, "utf-8");
-            const allLines = content.split("\n");
-            const lineCount = allLines.length;
-            if (kind === "add") {
-              linesAdded = lineCount;
-            } else {
-              linesAdded = lineCount;
-            }
-            // Capture first 6 lines as preview
-            preview = allLines.slice(0, 6).join("\n");
-            if (allLines.length > 6) preview += "\n...";
-          } catch { /* file not readable */ }
-          events.push({ type: "file_change", data: { path, kind, linesAdded, linesRemoved, preview } });
-        }
-      }
-    }
-  }
 
   const final = findFinal(chunk);
   if (final && !events.some((e) => e.type === "text" && e.data.text === final)) {
@@ -411,10 +416,7 @@ export function chunkToEvents(
         cacheWriteTokens: 0,
         inputTokens: metrics.inputTokens,
         outputTokens,
-        standard: {
-          label: "cache_hit_rate",
-          value: metrics.hitRate,
-        },
+        standard: cacheStandard.record(metrics) as unknown as Record<string, unknown>,
       } satisfies CacheMetricsPayload,
     });
   }
@@ -657,4 +659,25 @@ function* walkValues(value: unknown): Generator<unknown> {
   for (const item of Object.values(value as Record<string, unknown>)) {
     yield* walkValues(item);
   }
+}
+
+/** Generate a file_change event when a write/edit tool completes */
+function produceFileChange(
+  events: AgentEvent[],
+  path: string,
+  toolName: string,
+): void {
+  const kind = toolName === "write_file" ? "add" as const : "edit" as const;
+  let linesAdded: number | undefined;
+  let linesRemoved: number | undefined;
+  let preview: string | undefined;
+  try {
+    const content = readFileSync(path, "utf-8");
+    const allLines = content.split("\n");
+    const lineCount = allLines.length;
+    linesAdded = lineCount;
+    preview = allLines.slice(0, 6).join("\n");
+    if (allLines.length > 6) preview += "\n...";
+  } catch { /* file not readable */ }
+  events.push({ type: "file_change", data: { path, kind, linesAdded, linesRemoved, preview } });
 }

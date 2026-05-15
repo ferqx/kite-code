@@ -19,6 +19,8 @@ function TuiBootstrap() {
   const threadIdRef = React.useRef<string>(`tui-${Date.now().toString(36)}`);
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const handleInputRef = React.useRef<(value: string) => void>(() => {});
+  const agentLoopActiveRef = React.useRef(false);
+  const abortControllerRef = React.useRef<AbortController | null>(null);
 
   React.useEffect(() => {
     const timer = setTimeout(() => setInitialized(true), 80);
@@ -40,6 +42,13 @@ function TuiBootstrap() {
       process.exit(0);
     }
   }, [state.exitRequested]);
+
+  // When Ctrl+C is pressed during agent loop (with no interrupt), abort via signal
+  React.useEffect(() => {
+    if (state.ctrlCPressed && agentLoopActiveRef.current && !state.interrupt) {
+      abortControllerRef.current?.abort();
+    }
+  }, [state.ctrlCPressed, state.interrupt]);
 
   const handleExit = React.useCallback(() => {
     dispatch({ type: "EVENT", event: { type: "text", data: { text: "👋 Goodbye!" } } });
@@ -67,6 +76,8 @@ function TuiBootstrap() {
 
   const runTask = React.useCallback(
     async (task: string) => {
+      if (agentLoopActiveRef.current) return;
+
       dispatch({ type: "USER_MESSAGE", text: task });
       dispatch({ type: "SET_RUNNING" });
 
@@ -76,6 +87,10 @@ function TuiBootstrap() {
 
       const shellExecutor = createSandboxExecutor({ enabled: true, workspace });
 
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+      agentLoopActiveRef.current = true;
+
       const generator = runAgent(provider, {
         task: fullTask,
         userId: "tui-user",
@@ -84,13 +99,17 @@ function TuiBootstrap() {
         checkpointPath: `${workspace}/.openpx/checkpoints.sqlite`,
         config,
         shellExecutor,
+        signal: abortController.signal,
       });
 
       let aborted = false;
 
       try {
         for await (const _ of generator) {
-          if (aborted) break;
+          if (abortController.signal.aborted) {
+            aborted = true;
+            break;
+          }
         }
         if (!aborted) dispatch({ type: "SET_EXITED" });
       } catch (e: any) {
@@ -100,6 +119,8 @@ function TuiBootstrap() {
         });
         dispatch({ type: "SET_EXITED" });
       } finally {
+        abortControllerRef.current = null;
+        agentLoopActiveRef.current = false;
         provider.reset();
         dispatch({ type: "SET_IDLE" });
       }
@@ -131,7 +152,7 @@ function TuiBootstrap() {
 
   const handleInput = React.useCallback(
     (value: string) => {
-      if (state.running) return;
+      if (agentLoopActiveRef.current) return;
 
       if (value.startsWith("/")) {
         handleSlashCommand(value);
@@ -147,7 +168,7 @@ function TuiBootstrap() {
 
       runTask(value);
     },
-    [state.running, runTask, handleSlashCommand]
+    [runTask, handleSlashCommand]
   );
 
   // Keep handleInput ref up to date for the editor effect

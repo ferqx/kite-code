@@ -10,7 +10,7 @@ interface StatusBarProps {
   running: boolean;
 }
 
-function formatDuration(seconds: number): string {
+export function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
@@ -26,14 +26,12 @@ function planLabel(status: StatusState): string {
 
 export default function StatusBar({ status, thinkingVisible, timerKey, running }: StatusBarProps) {
   const [elapsed, setElapsed] = useState(0);
-  const isMock = process.env.OPENPX_MOCK === "true";
 
   useEffect(() => {
     if (!running) {
       setElapsed(0);
       return;
     }
-    if (isMock) { setElapsed(0); return; }
     setElapsed(0);
     const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(timer);
@@ -69,15 +67,15 @@ export default function StatusBar({ status, thinkingVisible, timerKey, running }
         <Text color={t.dim}>│</Text>
         <Text>
           <Text color={t.muted}>cache: </Text>
-          <Text color={cacheColor}>{isMock ? "<CACHE_HIT_RATE>" : `${status.cacheHitRate.toFixed(0)}%`}</Text>
+          <Text color={cacheColor}>{`${status.cacheHitRate.toFixed(0)}%`}</Text>
         </Text>
         <Text color={t.dim}>│</Text>
         <Text>
           <Text color={t.muted}>tokens: </Text>
-          <Text>{isMock ? "<CACHE_TOKEN_COUNT>" : status.totalTokens.toLocaleString()}</Text>
+          <Text>{status.totalTokens.toLocaleString()}</Text>
         </Text>
         <Text color={t.dim}>│</Text>
-        {running && <Text color={t.primary}>{isMock ? "<TIMER>" : formatDuration(elapsed)}</Text>}
+        {running && <Text color={t.primary}>{formatDuration(elapsed)}</Text>}
         {running && <Text color={t.dim}>│</Text>}
         <Text color={authColor}>
           [{status.authorization === "full_access" ? "full" : "safe"}]

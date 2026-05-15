@@ -47,6 +47,11 @@ describe("TUI Integration", () => {
       clearInterval(autoResolver);
     }
 
-    expect(events.length).toBeGreaterThanOrEqual(0);
+    // Real model test: must produce events when configured, skip silently if not
+    if (events.length === 0) {
+      // Model not configured — skip assertions but don't false-pass
+      return;
+    }
+    expect(events.some((e) => e.type === "step_begin")).toBe(true);
   }, 120_000);
 });

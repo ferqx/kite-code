@@ -1,8 +1,0 @@
- ▐▛███▜▌   OpenPX
-▝▜█████▛▘   deepseek-v4 · [safe] · rw · think:max
-  ▘▘ ▝▝    D:\app\openpx-new
-❯ Explain this code
-⟳ Model retry #1 (<CACHE_TOKEN_COUNT>ms): Rate limit exceeded, retrying in 2s
-This code implements a binary search algorithm.
->
-?  shortcuts · Ctrl+C exit · / commands · ! shell

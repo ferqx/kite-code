@@ -63,7 +63,7 @@ describe("model transient retry", () => {
     expect(attempts).toBe(2);
   });
 
-  test("retries 5xx server errors (502/503/504)", async () => {
+  test("retries 5xx server errors", async () => {
     let attempts = 0;
 
     const result = await withTransientModelRetry(

@@ -11,7 +11,7 @@ interface OutputAreaProps {
   thinkingVisible: boolean;
 }
 
-function toolColor(status: string): string {
+export function toolColor(status: string): string {
   switch (status) {
     case "done": return t.success;
     case "error": return t.error;
@@ -25,7 +25,7 @@ function formatElapsed(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function changePrefix(kind: string): { prefix: string; color: string } {
+export function changePrefix(kind: string): { prefix: string; color: string } {
   switch (kind) {
     case "add": return { prefix: "+", color: t.success };
     case "edit": return { prefix: "~", color: t.warning };
@@ -44,11 +44,9 @@ function formatLines(added?: number, removed?: number): string {
 function resolveApprovalLabel(resolved?: { action: string; grant?: string; pattern?: string }): string {
   if (!resolved) return "";
   if (resolved.action === "denied") return "× Denied";
-  if (resolved.action === "approve_once") {
-    if (resolved.grant === "full_access") return "✓ Approved (full access)";
-    if (resolved.grant === "same_command") return `✓ Approved (same command)${resolved.pattern ? ` "${resolved.pattern}"` : ""}`;
-    return "✓ Approved (once)";
-  }
+  if (resolved.action === "approve_once") return "✓ Approved (once)";
+  if (resolved.action === "same_command") return `✓ Approved (same command)${resolved.pattern ? ` "${resolved.pattern}"` : ""}`;
+  if (resolved.action === "full_access") return "✓ Approved (full access)";
   return `? ${resolved.action}`;
 }
 

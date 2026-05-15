@@ -1,4 +1,4 @@
-# CLAUDE.md
+# **CLAUDE.md**
 
 ## 技术栈
 
@@ -65,3 +65,15 @@ bun run agent resume --thread demo --user local --approve  # 审批后恢复执�
 | checkpoint 持久化 | `bun test tests/checkpoint.test.ts tests/integration.test.ts` |
 | 跨模块/不确定 | `bun test` + `bun run typecheck` |
 | 真实模型链路 | `bun run test:real` |
+
+## 测试编写原则
+
+- **测试是为了发现程序问题，不是为了通过而通过**。如果测试断言与实际行为不符，应优先怀疑程序行为是否正确，而不是为了让测试变绿去迁就当前行为
+- 反面案例：ApprovalBlock 的 `onResolved` 签名是 `(action, grant?)`，action 固定为 `"approve_once"`，grant 才是授权范围。若测试只取第一个参数并断言 `"same_command"`，这只是迁就了错误的参数位置，没有验证真正需要验证的东西
+- 测试用例名称应描述验证的**行为**，而非实现细节
+
+## 平台兼容
+
+- 测试用例必须支持 Windows / Unix 双平台
+- TUI必须支持 Windows / Unix 双平台
+- Shell 工具必须支持 Windows / Unix 双平台

@@ -375,7 +375,7 @@ async function runStep(
       if (action.type === "reject") {
         resolution = { action: "denied" };
       } else if (action.type === "approve") {
-        resolution = { action: "approve_once", grant: action.grant };
+        resolution = { action: action.grant, grant: action.grant };
       } else if (action.type === "input") {
         resolution = action.text;
       } else {

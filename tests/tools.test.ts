@@ -25,6 +25,9 @@ describe("tool safety", () => {
     expect(() => assertInsideWorkspace(workspace, "..\\outside.txt")).toThrow(
       /outside workspace/,
     );
+    expect(() => assertInsideWorkspace(workspace, "../outside.txt")).toThrow(
+      /outside workspace/,
+    );
   });
 
   test("write_file creates files inside the workspace", () => {
@@ -60,9 +63,8 @@ describe("tool safety", () => {
 
     expect(result.ok).toBe(true);
     expect(existsSync(absolutePath)).toBe(true);
-    expect(existsSync(join(workspace, workspace.slice(1), "nested", "hello.txt"))).toBe(
-      false,
-    );
+    // Verify the absolute path was not misinterpreted as relative and double-nested
+    expect(existsSync(join(workspace, workspace.slice(1), "nested", "hello.txt"))).toBe(false);
   });
 
   test("edit_file finds and replaces text", () => {
@@ -123,6 +125,8 @@ describe("tool safety", () => {
     expect(result.command).toBe("pwd");
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.length).toBeGreaterThan(0);
+    // pwd output must point to the same directory as workspace (resolve symlinks)
+    const { realpathSync } = await import("node:fs");
+    expect(realpathSync(result.stdout.trim())).toBe(realpathSync(workspace));
   });
 });

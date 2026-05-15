@@ -10,7 +10,6 @@
     "test:real": "bun run tests/real-test-cli.ts",
     "test:mock": "bun test ./tests/mock-compaction.real.ts",
     "test:e2e": "bun test ./tests/e2e/",
-    "test:e2e:update": "set UPDATE_SNAPSHOTS=true && bun test ./tests/e2e/",
     "tui": "bun run src/app/tui/index.tsx",
     "typecheck": "tsc --noEmit"
   },

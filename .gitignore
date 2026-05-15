@@ -38,3 +38,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .worktrees/
 
 .tmp-*/
+
+# e2e test fixtures (generated, not archived)
+tests/e2e/fixtures/

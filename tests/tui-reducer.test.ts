@@ -34,12 +34,15 @@ describe("eventReducer (blocks model)", () => {
       expect(s.blocks[0].kind).toBe("text");
       expect((s.blocks[0] as any).content).toBe("hello");
     });
-    test("unique incrementing ids", () => {
+    test("assigns unique incrementing ids to blocks", () => {
       let s = fresh();
       s = dispatch(s, textEvt("a"));
       s = dispatch(s, textEvt("b"));
       s = dispatch(s, textEvt("c"));
-      expect(new Set(s.blocks.map((b) => b.id)).size).toBe(3);
+      const ids = s.blocks.map((b) => b.id);
+      expect(new Set(ids).size).toBe(3);
+      expect(ids[0]).toBeLessThan(ids[1]);
+      expect(ids[1]).toBeLessThan(ids[2]);
     });
   });
 
@@ -244,10 +247,12 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "TOGGLE_REASON", id });
       expect((s.blocks[0] as any).folded).toBe(false);
     });
-    test("TOGGLE_THINKING toggles flag", () => {
+    test("TOGGLE_THINKING toggles flag both ways", () => {
       let s = fresh();
       s = dispatch(s, { type: "TOGGLE_THINKING" });
       expect(s.thinkingVisible).toBe(false);
+      s = dispatch(s, { type: "TOGGLE_THINKING" });
+      expect(s.thinkingVisible).toBe(true);
     });
     test("CLEAR_OUTPUT clears blocks", () => {
       let s = dispatch(fresh(), textEvt("hello"));
