@@ -93,7 +93,11 @@ function TuiBootstrap() {
           if (aborted) break;
         }
         if (!aborted) dispatch({ type: "SET_EXITED" });
-      } catch {
+      } catch (e: any) {
+        provider.onEvent({
+          type: "error",
+          data: { message: e?.message ?? String(e), recoverable: false },
+        });
         dispatch({ type: "SET_EXITED" });
       } finally {
         provider.reset();
