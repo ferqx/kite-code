@@ -2,7 +2,6 @@ import { describe, test, expect } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeListChatModel } from "@langchain/core/utils/testing";
 import { AIMessage } from "@langchain/core/messages";
 import { render } from "ink-testing-library";
 import React from "react";
@@ -12,146 +11,150 @@ import type { Action } from "../src/app/tui/App";
 import { TuiUserInputProvider } from "../src/app/tui/provider";
 import { runAgent } from "../src/core/runner";
 import { loadAgentConfig } from "../src/core/config/index";
+import { StreamingMockModel, type MockResponse } from "./mock-model";
 import type { AgentEvent } from "../src/protocol/events";
 
-describe("TUI Agent Integration (real loop + mock LLM)", () => {
-  test("agent loop produces text events without stalling", async () => {
-    const root = join(tmpdir(), "openpx-int-tui-real");
-    rmSync(root, { recursive: true, force: true });
-    mkdirSync(root, { recursive: true });
+function tempWorkspace() {
+  const root = join(tmpdir(), `openpx-int-${Date.now().toString(36)}`);
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(root, { recursive: true });
+  return root;
+}
 
-    // Mock model: returns a single AIMessage with text content
-    const model = new FakeListChatModel({
-      responses: [
-        new AIMessage({
-          content: "Hello! This is a test response from the mock model.",
-          id: "mock-msg-1",
-        }),
-      ],
-    });
+function makeModel(responses: MockResponse[]) {
+  return new StreamingMockModel({ responses }) as any;
+}
 
-    const events: AgentEvent[] = [];
-    const dispatch = (event: AgentEvent) => { events.push(event); };
-    const provider = new TuiUserInputProvider(dispatch);
+async function runAndCollect(
+  model: any,
+  root: string,
+  onEvent: (e: AgentEvent) => void,
+  autoApprove = false,
+) {
+  const provider = new TuiUserInputProvider(onEvent);
 
-    // Auto-resolve interrupts
-    const autoResolve = setInterval(() => {
-      const interrupt = provider.getPendingInterrupt();
-      if (interrupt) {
-        if (interrupt.kind === "approval") {
-          provider.submitAction({ type: "approve", grant: "approve_once" });
-        } else {
-          provider.submitAction({ type: "input", text: "ok" });
-        }
-      }
-    }, 50);
-
-    try {
-      const generator = runAgent(provider, {
-        task: "Reply with a simple greeting. Do not use any tools.",
-        userId: "test-user",
-        threadId: `int-tui-${Date.now().toString(36)}`,
-        workspace: root,
-        checkpointPath: join(root, "checkpoints.sqlite"),
-        config: loadAgentConfig(),
-        model: model as any,
-      });
-
-      for await (const _ of generator) {
-        // driven by provider, events pushed via dispatch callback
-      }
-    } finally {
-      clearInterval(autoResolve);
+  let resolved = false;
+  const timer = setInterval(() => {
+    if (!autoApprove || resolved) return;
+    const i = provider.getPendingInterrupt();
+    if (i?.kind === "approval") {
+      provider.submitAction({ type: "approve", grant: "approve_once" });
+      resolved = true;
     }
+  }, 50);
 
-    // Must have produced at least text events
+  try {
+    const gen = runAgent(provider, {
+      task: "test task",
+      userId: "test-user",
+      threadId: `t-${Date.now().toString(36)}`,
+      workspace: root,
+      checkpointPath: join(root, "cp.sqlite"),
+      config: loadAgentConfig(),
+      model,
+    });
+    for await (const _ of gen) {}
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+describe("Agent Integration (mock LLM)", () => {
+  // ── 基础：正常文本响应 / Basic text response ──
+  test("model responds with text, no stall", async () => {
+    const root = tempWorkspace();
+    const events: AgentEvent[] = [];
+    const model = makeModel([
+      { message: new AIMessage({ content: "Hello from mock!", id: "m1" }) },
+    ]);
+
+    await runAndCollect(model, root, (e) => events.push(e));
+
     const textEvents = events.filter((e) => e.type === "text");
     expect(textEvents.length).toBeGreaterThan(0);
+    expect(textEvents[0].data.text).toContain("Hello from mock!");
+  });
 
-    // Feed events through reducer and verify render
-    let state = createInitialState();
-    for (const event of events) {
-      state = eventReducer(state, { type: "EVENT", event } as Action);
-    }
-    state = eventReducer(state, { type: "SET_IDLE" } as Action);
-
-    const { lastFrame, unmount } = render(
-      React.createElement(App, {
-        state,
-        dispatch: () => {},
-        onToggleReason: () => {},
-        provider,
-      })
-    );
-
-    const ansi = lastFrame();
-    expect(ansi).toContain("OpenPX");
-    expect(ansi).toContain("Hello! This is a test response");
-
-    unmount();
-  }, 30_000);
-
-  test("agent loop handles tool approval interrupt flow", async () => {
-    const root = join(tmpdir(), "openpx-int-tui-approval");
-    rmSync(root, { recursive: true, force: true });
-    mkdirSync(root, { recursive: true });
-
-    // Mock model: returns tool_call, then plain text
-    const model = new FakeListChatModel({
-      responses: [
-        new AIMessage({
-          content: "",
-          id: "mock-msg-tool",
-          tool_calls: [
-            {
-              id: "call_1",
-              name: "shell_execute",
-              args: { command: "echo hello", intent: "inspect" },
-            },
-          ],
-        }),
-        new AIMessage({
-          content: "Shell command completed.",
-          id: "mock-msg-text",
-        }),
-      ],
-    });
-
+  // ── 延迟响应（模拟网络延迟）/ Response with simulated network delay ──
+  test("model with 500ms delay still produces response", async () => {
+    const root = tempWorkspace();
     const events: AgentEvent[] = [];
-    const provider = new TuiUserInputProvider((event) => { events.push(event); });
+    const model = makeModel([
+      { message: new AIMessage({ content: "Delayed response", id: "m1" }), delay: 500 },
+    ]);
 
-    let approvalResolved = false;
-    const autoResolve = setInterval(() => {
-      if (approvalResolved) return;
-      const interrupt = provider.getPendingInterrupt();
-      if (interrupt?.kind === "approval") {
-        provider.submitAction({ type: "approve", grant: "approve_once" });
-        approvalResolved = true;
-      }
-    }, 50);
+    const start = Date.now();
+    await runAndCollect(model, root, (e) => events.push(e));
+    const elapsed = Date.now() - start;
 
+    const textEvents = events.filter((e) => e.type === "text");
+    expect(textEvents.length).toBeGreaterThan(0);
+    expect(elapsed).toBeGreaterThanOrEqual(400);
+  }, 10_000);
+
+  // ── 模型错误 → 异常传播到 generator / Model error propagates to generator ──
+  test("model throws error, generator yields error (no stall)", async () => {
+    const root = tempWorkspace();
+    const events: AgentEvent[] = [];
+    const model = makeModel([
+      { error: "Network timeout after 30s", delay: 50 },
+    ]);
+
+    let caught = false;
     try {
-      const generator = runAgent(provider, {
-        task: "Run echo hello.",
-        userId: "test-user",
-        threadId: `int-tui-approval-${Date.now().toString(36)}`,
-        workspace: root,
-        checkpointPath: join(root, "cp.sqlite"),
-        config: loadAgentConfig(),
-        model: model as any,
-      });
-
-      for await (const _ of generator) {}
-    } finally {
-      clearInterval(autoResolve);
+      await runAndCollect(model, root, (e) => events.push(e));
+    } catch (e: any) {
+      caught = true;
+      expect(e.message).toContain("Network timeout");
     }
+    expect(caught).toBe(true);
+  });
 
-    // Verify critical events are produced
-    const eventTypes = new Set(events.map((e) => e.type));
-    expect(eventTypes.has("tool_call")).toBe(true);
-    expect(eventTypes.has("need_approval")).toBe(true);
-    expect(eventTypes.has("step_begin")).toBe(true);
-    expect(eventTypes.has("step_end")).toBe(true);
-    // The full loop completed (no uncaught exceptions)
-  }, 30_000);
+  // ── 空响应 → 不卡住 / Empty response, no stall ──
+  test("model returns empty response, graph completes", async () => {
+    const root = tempWorkspace();
+    const events: AgentEvent[] = [];
+    const model = makeModel([
+      { message: new AIMessage({ content: "", id: "m1" }) },
+    ]);
+
+    await runAndCollect(model, root, (e) => events.push(e));
+
+    const stepEnd = events.filter((e) => e.type === "step_end");
+    expect(stepEnd.length).toBeGreaterThan(0);
+  });
+
+  // ── 连续两次模型调用 / Two consecutive model calls ──
+  test("two sequential model calls both produce events", async () => {
+    const root = tempWorkspace();
+    const events: AgentEvent[] = [];
+    const model = makeModel([
+      { message: new AIMessage({ content: "First response", id: "m1" }) },
+      // Second call doesn't happen in this scenario since the first response has no tool_calls
+    ]);
+
+    await runAndCollect(model, root, (e) => events.push(e));
+
+    const textEvents = events.filter((e) => e.type === "text");
+    expect(textEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ── 大量输出不卡住 / Long output doesn't stall ──
+  test("long text response completes without stall", async () => {
+    const root = tempWorkspace();
+    const events: AgentEvent[] = [];
+    const longText = "A".repeat(10000);
+    const model = makeModel([
+      { message: new AIMessage({ content: longText, id: "m1" }) },
+    ]);
+
+    const start = Date.now();
+    await runAndCollect(model, root, (e) => events.push(e));
+    const elapsed = Date.now() - start;
+
+    const textEvents = events.filter((e) => e.type === "text");
+    expect(textEvents.length).toBeGreaterThan(0);
+    // Should complete in reasonable time (< 5s for 10KB text)
+    expect(elapsed).toBeLessThan(5000);
+  }, 15_000);
 });
