@@ -1,0 +1,45 @@
+{
+  "blocks": [
+    {
+      "id": 10,
+      "kind": "user",
+      "content": "Explain this code"
+    },
+    {
+      "id": 11,
+      "kind": "text",
+      "content": "⟳ Model retry #1 (2000ms): Rate limit exceeded, retrying in 2s"
+    },
+    {
+      "id": 12,
+      "kind": "text",
+      "content": "This code implements a binary search algorithm.",
+      "streaming": false
+    }
+  ],
+  "interrupt": null,
+  "status": {
+    "phase": "building",
+    "plan": null,
+    "authorization": "default",
+    "workspaceAccess": "write",
+    "cacheHitRate": "<CACHE_HIT_RATE>",
+    "totalTokens": "<CACHE_TOKEN_COUNT>",
+    "currentNode": null,
+    "modelName": "deepseek-v4",
+    "thinkingMode": "max"
+  },
+  "exited": false,
+  "running": false,
+  "compacting": false,
+  "runCount": 1,
+  "thinkingVisible": true,
+  "leaderPending": false,
+  "showHelp": false,
+  "showModelSelector": false,
+  "ctrlCPressed": false,
+  "sessionKey": 0,
+  "exitRequested": false,
+  "editorRequested": false,
+  "runStartTime": 1778833257994
+}

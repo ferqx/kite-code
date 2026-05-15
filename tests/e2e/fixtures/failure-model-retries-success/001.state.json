@@ -1,0 +1,55 @@
+{
+  "blocks": [
+    {
+      "id": 13,
+      "kind": "user",
+      "content": "What is 2+2?"
+    },
+    {
+      "id": 14,
+      "kind": "text",
+      "content": "⟳ Model retry #1 (1000ms): Network error: ETIMEDOUT"
+    },
+    {
+      "id": 15,
+      "kind": "text",
+      "content": "⟳ Model retry #2 (2000ms): Network error: ETIMEDOUT"
+    },
+    {
+      "id": 16,
+      "kind": "text",
+      "content": "⟳ Model retry #3 (4000ms): Network error: ETIMEDOUT"
+    },
+    {
+      "id": 17,
+      "kind": "text",
+      "content": "2 + 2 = 4",
+      "streaming": false
+    }
+  ],
+  "interrupt": null,
+  "status": {
+    "phase": "building",
+    "plan": null,
+    "authorization": "default",
+    "workspaceAccess": "write",
+    "cacheHitRate": "<CACHE_HIT_RATE>",
+    "totalTokens": "<CACHE_TOKEN_COUNT>",
+    "currentNode": null,
+    "modelName": "deepseek-v4",
+    "thinkingMode": "max"
+  },
+  "exited": false,
+  "running": false,
+  "compacting": false,
+  "runCount": 1,
+  "thinkingVisible": true,
+  "leaderPending": false,
+  "showHelp": false,
+  "showModelSelector": false,
+  "ctrlCPressed": false,
+  "sessionKey": 0,
+  "exitRequested": false,
+  "editorRequested": false,
+  "runStartTime": 1778833258468
+}

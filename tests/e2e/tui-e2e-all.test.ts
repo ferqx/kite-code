@@ -7,6 +7,7 @@ import * as AM from "./scenarios/agent-messages";
 import * as TF from "./scenarios/tool-flow";
 import * as SD from "./scenarios/state-display";
 import * as IF from "./scenarios/input-flow";
+import * as FS from "./scenarios/failure-scenarios";
 
 const UPDATE = Bun.argv.includes("--update-snapshots") ||
   process.env.UPDATE_SNAPSHOTS === "true";
@@ -211,5 +212,35 @@ describe(`${label} Input flow`, () => {
 
   test("Ctrl+C interrupt during running", async () => {
     await verifyScenario("input-flow-ctrl-c", IF.ctrlCInterrupt, 1).verifyAll();
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// Failure scenarios
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} Failure scenarios`, () => {
+  test("agent error mid-response", async () => {
+    await verifyScenario("failure-agent-error", FS.agentError, 1).verifyAll();
+  });
+
+  test("operation retry (connection timeout)", async () => {
+    await verifyScenario("failure-retry", FS.operationRetry, 1).verifyAll();
+  });
+
+  test("model API retry (rate limit)", async () => {
+    await verifyScenario("failure-model-retry", FS.modelRetry, 1).verifyAll();
+  });
+
+  test("multiple model retries then success", async () => {
+    await verifyScenario("failure-model-retries-success", FS.modelRetriesThenSuccess, 1).verifyAll();
+  });
+
+  test("tool execution error (shell non-zero exit)", async () => {
+    await verifyScenario("failure-tool-error", FS.toolExecutionError, 2).verifyAll();
+  });
+
+  test("error then successful recovery", async () => {
+    await verifyScenario("failure-recovery", FS.errorRecovery, 2).verifyAll();
   });
 });

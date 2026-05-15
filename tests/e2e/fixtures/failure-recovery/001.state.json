@@ -1,0 +1,102 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": "user",
+      "content": "Read the config"
+    },
+    {
+      "id": 2,
+      "kind": "text",
+      "content": "Let me read config.json...",
+      "streaming": true
+    },
+    {
+      "id": 3,
+      "kind": "tool_card",
+      "callId": "mock-1778833716018",
+      "name": "read_file",
+      "args": {
+        "path": "config.json"
+      },
+      "status": "error",
+      "summary": "File not found: config.json",
+      "preview": "config.json",
+      "elapsedMs": 25
+    },
+    {
+      "id": 4,
+      "kind": "text",
+      "content": "⚠ Retry #1: Config file not found, searching for alternatives"
+    },
+    {
+      "id": 5,
+      "kind": "text",
+      "content": "config.json not found. Let me check for alternative config files.",
+      "streaming": true
+    },
+    {
+      "id": 6,
+      "kind": "tool_card",
+      "callId": "mock-1778833716234",
+      "name": "shell_execute",
+      "args": {
+        "command": "ls *.config.* 2>nul || echo 'none found'"
+      },
+      "status": "running",
+      "summary": "",
+      "preview": "ls *.config.* 2>nul || echo 'none found'"
+    },
+    {
+      "id": 7,
+      "kind": "approval",
+      "approval": {
+        "tool": "shell_execute",
+        "scope": "once",
+        "cwd": "D:\\app\\openpx-new",
+        "threadId": "mock-thread",
+        "command": "ls *.config.*",
+        "risk": "read",
+        "summary": "Search for config files",
+        "reason": "Test reason",
+        "approvalHash": "mock-hash",
+        "expectedEffects": [],
+        "grantOptions": [
+          "approve_once",
+          "same_command",
+          "full_access"
+        ],
+        "recommendedGrant": "approve_once"
+      }
+    }
+  ],
+  "interrupt": {
+    "kind": "approval",
+    "blockId": 7
+  },
+  "status": {
+    "phase": "building",
+    "plan": null,
+    "authorization": "default",
+    "workspaceAccess": "write",
+    "cacheHitRate": "<CACHE_HIT_RATE>",
+    "totalTokens": "<CACHE_TOKEN_COUNT>",
+    "currentNode": null,
+    "modelName": "deepseek-v4",
+    "thinkingMode": "max"
+  },
+  "exited": false,
+  "running": true,
+  "compacting": false,
+  "runCount": 1,
+  "thinkingVisible": true,
+  "leaderPending": false,
+  "showHelp": false,
+  "showModelSelector": false,
+  "ctrlCPressed": false,
+  "sessionKey": 0,
+  "exitRequested": false,
+  "editorRequested": false,
+  "runStartTime": 1778833715897,
+  "toolStartTimes": {}
+}
