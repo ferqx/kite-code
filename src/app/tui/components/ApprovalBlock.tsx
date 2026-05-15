@@ -51,9 +51,8 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     if (match) {
       if (match.grant) {
         const patternStr = match.showPattern ? ` ("${pattern}")` : "";
-        const cmd = editMode ? editedCommand : approval.command;
         provider.submitAction({ type: "approve", grant: match.grant });
-        onResolved(String(match.grant), match.grant, patternStr);
+        onResolved("approve_once", match.grant, patternStr);
       } else {
         provider.submitAction({ type: "reject" });
         onResolved("denied");
@@ -68,7 +67,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       if (opt.grant) {
         const patternStr = opt.showPattern ? ` ("${pattern}")` : "";
         provider.submitAction({ type: "approve", grant: opt.grant });
-        onResolved(String(opt.grant), opt.grant, patternStr);
+        onResolved("approve_once", opt.grant, patternStr);
       } else {
         provider.submitAction({ type: "reject" });
         onResolved("denied");
