@@ -411,8 +411,7 @@ export function chunkToEvents(
 
 function isToolMessage(msg: Record<string, unknown>): boolean {
   try {
-    const type = msg._getType;
-    if (typeof type === "function") return (type as () => string)() === "tool";
+    if (typeof msg._getType === "function") return (msg._getType as () => string).call(msg) === "tool";
   } catch { /* ignore */ }
   return false;
 }
