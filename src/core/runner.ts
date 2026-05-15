@@ -300,7 +300,19 @@ export function chunkToEvents(
           let summary = content.slice(0, 200);
           try {
             const p = JSON.parse(content);
-            if (p && typeof p === "object") { ok = p.ok !== false; summary = p.message ?? p.summary ?? summary; }
+            if (p && typeof p === "object") {
+              ok = p.ok !== false;
+              if (p.ok !== false) {
+                summary = (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
+              } else {
+                const reason = (p.failure as Record<string, unknown> | undefined)?.reason as string
+                  ?? (p.stderr as string)
+                  ?? (p.message as string)
+                  ?? (p.summary as string)
+                  ?? summary;
+                summary = reason;
+              }
+            }
           } catch { /* use raw content */ }
           events.push({
             type: "tool_done",
