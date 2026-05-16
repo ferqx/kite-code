@@ -37,7 +37,7 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
   }
 }
 
-/** macOS Seatbelt executor */
+/** macOS Seatbelt executor（参照 Codex create_seatbelt_command_args 使用 -p 传 profile）*/
 function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
   const profile = generateSandboxProfile(workspace);
@@ -45,13 +45,12 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => ({
     cmd: [
       "/usr/bin/sandbox-exec",
-      "-f",
-      "/dev/stdin",
+      "-p",
+      profile,
       "/bin/sh",
-      "-lc",
+      "-c",
       wrappedCommand,
     ],
-    stdin: profile,
   }));
 }
 
@@ -64,8 +63,8 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
 
   return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => {
     const innerCmd = seccompPath
-      ? [seccompPath, "/bin/sh", "-lc", wrappedCommand]
-      : ["/bin/sh", "-lc", wrappedCommand];
+      ? [seccompPath, "/bin/sh", "-c", wrappedCommand]
+      : ["/bin/sh", "-c", wrappedCommand];
     return { cmd: [bwrapPath, ...bwrapArgs, ...innerCmd] };
   });
 }

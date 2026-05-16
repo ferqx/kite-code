@@ -67,22 +67,41 @@ describe("sandbox executor integration", () => {
     }
   });
 
-  test("blocks file read outside workspace", async () => {
+  test("allows file read outside workspace (dev tools need system paths)", async () => {
     const ws = setupWorkspace();
-    // 在真实 HOME 目录下创建测试文件，该路径不在沙箱白名单中
-    // Create test file in real HOME, which is not in sandbox allowlist
-    const secretFile = join(homedir(), `.openpx-sandbox-test-${process.pid}`);
-    writeFileSync(secretFile, "secret");
+    // 文件读取不再被沙箱阻止，以满足 git、xcrun 等开发工具的需求
+    // 危险文件访问由 checkDangerousPaths 和工具策略兜底
+    // File reads are no longer blocked by sandbox for dev tool compatibility
+    // Dangerous file access is caught by checkDangerousPaths and tool policy
+    const externalFile = join(homedir(), `.openpx-sandbox-test-${process.pid}`);
+    writeFileSync(externalFile, "secret");
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({
         workspace: ws,
-        command: `cat "${secretFile}"`,
+        command: `cat "${externalFile}"`,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain("secret");
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test("blocks file write outside workspace", async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(homedir(), `.openpx-sandbox-test-write-${process.pid}`);
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `echo evil > "${externalFile}"`,
       });
       expect(result.ok).toBe(false);
       expect(result.exitCode).not.toBe(0);
     } finally {
-      rmSync(secretFile, { force: true });
+      rmSync(externalFile, { force: true });
       cleanupWorkspace(ws);
     }
   });

@@ -52,9 +52,9 @@ describe("sandbox profile generation", () => {
     expect(profile).toContain('(import "system.sb")');
   });
 
-  test("profile allows directory metadata traversal to resolve paths", () => {
+  test("profile allows global file read so dev tools (git, xcrun) can access system paths", () => {
     const profile = generateSandboxProfile("/tmp/test-workspace");
-    expect(profile).toContain("(allow file-read-metadata (subpath \"/\"))");
+    expect(profile).toContain('(allow file-read* (subpath "/"))');
   });
 
   test("profile includes tmp directories for file operations", () => {
