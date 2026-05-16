@@ -28,6 +28,7 @@ export interface TuiState {
   runCount: number;
   runStartTime?: number;
   thinkingVisible: boolean;
+  currentRunReasonId?: number;
   leaderPending: boolean;
   showHelp: boolean;
   showModelSelector: boolean;

@@ -95,8 +95,17 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
           return { ...state, blocks: [...state.blocks, block] };
         }
         case "reason": {
-          const block: OutputBlock = { id: nextId++, kind: "reason", content: event.data.text, folded: true };
-          return { ...state, blocks: [...state.blocks, block] };
+          if (state.currentRunReasonId != null) {
+            const blocks = state.blocks.map((b) =>
+              b.id === state.currentRunReasonId && b.kind === "reason"
+                ? { ...b, content: b.content + "\n\n" + event.data.text }
+                : b
+            );
+            return { ...state, blocks };
+          }
+          const id = nextId++;
+          const block: OutputBlock = { id, kind: "reason", content: event.data.text, folded: true };
+          return { ...state, blocks: [...state.blocks, block], currentRunReasonId: id };
         }
         case "tool_call": {
           const preview = getToolPreview(event.data.name, event.data.args);
@@ -220,7 +229,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return { ...state, exited: true, blocks: [...state.blocks, block] };
     }
     case "SET_RUNNING":
-      return { ...state, running: true, exited: false, runCount: state.runCount + 1, runStartTime: Date.now(), ctrlCPressed: false, exitRequested: false, sessionError: false };
+      return { ...state, running: true, exited: false, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false };
     case "SET_IDLE": {
       const blocks = state.blocks.map((b) =>
         b.kind === "text" && b.streaming ? { ...b, streaming: false } : b
@@ -236,7 +245,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     case "TOGGLE_THINKING":
       return { ...state, thinkingVisible: !state.thinkingVisible };
     case "CLEAR_OUTPUT":
-      return { ...state, blocks: [], toolStartTimes: undefined };
+      return { ...state, blocks: [], toolStartTimes: undefined, currentRunReasonId: undefined };
     case "RESOLVE_INTERRUPT": {
       const blocks = state.blocks.map((b) => {
         if (b.id !== action.blockId) return b;
@@ -378,6 +387,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         showHelp: false,
         showModelSelector: false,
         leaderPending: false,
+        currentRunReasonId: undefined,
         sessionKey: state.sessionKey + 1,
         status: { ...state.status, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null },
       };
@@ -406,6 +416,7 @@ const initialState: TuiState = {
   compacting: false,
   runCount: 0,
   thinkingVisible: true,
+  currentRunReasonId: undefined,
   leaderPending: false,
   showHelp: false,
   showModelSelector: false,
