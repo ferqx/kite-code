@@ -8,7 +8,22 @@ interface HeaderProps {
   status: StatusState;
   running: boolean;
   timerKey: number;
+  error?: boolean;
 }
+
+type CatMood = "working" | "error" | "idle";
+
+function catMood(running: boolean, error: boolean): CatMood {
+  if (running) return "working";
+  if (error) return "error";
+  return "idle";
+}
+
+const CAT_LINES: Record<CatMood, [string, string, string]> = {
+  working: ["  /\\_/\\  ", " ( ^ ^ ) ", "  > w <  "],
+  error:   ["  /\\_/\\  ", " ( T T ) ", "  > . <  "],
+  idle:    ["  /\\_/\\  ", " ( = = ) ", "  > ~ <  "],
+};
 
 function planLabel(status: StatusState): string {
   if (!status.plan) return "";
@@ -18,7 +33,7 @@ function planLabel(status: StatusState): string {
   return `Step ${done}/${total}${active ? `: ${active.step}` : ""}`;
 }
 
-export default function Header({ status, running, timerKey }: HeaderProps) {
+export default function Header({ status, running, timerKey, error }: HeaderProps) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -31,6 +46,9 @@ export default function Header({ status, running, timerKey }: HeaderProps) {
     return () => clearInterval(timer);
   }, [timerKey, running]);
 
+  const mood = catMood(running, !!error);
+  const [catTop, catMid, catBot] = CAT_LINES[mood];
+
   const authLabel = status.authorization === "full_access" ? "full" : "safe";
   const authColor = status.authorization === "full_access" ? t.warning : t.success;
   const rwLabel = status.workspaceAccess === "read-only" ? "ro" : "rw";
@@ -38,9 +56,7 @@ export default function Header({ status, running, timerKey }: HeaderProps) {
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={t.primary}>
-          {" ▐▛███▜▌   "}
-        </Text>
+        <Text color={t.primary}>{catTop}  </Text>
         <Text bold color={t.primary}>
           OpenPX
         </Text>
@@ -51,9 +67,7 @@ export default function Header({ status, running, timerKey }: HeaderProps) {
         )}
       </Box>
       <Box>
-        <Text color={t.primary}>
-          {"▝▜█████▛▘   "}
-        </Text>
+        <Text color={t.primary}>{catMid}  </Text>
         <Text color={t.muted}>{status.modelName}</Text>
         <Text color={t.dim}> · </Text>
         <Text color={authColor}>[{authLabel}]</Text>
@@ -71,9 +85,7 @@ export default function Header({ status, running, timerKey }: HeaderProps) {
         )}
       </Box>
       <Box>
-        <Text color={t.primary}>
-          {"  ▘▘ ▝▝    "}
-        </Text>
+        <Text color={t.primary}>{catBot}  </Text>
         <Text color={t.dim}>{process.cwd()}</Text>
       </Box>
     </Box>

@@ -35,6 +35,7 @@ export interface TuiState {
   sessionKey: number;
   exitRequested: boolean;
   editorRequested: boolean;
+  sessionError: boolean;
 }
 
 export interface InterruptState {

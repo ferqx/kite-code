@@ -821,6 +821,7 @@ describe("App", () => {
       sessionKey: 0,
       exitRequested: false,
       editorRequested: false,
+      sessionError: false,
       ...overrides,
     };
   }

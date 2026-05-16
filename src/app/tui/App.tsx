@@ -174,7 +174,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         }
         case "error": {
           const block: OutputBlock = { id: nextId++, kind: "text", content: `Error: ${event.data.message}` };
-          return { ...state, blocks: [...state.blocks, block] };
+          return { ...state, blocks: [...state.blocks, block], sessionError: true };
         }
         case "file_change": {
           const change: FileChangeRecord = {
@@ -220,7 +220,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return { ...state, exited: true, blocks: [...state.blocks, block] };
     }
     case "SET_RUNNING":
-      return { ...state, running: true, exited: false, runCount: state.runCount + 1, runStartTime: Date.now(), ctrlCPressed: false, exitRequested: false };
+      return { ...state, running: true, exited: false, runCount: state.runCount + 1, runStartTime: Date.now(), ctrlCPressed: false, exitRequested: false, sessionError: false };
     case "SET_IDLE": {
       const blocks = state.blocks.map((b) =>
         b.kind === "text" && b.streaming ? { ...b, streaming: false } : b
@@ -374,6 +374,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         compacting: false,
         ctrlCPressed: false,
         exitRequested: false,
+        sessionError: false,
         showHelp: false,
         showModelSelector: false,
         leaderPending: false,
@@ -412,6 +413,7 @@ const initialState: TuiState = {
   sessionKey: 0,
   exitRequested: false,
   editorRequested: false,
+  sessionError: false,
 };
 
 export function createInitialState(): TuiState {
@@ -464,7 +466,7 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
 
   return (
     <Box flexDirection="column">
-      <MemoHeader status={state.status} running={state.running} timerKey={state.runCount} />
+      <MemoHeader status={state.status} running={state.running} timerKey={state.runCount} error={state.sessionError} />
       <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
       {state.showHelp && <HelpPanel onClose={hideHelp} />}
       {state.showModelSelector && (

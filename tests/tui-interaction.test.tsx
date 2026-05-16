@@ -60,7 +60,7 @@ function fakeState(overrides: Partial<TuiState> = {}): TuiState {
     exited: false, running: false, compacting: false, runCount: 0,
     thinkingVisible: true, leaderPending: false,
     showHelp: false, showModelSelector: false, ctrlCPressed: false,
-    sessionKey: 0, exitRequested: false, editorRequested: false,
+    sessionKey: 0, exitRequested: false, editorRequested: false, sessionError: false,
     ...overrides,
   };
 }
