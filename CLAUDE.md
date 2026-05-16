@@ -13,6 +13,7 @@
 bun install          # 安装依赖
 bun test             # 运行默认测试（不含真实模型/网络端到端测试）
 bun test tests/graph.test.ts  # 运行单个测试文件
+bun test tests/e2e/            # 运行 TUI e2e 套件（mock agent，无需真实模型）
 bun run typecheck    # 类型检查
 bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/openpx.jsonc）
 ```
@@ -54,6 +55,9 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 | 上下文整理 | `bun test tests/context.test.ts` |
 | 运行时编排 | `bun test tests/runner.test.ts` |
 | checkpoint 持久化 | `bun test tests/checkpoint.test.ts tests/integration.test.ts` |
+| TUI reducer 逻辑 | `bun test tests/tui-reducer.test.ts` |
+| TUI 布局/渲染 | `bun test tests/tui-layout.test.tsx` |
+| TUI e2e（mock agent） | `bun test tests/e2e/` |
 | 跨模块/不确定 | `bun test` + `bun run typecheck` |
 | 真实模型链路 | `bun run test:real` |
 

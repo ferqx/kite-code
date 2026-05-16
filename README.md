@@ -20,12 +20,14 @@
 
 ## 源码结构
 
+- `src/app/tui/`：基于 React Ink 的交互式 TUI（OutputArea、App 布局、reducer、键盘快捷键、斜杠命令支持）。
 - `src/app/`：CLI 入口、run/resume 编排和事件流标准化。
 - `src/harness/`：LangGraph 控制循环、状态、路由、审批和工具分发。
 - `src/model/`：模型适配器工厂、OpenAI-compatible provider 适配、Ollama provider 适配、DeepSeek 专用 patch、静态 prompt、运行时上下文和上下文压缩。
 - `src/tools/`：模型工具定义，以及文件、shell、patch 工具实现。
 - `src/persistence/`：Bun SQLite LangGraph checkpointer。
 - `src/config/`：本地 `~/.openpx/openpx.jsonc` 配置加载器。
+- `tests/e2e/`：TUI 端到端测试套件（mock agent，88 个场景，覆盖斜杠命令、键盘快捷键、设置/会话、真实 agent 对话、视口回归）。
 - `src/shared/`：共享类型和 prompt cache 指标。
 
 ## 安装
@@ -191,6 +193,14 @@ bun run agent resume --thread demo --user local --answer "使用最小实现，�
 ```bash
 bun test
 ```
+
+TUI 端到端测试（mock agent，无需 API 密钥）：
+
+```bash
+bun test tests/e2e/
+```
+
+覆盖 88 个场景：斜杠命令、键盘快捷键、设置/会话管理、真实 agent 对话（StreamingMockModel + 完整 TUI 渲染）和视口回归测试。
 
 真实配置模型端到端测试：
 

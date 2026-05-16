@@ -100,12 +100,15 @@
 - 行内代码高亮
 - 链接渲染
 
-### 自动滚动
+### 渲染策略（2026-05-16 更新）
 
-- 模型输出时自动 stick to bottom
-- 用户按 Up/PgUp/鼠标滚动回溯时取消自动跟随
-- 新输出到达时若已在底部则自动跟随，否则保持位置
-- 按 End 或提交新输入时恢复自动跟随
+- OutputArea 始终渲染全部 block，不做视口剔除
+- 内容超出终端可视区域后由终端原生 scrollback 处理滚动
+- ↑ ↓ 键仅移动 focusedIndex（控制 ❯ 视觉指示器），不改变可见范围
+- Enter 键用于展开/折叠 reason block
+- 不做视口居中计算，不做 autoScrollRef 切换
+
+详见 `docs/space/execution/active/tui-no-viewport-culling.md`
 
 ### 推理折叠
 
