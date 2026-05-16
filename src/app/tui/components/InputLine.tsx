@@ -1,8 +1,14 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import TextInput from "ink-text-input";
 import { useFileSearch } from "../hooks/useFileSearch";
+import {
+  useSlashSuggestions,
+  SLASH_COMMANDS,
+  SLASH_COMMAND_DEFS,
+  MODEL_NAMES,
+} from "../hooks/useSlashSuggestions";
 import { darkTheme as t } from "../theme";
 
 interface InputLineProps {
@@ -11,15 +17,21 @@ interface InputLineProps {
   disabled?: boolean;
   placeholder?: string;
   workspace: string;
+  /** When an overlay (HelpPanel, ModelSelector) is active, suppress slash suggestions */
+  overlayActive?: boolean;
 }
 
-const SLASH_COMMANDS = [
-  "thinking", "model", "sessions", "plan", "code", "auth",
-  "clear", "compact", "undo", "redo", "export", "editor",
-  "setting", "help", "exit",
-];
-
-const MODEL_NAMES = ["deepseek-v4", "deepseek-v3", "gpt-4o", "claude-sonnet-4"];
+function commonPrefix(strings: string[]): string {
+  if (strings.length === 0) return "";
+  let prefix = strings[0];
+  for (const s of strings.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < s.length && prefix[i] === s[i]) i++;
+    prefix = prefix.slice(0, i);
+    if (prefix === "") break;
+  }
+  return prefix;
+}
 
 function completeSlash(input: string): string | null {
   if (!input.startsWith("/")) return null;
@@ -32,13 +44,8 @@ function completeSlash(input: string): string | null {
     const matches = SLASH_COMMANDS.filter((c) => c.startsWith(partial));
     if (matches.length === 1) return "/" + matches[0];
     if (matches.length > 1) {
-      let common = matches[0];
-      for (const m of matches.slice(1)) {
-        let i = 0;
-        while (i < common.length && i < m.length && common[i] === m[i]) i++;
-        common = common.slice(0, i);
-      }
-      if (common.length > partial.length) return "/" + common;
+      const prefix = commonPrefix(matches);
+      if (prefix.length > partial.length) return "/" + prefix;
     }
     return null;
   }
@@ -48,38 +55,112 @@ function completeSlash(input: string): string | null {
     const matches = MODEL_NAMES.filter((m) => m.startsWith(partial));
     if (matches.length === 1) return "/model " + matches[0];
     if (matches.length > 1) {
-      let common = matches[0];
-      for (const m of matches.slice(1)) {
-        let i = 0;
-        while (i < common.length && i < m.length && common[i] === m[i]) i++;
-        common = common.slice(0, i);
-      }
-      if (common.length > partial.length) return "/model " + common;
+      const prefix = commonPrefix(matches);
+      if (prefix.length > partial.length) return "/model " + prefix;
     }
   }
 
   return null;
 }
 
-export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace }: InputLineProps) {
+export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive }: InputLineProps) {
   const [value, setValue] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const fileSearch = useFileSearch(value, workspace);
+  const slashSuggestions = useSlashSuggestions(value);
+
+  // Force TextInput remount on programmatic value changes so cursor resets to end.
+  // ink-text-input only advances cursorOffset when it exceeds new length, never
+  // when the value grows externally — so we remount via changing key.
+  const textKeyRef = useRef(0);
+  const commitValue = useCallback((next: string) => {
+    textKeyRef.current++;
+    setValue(next);
+  }, []);
 
   const handleSubmit = useCallback(
     (val: string) => {
       if (val.trim()) {
         setHistory((prev) => [...prev, val]);
         setHistoryIndex(-1);
+        textKeyRef.current++;
         onSubmit(val);
-        setValue("");
+        // Keep slash command text visible so it stays in the input while
+        // secondary overlays (ModelSelector) are active above it.
+        if (!val.startsWith("/")) {
+          setValue("");
+        }
       }
     },
     [onSubmit]
   );
 
-  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; tab?: boolean }) => {
+  // Check if input value is exactly a known slash command (no args, no trailing spaces)
+  const slashMatched = useMemo((): boolean => {
+    if (!value.startsWith("/")) return false;
+    if (/\s/.test(value)) return false;
+    const cmd = value.slice(1);
+    if (!cmd) return false;
+    return SLASH_COMMAND_DEFS.some(
+      (def) => def.name === cmd || def.aliases.includes(cmd)
+    );
+  }, [value]);
+
+  // Ghost text: the untyped suffix of the selected suggestion, shown as a dimmed preview
+  const slashGhost = useMemo((): string | null => {
+    if (!slashSuggestions.active || !slashSuggestions.result) return null;
+    const selected = slashSuggestions.result.items[slashSuggestions.selectedIndex];
+    if (!selected) return null;
+    const suffix = selected.command.slice(slashSuggestions.result.partial.length);
+    return suffix.length > 0 ? suffix : null;
+  }, [slashSuggestions.active, slashSuggestions.result, slashSuggestions.selectedIndex]);
+
+  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; tab?: boolean; escape?: boolean; rightArrow?: boolean }) => {
+    // When an overlay is active, yield all keyboard handling to it
+    if (overlayActive) return;
+
+    // Slash command suggestion navigation
+    if (slashSuggestions.active && slashSuggestions.result) {
+      if (key.escape) {
+        commitValue("");
+        return;
+      }
+      if (key.upArrow) {
+        slashSuggestions.setSelectedIndex((s: number) => Math.max(0, s - 1));
+        return;
+      }
+      if (key.downArrow) {
+        slashSuggestions.setSelectedIndex((s: number) =>
+          Math.min(slashSuggestions.result!.items.length - 1, s + 1)
+        );
+        return;
+      }
+      if (key.tab || key.rightArrow) {
+        // Commit ghost text: shell-style common prefix completion
+        const names = slashSuggestions.result.items.map((item) => item.command);
+        const prefix = commonPrefix(names);
+        if (prefix.length > slashSuggestions.result.partial.length) {
+          commitValue(slashSuggestions.result.kind === "model" ? "/model " + prefix : "/" + prefix);
+        } else {
+          // No common prefix extension — commit the selected item directly
+          const selected = slashSuggestions.result.items[slashSuggestions.selectedIndex];
+          if (selected) {
+            commitValue(slashSuggestions.replaceCommand(selected, slashSuggestions.result.kind));
+          }
+        }
+        return;
+      }
+      if (key.return) {
+        // Commit ghost text on Enter, then let TextInput submit
+        const selected = slashSuggestions.result.items[slashSuggestions.selectedIndex];
+        if (selected) {
+          commitValue(slashSuggestions.replaceCommand(selected, slashSuggestions.result.kind));
+        }
+        return;
+      }
+    }
+
     // @file search navigation
     if (fileSearch.active) {
       if (key.upArrow) {
@@ -94,23 +175,23 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         const selected = fileSearch.results[fileSearch.selectedIndex];
         if (selected) {
           const newVal = fileSearch.replaceQuery(selected);
-          setValue(newVal);
+          commitValue(newVal);
         }
         return;
       }
     }
 
-    // Tab completion for slash commands
+    // Tab completion for slash commands (fallback when dropdown is not active)
     if (key.tab) {
       const completed = completeSlash(value);
       if (completed) {
-        setValue(completed);
+        commitValue(completed);
       }
       return;
     }
 
     if (key.return && key.shift) {
-      setValue((v) => v + "\n");
+      commitValue(value + "\n");
       return;
     }
     if (key.upArrow && history.length > 0) {
@@ -142,11 +223,61 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
   const promptChar = mode === "approval" ? "[A/S/F/D] " : mode === "question" ? "? " : "> ";
 
+  // Suppress slash suggestions when an overlay is active (stack discipline)
+  const showSlashDropdown = slashSuggestions.active && slashSuggestions.result && !overlayActive;
+
   return (
     <Box flexDirection="column">
+      {/* Main input line with ghost text */}
+      <Box>
+        <Text color={t.primary} bold={slashMatched}>{promptChar}</Text>
+        <TextInput
+          key={textKeyRef.current}
+          value={value}
+          onChange={setValue}
+          onSubmit={handleSubmit}
+          placeholder={placeholder}
+          focus={!overlayActive}
+        />
+        {slashGhost && !overlayActive && (
+          <Text color={t.dim}>{slashGhost}</Text>
+        )}
+      </Box>
+
+      {/* Slash command suggestion dropdown */}
+      {showSlashDropdown && (
+        <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginTop={1}>
+          <Text bold color={t.primary}>
+            {slashSuggestions.result!.kind === "model"
+              ? `── Models matching "${slashSuggestions.result!.partial}" ──`
+              : `── Commands matching /${slashSuggestions.result!.partial} ──`}
+          </Text>
+          {slashSuggestions.result!.items.map((item, i) => {
+            const isSelected = i === slashSuggestions.selectedIndex;
+            const aliasStr =
+              slashSuggestions.result!.kind === "command" && item.aliases.length > 0
+                ? ` (${item.aliases.join(", ")})`
+                : "";
+            const argsStr = item.args ? ` ${item.args}` : "";
+            return (
+              <Box key={item.command}>
+                <Text color={isSelected ? t.primary : t.muted}>
+                  {isSelected ? "❯ " : "  "}/{item.command}{argsStr}
+                </Text>
+                <Text color={t.dim}>{aliasStr}</Text>
+                {item.description && (
+                  <Text color={t.dim}> — {item.description}</Text>
+                )}
+              </Box>
+            );
+          })}
+          <Text color={t.dim}>↑↓ navigate  Tab/→ complete  Enter commit  Esc dismiss</Text>
+        </Box>
+      )}
+
       {/* @file search dropdown */}
       {fileSearch.active && (
-        <Box flexDirection="column" borderStyle="round" borderColor={t.warning} paddingX={1} marginBottom={1}>
+        <Box flexDirection="column" borderStyle="round" borderColor={t.warning} paddingX={1} marginTop={1}>
           <Text bold color={t.warning}>── Files matching @{fileSearch.query} ──</Text>
           {fileSearch.results.map((f, i) => (
             <Box key={f.path}>
@@ -163,17 +294,6 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
           <Text color={t.dim}>Tab/Enter select  Esc dismiss</Text>
         </Box>
       )}
-
-      {/* Main input line */}
-      <Box>
-        <Text color={t.primary}>{promptChar}</Text>
-        <TextInput
-          value={value}
-          onChange={setValue}
-          onSubmit={handleSubmit}
-          placeholder={placeholder}
-        />
-      </Box>
     </Box>
   );
 }

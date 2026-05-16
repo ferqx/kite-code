@@ -1,0 +1,102 @@
+import { useState, useMemo } from "react";
+
+export interface SlashCommandDef {
+  name: string;
+  aliases: string[];
+  description: string;
+  args?: string;
+}
+
+export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
+  { name: "thinking", aliases: ["t"], description: "Toggle thinking visibility" },
+  { name: "model", aliases: [], description: "Switch model", args: "[name]" },
+  { name: "sessions", aliases: [], description: "Show sessions", args: "[id]" },
+  { name: "plan", aliases: [], description: "Enter planning mode" },
+  { name: "auth", aliases: [], description: "Toggle authorization mode", args: "[mode]" },
+  { name: "clear", aliases: ["c"], description: "Clear output" },
+  { name: "compact", aliases: [], description: "Compact context" },
+  { name: "setting", aliases: ["config"], description: "Show settings" },
+  { name: "help", aliases: ["h"], description: "Show help" },
+  { name: "exit", aliases: ["quit", "q"], description: "Exit OpenPX" },
+];
+
+export const SLASH_COMMANDS = SLASH_COMMAND_DEFS.map((c) => c.name);
+export const MODEL_NAMES = ["deepseek-v4", "deepseek-v3", "gpt-4o", "claude-sonnet-4"];
+
+export interface SuggestionItem {
+  command: string;
+  aliases: string[];
+  description: string;
+  args?: string;
+}
+
+export interface SlashSuggestionsResult {
+  kind: "command" | "model";
+  partial: string;
+  items: SuggestionItem[];
+}
+
+export function useSlashSuggestions(inputValue: string) {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const result = useMemo((): SlashSuggestionsResult | null => {
+    // /model <partial-model-name>
+    const modelMatch = inputValue.match(/^\/model\s+(\S*)$/i);
+    if (modelMatch) {
+      const partial = modelMatch[1].toLowerCase();
+      const models = MODEL_NAMES.filter((m) => m.toLowerCase().startsWith(partial));
+      if (models.length === 0) return null;
+      return {
+        kind: "model",
+        partial,
+        items: models.map((m) => ({ command: m, aliases: [], description: "" })),
+      };
+    }
+
+    // /<partial-command>
+    const cmdMatch = inputValue.match(/^\/(\S*)$/);
+    if (!cmdMatch) return null;
+
+    const partial = cmdMatch[1].toLowerCase();
+    const commands = SLASH_COMMAND_DEFS.filter(
+      (cmd) =>
+        cmd.name.startsWith(partial) ||
+        cmd.aliases.some((a) => a.startsWith(partial))
+    );
+
+    if (commands.length === 0) return null;
+
+    return {
+      kind: "command",
+      partial,
+      items: commands.map((c) => ({
+        command: c.name,
+        aliases: c.aliases,
+        description: c.description,
+        args: c.args,
+      })),
+    };
+  }, [inputValue]);
+
+  // Reset selection when results change
+  const active = result !== null && result.items.length > 0;
+
+  // Memo: clamp selectedIndex when results change
+  const safeSelectedIndex =
+    result && selectedIndex >= result.items.length ? 0 : selectedIndex;
+
+  const replaceCommand = (item: SuggestionItem, kind: "command" | "model"): string => {
+    if (kind === "model") {
+      return inputValue.replace(/\/model\s+\S*$/, `/model ${item.command}`);
+    }
+    return "/" + item.command;
+  };
+
+  return {
+    result,
+    active,
+    selectedIndex: safeSelectedIndex,
+    setSelectedIndex,
+    replaceCommand,
+  };
+}

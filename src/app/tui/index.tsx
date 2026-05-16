@@ -238,6 +238,7 @@ function TuiBootstrap() {
         onSubmit={handleInput}
         disabled={state.running}
         workspace={workspace}
+        overlayActive={state.showHelp || state.showModelSelector}
       />
     </App>
   );

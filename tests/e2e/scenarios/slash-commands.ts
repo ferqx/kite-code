@@ -142,49 +142,12 @@ export const slashModelList: CmdCase = {
   ],
 };
 
-/** /export — exports session to file */
-export const slashExport: CmdCase = {
-  scenario: {
-    terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
-    steps: [
-      { type: "dispatch", actionType: "EXPORT_SESSION" },
-      { type: "agent-done" },
-    ],
-  },
-  expectations: [
-    {
-      reason: "terminal",
-      ansi: [
-        { type: "contains", text: "Session exported", description: "export confirmation" },
-      ],
-      state: [{ type: "running-is", value: false }],
-    },
-  ],
-};
-
 /** /plan — switch to planning phase */
 export const slashPlan: CmdCase = {
   scenario: {
     terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
     steps: [
       { type: "dispatch", actionType: "SET_PHASE", payload: { phase: "planning" } },
-      { type: "agent-done" },
-    ],
-  },
-  expectations: [
-    {
-      reason: "terminal",
-      state: [{ type: "running-is", value: false }],
-    },
-  ],
-};
-
-/** /code — switch to building phase */
-export const slashCode: CmdCase = {
-  scenario: {
-    terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
-    steps: [
-      { type: "dispatch", actionType: "SET_PHASE", payload: { phase: "building" } },
       { type: "agent-done" },
     ],
   },
@@ -213,36 +176,3 @@ export const slashCompact: CmdCase = {
   ],
 };
 
-/** /editor — open external editor */
-export const slashEditor: CmdCase = {
-  scenario: {
-    terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
-    steps: [
-      { type: "dispatch", actionType: "OPEN_EDITOR" },
-      { type: "agent-done" },
-    ],
-  },
-  expectations: [
-    {
-      reason: "terminal",
-      state: [{ type: "running-is", value: false }],
-    },
-  ],
-};
-
-/** /undo — undo stub */
-export const slashUndo: CmdCase = {
-  scenario: {
-    terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
-    steps: [
-      { type: "dispatch", actionType: "UNDO" as any },
-      { type: "agent-done" },
-    ],
-  },
-  expectations: [
-    {
-      reason: "terminal",
-      state: [{ type: "running-is", value: false }],
-    },
-  ],
-};

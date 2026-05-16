@@ -49,13 +49,9 @@ describe("parseSlashCommand", () => {
     expect(parseSlashCommand("/sessions run-abc123")).toEqual({ type: "sessions", id: "run-abc123" });
   });
 
-  // ── /plan / /code ──
+  // ── /plan ──
   test("parses /plan", () => {
     expect(parseSlashCommand("/plan")).toEqual({ type: "plan" });
-  });
-
-  test("parses /code", () => {
-    expect(parseSlashCommand("/code")).toEqual({ type: "code" });
   });
 
   // ── /auth ──
@@ -79,25 +75,6 @@ describe("parseSlashCommand", () => {
   // ── /compact ──
   test("parses /compact", () => {
     expect(parseSlashCommand("/compact")).toEqual({ type: "compact" });
-  });
-
-  // ── /undo / /redo ──
-  test("parses /undo", () => {
-    expect(parseSlashCommand("/undo")).toEqual({ type: "undo" });
-  });
-
-  test("parses /redo", () => {
-    expect(parseSlashCommand("/redo")).toEqual({ type: "redo" });
-  });
-
-  // ── /export ──
-  test("parses /export", () => {
-    expect(parseSlashCommand("/export")).toEqual({ type: "export" });
-  });
-
-  // ── /editor ──
-  test("parses /editor", () => {
-    expect(parseSlashCommand("/editor")).toEqual({ type: "editor" });
   });
 
   // ── /setting ──

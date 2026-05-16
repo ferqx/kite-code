@@ -7,14 +7,9 @@ export type SlashAction =
   | { type: "model_list" }
   | { type: "sessions"; id?: string }
   | { type: "plan" }
-  | { type: "code" }
   | { type: "auth"; mode?: string }
   | { type: "clear" }
   | { type: "compact" }
-  | { type: "undo" }
-  | { type: "redo" }
-  | { type: "export" }
-  | { type: "editor" }
   | { type: "setting" }
   | { type: "help" }
   | { type: "exit" }
@@ -33,14 +28,9 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: "model", name: arg || undefined };
     case "sessions": return { type: "sessions", id: arg || undefined };
     case "plan": return { type: "plan" };
-    case "code": return { type: "code" };
     case "auth": return { type: "auth", mode: arg || undefined };
     case "clear": case "c": return { type: "clear" };
     case "compact": return { type: "compact" };
-    case "undo": return { type: "undo" };
-    case "redo": return { type: "redo" };
-    case "export": return { type: "export" };
-    case "editor": return { type: "editor" };
     case "setting": case "config": return { type: "setting" };
     case "help": case "h": return { type: "help" };
     case "exit": case "quit": case "q": return { type: "exit" };
@@ -70,10 +60,6 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
         dispatch({ type: "SET_PHASE", phase: "planning" as const });
         dispatch({ type: "SWITCH_AUTH", mode: "default" });
         break;
-      case "code":
-        dispatch({ type: "SET_PHASE", phase: "building" as const });
-        dispatch({ type: "SWITCH_AUTH", mode: "full_access" });
-        break;
       case "auth":
         dispatch({ type: "SWITCH_AUTH", mode: action.mode ?? "toggle" });
         break;
@@ -82,18 +68,6 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
         break;
       case "compact":
         dispatch({ type: "COMPACT_CONTEXT" });
-        break;
-      case "undo":
-        dispatch({ type: "UNDO" });
-        break;
-      case "redo":
-        dispatch({ type: "REDO" });
-        break;
-      case "export":
-        dispatch({ type: "EXPORT_SESSION" });
-        break;
-      case "editor":
-        dispatch({ type: "OPEN_EDITOR" });
         break;
       case "setting":
         dispatch({ type: "SHOW_SETTING" });

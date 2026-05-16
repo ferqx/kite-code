@@ -48,7 +48,7 @@ export default function ModelSelector({ models = DEFAULT_MODELS, currentModel, o
         {models.map((model, i) => (
           <Box key={model.id}>
             <Text color={i === selected ? t.primary : t.muted}>
-              {i === selected ? ">" : " "} {model.name}{model.id === currentModel ? " (current)" : ""}
+              {i === selected ? "❯" : " "} {model.name}{model.id === currentModel ? " (current)" : ""}
             </Text>
             {model.description ? <Text color={t.dim}> — {model.description}</Text> : null}
           </Box>

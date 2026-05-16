@@ -298,28 +298,12 @@ describe(`${label} Slash commands`, () => {
     await verify("slash-model-list", SC.slashModelList, 1).verifyAll();
   });
 
-  test("/export exports session", async () => {
-    await verify("slash-export", SC.slashExport, 1).verifyAll();
-  });
-
   test("/plan switches to planning phase", async () => {
     await verify("slash-plan", SC.slashPlan, 1).verifyAll();
   });
 
-  test("/code switches to building phase", async () => {
-    await verify("slash-code", SC.slashCode, 1).verifyAll();
-  });
-
   test("/compact requests context compaction", async () => {
     await verify("slash-compact", SC.slashCompact, 1).verifyAll();
-  });
-
-  test("/editor opens external editor", async () => {
-    await verify("slash-editor", SC.slashEditor, 1).verifyAll();
-  });
-
-  test("/undo shows stub message", async () => {
-    await verify("slash-undo", SC.slashUndo, 1).verifyAll();
   });
 });
 
