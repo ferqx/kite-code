@@ -85,11 +85,15 @@ export const slashClear: CmdCase = {
   ],
 };
 
-/** /thinking — toggles thinking visibility */
+/** /thinking — shows reasoning content; second use hides it */
 export const slashThinking: CmdCase = {
   scenario: {
     terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
     steps: [
+      { type: "agent-reason", text: "Let me analyze the request carefully." },
+      { type: "agent-done" },
+      { type: "dispatch", actionType: "TOGGLE_THINKING" },
+      { type: "agent-done" },
       { type: "dispatch", actionType: "TOGGLE_THINKING" },
       { type: "agent-done" },
     ],
@@ -97,6 +101,27 @@ export const slashThinking: CmdCase = {
   expectations: [
     {
       reason: "terminal",
+      ansi: [
+        { type: "contains", text: "▶ Thinking...", description: "default: folded, content hidden" },
+      ],
+      state: [
+        { type: "running-is", value: false },
+        { type: "has-block-kind", kind: "reason" },
+      ],
+    },
+    {
+      reason: "terminal",
+      ansi: [
+        { type: "contains", text: "▼ Thinking", description: "first /thinking: unfolded, content visible" },
+        { type: "contains", text: "Let me analyze", description: "reasoning content shown" },
+      ],
+      state: [{ type: "running-is", value: false }],
+    },
+    {
+      reason: "terminal",
+      ansi: [
+        { type: "not-contains", text: "▼ Thinking", description: "second /thinking: hidden" },
+      ],
       state: [{ type: "running-is", value: false }],
     },
   ],

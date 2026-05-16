@@ -16,7 +16,7 @@ export function useGlobalKeys(dispatch: Dispatch<any>, running: boolean) {
       return;
     }
     if (key.ctrl && input === "t") {
-      dispatch({ type: "TOGGLE_THINKING" });
+      dispatch({ type: "TOGGLE_ALL_REASON" });
       return;
     }
     if ((key.ctrl && input === "h") || input === "\x1bOP" || input === "\x1b[11~") {

@@ -247,12 +247,48 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "TOGGLE_REASON", id });
       expect((s.blocks[0] as any).folded).toBe(false);
     });
-    test("TOGGLE_THINKING toggles flag both ways", () => {
+    test("TOGGLE_ALL_REASON toggles all reason blocks folded", () => {
       let s = fresh();
-      s = dispatch(s, { type: "TOGGLE_THINKING" });
-      expect(s.thinkingVisible).toBe(false);
+      s = dispatch(s, reasonEvt("first"));
+      s = dispatch(s, textEvt("between"));
+      s = dispatch(s, reasonEvt("second"));
+      // Both start folded
+      expect((s.blocks[0] as any).folded).toBe(true);
+      expect((s.blocks[2] as any).folded).toBe(true);
+      // Toggle: expand all
+      s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
+      expect((s.blocks[0] as any).folded).toBe(false);
+      expect((s.blocks[2] as any).folded).toBe(false);
+      // Toggle: collapse all
+      s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
+      expect((s.blocks[0] as any).folded).toBe(true);
+      expect((s.blocks[2] as any).folded).toBe(true);
+    });
+    test("TOGGLE_ALL_REASON is no-op when no reason blocks", () => {
+      let s = dispatch(fresh(), textEvt("hello"));
+      const prev = s.blocks;
+      s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
+      expect(s.blocks).toBe(prev);
+    });
+    test("TOGGLE_THINKING shows content on first use, hides on second", () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt("step 1"));
+      // Default: thinkingVisible=true, folded=true → content NOT visible
+      // First toggle should SHOW content
       s = dispatch(s, { type: "TOGGLE_THINKING" });
       expect(s.thinkingVisible).toBe(true);
+      expect((s.blocks[0] as any).folded).toBe(false);
+      // Second toggle should HIDE content
+      s = dispatch(s, { type: "TOGGLE_THINKING" });
+      expect(s.thinkingVisible).toBe(false);
+    });
+    test("TOGGLE_THINKING shows content when thinking was off", () => {
+      let s = fresh();
+      s = { ...s, thinkingVisible: false };
+      s = dispatch(s, reasonEvt("step 1"));
+      s = dispatch(s, { type: "TOGGLE_THINKING" });
+      expect(s.thinkingVisible).toBe(true);
+      expect((s.blocks[0] as any).folded).toBe(false);
     });
     test("CLEAR_OUTPUT clears blocks", () => {
       let s = dispatch(fresh(), textEvt("hello"));

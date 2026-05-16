@@ -19,6 +19,7 @@ export type Action =
   | { type: "SET_RUNNING" }
   | { type: "SET_IDLE" }
   | { type: "TOGGLE_REASON"; id: number }
+  | { type: "TOGGLE_ALL_REASON" }
   | { type: "TOGGLE_THINKING" }
   | { type: "CLEAR_OUTPUT" }
   | { type: "RESOLVE_INTERRUPT"; blockId: number; resolution: string | { action: string; grant?: string; pattern?: string } }
@@ -124,12 +125,15 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         }
         case "reason": {
           if (state.currentRunReasonId != null) {
-            const blocks = state.blocks.map((b) =>
-              b.id === state.currentRunReasonId && b.kind === "reason"
-                ? { ...b, content: b.content + "\n\n" + event.data.text }
-                : b
-            );
-            return { ...state, blocks };
+            const lastBlock = state.blocks.at(-1);
+            if (lastBlock?.kind === "reason" && lastBlock.id === state.currentRunReasonId) {
+              const blocks = state.blocks.map((b) =>
+                b.id === state.currentRunReasonId && b.kind === "reason"
+                  ? { ...b, content: b.content + "\n\n" + event.data.text }
+                  : b
+              );
+              return { ...state, blocks };
+            }
           }
           const id = nextId++;
           const block: OutputBlock = { id, kind: "reason", content: event.data.text, folded: true };
@@ -277,8 +281,29 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       );
       return { ...state, blocks };
     }
-    case "TOGGLE_THINKING":
-      return { ...state, thinkingVisible: !state.thinkingVisible };
+    case "TOGGLE_ALL_REASON": {
+      const reasonBlocks = state.blocks.filter((b) => b.kind === "reason");
+      if (reasonBlocks.length === 0) return state;
+      const anyExpanded = reasonBlocks.some((b) => b.kind === "reason" && !b.folded);
+      const blocks = state.blocks.map((b) =>
+        b.kind === "reason" ? { ...b, folded: anyExpanded } : b
+      );
+      return { ...state, blocks };
+    }
+    case "TOGGLE_THINKING": {
+      const reasonBlocks = state.blocks.filter((b) => b.kind === "reason");
+      // Any reasoning content currently visible to the user?
+      const isVisible = state.thinkingVisible && reasonBlocks.some((b) => b.kind === "reason" && !b.folded);
+      if (isVisible) {
+        // Hide everything
+        return { ...state, thinkingVisible: false };
+      }
+      // Show: enable visibility + unfold all reason blocks
+      const blocks = state.blocks.map((b) =>
+        b.kind === "reason" ? { ...b, folded: false } : b
+      );
+      return { ...state, thinkingVisible: true, blocks };
+    }
     case "CLEAR_OUTPUT":
       return { ...state, blocks: [], toolStartTimes: undefined, currentRunReasonId: undefined };
     case "RESOLVE_INTERRUPT": {

@@ -152,12 +152,12 @@ function TuiBootstrap() {
 
   const handleInput = React.useCallback(
     (value: string) => {
-      if (agentLoopActiveRef.current) return;
-
       if (value.startsWith("/")) {
         handleSlashCommand(value);
         return;
       }
+
+      if (agentLoopActiveRef.current) return;
 
       if (value.startsWith("!")) {
         const command = value.slice(1).trim();

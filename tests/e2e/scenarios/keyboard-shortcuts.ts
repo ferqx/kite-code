@@ -74,18 +74,34 @@ export const ctrlLClearOutput: KbCase = {
   ],
 };
 
-/** Ctrl+T — toggle thinking visibility */
-export const ctrlTToggleThinking: KbCase = {
+/** Ctrl+T — expand/collapse all reasoning blocks */
+export const ctrlTToggleAllReason: KbCase = {
   scenario: {
     terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
     steps: [
-      { type: "dispatch", actionType: "TOGGLE_THINKING" },
+      { type: "agent-reason", text: "Let me analyze this step by step." },
       { type: "agent-done" },
+      { type: "dispatch", actionType: "TOGGLE_ALL_REASON" },
+      { type: "assert-snapshot" },
     ],
   },
   expectations: [
     {
       reason: "terminal",
+      ansi: [
+        { type: "contains", text: "▶ Thinking...", description: "reason block initially folded" },
+      ],
+      state: [
+        { type: "running-is", value: false },
+        { type: "has-block-kind", kind: "reason" },
+      ],
+    },
+    {
+      reason: "explicit",
+      ansi: [
+        { type: "contains", text: "▼ Thinking", description: "after Ctrl+T: expanded" },
+        { type: "contains", text: "Let me analyze this step by step", description: "content visible" },
+      ],
       state: [{ type: "running-is", value: false }],
     },
   ],
@@ -180,6 +196,80 @@ export const leaderNewSession: KbCase = {
         { type: "blocks-max", count: 2, description: "only exit summary in new session" },
         { type: "running-is", value: false },
       ],
+    },
+  ],
+};
+
+/** Down arrow + Enter — expand a folded reason block (▶ Thinking... → ▼ Thinking) */
+export const enterExpandReason: KbCase = {
+  scenario: {
+    terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
+    steps: [
+      { type: "agent-reason", text: "Let me think about this carefully. I need to analyze the codebase structure." },
+      { type: "agent-done" },
+      { type: "simulate-key", key: "\x1b[B" },
+      { type: "simulate-key", key: "\r" },
+      { type: "assert-snapshot" },
+    ],
+  },
+  expectations: [
+    {
+      reason: "terminal",
+      ansi: [
+        { type: "contains", text: "▶ Thinking...", description: "initial state: folded reason block" },
+      ],
+      state: [
+        { type: "running-is", value: false },
+        { type: "has-block-kind", kind: "reason" },
+      ],
+    },
+    {
+      reason: "explicit",
+      ansi: [
+        { type: "contains", text: "▼ Thinking", description: "expanded: shows ▼ Thinking label" },
+        { type: "contains", text: "Let me think about this carefully", description: "expanded: content visible" },
+      ],
+      state: [{ type: "running-is", value: false }],
+    },
+  ],
+};
+
+/** Enter toggles reason block back to folded (▼ Thinking → ▶ Thinking...) */
+export const enterCollapseReason: KbCase = {
+  scenario: {
+    terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
+    steps: [
+      { type: "agent-reason", text: "Analyzing the request..." },
+      { type: "agent-done" },
+      { type: "simulate-key", key: "\x1b[B" },
+      { type: "simulate-key", key: "\r" },
+      { type: "assert-snapshot" },
+      { type: "simulate-key", key: "\r" },
+      { type: "assert-snapshot" },
+    ],
+  },
+  expectations: [
+    {
+      reason: "terminal",
+      ansi: [
+        { type: "contains", text: "▶ Thinking...", description: "initial: folded" },
+      ],
+      state: [{ type: "running-is", value: false }],
+    },
+    {
+      reason: "explicit",
+      ansi: [
+        { type: "contains", text: "▼ Thinking", description: "after first Enter: expanded" },
+        { type: "contains", text: "Analyzing the request", description: "content visible" },
+      ],
+      state: [{ type: "running-is", value: false }],
+    },
+    {
+      reason: "explicit",
+      ansi: [
+        { type: "contains", text: "▶ Thinking...", description: "after second Enter: folded again" },
+      ],
+      state: [{ type: "running-is", value: false }],
     },
   ],
 };

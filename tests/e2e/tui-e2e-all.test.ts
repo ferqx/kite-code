@@ -286,8 +286,8 @@ describe(`${label} Slash commands`, () => {
     await verify("slash-clear", SC.slashClear, 2).verifyAll();
   });
 
-  test("/thinking toggles thinking visibility", async () => {
-    await verify("slash-thinking", SC.slashThinking, 1).verifyAll();
+  test("/thinking shows then hides reasoning", async () => {
+    await verify("slash-thinking", SC.slashThinking, 3).verifyAll();
   });
 
   test("/auth switches authorization mode", async () => {
@@ -324,8 +324,8 @@ describe(`${label} Keyboard shortcuts`, () => {
     await verify("kb-ctrl-l", KS.ctrlLClearOutput, 2).verifyAll();
   });
 
-  test("Ctrl+T toggles thinking", async () => {
-    await verify("kb-ctrl-t", KS.ctrlTToggleThinking, 1).verifyAll();
+  test("Ctrl+T expands/collapses all reasoning", async () => {
+    await verify("kb-ctrl-t", KS.ctrlTToggleAllReason, 2).verifyAll();
   });
 
   test("Ctrl+R toggles authorization", async () => {
@@ -350,6 +350,14 @@ describe(`${label} Keyboard shortcuts`, () => {
 
   test("Ctrl+O escape resets overlays", async () => {
     await verify("kb-ctrl-o", KS.ctrlOEscape, 1).verifyAll();
+  });
+
+  test("Enter expands folded reason block", async () => {
+    await verify("kb-enter-expand-reason", KS.enterExpandReason, 2).verifyAll();
+  });
+
+  test("Enter collapses expanded reason block", async () => {
+    await verify("kb-enter-collapse-reason", KS.enterCollapseReason, 3).verifyAll();
   });
 });
 

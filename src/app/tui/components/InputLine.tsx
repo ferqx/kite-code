@@ -78,19 +78,37 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     textKeyRef.current++;
     setValue(next);
   }, []);
+  // Track whether slash input needs commit (active suggestions + partial match).
+  // Set after slashMatched is computed below.
+  const slashNeedsCommitRef = useRef(false);
+  // Track whether @file search is active so handleSubmit can suppress
+  // premature TextInput submits (same root cause as slash suggestions).
+  const fileActiveRef = useRef(false);
+  fileActiveRef.current = fileSearch.active;
+  // Saved value for Ctrl+letter revert. UPDATED ONLY at end of non-Ctrl
+  // keystrokes in the useInput handler — NOT during render. Each useInput
+  // runs in its own discreteUpdates, so TextInput's setState already flushed
+  // and any render-updated ref would be stale by the time our handler fires.
+  const savedValueRef = useRef(value);
+  // DO NOT update savedValueRef here — updated in useInput handler below.
 
   const handleSubmit = useCallback(
     (val: string) => {
-      if (val.trim()) {
-        setHistory((prev) => [...prev, val]);
-        setHistoryIndex(-1);
-        textKeyRef.current++;
-        onSubmit(val);
-        // Keep slash command text visible so it stays in the input while
-        // secondary overlays (ModelSelector) are active above it.
-        if (!val.startsWith("/")) {
-          setValue("");
-        }
+      if (!val.trim()) return;
+      // When slash suggestions or @file search are active and the current text
+      // is only a partial match, TextInput's premature submit would fail or
+      // trigger a wrong action. Suppress; the useInput handler commits + submits.
+      if (val.startsWith("/") && slashNeedsCommitRef.current) return;
+      if (fileActiveRef.current) return;
+      setHistory((prev) => [...prev, val]);
+      setHistoryIndex(-1);
+      textKeyRef.current++;
+      onSubmit(val);
+      // Clear input immediately for one-shot slash commands (no secondary overlay).
+      // Keep it for /model which opens ModelSelector as a stacked overlay.
+      const isSlashOverlay = /^\/model(\s|$)/.test(val);
+      if (!isSlashOverlay) {
+        setValue("");
       }
     },
     [onSubmit]
@@ -107,6 +125,10 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     );
   }, [value]);
 
+  // Sync ref for handleSubmit: only suppress TextInput's premature submit
+  // when suggestions are active AND the current text is not yet a valid command.
+  slashNeedsCommitRef.current = slashSuggestions.active && !slashMatched;
+
   // Ghost text: the untyped suffix of the selected suggestion, shown as a dimmed preview
   const slashGhost = useMemo((): string | null => {
     if (!slashSuggestions.active || !slashSuggestions.result) return null;
@@ -116,7 +138,18 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     return suffix.length > 0 ? suffix : null;
   }, [slashSuggestions.active, slashSuggestions.result, slashSuggestions.selectedIndex]);
 
-  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; tab?: boolean; escape?: boolean; rightArrow?: boolean }) => {
+  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; tab?: boolean; escape?: boolean; rightArrow?: boolean; ctrl?: boolean }) => {
+    // Ctrl+letter shortcuts (t, l, r, h, e, o, x) are handled by
+    // useGlobalKeys/useLeaderKeys. ink-text-input only filters Ctrl+C,
+    // so these letters leak into the input value via TextInput (which
+    // fires before us in its own discreteUpdates that already flushed).
+    // Revert using savedValueRef — set at the END of the previous non-Ctrl
+    // handler invocation, so it survives the intermediate re-render.
+    if (key.ctrl && /^[a-z]$/.test(_input)) {
+      setValue(savedValueRef.current);
+      return;
+    }
+
     // When an overlay is active, yield all keyboard handling to it
     if (overlayActive) return;
 
@@ -152,10 +185,21 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         return;
       }
       if (key.return) {
-        // Commit ghost text on Enter, then let TextInput submit
+        // Commit completed command and submit it inline — TextInput already
+        // processed Enter (with the partial text) and was suppressed via
+        // slashActiveRef in handleSubmit.
         const selected = slashSuggestions.result.items[slashSuggestions.selectedIndex];
         if (selected) {
-          commitValue(slashSuggestions.replaceCommand(selected, slashSuggestions.result.kind));
+          const fullCmd = slashSuggestions.replaceCommand(selected, slashSuggestions.result.kind);
+          commitValue(fullCmd);
+          setHistory((prev) => [...prev, fullCmd]);
+          setHistoryIndex(-1);
+          textKeyRef.current++;
+          onSubmit(fullCmd);
+          const isSlashOverlay = /^\/model(\s|$)/.test(fullCmd);
+          if (!isSlashOverlay) {
+            setValue("");
+          }
         }
         return;
       }
@@ -163,6 +207,11 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
     // @file search navigation
     if (fileSearch.active) {
+      if (key.escape) {
+        // Remove @query to dismiss the dropdown
+        commitValue(value.replace(/@\S*$/, ""));
+        return;
+      }
       if (key.upArrow) {
         fileSearch.setSelectedIndex((s: number) => Math.max(0, s - 1));
         return;
@@ -171,11 +220,26 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         fileSearch.setSelectedIndex((s: number) => Math.min(fileSearch.results.length - 1, s + 1));
         return;
       }
-      if (key.tab || key.return) {
+      if (key.tab) {
+        const selected = fileSearch.results[fileSearch.selectedIndex];
+        if (selected) {
+          commitValue(fileSearch.replaceQuery(selected));
+        }
+        return;
+      }
+      if (key.return) {
+        // Same root cause as slash suggestions: TextInput fires before
+        // InputLine and would submit the uncompleted text. Commit + submit
+        // inline; handleSubmit suppresses the premature TextInput submit.
         const selected = fileSearch.results[fileSearch.selectedIndex];
         if (selected) {
           const newVal = fileSearch.replaceQuery(selected);
           commitValue(newVal);
+          setHistory((prev) => [...prev, newVal]);
+          setHistoryIndex(-1);
+          textKeyRef.current++;
+          onSubmit(newVal);
+          setValue("");
         }
         return;
       }
@@ -210,7 +274,14 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         setHistoryIndex(idx);
         setValue(history[idx]);
       }
+      return;
     }
+
+    // Normal keystroke (regular character, backspace, etc.) — update the
+    // saved value so the next Ctrl+letter revert uses the correct snapshot.
+    // Ctrl keystrokes return early at the top; programmatic value changes
+    // (slash/file autocomplete) return before reaching here.
+    savedValueRef.current = value;
   });
 
   if (disabled) {
