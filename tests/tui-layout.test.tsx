@@ -349,12 +349,12 @@ describe("MarkdownBlock", () => {
     expect(lastFrame()).toContain("quoted text");
   });
 
-  test("renders code block with fence and line prefix", () => {
+  test("renders code block with lang label and line prefix", () => {
     const { lastFrame } = render(
       <MarkdownBlock content={"```ts\nconst x = 1;\nreturn x;\n```"} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain("```ts");
+    expect(frame).toContain("┌─ ts ─");
     expect(frame).toContain("const x = 1");
   });
 
@@ -702,7 +702,7 @@ describe("OutputArea", () => {
     expect(frame).toContain("npm test");
   });
 
-  test("renders tool_card with done status and summary", () => {
+  test("renders tool_card with done status, hides summary for success", () => {
     const blocks: OutputBlock[] = [
       { id: 1, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "done", summary: "OK", preview: "foo.ts", elapsedMs: 1234 },
     ];
@@ -710,8 +710,32 @@ describe("OutputArea", () => {
       <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
     );
     const frame = lastFrame();
-    expect(frame).toContain("OK");
-    expect(frame).toContain("1.2s");
+    expect(frame).not.toContain("OK");
+    expect(frame).toContain("foo.ts");
+    expect(frame).not.toContain("1.2s");
+  });
+
+  test("renders tool_card with error status and shows summary", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "tool_card", callId: "c1", name: "shell_execute", args: {}, status: "error", summary: "command not found", elapsedMs: 100 },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("command not found");
+    expect(frame).toContain("100ms");
+  });
+
+  test("renders tool_card with detail annotation", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "tool_card", callId: "c1", name: "edit_file", args: {}, status: "done", summary: "", detail: "+3 -2" },
+    ];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("+3 -2");
   });
 
   test("renders file_change block", () => {

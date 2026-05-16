@@ -342,11 +342,13 @@ export function chunkToEvents(
               if (p.ok !== false) {
                 summary = (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
               } else {
-                const reason = (p.failure as Record<string, unknown> | undefined)?.reason as string
-                  ?? (p.stderr as string)
-                  ?? (p.message as string)
-                  ?? (p.summary as string)
-                  ?? summary;
+                const reason = (p.rejected as boolean)
+                  ? ((p.reason as string) ?? "action rejected")
+                  : (p.failure as Record<string, unknown> | undefined)?.reason as string
+                    ?? (p.stderr as string)
+                    ?? (p.message as string)
+                    ?? (p.summary as string)
+                    ?? summary;
                 summary = reason;
               }
             }

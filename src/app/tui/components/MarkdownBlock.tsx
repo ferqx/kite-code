@@ -86,7 +86,6 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
   let i = 0;
 
   while (i < line.length) {
-    // Comment: // or #
     if ((lang === "ts" || lang === "py" || lang === "sh") && line[i] === "/" && line[i + 1] === "/") {
       tokens.push({ text: line.slice(i), color: t.dim });
       return tokens;
@@ -100,7 +99,6 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
       return tokens;
     }
 
-    // Strings
     if (line[i] === '"' || line[i] === "'" || line[i] === "`") {
       const quote = line[i];
       let j = i + 1;
@@ -115,7 +113,6 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
       continue;
     }
 
-    // Numbers
     if (/[0-9]/.test(line[i]) && (i === 0 || /[\s([{=+\-*/%<>,;:]/.test(line[i - 1]))) {
       let j = i;
       while (j < line.length && /[0-9a-fA-FxX._]/.test(line[j])) j++;
@@ -127,7 +124,6 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
       }
     }
 
-    // Words (keywords, identifiers)
     if (/[a-zA-Z_$]/.test(line[i])) {
       let j = i;
       while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j])) j++;
@@ -142,7 +138,6 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
       continue;
     }
 
-    // Other characters
     tokens.push({ text: line[i] });
     i++;
   }
@@ -167,57 +162,255 @@ function CodeLine({ line, lang }: { line: string; lang: string }) {
   );
 }
 
+// ── CJK display width ──
+
+function charWidth(code: number): number {
+  if (code < 0x20) return 0;
+  if (code < 0x7f) return 1;
+  if (
+    (code >= 0x1100 && code <= 0x115f) || // Hangul Jamo
+    (code >= 0x2e80 && code <= 0x303e) || // CJK radicals, symbols
+    (code >= 0x3040 && code <= 0x33bf) || // Hiragana, Katakana, Bopomofo, CJK compat
+    (code >= 0x3400 && code <= 0x4dbf) || // CJK Ext-A
+    (code >= 0x4e00 && code <= 0xa4cf) || // CJK Unified + Yi
+    (code >= 0xac00 && code <= 0xd7a3) || // Hangul Syllables
+    (code >= 0xf900 && code <= 0xfaff) || // CJK Compat Ideographs
+    (code >= 0xfe10 && code <= 0xfe6f) || // Vertical forms, CJK compat
+    (code >= 0xff01 && code <= 0xff60) || // Fullwidth forms
+    (code >= 0xffe0 && code <= 0xffe6) || // Fullwidth signs
+    (code >= 0x1f300 && code <= 0x1f9ff) || // Emoji, pictographs
+    (code >= 0x20000 && code <= 0x2ffff)   // CJK Ext-B+
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+function stringWidth(s: string): number {
+  let width = 0;
+  for (const ch of s) {
+    width += charWidth(ch.codePointAt(0) ?? 0);
+  }
+  return width;
+}
+
+// ── table detection & rendering ──
+
+const PIPE = /[|│]/; // | or │ (box-drawing vertical)
+
+function isTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  // Markdown: | col1 | col2 | or │ col1 │ col2 │
+  // Also support: col1 | col2 | col3 (no leading pipe)
+  if (/^[|│]/.test(trimmed) && /[|│]$/.test(trimmed)) return true;
+  // Row has at least two pipe separators → likely a table row
+  const pipes = trimmed.match(/[|│]/g);
+  return (pipes?.length ?? 0) >= 2;
+}
+
+function isTableSeparator(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  // Must contain at least one pipe (| or │) and consist of separator chars only
+  if (!/[|│]/.test(trimmed)) return false;
+  return /^[\s\-:|─━┼╿]+$/.test(trimmed);
+}
+
+function parseTable(lines: string[]): { headers: string[]; rows: string[][]; widths: number[] } {
+  const parseCells = (line: string) => {
+    let trimmed = line.trim();
+    // Strip leading/trailing pipe │
+    trimmed = trimmed.replace(/^[|│]\s*/, "").replace(/\s*[|│]$/, "");
+    return trimmed.split(PIPE).map(c => c.trim());
+  };
+
+  const headers = parseCells(lines[0]);
+  const rows: string[][] = [];
+  for (let i = 2; i < lines.length; i++) {
+    rows.push(parseCells(lines[i]));
+  }
+
+  const widths = headers.map((h, col) => {
+    let max = stringWidth(h);
+    rows.forEach(r => {
+      const cell = r[col] ?? "";
+      const w = stringWidth(cell);
+      if (w > max) max = w;
+    });
+    return max;
+  });
+
+  return { headers, rows, widths };
+}
+
+function padCell(text: string, width: number): string {
+  const current = stringWidth(text);
+  if (current >= width) return text;
+  return text + " ".repeat(width - current);
+}
+
+function TableBlock({ lines }: { lines: string[] }) {
+  const { headers, rows, widths } = parseTable(lines);
+
+  return (
+    <Box flexDirection="column">
+      {/* header */}
+      <Box>
+        <Text color={t.dim}>┌</Text>
+        {headers.map((h, ci) => (
+          <React.Fragment key={ci}>
+            {ci > 0 && <Text color={t.dim}>┬</Text>}
+            <Text color={t.dim}>{"─".repeat(widths[ci] + 2)}</Text>
+          </React.Fragment>
+        ))}
+        <Text color={t.dim}>┐</Text>
+      </Box>
+      <Box>
+        <Text color={t.dim}>│</Text>
+        {headers.map((h, ci) => (
+          <React.Fragment key={ci}>
+            {ci > 0 && <Text color={t.dim}>│</Text>}
+            <Text bold color={t.primary}> {padCell(h, widths[ci])} </Text>
+          </React.Fragment>
+        ))}
+        <Text color={t.dim}>│</Text>
+      </Box>
+      <Box>
+        <Text color={t.dim}>├</Text>
+        {widths.map((w, ci) => (
+          <React.Fragment key={ci}>
+            {ci > 0 && <Text color={t.dim}>┼</Text>}
+            <Text color={t.dim}>{"─".repeat(w + 2)}</Text>
+          </React.Fragment>
+        ))}
+        <Text color={t.dim}>┤</Text>
+      </Box>
+      {/* data rows */}
+      {rows.map((row, ri) => (
+        <Box key={ri}>
+          <Text color={t.dim}>│</Text>
+          {row.map((cell, ci) => (
+            <React.Fragment key={ci}>
+              {ci > 0 && <Text color={t.dim}>│</Text>}
+              <Text color={t.muted}> {padCell(cell, widths[ci])} </Text>
+            </React.Fragment>
+          ))}
+          {row.length < headers.length && (
+            <Text color={t.muted}>{" ".repeat(widths.slice(row.length).reduce((a, w) => a + w + 3, 0))}</Text>
+          )}
+          <Text color={t.dim}>│</Text>
+        </Box>
+      ))}
+      {/* bottom border */}
+      <Box>
+        <Text color={t.dim}>└</Text>
+        {widths.map((w, ci) => (
+          <React.Fragment key={ci}>
+            {ci > 0 && <Text color={t.dim}>┴</Text>}
+            <Text color={t.dim}>{"─".repeat(w + 2)}</Text>
+          </React.Fragment>
+        ))}
+        <Text color={t.dim}>┘</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ── line grouping ──
+
+type LineGroup =
+  | { kind: "single"; line: string; index: number }
+  | { kind: "code"; lines: string[]; lang: string; startIndex: number }
+  | { kind: "table"; lines: string[]; startIndex: number };
+
+function groupLines(lines: string[]): LineGroup[] {
+  const groups: LineGroup[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Code block
+    if (line.startsWith("```")) {
+      const lang = detectLang(line);
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith("```")) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      groups.push({ kind: "code", lines: codeLines, lang, startIndex: i });
+      i++; // skip closing ```
+      continue;
+    }
+
+    // Table: must have header row + separator row
+    if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      const tableLines: string[] = [line, lines[i + 1]];
+      i += 2;
+      while (i < lines.length && isTableRow(lines[i])) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      groups.push({ kind: "table", lines: tableLines, startIndex: i });
+      continue;
+    }
+
+    groups.push({ kind: "single", line, index: i });
+    i++;
+  }
+
+  return groups;
+}
+
 // ── main component ──
 
 export default function MarkdownBlock({ content, streaming }: MarkdownBlockProps) {
   const lines = content.split("\n");
-  let inCodeBlock = false;
-  let codeLang = "";
+  const groups = groupLines(lines);
 
   return (
     <Box flexDirection="column">
-      {lines.map((line, i) => {
-        if (line.startsWith("```")) {
-          if (inCodeBlock) {
-            inCodeBlock = false;
-            codeLang = "";
-          } else {
-            inCodeBlock = true;
-            codeLang = detectLang(line);
-          }
+      {groups.map((group, gi) => {
+        if (group.kind === "code") {
           return (
-            <Text key={i} color={t.dim}>
-              {line}
-            </Text>
-          );
-        }
-
-        if (inCodeBlock) {
-          return (
-            <Box key={i} paddingLeft={1}>
-              <Text color={t.dim}>│ </Text>
-              <CodeLine line={line} lang={codeLang} />
+            <Box key={gi} flexDirection="column">
+              <Text color={t.dim}>┌─ {group.lang || "code"} ─</Text>
+              {group.lines.map((codeLine, ci) => (
+                <Box key={ci} paddingLeft={1}>
+                  <Text color={t.dim}>│ </Text>
+                  <CodeLine line={codeLine} lang={group.lang} />
+                </Box>
+              ))}
+              <Text color={t.dim}>└─</Text>
             </Box>
           );
         }
 
+        if (group.kind === "table") {
+          return <TableBlock key={gi} lines={group.lines} />;
+        }
+
+        // ── single line ──
+        const line = group.line;
+
         if (line.startsWith("### ")) {
           return (
-            <Text key={i} bold color={t.primary}>
+            <Text key={gi} bold color={t.primary}>
               {line.slice(4)}
             </Text>
           );
         }
         if (line.startsWith("## ")) {
           return (
-            <Text key={i} bold color={t.primary}>
+            <Text key={gi} bold color={t.primary}>
               ── {line.slice(3)} ──
             </Text>
           );
         }
         if (line.startsWith("# ")) {
           return (
-            <Text key={i} bold color={t.primary} underline>
+            <Text key={gi} bold color={t.primary} underline>
               {line.slice(2)}
             </Text>
           );
@@ -226,7 +419,7 @@ export default function MarkdownBlock({ content, streaming }: MarkdownBlockProps
         if (line.startsWith("- ") || line.startsWith("* ")) {
           const indent = line.match(/^\s*/)?.[0].length ?? 0;
           return (
-            <Box key={i} paddingLeft={indent}>
+            <Box key={gi} paddingLeft={indent}>
               <Text color={t.muted}>· </Text>
               <MarkdownLine content={line.slice(2)} />
             </Box>
@@ -235,17 +428,17 @@ export default function MarkdownBlock({ content, streaming }: MarkdownBlockProps
 
         if (line.startsWith("> ")) {
           return (
-            <Text key={i} color={t.dim}>
+            <Text key={gi} color={t.dim}>
               │ {line.slice(2)}
             </Text>
           );
         }
 
         if (line.trim() === "") {
-          return <Box key={i} height={1} />;
+          return <Box key={gi} height={1} />;
         }
 
-        return <MarkdownLine key={i} content={line} />;
+        return <MarkdownLine key={gi} content={line} />;
       })}
       {streaming && <Text color={t.primary}>▌</Text>}
     </Box>

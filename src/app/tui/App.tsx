@@ -77,6 +77,34 @@ function modelListText(): string {
   ].join("\n");
 }
 
+function computeToolDetail(name: string, args: Record<string, unknown>): string | undefined {
+  switch (name) {
+    case "read_file": {
+      const offset = typeof args.offset === "number" ? args.offset : undefined;
+      const limit = typeof args.limit === "number" ? args.limit : undefined;
+      if (offset != null && offset > 1) {
+        return limit != null ? `L${offset}-L${offset + limit - 1}` : `L${offset}-`;
+      }
+      if (limit != null) {
+        return `L1-L${limit}`;
+      }
+      return undefined;
+    }
+    case "edit_file": {
+      const oldStr = typeof args.old_string === "string" ? args.old_string : "";
+      const newStr = typeof args.new_string === "string" ? args.new_string : "";
+      const removed = oldStr.split("\n").length;
+      const added = newStr.split("\n").length;
+      const parts: string[] = [];
+      if (added > 0) parts.push(`+${added}`);
+      if (removed > 0) parts.push(`-${removed}`);
+      return parts.length > 0 ? parts.join(" ") : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
 export function eventReducer(state: TuiState, action: Action): TuiState {
   switch (action.type) {
     case "EVENT": {
@@ -123,11 +151,18 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
           const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
           const nextTimes = new Map(state.toolStartTimes);
           nextTimes.delete(event.data.call_id);
-          const blocks = state.blocks.map((b) =>
-            b.kind === "tool_card" && b.callId === event.data.call_id
-              ? { ...b, status: event.data.ok ? "done" as const : "error" as const, summary: event.data.summary, elapsedMs }
-              : b
-          );
+          const blocks = state.blocks.map((b) => {
+            if (b.kind === "tool_card" && b.callId === event.data.call_id) {
+              return {
+                ...b,
+                status: event.data.ok ? "done" as const : "error" as const,
+                summary: event.data.summary,
+                elapsedMs,
+                detail: computeToolDetail(b.name, b.args),
+              };
+            }
+            return b;
+          });
           return { ...state, blocks, toolStartTimes: nextTimes };
         }
         case "state_change": {
@@ -477,16 +512,9 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
 
   return (
     <Box flexDirection="column">
-      <MemoHeader status={state.status} running={state.running} timerKey={state.runCount} error={state.sessionError} />
+      <MemoHeader status={state.status} running={state.running} timerKey={state.runCount} error={state.sessionError} paused={!!state.interrupt} />
       <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
       {state.showHelp && <HelpPanel onClose={hideHelp} />}
-      {state.showModelSelector && (
-        <ModelSelector
-          currentModel={state.status.modelName}
-          onSelect={selectModel}
-          onClose={hideModelSelector}
-        />
-      )}
       {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
         <ApprovalBlock
           approval={interruptBlock.approval}
@@ -502,6 +530,13 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
         />
       )}
       {children}
+      {state.showModelSelector && (
+        <ModelSelector
+          currentModel={state.status.modelName}
+          onSelect={selectModel}
+          onClose={hideModelSelector}
+        />
+      )}
       <Footer />
     </Box>
   );

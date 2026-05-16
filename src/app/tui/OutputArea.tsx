@@ -50,11 +50,46 @@ function resolveApprovalLabel(resolved?: { action: string; grant?: string; patte
   return `? ${resolved.action}`;
 }
 
+const MAX_TOOL_LINES = 12;
+
+function renderToolSummary(summary: string, isError: boolean) {
+  const prefix = isError ? "✕ " : "⎿ ";
+  const color = isError ? t.error : t.dim;
+  const text = summary.trimEnd();
+  const lines = text.split("\n");
+
+  if (lines.length <= 1) {
+    return (
+      <Text color={color}>
+        {prefix}{text.slice(0, 300)}
+      </Text>
+    );
+  }
+
+  const displayLines = lines.slice(0, MAX_TOOL_LINES);
+  const truncated = lines.length > MAX_TOOL_LINES;
+
+  return (
+    <React.Fragment>
+      {displayLines.map((line, i) => (
+        <Text key={i} color={color}>
+          {i === 0 ? prefix : "   "}{line.slice(0, 200)}
+        </Text>
+      ))}
+      {truncated && (
+        <Text color={t.dim}>   ... ({lines.length - MAX_TOOL_LINES} more lines)</Text>
+      )}
+    </React.Fragment>
+  );
+}
+
+const BLOCK_GAP = 1;
+
 function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: boolean, _i: number, prevBlock?: OutputBlock) {
   switch (block.kind) {
     case "user":
       return (
-        <Box key={block.id}>
+        <Box key={block.id} marginBottom={BLOCK_GAP}>
           <Text color={t.primary}>❯ </Text>
           <MarkdownBlock content={block.content} />
         </Box>
@@ -62,7 +97,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
 
     case "text":
       return (
-        <Box key={block.id}>
+        <Box key={block.id} marginBottom={BLOCK_GAP}>
           {isFocused ? <Text color={t.primary}>❯ </Text> : null}
           <MarkdownBlock content={block.content} streaming={block.streaming} />
         </Box>
@@ -71,7 +106,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
     case "reason": {
       const isConsecutive = prevBlock?.kind === "reason";
       return (
-        <Box key={block.id} flexDirection="column">
+        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           {!isConsecutive && (
             <Text color={isFocused ? t.primary : t.dim}>
               {!thinkingVisible || block.folded ? "▶ Thinking..." : "▼ Thinking"}
@@ -91,25 +126,26 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
 
     case "tool_card":
       return (
-        <Box key={block.id} flexDirection="column" marginBottom={1}>
+        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           <Box>
             <Text color={toolColor(block.status)}>⏺ </Text>
             <Text color={t.primary}>{block.name}</Text>
             {block.preview ? (
               <Text color={t.muted}> {block.preview}</Text>
             ) : null}
+            {block.detail ? (
+              <Text color={t.dim}> {block.detail}</Text>
+            ) : null}
             {block.status === "running" ? (
               <Text color={t.dim}> ...</Text>
             ) : null}
-            {block.elapsedMs != null && (
+            {block.elapsedMs != null && block.name === "shell_execute" && (
               <Text color={t.dim}> ({formatElapsed(block.elapsedMs)})</Text>
             )}
           </Box>
-          {block.status !== "running" && block.summary ? (
-            <Box paddingLeft={3}>
-              <Text color={block.status === "error" ? t.error : t.dim}>
-                {block.status === "error" ? "✕ " : "⎿ "}{block.summary.slice(0, 200)}
-              </Text>
+          {block.status === "error" && block.summary ? (
+            <Box paddingLeft={3} flexDirection="column">
+              {renderToolSummary(block.summary, true)}
             </Box>
           ) : null}
         </Box>
@@ -117,7 +153,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
 
     case "file_change":
       return (
-        <Box key={block.id} flexDirection="column">
+        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           <Text color={t.muted}>── File Changes ──</Text>
           {block.changes.map((change, ci) => {
             const { prefix, color } = changePrefix(change.kind);
@@ -146,7 +182,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
     case "approval": {
       const label = resolveApprovalLabel(block.resolved);
       return (
-        <Box key={block.id} flexDirection="column">
+        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           {label ? (
             <Text color={label.startsWith("✓") ? t.success : t.error}>{label}</Text>
           ) : (
@@ -157,7 +193,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
     }
     case "question": {
       return (
-        <Box key={block.id} flexDirection="column">
+        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           {block.resolved ? (
             <Text>
               <Text color={t.success}>✓ Answered: </Text>

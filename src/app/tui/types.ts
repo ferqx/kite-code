@@ -4,7 +4,7 @@ export type OutputBlock =
   | { id: number; kind: "user"; content: string }
   | { id: number; kind: "text"; content: string; streaming?: boolean }
   | { id: number; kind: "reason"; content: string; folded: boolean }
-  | { id: number; kind: "tool_card"; callId: string; name: string; args: Record<string, unknown>; status: "running" | "done" | "error"; summary: string; preview?: string; elapsedMs?: number }
+  | { id: number; kind: "tool_card"; callId: string; name: string; args: Record<string, unknown>; status: "running" | "done" | "error"; summary: string; preview?: string; elapsedMs?: number; detail?: string }
   | { id: number; kind: "file_change"; changes: FileChangeRecord[] }
   | { id: number; kind: "approval"; approval: ToolApprovalPayload; resolved?: { action: string; grant?: string; pattern?: string } }
   | { id: number; kind: "question"; question: UserInputPayload; resolved?: string };

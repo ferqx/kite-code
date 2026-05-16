@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import type { StatusState } from "./types";
 import { darkTheme as t } from "./theme";
@@ -9,6 +9,7 @@ interface HeaderProps {
   running: boolean;
   timerKey: number;
   error?: boolean;
+  paused?: boolean;
 }
 
 type CatMood = "working" | "error" | "idle";
@@ -33,18 +34,23 @@ function planLabel(status: StatusState): string {
   return `Step ${done}/${total}${active ? `: ${active.step}` : ""}`;
 }
 
-export default function Header({ status, running, timerKey, error }: HeaderProps) {
+export default function Header({ status, running, timerKey, error, paused }: HeaderProps) {
   const [elapsed, setElapsed] = useState(0);
+  const prevTimerKeyRef = useRef(timerKey);
 
   useEffect(() => {
-    if (!running) {
+    // New run: reset elapsed and restart
+    if (timerKey !== prevTimerKeyRef.current) {
+      prevTimerKeyRef.current = timerKey;
       setElapsed(0);
-      return;
     }
-    setElapsed(0);
+
+    if (!running || paused) {
+      return; // timer stopped, keep current elapsed
+    }
     const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(timer);
-  }, [timerKey, running]);
+  }, [timerKey, running, paused]);
 
   const mood = catMood(running, !!error);
   const [catTop, catMid, catBot] = CAT_LINES[mood];
