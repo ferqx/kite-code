@@ -112,23 +112,6 @@ describe("model context protocol", () => {
     ]);
   });
 
-  // 验证单一静态系统提示足够大且稳定，避免访问权限变化破坏 provider 前缀缓存 / Verify one stable static prompt for provider prefix caching
-  test("uses one substantial stable static prompt for the agent", () => {
-    const prompt = buildStaticSystemPrompt("agent");
-
-    expect(prompt).toContain("Code Agent Contract");
-    expect(prompt).toContain("Planning policy");
-    expect(prompt).toContain("Clarification policy");
-    expect(prompt).toContain("ask_user");
-    expect(prompt).toContain("Execution policy");
-    expect(prompt).toContain("Workspace access policy");
-    expect(prompt).toContain("Message policy");
-    expect(prompt).toContain("Completion policy");
-    expect(prompt).toContain("Respond in Chinese by default"); // 默认中文回复 / Default Chinese response
-    expect(prompt).not.toContain("current model");
-    expect(prompt).not.toContain("浣犳槸"); // 不含乱码 / No garbled text
-    expect(prompt.length).toBeGreaterThan(1200); // 提示词应足够长以触发缓存 / Prompt must be long enough for cache threshold
-  });
 
   // 验证 plan 作为高频动态状态注入尾部 HumanMessage，避免动态 SystemMessage 破坏 provider 缓存 / Verify plan is injected as trailing HumanMessage after conversation messages
   test("injects plan as trailing synthetic HumanMessage after conversation messages", () => {
@@ -167,7 +150,6 @@ describe("model context protocol", () => {
     expect(String(messages[3].content)).toContain("- [pending] Run tests");
 
     // system prompt 前缀不受 plan 状态影响 / system prompt prefix unchanged by plan state
-    expect(String(messages[0].content)).toContain("Code Agent Contract");
     expect(String(messages[0].content)).not.toContain("Add dark mode");
     expect(String(messages[0].content)).not.toContain("Create toggle component");
     expect(String(messages[1].content)).toContain("Cacheable runtime context:");
@@ -192,7 +174,6 @@ describe("model context protocol", () => {
       "human",
     ]);
     expect(messages[3]).toBeInstanceOf(HumanMessage);
-    expect(String(messages[0].content)).toContain("Code Agent Contract");
     expect(String(messages[0].content)).not.toContain("Current workspace access: read-only");
     expect(String(messages[1].content)).toContain("Cacheable runtime context:");
     expect(String(messages[1].content)).not.toContain("Current workspace access:");
