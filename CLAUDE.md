@@ -17,18 +17,8 @@ bun run typecheck    # 类型检查
 bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/openpx.jsonc）
 ```
 
-启动 agent 任务：
-
-```bash
-bun run agent run --thread demo --user local --task "Create hello.txt with exact content \"hello\""
-bun run agent resume --thread demo --user local --approve  # 审批后恢复执行
-```
-
 ## 项目架构
 
-核心流程：单一 `agent` 节点，条件路由到 `approval` / `tools` / `user_input`，完成后回到 `agent` 继续循环，无工具调用时结束。
-
-关键文件：
 - `src/harness/graph.ts` — LangGraph 节点组装和主循环拓扑（单 agent 节点）
 - `src/harness/routes.ts` — agent / approval / tools / user_input 之间的路由
 - `src/harness/tool-runner.ts` — 执行经过审批或允许直通的工具请求
@@ -42,6 +32,7 @@ bun run agent resume --thread demo --user local --approve  # 审批后恢复执�
 - `src/config/index.ts` — 读取本地 `~/.openpx/openpx.jsonc` 配置
 - `tests/` — 测试是理解行为约束的重要来源
 - `docs/` — 设计文档、决策记录和未来规划
+- `docs/space/README.md` - space 目录导航和使用说明
 
 ## 提交流程
 
@@ -69,7 +60,6 @@ bun run agent resume --thread demo --user local --approve  # 审批后恢复执�
 ## 测试编写原则
 
 - **测试是为了发现程序问题，不是为了通过而通过**。如果测试断言与实际行为不符，应优先怀疑程序行为是否正确，而不是为了让测试变绿去迁就当前行为
-- 反面案例：ApprovalBlock 的 `onResolved` 签名是 `(action, grant?)`，action 固定为 `"approve_once"`，grant 才是授权范围。若测试只取第一个参数并断言 `"same_command"`，这只是迁就了错误的参数位置，没有验证真正需要验证的东西
 - 测试用例名称应描述验证的**行为**，而非实现细节
 
 ## 平台兼容
@@ -77,3 +67,12 @@ bun run agent resume --thread demo --user local --approve  # 审批后恢复执�
 - 测试用例必须支持 Windows / Unix 双平台
 - TUI必须支持 Windows / Unix 双平台
 - Shell 工具必须支持 Windows / Unix 双平台
+- 文件工具必须支持 Windows / Unix 双平台，且正确处理路径分隔符差异
+- 其他工具和核心逻辑应尽量避免平台特定行为，或在文档中明确说明平台限制
+- 测试覆盖应包含平台差异相关的边界情况，确保在不同环境下行为一致
+- 在开发过程中应使用跨平台工具和库，避免引入仅支持单一平台的依赖
+- 在提交前应在至少一个 Windows 和一个 Unix 环境中运行测试，确保没有平台特定的失败
+
+## space 文档更新
+
+- 每次提交前都要检查是否有新的设计决策、行为约束或实现细节需要记录在 `docs/space/` 中，尤其是 `execution/active/` 下的规则记录
