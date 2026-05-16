@@ -34,19 +34,19 @@ function verify(name: string, s: { scenario: any; expectations: any[] }, count: 
 
 describe(`${label} Approval variants`, () => {
   test("approve_once", async () => {
-    await verifyScenario("approval-variants-approve-once", AV.approveOnce, 2).verifyAll();
+    await verifyScenario("approval-variants-approve-once", AV.approveOnce.scenario, 2, AV.approveOnce.expectations).verifyAll();
   });
   test("same_command", async () => {
-    await verifyScenario("approval-variants-same-command", AV.approveSameCommand, 2).verifyAll();
+    await verifyScenario("approval-variants-same-command", AV.approveSameCommand.scenario, 2, AV.approveSameCommand.expectations).verifyAll();
   });
   test("full_access", async () => {
-    await verifyScenario("approval-variants-full-access", AV.approveFullAccess, 2).verifyAll();
+    await verifyScenario("approval-variants-full-access", AV.approveFullAccess.scenario, 2, AV.approveFullAccess.expectations).verifyAll();
   });
   test("deny approval", async () => {
-    await verifyScenario("approval-variants-deny", AV.denyApproval, 2).verifyAll();
+    await verifyScenario("approval-variants-deny", AV.denyApproval.scenario, 2, AV.denyApproval.expectations).verifyAll();
   });
   test("write_file approval with text", async () => {
-    await verifyScenario("approval-variants-write-file", AV.approveWriteFile, 2).verifyAll();
+    await verifyScenario("approval-variants-write-file", AV.approveWriteFile.scenario, 2, AV.approveWriteFile.expectations).verifyAll();
   });
 });
 
@@ -56,16 +56,16 @@ describe(`${label} Approval variants`, () => {
 
 describe(`${label} Question variants`, () => {
   test("options only", async () => {
-    await verifyScenario("question-variants-options", QV.questionOptions, 2).verifyAll();
+    await verifyScenario("question-variants-options", QV.questionOptions.scenario, 2, QV.questionOptions.expectations).verifyAll();
   });
   test("free text only", async () => {
-    await verifyScenario("question-variants-free-text", QV.questionFreeText, 2).verifyAll();
+    await verifyScenario("question-variants-free-text", QV.questionFreeText.scenario, 2, QV.questionFreeText.expectations).verifyAll();
   });
   test("options + free text", async () => {
-    await verifyScenario("question-variants-options-free-text", QV.questionOptionsAndFreeText, 2).verifyAll();
+    await verifyScenario("question-variants-options-free-text", QV.questionOptionsAndFreeText.scenario, 2, QV.questionOptionsAndFreeText.expectations).verifyAll();
   });
   test("with context text", async () => {
-    await verifyScenario("question-variants-context", QV.questionWithContext, 2).verifyAll();
+    await verifyScenario("question-variants-context", QV.questionWithContext.scenario, 2, QV.questionWithContext.expectations).verifyAll();
   });
 });
 
@@ -75,16 +75,16 @@ describe(`${label} Question variants`, () => {
 
 describe(`${label} Agent messages`, () => {
   test("plain text output", async () => {
-    await verifyScenario("agent-messages-plain-text", AM.plainText, 1).verifyAll();
+    await verifyScenario("agent-messages-plain-text", AM.plainText, 1, AM.plainTextExpectations).verifyAll();
   });
   test("reason (thinking) blocks", async () => {
-    await verifyScenario("agent-messages-reason", AM.reasonBlock, 1).verifyAll();
+    await verifyScenario("agent-messages-reason", AM.reasonBlock, 1, AM.reasonBlockExpectations).verifyAll();
   });
   test("long multi-block text", async () => {
-    await verifyScenario("agent-messages-long-text", AM.longTextResponse, 1).verifyAll();
+    await verifyScenario("agent-messages-long-text", AM.longTextResponse, 1, AM.longTextExpectations).verifyAll();
   });
   test("mixed reason and text", async () => {
-    await verifyScenario("agent-messages-mixed", AM.mixedReasonAndText, 1).verifyAll();
+    await verifyScenario("agent-messages-mixed", AM.mixedReasonAndText, 1, AM.mixedExpectations).verifyAll();
   });
 });
 
@@ -219,23 +219,23 @@ describe(`${label} Lifecycle events`, () => {
 
 describe(`${label} Input flow`, () => {
   test("basic input → reply", async () => {
-    await verifyScenario("input-flow-basic", IF.basicInputReply, 1).verifyAll();
+    await verifyScenario("input-flow-basic", IF.basicInputReply, 1, IF.basicInputReplyExpectations).verifyAll();
   });
 
   test("input → tool call → approval", async () => {
-    await verifyScenario("input-flow-tool-approval", IF.inputToolApproval, 2).verifyAll();
+    await verifyScenario("input-flow-tool-approval", IF.inputToolApproval, 2, IF.inputToolApprovalExpectations).verifyAll();
   });
 
   test("input → tool call → full_access", async () => {
-    await verifyScenario("input-flow-full-access", IF.inputFullAccess, 2).verifyAll();
+    await verifyScenario("input-flow-full-access", IF.inputFullAccess, 2, IF.inputFullAccessExpectations).verifyAll();
   });
 
   test("multi-turn conversation", async () => {
-    await verifyScenario("input-flow-multi-turn", IF.multiTurn, 2).verifyAll();
+    await verifyScenario("input-flow-multi-turn", IF.multiTurn, 2, IF.multiTurnExpectations).verifyAll();
   });
 
   test("Ctrl+C interrupt during running", async () => {
-    await verifyScenario("input-flow-ctrl-c", IF.ctrlCInterrupt, 1).verifyAll();
+    await verifyScenario("input-flow-ctrl-c", IF.ctrlCInterrupt, 1, IF.ctrlCInterruptExpectations).verifyAll();
   });
 });
 
@@ -245,27 +245,27 @@ describe(`${label} Input flow`, () => {
 
 describe(`${label} Failure scenarios`, () => {
   test("agent error mid-response", async () => {
-    await verifyScenario("failure-agent-error", FS.agentError, 1).verifyAll();
+    await verifyScenario("failure-agent-error", FS.agentError, 1, FS.agentErrorExpectations).verifyAll();
   });
 
   test("operation retry (connection timeout)", async () => {
-    await verifyScenario("failure-retry", FS.operationRetry, 1).verifyAll();
+    await verifyScenario("failure-retry", FS.operationRetry, 1, FS.operationRetryExpectations).verifyAll();
   });
 
   test("model API retry (rate limit)", async () => {
-    await verifyScenario("failure-model-retry", FS.modelRetry, 1).verifyAll();
+    await verifyScenario("failure-model-retry", FS.modelRetry, 1, FS.modelRetryExpectations).verifyAll();
   });
 
   test("multiple model retries then success", async () => {
-    await verifyScenario("failure-model-retries-success", FS.modelRetriesThenSuccess, 1).verifyAll();
+    await verifyScenario("failure-model-retries-success", FS.modelRetriesThenSuccess, 1, FS.modelRetriesThenSuccessExpectations).verifyAll();
   });
 
   test("tool execution error (shell non-zero exit)", async () => {
-    await verifyScenario("failure-tool-error", FS.toolExecutionError, 2).verifyAll();
+    await verifyScenario("failure-tool-error", FS.toolExecutionError, 2, FS.toolExecutionErrorExpectations).verifyAll();
   });
 
   test("error then successful recovery", async () => {
-    await verifyScenario("failure-recovery", FS.errorRecovery, 2).verifyAll();
+    await verifyScenario("failure-recovery", FS.errorRecovery, 2, FS.errorRecoveryExpectations).verifyAll();
   });
 });
 
@@ -326,6 +326,10 @@ describe(`${label} Keyboard shortcuts`, () => {
 
   test("Ctrl+T expands/collapses all reasoning", async () => {
     await verify("kb-ctrl-t", KS.ctrlTToggleAllReason, 2).verifyAll();
+  });
+
+  test("Ctrl+letter does not leak character into input", async () => {
+    await verify("kb-ctrl-letter-no-leak", KS.ctrlLetterNoCharLeak, 1).verifyAll();
   });
 
   test("Ctrl+R toggles authorization", async () => {

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
-import TextInput from "ink-text-input";
+import CtrlSafeTextInput from "./CtrlSafeTextInput";
 import { useFileSearch } from "../hooks/useFileSearch";
 import {
   useSlashSuggestions,
@@ -85,12 +85,6 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   // premature TextInput submits (same root cause as slash suggestions).
   const fileActiveRef = useRef(false);
   fileActiveRef.current = fileSearch.active;
-  // Saved value for Ctrl+letter revert. UPDATED ONLY at end of non-Ctrl
-  // keystrokes in the useInput handler — NOT during render. Each useInput
-  // runs in its own discreteUpdates, so TextInput's setState already flushed
-  // and any render-updated ref would be stale by the time our handler fires.
-  const savedValueRef = useRef(value);
-  // DO NOT update savedValueRef here — updated in useInput handler below.
 
   const handleSubmit = useCallback(
     (val: string) => {
@@ -139,17 +133,6 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   }, [slashSuggestions.active, slashSuggestions.result, slashSuggestions.selectedIndex]);
 
   useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; tab?: boolean; escape?: boolean; rightArrow?: boolean; ctrl?: boolean }) => {
-    // Ctrl+letter shortcuts (t, l, r, h, e, o, x) are handled by
-    // useGlobalKeys/useLeaderKeys. ink-text-input only filters Ctrl+C,
-    // so these letters leak into the input value via TextInput (which
-    // fires before us in its own discreteUpdates that already flushed).
-    // Revert using savedValueRef — set at the END of the previous non-Ctrl
-    // handler invocation, so it survives the intermediate re-render.
-    if (key.ctrl && /^[a-z]$/.test(_input)) {
-      setValue(savedValueRef.current);
-      return;
-    }
-
     // When an overlay is active, yield all keyboard handling to it
     if (overlayActive) return;
 
@@ -276,12 +259,6 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       }
       return;
     }
-
-    // Normal keystroke (regular character, backspace, etc.) — update the
-    // saved value so the next Ctrl+letter revert uses the correct snapshot.
-    // Ctrl keystrokes return early at the top; programmatic value changes
-    // (slash/file autocomplete) return before reaching here.
-    savedValueRef.current = value;
   });
 
   if (disabled) {
@@ -302,7 +279,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       {/* Main input line with ghost text */}
       <Box>
         <Text color={t.primary} bold={slashMatched}>{promptChar}</Text>
-        <TextInput
+        <CtrlSafeTextInput
           key={textKeyRef.current}
           value={value}
           onChange={setValue}

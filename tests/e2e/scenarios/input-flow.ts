@@ -1,4 +1,4 @@
-import type { Scenario } from "../types";
+import type { Scenario, SnapshotExpectation } from "../types";
 
 const baseFreeze: Scenario["freeze"] = ["timer", "cacheHitRate", "cacheTokenCount"];
 
@@ -12,6 +12,17 @@ export const basicInputReply: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const basicInputReplyExpectations: SnapshotExpectation[] = [
+  {
+    reason: "terminal",
+    state: [
+      { type: "running-is", value: false },
+      { type: "has-block-kind", kind: "user" },
+      { type: "has-block-kind", kind: "text" },
+      { type: "blocks-min", count: 2, description: "at least user + agent text blocks" },
+    ],
+  },
+];
 
 /** Input triggers tool call, user grants full_access */
 export const inputFullAccess: Scenario = {
@@ -27,6 +38,17 @@ export const inputFullAccess: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const inputFullAccessExpectations: SnapshotExpectation[] = [
+  { reason: "approval-wait" },
+  {
+    reason: "terminal",
+    ansi: [
+      { type: "contains", text: "package.json", description: "tool output visible" },
+      { type: "contains", text: "Here are the files", description: "agent text visible" },
+    ],
+    state: [{ type: "running-is", value: false }],
+  },
+];
 
 /** Input triggers tool call, user grants approve_once */
 export const inputToolApproval: Scenario = {
@@ -42,8 +64,18 @@ export const inputToolApproval: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const inputToolApprovalExpectations: SnapshotExpectation[] = [
+  { reason: "approval-wait" },
+  {
+    reason: "terminal",
+    ansi: [
+      { type: "contains", text: "config.json", description: "file path visible in output" },
+    ],
+    state: [{ type: "running-is", value: false }],
+  },
+];
 
-/** Multi-turn conversation — short enough to fit viewport */
+/** Multi-turn conversation */
 export const multiTurn: Scenario = {
   terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
   steps: [
@@ -55,14 +87,45 @@ export const multiTurn: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const multiTurnExpectations: SnapshotExpectation[] = [
+  {
+    reason: "terminal",
+    ansi: [
+      { type: "contains", text: "Hi", description: "first user message visible" },
+      { type: "contains", text: "Hello!", description: "first agent response visible" },
+    ],
+    state: [{ type: "running-is", value: false }],
+  },
+  {
+    reason: "terminal",
+    ansi: [
+      { type: "contains", text: "What is 1+1?", description: "second user message visible" },
+      { type: "contains", text: "2", description: "second agent response visible" },
+    ],
+    state: [{ type: "running-is", value: false }],
+  },
+];
 
-/** Ctrl+C during agent running — verify via state assertion */
+/**
+ * Ctrl+C during agent running — verify the interrupt stops execution.
+ * simulate-input dispatches USER_MESSAGE + SET_RUNNING, so the agent is
+ * running when \x03 (Ctrl+C) arrives. After Ctrl+C, running must be false.
+ */
 export const ctrlCInterrupt: Scenario = {
   terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
   steps: [
     { type: "simulate-input", text: "Long task" },
     { type: "agent-text", text: "Running..." },
     { type: "simulate-key", key: "\x03" },
-    { type: "agent-done" },
+    { type: "assert-snapshot" },
   ],
 };
+export const ctrlCInterruptExpectations: SnapshotExpectation[] = [
+  {
+    reason: "explicit",
+    ansi: [
+      { type: "contains", text: "Running...", description: "agent output visible before interrupt" },
+    ],
+    state: [{ type: "running-is", value: false }],
+  },
+];

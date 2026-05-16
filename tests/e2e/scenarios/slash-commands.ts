@@ -139,6 +139,7 @@ export const slashAuth: CmdCase = {
   expectations: [
     {
       reason: "terminal",
+      ansi: [{ type: "contains", text: "[full]", description: "auth mode indicator toggled to full" }],
       state: [{ type: "running-is", value: false }],
     },
   ],
@@ -184,7 +185,8 @@ export const slashPlan: CmdCase = {
   ],
 };
 
-/** /compact — request context compaction during running */
+/** /compact — request context compaction during running.
+ *  When not running, compaction is a no-op (reducer checks state.running). */
 export const slashCompact: CmdCase = {
   scenario: {
     terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,

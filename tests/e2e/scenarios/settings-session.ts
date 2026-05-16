@@ -72,6 +72,7 @@ export const modelSelector: Case = {
       reason: "terminal",
       state: [
         { type: "running-is", value: false },
+        { type: "has-block-kind", kind: "text", description: "model selection confirmation" },
       ],
     },
   ],
@@ -113,7 +114,10 @@ export const exitFlow: Case = {
   expectations: [
     {
       reason: "terminal",
-      state: [{ type: "running-is", value: false }],
+      state: [
+        { type: "running-is", value: false },
+        { type: "blocks-min", count: 0, description: "exit flow: state is frozen" },
+      ],
     },
   ],
 };
@@ -154,7 +158,10 @@ export const externalEditor: Case = {
   expectations: [
     {
       reason: "terminal",
-      state: [{ type: "running-is", value: false }],
+      state: [
+        { type: "running-is", value: false },
+        { type: "no-block-kind", kind: "approval", description: "editor ops create no approval blocks" },
+      ],
     },
   ],
 };

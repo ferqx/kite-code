@@ -376,7 +376,7 @@ describe("OutputArea interaction", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("App global keys", () => {
-  test("Ctrl+T dispatches TOGGLE_THINKING", () => {
+  test("Ctrl+T dispatches TOGGLE_ALL_REASON", () => {
     let dispatched: any = null;
     const state = fakeState();
     const { stdin } = render(
@@ -384,7 +384,7 @@ describe("App global keys", () => {
     );
 
     stdin.write("\x14"); // Ctrl+T
-    expect(dispatched).toEqual({ type: "TOGGLE_THINKING" });
+    expect(dispatched).toEqual({ type: "TOGGLE_ALL_REASON" });
   });
 
   test("Ctrl+L dispatches CLEAR_OUTPUT", () => {

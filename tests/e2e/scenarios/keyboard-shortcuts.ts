@@ -46,8 +46,16 @@ export const escCloseHelp: KbCase = {
     ],
   },
   expectations: [
-    { reason: "terminal", state: [{ type: "running-is", value: false }] },
-    { reason: "terminal", state: [{ type: "running-is", value: false }] },
+    {
+      reason: "terminal",
+      ansi: [{ type: "contains", text: "Keyboard Shortcuts", description: "help visible" }],
+      state: [{ type: "running-is", value: false }],
+    },
+    {
+      reason: "terminal",
+      ansi: [{ type: "not-contains", text: "Keyboard Shortcuts", description: "help dismissed" }],
+      state: [{ type: "running-is", value: false }],
+    },
   ],
 };
 
@@ -63,9 +71,14 @@ export const ctrlLClearOutput: KbCase = {
     ],
   },
   expectations: [
-    { reason: "terminal", state: [{ type: "running-is", value: false }] },
     {
       reason: "terminal",
+      ansi: [{ type: "contains", text: "Some content to clear", description: "content present before clear" }],
+      state: [{ type: "running-is", value: false }],
+    },
+    {
+      reason: "terminal",
+      ansi: [{ type: "not-contains", text: "Some content to clear", description: "content removed after clear" }],
       state: [
         { type: "blocks-max", count: 2, description: "only exit summary after clear" },
         { type: "running-is", value: false },
@@ -119,23 +132,26 @@ export const ctrlRToggleAuth: KbCase = {
   expectations: [
     {
       reason: "terminal",
+      ansi: [{ type: "contains", text: "[full]", description: "auth mode toggled to full in status bar" }],
       state: [{ type: "running-is", value: false }],
     },
   ],
 };
 
-/** Ctrl+C when not running (first press) — sets ctrlCPressed */
+/** Ctrl+C when not running (first press) — sets ctrlCPressed flag.
+ *  Note: the flag itself is not checked via state assertion because the
+ *  snapshot assertion system currently only covers blocks/interrupt/running. */
 export const ctrlCFirstPress: KbCase = {
   scenario: {
     terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
     steps: [
       { type: "dispatch", actionType: "CTRL_C" },
-      { type: "agent-done" },
+      { type: "assert-snapshot" },
     ],
   },
   expectations: [
     {
-      reason: "terminal",
+      reason: "explicit",
       state: [{ type: "running-is", value: false }],
     },
   ],
@@ -148,12 +164,12 @@ export const ctrlCSecondPress: KbCase = {
     steps: [
       { type: "dispatch", actionType: "CTRL_C" },
       { type: "dispatch", actionType: "CTRL_C" },
-      { type: "agent-done" },
+      { type: "assert-snapshot" },
     ],
   },
   expectations: [
     {
-      reason: "terminal",
+      reason: "explicit",
       state: [{ type: "running-is", value: false }],
     },
   ],
@@ -268,6 +284,39 @@ export const enterCollapseReason: KbCase = {
       reason: "explicit",
       ansi: [
         { type: "contains", text: "▶ Thinking...", description: "after second Enter: folded again" },
+      ],
+      state: [{ type: "running-is", value: false }],
+    },
+  ],
+};
+
+/**
+ * Ctrl+letter shortcuts must NOT leak the character into the text input.
+ * ink-text-input upstream only filters Ctrl+C; our CtrlSafeTextInput filters
+ * all Ctrl+letter combos. This test simulates real keyboard input via stdin
+ * (not dispatch) to verify the full useInput → TextInput chain.
+ */
+export const ctrlLetterNoCharLeak: KbCase = {
+  scenario: {
+    terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
+    steps: [
+      // Type "hello" character-by-character via stdin so it stays in the input field
+      { type: "simulate-key", key: "h" },
+      { type: "simulate-key", key: "e" },
+      { type: "simulate-key", key: "l" },
+      { type: "simulate-key", key: "l" },
+      { type: "simulate-key", key: "o" },
+      // Press Ctrl+T — must NOT add 't' to the input
+      { type: "simulate-key", key: "\x14" },
+      { type: "assert-snapshot" },
+    ],
+  },
+  expectations: [
+    {
+      reason: "explicit",
+      ansi: [
+        { type: "contains", text: "> hello", description: "input text intact after Ctrl+T" },
+        { type: "not-contains", text: "hellot", description: "no 't' leaked from Ctrl+T" },
       ],
       state: [{ type: "running-is", value: false }],
     },

@@ -1,4 +1,4 @@
-import type { Scenario } from "../types";
+import type { Scenario, SnapshotExpectation } from "../types";
 
 const baseFreeze: Scenario["freeze"] = ["timer", "cacheHitRate", "cacheTokenCount"];
 
@@ -12,6 +12,15 @@ export const agentError: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const agentErrorExpectations: SnapshotExpectation[] = [
+  {
+    reason: "terminal",
+    state: [
+      { type: "running-is", value: false },
+      { type: "has-block-kind", kind: "user" },
+    ],
+  },
+];
 
 /** Operation retry (non-model retry, e.g. tool execution retry) */
 export const operationRetry: Scenario = {
@@ -26,6 +35,15 @@ export const operationRetry: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const operationRetryExpectations: SnapshotExpectation[] = [
+  {
+    reason: "terminal",
+    state: [
+      { type: "running-is", value: false },
+      { type: "blocks-min", count: 2 },
+    ],
+  },
+];
 
 /** Model API call fails and retries */
 export const modelRetry: Scenario = {
@@ -37,6 +55,15 @@ export const modelRetry: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const modelRetryExpectations: SnapshotExpectation[] = [
+  {
+    reason: "terminal",
+    state: [
+      { type: "running-is", value: false },
+      { type: "has-block-kind", kind: "text" },
+    ],
+  },
+];
 
 /** Multiple model retries then success */
 export const modelRetriesThenSuccess: Scenario = {
@@ -50,6 +77,15 @@ export const modelRetriesThenSuccess: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const modelRetriesThenSuccessExpectations: SnapshotExpectation[] = [
+  {
+    reason: "terminal",
+    state: [
+      { type: "running-is", value: false },
+      { type: "has-block-kind", kind: "text" },
+    ],
+  },
+];
 
 /** Tool execution fails with error (shell command non-zero exit) */
 export const toolExecutionError: Scenario = {
@@ -66,6 +102,16 @@ export const toolExecutionError: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const toolExecutionErrorExpectations: SnapshotExpectation[] = [
+  { reason: "approval-wait" },
+  {
+    reason: "terminal",
+    state: [
+      { type: "running-is", value: false },
+      { type: "has-block-kind", kind: "tool_card" },
+    ],
+  },
+];
 
 /** Error then successful recovery */
 export const errorRecovery: Scenario = {
@@ -86,3 +132,13 @@ export const errorRecovery: Scenario = {
     { type: "agent-done" },
   ],
 };
+export const errorRecoveryExpectations: SnapshotExpectation[] = [
+  { reason: "approval-wait" },
+  {
+    reason: "terminal",
+    state: [
+      { type: "running-is", value: false },
+      { type: "has-block-kind", kind: "text" },
+    ],
+  },
+];
