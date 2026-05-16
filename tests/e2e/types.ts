@@ -1,4 +1,5 @@
 import type { UserAction } from "../../src/protocol/actions";
+import type { OutputBlock } from "../../src/app/tui/types";
 
 export interface Scenario {
   terminalWidth: number;
@@ -28,7 +29,8 @@ export type Step =
   | { type: "cache-metrics"; hitRate: number; inputTokens: number; outputTokens: number }
   | { type: "compact"; reason: string; summary: string }
   | { type: "simulate-input"; text: string }
-  | { type: "simulate-key"; key: string };
+  | { type: "simulate-key"; key: string }
+  | { type: "dispatch"; actionType: string; payload?: Record<string, unknown> };
 
 export interface NeedApprovalPayload {
   tool: string;
@@ -54,4 +56,52 @@ export interface E2EResult {
   snapshots: Snapshot[];
   pass: boolean;
   error?: string;
+}
+
+// ── Content assertions for verifying rendered ANSI output ──
+
+export type AnsiAssertion =
+  | { type: "contains"; text: string; description?: string }
+  | { type: "not-contains"; text: string; description?: string }
+  | { type: "matches"; pattern: string; description?: string }
+  | { type: "contains-all"; texts: string[]; description?: string }
+  | { type: "contains-in-order"; texts: string[]; description?: string }
+  | { type: "contains-each"; texts: string[]; description?: string };
+
+export type StateAssertion =
+  | { type: "blocks-min"; count: number; description?: string }
+  | { type: "blocks-max"; count: number; description?: string }
+  | { type: "blocks-equal"; count: number; description?: string }
+  | { type: "has-block-kind"; kind: OutputBlock["kind"]; description?: string }
+  | { type: "no-block-kind"; kind: OutputBlock["kind"]; description?: string }
+  | { type: "blocks-of-kind-count"; kind: OutputBlock["kind"]; count: number; description?: string }
+  | { type: "block-kinds-in-order"; kinds: OutputBlock["kind"][]; description?: string }
+  | { type: "interrupt-kind"; kind: "approval" | "input" | null; description?: string }
+  | { type: "last-block-kind"; kind: OutputBlock["kind"]; description?: string }
+  | { type: "running-is"; value: boolean; description?: string }
+  | { type: "all-blocks-non-streaming"; description?: string };
+
+export interface SnapshotExpectation {
+  reason: "approval-wait" | "question-wait" | "terminal" | "explicit";
+  ansi?: AnsiAssertion[];
+  state?: StateAssertion[];
+}
+
+// ── Real agent e2e scenario ──
+
+export interface RealAgentScenario {
+  terminalWidth?: number;
+  stepTimeout?: number;
+  freeze?: Array<"timer" | "timestamp" | "cacheHitRate" | "cacheTokenCount" | "toolElapsed">;
+  task: string;
+  modelResponses: Array<{
+    message?: { content: string; tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> };
+    delay?: number;
+    error?: string;
+  }>;
+  /** Auto-approve tool calls during agent run */
+  autoApprove?: boolean;
+  /** Files to create in temp workspace before running agent */
+  workspaceFiles?: Record<string, string>;
+  expectations: SnapshotExpectation[];
 }

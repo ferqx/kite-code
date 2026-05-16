@@ -397,12 +397,23 @@ async function runStep(
       break;
 
     case "agent-done":
+      dispatch({ type: "SET_EXITED" });
       dispatch({ type: "SET_IDLE" });
       await waitForIdle(timeout);
       await tick();
       await tick();
       snapshots.push(takeSnapshot("terminal", freezeKeys, lastFrame));
       break;
+
+    case "dispatch": {
+      const actionType = step.actionType;
+      const payload = step.payload ?? {};
+      // Map action type to TUI action with payload
+      const action: any = { type: actionType, ...payload };
+      dispatch(action);
+      await tick();
+      break;
+    }
 
     default:
       throw new Error(`Unknown step type: ${(step as any).type}`);

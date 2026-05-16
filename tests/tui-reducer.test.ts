@@ -376,6 +376,65 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "SET_IDLE" });
       expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).streaming).toBe(false);
     });
+    test("SET_EXITED adds exit summary block and sets exited flag", () => {
+      let s = fresh(); s = { ...s, running: true, runStartTime: Date.now() - 5000 };
+      s = dispatch(s, { type: "SET_EXITED" });
+      expect(s.exited).toBe(true);
+      const last = s.blocks.at(-1) as Extract<OutputBlock, { kind: "text" }>;
+      expect(last.kind).toBe("text");
+      expect(last.content).toMatch(/^── \d+s ──$/);
+    });
+    test("SET_EXITED summary includes file change count", () => {
+      let s = fresh(); s = { ...s, running: true };
+      // Add a file_change block with 2 changes
+      s = dispatch(s, { type: "EVENT", event: { type: "file_change", data: { path: "a.ts", kind: "add" } } });
+      s = dispatch(s, { type: "EVENT", event: { type: "file_change", data: { path: "b.ts", kind: "edit" } } });
+      s = dispatch(s, { type: "SET_EXITED" });
+      const last = s.blocks.at(-1) as Extract<OutputBlock, { kind: "text" }>;
+      expect(last.content).toContain("2 files");
+    });
+    test("SET_EXITED + SET_IDLE preserves both the exit summary and content blocks", () => {
+      let s = fresh(); s = { ...s, running: true };
+      s = dispatch(s, textEvt("AI response"));
+      s = dispatch(s, { type: "SET_EXITED" });
+      s = dispatch(s, { type: "SET_IDLE" });
+      // All blocks preserved, exit summary at end
+      expect(s.blocks).toHaveLength(2);
+      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("AI response");
+      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).streaming).toBe(false);
+      expect((s.blocks[1] as Extract<OutputBlock, { kind: "text" }>).content).toMatch(/^── /);
+      expect(s.exited).toBe(false);
+      expect(s.running).toBe(false);
+    });
+    test("consecutive streaming text events replace last block instead of appending", () => {
+      let s = fresh(); s = { ...s, running: true };
+      s = dispatch(s, textEvt("Hello"));
+      s = dispatch(s, textEvt("Hello, world"));
+      s = dispatch(s, textEvt("Hello, world!"));
+      // Only 1 block — each event replaced the previous streaming block
+      expect(s.blocks).toHaveLength(1);
+      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("Hello, world!");
+    });
+    test("streaming text appends new block when last block is not streaming text", () => {
+      let s = fresh(); s = { ...s, running: true };
+      // First text (streaming)
+      s = dispatch(s, textEvt("Hello"));
+      // Tool card interleaved
+      s = dispatch(s, tcEvt("c1", "read_file"));
+      // Next text should be a new block (last is tool_card, not streaming text)
+      s = dispatch(s, textEvt("After tool"));
+      expect(s.blocks).toHaveLength(3);
+      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("Hello");
+      expect(s.blocks[1].kind).toBe("tool_card");
+      expect((s.blocks[2] as Extract<OutputBlock, { kind: "text" }>).content).toBe("After tool");
+    });
+    test("SET_EXITED then SET_IDLE clears exited flag", () => {
+      let s = fresh(); s = { ...s, running: true };
+      s = dispatch(s, { type: "SET_EXITED" });
+      expect(s.exited).toBe(true);
+      s = dispatch(s, { type: "SET_IDLE" });
+      expect(s.exited).toBe(false);
+    });
   });
 
   describe("immutability", () => {

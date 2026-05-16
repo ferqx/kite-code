@@ -83,6 +83,14 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       const { event } = action;
       switch (event.type) {
         case "text": {
+          // Replace last streaming text block with updated content instead of
+          // appending — prevents block accumulation that breaks viewport culling
+          const lastBlock = state.blocks.at(-1);
+          if (lastBlock?.kind === "text" && lastBlock.streaming) {
+            const updated = state.blocks.slice(0, -1);
+            updated.push({ ...lastBlock, content: event.data.text });
+            return { ...state, blocks: updated };
+          }
           const block: OutputBlock = { id: nextId++, kind: "text", content: event.data.text, streaming: state.running };
           return { ...state, blocks: [...state.blocks, block] };
         }
@@ -455,7 +463,7 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
   );
 
   return (
-    <Box flexDirection="column" height="100%">
+    <Box flexDirection="column">
       <MemoHeader status={state.status} running={state.running} timerKey={state.runCount} />
       <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
       {state.showHelp && <HelpPanel onClose={hideHelp} />}

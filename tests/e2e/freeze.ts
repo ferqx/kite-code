@@ -15,6 +15,9 @@ export function freezeAnsi(ansi: string, freezeKeys: string[]): string {
     if (!p) continue;
     if (key === "timer") {
       result = result.replace(/\b\d{2}:\d{2}\b/g, p);
+      // Freeze elapsed time in exit summary line (── 22s ──, ── 1m 30s ──)
+      result = result.replace(/── \d{1,3}s ──/g, `── ${p} ──`);
+      result = result.replace(/── \d+m \d{1,2}s ──/g, `── ${p} ──`);
     }
     if (key === "cacheHitRate") {
       result = result.replace(/\b\d{1,3}%/g, p);

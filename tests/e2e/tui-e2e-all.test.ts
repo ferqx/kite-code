@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { runTuiE2E } from "./mock-agent";
+import { runRealAgentE2E } from "./real-agent";
 import { verifyScenario } from "./helpers";
 import * as AV from "./scenarios/approval-variants";
 import * as QV from "./scenarios/question-variants";
@@ -8,11 +9,24 @@ import * as TF from "./scenarios/tool-flow";
 import * as SD from "./scenarios/state-display";
 import * as IF from "./scenarios/input-flow";
 import * as FS from "./scenarios/failure-scenarios";
+import * as SC from "./scenarios/slash-commands";
+import * as KS from "./scenarios/keyboard-shortcuts";
+import * as SS from "./scenarios/settings-session";
+import * as VP from "./scenarios/viewport-culling";
+import * as RC from "./scenarios/real-agent-conversation";
 
 const UPDATE = Bun.argv.includes("--update-snapshots") ||
   process.env.UPDATE_SNAPSHOTS === "true";
 
 const label = UPDATE ? "[UPDATE]" : "[VERIFY]";
+
+// ══════════════════════════════════════════════════════════
+// Enhanced verification helper
+// ══════════════════════════════════════════════════════════
+
+function verify(name: string, s: { scenario: any; expectations: any[] }, count: number) {
+  return verifyScenario(name, s.scenario, count, s.expectations);
+}
 
 // ══════════════════════════════════════════════════════════
 // Approval variants
@@ -122,6 +136,8 @@ describe(`${label} Lifecycle events`, () => {
     });
     expect(result.pass).toBe(true);
     expect(result.snapshots.length).toBe(1);
+    // Content verification: error message visible in output
+    expect(result.snapshots[0].ansi).toContain("Error");
   });
 
   test("retry event renders", async () => {
@@ -134,6 +150,7 @@ describe(`${label} Lifecycle events`, () => {
       ],
     });
     expect(result.pass).toBe(true);
+    expect(result.snapshots[0].ansi).toContain("Retry");
   });
 
   test("compaction begin/end", async () => {
@@ -146,6 +163,7 @@ describe(`${label} Lifecycle events`, () => {
       ],
     });
     expect(result.pass).toBe(true);
+    expect(result.snapshots[0].ansi).toContain("Compacting");
   });
 
   test("file change events coalesce", async () => {
@@ -159,6 +177,10 @@ describe(`${label} Lifecycle events`, () => {
       ],
     });
     expect(result.pass).toBe(true);
+    // File changes render
+    expect(result.snapshots[0].ansi).toContain("File Changes");
+    expect(result.snapshots[0].ansi).toContain("src/utils.ts");
+    expect(result.snapshots[0].ansi).toContain("src/index.ts");
   });
 
   test("state change events", async () => {
@@ -174,6 +196,8 @@ describe(`${label} Lifecycle events`, () => {
       ],
     });
     expect(result.pass).toBe(true);
+    expect(result.snapshots[0].ansi).toContain("Planning active");
+    expect(result.snapshots[0].ansi).toContain("Building active");
   });
 
   test("cache metrics events update status", async () => {
@@ -242,5 +266,183 @@ describe(`${label} Failure scenarios`, () => {
 
   test("error then successful recovery", async () => {
     await verifyScenario("failure-recovery", FS.errorRecovery, 2).verifyAll();
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// Slash commands (dispatch → render pipeline)
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} Slash commands`, () => {
+  test("/help shows keyboard shortcuts panel", async () => {
+    await verify("slash-help", SC.slashHelp, 1).verifyAll();
+  });
+
+  test("/setting shows current configuration", async () => {
+    await verify("slash-setting", SC.slashSetting, 1).verifyAll();
+  });
+
+  test("/clear removes all output blocks", async () => {
+    await verify("slash-clear", SC.slashClear, 2).verifyAll();
+  });
+
+  test("/thinking toggles thinking visibility", async () => {
+    await verify("slash-thinking", SC.slashThinking, 1).verifyAll();
+  });
+
+  test("/auth switches authorization mode", async () => {
+    await verify("slash-auth", SC.slashAuth, 1).verifyAll();
+  });
+
+  test("/model list displays available models", async () => {
+    await verify("slash-model-list", SC.slashModelList, 1).verifyAll();
+  });
+
+  test("/export exports session", async () => {
+    await verify("slash-export", SC.slashExport, 1).verifyAll();
+  });
+
+  test("/plan switches to planning phase", async () => {
+    await verify("slash-plan", SC.slashPlan, 1).verifyAll();
+  });
+
+  test("/code switches to building phase", async () => {
+    await verify("slash-code", SC.slashCode, 1).verifyAll();
+  });
+
+  test("/compact requests context compaction", async () => {
+    await verify("slash-compact", SC.slashCompact, 1).verifyAll();
+  });
+
+  test("/editor opens external editor", async () => {
+    await verify("slash-editor", SC.slashEditor, 1).verifyAll();
+  });
+
+  test("/undo shows stub message", async () => {
+    await verify("slash-undo", SC.slashUndo, 1).verifyAll();
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// Keyboard shortcuts
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} Keyboard shortcuts`, () => {
+  test("Ctrl+H shows help", async () => {
+    await verify("kb-ctrl-h", KS.ctrlHShowHelp, 1).verifyAll();
+  });
+
+  test("Esc closes help", async () => {
+    await verify("kb-esc-close-help", KS.escCloseHelp, 2).verifyAll();
+  });
+
+  test("Ctrl+L clears output", async () => {
+    await verify("kb-ctrl-l", KS.ctrlLClearOutput, 2).verifyAll();
+  });
+
+  test("Ctrl+T toggles thinking", async () => {
+    await verify("kb-ctrl-t", KS.ctrlTToggleThinking, 1).verifyAll();
+  });
+
+  test("Ctrl+R toggles authorization", async () => {
+    await verify("kb-ctrl-r", KS.ctrlRToggleAuth, 1).verifyAll();
+  });
+
+  test("Ctrl+C first press sets ctrlCPressed", async () => {
+    await verify("kb-ctrl-c-first", KS.ctrlCFirstPress, 1).verifyAll();
+  });
+
+  test("Ctrl+C second press sets exitRequested", async () => {
+    await verify("kb-ctrl-c-second", KS.ctrlCSecondPress, 1).verifyAll();
+  });
+
+  test("Leader key cancel (Ctrl+X Esc)", async () => {
+    await verify("kb-leader-cancel", KS.leaderCancel, 1).verifyAll();
+  });
+
+  test("Leader key new session (Ctrl+X N)", async () => {
+    await verify("kb-leader-new-session", KS.leaderNewSession, 2).verifyAll();
+  });
+
+  test("Ctrl+O escape resets overlays", async () => {
+    await verify("kb-ctrl-o", KS.ctrlOEscape, 1).verifyAll();
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// Settings, session, and exit
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} Settings & Session`, () => {
+  test("list models", async () => {
+    await verify("settings-model-list", SS.modelList, 1).verifyAll();
+  });
+
+  test("list sessions shows stub", async () => {
+    await verify("settings-sessions", SS.sessionsList, 1).verifyAll();
+  });
+
+  test("model selector → select model", async () => {
+    await verify("settings-model-selector", SS.modelSelector, 1).verifyAll();
+  });
+
+  test("new session clears blocks", async () => {
+    await verify("settings-new-session", SS.newSession, 2).verifyAll();
+  });
+
+  test("exit flow (Ctrl+C twice)", async () => {
+    await verify("settings-exit", SS.exitFlow, 1).verifyAll();
+  });
+
+  test("export session confirmation", async () => {
+    await verify("settings-export", SS.exportSession, 1).verifyAll();
+  });
+
+  test("external editor open/close", async () => {
+    await verify("settings-editor", SS.externalEditor, 1).verifyAll();
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// Real agent e2e (mock model via runAgent)
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} Real agent (mock LLM)`, () => {
+  test("simple text response renders in TUI", async () => {
+    await runRealAgentE2E("real-simple-text", RC.simpleTextResponse);
+  }, 20000);
+
+  test("tool call auto-approved renders in TUI", async () => {
+    await runRealAgentE2E("real-tool-call", RC.toolCallAutoApprove);
+  }, 20000);
+
+  test("model error completes without hanging", async () => {
+    await runRealAgentE2E("real-model-error", RC.modelError);
+  }, 20000);
+
+  test("multi-turn conversation response visible", async () => {
+    await runRealAgentE2E("real-multi-turn", RC.multiTurnSimple);
+  }, 20000);
+
+  test("empty response completes without stall", async () => {
+    await runRealAgentE2E("real-empty", RC.emptyResponse);
+  }, 20000);
+});
+
+// ══════════════════════════════════════════════════════════
+// Viewport culling regression tests
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} No viewport culling`, () => {
+  test("all blocks visible with many blocks + long text", async () => {
+    await verify("vp-all-visible", VP.noCullingAllBlocksVisible, 1).verifyAll();
+  });
+
+  test("tool cards visible even with long text responses", async () => {
+    await verify("vp-tools-visible", VP.allBlocksVisibleWithLongText, 1).verifyAll();
+  });
+
+  test("default rendering shows all content", async () => {
+    await verify("vp-default", VP.defaultViewportWorks, 1).verifyAll();
   });
 });
