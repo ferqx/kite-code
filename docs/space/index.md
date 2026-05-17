@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-05-16
+最后更新：2026-05-17
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -37,6 +37,7 @@
 | `understanding/2026-05-10-authorization-mode-switch-design.md` | understanding | 授权模式切换（default/full_access）的设计规范，包含 AuthorizationOverride 内存覆盖和 set_authorization_mode 工具的设计决策。 |
 | `understanding/2026-05-11-three-layer-architecture-design.md` | understanding | 三层分离架构（protocol/core/app）设计规范，将 Agent 核心重构为纯逻辑库，支持 TUI/Desktop 多前端。 |
 | `understanding/2026-05-12-tui-overhaul-design.md` | understanding | TUI 全面重构设计 — 交互式对话循环、流式 markdown 渲染、快捷键体系、slash 命令等 9 维度改版。 |
+| `understanding/2026-05-17-sessions-command-design.md` | understanding | /sessions 会话列表、断点续接、智能命名、模型配置持久化设计。 |
 
 ## 完成执行记录
 
@@ -52,6 +53,7 @@
 | `execution/completed/2026-05-06-tool-description-contracts.md` | completed | 记录工具描述从功能字符串升级为结构化 ACI 契约的实现和验证。 |
 | `execution/completed/2026-05-10-authorization-mode-switch.md` | completed | 记录授权模式切换功能的实现，包括 AuthorizationOverride、set_authorization_mode 工具、CLI --authorization-mode 标志和测试覆盖。 |
 | `execution/completed/2026-05-16-remove-viewport-culling.md` | completed | 记录移除 TUI 视口剔除逻辑，让终端原生 scrollback 处理溢出；补齐 e2e 验证体系（88 个 e2e 测试、6 种严格断言类型、真实 agent 运行器）。 |
+| `execution/completed/2026-05-17-sessions-command-implementation.md` | completed | /sessions 功能的完整实现记录 — 23 文件变更、SessionSelector 覆盖层、checkpoint 消息加载、中断恢复、智能命名、模型配置持久化。 |
 
 ## 参考资料
 
