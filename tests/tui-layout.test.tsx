@@ -841,6 +841,7 @@ describe("App", () => {
       leaderPending: false,
       showHelp: false,
       showModelSelector: false,
+      showSessions: false,
       ctrlCPressed: false,
       sessionKey: 0,
       exitRequested: false,

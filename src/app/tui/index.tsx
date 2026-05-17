@@ -1,13 +1,22 @@
 import React from "react";
 import { render } from "ink";
-import { loadAgentConfig, defaultCheckpointPath, editorInputPath } from "@/core/config/index";
+import { loadAgentConfig, editorInputPath, type AgentConfig } from "@/core/config/index";
 import { createSandboxExecutor } from "@/core/sandbox/index";
 import { runAgent } from "@/core/runner";
 import { TuiUserInputProvider } from "./provider";
-import App, { useTuiState } from "./App";
+import App, { useTuiState, type Action } from "./App";
 import InputLine from "./components/InputLine";
 import StartupScreen from "./components/StartupScreen";
 import { useSlashCommand } from "./hooks/useSlashCommand";
+import { loadSession } from "../../core/persistence/sessions.js";
+import { defaultCheckpointPath } from "../../core/config/paths.js";
+
+function resolveModelForResume(
+  currentConfig: AgentConfig,
+  persistedModelName: string,
+): string {
+  return persistedModelName || currentConfig.modelName;
+}
 
 function TuiBootstrap() {
   const { state, dispatch, onToggleReason } = useTuiState();
@@ -16,11 +25,58 @@ function TuiBootstrap() {
   const [initialized, setInitialized] = React.useState(false);
   const prevInterruptRef = React.useRef(state.interrupt);
   const conversationHistoryRef = React.useRef<string[]>([]);
-  const threadIdRef = React.useRef<string>(`tui-${Date.now().toString(36)}`);
+  // Lazy init — only create thread when user sends first message
+  const threadIdRef = React.useRef<string>("");
+  const pendingSessionRef = React.useRef<string | null>(null);
+  const thinkingLevelRef = React.useRef<string | null>(null);
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const handleInputRef = React.useRef<(value: string) => void>(() => {});
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
+
+  const dispatchSessionLoad = React.useCallback(
+    async (action: any) => {
+      if (action.type === "LOAD_SESSION_PENDING") {
+        const threadId = action.threadId;
+        pendingSessionRef.current = threadId;
+        try {
+          const result = await loadSession(defaultCheckpointPath(), threadId);
+          if (!result || pendingSessionRef.current !== threadId) {
+            pendingSessionRef.current = null;
+            return;
+          }
+
+          const modelName = resolveModelForResume(config, result.modelName);
+          const thinkingLevel = result.thinkingLevel ?? "max";
+          thinkingLevelRef.current = thinkingLevel;
+          threadIdRef.current = threadId;
+          conversationHistoryRef.current = [];
+
+          dispatch({
+            type: "LOAD_SESSION",
+            blocks: result.blocks,
+            interrupt: result.interrupt,
+            modelProvider: result.modelProvider,
+            modelName,
+            thinkingLevel,
+          });
+        } catch (e: any) {
+          dispatch({
+            type: "LOAD_SESSION",
+            blocks: [{ id: 1, kind: "text", content: `Failed to load session: ${e?.message ?? e}` }],
+            interrupt: null,
+            modelProvider: "",
+            modelName: "",
+            thinkingLevel: null,
+          });
+        }
+        pendingSessionRef.current = null;
+        return;
+      }
+      dispatch(action);
+    },
+    [dispatch, config],
+  );
 
   React.useEffect(() => {
     const timer = setTimeout(() => setInitialized(true), 80);
@@ -32,7 +88,8 @@ function TuiBootstrap() {
     if (state.sessionKey !== prevSessionKeyRef.current) {
       prevSessionKeyRef.current = state.sessionKey;
       conversationHistoryRef.current = [];
-      threadIdRef.current = `tui-${Date.now().toString(36)}`;
+      threadIdRef.current = ""; // Lazy init on first message
+      thinkingLevelRef.current = null;
     }
   }, [state.sessionKey]);
 
@@ -81,6 +138,11 @@ function TuiBootstrap() {
       dispatch({ type: "USER_MESSAGE", text: task });
       dispatch({ type: "SET_RUNNING" });
 
+      // Lazy init thread ID on first message
+      if (!threadIdRef.current) {
+        threadIdRef.current = `tui-${Date.now().toString(36)}`;
+      }
+
       // Build conversation context from history
       conversationHistoryRef.current.push(`User: ${task}`);
       const fullTask = conversationHistoryRef.current.join("\n");
@@ -100,6 +162,7 @@ function TuiBootstrap() {
         config,
         shellExecutor,
         signal: abortController.signal,
+        thinkingLevel: thinkingLevelRef.current,
       });
 
       let aborted = false;
@@ -123,6 +186,19 @@ function TuiBootstrap() {
         agentLoopActiveRef.current = false;
         provider.reset();
         dispatch({ type: "SET_IDLE" });
+
+        // Fire-and-forget: generate smart session name after first message
+        const threadId = threadIdRef.current;
+        const firstTask = task;
+        (async () => {
+          try {
+            const { generateSessionName, persistSessionName } = await import("../../core/persistence/sessions.js");
+            const name = await generateSessionName(firstTask);
+            if (name) {
+              await persistSessionName(defaultCheckpointPath(), threadId, name);
+            }
+          } catch { /* non-critical */ }
+        })();
       }
     },
     [provider, workspace, config, dispatch]
@@ -232,13 +308,13 @@ function TuiBootstrap() {
   }
 
   return (
-    <App state={state} dispatch={dispatch} onToggleReason={onToggleReason} provider={provider}>
+    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider}>
       <InputLine
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
         onSubmit={handleInput}
         disabled={state.running}
         workspace={workspace}
-        overlayActive={state.showHelp || state.showModelSelector}
+        overlayActive={state.showHelp || state.showModelSelector || state.showSessions}
       />
     </App>
   );

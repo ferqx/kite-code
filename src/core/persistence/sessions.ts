@@ -1,0 +1,408 @@
+import { Database } from "bun:sqlite";
+import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
+import { BunSqliteSaver } from "./checkpoint.js";
+import { createChatModel } from "../model/factory.js";
+import { loadAgentConfig, type AgentConfig } from "../config/index.js";
+import type { OutputBlock, InterruptState } from "../../app/tui/types.js";
+
+// ── Public types ──
+
+export interface SessionInfo {
+  threadId: string;
+  name: string;
+  updatedAt: string; // "YYYY-MM-DD HH:MM:SS" local time
+}
+
+export interface SessionLoadResult {
+  threadId: string;
+  blocks: OutputBlock[];
+  interrupt: InterruptState | null;
+  modelProvider: string;
+  modelName: string;
+  thinkingLevel: string | null;
+}
+
+// ── List sessions ──
+
+/** 列出最近的会话，最多 50 条，按更新时间降序 / List recent sessions, max 50, ordered by last updated descending */
+export async function listSessions(checkpointPath: string): Promise<SessionInfo[]> {
+  const saver = new BunSqliteSaver(checkpointPath);
+  try {
+    saver.setup(); // Ensure tables + created_at column exist
+    const db = (saver as any).db as Database;
+    const rows = db
+      .query<
+        { thread_id: string; updated_at: string | null },
+        []
+      >(
+        `SELECT thread_id, MAX(created_at) AS updated_at
+         FROM checkpoints
+         WHERE checkpoint_ns = '' AND created_at IS NOT NULL
+         GROUP BY thread_id
+         ORDER BY updated_at DESC
+         LIMIT 50`,
+      )
+      .all();
+
+    const sessions: SessionInfo[] = [];
+    for (const row of rows) {
+      const name = await readSessionName(saver, row.thread_id);
+      sessions.push({
+        threadId: row.thread_id,
+        name,
+        updatedAt: formatLocalTime(row.updated_at),
+      });
+    }
+    return sessions;
+  } finally {
+    saver.close();
+  }
+}
+
+/** 为会话列表中的每个会话惰性生成智能名称（已有 cached 名称的跳过）/ Lazily generate smart names for sessions without cached names */
+export async function enrichSessionNames(
+  checkpointPath: string,
+  sessions: SessionInfo[],
+  onNamed: (threadId: string, name: string) => void,
+): Promise<void> {
+  for (const s of sessions) {
+    // Skip if already has a good name (not just truncated threadId)
+    if (s.name !== s.threadId && !s.name.endsWith("...")) continue;
+
+    try {
+      const result = await loadSession(checkpointPath, s.threadId);
+      if (!result) continue;
+
+      // Find first user message content
+      const userBlock = result.blocks.find((b) => b.kind === "user");
+      if (!userBlock || userBlock.kind !== "user") continue;
+
+      const generated = await generateSessionName(userBlock.content);
+      if (generated) {
+        await persistSessionName(checkpointPath, s.threadId, generated);
+        onNamed(s.threadId, generated);
+      }
+    } catch { /* skip this session */ }
+  }
+}
+
+// ── Load session ──
+
+/** 加载指定会话的最新 checkpoint 并返回结构化的会话数据 / Load latest checkpoint for a thread and return structured session data */
+export async function loadSession(
+  checkpointPath: string,
+  threadId: string,
+): Promise<SessionLoadResult | null> {
+  const saver = new BunSqliteSaver(checkpointPath);
+  try {
+    const tuple = await saver.getTuple({
+      configurable: { thread_id: threadId },
+    });
+    if (!tuple) return null;
+
+    const cv = (tuple.checkpoint.channel_values ?? {}) as Record<string, unknown>;
+    const messages = Array.isArray(cv.messages) ? (cv.messages as unknown[]) : [];
+    const blocks = messagesToOutputBlocks(messages);
+
+    // Check pending writes for interrupt, not channel_values — interrupt() throws
+    // before state updates are returned, so channel_values.approvedToolRequest
+    // /approvedToolGrant are always null at interrupt checkpoints.
+    const pendingWrites = tuple.pendingWrites as [string, string, unknown][] | undefined;
+    const interrupt = detectInterrupt(pendingWrites);
+
+    return {
+      threadId,
+      blocks,
+      interrupt,
+      modelProvider: typeof cv.modelProvider === "string" ? cv.modelProvider : "",
+      modelName: typeof cv.modelName === "string" ? cv.modelName : "",
+      thinkingLevel: typeof cv.thinkingLevel === "string" ? cv.thinkingLevel : null,
+    };
+  } finally {
+    saver.close();
+  }
+}
+
+// ── Message mapping ──
+
+/** 将 LangChain 消息数组映射为 OutputBlock 数组 / Map LangChain messages to OutputBlock array */
+function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
+  const blocks: OutputBlock[] = [];
+  let nextId = 1;
+
+  for (const msg of messages) {
+    if (!msg || typeof msg !== "object") continue;
+
+    // HumanMessage → user block
+    if (HumanMessage.isInstance(msg)) {
+      let content = extractText(msg.content as unknown);
+      // Strip "User: " prefix added by runTask for conversation history
+      content = content.replace(/^User:\s*/, "");
+      if (content.length > 0) {
+        blocks.push({ id: nextId++, kind: "user", content });
+      }
+      continue;
+    }
+
+    // AIMessage
+    if (AIMessage.isInstance(msg)) {
+      const rawMsg = msg as unknown as Record<string, unknown>;
+      const additionalKwargs = (rawMsg.additional_kwargs as Record<string, unknown> | undefined) ?? {};
+
+      // reasoning_content → reason block
+      const reasoningContent =
+        (rawMsg.reasoning_content as string | undefined) ??
+        (additionalKwargs.reasoning_content as string | undefined);
+      if (typeof reasoningContent === "string" && reasoningContent.length > 0) {
+        blocks.push({
+          id: nextId++,
+          kind: "reason",
+          content: reasoningContent,
+          folded: false,
+        });
+      }
+
+      // tool_calls → tool_card blocks
+      const toolCalls = msg.tool_calls;
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+        for (const tc of toolCalls) {
+          if (tc && typeof tc === "object") {
+            const call = tc as Record<string, unknown>;
+            blocks.push({
+              id: nextId++,
+              kind: "tool_card",
+              callId: typeof call.id === "string" ? call.id : "",
+              name: typeof call.name === "string" ? call.name : "",
+              args: (call.args as Record<string, unknown>) ?? {},
+              status: "done",
+              summary: "",
+            });
+          }
+        }
+      }
+
+      // text content → text block
+      const content = extractText(msg.content as unknown);
+      if (content.length > 0) {
+        blocks.push({ id: nextId++, kind: "text", content });
+      }
+      continue;
+    }
+
+    // ToolMessage → tool_card block (status based on result)
+    const tm = msg as Record<string, unknown>;
+    if (isToolMessageLike(tm)) {
+      const content = typeof tm.content === "string" ? tm.content : JSON.stringify(tm.content);
+      let ok = true;
+      let summary = content.slice(0, 200);
+      try {
+        const p = JSON.parse(content);
+        if (p && typeof p === "object") {
+          ok = p.ok !== false;
+          if (p.ok !== false) {
+            summary =
+              (p.stdout as string) ??
+              (p.message as string) ??
+              (p.summary as string) ??
+              summary;
+          } else {
+            summary =
+              (p.reason as string) ??
+              (p.stderr as string) ??
+              (p.message as string) ??
+              (p.summary as string) ??
+              summary;
+          }
+        }
+      } catch {
+        /* use raw content */
+      }
+
+      blocks.push({
+        id: nextId++,
+        kind: "tool_card",
+        callId: (tm.tool_call_id as string) ?? "",
+        name: (tm.name as string) ?? "",
+        args: {},
+        status: ok ? "done" : "error",
+        summary,
+      });
+    }
+  }
+
+  return blocks;
+}
+
+// ── Helpers ──
+
+/** 提取消息文本内容 / Extract text content from various content formats */
+function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((b: unknown) => {
+        if (b && typeof b === "object" && "text" in (b as Record<string, unknown>)) {
+          return String((b as Record<string, unknown>).text);
+        }
+        return "";
+      })
+      .join("");
+  }
+  return String(content ?? "");
+}
+
+/** 检测审批或用户输入中断状态 / Detect approval or user input interrupt state
+
+LangGraph 的 `interrupt()` 在执行时抛出 GraphInterrupt，状态更新尚未返回，
+因此 `channel_values.approvedToolRequest`/`approvedToolGrant` 在中断检查点中始终为 null。
+实际的中断值存储在 pending writes 中 `__interrupt__` 通道内。
+*/
+function detectInterrupt(
+  pendingWrites: [string, string, unknown][] | undefined,
+): InterruptState | null {
+  if (!pendingWrites || pendingWrites.length === 0) return null;
+
+  for (const [, channel, value] of pendingWrites) {
+    if (channel === "__interrupt__" && value && typeof value === "object") {
+      const v = value as Record<string, unknown>;
+      if (v.kind === "tool_approval") {
+        return { kind: "approval", blockId: 0 };
+      }
+      if (v.kind === "user_input") {
+        return { kind: "input", blockId: 0 };
+      }
+    }
+  }
+  return null;
+}
+
+/** 判断是否为 ToolMessage 类消息 / Check if message is ToolMessage-like */
+function isToolMessageLike(msg: Record<string, unknown>): boolean {
+  try {
+    if (typeof msg._getType === "function") {
+      return (msg._getType as () => string).call(msg) === "tool";
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** 读取会话名称：优先 cached metadata，兜底截断首条消息 / Read session name: cached > truncation */
+async function readSessionName(saver: BunSqliteSaver, threadId: string): Promise<string> {
+  try {
+    const tuple = await saver.getTuple({ configurable: { thread_id: threadId } });
+    if (!tuple) return threadId;
+
+    // 1. Check cached session_name in metadata (set by smart naming)
+    const meta = tuple.metadata as Record<string, unknown> | undefined;
+    if (meta?.session_name && typeof meta.session_name === "string" && meta.session_name.length > 0) {
+      return meta.session_name;
+    }
+
+    // 2. Find first HumanMessage and extract content
+    const messages = tuple.checkpoint.channel_values?.messages;
+    if (!Array.isArray(messages) || messages.length === 0) return threadId;
+
+    for (const msg of messages) {
+      const m = msg as Record<string, unknown> | undefined;
+      if (!m) continue;
+      const msgType = typeof m._getType === "function" ? m._getType() : typeof m.getType === "function" ? m.getType() : undefined;
+      if (msgType !== "human") continue;
+      let content = (typeof m.content === "string" ? m.content : extractText(m.content)).trim();
+      if (!content) continue;
+      // Strip conversation history prefix added by runTask
+      content = content.replace(/^User:\s*/, "");
+      if (!content) continue;
+      return content.length > 40 ? content.slice(0, 40) + "..." : content;
+    }
+
+    return threadId;
+  } catch {
+    return threadId;
+  }
+}
+
+/** 使用轻量模型为会话生成简短有意义的名称（4-20 个字符）/ Generate a short meaningful session name (4-20 chars) using a lightweight model */
+export async function generateSessionName(firstMessage: string): Promise<string> {
+  // Strip "User: " prefix added by runTask conversation history
+  const cleanMessage = firstMessage.replace(/^User:\s*/, "").trim();
+  if (!cleanMessage) return "";
+
+  // Fast-fail: skip if no API key configured (avoids network timeout)
+  let config: AgentConfig;
+  try {
+    config = loadAgentConfig();
+  } catch {
+    return "";
+  }
+  if (!config.apiKey) return "";
+
+  try {
+    const model = createChatModel(config);
+
+    const response = await model.invoke([
+      new SystemMessage(
+        "You are a session naming assistant. Generate a short, meaningful name (4-20 characters) " +
+        "for a conversation based on the user's first message. Reply with ONLY the name, no explanation, no quotes, no punctuation at the end. " +
+        "Use the same language as the user's message.",
+      ),
+      new HumanMessage(`First message: "${cleanMessage}"`),
+    ]);
+
+    const name = (typeof response.content === "string" ? response.content : "").trim();
+
+    // Clean up: remove quotes, trailing punctuation, extra whitespace
+    const cleaned = name.replace(/^["']|["']$/g, "").replace(/[.!。,，、；;]$/, "").trim();
+
+    if (cleaned.length >= 2 && cleaned.length <= 30) return cleaned;
+    return cleaned.slice(0, 30) || "";
+  } catch {
+    return ""; // caller handles fallback to truncation
+  }
+}
+
+/** 持久化会话名称到 checkpoint metadata / Persist session name to checkpoint metadata */
+export async function persistSessionName(
+  checkpointPath: string,
+  threadId: string,
+  name: string,
+): Promise<void> {
+  const saver = new BunSqliteSaver(checkpointPath);
+  try {
+    const tuple = await saver.getTuple({ configurable: { thread_id: threadId } });
+    if (!tuple) return;
+
+    const db = (saver as any).db as Database;
+    const checkpointId =
+      tuple.config?.configurable?.checkpoint_id ?? "";
+    if (!checkpointId) return;
+
+    db.run(
+      `UPDATE checkpoints SET metadata = json_set(COALESCE(metadata, '{}'), '$.session_name', ?)
+       WHERE thread_id = ? AND checkpoint_ns = '' AND checkpoint_id = ?`,
+      [name, threadId, checkpointId],
+    );
+  } catch {
+    // Non-critical: name will be regenerated on next listing
+  } finally {
+    saver.close();
+  }
+}
+
+/** 将 UTC 时间字符串（SQLite datetime('now') 格式）转为本地时间字符串 / Convert UTC time string to local time, handles null/empty for legacy rows */
+function formatLocalTime(utcStr: string | null): string {
+  if (!utcStr) return "(unknown)";
+  try {
+    // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" in UTC
+    const d = new Date(utcStr.replace(" ", "T") + "Z");
+    if (isNaN(d.getTime())) return utcStr;
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+      `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    );
+  } catch {
+    return utcStr;
+  }
+}

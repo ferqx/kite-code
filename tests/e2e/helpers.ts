@@ -188,6 +188,10 @@ function verifyStateAssertion(state: Record<string, unknown>, assertion: StateAs
       expect(state.running, `${label}: running must be ${assertion.value}${context}`)
         .toBe(assertion.value);
       break;
+    case "show-sessions-is":
+      expect(state.showSessions, `${label}: showSessions must be ${assertion.value}${context}`)
+        .toBe(assertion.value);
+      break;
     case "all-blocks-non-streaming": {
       const streaming = blocks.filter((b) => b.kind === "text" && (b as any).streaming === true).length;
       expect(streaming, `${label}: all text blocks must be non-streaming${context}`)

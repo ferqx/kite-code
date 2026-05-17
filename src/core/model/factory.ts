@@ -85,6 +85,7 @@ export function createOpenAICompatibleModel(config: AgentConfig): ChatOpenAI {
     model: config.modelName,
     temperature: 0,
     timeout: MODEL_REQUEST_TIMEOUT_MS,
+    ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
   });
 }
 

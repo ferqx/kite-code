@@ -50,6 +50,8 @@ export interface RunAgentInput {
   resume?: AgentResumeValue;
   /** 外部中止信号 / External abort signal to cancel the agent loop */
   signal?: AbortSignal;
+  /** 思考级别，映射到 reasoning_effort API 参数 / Thinking level, mapped to reasoning_effort API param */
+  thinkingLevel?: string | null;
 }
 
 export interface StreamCodeAgentInput {
@@ -63,6 +65,8 @@ export interface StreamCodeAgentInput {
   mode?: WorkspaceAccessRequest;
   contextBudget?: ContextBudget;
   authorizationOverride?: AuthorizationOverride;
+  /** 思考级别 / Thinking level */
+  thinkingLevel?: string | null;
 }
 
 export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task"> {
@@ -99,6 +103,7 @@ export async function* runAgent(
     shellExecutor: input.shellExecutor,
     authorizationOverride: input.authorizationOverride,
     model: input.model,
+    thinkingLevel: input.thinkingLevel,
   });
 
   try {
@@ -118,6 +123,9 @@ export async function* runAgent(
       authorization: prevAuth ?? defaultAuthorizationState(),
       contextSummary: "",
       contextBudget: input.contextBudget,
+      modelProvider: input.config.providerName,
+      modelName: input.config.modelName,
+      thinkingLevel: input.thinkingLevel ?? null,
     };
 
     let resumeValue: AgentResumeValue | null = input.resume ?? null;
@@ -547,6 +555,7 @@ export async function* streamCodeAgent(
     checkpointPath: input.checkpointPath,
     shellExecutor: input.shellExecutor,
     authorizationOverride: input.authorizationOverride,
+    thinkingLevel: input.thinkingLevel,
   });
 
   let streamCompleted = false;
@@ -568,6 +577,9 @@ export async function* streamCodeAgent(
         authorization: prevAuth ?? defaultAuthorizationState(),
         contextSummary: "",
         contextBudget: input.contextBudget,
+        modelProvider: input.config.providerName,
+        modelName: input.config.modelName,
+        thinkingLevel: input.thinkingLevel ?? null,
       },
       graphConfig(input.threadId),
     );
@@ -589,6 +601,7 @@ export async function* resumeCodeAgent(
     checkpointPath: input.checkpointPath,
     shellExecutor: input.shellExecutor,
     authorizationOverride: input.authorizationOverride,
+    thinkingLevel: input.thinkingLevel,
   });
 
   let streamCompleted = false;

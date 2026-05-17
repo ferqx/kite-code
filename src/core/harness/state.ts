@@ -63,6 +63,21 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => undefined,
   }),
+  /** 模型提供商 / Model provider (e.g. openai, deepseek, anthropic) */
+  modelProvider: Annotation<string>({
+    reducer: (_left, right) => right,
+    default: () => "",
+  }),
+  /** 模型名称 / Model name (e.g. gpt-4o, deepseek-v3) */
+  modelName: Annotation<string>({
+    reducer: (_left, right) => right,
+    default: () => "",
+  }),
+  /** 思考级别 / Thinking level (null = default, "low", "medium", "high") */
+  thinkingLevel: Annotation<string | null>({
+    reducer: (_left, right) => right,
+    default: () => null,
+  }),
   /** 对话消息列表 / Conversation message list */
   messages: Annotation<BaseMessage[]>({
     reducer: messagesStateReducer,

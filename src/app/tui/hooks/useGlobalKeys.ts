@@ -7,6 +7,10 @@ export function useGlobalKeys(dispatch: Dispatch<any>, running: boolean) {
       dispatch({ type: "CTRL_C" });
       return;
     }
+    if (key.ctrl && input === "n") {
+      dispatch({ type: "NEW_SESSION" });
+      return;
+    }
     if (key.ctrl && input === "l") {
       dispatch({ type: "CLEAR_OUTPUT" });
       return;
@@ -65,10 +69,6 @@ export function useLeaderKeys(dispatch: Dispatch<any>, leaderPending: boolean) {
         break;
       case "e":
         dispatch({ type: "OPEN_EDITOR" });
-        dispatch({ type: "LEADER_CANCEL" });
-        break;
-      case "n":
-        dispatch({ type: "NEW_SESSION" });
         dispatch({ type: "LEADER_CANCEL" });
         break;
       case "q":

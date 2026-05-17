@@ -79,6 +79,7 @@ export type StateAssertion =
   | { type: "interrupt-kind"; kind: "approval" | "input" | null; description?: string }
   | { type: "last-block-kind"; kind: OutputBlock["kind"]; description?: string }
   | { type: "running-is"; value: boolean; description?: string }
+  | { type: "show-sessions-is"; value: boolean; description?: string }
   | { type: "all-blocks-non-streaming"; description?: string };
 
 export interface SnapshotExpectation {

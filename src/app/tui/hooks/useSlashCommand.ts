@@ -12,6 +12,7 @@ export type SlashAction =
   | { type: "compact" }
   | { type: "setting" }
   | { type: "help" }
+  | { type: "new" }
   | { type: "exit" }
   | { type: "unknown"; raw: string };
 
@@ -33,6 +34,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case "compact": return { type: "compact" };
     case "setting": case "config": return { type: "setting" };
     case "help": case "h": return { type: "help" };
+    case "new": return { type: "new" };
     case "exit": case "quit": case "q": return { type: "exit" };
     default: return { type: "unknown", raw: input };
   }
@@ -54,7 +56,13 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
         dispatch({ type: "LIST_MODELS" });
         break;
       case "sessions":
-        dispatch({ type: "SHOW_SESSIONS", id: action.id });
+        if (action.id) {
+          // /sessions <id> directly loads the session — handled in Task 12
+        }
+        dispatch({ type: "SHOW_SESSIONS" });
+        break;
+      case "new":
+        dispatch({ type: "NEW_SESSION" });
         break;
       case "plan":
         dispatch({ type: "SET_PHASE", phase: "planning" as const });

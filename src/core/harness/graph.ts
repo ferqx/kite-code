@@ -61,6 +61,8 @@ export interface BuildCodeAgentGraphInput {
   model?: SupportedChatModel;
   /** 可选的内存级授权覆盖 / Optional in-memory authorization override */
   authorizationOverride?: AuthorizationOverride;
+  /** 思考级别，映射到 reasoning_effort API 参数 / Thinking level, mapped to reasoning_effort API param */
+  thinkingLevel?: string | null;
 }
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
@@ -88,10 +90,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       const { state: result, contextRetries } = await invokeModel(model, state, tools);
       const allRetries = [...retryEvents, ...contextRetries];
       const syncedAuth = authorizationForState(state, override);
+      const modelConfigState = {
+        modelProvider: input.config.providerName,
+        modelName: input.config.modelName,
+        thinkingLevel: input.thinkingLevel ?? null,
+      };
       if (allRetries.length > 0) {
-        return { ...result, authorization: syncedAuth, modelRetries: allRetries };
+        return { ...result, ...modelConfigState, authorization: syncedAuth, modelRetries: allRetries };
       }
-      return { ...result, authorization: syncedAuth };
+      return { ...result, ...modelConfigState, authorization: syncedAuth };
     } finally {
       (model as unknown as Record<string, unknown>)._retryListener = null;
     }

@@ -32,6 +32,7 @@ export interface TuiState {
   leaderPending: boolean;
   showHelp: boolean;
   showModelSelector: boolean;
+  showSessions: boolean;
   ctrlCPressed: boolean;
   sessionKey: number;
   exitRequested: boolean;

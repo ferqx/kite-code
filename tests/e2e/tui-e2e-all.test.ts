@@ -374,8 +374,12 @@ describe(`${label} Settings & Session`, () => {
     await verify("settings-model-list", SS.modelList, 1).verifyAll();
   });
 
-  test("list sessions shows stub", async () => {
+  test("list sessions opens overlay", async () => {
     await verify("settings-sessions", SS.sessionsList, 1).verifyAll();
+  });
+
+  test("escape closes session overlay", async () => {
+    await verify("settings-sessions-escape", SS.sessionsEscape, 1).verifyAll();
   });
 
   test("model selector → select model", async () => {

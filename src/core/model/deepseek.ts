@@ -200,5 +200,6 @@ export function createDeepSeekModel(config: AgentConfig): ChatDeepSeek {
     model: config.modelName,
     temperature: 0,
     timeout: MODEL_REQUEST_TIMEOUT_MS,
+    ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
   });
 }

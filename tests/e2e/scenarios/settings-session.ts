@@ -34,7 +34,7 @@ export const modelList: Case = {
   ],
 };
 
-/** /sessions — shows session list stub */
+/** /sessions — opens session list overlay */
 export const sessionsList: Case = {
   scenario: {
     terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
@@ -46,11 +46,31 @@ export const sessionsList: Case = {
   expectations: [
     {
       reason: "terminal",
-      ansi: [
-        { type: "contains", text: "not yet implemented", description: "stub message" },
-      ],
+      ansi: [],
       state: [
-        { type: "has-block-kind", kind: "text" },
+        { type: "show-sessions-is", value: true },
+        { type: "running-is", value: false },
+      ],
+    },
+  ],
+};
+
+/** /sessions — ESCAPE closes session list overlay */
+export const sessionsEscape: Case = {
+  scenario: {
+    terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
+    steps: [
+      { type: "dispatch", actionType: "SHOW_SESSIONS" },
+      { type: "dispatch", actionType: "ESCAPE" },
+      { type: "agent-done" },
+    ],
+  },
+  expectations: [
+    {
+      reason: "terminal",
+      ansi: [],
+      state: [
+        { type: "show-sessions-is", value: false },
         { type: "running-is", value: false },
       ],
     },

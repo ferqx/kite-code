@@ -30,6 +30,8 @@ interface CheckpointRow {
   checkpoint: string | Uint8Array;
   /** 序列化的元数据 / Serialized metadata */
   metadata: string | Uint8Array;
+  /** 创建时间（用于排序 sessions）/ Creation timestamp (for session sorting) */
+  created_at: string;
 }
 
 /** 待写入表行数据类型 / Pending write table row data type */
@@ -84,6 +86,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
         type text,
         checkpoint text,
         metadata text,
+        created_at text not null default (datetime('now')),
         primary key (thread_id, checkpoint_ns, checkpoint_id)
       )
     `);
@@ -100,6 +103,23 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
         primary key (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
       )
     `);
+
+    // 新增 created_at 列用于排序 sessions / Add created_at column for session sorting
+    // 如果列已存在则忽略错误 / Ignore error if column already exists
+    try {
+      // default 必须为常量（SQLite ALTER TABLE 不允许函数调用），存量行 created_at 保持 NULL
+      // DEFAULT must be constant — existing rows keep NULL
+      this.db.exec(
+        "ALTER TABLE checkpoints ADD COLUMN created_at TEXT",
+      );
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message?.includes("duplicate column")) {
+        // Column already exists — ignore
+      } else {
+        throw e;
+      }
+    }
+
     this.isSetup = true;
   }
 
@@ -260,8 +280,8 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     this.db
       .query(
         `insert or replace into checkpoints
-         (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-         values (?, ?, ?, ?, ?, ?, ?)`,
+         (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata, created_at)
+         values (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
       )
       .run(
         String(threadId),
@@ -404,5 +424,6 @@ function selectCheckpointColumns(): string {
       parent_checkpoint_id,
       type,
       checkpoint,
-      metadata`;
+      metadata,
+      created_at`;
 }

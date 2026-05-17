@@ -11,6 +11,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: "thinking", aliases: ["t"], description: "Toggle thinking visibility" },
   { name: "model", aliases: [], description: "Switch model", args: "[name]" },
   { name: "sessions", aliases: [], description: "Show sessions", args: "[id]" },
+  { name: "new", aliases: [], description: "Start a new session" },
   { name: "plan", aliases: [], description: "Enter planning mode" },
   { name: "auth", aliases: [], description: "Toggle authorization mode", args: "[mode]" },
   { name: "clear", aliases: ["c"], description: "Clear output" },

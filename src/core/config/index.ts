@@ -33,6 +33,8 @@ export interface AgentConfig {
   providerName: string;
   /** LangChain adapter 类型 / LangChain adapter type */
   providerType: ModelProviderType;
+  /** 思考程度，映射到 reasoning_effort API 参数 / Thinking level, mapped to reasoning_effort API param */
+  reasoningEffort?: string | null;
 }
 
 /** 加载配置选项 / Configuration loading options */

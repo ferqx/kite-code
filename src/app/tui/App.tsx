@@ -8,6 +8,7 @@ import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
 import HelpPanel from "./components/HelpPanel";
 import ModelSelector from "./components/ModelSelector";
+import SessionSelector from "./components/SessionSelector.js";
 import Header from "./Header";
 import Footer from "./Footer";
 import { useGlobalKeys, useLeaderKeys } from "./hooks/useGlobalKeys";
@@ -41,7 +42,10 @@ export type Action =
   | { type: "SHOW_MODEL_SELECTOR" }
   | { type: "HIDE_MODEL_SELECTOR" }
   | { type: "LIST_MODELS" }
-  | { type: "SHOW_SESSIONS"; id?: string }
+  | { type: "SHOW_SESSIONS" }
+  | { type: "HIDE_SESSIONS" }
+  | { type: "LOAD_SESSION_PENDING"; threadId: string }
+  | { type: "LOAD_SESSION"; blocks: OutputBlock[]; interrupt: InterruptState | null; modelProvider: string; modelName: string; thinkingLevel: string | null }
   | { type: "SELECT_MODEL"; modelId: string }
   | { type: "NEW_SESSION" }
   | { type: "USER_MESSAGE"; text: string }
@@ -335,6 +339,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return { ...state, leaderPending: false };
     case "ESCAPE":
       if (state.showHelp) return { ...state, showHelp: false };
+      if (state.showSessions) return { ...state, showSessions: false };
       if (state.showModelSelector) return { ...state, showModelSelector: false };
       if (state.leaderPending) return { ...state, leaderPending: false };
       if (state.interrupt) {
@@ -401,12 +406,34 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       const block: OutputBlock = { id: nextId++, kind: "text", content: modelListText() };
       return { ...state, blocks: [...state.blocks, block] };
     }
-    case "SHOW_SESSIONS": {
-      const content = action.id
-        ? `Session switch to "${action.id}": session management not yet implemented`
-        : "Session list: session management not yet implemented";
-      const block: OutputBlock = { id: nextId++, kind: "text", content };
-      return { ...state, blocks: [...state.blocks, block] };
+    case "SHOW_SESSIONS":
+      return { ...state, showSessions: true };
+    case "HIDE_SESSIONS":
+      return { ...state, showSessions: false };
+    case "LOAD_SESSION_PENDING": {
+      // No state change — handled in index.tsx via effect
+      return state;
+    }
+    case "LOAD_SESSION": {
+      // Reset block ID counter based on loaded blocks
+      const maxId = action.blocks.reduce((max, b) => Math.max(max, b.id), 0);
+      nextId = maxId + 1;
+
+      return {
+        ...state,
+        blocks: action.blocks,
+        interrupt: action.interrupt,
+        showSessions: false,    // Close the session selector
+        exited: false,          // Reset exit state
+        running: false,         // Not running
+        compacting: false,      // Not compacting
+        currentRunReasonId: undefined,
+        status: {
+          ...state.status,
+          modelName: action.modelName || state.status.modelName,
+          thinkingMode: action.thinkingLevel || state.status.thinkingMode,
+        },
+      };
     }
     case "SELECT_MODEL":
       return {
@@ -447,6 +474,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         sessionError: false,
         showHelp: false,
         showModelSelector: false,
+        showSessions: false,
         leaderPending: false,
         currentRunReasonId: undefined,
         sessionKey: state.sessionKey + 1,
@@ -481,6 +509,7 @@ const initialState: TuiState = {
   leaderPending: false,
   showHelp: false,
   showModelSelector: false,
+  showSessions: false,
   ctrlCPressed: false,
   sessionKey: 0,
   exitRequested: false,
@@ -514,6 +543,13 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
   const hideHelp = useCallback(() => dispatch({ type: "HIDE_HELP" }), [dispatch]);
   const hideModelSelector = useCallback(() => dispatch({ type: "HIDE_MODEL_SELECTOR" }), [dispatch]);
   const selectModel = useCallback((modelId: string) => dispatch({ type: "SELECT_MODEL", modelId }), [dispatch]);
+  const hideSessions = useCallback(() => dispatch({ type: "HIDE_SESSIONS" }), [dispatch]);
+  const selectSession = useCallback(
+    (threadId: string) => {
+      dispatch({ type: "LOAD_SESSION_PENDING", threadId });
+    },
+    [dispatch],
+  );
 
   const interruptBlock = useMemo(() => {
     if (!state.interrupt) return undefined;
@@ -556,6 +592,12 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
         />
       )}
       {children}
+      {state.showSessions && (
+        <SessionSelector
+          onSelect={selectSession}
+          onClose={hideSessions}
+        />
+      )}
       {state.showModelSelector && (
         <ModelSelector
           currentModel={state.status.modelName}
