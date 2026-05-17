@@ -292,16 +292,16 @@ describe("loadSession", () => {
 
     const result = await loadSession(dbPath, "thread-tc");
     expect(result).not.toBeNull();
-    // user → tool_card → text (matches runner's event order: reasoning → tool_calls → text)
+    // user → tool_card (from AIMessage tool_calls, flushed at end) → text
     expect(result!.blocks.length).toBe(3);
     expect(result!.blocks[0].kind).toBe("user");
     expect(result!.blocks[1].kind).toBe("tool_card");
     expect(result!.blocks[2].kind).toBe("text");
-    if (result!.blocks[2].kind === "tool_card") {
-      expect(result!.blocks[2].callId).toBe("call-1");
-      expect(result!.blocks[2].name).toBe("read_file");
-      expect(result!.blocks[2].args).toEqual({ path: "/tmp/test.txt" });
-      expect(result!.blocks[2].status).toBe("done");
+    if (result!.blocks[1].kind === "tool_card") {
+      expect(result!.blocks[1].callId).toBe("call-1");
+      expect(result!.blocks[1].name).toBe("read_file");
+      expect(result!.blocks[1].args).toEqual({ path: "/tmp/test.txt" });
+      expect(result!.blocks[1].status).toBe("done");
     }
   });
 
@@ -334,18 +334,15 @@ describe("loadSession", () => {
 
     const result = await loadSession(dbPath, "thread-tm");
     expect(result).not.toBeNull();
-    // user → tool_card (from AIMessage) → tool_card (from ToolMessage)
+    // AIMessage tool_calls → tool_card, then ToolMessage enriches it in place
     const toolCards = result!.blocks.filter((b) => b.kind === "tool_card");
-    expect(toolCards.length).toBe(2);
-    // First tool_card is from AIMessage (no summary needed)
+    expect(toolCards.length).toBe(1);
     if (toolCards[0].kind === "tool_card") {
       expect(toolCards[0].status).toBe("done");
       expect(toolCards[0].name).toBe("shell_execute");
-    }
-    // Second tool_card is from ToolMessage
-    if (toolCards[1].kind === "tool_card") {
-      expect(toolCards[1].status).toBe("done");
-      expect(toolCards[1].summary).toBe("hello");
+      expect(toolCards[0].summary).toBe("hello");
+      expect(toolCards[0].args).toEqual({ command: "echo hello" });
+      expect(toolCards[0].preview).toBe("echo hello");
     }
   });
 

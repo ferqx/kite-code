@@ -162,20 +162,24 @@ function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
         });
       }
 
-      // tool_calls → tool_card blocks
+      // tool_calls → tool_card blocks (result summary added later from ToolMessage if present)
       const toolCalls = msg.tool_calls;
       if (Array.isArray(toolCalls) && toolCalls.length > 0) {
         for (const tc of toolCalls) {
           if (tc && typeof tc === "object") {
             const call = tc as Record<string, unknown>;
+            const callId = typeof call.id === "string" ? call.id : "";
+            const name = typeof call.name === "string" ? call.name : "";
+            const args = (call.args as Record<string, unknown>) ?? {};
             blocks.push({
               id: nextId++,
               kind: "tool_card",
-              callId: typeof call.id === "string" ? call.id : "",
-              name: typeof call.name === "string" ? call.name : "",
-              args: (call.args as Record<string, unknown>) ?? {},
+              callId,
+              name,
+              args,
               status: "done",
               summary: "",
+              preview: computePreview(name, args),
             });
           }
         }
@@ -189,9 +193,11 @@ function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
       continue;
     }
 
-    // ToolMessage → tool_card block (status based on result)
+    // ToolMessage → update matching AIMessage tool_card with result, or create standalone
     const tm = msg as Record<string, unknown>;
     if (isToolMessageLike(tm)) {
+      const callId = (tm.tool_call_id as string) ?? "";
+
       const content = typeof tm.content === "string" ? tm.content : JSON.stringify(tm.content);
       let ok = true;
       let summary = content.slice(0, 200);
@@ -218,19 +224,57 @@ function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
         /* use raw content */
       }
 
-      blocks.push({
-        id: nextId++,
-        kind: "tool_card",
-        callId: (tm.tool_call_id as string) ?? "",
-        name: (tm.name as string) ?? "",
-        args: {},
-        status: ok ? "done" : "error",
-        summary,
-      });
+      // Find existing tool_card from AIMessage tool_calls and enrich with result
+      const existingIdx = blocks.findIndex(
+        (b) => b.kind === "tool_card" && b.callId === callId,
+      );
+      if (existingIdx >= 0 && blocks[existingIdx].kind === "tool_card") {
+        blocks[existingIdx] = {
+          ...blocks[existingIdx],
+          status: ok ? "done" : "error",
+          summary,
+        } as typeof blocks[number];
+      } else {
+        // Standalone ToolMessage (no preceding AIMessage tool_calls)
+        const name = (tm.name as string) ?? "";
+        blocks.push({
+          id: nextId++,
+          kind: "tool_card",
+          callId,
+          name,
+          args: {},
+          status: ok ? "done" : "error",
+          summary,
+        });
+      }
     }
   }
 
   return blocks;
+}
+
+/** 计算回放工具卡片的 preview 文本 / Compute preview text for replayed tool cards */
+function computePreview(name: string, args: Record<string, unknown>): string | undefined {
+  switch (name) {
+    case "read_file":
+    case "write_file":
+    case "edit_file":
+      return String(args.path ?? "") || undefined;
+    case "shell_execute": {
+      const cmd = String(args.command ?? "");
+      if (!cmd) return undefined;
+      return cmd.length > 60 ? cmd.slice(0, 57) + "..." : cmd;
+    }
+    case "update_plan":
+      return String(args.name ?? "") || undefined;
+    case "ask_user": {
+      const q = String(args.question ?? "");
+      if (!q) return undefined;
+      return q.length > 40 ? q.slice(0, 37) + "..." : q;
+    }
+    default:
+      return undefined;
+  }
 }
 
 // ── Helpers ──

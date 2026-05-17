@@ -266,6 +266,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
       tool_call_id: request.id ?? "missing-tool-call-id",
+      name: request.name,
       status: result.ok === false ? "error" : "success",
     });
 
@@ -508,6 +509,7 @@ function rejectedToolMessage(
           reason,
         }),
         tool_call_id: request.id ?? "missing-tool-call-id",
+        name: request.name,
         status: "error",
       }),
     ],
