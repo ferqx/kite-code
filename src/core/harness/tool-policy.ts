@@ -5,12 +5,12 @@ import type {
   ShellApprovalGrant,
   ShellGrantUsed,
   WorkspaceAccess,
-} from "../../protocol/events";
+} from "@/protocol/events";
 import type {
   AuthorizationOverride,
   ThreadAuthorizationState,
-} from "../types";
-import { isReadOnlyShellCommand } from "../tools/definitions";
+} from "@/core/types";
+import { isReadOnlyShellCommand } from "@/core/tools/definitions";
 import type { PendingToolRequest } from "./tool-requests";
 
 export type ToolRisk =

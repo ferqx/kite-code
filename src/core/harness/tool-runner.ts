@@ -3,14 +3,14 @@ import type {
   AgentPlan,
   ShellGrantUsed,
   WorkspaceAccess,
-} from "../../protocol/events";
+} from "@/protocol/events";
 import type {
   AuthorizationOverride,
   ShellResult,
   ThreadAuthorizationState,
-} from "../types";
-import { editFile, readFile, writeFile } from "../tools/file";
-import { shellTool, type ShellExecutor } from "../tools/shell";
+} from "@/core/types";
+import { editFile, readFile, writeFile } from "@/core/tools/file";
+import { shellTool, type ShellExecutor } from "@/core/tools/shell";
 import {
   defaultPhaseForWorkspaceAccess,
   evaluateToolPolicy,

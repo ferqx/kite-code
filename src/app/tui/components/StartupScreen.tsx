@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { darkTheme as t } from "../theme";
+import { darkTheme as t } from "@/app/tui/theme";
 
 interface StartupScreenProps {
   modelName: string;

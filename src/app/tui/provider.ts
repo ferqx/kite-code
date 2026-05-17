@@ -1,6 +1,6 @@
-import type { AgentEvent } from "../../protocol/events";
-import type { InterruptPayload, UserAction } from "../../protocol/actions";
-import type { UserInputProvider } from "../../protocol/provider";
+import type { AgentEvent } from "@/protocol/events";
+import type { InterruptPayload, UserAction } from "@/protocol/actions";
+import type { UserInputProvider } from "@/protocol/provider";
 
 export class TuiUserInputProvider implements UserInputProvider {
   private dispatch: (event: AgentEvent) => void;

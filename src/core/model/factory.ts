@@ -3,7 +3,7 @@ import { ChatOllama } from "@langchain/ollama";
 import { BaseMessage } from "@langchain/core/messages";
 import { ChatResult } from "@langchain/core/outputs";
 import { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
-import type { AgentConfig } from "../config/index";
+import type { AgentConfig } from "@/core/config/index";
 import { createDeepSeekModel, withTransientModelRetry, type ModelRetryListener } from "./deepseek";
 
 const MODEL_REQUEST_TIMEOUT_MS = 30_000;

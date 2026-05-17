@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
-import { darkTheme as t } from "../theme";
+import { darkTheme as t } from "@/app/tui/theme";
 
 export interface ModelOption {
   id: string;

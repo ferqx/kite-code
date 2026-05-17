@@ -5,11 +5,11 @@ import type {
   AgentPhase,
   ShellGrantUsed,
   WorkspaceAccess,
-} from "../../protocol/events";
+} from "@/protocol/events";
 import type {
   ContextBudget,
   ThreadAuthorizationState,
-} from "../types";
+} from "@/core/types";
 import { defaultAuthorizationState } from "./tool-policy";
 import type { PendingToolRequest } from "./tool-requests";
 

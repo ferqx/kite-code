@@ -1,6 +1,6 @@
 import { ChatDeepSeek } from "@langchain/deepseek";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
-import type { AgentConfig } from "../config/index";
+import type { AgentConfig } from "@/core/config/index";
 
 /** 模型重试监听器 / Model retry listener */
 export type ModelRetryListener = (attempt: number, error: unknown, delayMs: number) => void;

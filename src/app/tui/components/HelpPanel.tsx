@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
-import { darkTheme as t } from "../theme";
+import { darkTheme as t } from "@/app/tui/theme";
 
 interface HelpPanelProps {
   onClose: () => void;

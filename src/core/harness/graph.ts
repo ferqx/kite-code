@@ -5,24 +5,24 @@ import {
   StateGraph,
   interrupt,
 } from "@langchain/langgraph";
-import type { AgentConfig } from "../config/index";
+import type { AgentConfig } from "@/core/config/index";
 import {
   buildStaticSystemPrompt,
   prepareModelContext,
   forceContextCompaction,
-} from "../model/context";
+} from "@/core/model/context";
 import {
   buildCacheableRuntimeContext,
   formatWorkspaceAccessReminder,
   formatPlanStateReminder,
-} from "../model/runtime-context";
-import { createChatModel, type SupportedChatModel } from "../model/factory";
-import { type ModelRetryListener } from "../model/deepseek";
-import { BunSqliteSaver } from "../persistence/checkpoint";
-import type { ShellApprovalGrant } from "../../protocol/events";
-import type { AgentResumeValue, AuthorizationOverride, ModelRetryEvent, ThreadAuthorizationState } from "../types";
-import { createAgentTools } from "../tools/definitions";
-import type { ShellExecutor } from "../tools/shell";
+} from "@/core/model/runtime-context";
+import { createChatModel, type SupportedChatModel } from "@/core/model/factory";
+import { type ModelRetryListener } from "@/core/model/deepseek";
+import { BunSqliteSaver } from "@/core/persistence/checkpoint";
+import type { ShellApprovalGrant } from "@/protocol/events";
+import type { AgentResumeValue, AuthorizationOverride, ModelRetryEvent, ThreadAuthorizationState } from "@/core/types";
+import { createAgentTools } from "@/core/tools/definitions";
+import type { ShellExecutor } from "@/core/tools/shell";
 import {
   routeAfterAgent,
   routeAfterApproval,

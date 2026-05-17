@@ -1,4 +1,4 @@
-import type { ToolCallPayload, ToolApprovalPayload, UserInputPayload, AgentPhase, AgentPlan, AuthorizationMode, WorkspaceAccess } from "../../protocol/events";
+import type { ToolCallPayload, ToolApprovalPayload, UserInputPayload, AgentPhase, AgentPlan, AuthorizationMode, WorkspaceAccess } from "@/protocol/events";
 
 export type OutputBlock =
   | { id: number; kind: "user"; content: string }

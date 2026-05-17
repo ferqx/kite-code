@@ -1,5 +1,5 @@
 import { ToolMessage } from "@langchain/core/messages";
-import type { AgentResumeValue } from "../types";
+import type { AgentResumeValue } from "@/core/types";
 import type { PendingToolRequest } from "./tool-requests";
 
 /** 规范化用户输入恢复值 / Normalize user input resume value */

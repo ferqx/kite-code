@@ -1,6 +1,7 @@
 import React, { useReducer, useCallback, useMemo, type Dispatch, type ReactNode } from "react";
 import { Box } from "ink";
-import type { AgentEvent } from "../../protocol/events";
+import { sessionExportPath } from "@/core/config/paths";
+import type { AgentEvent } from "@/protocol/events";
 import type { TuiState, OutputBlock, StatusState, InterruptState, FileChangeRecord } from "./types";
 import OutputArea from "./OutputArea";
 import ApprovalBlock from "./components/ApprovalBlock";
@@ -370,7 +371,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     }
     case "EXPORT_SESSION": {
       const now = new Date().toISOString().replace(/[:.]/g, "-");
-      const filename = `${process.cwd()}/.openpx/session-${now}.md`;
+      const filename = sessionExportPath(now);
       const body = state.blocks
         .map((b) => {
           if (b.kind === "user") return `**You:** ${b.content}`;

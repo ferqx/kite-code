@@ -1,11 +1,11 @@
 import { join, resolve } from "node:path";
-import { loadAgentConfig } from "../../core/config/index";
-import { createSandboxExecutor } from "../../core/sandbox/index";
-import { runAgent } from "../../core/runner";
-import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from "../../protocol/events";
-import type { InterruptPayload, UserAction } from "../../protocol/actions";
-import type { UserInputProvider } from "../../protocol/provider";
-import type { AuthorizationOverride } from "../../core/types";
+import { loadAgentConfig, defaultCheckpointPath } from "@/core/config/index";
+import { createSandboxExecutor } from "@/core/sandbox/index";
+import { runAgent } from "@/core/runner";
+import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from "@/protocol/events";
+import type { InterruptPayload, UserAction } from "@/protocol/actions";
+import type { UserInputProvider } from "@/protocol/provider";
+import type { AuthorizationOverride } from "@/core/types";
 
 export interface ParsedArgs {
   command: "run" | "resume" | "help";
@@ -140,7 +140,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     threadId: explicitThread || (command === "run" ? freshThreadId() : "default-thread"),
     userId: value("--user", "default-user"),
     workspace: resolve(value("--workspace", cwd)),
-    checkpointPath: resolve(value("--checkpoints", join(cwd, ".openpx", "checkpoints.sqlite"))),
+    checkpointPath: resolve(value("--checkpoints", defaultCheckpointPath())),
     mode,
     authorizationMode,
     approve: approvalGrant !== undefined,

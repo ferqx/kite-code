@@ -2,9 +2,9 @@ import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import TextInput from "ink-text-input";
-import type { UserInputPayload } from "../../protocol/events";
-import type { TuiUserInputProvider } from "../provider";
-import { darkTheme as t } from "../theme";
+import type { UserInputPayload } from "@/app/protocol/events";
+import type { TuiUserInputProvider } from "@/app/tui/provider";
+import { darkTheme as t } from "@/app/tui/theme";
 
 interface InputBlockProps {
   question: UserInputPayload;

@@ -1,4 +1,4 @@
-import type { AuthorizationMode, ShellApprovalGrant, ShellGrantUsed, WorkspaceAccess } from "../protocol/events";
+import type { AuthorizationMode, ShellApprovalGrant, ShellGrantUsed, WorkspaceAccess } from "@/protocol/events";
 
 export interface ShellInput {
   workspace: string;

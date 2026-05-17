@@ -1,5 +1,5 @@
-import type { ShellExecutor } from "../tools/shell";
-import { shellTool } from "../tools/shell";
+import type { ShellExecutor } from "@/core/tools/shell";
+import { shellTool } from "@/core/tools/shell";
 import { generateBwrapArgs } from "./bwrap";
 import { detectSandboxBackend, type SandboxBackend } from "./platform";
 import { findApplySeccomp, resolveSeccompPath } from "./seccomp";

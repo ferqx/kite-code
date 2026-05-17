@@ -21,9 +21,9 @@ import type {
   UserInputPayload,
   WorkspaceAccess,
   WorkspaceAccessRequest,
-} from "../protocol/events";
-import type { UserAction } from "../protocol/actions";
-import type { UserInputProvider } from "../protocol/provider";
+} from "@/protocol/events";
+import type { UserAction } from "@/protocol/actions";
+import type { UserInputProvider } from "@/protocol/provider";
 import type {
   AgentResumeValue,
   AuthorizationOverride,

@@ -10,13 +10,13 @@ import {
   formatWorkspaceAccessReminder,
   formatPlanStateReminder,
 } from "./runtime-context";
-import type { AgentPlan, WorkspaceAccess } from "../../protocol/events";
-import type { ContextBudget } from "../types";
+import type { AgentPlan, WorkspaceAccess } from "@/protocol/events";
+import type { ContextBudget } from "@/core/types";
 import {
   summarizeMessages,
   formatCompactedSummary,
 } from "./summarizer";
-import systemPrompt from '../prompts/system-prompt.txt';
+import systemPrompt from "@/core/prompts/system-prompt.txt";
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = "agent";
 

@@ -2,14 +2,14 @@ import React, { useState, useCallback, useMemo, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import CtrlSafeTextInput from "./CtrlSafeTextInput";
-import { useFileSearch } from "../hooks/useFileSearch";
+import { useFileSearch } from "@/app/tui/hooks/useFileSearch";
 import {
   useSlashSuggestions,
   SLASH_COMMANDS,
   SLASH_COMMAND_DEFS,
   MODEL_NAMES,
-} from "../hooks/useSlashSuggestions";
-import { darkTheme as t } from "../theme";
+} from "@/app/tui/hooks/useSlashSuggestions";
+import { darkTheme as t } from "@/app/tui/theme";
 
 interface InputLineProps {
   mode: "prompt" | "approval" | "question";

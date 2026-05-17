@@ -5,11 +5,11 @@ import type {
   ShellApprovalGrant,
   UserInputOption,
   UserInputRequest,
-} from "../../protocol/events";
+} from "@/protocol/events";
 import type {
   ShellActionEnvelope,
   ShellIntent,
-} from "../types";
+} from "@/core/types";
 
 /** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
 export type PendingToolRequest =

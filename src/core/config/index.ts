@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { parse } from "jsonc-parser";
 import { z } from "zod";
+import { defaultConfigPath } from "./paths";
 
 const providerSchema = z.object({
   type: z.enum(["deepseek", "openai", "openai-compatible", "ollama"]).optional(),
@@ -46,10 +45,7 @@ export interface LoadAgentConfigOptions {
   modelName?: string;
 }
 
-/** 获取默认配置路径 / Get default configuration path */
-export function defaultConfigPath(): string {
-  return join(homedir(), ".openpx", "openpx.jsonc");
-}
+export { defaultConfigPath, defaultCheckpointPath, editorInputPath, sessionExportPath } from "./paths";
 
 /** 加载并解析 Agent 配置 / Load and parse agent configuration */
 export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConfig {

@@ -1,8 +1,8 @@
 import React from "react";
 import { render } from "ink";
-import { loadAgentConfig } from "../../core/config/index";
-import { createSandboxExecutor } from "../../core/sandbox/index";
-import { runAgent } from "../../core/runner";
+import { loadAgentConfig, defaultCheckpointPath, editorInputPath } from "@/core/config/index";
+import { createSandboxExecutor } from "@/core/sandbox/index";
+import { runAgent } from "@/core/runner";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState } from "./App";
 import InputLine from "./components/InputLine";
@@ -96,7 +96,7 @@ function TuiBootstrap() {
         userId: "tui-user",
         threadId: threadIdRef.current,
         workspace,
-        checkpointPath: `${workspace}/.openpx/checkpoints.sqlite`,
+        checkpointPath: defaultCheckpointPath(),
         config,
         shellExecutor,
         signal: abortController.signal,
@@ -185,7 +185,7 @@ function TuiBootstrap() {
     }
 
     let cancelled = false;
-    const tmpFile = `${workspace}/.openpx/editor-input-${Date.now().toString(36)}.md`;
+    const tmpFile = editorInputPath(Date.now().toString(36));
 
     import("node:fs").then(({ writeFileSync }) => {
       writeFileSync(tmpFile, "", "utf-8");
