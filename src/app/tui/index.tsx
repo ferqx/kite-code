@@ -143,9 +143,13 @@ function TuiBootstrap() {
         threadIdRef.current = `tui-${Date.now().toString(36)}`;
       }
 
-      // Build conversation context from history
-      conversationHistoryRef.current.push(`User: ${task}`);
-      const fullTask = conversationHistoryRef.current.join("\n");
+      // Each turn sends only the current message. The checkpoint maintains
+      // the full conversation history — runAgent reads it automatically.
+      // conversationHistoryRef accumulates shell command outputs for context.
+      const shellContext = conversationHistoryRef.current.length > 0
+        ? "\n" + conversationHistoryRef.current.join("\n")
+        : "";
+      const fullTask = task + shellContext;
 
       const shellExecutor = createSandboxExecutor({ enabled: true, workspace });
 
