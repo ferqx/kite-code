@@ -301,6 +301,19 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "ESCAPE" });
       expect(s.interrupt).toBeNull();
     });
+    test("ESCAPE when running cancels the agent", () => {
+      let s = fresh(); s = { ...s, running: true };
+      s = dispatch(s, { type: "ESCAPE" });
+      expect(s.running).toBe(false);
+      expect(s.ctrlCPressed).toBe(true);
+    });
+    test("ESCAPE when running with interrupt cancels both", () => {
+      let s = fresh(); s = { ...s, running: true, interrupt: { kind: "approval", blockId: 99 } };
+      s = dispatch(s, { type: "ESCAPE" });
+      expect(s.running).toBe(false);
+      expect(s.ctrlCPressed).toBe(true);
+      expect(s.interrupt).toBeNull();
+    });
     test("ESCAPE closes help before modelSelector", () => {
       let s = fresh();
       s = { ...s, showHelp: true, showModelSelector: true };

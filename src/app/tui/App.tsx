@@ -342,6 +342,11 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       if (state.showSessions) return { ...state, showSessions: false };
       if (state.showModelSelector) return { ...state, showModelSelector: false };
       if (state.leaderPending) return { ...state, leaderPending: false };
+      if (state.running) {
+        const next = { ...state, running: false, ctrlCPressed: true };
+        if (state.interrupt) next.interrupt = null;
+        return next;
+      }
       if (state.interrupt) {
         return { ...state, interrupt: null };
       }

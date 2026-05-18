@@ -316,7 +316,7 @@ function TuiBootstrap() {
       <InputLine
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
         onSubmit={handleInput}
-        disabled={state.running}
+        disabled={!!state.interrupt}
         workspace={workspace}
         overlayActive={state.showHelp || state.showModelSelector || state.showSessions}
       />
