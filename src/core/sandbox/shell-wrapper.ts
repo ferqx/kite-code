@@ -18,12 +18,10 @@ export function buildUlimitPreamble(limits: Partial<ResourceLimits> = {}): strin
 
 /** 构建硬化后的环境变量 / Build hardened environment variables */
 export function buildHardenedEnv(workspace: string): Record<string, string> {
-  const sandboxHome = join(workspace, ".sandbox-home");
   const sandboxTmp = join(workspace, ".sandbox-tmp");
   const sandboxBunCache = join(workspace, ".sandbox-bun-cache");
 
   // 确保沙箱目录存在 / Ensure sandbox directories exist
-  mkdirSync(sandboxHome, { recursive: true });
   mkdirSync(sandboxTmp, { recursive: true });
   mkdirSync(sandboxBunCache, { recursive: true });
 
@@ -38,12 +36,19 @@ export function buildHardenedEnv(workspace: string): Record<string, string> {
     }
   }
 
-  // 重定向可写目录到工作区 / Redirect writable directories into workspace
-  env["HOME"] = sandboxHome;
+  // HOME 继承真实值，`~` 展开到真实用户目录。dotfile 写入由
+  // checkDangerousPaths + tool-policy 审批流拦截，不再需要假 HOME。
+  // Inherit real HOME so `~` resolves to the actual user directory.
+  // Dotfile writes are blocked by checkDangerousPaths + tool-policy approval.
+  if (process.env.HOME) {
+    env["HOME"] = process.env.HOME;
+  }
+
+  // 重定向临时目录和缓存到工作区 / Redirect temp dirs and caches into workspace
   env["TMPDIR"] = sandboxTmp;
   env["TMP"] = sandboxTmp;
   env["TEMP"] = sandboxTmp;
-  env["XDG_CACHE_HOME"] = join(workspace, ".sandbox-home", ".cache");
+  env["XDG_CACHE_HOME"] = join(sandboxTmp, ".cache");
   env["BUN_INSTALL_CACHE_DIR"] = sandboxBunCache;
 
   return env;
@@ -169,11 +174,18 @@ const DANGEROUS_PATHS = [
   "/etc/group",
   "/etc/hosts",
   "/etc/resolv.conf",
+  "/etc/ssh/sshd_config",
+  "/etc/ssh/ssh_config",
   "crontab",
-  "launchd",
-  "systemd",
-  ".service",
-  ".timer",
+  // 持久化机制 — 重启后自动执行（参考 Codex CLI）/ Persistence — auto-start after reboot
+  "Library/LaunchAgents/",
+  "Library/LaunchDaemons/",
+  ".config/systemd/user/",
+  "/etc/systemd/system/",
+  ".config/autostart/",
+  // Docker 凭证（Registry 凭据泄露）/ Docker credentials
+  ".docker/config.json",
+  ".docker/daemon.json",
 ];
 
 /** 从危险路径列表编译的正则模式 / Regex patterns compiled from dangerous path list */

@@ -4,8 +4,6 @@ export interface SandboxOptions {
   enabled: boolean;
   /** 工作目录路径 / Workspace directory path */
   workspace: string;
-  /** 允许外网访问（默认 false，仅 localhost）/ Allow external network access (default false, localhost only) */
-  allowNetwork?: boolean;
   /** 自定义资源限制（覆盖默认值）/ Custom resource limits (overrides defaults) */
   resourceLimits?: Partial<ResourceLimits>;
 }

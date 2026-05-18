@@ -15,7 +15,6 @@ export function generateSandboxProfile(workspace: string): string {
     fileReadPolicy(),
     fileWritePolicy(workspace),
     fileWriteUnlinkPolicy(workspace),
-    networkPolicy(),
   ]
     .filter(Boolean)
     .join("\n");
@@ -130,32 +129,16 @@ function fileReadPolicy(): string {
 (allow file-map-executable (subpath "/"))`;
 }
 
-/** 3. 文件写入层 — 仅 workspace + /tmp 可写 */
-function fileWritePolicy(workspace: string): string {
-  return `;; ── 文件写入：仅 workspace 和临时目录可写 ──
-(allow file-write* file-ioctl
-  (subpath "${esc(workspace)}")
-  (subpath "/tmp")
-  (subpath "/private/tmp")
-  (subpath "/private/var/tmp")
-  (subpath "/private/var/folders"))`;
+/** 3. 文件写入层 — 全局可写，授权由 tool-policy + checkDangerousPaths 兜底 */
+function fileWritePolicy(_workspace: string): string {
+  return `;; ── 文件写入：全局可写，授权由 tool-policy 审批 + checkDangerousPaths 兜底 ──
+(allow file-write* file-ioctl (subpath "/"))`;
 }
 
-/** 4. 防逃逸 sandwich — 全局禁止 unlink/create/symlink，仅工作区和临时目录覆盖 */
-function fileWriteUnlinkPolicy(workspace: string): string {
-  return `;; ── 防逃逸：禁止在工作区外创建 / 删除文件 ──
-(deny file-write-unlink file-write-create)
-(allow file-write-unlink file-write-create
-  (subpath "${esc(workspace)}")
-  (subpath "/tmp")
-  (subpath "/private/tmp")
-  (subpath "/private/var/tmp")
-  (subpath "/private/var/folders"))`;
-}
-
-/** 5. 网络层 — 默认断网，启用时由调用方追加 seatbelt_network_policy */
-function networkPolicy(): string {
-  return ";; ── 网络：默认断网 ──\n(deny network*)";
+/** 4. 文件创建/删除层 — 全局允许，危险路径由 checkDangerousPaths 拦截 */
+function fileWriteUnlinkPolicy(_workspace: string): string {
+  return `;; ── 文件创建/删除：全局允许，危险路径由 checkDangerousPaths 拦截 ──
+(allow file-write-unlink file-write-create (subpath "/"))`;
 }
 
 /** 转义 SBPL 字符串字面量中的反斜杠 */

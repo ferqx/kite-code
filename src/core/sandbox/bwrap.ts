@@ -7,7 +7,6 @@ import { existsSync } from "node:fs";
  * 隔离策略：
  * - 系统路径只读绑定，工作区读写绑定
  * - tmpfs /tmp 临时目录
- * - --unshare-net 网络隔离
  * - --unshare-pid 进程隔离
  */
 export function generateBwrapArgs(workspace: string): string[] {
@@ -29,9 +28,6 @@ export function generateBwrapArgs(workspace: string): string[] {
   // 最小设备节点和 proc
   args.push("--dev", "/dev");
   args.push("--proc", "/proc");
-
-  // 网络隔离
-  args.push("--unshare-net");
 
   // 进程隔离
   args.push("--unshare-pid");
