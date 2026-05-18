@@ -112,12 +112,20 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         if (oldIdx >= 0) {
           const beforeOld = next.slice(0, oldIdx);
           const afterOld = next.slice(oldIdx + ps.placeholder.length);
-          const pastedContent = afterOld;
-          const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
-          const combined = beforeOld + placeholder;
-          setPasteState({ pastedContent, placeholder });
-          textKeyRef.current++;
-          setValue(combined);
+
+          if (afterOld.length >= beforeOld.length) {
+            const pastedContent = afterOld;
+            const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
+            setPasteState({ pastedContent, placeholder });
+            textKeyRef.current++;
+            setValue(beforeOld + placeholder);
+          } else {
+            const pastedContent = beforeOld;
+            const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
+            setPasteState({ pastedContent, placeholder });
+            textKeyRef.current++;
+            setValue(placeholder + afterOld);
+          }
           return;
         }
       }
