@@ -1,23 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 
 // ============================================================================
-// 工作区路径安全校验 / Workspace path safety validation
+// 路径解析 — 相对路径基于 workspace，绝对路径原样使用
+// Path resolution — relative paths relative to workspace, absolute paths pass through
 // ============================================================================
 
-function safePath(workspace: string, filePath: string): string {
-  const wsResolved = resolve(workspace);
-  const resolved = resolve(wsResolved, filePath.replace(/[\\/]+/g, sep));
-  const relativePath = relative(wsResolved, resolved);
-  if (
-    relativePath &&
-    (relativePath === ".." ||
-      relativePath.startsWith(`..${sep}`) ||
-      isAbsolute(relativePath))
-  ) {
-    throw new Error(`Refusing path outside workspace: ${filePath}`);
-  }
-  return resolved;
+function resolvePath(workspace: string, filePath: string): string {
+  return resolve(workspace, filePath.replace(/[\\/]+/g, sep));
 }
 
 // ============================================================================
@@ -43,7 +33,7 @@ export interface ReadFileResult {
 
 export function readFile(input: ReadFileInput): ReadFileResult {
   try {
-    const target = safePath(input.workspace, input.path);
+    const target = resolvePath(input.workspace, input.path);
     if (!existsSync(target)) {
       return {
         ok: false,
@@ -122,7 +112,7 @@ export interface EditFileResult {
 
 export function editFile(input: EditFileInput): EditFileResult {
   try {
-    const target = safePath(input.workspace, input.path);
+    const target = resolvePath(input.workspace, input.path);
     if (!existsSync(target)) {
       return { ok: false, path: input.path, error: `File not found: ${input.path}` };
     }
@@ -224,7 +214,7 @@ export interface WriteFileResult {
 
 export function writeFile(input: WriteFileInput): WriteFileResult {
   try {
-    const target = safePath(input.workspace, input.path);
+    const target = resolvePath(input.workspace, input.path);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, input.content, "utf8");
 

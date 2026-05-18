@@ -35,7 +35,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       name: "read_file",
       description: READ_FILE_CONTRACT.description,
       schema: z.object({
-        path: z.string().describe("Relative path to the file"),
+        path: z.string().describe("Path to the file (relative to workspace, or absolute)"),
         offset: z.number().optional().describe("Starting line number (1-indexed, default 1)"),
         limit: z.number().optional().describe("Maximum number of lines to read"),
       }),
@@ -57,7 +57,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       name: "edit_file",
       description: EDIT_FILE_CONTRACT.description,
       schema: z.object({
-        path: z.string().describe("Relative path to the file to edit"),
+        path: z.string().describe("Path to the file to edit (relative to workspace, or absolute)"),
         old_string: z.string().describe("The exact text to replace. Must match the file content exactly, including whitespace."),
         new_string: z.string().describe("The new text to replace old_string with"),
         replace_all: z.boolean().optional().describe("Replace all occurrences (default: false, fails if multiple matches found)"),
@@ -74,7 +74,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       name: "write_file",
       description: WRITE_FILE_CONTRACT.description,
       schema: z.object({
-        path: z.string().describe("Relative path to the file"),
+        path: z.string().describe("Path to the file (relative to workspace, or absolute)"),
         content: z.string().describe("Complete file content to write"),
       }),
     },
@@ -291,6 +291,12 @@ export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = command.trim();
   // 拒绝对空命令和包含输出重定向的命令 / Reject empty commands and commands with output redirection
   if (!trimmed || /(^|[^>])>{1,2}($|[^>])/.test(trimmed)) {
+    return false;
+  }
+
+  // 拒绝命令替换 — $() 和反引号中可能包含写入命令，直通会导致绕过审批
+  // Reject command substitution — $() and backticks may contain write commands
+  if (/\$\(/.test(trimmed) || /`/.test(trimmed)) {
     return false;
   }
 
