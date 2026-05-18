@@ -109,7 +109,7 @@ function CtrlSafeTextInput({
       }
 
       if (key.return) {
-        if (onSubmit) {
+        if (!key.shift && onSubmit) {
           onSubmit(originalValue);
         }
         return;
