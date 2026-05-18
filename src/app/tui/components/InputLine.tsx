@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import CtrlSafeTextInput from "./CtrlSafeTextInput";
+import type { AtomicBlock } from "./CtrlSafeTextInput";
 import { useFileSearch } from "@/app/tui/hooks/useFileSearch";
 import {
   useSlashSuggestions,
@@ -11,14 +12,21 @@ import {
 } from "@/app/tui/hooks/useSlashSuggestions";
 import { darkTheme as t } from "@/app/tui/theme";
 
+const PASTE_THRESHOLD = 10_000;
+
+interface PasteState {
+  pastedContent: string;
+  placeholder: string;
+}
+
 interface InputLineProps {
   mode: "prompt" | "approval" | "question";
   onSubmit: (value: string) => void;
   disabled?: boolean;
   placeholder?: string;
   workspace: string;
-  /** When an overlay (HelpPanel, ModelSelector) is active, suppress slash suggestions */
   overlayActive?: boolean;
+  editorContentRef?: React.MutableRefObject<(() => string) | null>;
 }
 
 function commonPrefix(strings: string[]): string {
@@ -63,7 +71,7 @@ function completeSlash(input: string): string | null {
   return null;
 }
 
-export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive }: InputLineProps) {
+export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef }: InputLineProps) {
   const [value, setValue] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -86,26 +94,95 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   const fileActiveRef = useRef(false);
   fileActiveRef.current = fileSearch.active;
 
+  const [pasteState, setPasteState] = useState<PasteState | null>(null);
+  const pasteStateRef = useRef(pasteState);
+  pasteStateRef.current = pasteState;
+
+  const clearPasteState = useCallback(() => setPasteState(null), []);
+
+  const handleChange = useCallback((next: string, meta?: { insertPos: number; insertLen: number }) => {
+
+    if (meta && meta.insertLen >= PASTE_THRESHOLD) {
+      const ps = pasteStateRef.current;
+      const { insertPos, insertLen } = meta;
+      const pastedContent = next.slice(insertPos, insertPos + insertLen);
+
+      if (ps) {
+        const oldIdx = next.indexOf(ps.placeholder);
+        if (oldIdx >= 0) {
+          const cleaned = next.slice(0, oldIdx) + next.slice(oldIdx + ps.placeholder.length);
+          let adjustedPos = insertPos;
+          if (insertPos >= oldIdx + ps.placeholder.length) {
+            adjustedPos = insertPos - ps.placeholder.length;
+          }
+          const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
+          const before = cleaned.slice(0, adjustedPos);
+          const after = cleaned.slice(adjustedPos + insertLen);
+          setPasteState({ pastedContent, placeholder });
+          textKeyRef.current++;
+          setValue(before + placeholder + after);
+          return;
+        }
+      }
+
+      const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
+      const before = next.slice(0, insertPos);
+      const after = next.slice(insertPos + insertLen);
+      setPasteState({ pastedContent, placeholder });
+      textKeyRef.current++;
+      setValue(before + placeholder + after);
+      return;
+    }
+
+    setValue(next);
+  }, []);
+
+  useEffect(() => {
+    if (pasteState && !value.includes(pasteState.placeholder)) {
+      setPasteState(null);
+    }
+  }, [value, pasteState]);
+
+  const atomicBlock: AtomicBlock | undefined = pasteState
+    ? (() => {
+        const idx = value.indexOf(pasteState.placeholder);
+        if (idx < 0) return undefined;
+        return { start: idx, end: idx + pasteState.placeholder.length - 1 };
+      })()
+    : undefined;
+
   const handleSubmit = useCallback(
     (val: string) => {
-      if (!val.trim()) return;
-      // When slash suggestions or @file search are active and the current text
-      // is only a partial match, TextInput's premature submit would fail or
-      // trigger a wrong action. Suppress; the useInput handler commits + submits.
-      if (val.startsWith("/") && slashNeedsCommitRef.current) return;
+      const ps = pasteStateRef.current;
+      let finalValue: string;
+      if (ps) {
+        const idx = val.indexOf(ps.placeholder);
+        if (idx >= 0) {
+          finalValue =
+            val.slice(0, idx) +
+            ps.pastedContent +
+            val.slice(idx + ps.placeholder.length);
+        } else {
+          finalValue = val;
+        }
+      } else {
+        finalValue = val;
+      }
+
+      if (!finalValue.trim()) return;
+      if (finalValue.startsWith("/") && slashNeedsCommitRef.current) return;
       if (fileActiveRef.current) return;
-      setHistory((prev) => [...prev, val]);
+      setPasteState(null);
+      setHistory((prev) => [...prev, finalValue]);
       setHistoryIndex(-1);
       textKeyRef.current++;
-      onSubmit(val);
-      // Clear input immediately for one-shot slash commands (no secondary overlay).
-      // Keep it for /model which opens ModelSelector as a stacked overlay.
-      const isSlashOverlay = /^\/model(\s|$)/.test(val);
+      onSubmit(finalValue);
+      const isSlashOverlay = /^\/model(\s|$)/.test(finalValue);
       if (!isSlashOverlay) {
         setValue("");
       }
     },
-    [onSubmit]
+    [onSubmit],
   );
 
   // Check if input value is exactly a known slash command (no args, no trailing spaces)
@@ -132,9 +209,27 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     return suffix.length > 0 ? suffix : null;
   }, [slashSuggestions.active, slashSuggestions.result, slashSuggestions.selectedIndex]);
 
+  const applyHistoryEntry = useCallback((entry: string) => {
+    if (entry.length >= PASTE_THRESHOLD) {
+      const placeholder = `[已粘贴 ${entry.length.toLocaleString()} 字符]`;
+      setPasteState({ pastedContent: entry, placeholder });
+      textKeyRef.current++;
+      setValue(placeholder);
+    } else {
+      setPasteState(null);
+      setValue(entry);
+    }
+  }, []);
+
   useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; tab?: boolean; escape?: boolean; rightArrow?: boolean; ctrl?: boolean }) => {
     // When an overlay is active, yield all keyboard handling to it
     if (overlayActive) return;
+
+    if (key.escape && pasteState) {
+      setPasteState(null);
+      commitValue("");
+      return;
+    }
 
     // Slash command suggestion navigation
     if (slashSuggestions.active && slashSuggestions.result) {
@@ -244,7 +339,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     if (key.upArrow && history.length > 0) {
       const idx = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
       setHistoryIndex(idx);
-      setValue(history[idx]);
+      applyHistoryEntry(history[idx]);
       return;
     }
     if (key.downArrow) {
@@ -252,14 +347,28 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       const idx = historyIndex + 1;
       if (idx >= history.length) {
         setHistoryIndex(-1);
+        setPasteState(null);
         setValue("");
       } else {
         setHistoryIndex(idx);
-        setValue(history[idx]);
+        applyHistoryEntry(history[idx]);
       }
       return;
     }
   });
+
+  if (editorContentRef) {
+    editorContentRef.current = () => {
+      const ps = pasteStateRef.current;
+      if (ps) {
+        const idx = value.indexOf(ps.placeholder);
+        if (idx >= 0) {
+          return value.slice(0, idx) + ps.pastedContent + value.slice(idx + ps.placeholder.length);
+        }
+      }
+      return value;
+    };
+  }
 
   if (disabled) {
     return (
@@ -282,15 +391,23 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         <CtrlSafeTextInput
           key={textKeyRef.current}
           value={value}
-          onChange={setValue}
+          onChange={handleChange}
           onSubmit={handleSubmit}
           placeholder={placeholder}
           focus={!overlayActive}
+          atomicBlock={atomicBlock}
+          onRemoveAtomicBlock={clearPasteState}
         />
         {slashGhost && !overlayActive && (
           <Text color={t.dim}>{slashGhost}</Text>
         )}
       </Box>
+
+      {pasteState && (
+        <Box marginTop={1}>
+          <Text color={t.dim}>Ctrl+E 在编辑器中查看完整内容</Text>
+        </Box>
+      )}
 
       {/* Slash command suggestion dropdown */}
       {showSlashDropdown && (

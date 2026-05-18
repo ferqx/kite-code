@@ -28,6 +28,7 @@ function TuiBootstrap() {
   // Lazy init — only create thread when user sends first message
   const threadIdRef = React.useRef<string>("");
   const pendingSessionRef = React.useRef<string | null>(null);
+  const editorContentRef = React.useRef<(() => string) | null>(null);
   const thinkingLevelRef = React.useRef<string | null>(null);
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const handleInputRef = React.useRef<(value: string) => void>(() => {});
@@ -268,7 +269,8 @@ function TuiBootstrap() {
     const tmpFile = editorInputPath(Date.now().toString(36));
 
     import("node:fs").then(({ writeFileSync }) => {
-      writeFileSync(tmpFile, "", "utf-8");
+      const content = editorContentRef.current?.() ?? "";
+      writeFileSync(tmpFile, content, "utf-8");
     }).then(() =>
       import("node:child_process")
     ).then(({ spawn }) => {
@@ -319,6 +321,7 @@ function TuiBootstrap() {
         disabled={!!state.interrupt}
         workspace={workspace}
         overlayActive={state.showHelp || state.showModelSelector || state.showSessions}
+        editorContentRef={editorContentRef}
       />
     </App>
   );

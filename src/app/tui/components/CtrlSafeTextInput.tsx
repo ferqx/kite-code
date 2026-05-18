@@ -5,6 +5,11 @@ import React, { useState, useEffect } from "react";
 import { Text, useInput } from "ink";
 import chalk from "chalk";
 
+export interface AtomicBlock {
+  start: number;
+  end: number; // inclusive
+}
+
 interface Props {
   value: string;
   placeholder?: string;
@@ -12,8 +17,10 @@ interface Props {
   mask?: string;
   highlightPastedText?: boolean;
   showCursor?: boolean;
-  onChange: (value: string) => void;
+  onChange: (value: string, meta?: { insertPos: number; insertLen: number }) => void;
   onSubmit?: (value: string) => void;
+  atomicBlock?: AtomicBlock;
+  onRemoveAtomicBlock?: () => void;
 }
 
 function CtrlSafeTextInput({
@@ -25,6 +32,8 @@ function CtrlSafeTextInput({
   showCursor = true,
   onChange,
   onSubmit,
+  atomicBlock,
+  onRemoveAtomicBlock,
 }: Props) {
   const [state, setState] = useState({
     cursorOffset: (originalValue || "").length,
@@ -47,6 +56,16 @@ function CtrlSafeTextInput({
       return previousState;
     });
   }, [originalValue, focus, showCursor]);
+
+  useEffect(() => {
+    if (!atomicBlock) return;
+    setState((prev) => {
+      if (prev.cursorOffset > atomicBlock.start && prev.cursorOffset <= atomicBlock.end) {
+        return { ...prev, cursorOffset: atomicBlock.end + 1 };
+      }
+      return prev;
+    });
+  }, [atomicBlock]);
 
   const cursorActualWidth = highlightPastedText ? cursorWidth : 0;
   const value = mask ? mask.repeat(originalValue.length) : originalValue;
@@ -79,8 +98,6 @@ function CtrlSafeTextInput({
 
   useInput(
     (input, key) => {
-      // Filter Ctrl+letter combos (not just Ctrl+C like upstream ink-text-input)
-      // to prevent TUI shortcut character leakage into the input field.
       if (
         key.upArrow ||
         key.downArrow ||
@@ -92,7 +109,7 @@ function CtrlSafeTextInput({
       }
 
       if (key.return) {
-        if (onSubmit) {
+        if (!key.shift && onSubmit) {
           onSubmit(originalValue);
         }
         return;
@@ -101,40 +118,102 @@ function CtrlSafeTextInput({
       let nextCursorOffset = cursorOffset;
       let nextValue = originalValue;
       let nextCursorWidth = 0;
+      let insertMeta: { insertPos: number; insertLen: number } | undefined;
+      const ab = atomicBlock;
 
-      if (key.leftArrow) {
-        if (showCursor) {
-          nextCursorOffset--;
-        }
-      } else if (key.rightArrow) {
-        if (showCursor) {
-          nextCursorOffset++;
-        }
-      } else if (key.backspace || key.delete) {
-        if (cursorOffset > 0) {
+      if (ab) {
+        if (key.leftArrow) {
+          if (cursorOffset > ab.start && cursorOffset <= ab.end + 1) {
+            nextCursorOffset = ab.start;
+          } else {
+            nextCursorOffset = cursorOffset - 1;
+          }
+        } else if (key.rightArrow) {
+          if (cursorOffset >= ab.start && cursorOffset < ab.end + 1) {
+            nextCursorOffset = ab.end + 1;
+          } else {
+            nextCursorOffset = cursorOffset + 1;
+          }
+        } else if (key.backspace) {
+          if (cursorOffset > ab.start && cursorOffset <= ab.end + 1) {
+            nextValue =
+              originalValue.slice(0, ab.start) +
+              originalValue.slice(ab.end + 1);
+            nextCursorOffset = ab.start;
+            setState({ cursorOffset: nextCursorOffset, cursorWidth: 0 });
+            onChange(nextValue);
+            onRemoveAtomicBlock?.();
+            return;
+          }
+          if (cursorOffset > 0) {
+            nextValue =
+              originalValue.slice(0, cursorOffset - 1) +
+              originalValue.slice(cursorOffset);
+            nextCursorOffset = cursorOffset - 1;
+          }
+        } else if (key.delete) {
+          if (cursorOffset >= ab.start && cursorOffset < ab.end + 1) {
+            nextValue =
+              originalValue.slice(0, ab.start) +
+              originalValue.slice(ab.end + 1);
+            nextCursorOffset = ab.start;
+            setState({ cursorOffset: nextCursorOffset, cursorWidth: 0 });
+            onChange(nextValue);
+            onRemoveAtomicBlock?.();
+            return;
+          }
+          if (cursorOffset < originalValue.length) {
+            nextValue =
+              originalValue.slice(0, cursorOffset) +
+              originalValue.slice(cursorOffset + 1);
+          }
+        } else {
           nextValue =
-            originalValue.slice(0, cursorOffset - 1) +
-            originalValue.slice(cursorOffset, originalValue.length);
-          nextCursorOffset--;
+            originalValue.slice(0, cursorOffset) +
+            input +
+            originalValue.slice(cursorOffset);
+          nextCursorOffset += input.length;
+          if (input.length > 1) {
+            nextCursorWidth = input.length;
+          }
+          insertMeta = { insertPos: cursorOffset, insertLen: input.length };
         }
       } else {
-        nextValue =
-          originalValue.slice(0, cursorOffset) +
-          input +
-          originalValue.slice(cursorOffset, originalValue.length);
-        nextCursorOffset += input.length;
+        if (key.leftArrow) {
+          if (showCursor) {
+            nextCursorOffset--;
+          }
+        } else if (key.rightArrow) {
+          if (showCursor) {
+            nextCursorOffset++;
+          }
+        } else if (key.backspace || key.delete) {
+          if (cursorOffset > 0) {
+            nextValue =
+              originalValue.slice(0, cursorOffset - 1) +
+              originalValue.slice(cursorOffset);
+            nextCursorOffset--;
+          }
+        } else {
+          nextValue =
+            originalValue.slice(0, cursorOffset) +
+            input +
+            originalValue.slice(cursorOffset);
+          nextCursorOffset += input.length;
 
-        if (input.length > 1) {
-          nextCursorWidth = input.length;
+          if (input.length > 1) {
+            nextCursorWidth = input.length;
+          }
+          insertMeta = { insertPos: cursorOffset, insertLen: input.length };
         }
       }
 
-      if (cursorOffset < 0) {
+      if (nextCursorOffset < 0) {
         nextCursorOffset = 0;
       }
 
-      if (cursorOffset > originalValue.length) {
-        nextCursorOffset = originalValue.length;
+      if (nextCursorOffset > nextValue.length) {
+        nextCursorOffset = nextValue.length;
       }
 
       setState({
@@ -143,7 +222,7 @@ function CtrlSafeTextInput({
       });
 
       if (nextValue !== originalValue) {
-        onChange(nextValue);
+        onChange(nextValue, insertMeta);
       }
     },
     { isActive: focus },
