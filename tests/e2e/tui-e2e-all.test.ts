@@ -237,6 +237,10 @@ describe(`${label} Input flow`, () => {
   test("Ctrl+C interrupt during running", async () => {
     await verifyScenario("input-flow-ctrl-c", IF.ctrlCInterrupt, 1, IF.ctrlCInterruptExpectations).verifyAll();
   });
+
+  test("paste placeholder (>= 10k chars)", async () => {
+    await verifyScenario("input-flow-paste-placeholder", IF.pastePlaceholder, 1, IF.pastePlaceholderExpectations).verifyAll();
+  });
 });
 
 // ══════════════════════════════════════════════════════════

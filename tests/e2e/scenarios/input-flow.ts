@@ -129,3 +129,28 @@ export const ctrlCInterruptExpectations: SnapshotExpectation[] = [
     state: [{ type: "running-is", value: false }],
   },
 ];
+
+/**
+ * Paste large content (>= 10,000 chars) — verify placeholder is shown
+ * with atomic block hint, and raw paste content is NOT visible.
+ */
+const PASTE_SIZE = 10_000;
+const LARGE_PASTE = "A".repeat(PASTE_SIZE);
+
+export const pastePlaceholder: Scenario = {
+  terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
+  steps: [
+    { type: "simulate-key", key: LARGE_PASTE },
+    { type: "assert-snapshot" },
+  ],
+};
+export const pastePlaceholderExpectations: SnapshotExpectation[] = [
+  {
+    reason: "explicit",
+    ansi: [
+      { type: "contains", text: "[已粘贴", description: "placeholder shown after large paste" },
+      { type: "contains", text: "Ctrl+E", description: "editor hint shown" },
+      { type: "not-contains", text: "AAAAAAAA", description: "raw paste content not visible" },
+    ],
+  },
+];
