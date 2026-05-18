@@ -321,7 +321,7 @@ function TuiBootstrap() {
 }
 
 if (import.meta.main) {
-  const { unmount } = render(<TuiBootstrap />);
+  const { unmount } = render(<TuiBootstrap />, { maxFps: 60 });
   process.on("SIGINT", () => {
     unmount();
     process.exit(0);
