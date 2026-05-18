@@ -57,6 +57,16 @@ function CtrlSafeTextInput({
     });
   }, [originalValue, focus, showCursor]);
 
+  useEffect(() => {
+    if (!atomicBlock) return;
+    setState((prev) => {
+      if (prev.cursorOffset > atomicBlock.start && prev.cursorOffset <= atomicBlock.end) {
+        return { ...prev, cursorOffset: atomicBlock.end + 1 };
+      }
+      return prev;
+    });
+  }, [atomicBlock]);
+
   const cursorActualWidth = highlightPastedText ? cursorWidth : 0;
   const value = mask ? mask.repeat(originalValue.length) : originalValue;
 

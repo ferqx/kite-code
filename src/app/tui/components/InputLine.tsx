@@ -25,8 +25,8 @@ interface InputLineProps {
   disabled?: boolean;
   placeholder?: string;
   workspace: string;
-  /** When an overlay (HelpPanel, ModelSelector) is active, suppress slash suggestions */
   overlayActive?: boolean;
+  editorContentRef?: React.MutableRefObject<(() => string) | null>;
 }
 
 function commonPrefix(strings: string[]): string {
@@ -71,7 +71,7 @@ function completeSlash(input: string): string | null {
   return null;
 }
 
-export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive }: InputLineProps) {
+export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef }: InputLineProps) {
   const [value, setValue] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -105,6 +105,23 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
     const delta = next.length - prevLen;
     if (delta >= PASTE_THRESHOLD) {
+      const ps = pasteStateRef.current;
+
+      if (ps) {
+        const oldIdx = next.indexOf(ps.placeholder);
+        if (oldIdx >= 0) {
+          const beforeOld = next.slice(0, oldIdx);
+          const afterOld = next.slice(oldIdx + ps.placeholder.length);
+          const pastedContent = afterOld;
+          const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
+          const combined = beforeOld + placeholder;
+          setPasteState({ pastedContent, placeholder });
+          textKeyRef.current++;
+          setValue(combined);
+          return;
+        }
+      }
+
       const pastedContent = next.slice(prevLen);
       const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
       const existing = next.slice(0, prevLen);
@@ -189,6 +206,18 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     const suffix = selected.command.slice(slashSuggestions.result.partial.length);
     return suffix.length > 0 ? suffix : null;
   }, [slashSuggestions.active, slashSuggestions.result, slashSuggestions.selectedIndex]);
+
+  const applyHistoryEntry = useCallback((entry: string) => {
+    if (entry.length >= PASTE_THRESHOLD) {
+      const placeholder = `[已粘贴 ${entry.length.toLocaleString()} 字符]`;
+      setPasteState({ pastedContent: entry, placeholder });
+      textKeyRef.current++;
+      setValue(placeholder);
+    } else {
+      setPasteState(null);
+      setValue(entry);
+    }
+  }, []);
 
   useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; tab?: boolean; escape?: boolean; rightArrow?: boolean; ctrl?: boolean }) => {
     // When an overlay is active, yield all keyboard handling to it
@@ -308,7 +337,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     if (key.upArrow && history.length > 0) {
       const idx = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
       setHistoryIndex(idx);
-      setValue(history[idx]);
+      applyHistoryEntry(history[idx]);
       return;
     }
     if (key.downArrow) {
@@ -316,14 +345,28 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       const idx = historyIndex + 1;
       if (idx >= history.length) {
         setHistoryIndex(-1);
+        setPasteState(null);
         setValue("");
       } else {
         setHistoryIndex(idx);
-        setValue(history[idx]);
+        applyHistoryEntry(history[idx]);
       }
       return;
     }
   });
+
+  if (editorContentRef) {
+    editorContentRef.current = () => {
+      const ps = pasteStateRef.current;
+      if (ps) {
+        const idx = value.indexOf(ps.placeholder);
+        if (idx >= 0) {
+          return value.slice(0, idx) + ps.pastedContent + value.slice(idx + ps.placeholder.length);
+        }
+      }
+      return value;
+    };
+  }
 
   if (disabled) {
     return (
