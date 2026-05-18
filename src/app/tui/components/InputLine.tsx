@@ -99,44 +99,39 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   pasteStateRef.current = pasteState;
   const prevValueLenRef = useRef(0);
 
-  const handleChange = useCallback((next: string) => {
+  const handleChange = useCallback((next: string, meta?: { insertPos: number; insertLen: number }) => {
     const prevLen = prevValueLenRef.current;
     prevValueLenRef.current = next.length;
 
-    const delta = next.length - prevLen;
-    if (delta >= PASTE_THRESHOLD) {
+    if (meta && meta.insertLen >= PASTE_THRESHOLD) {
       const ps = pasteStateRef.current;
+      const { insertPos, insertLen } = meta;
+      const pastedContent = next.slice(insertPos, insertPos + insertLen);
 
       if (ps) {
         const oldIdx = next.indexOf(ps.placeholder);
         if (oldIdx >= 0) {
-          const beforeOld = next.slice(0, oldIdx);
-          const afterOld = next.slice(oldIdx + ps.placeholder.length);
-
-          if (afterOld.length >= beforeOld.length) {
-            const pastedContent = afterOld;
-            const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
-            setPasteState({ pastedContent, placeholder });
-            textKeyRef.current++;
-            setValue(beforeOld + placeholder);
-          } else {
-            const pastedContent = beforeOld;
-            const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
-            setPasteState({ pastedContent, placeholder });
-            textKeyRef.current++;
-            setValue(placeholder + afterOld);
+          const cleaned = next.slice(0, oldIdx) + next.slice(oldIdx + ps.placeholder.length);
+          let adjustedPos = insertPos;
+          if (insertPos >= oldIdx + ps.placeholder.length) {
+            adjustedPos = insertPos - ps.placeholder.length;
           }
+          const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
+          const before = cleaned.slice(0, adjustedPos);
+          const after = cleaned.slice(adjustedPos + insertLen);
+          setPasteState({ pastedContent, placeholder });
+          textKeyRef.current++;
+          setValue(before + placeholder + after);
           return;
         }
       }
 
-      const pastedContent = next.slice(prevLen);
       const placeholder = `[已粘贴 ${pastedContent.length.toLocaleString()} 字符]`;
-      const existing = next.slice(0, prevLen);
-      const combined = existing + placeholder;
+      const before = next.slice(0, insertPos);
+      const after = next.slice(insertPos + insertLen);
       setPasteState({ pastedContent, placeholder });
       textKeyRef.current++;
-      setValue(combined);
+      setValue(before + placeholder + after);
       return;
     }
 

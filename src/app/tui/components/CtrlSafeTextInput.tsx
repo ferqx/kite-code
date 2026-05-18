@@ -17,7 +17,7 @@ interface Props {
   mask?: string;
   highlightPastedText?: boolean;
   showCursor?: boolean;
-  onChange: (value: string) => void;
+  onChange: (value: string, meta?: { insertPos: number; insertLen: number }) => void;
   onSubmit?: (value: string) => void;
   atomicBlock?: AtomicBlock;
   onRemoveAtomicBlock?: () => void;
@@ -118,6 +118,7 @@ function CtrlSafeTextInput({
       let nextCursorOffset = cursorOffset;
       let nextValue = originalValue;
       let nextCursorWidth = 0;
+      let insertMeta: { insertPos: number; insertLen: number } | undefined;
       const ab = atomicBlock;
 
       if (ab) {
@@ -175,6 +176,7 @@ function CtrlSafeTextInput({
           if (input.length > 1) {
             nextCursorWidth = input.length;
           }
+          insertMeta = { insertPos: cursorOffset, insertLen: input.length };
         }
       } else {
         if (key.leftArrow) {
@@ -202,6 +204,7 @@ function CtrlSafeTextInput({
           if (input.length > 1) {
             nextCursorWidth = input.length;
           }
+          insertMeta = { insertPos: cursorOffset, insertLen: input.length };
         }
       }
 
@@ -219,7 +222,7 @@ function CtrlSafeTextInput({
       });
 
       if (nextValue !== originalValue) {
-        onChange(nextValue);
+        onChange(nextValue, insertMeta);
       }
     },
     { isActive: focus },
