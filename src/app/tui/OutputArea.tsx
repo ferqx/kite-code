@@ -1,11 +1,13 @@
-import React from "react";
+import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
+import { useInput } from "ink";
 import type { OutputBlock } from "./types";
 import MarkdownBlock from "./components/MarkdownBlock";
 import { darkTheme as t } from "./theme";
 
 interface OutputAreaProps {
   blocks: OutputBlock[];
+  onToggleReason: (id: number) => void;
   thinkingVisible: boolean;
 }
 
@@ -83,7 +85,7 @@ function renderToolSummary(summary: string, isError: boolean) {
 
 const BLOCK_GAP = 1;
 
-function renderBlock(block: OutputBlock, thinkingVisible: boolean, _i: number, prevBlock?: OutputBlock) {
+function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: boolean, _i: number, prevBlock?: OutputBlock) {
   switch (block.kind) {
     case "user":
       return (
@@ -96,6 +98,7 @@ function renderBlock(block: OutputBlock, thinkingVisible: boolean, _i: number, p
     case "text":
       return (
         <Box key={block.id} marginBottom={BLOCK_GAP}>
+          {isFocused ? <Text color={t.primary}>❯ </Text> : null}
           <MarkdownBlock content={block.content} streaming={block.streaming} />
         </Box>
       );
@@ -105,7 +108,7 @@ function renderBlock(block: OutputBlock, thinkingVisible: boolean, _i: number, p
       return (
         <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           {!isConsecutive && (
-            <Text color={t.dim}>
+            <Text color={isFocused ? t.primary : t.dim}>
               {!thinkingVisible || block.folded ? "▶ Thinking..." : "▼ Thinking"}
             </Text>
           )}
@@ -208,10 +211,38 @@ function renderBlock(block: OutputBlock, thinkingVisible: boolean, _i: number, p
   }
 }
 
-export default function OutputArea({ blocks, thinkingVisible }: OutputAreaProps) {
+export default function OutputArea({ blocks, onToggleReason, thinkingVisible }: OutputAreaProps) {
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const focusedIndexRef = useRef(focusedIndex);
+  focusedIndexRef.current = focusedIndex;
+
+  useInput((_input: unknown, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+    if (key.upArrow) {
+      setFocusedIndex((prev) => {
+        if (blocks.length === 0) return null;
+        return Math.max(0, (prev ?? blocks.length) - 1);
+      });
+    }
+    if (key.downArrow) {
+      setFocusedIndex((prev) => {
+        if (blocks.length === 0) return null;
+        return Math.min(blocks.length - 1, (prev ?? -1) + 1);
+      });
+    }
+    if (key.return && focusedIndexRef.current !== null && focusedIndexRef.current < blocks.length) {
+      const block = blocks[focusedIndexRef.current];
+      if (block && block.kind === "reason") {
+        onToggleReason(block.id);
+      }
+    }
+  });
+
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {blocks.map((block, i) => renderBlock(block, thinkingVisible, i, blocks[i - 1]))}
+      {blocks.map((block, i) => {
+        const isFocused = i === focusedIndex;
+        return renderBlock(block, isFocused, thinkingVisible, i, blocks[i - 1]);
+      })}
     </Box>
   );
 }
