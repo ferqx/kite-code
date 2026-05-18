@@ -1,13 +1,22 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 
 // ============================================================================
-// 路径解析 — 相对路径基于 workspace，绝对路径原样使用
-// Path resolution — relative paths relative to workspace, absolute paths pass through
+// 路径解析 — 相对路径基于 workspace，绝对路径原样使用，`~` 展开为 HOME
+// Path resolution — relative paths relative to workspace, absolute paths pass through, `~` expands to HOME
 // ============================================================================
 
 function resolvePath(workspace: string, filePath: string): string {
-  return resolve(workspace, filePath.replace(/[\\/]+/g, sep));
+  const normalized = filePath.replace(/[\\/]+/g, sep);
+  // 展开 ~ 为 HOME，与 shell 行为一致 / Expand ~ to HOME, matching shell behavior
+  const expanded =
+    normalized === "~"
+      ? homedir()
+      : normalized.startsWith(`~${sep}`)
+        ? homedir() + normalized.slice(1)
+        : normalized;
+  return resolve(workspace, expanded);
 }
 
 // ============================================================================
