@@ -36,15 +36,14 @@ describe("sandbox profile generation", () => {
     expect(profile).toContain("(allow process-fork)");
   });
 
-  test("profile includes workspace path with full read-write", () => {
+  test("profile allows global file write (authorization by tool-policy, not sandbox)", () => {
     const profile = generateSandboxProfile("/tmp/test-workspace");
-    expect(profile).toContain(`(subpath "/tmp/test-workspace")`);
-    expect(profile).toContain("file-write*");
+    expect(profile).toContain('(allow file-write* file-ioctl (subpath "/"))');
   });
 
-  test("profile denies network by default", () => {
+  test("profile does not deny network (controlled by tool-policy approval)", () => {
     const profile = generateSandboxProfile("/tmp/test-workspace");
-    expect(profile).toContain("(deny network*)");
+    expect(profile).not.toContain("(deny network*)");
   });
 
   test("profile imports system.sb as base", () => {
@@ -57,20 +56,9 @@ describe("sandbox profile generation", () => {
     expect(profile).toContain('(allow file-read* (subpath "/"))');
   });
 
-  test("profile includes tmp directories for file operations", () => {
+  test("profile allows global file create/unlink (dangerous paths blocked by checkDangerousPaths)", () => {
     const profile = generateSandboxProfile("/tmp/test-workspace");
-    expect(profile).toContain("(subpath \"/tmp\")");
-    expect(profile).toContain("(subpath \"/private/tmp\")");
-  });
-
-  test("profile escapes backslashes in workspace path", () => {
-    const profile = generateSandboxProfile("/tmp/test\\path");
-    expect(profile).toContain("/tmp/test\\\\path");
-  });
-
-  test("profile includes move-blocking to prevent rename/symlink escape", () => {
-    const profile = generateSandboxProfile("/tmp/test-workspace");
-    expect(profile).toContain("(deny file-write-unlink file-write-create)");
+    expect(profile).toContain('(allow file-write-unlink file-write-create (subpath "/"))');
   });
 });
 
@@ -98,20 +86,22 @@ describe("shell wrapper utilities", () => {
     try {
       process.env.TEST_KEEP_VAR = "keep-me";
       const env = buildHardenedEnv(ws);
-      // PATH should be passed through from parent
+      // PATH and HOME should be inherited from parent
       expect(env.PATH).toBeDefined();
-      expect(env.HOME).toContain(".sandbox-home");
+      expect(env.HOME).toBe(process.env.HOME as string);
     } finally {
       rmSync(ws, { recursive: true, force: true });
       delete process.env.TEST_KEEP_VAR;
     }
   });
 
-  test("hardened env redirects writable paths to workspace", () => {
+  test("hardened env redirects temp and cache paths to workspace", () => {
     const ws = mkdtempSync(join(tmpdir(), "sandbox-test-"));
     try {
       const env = buildHardenedEnv(ws);
-      expect(env.HOME).toBe(join(ws, ".sandbox-home"));
+      // HOME is inherited from parent (real user home), not redirected
+      expect(env.HOME).toBeDefined();
+      // Temp and cache paths are still sandboxed
       expect(env.TMPDIR).toBe(join(ws, ".sandbox-tmp"));
       expect(env.TMP).toBe(join(ws, ".sandbox-tmp"));
       expect(env.TEMP).toBe(join(ws, ".sandbox-tmp"));
@@ -189,6 +179,33 @@ describe("dangerous path detection", () => {
     expect(checkDangerousPaths("pwd")).toBeNull();
     expect(checkDangerousPaths("cat README.md")).toBeNull();
   });
+
+  // ── 持久化机制 / Persistence mechanisms ──
+  test("detects macOS LaunchAgents tampering", () => {
+    // 绝对路径 /Library/LaunchAgents 和 ~/Library/LaunchAgents 都会被捕获
+    expect(checkDangerousPaths("cp evil.plist ~/Library/LaunchAgents/evil.plist")).toBe("Library/LaunchAgents/");
+    expect(checkDangerousPaths("echo plist > /Library/LaunchAgents/com.attacker.plist")).toBe("Library/LaunchAgents/");
+    expect(checkDangerousPaths("rm /Library/LaunchDaemons/system.plist")).toBe("Library/LaunchDaemons/");
+  });
+
+  test("detects systemd user unit tampering", () => {
+    expect(checkDangerousPaths("echo unit > ~/.config/systemd/user/evil.service")).toBe(".config/systemd/user/");
+    expect(checkDangerousPaths("cp evil.service /etc/systemd/system/evil.service")).toBe("/etc/systemd/system/");
+  });
+
+  test("detects XDG autostart tampering", () => {
+    expect(checkDangerousPaths("echo desktop > ~/.config/autostart/evil.desktop")).toBe(".config/autostart/");
+  });
+
+  test("detects Docker config tampering", () => {
+    expect(checkDangerousPaths("cat ~/.docker/config.json")).toBe(".docker/config.json");
+    expect(checkDangerousPaths("echo '{}' > .docker/daemon.json")).toBe(".docker/daemon.json");
+  });
+
+  test("detects SSH daemon config tampering", () => {
+    expect(checkDangerousPaths("echo PermitRootLogin yes >> /etc/ssh/sshd_config")).toBe("/etc/ssh/sshd_config");
+    expect(checkDangerousPaths("cat /etc/ssh/ssh_config")).toBe("/etc/ssh/ssh_config");
+  });
 });
 
 // 验证平台检测 / Validate platform detection
@@ -224,7 +241,6 @@ describe("bwrap argument generation", () => {
 
   test("includes essential isolation flags", () => {
     const args = generateBwrapArgs("/tmp/test-ws");
-    expect(args).toContain("--unshare-net");
     expect(args).toContain("--unshare-pid");
     expect(args).toContain("--die-with-parent");
     expect(args).toContain("--new-session");

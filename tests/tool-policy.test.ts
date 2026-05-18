@@ -92,8 +92,8 @@ describe("tool policy", () => {
     const decision = evaluateToolPolicy({
       request: {
         ...shellExecuteRequest,
-        args: { command: "git reset --hard" },
-        protectedCommand: "git reset --hard",
+        args: { command: "sudo rm -rf /" },
+        protectedCommand: "sudo rm -rf /",
       },
       workspaceAccess: "write",
       phase: "building",
@@ -179,7 +179,7 @@ describe("tool policy", () => {
     expect(decision.grantUsed).toBe("none");
   });
 
-  // 验证 full_access 当前 thread 内允许所有 shell_execute 风险等级 / full_access allows all shell_execute risk classes in the current thread
+  // 验证 full_access 当前 thread 内允许非 destructive 的 shell_execute / full_access allows non-destructive shell commands
   test("allows shell execution risk classes under full access", () => {
     const authorization = applyApprovalGrant({
       authorization: defaultAuthorizationState(),
@@ -193,7 +193,6 @@ describe("tool policy", () => {
       "bun test",
       "echo hi > hello.txt",
       "git add -A",
-      "git reset --hard",
     ]) {
       const decision = evaluateToolPolicy({
         request: {
@@ -212,6 +211,60 @@ describe("tool policy", () => {
       expect(decision.requiresApproval).toBe(false);
       expect(decision.grantUsed).toBe("full_access");
     }
+  });
+
+  // 验证 destructive 命令在 full_access 下仍然被拒绝 / destructive commands are denied even under full_access
+  test("denies destructive commands even under full access", () => {
+    const authorization = applyApprovalGrant({
+      authorization: defaultAuthorizationState(),
+      grant: "full_access",
+      workspace: "/tmp/project",
+      threadId: "thread-a",
+      request: shellExecuteRequest,
+    });
+
+    const decision = evaluateToolPolicy({
+      request: {
+        ...shellExecuteRequest,
+        args: { command: "sudo rm -rf /" },
+        protectedCommand: "sudo rm -rf /",
+      },
+      workspaceAccess: "write",
+      phase: "building",
+      workspace: "/tmp/project",
+      threadId: "thread-a",
+      authorization,
+    });
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.risk).toBe("destructive");
+    expect(decision.grantUsed).toBe("none");
+  });
+
+  // 验证 destructive 命令在 same_command grant 下仍然被拒绝 / destructive commands are denied even with same_command grant
+  test("denies destructive commands even with same_command grant", () => {
+    const authorization = grantSameCommand(defaultAuthorizationState(), {
+      workspace: "/tmp/project",
+      threadId: "thread-a",
+      command: "sudo rm -rf /",
+    });
+
+    const decision = evaluateToolPolicy({
+      request: {
+        ...shellExecuteRequest,
+        args: { command: "sudo rm -rf /" },
+        protectedCommand: "sudo rm -rf /",
+      },
+      workspaceAccess: "write",
+      phase: "building",
+      workspace: "/tmp/project",
+      threadId: "thread-a",
+      authorization,
+    });
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.risk).toBe("destructive");
+    expect(decision.grantUsed).toBe("none");
   });
 
   // 验证 approve_once 不写入 command grant，same_command 和 full_access 才更新 thread 授权状态 / Grant updates are explicit and thread-scoped

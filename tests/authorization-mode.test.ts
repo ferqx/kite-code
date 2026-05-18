@@ -67,7 +67,7 @@ describe("authorization mode switch", () => {
     expect(decision.requiresApproval).toBe(false);
   });
 
-  test("set_authorization_mode is always allowed", () => {
+  test("set_authorization_mode to full_access requires approval", () => {
     const decision = evaluateToolPolicy({
       request: {
         id: "call-3",
@@ -75,6 +75,23 @@ describe("authorization mode switch", () => {
         args: { mode: "full_access" },
         reason: "User requested auto-execute",
         protectedCommand: "set_authorization_mode full_access",
+      },
+      workspaceAccess: "write",
+      phase: "building",
+    });
+    expect(decision.allowed).toBe(true);
+    expect(decision.requiresApproval).toBe(true);
+    expect(decision.risk).toBe("plan");
+  });
+
+  test("set_authorization_mode to default is auto-allowed", () => {
+    const decision = evaluateToolPolicy({
+      request: {
+        id: "call-4",
+        name: "set_authorization_mode",
+        args: { mode: "default" },
+        reason: "Restore default",
+        protectedCommand: "set_authorization_mode default",
       },
       workspaceAccess: "write",
       phase: "building",
@@ -127,7 +144,7 @@ describe("authorization mode switch", () => {
     ).toBe("tools");
   });
 
-  test("routes set_authorization_mode to tools (no approval)", () => {
+  test("routes set_authorization_mode to full_access through approval", () => {
     expect(
       routeAfterAgent(
         {
@@ -143,7 +160,7 @@ describe("authorization mode switch", () => {
           ],
         } as unknown as CodeAgentState,
       ),
-    ).toBe("tools");
+    ).toBe("approval");
   });
 
   // ---- tool execution ----

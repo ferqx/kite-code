@@ -89,24 +89,26 @@ describe("sandbox executor integration", () => {
     }
   });
 
-  test("blocks file write outside workspace", async () => {
+  test("allows file write outside workspace (authorization handled by tool-policy)", async () => {
     const ws = setupWorkspace();
     const externalFile = join(homedir(), `.openpx-sandbox-test-write-${process.pid}`);
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({
         workspace: ws,
-        command: `echo evil > "${externalFile}"`,
+        command: `echo hello > "${externalFile}"`,
       });
-      expect(result.ok).toBe(false);
-      expect(result.exitCode).not.toBe(0);
+      // 工作区外写入由 tool-policy 审批控制，沙箱不再拦截
+      // Writes outside workspace are controlled by tool-policy approval, not sandbox
+      expect(result.ok).toBe(true);
+      expect(result.exitCode).toBe(0);
     } finally {
       rmSync(externalFile, { force: true });
       cleanupWorkspace(ws);
     }
   });
 
-  test("blocks external network access", async () => {
+  test("allows external network access (controlled by tool-policy, not sandbox)", async () => {
     const ws = setupWorkspace();
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
@@ -115,16 +117,21 @@ describe("sandbox executor integration", () => {
         command:
           "curl -s --connect-timeout 3 --max-time 5 http://example.com 2>&1 || true",
       });
-      // 沙箱应拒绝网络连接 / Sandbox should deny network connection
-      // 退出码非 0 或 stderr/stdout 包含 sandbox 拒绝信息
+      // 网络访问由 tool-policy 审批控制，沙箱不再拦截
+      // Network access is controlled by tool-policy approval, not sandbox
       const output = result.stdout + result.stderr;
-      const denied =
-        result.exitCode !== 0 ||
+      const connected =
+        result.exitCode === 0 ||
+        output.includes("Example Domain") ||
+        output.includes("<html") ||
+        output.includes("200 OK") ||
+        output.includes("301") ||
+        output.includes("302");
+      // curl may fail due to DNS/timeout, but should NOT fail with sandbox denial
+      const sandboxDenied =
         output.includes("Operation not permitted") ||
-        output.includes("Could not resolve host") ||
-        output.includes("deny") ||
-        output === "";
-      expect(denied).toBe(true);
+        output.includes("deny");
+      expect(sandboxDenied).toBe(false);
     } finally {
       cleanupWorkspace(ws);
     }

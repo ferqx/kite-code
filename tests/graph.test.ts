@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import {
+  routeEntry,
   routeAfterAgent,
   routeAfterApproval,
   routeAfterTools,
@@ -9,7 +10,10 @@ import {
 import { normalizeUserInputResume } from "../src/core/harness/user-input";
 import { runApprovedTool } from "../src/core/harness/tool-runner";
 import { isReadOnlyWorkspaceAccess } from "../src/core/harness/state";
-import { toolRequestFromMessage } from "../src/core/harness/tool-requests";
+import {
+  getPendingToolRequest,
+  toolRequestFromMessage,
+} from "../src/core/harness/tool-requests";
 import {
   applyApprovalGrant,
   defaultAuthorizationState,
@@ -198,7 +202,7 @@ describe("graph local tool routing", () => {
               {
                 id: "call-1",
                 name: "shell_execute",
-                args: { command: "git reset --hard" },
+                args: { command: "sudo rm -rf /" },
               },
             ],
           }),
@@ -221,7 +225,7 @@ describe("graph local tool routing", () => {
               {
                 id: "call-1",
                 name: "shell_execute",
-                args: { command: "git reset --hard" },
+                args: { command: "sudo rm -rf /" },
               },
             ],
           }),
@@ -696,4 +700,298 @@ describe("graph local tool routing", () => {
     expect((result as ShellResult).stdout).toBe("package");
   });
 
+});
+
+// ── routeEntry 与 getPendingToolRequest 测试 / routeEntry and getPendingToolRequest tests ──
+describe("routeEntry — start-of-graph routing", () => {
+  const baseState = {
+    workspaceAccess: "write" as const,
+    phase: "building" as const,
+    workspace: "/tmp/workspace",
+    threadId: "thread-1",
+    userId: "test",
+    authorization: defaultAuthorizationState(),
+    approvedToolRequest: null,
+    approvedToolGrant: null,
+    contextBudget: undefined,
+    contextSummary: "",
+    plan: null,
+    final: "",
+    modelProvider: "",
+    modelName: "",
+    thinkingLevel: null,
+    messages: [],
+  };
+
+  test("routes to agent when no messages exist", () => {
+    expect(routeEntry(baseState as CodeAgentState)).toBe("agent");
+  });
+
+  test("routes to agent when conversation has no pending tool calls", () => {
+    const state = {
+      ...baseState,
+      messages: [
+        new AIMessage({ content: "Hello" }),
+      ],
+    } as CodeAgentState;
+    expect(routeEntry(state)).toBe("agent");
+  });
+
+  test("routes to tools for update_plan (no approval needed)", () => {
+    const state = {
+      ...baseState,
+      messages: [
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-1", name: "update_plan", args: { name: "Test Plan", description: "desc", status: "in_progress", steps: [] } },
+          ],
+        }),
+      ],
+    } as unknown as CodeAgentState;
+    expect(routeEntry(state)).toBe("tools");
+  });
+
+  test("routes to approval for write_file tool call", () => {
+    const state = {
+      ...baseState,
+      messages: [
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-1", name: "write_file", args: { path: "test.txt", content: "hi" } },
+          ],
+        }),
+      ],
+    } as unknown as CodeAgentState;
+    expect(routeEntry(state)).toBe("approval");
+  });
+
+  test("routes to user_input for ask_user tool call", () => {
+    const state = {
+      ...baseState,
+      messages: [
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-ask", name: "ask_user", args: { question: "What next?" } },
+          ],
+        }),
+      ],
+    } as unknown as CodeAgentState;
+    expect(routeEntry(state)).toBe("user_input");
+  });
+
+  test("routes to tools for destructive shell_execute (policy rejects)", () => {
+    const state = {
+      ...baseState,
+      messages: [
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-1", name: "shell_execute", args: { command: "sudo rm -rf /" } },
+          ],
+        }),
+      ],
+    } as unknown as CodeAgentState;
+    expect(routeEntry(state)).toBe("tools");
+  });
+
+  test("routes to agent when all tool calls are resolved with ToolMessages", () => {
+    const state = {
+      ...baseState,
+      messages: [
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-1", name: "read_file", args: { path: "x.ts" } },
+          ],
+        }),
+        new ToolMessage({
+          content: "file content",
+          tool_call_id: "call-1",
+          status: "success",
+        }),
+        new AIMessage({ content: "Done reading." }),
+      ],
+    } as unknown as CodeAgentState;
+    expect(routeEntry(state)).toBe("agent");
+  });
+
+  test("routes to approval when last AIMessage has unresolved tool call (checkpoint restore)", () => {
+    // Simulate checkpoint restore: conversation has resolved tool calls followed
+    // by an unresolved AIMessage (interrupted before approval completed)
+    const state = {
+      ...baseState,
+      messages: [
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-1", name: "read_file", args: { path: "x.ts" } },
+          ],
+        }),
+        new ToolMessage({
+          content: "file content",
+          tool_call_id: "call-1",
+          status: "success",
+        }),
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-2", name: "write_file", args: { path: "y.ts", content: "new" } },
+          ],
+        }),
+        // No ToolMessage for call-2 — dangling tool call
+      ],
+    } as unknown as CodeAgentState;
+    // Should detect the dangling call-2 and route to approval
+    expect(routeEntry(state)).toBe("approval");
+  });
+
+  test("routes to tools when read-only shell_execute is pending (no approval needed)", () => {
+    const state = {
+      ...baseState,
+      messages: [
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-1", name: "shell_execute", args: { command: "git status --short" } },
+          ],
+        }),
+      ],
+    } as unknown as CodeAgentState;
+    expect(routeEntry(state)).toBe("tools");
+  });
+
+  test("detects unresolved tool call correctly with interleaved resolved calls", () => {
+    // Complex scenario: multiple tool calls with interleaving
+    const state = {
+      ...baseState,
+      messages: [
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-a", name: "read_file", args: { path: "a.ts" } },
+          ],
+        }),
+        new ToolMessage({
+          content: "a content",
+          tool_call_id: "call-a",
+          status: "success",
+        }),
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-b", name: "read_file", args: { path: "b.ts" } },
+          ],
+        }),
+        new ToolMessage({
+          content: "b content",
+          tool_call_id: "call-b",
+          status: "success",
+        }),
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-c", name: "shell_execute", args: { command: "rm file.txt" } },
+          ],
+        }),
+        // call-c has no ToolMessage — dangling
+      ],
+    } as unknown as CodeAgentState;
+    expect(routeEntry(state)).toBe("approval");
+  });
+});
+
+describe("getPendingToolRequest", () => {
+  const workspace = "/tmp/workspace";
+
+  test("returns null for empty messages", () => {
+    expect(getPendingToolRequest([], workspace)).toBeNull();
+  });
+
+  test("returns null when last message is plain text AIMessage", () => {
+    const messages = [new AIMessage({ content: "Hello" })];
+    expect(getPendingToolRequest(messages, workspace)).toBeNull();
+  });
+
+  test("returns pending request for unresolved tool call on last AIMessage", () => {
+    const messages = [
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "call-1", name: "shell_execute", args: { command: "rm -f *.log" } },
+        ],
+      }),
+    ];
+    const result = getPendingToolRequest(messages, workspace);
+    expect(result).not.toBeNull();
+    expect(result?.name).toBe("shell_execute");
+    if (result && result.name === "shell_execute") {
+      expect(result.args.command).toBe("rm -f *.log");
+    }
+  });
+
+  test("returns null when all tool calls have matching ToolMessages", () => {
+    const messages = [
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "call-1", name: "read_file", args: { path: "x.ts" } },
+        ],
+      }),
+      new ToolMessage({
+        content: "result",
+        tool_call_id: "call-1",
+        status: "success",
+      }),
+    ];
+    expect(getPendingToolRequest(messages, workspace)).toBeNull();
+  });
+
+  test("detects dangling tool call in middle of conversation (not last message)", () => {
+    const messages = [
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "call-1", name: "read_file", args: { path: "x.ts" } },
+        ],
+      }),
+      // No ToolMessage for call-1 — dangling
+      new AIMessage({ content: "I'll read that file." }),
+    ];
+    const result = getPendingToolRequest(messages, workspace);
+    expect(result).not.toBeNull();
+    expect(result?.name).toBe("read_file");
+  });
+
+  test("detects pending tool calls from reconstructed message instances (checkpoint round-trip)", () => {
+    // Simulate messages as reconstructed by the LangGraph checkpoint serde
+    // — these are actual class instances, not plain objects
+    const messages = [
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "call-prev", name: "read_file", args: { path: "prev.ts" } },
+        ],
+      }),
+      new ToolMessage({
+        content: "previous result",
+        tool_call_id: "call-prev",
+        status: "success",
+      }),
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "call-d", name: "shell_execute", args: { command: "ls" } },
+        ],
+      }),
+      // No ToolMessage for call-d — dangling
+    ];
+
+    const result = getPendingToolRequest(messages, workspace);
+    expect(result).not.toBeNull();
+    expect(result?.name).toBe("shell_execute");
+    expect(result?.id).toBe("call-d");
+  });
 });
