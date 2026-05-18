@@ -97,11 +97,10 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   const [pasteState, setPasteState] = useState<PasteState | null>(null);
   const pasteStateRef = useRef(pasteState);
   pasteStateRef.current = pasteState;
-  const prevValueLenRef = useRef(0);
+
+  const clearPasteState = useCallback(() => setPasteState(null), []);
 
   const handleChange = useCallback((next: string, meta?: { insertPos: number; insertLen: number }) => {
-    const prevLen = prevValueLenRef.current;
-    prevValueLenRef.current = next.length;
 
     if (meta && meta.insertLen >= PASTE_THRESHOLD) {
       const ps = pasteStateRef.current;
@@ -397,7 +396,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
           placeholder={placeholder}
           focus={!overlayActive}
           atomicBlock={atomicBlock}
-          onRemoveAtomicBlock={() => setPasteState(null)}
+          onRemoveAtomicBlock={clearPasteState}
         />
         {slashGhost && !overlayActive && (
           <Text color={t.dim}>{slashGhost}</Text>
