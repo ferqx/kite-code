@@ -294,7 +294,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     .addNode("approval", approval)
     .addNode("user_input", userInput)
     .addNode("tools", tools)
-    .addConditionalEdges(START, routeEntry)
+    .addConditionalEdges(START, (state: CodeAgentState) => routeEntry(state, override))
     .addConditionalEdges("agent", (state: CodeAgentState) => routeAfterAgent(state, override))
     .addConditionalEdges("approval", routeAfterApproval)
     .addConditionalEdges("user_input", routeAfterUserInput)

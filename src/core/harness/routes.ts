@@ -7,9 +7,31 @@ import {
   evaluateToolPolicy,
 } from "./tool-policy";
 
-/** START 入口路由：进入单一 agent / Entry routing to the single agent */
-export function routeEntry(_state: CodeAgentState): "agent" {
-  return "agent";
+/** START 入口路由：检查是否有待处理工具调用，避免从 checkpoint 恢复时模型收到悬空 tool_calls / Entry routing — check for pending tool calls to avoid dangling tool_calls on checkpoint restore */
+export function routeEntry(
+  state: CodeAgentState,
+  override?: AuthorizationOverride,
+): "agent" | "approval" | "tools" | "user_input" {
+  const request = getPendingToolRequest(state.messages, state.workspace);
+  if (!request) {
+    return "agent";
+  }
+  if (request.name === "ask_user") {
+    return "user_input";
+  }
+  const workspaceAccess = state.workspaceAccess ?? "write";
+  const decision = evaluateToolPolicy({
+    request,
+    workspaceAccess,
+    phase: state.phase ?? defaultPhaseForWorkspaceAccess(workspaceAccess),
+    workspace: state.workspace,
+    threadId: state.threadId,
+    authorization: state.authorization,
+    override,
+  });
+
+  if (!decision.allowed) return "tools";
+  return decision.requiresApproval ? "approval" : "tools";
 }
 
 /** agent 节点后的路由: approval | tools | user_input | END / Routing after agent */

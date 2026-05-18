@@ -202,6 +202,20 @@ export function evaluateToolPolicy(input: {
   }
 
   if (request.name === "set_authorization_mode") {
+    // 切换到 full_access 必须经用户审批，防止 agent 自行提权
+    // Switching to full_access must go through user approval to prevent self-escalation
+    if (request.args.mode === "full_access") {
+      return requireApproval({
+        risk: "plan",
+        reason: "Switching to full_access requires user approval.",
+        userVisibleSummary: `Request to switch authorization mode to: full_access`,
+        expectedEffects: [
+          "All future tool calls in this thread will execute without approval",
+          "Does not mutate workspace files",
+        ],
+      });
+    }
+    // 切换回 default 无需审批 / Switching back to default does not need approval
     return allow({
       risk: "plan",
       reason: "Authorization mode changes do not mutate the workspace.",
@@ -214,6 +228,17 @@ export function evaluateToolPolicy(input: {
   }
 
   if (request.name === "shell_execute") {
+    // 兜底：destructive 命令在任何模式下都拒绝，不受 full_access / same_command 影响
+    // Safety net: destructive commands are always denied regardless of authorization mode
+    if (isDestructiveShellCommand(request.args.command)) {
+      return deny({
+        risk: "destructive",
+        reason: "Destructive shell commands are denied by default.",
+        userVisibleSummary: `Rejected destructive shell command: ${request.args.command}`,
+        expectedEffects: ["No command will be executed"],
+      });
+    }
+
     const authorized = authorizedShellDecision({
       authorization,
       workspace: input.workspace ?? "",
@@ -518,16 +543,11 @@ function classifyShellRisk(command: string): ToolRisk {
 function isDestructiveShellCommand(command: string): boolean {
   const normalized = normalizeShell(command);
   return (
-    /(?:^|[;&|]\s*)sudo\b/.test(normalized) ||
-    /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r|-r\s+-f|-f\s+-r)\b/.test(normalized) ||
-    /\bcurl\b.+\|\s*(?:sh|bash)\b/.test(normalized) ||
-    /\bwget\b.+\|\s*(?:sh|bash)\b/.test(normalized) ||
-    /\bgit\s+push\b/.test(normalized) ||
-    /\bgit\s+reset\s+--hard\b/.test(normalized) ||
-    /\bgit\s+clean\s+-[^\s]*f/.test(normalized) ||
-    /\bchmod\s+-[^\s]*r\b/.test(normalized) ||
-    /\bchown\s+-[^\s]*r\b/.test(normalized) ||
-    /(?:^|[;&|]\s*)kill(?:all)?\b/.test(normalized)
+    /(?:(?:^|[;&|]\s*)|\/)sudo\b/.test(normalized) ||
+    /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r|-r\s+-f|-f\s+-r|--recursive.*--force|--force.*--recursive)\b/.test(normalized) ||
+    /\bchmod\s+(?:-[^\s]*r|--recursive)\b/.test(normalized) ||
+    /\bchown\s+(?:-[^\s]*r|--recursive)\b/.test(normalized) ||
+    /(?:(?:^|[;&|]\s*)|\/)kill(?:all)?\b/.test(normalized)
   );
 }
 
@@ -541,7 +561,7 @@ function isWriteLikeShellCommand(command: string): boolean {
   const normalized = normalizeShell(command);
   return (
     /(^|[^>])>{1,2}($|[^>])/.test(normalized) ||
-    /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee)\b/.test(normalized) ||
+    /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee|rm|unlink)\b/.test(normalized) ||
     /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update)\b/.test(normalized)
   );
 }

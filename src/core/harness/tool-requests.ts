@@ -82,16 +82,70 @@ export type PendingToolRequest =
       protectedCommand: string;
     };
 
-/** 从消息列表中获取待处理的工具请求 / Get pending tool request from message list */
+/** 从消息列表中获取待处理的工具请求 / Get pending tool request from message list
+
+ 向后搜索最新的含有 tool_calls 的 AIMessage，检查其 tool_call_id 是否已被后方
+ ToolMessage 应答，避免 checkpoint 恢复时遗漏悬空工具调用。
+*/
 export function getPendingToolRequest(
   messages: BaseMessage[],
   workspace: string,
 ): PendingToolRequest | null {
-  const lastMessage = messages.at(-1);
-  if (!(lastMessage instanceof AIMessage)) {
-    return null;
+  // Collect resolved tool_call_ids from ToolMessages
+  const resolvedIds = new Set<string>();
+  for (const msg of messages) {
+    if (isToolMessageInstance(msg)) {
+      const tcId = (msg as unknown as Record<string, string>).tool_call_id;
+      if (tcId) resolvedIds.add(tcId);
+    }
   }
-  return toolRequestFromMessage(lastMessage, workspace);
+
+  // Search backwards for the last AIMessage with an unresolved tool_call.
+  // Use AIMessage.isInstance() instead of instanceof to handle deserialized
+  // messages from checkpoint — isInstance falls back to checking the `type`
+  // field when the prototype chain is unavailable (e.g. after JSON round-trip).
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!AIMessage.isInstance(msg)) continue;
+    const call = msg.tool_calls?.[0];
+    if (!call) continue;
+    if (!call.id || resolvedIds.has(call.id)) continue;
+    return toolRequestFromMessage(msg, workspace);
+  }
+
+  return null;
+}
+
+/**
+ * 检测消息是否为 ToolMessage 实例。
+ * 优先使用 _getType() 方法（正确构造的实例），fallback 到检查
+ * tool_call_id 字段（checkpoint 反序列化后的 plain object）。
+ *
+ * Detect whether a message is a ToolMessage instance.
+ * Prefer _getType() (correctly constructed instances), fall back to
+ * checking the tool_call_id field (plain objects after checkpoint deserialization).
+ */
+function isToolMessageInstance(msg: unknown): boolean {
+  const m = msg as Record<string, unknown> | null;
+  if (!m) return false;
+
+  // Primary: use _getType() for correctly constructed instances
+  try {
+    if (typeof m._getType === "function") {
+      return (m._getType as () => string).call(m) === "tool";
+    }
+  } catch { /* ignore */ }
+
+  // Fallback: checkpoint-deserialized messages — check for tool_call_id
+  // which is unique to ToolMessage in the LangChain message hierarchy
+  if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0) {
+    // Guard against false positives: AIMessage never has tool_call_id
+    if (AIMessage.isInstance(msg)) return false;
+    // HumanMessage / SystemMessage never have tool_call_id
+    return true;
+  }
+
+  return false;
 }
 
 /** 解析 AIMessage 中的工具调用请求 / Parse tool call request from an AIMessage */
