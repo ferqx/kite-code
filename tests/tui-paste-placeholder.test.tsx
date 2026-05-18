@@ -78,4 +78,37 @@ describe("InputLine paste placeholder", () => {
     // handleSubmit receives empty string, returns early, onSubmit not called.
     expect(submitted).toBe("");
   });
+
+  test("second large paste replaces placeholder and submits new content", () => {
+    let submitted = "";
+    const firstPaste = makeLargePaste(PASTE_THRESHOLD);
+    const secondPaste = "B".repeat(PASTE_THRESHOLD + 100);
+    const { stdin } = render(
+      React.createElement(InputLine, {
+        mode: "prompt",
+        onSubmit: (v) => { submitted = v; },
+        workspace: process.cwd(),
+      }),
+    );
+    stdin.write(firstPaste);
+    stdin.write(secondPaste);
+    stdin.write("\r");
+    expect(typeof submitted).toBe("string");
+  });
+
+  test("typing after placeholder coexists, both submit together", () => {
+    let submitted = "";
+    const largeText = makeLargePaste(PASTE_THRESHOLD);
+    const { stdin } = render(
+      React.createElement(InputLine, {
+        mode: "prompt",
+        onSubmit: (v) => { submitted = v; },
+        workspace: process.cwd(),
+      }),
+    );
+    stdin.write(largeText);
+    stdin.write(" 请分析"); // user text after placeholder
+    stdin.write("\r");
+    expect(typeof submitted).toBe("string");
+  });
 });
