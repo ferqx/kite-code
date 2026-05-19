@@ -176,6 +176,10 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         finalValue = val;
       }
 
+      // Normalize \r\n and standalone \r to \n, preventing carriage
+      // return from resetting cursor to column 0 and overwriting output.
+      finalValue = finalValue.replace(/\r\n?/g, "\n");
+
       if (!finalValue.trim()) return;
       if (finalValue.startsWith("/") && slashNeedsCommitRef.current) return;
       if (fileActiveRef.current) return;
@@ -230,7 +234,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     }
   }, []);
 
-  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; tab?: boolean; escape?: boolean; rightArrow?: boolean; ctrl?: boolean }) => {
+  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; meta?: boolean; tab?: boolean; escape?: boolean; rightArrow?: boolean; ctrl?: boolean }) => {
     // When an overlay is active, yield all keyboard handling to it
     if (overlayActive) return;
 
@@ -342,7 +346,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     }
 
     if (key.return) {
-      if (key.shift) {
+      if (key.shift || key.meta) {
         commitValue(valueRef.current + "\n");
         return;
       }

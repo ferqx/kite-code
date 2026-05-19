@@ -325,10 +325,38 @@ function TuiBootstrap() {
   );
 }
 
+function enableKittyKeyboardProtocol() {
+  if (process.stdout.isTTY && process.stdin.isTTY) {
+    // Enable Kitty keyboard protocol disambiguate mode so Shift+Enter
+    // is reported as CSI 13;2 u instead of raw \r indistinguishable
+    // from plain Enter. Ink's parseKeypress already handles CSI-u.
+    process.stdout.write("\x1b[>1u");
+  }
+}
+
+function disableKittyKeyboardProtocol() {
+  if (process.stdout.isTTY && process.stdin.isTTY) {
+    process.stdout.write("\x1b[<u");
+  }
+}
+
 if (import.meta.main) {
-  const { unmount } = render(<TuiBootstrap />, { maxFps: 60 });
+  enableKittyKeyboardProtocol();
+  // Disable Ink's built-in Ctrl+C exit (which only detects \x03, not
+  // Kitty CSI-u). Instead, useGlobalKeys dispatches CTRL_C which the
+  // reducer handles for both legacy \x03 and CSI-u 99;5 u formats.
+  const { unmount } = render(<TuiBootstrap />, { maxFps: 60, exitOnCtrlC: false });
   process.on("SIGINT", () => {
+    disableKittyKeyboardProtocol();
     unmount();
     process.exit(0);
+  });
+  process.on("SIGTERM", () => {
+    disableKittyKeyboardProtocol();
+    unmount();
+    process.exit(0);
+  });
+  process.on("exit", () => {
+    disableKittyKeyboardProtocol();
   });
 }

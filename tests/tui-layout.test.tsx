@@ -648,7 +648,7 @@ describe("OutputArea", () => {
     const { lastFrame } = render(
       <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
     );
-    expect(lastFrame()).toContain("Hello agent");
+    expect(lastFrame()).toContain("❯ Hello agent");
   });
 
   test("renders text block", () => {

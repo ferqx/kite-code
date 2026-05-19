@@ -90,8 +90,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
     case "user":
       return (
         <Box key={block.id} marginBottom={BLOCK_GAP}>
-          <Text color={t.primary}>❯ </Text>
-          <MarkdownBlock content={block.content} />
+          <MarkdownBlock content={"❯ " + block.content} />
         </Box>
       );
 

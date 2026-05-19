@@ -2,7 +2,7 @@
 // not just Ctrl+C. This prevents character leakage from TUI shortcuts like
 // Ctrl+T, Ctrl+L, Ctrl+R, Ctrl+H, Ctrl+E, Ctrl+O, Ctrl+X.
 import React, { useState, useEffect } from "react";
-import { Text, useInput, usePaste } from "ink";
+import { Box, Text, useInput, usePaste } from "ink";
 import chalk from "chalk";
 
 export interface AtomicBlock {
