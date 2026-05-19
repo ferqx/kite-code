@@ -31,7 +31,6 @@ function TuiBootstrap() {
   const editorContentRef = React.useRef<EditorContentHandle | null>(null);
   const thinkingLevelRef = React.useRef<string | null>(null);
   const prevSessionKeyRef = React.useRef(state.sessionKey);
-  const handleInputRef = React.useRef<(value: string) => void>(() => {});
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
@@ -251,11 +250,6 @@ function TuiBootstrap() {
     },
     [runTask, handleSlashCommand]
   );
-
-  // Keep handleInput ref up to date for the editor effect
-  React.useEffect(() => {
-    handleInputRef.current = handleInput;
-  }, [handleInput]);
 
   // Handle external editor: spawn $EDITOR, read content, submit as input
   React.useEffect(() => {

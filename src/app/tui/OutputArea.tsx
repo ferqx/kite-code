@@ -167,7 +167,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
                   <Box paddingLeft={3} flexDirection="column">
                     {change.preview.split("\n").map((pl, pli) => (
                       <Text key={pli} color={t.dim}>
-                        {pli === 0 ? "│ " : "│ "}{pl}
+                        │ {pl}
                       </Text>
                     ))}
                   </Box>

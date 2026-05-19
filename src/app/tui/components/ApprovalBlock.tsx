@@ -67,7 +67,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       if (opt.grant) {
         const patternStr = opt.showPattern ? ` ("${pattern}")` : "";
         provider.submitAction({ type: "approve", grant: opt.grant });
-        onResolved("approve_once", opt.grant, patternStr);
+        onResolved(opt.grant, opt.grant, patternStr);
       } else {
         provider.submitAction({ type: "reject" });
         onResolved("denied");

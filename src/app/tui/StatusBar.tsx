@@ -1,19 +1,17 @@
+// @deprecated This component is no longer rendered in the app (replaced by Header).
+// The StatusBar module is kept for test compatibility only.
+// Use `formatDuration` from "./Header" instead.
 import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import type { StatusState } from "./types";
 import { darkTheme as t } from "./theme";
+import { formatDuration } from "./Header";
 
 interface StatusBarProps {
   status: StatusState;
   thinkingVisible: boolean;
   timerKey: number;
   running: boolean;
-}
-
-export function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 function planLabel(status: StatusState): string {

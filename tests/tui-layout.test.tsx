@@ -603,7 +603,7 @@ describe("InputLine", () => {
     const { lastFrame } = render(
       <InputLine mode="prompt" onSubmit={noop} workspace={process.cwd()} />,
     );
-    expect(lastFrame()).toContain(">");
+    expect(lastFrame()).toContain("❯");
   });
 
   test("renders [A/S/F/D] for approval mode", () => {

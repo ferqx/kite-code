@@ -315,7 +315,7 @@ export const ctrlLetterNoCharLeak: KbCase = {
     {
       reason: "explicit",
       ansi: [
-        { type: "contains", text: "> hello", description: "input text intact after Ctrl+T" },
+        { type: "contains", text: "❯ hello", description: "input text intact after Ctrl+T" },
         { type: "not-contains", text: "hellot", description: "no 't' leaked from Ctrl+T" },
       ],
       state: [{ type: "running-is", value: false }],

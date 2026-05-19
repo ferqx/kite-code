@@ -2,7 +2,12 @@ import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import type { StatusState } from "./types";
 import { darkTheme as t } from "./theme";
-import { formatDuration } from "./StatusBar";
+
+export function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
 
 interface HeaderProps {
   status: StatusState;

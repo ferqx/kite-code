@@ -368,7 +368,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     }
     case "COMPACT_CONTEXT": {
       if (!state.running) return state;
-      const block: OutputBlock = { id: nextId++, kind: "text", content: "⟳ Manual compaction requested — waiting for graph node to trigger" };
+      const block: OutputBlock = { id: nextId++, kind: "text", content: "⟳ Manual compaction requested — context will be compacted on next overflow" };
       return { ...state, blocks: [...state.blocks, block] };
     }
     case "UNDO": {

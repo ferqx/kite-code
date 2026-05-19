@@ -32,7 +32,7 @@ export function useGlobalKeys(dispatch: Dispatch<any>, running: boolean) {
       return;
     }
     if (key.ctrl && input === "o") {
-      // Toggle output focus — clears any open overlays and resets navigation
+      // Clear any open overlays (help, sessions, model selector) and reset navigation
       dispatch({ type: "ESCAPE" });
       return;
     }
@@ -55,6 +55,10 @@ export function useLeaderKeys(dispatch: Dispatch<any>, leaderPending: boolean) {
       return;
     }
     switch (input.toLowerCase()) {
+      case "n":
+        dispatch({ type: "NEW_SESSION" });
+        dispatch({ type: "LEADER_CANCEL" });
+        break;
       case "c":
         dispatch({ type: "COMPACT_CONTEXT" });
         dispatch({ type: "LEADER_CANCEL" });
