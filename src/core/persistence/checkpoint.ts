@@ -60,6 +60,8 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
   private readonly db: Database;
   /** 是否已初始化表结构 / Whether tables have been set up */
   private isSetup = false;
+  /** 是否已关闭 / Whether the database has been closed */
+  private isClosed = false;
 
   /** 创建实例并初始化数据库 / Create instance and initialize database */
   constructor(private readonly dbPath: string) {
@@ -70,6 +72,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
 
   /** 创建 checkpoint 和 writes 表，开启 WAL 模式 / Create checkpoint and writes tables, enable WAL mode */
   setup(): void {
+    if (this.isClosed) return;
     // 已初始化则跳过 / Skip if already set up
     if (this.isSetup) {
       return;
@@ -277,6 +280,16 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
       throw new Error("Checkpoint and metadata serialized to different types");
     }
 
+    if (this.isClosed) {
+      return {
+        configurable: {
+          thread_id: threadId,
+          checkpoint_ns: checkpointNs,
+          checkpoint_id: checkpoint.id,
+        },
+      };
+    }
+
     this.db
       .query(
         `insert or replace into checkpoints
@@ -337,6 +350,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
         ] as const;
       }),
     );
+    if (this.isClosed) return;
     this.db.transaction(() => {
       for (const row of rows) {
         insert.run(...row);
@@ -355,6 +369,8 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
 
   /** 关闭数据库连接 / Close database connection */
   close(): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
     this.db.close();
   }
 

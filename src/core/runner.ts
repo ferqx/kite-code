@@ -67,6 +67,8 @@ export interface StreamCodeAgentInput {
   authorizationOverride?: AuthorizationOverride;
   /** 思考级别 / Thinking level */
   thinkingLevel?: string | null;
+  /** 外部中止信号 / External abort signal */
+  signal?: AbortSignal;
 }
 
 export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task"> {
@@ -157,7 +159,9 @@ export async function* runAgent(
       resumeValue = mapActionToResumeValue(result.action);
     }
   } finally {
-    checkpointer.close();
+    if (!signal?.aborted) {
+      checkpointer.close();
+    }
   }
 }
 
@@ -559,6 +563,8 @@ export async function* streamCodeAgent(
     thinkingLevel: input.thinkingLevel,
   });
 
+  const signal = input.signal;
+
   let streamCompleted = false;
   try {
     const initialWorkspaceAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? "auto");
@@ -588,7 +594,7 @@ export async function* streamCodeAgent(
     yield* normalizeGraphStream(stream);
     streamCompleted = true;
   } finally {
-    if (streamCompleted) {
+    if (streamCompleted && !signal?.aborted) {
       checkpointer.close();
     }
   }
@@ -605,6 +611,8 @@ export async function* resumeCodeAgent(
     thinkingLevel: input.thinkingLevel,
   });
 
+  const signal = input.signal;
+
   let streamCompleted = false;
   try {
     const stream = await graph.stream(
@@ -615,7 +623,7 @@ export async function* resumeCodeAgent(
     yield* normalizeGraphStream(stream);
     streamCompleted = true;
   } finally {
-    if (streamCompleted) {
+    if (streamCompleted && !signal?.aborted) {
       checkpointer.close();
     }
   }
