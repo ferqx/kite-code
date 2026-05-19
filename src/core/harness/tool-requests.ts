@@ -363,6 +363,7 @@ function normalizeShellActionEnvelope(value: unknown): ShellActionEnvelope {
     : "pwd";
   return {
     command,
+    ...(typeof record.description === "string" ? { description: record.description } : {}),
     ...(isShellIntent(record.intent) ? { intent: record.intent } : {}),
     ...(typeof record.objective === "string" ? { objective: record.objective } : {}),
     ...(typeof record.justification === "string"

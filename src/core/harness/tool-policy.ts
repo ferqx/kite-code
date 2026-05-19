@@ -560,7 +560,7 @@ function isVcsMutationCommand(command: string): boolean {
 function isWriteLikeShellCommand(command: string): boolean {
   const normalized = normalizeShell(command);
   return (
-    /(^|[^>])>{1,2}($|[^>])/.test(normalized) ||
+    /(^|[^>])>{1,2}(?!&[12])(?:$|[^>])/.test(normalized) ||
     /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee|rm|unlink)\b/.test(normalized) ||
     /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update)\b/.test(normalized)
   );

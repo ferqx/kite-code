@@ -154,6 +154,12 @@ describe("code agent tool definitions", () => {
     );
     expect(isReadOnlyShellCommand("git status --short")).toBe(true);
     expect(isReadOnlyShellCommand("git diff -- src/app/runner.ts")).toBe(true);
+    // Windows-native read-only commands
+    expect(isReadOnlyShellCommand("dir")).toBe(true);
+    expect(isReadOnlyShellCommand("findstr pattern file.txt")).toBe(true);
+    expect(isReadOnlyShellCommand("echo %cd%")).toBe(true);
+    expect(isReadOnlyShellCommand("gl")).toBe(true);
+    expect(isReadOnlyShellCommand("Get-Item file.txt")).toBe(true);
   });
 
   // 验证可能写入、删除或执行项目代码的 shell 命令不会被分类为只读（sed -i, rm -rf, git add, mkdir 等） / Shell commands that can write, delete, or execute project code (sed -i, rm -rf, git add, mkdir, etc.) are not classified as read-only
@@ -168,6 +174,12 @@ describe("code agent tool definitions", () => {
     expect(isReadOnlyShellCommand("awk 'BEGIN { system(\"rm hello.txt\") }'")).toBe(
       false,
     );
+    // 裸 & 命令分隔符注入 (cmd.exe / bash)
+    expect(isReadOnlyShellCommand("echo hello & rm -rf src")).toBe(false);
+    expect(isReadOnlyShellCommand("echo hello & del file.txt")).toBe(false);
+    // && 和 2>&1 仍然允许
+    expect(isReadOnlyShellCommand("rg pattern file 2>&1")).toBe(true);
+    expect(isReadOnlyShellCommand("cat a.txt && cat b.txt")).toBe(true);
   });
 });
 

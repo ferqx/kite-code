@@ -30,24 +30,23 @@ export const READ_FILE_CONTRACT: ToolContract = {
   name: "read_file",
   sections: {
     whenToUse:
-      "Read a file from the workspace to see its current content with line numbers. " +
-      "Use this BEFORE edit_file to get the exact text to replace. " +
+      "Read a file from the workspace with line numbers. " +
       "Use this to inspect file contents, verify changes, or understand code structure. " +
-      "Do NOT use read_file when you need to search across multiple files — use shell_execute with intent=inspect and rg/grep. " +
-      "Do NOT use it to list directory contents — use shell_execute with ls or find.",
+      "ALWAYS call read_file BEFORE edit_file so old_string matches exactly. " +
+      "Do NOT use shell commands (cat, head, tail, sed) to read files — use read_file instead. " +
+      "Do NOT use read_file to list directories or search across multiple files — use shell_execute intent=inspect for that.",
     commonMistakes:
-      "Editing a file without first calling read_file (causes edit_file to fail because old_string won't match). " +
-      "Using an absolute path instead of a relative workspace path. " +
+      "Editing a file without reading it first — edit_file will fail because old_string won't match. " +
       "Assuming file content without verifying — always read first. " +
-      "Reading large files without offset/limit, wasting context.",
+      "Reading large files without offset/limit, wasting context. " +
+      "Using an absolute path when a relative workspace path is expected.",
     outputFormat:
-      "JSON with fields: ok (boolean), content (line-numbered text like '  1|line content'), error (empty on success). " +
-      "If the file does not exist, returns ok: false with error message.",
+      "JSON: ok (boolean), content (line-numbered text: '  1|line content'), error (empty on success). " +
+      "File not found: ok: false with error message.",
     failureHandling:
-      "If file not found (ok: false), use shell_execute with intent=inspect and ls, find, or rg to locate the correct path. " +
-      "If the path parameter is missing or empty, verify you provided it. " +
-      "If offset is beyond file length, reduce or remove offset. " +
-      "If you're unsure about the path, explore the workspace with shell_execute intent=inspect first, then retry read_file.",
+      "If file not found: use shell_execute intent=inspect to locate the correct path, then retry. " +
+      "If offset is beyond file length: reduce or remove offset. " +
+      "If path is unknown: explore the workspace with shell_execute first, then retry read_file.",
   },
   description: "",
 };
@@ -58,23 +57,22 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       "Replace specific text in an existing file. Use for targeted, small-to-medium edits. " +
-      "ALWAYS call read_file first to see the exact content and line numbers, then construct old_string from that output. " +
+      "ALWAYS call read_file first to get the exact content for old_string. " +
+      "Do NOT use shell commands (sed -i, awk, echo >, tee) to edit files — use edit_file instead. " +
       "Do NOT use edit_file for creating new files — use write_file. " +
-      "Do NOT use edit_file for completely rewriting a file — use write_file. " +
-      "Do NOT call edit_file without first calling read_file and verifying exact content.",
+      "Do NOT use edit_file to rewrite the entire file — use write_file.",
     commonMistakes:
-      "old_string does not match file content exactly — whitespace, indentation, blank lines, or trailing spaces differ. " +
-      "The same old_string appears multiple times in the file but replace_all is not set to true (edit_file will fail with a duplicate-match error). " +
-      "Calling edit_file without calling read_file first, so old_string is based on guesswork rather than actual content. " +
-      "Trying to edit a file that doesn't exist — use write_file for new files. " +
-      "Not including enough surrounding lines in old_string to make it unique.",
+      "old_string doesn't match the file exactly — whitespace, indentation, or blank lines differ. " +
+      "Calling edit_file without read_file first, so old_string is guesswork. " +
+      "Same old_string appears multiple times without replace_all: true — causes duplicate-match error. " +
+      "Not including enough surrounding context in old_string to make it unique.",
     outputFormat:
-      "JSON with fields: ok (boolean), replacements (number of occurrences replaced), fromLine and toLine (replacement line range), error (empty on success). " +
-      "On success, stdout contains 'Replaced N occurrence(s) at line L1-L2'.",
+      "JSON: ok (boolean), replacements (count), fromLine/toLine (line range), error (empty on success). " +
+      "Success: 'Replaced N occurrence(s) at line L1-L2'.",
     failureHandling:
-      "If old_string is not found, re-read the file with read_file to verify current content, then retry with the correct old_string copied from the read_file output. " +
-      "If duplicate match error (multiple occurrences without replace_all), add more surrounding context lines to old_string to make it unique (preferred), or set replace_all: true. " +
-      "Always verify the edit succeeded by calling read_file on the edited region.",
+      "If old_string not found: re-read the file with read_file, then retry with verified content. " +
+      "If duplicate match: add more surrounding context to old_string (preferred) or set replace_all: true. " +
+      "Always verify the edit with read_file afterward.",
   },
   description: "",
 };
@@ -84,21 +82,23 @@ export const WRITE_FILE_CONTRACT: ToolContract = {
   name: "write_file",
   sections: {
     whenToUse:
-      "Create a new file or completely overwrite an existing file with new content. " +
-      "Use for creating files that don't exist yet, or when the entire file content must be replaced. " +
-      "Do NOT use write_file for small targeted edits to existing files — use read_file + edit_file instead. " +
-      "Do NOT use write_file to modify just a few lines; it replaces ALL content.",
+      "Create a new file or completely overwrite an existing file. " +
+      "Use for creating files that don't exist yet, or replacing entire file content. " +
+      "Do NOT use shell redirection (>, >>, tee) or heredoc to write files — use write_file instead. " +
+      "Do NOT use write_file for small targeted edits — use read_file + edit_file instead. " +
+      "write_file replaces ALL content; any lines not in 'content' will be gone.",
     commonMistakes:
-      "Using write_file for small changes instead of edit_file — this is wasteful and loses precision. " +
-      "Accidentally overwriting an existing file without verifying its current content with read_file first. " +
-      "Forgetting that write_file replaces ALL content; any lines not in 'content' will be gone.",
+      "Using write_file for small changes instead of edit_file — wasteful and loses precision. " +
+      "Overwriting an existing file without first calling read_file to verify its current content. " +
+      "Forgetting that write_file replaces the entire file — every omitted line is lost.",
     outputFormat:
-      "JSON with fields: ok (boolean), lines (number of lines written), error (empty on success). " +
-      "On success, stdout contains 'Wrote N line(s) to path/to/file'.",
+      "JSON: ok (boolean), lines (lines written), error (empty on success). " +
+      "Success: 'Wrote N line(s) to path/to/file'. " +
+      "Parent directories are created automatically.",
     failureHandling:
-      "If writing fails, check that the path is a valid relative workspace path. " +
-      "write_file automatically creates parent directories; if a permission or boundary error occurs, verify the path is inside the workspace. " +
-      "If the file already exists and you only need partial changes, switch to read_file + edit_file.",
+      "If write fails: verify the path is a valid relative workspace path. " +
+      "If permission or boundary error: verify the path is inside the workspace. " +
+      "If the file already exists and you only need partial changes: use read_file + edit_file.",
   },
   description: "",
 };
@@ -108,30 +108,31 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
   name: "shell_execute",
   sections: {
     whenToUse:
-      "Execute a shell command in the workspace with action envelope metadata. " +
-      "Use intent=inspect for read-only exploration (ls, rg, grep, find, cat, git status, git diff, git log). " +
-      "Use intent=verify for tests, typecheck, lint, or build verification (e.g. bun test, bun run typecheck). " +
-      "Use intent=test for running test suites, intent=build for compilation or install, intent=git for version control mutations, intent=other for anything else. " +
-      "Do NOT use shell_execute for reading file contents by path — use read_file. " +
-      "Do NOT use shell_execute for editing files — use edit_file or write_file. " +
-      "Always include objective, justification, expected_observation, and failure_strategy when they help the user review the command. " +
-      "In plan mode, only intent=inspect with read-only commands is allowed; mutating commands will be rejected.",
+      "Execute a shell command in the workspace. " +
+      "This is the LAST RESORT for terminal operations — prefer dedicated tools whenever available: " +
+      "use read_file to read files, edit_file/write_file to modify files, not shell commands like cat/sed/echo. " +
+      "Use shell_execute for: running test suites (bun test), typecheck/lint (bun run typecheck), " +
+      "installing dependencies (bun install), git operations, and other terminal-only tasks. " +
+      "Set intent=inspect for read-only exploration (listing files, searching, git status/diff/log) — these bypass approval. " +
+      "Set intent=verify for tests/typecheck/lint, intent=test for test suites, intent=build for compile/install, intent=git for version control, intent=other for everything else. " +
+      "Write a short human-readable description so the user can understand what the command does at a glance. " +
+      "Include objective, justification, expected_observation, and failure_strategy when the command needs user approval. " +
+      "Mention a grant_request (approve_once | same_command | full_access) if the command requires approval.",
     commonMistakes:
-      "Using intent=inspect for commands that write or execute code — the harness will reject these. " +
-      "Omitting the action envelope metadata (objective, justification, expected_observation, failure_strategy) when the command needs review. " +
-      "Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R, etc.) — these are denied by default. " +
-      "Running commands that need approval without specifying a grant_request (approve_once, same_command, or full_access). " +
-      "Using shell_execute to read files by name instead of using read_file.",
+      "Using shell_execute to read files (cat, head, tail, sed) — use read_file instead. " +
+      "Using shell_execute to edit files (sed -i, echo >, tee, heredoc) — use edit_file or write_file instead. " +
+      "Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R) — denied by default. " +
+      "Missing description field — always provide a short human-readable summary. " +
+      "Using intent=inspect for mutating commands — the harness will reject these.",
     outputFormat:
-      "JSON with fields: ok (boolean), command (executed command), exitCode (0=success, nonzero=failure), stdout, stderr, and action (the action envelope metadata). " +
-      "If the command is rejected by policy, ok is false with the rejection reason in stderr. " +
-      "exitCode 0 still requires checking stderr for warnings.",
+      "JSON with fields: ok (boolean), command (executed command), exitCode (0=success), stdout, stderr. " +
+      "If rejected by policy, ok: false with reason in stderr. " +
+      "Check stderr for warnings even when exitCode is 0.",
     failureHandling:
-      "If exitCode is nonzero, read stderr for the error message and adjust the command accordingly. " +
-      "If the intent was verify and tests fail, read the test failure output (in stdout/stderr), fix the relevant code, then re-run. " +
-      "If the command was rejected by policy, check: (1) are you in plan mode with a non-read-only command? (2) did you use intent=inspect for a mutating command? " +
-      "If the command needs approval and was denied, specify a grant_request in the next call. " +
-      "If the command output is empty but exitCode is 0, check if the command needs a different flag or path.",
+      "If exitCode nonzero: read stderr, adjust command, retry. " +
+      "If tests fail (intent=verify): read failure output, fix code, re-run. " +
+      "If rejected by policy: check intent matches command type; add grant_request for approval. " +
+      "If output empty but exitCode 0: try different flags or path.",
   },
   description: "",
 };

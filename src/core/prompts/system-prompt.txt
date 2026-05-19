@@ -42,20 +42,22 @@
 *  读取文件使用 `read_file`，已知路径直接读取。
 *  编辑文件使用 `edit_file`，通过精确字符串匹配替换；必须逐字匹配源文件内容，提供足够独特的上下文。
 *  新建或完整重写文件使用 `write_file`。
+*  **专用工具优先**：读取文件用 `read_file`，不要用 `cat`/`head`/`tail`/`sed`；编辑文件用 `edit_file`，不要用 `sed -i`/`awk`；写入文件用 `write_file`，不要用 `>`/`>>`/`tee`/heredoc。
 *  大修改必须拆成多个局部编辑；避免整文件级替换。
 *  所有读操作允许并行执行。
 *  所有写操作必须串行执行，不要并发发起。
 
 ## shell_execute
 
-*  `shell_execute` 是唯一的命令执行工具
-*  搜索文本或文件时首选 `rg` / `grep`。
-*  文件局部阅读也可用 `head`、`tail`、`sed`。
+*  `shell_execute` 是命令执行工具，但**仅在专用工具不适用时才使用**。能通过 `read_file`/`edit_file`/`write_file` 完成的，不要用 shell。
+*  每次调用必须写 `description`：一句话告诉用户这个命令在做什么。
+*  搜索文本或文件：用 `rg`/`grep`/`findstr`（Windows）或 `sls`（PowerShell）。
+*  查看目录内容：用 `ls`/`dir`（Windows cmd）或 `gci`（PowerShell）。
 *  读取类命令标记 `intent="inspect"`，直通执行无需审批。
 *  验证类命令标记 `intent="verify"`（如 `bun test`、`bun run typecheck`）。
-*  写类或 VCS 变更命令（如 `git add`、`git commit`、`mkdir`、`mv`）需要用户审批。
+*  写类或 VCS 变更命令（如 `git add`、`git commit`、`mkdir`、`mv`）需要用户审批，附带 `grant_request` 建议审批范围。
 *  对复杂命令补充 `objective`、`justification`、`expected_observation`、`failure_strategy` 帮助审批判断。
-*  **严禁**通过 shell 重定向（`>`、`>>`）、heredoc、`tee` 等方式写文件，所有文件写入必须通过 `edit_file` 或 `write_file`。
+*  **严禁**通过 shell 重定向（`>`、`>>`）、heredoc、`tee` 等方式写文件。
 
 ## 并发与串行
 
