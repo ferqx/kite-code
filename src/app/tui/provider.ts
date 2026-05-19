@@ -46,6 +46,9 @@ export class TuiUserInputProvider implements UserInputProvider {
   }
 
   reset(): void {
+    if (this.pendingResolve) {
+      this.pendingResolve({ type: "cancel" });
+    }
     this.pendingResolve = null;
     this.pendingInterrupt = null;
   }
