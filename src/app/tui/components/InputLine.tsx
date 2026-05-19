@@ -410,7 +410,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     );
   }
 
-  const promptChar = mode === "approval" ? "[A/S/F/D] " : mode === "question" ? "? " : "> ";
+  const promptChar = mode === "approval" ? "[A/S/F/D] " : mode === "question" ? "? " : "❯ ";
 
   // Suppress slash suggestions when an overlay is active (stack discipline)
   const showSlashDropdown = slashSuggestions.active && slashSuggestions.result && !overlayActive;
