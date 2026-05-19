@@ -5,7 +5,7 @@ import { createSandboxExecutor } from "@/core/sandbox/index";
 import { runAgent } from "@/core/runner";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
-import InputLine from "./components/InputLine";
+import InputLine, { type EditorContentHandle } from "./components/InputLine";
 import StartupScreen from "./components/StartupScreen";
 import { useSlashCommand } from "./hooks/useSlashCommand";
 import { loadSession } from "../../core/persistence/sessions.js";
@@ -28,7 +28,7 @@ function TuiBootstrap() {
   // Lazy init — only create thread when user sends first message
   const threadIdRef = React.useRef<string>("");
   const pendingSessionRef = React.useRef<string | null>(null);
-  const editorContentRef = React.useRef<(() => string) | null>(null);
+  const editorContentRef = React.useRef<EditorContentHandle | null>(null);
   const thinkingLevelRef = React.useRef<string | null>(null);
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const handleInputRef = React.useRef<(value: string) => void>(() => {});
@@ -269,7 +269,7 @@ function TuiBootstrap() {
     const tmpFile = editorInputPath(Date.now().toString(36));
 
     import("node:fs").then(({ writeFileSync }) => {
-      const content = editorContentRef.current?.() ?? "";
+      const content = editorContentRef.current?.getContent() ?? "";
       writeFileSync(tmpFile, content, "utf-8");
     }).then(() =>
       import("node:child_process")
@@ -282,10 +282,8 @@ function TuiBootstrap() {
             const content = readFileSync(tmpFile, "utf-8").trim();
             unlinkSync(tmpFile);
             if (content) {
-              // Submit content as user input on next tick
-              setTimeout(() => {
-                handleInputRef.current(content);
-              }, 0);
+              // Large content → placeholder in input; small → auto-submit
+              editorContentRef.current?.handleEditorResult(content);
             }
           } catch {
             /* file may not exist */

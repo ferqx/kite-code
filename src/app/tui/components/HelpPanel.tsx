@@ -27,6 +27,7 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
         ["Ctrl+R", "Toggle authorization mode"],
         ["Ctrl+T", "Expand/collapse all reasoning"],
         ["Ctrl+E", "Open external editor ($EDITOR)"],
+        ["Shift+Enter", "Insert newline"],
         ["Ctrl+O", "Reset overlays / focus output"],
         ["Ctrl+H / F1", "Show this help"],
       ],

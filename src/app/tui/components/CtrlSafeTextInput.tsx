@@ -2,7 +2,7 @@
 // not just Ctrl+C. This prevents character leakage from TUI shortcuts like
 // Ctrl+T, Ctrl+L, Ctrl+R, Ctrl+H, Ctrl+E, Ctrl+O, Ctrl+X.
 import React, { useState, useEffect } from "react";
-import { Text, useInput } from "ink";
+import { Text, useInput, usePaste } from "ink";
 import chalk from "chalk";
 
 export interface AtomicBlock {
@@ -67,34 +67,65 @@ function CtrlSafeTextInput({
     });
   }, [atomicBlock]);
 
+  // Bracketed paste mode: receives the full pasted string in one callback.
+  // Without this, pasted text arrives character-by-character through useInput
+  // and the parent's paste placeholder threshold is never reached.
+  usePaste((text) => {
+    if (!text) return;
+    const newValue =
+      originalValue.slice(0, cursorOffset) +
+      text +
+      originalValue.slice(cursorOffset);
+    const newCursorOffset = cursorOffset + text.length;
+    setState({ cursorOffset: newCursorOffset, cursorWidth: text.length });
+    onChange(newValue, { insertPos: cursorOffset, insertLen: text.length });
+  }, { isActive: focus });
+
   const cursorActualWidth = highlightPastedText ? cursorWidth : 0;
   const value = mask ? mask.repeat(originalValue.length) : originalValue;
 
-  let renderedValue = value;
-  let renderedPlaceholder = placeholder
-    ? chalk.grey(placeholder)
-    : undefined;
+  // ── render helper: split into lines, highlight cursor ──
+  const displayLines = value.length > 0 ? value.split("\n") : [""];
 
-  if (showCursor && focus) {
-    renderedPlaceholder =
-      placeholder.length > 0
-        ? chalk.inverse(placeholder[0]) + chalk.grey(placeholder.slice(1))
-        : chalk.inverse(" ");
-
-    renderedValue = value.length > 0 ? "" : chalk.inverse(" ");
-    let i = 0;
-    for (const char of value) {
-      renderedValue +=
-        i >= cursorOffset - cursorActualWidth && i <= cursorOffset
-          ? chalk.inverse(char)
-          : char;
-      i++;
+  let cursorLine = 0;
+  let cursorCol = cursorOffset;
+  for (let i = 0; i < displayLines.length; i++) {
+    if (cursorCol <= displayLines[i].length) {
+      cursorLine = i;
+      break;
     }
-
-    if (value.length > 0 && cursorOffset === value.length) {
-      renderedValue += chalk.inverse(" ");
-    }
+    cursorCol -= displayLines[i].length + 1; // +1 for the \n
   }
+
+  const renderedLines = (() => {
+    if (!showCursor || !focus) {
+      return displayLines.map((l) => l || " ");
+    }
+    return displayLines.map((line, lineIdx) => {
+      if (lineIdx !== cursorLine) return line || " ";
+      // Build line with cursor
+      if (line.length === 0) return chalk.inverse(" ");
+      let rendered = "";
+      for (let j = 0; j < line.length; j++) {
+        const highlighted =
+          j >= cursorCol - cursorActualWidth && j <= cursorCol;
+        rendered += highlighted ? chalk.inverse(line[j]) : line[j];
+      }
+      if (cursorCol >= line.length) {
+        rendered += chalk.inverse(" ");
+      }
+      return rendered;
+    });
+  })();
+
+  const renderedPlaceholder =
+    placeholder
+      ? showCursor && focus
+        ? placeholder.length > 0
+          ? chalk.inverse(placeholder[0]) + chalk.grey(placeholder.slice(1))
+          : chalk.inverse(" ")
+        : chalk.grey(placeholder)
+      : undefined;
 
   useInput(
     (input, key) => {
@@ -109,9 +140,8 @@ function CtrlSafeTextInput({
       }
 
       if (key.return) {
-        if (!key.shift && onSubmit) {
-          onSubmit(originalValue);
-        }
+        // Enter / Shift+Enter handling is in InputLine to have reliable
+        // access to handleSubmit and value without stale-closure risk.
         return;
       }
 
@@ -228,14 +258,29 @@ function CtrlSafeTextInput({
     { isActive: focus },
   );
 
+  // ── multi-line or single-line? ──
+  if (displayLines.length <= 1) {
+    // Single line: keep original rendering (bare <Text>) for compat
+    return (
+      <Text>
+        {placeholder && value.length === 0
+          ? renderedPlaceholder
+          : renderedLines[0]}
+      </Text>
+    );
+  }
+
+  // Multi-line: split across Box column
   return (
-    <Text>
-      {placeholder
-        ? value.length > 0
-          ? renderedValue
-          : renderedPlaceholder
-        : renderedValue}
-    </Text>
+    <Box flexDirection="column">
+      {placeholder && value.length === 0 ? (
+        <Text>{renderedPlaceholder}</Text>
+      ) : (
+        renderedLines.map((line, i) => (
+          <Text key={i}>{line}</Text>
+        ))
+      )}
+    </Box>
   );
 }
 

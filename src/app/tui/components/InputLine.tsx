@@ -12,11 +12,16 @@ import {
 } from "@/app/tui/hooks/useSlashSuggestions";
 import { darkTheme as t } from "@/app/tui/theme";
 
-const PASTE_THRESHOLD = 10_000;
+export const PASTE_THRESHOLD = 100;
 
 interface PasteState {
   pastedContent: string;
   placeholder: string;
+}
+
+export interface EditorContentHandle {
+  getContent(): string;
+  handleEditorResult(content: string): void;
 }
 
 interface InputLineProps {
@@ -26,7 +31,7 @@ interface InputLineProps {
   placeholder?: string;
   workspace: string;
   overlayActive?: boolean;
-  editorContentRef?: React.MutableRefObject<(() => string) | null>;
+  editorContentRef?: React.MutableRefObject<EditorContentHandle | null>;
 }
 
 function commonPrefix(strings: string[]): string {
@@ -73,6 +78,8 @@ function completeSlash(input: string): string | null {
 
 export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef }: InputLineProps) {
   const [value, setValue] = useState("");
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const fileSearch = useFileSearch(value, workspace);
@@ -184,6 +191,8 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     },
     [onSubmit],
   );
+  const handleSubmitRef = useRef(handleSubmit);
+  handleSubmitRef.current = handleSubmit;
 
   // Check if input value is exactly a known slash command (no args, no trailing spaces)
   const slashMatched = useMemo((): boolean => {
@@ -332,8 +341,12 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       return;
     }
 
-    if (key.return && key.shift) {
-      commitValue(value + "\n");
+    if (key.return) {
+      if (key.shift) {
+        commitValue(valueRef.current + "\n");
+        return;
+      }
+      handleSubmitRef.current(valueRef.current);
       return;
     }
     if (key.upArrow && history.length > 0) {
@@ -358,15 +371,30 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   });
 
   if (editorContentRef) {
-    editorContentRef.current = () => {
-      const ps = pasteStateRef.current;
-      if (ps) {
-        const idx = value.indexOf(ps.placeholder);
-        if (idx >= 0) {
-          return value.slice(0, idx) + ps.pastedContent + value.slice(idx + ps.placeholder.length);
+    editorContentRef.current = {
+      getContent: () => {
+        const ps = pasteStateRef.current;
+        if (ps) {
+          const idx = value.indexOf(ps.placeholder);
+          if (idx >= 0) {
+            return value.slice(0, idx) + ps.pastedContent + value.slice(idx + ps.placeholder.length);
+          }
         }
-      }
-      return value;
+        return value;
+      },
+      handleEditorResult: (content: string) => {
+        if (!content) return;
+        if (content.length >= PASTE_THRESHOLD) {
+          const placeholder = `[已粘贴 ${content.length.toLocaleString()} 字符]`;
+          setPasteState({ pastedContent: content, placeholder });
+          textKeyRef.current++;
+          setValue(placeholder);
+        } else {
+          setPasteState(null);
+          textKeyRef.current++;
+          setValue(content);
+        }
+      },
     };
   }
 
@@ -405,7 +433,13 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
       {pasteState && (
         <Box marginTop={1}>
-          <Text color={t.dim}>Ctrl+E 在编辑器中查看完整内容</Text>
+          <Text color={t.dim}>Ctrl+E 编辑器查看 | Shift+Enter 换行 | Enter 提交</Text>
+        </Box>
+      )}
+
+      {!pasteState && !slashSuggestions.active && !fileSearch.active && (
+        <Box marginTop={1}>
+          <Text color={t.dim}>Shift+Enter 换行  Enter 提交</Text>
         </Box>
       )}
 
