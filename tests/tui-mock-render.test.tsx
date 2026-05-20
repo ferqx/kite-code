@@ -14,18 +14,18 @@ function fakeStatus() {
 }
 
 describe("Header", () => {
-  test("shows timer with 00:00 when running starts", () => {
+  test("shows working cat face when running", () => {
     const { lastFrame } = render(
-      React.createElement(Header, { status: fakeStatus(), running: true, timerKey: 0 })
+      React.createElement(Header, { status: fakeStatus(), running: true })
     );
-    expect(lastFrame()).toContain("00:00");
+    expect(lastFrame()).toContain("( ^ ^ )");
   });
 
-  test("hides timer when not running", () => {
+  test("shows idle cat face when not running", () => {
     const { lastFrame } = render(
-      React.createElement(Header, { status: fakeStatus(), running: false, timerKey: 0 })
+      React.createElement(Header, { status: fakeStatus(), running: false })
     );
-    expect(lastFrame()).not.toContain("00:00");
+    expect(lastFrame()).toContain("( = = )");
   });
 });
 
