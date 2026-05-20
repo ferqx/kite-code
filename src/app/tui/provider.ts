@@ -32,8 +32,18 @@ export class TuiUserInputProvider implements UserInputProvider {
 
   async requestAction(payload: InterruptPayload): Promise<UserAction> {
     this.pendingInterrupt = payload;
+    const timeout = setTimeout(() => {
+      if (this.pendingResolve) {
+        this.pendingResolve({ type: "cancel" });
+        this.pendingResolve = null;
+        this.pendingInterrupt = null;
+      }
+    }, 300_000);
     return new Promise<UserAction>((resolve) => {
-      this.pendingResolve = resolve;
+      this.pendingResolve = (action: UserAction) => {
+        clearTimeout(timeout);
+        resolve(action);
+      };
     });
   }
 

@@ -43,6 +43,7 @@ function formatLines(added?: number, removed?: number): string {
 
 function resolveApprovalLabel(resolved?: { action: string; grant?: string; pattern?: string }): string {
   if (!resolved) return "";
+  if (resolved.action === "cancelled") return "⊘ Cancelled";
   if (resolved.action === "denied") return "× Denied";
   if (resolved.action === "approve_once") return "✓ Approved (once)";
   if (resolved.action === "same_command") return `✓ Approved (same command)${resolved.pattern ? ` "${resolved.pattern}"` : ""}`;
@@ -98,7 +99,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
       return (
         <Box key={block.id} marginBottom={BLOCK_GAP}>
           {isFocused ? <Text color={t.primary}>❯ </Text> : null}
-          <MarkdownBlock content={block.content} streaming={block.streaming} />
+          <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? t.error : undefined} />
         </Box>
       );
 
@@ -194,10 +195,14 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
       return (
         <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           {block.resolved ? (
-            <Text>
-              <Text color={t.success}>✓ Answered: </Text>
-              <Text color={t.muted}>{block.resolved}</Text>
-            </Text>
+            block.resolved === "cancelled" ? (
+              <Text color={t.dim}>⊘ Question cancelled</Text>
+            ) : (
+              <Text>
+                <Text color={t.success}>✓ Answered: </Text>
+                <Text color={t.muted}>{block.resolved}</Text>
+              </Text>
+            )
           ) : (
             <Text color={t.primary}>? Question</Text>
           )}

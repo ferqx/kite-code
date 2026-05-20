@@ -2,7 +2,7 @@ import type { ToolCallPayload, ToolApprovalPayload, UserInputPayload, AgentPhase
 
 export type OutputBlock =
   | { id: number; kind: "user"; content: string }
-  | { id: number; kind: "text"; content: string; streaming?: boolean }
+  | { id: number; kind: "text"; content: string; streaming?: boolean; isError?: boolean }
   | { id: number; kind: "reason"; content: string; folded: boolean }
   | { id: number; kind: "tool_card"; callId: string; name: string; args: Record<string, unknown>; status: "running" | "done" | "error"; summary: string; preview?: string; elapsedMs?: number; detail?: string }
   | { id: number; kind: "file_change"; changes: FileChangeRecord[] }

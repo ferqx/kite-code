@@ -57,7 +57,8 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
         break;
       case "sessions":
         if (action.id) {
-          // /sessions <id> directly loads the session — handled in Task 12
+          dispatch({ type: "LOAD_SESSION_PENDING", threadId: action.id });
+          break;
         }
         dispatch({ type: "SHOW_SESSIONS" });
         break;
