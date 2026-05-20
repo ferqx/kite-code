@@ -5,6 +5,7 @@ import { darkTheme as t } from "@/app/tui/theme";
 interface MarkdownBlockProps {
   content: string;
   streaming?: boolean;
+  color?: string;
 }
 
 export interface InlineSegment {
@@ -365,7 +366,7 @@ function groupLines(lines: string[]): LineGroup[] {
 
 // ── main component ──
 
-export default function MarkdownBlock({ content, streaming }: MarkdownBlockProps) {
+export default function MarkdownBlock({ content, streaming, color }: MarkdownBlockProps) {
   const lines = content.split("\n");
   const groups = groupLines(lines);
 
@@ -421,7 +422,7 @@ export default function MarkdownBlock({ content, streaming }: MarkdownBlockProps
           return (
             <Box key={gi} paddingLeft={indent}>
               <Text color={t.muted}>· </Text>
-              <MarkdownLine content={line.slice(2)} />
+              <MarkdownLine content={line.slice(2)} color={color} />
             </Box>
           );
         }
@@ -438,18 +439,18 @@ export default function MarkdownBlock({ content, streaming }: MarkdownBlockProps
           return <Box key={gi} height={1} />;
         }
 
-        return <MarkdownLine key={gi} content={line} />;
+        return <MarkdownLine key={gi} content={line} color={color} />;
       })}
       {streaming && <Text color={t.primary}>▌</Text>}
     </Box>
   );
 }
 
-function MarkdownLine({ content }: { content: string }) {
+function MarkdownLine({ content, color }: { content: string; color?: string }) {
   const segments = parseInline(content);
 
   if (segments.length === 1 && !segments[0].bold && !segments[0].italic && !segments[0].code) {
-    return <Text>{content}</Text>;
+    return <Text color={color}>{content}</Text>;
   }
 
   return (
@@ -459,7 +460,7 @@ function MarkdownLine({ content }: { content: string }) {
           key={j}
           bold={seg.bold}
           italic={seg.italic}
-          color={seg.code ? t.warning : undefined}
+          color={seg.code ? t.warning : (color ?? undefined)}
         >
           {seg.text}
         </Text>

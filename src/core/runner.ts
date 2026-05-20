@@ -109,6 +109,8 @@ export async function* runAgent(
     thinkingLevel: input.thinkingLevel,
   });
 
+  const signal = input.signal;
+
   try {
     const initialAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? "auto");
     const initialPhase = workspaceAccessToPhase(initialAccess);
@@ -132,8 +134,6 @@ export async function* runAgent(
     };
 
     let resumeValue: AgentResumeValue | null = input.resume ?? null;
-
-    const signal = input.signal;
 
     while (true) {
       if (signal?.aborted) break;

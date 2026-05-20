@@ -64,6 +64,7 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
       case "sessions":
         if (action.id) {
           dispatch({ type: "LOAD_SESSION_PENDING", threadId: action.id });
+          break;
         } else {
           dispatch({ type: "SHOW_SESSIONS" });
         }

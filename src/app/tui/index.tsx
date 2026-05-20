@@ -41,8 +41,20 @@ function TuiBootstrap() {
         pendingSessionRef.current = threadId;
         try {
           const result = await loadSession(defaultCheckpointPath(), threadId);
-          if (!result || pendingSessionRef.current !== threadId) {
+          if (pendingSessionRef.current !== threadId) {
             pendingSessionRef.current = null;
+            return;
+          }
+          if (!result) {
+            pendingSessionRef.current = null;
+            dispatch({
+              type: "LOAD_SESSION",
+              blocks: [{ id: 1, kind: "text", content: `Session ${threadId} has no saved checkpoints.` }],
+              interrupt: null,
+              modelProvider: "",
+              modelName: "",
+              thinkingLevel: null,
+            });
             return;
           }
 
@@ -288,6 +300,8 @@ function TuiBootstrap() {
       proc.on("error", () => {
         if (!cancelled) dispatch({ type: "EDITOR_DONE" });
       });
+    }).catch(() => {
+      if (!cancelled) dispatch({ type: "EDITOR_DONE" });
     });
 
     return () => {

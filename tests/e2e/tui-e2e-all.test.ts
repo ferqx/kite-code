@@ -137,7 +137,7 @@ describe(`${label} Lifecycle events`, () => {
     expect(result.pass).toBe(true);
     expect(result.snapshots.length).toBe(1);
     // Content verification: error message visible in output
-    expect(result.snapshots[0].ansi).toContain("Error");
+    expect(result.snapshots[0].ansi).toContain("Recoverable error");
   });
 
   test("retry event renders", async () => {

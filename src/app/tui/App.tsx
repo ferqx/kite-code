@@ -12,6 +12,7 @@ import ModelSelector from "./components/ModelSelector";
 import SessionSelector from "./components/SessionSelector.js";
 import Header from "./Header";
 import Footer from "./Footer";
+import StatusBar from "./StatusBar";
 import { useGlobalKeys, useLeaderKeys } from "./hooks/useGlobalKeys";
 
 const MemoHeader = React.memo(Header);
@@ -35,8 +36,6 @@ export type Action =
   | { type: "CTRL_C" }
   | { type: "SWITCH_AUTH"; mode: string }
   | { type: "COMPACT_CONTEXT" }
-  | { type: "UNDO" }
-  | { type: "REDO" }
   | { type: "EXPORT_SESSION" }
   | { type: "OPEN_EDITOR" }
   | { type: "EDITOR_DONE" }
@@ -110,6 +109,15 @@ function computeToolDetail(name: string, args: Record<string, unknown>): string 
     default:
       return undefined;
   }
+}
+
+function resolveInterruptBlock(blocks: OutputBlock[], blockId: number): OutputBlock[] {
+  return blocks.map((b) => {
+    if (b.id !== blockId) return b;
+    if (b.kind === "approval") return { ...b, resolved: { action: "cancelled" } };
+    if (b.kind === "question") return { ...b, resolved: "cancelled" };
+    return b;
+  });
 }
 
 export function eventReducer(state: TuiState, action: Action): TuiState {
@@ -227,8 +235,10 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
           return { ...state, blocks: [...state.blocks, block], interrupt };
         }
         case "error": {
-          const block: OutputBlock = { id: nextId++, kind: "text", content: `Error: ${event.data.message}` };
-          return { ...state, blocks: [...state.blocks, block], sessionError: true };
+          const recoverable = event.data.recoverable;
+          const prefix = recoverable ? "⟳ Recoverable error" : "Error";
+          const block: OutputBlock = { id: nextId++, kind: "text", content: `${prefix}: ${event.data.message}`, isError: !recoverable };
+          return { ...state, blocks: [...state.blocks, block], sessionError: !recoverable };
         }
         case "file_change": {
           const change: FileChangeRecord = {
@@ -274,7 +284,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return { ...state, exited: true, blocks: [...state.blocks, block] };
     }
     case "SET_RUNNING":
-      return { ...state, running: true, exited: false, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false };
+      return { ...state, running: true, exited: false, interrupt: null, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false };
     case "SET_IDLE": {
       const blocks = state.blocks.map((b) =>
         b.kind === "text" && b.streaming ? { ...b, streaming: false } : b
@@ -344,19 +354,28 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       if (state.showModelSelector) return { ...state, showModelSelector: false };
       if (state.leaderPending) return { ...state, leaderPending: false };
       if (state.running) {
-        const next = { ...state, running: false, ctrlCPressed: true };
-        if (state.interrupt) next.interrupt = null;
+        let next = { ...state, running: false, ctrlCPressed: true };
+        if (state.interrupt) {
+          next.interrupt = null;
+          next.blocks = resolveInterruptBlock(state.blocks, state.interrupt.blockId);
+        }
         return next;
       }
       if (state.interrupt) {
-        return { ...state, interrupt: null };
+        return {
+          ...state,
+          interrupt: null,
+          blocks: resolveInterruptBlock(state.blocks, state.interrupt.blockId),
+        };
       }
       return state;
     case "CTRL_C":
       if (state.running) {
-        // When interrupt is active, also clear it so the provider is cancelled
-        const next = { ...state, running: false, ctrlCPressed: true };
-        if (state.interrupt) next.interrupt = null;
+        let next = { ...state, running: false, ctrlCPressed: true };
+        if (state.interrupt) {
+          next.interrupt = null;
+          next.blocks = resolveInterruptBlock(state.blocks, state.interrupt.blockId);
+        }
         return next;
       }
       if (state.ctrlCPressed) return { ...state, exitRequested: true };
@@ -370,14 +389,6 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     case "COMPACT_CONTEXT": {
       if (!state.running) return state;
       const block: OutputBlock = { id: nextId++, kind: "text", content: "⟳ Manual compaction requested — context will be compacted on next overflow" };
-      return { ...state, blocks: [...state.blocks, block] };
-    }
-    case "UNDO": {
-      const block: OutputBlock = { id: nextId++, kind: "text", content: "Undo: checkpoint rollback not yet implemented" };
-      return { ...state, blocks: [...state.blocks, block] };
-    }
-    case "REDO": {
-      const block: OutputBlock = { id: nextId++, kind: "text", content: "Redo: checkpoint restore not yet implemented" };
       return { ...state, blocks: [...state.blocks, block] };
     }
     case "EXPORT_SESSION": {
@@ -582,6 +593,7 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
     <Box flexDirection="column">
       <MemoHeader status={state.status} running={state.running} error={state.sessionError} />
       <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
+      <StatusBar status={state.status} thinkingVisible={state.thinkingVisible} timerKey={state.runCount} running={state.running} />
       {state.showHelp && <HelpPanel onClose={hideHelp} />}
       {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
         <ApprovalBlock
