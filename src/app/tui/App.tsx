@@ -4,6 +4,7 @@ import { sessionExportPath } from "@/core/config/paths";
 import type { AgentEvent } from "@/protocol/events";
 import type { TuiState, OutputBlock, StatusState, InterruptState, FileChangeRecord } from "./types";
 import OutputArea from "./OutputArea";
+import ActivityBar from "./ActivityBar";
 import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
 import HelpPanel from "./components/HelpPanel";
@@ -579,7 +580,7 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
 
   return (
     <Box flexDirection="column">
-      <MemoHeader status={state.status} running={state.running} timerKey={state.runCount} error={state.sessionError} paused={!!state.interrupt} />
+      <MemoHeader status={state.status} running={state.running} error={state.sessionError} />
       <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
       {state.showHelp && <HelpPanel onClose={hideHelp} />}
       {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
@@ -596,7 +597,6 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
           onResolved={resolveInput}
         />
       )}
-      {children}
       {state.showSessions && (
         <SessionSelector
           onSelect={selectSession}
@@ -610,6 +610,8 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
           onClose={hideModelSelector}
         />
       )}
+      <ActivityBar running={state.running} timerKey={state.runCount} />
+      {children}
       <Footer />
     </Box>
   );
