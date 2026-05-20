@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import type { Dispatch } from "react";
+import { MODEL_NAMES } from "./useSlashSuggestions";
 
 export type SlashAction =
   | { type: "thinking" }
@@ -50,16 +51,22 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
         dispatch({ type: "TOGGLE_THINKING" });
         break;
       case "model":
-        dispatch({ type: "SHOW_MODEL_SELECTOR" });
+        if (action.name && MODEL_NAMES.some((m) => m.toLowerCase() === action.name!.toLowerCase())) {
+          const matched = MODEL_NAMES.find((m) => m.toLowerCase() === action.name!.toLowerCase())!;
+          dispatch({ type: "SELECT_MODEL", modelId: matched });
+        } else {
+          dispatch({ type: "SHOW_MODEL_SELECTOR" });
+        }
         break;
       case "model_list":
         dispatch({ type: "LIST_MODELS" });
         break;
       case "sessions":
         if (action.id) {
-          // /sessions <id> directly loads the session — handled in Task 12
+          dispatch({ type: "LOAD_SESSION_PENDING", threadId: action.id });
+        } else {
+          dispatch({ type: "SHOW_SESSIONS" });
         }
-        dispatch({ type: "SHOW_SESSIONS" });
         break;
       case "new":
         dispatch({ type: "NEW_SESSION" });

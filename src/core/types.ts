@@ -17,6 +17,7 @@ export type ShellIntent = "inspect" | "verify" | "build" | "test" | "git" | "oth
 
 export interface ShellActionEnvelope {
   command: string;
+  description?: string;
   intent?: ShellIntent;
   objective?: string;
   justification?: string;

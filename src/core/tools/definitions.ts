@@ -93,6 +93,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       description: SHELL_EXECUTE_CONTRACT.description,
       schema: z.object({
         command: z.string().describe("Shell command to execute in the workspace"),
+        description: z.string().optional().describe("Short human-readable description of what this command does (shown to the user)"),
         intent: z
           .enum(["inspect", "verify", "build", "test", "git", "other"])
           .optional()
@@ -250,14 +251,19 @@ function createSetAuthorizationModeTool() {
 const PLAN_READ_ONLY_COMMANDS = new Set([
   "awk",
   "cat",
+  "dir",
   "du",
+  "echo",
   "file",
   "find",
+  "findstr",
   "gc",
   "gci",
   "get-childitem",
   "get-content",
+  "get-item",
   "get-location",
+  "gl",
   "grep",
   "head",
   "ls",
@@ -289,14 +295,23 @@ const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
 /** 检查命令是否可作为 shell_execute inspect 直通 / Check if command can bypass approval as shell_execute inspect */
 export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = command.trim();
-  // 拒绝对空命令和包含输出重定向的命令 / Reject empty commands and commands with output redirection
-  if (!trimmed || /(^|[^>])>{1,2}($|[^>])/.test(trimmed)) {
+  // 拒绝对空命令和包含文件输出重定向的命令（允许 >&N stderr 重定向到 fd）
+  // Reject empty commands and file output redirection; allow >&N stderr-to-fd redirect
+  if (!trimmed || /(^|[^>])>{1,2}(?!&[12])(?:$|[^>])/.test(trimmed)) {
     return false;
   }
 
   // 拒绝命令替换 — $() 和反引号中可能包含写入命令，直通会导致绕过审批
   // Reject command substitution — $() and backticks may contain write commands
   if (/\$\(/.test(trimmed) || /`/.test(trimmed)) {
+    return false;
+  }
+
+  // 拒绝裸 & 命令分隔符（cmd.exe: cmd1 & cmd2, bash: cmd1 & cmd2）
+  // 允许 &&（逻辑与，已按分隔符拆段）、>&N / N>&M（stderr 重定向）
+  // Reject bare & command separator; allow && and >&N stderr redirect
+  const stripped = trimmed.replace(/&&/g, "").replace(/\d?>&\d?/g, "");
+  if (stripped.includes("&")) {
     return false;
   }
 

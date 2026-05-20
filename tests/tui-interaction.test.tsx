@@ -505,7 +505,7 @@ describe("App leader keys", () => {
     expect(dispatched).toContainEqual({ type: "LEADER_CANCEL" });
   });
 
-  test("Ctrl+X then N is unhandled (removed — use Ctrl+N instead)", () => {
+  test("Ctrl+X then N dispatches NEW_SESSION + LEADER_CANCEL", () => {
     const dispatched: any[] = [];
     const state = fakeState({ leaderPending: true });
     const { stdin } = render(
@@ -513,7 +513,8 @@ describe("App leader keys", () => {
     );
 
     stdin.write("n");
-    expect(dispatched).not.toContainEqual({ type: "NEW_SESSION" });
+    expect(dispatched).toContainEqual({ type: "NEW_SESSION" });
+    expect(dispatched).toContainEqual({ type: "LEADER_CANCEL" });
   });
 
   test("Ctrl+X then E dispatches OPEN_EDITOR + LEADER_CANCEL", () => {
