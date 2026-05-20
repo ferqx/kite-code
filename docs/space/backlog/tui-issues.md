@@ -7,6 +7,8 @@
 
 ## 可即时修复（低成本）
 
+> B02–B04 对应 [`plans/2026-05-20-tui-production-roadmap.md`](../plans/2026-05-20-tui-production-roadmap.md) 第四步（功能补齐）。
+
 ### B01 — `/sessions <id>` 直接加载是空分支
 
 - 位置：`src/app/tui/hooks/useSlashCommand.ts:59-62`
@@ -57,6 +59,8 @@
 ---
 
 ## 待评估修复
+
+> 以下 B08–B10 已纳入 [`plans/2026-05-20-tui-production-roadmap.md`](../plans/2026-05-20-tui-production-roadmap.md) 第三步（防御纵深）。
 
 ### B08 — React Error Boundary 缺失
 

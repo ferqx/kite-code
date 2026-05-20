@@ -54,9 +54,4 @@ UNDO/REDO Action 类型和 reducer 分支已在 2026-05-20 移除（无键盘绑
 
 ## 剩余未修复的低风险项
 
-| # | 问题 | 位置 |
-|---|------|------|
-| 1 | React Error Boundary 缺失 — 任何 render 错误直接崩进程 | `index.tsx:348` |
-| 2 | Checkpoint 句柄在 abort 时泄漏 — `checkpointer.close()` 被跳过 | `runner.ts:161-165` |
-| 3 | Session 名称生成的空 API key 静默失败 | `sessions.ts:371-407` |
-| 4 | 外部编辑器 temp 文件在取消/unmount 时泄漏 | `index.tsx:269` |
+详见 [`backlog/tui-issues.md`](../backlog/tui-issues.md) 的 B08–B11。

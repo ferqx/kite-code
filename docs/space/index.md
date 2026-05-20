@@ -47,6 +47,14 @@
 | `backlog/README.md` | active | 定义 backlog 目录用途和使用规范。 |
 | `backlog/tui-issues.md` | active | TUI 待修复项清单：已知缺口、清理方向、依赖项。 |
 
+## Plans（实施计划）
+
+| 记录 | 状态 | 用途 |
+| --- | --- | --- |
+| `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
+| `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
+| `plans/2026-05-20-tui-production-roadmap.md` | draft | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
+
 ## 完成执行记录
 
 | 记录 | 状态 | 用途 |

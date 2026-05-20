@@ -106,6 +106,35 @@ reference 记录不具备约束力，除非被提升为 `execution/active/` 规�
 - 临时生成说明。
 - 可能有用但不能静默成为政策的材料。
 
+### `backlog/`
+
+保存已识别但尚未排期的已知问题和功能缺口。
+
+用于：
+
+- 标记已知缺陷、缺失功能或清理项。
+- 记录影响范围和修复方向（不展开为完整实施方案）。
+- 作为 plans/ 的输入来源。
+
+每条记录是一个轻量标签，一个 item 一行。不应包含完整实施步骤（那是 plans/ 的职责）。
+
+### `plans/`
+
+保存实施计划 — 事前规划"怎么做"的详细工程方案。
+
+用于：
+
+- 多步骤任务的分解和排序。
+- 明确步骤间的依赖关系。
+- 记录每步涉及的文件和验证方法。
+
+与 `backlog/` 的区别：backlog 标记"问题是什么"，plans 定义"如何解决"。
+
+生命周期：
+1. 创建：从 backlog 或审查中提取，形成步骤化方案
+2. 执行中：随进展更新步骤状态
+3. 完成后：移除文件，转为 `execution/completed/` 记录；如有未完成项，更新 `backlog/`
+
 ## 权威与冲突规则
 
 权威顺序：
@@ -223,6 +252,8 @@ space 记录不应膨胀成第二个 README。
 - `execution/active/topic-rule.md`
 - `execution/completed/YYYY-MM-DD-topic.md`
 - `references/source-topic.md`
+- `backlog/topic.md`
+- `plans/YYYY-MM-DD-topic.md`
 
 历史记录优先使用日期前缀。active 记录不需要在文件名中使用日期，因为它们代表当前规则。
 

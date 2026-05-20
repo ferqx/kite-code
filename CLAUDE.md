@@ -20,20 +20,40 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 
 ## 项目架构
 
-- `src/harness/graph.ts` — LangGraph 节点组装和主循环拓扑（单 agent 节点）
-- `src/harness/routes.ts` — agent / approval / tools / user_input 之间的路由
-- `src/harness/tool-runner.ts` — 执行经过审批或允许直通的工具请求
-- `src/harness/tool-policy.ts` — 工具安全策略与审批决策
-- `src/app/runner.ts` — run / resume 编排与事件流输出
-- `src/app/cli.ts` — CLI 参数解析和入口行为
-- `src/tools/definitions.ts` — 6 个 Agent 工具定义及只读命令分类
-- `src/tools/tool-contracts.ts` — 工具 ACI 契约（一等 UX 文档）
-- `src/tools/shell.ts`、`src/tools/file.ts`、`src/tools/apply-patch.ts` — 底层工具实现
-- `src/model/context.ts`、`src/model/runtime-context.ts` — 模型上下文整理、压缩和证据注入
-- `src/config/index.ts` — 读取本地 `~/.openpx/openpx.jsonc` 配置
+三层架构（protocol → core → app）：
+
+**`src/protocol/` — 协议层**：事件类型、action 类型、provider 接口
+- `events.ts` — `AgentEvent` 19 种子类型定义
+- `actions.ts` — 中断 action、user action 类型
+- `provider.ts` — `UserInputProvider` 接口
+
+**`src/core/` — 核心层**：图编排、模型、工具、持久化、配置
+- `harness/graph.ts` — LangGraph 节点组装和主循环拓扑（单 agent 节点）
+- `harness/routes.ts` — agent / approval / tools / user_input 之间的路由
+- `harness/tool-runner.ts` — 执行经过审批或允许直通的工具请求
+- `harness/tool-policy.ts` — 工具安全策略与审批决策
+- `runner.ts` — run / resume 编排与事件流输出
+- `model/context.ts`、`model/runtime-context.ts` — 模型上下文整理、压缩和证据注入
+- `tools/definitions.ts` — 6 个 Agent 工具定义及只读命令分类
+- `tools/tool-contracts.ts` — 工具 ACI 契约（一等 UX 文档）
+- `tools/shell.ts`、`tools/file.ts`、`tools/apply-patch.ts` — 底层工具实现
+- `persistence/checkpoint.ts` — Bun SQLite LangGraph checkpointer
+- `persistence/sessions.ts` — 会话列表、加载、命名
+- `config/index.ts`、`config/paths.ts` — 配置读取与路径管理
+
+**`src/app/` — 应用层**：TUI 前端、CLI 入口
+- `tui/index.tsx` — TUI 入口、agent 生命周期、Kitty 键盘协议
+- `tui/App.tsx` — reducer（42 种 Action）、初始状态、App 布局
+- `tui/OutputArea.tsx` — block 渲染（text/reason/tool_card/file_change/approval/question）
+- `tui/components/` — InputLine、MarkdownBlock、ApprovalBlock、InputBlock、HelpPanel、ModelSelector、SessionSelector、StartupScreen、CtrlSafeTextInput
+- `tui/hooks/` — useGlobalKeys、useLeaderKeys、useSlashCommand、useSlashSuggestions、useFileSearch、useSessionList
+- `cli/index.ts` — CLI 参数解析和入口行为
+
+**文档**：
+- `PRODUCT.md` — 产品定义、核心特性、竞品差异
+- `ROADMAP.md` — 路线图：当前阶段、下一步、长期愿景
+- `docs/space/` — 设计决策、规则、方案、待办
 - `tests/` — 测试是理解行为约束的重要来源
-- `docs/` — 设计文档、决策记录和未来规划
-- `docs/space/README.md` - space 目录导航和使用说明
 
 ## 提交流程
 
@@ -77,6 +97,13 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 - 在开发过程中应使用跨平台工具和库，避免引入仅支持单一平台的依赖
 - 在提交前应在至少一个 Windows 和一个 Unix 环境中运行测试，确保没有平台特定的失败
 
-## space 文档更新
+## 项目顶层文档
 
-- 每次提交前都要检查是否有新的设计决策、行为约束或实现细节需要记录在 `docs/space/` 中，尤其是 `execution/active/` 下的规则记录
+- `PRODUCT.md` — 产品定义：定位、核心特性、明确不做的事、架构原则、竞品差异
+- `ROADMAP.md` — 路线图：当前阶段、下一步、长期愿景
+- `docs/space/` — 设计决策、规则、方案、待办；入口 `docs/space/index.md`
+- `docs/space/plans/index.md` — 方案注册表
+
+**读**：每次重要决策应先对照 `PRODUCT.md` 判断是否在产品边界内。规划新功能应查看 `ROADMAP.md`。
+
+**写**：每次提交前检查是否有新的设计决策、行为约束或实现细节需要记录在 `docs/space/` 中，尤其是 `execution/active/` 下的规则记录。
