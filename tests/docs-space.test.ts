@@ -19,7 +19,7 @@ describe("repository knowledge system", () => {
     const indexPath = join(repoRoot, "docs", "space", "index.md");
     const index = readFileSync(indexPath, "utf8");
     const indexedActiveRecords = Array.from(
-      index.matchAll(/\| `([^`]+)` \| active \|/g),
+      index.matchAll(/\| `(execution\/active\/[^`]+)` \| active \|/g),
       (match) => match[1],
     ).sort();
 
