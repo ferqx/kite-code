@@ -1,8 +1,9 @@
 # TUI 生产就绪路线图
 
 日期：2026-05-20
-状态：draft
+状态：implemented
 来源：TUI 生产就绪度深度审查
+实施日期：2026-05-21
 
 ---
 
@@ -26,144 +27,93 @@
 
 ---
 
-## 第二步：感知闭环
+## 第二步：感知闭环 ✅
 
 **目标**：用户能清晰感知 agent 的实时状态
 
-### 2.1 流式输出指示器
+### ✅ 2.1 流式输出指示器
 
-- **问题**：模型输出期间无任何视觉信号，用户不知道 agent 是否在工作
-- **涉及文件**：
-  - `src/app/tui/components/MarkdownBlock.tsx` — 已有 `streaming` prop，当前仅显示末尾 `▌` 光标
-  - `src/app/tui/OutputArea.tsx` — text block 渲染逻辑
-- **方案**：在正在流式输出的 text block 行首显示闪烁的 `❯` 或旋转指示器
-- **验证**：`bun test tests/tui-layout.test.tsx`
-- **依赖**：无
+- **实现**：`OutputArea.tsx:101` — streaming text block 行首显示 `❯` 前缀（`{(isFocused || block.streaming) ? …}`）
+- **测试**：`tui-layout.test.tsx` 新增 2 个渲染测试（streaming=true 显示 `❯`，false 不显示）
 
-### 2.2 Plan 进度接入
+### ✅ 2.2 Plan 进度接入
 
-- **问题**：`state_change.plan` 事件 runner 已发出（`runner.ts:394`），StatusBar 的 `planLabel()` 已实现，但需确认数据链
-- **涉及文件**：
-  - `src/app/tui/StatusBar.tsx` — `planLabel()` 已实现
-  - `src/core/runner.ts` — `chunkToEvents()` 中 `state_change` 事件包含 `plan`
-  - `src/core/harness/graph.ts` — agent 节点的 plan 更新逻辑
-- **方案**：验证 runner → TUI 的 plan 数据链路，确保 `status.plan` 正确更新
-- **验证**：`bun test tests/tui-layout.test.tsx`，`bun test tests/integration.test.ts`
-- **依赖**：无
+- **结论**：数据链路完整（graph → runner `chunkToEvents()` → `state_change` event → reducer → Header/StatusBar `planLabel()`），无需代码修改
 
-### 2.3 Phase 切换确认
+### ✅ 2.3 Phase 切换确认
 
-- **问题**：StatusBar 显示 Building/Planning，需确认 `/plan` 命令后 `state_change.phase` 正确传导
-- **涉及文件**：
-  - `src/app/tui/hooks/useSlashCommand.ts` — `/plan` 命令
-  - `src/app/tui/App.tsx` — `SET_PHASE` action
-  - `src/core/runner.ts` — phase 事件发射
-- **方案**：添加 phase 切换的 e2e 场景验证
-- **验证**：`bun test tests/tui-reducer.test.ts`
-- **依赖**：无
+- **实现**：`tui-reducer.test.ts` 新增 2 个测试 — `SET_PHASE` 双向切换、`SWITCH_AUTH` 显式模式
 
 ---
 
-## 第三步：防御纵深
+## 第三步：防御纵深 ✅
 
 **目标**：异常场景不丢数据、不崩进程
 
-### 3.1 React Error Boundary
+### ✅ 3.1 React Error Boundary
 
-- **问题**：任何 render 错误直接导致 Ink 进程崩溃，无兜底
-- **涉及文件**：
-  - `src/app/tui/index.tsx` — `<TuiBootstrap />` 渲染入口
-  - 新建 `src/app/tui/components/ErrorBoundary.tsx`
-- **方案**：
-  1. 创建 `ErrorBoundary` 组件，捕获子组件 render 错误
-  2. 显示错误信息和"按任意键退出"提示
-  3. 包裹 `<TuiBootstrap />`
-- **风险**：Error Boundary 只能捕获 render 阶段的错误，不能捕获事件处理器或异步错误
-- **验证**：`bun test tests/tui-layout.test.tsx`（新增错误边界测试）
+- **实现**：新建 `src/app/tui/components/ErrorBoundary.tsx`（类组件 + ErrorFallback 函数组件），包裹 `index.tsx` 中的 `<TuiBootstrap />`
+- **测试**：`tui-layout.test.tsx` 新增 2 个测试 — 正常渲染、render 错误捕获 + 按任意键退出
 
-### 3.2 Checkpoint 句柄泄漏
+### ✅ 3.2 Checkpoint 句柄泄漏
 
-- **问题**：`runner.ts:161-165` — `checkpointer.close()` 在 abort 时被跳过
-- **涉及文件**：
-  - `src/core/runner.ts` — `runAgent` 的 finally 块
-  - `src/core/persistence/checkpoint.ts` — `BunSqliteSaver.close()`
-- **方案**：
-  1. 检查 `BunSqliteSaver` 是否自身有 GC 安全网
-  2. 若无，移除 `if (!signal?.aborted)` 守卫，始终 close
-  3. 验证 close 在 abort 后调用不会 crash（`isClosed` 防御已存在）
-- **风险**：abort 后 close 可能与写入操作竞态
-- **验证**：`bun test tests/checkpoint.test.ts`
+- **实现**：`runner.ts` 3 处移除 `!signal?.aborted` 守卫（`runAgent`、`streamCodeAgent`、`resumeCodeAgent`），始终调用 `checkpointer.close()`；`isClosed` 防御已存在
+- **测试**：`runner.test.ts` 新增 close 安全性测试（多次调用不崩溃）
 
-### 3.3 编辑器 Temp 文件泄漏
+### ✅ 3.3 编辑器 Temp 文件泄漏
 
-- **问题**：编辑器进程 unmount 取消时 temp file 未 unlink
-- **涉及文件**：
-  - `src/app/tui/index.tsx:269-300` — editor 效果
-- **方案**：在 effect 的 cleanup 函数中 `try { unlinkSync(tmpFile) } catch {}`
-- **验证**：手动测试 Ctrl+E → 快速 Ctrl+C 取消 → 确认 temp 文件被清理
+- **实现**：`index.tsx` editor effect cleanup 中动态 `import("node:fs").unlinkSync(tmpFile)` 套 try/catch
+- **验证**：手动测试（Ctrl+E → 快速取消）
 
 ---
 
-## 第四步：功能补齐
+## 第四步：功能补齐（部分完成）
 
 **目标**：对标 Claude Code CLI 核心体验
 
-### 4.1 Undo/Redo（checkpoint 回溯）
+### 🔜 4.1 Undo/Redo（checkpoint 回溯）
 
-- **问题**：当前无撤销能力，依赖方需要 checkpoint 链 fork
-- **涉及文件**：
-  - `src/core/persistence/checkpoint.ts` — `BunSqliteSaver`，需新增 fork/回溯方法
-  - `src/core/runner.ts` — 新增从指定 checkpoint 启动的入口
-  - `src/app/tui/App.tsx` — 还原 UNDO/REDO action（已移除）
-  - `src/app/tui/hooks/useGlobalKeys.ts` — 添加 Ctrl+Z / Ctrl+Y
-- **方案**：
-  1. `BunSqliteSaver` 新增 `getCheckpointChain(threadId)` 利用 `parent_checkpoint_id` 遍历
-  2. `runAgent` 支持 `resumeFromCheckpointId` 参数
-  3. TUI 接入
-- **难度**：高，涉及 checkpoint 层设计
-- **依赖**：需要 saver 层改造，影响所有 runner 调用方
+- **状态**：讨论后决定后续单独设计。需要 checkpoint 层深度改造（`getCheckpointChain`、fork 机制），风险较高。当前 checkpoint `parent_checkpoint_id` 链已存在，基础可复用。
+- **难度**：高
+- **依赖**：saver 层改造
 
-### 4.2 手动 Compaction
+### ✅ 4.2 手动 Compaction
 
-- **问题**：`/compact` 仅输出文本提示，无实际触发
-- **涉及文件**：
-  - `src/core/harness/graph.ts` — `forceContextCompaction()` 需暴露
-  - `src/app/tui/App.tsx` — `COMPACT_CONTEXT` reducer
-  - `src/app/tui/index.tsx` — 通过 provider 信号触发
-- **方案**：
-  1. graph 层提供可通过事件触发的 compaction 入口
-  2. runner 接受 compaction 信号并转发给 graph
-  3. TUI 接入
+- **实现**：
+  - `state.ts` — 新增 `forceCompact` 字段
+  - `graph.ts` — agent 节点读取 `forceCompact`，在模型调用前执行 `forceContextCompaction()`
+  - `runner.ts` — 读取 provider 的 `compactRequested` 标志，通过 `Command.update` 传入 graph
+  - `provider.ts` — 新增 `compactRequested` 属性
+  - `useSlashCommand.ts` + `useGlobalKeys.ts` — `/compact` 和 `Ctrl+X c` 触发 `onCompactRequest` 回调
+  - `App.tsx` + `index.tsx` — 接线
+- **测试**：`graph.test.ts` 新增 2 个 forceCompact 测试；e2e 新增 compaction-while-running 场景
 
-### 4.3 自定义斜杠命令
+### 📋 4.3 自定义斜杠命令
 
-- **问题**：仅内置 13 个命令，用户无法扩展
-- **方案**：后续设计，暂不排期
+- **状态**：暂不排期。已讨论配置混合方案（shell 命令 + action 链），待插件架构成熟后再实施。
 - **依赖**：插件架构设计
 
 ---
 
-## 步骤依赖关系
+## ✅ 额外完成
 
-```
-第二步（无依赖）
-  ├── 2.1 流式指示器
-  ├── 2.2 Plan 进度       ← 可并行
-  └── 2.3 Phase 确认      ← 可并行
-       ↓
-第三步（部分依赖 step2 中的 Error Boundary）
-  ├── 3.1 Error Boundary  ← 可立即开始
-  ├── 3.2 Checkpoint 泄漏 ← 可立即开始
-  └── 3.3 Temp 文件泄漏    ← 可立即开始
-       ↓
-第四步（依赖 checkpoint 层改造）
-  ├── 4.1 Undo/Redo       ← 依赖 saver 改造
-  ├── 4.2 Compaction      ← 依赖 graph 改造
-  └── 4.3 自定义命令      ← 暂不排期
-```
+- `tools.test.ts` — 修复 macOS 上 `msys2ToWindowsPath` + `/var` symlink 导致的路径比对失败
+- 测试缺口补全 — `tui-layout.test.tsx`（+2 streaming 渲染测试）、`graph.test.ts`（+2 forceCompact 测试）、`runner.test.ts`（+1 close 安全测试）
+- e2e 清理 — 删除 3 个冗余文件、移动 `freeze.test.ts`、清理死代码、补 compaction-while-running 场景
 
-## 建议执行顺序
+## 实施汇总
 
-1. **本周**：第二步全部（感知闭环，改动最小，感知最强）
-2. **下周**：第三步全部（防御纵深，独立不依赖其他步）
-3. **后续**：根据 saver/graph 改造进度启动第四步
+| 步骤 | 任务 | 状态 |
+|------|------|:--:|
+| 第二步 | 2.1 流式输出指示器 | ✅ |
+| | 2.2 Plan 进度接入 | ✅ |
+| | 2.3 Phase 切换确认 | ✅ |
+| 第三步 | 3.1 React Error Boundary | ✅ |
+| | 3.2 Checkpoint 句柄泄漏 | ✅ |
+| | 3.3 编辑器 Temp 文件泄漏 | ✅ |
+| 第四步 | 4.1 Undo/Redo | 🔜 |
+| | 4.2 手动 Compaction | ✅ |
+| | 4.3 自定义斜杠命令 | 📋 |
+| 额外 | tools.test 路径修复 | ✅ |
+| | 测试缺口补全 | ✅ |
+| | e2e 清理 | ✅ |
