@@ -7,6 +7,7 @@ import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
 import InputLine, { type EditorContentHandle } from "./components/InputLine";
 import StartupScreen from "./components/StartupScreen";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { useSlashCommand } from "./hooks/useSlashCommand";
 import { loadSession } from "../../core/persistence/sessions.js";
 import { defaultCheckpointPath } from "../../core/config/paths.js";
@@ -124,8 +125,6 @@ function TuiBootstrap() {
     setTimeout(() => process.exit(0), 300);
   }, [dispatch]);
 
-  const handleSlashCommand = useSlashCommand(dispatch, handleExit);
-
   const provider = React.useMemo(
     () =>
       new TuiUserInputProvider((event) => {
@@ -133,6 +132,10 @@ function TuiBootstrap() {
       }),
     [dispatch]
   );
+
+  const handleSlashCommand = useSlashCommand(dispatch, handleExit, () => {
+    provider.compactRequested = true;
+  });
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
   React.useEffect(() => {
@@ -306,6 +309,9 @@ function TuiBootstrap() {
 
     return () => {
       cancelled = true;
+      import("node:fs").then(({ unlinkSync }) => {
+        try { unlinkSync(tmpFile); } catch {}
+      }).catch(() => {});
     };
   }, [state.editorRequested, workspace, dispatch]);
 
@@ -320,7 +326,7 @@ function TuiBootstrap() {
   }
 
   return (
-    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider}>
+    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }}>
       <InputLine
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
         onSubmit={handleInput}
@@ -353,7 +359,7 @@ if (import.meta.main) {
   // Disable Ink's built-in Ctrl+C exit (which only detects \x03, not
   // Kitty CSI-u). Instead, useGlobalKeys dispatches CTRL_C which the
   // reducer handles for both legacy \x03 and CSI-u 99;5 u formats.
-  const { unmount } = render(<TuiBootstrap />, { maxFps: 60, exitOnCtrlC: false });
+  const { unmount } = render(<ErrorBoundary><TuiBootstrap /></ErrorBoundary>, { maxFps: 60, exitOnCtrlC: false });
   process.on("SIGINT", () => {
     disableKittyKeyboardProtocol();
     unmount();

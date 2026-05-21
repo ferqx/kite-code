@@ -58,6 +58,11 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => "",
   }),
+  /** 手动触发上下文压缩的标志 / Flag to force context compaction on next agent cycle */
+  forceCompact: Annotation<boolean>({
+    reducer: (_left, right) => right,
+    default: () => false,
+  }),
   /** 上下文预算配置 / Context budget configuration */
   contextBudget: Annotation<ContextBudget | undefined>({
     reducer: (_left, right) => right,

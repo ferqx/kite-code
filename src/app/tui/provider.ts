@@ -6,6 +6,8 @@ export class TuiUserInputProvider implements UserInputProvider {
   private dispatch: (event: AgentEvent) => void;
   private pendingResolve: ((action: UserAction) => void) | null = null;
   private pendingInterrupt: InterruptPayload | null = null;
+  /** 手动压缩上下文请求标志 / Flag set when user requests manual compaction */
+  compactRequested = false;
 
   constructor(dispatch: (event: AgentEvent) => void) {
     this.dispatch = dispatch;

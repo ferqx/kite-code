@@ -388,7 +388,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     }
     case "COMPACT_CONTEXT": {
       if (!state.running) return state;
-      const block: OutputBlock = { id: nextId++, kind: "text", content: "⟳ Manual compaction requested — context will be compacted on next overflow" };
+      const block: OutputBlock = { id: nextId++, kind: "text", content: "⟳ Manual compaction requested — context will be compacted on next agent cycle" };
       return { ...state, blocks: [...state.blocks, block] };
     }
     case "EXPORT_SESSION": {
@@ -543,6 +543,7 @@ export interface AppProps {
   dispatch: Dispatch<Action>;
   onToggleReason: (id: number) => void;
   provider: import("./provider").TuiUserInputProvider;
+  onCompactRequest?: () => void;
   children?: ReactNode;
 }
 
@@ -552,9 +553,9 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
   return { state, dispatch, onToggleReason };
 }
 
-export default function App({ state, dispatch, onToggleReason, provider, children }: AppProps) {
+export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, children }: AppProps) {
   useGlobalKeys(dispatch, state.running);
-  useLeaderKeys(dispatch, state.leaderPending);
+  useLeaderKeys(dispatch, state.leaderPending, onCompactRequest);
 
   // Stabilized callbacks for React.memo children
   const hideHelp = useCallback(() => dispatch({ type: "HIDE_HELP" }), [dispatch]);

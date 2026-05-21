@@ -86,8 +86,25 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       });
     };
     (model as unknown as Record<string, unknown>)._retryListener = listener;
+
+    // 手动压缩：在下一次模型调用前压缩上下文
+    // Manual compaction: compact context before next model invocation
+    let effectiveState = state;
+    if (state.forceCompact) {
+      const compacted = forceContextCompaction(state.messages);
+      const newSummary = state.contextSummary
+        ? `${state.contextSummary}\n\n${compacted.summary}`.trim()
+        : compacted.summary;
+      effectiveState = {
+        ...state,
+        messages: compacted.messages,
+        contextSummary: newSummary,
+        forceCompact: false,
+      } as CodeAgentState;
+    }
+
     try {
-      const { state: result, contextRetries } = await invokeModel(model, state, tools);
+      const { state: result, contextRetries } = await invokeModel(model, effectiveState, tools);
       const allRetries = [...retryEvents, ...contextRetries];
       const syncedAuth = authorizationForState(state, override);
       const modelConfigState = {

@@ -98,7 +98,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
     case "text":
       return (
         <Box key={block.id} marginBottom={BLOCK_GAP}>
-          {isFocused ? <Text color={t.primary}>❯ </Text> : null}
+          {(isFocused || block.streaming) ? <Text color={t.primary}>❯ </Text> : null}
           <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? t.error : undefined} />
         </Box>
       );

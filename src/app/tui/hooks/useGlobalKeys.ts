@@ -47,7 +47,7 @@ export function useGlobalKeys(dispatch: Dispatch<any>, running: boolean) {
   });
 }
 
-export function useLeaderKeys(dispatch: Dispatch<any>, leaderPending: boolean) {
+export function useLeaderKeys(dispatch: Dispatch<any>, leaderPending: boolean, onCompactRequest?: () => void) {
   useInput((input: string, key: { escape?: boolean }) => {
     if (!leaderPending) return;
     if (key.escape) {
@@ -61,6 +61,7 @@ export function useLeaderKeys(dispatch: Dispatch<any>, leaderPending: boolean) {
         break;
       case "c":
         dispatch({ type: "COMPACT_CONTEXT" });
+        if (onCompactRequest) onCompactRequest();
         dispatch({ type: "LEADER_CANCEL" });
         break;
       case "m":

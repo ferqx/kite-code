@@ -144,9 +144,23 @@ export async function* runAgent(
         recursionLimit: 60,
       };
 
-      const stream = resumeValue
-        ? await graph.stream(new Command({ resume: resumeValue }) as any, streamConfig)
-        : await graph.stream(initialState, streamConfig);
+      // 检查 provider 是否设置了手动压缩标志 / Check if provider requested manual compaction
+      const providerExt = provider as { compactRequested?: boolean };
+      const compactRequested = providerExt.compactRequested === true;
+      if (compactRequested) {
+        providerExt.compactRequested = false;
+      }
+
+      let stream: AsyncIterable<unknown>;
+      if (resumeValue) {
+        const cmd: Record<string, unknown> = { resume: resumeValue };
+        if (compactRequested) (cmd as any).update = { forceCompact: true };
+        stream = await graph.stream(new Command(cmd) as any, streamConfig);
+      } else if (compactRequested) {
+        stream = await graph.stream({ ...initialState, forceCompact: true }, streamConfig);
+      } else {
+        stream = await graph.stream(initialState, streamConfig);
+      }
 
       resumeValue = null;
 
@@ -159,9 +173,7 @@ export async function* runAgent(
       resumeValue = mapActionToResumeValue(result.action);
     }
   } finally {
-    if (!signal?.aborted) {
-      checkpointer.close();
-    }
+    checkpointer.close();
   }
 }
 
@@ -594,9 +606,7 @@ export async function* streamCodeAgent(
     yield* normalizeGraphStream(stream);
     streamCompleted = true;
   } finally {
-    if (streamCompleted && !signal?.aborted) {
-      checkpointer.close();
-    }
+    checkpointer.close();
   }
 }
 
@@ -623,9 +633,7 @@ export async function* resumeCodeAgent(
     yield* normalizeGraphStream(stream);
     streamCompleted = true;
   } finally {
-    if (streamCompleted && !signal?.aborted) {
-      checkpointer.close();
-    }
+    checkpointer.close();
   }
 }
 

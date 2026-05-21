@@ -41,7 +41,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
   }
 }
 
-export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
+export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void, onCompactRequest?: () => void) {
   return useCallback((input: string): boolean => {
     const action = parseSlashCommand(input);
     if (!action) return false;
@@ -84,6 +84,7 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void) {
         break;
       case "compact":
         dispatch({ type: "COMPACT_CONTEXT" });
+        if (onCompactRequest) onCompactRequest();
         break;
       case "setting":
         dispatch({ type: "SHOW_SETTING" });
