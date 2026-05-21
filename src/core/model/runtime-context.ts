@@ -53,7 +53,7 @@ export function getRuntimeSystemInfo(input: {
     os: type(),
     platform: platform(),
     release: release(),
-    shell: process.env.SHELL || process.env.ComSpec || "powershell",
+    shell: process.env.SHELL || "bash",
     cwd: process.cwd(),
     workspace: input.workspace,
   };
@@ -71,29 +71,9 @@ export function buildRuntimeContext(input: RuntimeContextInput): string {
     `CWD: ${info.cwd}`,
     `Workspace: ${info.workspace}`,
     `Workspace access policy: ${workspaceAccessPolicy()}`,
-    ...platformShellGuide(info.platform),
   ];
 
   return lines.join("\n");
-}
-
-/** 按平台注入 shell 命令指南，防止模型在 Windows 上调用 Unix 命令 / Inject platform-specific shell command guide to prevent the model from calling Unix commands on Windows */
-function platformShellGuide(platform: string): string[] {
-  if (platform === "win32") {
-    return [
-      "Platform shell guide: You are on Windows. Use Windows-native or cross-platform commands only:",
-      "- List files: dir / Get-ChildItem (gci)",
-      "- Search text: findstr (cmd), Select-String (sls) (PowerShell), or rg if installed",
-      "- Search files: dir /s (cmd), Get-ChildItem (gci) -Recurse (PowerShell)",
-      "- Read file content: type (cmd), Get-Content (gc) (PowerShell)",
-      "- Print working directory: echo %cd% (cmd), Get-Location (gl) (PowerShell)",
-      "- File info: dir (cmd), Get-Item (PowerShell)",
-      "- Path separator: backslash (\\) or forward slash (/); PowerShell accepts both",
-      "- Shell: cmd.exe or powershell.exe (whichever the Shell field above indicates)",
-      "- Do NOT use: ls, cat, pwd, stat, grep, find (Unix), sed, awk, xargs unless you have verified they are available",
-    ];
-  }
-  return [];
 }
 
 /** 构建可缓存的运行时上下文（不含时间戳，适合 provider 前缀缓存）/ Build cacheable runtime context (no timestamps, cache-stable for provider prefix caching) */

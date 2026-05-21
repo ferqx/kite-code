@@ -65,9 +65,7 @@ export type UserInputResumeValue =
 
 export type AgentResumeValue = ToolApprovalResumeValue | UserInputResumeValue;
 
-export interface ContextBudget {
-  maxToolOutputChars: number;
-}
+export interface ContextBudget {}
 
 export interface ModelRetryEvent {
   attempt: number;

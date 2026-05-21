@@ -51,8 +51,8 @@
 
 *  `shell_execute` 是命令执行工具，但**仅在专用工具不适用时才使用**。能通过 `read_file`/`edit_file`/`write_file` 完成的，不要用 shell。
 *  每次调用必须写 `description`：一句话告诉用户这个命令在做什么。
-*  搜索文本或文件：用 `rg`/`grep`/`findstr`（Windows）或 `sls`（PowerShell）。
-*  查看目录内容：用 `ls`/`dir`（Windows cmd）或 `gci`（PowerShell）。
+*  搜索文本或文件：用 `rg`/`grep`。
+*  查看目录内容：用 `ls`。
 *  读取类命令标记 `intent="inspect"`，直通执行无需审批。
 *  验证类命令标记 `intent="verify"`（如 `bun test`、`bun run typecheck`）。
 *  写类或 VCS 变更命令（如 `git add`、`git commit`、`mkdir`、`mv`）需要用户审批，附带 `grant_request` 建议审批范围。

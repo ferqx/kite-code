@@ -5,6 +5,15 @@ import { join } from "node:path";
 import { assertInsideWorkspace, shellTool } from "../src/core/tools/shell";
 import { writeFile, editFile, readFile } from "../src/core/tools/file";
 
+/** Convert MSYS2 Unix-style path to Windows-style path */
+function msys2ToWindowsPath(p: string): string {
+  return p
+    .replace(/^\/cygdrive\/([a-z])\b/i, "$1:\\")
+    .replace(/^\/mnt\/([a-z])\b/i, "$1:\\")
+    .replace(/^\/([a-z])\//i, "$1:\\")
+    .replace(/\//g, "\\");
+}
+
 describe("tool safety", () => {
   test("allows paths inside the workspace", () => {
     const workspace = join(tmpdir(), "openpx-langgraph-tools-safe");
@@ -125,8 +134,22 @@ describe("tool safety", () => {
     expect(result.command).toBe("pwd");
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
-    // pwd output must point to the same directory as workspace (resolve symlinks)
-    const { realpathSync } = await import("node:fs");
-    expect(realpathSync(result.stdout.trim())).toBe(realpathSync(workspace));
+    // MSYS2 bash on Windows outputs Unix-style paths; normalize to compare with workspace
+    const { resolve } = await import("node:path");
+    const pwdOutput = result.stdout.trim();
+    const normalizedPwd = msys2ToWindowsPath(pwdOutput);
+    expect(resolve(normalizedPwd).toLowerCase()).toBe(resolve(workspace).toLowerCase());
+  });
+
+  test("shell_execute produces no stderr noise on standard commands", async () => {
+    const workspace = join(tmpdir(), "openpx-langgraph-tools-shell-clean");
+    mkdirSync(workspace, { recursive: true });
+
+    const result = await shellTool({ workspace, command: "ls" });
+
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    // MSYS2 bash must not emit /tmp or other spurious warnings to stderr
+    expect(result.stderr).toBe("");
   });
 });

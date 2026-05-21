@@ -11,7 +11,6 @@ import {
   formatPlanStateReminder,
 } from "./runtime-context";
 import type { AgentPlan, WorkspaceAccess } from "@/protocol/events";
-import type { ContextBudget } from "@/core/types";
 import {
   summarizeMessages,
   formatCompactedSummary,
@@ -32,16 +31,9 @@ export interface ModelContextState {
   workspaceAccess?: WorkspaceAccess;
   /** 执行计划 / Execution plan */
   plan?: AgentPlan | null;
-  /** 上下文预算 / Context budget */
-  contextBudget?: ContextBudget;
   /** 上下文摘要 / Context summary */
   contextSummary?: string;
 }
-
-/** 默认上下文预算（4000 字符工具输出截断） / Default context budget (4000 char tool output truncation) */
-const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
-  maxToolOutputChars: 4000,
-};
 
 /** 工具结果清理触发阈值（字符数，≈ 48K tokens）/ Tool result clearing trigger threshold (chars, ≈ 48K tokens) */
 const CLEAR_THRESHOLD_CHARS = 150000;
@@ -67,8 +59,6 @@ export function prepareModelContext(
   role: AgentRole,
   state: ModelContextState,
 ): PreparedModelContext {
-  const budget = state.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
-  const maxToolOutputChars = Math.max(1, budget.maxToolOutputChars);
   let msgs = state.messages.length > 0
     ? state.messages
     : [new HumanMessage("")];
@@ -77,9 +67,6 @@ export function prepareModelContext(
   if (estimatePromptChars(role, { ...state, messages: msgs }) > CLEAR_THRESHOLD_CHARS) {
     msgs = clearOldToolResults(msgs, CLEAR_KEEP_RECENT);
   }
-
-  // 截断长工具输出 / Truncate long tool outputs
-  msgs = msgs.map((m) => truncateToolMessage(m, maxToolOutputChars));
 
   return {
     contextSummary: state.contextSummary ?? "",
@@ -100,9 +87,7 @@ export function prepareModelContext(
 /** 强制压缩对话消息（仅由 context overflow 触发）/ Force compaction of conversation messages (only triggered by context overflow) */
 export function forceContextCompaction(
   messages: BaseMessage[],
-  budget: ContextBudget,
 ): { messages: BaseMessage[]; summary: string } {
-  const maxToolOutputChars = Math.max(1, budget.maxToolOutputChars);
   const KEEP_FULL = 8;
 
   let fullStart = Math.max(0, messages.length - KEEP_FULL);
@@ -111,14 +96,11 @@ export function forceContextCompaction(
   }
 
   const toSummarize = messages.slice(0, fullStart);
-  const keepFull = messages
-    .slice(fullStart)
-    .map((m) => truncateToolMessage(m, maxToolOutputChars));
+  const keepFull = messages.slice(fullStart);
 
   if (toSummarize.length === 0) {
-    // Nothing to summarize, just truncate and return
     return {
-      messages: messages.map((m) => truncateToolMessage(m, maxToolOutputChars)),
+      messages,
       summary: "",
     };
   }
@@ -185,24 +167,6 @@ export function clearOldToolResults(messages: BaseMessage[], keepRecent: number)
   }
 
   return result;
-}
-
-/** 截断超出长度限制的工具消息 / Truncate tool message exceeding length limit */
-function truncateToolMessage(message: BaseMessage, maxChars: number): BaseMessage {
-  if (!(message instanceof ToolMessage)) {
-    return message;
-  }
-
-  const content = textContent(message.content);
-  if (content.length <= maxChars) {
-    return message;
-  }
-
-  return new ToolMessage({
-    content: `${content.slice(0, maxChars)}\n[truncated ${content.length - maxChars} chars]`,
-    tool_call_id: message.tool_call_id,
-    status: message.status,
-  });
 }
 
 /** 提取消息文本内容 / Extract message text content */

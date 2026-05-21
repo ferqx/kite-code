@@ -346,8 +346,7 @@ async function invokeModel(
       error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
       delayMs: 0,
     });
-    const budget = state.contextBudget ?? { maxToolOutputChars: 4000 };
-    const compacted = forceContextCompaction(state.messages, budget);
+    const compacted = forceContextCompaction(state.messages);
     const retryMessages = rebuildMessages("agent", state, compacted.messages);
     try {
       response = await bindAgentTools(model, tools)
