@@ -185,8 +185,7 @@ export const slashPlan: CmdCase = {
   ],
 };
 
-/** /compact — request context compaction during running.
- *  When not running, compaction is a no-op (reducer checks state.running). */
+/** /compact when not running — no-op (reducer checks state.running). */
 export const slashCompact: CmdCase = {
   scenario: {
     terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
@@ -199,6 +198,29 @@ export const slashCompact: CmdCase = {
     {
       reason: "terminal",
       state: [{ type: "running-is", value: false }],
+    },
+  ],
+};
+
+/** /compact while running — produces "Manual compaction requested" block. */
+export const slashCompactWhenRunning: CmdCase = {
+  scenario: {
+    terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
+    steps: [
+      { type: "simulate-input", text: "hello" },
+      { type: "dispatch", actionType: "COMPACT_CONTEXT" },
+      { type: "agent-done" },
+    ],
+  },
+  expectations: [
+    {
+      reason: "terminal",
+      ansi: [
+        { type: "contains", text: "Manual compaction requested", description: "compaction block visible" },
+      ],
+      state: [
+        { type: "running-is", value: false },
+      ],
     },
   ],
 };

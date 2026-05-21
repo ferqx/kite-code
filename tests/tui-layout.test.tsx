@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { render } from "ink-testing-library";
+import ErrorBoundary from "../src/app/tui/components/ErrorBoundary";
 import Footer from "../src/app/tui/Footer";
 import Header from "../src/app/tui/Header";
 import StatusBar from "../src/app/tui/StatusBar";
@@ -659,6 +660,22 @@ describe("OutputArea", () => {
     expect(lastFrame()).toContain("Response text");
   });
 
+  test("shows ❯ prefix for streaming text block", () => {
+    const blocks: OutputBlock[] = [{ id: 1, kind: "text", content: "Streaming response", streaming: true }];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).toContain("❯");
+  });
+
+  test("does not show ❯ prefix for non-streaming text block", () => {
+    const blocks: OutputBlock[] = [{ id: 1, kind: "text", content: "Static response", streaming: false }];
+    const { lastFrame } = render(
+      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
+    );
+    expect(lastFrame()).not.toContain("❯");
+  });
+
   test("renders reason block with toggle indicator", () => {
     const blocks: OutputBlock[] = [
       { id: 1, kind: "reason", content: "Thinking about it...", folded: false },
@@ -980,5 +997,56 @@ describe("App", () => {
     const footerIdx = frame!.indexOf("shortcuts");
     const promptIdx = frame!.indexOf(">");
     expect(promptIdx).toBeLessThan(footerIdx);
+  });
+});
+
+// ── ErrorBoundary ──
+
+describe("ErrorBoundary", () => {
+  function ThrowingComponent(): never {
+    throw new Error("Render crash test error");
+  }
+
+  test("renders children when no error", () => {
+    const Text = require("ink").Text;
+    const { lastFrame } = render(
+      <ErrorBoundary>
+        <Text>Normal content</Text>
+      </ErrorBoundary>,
+    );
+    expect(lastFrame()).toContain("Normal content");
+  });
+
+  test("catches render errors and shows fallback UI", () => {
+    const origError = console.error;
+    console.error = () => {};
+
+    const exitCalls: number[] = [];
+    const origExit = process.exit;
+    process.exit = ((code?: number) => {
+      exitCalls.push(code ?? 0);
+    }) as typeof process.exit;
+
+    try {
+      const { lastFrame, stdin } = render(
+        <ErrorBoundary>
+          <ThrowingComponent />
+        </ErrorBoundary>,
+      );
+
+      const frame = lastFrame();
+      expect(frame).toContain("An unrecoverable error occurred");
+      expect(frame).toContain("Render crash test error");
+      expect(frame).toContain("Press any key to exit");
+
+      // Simulate a keypress to trigger process.exit(1)
+      stdin.write("x");
+
+      expect(exitCalls).toHaveLength(1);
+      expect(exitCalls[0]).toBe(1);
+    } finally {
+      process.exit = origExit;
+      console.error = origError;
+    }
   });
 });

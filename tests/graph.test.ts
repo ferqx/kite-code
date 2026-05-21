@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { AIMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
+import { ChatOpenAI } from "@langchain/openai";
 import {
   routeEntry,
   routeAfterAgent,
@@ -22,6 +23,62 @@ import {
 import type { CodeAgentState } from "../src/core/harness/state";
 import type { AgentPlan } from "../src/protocol/index";
 import type { ShellResult } from "../src/core/types";
+import type { AgentConfig } from "../src/core/config/index";
+import { buildCodeAgentGraph } from "../src/core/harness/graph";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
+import { forceContextCompaction } from "../src/core/model/context";
+
+// ---------------------------------------------------------------------------
+// FakeChatModel with spy — used for agent node integration tests
+// ---------------------------------------------------------------------------
+
+class SpyFakeChatModel extends ChatOpenAI {
+  _retryListener: unknown = null;
+  private _callCount = 0;
+  /** The input messages received by the last invoke() call */
+  lastInputMessages: BaseMessage[] = [];
+
+  get callCount() {
+    return this._callCount;
+  }
+
+  constructor(private _responses: AIMessage[]) {
+    super({
+      apiKey: "noop",
+      model: "fake",
+      configuration: { baseURL: "http://localhost:9999" },
+      temperature: 0,
+    });
+  }
+
+  override async invoke(input: unknown, _options?: unknown): Promise<any> {
+    // Save the messages the model was given (input is an array of BaseMessages)
+    if (Array.isArray(input)) this.lastInputMessages = input as BaseMessage[];
+    const response =
+      this._responses[this._callCount] ??
+      this._responses[this._responses.length - 1];
+    this._callCount++;
+    return response;
+  }
+
+  bind(_kwargs: unknown): this {
+    return this;
+  }
+
+  override bindTools(_tools: unknown[], _kwargs?: unknown): this {
+    return this;
+  }
+}
+
+const fakeConfig: AgentConfig = {
+  providerName: "fake" as any,
+  providerType: "openai-compatible",
+  apiKey: "noop",
+  baseURL: "http://localhost:9999",
+  modelName: "fake",
+};
 
 const activePlan: AgentPlan = {
   name: "Implement state-first plan flow",
@@ -720,6 +777,7 @@ describe("routeEntry — start-of-graph routing", () => {
     modelProvider: "",
     modelName: "",
     thinkingLevel: null,
+    forceCompact: false,
     messages: [],
   };
 
@@ -993,5 +1051,113 @@ describe("getPendingToolRequest", () => {
     expect(result).not.toBeNull();
     expect(result?.name).toBe("shell_execute");
     expect(result?.id).toBe("call-d");
+  });
+});
+
+// ── forceCompact 集成测试 / forceCompact integration tests ──
+describe("forceCompact in agent node", () => {
+  let workspace: string;
+  let checkpointPath: string;
+
+  function setUp() {
+    workspace = fs.mkdtempSync(
+      path.join(os.tmpdir(), "openpx-graph-"),
+    );
+    checkpointPath = path.join(workspace, "checkpoint.db");
+  }
+
+  function tearDown() {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+
+  test("forceCompact triggers compaction before model invocation", async () => {
+    setUp();
+    try {
+      // Create 15 messages (well over the 8-message keep threshold of forceContextCompaction)
+      const manyMessages: BaseMessage[] = [];
+      for (let i = 0; i < 15; i++) {
+        manyMessages.push(new HumanMessage(`message ${i}`));
+      }
+
+      // Create a spy model that records what it received
+      const aiResponse = new AIMessage({ content: "已完成。" });
+      const spyModel = new SpyFakeChatModel([aiResponse]);
+
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: spyModel as any,
+      });
+
+      const chunks: Record<string, unknown>[] = [];
+      const stream = await graph.stream(
+        {
+          messages: manyMessages,
+          workspaceAccess: "write" as const,
+          phase: "building" as const,
+          plan: null,
+          userId: "test",
+          threadId: "fc1",
+          workspace,
+          contextSummary: "",
+          forceCompact: true,
+        },
+        {
+          configurable: { thread_id: "fc1" },
+          streamMode: "updates" as const,
+          recursionLimit: 60,
+        },
+      );
+
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+
+      checkpointer.close();
+
+      // The agent should have been invoked
+      expect(spyModel.callCount).toBeGreaterThanOrEqual(1);
+
+      // After compaction, the messages passed to the model should be fewer than
+      // the original 15 + system messages (2 system = 17). Compaction keeps last
+      // 8 and replaces the rest with a summary HumanMessage.
+      // So expected model messages: 2 system + 1 summary + 8 kept = 11
+      const modelInput = spyModel.lastInputMessages;
+      expect(modelInput.length).toBeLessThan(15 + 2); // fewer than original + system
+
+      // The agent chunk should contain the model's response
+      const agentChunk = chunks.find((c) => c.agent)?.agent as
+        | Record<string, unknown>
+        | undefined;
+      expect(agentChunk).toBeDefined();
+
+      // The contextSummary should have been updated with compaction summary
+      const ctxSummary =
+        (agentChunk?.contextSummary as string) ?? "";
+      expect(ctxSummary).toContain("Compacted");
+
+      // forceCompact should NOT appear in the agent's returned state
+      // (it is reset to false inside the agent node after compaction)
+      expect(agentChunk?.forceCompact).toBeFalsy();
+    } finally {
+      tearDown();
+    }
+  });
+
+  test("forceContextCompaction keeps last 8 messages when total exceeds threshold", () => {
+    // Unit test: verify forceContextCompaction behavior directly
+    const messages: BaseMessage[] = [];
+    for (let i = 0; i < 12; i++) {
+      messages.push(new HumanMessage(`message ${i}`));
+    }
+
+    const result = forceContextCompaction(messages);
+
+    // Should keep last 8 of 12 messages + 1 summary = 9 messages total
+    expect(result.messages.length).toBeLessThanOrEqual(9);
+    // The summary text should mention compaction
+    expect(result.summary).toContain("Compacted");
+    // Summary should mention how many messages were compacted (12 - 8 = 4)
+    expect(result.summary).toContain("4");
   });
 });

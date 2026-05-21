@@ -344,6 +344,21 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "SWITCH_AUTH", mode: "toggle" });
       expect(s.status.authorization).toBe("default");
     });
+    test("SWITCH_AUTH with explicit mode sets authorization directly", () => {
+      let s = fresh();
+      s = dispatch(s, { type: "SWITCH_AUTH", mode: "full_access" });
+      expect(s.status.authorization).toBe("full_access");
+      s = dispatch(s, { type: "SWITCH_AUTH", mode: "default" });
+      expect(s.status.authorization).toBe("default");
+    });
+    test("SET_PHASE transitions between planning and building", () => {
+      let s = fresh();
+      expect(s.status.phase).toBe("building");
+      s = dispatch(s, { type: "SET_PHASE", phase: "planning" });
+      expect(s.status.phase).toBe("planning");
+      s = dispatch(s, { type: "SET_PHASE", phase: "building" });
+      expect(s.status.phase).toBe("building");
+    });
     test("SHOW_MODEL_SELECTOR / HIDE_MODEL_SELECTOR", () => {
       let s = fresh();
       s = dispatch(s, { type: "SHOW_MODEL_SELECTOR" });

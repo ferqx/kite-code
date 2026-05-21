@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { freezeAnsi, freezeState } from "./freeze";
+import { freezeAnsi, freezeState } from "./e2e/freeze";
 
 describe("freezeAnsi", () => {
   test("replaces timer pattern", () => {

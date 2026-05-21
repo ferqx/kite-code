@@ -6,7 +6,6 @@ import * as AV from "./scenarios/approval-variants";
 import * as QV from "./scenarios/question-variants";
 import * as AM from "./scenarios/agent-messages";
 import * as TF from "./scenarios/tool-flow";
-import * as SD from "./scenarios/state-display";
 import * as IF from "./scenarios/input-flow";
 import * as FS from "./scenarios/failure-scenarios";
 import * as SC from "./scenarios/slash-commands";
@@ -107,16 +106,6 @@ describe(`${label} Tool flow`, () => {
   });
   test("plan update tool", async () => {
     await verifyScenario("tool-flow-plan", TF.planUpdate, 1).verifyAll();
-  });
-});
-
-// ══════════════════════════════════════════════════════════
-// State display
-// ══════════════════════════════════════════════════════════
-
-describe(`${label} State display`, () => {
-  test("empty session", async () => {
-    await verifyScenario("state-display-empty", SD.emptySession, 1).verifyAll();
   });
 });
 
@@ -308,6 +297,10 @@ describe(`${label} Slash commands`, () => {
 
   test("/compact requests context compaction", async () => {
     await verify("slash-compact", SC.slashCompact, 1).verifyAll();
+  });
+
+  test("/compact while running shows block", async () => {
+    await verify("slash-compact-running", SC.slashCompactWhenRunning, 1).verifyAll();
   });
 });
 

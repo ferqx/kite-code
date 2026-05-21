@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, mock } from "bun:test";
 import { AIMessage } from "@langchain/core/messages";
 import {
   initialAgentPhaseForAccess,
@@ -10,7 +10,6 @@ import {
 import { createPromptCacheStandardTracker } from "../src/core/cache-metrics";
 import type { AgentEvent } from "../src/protocol/index";
 import type { ModelRetryEvent } from "../src/core/types";
-
 // 测试 runner 的初始工作区访问权限选择逻辑 / Test runner initial workspace access selection logic
 describe("runner initial workspace access selection", () => {
   // 验证以 /plan 开头的任务自动进入只读工作区访问 / Verify /plan tasks start with read-only workspace access
@@ -183,5 +182,17 @@ describe("chunkToEvents final dedup", () => {
     const events = chunkToEvents(chunk, "write", cacheStandard);
     expect(events.filter((e) => e.type === "text")).toHaveLength(2);
     expect(events.filter((e) => e.type === "final")).toHaveLength(1);
+  });
+});
+
+// ── checkpointer close 安全测试 / checkpointer close safety test ──
+// 验证 BunSqliteSaver 的 isClosed 守卫正确工作，确保 abort 后 close() 不崩溃
+describe("checkpointer close safety", () => {
+  test("close() is safe to call multiple times (no throw)", async () => {
+    const { BunSqliteSaver } = await import("../src/core/persistence/checkpoint");
+    const saver = new BunSqliteSaver(":memory:");
+    saver.close();
+    // 第二次 close() 不应抛出异常 / Second close() should not throw
+    expect(() => saver.close()).not.toThrow();
   });
 });

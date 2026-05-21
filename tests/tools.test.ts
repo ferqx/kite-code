@@ -135,10 +135,12 @@ describe("tool safety", () => {
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
     // MSYS2 bash on Windows outputs Unix-style paths; normalize to compare with workspace
+    // On macOS, /var is a symlink to /private/var, so pwd may differ from tmpdir()
     const { resolve } = await import("node:path");
+    const { realpathSync } = await import("node:fs");
     const pwdOutput = result.stdout.trim();
-    const normalizedPwd = msys2ToWindowsPath(pwdOutput);
-    expect(resolve(normalizedPwd).toLowerCase()).toBe(resolve(workspace).toLowerCase());
+    const normalizedPwd = process.platform === "win32" ? msys2ToWindowsPath(pwdOutput) : pwdOutput;
+    expect(realpathSync(normalizedPwd).toLowerCase()).toBe(realpathSync(workspace).toLowerCase());
   });
 
   test("shell_execute produces no stderr noise on standard commands", async () => {

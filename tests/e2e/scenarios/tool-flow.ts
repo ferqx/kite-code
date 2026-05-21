@@ -43,15 +43,6 @@ export const toolError: Scenario = {
   ],
 };
 
-/** File change events (edit) */
-export const fileChangeEdit: Scenario = {
-  terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
-  steps: [
-    { type: "agent-text", text: "I'll update the config file." },
-    { type: "agent-done" },
-  ],
-};
-
 /** Mixed blocks: text + file_change + tool_card */
 export const mixedBlocks: Scenario = {
   terminalWidth: 120, stepTimeout: 5000, freeze: baseFreeze,
