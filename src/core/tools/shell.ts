@@ -1,5 +1,4 @@
-import { mkdirSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ShellInput, ShellResult } from "@/core/types";
 import { findBashBinary, getMsys2BinDir } from "./bash-path";
 
@@ -36,7 +35,7 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
         cwd: input.workspace,
         stdout: "pipe",
         stderr: "pipe",
-        env: buildShellEnv(input.workspace),
+        env: buildShellEnv(),
       },
     );
     const stdout = await new Response(proc.stdout).text();
@@ -76,32 +75,15 @@ function buildShellInvocation(command: string): string[] {
   return [process.env.SHELL || "/bin/sh", "-lc", command];
 }
 
-/** 构建 Shell 执行环境变量，前置 vendored bin 到 PATH，在 workspace 下建临时目录供 MSYS2 /tmp 使用 */
-function buildShellEnv(workspace: string): Record<string, string> | undefined {
+/** 构建 Shell 执行环境变量，前置 vendored bin 到 PATH */
+function buildShellEnv(): Record<string, string> | undefined {
   if (process.platform !== "win32") return undefined;
   const msys2Bin = getMsys2BinDir();
   if (!msys2Bin) return undefined;
 
   const env = { ...process.env } as Record<string, string>;
   env.PATH = `${msys2Bin};${env.PATH || ""}`;
-
-  // MSYS2 bash needs a writable /tmp in its virtual filesystem.
-  // Use a workspace-local dir, guaranteed to exist and be reachable.
-  const tmpDir = join(workspace, ".openpx-tmp");
-  mkdirSync(tmpDir, { recursive: true });
-  const msys2Tmp = toMsys2Path(tmpDir);
-  env.TMPDIR = msys2Tmp;
-  env.TMP = msys2Tmp;
-  env.TEMP = msys2Tmp;
-
   return env;
-}
-
-/** Windows 路径转 MSYS2 Unix 格式：C:\foo → /cygdrive/c/foo */
-function toMsys2Path(windowsPath: string): string {
-  return windowsPath
-    .replace(/^([A-Z]):/i, "/cygdrive/$1")
-    .replace(/\\/g, "/");
 }
 
 /** 过滤 MSYS2 启动时的无害噪音（/tmp 警告等） */
