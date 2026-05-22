@@ -36,6 +36,10 @@ function TuiBootstrap() {
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
   const mcpManagerRef = React.useRef<McpManager | null>(null);
+  const [mcpManager, setMcpManager] = React.useState<McpManager | null>(null);
+  const [mcpPromptRegistry, setMcpPromptRegistry] = React.useState<
+    Map<string, { server: string; prompt: { name: string; description?: string } }> | undefined
+  >(undefined);
 
   const dispatchSessionLoad = React.useCallback(
     async (action: any) => {
@@ -120,8 +124,11 @@ function TuiBootstrap() {
     const mcpConfig = loadMcpConfig();
     const manager = new McpManager();
     mcpManagerRef.current = manager;
-    // Fire-and-forget connect (non-blocking)
-    manager.connectAll(mcpConfig.servers).catch((err) => {
+    setMcpManager(manager);
+    // Connect and update prompt registry when ready
+    manager.connectAll(mcpConfig.servers).then(() => {
+      setMcpPromptRegistry(new Map(manager.getPromptRegistry()));
+    }).catch((err) => {
       console.error("[MCP] Failed to connect servers:", err);
     });
     return () => {
@@ -129,6 +136,8 @@ function TuiBootstrap() {
         console.error("[MCP] Failed to disconnect servers:", err);
       });
       mcpManagerRef.current = null;
+      setMcpManager(null);
+      setMcpPromptRegistry(undefined);
     };
   }, []);
 
@@ -156,7 +165,7 @@ function TuiBootstrap() {
     dispatch,
     handleExit,
     () => { provider.compactRequested = true; },
-    mcpManagerRef.current?.getPromptRegistry(),
+    mcpPromptRegistry,
   );
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
@@ -348,7 +357,7 @@ function TuiBootstrap() {
   }
 
   return (
-    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }} mcpManager={mcpManagerRef.current ?? undefined}>
+    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }} mcpManager={mcpManager ?? undefined}>
       <InputLine
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
         onSubmit={handleInput}

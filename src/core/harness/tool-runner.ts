@@ -11,6 +11,7 @@ import type {
 } from "@/core/types";
 import { editFile, readFile, writeFile } from "@/core/tools/file";
 import { shellTool, type ShellExecutor } from "@/core/tools/shell";
+import type { McpManager } from "@/core/mcp";
 import {
   defaultPhaseForWorkspaceAccess,
   evaluateToolPolicy,
@@ -31,6 +32,8 @@ export async function runApprovedTool(
   approvedGrant: ShellGrantUsed = "none",
   threadId = "",
   override?: AuthorizationOverride,
+  mcpManager?: McpManager,
+  mcpRiskOverride?: Record<string, "read">,
 ): Promise<ToolExecutionResult> {
   const policy = evaluateToolPolicy({
     request,
@@ -40,6 +43,7 @@ export async function runApprovedTool(
     threadId,
     authorization: normalizeAuthorizationState(authorization),
     override,
+    mcpRiskOverride,
   });
   if (!policy.allowed) {
     return withFailureGuidance(request, {
@@ -150,6 +154,49 @@ export async function runApprovedTool(
       stderr: "",
       authorization: newAuth,
     });
+  }
+
+  if (request.name.startsWith("mcp__")) {
+    if (!mcpManager) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.name,
+        exitCode: -1,
+        stdout: "",
+        stderr: "MCP manager is not available. No MCP servers are configured.",
+      });
+    }
+    // mcp__servername__toolname → servername, toolname
+    const parts = request.name.split("__");
+    const serverName = parts[1] ?? "";
+    const toolName = parts.slice(2).join("__");
+    if (!serverName || !toolName) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.name,
+        exitCode: -1,
+        stdout: "",
+        stderr: `Invalid MCP tool name format: ${request.name}. Expected mcp__<server>__<tool>.`,
+      });
+    }
+    try {
+      const output = await mcpManager.callTool(serverName, toolName, request.args as unknown as Record<string, unknown>);
+      return withFailureGuidance(request, {
+        ok: true,
+        command: request.name,
+        exitCode: 0,
+        stdout: output,
+        stderr: "",
+      });
+    } catch (err) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.name,
+        exitCode: -1,
+        stdout: "",
+        stderr: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   if (request.name === "shell_execute") {

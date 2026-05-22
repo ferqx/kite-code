@@ -74,6 +74,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
   const override = input.authorizationOverride;
 
+  // Build MCP risk override map from server configs
+  const mcpRiskOverride: Record<string, "read"> = {};
+  if (input.mcpManager) {
+    for (const [name, state] of input.mcpManager.getServerStates()) {
+      if (state.config.risk === "read") {
+        mcpRiskOverride[name] = "read";
+      }
+    }
+  }
+
   /** Agent 节点：使用稳定工具 schema，由执行层强制工作区访问边界 / Agent node */
   const agent = async (state: CodeAgentState) => {
     const tools = createAgentTools({
@@ -150,6 +160,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       threadId: state.threadId,
       authorization: state.authorization,
       override,
+      mcpRiskOverride,
     });
     const approvalPayload = buildToolApproval({
       workspace: state.workspace,
@@ -291,6 +302,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       grantUsed,
       state.threadId,
       override,
+      input.mcpManager,
+      mcpRiskOverride,
     );
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
@@ -323,8 +336,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     .addNode("approval", approval)
     .addNode("user_input", userInput)
     .addNode("tools", tools)
-    .addConditionalEdges(START, (state: CodeAgentState) => routeEntry(state, override))
-    .addConditionalEdges("agent", (state: CodeAgentState) => routeAfterAgent(state, override))
+    .addConditionalEdges(START, (state: CodeAgentState) => routeEntry(state, override, mcpRiskOverride))
+    .addConditionalEdges("agent", (state: CodeAgentState) => routeAfterAgent(state, override, mcpRiskOverride))
     .addConditionalEdges("approval", routeAfterApproval)
     .addConditionalEdges("user_input", routeAfterUserInput)
     .addConditionalEdges("tools", routeAfterTools)

@@ -29,7 +29,7 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
             Add mcpServers to ~/.openpx/openpx.jsonc or .mcp.json in your project root.
           </Text>
         </Box>
-        <Text color={t.dim} marginTop={1}>
+        <Text color={t.dim}>
           Press any key to close
         </Text>
       </Box>
@@ -100,9 +100,11 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
         );
       })}
 
-      <Text color={t.dim} marginTop={1}>
-        Press any key to close
-      </Text>
+      <Box marginTop={1}>
+        <Text color={t.dim}>
+          Press any key to close
+        </Text>
+      </Box>
     </Box>
   );
 }

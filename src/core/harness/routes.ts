@@ -11,6 +11,7 @@ import {
 export function routeEntry(
   state: CodeAgentState,
   override?: AuthorizationOverride,
+  mcpRiskOverride?: Record<string, "read">,
 ): "agent" | "approval" | "tools" | "user_input" {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) {
@@ -28,6 +29,7 @@ export function routeEntry(
     threadId: state.threadId,
     authorization: state.authorization,
     override,
+    mcpRiskOverride,
   });
 
   if (!decision.allowed) return "tools";
@@ -38,6 +40,7 @@ export function routeEntry(
 export function routeAfterAgent(
   state: CodeAgentState,
   override?: AuthorizationOverride,
+  mcpRiskOverride?: Record<string, "read">,
 ): "approval" | "tools" | "user_input" | typeof END {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) {
@@ -55,6 +58,7 @@ export function routeAfterAgent(
     threadId: state.threadId,
     authorization: state.authorization,
     override,
+    mcpRiskOverride,
   });
 
   if (!decision.allowed) return "tools";
