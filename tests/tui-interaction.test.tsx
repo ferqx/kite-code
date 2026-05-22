@@ -59,7 +59,7 @@ function fakeState(overrides: Partial<TuiState> = {}): TuiState {
     status: fakeStatus(),
     exited: false, running: false, compacting: false, runCount: 0,
     thinkingVisible: true, leaderPending: false,
-    showHelp: false, showModelSelector: false, showSessions: false, showMcp: false, ctrlCPressed: false,
+    showHelp: false, showModelSelector: false, showSessions: false, showMcp: false, showRewind: false, checkpoints: [], rewindCounter: 0, ctrlCPressed: false,
     sessionKey: 0, exitRequested: false, editorRequested: false, sessionError: false,
     ...overrides,
   };

@@ -54,6 +54,14 @@ interface PendingSendRow {
   value: string | Uint8Array | null;
 }
 
+/** 检查点摘要条目 / Checkpoint summary entry for UI listing */
+export interface CheckpointEntry {
+  checkpointId: string;
+  parentCheckpointId: string | null;
+  createdAt: string;
+  firstUserMessage: string;
+}
+
 /** 基于 Bun SQLite 的 LangGraph Checkpoint 持久化器 / LangGraph checkpoint persistence using Bun SQLite */
 export class BunSqliteSaver extends BaseCheckpointSaver {
   /** 数据库实例 / Database instance */
@@ -187,6 +195,72 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
         checkpointNs,
         row.checkpoint_id,
       ),
+    };
+  }
+
+  /** 枚举线程最近 N 个 checkpoint 及首条用户消息摘要 / List recent checkpoints with first user message summary */
+  async listCheckpoints(
+    threadId: string,
+    limit: number = 20,
+  ): Promise<CheckpointEntry[]> {
+    this.setup();
+    const rows = this.db
+      .query<CheckpointRow, [string, number]>(
+        `select checkpoint_id, parent_checkpoint_id, type, checkpoint, created_at
+         from checkpoints
+         where thread_id = ? and checkpoint_ns = ''
+         order by checkpoint_id desc
+         limit ?`,
+      )
+      .all(threadId, limit);
+
+    const entries: CheckpointEntry[] = [];
+    for (const row of rows) {
+      let firstUserMessage = "";
+      try {
+        const checkpoint = await this.serde.loadsTyped(row.type ?? "json", row.checkpoint);
+        const messages = checkpoint.channel_values?.messages as Array<{ lc_id?: string[]; id?: string[]; content?: unknown }> | undefined;
+        if (Array.isArray(messages)) {
+          for (const msg of messages) {
+            const type = msg.lc_id?.[2] ?? msg.id?.[2] ?? "";
+            if (type === "HumanMessage") {
+              const content = typeof msg.content === "string" ? msg.content : "";
+              firstUserMessage = content.slice(0, 60);
+              break;
+            }
+          }
+        }
+      } catch { /* skip unparseable checkpoints */ }
+
+      entries.push({
+        checkpointId: row.checkpoint_id,
+        parentCheckpointId: row.parent_checkpoint_id,
+        createdAt: row.created_at ?? "",
+        firstUserMessage,
+      });
+    }
+    return entries;
+  }
+
+  /** 加载指定 checkpoint 的完整 state / Load full state from a specific checkpoint */
+  async getCheckpointState(
+    threadId: string,
+    checkpointId: string,
+  ): Promise<Partial<import("@/core/harness/state").CodeAgentState> | null> {
+    this.setup();
+    const tuple = await this.getTuple({
+      configurable: { thread_id: threadId, checkpoint_id: checkpointId },
+    });
+    if (!tuple || !tuple.checkpoint?.channel_values) return null;
+
+    const cv = tuple.checkpoint.channel_values;
+    return {
+      messages: (cv.messages as import("@langchain/core/messages").BaseMessage[]) ?? [],
+      workspaceAccess: cv.workspaceAccess as import("@/core/harness/state").CodeAgentState["workspaceAccess"] ?? "write",
+      phase: cv.phase as import("@/core/harness/state").CodeAgentState["phase"] ?? "building",
+      plan: (cv.plan as import("@/core/harness/state").CodeAgentState["plan"]) ?? null,
+      authorization: cv.authorization as import("@/core/harness/state").CodeAgentState["authorization"],
+      contextSummary: (cv.contextSummary as string) ?? "",
     };
   }
 

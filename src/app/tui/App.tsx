@@ -10,6 +10,8 @@ import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
 import HelpPanel from "./components/HelpPanel";
 import McpPanel from "./components/McpPanel";
+import CheckpointSelector from "./components/CheckpointSelector";
+import type { CheckpointEntry } from "@/core/persistence/checkpoint";
 import ModelSelector from "./components/ModelSelector";
 import SessionSelector from "./components/SessionSelector.js";
 import Header from "./Header";
@@ -54,7 +56,12 @@ export type Action =
   | { type: "SHOW_SETTING" }
   | { type: "SHOW_MCP" }
   | { type: "HIDE_MCP" }
-  | { type: "INJECT_MCP_PROMPT"; server: string; promptName: string };
+  | { type: "INJECT_MCP_PROMPT"; server: string; promptName: string }
+  | { type: "SHOW_REWIND" }
+  | { type: "HIDE_REWIND" }
+  | { type: "REVERT_TO_CHECKPOINT"; checkpointId: string }
+  | { type: "FORK_FROM_CHECKPOINT"; checkpointId: string }
+  | { type: "SET_CHECKPOINTS"; checkpoints: CheckpointEntry[] };
 
 let nextId = 1;
 
@@ -347,6 +354,16 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return { ...state, showMcp: true };
     case "HIDE_MCP":
       return { ...state, showMcp: false };
+    case "SHOW_REWIND":
+      return { ...state, showRewind: true };
+    case "HIDE_REWIND":
+      return { ...state, showRewind: false, checkpoints: [] };
+    case "SET_CHECKPOINTS":
+      return { ...state, checkpoints: action.checkpoints };
+    case "REVERT_TO_CHECKPOINT":
+      return { ...state, showRewind: false, rewindCounter: state.rewindCounter + 1 };
+    case "FORK_FROM_CHECKPOINT":
+      return { ...state, showRewind: false, rewindCounter: state.rewindCounter + 1 };
     case "INJECT_MCP_PROMPT": {
       const block: OutputBlock = { id: nextId++, kind: "user", content: `/mcp__${action.server}__${action.promptName}` };
       return { ...state, blocks: [...state.blocks, block] };
@@ -362,6 +379,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       if (state.showSessions) return { ...state, showSessions: false };
       if (state.showModelSelector) return { ...state, showModelSelector: false };
       if (state.showMcp) return { ...state, showMcp: false };
+      if (state.showRewind) return { ...state, showRewind: false, checkpoints: [] };
       if (state.leaderPending) return { ...state, leaderPending: false };
       if (state.running) {
         let next = { ...state, running: false, ctrlCPressed: true };
@@ -504,6 +522,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         showSessions: false,
         showMcp: false,
         leaderPending: false,
+        rewindCounter: 0,
         currentRunReasonId: undefined,
         sessionKey: state.sessionKey + 1,
         status: { ...state.status, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null },
@@ -539,6 +558,9 @@ const initialState: TuiState = {
   showModelSelector: false,
   showSessions: false,
   showMcp: false,
+  showRewind: false,
+  checkpoints: [],
+  rewindCounter: 0,
   ctrlCPressed: false,
   sessionKey: 0,
   exitRequested: false,
@@ -576,6 +598,9 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
   const selectModel = useCallback((modelId: string) => dispatch({ type: "SELECT_MODEL", modelId }), [dispatch]);
   const hideSessions = useCallback(() => dispatch({ type: "HIDE_SESSIONS" }), [dispatch]);
   const hideMcp = useCallback(() => dispatch({ type: "HIDE_MCP" }), [dispatch]);
+  const hideRewind = useCallback(() => dispatch({ type: "HIDE_REWIND" }), [dispatch]);
+  const handleRevert = useCallback((checkpointId: string) => dispatch({ type: "REVERT_TO_CHECKPOINT", checkpointId }), [dispatch]);
+  const handleFork = useCallback((checkpointId: string) => dispatch({ type: "FORK_FROM_CHECKPOINT", checkpointId }), [dispatch]);
   const selectSession = useCallback(
     (threadId: string) => {
       dispatch({ type: "LOAD_SESSION_PENDING", threadId });
@@ -639,6 +664,14 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
       )}
       {state.showMcp && mcpManager && (
         <McpPanel manager={mcpManager} onClose={hideMcp} />
+      )}
+      {state.showRewind && (
+        <CheckpointSelector
+          checkpoints={state.checkpoints}
+          onRevert={handleRevert}
+          onFork={handleFork}
+          onClose={hideRewind}
+        />
       )}
       <ActivityBar running={state.running} timerKey={state.runCount} />
       {children}

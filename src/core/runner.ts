@@ -194,6 +194,140 @@ export async function* runAgent(
   }
 }
 
+export interface RevertInput {
+  threadId: string;
+  checkpointId: string;
+  workspace: string;
+  checkpointPath: string;
+  config: AgentConfig;
+  shellExecutor?: ShellExecutor;
+  signal?: AbortSignal;
+  model?: SupportedChatModel;
+  thinkingLevel?: string | null;
+}
+
+/** 当前 thread 恢复到指定 checkpoint 继续执行 / Revert current thread to a checkpoint */
+export async function* revertToCheckpoint(
+  provider: UserInputProvider,
+  input: RevertInput,
+): AsyncGenerator<AgentEvent> {
+  const { graph, checkpointer } = buildCodeAgentGraph({
+    config: input.config,
+    checkpointPath: input.checkpointPath,
+    shellExecutor: input.shellExecutor,
+    thinkingLevel: input.thinkingLevel ?? null,
+    model: input.model,
+  });
+
+  const signal = input.signal;
+
+  try {
+    // Verify checkpoint exists before attempting revert
+    const cpState = await checkpointer.getCheckpointState(
+      input.threadId,
+      input.checkpointId,
+    );
+    if (!cpState) {
+      yield {
+        type: "error" as const,
+        data: { message: "Checkpoint not found", recoverable: false },
+      };
+      return;
+    }
+
+    const streamConfig = {
+      configurable: {
+        thread_id: input.threadId,
+        checkpoint_id: input.checkpointId,
+      },
+      streamMode: "updates" as const,
+      recursionLimit: 60,
+    };
+
+    const stream = await graph.stream(
+      { messages: [], __revert__: true } as any,
+      streamConfig,
+    );
+
+    const result = await processStream(provider, stream, signal);
+    yield* result.events;
+  } finally {
+    checkpointer.close();
+  }
+}
+
+export interface ForkInput {
+  oldThreadId: string;
+  checkpointId: string;
+  newThreadId: string;
+  workspace: string;
+  checkpointPath: string;
+  config: AgentConfig;
+  shellExecutor?: ShellExecutor;
+  signal?: AbortSignal;
+  model?: SupportedChatModel;
+  thinkingLevel?: string | null;
+}
+
+/** 从旧 checkpoint fork 新会话 / Fork a new session from an old checkpoint */
+export async function* forkFromCheckpoint(
+  provider: UserInputProvider,
+  input: ForkInput,
+): AsyncGenerator<AgentEvent> {
+  const { graph, checkpointer } = buildCodeAgentGraph({
+    config: input.config,
+    checkpointPath: input.checkpointPath,
+    shellExecutor: input.shellExecutor,
+    thinkingLevel: input.thinkingLevel ?? null,
+    model: input.model,
+  });
+
+  const signal = input.signal;
+
+  try {
+    const oldState = await checkpointer.getCheckpointState(
+      input.oldThreadId,
+      input.checkpointId,
+    );
+    if (!oldState) {
+      yield {
+        type: "error" as const,
+        data: { message: "Checkpoint not found", recoverable: false },
+      };
+      return;
+    }
+
+    const initialState = {
+      userId: "",
+      threadId: input.newThreadId,
+      workspace: input.workspace,
+      workspaceAccess: oldState.workspaceAccess ?? "write",
+      phase: oldState.phase ?? "building",
+      plan: oldState.plan,
+      messages: (oldState.messages as any[]) ?? [],
+      authorization: oldState.authorization ?? defaultAuthorizationState(),
+      contextSummary: oldState.contextSummary ?? "",
+      contextBudget: undefined as any,
+      modelProvider: input.config.providerName,
+      modelName: input.config.modelName,
+      thinkingLevel: null as string | null,
+      forceCompact: false,
+    };
+
+    const streamConfig = {
+      configurable: { thread_id: input.newThreadId },
+      streamMode: "updates" as const,
+      recursionLimit: 60,
+    };
+
+    const stream = await graph.stream(initialState, streamConfig);
+    const result = await processStream(provider, stream, signal);
+    yield* result.events;
+  } finally {
+    checkpointer.close();
+  }
+}
+
 type StreamResult =
   | { kind: "done"; events: AgentEvent[] }
   | { kind: "interrupt"; action: UserAction; events: AgentEvent[] };

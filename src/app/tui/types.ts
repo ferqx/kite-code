@@ -34,6 +34,9 @@ export interface TuiState {
   showModelSelector: boolean;
   showSessions: boolean;
   showMcp: boolean;
+  showRewind: boolean;
+  checkpoints: import("@/core/persistence/checkpoint").CheckpointEntry[];
+  rewindCounter: number;
   ctrlCPressed: boolean;
   sessionKey: number;
   exitRequested: boolean;

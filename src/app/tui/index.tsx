@@ -3,7 +3,7 @@ import { render } from "ink";
 import { loadAgentConfig, loadMcpConfig, editorInputPath, type AgentConfig } from "@/core/config/index";
 import { McpManager } from "@/core/mcp";
 import { createSandboxExecutor } from "@/core/sandbox/index";
-import { runAgent, isRecoverableError } from "@/core/runner";
+import { runAgent, isRecoverableError, revertToCheckpoint, forkFromCheckpoint } from "@/core/runner";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
 import InputLine, { type EditorContentHandle } from "./components/InputLine";
@@ -12,6 +12,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { useSlashCommand } from "./hooks/useSlashCommand";
 import { loadSession } from "../../core/persistence/sessions.js";
 import { defaultCheckpointPath } from "../../core/config/paths.js";
+import { BunSqliteSaver } from "../../core/persistence/checkpoint.js";
 
 function resolveModelForResume(
   currentConfig: AgentConfig,
@@ -35,6 +36,7 @@ function TuiBootstrap() {
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
+  const pendingRewindRef = React.useRef<{ type: "revert"; checkpointId: string } | { type: "fork"; checkpointId: string } | null>(null);
   const mcpManagerRef = React.useRef<McpManager | null>(null);
   const [mcpManager, setMcpManager] = React.useState<McpManager | null>(null);
   const [mcpPromptRegistry, setMcpPromptRegistry] = React.useState<
@@ -92,6 +94,12 @@ function TuiBootstrap() {
         pendingSessionRef.current = null;
         return;
       }
+      // Intercept REVERT/FORK to store pending action before reducer closes panel
+      if (action.type === "REVERT_TO_CHECKPOINT") {
+        pendingRewindRef.current = { type: "revert", checkpointId: action.checkpointId };
+      } else if (action.type === "FORK_FROM_CHECKPOINT") {
+        pendingRewindRef.current = { type: "fork", checkpointId: action.checkpointId };
+      }
       dispatch(action);
     },
     [dispatch, config],
@@ -109,6 +117,8 @@ function TuiBootstrap() {
       conversationHistoryRef.current = [];
       threadIdRef.current = ""; // Lazy init on first message
       thinkingLevelRef.current = null;
+      pendingRewindRef.current = null;
+      prevRewindCounterRef.current = 0;
     }
   }, [state.sessionKey]);
 
@@ -118,6 +128,47 @@ function TuiBootstrap() {
       process.exit(0);
     }
   }, [state.exitRequested]);
+
+  // Load checkpoint list when Rewind panel is opened
+  React.useEffect(() => {
+    if (!state.showRewind || !threadIdRef.current) return;
+
+    let disposed = false;
+    const checkpointPath = defaultCheckpointPath();
+    const saver = new BunSqliteSaver(checkpointPath);
+    try {
+      saver.listCheckpoints(threadIdRef.current).then((cps) => {
+        if (disposed) return;
+        dispatch({ type: "SET_CHECKPOINTS", checkpoints: cps });
+      }).catch(() => {
+        if (disposed) return;
+        dispatch({ type: "SET_CHECKPOINTS", checkpoints: [] });
+      }).finally(() => {
+        saver.close();
+      });
+    } catch {
+      dispatch({ type: "SET_CHECKPOINTS", checkpoints: [] });
+      saver.close();
+    }
+    return () => {
+      disposed = true;
+      try { saver.close(); } catch { /* already closed */ }
+    };
+  }, [state.showRewind, dispatch]);
+
+  // Execute revert/fork when triggered by CheckpointSelector
+  const prevRewindCounterRef = React.useRef(0);
+  React.useEffect(() => {
+    if (state.rewindCounter === prevRewindCounterRef.current) return;
+    prevRewindCounterRef.current = state.rewindCounter;
+    if (state.rewindCounter === 0) return;
+
+    const pending = pendingRewindRef.current;
+    pendingRewindRef.current = null;
+    if (!pending) return;
+
+    runRewind(pending.type, pending.checkpointId);
+  }, [state.rewindCounter, runRewind]);
 
   // MCP Manager lifecycle: create, connect, disconnect on unmount
   React.useEffect(() => {
@@ -249,6 +300,83 @@ function TuiBootstrap() {
             }
           } catch { /* non-critical */ }
         })();
+      }
+    },
+    [provider, workspace, config, dispatch]
+  );
+
+  // Execute revert/fork when user selects from /rewind panel
+  const runRewind = React.useCallback(
+    async (type: "revert" | "fork", checkpointId: string) => {
+      if (agentLoopActiveRef.current) return;
+
+      dispatch({ type: "SET_RUNNING" });
+
+      const threadId = threadIdRef.current;
+      if (!threadId) {
+        provider.onEvent({
+          type: "error",
+          data: { message: "No active session. Start a conversation first.", recoverable: false },
+        });
+        dispatch({ type: "SET_EXITED" });
+        dispatch({ type: "SET_IDLE" });
+        return;
+      }
+
+      const shellExecutor = createSandboxExecutor({ enabled: true, workspace });
+
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+      agentLoopActiveRef.current = true;
+
+      let generator: AsyncGenerator<any>;
+      if (type === "revert") {
+        generator = revertToCheckpoint(provider, {
+          threadId,
+          checkpointId,
+          workspace,
+          checkpointPath: defaultCheckpointPath(),
+          config,
+          shellExecutor,
+          signal: abortController.signal,
+          thinkingLevel: thinkingLevelRef.current,
+        });
+      } else {
+        const newThreadId = `tui-${Date.now().toString(36)}`;
+        threadIdRef.current = newThreadId;
+        generator = forkFromCheckpoint(provider, {
+          oldThreadId: threadId,
+          checkpointId,
+          newThreadId,
+          workspace,
+          checkpointPath: defaultCheckpointPath(),
+          config,
+          shellExecutor,
+          signal: abortController.signal,
+          thinkingLevel: thinkingLevelRef.current,
+        });
+      }
+
+      let aborted = false;
+      try {
+        for await (const _ of generator) {
+          if (abortController.signal.aborted) {
+            aborted = true;
+            break;
+          }
+        }
+        if (!aborted) dispatch({ type: "SET_EXITED" });
+      } catch (e: any) {
+        provider.onEvent({
+          type: "error",
+          data: { message: e?.message ?? String(e), recoverable: isRecoverableError(e) },
+        });
+        dispatch({ type: "SET_EXITED" });
+      } finally {
+        abortControllerRef.current = null;
+        agentLoopActiveRef.current = false;
+        provider.reset();
+        dispatch({ type: "SET_IDLE" });
       }
     },
     [provider, workspace, config, dispatch]

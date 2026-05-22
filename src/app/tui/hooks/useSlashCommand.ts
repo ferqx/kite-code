@@ -16,6 +16,7 @@ export type SlashAction =
   | { type: "new" }
   | { type: "exit" }
   | { type: "mcp" }
+  | { type: "rewind" }
   | { type: "unknown"; raw: string };
 
 export function parseSlashCommand(input: string): SlashAction | null {
@@ -38,6 +39,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case "help": case "h": return { type: "help" };
     case "new": return { type: "new" };
     case "mcp": return { type: "mcp" };
+    case "rewind": return { type: "rewind" };
     case "exit": case "quit": case "q": return { type: "exit" };
     default: return { type: "unknown", raw: input };
   }
@@ -101,6 +103,9 @@ export function useSlashCommand(
         break;
       case "mcp":
         dispatch({ type: "SHOW_MCP" });
+        break;
+      case "rewind":
+        dispatch({ type: "SHOW_REWIND" });
         break;
       case "exit":
         if (onExit) onExit();
