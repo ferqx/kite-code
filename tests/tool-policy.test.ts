@@ -366,6 +366,41 @@ describe("tool policy", () => {
     expect(changedCommand).not.toBe(first);
   });
 
+  // read_mcp_resource tool policy tests
+  test("allows read_mcp_resource without approval", () => {
+    const decision = evaluateToolPolicy({
+      request: {
+        id: "call-mcp-resource",
+        name: "read_mcp_resource",
+        args: { server: "docs", uri: "file:///api.md" },
+        reason: "Model requested MCP resource",
+        protectedCommand: "read_mcp_resource",
+      },
+      workspaceAccess: "write",
+      phase: "building",
+    });
+    expect(decision.allowed).toBe(true);
+    expect(decision.requiresApproval).toBe(false);
+    expect(decision.risk).toBe("read");
+  });
+
+  test("allows read_mcp_resource in read-only workspace", () => {
+    const decision = evaluateToolPolicy({
+      request: {
+        id: "call-mcp-resource",
+        name: "read_mcp_resource",
+        args: { server: "docs", uri: "file:///api.md" },
+        reason: "Model requested MCP resource",
+        protectedCommand: "read_mcp_resource",
+      },
+      workspaceAccess: "read-only",
+      phase: "planning",
+    });
+    expect(decision.allowed).toBe(true);
+    expect(decision.requiresApproval).toBe(false);
+    expect(decision.risk).toBe("read");
+  });
+
   // MCP 工具策略测试 / MCP tool policy tests
   describe("MCP tools", () => {
     test("requires approval for mcp__* tools by default", () => {

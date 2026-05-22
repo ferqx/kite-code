@@ -80,6 +80,16 @@ export type PendingToolRequest =
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
       protectedCommand: string;
+    }
+  | {
+      /** 工具调用 ID / Tool call ID */
+      id?: string;
+      name: "read_mcp_resource";
+      args: { server: string; uri: string };
+      /** 调用原因 / Call reason */
+      reason: string;
+      /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
     };
 
 /** 从消息列表中获取待处理的工具请求 / Get pending tool request from message list
@@ -243,6 +253,17 @@ export function toolRequestFromMessage(
       args: { mode },
       reason: "Model requested authorization mode change",
       protectedCommand: `set_authorization_mode ${mode}`,
+    };
+  }
+
+  if (call.name === "read_mcp_resource") {
+    const args = call.args as { server?: string; uri?: string };
+    return {
+      id: call.id,
+      name: "read_mcp_resource",
+      args: { server: args.server || "", uri: args.uri || "" },
+      reason: "Model requested MCP resource read",
+      protectedCommand: `read_mcp_resource ${args.server || ""}`,
     };
   }
 

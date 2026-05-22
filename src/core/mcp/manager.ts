@@ -2,10 +2,13 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
-import { PromptListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ToolListChangedNotificationSchema,
+  PromptListChangedNotificationSchema,
+  ResourceListChangedNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { Tool as SdkTool } from "@modelcontextprotocol/sdk/types.js";
-import type { McpServerConfig, McpPrompt, McpServerState } from "./types";
+import type { McpServerConfig, McpPrompt, McpResource, McpServerState } from "./types";
 
 const MCP_STARTUP_TIMEOUT = 5000;
 const HTTP_MAX_RECONNECT = 5;
@@ -57,6 +60,7 @@ export class McpManager {
         client,
         tools: [],
         prompts: [],
+        resources: [],
         connected: false,
         error: String(err),
       });
@@ -79,6 +83,15 @@ export class McpManager {
       prompts = (result.prompts ?? []) as McpPrompt[];
     } catch {
       // prompts are optional
+    }
+
+    // Fetch resources (optional)
+    let resources: McpResource[] = [];
+    try {
+      const resourceResult = await client.listResources();
+      resources = (resourceResult.resources ?? []) as McpResource[];
+    } catch {
+      // Resources are optional in MCP
     }
 
     // Register prompts in the global registry
@@ -142,11 +155,29 @@ export class McpManager {
       // handler setup best-effort
     }
 
+    try {
+      client.setNotificationHandler(
+        ResourceListChangedNotificationSchema,
+        async () => {
+          const state = this.servers.get(name);
+          if (state) {
+            try {
+              const result = await client.listResources();
+              state.resources = (result.resources ?? []) as McpResource[];
+            } catch { /* ignore */ }
+          }
+        },
+      );
+    } catch {
+      // handler setup best-effort
+    }
+
     this.servers.set(name, {
       config,
       client,
       tools,
       prompts,
+      resources,
       connected: true,
     });
   }
@@ -188,6 +219,35 @@ export class McpManager {
         .filter((c: { type: string }) => c.type === "text")
         .map((c: { text: string }) => c.text);
       return textParts.join("\n");
+    }
+    return JSON.stringify(result);
+  }
+
+  /** 列出指定 server 的所有资源（从缓存） / List resources for a server (from cache) */
+  getResources(serverName: string): McpResource[] {
+    return this.servers.get(serverName)?.resources ?? [];
+  }
+
+  /** 从指定 server 读取资源内容 / Read resource content from a server */
+  async readResource(serverName: string, uri: string): Promise<string> {
+    if (!serverName || !uri) {
+      throw new Error("server and uri are required");
+    }
+    const state = this.servers.get(serverName);
+    if (!state) {
+      throw new Error(`Unknown MCP server: ${serverName}`);
+    }
+    if (!state.connected) {
+      throw new Error(`MCP server not connected: ${serverName}`);
+    }
+    const client = state.client as Client;
+    const result = await client.readResource(
+      { uri },
+      { timeout: MCP_STARTUP_TIMEOUT },
+    );
+    // Extract text from resource contents
+    if (result.contents && result.contents.length > 0) {
+      return result.contents.map((c: { text?: string; blob?: string }) => c.text ?? c.blob ?? "").join("\n");
     }
     return JSON.stringify(result);
   }

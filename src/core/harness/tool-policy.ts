@@ -203,6 +203,15 @@ export function evaluateToolPolicy(input: {
     });
   }
 
+  if (request.name === "read_mcp_resource") {
+    return allow({
+      risk: "read",
+      reason: "Read MCP resources only inspects remote content exposed by MCP servers.",
+      userVisibleSummary: `Read MCP resource from ${request.args.server ?? "MCP server"}: ${request.args.uri ?? "?"}`,
+      expectedEffects: ["Reads content from external MCP server", "Does not mutate workspace files"],
+    });
+  }
+
   if (request.name === "set_authorization_mode") {
     // 切换到 full_access 必须经用户审批，防止 agent 自行提权
     // Switching to full_access must go through user approval to prevent self-escalation

@@ -193,6 +193,35 @@ export const ASK_USER_CONTRACT: ToolContract = {
 };
 ASK_USER_CONTRACT.description = buildDescription(ASK_USER_CONTRACT.sections);
 
+export const READ_MCP_RESOURCE_CONTRACT: ToolContract = {
+  name: "read_mcp_resource",
+  sections: {
+    whenToUse:
+      "Read a resource (documentation, API spec, or other content) from an MCP server. " +
+      "Use this to fetch external reference materials exposed by configured MCP servers. " +
+      "ALWAYS use mcp__<server>__list_resources first to discover available URIs before calling read_mcp_resource. " +
+      "Do NOT use read_mcp_resource for tools or prompts — use the dedicated mcp__<server>__<tool> functions instead. " +
+      "Do NOT use read_mcp_resource for reading workspace files — use read_file instead. " +
+      "This tool only accesses content explicitly exposed by the MCP server; it cannot read arbitrary files.",
+    commonMistakes:
+      "Calling read_mcp_resource without first discovering available URIs via list_resources — the call will fail with an unknown URI. " +
+      "Using a wrong server name — verify the server is connected via /mcp panel before calling. " +
+      "Assuming the MCP server exposes resources when it only has tools — check the MCP panel to confirm resources are available. " +
+      "Not handling the case where no MCP manager is available — calls fail gracefully with a clear message.",
+    outputFormat:
+      "JSON: ok (boolean), content (string — the resource text content), or stderr (string) on failure. " +
+      "Multiple resource parts are joined with newlines. " +
+      "No MCP manager: ok: false with stderr explaining configuration is needed.",
+    failureHandling:
+      "If 'Unknown MCP server': verify the server name matches the configuration in openpx.jsonc or .mcp.json. " +
+      "If 'MCP server not connected': check /mcp panel for connection status and errors. " +
+      "If 'No MCP manager available': configure mcpServers in openpx.jsonc to enable MCP integration. " +
+      "If the resource content is unexpectedly empty: verify the URI with list_resources and try again.",
+  },
+  description: "",
+};
+READ_MCP_RESOURCE_CONTRACT.description = buildDescription(READ_MCP_RESOURCE_CONTRACT.sections);
+
 export const SET_AUTHORIZATION_MODE_CONTRACT: ToolContract = {
   name: "set_authorization_mode",
   sections: {
@@ -249,6 +278,7 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ["edit_file", EDIT_FILE_CONTRACT],
   ["write_file", WRITE_FILE_CONTRACT],
   ["shell_execute", SHELL_EXECUTE_CONTRACT],
+  ["read_mcp_resource", READ_MCP_RESOURCE_CONTRACT],
   ["update_plan", UPDATE_PLAN_CONTRACT],
   ["ask_user", ASK_USER_CONTRACT],
   ["set_authorization_mode", SET_AUTHORIZATION_MODE_CONTRACT],

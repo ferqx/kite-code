@@ -26,12 +26,29 @@ export interface McpPrompt {
   }>;
 }
 
+/** MCP Resource */
+export interface McpResource {
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+}
+
+/** MCP Resource Content */
+export interface McpResourceContent {
+  uri: string;
+  mimeType?: string;
+  text?: string;
+  blob?: string;
+}
+
 /** MCP Server runtime state */
 export interface McpServerState {
   config: McpServerConfig;
   client: unknown; // Client from SDK
   tools: SdkTool[];
   prompts: McpPrompt[];
+  resources: McpResource[];
   connected: boolean;
   error?: string;
 }

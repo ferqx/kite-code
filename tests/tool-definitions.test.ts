@@ -25,6 +25,7 @@ describe("code agent tool definitions", () => {
       "edit_file",
       "write_file",
       "shell_execute",
+      "read_mcp_resource",
       "update_plan",
       "ask_user",
       "set_authorization_mode",
@@ -98,6 +99,7 @@ describe("code agent tool definitions", () => {
       "edit_file",
       "write_file",
       "shell_execute",
+      "read_mcp_resource",
       "update_plan",
       "ask_user",
       "set_authorization_mode",
@@ -175,6 +177,7 @@ describe("tool contracts (ACI)", () => {
     "write_file",
     "shell_execute",
     "update_plan",
+    "read_mcp_resource",
     "ask_user",
     "set_authorization_mode",
   ];
@@ -277,6 +280,31 @@ describe("tool contracts (ACI)", () => {
     expect(contract.sections.whenToUse).toMatch(/intent=inspect|intent=verify|intent=test|intent=build|intent=git/);
     expect(contract.sections.commonMistakes).toMatch(/reject/);
     expect(contract.sections.failureHandling).toMatch(/rejected by policy|denied|plan mode/);
+  });
+
+  // read_mcp_resource 工具 schema 校验 / read_mcp_resource tool schema validation
+  test("validates read_mcp_resource schema", () => {
+    const tools = createAgentTools({
+      workspace: "/workspace",
+    });
+    const tool = tools.find((item) => item.name === "read_mcp_resource")!;
+    expect(tool).toBeDefined();
+
+    // Valid schema
+    expect(
+      tool.schema.safeParse({
+        server: "docs-server",
+        uri: "file:///specs/api.md",
+      }).success,
+    ).toBe(true);
+
+    // Missing required fields
+    expect(
+      tool.schema.safeParse({}).success,
+    ).toBe(false);
+    expect(
+      tool.schema.safeParse({ server: "srv" }).success,
+    ).toBe(false);
   });
 
   // apply_patch 契约已存在但尚未注册为 Agent 工具 / apply_patch contract exists but is not yet registered as an agent tool

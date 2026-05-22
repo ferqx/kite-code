@@ -89,6 +89,20 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
               </Box>
             )}
 
+            {connected && state.resources && state.resources.length > 0 && (
+              <Box flexDirection="column" paddingLeft={2} marginTop={1}>
+                <Text color={t.dim} bold>Resources:</Text>
+                {state.resources.slice(0, 10).map((r) => (
+                  <Text key={r.uri} color={t.muted}>
+                    {"📄"} {r.name || r.uri} ({r.uri})
+                  </Text>
+                ))}
+                {state.resources.length > 10 && (
+                  <Text color={t.dim}>…and {state.resources.length - 10} more</Text>
+                )}
+              </Box>
+            )}
+
             {totalToolsShown >= MAX_TOOLS && (
               <Box paddingLeft={2}>
                 <Text color={t.dim}>

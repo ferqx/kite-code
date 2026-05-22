@@ -11,6 +11,7 @@ import {
   EDIT_FILE_CONTRACT,
   WRITE_FILE_CONTRACT,
   SHELL_EXECUTE_CONTRACT,
+  READ_MCP_RESOURCE_CONTRACT,
   UPDATE_PLAN_CONTRACT,
   ASK_USER_CONTRACT,
   SET_AUTHORIZATION_MODE_CONTRACT,
@@ -123,11 +124,40 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     },
   );
 
+  const readMcpResource = tool(
+    async ({ server, uri }) => {
+      if (!input.mcpManager) {
+        return JSON.stringify({
+          ok: false,
+          stderr: "No MCP manager available. Configure mcpServers in openpx.jsonc.",
+        });
+      }
+      try {
+        const content = await input.mcpManager.readResource(server, uri);
+        return JSON.stringify({ ok: true, content });
+      } catch (err) {
+        return JSON.stringify({
+          ok: false,
+          stderr: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    {
+      name: "read_mcp_resource",
+      description: READ_MCP_RESOURCE_CONTRACT.description,
+      schema: z.object({
+        server: z.string().describe("MCP server name"),
+        uri: z.string().describe("Resource URI to read (e.g. file:///docs/api.md)"),
+      }),
+    },
+  );
+
   const builtinTools = [
     readFileTool,
     editFileTool,
     writeFileTool,
     shellExecute,
+    readMcpResource,
     createUpdatePlanTool(),
     createAskUserTool(),
     createSetAuthorizationModeTool(),
