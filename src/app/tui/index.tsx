@@ -1,6 +1,7 @@
 import React from "react";
 import { render } from "ink";
-import { loadAgentConfig, editorInputPath, type AgentConfig } from "@/core/config/index";
+import { loadAgentConfig, loadMcpConfig, editorInputPath, type AgentConfig } from "@/core/config/index";
+import { McpManager } from "@/core/mcp";
 import { createSandboxExecutor } from "@/core/sandbox/index";
 import { runAgent, isRecoverableError } from "@/core/runner";
 import { TuiUserInputProvider } from "./provider";
@@ -34,6 +35,7 @@ function TuiBootstrap() {
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
+  const mcpManagerRef = React.useRef<McpManager | null>(null);
 
   const dispatchSessionLoad = React.useCallback(
     async (action: any) => {
@@ -113,6 +115,23 @@ function TuiBootstrap() {
     }
   }, [state.exitRequested]);
 
+  // MCP Manager lifecycle: create, connect, disconnect on unmount
+  React.useEffect(() => {
+    const mcpConfig = loadMcpConfig();
+    const manager = new McpManager();
+    mcpManagerRef.current = manager;
+    // Fire-and-forget connect (non-blocking)
+    manager.connectAll(mcpConfig.servers).catch((err) => {
+      console.error("[MCP] Failed to connect servers:", err);
+    });
+    return () => {
+      manager.disconnectAll().catch((err) => {
+        console.error("[MCP] Failed to disconnect servers:", err);
+      });
+      mcpManagerRef.current = null;
+    };
+  }, []);
+
   // When Ctrl+C is pressed during agent loop (with no interrupt), abort via signal
   React.useEffect(() => {
     if (state.ctrlCPressed && agentLoopActiveRef.current && !state.interrupt) {
@@ -133,9 +152,12 @@ function TuiBootstrap() {
     [dispatch]
   );
 
-  const handleSlashCommand = useSlashCommand(dispatch, handleExit, () => {
-    provider.compactRequested = true;
-  });
+  const handleSlashCommand = useSlashCommand(
+    dispatch,
+    handleExit,
+    () => { provider.compactRequested = true; },
+    mcpManagerRef.current?.getPromptRegistry(),
+  );
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
   React.useEffect(() => {
@@ -326,7 +348,7 @@ function TuiBootstrap() {
   }
 
   return (
-    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }}>
+    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }} mcpManager={mcpManagerRef.current ?? undefined}>
       <InputLine
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
         onSubmit={handleInput}

@@ -33,6 +33,7 @@ export interface TuiState {
   showHelp: boolean;
   showModelSelector: boolean;
   showSessions: boolean;
+  showMcp: boolean;
   ctrlCPressed: boolean;
   sessionKey: number;
   exitRequested: boolean;

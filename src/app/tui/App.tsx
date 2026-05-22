@@ -2,12 +2,14 @@ import React, { useReducer, useCallback, useMemo, type Dispatch, type ReactNode 
 import { Box } from "ink";
 import { sessionExportPath } from "@/core/config/paths";
 import type { AgentEvent } from "@/protocol/events";
+import type { McpManager } from "@/core/mcp";
 import type { TuiState, OutputBlock, StatusState, InterruptState, FileChangeRecord } from "./types";
 import OutputArea from "./OutputArea";
 import ActivityBar from "./ActivityBar";
 import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
 import HelpPanel from "./components/HelpPanel";
+import McpPanel from "./components/McpPanel";
 import ModelSelector from "./components/ModelSelector";
 import SessionSelector from "./components/SessionSelector.js";
 import Header from "./Header";
@@ -49,7 +51,10 @@ export type Action =
   | { type: "SELECT_MODEL"; modelId: string }
   | { type: "NEW_SESSION" }
   | { type: "USER_MESSAGE"; text: string }
-  | { type: "SHOW_SETTING" };
+  | { type: "SHOW_SETTING" }
+  | { type: "SHOW_MCP" }
+  | { type: "HIDE_MCP" }
+  | { type: "INJECT_MCP_PROMPT"; server: string; promptName: string };
 
 let nextId = 1;
 
@@ -338,6 +343,14 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return { ...state, showHelp: true };
     case "HIDE_HELP":
       return { ...state, showHelp: false };
+    case "SHOW_MCP":
+      return { ...state, showMcp: true };
+    case "HIDE_MCP":
+      return { ...state, showMcp: false };
+    case "INJECT_MCP_PROMPT": {
+      const block: OutputBlock = { id: nextId++, kind: "user", content: `/mcp__${action.server}__${action.promptName}` };
+      return { ...state, blocks: [...state.blocks, block] };
+    }
     case "SET_PHASE":
       return { ...state, status: { ...state.status, phase: action.phase } };
     case "LEADER_PENDING":
@@ -348,6 +361,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       if (state.showHelp) return { ...state, showHelp: false };
       if (state.showSessions) return { ...state, showSessions: false };
       if (state.showModelSelector) return { ...state, showModelSelector: false };
+      if (state.showMcp) return { ...state, showMcp: false };
       if (state.leaderPending) return { ...state, leaderPending: false };
       if (state.running) {
         let next = { ...state, running: false, ctrlCPressed: true };
@@ -488,6 +502,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         showHelp: false,
         showModelSelector: false,
         showSessions: false,
+        showMcp: false,
         leaderPending: false,
         currentRunReasonId: undefined,
         sessionKey: state.sessionKey + 1,
@@ -523,6 +538,7 @@ const initialState: TuiState = {
   showHelp: false,
   showModelSelector: false,
   showSessions: false,
+  showMcp: false,
   ctrlCPressed: false,
   sessionKey: 0,
   exitRequested: false,
@@ -540,6 +556,7 @@ export interface AppProps {
   onToggleReason: (id: number) => void;
   provider: import("./provider").TuiUserInputProvider;
   onCompactRequest?: () => void;
+  mcpManager?: McpManager;
   children?: ReactNode;
 }
 
@@ -549,7 +566,7 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
   return { state, dispatch, onToggleReason };
 }
 
-export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, children }: AppProps) {
+export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, children }: AppProps) {
   useGlobalKeys(dispatch, state.running);
   useLeaderKeys(dispatch, state.leaderPending, onCompactRequest);
 
@@ -558,6 +575,7 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
   const hideModelSelector = useCallback(() => dispatch({ type: "HIDE_MODEL_SELECTOR" }), [dispatch]);
   const selectModel = useCallback((modelId: string) => dispatch({ type: "SELECT_MODEL", modelId }), [dispatch]);
   const hideSessions = useCallback(() => dispatch({ type: "HIDE_SESSIONS" }), [dispatch]);
+  const hideMcp = useCallback(() => dispatch({ type: "HIDE_MCP" }), [dispatch]);
   const selectSession = useCallback(
     (threadId: string) => {
       dispatch({ type: "LOAD_SESSION_PENDING", threadId });
@@ -618,6 +636,9 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
           onSelect={selectModel}
           onClose={hideModelSelector}
         />
+      )}
+      {state.showMcp && mcpManager && (
+        <McpPanel manager={mcpManager} onClose={hideMcp} />
       )}
       <ActivityBar running={state.running} timerKey={state.runCount} />
       {children}

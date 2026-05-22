@@ -15,6 +15,7 @@ export type SlashAction =
   | { type: "help" }
   | { type: "new" }
   | { type: "exit" }
+  | { type: "mcp" }
   | { type: "unknown"; raw: string };
 
 export function parseSlashCommand(input: string): SlashAction | null {
@@ -36,12 +37,18 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case "setting": case "config": return { type: "setting" };
     case "help": case "h": return { type: "help" };
     case "new": return { type: "new" };
+    case "mcp": return { type: "mcp" };
     case "exit": case "quit": case "q": return { type: "exit" };
     default: return { type: "unknown", raw: input };
   }
 }
 
-export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void, onCompactRequest?: () => void) {
+export function useSlashCommand(
+  dispatch: Dispatch<any>,
+  onExit?: () => void,
+  onCompactRequest?: () => void,
+  mcpPromptRegistry?: ReadonlyMap<string, { server: string; prompt: { name: string; description?: string; arguments?: any[] } }>,
+) {
   return useCallback((input: string): boolean => {
     const action = parseSlashCommand(input);
     if (!action) return false;
@@ -92,13 +99,26 @@ export function useSlashCommand(dispatch: Dispatch<any>, onExit?: () => void, on
       case "help":
         dispatch({ type: "SHOW_HELP" });
         break;
+      case "mcp":
+        dispatch({ type: "SHOW_MCP" });
+        break;
       case "exit":
         if (onExit) onExit();
         else process.exit(0);
         break;
-      default:
+      default: {
+        // Check MCP prompt registry for dynamic commands like /mcp__servername__promptname
+        if (action.type === "unknown" && mcpPromptRegistry) {
+          const cmd = action.raw.slice(1).trim().split(/\s+/)[0];
+          const entry = mcpPromptRegistry.get(cmd);
+          if (entry) {
+            dispatch({ type: "INJECT_MCP_PROMPT", server: entry.server, promptName: entry.prompt.name });
+            return true;
+          }
+        }
         return false;
+      }
     }
     return true;
-  }, [dispatch, onExit]);
+  }, [dispatch, onExit, onCompactRequest, mcpPromptRegistry]);
 }

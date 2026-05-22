@@ -859,6 +859,7 @@ describe("App", () => {
       showHelp: false,
       showModelSelector: false,
       showSessions: false,
+      showMcp: false,
       ctrlCPressed: false,
       sessionKey: 0,
       exitRequested: false,
