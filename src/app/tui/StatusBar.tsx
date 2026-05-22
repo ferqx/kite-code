@@ -12,6 +12,7 @@ interface StatusBarProps {
   thinkingVisible: boolean;
   timerKey: number;
   running: boolean;
+  compacting: boolean;
 }
 
 function planLabel(status: StatusState): string {
@@ -22,7 +23,7 @@ function planLabel(status: StatusState): string {
   return `Step ${done}/${total}${active ? `: ${active.step}` : ""}`;
 }
 
-export default function StatusBar({ status, thinkingVisible, timerKey, running }: StatusBarProps) {
+export default function StatusBar({ status, thinkingVisible, timerKey, running, compacting }: StatusBarProps) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -43,6 +44,13 @@ export default function StatusBar({ status, thinkingVisible, timerKey, running }
 
   return (
     <Box flexDirection="column">
+      {/* Compacting indicator */}
+      {compacting && (
+        <Box>
+          <Text color={t.warning}>⏳ Compacting...</Text>
+        </Box>
+      )}
+
       {/* Row 1 — phase + progress */}
       <Box>
         <Text color={phaseColor}>{phaseIcon} </Text>

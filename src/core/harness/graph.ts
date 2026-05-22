@@ -78,6 +78,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       shellExecutor: input.shellExecutor,
     });
     const retryEvents: ModelRetryEvent[] = [];
+    let compactionPerformed: { reason: string; summary: string } | null = null;
     const listener: ModelRetryListener = (attempt, error, delayMs) => {
       retryEvents.push({
         attempt,
@@ -101,10 +102,17 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         contextSummary: newSummary,
         forceCompact: false,
       } as CodeAgentState;
+      compactionPerformed = {
+        reason: "Manual compaction triggered by /compact or Ctrl+X c",
+        summary: compacted.summary,
+      };
     }
 
     try {
-      const { state: result, contextRetries } = await invokeModel(model, effectiveState, tools);
+      const { state: result, contextRetries, compactionPerformed: autoCompact } = await invokeModel(model, effectiveState, tools);
+      if (autoCompact && !compactionPerformed) {
+        compactionPerformed = autoCompact;
+      }
       const allRetries = [...retryEvents, ...contextRetries];
       const syncedAuth = authorizationForState(state, override);
       const modelConfigState = {
@@ -113,9 +121,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         thinkingLevel: input.thinkingLevel ?? null,
       };
       if (allRetries.length > 0) {
-        return { ...result, ...modelConfigState, authorization: syncedAuth, modelRetries: allRetries };
+        return { ...result, ...modelConfigState, authorization: syncedAuth, modelRetries: allRetries, compactionPerformed };
       }
-      return { ...result, ...modelConfigState, authorization: syncedAuth };
+      return { ...result, ...modelConfigState, authorization: syncedAuth, compactionPerformed };
     } finally {
       (model as unknown as Record<string, unknown>)._retryListener = null;
     }
@@ -339,6 +347,8 @@ interface InvokeModelResult {
   state: Record<string, unknown>;
   /** 上下文溢出重试事件（Layer 1/2），由 agent 节点合并到 modelRetries / Context overflow retry events, merged into modelRetries by agent node */
   contextRetries: ModelRetryEvent[];
+  /** 压缩触发信息（由 agent 节点检测并 emit compact 事件）/ Compaction trigger info (detected by agent node to emit compact events) */
+  compactionPerformed?: { reason: string; summary: string } | null;
 }
 
 /** 共享的模型调用逻辑 / Shared model invocation logic */
@@ -349,6 +359,7 @@ async function invokeModel(
 ): Promise<InvokeModelResult> {
   let prepared = prepareModelContext("agent", state);
   const contextRetries: ModelRetryEvent[] = [];
+  let compactionPerformed: { reason: string; summary: string } | null = null;
 
   let response: AIMessage;
   try {
@@ -368,6 +379,10 @@ async function invokeModel(
     try {
       response = await bindAgentTools(model, tools)
         .invoke(retryMessages) as AIMessage;
+      compactionPerformed = {
+        reason: "Auto compaction due to context overflow (layer 1: rules-based)",
+        summary: compacted.summary,
+      };
       prepared = { ...prepared, contextSummary: mergeSummaries(state.contextSummary ?? "", compacted.summary) };
     } catch (retryError) {
       if (!isContextOverflowError(retryError)) throw retryError;
@@ -383,6 +398,10 @@ async function invokeModel(
       const llmRetry = rebuildMessages("agent", state, llmMessages);
       response = await bindAgentTools(model, tools)
         .invoke(llmRetry) as AIMessage;
+      compactionPerformed = {
+        reason: "Auto compaction due to context overflow (layer 2: LLM summarization)",
+        summary: "Generated conversation summary via LLM",
+      };
       prepared = {
         ...prepared,
         contextSummary: mergeSummaries(state.contextSummary ?? "",
@@ -405,6 +424,7 @@ async function invokeModel(
         messages: [toolCallMessage],
       },
       contextRetries,
+      compactionPerformed,
     };
   }
 
@@ -420,6 +440,7 @@ async function invokeModel(
       messages: [response],
     },
     contextRetries,
+    compactionPerformed,
   };
 }
 

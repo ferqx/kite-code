@@ -439,6 +439,18 @@ export function chunkToEvents(
       }
     }
 
+    const cp = node.compactionPerformed;
+    if (cp && typeof cp === "object" && typeof (cp as Record<string, unknown>).reason === "string") {
+      events.push({
+        type: "compact_begin",
+        data: { reason: (cp as Record<string, unknown>).reason as string },
+      });
+      events.push({
+        type: "compact_end",
+        data: { summary: ((cp as Record<string, unknown>).summary as string) ?? "" },
+      });
+    }
+
     events.push({ type: "step_end", data: { node: key } });
   }
 

@@ -590,7 +590,7 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
     <Box flexDirection="column">
       <MemoHeader status={state.status} running={state.running} error={state.sessionError} />
       <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
-      <StatusBar status={state.status} thinkingVisible={state.thinkingVisible} timerKey={state.runCount} running={state.running} />
+      <StatusBar status={state.status} thinkingVisible={state.thinkingVisible} timerKey={state.runCount} running={state.running} compacting={state.compacting} />
       {state.showHelp && <HelpPanel onClose={hideHelp} />}
       {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
         <ApprovalBlock
