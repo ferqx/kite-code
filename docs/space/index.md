@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-05-20
+最后更新：2026-05-22
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -40,6 +40,8 @@
 | `understanding/2026-05-17-sessions-command-design.md` | understanding | /sessions 会话列表、断点续接、智能命名、模型配置持久化设计。 |
 | `understanding/2026-05-20-tui-known-issues.md` | understanding | TUI 已知问题清单：死事件类型、compacting 字段、recoverable 标志、手动 compaction 空壳、剩余未修复项。 |
 
+| `understanding/2026-05-22-rewind-mcp-resources-design.md` | understanding | Rewind（Revert + Fork）和 MCP Resources 的设计规范。 |
+
 ## Backlog（工作待办）
 
 | 记录 | 状态 | 用途 |
@@ -53,7 +55,11 @@
 | --- | --- | --- |
 | `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
 | `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
-| `plans/2026-05-20-tui-production-roadmap.md` | draft | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
+| `plans/2026-05-20-tui-production-roadmap.md` | completed | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
+| `plans/2026-05-22-production-gaps-closure.md` | active | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 📋 就绪，Phase3 ⏳。 |
+| `plans/2026-05-22-production-gaps-phase1.md` | completed | Phase 1 实施记录（8 commits）。 |
+| `plans/2026-05-22-production-gaps-phase2.md` | ready | Phase 2 实施计划（7 tasks）。Rewind + MCP Resources，待执行。 |
+| `plans/2026-05-22-skills-system.md` | draft | Skills 系统方案 — 对齐 Claude Code，按需加载+Skill 工具+Available Skills 区段。 |
 
 ## 完成执行记录
 

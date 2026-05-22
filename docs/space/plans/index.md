@@ -19,7 +19,9 @@
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
 | [`2026-05-20-tui-production-roadmap.md`](2026-05-20-tui-production-roadmap.md) | completed | P0 | — | — | Step2 感知闭环：流式指示器 + Plan 连线 + Phase 确认<br>Step3 防御纵深：Error Boundary + Checkpoint 关闭 + Temp 清理<br>Step4 功能补齐：手动 Compaction |<!-- replaced by 2026-05-22-production-gaps-closure.md for remaining gaps -->|
-| [`2026-05-22-production-gaps-closure.md`](2026-05-22-production-gaps-closure.md) | draft | P0 | — | 替代 2026-05-20 路线图中未完成项 | Phase1 MCP 核心 + 事件闭环 + 错误分类<br>Phase2 MCP Resources + Rewind<br>Phase3 Hooks + 自定义斜杠命令 |
+| [`2026-05-22-production-gaps-closure.md`](2026-05-22-production-gaps-closure.md) | active | P0 | — | 替代 2026-05-20 路线图中未完成项 | Phase1 ✅ MCP + 事件闭环<br>Phase2 📋 Rewind + MCP Resources（方案已确认，计划就绪）<br>Phase3 ⏳ Hooks + 自定义命令 |
+| [`2026-05-22-production-gaps-phase1.md`](2026-05-22-production-gaps-phase1.md) | completed | P0 | — | — | Phase 1 详细实施计划（8 tasks, 8 commits）。 |
+| [`2026-05-22-production-gaps-phase2.md`](2026-05-22-production-gaps-phase2.md) | ready | P0 | — | — | Phase 2 详细实施计划（7 tasks）。Rewind（Revert+Fork）+ MCP Resources。待新会话执行。 |
 | [`2026-05-22-skills-system.md`](2026-05-22-skills-system.md) | draft | P1 | — | — | Phase1 Skills 核心：loader + Skill 工具 + Available Skills 区段 + /skill-name + --skill CLI |
 
 ## 计划文件命名规范
