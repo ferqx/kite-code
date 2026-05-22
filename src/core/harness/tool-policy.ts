@@ -21,6 +21,7 @@ export type ToolRisk =
   | "destructive"
   | "network"
   | "vcs_mutation"
+  | "mcp"
   | "unknown";
 
 export interface ToolPolicyDecision {
@@ -169,6 +170,7 @@ export function evaluateToolPolicy(input: {
   threadId?: string;
   authorization?: ThreadAuthorizationState | null;
   override?: AuthorizationOverride;
+  mcpRiskOverride?: Record<string, "read">;
 }): ToolPolicyDecision {
   const { request, workspaceAccess, phase } = input;
   const authorization = normalizeAuthorizationState(input.authorization);
@@ -292,6 +294,30 @@ export function evaluateToolPolicy(input: {
 
   if (request.name === "shell_execute") {
     return classifyShellExecute(request.args.command);
+  }
+
+  if ((request as PendingToolRequest).name.startsWith("mcp__")) {
+    const toolName = (request as PendingToolRequest).name;
+    // mcp__servername__toolname → servername
+    const parts = toolName.split("__");
+    const serverName = parts.length >= 2 ? parts[1] : "";
+    const serverRisk = serverName ? input.mcpRiskOverride?.[serverName] : undefined;
+
+    if (serverRisk === "read") {
+      return allow({
+        risk: "read",
+        reason: `MCP server "${serverName}" risk explicitly lowered to read by config.`,
+        userVisibleSummary: `Run MCP tool: ${toolName}`,
+        expectedEffects: ["Calls MCP server tool (risk lowered by config)"],
+      });
+    }
+
+    return requireApproval({
+      risk: "mcp",
+      reason: "MCP tools require user approval by default.",
+      userVisibleSummary: `Run MCP tool: ${toolName}`,
+      expectedEffects: ["Calls external MCP server tool", "May have side effects"],
+    });
   }
 
   return deny({

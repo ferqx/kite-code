@@ -15,6 +15,7 @@ import {
   ASK_USER_CONTRACT,
   SET_AUTHORIZATION_MODE_CONTRACT,
 } from "./tool-contracts";
+import { adaptMcpTool } from "@/core/mcp/tool-adapter";
 
 /** 创建 Agent 工具集输入 / Input for creating agent tools */
 export interface CreateAgentToolsInput {
@@ -22,6 +23,8 @@ export interface CreateAgentToolsInput {
   workspace: string;
   /** 可选 Shell 执行器 / Optional shell executor */
   shellExecutor?: ShellExecutor;
+  /** 可选 MCP 管理器 / Optional MCP manager */
+  mcpManager?: import("@/core/mcp/manager").McpManager;
 }
 
 /** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
@@ -120,7 +123,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     },
   );
 
-  return [
+  const builtinTools = [
     readFileTool,
     editFileTool,
     writeFileTool,
@@ -129,6 +132,17 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     createAskUserTool(),
     createSetAuthorizationModeTool(),
   ];
+
+  // MCP 工具合成
+  if (input.mcpManager) {
+    const mcpEntries = input.mcpManager.getAllTools();
+    const mcpTools = mcpEntries.map(({ server, tool }) =>
+      adaptMcpTool(server, tool, input.mcpManager!),
+    );
+    return [...builtinTools, ...mcpTools];
+  }
+
+  return builtinTools;
 }
 
 /** 兼容旧名称：创建代码 Agent 工具集 / Backward-compatible alias for agent tools */

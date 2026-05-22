@@ -366,6 +366,55 @@ describe("tool policy", () => {
     expect(changedCommand).not.toBe(first);
   });
 
+  // MCP 工具策略测试 / MCP tool policy tests
+  describe("MCP tools", () => {
+    test("requires approval for mcp__* tools by default", () => {
+      const decision = evaluateToolPolicy({
+        request: {
+          name: "mcp__playwright__navigate",
+          args: { url: "https://example.com" },
+          reason: "Model requested MCP tool",
+          protectedCommand: "mcp__playwright__navigate",
+        } as unknown as PendingToolRequest,
+        workspaceAccess: "write",
+        phase: "building",
+      });
+      expect(decision.requiresApproval).toBe(true);
+      expect(decision.risk).toBe("mcp");
+    });
+
+    test("allows MCP tool with server-level risk=read override", () => {
+      const decision = evaluateToolPolicy({
+        request: {
+          name: "mcp__safe_reader__list",
+          args: {},
+          reason: "Model requested MCP tool",
+          protectedCommand: "mcp__safe_reader__list",
+        } as unknown as PendingToolRequest,
+        workspaceAccess: "write",
+        phase: "building",
+        mcpRiskOverride: { safe_reader: "read" },
+      });
+      expect(decision.allowed).toBe(true);
+      expect(decision.requiresApproval).toBe(false);
+      expect(decision.risk).toBe("read");
+    });
+
+    test("denies MCP tools in read-only workspace", () => {
+      const decision = evaluateToolPolicy({
+        request: {
+          name: "mcp__playwright__navigate",
+          args: {},
+          reason: "Model requested MCP tool",
+          protectedCommand: "mcp__playwright__navigate",
+        } as unknown as PendingToolRequest,
+        workspaceAccess: "read-only",
+        phase: "planning",
+      });
+      expect(decision.allowed).toBe(false);
+    });
+  });
+
   // 验证用户替换命令时只改当前可替换工具请求，不改变工具调用 ID / Replacement approval updates only the current command-bearing request
   test("replaces the approved command for shell-like requests", () => {
     const replaced = replaceApprovalCommand(

@@ -23,6 +23,7 @@ import type { ShellApprovalGrant } from "@/protocol/events";
 import type { AgentResumeValue, AuthorizationOverride, ModelRetryEvent, ThreadAuthorizationState } from "@/core/types";
 import { createAgentTools } from "@/core/tools/definitions";
 import type { ShellExecutor } from "@/core/tools/shell";
+import type { McpManager } from "@/core/mcp";
 import {
   routeAfterAgent,
   routeAfterApproval,
@@ -63,6 +64,8 @@ export interface BuildCodeAgentGraphInput {
   authorizationOverride?: AuthorizationOverride;
   /** 思考级别，映射到 reasoning_effort API 参数 / Thinking level, mapped to reasoning_effort API param */
   thinkingLevel?: string | null;
+  /** 可选 MCP 管理器 / Optional MCP manager */
+  mcpManager?: McpManager;
 }
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
@@ -76,6 +79,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     const tools = createAgentTools({
       workspace: state.workspace,
       shellExecutor: input.shellExecutor,
+      mcpManager: input.mcpManager,
     });
     const retryEvents: ModelRetryEvent[] = [];
     let compactionPerformed: { reason: string; summary: string } | null = null;
