@@ -42,13 +42,15 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 
 | 方向 | 状态 | 说明 |
 |------|------|------|
-| TUI 感知闭环 | 即将开始 | 流式输出指示器、Plan 进度、Phase 切换 |
-| TUI 防御纵深 | 已计划 | Error Boundary、checkpoint 泄漏修复、编辑器 temp 清理 |
-| Undo/Redo | 已计划 | 利用 checkpoint 链实现对话回溯（需 saver 层改造） |
-| 手动 Compaction | 已计划 | `/compact` 从空壳变为实际 graph 触发 |
-| MCP 协议支持 | 评估中 | Model Context Protocol 可扩展工具生态 |
-| Hooks 系统 | 评估中 | 工具执行前后的 shell hook |
-| 自定义斜杠命令 | 评估中 | 用户可定义命令 |
+| MCP 协议支持 | Phase 1 | stdio + streamable HTTP transport，工具集成，对齐 Claude Code MCP |
+| 事件闭环 | Phase 1 | compact_begin/compact_end 事件接入 + compacting UI + retry 事件清理 |
+| 错误分类 | Phase 1 | runner 层区分可恢复/不可恢复错误 |
+| MCP Resources | Phase 2 | MCP resource 注入 agent 上下文 |
+| Rewind（会话回溯） | Phase 2 | `/rewind` 命令，利用 checkpoint 链回溯（对齐 Claude Code Rewind） |
+| Hooks 系统 | Phase 3 | PreToolUse / PostToolUse shell hook |
+| 自定义斜杠命令 | Phase 3 | `customCommands` 配置段，`/` 补全集成 |
+
+> 详见 [`docs/space/plans/2026-05-22-production-gaps-closure.md`](docs/space/plans/2026-05-22-production-gaps-closure.md)
 
 ## 暂不排期
 
@@ -76,7 +78,9 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 | 审批粒度 | 工具级 + 命令级 | 工具级 | 工具级 |
 | 架构分层 | protocol/core/app 三层 | 单体 | — |
 | 持久化 | SQLite checkpoint 链 | SQLite | — |
-| MCP | 评估中 | 已支持 | — |
+| MCP | Phase 1（规划中） | 已支持 | — |
+| Rewind | Phase 2（规划中） | 已支持 | — |
+| Hooks | Phase 3（规划中） | 已支持 | — |
 
 ## 关联文档
 
