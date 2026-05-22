@@ -13,7 +13,6 @@ export type AgentEvent =
   | { type: "compact_begin"; data: { reason: string } }
   | { type: "compact_end"; data: { summary: string } }
   | { type: "cache_metrics"; data: CacheMetricsPayload }
-  | { type: "retry"; data: { attempt: number; reason: string } }
   | { type: "error"; data: { message: string; recoverable: boolean } }
   | { type: "interrupt"; data: unknown }
   | { type: "update"; data: unknown }

@@ -22,7 +22,6 @@ export type Step =
   | { type: "expect-mode"; mode: "approval" | "question" }
   | { type: "assert-snapshot" }
   | { type: "error"; message: string }
-  | { type: "retry"; attempt: number; reason: string }
   | { type: "model-retry"; attempt: number; error: string; delayMs: number }
   | { type: "file-change"; path: string; kind: "add" | "edit" | "delete"; linesAdded?: number; linesRemoved?: number; preview?: string }
   | { type: "state-change"; phase?: "planning" | "building"; authorization?: "default" | "full_access"; plan?: { name: string; description: string; steps: { step: string; status: "pending" | "in_progress" | "completed" }[] } | null }

@@ -192,10 +192,6 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
           if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
           return { ...state, status: next };
         }
-        case "retry": {
-          const block: OutputBlock = { id: nextId++, kind: "text", content: `⚠ Retry #${event.data.attempt}: ${event.data.reason}` };
-          return { ...state, blocks: [...state.blocks, block] };
-        }
         case "model_retry": {
           const block: OutputBlock = { id: nextId++, kind: "text", content: `⟳ Model retry #${event.data.attempt} (${event.data.delayMs}ms): ${event.data.error}` };
           return { ...state, blocks: [...state.blocks, block] };

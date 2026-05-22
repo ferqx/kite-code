@@ -271,14 +271,6 @@ async function runStep(
       await tick();
       break;
 
-    case "retry":
-      dispatch({
-        type: "EVENT",
-        event: { type: "retry", data: { attempt: step.attempt, reason: step.reason } },
-      });
-      await tick();
-      break;
-
     case "model-retry":
       dispatch({
         type: "EVENT",

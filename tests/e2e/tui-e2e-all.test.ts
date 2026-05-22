@@ -129,17 +129,17 @@ describe(`${label} Lifecycle events`, () => {
     expect(result.snapshots[0].ansi).toContain("Recoverable error");
   });
 
-  test("retry event renders", async () => {
+  test("model_retry event renders", async () => {
     const result = await runTuiE2E({
       terminalWidth: 120,
       freeze: ["timer", "cacheHitRate", "cacheTokenCount"],
       steps: [
-        { type: "retry", attempt: 1, reason: "Connection timeout" },
+        { type: "model-retry", attempt: 1, error: "Connection timeout", delayMs: 0 },
         { type: "agent-done" },
       ],
     });
     expect(result.pass).toBe(true);
-    expect(result.snapshots[0].ansi).toContain("Retry");
+    expect(result.snapshots[0].ansi).toContain("Model retry");
   });
 
   test("compaction begin/end", async () => {
