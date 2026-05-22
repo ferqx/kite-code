@@ -402,7 +402,8 @@ export async function generateSessionName(firstMessage: string): Promise<string>
     if (cleaned.length >= 2 && cleaned.length <= 30) return cleaned;
     return cleaned.slice(0, 30) || "";
   } catch {
-    return ""; // caller handles fallback to truncation
+    return cleanMessage.slice(0, 30) || "";
+    // 原: return ""; // caller handles fallback to truncation
   }
 }
 
