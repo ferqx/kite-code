@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parse } from "jsonc-parser";
 import { z } from "zod";
 import { defaultConfigPath } from "./paths";
+import type { McpServerConfig } from "../mcp/types";
 
 const providerSchema = z.object({
   type: z.enum(["deepseek", "openai", "openai-compatible", "ollama"]).optional(),
@@ -121,4 +123,139 @@ function resolveProviderBaseURL(
     return "http://localhost:11434";
   }
   throw new Error(`Model provider '${providerName}' requires baseURL`);
+}
+
+/** MCP configuration result */
+export interface McpConfig {
+  servers: Record<string, McpServerConfig>;
+}
+
+/**
+ * Load MCP server configurations from:
+ * 1. openpx.jsonc -> mcpServers section
+ * 2. .mcp.json in project root (merged, doesn't override same-name servers)
+ */
+export function loadMcpConfig(configPath?: string): McpConfig {
+  const servers: Record<string, McpServerConfig> = {};
+
+  // 1. openpx.jsonc
+  const primaryPath = configPath ?? defaultConfigPath();
+  if (existsSync(primaryPath)) {
+    const raw = readFileSync(primaryPath, "utf8");
+    const parsed = parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "mcpServers" in (parsed as object)
+    ) {
+      const mcpServers = (parsed as Record<string, unknown>).mcpServers;
+      if (mcpServers && typeof mcpServers === "object") {
+        for (const [name, cfg] of Object.entries(
+          mcpServers as Record<string, unknown>,
+        )) {
+          if (cfg && typeof cfg === "object") {
+            servers[name] = normalizeMcpServerConfig(
+              cfg as Record<string, unknown>,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // 2. .mcp.json
+  const projectMcpPath = resolve(process.cwd(), ".mcp.json");
+  if (existsSync(projectMcpPath)) {
+    const raw = readFileSync(projectMcpPath, "utf8");
+    const parsed = parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "mcpServers" in (parsed as object)
+    ) {
+      const mcpServers = (parsed as Record<string, unknown>).mcpServers;
+      if (mcpServers && typeof mcpServers === "object") {
+        for (const [name, cfg] of Object.entries(
+          mcpServers as Record<string, unknown>,
+        )) {
+          if (!servers[name] && cfg && typeof cfg === "object") {
+            servers[name] = normalizeMcpServerConfig(
+              cfg as Record<string, unknown>,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return { servers };
+}
+
+/** Normalize a raw MCP server config object */
+function normalizeMcpServerConfig(
+  raw: Record<string, unknown>,
+): McpServerConfig {
+  const type: McpServerConfig["type"] =
+    raw.type === "http" ? "http" : "stdio";
+
+  const config: McpServerConfig = { type };
+
+  if (typeof raw.command === "string") {
+    config.command = expandEnvVars(raw.command);
+  }
+  if (Array.isArray(raw.args)) {
+    config.args = raw.args
+      .filter((a): a is string => typeof a === "string")
+      .map(expandEnvVars);
+  }
+  if (raw.url && typeof raw.url === "string") {
+    config.url = expandEnvVars(raw.url);
+  }
+  if (raw.env && typeof raw.env === "object") {
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(
+      raw.env as Record<string, unknown>,
+    )) {
+      if (typeof v === "string") {
+        env[k] = expandEnvVars(v);
+      }
+    }
+    config.env = env;
+  }
+  if (raw.headers && typeof raw.headers === "object") {
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(
+      raw.headers as Record<string, unknown>,
+    )) {
+      if (typeof v === "string") {
+        headers[k] = expandEnvVars(v);
+      }
+    }
+    config.headers = headers;
+  }
+  if (raw.risk === "read") {
+    config.risk = "read";
+  }
+
+  return config;
+}
+
+/**
+ * Expand environment variable references in a string.
+ * Supports ${VAR} and ${VAR:-default} syntax.
+ */
+export function expandEnvVars(value: string): string {
+  return value.replace(
+    /\$\{(\w+)(?::-([^}]*))?\}/g,
+    (_match, varName: string, defaultValue: string | undefined) => {
+      const envValue = process.env[varName];
+      if (envValue !== undefined && envValue !== "") {
+        return envValue;
+      }
+      if (defaultValue !== undefined) {
+        return defaultValue;
+      }
+      return "";
+    },
+  );
 }
