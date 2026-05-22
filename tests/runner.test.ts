@@ -6,6 +6,7 @@ import {
   normalizeGraphStream,
   taskMessageForInitialAccess,
   chunkToEvents,
+  isRecoverableError,
 } from "../src/core/runner";
 import { createPromptCacheStandardTracker } from "../src/core/cache-metrics";
 import type { AgentEvent } from "../src/protocol/index";
@@ -194,5 +195,55 @@ describe("checkpointer close safety", () => {
     saver.close();
     // 第二次 close() 不应抛出异常 / Second close() should not throw
     expect(() => saver.close()).not.toThrow();
+  });
+});
+
+describe("isRecoverableError", () => {
+  test("returns true for ETIMEDOUT", () => {
+    expect(isRecoverableError(new Error("connect ETIMEDOUT"))).toBe(true);
+  });
+
+  test("returns true for ECONNRESET", () => {
+    expect(isRecoverableError(new Error("read ECONNRESET"))).toBe(true);
+  });
+
+  test("returns true for 429", () => {
+    expect(isRecoverableError(new Error("HTTP 429 Too Many Requests"))).toBe(true);
+  });
+
+  test("returns true for 502/503", () => {
+    expect(isRecoverableError(new Error("503 Service Unavailable"))).toBe(true);
+    expect(isRecoverableError(new Error("502 Bad Gateway"))).toBe(true);
+  });
+
+  test("returns true for overloaded", () => {
+    expect(isRecoverableError(new Error("Model overloaded"))).toBe(true);
+  });
+
+  test("returns true for timeout", () => {
+    expect(isRecoverableError(new Error("Request timeout"))).toBe(true);
+  });
+
+  test("returns true for rate limit text", () => {
+    expect(isRecoverableError(new Error("Rate limit exceeded"))).toBe(true);
+  });
+
+  test("returns false for AbortError", () => {
+    const err = new Error("Aborted");
+    err.name = "AbortError";
+    expect(isRecoverableError(err)).toBe(false);
+  });
+
+  test("returns false for config errors", () => {
+    expect(isRecoverableError(new Error("Model provider 'x' requires apiKey"))).toBe(false);
+  });
+
+  test("returns false for non-Error types", () => {
+    expect(isRecoverableError("some string")).toBe(false);
+  });
+
+  test("is case-insensitive", () => {
+    expect(isRecoverableError(new Error("ETIMEDOUT"))).toBe(true);
+    expect(isRecoverableError(new Error("Rate Limit"))).toBe(true);
   });
 });

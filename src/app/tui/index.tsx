@@ -2,7 +2,7 @@ import React from "react";
 import { render } from "ink";
 import { loadAgentConfig, editorInputPath, type AgentConfig } from "@/core/config/index";
 import { createSandboxExecutor } from "@/core/sandbox/index";
-import { runAgent } from "@/core/runner";
+import { runAgent, isRecoverableError } from "@/core/runner";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
 import InputLine, { type EditorContentHandle } from "./components/InputLine";
@@ -197,7 +197,7 @@ function TuiBootstrap() {
       } catch (e: any) {
         provider.onEvent({
           type: "error",
-          data: { message: e?.message ?? String(e), recoverable: false },
+          data: { message: e?.message ?? String(e), recoverable: isRecoverableError(e) },
         });
         dispatch({ type: "SET_EXITED" });
       } finally {

@@ -96,6 +96,23 @@ async function readLastAuthorization(
 }
 
 
+/** 按错误类型分类是否为可恢复错误 / Classify whether an error is recoverable */
+export function isRecoverableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message?.toLowerCase() ?? "";
+    if (msg.includes("etimedout")) return true;         // TCP 超时
+    if (msg.includes("econnreset")) return true;        // 连接重置
+    if (msg.includes("429")) return true;               // 速率限制
+    if (msg.includes("503") || msg.includes("502")) return true; // 服务不可用
+    if (msg.includes("overloaded")) return true;        // 模型过载
+    if (msg.includes("timeout")) return true;           // 通用超时
+    if (msg.includes("rate limit")) return true;        // 速率限制文字
+    if (error.name === "AbortError") return false;      // 用户主动取消 → 不可恢复
+  }
+  return false;  // 默认不可恢复（配置/权限/未知错误）
+}
+
+
 export async function* runAgent(
   provider: UserInputProvider,
   input: RunAgentInput,
