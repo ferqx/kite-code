@@ -52,6 +52,8 @@ export interface RunAgentInput {
   signal?: AbortSignal;
   /** 思考级别，映射到 reasoning_effort API 参数 / Thinking level, mapped to reasoning_effort API param */
   thinkingLevel?: string | null;
+  skills?: import("@/core/skills/types").SkillManifest[];
+  skillOptions?: import("@/core/skills/types").SkillScanOptions;
 }
 
 export interface StreamCodeAgentInput {
@@ -124,6 +126,8 @@ export async function* runAgent(
     authorizationOverride: input.authorizationOverride,
     model: input.model,
     thinkingLevel: input.thinkingLevel,
+    skills: input.skills,
+    skillOptions: input.skillOptions,
   });
 
   const signal = input.signal;
