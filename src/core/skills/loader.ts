@@ -8,6 +8,8 @@ import type { SkillManifest, ValidatedSkill, SkillScanOptions } from "./types";
 function parseFrontmatter(
   content: string,
 ): { fields: Record<string, string>; body: string } | null {
+  // Normalize line endings: CRLF / CR -> LF
+  content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!content.startsWith("---")) return null;
   const afterStart = content.slice(3);
   const nextNewline = afterStart.indexOf("\n");
@@ -36,6 +38,7 @@ function parseFrontmatter(
         while (i < lines.length && (lines[i].startsWith("  ") || lines[i].trim() === "")) {
           i++;
         }
+        i--; // compensate for the outer i++
         continue;
       }
       // Strip surrounding quotes

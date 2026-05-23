@@ -145,6 +145,40 @@ Body here.`);
     const ms = scanSkills(opts);
     expect(ms).toHaveLength(1);
   });
+
+  it("skips name ending with hyphen", () => {
+    const opts = makeOptions(tmp);
+    writeSkill(opts.projectOpenpxSkillsDir, "bad-", { name: "bad-", description: "Ends with hyphen" });
+    expect(scanSkills(opts)).toEqual([]);
+  });
+
+  it("handles CRLF line endings", () => {
+    const opts = makeOptions(tmp);
+    const dir = join(opts.projectOpenpxSkillsDir, "crlf-skill");
+    mkdirSync(dir, { recursive: true });
+    // Use \r\n line endings
+    writeFileSync(join(dir, "SKILL.md"), "---\r\nname: crlf-skill\r\ndescription: CRLF test\r\n---\r\n\r\nWorks with Windows line endings.");
+    const ms = scanSkills(opts);
+    expect(ms).toHaveLength(1);
+    expect(ms[0].name).toBe("crlf-skill");
+  });
+
+  it("parses fields after metadata block", () => {
+    const opts = makeOptions(tmp);
+    const dir = join(opts.projectOpenpxSkillsDir, "after-meta");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), `---
+name: after-meta
+metadata:
+  author: test
+description: Should be parsed
+---
+Body.`);
+    const ms = scanSkills(opts);
+    expect(ms).toHaveLength(1);
+    expect(ms[0].name).toBe("after-meta");
+    expect(ms[0].description).toBe("Should be parsed");
+  });
 });
 
 describe("getSkillContent", () => {
