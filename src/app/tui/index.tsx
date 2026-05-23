@@ -13,6 +13,9 @@ import { useSlashCommand } from "./hooks/useSlashCommand";
 import { loadSession } from "../../core/persistence/sessions.js";
 import { defaultCheckpointPath } from "../../core/config/paths.js";
 import { BunSqliteSaver } from "../../core/persistence/checkpoint.js";
+import { scanSkills, getSkillContent } from "@/core/skills/loader";
+import { skillDirs } from "@/core/config/paths";
+import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 
 function resolveModelForResume(
   currentConfig: AgentConfig,
@@ -42,6 +45,10 @@ function TuiBootstrap() {
   const [mcpPromptRegistry, setMcpPromptRegistry] = React.useState<
     Map<string, { server: string; prompt: { name: string; description?: string } }> | undefined
   >(undefined);
+  const skillManifestsRef = React.useRef<SkillManifest[]>([]);
+  const skillOptionsRef = React.useRef<SkillScanOptions | null>(null);
+  const pendingSkillsRef = React.useRef<string[]>([]);
+  const runTaskRef = React.useRef<(task: string) => Promise<void>>(async () => {});
 
   const dispatchSessionLoad = React.useCallback(
     async (action: any) => {
@@ -192,6 +199,20 @@ function TuiBootstrap() {
     };
   }, []);
 
+  // Skills loader: scan on mount
+  React.useEffect(() => {
+    const opts = skillDirs(workspace);
+    skillOptionsRef.current = opts;
+    const manifests = scanSkills(opts);
+    skillManifestsRef.current = manifests;
+    dispatch({ type: "SET_SKILL_MANIFESTS", manifests });
+  }, [workspace, dispatch]);
+
+  // Keep pendingSkills ref in sync for use in runTask callback
+  React.useEffect(() => {
+    pendingSkillsRef.current = state.pendingSkills;
+  }, [state.pendingSkills]);
+
   // When Ctrl+C is pressed during agent loop (with no interrupt), abort via signal
   React.useEffect(() => {
     if (state.ctrlCPressed && agentLoopActiveRef.current && !state.interrupt) {
@@ -212,11 +233,18 @@ function TuiBootstrap() {
     [dispatch]
   );
 
+  const runTaskBridge = React.useCallback((task: string) => {
+    runTaskRef.current?.(task);
+  }, []);
+
   const handleSlashCommand = useSlashCommand(
     dispatch,
     handleExit,
     () => { provider.compactRequested = true; },
     mcpPromptRegistry,
+    skillManifestsRef.current,
+    skillOptionsRef.current ?? undefined,
+    runTaskBridge,
   );
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
@@ -243,10 +271,17 @@ function TuiBootstrap() {
       // Each turn sends only the current message. The checkpoint maintains
       // the full conversation history — runAgent reads it automatically.
       // conversationHistoryRef accumulates shell command outputs for context.
+      // Prepend any activated skills
+      let pendingSkillsContent = "";
+      if (pendingSkillsRef.current.length > 0) {
+        pendingSkillsContent = pendingSkillsRef.current.join("");
+        dispatch({ type: "DEACTIVATE_SKILL", name: "" }); // clear after injection
+      }
+
       const shellContext = conversationHistoryRef.current.length > 0
         ? "\n" + conversationHistoryRef.current.join("\n")
         : "";
-      const fullTask = task + shellContext;
+      const fullTask = pendingSkillsContent + task + shellContext;
 
       const shellExecutor = createSandboxExecutor({ enabled: true, workspace });
 
@@ -264,6 +299,8 @@ function TuiBootstrap() {
         shellExecutor,
         signal: abortController.signal,
         thinkingLevel: thinkingLevelRef.current,
+        skills: skillManifestsRef.current,
+        skillOptions: skillOptionsRef.current ?? undefined,
       });
 
       let aborted = false;
@@ -304,6 +341,8 @@ function TuiBootstrap() {
     },
     [provider, workspace, config, dispatch]
   );
+  // Keep ref in sync so slash-command bridge can invoke latest runTask
+  runTaskRef.current = runTask;
 
   // Execute revert/fork when user selects from /rewind panel
   const runRewind = React.useCallback(
