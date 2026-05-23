@@ -1,5 +1,7 @@
 import { join, resolve } from "node:path";
 import { loadAgentConfig, defaultCheckpointPath } from "@/core/config/index";
+import { skillDirs } from "@/core/config/paths";
+import { scanSkills, getSkillContent } from "@/core/skills/loader";
 import { createSandboxExecutor } from "@/core/sandbox/index";
 import { runAgent } from "@/core/runner";
 import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from "@/protocol/events";
@@ -22,6 +24,7 @@ export interface ParsedArgs {
   replacementCommand?: string;
   answer?: string;
   sandbox: boolean;
+  skills: string[];
 }
 
 export async function main(): Promise<void> {
@@ -42,10 +45,27 @@ export async function main(): Promise<void> {
       ? { current: args.authorizationMode }
       : undefined;
 
+  // Load skill contents and prepend to task
+  let task = args.task ?? "";
+  let manifests: import("@/core/skills/types").SkillManifest[] = [];
+  let skillOptions: import("@/core/skills/types").SkillScanOptions | undefined;
+  if (args.skills.length > 0) {
+    skillOptions = skillDirs(args.workspace);
+    manifests = scanSkills(skillOptions);
+    const skillContents: string[] = [];
+    for (const name of args.skills) {
+      const result = getSkillContent(manifests, name, skillOptions);
+      if (result) {
+        skillContents.push(`[SKILL: ${result.name}]\n\n${result.content}\n\n---\n\n`);
+      }
+    }
+    task = skillContents.join("") + task;
+  }
+
   const provider = createCliProvider(args);
 
   const generator = runAgent(provider, {
-    task: args.task ?? "",
+    task,
     userId: args.userId,
     threadId: args.threadId,
     workspace: args.workspace,
@@ -54,6 +74,8 @@ export async function main(): Promise<void> {
     mode: args.mode,
     shellExecutor,
     authorizationOverride,
+    skills: manifests,
+    skillOptions,
     resume: args.command === "resume"
       ? (
         args.answer === undefined
@@ -134,6 +156,17 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const replacementCommand = optionalValue("--replace-command");
   const approvalGrant = parseApprovalGrant(argv);
 
+  const multi = (flag: string): string[] => {
+    const values: string[] = [];
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === flag && i + 1 < argv.length) {
+        values.push(argv[i + 1]);
+        i++;
+      }
+    }
+    return values;
+  };
+
   return {
     command,
     task: command === "run" ? value("--task", positionalTask(argv)) : "",
@@ -149,6 +182,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     replacementCommand,
     answer,
     sandbox: !noSandbox,
+    skills: multi("--skill"),
   };
 }
 
@@ -161,7 +195,7 @@ function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
 
 function positionalTask(argv: string[]): string {
   if (argv[0] !== "run") return "";
-  const optionNamesWithValues = new Set(["--task", "--thread", "--user", "--workspace", "--checkpoints", "--mode", "--answer", "--approval-hash", "--replace-command"]);
+  const optionNamesWithValues = new Set(["--task", "--thread", "--user", "--workspace", "--checkpoints", "--mode", "--answer", "--approval-hash", "--replace-command", "--skill"]);
   const parts: string[] = [];
   for (let index = 1; index < argv.length; index++) {
     const item = argv[index];
@@ -199,6 +233,7 @@ Options:
   --workspace <path>     Tool workspace
   --checkpoints <path>   SQLite checkpoint path
   --mode <mode>          auto, read-only, write, plan, or builder
+  --skill <name>         Activate a skill (repeatable)
   --approve              Approve tool call on resume
   --approve-same-command Approve same future commands
   --full-access          Allow all future shell_execute

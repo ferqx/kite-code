@@ -106,4 +106,22 @@ describe("cli argument parsing", () => {
     expect(args.mode).toBe("read-only");
     expect(legacyArgs.mode).toBe("plan");
   });
+
+  // 验证 --skill 参数解析为单值 / Verify --skill flag is parsed
+  test("parses --skill flag", () => {
+    const result = parseArgs(["run", "--task", "fix", "--skill", "tdd"]);
+    expect(result.skills).toContain("tdd");
+  });
+
+  // 验证多个 --skill 参数解析为数组，保持顺序 / Verify multiple --skill flags parse as ordered array
+  test("parses multiple --skill flags", () => {
+    const result = parseArgs(["run", "--task", "fix", "--skill", "tdd", "--skill", "debugging"]);
+    expect(result.skills).toEqual(["tdd", "debugging"]);
+  });
+
+  // 验证未提供 --skill 时 skills 字段默认为空数组 / Verify skills defaults to empty array when not provided
+  test("defaults skills to empty array", () => {
+    const result = parseArgs(["run", "--task", "fix"]);
+    expect(result.skills).toEqual([]);
+  });
 });
