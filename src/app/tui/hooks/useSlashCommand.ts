@@ -1,6 +1,8 @@
 import { useCallback } from "react";
 import type { Dispatch } from "react";
 import { MODEL_NAMES } from "./useSlashSuggestions";
+import { getSkillContent } from "@/core/skills/loader";
+import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 
 export type SlashAction =
   | { type: "thinking" }
@@ -50,6 +52,9 @@ export function useSlashCommand(
   onExit?: () => void,
   onCompactRequest?: () => void,
   mcpPromptRegistry?: ReadonlyMap<string, { server: string; prompt: { name: string; description?: string; arguments?: any[] } }>,
+  skillManifests?: SkillManifest[],
+  skillOptions?: SkillScanOptions,
+  onRunTask?: (task: string) => void,
 ) {
   return useCallback((input: string): boolean => {
     const action = parseSlashCommand(input);
@@ -121,9 +126,28 @@ export function useSlashCommand(
             return true;
           }
         }
+        // Check skills
+        const raw = action.raw;
+        if (action.type === "unknown" && skillManifests && skillOptions) {
+          const parts = raw.slice(1).trim().split(/\s+/);
+          const skillName = parts[0];
+          const matched = skillManifests.find((s) => s.name === skillName);
+          if (matched) {
+            const skillResult = getSkillContent(skillManifests, skillName, skillOptions);
+            if (skillResult) {
+              const taskPart = parts.slice(1).join(" ");
+              dispatch({ type: "ACTIVATE_SKILL", name: skillResult.name, content: skillResult.content });
+              if (taskPart && onRunTask) {
+                const combined = skillResult.content + "\n\n---\n\nUser task: " + taskPart;
+                onRunTask(combined);
+              }
+            }
+            return true;
+          }
+        }
         return false;
       }
     }
     return true;
-  }, [dispatch, onExit, onCompactRequest, mcpPromptRegistry]);
+  }, [dispatch, onExit, onCompactRequest, mcpPromptRegistry, skillManifests, skillOptions, onRunTask]);
 }

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import type { SkillManifest } from "@/core/skills/types";
 
 export interface SlashCommandDef {
   name: string;
@@ -37,7 +38,10 @@ export interface SlashSuggestionsResult {
   items: SuggestionItem[];
 }
 
-export function useSlashSuggestions(inputValue: string) {
+export function useSlashSuggestions(
+  inputValue: string,
+  skillManifests?: SkillManifest[],
+) {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const result = useMemo((): SlashSuggestionsResult | null => {
@@ -64,6 +68,21 @@ export function useSlashSuggestions(inputValue: string) {
         cmd.name.startsWith(partial) ||
         cmd.aliases.some((a) => a.startsWith(partial))
     );
+
+    // Also check skill manifests
+    if (skillManifests && skillManifests.length > 0) {
+      const skillMatches = skillManifests
+        .filter((s) => s.name.startsWith(partial))
+        .map((s) => ({
+          name: s.name,
+          aliases: [] as string[],
+          description: s.description,
+        }));
+
+      if (skillMatches.length > 0) {
+        commands.push(...skillMatches);
+      }
+    }
 
     if (commands.length === 0) return null;
 
