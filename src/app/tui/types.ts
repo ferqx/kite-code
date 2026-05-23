@@ -37,6 +37,8 @@ export interface TuiState {
   showRewind: boolean;
   checkpoints: import("@/core/persistence/checkpoint").CheckpointEntry[];
   rewindCounter: number;
+  pendingSkills: string[];
+  skillManifests: import("@/core/skills/types").SkillManifest[];
   ctrlCPressed: boolean;
   sessionKey: number;
   exitRequested: boolean;

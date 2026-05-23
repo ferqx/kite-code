@@ -61,7 +61,11 @@ export type Action =
   | { type: "HIDE_REWIND" }
   | { type: "REVERT_TO_CHECKPOINT"; checkpointId: string }
   | { type: "FORK_FROM_CHECKPOINT"; checkpointId: string }
-  | { type: "SET_CHECKPOINTS"; checkpoints: CheckpointEntry[] };
+  | { type: "SET_CHECKPOINTS"; checkpoints: CheckpointEntry[] }
+  | { type: "ACTIVATE_SKILL"; name: string; content: string }
+  | { type: "DEACTIVATE_SKILL"; name: string }
+  | { type: "LIST_SKILLS" }
+  | { type: "SET_SKILL_MANIFESTS"; manifests: import("@/core/skills/types").SkillManifest[] };
 
 let nextId = 1;
 
@@ -360,6 +364,37 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return { ...state, showRewind: false, checkpoints: [] };
     case "SET_CHECKPOINTS":
       return { ...state, checkpoints: action.checkpoints };
+    case "SET_SKILL_MANIFESTS":
+      return { ...state, skillManifests: action.manifests };
+    case "ACTIVATE_SKILL": {
+      const content = `[SKILL: ${action.name}]\n\n${action.content}\n\n---\n\n`;
+      return { ...state, pendingSkills: [...state.pendingSkills, content] };
+    }
+    case "DEACTIVATE_SKILL":
+      return { ...state, pendingSkills: [] };
+    case "LIST_SKILLS": {
+      if (state.skillManifests.length === 0) {
+        return {
+          ...state,
+          blocks: [...state.blocks, {
+            id: Date.now(),
+            kind: "text" as const,
+            content: "No skills available.",
+          }],
+        };
+      }
+      const lines = state.skillManifests.map(
+        (s) => `- **${s.name}**: ${s.description} (${s.source}/${s.origin})`,
+      );
+      return {
+        ...state,
+        blocks: [...state.blocks, {
+          id: Date.now(),
+          kind: "text" as const,
+          content: "## Available Skills\n\n" + lines.join("\n"),
+        }],
+      };
+    }
     case "REVERT_TO_CHECKPOINT":
       return { ...state, showRewind: false, rewindCounter: state.rewindCounter + 1 };
     case "FORK_FROM_CHECKPOINT":
@@ -566,6 +601,8 @@ const initialState: TuiState = {
   exitRequested: false,
   editorRequested: false,
   sessionError: false,
+  pendingSkills: [],
+  skillManifests: [],
 };
 
 export function createInitialState(): TuiState {

@@ -868,6 +868,8 @@ describe("App", () => {
       exitRequested: false,
       editorRequested: false,
       sessionError: false,
+      pendingSkills: [],
+      skillManifests: [],
       ...overrides,
     };
   }
