@@ -129,7 +129,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
 
     try {
-      const { state: result, contextRetries, compactionPerformed: autoCompact } = await invokeModel(model, effectiveState, tools);
+      const { state: result, contextRetries, compactionPerformed: autoCompact } = await invokeModel(model, effectiveState, tools, input.skills);
       if (autoCompact && !compactionPerformed) {
         compactionPerformed = autoCompact;
       }
@@ -310,6 +310,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       override,
       input.mcpManager,
       mcpRiskOverride,
+      input.skills,
+      input.skillOptions,
     );
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
@@ -379,8 +381,9 @@ async function invokeModel(
   model: ReturnType<typeof createChatModel>,
   state: CodeAgentState,
   tools: ReturnType<typeof createAgentTools>,
+  skills?: import("@/core/skills/types").SkillManifest[],
 ): Promise<InvokeModelResult> {
-  let prepared = prepareModelContext("agent", state);
+  let prepared = prepareModelContext("agent", state, skills);
   const contextRetries: ModelRetryEvent[] = [];
   let compactionPerformed: { reason: string; summary: string } | null = null;
 
@@ -398,7 +401,7 @@ async function invokeModel(
       delayMs: 0,
     });
     const compacted = forceContextCompaction(state.messages);
-    const retryMessages = rebuildMessages("agent", state, compacted.messages);
+    const retryMessages = rebuildMessages("agent", state, compacted.messages, skills);
     try {
       response = await bindAgentTools(model, tools)
         .invoke(retryMessages) as AIMessage;
@@ -418,7 +421,7 @@ async function invokeModel(
       });
       const summaryMsg = await generateLLMSummary(model, state.messages);
       const llmMessages = [new HumanMessage(summaryMsg), ...compacted.messages.slice(-8)];
-      const llmRetry = rebuildMessages("agent", state, llmMessages);
+      const llmRetry = rebuildMessages("agent", state, llmMessages, skills);
       response = await bindAgentTools(model, tools)
         .invoke(llmRetry) as AIMessage;
       compactionPerformed = {
@@ -508,9 +511,10 @@ function rebuildMessages(
   role: "agent",
   state: CodeAgentState,
   conversationMessages: BaseMessage[],
+  skills?: import("@/core/skills/types").SkillManifest[],
 ): BaseMessage[] {
   const messages: BaseMessage[] = [];
-  messages.push(new SystemMessage(buildStaticSystemPrompt(role)));
+  messages.push(new SystemMessage(buildStaticSystemPrompt(role, skills)));
   messages.push(new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "" })));
   messages.push(...conversationMessages);
   if (state.workspaceAccess === "read-only") {

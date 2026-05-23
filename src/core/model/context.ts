@@ -51,28 +51,29 @@ export interface PreparedModelContext {
 }
 
 /** 构建模型消息列表 / Build model message list */
-export function buildModelMessages(role: AgentRole, state: ModelContextState) {
-  return prepareModelContext(role, state).messages;
+export function buildModelMessages(role: AgentRole, state: ModelContextState, skills?: SkillManifest[]) {
+  return prepareModelContext(role, state, skills).messages;
 }
 
 /** 准备模型上下文（组装系统提示词 + 对话消息，接近阈值时清理旧工具结果） / Prepare model context (assemble, clear old tool results when near threshold) */
 export function prepareModelContext(
   role: AgentRole,
   state: ModelContextState,
+  skills?: SkillManifest[],
 ): PreparedModelContext {
   let msgs = state.messages.length > 0
     ? state.messages
     : [new HumanMessage("")];
 
   // 工具结果清理：估计 token 接近窗口限制时清除旧工具结果 / Tool result clearing: clear old results when estimated tokens near window limit
-  if (estimatePromptChars(role, { ...state, messages: msgs }) > CLEAR_THRESHOLD_CHARS) {
+  if (estimatePromptChars(role, { ...state, messages: msgs }, skills) > CLEAR_THRESHOLD_CHARS) {
     msgs = clearOldToolResults(msgs, CLEAR_KEEP_RECENT);
   }
 
   return {
     contextSummary: state.contextSummary ?? "",
     messages: [
-      new SystemMessage(buildStaticSystemPrompt(role)),
+      new SystemMessage(buildStaticSystemPrompt(role, skills)),
       new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "" })),
       ...msgs,
       ...(state.workspaceAccess === "read-only"
@@ -151,8 +152,8 @@ export function buildDynamicSystemContext(state: ModelContextState): string {
 }
 
 /** 估算完整 prompt 的字符数，用于触发清理阈值 / Estimate full prompt character count for clearing threshold */
-function estimatePromptChars(role: AgentRole, state: ModelContextState): number {
-  let total = buildStaticSystemPrompt(role).length;
+function estimatePromptChars(role: AgentRole, state: ModelContextState, skills?: SkillManifest[]): number {
+  let total = buildStaticSystemPrompt(role, skills).length;
   total += buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "" }).length;
   for (const msg of state.messages) {
     total += textContent(msg.content).length;

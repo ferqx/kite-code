@@ -19,6 +19,8 @@ import {
 } from "./tool-policy";
 import type { PendingToolRequest } from "./tool-requests";
 import type { ToolExecutionResult } from "./tool-result";
+import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
+import { getSkillContent } from "@/core/skills/loader";
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
 export async function runApprovedTool(
@@ -34,6 +36,8 @@ export async function runApprovedTool(
   override?: AuthorizationOverride,
   mcpManager?: McpManager,
   mcpRiskOverride?: Record<string, "read">,
+  skillManifests?: SkillManifest[],
+  skillOptions?: SkillScanOptions,
 ): Promise<ToolExecutionResult> {
   const policy = evaluateToolPolicy({
     request,
@@ -153,6 +157,45 @@ export async function runApprovedTool(
       stdout: `Authorization mode set to: ${request.args.mode}`,
       stderr: "",
       authorization: newAuth,
+    });
+  }
+
+  if (request.name === "Skill") {
+    if (!skillManifests || !skillOptions) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: "Skill",
+        exitCode: -1,
+        stdout: "",
+        stderr: "Skills system not configured. No skill manifests available.",
+      });
+    }
+    const skillName = request.args.skill as string;
+    if (!skillName) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: "Skill",
+        exitCode: -1,
+        stdout: "",
+        stderr: "Skill name is required.",
+      });
+    }
+    const result = getSkillContent(skillManifests, skillName, skillOptions);
+    if (!result) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: "Skill",
+        exitCode: -1,
+        stdout: "",
+        stderr: `Skill not found: ${skillName}`,
+      });
+    }
+    return withFailureGuidance(request, {
+      ok: true,
+      command: `Skill ${skillName}`,
+      exitCode: 0,
+      stdout: `Skill loaded: ${result.name}\n\n${result.content}`,
+      stderr: "",
     });
   }
 
@@ -289,5 +332,9 @@ function toolUsageGuidance(request: PendingToolRequest): string {
       return "Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.";
     case "set_authorization_mode":
       return "Use set_authorization_mode only when the user explicitly requests a mode change. Choose 'full_access' for auto-execute without confirmation, or 'default' to restore confirmation requirements.";
+    case "Skill":
+      return "Use Skill with the name of a skill from the Available Skills list. The skill name must exactly match. Only use skills listed in the system prompt under Available Skills.";
+    default:
+      return "";
   }
 }
