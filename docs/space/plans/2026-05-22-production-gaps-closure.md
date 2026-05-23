@@ -1,7 +1,7 @@
 # 生产就绪补齐方案
 
 日期：2026-05-22
-状态：active（Phase 1 ✅ 已完成，Phase 2 📋 方案已确认、计划就绪待执行，Phase 3 ⏳ 待启动）
+状态：active（Phase 1 ✅ 已完成，Phase 2 ✅ 已完成，Phase 3 📋 Skills 系统设计已确认、待制定实施计划）
 参考：Claude Code MCP 实现、Rewind 模型、交互模式
 
 ---
@@ -339,64 +339,29 @@ emit({
 
 ---
 
-## Phase 3：Hooks + 自定义斜杠命令
+## Phase 3：Skills 系统
 
-> **优先级**：P2-P3
-> **目标**：扩展能力补齐
+> **优先级**：P1
+> **目标**：实现 agentskills.io 标准的 Skill 机制，聚焦 code agent 主功能完善
+> **设计文档**：[`understanding/2026-05-23-skills-system-design.md`](../understanding/2026-05-23-skills-system-design.md)
 
-### 3.1 Hooks 系统
+### 3.1 Skills 系统
 
-对齐 Claude Code hooks 模型。
+严格遵循 agentskills.io 开放标准。Skill 是按需加载的 Markdown 指令文件，通过 `Skill` 工具和 `/skill-name` 斜杠命令两种方式触发。
 
-**配置**：
-```jsonc
-// ~/.openpx/openpx.jsonc
-{
-  "hooks": {
-    "PreToolUse": [
-      { "matcher": "shell_execute:rm *", "command": "/usr/local/bin/block-rm.sh" }
-    ],
-    "PostToolUse": [
-      { "matcher": "", "command": "notify.sh" }
-    ]
-  }
-}
-```
+**存放路径**（按优先级）：
+- 项目 `.openpx/skills/` > `.agents/skills/`
+- 用户 `~/.openpx/skills/` > `~/.agents/skills/`
 
-**执行模型**：
-- Shell 脚本执行，exit code 控制行为
-  - `0`：放行
-  - `2`：阻断（stderr 作为阻断原因展示给用户）
-  - 其他：视为错误，放行
-- stdin 传入 JSON：工具名、参数、上下文
-- stdout 可选：JSON 可覆盖工具参数（PostToolUse）
+**两种触发方式**：
+- **Agent 自激活**：system prompt 中 Available Skills 区段列出所有 skill 的 name + description，Agent 根据任务判断匹配后调用 `Skill` 工具加载完整指令
+- **用户显式触发**：`/skill-name` 斜杠命令直接激活，支持 `/skill-name <task>` 组合形式
 
-**模块**：`src/core/hooks/` — 独立模块，被 tool-runner 调用。
+**容错策略**：所有 Skill 校验异常（格式错误、缺少字段、目录结构异常）静默跳过，不 throw、不 crash、不在 TUI 展示错误。
 
-### 3.2 自定义斜杠命令
+### 缓后：Hooks + 自定义斜杠命令
 
-**配置**：
-```jsonc
-{
-  "customCommands": {
-    "build": {
-      "name": "build",
-      "command": "npm run build",
-      "description": "Run project build"
-    },
-    "pr-review": {
-      "name": "pr-review",
-      "command": "gh pr list | head -20",
-      "description": "List recent pull requests"
-    }
-  }
-}
-```
-
-**TUI 集成**：
-- `useSlashCommand.ts` 扩展 — 合并内置命令和 `customCommands`
-- `/` 补全菜单自动包含自定义命令
-- 执行模型：shell 命令，输出作为 context 注入当前对话
+原 Phase 3（Hooks + 自定义斜杠命令）目前优先级不高，延后实施。Skills 系统实现后，自定义斜杠命令可复用其加载机制。
 
 ---
 
@@ -414,8 +379,9 @@ emit({
 | Phase 1 | MCP 安全策略 | `src/core/harness/tool-policy.ts` | `tests/tool-policy.test.ts` |
 | Phase 2 | MCP Resources | `src/core/mcp/`（扩展） | `tests/mcp.test.ts` 扩展 |
 | Phase 2 | Rewind | `src/core/persistence/checkpoint.ts` + `runner.ts` + `useSlashCommand.ts` + `useGlobalKeys.ts` | `tests/checkpoint.test.ts` + e2e |
-| Phase 3 | Hooks 系统 | `src/core/hooks/`（新建） | `tests/hooks.test.ts` |
-| Phase 3 | 自定义斜杠命令 | `useSlashCommand.ts` + `config/index.ts` | `tests/tui-reducer.test.ts` |
+| Phase 3 | Skills 系统 | `src/core/skills/`（新建 4 文件）+ `tools/definitions.ts` + `tool-policy.ts` + `context.ts` | `tests/skills/`（新建）+ `tests/tui-reducer.test.ts`（扩展） |
+| 缓后 | Hooks 系统 | `src/core/hooks/` | — |
+| 缓后 | 自定义斜杠命令 | `useSlashCommand.ts` + `config/index.ts` | — |
 
 ## 变更影响面
 
@@ -423,7 +389,8 @@ emit({
 |-------|---------|---------|
 | Phase 1 | ~9 | ~12 |
 | Phase 2 | ~1 | ~7 |
-| Phase 3 | ~4 | ~5 |
+| Phase 3 (Skills) | ~4 | ~13 |
+| 缓后 (Hooks+命令) | ~3 | ~3 |
 
 ## 相关文档
 

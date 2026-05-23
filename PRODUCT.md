@@ -45,10 +45,11 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 | MCP 协议支持 | Phase 1 | stdio + streamable HTTP transport，工具集成，对齐 Claude Code MCP |
 | 事件闭环 | Phase 1 | compact_begin/compact_end 事件接入 + compacting UI + retry 事件清理 |
 | 错误分类 | Phase 1 | runner 层区分可恢复/不可恢复错误 |
-| MCP Resources | Phase 2 | MCP resource 注入 agent 上下文 |
-| Rewind（会话回溯） | Phase 2 | `/rewind` 命令，利用 checkpoint 链回溯（对齐 Claude Code Rewind） |
-| Hooks 系统 | Phase 3 | PreToolUse / PostToolUse shell hook |
-| 自定义斜杠命令 | Phase 3 | `customCommands` 配置段，`/` 补全集成 |
+| MCP Resources | Phase 2 ✅ | MCP resource 注入 agent 上下文 |
+| Rewind（会话回溯） | Phase 2 ✅ | `/rewind` 命令，利用 checkpoint 链回溯（对齐 Claude Code Rewind） |
+| Skills 系统 | Phase 3 | 严格遵循 agentskills.io 开放标准，按需加载 Markdown 指令文件 |
+| Hooks 系统 | 缓后 | PreToolUse / PostToolUse shell hook |
+| 自定义斜杠命令 | 缓后 | `customCommands` 配置段，`/` 补全集成 |
 
 > 详见 [`docs/space/plans/2026-05-22-production-gaps-closure.md`](docs/space/plans/2026-05-22-production-gaps-closure.md)
 
@@ -78,9 +79,10 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 | 审批粒度 | 工具级 + 命令级 | 工具级 | 工具级 |
 | 架构分层 | protocol/core/app 三层 | 单体 | — |
 | 持久化 | SQLite checkpoint 链 | SQLite | — |
-| MCP | Phase 1（规划中） | 已支持 | — |
-| Rewind | Phase 2（规划中） | 已支持 | — |
-| Hooks | Phase 3（规划中） | 已支持 | — |
+| MCP | 已支持 | 已支持 | — |
+| Rewind | 已支持 | 已支持 | — |
+| Skills | Phase 3（规划中） | 已支持 | — |
+| Hooks | 缓后 | 已支持 | — |
 
 ## 关联文档
 

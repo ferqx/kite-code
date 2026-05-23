@@ -41,6 +41,7 @@
 | `understanding/2026-05-20-tui-known-issues.md` | understanding | TUI 已知问题清单：死事件类型、compacting 字段、recoverable 标志、手动 compaction 空壳、剩余未修复项。 |
 
 | `understanding/2026-05-22-rewind-mcp-resources-design.md` | understanding | Rewind（Revert + Fork）和 MCP Resources 的设计规范。 |
+| `understanding/2026-05-23-skills-system-design.md` | understanding | Skills 系统设计 — 对齐 agentskills.io 开放标准，按需加载 + Skill 工具 + Available Skills 区段 + /skill-name。 |
 
 ## Backlog（工作待办）
 
@@ -59,7 +60,8 @@
 | `plans/2026-05-22-production-gaps-closure.md` | active | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 📋 就绪，Phase3 ⏳。 |
 | `plans/2026-05-22-production-gaps-phase1.md` | completed | Phase 1 实施记录（8 commits）。 |
 | `plans/2026-05-22-production-gaps-phase2.md` | ready | Phase 2 实施计划（7 tasks）。Rewind + MCP Resources，待执行。 |
-| `plans/2026-05-22-skills-system.md` | draft | Skills 系统方案 — 对齐 Claude Code，按需加载+Skill 工具+Available Skills 区段。 |
+| `plans/2026-05-22-skills-system.md` | superseded | 被 [`understanding/2026-05-23-skills-system-design.md`](../understanding/2026-05-23-skills-system-design.md) 替代。 |
+| `plans/2026-05-23-skills-system-phase3.md` | draft | Phase 3 实施计划（Skills 系统），待制定。 |
 
 ## 完成执行记录
 

@@ -1,6 +1,6 @@
 # OpenPX 路线图
 
-最后更新：2026-05-22
+最后更新：2026-05-23
 
 ---
 
@@ -21,11 +21,11 @@ TUI 生产就绪 4 步路线图已完成，当前重点补齐遗留缺口，对�
 
 ---
 
-## 🔜 下一步：生产就绪补齐（3 阶段）
+## 🔜 下一步：生产就绪补齐
 
 > 详见 [`docs/space/plans/2026-05-22-production-gaps-closure.md`](docs/space/plans/2026-05-22-production-gaps-closure.md)
 
-### Phase 1：MCP 核心 + 事件闭环 + 错误分类
+### Phase 1：MCP 核心 + 事件闭环 + 错误分类 ✅
 
 **主攻方向 — MCP 协议支持**（对齐 Claude Code MCP 实现）：
 
@@ -42,17 +42,27 @@ TUI 生产就绪 4 步路线图已完成，当前重点补齐遗留缺口，对�
 - **Recoverable 错误分类**：runner 区分网络/超时（可恢复）和配置/权限（不可恢复）
 - **Session 命名修复**：API key 缺失时 fallback 为截断的用户输入
 
-### Phase 2：MCP Resources + Rewind
+### Phase 2：MCP Resources + Rewind ✅
 
 - **MCP Resources**：`resources/list` + `resources/read`，通过内置工具注入 agent 上下文
 - **Rewind（会话回溯）**：对齐 Claude Code `/rewind` 模型，基于已有 checkpoint 链的回溯
   - `/rewind` 命令 → checkpoint 列表 → fork 新会话
   - 不实现 Ctrl+Z/Ctrl+Y 逐次撤销
 
-### Phase 3：Hooks + 自定义斜杠命令
+### Phase 3：Skills 系统
 
-- **Hooks 系统**：`PreToolUse` / `PostToolUse` hook，shell 脚本 → exit code 控制放行/阻断
-- **自定义斜杠命令**：`customCommands` 配置段，`/` 补全菜单集成
+> 详见 [`docs/space/understanding/2026-05-23-skills-system-design.md`](docs/space/understanding/2026-05-23-skills-system-design.md)
+
+- **Skills 系统**：严格遵循 agentskills.io 开放标准，按需加载 Markdown 指令文件
+  - `Skill` 工具：Agent 根据 Available Skills 区段自主匹配调用
+  - `/skill-name` 斜杠命令：用户显式激活
+  - 4 目录扫描：`.openpx/skills/` > `.agents/skills/` > `~/.openpx/skills/` > `~/.agents/skills/`
+  - 容错优先：所有校验异常静默跳过，不阻断 TUI
+
+### 后续（暂缓）
+
+- **Hooks 系统**：`PreToolUse` / `PostToolUse` hook — 当前优先级不高，延后
+- **自定义斜杠命令**：`customCommands` 配置段 — Skills 系统实现后可复用其机制
 
 ---
 
