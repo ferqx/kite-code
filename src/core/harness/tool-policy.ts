@@ -212,6 +212,15 @@ export function evaluateToolPolicy(input: {
     });
   }
 
+  if (request.name === "Skill") {
+    return allow({
+      risk: "read",
+      reason: "Skill invocation loads read-only instructions into conversation context.",
+      userVisibleSummary: `Load skill: ${request.args.skill ?? "?"}`,
+      expectedEffects: ["Loads skill instructions into conversation context", "No side effects"],
+    });
+  }
+
   if (request.name === "set_authorization_mode") {
     // 切换到 full_access 必须经用户审批，防止 agent 自行提权
     // Switching to full_access must go through user approval to prevent self-escalation

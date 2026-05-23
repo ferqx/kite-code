@@ -17,6 +17,7 @@ import {
   SET_AUTHORIZATION_MODE_CONTRACT,
 } from "./tool-contracts";
 import { adaptMcpTool } from "@/core/mcp/tool-adapter";
+import { createSkillTool } from "@/core/skills/skill-tool";
 
 /** 创建 Agent 工具集输入 / Input for creating agent tools */
 export interface CreateAgentToolsInput {
@@ -26,6 +27,10 @@ export interface CreateAgentToolsInput {
   shellExecutor?: ShellExecutor;
   /** 可选 MCP 管理器 / Optional MCP manager */
   mcpManager?: import("@/core/mcp/manager").McpManager;
+  /** 可选技能清单 / Optional skill manifests */
+  skills?: import("@/core/skills/types").SkillManifest[];
+  /** 可选技能扫描选项 / Optional skill scan options */
+  skillOptions?: import("@/core/skills/types").SkillScanOptions;
 }
 
 /** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
@@ -152,12 +157,18 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     },
   );
 
+  let skillTool: ReturnType<typeof createSkillTool> | null = null;
+  if (input.skills && input.skills.length > 0 && input.skillOptions) {
+    skillTool = createSkillTool(input.skills, input.skillOptions);
+  }
+
   const builtinTools = [
     readFileTool,
     editFileTool,
     writeFileTool,
     shellExecute,
     readMcpResource,
+    ...(skillTool ? [skillTool] : []),
     createUpdatePlanTool(),
     createAskUserTool(),
     createSetAuthorizationModeTool(),
