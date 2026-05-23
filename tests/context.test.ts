@@ -11,6 +11,7 @@ import {
   summarizeMessages,
   formatCompactedSummary,
 } from "../src/core/model/summarizer";
+import type { SkillManifest } from "../src/core/skills/types";
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
 describe("model context protocol", () => {
@@ -474,5 +475,32 @@ describe("clearOldToolResults", () => {
     expect(tm.tool_call_id).toBe("abc");
     expect(tm.status).toBe("error");
     expect(String(tm.content)).toContain("cleared");
+  });
+});
+
+// ============================================================================
+// buildStaticSystemPrompt with skills / Tests for buildStaticSystemPrompt skill section
+// ============================================================================
+describe("buildStaticSystemPrompt with skills", () => {
+  test("includes Available Skills section when skills provided", () => {
+    const skills: SkillManifest[] = [
+      { name: "tdd", description: "Use when writing tests", source: "project", origin: ".openpx" },
+      { name: "debugging", description: "Use when debugging", source: "user", origin: ".agents" },
+    ];
+    const prompt = buildStaticSystemPrompt("agent", skills);
+    expect(prompt).toContain("## Available Skills");
+    expect(prompt).toContain("- tdd: Use when writing tests");
+    expect(prompt).toContain("- debugging: Use when debugging");
+    expect(prompt).toContain("`Skill`");
+  });
+
+  test("does not include section when skills empty", () => {
+    const prompt = buildStaticSystemPrompt("agent", []);
+    expect(prompt).not.toContain("## Available Skills");
+  });
+
+  test("does not include section when skills undefined (backwards compat)", () => {
+    const prompt = buildStaticSystemPrompt("agent");
+    expect(prompt).not.toContain("## Available Skills");
   });
 });

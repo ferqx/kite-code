@@ -16,6 +16,7 @@ import {
   formatCompactedSummary,
 } from "./summarizer";
 import systemPrompt from "@/core/prompts/system-prompt.txt";
+import type { SkillManifest } from "@/core/skills/types";
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = "agent";
 
@@ -121,8 +122,27 @@ export function forceContextCompaction(
 }
 
 /** 构建静态系统提示词 / Build static system prompt */
-export function buildStaticSystemPrompt(_role: AgentRole): string {
-  return systemPrompt;
+export function buildStaticSystemPrompt(
+  _role: AgentRole,
+  skills?: SkillManifest[],
+): string {
+  const base = systemPrompt;
+  if (!skills || skills.length === 0) return base;
+
+  const lines = skills.map((s) => `- ${s.name}: ${s.description}`);
+  const section = [
+    "",
+    "## Available Skills",
+    "",
+    "The following skills are available. Use the `Skill` tool to invoke a skill when its",
+    "description matches your task. Invoking a skill loads detailed instructions you MUST follow.",
+    "",
+    ...lines,
+    "",
+    "IMPORTANT: If there is even a 1% chance a skill might apply, invoke it.",
+  ].join("\n");
+
+  return base + section;
 }
 
 /** 构建动态系统上下文 / Build dynamic system context */
