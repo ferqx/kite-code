@@ -55,6 +55,7 @@ function fakeStatus() {
 
 function fakeState(overrides: Partial<TuiState> = {}): TuiState {
   return {
+    sessions: [], activeSessionId: null, focus: "input" as const, sidebarSelection: 0,
     blocks: [], interrupt: null,
     status: fakeStatus(),
     exited: false, running: false, compacting: false, runCount: 0,

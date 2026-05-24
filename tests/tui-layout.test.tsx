@@ -847,6 +847,10 @@ describe("OutputArea", () => {
 describe("App", () => {
   function fakeState(overrides: Partial<TuiState> = {}): TuiState {
     return {
+      sessions: [],
+      activeSessionId: null,
+      focus: "input" as const,
+      sidebarSelection: 0,
       blocks: [],
       interrupt: null,
       status: fakeStatus(),

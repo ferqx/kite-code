@@ -569,6 +569,10 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
 }
 
 const initialState: TuiState = {
+  sessions: [],
+  activeSessionId: null,
+  focus: "input" as const,
+  sidebarSelection: 0,
   blocks: [],
   interrupt: null,
   status: {

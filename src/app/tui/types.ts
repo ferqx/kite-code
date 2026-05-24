@@ -18,6 +18,13 @@ export interface FileChangeRecord {
 }
 
 export interface TuiState {
+  // ── 新增：多会话 ──
+  sessions: SessionSnapshot[];
+  activeSessionId: string | null;
+  focus: "input" | "sidebar";
+  sidebarSelection: number;
+
+  // ── 现有字段保留不变 ──
   blocks: OutputBlock[];
   interrupt: InterruptState | null;
   toolStartTimes?: Map<string, number>;
@@ -61,4 +68,16 @@ export interface StatusState {
   currentNode: string | null;
   modelName: string;
   thinkingMode: string;
+}
+
+export interface SessionSnapshot {
+  threadId: string;
+  name: string;
+  workspace: string;
+  active: boolean;
+  running: boolean;
+  pendingInterrupt: boolean;
+  plan: import("@/protocol/events").AgentPlan | null;
+  status: StatusState;
+  blocks: OutputBlock[];
 }
