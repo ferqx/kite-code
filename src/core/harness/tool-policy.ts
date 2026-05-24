@@ -330,6 +330,16 @@ export function evaluateToolPolicy(input: {
       });
     }
 
+    if (effectiveMode === "full_access") {
+      return allow({
+        risk: "mcp",
+        reason: "full_access is enabled for this thread.",
+        userVisibleSummary: `Run MCP tool under full_access: ${toolName}`,
+        expectedEffects: ["Calls external MCP server tool", "May have side effects"],
+        grantUsed: "full_access",
+      });
+    }
+
     return requireApproval({
       risk: "mcp",
       reason: "MCP tools require user approval by default.",

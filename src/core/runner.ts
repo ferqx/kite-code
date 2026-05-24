@@ -54,6 +54,8 @@ export interface RunAgentInput {
   thinkingLevel?: string | null;
   skills?: import("@/core/skills/types").SkillManifest[];
   skillOptions?: import("@/core/skills/types").SkillScanOptions;
+  /** 可选 MCP 管理器，提供 MCP 工具和资源 / Optional MCP manager, provides MCP tools and resources */
+  mcpManager?: import("@/core/mcp").McpManager;
 }
 
 export interface StreamCodeAgentInput {
@@ -71,6 +73,8 @@ export interface StreamCodeAgentInput {
   thinkingLevel?: string | null;
   /** 外部中止信号 / External abort signal */
   signal?: AbortSignal;
+  /** 可选 MCP 管理器 / Optional MCP manager */
+  mcpManager?: import("@/core/mcp").McpManager;
 }
 
 export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task"> {
@@ -128,6 +132,7 @@ export async function* runAgent(
     thinkingLevel: input.thinkingLevel,
     skills: input.skills,
     skillOptions: input.skillOptions,
+    mcpManager: input.mcpManager,
   });
 
   const signal = input.signal;
@@ -208,6 +213,7 @@ export interface RevertInput {
   signal?: AbortSignal;
   model?: SupportedChatModel;
   thinkingLevel?: string | null;
+  mcpManager?: import("@/core/mcp").McpManager;
 }
 
 /** 当前 thread 恢复到指定 checkpoint 继续执行 / Revert current thread to a checkpoint */
@@ -221,6 +227,7 @@ export async function* revertToCheckpoint(
     shellExecutor: input.shellExecutor,
     thinkingLevel: input.thinkingLevel ?? null,
     model: input.model,
+    mcpManager: input.mcpManager,
   });
 
   const signal = input.signal;
@@ -271,6 +278,7 @@ export interface ForkInput {
   signal?: AbortSignal;
   model?: SupportedChatModel;
   thinkingLevel?: string | null;
+  mcpManager?: import("@/core/mcp").McpManager;
 }
 
 /** 从旧 checkpoint fork 新会话 / Fork a new session from an old checkpoint */
@@ -284,6 +292,7 @@ export async function* forkFromCheckpoint(
     shellExecutor: input.shellExecutor,
     thinkingLevel: input.thinkingLevel ?? null,
     model: input.model,
+    mcpManager: input.mcpManager,
   });
 
   const signal = input.signal;
@@ -740,6 +749,7 @@ export async function* streamCodeAgent(
     shellExecutor: input.shellExecutor,
     authorizationOverride: input.authorizationOverride,
     thinkingLevel: input.thinkingLevel,
+    mcpManager: input.mcpManager,
   });
 
   const signal = input.signal;
@@ -786,6 +796,7 @@ export async function* resumeCodeAgent(
     shellExecutor: input.shellExecutor,
     authorizationOverride: input.authorizationOverride,
     thinkingLevel: input.thinkingLevel,
+    mcpManager: input.mcpManager,
   });
 
   const signal = input.signal;

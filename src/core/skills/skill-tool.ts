@@ -1,5 +1,5 @@
 import { tool } from "@langchain/core/tools";
-import { z } from "zod/v4";
+import { z } from "zod";
 import type { SkillManifest, SkillScanOptions } from "./types";
 import { getSkillContent } from "./loader";
 

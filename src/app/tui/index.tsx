@@ -4,6 +4,7 @@ import { loadAgentConfig, loadMcpConfig, editorInputPath, type AgentConfig } fro
 import { McpManager } from "@/core/mcp";
 import { createSandboxExecutor } from "@/core/sandbox/index";
 import { runAgent, isRecoverableError, revertToCheckpoint, forkFromCheckpoint } from "@/core/runner";
+import { buildRunAgentParams, buildRevertParams, buildForkParams } from "./run-agent";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
 import InputLine, { type EditorContentHandle } from "./components/InputLine";
@@ -165,6 +166,7 @@ function TuiBootstrap() {
 
   // Execute revert/fork when triggered by CheckpointSelector
   const prevRewindCounterRef = React.useRef(0);
+  const runRewindRef = React.useRef<((type: "revert" | "fork", checkpointId: string) => void) | null>(null);
   React.useEffect(() => {
     if (state.rewindCounter === prevRewindCounterRef.current) return;
     prevRewindCounterRef.current = state.rewindCounter;
@@ -174,8 +176,8 @@ function TuiBootstrap() {
     pendingRewindRef.current = null;
     if (!pending) return;
 
-    runRewind(pending.type, pending.checkpointId);
-  }, [state.rewindCounter, runRewind]);
+    runRewindRef.current?.(pending.type, pending.checkpointId);
+  }, [state.rewindCounter]);
 
   // MCP Manager lifecycle: create, connect, disconnect on unmount
   React.useEffect(() => {
@@ -281,27 +283,27 @@ function TuiBootstrap() {
       const shellContext = conversationHistoryRef.current.length > 0
         ? "\n" + conversationHistoryRef.current.join("\n")
         : "";
-      const fullTask = pendingSkillsContent + task + shellContext;
-
       const shellExecutor = createSandboxExecutor({ enabled: true, workspace });
 
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
       agentLoopActiveRef.current = true;
 
-      const generator = runAgent(provider, {
-        task: fullTask,
-        userId: "tui-user",
+      const runAgentParams = buildRunAgentParams({
+        task,
         threadId: threadIdRef.current,
         workspace,
-        checkpointPath: defaultCheckpointPath(),
         config,
         shellExecutor,
         signal: abortController.signal,
         thinkingLevel: thinkingLevelRef.current,
         skills: skillManifestsRef.current,
-        skillOptions: skillOptionsRef.current ?? undefined,
+        skillOptions: skillOptionsRef.current,
+        mcpManager: mcpManagerRef.current,
+        pendingSkillsContent,
+        shellContext,
       });
+      const generator = runAgent(provider, runAgentParams);
 
       let aborted = false;
 
@@ -368,32 +370,33 @@ function TuiBootstrap() {
       abortControllerRef.current = abortController;
       agentLoopActiveRef.current = true;
 
+      const baseRewindParams = {
+        threadId,
+        workspace,
+        config,
+        shellExecutor,
+        signal: abortController.signal,
+        thinkingLevel: thinkingLevelRef.current,
+        skills: skillManifestsRef.current,
+        skillOptions: skillOptionsRef.current,
+        mcpManager: mcpManagerRef.current,
+      };
+
       let generator: AsyncGenerator<any>;
       if (type === "revert") {
-        generator = revertToCheckpoint(provider, {
-          threadId,
+        generator = revertToCheckpoint(provider, buildRevertParams({
+          ...baseRewindParams,
           checkpointId,
-          workspace,
-          checkpointPath: defaultCheckpointPath(),
-          config,
-          shellExecutor,
-          signal: abortController.signal,
-          thinkingLevel: thinkingLevelRef.current,
-        });
+        }));
       } else {
         const newThreadId = `tui-${Date.now().toString(36)}`;
         threadIdRef.current = newThreadId;
-        generator = forkFromCheckpoint(provider, {
+        generator = forkFromCheckpoint(provider, buildForkParams({
+          ...baseRewindParams,
           oldThreadId: threadId,
           checkpointId,
           newThreadId,
-          workspace,
-          checkpointPath: defaultCheckpointPath(),
-          config,
-          shellExecutor,
-          signal: abortController.signal,
-          thinkingLevel: thinkingLevelRef.current,
-        });
+        }));
       }
 
       let aborted = false;
@@ -420,6 +423,7 @@ function TuiBootstrap() {
     },
     [provider, workspace, config, dispatch]
   );
+  runRewindRef.current = runRewind;
 
   // Execute !shell commands directly
   const runShell = React.useCallback(
