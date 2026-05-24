@@ -48,10 +48,9 @@ export class SessionRuntime {
   private _foreground = true;
   private _foregroundWake: (() => void) | null = null;
   private _proxyProvider: TuiUserInputProvider;
-  /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve */
+  /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
   private _pendingInterrupt: any = null;
   private _pendingResolve: ((action: any) => void) | null = null;
-  private _interruptTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     threadId: string,
@@ -197,10 +196,9 @@ export class SessionRuntime {
     this.eventBuffer.push(event);
   }
 
-  /** 创建代理提供器。interrupt 使用运行时自身状态，不与 realProvider 共享 pendingResolve */
+  /** 创建代理提供器。interrupt 使用运行时自身状态，永久等待用户处理 */
   private _createProxyProvider(realProvider: TuiUserInputProvider): TuiUserInputProvider {
     const self = this;
-    const FIVE_MINUTES = 300_000;
     return {
       onEvent(event: AgentEvent): void {
         if (self._foreground) {
@@ -229,17 +227,10 @@ export class SessionRuntime {
           }
           self.pendingInterrupt = false;
         }
-        // 使用运行时自身的中断状态，不共享 realProvider.pendingResolve
+        // 使用运行时自身的中断状态，永久等待用户处理
         self._pendingInterrupt = payload;
-        self._clearInterruptTimeout();
-        self._interruptTimeout = setTimeout(() => {
-          self._resolveInterrupt({ type: "cancel" as const });
-        }, FIVE_MINUTES);
         return new Promise<any>((resolve) => {
-          self._pendingResolve = (action: any) => {
-            self._clearInterruptTimeout();
-            resolve(action);
-          };
+          self._pendingResolve = resolve;
         });
       },
 
@@ -271,13 +262,6 @@ export class SessionRuntime {
       this._pendingResolve = null;
       this._pendingInterrupt = null;
       r(action);
-    }
-  }
-
-  private _clearInterruptTimeout(): void {
-    if (this._interruptTimeout !== null) {
-      clearTimeout(this._interruptTimeout);
-      this._interruptTimeout = null;
     }
   }
 }
