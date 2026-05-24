@@ -1,5 +1,7 @@
 import type { UserAction } from "../../src/protocol/actions";
 import type { OutputBlock } from "../../src/app/tui/types";
+import type { McpManager } from "../../src/core/mcp";
+import type { SkillManifest, SkillScanOptions } from "../../src/core/skills/types";
 
 export interface Scenario {
   terminalWidth: number;
@@ -103,5 +105,13 @@ export interface RealAgentScenario {
   autoApprove?: boolean;
   /** Files to create in temp workspace before running agent */
   workspaceFiles?: Record<string, string>;
+  /** Optional MCP manager (connected to real MCP servers for testing) */
+  mcpManager?: McpManager;
+  /** Optional skill manifests for the agent */
+  skills?: SkillManifest[];
+  /** Optional skill scan options for content loading */
+  skillOptions?: SkillScanOptions;
+  /** Called after workspace creation for scenario-specific setup (skills, etc.) */
+  onWorkspaceReady?: (workspace: string) => Promise<void> | void;
   expectations: SnapshotExpectation[];
 }

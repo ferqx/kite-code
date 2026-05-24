@@ -4,6 +4,7 @@ import {
   isReadOnlyShellCommand,
 } from "../src/core/tools/definitions";
 import { TOOL_CONTRACTS } from "../src/core/tools/tool-contracts";
+import type { SkillManifest } from "../src/core/skills/types";
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe("code agent tool definitions", () => {
@@ -166,6 +167,156 @@ describe("code agent tool definitions", () => {
     // && 和 2>&1 仍然允许
     expect(isReadOnlyShellCommand("rg pattern file 2>&1")).toBe(true);
     expect(isReadOnlyShellCommand("cat a.txt && cat b.txt")).toBe(true);
+  });
+
+  // ── Prompt cache: MCP tool ordering / MCP 工具顺序不破坏前缀缓存 ──
+
+  test("builtin tools unchanged when MCP is present — MCP appended at end", () => {
+    const baseNames = createAgentTools({ workspace: "/tmp" }).map((t) => t.name);
+
+    const mockMcpManager = {
+      getAllTools: () => [{
+        server: "test",
+        tool: {
+          name: "echo",
+          description: "Echo tool",
+          inputSchema: { type: "object", properties: { message: { type: "string" } } },
+        },
+      }],
+      callTool: async (_server: string, _tool: string, _args: Record<string, unknown>) => "ok",
+    };
+
+    const withMcp = createAgentTools({
+      workspace: "/tmp",
+      mcpManager: mockMcpManager as any,
+    });
+
+    const mcpNames = withMcp.map((t) => t.name);
+
+    // 内置工具集合不变
+    expect(mcpNames.slice(0, baseNames.length)).toEqual(baseNames);
+
+    // MCP 工具追加在末尾
+    expect(mcpNames[mcpNames.length - 1]).toBe("mcp__test__echo");
+
+    // 内置工具描述不变
+    const baseTool = createAgentTools({ workspace: "/tmp" }).find((t) => t.name === "read_file")!;
+    const mcpTool = withMcp.find((t) => t.name === "read_file")!;
+    expect(mcpTool.description).toBe(baseTool.description);
+  });
+
+  test("standalone mode preserves cache-stable tool schema", () => {
+    // 独立工具模式（无 MCP）应始终返回相同顺序的工具
+    const tools1 = createAgentTools({ workspace: "/tmp" });
+    const tools2 = createAgentTools({ workspace: "/tmp" });
+    expect(tools1.map((t) => t.name)).toEqual(tools2.map((t) => t.name));
+  });
+
+  // ── Prompt cache: Skill tool placement / Skill 工具插入不影响其他工具 ──
+
+  test("Skill tool inserted before update_plan, not at end", () => {
+    const skills: SkillManifest[] = [
+      { name: "tdd", description: "Test-driven development", source: "project", origin: ".openpx" },
+    ];
+
+    const tools = createAgentTools({
+      workspace: "/tmp",
+      skills,
+      skillOptions: {
+        projectOpenpxSkillsDir: "/tmp/.openpx/skills",
+        projectAgentsSkillsDir: "/tmp/.agents/skills",
+        userOpenpxSkillsDir: "/tmp/user-skills",
+        userAgentsSkillsDir: "/tmp/user-agents-skills",
+      },
+    });
+
+    const names = tools.map((t) => t.name);
+
+    // Skill 在 update_plan 之前
+    const skillIndex = names.indexOf("Skill");
+    const updatePlanIndex = names.indexOf("update_plan");
+    expect(skillIndex).toBeGreaterThan(-1);
+    expect(skillIndex).toBeLessThan(updatePlanIndex);
+
+    // read_mcp_resource 在 Skill 之前
+    const mcpResourceIndex = names.indexOf("read_mcp_resource");
+    expect(mcpResourceIndex).toBeLessThan(skillIndex);
+  });
+
+  test("builtin tools unchanged when Skill is present", () => {
+    const baseNames = createAgentTools({ workspace: "/tmp" }).map((t) => t.name);
+
+    const skills: SkillManifest[] = [
+      { name: "tdd", description: "TDD workflow", source: "project", origin: ".openpx" },
+    ];
+
+    const withSkill = createAgentTools({
+      workspace: "/tmp",
+      skills,
+      skillOptions: {
+        projectOpenpxSkillsDir: "/tmp/.openpx/skills",
+        projectAgentsSkillsDir: "/tmp/.agents/skills",
+        userOpenpxSkillsDir: "/tmp/user-skills",
+        userAgentsSkillsDir: "/tmp/user-agents-skills",
+      },
+    });
+
+    const skillNames = withSkill.map((t) => t.name);
+
+    // 去掉 Skill 后，其余内置工具与 base 完全相同
+    const withoutSkill = skillNames.filter((n) => n !== "Skill");
+    expect(withoutSkill).toEqual(baseNames);
+  });
+
+  test("MCP + Skill together: both appended, builtins unchanged", () => {
+    const baseNames = createAgentTools({ workspace: "/tmp" }).map((t) => t.name);
+
+    const skills: SkillManifest[] = [
+      { name: "tdd", description: "TDD", source: "project", origin: ".openpx" },
+    ];
+
+    const mockMcpManager = {
+      getAllTools: () => [{
+        server: "test",
+        tool: {
+          name: "echo",
+          description: "Echo tool",
+          inputSchema: { type: "object", properties: { message: { type: "string" } } },
+        },
+      }],
+      callTool: async () => "ok",
+    };
+
+    const tools = createAgentTools({
+      workspace: "/tmp",
+      skills,
+      skillOptions: {
+        projectOpenpxSkillsDir: "/tmp/.openpx/skills",
+        projectAgentsSkillsDir: "/tmp/.agents/skills",
+        userOpenpxSkillsDir: "/tmp/user-skills",
+        userAgentsSkillsDir: "/tmp/user-agents-skills",
+      },
+      mcpManager: mockMcpManager as any,
+    });
+
+    const names = tools.map((t) => t.name);
+
+    // 检查内置工具前缀
+    // 去掉 Skill 和 MCP 工具后应与 base 完全一致
+    const builtinPart = names.filter((n) => n !== "Skill" && !n.startsWith("mcp__"));
+    expect(builtinPart).toEqual(baseNames);
+
+    // Skill 在 MCP 工具之前
+    const skillIndex = names.indexOf("Skill");
+    const firstMcpIndex = names.findIndex((n) => n.startsWith("mcp__"));
+    expect(skillIndex).toBeGreaterThan(-1);
+    expect(firstMcpIndex).toBeGreaterThan(-1);
+    expect(skillIndex).toBeLessThan(firstMcpIndex);
+
+    // MCP 工具在最后
+    for (let i = firstMcpIndex; i < names.length; i++) {
+      expect(names[i].startsWith("mcp__")).toBe(true);
+    }
   });
 });
 

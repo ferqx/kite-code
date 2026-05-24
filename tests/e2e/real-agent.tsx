@@ -140,6 +140,11 @@ export async function runRealAgentE2E(
     }
   }
 
+  // Allow scenario-specific workspace setup (skills, etc.)
+  if (scenario.onWorkspaceReady) {
+    await scenario.onWorkspaceReady(workspace);
+  }
+
   const terminalWidth = scenario.terminalWidth ?? 120;
   const timeout = scenario.stepTimeout ?? 15000;
   const freezeKeys = scenario.freeze ?? [];
@@ -207,6 +212,9 @@ export async function runRealAgentE2E(
     checkpointPath: join(workspace, "cp.sqlite"),
     config: loadAgentConfig(),
     model,
+    mcpManager: scenario.mcpManager,
+    skills: scenario.skills,
+    skillOptions: scenario.skillOptions,
   });
 
   // Stream the agent — capture approval/question snapshots as they occur

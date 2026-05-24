@@ -13,6 +13,9 @@ import * as KS from "./scenarios/keyboard-shortcuts";
 import * as SS from "./scenarios/settings-session";
 import * as VP from "./scenarios/viewport-culling";
 import * as RC from "./scenarios/real-agent-conversation";
+import * as SK from "./scenarios/skills";
+import * as MC from "./scenarios/mcp";
+import type { McpManager } from "../../src/core/mcp";
 
 const UPDATE = Bun.argv.includes("--update-snapshots") ||
   process.env.UPDATE_SNAPSHOTS === "true";
@@ -442,4 +445,120 @@ describe(`${label} No viewport culling`, () => {
   test("default rendering shows all content", async () => {
     await verify("vp-default", VP.defaultViewportWorks, 1).verifyAll();
   });
+});
+
+// ══════════════════════════════════════════════════════════
+// Skills — slash commands (mock-agent)
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} Skills — slash commands`, () => {
+  test("/skills with no manifests shows empty", async () => {
+    await verify("skills-list-empty", SK.listSkillsEmpty, 1).verifyAll();
+  });
+
+  test("/skills with manifests shows skill list", async () => {
+    await verify("skills-list-with-manifests", SK.listSkillsWithManifests, 1).verifyAll();
+  });
+
+  test("ACTIVATE_SKILL and DEACTIVATE_SKILL state", async () => {
+    await verify("skills-activate-deactivate", SK.skillActivateDeactivate, 2).verifyAll();
+  });
+
+  test("SET_SKILL_MANIFESTS action", async () => {
+    await verify("skills-set-manifests", SK.setSkillManifestsAction, 1).verifyAll();
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// Skills — real agent (mock model + real SKILL.md files)
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} Skills — agent tool calls`, () => {
+  test("agent calls Skill tool and receives content", async () => {
+    await runRealAgentE2E("skills-tool-call", SK.skillToolCallScenario);
+  }, 25000);
+
+  test("agent calls unknown skill gets error", async () => {
+    await runRealAgentE2E("skills-unknown", SK.unknownSkillScenario);
+  }, 25000);
+
+  test("agent uses skill in multi-turn conversation", async () => {
+    await runRealAgentE2E("skills-multi-turn", SK.skillMultiTurnScenario);
+  }, 30000);
+});
+
+// ══════════════════════════════════════════════════════════
+// MCP — slash commands (mock-agent)
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} MCP — slash commands`, () => {
+  test("/mcp shows MCP panel", async () => {
+    await verify("mcp-show-panel", MC.showMcpPanel, 1).verifyAll();
+  });
+
+  test("HIDE_MCP closes panel", async () => {
+    await verify("mcp-hide-panel", MC.hideMcpPanel, 2).verifyAll();
+  });
+
+  test("INJECT_MCP_PROMPT shows user block", async () => {
+    await verify("mcp-inject-prompt", MC.injectMcpPrompt, 1).verifyAll();
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// MCP — real agent (mock model + real MCP test server)
+// ══════════════════════════════════════════════════════════
+
+describe(`${label} MCP — agent tool calls`, () => {
+  let mcpManager: McpManager | null = null;
+
+  test("agent calls MCP echo tool", async () => {
+    mcpManager = await MC.createTestMcpManager();
+    try {
+      await runRealAgentE2E("mcp-echo-tool", MC.mcpToolCallScenario(mcpManager));
+    } finally {
+      await MC.disposeTestMcpManager(mcpManager);
+      mcpManager = null;
+    }
+  }, 30000);
+
+  test("agent calls MCP add tool", async () => {
+    mcpManager = await MC.createTestMcpManager();
+    try {
+      await runRealAgentE2E("mcp-add-tool", MC.mcpAddToolScenario(mcpManager));
+    } finally {
+      await MC.disposeTestMcpManager(mcpManager);
+      mcpManager = null;
+    }
+  }, 30000);
+
+  test("agent calls MCP get_info tool", async () => {
+    mcpManager = await MC.createTestMcpManager();
+    try {
+      await runRealAgentE2E("mcp-get-info", MC.mcpToolRiskReadScenario(mcpManager));
+    } finally {
+      await MC.disposeTestMcpManager(mcpManager);
+      mcpManager = null;
+    }
+  }, 30000);
+
+  test("agent reads MCP resource", async () => {
+    mcpManager = await MC.createTestMcpManager();
+    try {
+      await runRealAgentE2E("mcp-read-resource", MC.mcpReadResourceScenario(mcpManager));
+    } finally {
+      await MC.disposeTestMcpManager(mcpManager);
+      mcpManager = null;
+    }
+  }, 30000);
+
+  test("non-existent MCP tool error handling", async () => {
+    mcpManager = await MC.createTestMcpManager();
+    try {
+      await runRealAgentE2E("mcp-nonexistent", MC.mcpToolNonExistentServer(mcpManager));
+    } finally {
+      await MC.disposeTestMcpManager(mcpManager);
+      mcpManager = null;
+    }
+  }, 30000);
 });

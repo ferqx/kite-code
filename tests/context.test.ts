@@ -503,4 +503,54 @@ describe("buildStaticSystemPrompt with skills", () => {
     const prompt = buildStaticSystemPrompt("agent");
     expect(prompt).not.toContain("## Available Skills");
   });
+
+  // ── Prompt cache: prefix stability ──
+
+  test("base prompt is prefix of skills-included prompt", () => {
+    const base = buildStaticSystemPrompt("agent");
+    const skills: SkillManifest[] = [
+      { name: "tdd", description: "Test-driven development", source: "project", origin: ".openpx" },
+    ];
+    const withSkills = buildStaticSystemPrompt("agent", skills);
+    // 技能追加在末尾，不破坏 base 前缀缓存
+    expect(withSkills.startsWith(base)).toBe(true);
+  });
+
+  test("skills appended at end, not injected in middle", () => {
+    const base = buildStaticSystemPrompt("agent");
+    const skills: SkillManifest[] = [
+      { name: "tdd", description: "TDD workflow", source: "project", origin: ".openpx" },
+    ];
+    const withSkills = buildStaticSystemPrompt("agent", skills);
+    // 验证技能 section 出现在 base 之后（base + 换行间隔）
+    const skillsIndex = withSkills.indexOf("## Available Skills");
+    expect(skillsIndex).toBeGreaterThan(0);
+    // skills section must come strictly after the base prompt (no injection)
+    expect(skillsIndex).toBeGreaterThan(base.length - 1);
+    // skills content must NOT appear in base portion
+    expect(withSkills.substring(0, base.length)).toBe(base);
+  });
+
+  test("prompt is idempotent for same skills", () => {
+    const skills: SkillManifest[] = [
+      { name: "tdd", description: "TDD workflow", source: "project", origin: ".openpx" },
+    ];
+    const prompt1 = buildStaticSystemPrompt("agent", skills);
+    const prompt2 = buildStaticSystemPrompt("agent", skills);
+    expect(prompt1).toBe(prompt2);
+  });
+
+  test("multiple skills preserved in stable input order", () => {
+    const skills: SkillManifest[] = [
+      { name: "z-skill", description: "Z description", source: "project", origin: ".openpx" },
+      { name: "a-skill", description: "A description", source: "project", origin: ".openpx" },
+    ];
+    const prompt = buildStaticSystemPrompt("agent", skills);
+    // 技能按输入顺序列出（不重新排序），保持可预测性
+    const zIndex = prompt.indexOf("- z-skill:");
+    const aIndex = prompt.indexOf("- a-skill:");
+    expect(zIndex).toBeGreaterThan(0);
+    expect(aIndex).toBeGreaterThan(0);
+    expect(zIndex).toBeLessThan(aIndex);
+  });
 });
