@@ -48,6 +48,10 @@ export class SessionRuntime {
   private _foreground = true;
   private _foregroundWake: (() => void) | null = null;
   private _proxyProvider: TuiUserInputProvider;
+  /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve */
+  private _pendingInterrupt: any = null;
+  private _pendingResolve: ((action: any) => void) | null = null;
+  private _interruptTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     threadId: string,
@@ -193,9 +197,10 @@ export class SessionRuntime {
     this.eventBuffer.push(event);
   }
 
-  /** 创建代理提供器，onEvent 根据 _foreground 路由 */
+  /** 创建代理提供器。interrupt 使用运行时自身状态，不与 realProvider 共享 pendingResolve */
   private _createProxyProvider(realProvider: TuiUserInputProvider): TuiUserInputProvider {
     const self = this;
+    const FIVE_MINUTES = 300_000;
     return {
       onEvent(event: AgentEvent): void {
         if (self._foreground) {
@@ -213,28 +218,67 @@ export class SessionRuntime {
         payload: { kind: string; approval?: any; question?: any },
       ): Promise<any> {
         if (!self._foreground) {
-          // 标记中断待处理，等待前台切换
+          // 后台中断：标记并等待前台切换
           self.pendingInterrupt = true;
           self.notifyInterrupt?.();
           await new Promise<void>((resolve) => {
             self._foregroundWake = resolve;
           });
-          // 如果 abort 被调用，foregroundWake 也触发但 controller 已空
           if (!self.abortController) {
             return { type: "cancel" as const };
           }
           self.pendingInterrupt = false;
         }
-        return realProvider.requestAction(payload as any);
+        // 使用运行时自身的中断状态，不共享 realProvider.pendingResolve
+        self._pendingInterrupt = payload;
+        self._clearInterruptTimeout();
+        self._interruptTimeout = setTimeout(() => {
+          self._resolveInterrupt({ type: "cancel" as const });
+        }, FIVE_MINUTES);
+        return new Promise<any>((resolve) => {
+          self._pendingResolve = (action: any) => {
+            self._clearInterruptTimeout();
+            resolve(action);
+          };
+        });
       },
 
-      reset(): void { realProvider.reset(); },
-      submitAction(action: any): void { realProvider.submitAction(action); },
-      getPendingInterrupt(): any { return realProvider.getPendingInterrupt(); },
-      teardown(): Promise<void> { return realProvider.teardown?.() ?? Promise.resolve(); },
+      submitAction(action: any): void {
+        self._resolveInterrupt(action);
+      },
+
+      reset(): void {
+        self._resolveInterrupt({ type: "cancel" as const });
+      },
+
+      getPendingInterrupt(): any {
+        return self._pendingInterrupt;
+      },
+
+      teardown(): Promise<void> {
+        self._resolveInterrupt({ type: "cancel" as const });
+        return Promise.resolve();
+      },
+
       get compactRequested(): boolean { return (realProvider as any).compactRequested ?? false; },
       set compactRequested(v: boolean) { (realProvider as any).compactRequested = v; },
     } as unknown as TuiUserInputProvider;
+  }
+
+  private _resolveInterrupt(action: any): void {
+    if (this._pendingResolve) {
+      const r = this._pendingResolve;
+      this._pendingResolve = null;
+      this._pendingInterrupt = null;
+      r(action);
+    }
+  }
+
+  private _clearInterruptTimeout(): void {
+    if (this._interruptTimeout !== null) {
+      clearTimeout(this._interruptTimeout);
+      this._interruptTimeout = null;
+    }
   }
 }
 

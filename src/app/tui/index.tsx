@@ -69,6 +69,16 @@ function TuiBootstrap() {
     }
   }, [state.sessionKey]);
 
+  // Sync conversation history from runtime on session switch
+  React.useEffect(() => {
+    const prevId = state.activeSessionId;
+    if (!prevId) return;
+    const rt = sessionManager.getRuntime(prevId);
+    if (rt) {
+      conversationHistoryRef.current = [...rt.conversationHistory];
+    }
+  }, [state.activeSessionId, sessionManager]);
+
   // Exit when exitRequested flag is set (double Ctrl+C when not running)
   React.useEffect(() => {
     if (state.exitRequested) {
@@ -261,6 +271,7 @@ function TuiBootstrap() {
       if (action.type === "SWITCH_SESSION") {
         const oldId = sessionManager.getActiveId();
         const newId = action.threadId;
+        if (oldId === newId) return; // 防止自切换清空缓冲区
 
         sessionManager.switchSession(oldId, newId);
 
@@ -272,13 +283,10 @@ function TuiBootstrap() {
 
         dispatch(action);
 
-        // 回放目标会话的缓冲事件，但跳过中断事件（已在后台处理或正在挂起）
+        // 回放目标会话的缓冲事件
         if (incomingRt && incomingRt.eventBuffer.length > 0) {
           dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
           for (const event of incomingRt.eventBuffer) {
-            if (event.type === "need_approval" || event.type === "need_input") {
-              continue; // 中断已在 requestAction 挂起 或 已 cancel
-            }
             dispatch({ type: "EVENT", event });
           }
           incomingRt.eventBuffer = [];
@@ -492,7 +500,9 @@ function TuiBootstrap() {
         return;
       }
 
-      if (agentLoopActiveRef.current) return;
+      // 检查当前活跃会话的运行状态，不阻塞其他会话
+      const activeRt = sessionManager.getRuntime(threadIdRef.current);
+      if (activeRt?.agentLoopActive) return;
 
       if (value.startsWith("!")) {
         const command = value.slice(1).trim();
@@ -503,7 +513,7 @@ function TuiBootstrap() {
 
       runTask(value);
     },
-    [runTask, handleSlashCommand]
+    [runTask, handleSlashCommand, sessionManager]
   );
 
   // Handle external editor: spawn $EDITOR, read content, submit as input

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { eventReducer, createInitialState } from "../src/app/tui/App";
 import type { Action } from "../src/app/tui/App";
-import type { TuiState, OutputBlock } from "../src/app/tui/types";
+import type { TuiState, OutputBlock, SessionSnapshot } from "../src/app/tui/types";
 import type { ToolApprovalPayload, UserInputPayload } from "../src/protocol/events";
 
 function fresh(): TuiState { return createInitialState(); }
@@ -394,7 +394,7 @@ describe("eventReducer (blocks model)", () => {
     test("NEW_SESSION clears blocks, resets state, increments sessionKey", () => {
       let s = fresh();
       s = { ...s, blocks: [{ id: 1, kind: "text", content: "old" }], compacting: true, ctrlCPressed: true, interrupt: { kind: "approval", blockId: 1 }, showHelp: true, showModelSelector: true, leaderPending: true, exitRequested: true };
-      s = dispatch(s, { type: "NEW_SESSION" });
+      s = dispatch(s, { type: "NEW_SESSION", threadId: "new-session-1" });
       expect(s.blocks).toHaveLength(0);
       expect(s.interrupt).toBeNull();
       expect(s.compacting).toBe(false);
@@ -404,6 +404,10 @@ describe("eventReducer (blocks model)", () => {
       expect(s.showModelSelector).toBe(false);
       expect(s.leaderPending).toBe(false);
       expect(s.sessionKey).toBe(1);
+      expect(s.activeSessionId).toBe("new-session-1");
+      expect(s.sessions).toHaveLength(1);
+      expect(s.sessions[0].threadId).toBe("new-session-1");
+      expect(s.sessions[0].active).toBe(true);
     });
     test("OPEN_EDITOR sets editorRequested", () => {
       let s = fresh();
@@ -581,6 +585,248 @@ describe("eventReducer (blocks model)", () => {
       ];
       const next = eventReducer(state, { type: "SET_SKILL_MANIFESTS", manifests });
       expect(next.skillManifests).toEqual(manifests);
+    });
+  });
+
+  describe("multi-session reducer actions", () => {
+    const initialState = createInitialState();
+
+    test("initial state has required multi-session fields", () => {
+      expect(initialState.sessions).toEqual([]);
+      expect(initialState.activeSessionId).toBeNull();
+      expect(initialState.focus).toBe("input");
+      expect(initialState.sidebarSelection).toBe(0);
+    });
+
+    test("NEW_SESSION saves current blocks to outgoing snapshot", () => {
+      const s: TuiState = {
+        ...initialState,
+        activeSessionId: "t1",
+        sessions: [
+          { threadId: "t1", name: "Session 1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        ],
+        blocks: [{ id: 1, kind: "text", content: "hello" }],
+      };
+      const next = eventReducer(s, { type: "NEW_SESSION", threadId: "t2" });
+      // Old session should have its blocks saved
+      expect(next.sessions).toHaveLength(2);
+      const oldSnap = next.sessions.find(sp => sp.threadId === "t1")!;
+      expect(oldSnap.blocks).toHaveLength(1);
+      expect((oldSnap.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("hello");
+      expect(oldSnap.active).toBe(false);
+      // New session should be active with empty blocks
+      const newSnap = next.sessions.find(sp => sp.threadId === "t2")!;
+      expect(newSnap.active).toBe(true);
+      expect(newSnap.blocks).toEqual([]);
+      expect(next.activeSessionId).toBe("t2");
+      expect(next.blocks).toEqual([]);
+    });
+
+    test("SWITCH_SESSION saves current blocks and restores target", () => {
+      const s: TuiState = {
+        ...initialState,
+        activeSessionId: "t1",
+        sessions: [
+          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [{ id: 1, kind: "text", content: "A" }] },
+          { threadId: "t2", name: "S2", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [{ id: 10, kind: "text", content: "B" }] },
+        ],
+        blocks: [{ id: 2, kind: "text", content: "latest in t1" }],
+      };
+      const next = eventReducer(s, { type: "SWITCH_SESSION", threadId: "t2" });
+      // t1 should have latest blocks saved
+      const t1 = next.sessions.find(sp => sp.threadId === "t1")!;
+      expect(t1.blocks).toHaveLength(1);
+      expect((t1.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("latest in t1");
+      expect(t1.active).toBe(false);
+      // t2 should be active and its blocks restored
+      const t2 = next.sessions.find(sp => sp.threadId === "t2")!;
+      expect(t2.active).toBe(true);
+      expect(t2.blocks).toHaveLength(1);
+      expect((t2.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("B");
+      expect(next.activeSessionId).toBe("t2");
+      expect(next.blocks).toEqual(t2.blocks);
+      expect(next.interrupt).toBeNull();
+      expect(next.focus).toBe("input");
+    });
+
+    test("SWITCH_SESSION to nonexistent session uses default empty blocks", () => {
+      const s: TuiState = {
+        ...initialState,
+        activeSessionId: "t1",
+        sessions: [
+          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        ],
+      };
+      const next = eventReducer(s, { type: "SWITCH_SESSION", threadId: "missing" });
+      expect(next.blocks).toEqual([]);
+      expect(next.activeSessionId).toBe("missing");
+    });
+
+    test("SET_FOCUS toggles focus", () => {
+      let state = eventReducer(initialState, { type: "SET_FOCUS", focus: "sidebar" });
+      expect(state.focus).toBe("sidebar");
+      state = eventReducer(state, { type: "SET_FOCUS", focus: "input" });
+      expect(state.focus).toBe("input");
+    });
+
+    test("SIDEBAR_NAV up decreases selection", () => {
+      const sessions: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const next = eventReducer(
+        { ...initialState, sessions, sidebarSelection: 1 },
+        { type: "SIDEBAR_NAV", direction: "up" }
+      );
+      expect(next.sidebarSelection).toBe(0);
+    });
+
+    test("SIDEBAR_NAV up at 0 stays at 0", () => {
+      const sessions: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const next = eventReducer(
+        { ...initialState, sessions, sidebarSelection: 0 },
+        { type: "SIDEBAR_NAV", direction: "up" }
+      );
+      expect(next.sidebarSelection).toBe(0);
+    });
+
+    test("SIDEBAR_NAV down increases selection", () => {
+      const sessions: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const next = eventReducer(
+        { ...initialState, sessions, sidebarSelection: 0 },
+        { type: "SIDEBAR_NAV", direction: "down" }
+      );
+      expect(next.sidebarSelection).toBe(1);
+    });
+
+    test("SIDEBAR_NAV down at last stays at last", () => {
+      const sessions: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const next = eventReducer(
+        { ...initialState, sessions, sidebarSelection: 0 },
+        { type: "SIDEBAR_NAV", direction: "down" }
+      );
+      expect(next.sidebarSelection).toBe(0);
+    });
+
+    test("SIDEBAR_NAV on empty sessions no-op", () => {
+      const next = eventReducer(
+        { ...initialState, sessions: [], sidebarSelection: 5 },
+        { type: "SIDEBAR_NAV", direction: "down" }
+      );
+      expect(next.sidebarSelection).toBe(5);
+    });
+
+    test("SESSION_INTERRUPT_PENDING sets pending flag on session", () => {
+      const sessions: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const next = eventReducer(
+        { ...initialState, sessions },
+        { type: "SESSION_INTERRUPT_PENDING", threadId: "a" }
+      );
+      expect(next.sessions[0].pendingInterrupt).toBe(true);
+      expect(next.sessions[1].pendingInterrupt).toBe(false);
+    });
+
+    test("SET_SESSIONS replaces sessions array", () => {
+      const sessions: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const next = eventReducer(initialState, { type: "SET_SESSIONS", sessions });
+      expect(next.sessions).toEqual(sessions);
+    });
+
+    test("SWITCH_SESSION preserves blocks on outgoing session and restores from incoming", () => {
+      const sessions: SessionSnapshot[] = [
+        {
+          threadId: "a", name: "A", workspace: "/tmp", active: true, running: false,
+          pendingInterrupt: false, plan: null,
+          status: { ...initialState.status, totalTokens: 100 },
+          blocks: [{ id: 1, kind: "text" as const, content: "session A content" }],
+        },
+        {
+          threadId: "b", name: "B", workspace: "/tmp", active: false, running: false,
+          pendingInterrupt: false, plan: null,
+          status: { ...initialState.status, totalTokens: 200 },
+          blocks: [{ id: 1, kind: "text" as const, content: "session B content" }],
+        },
+      ];
+
+      let state: TuiState = {
+        ...initialState,
+        sessions,
+        activeSessionId: "a",
+        blocks: [{ id: 2, kind: "text" as const, content: "updated A content" }],
+      };
+
+      // Simulate SWITCH_SESSION to "b"
+      const newSessions = state.sessions.map(s =>
+        s.threadId === state.activeSessionId
+          ? { ...s, blocks: state.blocks, status: state.status, active: false }
+          : s.threadId === "b"
+            ? { ...s, active: true }
+            : s
+      );
+      const target = newSessions.find(s => s.threadId === "b")!;
+
+      state = {
+        ...state,
+        sessions: newSessions,
+        activeSessionId: "b",
+        blocks: target.blocks,
+        status: target.status,
+        interrupt: null,
+        focus: "input" as const,
+      };
+
+      // Verify A's blocks were saved
+      const savedA = state.sessions.find(s => s.threadId === "a")!;
+      expect(savedA.blocks).toEqual([{ id: 2, kind: "text", content: "updated A content" }] as OutputBlock[]);
+      expect(savedA.active).toBe(false);
+
+      // Verify B's blocks were restored
+      expect(state.blocks).toEqual([{ id: 1, kind: "text", content: "session B content" }] as OutputBlock[]);
+      expect(state.activeSessionId).toBe("b");
+      expect(state.status.totalTokens).toBe(200);
+      expect(state.focus).toBe("input");
+    });
+
+    test("SESSION_INTERRUPT_PENDING sets flag on correct session", () => {
+      const sessions: SessionSnapshot[] = [
+        {
+          threadId: "a", name: "A", workspace: "/tmp", active: true, running: false,
+          pendingInterrupt: false, plan: null,
+          status: initialState.status, blocks: [],
+        },
+        {
+          threadId: "b", name: "B", workspace: "/tmp", active: false, running: true,
+          pendingInterrupt: false, plan: null,
+          status: initialState.status, blocks: [],
+        },
+      ];
+
+      let state = { ...initialState, sessions, activeSessionId: "a" };
+
+      // Simulate SESSION_INTERRUPT_PENDING for "b"
+      state = {
+        ...state,
+        sessions: state.sessions.map(s =>
+          s.threadId === "b" ? { ...s, pendingInterrupt: true } : s
+        ),
+      };
+
+      const a = state.sessions.find(s => s.threadId === "a")!;
+      const b = state.sessions.find(s => s.threadId === "b")!;
+      expect(a.pendingInterrupt).toBe(false);
+      expect(b.pendingInterrupt).toBe(true);
     });
   });
 });

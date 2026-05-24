@@ -14,6 +14,7 @@ import CheckpointSelector from "./components/CheckpointSelector";
 import type { CheckpointEntry } from "@/core/persistence/checkpoint";
 import ModelSelector from "./components/ModelSelector";
 import SessionSelector from "./components/SessionSelector.js";
+import Sidebar from "./components/Sidebar";
 import Header from "./Header";
 import Footer from "./Footer";
 import StatusBar from "./StatusBar";
@@ -738,53 +739,71 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
     [dispatch, interruptBlock]
   );
 
+  const handleSwitchSession = useCallback((threadId: string) => dispatch({ type: "SWITCH_SESSION", threadId }), [dispatch]);
+  const handleSidebarNav = useCallback((direction: "up" | "down") => dispatch({ type: "SIDEBAR_NAV", direction }), [dispatch]);
+
   return (
-    <Box flexDirection="column">
-      <MemoHeader status={state.status} running={state.running} error={state.sessionError} />
-      <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
-      <StatusBar status={state.status} thinkingVisible={state.thinkingVisible} timerKey={state.runCount} running={state.running} compacting={state.compacting} />
-      {state.showHelp && <HelpPanel onClose={hideHelp} />}
-      {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
-        <ApprovalBlock
-          approval={interruptBlock.approval}
-          provider={provider}
-          onResolved={resolveApproval}
-        />
-      )}
-      {interruptBlock?.kind === "question" && !interruptBlock.resolved && (
-        <InputBlock
-          question={interruptBlock.question}
-          provider={provider}
-          onResolved={resolveInput}
-        />
-      )}
-      {state.showSessions && (
-        <SessionSelector
-          onSelect={selectSession}
-          onClose={hideSessions}
-        />
-      )}
-      {state.showModelSelector && (
-        <ModelSelector
-          currentModel={state.status.modelName}
-          onSelect={selectModel}
-          onClose={hideModelSelector}
-        />
-      )}
-      {state.showMcp && mcpManager && (
-        <McpPanel manager={mcpManager} onClose={hideMcp} />
-      )}
-      {state.showRewind && (
-        <CheckpointSelector
-          checkpoints={state.checkpoints}
-          onRevert={handleRevert}
-          onFork={handleFork}
-          onClose={hideRewind}
-        />
-      )}
-      <ActivityBar running={state.running} timerKey={state.runCount} />
-      {children}
-      <Footer />
+    <Box flexDirection="row">
+      {/* ── Left: Main content (existing column layout) ── */}
+      <Box flexDirection="column" flexGrow={1}>
+        <MemoHeader status={state.status} running={state.running} error={state.sessionError} />
+        <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
+        <StatusBar status={state.status} thinkingVisible={state.thinkingVisible} timerKey={state.runCount} running={state.running} compacting={state.compacting} />
+        {state.showHelp && <HelpPanel onClose={hideHelp} />}
+        {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
+          <ApprovalBlock
+            approval={interruptBlock.approval}
+            provider={provider}
+            onResolved={resolveApproval}
+          />
+        )}
+        {interruptBlock?.kind === "question" && !interruptBlock.resolved && (
+          <InputBlock
+            question={interruptBlock.question}
+            provider={provider}
+            onResolved={resolveInput}
+          />
+        )}
+        {state.showSessions && (
+          <SessionSelector
+            onSelect={selectSession}
+            onClose={hideSessions}
+          />
+        )}
+        {state.showModelSelector && (
+          <ModelSelector
+            currentModel={state.status.modelName}
+            onSelect={selectModel}
+            onClose={hideModelSelector}
+          />
+        )}
+        {state.showMcp && mcpManager && (
+          <McpPanel manager={mcpManager} onClose={hideMcp} />
+        )}
+        {state.showRewind && (
+          <CheckpointSelector
+            checkpoints={state.checkpoints}
+            onRevert={handleRevert}
+            onFork={handleFork}
+            onClose={hideRewind}
+          />
+        )}
+        <ActivityBar running={state.running} timerKey={state.runCount} />
+        {children}
+        <Footer />
+      </Box>
+
+      {/* ── Right: Sidebar ── */}
+      <Sidebar
+        sessions={state.sessions}
+        activeSessionId={state.activeSessionId}
+        focus={state.focus}
+        sidebarSelection={state.sidebarSelection}
+        plan={state.status.plan}
+        onSwitch={handleSwitchSession}
+        onNavigate={handleSidebarNav}
+        onNew={() => dispatch({ type: "NEW_SESSION", threadId: `tui-${Date.now().toString(36)}` })}
+      />
     </Box>
   );
 }
