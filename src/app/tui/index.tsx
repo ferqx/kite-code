@@ -17,6 +17,7 @@ import { BunSqliteSaver } from "../../core/persistence/checkpoint.js";
 import { scanSkills, getSkillContent } from "@/core/skills/loader";
 import { skillDirs } from "@/core/config/paths";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
+import { SessionManager } from "./session-manager";
 
 function resolveModelForResume(
   currentConfig: AgentConfig,
@@ -51,68 +52,6 @@ function TuiBootstrap() {
   const pendingSkillsRef = React.useRef<string[]>([]);
   const runTaskRef = React.useRef<(task: string) => Promise<void>>(async () => {});
 
-  const dispatchSessionLoad = React.useCallback(
-    async (action: any) => {
-      if (action.type === "LOAD_SESSION_PENDING") {
-        const threadId = action.threadId;
-        pendingSessionRef.current = threadId;
-        try {
-          const result = await loadSession(defaultCheckpointPath(), threadId);
-          if (pendingSessionRef.current !== threadId) {
-            pendingSessionRef.current = null;
-            return;
-          }
-          if (!result) {
-            pendingSessionRef.current = null;
-            dispatch({
-              type: "LOAD_SESSION",
-              blocks: [{ id: 1, kind: "text", content: `Session ${threadId} has no saved checkpoints.` }],
-              interrupt: null,
-              modelProvider: "",
-              modelName: "",
-              thinkingLevel: null,
-            });
-            return;
-          }
-
-          const modelName = resolveModelForResume(config, result.modelName);
-          const thinkingLevel = result.thinkingLevel ?? "max";
-          thinkingLevelRef.current = thinkingLevel;
-          threadIdRef.current = threadId;
-          conversationHistoryRef.current = [];
-
-          dispatch({
-            type: "LOAD_SESSION",
-            blocks: result.blocks,
-            interrupt: result.interrupt,
-            modelProvider: result.modelProvider,
-            modelName,
-            thinkingLevel,
-          });
-        } catch (e: any) {
-          dispatch({
-            type: "LOAD_SESSION",
-            blocks: [{ id: 1, kind: "text", content: `Failed to load session: ${e?.message ?? e}` }],
-            interrupt: null,
-            modelProvider: "",
-            modelName: "",
-            thinkingLevel: null,
-          });
-        }
-        pendingSessionRef.current = null;
-        return;
-      }
-      // Intercept REVERT/FORK to store pending action before reducer closes panel
-      if (action.type === "REVERT_TO_CHECKPOINT") {
-        pendingRewindRef.current = { type: "revert", checkpointId: action.checkpointId };
-      } else if (action.type === "FORK_FROM_CHECKPOINT") {
-        pendingRewindRef.current = { type: "fork", checkpointId: action.checkpointId };
-      }
-      dispatch(action);
-    },
-    [dispatch, config],
-  );
-
   React.useEffect(() => {
     const timer = setTimeout(() => setInitialized(true), 80);
     return () => clearTimeout(timer);
@@ -123,7 +62,7 @@ function TuiBootstrap() {
     if (state.sessionKey !== prevSessionKeyRef.current) {
       prevSessionKeyRef.current = state.sessionKey;
       conversationHistoryRef.current = [];
-      threadIdRef.current = ""; // Lazy init on first message
+      threadIdRef.current = sessionManager.getActiveId();
       thinkingLevelRef.current = null;
       pendingRewindRef.current = null;
       prevRewindCounterRef.current = 0;
@@ -235,6 +174,101 @@ function TuiBootstrap() {
     [dispatch]
   );
 
+  const sessionManager = React.useMemo(() => {
+    const mgr = new SessionManager({
+      config,
+      provider,
+      skillManifests: skillManifestsRef.current,
+      skillOptions: skillOptionsRef.current,
+      mcpManager: mcpManagerRef.current,
+    });
+    mgr.setSnapshotCallback((threadId) => {
+      dispatch({ type: "SESSION_INTERRUPT_PENDING", threadId });
+    });
+    return mgr;
+  }, [config, provider]);
+
+  // Auto-create initial session on mount
+  React.useEffect(() => {
+    if (!initialized) return;
+    if (sessionManager.getActiveId()) return;
+    const newId = sessionManager.createSession(workspace);
+    threadIdRef.current = newId;
+    dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+  }, [initialized]);
+
+  const dispatchSessionLoad = React.useCallback(
+    async (action: any) => {
+      // Intercept NEW_SESSION to create runtime via SessionManager
+      if (action.type === "NEW_SESSION") {
+        const newId = sessionManager.createSession(workspace);
+        threadIdRef.current = newId;
+        // The reducer will use this threadId to create the snapshot
+        dispatch({ type: "NEW_SESSION", threadId: newId });
+        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        return;
+      }
+      // ── existing intercepts for LOAD_SESSION_PENDING, REVERT, FORK ──
+      if (action.type === "LOAD_SESSION_PENDING") {
+        const threadId = action.threadId;
+        pendingSessionRef.current = threadId;
+        try {
+          const result = await loadSession(defaultCheckpointPath(), threadId);
+          if (pendingSessionRef.current !== threadId) {
+            pendingSessionRef.current = null;
+            return;
+          }
+          if (!result) {
+            pendingSessionRef.current = null;
+            dispatch({
+              type: "LOAD_SESSION",
+              blocks: [{ id: 1, kind: "text", content: `Session ${threadId} has no saved checkpoints.` }],
+              interrupt: null,
+              modelProvider: "",
+              modelName: "",
+              thinkingLevel: null,
+            });
+            return;
+          }
+
+          const modelName = resolveModelForResume(config, result.modelName);
+          const thinkingLevel = result.thinkingLevel ?? "max";
+          thinkingLevelRef.current = thinkingLevel;
+          threadIdRef.current = threadId;
+          conversationHistoryRef.current = [];
+
+          dispatch({
+            type: "LOAD_SESSION",
+            blocks: result.blocks,
+            interrupt: result.interrupt,
+            modelProvider: result.modelProvider,
+            modelName,
+            thinkingLevel,
+          });
+        } catch (e: any) {
+          dispatch({
+            type: "LOAD_SESSION",
+            blocks: [{ id: 1, kind: "text", content: `Failed to load session: ${e?.message ?? e}` }],
+            interrupt: null,
+            modelProvider: "",
+            modelName: "",
+            thinkingLevel: null,
+          });
+        }
+        pendingSessionRef.current = null;
+        return;
+      }
+      // Intercept REVERT/FORK to store pending action before reducer closes panel
+      if (action.type === "REVERT_TO_CHECKPOINT") {
+        pendingRewindRef.current = { type: "revert", checkpointId: action.checkpointId };
+      } else if (action.type === "FORK_FROM_CHECKPOINT") {
+        pendingRewindRef.current = { type: "fork", checkpointId: action.checkpointId };
+      }
+      dispatch(action);
+    },
+    [dispatch, config, sessionManager, workspace],
+  );
+
   const runTaskBridge = React.useCallback((task: string) => {
     runTaskRef.current?.(task);
   }, []);
@@ -268,6 +302,15 @@ function TuiBootstrap() {
       // Lazy init thread ID on first message
       if (!threadIdRef.current) {
         threadIdRef.current = `tui-${Date.now().toString(36)}`;
+      }
+
+      // Notify SessionManager that this session is running
+      const activeId = threadIdRef.current;
+      const rtRun = sessionManager.getRuntime(activeId);
+      if (rtRun) {
+        rtRun.agentLoopActive = true;
+        sessionManager.onStatusChange(activeId);
+        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
       }
 
       // Each turn sends only the current message. The checkpoint maintains
@@ -327,8 +370,16 @@ function TuiBootstrap() {
         provider.reset();
         dispatch({ type: "SET_IDLE" });
 
-        // Fire-and-forget: generate smart session name after first message
+        // Notify SessionManager that this session is no longer running
         const threadId = threadIdRef.current;
+        const rtIdle = sessionManager.getRuntime(threadId);
+        if (rtIdle) {
+          rtIdle.agentLoopActive = false;
+          sessionManager.onStatusChange(threadId);
+          dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        }
+
+        // Fire-and-forget: generate smart session name after first message
         const firstTask = task;
         (async () => {
           try {
@@ -341,7 +392,7 @@ function TuiBootstrap() {
         })();
       }
     },
-    [provider, workspace, config, dispatch]
+    [provider, workspace, config, dispatch, sessionManager]
   );
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;
