@@ -3,8 +3,8 @@ import { render } from "ink";
 import { loadAgentConfig, loadMcpConfig, editorInputPath, type AgentConfig } from "@/core/config/index";
 import { McpManager } from "@/core/mcp";
 import { createSandboxExecutor } from "@/core/sandbox/index";
-import { runAgent, isRecoverableError, revertToCheckpoint, forkFromCheckpoint } from "@/core/runner";
-import { buildRunAgentParams, buildRevertParams, buildForkParams } from "./run-agent";
+import { isRecoverableError, revertToCheckpoint, forkFromCheckpoint } from "@/core/runner";
+import { buildRevertParams, buildForkParams } from "./run-agent";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
 import InputLine, { type EditorContentHandle } from "./components/InputLine";
@@ -154,13 +154,6 @@ function TuiBootstrap() {
     pendingSkillsRef.current = state.pendingSkills;
   }, [state.pendingSkills]);
 
-  // When Ctrl+C is pressed during agent loop (with no interrupt), abort via signal
-  React.useEffect(() => {
-    if (state.ctrlCPressed && agentLoopActiveRef.current && !state.interrupt) {
-      abortControllerRef.current?.abort();
-    }
-  }, [state.ctrlCPressed, state.interrupt]);
-
   const handleExit = React.useCallback(() => {
     dispatch({ type: "EVENT", event: { type: "text", data: { text: "👋 Goodbye!" } } });
     setTimeout(() => process.exit(0), 300);
@@ -264,6 +257,26 @@ function TuiBootstrap() {
       } else if (action.type === "FORK_FROM_CHECKPOINT") {
         pendingRewindRef.current = { type: "fork", checkpointId: action.checkpointId };
       }
+      // ── 多会话：SWITCH_SESSION 拦截，缓冲回放 ──
+      if (action.type === "SWITCH_SESSION") {
+        const oldId = sessionManager.getActiveId();
+        const newId = action.threadId;
+
+        sessionManager.switchSession(oldId, newId);
+        dispatch(action);
+
+        // 回放目标会话的缓冲事件 / Replay buffered events from incoming session
+        const incomingRt = sessionManager.getRuntime(newId);
+        if (incomingRt && incomingRt.eventBuffer.length > 0) {
+          dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+          for (const event of incomingRt.eventBuffer) {
+            dispatch({ type: "EVENT", event });
+          }
+          incomingRt.eventBuffer = [];
+          incomingRt.pendingInterrupt = false;
+        }
+        return;
+      }
       dispatch(action);
     },
     [dispatch, config, sessionManager, workspace],
@@ -292,92 +305,52 @@ function TuiBootstrap() {
     }
   }, [state.interrupt, provider]);
 
+  // When Ctrl+C is pressed during agent loop (with no interrupt), abort via signal
+  React.useEffect(() => {
+    if (state.ctrlCPressed && !state.interrupt) {
+      const rt = sessionManager.getRuntime(threadIdRef.current);
+      rt?.abortController?.abort();
+    }
+  }, [state.ctrlCPressed, state.interrupt, sessionManager]);
+
   const runTask = React.useCallback(
     async (task: string) => {
-      if (agentLoopActiveRef.current) return;
+      const threadId = threadIdRef.current;
+      const rt = sessionManager.getRuntime(threadId);
+      if (!rt || rt.agentLoopActive) return;
+
+      // 将 React 层 per-session 状态同步到 Runtime / Sync React-layer per-session state to runtime
+      rt.pendingSkills = [...pendingSkillsRef.current];
+      rt.thinkingLevel = thinkingLevelRef.current;
+      rt.conversationHistory = [...conversationHistoryRef.current];
 
       dispatch({ type: "USER_MESSAGE", text: task });
       dispatch({ type: "SET_RUNNING" });
+      dispatch({ type: "DEACTIVATE_SKILL", name: "" }); // clear after capture into runtime
 
-      // Lazy init thread ID on first message
-      if (!threadIdRef.current) {
-        threadIdRef.current = `tui-${Date.now().toString(36)}`;
-      }
+      const isActive = sessionManager.getActiveId() === threadId;
+      const mode = isActive ? "foreground" : "background";
 
-      // Notify SessionManager that this session is running
-      const activeId = threadIdRef.current;
-      const rtRun = sessionManager.getRuntime(activeId);
-      if (rtRun) {
-        rtRun.agentLoopActive = true;
-        sessionManager.onStatusChange(activeId);
-        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-      }
-
-      // Each turn sends only the current message. The checkpoint maintains
-      // the full conversation history — runAgent reads it automatically.
-      // conversationHistoryRef accumulates shell command outputs for context.
-      // Prepend any activated skills
-      let pendingSkillsContent = "";
-      if (pendingSkillsRef.current.length > 0) {
-        pendingSkillsContent = pendingSkillsRef.current.join("");
-        dispatch({ type: "DEACTIVATE_SKILL", name: "" }); // clear after injection
-      }
-
-      const shellContext = conversationHistoryRef.current.length > 0
-        ? "\n" + conversationHistoryRef.current.join("\n")
-        : "";
-      const shellExecutor = createSandboxExecutor({ enabled: true, workspace });
-
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
+      // Update running state
+      rt.agentLoopActive = true;
+      // Keep legacy refs in sync for runRewind / Ctrl+C handler
       agentLoopActiveRef.current = true;
-
-      const runAgentParams = buildRunAgentParams({
-        task,
-        threadId: threadIdRef.current,
-        workspace,
-        config,
-        shellExecutor,
-        signal: abortController.signal,
-        thinkingLevel: thinkingLevelRef.current,
-        skills: skillManifestsRef.current,
-        skillOptions: skillOptionsRef.current,
-        mcpManager: mcpManagerRef.current,
-        pendingSkillsContent,
-        shellContext,
-      });
-      const generator = runAgent(provider, runAgentParams);
-
-      let aborted = false;
+      sessionManager.onStatusChange(threadId);
+      dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
 
       try {
-        for await (const _ of generator) {
-          if (abortController.signal.aborted) {
-            aborted = true;
-            break;
-          }
-        }
-        if (!aborted) dispatch({ type: "SET_EXITED" });
-      } catch (e: any) {
-        provider.onEvent({
-          type: "error",
-          data: { message: e?.message ?? String(e), recoverable: isRecoverableError(e) },
-        });
-        dispatch({ type: "SET_EXITED" });
+        await rt.runTask(task, {
+          dispatch,
+          provider,
+          config,
+        }, mode);
       } finally {
-        abortControllerRef.current = null;
+        rt.agentLoopActive = false;
         agentLoopActiveRef.current = false;
-        provider.reset();
+        abortControllerRef.current = null;
+        sessionManager.onStatusChange(threadId);
+        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
         dispatch({ type: "SET_IDLE" });
-
-        // Notify SessionManager that this session is no longer running
-        const threadId = threadIdRef.current;
-        const rtIdle = sessionManager.getRuntime(threadId);
-        if (rtIdle) {
-          rtIdle.agentLoopActive = false;
-          sessionManager.onStatusChange(threadId);
-          dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-        }
 
         // Fire-and-forget: generate smart session name after first message
         const firstTask = task;
@@ -392,7 +365,7 @@ function TuiBootstrap() {
         })();
       }
     },
-    [provider, workspace, config, dispatch, sessionManager]
+    [provider, workspace, config, dispatch, sessionManager],
   );
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;
