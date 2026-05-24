@@ -32,6 +32,7 @@ interface InputLineProps {
   workspace: string;
   overlayActive?: boolean;
   editorContentRef?: React.MutableRefObject<EditorContentHandle | null>;
+  focus?: "input" | "sidebar";
 }
 
 function commonPrefix(strings: string[]): string {
@@ -76,7 +77,18 @@ function completeSlash(input: string): string | null {
   return null;
 }
 
-export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef }: InputLineProps) {
+export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef, focus = "input" }: InputLineProps) {
+  // When sidebar focused, show dimmed placeholder instead of the normal input
+  if (focus === "sidebar") {
+    return (
+      <Box flexDirection="column">
+        <Box>
+          <Text dimColor>Sidebar focused — Tab to input</Text>
+        </Box>
+      </Box>
+    );
+  }
+
   const [value, setValue] = useState("");
   const valueRef = useRef(value);
   valueRef.current = value;

@@ -536,6 +536,7 @@ function TuiBootstrap() {
         workspace={workspace}
         overlayActive={state.showHelp || state.showModelSelector || state.showSessions}
         editorContentRef={editorContentRef}
+        focus={state.focus}
       />
     </App>
   );

@@ -3,7 +3,7 @@ import { Box } from "ink";
 import { sessionExportPath } from "@/core/config/paths";
 import type { AgentEvent } from "@/protocol/events";
 import type { McpManager } from "@/core/mcp";
-import type { TuiState, OutputBlock, StatusState, InterruptState, FileChangeRecord } from "./types";
+import type { TuiState, OutputBlock, StatusState, InterruptState, FileChangeRecord, SessionSnapshot } from "./types";
 import OutputArea from "./OutputArea";
 import ActivityBar from "./ActivityBar";
 import ApprovalBlock from "./components/ApprovalBlock";
@@ -51,7 +51,7 @@ export type Action =
   | { type: "LOAD_SESSION_PENDING"; threadId: string }
   | { type: "LOAD_SESSION"; blocks: OutputBlock[]; interrupt: InterruptState | null; modelProvider: string; modelName: string; thinkingLevel: string | null }
   | { type: "SELECT_MODEL"; modelId: string }
-  | { type: "NEW_SESSION" }
+  | { type: "NEW_SESSION"; threadId: string }
   | { type: "USER_MESSAGE"; text: string }
   | { type: "SHOW_SETTING" }
   | { type: "SHOW_MCP" }
@@ -65,7 +65,13 @@ export type Action =
   | { type: "ACTIVATE_SKILL"; name: string; content: string }
   | { type: "DEACTIVATE_SKILL"; name: string }
   | { type: "LIST_SKILLS" }
-  | { type: "SET_SKILL_MANIFESTS"; manifests: import("@/core/skills/types").SkillManifest[] };
+  | { type: "SET_SKILL_MANIFESTS"; manifests: import("@/core/skills/types").SkillManifest[] }
+  // ── 新增：多会话 ──
+  | { type: "SWITCH_SESSION"; threadId: string }
+  | { type: "SET_SESSIONS"; sessions: import("./types").SessionSnapshot[] }
+  | { type: "SET_FOCUS"; focus: "input" | "sidebar" }
+  | { type: "SIDEBAR_NAV"; direction: "up" | "down" }
+  | { type: "SESSION_INTERRUPT_PENDING"; threadId: string };
 
 let nextId = 1;
 
@@ -542,8 +548,27 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     }
     case "NEW_SESSION": {
       nextId = 1;
+      // Save current session blocks/status to snapshots before creating new
+      const newSessions = state.sessions.map(s =>
+        s.threadId === state.activeSessionId
+          ? { ...s, blocks: state.blocks, status: state.status, active: false }
+          : s
+      );
+      const newSnapshot: SessionSnapshot = {
+        threadId: action.threadId,
+        name: action.threadId,
+        workspace: state.sessions.find(s => s.threadId === state.activeSessionId)?.workspace ?? "",
+        active: true,
+        running: false,
+        pendingInterrupt: false,
+        plan: null,
+        status: { ...state.status, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null },
+        blocks: [],
+      };
       return {
         ...state,
+        sessions: [...newSessions, newSnapshot],
+        activeSessionId: action.threadId,
         blocks: [],
         toolStartTimes: undefined,
         interrupt: null,
@@ -563,6 +588,49 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         status: { ...state.status, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null },
       };
     }
+    case "SWITCH_SESSION": {
+      const sessions = state.sessions.map(s =>
+        s.threadId === state.activeSessionId
+          ? { ...s, blocks: state.blocks, status: state.status, active: false }
+          : s.threadId === action.threadId
+            ? { ...s, active: true }
+            : s
+      );
+      const target = sessions.find(s => s.threadId === action.threadId);
+      return {
+        ...state,
+        sessions,
+        activeSessionId: action.threadId,
+        blocks: target?.blocks ?? [],
+        status: target?.status ?? {
+          ...state.status,
+          totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null,
+        },
+        interrupt: null,
+        focus: "input" as const,
+      };
+    }
+    case "SET_SESSIONS":
+      return { ...state, sessions: action.sessions };
+    case "SET_FOCUS":
+      return { ...state, focus: action.focus };
+    case "SIDEBAR_NAV": {
+      const len = state.sessions.length;
+      if (len === 0) return state;
+      const next = action.direction === "up"
+        ? Math.max(0, state.sidebarSelection - 1)
+        : Math.min(len - 1, state.sidebarSelection + 1);
+      return { ...state, sidebarSelection: next };
+    }
+    case "SESSION_INTERRUPT_PENDING":
+      return {
+        ...state,
+        sessions: state.sessions.map(s =>
+          s.threadId === action.threadId
+            ? { ...s, pendingInterrupt: true }
+            : s
+        ),
+      };
     default:
       return state;
   }
@@ -630,7 +698,7 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
 }
 
 export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, children }: AppProps) {
-  useGlobalKeys(dispatch, state.running);
+  useGlobalKeys(dispatch, state.running, state.focus);
   useLeaderKeys(dispatch, state.leaderPending, onCompactRequest);
 
   // Stabilized callbacks for React.memo children

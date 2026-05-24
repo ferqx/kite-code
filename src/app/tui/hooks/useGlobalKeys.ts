@@ -1,8 +1,14 @@
 import { useInput } from "ink";
 import type { Dispatch } from "react";
 
-export function useGlobalKeys(dispatch: Dispatch<any>, running: boolean) {
-  useInput((input: string, key: { ctrl?: boolean; escape?: boolean }) => {
+export function useGlobalKeys(dispatch: Dispatch<any>, running: boolean, focus: "input" | "sidebar") {
+  useInput((input: string, key: { ctrl?: boolean; escape?: boolean; tab?: boolean; shift?: boolean }) => {
+    // Tab without ctrl: toggle focus
+    if (key.tab && !key.ctrl) {
+      dispatch({ type: "SET_FOCUS", focus: focus === "input" ? "sidebar" : "input" });
+      return;
+    }
+
     if (key.ctrl && input === "c") {
       dispatch({ type: "CTRL_C" });
       return;
