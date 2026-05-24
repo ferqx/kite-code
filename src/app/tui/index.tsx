@@ -360,6 +360,8 @@ function TuiBootstrap() {
             const name = await generateSessionName(firstTask);
             if (name) {
               await persistSessionName(defaultCheckpointPath(), threadId, name);
+              sessionManager.setName(threadId, name);
+              dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
             }
           } catch { /* non-critical */ }
         })();

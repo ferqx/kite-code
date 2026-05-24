@@ -31,6 +31,7 @@ export class SessionRuntime {
   conversationHistory: string[] = [];
   pendingSkills: string[] = [];
   thinkingLevel: string | null = null;
+  name: string;
 
   readonly skillManifests: SkillManifest[];
   readonly skillOptions: SkillScanOptions | null;
@@ -47,6 +48,7 @@ export class SessionRuntime {
   ) {
     this.threadId = threadId;
     this.workspace = workspace;
+    this.name = threadId;
     this.skillManifests = deps.skillManifests;
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
@@ -223,7 +225,7 @@ export class SessionManager {
     for (const [threadId, rt] of this.runtimes) {
       result.push({
         threadId,
-        name: threadId,
+        name: rt.name,
         workspace: rt.workspace,
         active: threadId === this.activeId,
         running: rt.agentLoopActive,
@@ -242,6 +244,12 @@ export class SessionManager {
 
   onStatusChange(threadId: string): void {
     this.snapshotCallback?.(threadId);
+  }
+
+  /** 设置会话名称（在 generateSessionName 后调用）/ Set session display name */
+  setName(threadId: string, name: string): void {
+    const rt = this.runtimes.get(threadId);
+    if (rt) rt.name = name;
   }
 
   setSnapshotCallback(fn: (threadId: string) => void): void {
