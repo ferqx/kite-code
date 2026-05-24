@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-05-23
+最后更新：2026-05-24
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,11 +19,11 @@
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
 | [`2026-05-20-tui-production-roadmap.md`](2026-05-20-tui-production-roadmap.md) | completed | P0 | — | — | Step2 感知闭环：流式指示器 + Plan 连线 + Phase 确认<br>Step3 防御纵深：Error Boundary + Checkpoint 关闭 + Temp 清理<br>Step4 功能补齐：手动 Compaction |<!-- replaced by 2026-05-22-production-gaps-closure.md for remaining gaps -->|
-| [`2026-05-22-production-gaps-closure.md`](2026-05-22-production-gaps-closure.md) | active | P0 | — | 替代 2026-05-20 路线图中未完成项 | Phase1 ✅ MCP + 事件闭环<br>Phase2 ✅ Rewind + MCP Resources<br>Phase3 📋 Skills 系统（设计已确认，计划就绪）<br>Hooks + 自定义命令延后 |
+| [`2026-05-22-production-gaps-closure.md`](2026-05-22-production-gaps-closure.md) | completed | P0 | — | 替代 2026-05-20 路线图中未完成项 | Phase1 ✅ MCP + 事件闭环<br>Phase2 ✅ Rewind + MCP Resources<br>Phase3 ✅ Skills 系统<br>Hooks + 自定义命令延后 |
 | [`2026-05-22-production-gaps-phase1.md`](2026-05-22-production-gaps-phase1.md) | completed | P0 | — | — | Phase 1 详细实施计划（8 tasks, 8 commits）。 |
-| [`2026-05-22-production-gaps-phase2.md`](2026-05-22-production-gaps-phase2.md) | ready | P0 | — | — | Phase 2 详细实施计划（7 tasks）。Rewind（Revert+Fork）+ MCP Resources。待新会话执行。 |
+| [`2026-05-22-production-gaps-phase2.md`](2026-05-22-production-gaps-phase2.md) | completed | P0 | — | — | Phase 2 详细实施计划（7 tasks）。Rewind（Revert+Fork）+ MCP Resources。 |
 | [`2026-05-22-skills-system.md`](2026-05-22-skills-system.md) | superseded | P1 | — | 被 [2026-05-23-skills-system-phase3.md](2026-05-23-skills-system-phase3.md) 替代 | — |
-| [`2026-05-23-skills-system-phase3.md`](2026-05-23-skills-system-phase3.md) | ready | P0 | Phase 1 + Phase 2 | — | Skills 系统实施计划（11 tasks）。agentskills.io 标准。 |
+| [`2026-05-23-skills-system-phase3.md`](2026-05-23-skills-system-phase3.md) | completed | P0 | Phase 1 + Phase 2 | — | Skills 系统实施计划（11 tasks）。agentskills.io 标准。 |
 
 ## 计划文件命名规范
 

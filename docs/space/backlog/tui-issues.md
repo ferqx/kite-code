@@ -2,6 +2,7 @@
 
 日期：2026-05-20
 来源：TUI 生产就绪度深度审查
+最后更新：2026-05-24（B02–B11 全部已修复，B12–B13 延后）
 
 ---
 
@@ -14,47 +15,39 @@
 - 位置：`src/app/tui/hooks/useSlashCommand.ts:59-62`
 - 状态：✅ 已修复（2026-05-20）
 
-### B02 — `error.recoverable` 上游未利用
+### B02 — `error.recoverable` 上游未利用 ✅
 
-- 位置：`src/app/tui/App.tsx:228`（reducer 已接入），`src/app/tui/index.tsx:183-187`（emit 点始终 `recoverable: false`）
-- 问题：TUI 端已支持可恢复/不可恢复差异化渲染，但 runner 从不发出 recoverable=true
-- 修复方向：在 `runner.ts` 或 `graph.ts` 中区分可恢复错误（网络/超时）和不可恢复错误（配置/权限）
+- 位置：`src/core/runner.ts`（`isRecoverableError`），`src/app/tui/index.tsx`（调用）
+- 状态：✅ 已修复（2026-05-22）。`isRecoverableError` 区分网络超时/速率限制（可恢复）和配置/权限（不可恢复），TUI 通过 `runTask` catch 调用。
 
-### B03 — UNDO/REDO 已移除，需重新实现
+### B03 — UNDO/REDO → Rewind ✅
 
-- 位置：`src/app/tui/App.tsx`（Action 和 reducer 已于 2026-05-20 移除）
-- 问题：`BunSqliteSaver` 仅 append-only，无 fork/rollback 方法
-- 实现方向：
-  1. saver 层新增 `getCheckpointChain()` 遍历 `parent_checkpoint_id`
-  2. runner 层新增 `runAgentFromCheckpoint(checkpointId)` 
-  3. TUI 层新增 `Ctrl+Z` / `Ctrl+Y` 绑定
+- 位置：`src/app/tui/index.tsx`（`runRewind`），`src/app/tui/components/CheckpointSelector.tsx`
+- 状态：✅ 已修复（2026-05-23）。实现 `/rewind` 命令 → checkpoint 列表 → Revert/Fork 操作，对齐 Claude Code Rewind 模型。
 
-### B04 — 手动 Compaction 是空壳
+### B04 — 手动 Compaction ✅
 
-- 位置：`src/app/tui/App.tsx:369-372`（reducer），`src/core/harness/graph.ts`（forceContextCompaction 未暴露）
-- 问题：`Ctrl+X C` / `/compact` 只输出文本提示，无实际 graph 触发
-- 实现方向：graph 暴露可通过信号触发的 compaction 入口，TUI 通过 provider 事件转发
+- 位置：`src/app/tui/index.tsx`（`compactRequested` flag），`src/core/harness/graph.ts`（`forceCompact` 状态处理）
+- 状态：✅ 已修复（2026-05-22）。`Ctrl+X C` / `/compact` 通过 provider 标志触发 graph 实际压缩，emit `compact_begin`/`compact_end` 事件。
 
 ---
 
 ## 需 e2e 同步清理（中等成本）
 
-### B05 — `retry` 事件生产路径未发射
+### B05 — `retry` 事件 → `model_retry` ✅
 
-- 位置：`src/protocol/events.ts:16`（类型），`src/app/tui/App.tsx:186-188`（reducer），`tests/e2e/mock-agent.tsx:274-278`（测试使用）
-- 问题：只有 `model_retry` 被 runner 发出，`retry` 从未触发
-- 清理方向：同步更新 mock-agent 和 failure-scenarios，移除 `retry` 分支，或让 runner 发出此事件
+- 位置：`src/protocol/events.ts`，`src/core/runner.ts`（`chunkToEvents`）
+- 状态：✅ 已修复（2026-05-22）。`model_retry` 事件由 runner `chunkToEvents` 从 graph 节点输出中提取并 emit，mock-agent 同步更新。
 
-### B06 — `compact_begin`/`compact_end` 事件生产路径未发射
+### B06 — `compact_begin`/`compact_end` 事件生产路径 ✅
 
-- 位置：`src/protocol/events.ts:13-14`（类型），`src/app/tui/App.tsx:249-255`（reducer），`tests/e2e/mock-agent.tsx:343-350`（测试使用）
-- 问题：graph 的 forceContextCompaction 未转化为事件
-- 清理方向：同步更新 mock-agent，移除分支，或让 graph 发出此事件
+- 位置：`src/core/runner.ts`（`chunkToEvents` L592-598），`src/app/tui/App.tsx`
+- 状态：✅ 已修复（2026-05-22）。graph 压缩后通过 `compactionPerformed` 字段输出，runner 转为 `compact_begin`/`compact_end` 事件。
 
-### B07 — `compacting` 字段无人消费
+### B07 — `compacting` 字段 UI 消费 ✅
 
-- 位置：`src/app/tui/types.ts:27`（TuiState.compacting），仅被 B06 的事件分支写入，无组件读取
-- 修复方向：在 Header/StatusBar 中消费 `compacting` 展示压缩中状态，或移除字段
+- 位置：`src/app/tui/StatusBar.tsx:48`，`src/app/tui/App.tsx:274-278`
+- 状态：✅ 已修复（2026-05-22）。StatusBar 通过 `compacting` prop 展示 `⏳ Compacting...` 状态，reducer 在收到 compact 事件时切换此字段。
 
 ---
 
@@ -62,27 +55,25 @@
 
 > 以下 B08–B10 已纳入 [`plans/2026-05-20-tui-production-roadmap.md`](../plans/2026-05-20-tui-production-roadmap.md) 第三步（防御纵深）。
 
-### B08 — React Error Boundary 缺失
+### B08 — React Error Boundary ✅
 
-- 位置：`src/app/tui/index.tsx:348`
-- 问题：任何 React render 错误直接导致 Ink 进程崩溃，无兜底
-- 方向：在 `<TuiBootstrap />` 外包一层 `<ErrorBoundary>`，捕获后显示错误并允许退出
+- 位置：`src/app/tui/components/ErrorBoundary.tsx`，`src/app/tui/index.tsx:566`
+- 状态：✅ 已修复（2026-05-23）。`<ErrorBoundary>` 包裹 `<TuiBootstrap />`，捕获 React render 错误后显示错误信息并允许退出。
 
-### B09 — Checkpoint 句柄在 abort 时泄漏
+### B09 — Checkpoint 句柄泄漏 ✅
 
-- 位置：`src/core/runner.ts:161-165`
-- 问题：`if (!signal?.aborted) checkpointer.close()` — 每次 Ctrl+C 取消都泄漏 SQLite fd，依赖 GC 回收
-- 方向：无论如何在 finally 中 close，或确保 Bun GC 能及时回收
+- 位置：`src/core/runner.ts`（5 个函数的 try/finally）
+- 状态：✅ 已修复（2026-05-22）。所有 runner 函数使用 `try { ... } finally { checkpointer.close(); }` 确保无论 abort 或异常都关闭。
 
-### B10 — 外部编辑器 temp 文件在取消/unmount 时泄漏
+### B10 — 编辑器 temp 文件清理 ✅
 
-- 位置：`src/app/tui/index.tsx:269-300`
-- 问题：editor 进程的 `.catch()` 已添加（2026-05-20），但 unmount 取消时 temp file 未 unlink
+- 位置：`src/app/tui/index.tsx:513-516`
+- 状态：✅ 已修复（2026-05-23）。editor `useEffect` 清理函数中 `unlinkSync(tmpFile)`，确保 unmount 时删除 temp 文件。
 
-### B11 — Session 命名 API key 缺失时静默失败
+### B11 — Session 命名 fallback ✅
 
-- 位置：`src/core/persistence/sessions.ts:371-407`
-- 问题：`generateSessionName` 无 API key 时返回空字符串，外层 catch 忽略 — session 名为空
+- 位置：`src/core/persistence/sessions.ts:376-406`
+- 状态：✅ 已修复（2026-05-22）。API key 缺失时 fast-fail 返回空字符串；catch 异常时 fallback 为 `cleanMessage.slice(0, 30)` 而非空字符串。
 
 ---
 

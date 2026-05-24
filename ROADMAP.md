@@ -1,12 +1,12 @@
 # OpenPX 路线图
 
-最后更新：2026-05-23
+最后更新：2026-05-24
 
 ---
 
-## 当前阶段：生产就绪补齐
+## 当前阶段：生产就绪补齐 ✅ 已完成
 
-TUI 生产就绪 4 步路线图已完成，当前重点补齐遗留缺口，对标 Claude Code CLI 核心体验。
+3 个 Phase 全部完成，OpenPX 已具备对标 Claude Code CLI 的核心体验。
 
 ### ✅ 已完成 — TUI 生产就绪（2026-05-20 ~ 2026-05-21）
 
@@ -21,48 +21,21 @@ TUI 生产就绪 4 步路线图已完成，当前重点补齐遗留缺口，对�
 
 ---
 
-## 🔜 下一步：生产就绪补齐
+## 🔜 后续：稳定期 + 暂缓项评估
 
-> 详见 [`docs/space/plans/2026-05-22-production-gaps-closure.md`](docs/space/plans/2026-05-22-production-gaps-closure.md)
+生产就绪补齐 3 个 Phase 已全部完成，当前进入稳定期。下一步方向：
 
-### Phase 1：MCP 核心 + 事件闭环 + 错误分类 ✅
+### 可即时推进
 
-**主攻方向 — MCP 协议支持**（对齐 Claude Code MCP 实现）：
+- **ROADMAP 收尾**：清理已完成的 plan 文件，更新 backlog 状态
+- **代码质量**：TypeScript strict 模式、API 文档生成
+- **真实场景验证**：使用真实模型链路验收 MCP + Skills + Rewind 完整体验
+- **性能优化**：前缀缓存命中率监控、checkpoint 压缩、大文件 diff 性能
 
-- **MCP Client**：stdio + streamable HTTP transport，JSON-RPC 2.0 协议
-- **工具集成**：MCP tool → LangChain StructuredTool，前缀 `mcp__servername__toolname`
-- **安全策略**：MCP 工具默认需要审批，可在配置中降级
-- **连接管理**：并行启动 + 失败不阻断 + HTTP 自动重连（指数退避）
+### 暂缓项（待需求确认后启动）
 
-**配套补齐**：
-
-- **Compact 事件闭环**：graph 压缩后通过 runner emit `compact_begin`/`compact_end`
-- **Compacting UI**：StatusBar 展示 `⏳ Compacting...` 状态
-- **Retry 事件清理**：移除死事件 `retry`，统一使用 `model_retry`
-- **Recoverable 错误分类**：runner 区分网络/超时（可恢复）和配置/权限（不可恢复）
-- **Session 命名修复**：API key 缺失时 fallback 为截断的用户输入
-
-### Phase 2：MCP Resources + Rewind ✅
-
-- **MCP Resources**：`resources/list` + `resources/read`，通过内置工具注入 agent 上下文
-- **Rewind（会话回溯）**：对齐 Claude Code `/rewind` 模型，基于已有 checkpoint 链的回溯
-  - `/rewind` 命令 → checkpoint 列表 → fork 新会话
-  - 不实现 Ctrl+Z/Ctrl+Y 逐次撤销
-
-### Phase 3：Skills 系统
-
-> 详见 [`docs/space/understanding/2026-05-23-skills-system-design.md`](docs/space/understanding/2026-05-23-skills-system-design.md)
-
-- **Skills 系统**：严格遵循 agentskills.io 开放标准，按需加载 Markdown 指令文件
-  - `Skill` 工具：Agent 根据 Available Skills 区段自主匹配调用
-  - `/skill-name` 斜杠命令：用户显式激活
-  - 4 目录扫描：`.openpx/skills/` > `.agents/skills/` > `~/.openpx/skills/` > `~/.agents/skills/`
-  - 容错优先：所有校验异常静默跳过，不阻断 TUI
-
-### 后续（暂缓）
-
-- **Hooks 系统**：`PreToolUse` / `PostToolUse` hook — 当前优先级不高，延后
-- **自定义斜杠命令**：`customCommands` 配置段 — Skills 系统实现后可复用其机制
+- **Hooks 系统**：`PreToolUse` / `PostToolUse` hook — 需要明确定义 hook 接口和触发时机
+- **自定义斜杠命令**：`customCommands` 配置段 — 可复用 Skills 机制实现
 
 ---
 
