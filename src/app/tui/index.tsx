@@ -436,7 +436,8 @@ function TuiBootstrap() {
         forkedRt.thinkingLevel = thinkingLevelRef.current;
         forkedRt.conversationHistory = [...conversationHistoryRef.current];
         sessionManager.onStatusChange(newThreadId);
-        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        // 切换到分叉的新会话，后续 generator 事件写入正确的 activeSession
+        dispatch({ type: "SWITCH_SESSION", threadId: newThreadId });
         generator = forkFromCheckpoint(provider, buildForkParams({
           ...baseRewindParams,
           oldThreadId: threadId,
@@ -480,8 +481,13 @@ function TuiBootstrap() {
           const result = execSync(command, { cwd, timeout: 30000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
           const output = result.trim() || "(no output)";
           dispatch({ type: "EVENT", event: { type: "text", data: { text: `\`\`\`\n${output}\n\`\`\`` } } });
-          // Add to conversation history for context
-          conversationHistoryRef.current.push(`User (shell): ${command}\nResult:\n${output}`);
+          // 写入当前会话 runtime，避免切换时丢失
+          const rt = sessionManager.getRuntime(threadIdRef.current);
+          if (rt) {
+            rt.conversationHistory.push(`User (shell): ${command}\nResult:\n${output}`);
+          } else {
+            conversationHistoryRef.current.push(`User (shell): ${command}\nResult:\n${output}`);
+          }
         } catch (err: any) {
           const errorMsg = err.stderr?.trim() || err.message || "command failed";
           dispatch({ type: "EVENT", event: { type: "text", data: { text: `✗ \`${command}\`\n\`\`\`\n${errorMsg}\n\`\`\`` } } });
@@ -490,7 +496,7 @@ function TuiBootstrap() {
         }
       });
     },
-    [dispatch]
+    [dispatch, sessionManager]
   );
 
   const handleInput = React.useCallback(
