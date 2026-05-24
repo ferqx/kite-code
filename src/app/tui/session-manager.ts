@@ -8,6 +8,9 @@ import { runAgent, isRecoverableError } from "@/core/runner";
 import { buildRunAgentParams } from "./run-agent";
 import { createSandboxExecutor } from "@/core/sandbox/index";
 
+/** 可丢弃的缓冲事件类型（text/reason 为非关键信息，丢弃时不丢失用户可见状态） */
+const DISPOSABLE_EVENT_TYPES = new Set(["text", "reason"]);
+
 /** 工厂依赖：注入到每个 SessionRuntime */
 export interface SessionDeps {
   config: AgentConfig;
@@ -41,6 +44,11 @@ export class SessionRuntime {
   /** 当后台会话命中中断时通知 Manager 刷新快照 / Callback to notify Manager on background interrupt */
   notifyInterrupt: (() => void) | null = null;
 
+  // ── 双模式代理：生成器始终使用 _proxyProvider，通过 _foreground 切换事件路由 ──
+  private _foreground = true;
+  private _foregroundWake: (() => void) | null = null;
+  private _proxyProvider: TuiUserInputProvider;
+
   constructor(
     threadId: string,
     workspace: string,
@@ -52,13 +60,19 @@ export class SessionRuntime {
     this.skillManifests = deps.skillManifests;
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
+    this._proxyProvider = this._createProxyProvider(deps.provider);
   }
+
+  // ── 公开 API ──
 
   abort(): void {
     this.abortController?.abort();
     this.abortController = null;
     this.agentLoopActive = false;
     this.generator = null;
+    // 如果有挂起的后台中断等待，解除阻塞
+    this._foregroundWake?.();
+    this._foregroundWake = null;
   }
 
   clearBuffer(): void {
@@ -68,7 +82,18 @@ export class SessionRuntime {
     this.pendingInterrupt = false;
   }
 
-  /** 运行 agent 任务，支持前台和后台两种模式 / Run agent task in foreground or background mode */
+  /** 切换到前台：新事件路由到 provider.onEvent，唤醒挂起的后台中断 */
+  setForeground(foreground: boolean): void {
+    this._foreground = foreground;
+    if (foreground) {
+      this._foregroundWake?.();
+      this._foregroundWake = null;
+    }
+  }
+
+  // ── Agent 运行 ──
+
+  /** 运行 agent 任务。始终使用代理提供器，通过 _foreground 控制事件路由 */
   async runTask(
     task: string,
     deps: {
@@ -76,11 +101,10 @@ export class SessionRuntime {
       provider: TuiUserInputProvider;
       config: AgentConfig;
     },
-    mode: "foreground" | "background",
   ): Promise<void> {
     if (this.agentLoopActive) return;
 
-    // 构建待注入的 skills 内容 / Build pending skills content for injection
+    // 构建待注入的 skills 内容
     let pendingSkillsContent = "";
     if (this.pendingSkills.length > 0) {
       pendingSkillsContent = this.pendingSkills.join("");
@@ -108,14 +132,12 @@ export class SessionRuntime {
       mcpManager: this.mcpManager,
       pendingSkillsContent,
       shellContext,
+      // 后台会话注入 full_access，避免中断阻塞 generator
+      authorizationOverride: this._foreground ? undefined : { current: "full_access" as const },
     });
 
-    // 后台模式：使用缓冲提供器，事件进入 buffer 而非直接 dispatch / Background mode: buffer events instead of dispatching
-    const actualProvider = mode === "background"
-      ? this._createBufferingProvider()
-      : deps.provider;
-
-    const generator = runAgent(actualProvider, runAgentParams);
+    // 始终使用代理提供器 — 事件路由由 _foreground 控制
+    const generator = runAgent(this._proxyProvider as any, runAgentParams);
     this.generator = generator;
 
     let aborted = false;
@@ -127,49 +149,91 @@ export class SessionRuntime {
           break;
         }
       }
-      if (!aborted) deps.dispatch({ type: "SET_EXITED" });
+      if (!aborted && this._foreground) {
+        deps.dispatch({ type: "SET_EXITED" });
+      }
     } catch (e: any) {
       const errorEvent: AgentEvent = {
         type: "error",
         data: { message: e?.message ?? String(e), recoverable: isRecoverableError(e) },
       };
-      if (mode === "foreground") {
+      if (this._foreground) {
         deps.provider.onEvent(errorEvent);
       } else {
-        this.eventBuffer.push(errorEvent);
+        this._pushToBuffer(errorEvent);
       }
-      deps.dispatch({ type: "SET_EXITED" });
+      if (this._foreground) {
+        deps.dispatch({ type: "SET_EXITED" });
+      }
     } finally {
       this.abortController = null;
       this.generator = null;
-      if (mode === "foreground") {
+      if (this._foreground) {
         deps.provider.reset();
       }
     }
   }
 
-  /** 创建后台缓冲提供器：事件进 buffer，中断立即返回 cancel / Create background buffering provider */
-  private _createBufferingProvider(): TuiUserInputProvider {
+  // ── 私有：代理提供器 & 缓冲 ──
+
+  /** 推送事件到缓冲，溢出时优先丢弃非关键事件 */
+  private _pushToBuffer(event: AgentEvent): void {
+    if (this.eventBuffer.length >= SessionRuntime.MAX_BUFFER) {
+      // 查找第一个可丢弃事件的下标
+      const dropIdx = this.eventBuffer.findIndex(
+        (e) => DISPOSABLE_EVENT_TYPES.has(e.type),
+      );
+      if (dropIdx >= 0) {
+        this.eventBuffer.splice(dropIdx, 1);
+      } else {
+        // 无可丢弃事件，移除最老的
+        this.eventBuffer.shift();
+      }
+    }
+    this.eventBuffer.push(event);
+  }
+
+  /** 创建代理提供器，onEvent 根据 _foreground 路由 */
+  private _createProxyProvider(realProvider: TuiUserInputProvider): TuiUserInputProvider {
     const self = this;
     return {
       onEvent(event: AgentEvent): void {
-        self.eventBuffer.push(event);
-        if (self.eventBuffer.length > SessionRuntime.MAX_BUFFER) {
-          self.eventBuffer.shift();
+        if (self._foreground) {
+          realProvider.onEvent(event);
+        } else {
+          self._pushToBuffer(event);
+          if (event.type === "need_approval" || event.type === "need_input") {
+            self.pendingInterrupt = true;
+            self.notifyInterrupt?.();
+          }
         }
-        if (event.type === "need_approval" || event.type === "need_input") {
+      },
+
+      async requestAction(
+        payload: { kind: string; approval?: any; question?: any },
+      ): Promise<any> {
+        if (!self._foreground) {
+          // 标记中断待处理，等待前台切换
           self.pendingInterrupt = true;
           self.notifyInterrupt?.();
+          await new Promise<void>((resolve) => {
+            self._foregroundWake = resolve;
+          });
+          // 如果 abort 被调用，foregroundWake 也触发但 controller 已空
+          if (!self.abortController) {
+            return { type: "cancel" as const };
+          }
+          self.pendingInterrupt = false;
         }
+        return realProvider.requestAction(payload as any);
       },
-      async requestAction(): Promise<{ type: "cancel" }> {
-        return { type: "cancel" };
-      },
-      reset(): void {},
-      submitAction(): void {},
-      getPendingInterrupt(): null { return null; },
-      teardown(): Promise<void> { return Promise.resolve(); },
-      compactRequested: false,
+
+      reset(): void { realProvider.reset(); },
+      submitAction(action: any): void { realProvider.submitAction(action); },
+      getPendingInterrupt(): any { return realProvider.getPendingInterrupt(); },
+      teardown(): Promise<void> { return realProvider.teardown?.() ?? Promise.resolve(); },
+      get compactRequested(): boolean { return (realProvider as any).compactRequested ?? false; },
+      set compactRequested(v: boolean) { (realProvider as any).compactRequested = v; },
     } as unknown as TuiUserInputProvider;
   }
 }
@@ -203,9 +267,10 @@ export class SessionManager {
   }
 
   switchSession(fromId: string, toId: string): void {
+    // 离开的会话切到后台模式
     const fromRt = this.runtimes.get(fromId);
     if (fromRt) {
-      fromRt.eventBuffer = [];  // 切换时清空离开的会话缓冲区 / Clear outgoing session buffer on switch
+      fromRt.setForeground(false);
       fromRt.pendingInterrupt = false;
     }
     this.activeId = toId;
@@ -246,7 +311,7 @@ export class SessionManager {
     this.snapshotCallback?.(threadId);
   }
 
-  /** 设置会话名称（在 generateSessionName 后调用）/ Set session display name */
+  /** 设置会话名称（在 generateSessionName 后调用） */
   setName(threadId: string, name: string): void {
     const rt = this.runtimes.get(threadId);
     if (rt) rt.name = name;
@@ -254,6 +319,18 @@ export class SessionManager {
 
   setSnapshotCallback(fn: (threadId: string) => void): void {
     this.snapshotCallback = fn;
+  }
+
+  // ── 供 index.tsx /new 拦截使用 ──
+
+  /** 注册一个由外部创建的 threadId（如 FORK） */
+  registerSession(threadId: string, workspace: string): SessionRuntime {
+    const rt = new SessionRuntime(threadId, workspace, this.deps);
+    rt.notifyInterrupt = () => {
+      this.snapshotCallback?.(rt.threadId);
+    };
+    this.runtimes.set(threadId, rt);
+    return rt;
   }
 }
 

@@ -263,13 +263,22 @@ function TuiBootstrap() {
         const newId = action.threadId;
 
         sessionManager.switchSession(oldId, newId);
+
+        // 进入的会话切到前台模式：代理提供器将事件路由到 provider.onEvent
+        const incomingRt = sessionManager.getRuntime(newId);
+        if (incomingRt) {
+          incomingRt.setForeground(true);
+        }
+
         dispatch(action);
 
-        // 回放目标会话的缓冲事件 / Replay buffered events from incoming session
-        const incomingRt = sessionManager.getRuntime(newId);
+        // 回放目标会话的缓冲事件，但跳过中断事件（已在后台处理或正在挂起）
         if (incomingRt && incomingRt.eventBuffer.length > 0) {
           dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
           for (const event of incomingRt.eventBuffer) {
+            if (event.type === "need_approval" || event.type === "need_input") {
+              continue; // 中断已在 requestAction 挂起 或 已 cancel
+            }
             dispatch({ type: "EVENT", event });
           }
           incomingRt.eventBuffer = [];
@@ -328,9 +337,6 @@ function TuiBootstrap() {
       dispatch({ type: "SET_RUNNING" });
       dispatch({ type: "DEACTIVATE_SKILL", name: "" }); // clear after capture into runtime
 
-      const isActive = sessionManager.getActiveId() === threadId;
-      const mode = isActive ? "foreground" : "background";
-
       // Update running state
       rt.agentLoopActive = true;
       // Keep legacy refs in sync for runRewind / Ctrl+C handler
@@ -343,7 +349,7 @@ function TuiBootstrap() {
           dispatch,
           provider,
           config,
-        }, mode);
+        });
       } finally {
         rt.agentLoopActive = false;
         agentLoopActiveRef.current = false;
@@ -417,6 +423,12 @@ function TuiBootstrap() {
       } else {
         const newThreadId = `tui-${Date.now().toString(36)}`;
         threadIdRef.current = newThreadId;
+        // FORK 创建新会话，注册到 SessionManager
+        const forkedRt = sessionManager.registerSession(newThreadId, workspace);
+        forkedRt.thinkingLevel = thinkingLevelRef.current;
+        forkedRt.conversationHistory = [...conversationHistoryRef.current];
+        sessionManager.onStatusChange(newThreadId);
+        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
         generator = forkFromCheckpoint(provider, buildForkParams({
           ...baseRewindParams,
           oldThreadId: threadId,

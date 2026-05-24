@@ -7,6 +7,7 @@ import type { AgentConfig } from "@/core/config/index";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import type { McpManager } from "@/core/mcp";
 import type { RunAgentInput, RevertInput, ForkInput } from "@/core/runner";
+import type { AuthorizationOverride } from "@/core/types";
 import { defaultCheckpointPath } from "@/core/config/paths";
 
 export interface BaseTuiParams {
@@ -19,6 +20,8 @@ export interface BaseTuiParams {
   skills: SkillManifest[];
   skillOptions: SkillScanOptions | null;
   mcpManager: McpManager | null;
+  /** 后台会话默认注入 full_access，避免中断阻塞 generator */
+  authorizationOverride?: AuthorizationOverride;
 }
 
 export interface BuildRunTaskParams extends BaseTuiParams {
@@ -46,6 +49,7 @@ function baseParams(p: BaseTuiParams) {
     signal: p.signal,
     thinkingLevel: p.thinkingLevel,
     mcpManager: p.mcpManager ?? undefined,
+    authorizationOverride: p.authorizationOverride,
   };
 }
 
