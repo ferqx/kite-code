@@ -26,7 +26,7 @@ function resolveModelForResume(
   return persistedModelName || currentConfig.modelName;
 }
 
-function TuiBootstrap() {
+export function TuiBootstrap() {
   const { state, dispatch, onToggleReason } = useTuiState();
   const workspace = process.cwd();
   const config = React.useMemo(() => loadAgentConfig(), []);
@@ -51,6 +51,28 @@ function TuiBootstrap() {
   const skillOptionsRef = React.useRef<SkillScanOptions | null>(null);
   const pendingSkillsRef = React.useRef<string[]>([]);
   const runTaskRef = React.useRef<(task: string) => Promise<void>>(async () => {});
+
+  const provider = React.useMemo(
+    () =>
+      new TuiUserInputProvider((event) => {
+        dispatch({ type: "EVENT", event });
+      }),
+    [dispatch]
+  );
+
+  const sessionManager = React.useMemo(() => {
+    const mgr = new SessionManager({
+      config,
+      provider,
+      skillManifests: skillManifestsRef.current,
+      skillOptions: skillOptionsRef.current,
+      mcpManager: mcpManagerRef.current,
+    });
+    mgr.setSnapshotCallback((threadId) => {
+      dispatch({ type: "SESSION_INTERRUPT_PENDING", threadId });
+    });
+    return mgr;
+  }, [config, provider]);
 
   React.useEffect(() => {
     const timer = setTimeout(() => setInitialized(true), 80);
@@ -168,28 +190,6 @@ function TuiBootstrap() {
     dispatch({ type: "EVENT", event: { type: "text", data: { text: "👋 Goodbye!" } } });
     setTimeout(() => process.exit(0), 300);
   }, [dispatch]);
-
-  const provider = React.useMemo(
-    () =>
-      new TuiUserInputProvider((event) => {
-        dispatch({ type: "EVENT", event });
-      }),
-    [dispatch]
-  );
-
-  const sessionManager = React.useMemo(() => {
-    const mgr = new SessionManager({
-      config,
-      provider,
-      skillManifests: skillManifestsRef.current,
-      skillOptions: skillOptionsRef.current,
-      mcpManager: mcpManagerRef.current,
-    });
-    mgr.setSnapshotCallback((threadId) => {
-      dispatch({ type: "SESSION_INTERRUPT_PENDING", threadId });
-    });
-    return mgr;
-  }, [config, provider]);
 
   // Auto-create initial session on mount
   React.useEffect(() => {
