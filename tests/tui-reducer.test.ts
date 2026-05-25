@@ -736,12 +736,30 @@ describe("eventReducer (blocks model)", () => {
       expect(next.sessions[1].pendingInterrupt).toBe(false);
     });
 
-    test("SET_SESSIONS replaces sessions array", () => {
-      const sessions: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+    test("SET_SESSIONS merges: preserves existing blocks and syncs activeSessionId", () => {
+      // Simulate: state has session with blocks, SET_SESSIONS comes in with empty blocks
+      const existing: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 100 }, blocks: [{ id: 1, kind: "text" as const, content: "hello" }] },
       ];
-      const next = eventReducer(initialState, { type: "SET_SESSIONS", sessions });
-      expect(next.sessions).toEqual(sessions);
+      const incoming: SessionSnapshot[] = [
+        { threadId: "a", name: "A (renamed)", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 0 }, blocks: [] },
+      ];
+      const state = { ...initialState, sessions: existing, activeSessionId: null };
+      const next = eventReducer(state, { type: "SET_SESSIONS", sessions: incoming });
+      // Name/running from incoming, blocks/status preserved from existing, activeSessionId synced
+      expect(next.sessions[0].name).toBe("A (renamed)");
+      expect(next.sessions[0].blocks).toEqual([{ id: 1, kind: "text", content: "hello" }]);
+      expect(next.sessions[0].status.totalTokens).toBe(100);
+      expect(next.activeSessionId).toBe("a"); // synced from incoming.active
+    });
+
+    test("SET_SESSIONS handles new session (no existing match)", () => {
+      const incoming: SessionSnapshot[] = [
+        { threadId: "new", name: "New", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const next = eventReducer(initialState, { type: "SET_SESSIONS", sessions: incoming });
+      expect(next.sessions[0].threadId).toBe("new");
+      expect(next.activeSessionId).toBe("new");
     });
 
     test("SWITCH_SESSION preserves blocks on outgoing session and restores from incoming", () => {
@@ -797,6 +815,64 @@ describe("eventReducer (blocks model)", () => {
       expect(state.activeSessionId).toBe("b");
       expect(state.status.totalTokens).toBe(200);
       expect(state.focus).toBe("input");
+    });
+
+    test("full chain: NEW_SESSION saves blocks → SET_SESSIONS preserves → SWITCH_SESSION restores", () => {
+      // Setup: session A is active with runtime blocks in state.blocks
+      let state: TuiState = {
+        ...initialState,
+        sessions: [
+          { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 100 }, blocks: [] },
+        ],
+        activeSessionId: "a",
+        blocks: [
+          { id: 1, kind: "user" as const, content: "Hello" },
+          { id: 2, kind: "text" as const, content: "Hi there!" },
+        ],
+      };
+
+      // Step 1: NEW_SESSION — should save session A's blocks
+      state = eventReducer(state, { type: "NEW_SESSION", threadId: "b" });
+      expect(state.sessions.length).toBe(2);
+      expect(state.sessions[0].threadId).toBe("a");
+      expect(state.sessions[0].blocks.length).toBe(2); // blocks saved
+      expect(state.sessions[0].blocks[0].content).toBe("Hello");
+      expect(state.sessions[0].active).toBe(false);
+      expect(state.sessions[1].threadId).toBe("b");
+      expect(state.sessions[1].active).toBe(true);
+      expect(state.activeSessionId).toBe("b");
+      expect(state.sidebarSelection).toBe(1);
+
+      // Step 2: SET_SESSIONS from SessionManager.getSnapshot() (blocks are always [])
+      // This simulates what happens after dispatchSessionLoad calls SET_SESSIONS
+      const runtimeSnapshots: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      state = eventReducer(state, { type: "SET_SESSIONS", sessions: runtimeSnapshots });
+      // Merge must preserve blocks from step 1
+      expect(state.sessions[0].blocks.length).toBe(2); // preserved!
+      expect(state.sessions[0].blocks[0].content).toBe("Hello");
+      expect(state.sessions[1].blocks.length).toBe(0); // new session, no blocks
+      expect(state.activeSessionId).toBe("b"); // synced from runtime
+
+      // Step 3: Add some blocks to session B's runtime (simulating agent response)
+      state = { ...state, blocks: [
+        { id: 3, kind: "user" as const, content: "Msg in B" },
+        { id: 4, kind: "text" as const, content: "Reply in B" },
+      ]};
+
+      // Step 4: SWITCH_SESSION back to A — should save B's blocks and restore A's
+      state = eventReducer(state, { type: "SWITCH_SESSION", threadId: "a" });
+      expect(state.activeSessionId).toBe("a");
+      expect(state.focus).toBe("input");
+      // A's blocks restored
+      expect(state.blocks.length).toBe(2);
+      expect(state.blocks[0].content).toBe("Hello");
+      expect(state.blocks[1].content).toBe("Hi there!");
+      // B's blocks saved to snapshot
+      expect(state.sessions[1].blocks.length).toBe(2);
+      expect(state.sessions[1].blocks[0].content).toBe("Msg in B");
     });
 
     test("SESSION_INTERRUPT_PENDING sets flag on correct session", () => {

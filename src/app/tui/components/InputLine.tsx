@@ -246,6 +246,26 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     }
   }, []);
 
+  // History navigation triggered by CtrlSafeTextInput when cursor is at line boundary
+  const handleNavigateHistory = useCallback((direction: "up" | "down") => {
+    if (direction === "up" && history.length > 0) {
+      const idx = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
+      setHistoryIndex(idx);
+      applyHistoryEntry(history[idx]);
+    } else if (direction === "down") {
+      if (historyIndex === -1) return;
+      const idx = historyIndex + 1;
+      if (idx >= history.length) {
+        setHistoryIndex(-1);
+        setPasteState(null);
+        setValue("");
+      } else {
+        setHistoryIndex(idx);
+        applyHistoryEntry(history[idx]);
+      }
+    }
+  }, [history, historyIndex, applyHistoryEntry]);
+
   useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; shift?: boolean; meta?: boolean; tab?: boolean; escape?: boolean; rightArrow?: boolean; ctrl?: boolean }) => {
     // When an overlay is active, yield all keyboard handling to it
     if (overlayActive) return;
@@ -365,25 +385,8 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       handleSubmitRef.current(valueRef.current);
       return;
     }
-    if (key.upArrow && history.length > 0) {
-      const idx = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
-      setHistoryIndex(idx);
-      applyHistoryEntry(history[idx]);
-      return;
-    }
-    if (key.downArrow) {
-      if (historyIndex === -1) return;
-      const idx = historyIndex + 1;
-      if (idx >= history.length) {
-        setHistoryIndex(-1);
-        setPasteState(null);
-        setValue("");
-      } else {
-        setHistoryIndex(idx);
-        applyHistoryEntry(history[idx]);
-      }
-      return;
-    }
+    // Up/Down cursor movement and history navigation are handled by
+    // CtrlSafeTextInput (multi-line cursor) via onNavigateHistory callback.
   });
 
   if (editorContentRef) {
@@ -441,6 +444,8 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
           focus={!overlayActive}
           atomicBlock={atomicBlock}
           onRemoveAtomicBlock={clearPasteState}
+          onNavigateHistory={handleNavigateHistory}
+          disableArrowNav={slashSuggestions.active || fileSearch.active}
         />
         {slashGhost && !overlayActive && (
           <Text color={t.dim}>{slashGhost}</Text>

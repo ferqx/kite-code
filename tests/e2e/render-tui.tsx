@@ -215,10 +215,12 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
   const origOpenpxHome = process.env.OPENPX_HOME;
   const origCwd = process.cwd();
   const origColumns = process.stdout.columns;
+  const origRows = process.stdout.rows;
   process.env.HOME = tempHome;
   process.env.OPENPX_HOME = tempHome;
   process.chdir(workspace);
   process.stdout.columns = terminalWidth;
+  process.stdout.rows = 40; // sufficient for sidebar virtual window tests
 
   const normalizedResponses: MockResponse[] = opts.modelResponses.map((r) => {
     const msg = r.message;
@@ -289,6 +291,7 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
     }
     process.chdir(origCwd);
     process.stdout.columns = origColumns ?? 80;
+    process.stdout.rows = origRows ?? 30;
     try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
     try { rmSync(workspace, { recursive: true, force: true }); } catch {}
     unlock();
@@ -343,9 +346,13 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
 
       getSessionCount() {
         const out = getOutput();
-        const activeCount = (out.match(/●   /g) || []).length;
-        const inactiveCount = (out.match(/○   /g) || []).length;
-        return activeCount + inactiveCount;
+        const visibleCount = (out.match(/[●○] /g) || []).length;
+        // Include sessions hidden by virtual window overflow indicators
+        const aboveMatch = out.match(/↑ (\d+) more/);
+        const belowMatch = out.match(/↓ (\d+) more/);
+        const above = aboveMatch ? parseInt(aboveMatch[1], 10) : 0;
+        const below = belowMatch ? parseInt(belowMatch[1], 10) : 0;
+        return visibleCount + above + below;
       },
     };
 

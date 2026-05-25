@@ -29,6 +29,8 @@ export class SessionRuntime {
   agentLoopActive = false;
   pendingInterrupt = false;
   eventBuffer: AgentEvent[] = [];
+  /** true if loaded from DB and state not yet hydrated / 从 DB 加载但尚未加载完整状态 */
+  dormant = false;
   static readonly MAX_BUFFER = 1000;
 
   conversationHistory: string[] = [];
@@ -363,6 +365,11 @@ export class SessionManager {
     };
     this.runtimes.set(threadId, rt);
     return rt;
+  }
+
+  /** 检查指定 threadId 是否已有运行时 / Check if a runtime exists for threadId */
+  hasRuntime(threadId: string): boolean {
+    return this.runtimes.has(threadId);
   }
 }
 

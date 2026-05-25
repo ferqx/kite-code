@@ -21,6 +21,10 @@ interface Props {
   onSubmit?: (value: string) => void;
   atomicBlock?: AtomicBlock;
   onRemoveAtomicBlock?: () => void;
+  /** 光标在首行按上/尾行按下时回调，用于历史导航 / Called when cursor at boundary for history navigation */
+  onNavigateHistory?: (direction: "up" | "down") => void;
+  /** 禁用上下箭头导航（如 slash 建议/文件搜索激活时） / Disable up/down arrow navigation (e.g. when slash suggestions or file search active) */
+  disableArrowNav?: boolean;
 }
 
 function CtrlSafeTextInput({
@@ -34,6 +38,8 @@ function CtrlSafeTextInput({
   onSubmit,
   atomicBlock,
   onRemoveAtomicBlock,
+  onNavigateHistory,
+  disableArrowNav,
 }: Props) {
   const [state, setState] = useState({
     cursorOffset: (originalValue || "").length,
@@ -130,8 +136,6 @@ function CtrlSafeTextInput({
   useInput(
     (input, key) => {
       if (
-        key.upArrow ||
-        key.downArrow ||
         (key.ctrl && /^[a-zA-Z]$/.test(input)) ||
         key.tab ||
         (key.shift && key.tab)
@@ -142,6 +146,38 @@ function CtrlSafeTextInput({
       if (key.return) {
         // Enter / Shift+Enter handling is in InputLine to have reliable
         // access to handleSubmit and value without stale-closure risk.
+        return;
+      }
+
+      // ── Up/Down: multi-line cursor movement or history navigation ──
+      if ((key.upArrow || key.downArrow) && !disableArrowNav) {
+        const lines = originalValue.length > 0 ? originalValue.split("\n") : [""];
+        let lineIdx = 0;
+        let col = cursorOffset;
+        for (let i = 0; i < lines.length; i++) {
+          if (col <= lines[i].length) { lineIdx = i; break; }
+          col -= lines[i].length + 1;
+        }
+
+        if (key.upArrow) {
+          if (lineIdx > 0) {
+            const newCol = Math.min(col, lines[lineIdx - 1].length);
+            let newOffset = newCol;
+            for (let i = 0; i < lineIdx - 1; i++) newOffset += lines[i].length + 1;
+            setState({ cursorOffset: newOffset, cursorWidth: 0 });
+          } else {
+            onNavigateHistory?.("up");
+          }
+        } else {
+          if (lineIdx < lines.length - 1) {
+            const newCol = Math.min(col, lines[lineIdx + 1].length);
+            let newOffset = newCol;
+            for (let i = 0; i <= lineIdx; i++) newOffset += lines[i].length + 1;
+            setState({ cursorOffset: newOffset, cursorWidth: 0 });
+          } else {
+            onNavigateHistory?.("down");
+          }
+        }
         return;
       }
 

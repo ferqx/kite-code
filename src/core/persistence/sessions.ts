@@ -389,15 +389,21 @@ export async function generateSessionName(firstMessage: string): Promise<string>
       new SystemMessage(
         "You are a session naming assistant. Generate a short, meaningful name (4-20 characters) " +
         "for a conversation based on the user's first message. Reply with ONLY the name, no explanation, no quotes, no punctuation at the end. " +
-        "Use the same language as the user's message.",
+        "Use the same language as the user's message. " +
+        "CRITICAL: Use ONLY plain text characters (letters, digits, spaces, hyphens, underscores). " +
+        "NO emoji, NO symbols, NO special characters.",
       ),
       new HumanMessage(`First message: "${cleanMessage}"`),
     ]);
 
     const name = (typeof response.content === "string" ? response.content : "").trim();
 
-    // Clean up: remove quotes, trailing punctuation, extra whitespace
-    const cleaned = name.replace(/^["']|["']$/g, "").replace(/[.!。,，、；;]$/, "").trim();
+    // Clean up: remove quotes, trailing punctuation, emoji, extra whitespace
+    const cleaned = name
+      .replace(/^["']|["']$/g, "")
+      .replace(/[.!。,，、；;]$/, "")
+      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{2B50}\u{2B55}\u{231A}\u{231B}\u{2328}\u{23CF}\u{23E9}-\u{23F3}\u{23F8}-\u{23FA}\u{24C2}\u{25AA}\u{25AB}\u{25B6}\u{25C0}\u{25FB}-\u{25FE}\u{2934}\u{2935}\u{3030}\u{303D}\u{3297}\u{3299}]/gu, "")
+      .trim();
 
     if (cleaned.length >= 2 && cleaned.length <= 30) return cleaned;
     return cleaned.slice(0, 30) || "";

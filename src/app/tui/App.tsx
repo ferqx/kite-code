@@ -570,6 +570,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         ...state,
         sessions: [...newSessions, newSnapshot],
         activeSessionId: action.threadId,
+        sidebarSelection: newSessions.length, // point to the new session
         blocks: [],
         toolStartTimes: undefined,
         interrupt: null,
@@ -611,8 +612,25 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         focus: "input" as const,
       };
     }
-    case "SET_SESSIONS":
-      return { ...state, sessions: action.sessions };
+    case "SET_SESSIONS": {
+      // Merge runtime snapshots with existing reducer state: keep blocks/status
+      // that reducers (NEW_SESSION, SWITCH_SESSION) manage, update runtime info
+      // (name, running, pendingInterrupt) from SessionManager.
+      // Also sync activeSessionId from the runtime snapshots.
+      const mergedSessions = action.sessions.map((incoming) => {
+        const existing = state.sessions.find((s) => s.threadId === incoming.threadId);
+        if (existing) {
+          return { ...incoming, blocks: existing.blocks, status: existing.status };
+        }
+        return incoming;
+      });
+      const activeIncoming = action.sessions.find((s) => s.active);
+      return {
+        ...state,
+        sessions: mergedSessions,
+        activeSessionId: activeIncoming?.threadId ?? state.activeSessionId,
+      };
+    }
     case "SET_FOCUS":
       return { ...state, focus: action.focus };
     case "SIDEBAR_NAV": {

@@ -11,7 +11,7 @@ import InputLine, { type EditorContentHandle } from "./components/InputLine";
 import StartupScreen from "./components/StartupScreen";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useSlashCommand } from "./hooks/useSlashCommand";
-import { loadSession } from "../../core/persistence/sessions.js";
+import { loadSession, listSessions } from "../../core/persistence/sessions.js";
 import { defaultCheckpointPath } from "../../core/config/paths.js";
 import { BunSqliteSaver } from "../../core/persistence/checkpoint.js";
 import { scanSkills, getSkillContent } from "@/core/skills/loader";
@@ -196,13 +196,40 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     setTimeout(() => process.exit(0), 300);
   }, [dispatch]);
 
-  // Auto-create initial session on mount
+  // Load historical sessions from DB on startup.
+  // Auto-create a new session only when the DB is empty (first run).
   React.useEffect(() => {
     if (!initialized) return;
-    if (sessionManager.getActiveId()) return;
-    const newId = sessionManager.createSession(workspace);
-    threadIdRef.current = newId;
-    dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+    const checkpointPath = defaultCheckpointPath();
+    listSessions(checkpointPath).then((dbSessions) => {
+      for (const s of dbSessions) {
+        if (!sessionManager.hasRuntime(s.threadId)) {
+          const rt = sessionManager.registerSession(s.threadId, workspace);
+          rt.dormant = true;
+          sessionManager.setName(s.threadId, s.name);
+        }
+      }
+
+      if (dbSessions.length > 0) {
+        // Historical sessions exist: activate the most recent one
+        const mostRecent = dbSessions[0].threadId;
+        sessionManager.switchSession("", mostRecent);
+        threadIdRef.current = mostRecent;
+      } else {
+        // First run: auto-create a new session
+        const newId = sessionManager.createSession(workspace);
+        threadIdRef.current = newId;
+      }
+
+      dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+    }).catch(() => {
+      // DB may not exist yet (first run) — auto-create
+      if (!sessionManager.getActiveId()) {
+        const newId = sessionManager.createSession(workspace);
+        threadIdRef.current = newId;
+        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+      }
+    });
   }, [initialized]);
 
   const dispatchSessionLoad = React.useCallback(
@@ -220,6 +247,23 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       if (action.type === "LOAD_SESSION_PENDING") {
         const threadId = action.threadId;
         pendingSessionRef.current = threadId;
+
+        // Ensure SessionManager switches to this session (handles dormant & SessionSelector loads)
+        const oldId = sessionManager.getActiveId();
+        if (oldId !== threadId) {
+          if (!sessionManager.hasRuntime(threadId)) {
+            sessionManager.registerSession(threadId, workspace);
+          }
+          sessionManager.switchSession(oldId, threadId);
+          const rt = sessionManager.getRuntime(threadId);
+          if (rt) {
+            rt.setForeground(true);
+            rt.dormant = false;
+          }
+        }
+        threadIdRef.current = threadId;
+        conversationHistoryRef.current = [];
+
         try {
           const result = await loadSession(defaultCheckpointPath(), threadId);
           if (pendingSessionRef.current !== threadId) {
@@ -242,8 +286,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           const modelName = resolveModelForResume(config, result.modelName);
           const thinkingLevel = result.thinkingLevel ?? "max";
           thinkingLevelRef.current = thinkingLevel;
-          threadIdRef.current = threadId;
-          conversationHistoryRef.current = [];
 
           dispatch({
             type: "LOAD_SESSION",
@@ -276,12 +318,24 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       if (action.type === "SWITCH_SESSION") {
         const oldId = sessionManager.getActiveId();
         const newId = action.threadId;
-        if (oldId === newId) return; // 防止自切换清空缓冲区
+        if (oldId === newId) {
+          // Same session: just return focus to input
+          dispatch({ type: "SET_FOCUS", focus: "input" as const });
+          return;
+        }
+
+        const incomingRt = sessionManager.getRuntime(newId);
+
+        // Dormant session (loaded from DB, state not yet hydrated): load full state
+        if (incomingRt?.dormant) {
+          dispatch({ type: "LOAD_SESSION_PENDING", threadId: newId });
+          return;
+        }
 
         sessionManager.switchSession(oldId, newId);
+        threadIdRef.current = newId;
 
         // 进入的会话切到前台模式：代理提供器将事件路由到 provider.onEvent
-        const incomingRt = sessionManager.getRuntime(newId);
         if (incomingRt) {
           incomingRt.setForeground(true);
         }
@@ -369,12 +423,13 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
         dispatch({ type: "SET_IDLE" });
 
-        // Fire-and-forget: generate smart session name after first message
-        const firstTask = task;
+        // Fire-and-forget: generate smart session name once after first message
         (async () => {
           try {
+            // Only generate if not already named (name still equals threadId)
+            if (rt.name !== threadId) return;
             const { generateSessionName, persistSessionName } = await import("../../core/persistence/sessions.js");
-            const name = await generateSessionName(firstTask);
+            const name = await generateSessionName(task);
             if (name) {
               await persistSessionName(defaultCheckpointPath(), threadId, name);
               sessionManager.setName(threadId, name);
@@ -599,38 +654,21 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   );
 }
 
-function enableKittyKeyboardProtocol() {
-  if (process.stdout.isTTY && process.stdin.isTTY) {
-    // Enable Kitty keyboard protocol disambiguate mode so Shift+Enter
-    // is reported as CSI 13;2 u instead of raw \r indistinguishable
-    // from plain Enter. Ink's parseKeypress already handles CSI-u.
-    process.stdout.write("\x1b[>1u");
-  }
-}
-
-function disableKittyKeyboardProtocol() {
-  if (process.stdout.isTTY && process.stdin.isTTY) {
-    process.stdout.write("\x1b[<u");
-  }
-}
-
 if (import.meta.main) {
-  enableKittyKeyboardProtocol();
-  // Disable Ink's built-in Ctrl+C exit (which only detects \x03, not
-  // Kitty CSI-u). Instead, useGlobalKeys dispatches CTRL_C which the
-  // reducer handles for both legacy \x03 and CSI-u 99;5 u formats.
-  const { unmount } = render(<ErrorBoundary><TuiBootstrap /></ErrorBoundary>, { maxFps: 60, exitOnCtrlC: false });
+  // Use Ink's built-in kittyKeyboard option instead of manual enableKittyKeyboardProtocol().
+  // The manual approach enabled Kitty at the terminal level but Ink's parser didn't
+  // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
+  const { unmount } = render(<ErrorBoundary><TuiBootstrap /></ErrorBoundary>, {
+    maxFps: 60,
+    exitOnCtrlC: false,
+    kittyKeyboard: { mode: 'enabled' },
+  });
   process.on("SIGINT", () => {
-    disableKittyKeyboardProtocol();
     unmount();
     process.exit(0);
   });
   process.on("SIGTERM", () => {
-    disableKittyKeyboardProtocol();
     unmount();
     process.exit(0);
-  });
-  process.on("exit", () => {
-    disableKittyKeyboardProtocol();
   });
 }

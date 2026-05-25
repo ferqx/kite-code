@@ -56,6 +56,8 @@ describe("TUI E2E (Real Pipeline)", () => {
           delay: 30,
         },
         { message: { content: "File looks good." } as any, delay: 30 },
+        textResponse("Reply A!")[0],
+        textResponse("Reply B!")[0],
       ],
     });
   });
@@ -194,6 +196,46 @@ describe("TUI E2E (Real Pipeline)", () => {
     tui.stdin.write("\r");
     await new Promise((r) => setTimeout(r, 500));
     expect(tui.getOutput()).toContain("Current Settings");
+  }, TIMEOUT);
+
+  // ══════════════════════════════════════════════════════════
+  // Session switching: arrow keys + Enter on sidebar
+  // ══════════════════════════════════════════════════════════
+
+  test("switch session via sidebar arrow keys + Enter loads message history", async () => {
+    // Send message in session 1 (auto-created)
+    await tui.sendMessage("SwitchMsgA");
+    await tui.waitForText("Reply A!", 15000);
+
+    // Create session 2 via Ctrl+X n
+    tui.stdin.write("\x18");
+    await new Promise((r) => setTimeout(r, 400));
+    tui.stdin.write("n");
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // Send message in session 2
+    await tui.sendMessage("SwitchMsgB");
+    await tui.waitForText("Reply B!", 15000);
+
+    // Tab → focus sidebar (sidebarSelection=1, points to session 2)
+    tui.stdin.write("\t");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(tui.getOutput()).toContain("Sidebar focused");
+
+    // UpArrow → select session 1 (sidebarSelection 1→0)
+    tui.stdin.write("\x1b[A");
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Enter → switch to session 1
+    tui.stdin.write("\r");
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const out = tui.getOutput();
+    // Session 1 message history must be visible
+    expect(out).toContain("SwitchMsgA");
+    expect(out).toContain("Reply A!");
+    // Focus must return to input
+    expect(out).not.toContain("Sidebar focused");
   }, TIMEOUT);
 
 });
