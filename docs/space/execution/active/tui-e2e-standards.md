@@ -23,44 +23,58 @@
 
 ### 1. TUI e2e 测试必须覆盖真实的 TuiBootstrap 渲染路径
 
-现有 `mock-agent.test.tsx` 和 `real-agent.tsx` 使用 `TuiMockRoot` / `TuiRealAgentRoot` 等简化根组件。这些组件直接使用 `useTuiState()` 和手动事件 dispatch，不经过真实的 `TuiBootstrap` → `handleInput` → `runTask` → `SessionManager` → `SessionRuntime` → `runAgent` 完整路径。
+所有 e2e 测试使用 `createTui()` helper（`tests/e2e/render-tui.tsx`）渲染真实 `TuiBootstrap` 组件。
 
-**要求**：`startup.test.tsx` 渲染真实的 `TuiBootstrap` 组件，覆盖以下关键点：
+- 不再使用 `TuiMockRoot` / `TuiRealAgentRoot` 等简化根组件（已删除）
+- `createTui` 注入 `StreamingMockModel` 替代真实 LLM，其他所有层（handleInput → runTask → SessionManager → SessionRuntime → runAgent → reducer → renderer）均为真实生产路径
+- 测试使用 `beforeAll`/`afterAll` 管理单个共享 TUI 实例（Ink 在同一进程中只能被 render 一次）
+
+### 2. 使用 `stdin.write` 模拟真实用户输入
+
+```typescript
+tui.stdin.write("hello");   // 输入文字
+await tick(100);
+tui.stdin.write("\r");       // 按下 Enter（触发 handleSubmit → handleInput → runTask）
+```
+
+或使用便捷方法：
+```typescript
+await tui.sendMessage("hello");  // 自动写入文字 + Enter + 等待
+```
+
+### 3. 测试环境必须提供合法的 AgentConfig
+
+`createTui` 自动创建临时 HOME 目录并写入合法配置文件。通过 `process.env.OPENPX_HOME` 隔离 checkpoint 数据库。
+
+### 4. 模型响应按顺序消费
+
+`StreamingMockModel._callCount` 在 `bindTools` 克隆之间共享。每个 `sendMessage` 调用消耗一个响应（错误和工具调用可能消耗多个）。
+
+### 5. 关键测试覆盖
 
 | 测试点 | 检测的回归 |
 |--------|-----------|
 | 渲染不崩溃（输出长度 > 10 字符） | TDZ ReferenceError, 导入失败 |
 | Auto-create session 显示在 Sidebar | SessionManager 未创建或 getSnapshot 为空 |
-| stdin 输入 → handleInput → runTask 链路 | handleInput 未被调用或 runTask 静默返回 |
+| stdin 输入 → 用户消息块出现在输出中 | handleInput 未被调用 |
+| 发送消息 → Agent 响应文本出现 | runTask → runAgent 链路完整 |
+| 发送消息 → 返回 idle 状态 | Agent 执行完毕后状态正确恢复 |
+| 多轮对话 | 多次 runTask 不冲突，_callCount 不重置 |
+| 模型错误 → TUI 不挂死 | 错误处理链路完整 |
+| 工具调用 | 工具卡片渲染正确 |
 
-### 2. 使用 `ink-testing-library` 的 `render` + `stdin.write` 模拟真实用户输入
+### 6. 文件对应关系
 
-```typescript
-const { stdin, lastFrame, unmount } = render(React.createElement(TuiBootstrap));
-stdin.write("hello");   // 输入文字
-stdin.write("\r");       // 按下 Enter
-```
-
-这触发 Ink 的 `useInput` hook，调用 `InputLine` 的 `onSubmit`，进而触发 `handleInput` → `runTask`。这是唯一能抓到 handleInput/runTask 链路中断的测试方式。
-
-### 3. 测试环境必须提供合法的 AgentConfig
-
-TuiBootstrap 调用 `loadAgentConfig()`，需要 `~/.openpx/openpx.jsonc` 文件。测试中通过设置 `process.env.HOME` 指向 temp 目录并提供合法配置文件。
-
-注意：测试中使用 mock API key，agent 可能无法实际调用模型 API，但 handleInput → runTask → dispatch 的链路仍应正常执行。
-
-### 4. 不要 mock McpManager（除非绝对必要）
-
-`mock.module` 是进程级全局 mock，会影响同进程中的其他测试。只在必要时使用，且必须被 mock 的类需提供 MCP e2e 测试所需的完整接口（`connect`, `getServerStates` 等）。
-
-### 5. 测试文件对应关系
-
-| 测试文件 | 测试范围 |
-|---------|---------|
-| `tests/e2e/startup.test.tsx` | TuiBootstrap 渲染、auto-create session、handleInput → runTask 链路 |
-| `tests/e2e/mock-agent.test.tsx` | App 组件状态管理（dispatch/reducer），使用 TuiMockRoot |
-| `tests/e2e/real-agent.tsx` | runAgent 执行流程（mock model），使用 TuiRealAgentRoot |
+| 文件 | 范围 |
+|------|------|
+| `tests/e2e/render-tui.tsx` | createTui helper，渲染真实 TuiBootstrap + StreamingMockModel |
+| `tests/e2e/startup.test.tsx` | 全部 e2e 测试（单文件，共享 TUI 实例） |
+| `tests/e2e/types.ts` | 类型定义 |
+| `tests/e2e/freeze.ts` | ANSI 冻结工具 |
+| `tests/mock-model.ts` | StreamingMockModel（响应共享计数器） |
 
 ## 理由
 
-TUI 通过 React hooks 管理状态，TDZ（暂时性死区）错误和闭合变量过时是高频回归。简化根组件的 mock 测试无法发现这些问题，必须通过渲染真实 TuiBootstrap 并模拟真实用户交互来验证。
+TUI 通过 React hooks 管理状态，TDZ 错误和闭合变量过时是高频回归。简化根组件的 mock 测试无法发现这些问题，必须通过渲染真实 TuiBootstrap 并模拟真实用户交互来验证。
+
+关键发现（2026-05-25）：`TuiBootstrap.runTask` 在调用 `rt.runTask()` 之前设置了 `rt.agentLoopActive = true`，而 `SessionRuntime.runTask` 的守卫条件 `if (this.agentLoopActive) return;` 导致 Agent 从未执行。这是 P0 级别的无声失败——用户消息显示但 Agent 不响应。此 bug 仅在真实 TuiBootstrap 渲染测试中被发现。

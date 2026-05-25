@@ -1,158 +1,199 @@
 /**
- * TUI Startup & Input flow e2e — renders the actual TuiBootstrap component.
+ * TUI E2E — Real Pipeline Tests
  *
- * Unlike mock-agent/real-agent tests which render simplified roots
- * (TuiMockRoot / TuiRealAgentRoot), these tests exercise the REAL
- * TuiBootstrap component to catch:
+ * Renders the actual TuiBootstrap component with only the LLM replaced by
+ * a StreamingMockModel. The full production path is exercised:
  *
- * - TDZ / ReferenceError during render phase (near-empty output)
- * - Auto-create session failure (no sidebar session marker)
- * - handleInput → runTask dispatch (user message block appears in output)
- *
- * Test gap documented in docs/space/execution/active/tui-e2e-standards.md
+ *   stdin.write → InputLine → handleInput → runTask → SessionManager
+ *   → SessionRuntime.runTask → runAgent → events → reducer → renderer
  */
-import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
-import React from "react";
-import { render } from "ink-testing-library";
-import { join } from "node:path";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { createTui, type TuiHarness } from "./render-tui";
 
-// ── Mock heavy dependencies ──
+const TIMEOUT = 60000;
 
-mock.module("@/core/skills/loader", () => ({
-  scanSkills: () => [],
-  getSkillContent: () => Promise.resolve(""),
-}));
+// ── Helpers ──
 
-function setupTempHome() {
-  const tempHome = mkdtempSync(join(tmpdir(), "openpx-startup-"));
-  const openpxDir = join(tempHome, ".openpx");
-  mkdirSync(openpxDir, { recursive: true });
-  writeFileSync(join(openpxDir, "openpx.jsonc"), JSON.stringify({
-    provider: {
-      deepseek: { type: "deepseek", apiKey: "test-key", baseURL: "https://test.api.example.com" },
-    },
-    model: {
-      default: { provider: "deepseek", name: "deepseek-v4" },
-    },
-  }, null, 2));
-  return tempHome;
+function textResponse(content: string, delay = 50) {
+  return [{ message: { content } as any, delay }];
 }
 
-async function tick(ms = 50): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function multiTurnResponses(...contents: string[]) {
+  return contents.map((content) => ({ message: { content } as any, delay: 30 }));
 }
 
-describe("TUI Startup & Input", () => {
+// ── Shared TUI instance — Ink can only render once per process ──
 
-  // ── Test 1: Render without crash ──
+let tui: TuiHarness;
 
-  test("TuiBootstrap renders meaningful output (no render crash)", async () => {
-    const tempHome = setupTempHome();
-    const origHome = process.env.HOME;
-    process.env.HOME = tempHome;
+describe("TUI E2E (Real Pipeline)", () => {
 
-    let result: ReturnType<typeof render> | null = null;
+  beforeAll(async () => {
+    // Responses consumed sequentially per agent turn.
+    // Test order and message count:
+    //   test 3: 1 msg → idx 0
+    //   test 4: 1 msg → idx 1
+    //   test 5: 1 msg → idx 2
+    //   test 6: 1 msg → idx 3
+    //   test 7: 2 msgs → idx 4-5
+    //   test 8: 0 msgs
+    //   test 9: 1 msg → idx 6 (error)
+    //   test 10: 1 msg (model called 2x: tool + follow-up) → idx 7-8
+    tui = await createTui({
+      modelResponses: [
+        textResponse("Got it!")[0],
+        textResponse("Hello!")[0],
+        textResponse("Done.")[0],
+        textResponse("All done.")[0],
+        textResponse("Hello! How can I help?")[0],
+        textResponse("The answer is 42.")[0],
+        { message: { content: "" } as any, error: "Network timeout", delay: 50 },
+        {
+          message: {
+            content: "Let me read the file.",
+            tool_calls: [{ id: "tc1", name: "read_file", args: { path: "test.txt" } }],
+          } as any,
+          delay: 30,
+        },
+        { message: { content: "File looks good." } as any, delay: 30 },
+      ],
+    });
+  });
 
-    try {
-      const { TuiBootstrap } = await import("../../src/app/tui/index");
-      result = render(React.createElement(TuiBootstrap));
+  afterAll(() => {
+    tui?.unmount();
+  });
 
-      // A render crash (TDZ/ReferenceError) produces near-empty output (~1 char)
-      // because React unmounts the tree on uncaught errors. Normal startup
-      // produces hundreds of characters of ANSI-formatted TUI content.
-      const output = result.lastFrame();
-      expect(output.length, "Output > 10 chars (empty = render crash)")
-        .toBeGreaterThan(10);
-      expect(output.toLowerCase()).toContain("openpx");
-    } finally {
-      result?.unmount();
-      process.env.HOME = origHome;
-      try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
-    }
-  }, 15000);
+  // ══════════════════════════════════════════════════════════
+  // Startup & Render
+  // ══════════════════════════════════════════════════════════
 
-  // ── Test 2: Auto-create session ──
+  test("renders without crash (output > 10 chars)", () => {
+    const output = tui.getOutput();
+    expect(output.length).toBeGreaterThan(10);
+    expect(output.toLowerCase()).toContain("openpx");
+  });
 
-  test("auto-create session shows in sidebar", async () => {
-    const tempHome = setupTempHome();
-    const origHome = process.env.HOME;
-    process.env.HOME = tempHome;
+  test("auto-creates session — sidebar shows session entry", () => {
+    expect(tui.getSessionCount()).toBeGreaterThanOrEqual(1);
+    expect(tui.getOutput()).not.toContain("No sessions");
+  });
 
-    let result: ReturnType<typeof render> | null = null;
+  // ══════════════════════════════════════════════════════════
+  // Send Message → Agent Response
+  // ══════════════════════════════════════════════════════════
 
-    try {
-      const { TuiBootstrap } = await import("../../src/app/tui/index");
-      result = render(React.createElement(TuiBootstrap));
+  test("send message → user message block appears in output", async () => {
+    await tui.sendMessage("unique-test-msg-42");
+    await tui.waitForIdle(15000);
+    expect(tui.getOutput()).toContain("unique-test-msg-42");
+  }, TIMEOUT);
 
-      // Wait for the 80ms initialization timer + session creation effect
-      await tick(200);
+  test("send message → agent responds with text visible in output", async () => {
+    await tui.sendMessage("hello");
+    await tui.waitForText("Hello!", 15000);
+    expect(tui.getOutput()).toContain("Hello!");
+  }, TIMEOUT);
 
-      const output = result.lastFrame();
-      // Sidebar shows ● for active session
-      expect(output).toContain("●");
-      expect(output).not.toContain("No sessions");
-    } finally {
-      result?.unmount();
-      process.env.HOME = origHome;
-      try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
-    }
-  }, 15000);
+  test("send message → returns to idle state after agent finishes", async () => {
+    await tui.sendMessage("do task");
+    await tui.waitForIdle(15000);
+    expect(tui.isRunning()).toBe(false);
+  }, TIMEOUT);
 
-  // ── Test 3: User input → handleInput → runTask → UI update ──
+  test("exit summary appears after agent finishes", async () => {
+    await tui.sendMessage("task");
+    await tui.waitForIdle(10000);
+    expect(tui.getOutput()).toContain("──");
+  }, TIMEOUT);
 
-  test("Enter key triggers handleInput → runTask → user message block", async () => {
-    const tempHome = setupTempHome();
-    const origHome = process.env.HOME;
-    process.env.HOME = tempHome;
+  // ══════════════════════════════════════════════════════════
+  // Multi-turn conversation
+  // ══════════════════════════════════════════════════════════
 
-    let result: ReturnType<typeof render> | null = null;
+  test("multi-turn conversation: both turns produce responses", async () => {
+    // Clear output first
+    tui.stdin.write("/clear");
+    await new Promise((r) => setTimeout(r, 100));
+    tui.stdin.write("\r");
+    await new Promise((r) => setTimeout(r, 500));
 
-    try {
-      const { TuiBootstrap } = await import("../../src/app/tui/index");
-      const { stdin, lastFrame, unmount } = render(React.createElement(TuiBootstrap));
-      result = { stdin, lastFrame, unmount } as any;
+    // Turn 1
+    await tui.sendMessage("Hi");
+    await tui.waitForIdle(10000);
+    expect(tui.getOutput()).toContain("Hello! How can I help?");
 
-      // Wait for initialization
-      await tick(300);
+    // Turn 2
+    await tui.sendMessage("What is the answer?");
+    await tui.waitForIdle(10000);
 
-      // Verify sidebar shows a session (initialized state)
-      const beforeOutput = result.lastFrame();
-      expect(beforeOutput).toContain("●");
+    const output = tui.getOutput();
+    expect(output).toContain("The answer is 42.");
+    expect(output).toContain("Hi");
+    expect(output).toContain("What is the answer?");
+  }, TIMEOUT);
 
-      // Simulate typing "hello" and pressing Enter
-      (result as any).stdin.write("hello");
-      await tick(100);
-      (result as any).stdin.write("\r");
-      await tick(500);
+  // ══════════════════════════════════════════════════════════
+  // Multiple sessions
+  // ══════════════════════════════════════════════════════════
 
-      const afterOutput = result.lastFrame();
+  test("creating new session increases sidebar count", async () => {
+    const initial = tui.getSessionCount();
 
-      // After input, either:
-      // a) handleInput was called → user message "hello" appears in output area
-      // b) If agent started running, the header cat changes to "( ^ ^ )"
-      const hasUserBlock = afterOutput.includes("hello");
-      const hasRunningCat = afterOutput.includes("( ^ ^ )");
-      const hasErrorCat = afterOutput.includes("( T T )");
+    tui.stdin.write("\x18"); // Ctrl+X → leader
+    await new Promise((r) => setTimeout(r, 200));
+    tui.stdin.write("n");    // 'n' → /new
+    await new Promise((r) => setTimeout(r, 1000));
 
-      // At minimum, output should change from before-input state.
-      // With a mock API key, the agent may fail → error cat, or
-      // the user message block should appear.
-      expect(afterOutput, "Output must change after user input")
-        .not.toBe(beforeOutput);
+    expect(tui.getSessionCount()).toBeGreaterThanOrEqual(initial + 1);
+  }, TIMEOUT);
 
-      // User message block "hello" should appear as a rendered block
-      // (not just in the input area). The InputLine clears after submit,
-      // so "hello" in output after Enter means it's a message block.
-      expect(hasUserBlock || hasRunningCat || hasErrorCat,
-        "Must have user message block or agent status change"
-      ).toBe(true);
-    } finally {
-      result?.unmount();
-      process.env.HOME = origHome;
-      try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
-    }
-  }, 20000);
+  // ══════════════════════════════════════════════════════════
+  // Error handling
+  // ══════════════════════════════════════════════════════════
+
+  test("model error → TUI does not hang", async () => {
+    // This consumes the error response
+    await tui.sendMessage("do something");
+    await tui.waitForIdle(15000);
+    expect(tui.isRunning()).toBe(false);
+  }, TIMEOUT);
+
+  // ══════════════════════════════════════════════════════════
+  // Tool call
+  // ══════════════════════════════════════════════════════════
+
+  test("tool call renders in output", async () => {
+    await tui.sendMessage("read test.txt");
+    await tui.waitForIdle(15000);
+
+    const output = tui.getOutput();
+    expect(output).toContain("read_file");
+    expect(output).toContain("File looks good");
+  }, TIMEOUT);
+
+  // ══════════════════════════════════════════════════════════
+  // Slash commands
+  // ══════════════════════════════════════════════════════════
+
+  test("/help shows keyboard shortcuts panel", async () => {
+    tui.stdin.write("/help");
+    await new Promise((r) => setTimeout(r, 100));
+    tui.stdin.write("\r");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(tui.getOutput()).toContain("Shortcuts");
+
+    // Dismiss HelpPanel
+    tui.stdin.write("\x1b"); // Escape
+    await new Promise((r) => setTimeout(r, 300));
+  }, TIMEOUT);
+
+  test("/setting shows current configuration", async () => {
+    tui.stdin.write("/setting");
+    await new Promise((r) => setTimeout(r, 100));
+    tui.stdin.write("\r");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(tui.getOutput()).toContain("Current Settings");
+  }, TIMEOUT);
 
 });

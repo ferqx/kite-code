@@ -16,11 +16,12 @@ export interface MockResponse {
 export class StreamingMockModel extends BaseChatModel {
   lc_namespace = ["test", "mock"];
   private _responses: MockResponse[];
-  private _callCount = 0;
+  private _callCount: { count: number };
 
   constructor(params: { responses: MockResponse[] } & BaseChatModelParams) {
     super(params);
     this._responses = params.responses;
+    this._callCount = (params as any)._sharedCounter ?? { count: 0 };
   }
 
   get responses(): BaseMessage[] {
@@ -33,7 +34,13 @@ export class StreamingMockModel extends BaseChatModel {
 
   bindTools(tools: any[]): this {
     const Cls = this.constructor as new (params: { responses: MockResponse[] } & BaseChatModelParams) => StreamingMockModel;
-    const bound = new Cls({ responses: this._responses });
+    // Share the counter across clones so multi-turn tests work.
+    // bindTools is called per-agent-run, creating new instances, but the
+    // original model is reused across turns via the model prop injection.
+    const bound = new Cls({
+      responses: this._responses,
+      _sharedCounter: this._callCount,
+    } as any);
     (bound as any).kwargs = { ...((this as any).kwargs ?? {}), tools };
     (bound as any).lc_kwargs = { ...((this as any).lc_kwargs ?? {}), tools };
     return bound as unknown as this;
@@ -43,8 +50,8 @@ export class StreamingMockModel extends BaseChatModel {
     _messages: BaseMessage[],
     _options: BaseLanguageModelCallOptions,
   ): Promise<ChatResult> {
-    const idx = this._callCount % this._responses.length;
-    this._callCount++;
+    const idx = this._callCount.count % this._responses.length;
+    this._callCount.count++;
     const response = this._responses[idx];
 
     if (!response?.message) {

@@ -26,7 +26,12 @@ function resolveModelForResume(
   return persistedModelName || currentConfig.modelName;
 }
 
-export function TuiBootstrap() {
+export interface TuiBootstrapProps {
+  /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
+  model?: import("@/core/model/factory").SupportedChatModel;
+}
+
+export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const { state, dispatch, onToggleReason } = useTuiState();
   const workspace = process.cwd();
   const config = React.useMemo(() => loadAgentConfig(), []);
@@ -345,9 +350,7 @@ export function TuiBootstrap() {
       dispatch({ type: "SET_RUNNING" });
       dispatch({ type: "DEACTIVATE_SKILL", name: "" }); // clear after capture into runtime
 
-      // Update running state
-      rt.agentLoopActive = true;
-      // Keep legacy refs in sync for runRewind / Ctrl+C handler
+      // Update running state — agentLoopActive is managed by SessionRuntime.runTask
       agentLoopActiveRef.current = true;
       sessionManager.onStatusChange(threadId);
       dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
@@ -357,9 +360,9 @@ export function TuiBootstrap() {
           dispatch,
           provider,
           config,
+          model: injectModel,
         });
       } finally {
-        rt.agentLoopActive = false;
         agentLoopActiveRef.current = false;
         abortControllerRef.current = null;
         sessionManager.onStatusChange(threadId);

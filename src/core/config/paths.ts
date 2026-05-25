@@ -2,7 +2,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { SkillScanOptions } from "@/core/skills/types";
 
-const OPENPX_DIR = join(homedir(), ".openpx");
+const OPENPX_HOME = process.env.OPENPX_HOME ?? homedir();
+const OPENPX_DIR = join(OPENPX_HOME, ".openpx");
 
 export function defaultConfigPath(): string {
   return join(OPENPX_DIR, "openpx.jsonc");

@@ -8,6 +8,7 @@ import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import type { McpManager } from "@/core/mcp";
 import type { RunAgentInput, RevertInput, ForkInput } from "@/core/runner";
 import type { AuthorizationOverride } from "@/core/types";
+import type { SupportedChatModel } from "@/core/model/factory";
 import { defaultCheckpointPath } from "@/core/config/paths";
 
 export interface BaseTuiParams {
@@ -28,6 +29,8 @@ export interface BuildRunTaskParams extends BaseTuiParams {
   task: string;
   pendingSkillsContent: string;
   shellContext: string;
+  /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
+  model?: SupportedChatModel;
 }
 
 export interface BuildRewindParams extends BaseTuiParams {
@@ -62,6 +65,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): RunAgentInput {
     threadId: p.threadId,
     skills: p.skills,
     skillOptions: p.skillOptions ?? undefined,
+    model: p.model,
   };
 }
 

@@ -103,9 +103,11 @@ export class SessionRuntime {
       dispatch: (action: any) => void;
       provider: TuiUserInputProvider;
       config: AgentConfig;
+      model?: import("@/core/model/factory").SupportedChatModel;
     },
   ): Promise<void> {
     if (this.agentLoopActive) return;
+    this.agentLoopActive = true;
 
     // 构建待注入的 skills 内容
     let pendingSkillsContent = "";
@@ -135,6 +137,7 @@ export class SessionRuntime {
       mcpManager: this.mcpManager,
       pendingSkillsContent,
       shellContext,
+      model: deps.model,
       // 后台会话注入 full_access，避免中断阻塞 generator
       authorizationOverride: this._foreground ? undefined : { current: "full_access" as const },
     });
@@ -169,6 +172,7 @@ export class SessionRuntime {
         deps.dispatch({ type: "SET_EXITED" });
       }
     } finally {
+      this.agentLoopActive = false;
       this.abortController = null;
       this.generator = null;
       if (this._foreground) {
