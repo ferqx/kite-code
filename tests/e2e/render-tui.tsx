@@ -68,6 +68,35 @@ export interface TuiHarness {
   isRunning: () => boolean;
   /** Check if idle state */
   isIdle: () => boolean;
+
+  // ── Approval flow ──
+  /** Wait for approval block to appear ([A] marker) */
+  waitForApproval: (timeout?: number) => Promise<void>;
+  /** Send approval key (A/S/F/D) and wait for result */
+  approve: (key: "A" | "S" | "F" | "D") => Promise<void>;
+
+  // ── Question flow ──
+  /** Wait for question block to appear */
+  waitForQuestion: (timeout?: number) => Promise<void>;
+  /** Type answer and submit */
+  answerQuestion: (text: string) => Promise<void>;
+
+  // ── Overlay detection ──
+  /** Wait for overlay to appear by keyword */
+  waitForOverlay: (keyword: string, timeout?: number) => Promise<void>;
+  /** Wait for overlay to disappear */
+  waitForOverlayGone: (keyword: string, timeout?: number) => Promise<void>;
+
+  // ── State queries ──
+  /** Get current authorization mode from rendered output */
+  getAuthMode: () => "default" | "full_access" | null;
+  /** Check if sidebar is focused */
+  isSidebarFocused: () => boolean;
+  /** Wait for running cat face to disappear */
+  waitForRunningGone: (timeout?: number) => Promise<void>;
+
+  /** Get mock model call count for response plan verification */
+  getCallCount: () => number;
 }
 
 // ── Cat face indicators (from Header.tsx CAT_LINES) ──
@@ -354,6 +383,63 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
         const below = belowMatch ? parseInt(belowMatch[1], 10) : 0;
         return visibleCount + above + below;
       },
+
+      // ── Approval flow ──
+
+      async waitForApproval(timeout = stepTimeout) {
+        await poll(() => getOutput().includes("[A]"), timeout, "approval block ([A] marker)");
+      },
+
+      async approve(key: "A" | "S" | "F" | "D") {
+        stdin.write(key.toLowerCase());
+        await tick(300);
+      },
+
+      // ── Question flow ──
+
+      async waitForQuestion(timeout = stepTimeout) {
+        await poll(
+          () => getOutput().includes("?") && !getOutput().includes("[A/S/F/D]"),
+          timeout,
+          "question block",
+        );
+      },
+
+      async answerQuestion(text: string) {
+        stdin.write(text);
+        await tick(100);
+        stdin.write("\r");
+        await tick(300);
+      },
+
+      // ── Overlay detection ──
+
+      async waitForOverlay(keyword: string, timeout = stepTimeout) {
+        await pollTextPresent(lastFrame, keyword, timeout);
+      },
+
+      async waitForOverlayGone(keyword: string, timeout = stepTimeout) {
+        await pollTextGone(lastFrame, keyword, timeout);
+      },
+
+      // ── State queries ──
+
+      getAuthMode() {
+        const out = getOutput();
+        if (out.includes("[full]")) return "full_access";
+        if (out.includes("[safe]")) return "default";
+        return null;
+      },
+
+      isSidebarFocused() {
+        return getOutput().includes("Sidebar focused");
+      },
+
+      async waitForRunningGone(timeout = stepTimeout) {
+        await pollTextGone(lastFrame, RUNNING_CAT, timeout);
+      },
+
+      getCallCount: () => (model as any)._callCount?.count ?? 0,
     };
 
     setupOk = true;
