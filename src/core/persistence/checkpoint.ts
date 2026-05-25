@@ -74,7 +74,9 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
   /** 创建实例并初始化数据库 / Create instance and initialize database */
   constructor(private readonly dbPath: string) {
     super();
-    mkdirSync(dirname(dbPath), { recursive: true });
+    if (dbPath !== ":memory:") {
+      mkdirSync(dirname(dbPath), { recursive: true });
+    }
     this.db = new Database(dbPath);
   }
 
