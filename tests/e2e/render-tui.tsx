@@ -399,7 +399,7 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
 
       async waitForQuestion(timeout = stepTimeout) {
         await poll(
-          () => getOutput().includes("?") && !getOutput().includes("[A/S/F/D]"),
+          () => getOutput().includes("?") && !getOutput().includes("[A]"),
           timeout,
           "question block",
         );
@@ -439,7 +439,7 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
         await pollTextGone(lastFrame, RUNNING_CAT, timeout);
       },
 
-      getCallCount: () => (model as any)._callCount?.count ?? 0,
+      getCallCount: () => (model as unknown as StreamingMockModel).callCount,
     };
 
     setupOk = true;

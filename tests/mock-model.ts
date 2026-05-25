@@ -28,6 +28,10 @@ export class StreamingMockModel extends BaseChatModel {
     return this._responses.map((r) => r.message);
   }
 
+  get callCount(): number {
+    return this._callCount.count;
+  }
+
   _llmType(): string {
     return "streaming-mock";
   }
