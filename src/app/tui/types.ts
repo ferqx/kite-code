@@ -18,11 +18,9 @@ export interface FileChangeRecord {
 }
 
 export interface TuiState {
-  // ── 新增：多会话 ──
+  // ── 多会话 ──
   sessions: SessionSnapshot[];
   activeSessionId: string | null;
-  focus: "input" | "sidebar";
-  sidebarSelection: number;
 
   // ── 现有字段保留不变 ──
   blocks: OutputBlock[];

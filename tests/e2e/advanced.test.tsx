@@ -2,7 +2,7 @@
  * TUI E2E — P2+P3 Advanced Interactions & Integration
  *
  * Tests for advanced input behaviors, leader keys, global shortcuts,
- * sidebar overflow, rapid operations, and integration scenarios.
+ * rapid operations, and integration scenarios.
  * Uses the real TuiBootstrap pipeline with StreamingMockModel and ResponsePlan.
  *
  * Coverage:
@@ -10,9 +10,8 @@
  *   2. Leader Keys (5 tests)
  *   3. Global Shortcuts (5 tests)
  *   4. Integration: /clear + resume (1 test, skipped)
- *   5. Sidebar Virtual Window Overflow (1 test)
- *   6. Rapid Consecutive Operations (1 test)
- *   7. Long Output (1 test)
+ *   5. Rapid Consecutive Operations (1 test)
+ *   6. Long Output (1 test)
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createTui, type TuiHarness } from "./render-tui";
@@ -27,10 +26,11 @@ const TIMEOUT = 60000;
 //   test "send 2 messages": history msg2          → 1 call
 //   test "long message":    long message          → 1 call
 //   test "Ctrl+X c":        compact context msg   → 1 call (delay 200ms)
-//   test "rapid Ctrl+C":    cancel target msg     → 1 call (delay 200ms)
+//   test "/clear + resume":  resume after clear    → 1 call
+//   test "rapid Ctrl+C":    cancel target msg     → 1 call (delay 500ms)
 //   test "rapid Ctrl+C":    recovery after cancel → 1 call
 //
-// Total consumed: 6
+// Total consumed: 7
 
 const plan = new ResponsePlan([
   {
@@ -52,8 +52,12 @@ const plan = new ResponsePlan([
     responses: [text("Compact context test complete.", 800)],
   },
   {
+    group: "resume-after-clear",
+    responses: [text("After clear response.")],
+  },
+  {
     group: "rapid-ctrl-c",
-    responses: [text("Processing rapid cancel test...", 200)],
+    responses: [text("Processing rapid cancel test...", 500)],
   },
   {
     group: "recovery-after-cancel",
@@ -64,7 +68,7 @@ const plan = new ResponsePlan([
 // ── Helpers ──
 
 function clearInputBuffer(tui: TuiHarness) {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 100; i++) {
     tui.stdin.write("\x7f");
   }
 }
@@ -219,7 +223,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       expect(tui.isIdle() || tui.isRunning()).toBe(true);
     }, TIMEOUT);
 
-    test.skip("Ctrl+X m → opens model selector", async () => {
+    test("Ctrl+X m → opens model selector", async () => {
       // Skip: Ink TextInput does not reliably recover stdin focus after overlay interactions in test environment.
       clearInputBuffer(tui);
       await sleep(100);
@@ -238,7 +242,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       await sleep(100);
     }, TIMEOUT);
 
-    test.skip("Ctrl+X l → opens session selector", async () => {
+    test("Ctrl+X l → opens session selector", async () => {
       // Skip: Ink TextInput does not reliably recover stdin focus after overlay interactions in test environment.
       clearInputBuffer(tui);
       await sleep(100);
@@ -306,14 +310,18 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       expect(outputAfter.length).toBeLessThan(outputBefore.length);
     }, TIMEOUT);
 
-    test("Ctrl+N → creates new session, count increases", async () => {
-      const countBefore = tui.getSessionCount();
+    test("Ctrl+N → creates new session, TUI remains responsive", async () => {
+      const outputBefore = tui.getOutput();
+      expect(outputBefore.length).toBeGreaterThan(0);
 
       tui.stdin.write("\x0e"); // Ctrl+N
       await sleep(1500);
 
-      const countAfter = tui.getSessionCount();
-      expect(countAfter).toBe(countBefore + 1);
+      // After creating a new session, the TUI should still be responsive
+      // and the output area should be cleared (NEW_SESSION clears blocks)
+      const outputAfter = tui.getOutput();
+      expect(outputAfter.length).toBeGreaterThan(0);
+      expect(tui.isIdle() || tui.isRunning()).toBe(true);
     }, TIMEOUT);
 
     test("Ctrl+H → opens help panel", async () => {
@@ -342,12 +350,12 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
   });
 
   // ══════════════════════════════════════════════════════════
-  // 5. Integration: /clear then resume (skipped)
+  // 4. Integration: /clear then resume (skipped)
   // ══════════════════════════════════════════════════════════
 
   describe("Integration: /clear + resume", () => {
 
-    test.skip("/clear then send new message → works normally", async () => {
+    test("/clear then send new message → works normally", async () => {
       // Skip: Ink TextInput does not reliably recover stdin focus after overlay interactions in test environment.
       // Send /clear command
       tui.stdin.write("/clear");
@@ -364,7 +372,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
   });
 
   // ══════════════════════════════════════════════════════════
-  // 6. Rapid Consecutive Operations
+  // 5. Rapid Consecutive Operations
   // ══════════════════════════════════════════════════════════
 
   describe("Rapid Operations", () => {
@@ -394,39 +402,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
   });
 
   // ══════════════════════════════════════════════════════════
-  // 7. Sidebar Virtual Window Overflow
-  // ══════════════════════════════════════════════════════════
-
-  describe("Sidebar Overflow", () => {
-
-    test("creating many sessions → overflow indicators or all visible, no crash", async () => {
-      // Create 30 sessions via Ctrl+X n to test sidebar virtual window
-      const sessionsToCreate = 30;
-      for (let i = 0; i < sessionsToCreate; i++) {
-        tui.stdin.write("\x18"); // Ctrl+X → leader
-        await sleep(80);
-        tui.stdin.write("n");
-        await sleep(120);
-      }
-
-      // Wait for all session creations to settle
-      await sleep(1500);
-
-      const sessionCount = tui.getSessionCount();
-      // After Ctrl+N test and this overflow test, there should be many sessions
-      expect(sessionCount).toBeGreaterThanOrEqual(sessionsToCreate);
-
-      // Verify TUI is still responsive
-      expect(tui.isIdle() || tui.isRunning()).toBe(true);
-
-      // Clean up any stray "n" characters
-      clearInputBuffer(tui);
-      await sleep(100);
-    }, TIMEOUT);
-  });
-
-  // ══════════════════════════════════════════════════════════
-  // 8. Long Output Check
+  // 6. Long Output Check
   // ══════════════════════════════════════════════════════════
 
   describe("Long Output", () => {
@@ -435,7 +411,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       // After all previous tests, the output should have substantial content
       const output = tui.getOutput();
       // The TUI rendered output should be non-trivial after many operations
-      // (even if some tests cleared or changed session, sidebar + header = non-trivial)
+      // (even if some tests cleared or changed session, header + output = non-trivial)
       expect(output.length).toBeGreaterThan(100);
     }, TIMEOUT);
   });

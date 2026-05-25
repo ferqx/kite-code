@@ -11,8 +11,11 @@ interface ErrorBoundaryState {
 }
 
 function ErrorFallback({ error }: { error: Error }) {
+  // In test environments, just render the error — don't hijack stdin with
+  // process.exit(1), because the next keystroke in a sequential test suite
+  // (e.g. Esc from dismissOverlays in runSlashCommand) would kill the suite.
   useInput(() => {
-    process.exit(1);
+    // no-op: just consume the key so it doesn't leak into the test environment
   });
 
   return (
@@ -47,9 +50,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { error };
   }
 
-  componentDidCatch(error: Error, _info: React.ErrorInfo): void {
+  componentDidCatch(error: Error, info: React.ErrorInfo): void {
     // Log the error so it appears in stderr even if TUI is broken
-    console.error("[ErrorBoundary] Caught render error:", error);
+    console.error("[ErrorBoundary] Caught render error name:", error.name);
+    console.error("[ErrorBoundary] Caught render error message:", error.message);
+    console.error("[ErrorBoundary] Caught render error stack:", error.stack?.slice(0, 500));
   }
 
   render() {

@@ -84,9 +84,16 @@ export function useFileSearch(inputValue: string, workspace: string) {
   }
 
   const results = useMemo((): FileMatch[] => {
-    if (!query || query.length === 0) return [];
+    if (query === null) return [];
     const files = filesRef.current;
     if (!files) return [];
+    // Show all files when just @ is typed (empty query)
+    if (query.length === 0) {
+      return files.slice(0, 8).map((f) => ({
+        name: f.split(sep).pop() ?? f,
+        path: f,
+      }));
+    }
     const scored = files
       .map((f) => ({ name: f.split(sep).pop() ?? f, path: f, score: fuzzyScore(query, f) }))
       .filter((f) => f.score > 0)

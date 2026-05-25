@@ -62,8 +62,6 @@ export interface TuiHarness {
   waitForTextGone: (text: string, timeout?: number) => Promise<void>;
   /** Get current rendered output */
   getOutput: () => string;
-  /** Count sessions in sidebar (by counting ● markers) */
-  getSessionCount: () => number;
   /** Check if running state is active */
   isRunning: () => boolean;
   /** Check if idle state */
@@ -90,8 +88,6 @@ export interface TuiHarness {
   // ── State queries ──
   /** Get current authorization mode from rendered output */
   getAuthMode: () => "default" | "full_access" | null;
-  /** Check if sidebar is focused */
-  isSidebarFocused: () => boolean;
   /** Wait for running cat face to disappear */
   waitForRunningGone: (timeout?: number) => Promise<void>;
 
@@ -104,11 +100,6 @@ export interface TuiHarness {
 const RUNNING_CAT = "( ^ ^ )";
 const ERROR_CAT = "( T T )";
 const IDLE_CAT = "( = = )";
-
-// ── Session markers (from Sidebar.tsx) ──
-
-const ACTIVE_SESSION = "●"; // ●
-const INACTIVE_SESSION = "○"; // ○
 
 // ── Temp directory helpers ──
 
@@ -284,8 +275,13 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
     origWarn.apply(console, args);
   };
 
+  // Import ErrorBoundary for crash detection in tests
+  const { default: ErrorBoundary } = await import("../../src/app/tui/components/ErrorBoundary");
+
   const { stdin, lastFrame, unmount: inkUnmount } = render(
-    React.createElement(TuiBootstrap, { model } as any),
+    React.createElement(ErrorBoundary, null,
+      React.createElement(TuiBootstrap, { model } as any),
+    ),
   );
 
   await poll(
@@ -297,13 +293,14 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
     "main App (cat face or prompt)",
   );
 
+  // Wait for the TUI to fully render — all initialization complete.
   await poll(
     () => {
       const out = lastFrame() ?? "";
-      return /[○●]   tui-/.test(out);
+      return out.includes("shortcuts · Ctrl+C exit");
     },
-    5000,
-    "auto-create session in sidebar",
+    8000,
+    "full TUI render (footer)",
   );
 
   const getOutput = () => lastFrame() ?? "";
@@ -373,17 +370,6 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
         await pollTextGone(lastFrame, text, timeout);
       },
 
-      getSessionCount() {
-        const out = getOutput();
-        const visibleCount = (out.match(/[●○] /g) || []).length;
-        // Include sessions hidden by virtual window overflow indicators
-        const aboveMatch = out.match(/↑ (\d+) more/);
-        const belowMatch = out.match(/↓ (\d+) more/);
-        const above = aboveMatch ? parseInt(aboveMatch[1], 10) : 0;
-        const below = belowMatch ? parseInt(belowMatch[1], 10) : 0;
-        return visibleCount + above + below;
-      },
-
       // ── Approval flow ──
 
       async waitForApproval(timeout = stepTimeout) {
@@ -429,10 +415,6 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
         if (out.includes("[full]")) return "full_access";
         if (out.includes("[safe]")) return "default";
         return null;
-      },
-
-      isSidebarFocused() {
-        return getOutput().includes("Sidebar focused");
       },
 
       async waitForRunningGone(timeout = stepTimeout) {

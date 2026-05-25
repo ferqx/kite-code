@@ -14,7 +14,7 @@ import CheckpointSelector from "./components/CheckpointSelector";
 import type { CheckpointEntry } from "@/core/persistence/checkpoint";
 import ModelSelector from "./components/ModelSelector";
 import SessionSelector from "./components/SessionSelector.js";
-import Sidebar from "./components/Sidebar";
+
 import Header from "./Header";
 import Footer from "./Footer";
 import StatusBar from "./StatusBar";
@@ -67,11 +67,9 @@ export type Action =
   | { type: "DEACTIVATE_SKILL"; name: string }
   | { type: "LIST_SKILLS" }
   | { type: "SET_SKILL_MANIFESTS"; manifests: import("@/core/skills/types").SkillManifest[] }
-  // ── 新增：多会话 ──
+  // ── 多会话 ──
   | { type: "SWITCH_SESSION"; threadId: string }
   | { type: "SET_SESSIONS"; sessions: import("./types").SessionSnapshot[] }
-  | { type: "SET_FOCUS"; focus: "input" | "sidebar" }
-  | { type: "SIDEBAR_NAV"; direction: "up" | "down" }
   | { type: "SESSION_INTERRUPT_PENDING"; threadId: string };
 
 let nextId = 1;
@@ -570,7 +568,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         ...state,
         sessions: [...newSessions, newSnapshot],
         activeSessionId: action.threadId,
-        sidebarSelection: newSessions.length, // point to the new session
+
         blocks: [],
         toolStartTimes: undefined,
         interrupt: null,
@@ -609,7 +607,6 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
           totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null,
         },
         interrupt: null,
-        focus: "input" as const,
       };
     }
     case "SET_SESSIONS": {
@@ -631,16 +628,6 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         activeSessionId: activeIncoming?.threadId ?? state.activeSessionId,
       };
     }
-    case "SET_FOCUS":
-      return { ...state, focus: action.focus };
-    case "SIDEBAR_NAV": {
-      const len = state.sessions.length;
-      if (len === 0) return state;
-      const next = action.direction === "up"
-        ? Math.max(0, state.sidebarSelection - 1)
-        : Math.min(len - 1, state.sidebarSelection + 1);
-      return { ...state, sidebarSelection: next };
-    }
     case "SESSION_INTERRUPT_PENDING":
       return {
         ...state,
@@ -658,8 +645,6 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
 const initialState: TuiState = {
   sessions: [],
   activeSessionId: null,
-  focus: "input" as const,
-  sidebarSelection: 0,
   blocks: [],
   interrupt: null,
   status: {
@@ -717,7 +702,8 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
 }
 
 export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, children }: AppProps) {
-  useGlobalKeys(dispatch, state.running, state.focus);
+  const overlayActive = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind;
+  useGlobalKeys(dispatch, state.running, overlayActive);
   useLeaderKeys(dispatch, state.leaderPending, onCompactRequest);
 
   // Stabilized callbacks for React.memo children
@@ -757,11 +743,9 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
     [dispatch, interruptBlock]
   );
 
-  const handleSwitchSession = useCallback((threadId: string) => dispatch({ type: "SWITCH_SESSION", threadId }), [dispatch]);
-  const handleSidebarNav = useCallback((direction: "up" | "down") => dispatch({ type: "SIDEBAR_NAV", direction }), [dispatch]);
 
   return (
-    <Box flexDirection="row">
+    <Box flexDirection="column">
       {/* ── Left: Main content (existing column layout) ── */}
       <Box flexDirection="column" flexGrow={1}>
         <MemoHeader status={state.status} running={state.running} error={state.sessionError} />
@@ -810,18 +794,6 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
         {children}
         <Footer />
       </Box>
-
-      {/* ── Right: Sidebar ── */}
-      <Sidebar
-        sessions={state.sessions}
-        activeSessionId={state.activeSessionId}
-        focus={state.focus}
-        sidebarSelection={state.sidebarSelection}
-        plan={state.status.plan}
-        onSwitch={handleSwitchSession}
-        onNavigate={handleSidebarNav}
-        onNew={() => dispatch({ type: "NEW_SESSION", threadId: `tui-${Date.now().toString(36)}` })}
-      />
     </Box>
   );
 }

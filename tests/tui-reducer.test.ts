@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { eventReducer, createInitialState } from "../src/app/tui/App";
 import type { Action } from "../src/app/tui/App";
-import type { TuiState, OutputBlock, SessionSnapshot } from "../src/app/tui/types";
+import type { TuiState, OutputBlock, SessionSnapshot, InterruptState } from "../src/app/tui/types";
+import type { CheckpointEntry } from "../src/core/persistence/checkpoint";
 import type { ToolApprovalPayload, UserInputPayload } from "../src/protocol/events";
 
 function fresh(): TuiState { return createInitialState(); }
@@ -526,6 +527,177 @@ describe("eventReducer (blocks model)", () => {
     });
   });
 
+  describe("LOAD_SESSION", () => {
+    test("resets nextId based on loaded blocks max id", () => {
+      const blocks: OutputBlock[] = [
+        { id: 5, kind: "text", content: "old" },
+        { id: 10, kind: "user", content: "old user" },
+      ];
+      let s = dispatch(fresh(), {
+        type: "LOAD_SESSION", blocks, interrupt: null,
+        modelProvider: "test", modelName: "deepseek-v4", thinkingLevel: null,
+      });
+      // After LOAD_SESSION with max id = 10, nextId should be 11
+      s = dispatch(s, textEvt("new block after load"));
+      const newBlock = s.blocks[s.blocks.length - 1];
+      expect(newBlock.id).toBe(11);
+    });
+
+    test("preserves interrupt when loading approval block", () => {
+      const interrupt: InterruptState = { kind: "approval", blockId: 42 };
+      const blocks: OutputBlock[] = [
+        { id: 42, kind: "approval", approval: approval() },
+      ];
+      const s = dispatch(fresh(), {
+        type: "LOAD_SESSION", blocks, interrupt,
+        modelProvider: "test", modelName: "deepseek-v4", thinkingLevel: null,
+      });
+      expect(s.interrupt).toEqual(interrupt);
+      expect(s.blocks[0].kind).toBe("approval");
+    });
+  });
+
+  describe("LOAD_SESSION_PENDING", () => {
+    test("is a no-op — state unchanged", () => {
+      const s = fresh();
+      s.blocks.push({ id: 1, kind: "text", content: "existing" });
+      const next = dispatch(s, { type: "LOAD_SESSION_PENDING", threadId: "t1" });
+      // LOAD_SESSION_PENDING returns the same state (identity preservation)
+      expect(next).toBe(s);
+    });
+  });
+
+  describe("LEADER_PENDING / LEADER_CANCEL", () => {
+    test("LEADER_PENDING sets leaderPending=true", () => {
+      const s = dispatch(fresh(), { type: "LEADER_PENDING" });
+      expect(s.leaderPending).toBe(true);
+    });
+    test("LEADER_CANCEL clears leaderPending", () => {
+      let s = fresh(); s = { ...s, leaderPending: true };
+      s = dispatch(s, { type: "LEADER_CANCEL" });
+      expect(s.leaderPending).toBe(false);
+    });
+  });
+
+  describe("COMPACT_CONTEXT", () => {
+    test("when running appends compaction text block", () => {
+      let s = fresh(); s = { ...s, running: true };
+      s = dispatch(s, { type: "COMPACT_CONTEXT" });
+      expect(s.blocks).toHaveLength(1);
+      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Manual compaction requested");
+    });
+    test("when not running is a no-op", () => {
+      const s = fresh();
+      const next = dispatch(s, { type: "COMPACT_CONTEXT" });
+      expect(next).toBe(s);
+      expect(next.blocks).toHaveLength(0);
+    });
+  });
+
+  describe("SHOW_SESSIONS / HIDE_SESSIONS + ESCAPE", () => {
+    test("SHOW_SESSIONS sets showSessions=true", () => {
+      const s = dispatch(fresh(), { type: "SHOW_SESSIONS" });
+      expect(s.showSessions).toBe(true);
+    });
+    test("HIDE_SESSIONS clears showSessions", () => {
+      let s = fresh(); s = { ...s, showSessions: true };
+      s = dispatch(s, { type: "HIDE_SESSIONS" });
+      expect(s.showSessions).toBe(false);
+    });
+    test("ESCAPE when showSessions=true clears it", () => {
+      let s = fresh(); s = { ...s, showSessions: true };
+      s = dispatch(s, { type: "ESCAPE" });
+      expect(s.showSessions).toBe(false);
+    });
+  });
+
+  describe("SHOW_REWIND / HIDE_REWIND / SET_CHECKPOINTS + ESCAPE", () => {
+    const ck1: CheckpointEntry = { checkpointId: "ck1", parentCheckpointId: null, createdAt: "2024-01-01T00:00:00Z", firstUserMessage: "hello" };
+
+    test("SHOW_REWIND sets showRewind=true", () => {
+      const s = dispatch(fresh(), { type: "SHOW_REWIND" });
+      expect(s.showRewind).toBe(true);
+    });
+    test("HIDE_REWIND clears showRewind and checkpoints", () => {
+      let s = fresh(); s = { ...s, showRewind: true, checkpoints: [ck1] };
+      s = dispatch(s, { type: "HIDE_REWIND" });
+      expect(s.showRewind).toBe(false);
+      expect(s.checkpoints).toEqual([]);
+    });
+    test("SET_CHECKPOINTS stores entries", () => {
+      const entries = [ck1, { ...ck1, checkpointId: "ck2" }];
+      const s = dispatch(fresh(), { type: "SET_CHECKPOINTS", checkpoints: entries });
+      expect(s.checkpoints).toEqual(entries);
+    });
+    test("ESCAPE when showRewind clears it and checkpoints", () => {
+      let s = fresh(); s = { ...s, showRewind: true, checkpoints: [ck1] };
+      s = dispatch(s, { type: "ESCAPE" });
+      expect(s.showRewind).toBe(false);
+      expect(s.checkpoints).toEqual([]);
+    });
+  });
+
+  describe("SHOW_MCP / HIDE_MCP + ESCAPE", () => {
+    test("SHOW_MCP sets showMcp=true", () => {
+      const s = dispatch(fresh(), { type: "SHOW_MCP" });
+      expect(s.showMcp).toBe(true);
+    });
+    test("HIDE_MCP clears showMcp", () => {
+      let s = fresh(); s = { ...s, showMcp: true };
+      s = dispatch(s, { type: "HIDE_MCP" });
+      expect(s.showMcp).toBe(false);
+    });
+    test("ESCAPE when showMcp clears it", () => {
+      let s = fresh(); s = { ...s, showMcp: true };
+      s = dispatch(s, { type: "ESCAPE" });
+      expect(s.showMcp).toBe(false);
+    });
+  });
+
+  describe("INJECT_MCP_PROMPT", () => {
+    test("appends user block with formatted prompt string", () => {
+      const s = dispatch(fresh(), { type: "INJECT_MCP_PROMPT", server: "github", promptName: "create-issue" });
+      expect(s.blocks).toHaveLength(1);
+      expect(s.blocks[0].kind).toBe("user");
+      expect((s.blocks[0] as Extract<OutputBlock, { kind: "user" }>).content).toBe("/mcp__github__create-issue");
+    });
+  });
+
+  describe("REVERT_TO_CHECKPOINT / FORK_FROM_CHECKPOINT", () => {
+    test("REVERT_TO_CHECKPOINT closes panel and increments rewindCounter", () => {
+      let s = fresh(); s = { ...s, showRewind: true, rewindCounter: 0 };
+      s = dispatch(s, { type: "REVERT_TO_CHECKPOINT", checkpointId: "ck1" });
+      expect(s.showRewind).toBe(false);
+      expect(s.rewindCounter).toBe(1);
+    });
+    test("FORK_FROM_CHECKPOINT closes panel and increments rewindCounter", () => {
+      let s = fresh(); s = { ...s, showRewind: true, rewindCounter: 5 };
+      s = dispatch(s, { type: "FORK_FROM_CHECKPOINT", checkpointId: "ck1" });
+      expect(s.showRewind).toBe(false);
+      expect(s.rewindCounter).toBe(6);
+    });
+  });
+
+  describe("EVENT.error sessionError flag", () => {
+    test("non-recoverable error sets sessionError=true", () => {
+      const s = dispatch(fresh(), {
+        type: "EVENT",
+        event: { type: "error", data: { message: "fatal error", recoverable: false } },
+      });
+      expect(s.sessionError).toBe(true);
+      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Error: fatal error");
+      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).isError).toBe(true);
+    });
+    test("recoverable error does NOT set sessionError", () => {
+      const s = dispatch(fresh(), {
+        type: "EVENT",
+        event: { type: "error", data: { message: "rate limit", recoverable: true } },
+      });
+      expect(s.sessionError).toBe(false);
+      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Recoverable error: rate limit");
+    });
+  });
+
   describe("ACTIVATE_SKILL", () => {
     test("adds skill content to pendingSkills", () => {
       const state = createInitialState();
@@ -594,8 +766,6 @@ describe("eventReducer (blocks model)", () => {
     test("initial state has required multi-session fields", () => {
       expect(initialState.sessions).toEqual([]);
       expect(initialState.activeSessionId).toBeNull();
-      expect(initialState.focus).toBe("input");
-      expect(initialState.sidebarSelection).toBe(0);
     });
 
     test("NEW_SESSION saves current blocks to outgoing snapshot", () => {
@@ -646,7 +816,6 @@ describe("eventReducer (blocks model)", () => {
       expect(next.activeSessionId).toBe("t2");
       expect(next.blocks).toEqual(t2.blocks);
       expect(next.interrupt).toBeNull();
-      expect(next.focus).toBe("input");
     });
 
     test("SWITCH_SESSION to nonexistent session uses default empty blocks", () => {
@@ -660,67 +829,6 @@ describe("eventReducer (blocks model)", () => {
       const next = eventReducer(s, { type: "SWITCH_SESSION", threadId: "missing" });
       expect(next.blocks).toEqual([]);
       expect(next.activeSessionId).toBe("missing");
-    });
-
-    test("SET_FOCUS toggles focus", () => {
-      let state = eventReducer(initialState, { type: "SET_FOCUS", focus: "sidebar" });
-      expect(state.focus).toBe("sidebar");
-      state = eventReducer(state, { type: "SET_FOCUS", focus: "input" });
-      expect(state.focus).toBe("input");
-    });
-
-    test("SIDEBAR_NAV up decreases selection", () => {
-      const sessions: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
-        { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
-      ];
-      const next = eventReducer(
-        { ...initialState, sessions, sidebarSelection: 1 },
-        { type: "SIDEBAR_NAV", direction: "up" }
-      );
-      expect(next.sidebarSelection).toBe(0);
-    });
-
-    test("SIDEBAR_NAV up at 0 stays at 0", () => {
-      const sessions: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
-      ];
-      const next = eventReducer(
-        { ...initialState, sessions, sidebarSelection: 0 },
-        { type: "SIDEBAR_NAV", direction: "up" }
-      );
-      expect(next.sidebarSelection).toBe(0);
-    });
-
-    test("SIDEBAR_NAV down increases selection", () => {
-      const sessions: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
-        { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
-      ];
-      const next = eventReducer(
-        { ...initialState, sessions, sidebarSelection: 0 },
-        { type: "SIDEBAR_NAV", direction: "down" }
-      );
-      expect(next.sidebarSelection).toBe(1);
-    });
-
-    test("SIDEBAR_NAV down at last stays at last", () => {
-      const sessions: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
-      ];
-      const next = eventReducer(
-        { ...initialState, sessions, sidebarSelection: 0 },
-        { type: "SIDEBAR_NAV", direction: "down" }
-      );
-      expect(next.sidebarSelection).toBe(0);
-    });
-
-    test("SIDEBAR_NAV on empty sessions no-op", () => {
-      const next = eventReducer(
-        { ...initialState, sessions: [], sidebarSelection: 5 },
-        { type: "SIDEBAR_NAV", direction: "down" }
-      );
-      expect(next.sidebarSelection).toBe(5);
     });
 
     test("SESSION_INTERRUPT_PENDING sets pending flag on session", () => {
@@ -802,7 +910,6 @@ describe("eventReducer (blocks model)", () => {
         blocks: target.blocks,
         status: target.status,
         interrupt: null,
-        focus: "input" as const,
       };
 
       // Verify A's blocks were saved
@@ -814,7 +921,6 @@ describe("eventReducer (blocks model)", () => {
       expect(state.blocks).toEqual([{ id: 1, kind: "text", content: "session B content" }] as OutputBlock[]);
       expect(state.activeSessionId).toBe("b");
       expect(state.status.totalTokens).toBe(200);
-      expect(state.focus).toBe("input");
     });
 
     test("full chain: NEW_SESSION saves blocks → SET_SESSIONS preserves → SWITCH_SESSION restores", () => {
@@ -841,7 +947,6 @@ describe("eventReducer (blocks model)", () => {
       expect(state.sessions[1].threadId).toBe("b");
       expect(state.sessions[1].active).toBe(true);
       expect(state.activeSessionId).toBe("b");
-      expect(state.sidebarSelection).toBe(1);
 
       // Step 2: SET_SESSIONS from SessionManager.getSnapshot() (blocks are always [])
       // This simulates what happens after dispatchSessionLoad calls SET_SESSIONS
@@ -865,7 +970,6 @@ describe("eventReducer (blocks model)", () => {
       // Step 4: SWITCH_SESSION back to A — should save B's blocks and restore A's
       state = eventReducer(state, { type: "SWITCH_SESSION", threadId: "a" });
       expect(state.activeSessionId).toBe("a");
-      expect(state.focus).toBe("input");
       // A's blocks restored
       expect(state.blocks.length).toBe(2);
       expect(state.blocks[0].content).toBe("Hello");
@@ -903,6 +1007,34 @@ describe("eventReducer (blocks model)", () => {
       const b = state.sessions.find(s => s.threadId === "b")!;
       expect(a.pendingInterrupt).toBe(false);
       expect(b.pendingInterrupt).toBe(true);
+    });
+
+    test("SET_SESSIONS with a new session (not in existing) adds it alongside existing sessions", () => {
+      const existing: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const incoming: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const state = { ...initialState, sessions: existing, activeSessionId: "a" };
+      const next = eventReducer(state, { type: "SET_SESSIONS", sessions: incoming });
+      expect(next.sessions).toHaveLength(2);
+      expect(next.sessions[0].threadId).toBe("a");
+      expect(next.sessions[1].threadId).toBe("b");
+      expect(next.activeSessionId).toBe("b");
+    });
+
+    test("SET_SESSIONS when no incoming session is active preserves existing activeSessionId", () => {
+      const existing: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const incoming: SessionSnapshot[] = [
+        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+      ];
+      const state = { ...initialState, sessions: existing, activeSessionId: "a" };
+      const next = eventReducer(state, { type: "SET_SESSIONS", sessions: incoming });
+      expect(next.activeSessionId).toBe("a");
     });
   });
 });

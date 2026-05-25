@@ -319,8 +319,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         const oldId = sessionManager.getActiveId();
         const newId = action.threadId;
         if (oldId === newId) {
-          // Same session: just return focus to input
-          dispatch({ type: "SET_FOCUS", focus: "input" as const });
+          // Same session — no-op
           return;
         }
 
@@ -648,7 +647,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         workspace={workspace}
         overlayActive={state.showHelp || state.showModelSelector || state.showSessions}
         editorContentRef={editorContentRef}
-        focus={state.focus}
       />
     </App>
   );

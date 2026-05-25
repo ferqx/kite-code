@@ -32,7 +32,6 @@ interface InputLineProps {
   workspace: string;
   overlayActive?: boolean;
   editorContentRef?: React.MutableRefObject<EditorContentHandle | null>;
-  focus?: "input" | "sidebar";
 }
 
 function commonPrefix(strings: string[]): string {
@@ -77,18 +76,7 @@ function completeSlash(input: string): string | null {
   return null;
 }
 
-export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef, focus = "input" }: InputLineProps) {
-  // When sidebar focused, show dimmed placeholder instead of the normal input
-  if (focus === "sidebar") {
-    return (
-      <Box flexDirection="column">
-        <Box>
-          <Text dimColor>Sidebar focused — Tab to input</Text>
-        </Box>
-      </Box>
-    );
-  }
-
+export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef }: InputLineProps) {
   const [value, setValue] = useState("");
   const valueRef = useRef(value);
   valueRef.current = value;
@@ -200,10 +188,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       setHistoryIndex(-1);
       textKeyRef.current++;
       onSubmit(finalValue);
-      const isSlashOverlay = /^\/model(\s|$)/.test(finalValue);
-      if (!isSlashOverlay) {
-        setValue("");
-      }
+      setValue("");
     },
     [onSubmit],
   );
@@ -319,10 +304,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
           setHistoryIndex(-1);
           textKeyRef.current++;
           onSubmit(fullCmd);
-          const isSlashOverlay = /^\/model(\s|$)/.test(fullCmd);
-          if (!isSlashOverlay) {
-            setValue("");
-          }
+          setValue("");
         }
         return;
       }
