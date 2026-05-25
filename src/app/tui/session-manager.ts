@@ -65,7 +65,19 @@ export class SessionRuntime {
     this.skillManifests = deps.skillManifests;
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
-    this._proxyProvider = this._createProxyProvider(deps.provider);
+
+    // Bridge: when realProvider.submitAction is called by UI components (ApprovalBlock,
+    // InputBlock), resolve this SessionRuntime's pending interrupt.  The graph uses
+    // _proxyProvider for requestAction, but UI components receive the real provider
+    // via React props — without this bridge the proxy's Promise never resolves.
+    const realProvider = deps.provider;
+    const origSubmitAction = realProvider.submitAction.bind(realProvider);
+    realProvider.submitAction = (action: any) => {
+      origSubmitAction(action);
+      this._resolveInterrupt(action);
+    };
+
+    this._proxyProvider = this._createProxyProvider(realProvider);
   }
 
   // ── 公开 API ──

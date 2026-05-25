@@ -52,16 +52,18 @@ export function modelError(message: string, delay = 50): MockResponse {
 }
 
 /** Shorthand: tool call response */
+let _toolSeq = 0;
 export function toolCall(
   name: string,
   args: Record<string, unknown>,
   content = "let me check",
   delay = 30,
 ): MockResponse {
+  const id = `tc-${name}-${++_toolSeq}`;
   return {
     message: {
       content,
-      tool_calls: [{ id: `tc-${name}`, name, args }],
+      tool_calls: [{ id, name, args }],
     } as any,
     delay,
   };
