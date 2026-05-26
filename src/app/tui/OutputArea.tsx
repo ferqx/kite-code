@@ -3,7 +3,8 @@ import { Box, Text } from "ink";
 import { useInput } from "ink";
 import type { OutputBlock } from "./types";
 import MarkdownBlock from "./components/MarkdownBlock";
-import { darkTheme as t } from "./theme";
+import { useTheme, darkTheme } from "./theme";
+const dt = darkTheme; // for exported utility functions
 
 interface OutputAreaProps {
   blocks: OutputBlock[];
@@ -13,10 +14,10 @@ interface OutputAreaProps {
 
 export function toolColor(status: string): string {
   switch (status) {
-    case "done": return t.success;
-    case "error": return t.error;
-    case "running": return t.warning;
-    default: return t.muted;
+    case "done": return dt.success;
+    case "error": return dt.error;
+    case "running": return dt.warning;
+    default: return dt.muted;
   }
 }
 
@@ -27,10 +28,10 @@ function formatElapsed(ms: number): string {
 
 export function changePrefix(kind: string): { prefix: string; color: string } {
   switch (kind) {
-    case "add": return { prefix: "+", color: t.success };
-    case "edit": return { prefix: "~", color: t.warning };
-    case "delete": return { prefix: "-", color: t.error };
-    default: return { prefix: "?", color: t.muted };
+    case "add": return { prefix: "+", color: dt.success };
+    case "edit": return { prefix: "~", color: dt.warning };
+    case "delete": return { prefix: "-", color: dt.error };
+    default: return { prefix: "?", color: dt.muted };
   }
 }
 
@@ -55,7 +56,7 @@ const MAX_TOOL_LINES = 12;
 
 function renderToolSummary(summary: string, isError: boolean) {
   const prefix = isError ? "✕ " : "⎿ ";
-  const color = isError ? t.error : t.dim;
+  const color = isError ? dt.error : dt.dim;
   const text = summary.trimEnd();
   const lines = text.split("\n");
 
@@ -78,7 +79,7 @@ function renderToolSummary(summary: string, isError: boolean) {
         </Text>
       ))}
       {truncated && (
-        <Text color={t.dim}>   ... ({lines.length - MAX_TOOL_LINES} more lines)</Text>
+        <Text color={dt.dim}>   ... ({lines.length - MAX_TOOL_LINES} more lines)</Text>
       )}
     </React.Fragment>
   );
@@ -98,8 +99,8 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
     case "text":
       return (
         <Box key={block.id} marginBottom={BLOCK_GAP}>
-          {(isFocused || block.streaming) ? <Text color={t.primary}>❯ </Text> : null}
-          <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? t.error : undefined} />
+          {(isFocused || block.streaming) ? <Text color={dt.primary}>❯ </Text> : null}
+          <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? dt.error : undefined} />
         </Box>
       );
 
@@ -108,17 +109,17 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
       return (
         <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           {!isConsecutive && (
-            <Text color={isFocused ? t.primary : t.dim}>
+            <Text color={isFocused ? dt.primary : dt.dim}>
               {!thinkingVisible || block.folded ? "▶ Thinking..." : "▼ Thinking"}
             </Text>
           )}
           {thinkingVisible && !block.folded && (
             <Box paddingLeft={2}>
-              <Text color={t.muted}>{block.content}</Text>
+              <Text color={dt.muted}>{block.content}</Text>
             </Box>
           )}
           {isConsecutive && (block.folded || !thinkingVisible) && (
-            <Text color={t.dim}>  ...</Text>
+            <Text color={dt.dim}>  ...</Text>
           )}
         </Box>
       );
@@ -129,18 +130,18 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
         <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           <Box>
             <Text color={toolColor(block.status)}>⏺ </Text>
-            <Text color={t.primary}>{block.name}</Text>
+            <Text color={dt.primary}>{block.name}</Text>
             {block.preview ? (
-              <Text color={t.muted}> {block.preview}</Text>
+              <Text color={dt.muted}> {block.preview}</Text>
             ) : null}
             {block.detail ? (
-              <Text color={t.dim}> {block.detail}</Text>
+              <Text color={dt.dim}> {block.detail}</Text>
             ) : null}
             {block.status === "running" ? (
-              <Text color={t.dim}> ...</Text>
+              <Text color={dt.dim}> ...</Text>
             ) : null}
             {block.elapsedMs != null && block.name === "shell_execute" && (
-              <Text color={t.dim}> ({formatElapsed(block.elapsedMs)})</Text>
+              <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
             )}
           </Box>
           {block.status === "error" && block.summary ? (
@@ -154,7 +155,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
     case "file_change":
       return (
         <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
-          <Text color={t.muted}>── File Changes ──</Text>
+          <Text color={dt.muted}>── File Changes ──</Text>
           {block.changes.map((change, ci) => {
             const { prefix, color } = changePrefix(change.kind);
             const lineInfo = formatLines(change.linesAdded, change.linesRemoved);
@@ -162,12 +163,12 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
               <Box key={`${block.id}-${ci}`} flexDirection="column">
                 <Box>
                   <Text color={color}>{prefix} {change.path}</Text>
-                  {lineInfo ? <Text color={t.dim}>{lineInfo}</Text> : null}
+                  {lineInfo ? <Text color={dt.dim}>{lineInfo}</Text> : null}
                 </Box>
                 {change.preview && (
                   <Box paddingLeft={3} flexDirection="column">
                     {change.preview.split("\n").map((pl, pli) => (
-                      <Text key={pli} color={t.dim}>
+                      <Text key={pli} color={dt.dim}>
                         │ {pl}
                       </Text>
                     ))}
@@ -184,9 +185,9 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
       return (
         <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           {label ? (
-            <Text color={label.startsWith("✓") ? t.success : t.error}>{label}</Text>
+            <Text color={label.startsWith("✓") ? dt.success : dt.error}>{label}</Text>
           ) : (
-            <Text color={t.warning}>⚠ Awaiting approval — {block.approval.command}</Text>
+            <Text color={dt.warning}>⚠ Awaiting approval — {block.approval.command}</Text>
           )}
         </Box>
       );
@@ -196,15 +197,15 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
         <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
           {block.resolved ? (
             block.resolved === "cancelled" ? (
-              <Text color={t.dim}>⊘ Question cancelled</Text>
+              <Text color={dt.dim}>⊘ Question cancelled</Text>
             ) : (
               <Text>
-                <Text color={t.success}>✓ Answered: </Text>
-                <Text color={t.muted}>{block.resolved}</Text>
+                <Text color={dt.success}>✓ Answered: </Text>
+                <Text color={dt.muted}>{block.resolved}</Text>
               </Text>
             )
           ) : (
-            <Text color={t.primary}>? Question</Text>
+            <Text color={dt.primary}>? Question</Text>
           )}
         </Box>
       );
@@ -216,6 +217,7 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
 }
 
 export default function OutputArea({ blocks, onToggleReason, thinkingVisible }: OutputAreaProps) {
+  const t = useTheme();
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const focusedIndexRef = useRef(focusedIndex);
   focusedIndexRef.current = focusedIndex;

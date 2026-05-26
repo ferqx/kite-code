@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
-import { darkTheme as t } from "@/app/tui/theme";
+import { useTheme } from "@/app/tui/theme";
 import { listAvailableModels, type AvailableModel } from "@/core/config";
 
 export interface ModelOption {
@@ -23,6 +23,7 @@ interface ModelSelectorProps {
 }
 
 export default function ModelSelector({ currentModel, onSelect, onClose }: ModelSelectorProps) {
+  const t = useTheme();
   const models: ModelOption[] = listAvailableModels().map(toModelOption);
   const [selected, setSelected] = useState(
     Math.max(0, models.findIndex((m) => m.id === currentModel))

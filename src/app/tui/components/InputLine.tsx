@@ -10,7 +10,7 @@ import {
   SLASH_COMMAND_DEFS,
   MODEL_NAMES,
 } from "@/app/tui/hooks/useSlashSuggestions";
-import { darkTheme as t } from "@/app/tui/theme";
+import { useTheme } from "@/app/tui/theme";
 
 export const PASTE_THRESHOLD = 100;
 
@@ -77,6 +77,7 @@ function completeSlash(input: string): string | null {
 }
 
 export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef }: InputLineProps) {
+  const t = useTheme();
   const [value, setValue] = useState("");
   const valueRef = useRef(value);
   valueRef.current = value;

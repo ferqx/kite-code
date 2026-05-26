@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import { useInput } from "ink";
 import type { McpManager } from "@/core/mcp";
 import type { McpServerState } from "@/core/mcp/index";
-import { darkTheme as t } from "../theme";
+import { useTheme } from "../theme";
 
 interface McpPanelProps {
   manager: McpManager;
@@ -15,6 +15,7 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
     onClose();
   });
 
+  const t = useTheme();
   const states = manager.getServerStates();
 
   if (states.size === 0) {

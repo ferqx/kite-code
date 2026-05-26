@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { darkTheme as t } from "./theme";
+import { useTheme } from "./theme";
 
 type CatMood = "working" | "error" | "idle";
 
@@ -22,6 +22,7 @@ interface HeaderProps {
 }
 
 export default function Header({ running, error }: HeaderProps) {
+  const t = useTheme();
   const mood = catMood(running, !!error);
   const [catTop, catMid, catBot] = CAT_LINES[mood];
 

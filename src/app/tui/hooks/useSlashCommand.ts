@@ -1,9 +1,7 @@
 import { useCallback } from "react";
 import type { Dispatch } from "react";
-import { MODEL_NAMES } from "./useSlashSuggestions";
 import { listAvailableModels } from "@/core/config";
 import { getSkillContent } from "@/core/skills/loader";
-import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 
 export type SlashAction =

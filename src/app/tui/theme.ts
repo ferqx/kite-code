@@ -1,3 +1,5 @@
+import { createContext, useContext } from "react";
+
 export interface Theme {
   primary: string;
   success: string;
@@ -28,3 +30,29 @@ export const darkTheme: Theme = {
     unknown: "#9CA3AF",
   },
 };
+
+export const lightTheme: Theme = {
+  primary: "#3B5CCC",
+  success: "#16A34A",
+  error: "#DC2626",
+  warning: "#CA8A04",
+  muted: "#6B7280",
+  dim: "#9CA3AF",
+  bg: "#FFFFFF",
+  risk: {
+    read: "#3B82F6",
+    plan: "#6366F1",
+    write_file: "#CA8A04",
+    execute_code: "#D97706",
+    destructive: "#DC2626",
+    network: "#EA580C",
+    vcs_mutation: "#DB2777",
+    unknown: "#9CA3AF",
+  },
+};
+
+export const ThemeContext = createContext<Theme>(darkTheme);
+
+export function useTheme(): Theme {
+  return useContext(ThemeContext);
+}

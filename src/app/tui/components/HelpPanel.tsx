@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
-import { darkTheme as t } from "@/app/tui/theme";
+import { useTheme } from "@/app/tui/theme";
 
 interface HelpPanelProps {
   onClose: () => void;
@@ -17,6 +17,7 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
     onClose();
   });
 
+  const t = useTheme();
   const groups: ShortcutGroup[] = [
     {
       title: "Actions",

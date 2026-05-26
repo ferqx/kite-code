@@ -1,6 +1,10 @@
 import React from "react";
 import { render } from "ink";
 import { loadAgentConfig, loadMcpConfig, editorInputPath, type AgentConfig } from "@/core/config/index";
+import { existsSync, readFileSync } from "node:fs";
+import { parse as parseJsonc } from "jsonc-parser";
+import { defaultConfigPath } from "@/core/config/paths";
+import { ThemeContext, darkTheme, lightTheme } from "./theme";
 import { McpManager } from "@/core/mcp";
 import { createSandboxExecutor } from "@/core/sandbox/index";
 import { isRecoverableError, revertToCheckpoint, forkFromCheckpoint } from "@/core/runner";
@@ -35,6 +39,17 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const { state, dispatch, onToggleReason } = useTuiState();
   const workspace = process.cwd();
   const config = React.useMemo(() => loadAgentConfig(), []);
+  const theme = React.useMemo(() => {
+    try {
+      const configPath = defaultConfigPath();
+      if (existsSync(configPath)) {
+        const raw = readFileSync(configPath, "utf8");
+        const parsed = parseJsonc(raw) as Record<string, unknown>;
+        if (parsed.theme === "light") return lightTheme;
+      }
+    } catch { /* use default */ }
+    return darkTheme;
+  }, []);
   const [initialized, setInitialized] = React.useState(false);
   const prevInterruptRef = React.useRef(state.interrupt);
   const conversationHistoryRef = React.useRef<string[]>([]);
@@ -639,6 +654,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   }
 
   return (
+    <ThemeContext.Provider value={theme}>
     <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }} mcpManager={mcpManager ?? undefined}>
       <InputLine
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
@@ -649,6 +665,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         editorContentRef={editorContentRef}
       />
     </App>
+    </ThemeContext.Provider>
   );
 }
 

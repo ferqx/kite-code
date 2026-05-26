@@ -4,7 +4,7 @@ import { useInput } from "ink";
 import TextInput from "ink-text-input";
 import type { UserInputPayload } from "@/app/protocol/events";
 import type { TuiUserInputProvider } from "@/app/tui/provider";
-import { darkTheme as t } from "@/app/tui/theme";
+import { useTheme } from "@/app/tui/theme";
 
 interface InputBlockProps {
   question: UserInputPayload;
@@ -13,6 +13,7 @@ interface InputBlockProps {
 }
 
 export default function InputBlock({ question, provider, onResolved }: InputBlockProps) {
+  const t = useTheme();
   const [selected, setSelected] = useState(0);
   const [freeText, setFreeText] = useState("");
   const [mode, setMode] = useState<"select" | "type">(

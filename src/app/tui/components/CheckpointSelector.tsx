@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { darkTheme as t } from "../theme";
+import { useTheme } from "../theme";
 import type { CheckpointEntry } from "@/core/persistence/checkpoint";
 
 export type { CheckpointEntry };
@@ -13,6 +13,7 @@ interface CheckpointSelectorProps {
 }
 
 export default function CheckpointSelector({ checkpoints, onRevert, onFork, onClose }: CheckpointSelectorProps) {
+  const t = useTheme();
   const [selected, setSelected] = useState(0);
 
   useInput((_input, key) => {

@@ -4,7 +4,7 @@ import { useInput } from "ink";
 import TextInput from "ink-text-input";
 import type { ToolApprovalPayload, ShellApprovalGrant } from "@/app/protocol/events";
 import type { TuiUserInputProvider } from "@/app/tui/provider";
-import { darkTheme as t } from "@/app/tui/theme";
+import { useTheme } from "@/app/tui/theme";
 
 interface ApprovalBlockProps {
   approval: ToolApprovalPayload;
@@ -20,6 +20,7 @@ const GRANTS: { key: string; label: string; grant: ShellApprovalGrant | null; de
 ];
 
 export default function ApprovalBlock({ approval, provider, onResolved }: ApprovalBlockProps) {
+  const t = useTheme();
   const [selected, setSelected] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [editedCommand, setEditedCommand] = useState(approval.command);

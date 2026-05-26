@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { darkTheme as t } from "@/app/tui/theme";
+import { useTheme } from "@/app/tui/theme";
 
 interface StartupScreenProps {
   modelName: string;
@@ -8,6 +8,7 @@ interface StartupScreenProps {
 }
 
 export default function StartupScreen({ modelName, workspace }: StartupScreenProps) {
+  const t = useTheme();
   const projectName = workspace.split("/").pop() ?? workspace.split("\\").pop() ?? "unknown";
 
   return (

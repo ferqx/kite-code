@@ -41,6 +41,7 @@ export type Action =
   | { type: "EXPAND_INPUT" }
   | { type: "SHOW_MODEL_SELECTOR" }
   | { type: "HIDE_MODEL_SELECTOR" }
+  | { type: "EDITOR_DONE" }
   | { type: "LIST_MODELS" }
   | { type: "SHOW_SESSIONS" }
   | { type: "HIDE_SESSIONS" }
@@ -474,6 +475,9 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     case "SHOW_MODEL_SELECTOR":
       return { ...state, showModelSelector: true };
     case "HIDE_MODEL_SELECTOR":
+      return { ...state, showModelSelector: false };
+    case "EDITOR_DONE":
+      return { ...state, editorRequested: false };
       return { ...state, showModelSelector: false };
     case "LIST_MODELS": {
       const block: OutputBlock = { id: nextId++, kind: "text", content: modelListText(state.status.modelName) };

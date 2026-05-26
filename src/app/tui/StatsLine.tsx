@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { StatusState } from "./types";
-import { darkTheme as t } from "./theme";
+import { useTheme } from "./theme";
 
 interface StatsLineProps {
   status: StatusState;
@@ -22,6 +22,7 @@ function formatDuration(seconds: number): string {
 }
 
 export default function StatsLine({ status, thinkingVisible, running, elapsed }: StatsLineProps) {
+  const t = useTheme();
   const cacheColor = status.cacheHitRate > 50 ? t.success : status.cacheHitRate > 20 ? t.warning : t.muted;
   const authLabel = status.authorization === "full_access" ? "完全" : "安全";
   const authColor = status.authorization === "full_access" ? t.warning : t.success;

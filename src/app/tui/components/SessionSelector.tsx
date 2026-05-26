@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import { useInput } from "ink";
 import { useSessionList } from "../hooks/useSessionList.js";
 import type { SessionInfo } from "../hooks/useSessionList.js";
-import { darkTheme as t } from "@/app/tui/theme";
+import { useTheme } from "@/app/tui/theme";
 
 interface SessionSelectorProps {
   onSelect: (sessionId: string) => void;
@@ -11,6 +11,7 @@ interface SessionSelectorProps {
 }
 
 export default function SessionSelector({ onSelect, onClose }: SessionSelectorProps) {
+  const t = useTheme();
   const { sessions, loading, error } = useSessionList();
   const [selected, setSelected] = useState(0);
   const selectedRef = useRef(selected);
