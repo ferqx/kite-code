@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-05-26
+最后更新：2026-05-27
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -26,7 +26,10 @@
 | `execution/active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |
 | `execution/active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
 | `execution/active/project-conventions.md` | active | 文档语言、注释规范、测试纪律、CLI 行为、提交粒度、仓库卫生 | 修改 Markdown 文档、测试、CLI、提交规范或仓库布局约束时。 |
+| `execution/active/tui-e2e-standards.md` | active | TUI E2E 测试标准、响应分配器、Harness 增强、P0-P3 覆盖分层 | 编写或修改 TUI E2E 测试、调整 mock agent 行为、新增 E2E 场景。 |
+| `execution/active/e2e-test-restructure.md` | active | E2E 测试用例体系重构方案 — 3 文件 60 测试覆盖 P0-P3 | E2E 测试重构、新增测试层级、调整测试文件组织。 |
 | `execution/active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
+| `execution/active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
 
 ## 理解记录
 

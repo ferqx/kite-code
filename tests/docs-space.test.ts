@@ -26,7 +26,7 @@ describe("repository knowledge system", () => {
     const activeRecords = collectFilesIfExists(
       join(repoRoot, "docs", "space", "execution", "active"),
     )
-      .map((path) => relative(join(repoRoot, "docs", "space"), path))
+      .map((path) => relative(join(repoRoot, "docs", "space"), path).replace(/\\/g, "/"))
       .filter((path) => path.endsWith(".md"))
       .sort();
 

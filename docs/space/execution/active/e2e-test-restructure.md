@@ -1,7 +1,28 @@
 # 方案：E2E 测试用例体系重构
 
 状态：active
-创建：2026-05-25
+最后更新：2026-05-25
+最后验证：2026-05-25
+范围：
+
+- `tests/e2e/`（E2E 测试文件组织、分层、harness 增强）
+- `tests/tui-reducer.test.ts`（配套 reducer 单元测试）
+
+读取时机：
+
+- 新增或重构 E2E 测试、调整测试分层、修改 test harness。
+- 分析 TUI bug 后需要补充 e2e 回归测试。
+
+相关：
+
+- `tui-e2e-standards.md`
+- `../completed/2026-05-25-e2e-test-restructure.md`
+
+验证：
+
+- `bun test tests/e2e/`
+- `bun test tests/tui-reducer.test.ts`
+- `bun test`
 
 ## 背景
 
