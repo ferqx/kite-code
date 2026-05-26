@@ -215,8 +215,11 @@ export class SessionRuntime {
         if (self._foreground) {
           realProvider.onEvent(event);
         } else {
+          // need_input is auto-cancelled in background (requestAction returns cancel immediately),
+          // so don't buffer it — replay would create an unanswerable zombie question
+          if (event.type === "need_input") return;
           self._pushToBuffer(event);
-          if (event.type === "need_approval" || event.type === "need_input") {
+          if (event.type === "need_approval") {
             self.pendingInterrupt = true;
             self.notifyInterrupt?.();
           }

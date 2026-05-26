@@ -46,7 +46,7 @@ export type Action =
   | { type: "SHOW_SESSIONS" }
   | { type: "HIDE_SESSIONS" }
   | { type: "LOAD_SESSION_PENDING"; threadId: string }
-  | { type: "LOAD_SESSION"; blocks: OutputBlock[]; interrupt: InterruptState | null; modelProvider: string; modelName: string; thinkingLevel: string | null }
+  | { type: "LOAD_SESSION"; threadId: string; blocks: OutputBlock[]; interrupt: InterruptState | null; modelProvider: string; modelName: string; thinkingLevel: string | null }
   | { type: "SELECT_MODEL"; modelId: string }
   | { type: "NEW_SESSION"; threadId: string }
   | { type: "USER_MESSAGE"; text: string }
@@ -505,8 +505,17 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       const maxId = action.blocks.reduce((max, b) => Math.max(max, b.id), 0);
       nextId = maxId + 1;
 
+      // Update the loaded session's snapshot with correct model/thinking info,
+      // so SWITCH_SESSION reads the right values when switching back later
+      const sessions = state.sessions.map(s =>
+        s.threadId === action.threadId
+          ? { ...s, status: { ...s.status, modelName: action.modelName || s.status.modelName, thinkingMode: action.thinkingLevel || s.status.thinkingMode } }
+          : s
+      );
+
       return {
         ...state,
+        sessions,
         blocks: action.blocks,
         interrupt: action.interrupt,
         showSessions: false,    // Close the session selector

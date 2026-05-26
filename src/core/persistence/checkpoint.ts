@@ -90,6 +90,8 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
 
     // WAL 模式提升并发读写性能 / WAL mode improves concurrent read/write performance
     this.db.run("pragma journal_mode = wal");
+    // 多会话并发写入时避免 SQLITE_BUSY / Avoid SQLITE_BUSY under concurrent multi-session writes
+    this.db.run("pragma busy_timeout = 5000");
     this.db.run(`
       create table if not exists checkpoints (
         thread_id text not null,

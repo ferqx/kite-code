@@ -293,6 +293,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           if (!result) {
             dispatch({
               type: "LOAD_SESSION",
+              threadId,
               blocks: [{ id: 1, kind: "text", content: `Session ${threadId} has no saved checkpoints.` }],
               interrupt: null,
               modelProvider: "",
@@ -308,6 +309,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
           dispatch({
             type: "LOAD_SESSION",
+              threadId,
             blocks: result.blocks,
             interrupt: result.interrupt,
             modelProvider: result.modelProvider,
@@ -325,6 +327,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           }
           dispatch({
             type: "LOAD_SESSION",
+              threadId,
             blocks: [{ id: 1, kind: "text", content: `Failed to load session: ${e?.message ?? e}` }],
             interrupt: null,
             modelProvider: "",
@@ -533,7 +536,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           checkpointId,
         }));
       } else {
-        const newThreadId = `tui-${Date.now().toString(36)}`;
+        const newThreadId = `tui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
         threadIdRef.current = newThreadId;
         // FORK 创建新会话，注册到 SessionManager
         const forkedRt = sessionManager.registerSession(newThreadId, workspace);
@@ -589,12 +592,15 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           dispatch({ type: "EVENT", event: { type: "text", data: { text: `\`\`\`\n${output}\n\`\`\`` } } });
           // 写入当前会话 runtime 和 ref，两者必须同步，否则下一次 runTask 会
           // 用 ref 中的旧值覆盖 runtime 的历史
+          // Cap at 50 entries to prevent token limit issues in long sessions
           const entry = `User (shell): ${command}\nResult:\n${output}`;
           const rt = sessionManager.getRuntime(threadIdRef.current);
           if (rt) {
             rt.conversationHistory.push(entry);
+            if (rt.conversationHistory.length > 50) rt.conversationHistory = rt.conversationHistory.slice(-50);
           }
           conversationHistoryRef.current.push(entry);
+          if (conversationHistoryRef.current.length > 50) conversationHistoryRef.current = conversationHistoryRef.current.slice(-50);
         } catch (err: any) {
           const errorMsg = err.stderr?.trim() || err.message || "command failed";
           dispatch({ type: "EVENT", event: { type: "text", data: { text: `✗ \`${command}\`\n\`\`\`\n${errorMsg}\n\`\`\`` } } });

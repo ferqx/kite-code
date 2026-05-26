@@ -533,7 +533,7 @@ describe("eventReducer (blocks model)", () => {
         { id: 10, kind: "user", content: "old user" },
       ];
       let s = dispatch(fresh(), {
-        type: "LOAD_SESSION", blocks, interrupt: null,
+        type: "LOAD_SESSION", threadId: "t1", blocks, interrupt: null,
         modelProvider: "test", modelName: "deepseek-v4", thinkingLevel: null,
       });
       // After LOAD_SESSION with max id = 10, nextId should be 11
@@ -548,7 +548,7 @@ describe("eventReducer (blocks model)", () => {
         { id: 42, kind: "approval", approval: approval() },
       ];
       const s = dispatch(fresh(), {
-        type: "LOAD_SESSION", blocks, interrupt,
+        type: "LOAD_SESSION", threadId: "t1", blocks, interrupt,
         modelProvider: "test", modelName: "deepseek-v4", thinkingLevel: null,
       });
       expect(s.interrupt).toEqual(interrupt);
