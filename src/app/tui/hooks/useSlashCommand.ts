@@ -1,7 +1,9 @@
 import { useCallback } from "react";
 import type { Dispatch } from "react";
 import { MODEL_NAMES } from "./useSlashSuggestions";
+import { listAvailableModels } from "@/core/config";
 import { getSkillContent } from "@/core/skills/loader";
+import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 
 export type SlashAction =
@@ -67,9 +69,14 @@ export function useSlashCommand(
         dispatch({ type: "TOGGLE_THINKING" });
         break;
       case "model":
-        if (action.name && MODEL_NAMES.some((m) => m.toLowerCase() === action.name!.toLowerCase())) {
-          const matched = MODEL_NAMES.find((m) => m.toLowerCase() === action.name!.toLowerCase())!;
-          dispatch({ type: "SELECT_MODEL", modelId: matched });
+        if (action.name) {
+          const available = listAvailableModels();
+          const matched = available.find((m) => m.name.toLowerCase() === action.name!.toLowerCase() || m.label.toLowerCase() === action.name!.toLowerCase());
+          if (matched) {
+            dispatch({ type: "SELECT_MODEL", modelId: matched.name });
+          } else {
+            dispatch({ type: "SHOW_MODEL_SELECTOR" });
+          }
         } else {
           dispatch({ type: "SHOW_MODEL_SELECTOR" });
         }

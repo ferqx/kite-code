@@ -244,6 +244,41 @@ function normalizeMcpServerConfig(
  * Expand environment variable references in a string.
  * Supports ${VAR} and ${VAR:-default} syntax.
  */
+export interface AvailableModel {
+  provider: string;
+  name: string;
+  label: string;
+  isDefault: boolean;
+}
+
+function fallbackModels(): AvailableModel[] {
+  return [
+    { provider: "deepseek", name: "deepseek-chat", label: "DeepSeek V4", isDefault: true },
+    { provider: "deepseek", name: "deepseek-reasoner", label: "DeepSeek R1", isDefault: false },
+    { provider: "openai", name: "gpt-4o", label: "GPT-4o", isDefault: false },
+    { provider: "anthropic", name: "claude-sonnet-4-20250514", label: "Claude Sonnet 4", isDefault: false },
+  ];
+}
+
+export function listAvailableModels(configPath?: string): AvailableModel[] {
+  const path = configPath ?? defaultConfigPath();
+  if (!existsSync(path)) return fallbackModels();
+  try {
+    const raw = readFileSync(path, "utf8");
+    const parsed = parse(raw) as Record<string, unknown>;
+    const models = parsed.models as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(models) || models.length === 0) return fallbackModels();
+    return models.map((m) => ({
+      provider: String(m.provider ?? ""),
+      name: String(m.name ?? ""),
+      label: String(m.label ?? m.name ?? ""),
+      isDefault: Boolean(m.default),
+    }));
+  } catch {
+    return fallbackModels();
+  }
+}
+
 export function expandEnvVars(value: string): string {
   return value.replace(
     /\$\{(\w+)(?::-([^}]*))?\}/g,

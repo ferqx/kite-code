@@ -87,16 +87,17 @@ function getToolPreview(name: string, args: Record<string, unknown>): string {
   }
 }
 
-function modelListText(): string {
-  return [
-    "── Available Models ──",
-    "  deepseek-v4       DeepSeek V4 (current)",
-    "  deepseek-v3       DeepSeek V3",
-    "  gpt-4o            OpenAI GPT-4o",
-    "  claude-sonnet-4   Claude Sonnet 4",
-    "",
-    "Use /model to open selector, /model <name> to switch",
-  ].join("\n");
+import { listAvailableModels } from "@/core/config";
+
+function modelListText(currentModel: string): string {
+  const available = listAvailableModels();
+  const lines = ["── Available Models ──"];
+  for (const m of available) {
+    const marker = m.name === currentModel ? " (current)" : "";
+    lines.push(`  ${m.name.padEnd(28)} ${m.label}${marker}`);
+  }
+  lines.push("", "Use /model to open selector, /model <name> to switch");
+  return lines.join("\n");
 }
 
 function computeToolDetail(name: string, args: Record<string, unknown>): string | undefined {
@@ -475,7 +476,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     case "HIDE_MODEL_SELECTOR":
       return { ...state, showModelSelector: false };
     case "LIST_MODELS": {
-      const block: OutputBlock = { id: nextId++, kind: "text", content: modelListText() };
+      const block: OutputBlock = { id: nextId++, kind: "text", content: modelListText(state.status.modelName) };
       return { ...state, blocks: [...state.blocks, block] };
     }
     case "SHOW_SESSIONS":
@@ -677,6 +678,7 @@ export interface AppProps {
   provider: import("./provider").TuiUserInputProvider;
   onCompactRequest?: () => void;
   mcpManager?: McpManager;
+  availableModels?: import("@/core/config").AvailableModel[];
   children?: ReactNode;
 }
 

@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import { darkTheme as t } from "@/app/tui/theme";
+import { listAvailableModels, type AvailableModel } from "@/core/config";
 
 export interface ModelOption {
   id: string;
@@ -9,21 +10,20 @@ export interface ModelOption {
   description: string;
 }
 
-const DEFAULT_MODELS: ModelOption[] = [
-  { id: "deepseek-v4", name: "DeepSeek V4", description: "Default" },
-  { id: "deepseek-v3", name: "DeepSeek V3", description: "" },
-  { id: "gpt-4o", name: "OpenAI GPT-4o", description: "" },
-  { id: "claude-sonnet-4", name: "Claude Sonnet 4", description: "" },
-];
+function toModelOption(m: AvailableModel): ModelOption {
+  const parts: string[] = [m.label];
+  if (m.isDefault) parts.push("default");
+  return { id: m.name, name: m.label, description: parts.length > 1 ? "default" : "" };
+}
 
 interface ModelSelectorProps {
-  models?: ModelOption[];
   currentModel: string;
   onSelect: (modelId: string) => void;
   onClose: () => void;
 }
 
-export default function ModelSelector({ models = DEFAULT_MODELS, currentModel, onSelect, onClose }: ModelSelectorProps) {
+export default function ModelSelector({ currentModel, onSelect, onClose }: ModelSelectorProps) {
+  const models: ModelOption[] = listAvailableModels().map(toModelOption);
   const [selected, setSelected] = useState(
     Math.max(0, models.findIndex((m) => m.id === currentModel))
   );
