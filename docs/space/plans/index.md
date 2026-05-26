@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-05-24
+最后更新：2026-05-26
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -24,6 +24,9 @@
 | [`2026-05-22-production-gaps-phase2.md`](2026-05-22-production-gaps-phase2.md) | completed | P0 | — | — | Phase 2 详细实施计划（7 tasks）。Rewind（Revert+Fork）+ MCP Resources。 |
 | [`2026-05-22-skills-system.md`](2026-05-22-skills-system.md) | superseded | P1 | — | 被 [2026-05-23-skills-system-phase3.md](2026-05-23-skills-system-phase3.md) 替代 | — |
 | [`2026-05-23-skills-system-phase3.md`](2026-05-23-skills-system-phase3.md) | completed | P0 | Phase 1 + Phase 2 | — | Skills 系统实施计划（11 tasks）。agentskills.io 标准。 |
+| [`2026-05-24-multi-session-concurrency.md`](2026-05-24-multi-session-concurrency.md) | completed | P0 | — | — | 多会话并发执行（3 tasks）。 |
+| [`2026-05-25-e2e-restructure.md`](2026-05-25-e2e-restructure.md) | completed | P1 | — | — | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
+| [`2026-05-26-tui-claude-code-parity.md`](2026-05-26-tui-claude-code-parity.md) | completed | P0 | — | — | TUI Claude Code 全面对标：布局重构、快捷键精简、功能补全、配置、主题（14 tasks）。 |
 
 ## 计划文件命名规范
 

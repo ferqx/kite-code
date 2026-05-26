@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-05-22
+最后更新：2026-05-26
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -42,6 +42,8 @@
 
 | `understanding/2026-05-22-rewind-mcp-resources-design.md` | understanding | Rewind（Revert + Fork）和 MCP Resources 的设计规范。 |
 | `understanding/2026-05-23-skills-system-design.md` | understanding | Skills 系统设计 — 对齐 agentskills.io 开放标准，按需加载 + Skill 工具 + Available Skills 区段 + /skill-name。 |
+| `understanding/2026-05-24-multi-session-concurrency-design.md` | understanding | 多会话并发执行设计规范。 |
+| `understanding/2026-05-26-tui-claude-code-parity-design.md` | understanding | TUI Claude Code 对标设计 — 布局重构、快捷键精简、功能补全、配置、主题、实施记录。 |
 
 ## Backlog（工作待办）
 
@@ -61,7 +63,10 @@
 | `plans/2026-05-22-production-gaps-phase1.md` | completed | Phase 1 实施记录（8 commits）。 |
 | `plans/2026-05-22-production-gaps-phase2.md` | ready | Phase 2 实施计划（7 tasks）。Rewind + MCP Resources，待执行。 |
 | `plans/2026-05-22-skills-system.md` | superseded | 被 [`understanding/2026-05-23-skills-system-design.md`](../understanding/2026-05-23-skills-system-design.md) 替代。 |
-| `plans/2026-05-23-skills-system-phase3.md` | draft | Phase 3 实施计划（Skills 系统），待制定。 |
+| `plans/2026-05-23-skills-system-phase3.md` | completed | Phase 3 实施计划（Skills 系统，11 tasks）。 |
+| `plans/2026-05-24-multi-session-concurrency.md` | completed | 多会话并发执行（3 tasks）。 |
+| `plans/2026-05-25-e2e-restructure.md` | completed | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
+| `plans/2026-05-26-tui-claude-code-parity.md` | completed | TUI Claude Code 全面对标（14 tasks）：布局、快捷键、功能、配置、主题。 |
 
 ## 完成执行记录
 
