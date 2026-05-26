@@ -30,9 +30,6 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
     case "bubblewrap":
       return createBwrapExecutor(options);
     default:
-      warn(
-        "No sandbox backend available on this platform. Falling back to unsandboxed shell execution.",
-      );
       return shellTool;
   }
 }
