@@ -15,7 +15,7 @@ import InputLine, { type EditorContentHandle } from "./components/InputLine";
 import StartupScreen from "./components/StartupScreen";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useSlashCommand } from "./hooks/useSlashCommand";
-import { loadSession, listSessions } from "../../core/persistence/sessions.js";
+import { loadSession, listSessions, deleteSession } from "../../core/persistence/sessions.js";
 import { defaultCheckpointPath } from "../../core/config/paths.js";
 import { BunSqliteSaver } from "../../core/persistence/checkpoint.js";
 import { scanSkills, getSkillContent } from "@/core/skills/loader";
@@ -176,6 +176,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     const manager = new McpManager();
     mcpManagerRef.current = manager;
     setMcpManager(manager);
+    sessionManager.updateMcpManager(manager);
     // Connect and update prompt registry when ready
     manager.connectAll(mcpConfig.servers).then(() => {
       setMcpPromptRegistry(new Map(manager.getPromptRegistry()));
@@ -199,12 +200,19 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     const manifests = scanSkills(opts);
     skillManifestsRef.current = manifests;
     dispatch({ type: "SET_SKILL_MANIFESTS", manifests });
+    sessionManager.updateSkillManifests(manifests);
   }, [workspace, dispatch]);
 
   // Keep pendingSkills ref in sync for use in runTask callback
   React.useEffect(() => {
     pendingSkillsRef.current = state.pendingSkills;
   }, [state.pendingSkills]);
+
+  // 将 thinkingLevel ref 与 state.status.thinkingMode 同步，确保 ModelSelector 切换后 runTask 拿到最新值
+  // Sync thinkingLevel ref with state.status.thinkingMode so runTask uses latest value after ModelSelector changes
+  React.useEffect(() => {
+    thinkingLevelRef.current = state.status.thinkingMode || null;
+  }, [state.status.thinkingMode]);
 
   const handleExit = React.useCallback(() => {
     dispatch({ type: "EVENT", event: { type: "text", data: { text: "👋 Goodbye!" } } });
@@ -359,6 +367,25 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         }
         return;
       }
+      // ── DELETE_SESSION：删除会话，从 DB 和 SessionManager 中移除 ──
+      if (action.type === "DELETE_SESSION") {
+        const { threadId } = action;
+        // Don't delete the active session
+        if (threadId === sessionManager.getActiveId()) {
+          dispatch(action); // just close the selector
+          return;
+        }
+        try {
+          await deleteSession(defaultCheckpointPath(), threadId);
+        } catch {
+          // DB error — still remove from runtime list
+        }
+        // Remove from SessionManager and refresh snapshots
+        sessionManager.removeRuntime(threadId);
+        dispatch(action);
+        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        return;
+      }
       dispatch(action);
     },
     [dispatch, config, sessionManager, workspace],
@@ -408,7 +435,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
       dispatch({ type: "USER_MESSAGE", text: task });
       dispatch({ type: "SET_RUNNING" });
-      dispatch({ type: "DEACTIVATE_SKILL", name: "" }); // clear after capture into runtime
+      dispatch({ type: "DEACTIVATE_SKILL" }); // clear after capture into runtime
 
       // Update running state — agentLoopActive is managed by SessionRuntime.runTask
       agentLoopActiveRef.current = true;
@@ -500,6 +527,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         forkedRt.thinkingLevel = thinkingLevelRef.current;
         forkedRt.conversationHistory = [...conversationHistoryRef.current];
         sessionManager.onStatusChange(newThreadId);
+        // 先同步 SessionSnapshot 到 state.sessions，再切换，避免 reducer 中 target 找不到新会话
+        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
         // 切换到分叉的新会话，后续 generator 事件写入正确的 activeSession
         dispatch({ type: "SWITCH_SESSION", threadId: newThreadId });
         generator = forkFromCheckpoint(provider, buildForkParams({
@@ -649,6 +678,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     <ThemeContext.Provider value={theme}>
     <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }} mcpManager={mcpManager ?? undefined}>
       <InputLine
+        key={state.activeSessionId}
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
         onSubmit={handleInput}
         disabled={!!state.interrupt}

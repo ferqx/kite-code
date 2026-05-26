@@ -32,13 +32,23 @@ export async function listSessions(checkpointPath: string): Promise<SessionInfo[
     const db = (saver as any).db as Database;
     const rows = db
       .query<
-        { thread_id: string; updated_at: string | null },
+        { thread_id: string; updated_at: string | null; cached_name: string | null },
         []
       >(
-        `SELECT thread_id, MAX(created_at) AS updated_at
-         FROM checkpoints
-         WHERE checkpoint_ns = '' AND created_at IS NOT NULL
-         GROUP BY thread_id
+        `SELECT
+           c.thread_id,
+           MAX(c.created_at) AS updated_at,
+           (SELECT json_extract(c2.metadata, '$.session_name')
+            FROM checkpoints c2
+            WHERE c2.thread_id = c.thread_id
+              AND c2.checkpoint_ns = ''
+              AND c2.metadata IS NOT NULL
+              AND json_extract(c2.metadata, '$.session_name') IS NOT NULL
+            ORDER BY c2.checkpoint_id DESC
+            LIMIT 1) AS cached_name
+         FROM checkpoints c
+         WHERE c.checkpoint_ns = '' AND c.created_at IS NOT NULL
+         GROUP BY c.thread_id
          ORDER BY updated_at DESC
          LIMIT 50`,
       )
@@ -46,7 +56,11 @@ export async function listSessions(checkpointPath: string): Promise<SessionInfo[
 
     const sessions: SessionInfo[] = [];
     for (const row of rows) {
-      const name = await readSessionName(saver, row.thread_id);
+      // 优先使用 cached_name（已持久化的智能名称），避免完整 checkpoint 反序列化
+      // Prefer cached_name (persisted smart name) to avoid full checkpoint deserialization
+      const name = row.cached_name
+        ? row.cached_name
+        : await readSessionName(saver, row.thread_id);
       sessions.push({
         threadId: row.thread_id,
         name,
@@ -108,7 +122,7 @@ export async function loadSession(
     // before state updates are returned, so channel_values.approvedToolRequest
     // /approvedToolGrant are always null at interrupt checkpoints.
     const pendingWrites = tuple.pendingWrites as [string, string, unknown][] | undefined;
-    const interrupt = detectInterrupt(pendingWrites);
+    const interrupt = detectInterrupt(pendingWrites, blocks);
 
     return {
       threadId,
@@ -300,9 +314,13 @@ function extractText(content: unknown): string {
 LangGraph 的 `interrupt()` 在执行时抛出 GraphInterrupt，状态更新尚未返回，
 因此 `channel_values.approvedToolRequest`/`approvedToolGrant` 在中断检查点中始终为 null。
 实际的中断值存储在 pending writes 中 `__interrupt__` 通道内。
+
+blockId 从 blocks 中推断：tool_approval 匹配最近的 tool_card block 的 id，
+user_input 使用 0（InputBlock 不需要 blockId 做显示匹配）。
 */
 function detectInterrupt(
   pendingWrites: [string, string, unknown][] | undefined,
+  blocks: OutputBlock[],
 ): InterruptState | null {
   if (!pendingWrites || pendingWrites.length === 0) return null;
 
@@ -310,6 +328,12 @@ function detectInterrupt(
     if (channel === "__interrupt__" && value && typeof value === "object") {
       const v = value as Record<string, unknown>;
       if (v.kind === "tool_approval") {
+        // Find the most recent tool_card block (the one that triggered approval)
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          if (blocks[i].kind === "tool_card") {
+            return { kind: "approval", blockId: blocks[i].id };
+          }
+        }
         return { kind: "approval", blockId: 0 };
       }
       if (v.kind === "user_input") {
@@ -436,6 +460,19 @@ export async function persistSessionName(
     );
   } catch {
     // Non-critical: name will be regenerated on next listing
+  } finally {
+    saver.close();
+  }
+}
+
+/** 删除整个会话的 checkpoints 和 writes / Delete all checkpoints and writes for a session */
+export async function deleteSession(
+  checkpointPath: string,
+  threadId: string,
+): Promise<void> {
+  const saver = new BunSqliteSaver(checkpointPath);
+  try {
+    await saver.deleteThread(threadId);
   } finally {
     saver.close();
   }

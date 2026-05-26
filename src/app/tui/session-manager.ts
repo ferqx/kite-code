@@ -38,9 +38,9 @@ export class SessionRuntime {
   thinkingLevel: string | null = null;
   name: string;
 
-  readonly skillManifests: SkillManifest[];
+  skillManifests: SkillManifest[];
   readonly skillOptions: SkillScanOptions | null;
-  readonly mcpManager: McpManager | null;
+  mcpManager: McpManager | null;
 
   generator: AsyncGenerator<AgentEvent> | null = null;
   /** 当后台会话命中中断时通知 Manager 刷新快照 / Callback to notify Manager on background interrupt */
@@ -66,18 +66,7 @@ export class SessionRuntime {
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
 
-    // Bridge: when realProvider.submitAction is called by UI components (ApprovalBlock,
-    // InputBlock), resolve this SessionRuntime's pending interrupt.  The graph uses
-    // _proxyProvider for requestAction, but UI components receive the real provider
-    // via React props — without this bridge the proxy's Promise never resolves.
-    const realProvider = deps.provider;
-    const origSubmitAction = realProvider.submitAction.bind(realProvider);
-    realProvider.submitAction = (action: any) => {
-      origSubmitAction(action);
-      this._resolveInterrupt(action);
-    };
-
-    this._proxyProvider = this._createProxyProvider(realProvider);
+    this._proxyProvider = this._createProxyProvider(deps.provider);
   }
 
   // ── 公开 API ──
@@ -234,7 +223,13 @@ export class SessionRuntime {
         payload: { kind: string; approval?: any; question?: any },
       ): Promise<any> {
         if (!self._foreground) {
-          // 后台中断：标记并等待前台切换
+          // user_input in background: auto-cancel (user can't respond)
+          // need_approval won't fire due to authorizationOverride, but guard anyway
+          if (payload.kind === "user_input") {
+            return { type: "cancel" as const };
+          }
+          // 后台 tool_approval 中断：标记并等待前台切换
+          // Background tool_approval: mark and wait for foreground switch
           self.pendingInterrupt = true;
           self.notifyInterrupt?.();
           await new Promise<void>((resolve) => {
@@ -253,11 +248,11 @@ export class SessionRuntime {
       },
 
       submitAction(action: any): void {
-        self._resolveInterrupt(action);
+        self.resolveInterrupt(action);
       },
 
       reset(): void {
-        self._resolveInterrupt({ type: "cancel" as const });
+        self.resolveInterrupt({ type: "cancel" as const });
       },
 
       getPendingInterrupt(): any {
@@ -265,7 +260,7 @@ export class SessionRuntime {
       },
 
       teardown(): Promise<void> {
-        self._resolveInterrupt({ type: "cancel" as const });
+        self.resolveInterrupt({ type: "cancel" as const });
         return Promise.resolve();
       },
 
@@ -274,7 +269,8 @@ export class SessionRuntime {
     } as unknown as TuiUserInputProvider;
   }
 
-  private _resolveInterrupt(action: any): void {
+  /** 解析挂起的中断（由 SessionManager 的中央 bridge 调用）/ Resolve pending interrupt (called by SessionManager's central bridge) */
+  resolveInterrupt(action: any): void {
     if (this._pendingResolve) {
       const r = this._pendingResolve;
       this._pendingResolve = null;
@@ -291,7 +287,19 @@ export class SessionManager {
   private snapshotCallback: ((threadId: string) => void) | null = null;
   private static sessionCounter = 0;
 
-  constructor(private deps: SessionDeps) {}
+  constructor(private deps: SessionDeps) {
+    // Central bridge: when UI components (ApprovalBlock, InputBlock) call submitAction
+    // on the real provider, route to the active runtime's resolveInterrupt.
+    // This runs once, avoiding the chain-wrapping anti-pattern of per-runtime bridges.
+    if (deps.provider.submitAction) {
+      const origSubmit = deps.provider.submitAction.bind(deps.provider);
+      deps.provider.submitAction = (action: any) => {
+        origSubmit(action);
+        const active = this.runtimes.get(this.activeId);
+        active?.resolveInterrupt(action);
+      };
+    }
+  }
 
   createSession(workspace: string): string {
     const threadId = `tui-${Date.now().toString(36)}-${SessionManager.sessionCounter++}`;
@@ -382,6 +390,36 @@ export class SessionManager {
   /** 检查指定 threadId 是否已有运行时 / Check if a runtime exists for threadId */
   hasRuntime(threadId: string): boolean {
     return this.runtimes.has(threadId);
+  }
+
+  /** 移除运行时（会话删除后调用）/ Remove a runtime (called after session deletion) */
+  removeRuntime(threadId: string): void {
+    const rt = this.runtimes.get(threadId);
+    if (rt) {
+      rt.abort();
+      rt.clearBuffer();
+    }
+    this.runtimes.delete(threadId);
+    // Don't leave activeId pointing to a deleted session
+    if (this.activeId === threadId) {
+      this.activeId = "";
+    }
+  }
+
+  /** 同步 skills 到所有现有运行时（skills 扫描完成后调用）/ Sync skill manifests to all existing runtimes (called after skill scan completes) */
+  updateSkillManifests(manifests: SkillManifest[]): void {
+    this.deps.skillManifests = manifests;
+    for (const rt of this.runtimes.values()) {
+      rt.skillManifests = manifests;
+    }
+  }
+
+  /** 同步 MCP manager 到所有现有运行时（MCP 连接完成后调用）/ Sync MCP manager to all existing runtimes (called after MCP connect completes) */
+  updateMcpManager(mcp: McpManager): void {
+    this.deps.mcpManager = mcp;
+    for (const rt of this.runtimes.values()) {
+      rt.mcpManager = mcp;
+    }
   }
 }
 
