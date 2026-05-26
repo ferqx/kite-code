@@ -6,6 +6,7 @@ import {
   prepareModelContext,
   forceContextCompaction,
   clearOldToolResults,
+  sanitizeToolCallPairs,
 } from "../src/core/model/context";
 import {
   summarizeMessages,
@@ -552,5 +553,130 @@ describe("buildStaticSystemPrompt with skills", () => {
     expect(zIndex).toBeGreaterThan(0);
     expect(aIndex).toBeGreaterThan(0);
     expect(zIndex).toBeLessThan(aIndex);
+  });
+});
+
+// ============================================================================
+// sanitizeToolCallPairs — 脏 checkpoint 消息清洗
+// 场景：进程崩溃/Ctrl+C 导致 checkpoint 中 AIMessage 的 tool_calls 缺少对应 ToolMessage，
+// 或 ToolMessage 缺少对应的 AIMessage。直接发给 DeepSeek API 会触发 400 错误。
+// ============================================================================
+describe("sanitizeToolCallPairs", () => {
+  test("passes through clean HumanMessages unchanged", () => {
+    const msgs: BaseMessage[] = [new HumanMessage("hello")];
+    const result = sanitizeToolCallPairs(msgs);
+    expect(result).toHaveLength(1);
+    expect(HumanMessage.isInstance(result[0])).toBe(true);
+  });
+
+  test("passes through clean paired tool_call + ToolMessage unchanged", () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage("run ls"),
+      new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "shell_execute", args: { command: "ls" } }] }),
+      new ToolMessage({ content: "file list", tool_call_id: "c1" }),
+    ];
+    const result = sanitizeToolCallPairs(msgs);
+    expect(result).toHaveLength(3);
+    expect(AIMessage.isInstance(result[1])).toBe(true);
+    expect((result[1] as AIMessage).tool_calls).toHaveLength(1);
+    expect(ToolMessage.isInstance(result[2])).toBe(true);
+  });
+
+  test("strips orphaned tool_calls from AIMessage but keeps text content", () => {
+    // 模拟：进程在工具执行前崩溃，AIMessage 有 tool_calls 但没有 ToolMessage
+    const msgs: BaseMessage[] = [
+      new HumanMessage("run ls"),
+      new AIMessage({
+        content: "Let me run that command",
+        tool_calls: [{ id: "orphan-1", name: "shell_execute", args: { command: "ls" } }],
+      }),
+      new HumanMessage("next question"),
+    ];
+    const result = sanitizeToolCallPairs(msgs);
+    expect(result).toHaveLength(3);
+
+    // AIMessage 保留文本内容，但 tool_calls 被清空
+    const ai = result[1] as AIMessage;
+    expect(AIMessage.isInstance(ai)).toBe(true);
+    const content = typeof ai.content === "string" ? ai.content : "";
+    expect(content).toContain("Let me run that command");
+    expect(ai.tool_calls).toHaveLength(0);
+  });
+
+  test("removes orphaned ToolMessage with no matching AIMessage", () => {
+    // 模拟：进程崩溃导致 ToolMessage 还在但 AIMessage 的 tool_calls 丢失
+    const msgs: BaseMessage[] = [
+      new HumanMessage("hey"),
+      new ToolMessage({ content: "orphan result", tool_call_id: "ghost-1" }),
+      new HumanMessage("continue"),
+    ];
+    const result = sanitizeToolCallPairs(msgs);
+    expect(result).toHaveLength(2);
+    expect(HumanMessage.isInstance(result[0])).toBe(true);
+    expect(HumanMessage.isInstance(result[1])).toBe(true);
+  });
+
+  test("handles mix of paired and orphaned messages correctly", () => {
+    // 混合：有正常的配对，也有孤儿
+    const msgs: BaseMessage[] = [
+      new HumanMessage("step 1"),
+      new AIMessage({ content: "ok", tool_calls: [{ id: "c1", name: "read_file", args: { path: "a.txt" } }] }),
+      new ToolMessage({ content: "content", tool_call_id: "c1" }),             // paired ✓
+      new HumanMessage("step 2"),
+      new AIMessage({ content: "running", tool_calls: [{ id: "c2", name: "shell_execute", args: { command: "npm test" } }] }),
+      // ToolMessage for c2 is MISSING (crash before tool ran)
+      new AIMessage({ content: "All done!" }),
+      new ToolMessage({ content: "ghost result", tool_call_id: "ghost" }),     // orphan ToolMessage ✗
+    ];
+    const result = sanitizeToolCallPairs(msgs);
+    // Expected:
+    // [0] HumanMessage "step 1"
+    // [1] AIMessage "ok" with c1 tool_calls (paired, intact)
+    // [2] ToolMessage c1 result
+    // [3] HumanMessage "step 2"
+    // [4] AIMessage "running" with tool_calls stripped (orphan) but text kept
+    // [5] AIMessage "All done!"
+    // ToolMessage "ghost" removed
+
+    expect(result).toHaveLength(6);
+
+    // Paired AIMessage keeps tool_calls
+    const pairedAi = result[1] as AIMessage;
+    expect(pairedAi.tool_calls).toHaveLength(1);
+    expect(pairedAi.tool_calls![0].id).toBe("c1");
+
+    // Orphan AIMessage: tool_calls stripped, text kept
+    const orphanAi = result[4] as AIMessage;
+    expect(orphanAi.tool_calls).toHaveLength(0);
+    const orphanContent = typeof orphanAi.content === "string" ? orphanAi.content : "";
+    expect(orphanContent).toBe("running");
+
+    // Orphan ToolMessage removed
+    const lastMsgs = result.slice(-2);
+    expect(lastMsgs.every((m) => !ToolMessage.isInstance(m))).toBe(true);
+  });
+
+  test("handles multiple tool_calls in one AIMessage — strips only orphaned ones", () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "c1", name: "read_file", args: { path: "x.txt" } },
+          { id: "c2", name: "shell_execute", args: { command: "ls" } },
+        ],
+      }),
+      new ToolMessage({ content: "file", tool_call_id: "c1" }),  // only c1 has result
+      // c2 is orphaned — no ToolMessage
+    ];
+    const result = sanitizeToolCallPairs(msgs);
+    const ai = result[0] as AIMessage;
+    // Only c1 survives
+    expect(ai.tool_calls).toHaveLength(1);
+    expect(ai.tool_calls![0].id).toBe("c1");
+  });
+
+  test("handles empty array", () => {
+    const result = sanitizeToolCallPairs([]);
+    expect(result).toHaveLength(0);
   });
 });

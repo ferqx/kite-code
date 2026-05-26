@@ -61,7 +61,7 @@ export function buildModelMessages(role: AgentRole, state: ModelContextState, sk
  * 保留文本内容但清空 tool_calls；移除无匹配 AIMessage 的孤儿 ToolMessage）。
  * 修复 checkpoint 中因中断/崩溃导致的消息不对齐，防止 DeepSeek API 400 错误。
  */
-function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
+export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
   // Collect all tool_call_ids from AIMessages in the list
   const aiToolCallIds = new Set<string>();
   for (const msg of messages) {
