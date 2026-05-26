@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ShellInput, ShellResult } from "@/core/types";
-import { findBashBinary, getMsys2BinDir } from "./bash-path";
+import { findBashBinary } from "./bash-path";
 
 /** Shell 执行器函数签名 / Shell executor function signature */
 export type ShellExecutor = (input: ShellInput) => Promise<ShellResult>;
@@ -35,7 +35,6 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
         cwd: input.workspace,
         stdout: "pipe",
         stderr: "pipe",
-        env: buildShellEnv(),
       },
     );
     const stdout = await new Response(proc.stdout).text();
@@ -65,7 +64,11 @@ function buildShellInvocation(command: string): string[] {
   if (process.platform === "win32") {
     const bashPath = findBashBinary();
     if (bashPath) {
-      return [bashPath, "-c", command];
+      // Prepend vendored /usr/bin to PATH inside bash so that coreutils
+      // (ls, grep, find, etc.) are found regardless of the parent process PATH.
+      // Don't override env in Bun.spawn — that breaks MSYS2 DLL path conversion
+      // and causes commands to fail with exit code 127.
+      return [bashPath, "-c", `export PATH="/usr/bin:$PATH" && ${command}`];
     }
     // fallback to cmd.exe if vendored bash is missing
     const systemRoot = process.env.SystemRoot || "C:\\Windows";
@@ -73,17 +76,6 @@ function buildShellInvocation(command: string): string[] {
   }
 
   return [process.env.SHELL || "/bin/sh", "-lc", command];
-}
-
-/** 构建 Shell 执行环境变量，前置 vendored bin 到 PATH */
-function buildShellEnv(): Record<string, string> | undefined {
-  if (process.platform !== "win32") return undefined;
-  const msys2Bin = getMsys2BinDir();
-  if (!msys2Bin) return undefined;
-
-  const env = { ...process.env } as Record<string, string>;
-  env.PATH = `${msys2Bin};${env.PATH || ""}`;
-  return env;
 }
 
 /** 过滤 MSYS2 启动时的无害噪音（/tmp 警告等） */
