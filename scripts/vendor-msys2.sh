@@ -71,14 +71,23 @@ done
 # --- DLL 依赖 ---
 echo ""
 echo "-- Checking DLL dependencies --"
-KEY_TOOLS=(grep sed awk find file)
-for tool in "${KEY_TOOLS[@]}"; do
-  tool_path="$MSYS2_DIR/${tool}.exe"
-  if [ ! -f "$tool_path" ]; then continue; fi
-  for dll in $("$MSYS2_DIR/objdump.exe" -p "$tool_path" 2>/dev/null | grep -oP 'DLL Name:\s*\Kmsys[-\w]+\.dll' || true); do
+# 检查所有已复制工具的 DLL 依赖（而非仅 KEY_TOOLS）
+# Check DLL dependencies for ALL copied tools (not just KEY_TOOLS)
+for exe in "$BIN_DIR"/*.exe; do
+  tool_name="$(basename "$exe")"
+  # 使用 ldd 检测 DLL 依赖（比 objdump 更可靠，objdump 可能未安装）
+  # Use ldd for DLL detection (more reliable than objdump which may not be installed)
+  for dll in $("$MSYS2_DIR/bash.exe" -c "ldd $(cygpath -u "$exe") 2>/dev/null" 2>/dev/null | grep -oP 'msys[-\w]+\.dll' || true); do
     if [ ! -f "$BIN_DIR/$dll" ]; then
-      cp "$MSYS2_DIR/$dll" "$BIN_DIR/"
-      echo "    $dll (needed by $tool)"
+      if [ -f "$MSYS2_DIR/$dll" ]; then
+        cp "$MSYS2_DIR/$dll" "$BIN_DIR/"
+        echo "    $dll (needed by $tool_name)"
+      elif [ -f "/mingw64/bin/$dll" ]; then
+        cp "/mingw64/bin/$dll" "$BIN_DIR/"
+        echo "    $dll (needed by $tool_name, from mingw64)"
+      else
+        echo "    WARN: cannot find $dll (needed by $tool_name)"
+      fi
     fi
   done
 done
