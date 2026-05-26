@@ -13,12 +13,13 @@ export interface InlineSegment {
   bold?: boolean;
   italic?: boolean;
   code?: boolean;
+  link?: string;
 }
 
 // ── inline markdown parsing ──
 
 export function parseInline(text: string): InlineSegment[] {
-  const allPatterns = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
+  const allPatterns = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|\[([^\]]+)\]\(([^)]+)\))/g;
   const segments: InlineSegment[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -33,6 +34,8 @@ export function parseInline(text: string): InlineSegment[] {
       segments.push({ text: match[3], italic: true });
     } else if (match[4] !== undefined) {
       segments.push({ text: match[4], code: true });
+    } else if (match[5] !== undefined && match[6] !== undefined) {
+      segments.push({ text: match[5], bold: true, link: match[6] });
     }
     lastIndex = match.index + match[1].length;
   }
@@ -455,16 +458,26 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
 
   return (
     <Text>
-      {segments.map((seg, j) => (
-        <Text
-          key={j}
-          bold={seg.bold}
-          italic={seg.italic}
-          color={seg.code ? t.warning : (color ?? undefined)}
-        >
-          {seg.text}
-        </Text>
-      ))}
+      {segments.map((seg, j) => {
+        if (seg.link) {
+          return (
+            <React.Fragment key={j}>
+              <Text bold color={t.primary}>{seg.text}</Text>
+              <Text color={t.dim}> ({seg.link})</Text>
+            </React.Fragment>
+          );
+        }
+        return (
+          <Text
+            key={j}
+            bold={seg.bold}
+            italic={seg.italic}
+            color={seg.code ? t.warning : (color ?? undefined)}
+          >
+            {seg.text}
+          </Text>
+        );
+      })}
     </Text>
   );
 }
