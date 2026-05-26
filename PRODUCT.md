@@ -14,17 +14,24 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 
 | 特性 | 说明 |
 |------|------|
-| 交互式 TUI | React Ink 终端界面，Markdown 渲染、键盘快捷键、多轮对话 |
+| 交互式 TUI | React Ink 终端界面，Markdown 渲染、键盘快捷键、多轮对话，四层布局（Header/Body/Footer/Overlay） |
 | CLI 入口 | 单次 `run` + `resume` 模式，适合脚本/CI |
-| 多 provider 支持 | DeepSeek、OpenAI、OpenAI-compatible、Ollama |
+| 多 provider 支持 | DeepSeek、OpenAI、OpenAI-compatible、Ollama，模型列表从配置动态加载 |
 | 审批机制 | 受保护工具人工审批，支持单次/同命令/完全授权 |
-| 6 个 Agent 工具 | read_file、edit_file、write_file、shell_execute、update_plan、ask_user |
-| 工具安全策略 | 风险分类（read/plan/write_file/execute_code/destructive/network/vcs_mutation） |
+| Agent 工具 | 6 个内置工具：read_file、edit_file、write_file、shell_execute、update_plan、ask_user |
+| 工具安全策略 | 风险分类（read/plan/write_file/execute_code/destructive/network/vcs_mutation/mcp） |
 | SQLite 持久化 | LangGraph checkpoint，会话回溯和断点续接 |
-| 上下文压缩 | 自动检测 overflow → 规则压缩 → LLM 摘要三层策略 |
+| 上下文压缩 | 自动检测 overflow → 规则压缩 → LLM 摘要三层策略，支持手动 `/compact` 触发 |
 | 跨平台 | Windows / Unix 双平台 |
 | 事件协议 | 标准化事件流，TUI 和 CLI 共享同一 runner |
 | 三层架构 | protocol → core → app 清晰分层 |
+| MCP 协议支持 | stdio + streamable HTTP transport，工具命名 `mcp__servername__toolname`，`/mcp` 管理面板 |
+| MCP Resources | `resources/list` + `resources/read`，`read_mcp_resource` 工具注入 agent 上下文 |
+| Rewind（会话回溯） | `/rewind` 命令 + `Esc Esc`，checkpoint 列表 → Revert/Fork，对齐 Claude Code Rewind |
+| Skills 系统 | agentskills.io 开放标准，`Skill` 工具 + `/skill-name` 斜杠命令，项目/用户级 skills 目录 |
+| 错误分类 | runner 层区分网络超时/速率限制（可恢复）vs 配置/权限（不可恢复） |
+| 多会话并发 | 独立 AbortController，会话间互不污染 |
+| 双主题 | dark / light，通过 `openpx.jsonc` 的 `theme` 字段切换 |
 
 ## 明确不做（当前）
 
@@ -42,14 +49,8 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 
 | 方向 | 状态 | 说明 |
 |------|------|------|
-| MCP 协议支持 | Phase 1 | stdio + streamable HTTP transport，工具集成，对齐 Claude Code MCP |
-| 事件闭环 | Phase 1 | compact_begin/compact_end 事件接入 + compacting UI + retry 事件清理 |
-| 错误分类 | Phase 1 | runner 层区分可恢复/不可恢复错误 |
-| MCP Resources | Phase 2 ✅ | MCP resource 注入 agent 上下文 |
-| Rewind（会话回溯） | Phase 2 ✅ | `/rewind` 命令，利用 checkpoint 链回溯（对齐 Claude Code Rewind） |
-| Skills 系统 | Phase 3 | 严格遵循 agentskills.io 开放标准，按需加载 Markdown 指令文件 |
-| Hooks 系统 | 缓后 | PreToolUse / PostToolUse shell hook |
-| 自定义斜杠命令 | 缓后 | `customCommands` 配置段，`/` 补全集成 |
+| Hooks 系统 | 缓后 | PreToolUse / PostToolUse shell hook，需明确定义 hook 接口和触发时机 |
+| 自定义斜杠命令 | 缓后 | `customCommands` 配置段，`/` 补全集成，可复用 Skills 机制实现 |
 
 > 详见 [`docs/space/plans/2026-05-22-production-gaps-closure.md`](docs/space/plans/2026-05-22-production-gaps-closure.md)
 
@@ -57,8 +58,6 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 
 | 方向 | 理由 |
 |------|------|
-| 多会话并发 | 需 checkpoint 线程安全先行 |
-| 主题定制 | 单一 dark theme 满足当前需求 |
 | IDE 插件 / Web 前端 | 不在当前规划中 |
 
 ## 架构原则
@@ -81,12 +80,12 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 | 持久化 | SQLite checkpoint 链 | SQLite | — |
 | MCP | 已支持 | 已支持 | — |
 | Rewind | 已支持 | 已支持 | — |
-| Skills | Phase 3（规划中） | 已支持 | — |
+| Skills | 已支持 | 已支持 | — |
 | Hooks | 缓后 | 已支持 | — |
 
 ## 关联文档
 
-- [`ROADMAP.md`](ROADMAP.md) — 路线图：当前阶段、时间线
+- [`ROADMAP.md`](ROADMAP.md) — 路线图：当前阶段、已完成项、后续方向
 - [`docs/space/plans/index.md`](docs/space/plans/index.md) — 方案注册表：详细实施方案
 - [`docs/space/`](docs/space/) — 设计决策、规则、完成记录
 - [`docs/space/backlog/`](docs/space/backlog/) — 已知问题清单
