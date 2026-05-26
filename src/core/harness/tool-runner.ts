@@ -160,6 +160,46 @@ export async function runApprovedTool(
     });
   }
 
+  if (request.name === "read_mcp_resource") {
+    if (!mcpManager) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `read_mcp_resource ${request.args.server ?? ""}`,
+        exitCode: -1,
+        stdout: "",
+        stderr: "MCP manager is not available. No MCP servers are configured.",
+      });
+    }
+    const { server, uri } = request.args;
+    if (!server || !uri) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `read_mcp_resource ${server ?? ""}`,
+        exitCode: -1,
+        stdout: "",
+        stderr: "server and uri are required",
+      });
+    }
+    try {
+      const content = await mcpManager.readResource(server, uri);
+      return withFailureGuidance(request, {
+        ok: true,
+        command: `read_mcp_resource ${server}`,
+        exitCode: 0,
+        stdout: content,
+        stderr: "",
+      });
+    } catch (err) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `read_mcp_resource ${server}`,
+        exitCode: -1,
+        stdout: "",
+        stderr: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   if (request.name === "Skill") {
     if (!skillManifests || !skillOptions) {
       return withFailureGuidance(request, {
