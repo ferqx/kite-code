@@ -5,8 +5,14 @@ import { join } from "node:path";
 import { assertInsideWorkspace, shellTool } from "../src/core/tools/shell";
 import { writeFile, editFile, readFile } from "../src/core/tools/file";
 
-/** Convert MSYS2 Unix-style path to Windows-style path */
+/** Convert MSYS2 Unix-style path to Windows-style path via cygpath */
 function msys2ToWindowsPath(p: string): string {
+  try {
+    const { spawnSync } = require("child_process");
+    const r = spawnSync("cygpath", ["-w", p], { encoding: "utf8", timeout: 3000 });
+    if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
+  } catch { /* fall through to regex */ }
+
   return p
     .replace(/^\/cygdrive\/([a-z])\b/i, "$1:\\")
     .replace(/^\/mnt\/([a-z])\b/i, "$1:\\")

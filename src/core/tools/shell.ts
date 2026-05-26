@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ShellInput, ShellResult } from "@/core/types";
-import { findBashBinary } from "./bash-path";
+import { findBashBinary, findSystemBash } from "./bash-path";
 
 /** Shell 执行器函数签名 / Shell executor function signature */
 export type ShellExecutor = (input: ShellInput) => Promise<ShellResult>;
@@ -62,15 +62,19 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
 /** 构建平台特定的 Shell 调用参数 / Build platform-specific shell invocation arguments */
 function buildShellInvocation(command: string): string[] {
   if (process.platform === "win32") {
-    const bashPath = findBashBinary();
-    if (bashPath) {
-      // Prepend vendored /usr/bin to PATH inside bash so that coreutils
-      // (ls, grep, find, etc.) are found regardless of the parent process PATH.
-      // Don't override env in Bun.spawn — that breaks MSYS2 DLL path conversion
-      // and causes commands to fail with exit code 127.
-      return [bashPath, "-c", `export PATH="/usr/bin:$PATH" && ${command}`];
+    // Prefer system bash (Git for Windows) — full MSYS2 env, no DLL issues
+    const systemBash = findSystemBash();
+    if (systemBash) {
+      return [systemBash, "-c", command];
     }
-    // fallback to cmd.exe if vendored bash is missing
+
+    // Fallback to vendored bash with PATH fix for coreutils
+    const vendoredBash = findBashBinary();
+    if (vendoredBash) {
+      return [vendoredBash, "-c", `export PATH="/usr/bin:$PATH" && ${command}`];
+    }
+
+    // Last resort: cmd.exe
     const systemRoot = process.env.SystemRoot || "C:\\Windows";
     return [`${systemRoot}\\System32\\cmd.exe`, "/d", "/c", command];
   }
