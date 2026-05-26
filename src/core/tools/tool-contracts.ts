@@ -32,9 +32,8 @@ export const READ_FILE_CONTRACT: ToolContract = {
     whenToUse:
       "Read a file from the workspace with line numbers. " +
       "Use this to inspect file contents, verify changes, or understand code structure. " +
-      "ALWAYS call read_file BEFORE edit_file so old_string matches exactly. " +
-      "Do NOT use shell commands (cat, head, tail, sed) to read files — use read_file instead. " +
-      "Do NOT use read_file to list directories or search across multiple files — use shell_execute intent=inspect for that.",
+      "Use offset/limit for long files. " +
+      "Do NOT use this to list directories or search across files — use shell_execute intent=inspect for that.",
     commonMistakes:
       "Editing a file without reading it first — edit_file will fail because old_string won't match. " +
       "Assuming file content without verifying — always read first. " +
@@ -57,10 +56,8 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       "Replace specific text in an existing file. Use for targeted, small-to-medium edits. " +
-      "ALWAYS call read_file first to get the exact content for old_string. " +
-      "Do NOT use shell commands (sed -i, awk, echo >, tee) to edit files — use edit_file instead. " +
-      "Do NOT use edit_file for creating new files — use write_file. " +
-      "Do NOT use edit_file to rewrite the entire file — use write_file.",
+      "Do NOT use for creating new files — use write_file. " +
+      "Do NOT use to rewrite the entire file — use write_file.",
     commonMistakes:
       "old_string doesn't match the file exactly — whitespace, indentation, or blank lines differ. " +
       "Calling edit_file without read_file first, so old_string is guesswork. " +
@@ -83,10 +80,8 @@ export const WRITE_FILE_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       "Create a new file or completely overwrite an existing file. " +
-      "Use for creating files that don't exist yet, or replacing entire file content. " +
-      "Do NOT use shell redirection (>, >>, tee) or heredoc to write files — use write_file instead. " +
-      "Do NOT use write_file for small targeted edits — use read_file + edit_file instead. " +
-      "write_file replaces ALL content; any lines not in 'content' will be gone.",
+      "Do NOT use for small targeted edits — use read_file + edit_file instead. " +
+      "Replaces ALL content; omitted lines are lost.",
     commonMistakes:
       "Using write_file for small changes instead of edit_file — wasteful and loses precision. " +
       "Overwriting an existing file without first calling read_file to verify its current content. " +
@@ -109,21 +104,15 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       "Execute a shell command in the workspace. " +
-      "This is the LAST RESORT for terminal operations — prefer dedicated tools whenever available: " +
-      "use read_file to read files, edit_file/write_file to modify files, not shell commands like cat/sed/echo. " +
-      "Use shell_execute for: running test suites (bun test), typecheck/lint (bun run typecheck), " +
-      "installing dependencies (bun install), git operations, and other terminal-only tasks. " +
+      "Prefer read_file/edit_file/write_file for file operations; use shell_execute for tests, typecheck, " +
+      "installs, git operations, and other terminal-only tasks. " +
       "Set intent=inspect for read-only exploration (listing files, searching, git status/diff/log) — these bypass approval. " +
-      "Set intent=verify for tests/typecheck/lint, intent=test for test suites, intent=build for compile/install, intent=git for version control, intent=other for everything else. " +
-      "Write a short human-readable description so the user can understand what the command does at a glance. " +
-      "Include objective, justification, expected_observation, and failure_strategy when the command needs user approval. " +
-      "Mention a grant_request (approve_once | same_command | full_access) if the command requires approval.",
+      "Write a short human-readable description so the user understands what the command does. " +
+      "For commands needing approval, include grant_request (approve_once | same_command | full_access).",
     commonMistakes:
-      "Using shell_execute to read files (cat, head, tail, sed) — use read_file instead. " +
-      "Using shell_execute to edit files (sed -i, echo >, tee, heredoc) — use edit_file or write_file instead. " +
-      "Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R) — denied by default. " +
       "Missing description field — always provide a short human-readable summary. " +
-      "Using intent=inspect for mutating commands — the harness will reject these.",
+      "Using intent=inspect for mutating commands — the harness will reject these. " +
+      "Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R) — denied by default.",
     outputFormat:
       "JSON with fields: ok (boolean), command (executed command), exitCode (0=success), stdout, stderr. " +
       "If rejected by policy, ok: false with reason in stderr. " +
@@ -142,23 +131,18 @@ export const UPDATE_PLAN_CONTRACT: ToolContract = {
   name: "update_plan",
   sections: {
     whenToUse:
-      "Update the current plan state when tracking progress is materially helpful to the user. " +
-      "Use this to communicate what steps you plan to take and to mark steps as completed. " +
-      "Do NOT use update_plan to record file operations, shell_execute calls, or dependency installations — those are actual tool calls, not plan items. " +
-      "Do NOT call update_plan excessively or for every tiny action — only when tracking materially helps. " +
-      "The plan must not edit files, run commands, install dependencies, or mutate the workspace.",
+      "Update the current plan state when tracking progress is materially helpful. " +
+      "Plan steps describe goals, not tool invocations — don't list file edits or shell_execute calls. " +
+      "Don't call update_plan for trivial actions — only when the user benefits from tracking.",
     commonMistakes:
-      "Including file edits, shell commands, or install steps in the plan's steps array — plan steps describe goals, not tool invocations. " +
-      "Using update_plan as a substitute for actually executing tools — it is a state tracker, not an action executor. " +
-      "Creating plans with workspace-mutating descriptions. " +
-      "Overusing update_plan for trivial progress — only call it when the user benefits from seeing the tracking.",
+      "Including tool calls (file edits, shell commands, installs) as plan steps instead of goals. " +
+      "Overusing update_plan for trivial progress.",
     outputFormat:
-      "JSON with ok: true (always) and a plan object containing name, description, status (pending|in_progress|completed), and steps (array of {step, status}). " +
-      "This tool is a no-op state tracker; it always succeeds.",
+      "JSON with ok: true and a plan object: name, description, status (pending|in_progress|completed), steps (array of {step, status}).",
     failureHandling:
-      "This tool is a no-op that always returns success. There is no error state to recover from. " +
-      "If the plan direction needs to change, call update_plan again with updated status or steps. " +
-      "If the plan is complete, call update_plan with status: completed.",
+      "This tool is a no-op; it always succeeds. " +
+      "To change direction, call again with updated status or steps. " +
+      "To finish, call with status: completed.",
   },
   description: "",
 };
@@ -168,17 +152,15 @@ export const ASK_USER_CONTRACT: ToolContract = {
   name: "ask_user",
   sections: {
     whenToUse:
-      "Ask the user one focused clarification question when progress is blocked by meaningful uncertainty that ONLY the user can resolve. " +
-      "Provide concrete, actionable answer options and include context explaining why this question blocks progress. " +
-      "Do NOT use ask_user for trivial confirmations or questions you can answer yourself by inspecting the workspace. " +
-      "Do NOT over-use — each ask_user call interrupts the user, and multiple back-to-back calls frustrate them. " +
-      "In plan mode, use this to clarify requirements and scope before producing a plan. " +
-      "In builder mode, use this sparingly — prefer read_file and shell_execute with intent=inspect over asking the user.",
+      "Ask the user one focused question when progress is blocked by uncertainty only the user can resolve. " +
+      "Provide concrete answer options and context explaining why this blocks progress. " +
+      "Do NOT ask trivial questions — inspect the workspace with read_file/shell_execute first. " +
+      "Do NOT over-use — interrupts frustrate users. " +
+      "In plan mode: use to clarify requirements before producing a plan.",
     commonMistakes:
-      "Asking vague questions that lack concrete options for the user to choose from. " +
-      "Asking too many questions in sequence without making progress on answers already received. " +
-      "Not providing enough context for the user to understand trade-offs between options. " +
-      "Using ask_user for questions the model could answer by reading workspace files or running inspect commands. " +
+      "Asking vague questions without concrete options for the user to choose from. " +
+      "Asking too many questions in sequence without acting on answers already received. " +
+      "Using ask_user for questions the model could answer by reading workspace files. " +
       "Asking a question without providing any options at all.",
     outputFormat:
       "This tool triggers a user_input interrupt handled by the harness. It returns ok: false (the harness intercepts it). " +
@@ -226,21 +208,16 @@ export const SET_AUTHORIZATION_MODE_CONTRACT: ToolContract = {
   name: "set_authorization_mode",
   sections: {
     whenToUse:
-      "Switch between default (require user confirmation for dangerous tools) and full_access " +
-      "(auto-execute all tools without confirmation) authorization modes. " +
-      "Call ONLY when the user explicitly requests a mode change, e.g. 'don't ask me for confirmation' or 'switch to auto mode'. " +
-      "Do NOT call this tool without an explicit user request to change authorization mode. " +
-      "This tool affects how other tools (shell_execute, write_file, edit_file) are authorized — " +
-      "it does not read or write workspace files itself.",
+      "Switch between default (require confirmation) and full_access (auto-execute all) authorization. " +
+      "Call ONLY when the user explicitly requests, e.g. 'switch to auto mode'. " +
+      "Affects how shell_execute, write_file, edit_file are authorized.",
     commonMistakes:
-      "Calling set_authorization_mode without the user explicitly asking for a mode change. " +
-      "Calling it excessively — one call is sufficient to change the mode for the entire thread.",
+      "Calling without the user explicitly asking for a mode change. " +
+      "Calling excessively — one call changes the mode for the entire thread.",
     outputFormat:
-      "JSON with ok: true and the new mode value (default or full_access). " +
-      "This tool always succeeds — if mode is already the requested value, it is a no-op.",
+      "JSON with ok: true and the new mode (default or full_access).",
     failureHandling:
-      "This tool always succeeds. If the mode parameter is invalid, it defaults to 'default'. " +
-      "There is no error state to recover from.",
+      "This tool always succeeds with no error state. Invalid mode defaults to 'default'.",
   },
   description: "",
 };
