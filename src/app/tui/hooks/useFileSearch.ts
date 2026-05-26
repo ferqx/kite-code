@@ -1,30 +1,62 @@
 import { useState, useMemo, useRef } from "react";
-import { readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { readdirSync, statSync, readFileSync, existsSync } from "node:fs";
+import { join, relative, sep, dirname } from "node:path";
 
 interface FileMatch {
   name: string;
   path: string;
 }
 
+function parseGitignore(dir: string): string[] {
+  const gitignorePath = join(dir, ".gitignore");
+  if (!existsSync(gitignorePath)) return [];
+  try {
+    const content = readFileSync(gitignorePath, "utf-8");
+    return content
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#"));
+  } catch {
+    return [];
+  }
+}
+
+function gitignoreToRegex(pattern: string): RegExp {
+  let p = pattern.replace(/\./g, "\\.");
+  p = p.replace(/\*\*/g, "__DS__");
+  p = p.replace(/\*/g, "[^/]*");
+  p = p.replace(/__DS__/g, ".*");
+  if (p.endsWith("/.*")) p = p.slice(0, -3) + "(/.*)?";
+  return new RegExp(`^${p}$`);
+}
+
 function listFiles(dir: string, base: string, maxFiles: number = 500): string[] {
   const files: string[] = [];
   const skip = new Set(["node_modules", ".git", ".openpx", "dist", "build", "__pycache__", ".DS_Store", "coverage"]);
 
-  function walk(current: string) {
+  function walk(current: string, gitignorePatterns: string[]) {
     if (files.length >= maxFiles) return;
     try {
+      const localPatterns = parseGitignore(current);
+      const allPatterns = gitignorePatterns.concat(localPatterns);
+
       const entries = readdirSync(current);
       for (const entry of entries) {
         if (skip.has(entry)) continue;
-        if (entry.startsWith(".")) continue;
+        if (entry.startsWith(".") && entry !== ".gitignore") continue;
         const full = join(current, entry);
+        const rel = relative(base, full).replace(/\\/g, "/");
+
         try {
           const s = statSync(full);
           if (s.isDirectory()) {
-            walk(full);
+            if (!allPatterns.some((p) => gitignoreToRegex(p).test(rel + "/"))) {
+              walk(full, allPatterns);
+            }
           } else if (s.isFile()) {
-            files.push(relative(base, full));
+            if (!allPatterns.some((p) => gitignoreToRegex(p).test(rel))) {
+              files.push(relative(base, full));
+            }
           }
         } catch {
           // permission errors
@@ -35,8 +67,8 @@ function listFiles(dir: string, base: string, maxFiles: number = 500): string[] 
     }
   }
 
-  walk(dir);
-  return files;
+  walk(dir, []);
+  return files.slice(0, maxFiles);
 }
 
 function fuzzyScore(query: string, target: string): number {
