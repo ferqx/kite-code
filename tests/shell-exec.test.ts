@@ -3,23 +3,17 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSandboxExecutor } from "../src/core/sandbox/executor";
-import { findSystemBash } from "../src/core/tools/bash-path";
+import {
+  gatherSystemBashCandidates,
+  isWslStubPath,
+  findSystemBash,
+} from "../src/core/tools/bash-path";
 
 describe("shell execute integration", () => {
-
-  test("findSystemBash excludes WSL stub", () => {
-    const bashPath = findSystemBash();
-    if (bashPath) {
-      // Must NOT be under SystemRoot (C:\Windows) — that's the WSL stub
-      const windir = (process.env.SystemRoot || "C:\\Windows").replace(/\\/g, "/").toLowerCase();
-      expect(bashPath.replace(/\\/g, "/").toLowerCase().startsWith(windir)).toBe(false);
-    }
-  });
   const workspace = join(tmpdir(), "openpx-e2e-shell");
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(workspace, "test.txt"), "hello");
 
-  // 使用与 TUI 完全相同的 createSandboxExecutor 创建 shell 执行器
   const shell = createSandboxExecutor({ enabled: true, workspace });
 
   test("ls returns file list with ok=true", async () => {
@@ -52,5 +46,54 @@ describe("shell execute integration", () => {
     const r = await shell({ workspace, command: "ls /nonexistent_path_xyz 2>&1" });
     expect(r.ok).toBe(false);
     expect(r.stderr.length + r.stdout.length).toBeGreaterThan(0);
+  });
+});
+
+describe("findSystemBash — candidate selection logic", () => {
+  const SYSTEMROOT = "C:\\Windows";
+
+  test("no git, no bash → returns null", () => {
+    const which = (_name: string) => null;
+    const { gitDerived, pathBash } = gatherSystemBashCandidates(which, SYSTEMROOT);
+    expect(gitDerived).toEqual([]);
+    expect(pathBash).toBeNull();
+  });
+
+  test("git found → derives bash candidates from git path", () => {
+    const which = (name: string) => name === "git" ? "C:\\Program Files\\Git\\cmd\\git.exe" : null;
+    const { gitDerived, pathBash } = gatherSystemBashCandidates(which, SYSTEMROOT);
+
+    expect(gitDerived.length).toBe(3);
+    expect(gitDerived[0]).toContain("bash.exe");
+    expect(gitDerived[1]).toContain(join("bin", "bash.exe"));
+    expect(pathBash).toBeNull();
+  });
+
+  test("bash in PATH from non-Windows directory → accepted", () => {
+    const which = (name: string) => name === "bash" ? "D:\\Git\\usr\\bin\\bash.exe" : null;
+    const { gitDerived, pathBash } = gatherSystemBashCandidates(which, SYSTEMROOT);
+
+    expect(isWslStubPath(pathBash!, SYSTEMROOT)).toBe(false);
+  });
+
+  test("WSL stub: bash at System32 → flagged as WSL", () => {
+    expect(isWslStubPath("C:\\Windows\\System32\\bash.exe", "C:\\Windows")).toBe(true);
+    expect(isWslStubPath("C:\\Windows\\SysWOW64\\bash.exe", "C:\\Windows")).toBe(true);
+    // Also test case-insensitive and forward-slashed variants
+    expect(isWslStubPath("c:\\windows\\system32\\bash.exe", "C:\\Windows")).toBe(true);
+  });
+
+  test("non-WSL paths → not flagged", () => {
+    expect(isWslStubPath("D:\\Git\\usr\\bin\\bash.exe", "C:\\Windows")).toBe(false);
+    expect(isWslStubPath("C:\\msys64\\usr\\bin\\bash.exe", "C:\\Windows")).toBe(false);
+    expect(isWslStubPath("/usr/bin/bash", "C:\\Windows")).toBe(false);
+  });
+
+  test("real environment: findSystemBash excludes WSL if git bash available", () => {
+    const bashPath = findSystemBash();
+    if (bashPath) {
+      expect(isWslStubPath(bashPath, process.env.SystemRoot || "C:\\Windows")).toBe(false);
+    }
+    // If null, no bash available — vendored or cmd.exe will be used (valid)
   });
 });

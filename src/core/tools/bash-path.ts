@@ -12,34 +12,52 @@ export function findBashBinary(): string | null {
   return null;
 }
 
-/** 定位系统自带 bash（Git for Windows / MSYS2）/ Locate system bash (Git for Windows / MSYS2) */
-export function findSystemBash(): string | null {
-  // 优先通过 git 定位 Git for Windows 带的 bash（最可靠）
-  // Prefer deriving bash from Git for Windows installation (most reliable)
-  const gitPath = Bun.which("git");
+export interface SystemBashCandidates {
+  /** Paths derived from git installation, if git is found */
+  gitDerived: string[];
+  /** bash found directly in PATH (may include WSL stub) */
+  pathBash: string | null;
+}
+
+/** Gather candidate bash paths from the system (pure logic, testable) */
+export function gatherSystemBashCandidates(
+  which: (name: string) => string | null,
+  systemRoot: string,
+): SystemBashCandidates {
+  const gitDerived: string[] = [];
+  const gitPath = which("git");
   if (gitPath) {
-    // git.exe is at <Git>\cmd\git.exe or <Git>\bin\git.exe or <Git>\mingw64\bin\git.exe
-    // bash.exe is at <Git>\bin\bash.exe or <Git>\usr\bin\bash.exe
     const gitDir = join(gitPath, "..");
-    const candidates = [
-      join(gitDir, "bash.exe"),
-      join(gitDir, "..", "bin", "bash.exe"),
-      join(gitDir, "..", "usr", "bin", "bash.exe"),
-    ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) return candidate;
+    for (const rel of ["bash.exe", join("..", "bin", "bash.exe"), join("..", "usr", "bin", "bash.exe")]) {
+      gitDerived.push(join(gitDir, rel));
     }
   }
+  return { gitDerived, pathBash: which("bash") };
+}
 
-  // Fallback: bash in PATH, skip WSL stub at C:\Windows\System32\bash.exe
-  const bashPath = Bun.which("bash");
-  if (bashPath) {
-    const normalized = bashPath.replace(/\\/g, "/").toLowerCase();
-    const windir = (process.env.SystemRoot || "C:\\Windows").replace(/\\/g, "/").toLowerCase();
-    // Skip WSL stub — it requires Hyper-V and causes HCS_E_HYPERV_NOT_INSTALLED
-    if (!normalized.startsWith(windir + "/")) {
-      return bashPath;
-    }
+/** Check if a path is a WSL stub (under SystemRoot like C:\Windows) */
+export function isWslStubPath(p: string, systemRoot: string): boolean {
+  return p.replace(/\\/g, "/").toLowerCase().startsWith(
+    systemRoot.replace(/\\/g, "/").toLowerCase() + "/",
+  );
+}
+
+/** 定位系统自带 bash（Git for Windows / MSYS2）/ Locate system bash (Git for Windows / MSYS2) */
+export function findSystemBash(): string | null {
+  const systemRoot = process.env.SystemRoot || "C:\\Windows";
+  const { gitDerived, pathBash } = gatherSystemBashCandidates(
+    (name) => Bun.which(name),
+    systemRoot,
+  );
+
+  // 优先通过 git 定位 Git for Windows 带的 bash（最可靠）
+  for (const candidate of gitDerived) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  // Fallback: bash in PATH, skip WSL stub
+  if (pathBash && !isWslStubPath(pathBash, systemRoot)) {
+    return pathBash;
   }
 
   return null;
