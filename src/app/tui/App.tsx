@@ -591,7 +591,7 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
 
   return (
     <Box flexDirection="column">
-      <MemoHeader status={state.status} running={state.running} error={state.sessionError} />
+      <MemoHeader running={state.running} error={state.sessionError} />
       <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
       <StatusBar status={state.status} thinkingVisible={state.thinkingVisible} timerKey={state.runCount} running={state.running} />
       {state.showHelp && <HelpPanel onClose={hideHelp} />}

@@ -1,19 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { StatusState } from "./types";
 import { darkTheme as t } from "./theme";
-
-export function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-interface HeaderProps {
-  status: StatusState;
-  running: boolean;
-  error?: boolean;
-}
 
 type CatMood = "working" | "error" | "idle";
 
@@ -29,52 +16,35 @@ const CAT_LINES: Record<CatMood, [string, string, string]> = {
   idle:    ["  /\\_/\\  ", " ( = = ) ", "  > ~ <  "],
 };
 
-function planLabel(status: StatusState): string {
-  if (!status.plan) return "";
-  const done = status.plan.steps.filter((s) => s.status === "completed").length;
-  const total = status.plan.steps.length;
-  const active = status.plan.steps.find((s) => s.status === "in_progress");
-  return `Step ${done}/${total}${active ? `: ${active.step}` : ""}`;
+interface HeaderProps {
+  running: boolean;
+  error?: boolean;
 }
 
-export default function Header({ status, running, error }: HeaderProps) {
-
+export default function Header({ running, error }: HeaderProps) {
   const mood = catMood(running, !!error);
   const [catTop, catMid, catBot] = CAT_LINES[mood];
-
-  const authLabel = status.authorization === "full_access" ? "full" : "safe";
-  const authColor = status.authorization === "full_access" ? t.warning : t.success;
-  const rwLabel = status.workspaceAccess === "read-only" ? "ro" : "rw";
 
   return (
     <Box flexDirection="column">
       <Box>
         <Text color={t.primary}>{catTop}  </Text>
-        <Text bold color={t.primary}>
-          OpenPX
-        </Text>
+        <Text bold color={t.primary}>OpenPX</Text>
       </Box>
       <Box>
-        <Text color={t.primary}>{catMid}  </Text>
-        <Text color={t.muted}>{status.modelName}</Text>
-        <Text color={t.dim}> · </Text>
-        <Text color={authColor}>[{authLabel}]</Text>
-        <Text color={t.dim}> · </Text>
-        <Text color={t.muted}>{rwLabel}</Text>
-        <Text color={t.dim}> · </Text>
-        <Text color={status.thinkingMode === "max" ? t.success : t.muted}>
-          think:{status.thinkingMode}
-        </Text>
-        {running && status.plan && (
-          <>
-            <Text color={t.dim}> · </Text>
-            <Text color={t.warning}>{planLabel(status)}</Text>
-          </>
-        )}
+        <Text color={t.primary}>{catMid}</Text>
+      </Box>
+      <Box marginBottom={1}>
+        <Text color={t.primary}>{catBot}</Text>
       </Box>
       <Box>
-        <Text color={t.primary}>{catBot}  </Text>
-        <Text color={t.dim}>{process.cwd()}</Text>
+        <Text color={t.dim}>? shortcuts</Text>
+        <Text color={t.dim}> · </Text>
+        <Text color={t.dim}>Ctrl+C exit</Text>
+        <Text color={t.dim}> · </Text>
+        <Text color={t.dim}>/ commands</Text>
+        <Text color={t.dim}> · </Text>
+        <Text color={t.dim}>! shell</Text>
       </Box>
     </Box>
   );

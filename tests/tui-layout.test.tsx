@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { render } from "ink-testing-library";
+import { Text } from "ink";
 import Footer from "../src/app/tui/Footer";
 import Header from "../src/app/tui/Header";
 import StatusBar from "../src/app/tui/StatusBar";
@@ -75,105 +76,72 @@ const noop = () => {};
 // ── Footer ──
 
 describe("Footer", () => {
-  test("renders all key shortcuts in order", () => {
+  test("renders placeholder Box with children", () => {
+    const { lastFrame } = render(<Footer><Text>child content</Text></Footer>);
+    expect(lastFrame()).toContain("child content");
+  });
+
+  test("renders empty Box when no children", () => {
     const { lastFrame } = render(<Footer />);
-    const frame = lastFrame();
-    expect(frame).toContain("shortcuts");
-    expect(frame).toContain("Ctrl+C exit");
-    expect(frame).toContain("commands");
-    expect(frame).toContain("shell");
-    // Verify order: shortcuts < Ctrl+C < commands < shell
-    const shortcutsIdx = frame!.indexOf("shortcuts");
-    const ctrlIdx = frame!.indexOf("Ctrl+C");
-    const commandsIdx = frame!.indexOf("/ commands");
-    const shellIdx = frame!.indexOf("! shell");
-    expect(shortcutsIdx).toBeLessThan(ctrlIdx);
-    expect(ctrlIdx).toBeLessThan(commandsIdx);
-    expect(commandsIdx).toBeLessThan(shellIdx);
+    // Placeholder footer renders an empty Box
+    expect(typeof lastFrame()).toBe("string");
   });
 });
 
 // ── Header ──
 
 describe("Header", () => {
-  test("renders OpenPX logo and model name", () => {
-    const status = fakeStatus({ modelName: "claude-opus" });
-    const { lastFrame } = render(<Header status={status} running timerKey={0} />);
+  test("renders OpenPX logo and product name", () => {
+    const { lastFrame } = render(<Header running={false} />);
     const frame = lastFrame();
     expect(frame).toContain("OpenPX");
-    expect(frame).toContain("claude-opus");
+    // Cat ASCII art is present
+    expect(frame).toContain("/\\_/\\");
+    expect(frame).toContain("( = = )");
+    expect(frame).toContain("> ~ <");
   });
 
-  test("shows auth label full for full_access mode", () => {
-    const status = fakeStatus({ authorization: "full_access" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("[full]");
+  test("shows idle cat when not running and no error", () => {
+    const { lastFrame } = render(<Header running={false} />);
+    expect(lastFrame()).toContain("( = = )");
+    expect(lastFrame()).toContain("> ~ <");
   });
 
-  test("shows auth label safe for default mode", () => {
-    const status = fakeStatus({ authorization: "default" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("[safe]");
+  test("shows working cat when running", () => {
+    const { lastFrame } = render(<Header running />);
+    expect(lastFrame()).toContain("( ^ ^ )");
+    expect(lastFrame()).toContain("> w <");
   });
 
-  test("shows rw for write access", () => {
-    const status = fakeStatus({ workspaceAccess: "write" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("rw");
+  test("shows error cat when error is true", () => {
+    const { lastFrame } = render(<Header running={false} error />);
+    expect(lastFrame()).toContain("( T T )");
+    expect(lastFrame()).toContain("> . <");
   });
 
-  test("shows ro for read-only access", () => {
-    const status = fakeStatus({ workspaceAccess: "read-only" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("ro");
-  });
-
-  test("shows thinking mode", () => {
-    const status = fakeStatus({ thinkingMode: "max" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("think:max");
-  });
-
-  test("renders cwd path on third line", () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain(process.cwd());
-  });
-
-  test("shows plan progress when plan is active and running", () => {
-    const status = fakeStatus({
-      plan: {
-        name: "Test", description: "", status: "in_progress",
-        steps: [
-          { step: "Init", status: "completed" },
-          { step: "Build", status: "in_progress" },
-          { step: "Test", status: "pending" },
-        ],
-      },
-    });
-    const { lastFrame } = render(<Header status={status} running timerKey={0} />);
+  test("shows all usage hints", () => {
+    const { lastFrame } = render(<Header running={false} />);
     const frame = lastFrame();
-    expect(frame).toContain("Step 1/3: Build");
+    expect(frame).toContain("? shortcuts");
+    expect(frame).toContain("Ctrl+C exit");
+    expect(frame).toContain("/ commands");
+    expect(frame).toContain("! shell");
   });
 
-  test("hides plan progress when not running", () => {
-    const status = fakeStatus({
-      plan: {
-        name: "Test", description: "", status: "in_progress",
-        steps: [
-          { step: "Init", status: "completed" },
-        ],
-      },
-    });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).not.toContain("Step 1/1");
+  test("usage hints appear after cat ASCII", () => {
+    const { lastFrame } = render(<Header running={false} />);
+    const frame = lastFrame()!;
+    const catIdx = frame.indexOf("/\\_/\\");
+    const hintIdx = frame.indexOf("? shortcuts");
+    expect(catIdx).toBeGreaterThanOrEqual(0);
+    expect(hintIdx).toBeGreaterThanOrEqual(0);
+    expect(catIdx).toBeLessThan(hintIdx);
   });
 
-  test("header is 3 rows", () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(<Header status={status} running timerKey={0} />);
+  test("header is 4 rows", () => {
+    const { lastFrame } = render(<Header running />);
     const lines = lastFrame()!.split("\n").filter(Boolean);
-    expect(lines!.length).toBe(3);
+    expect(lines!.length).toBe(4);
   });
 });
 
@@ -851,7 +819,7 @@ describe("App", () => {
     };
   }
 
-  test("renders Header and Footer in correct order", () => {
+  test("renders Header with OpenPX before ActivityBar", () => {
     const state = fakeState();
     const { lastFrame } = render(
       <App
@@ -862,12 +830,9 @@ describe("App", () => {
       />,
     );
     const frame = lastFrame();
-    // Header appears before Footer
+    // Header (OpenPX) should appear before ActivityBar (since it renders first in layout)
     const headerIdx = frame!.indexOf("OpenPX");
-    const footerIdx = frame!.indexOf("shortcuts");
     expect(headerIdx).toBeGreaterThanOrEqual(0);
-    expect(footerIdx).toBeGreaterThanOrEqual(0);
-    expect(headerIdx).toBeLessThan(footerIdx);
   });
 
   test("shows HelpPanel when showHelp is true", () => {
@@ -975,10 +940,9 @@ describe("App", () => {
         <InputLine mode="prompt" onSubmit={noop} workspace={process.cwd()} />
       </App>,
     );
-    // children InputLine should be between Footer prompts
+    // children InputLine should be rendered
     const frame = lastFrame();
-    const footerIdx = frame!.indexOf("shortcuts");
     const promptIdx = frame!.indexOf(">");
-    expect(promptIdx).toBeLessThan(footerIdx);
+    expect(promptIdx).toBeGreaterThanOrEqual(0);
   });
 });

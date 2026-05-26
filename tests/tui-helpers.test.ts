@@ -3,7 +3,7 @@ import { darkTheme } from "../src/app/tui/theme";
 import type { Theme } from "../src/app/tui/theme";
 import { parseInline, type InlineSegment } from "../src/app/tui/components/MarkdownBlock";
 import { changePrefix, toolColor } from "../src/app/tui/OutputArea";
-import { formatDuration } from "../src/app/tui/Header";
+import { formatDuration } from "../src/app/tui/StatusBar";
 
 describe("darkTheme", () => {
   test("has all required color keys", () => {

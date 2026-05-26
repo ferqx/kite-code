@@ -16,14 +16,14 @@ function fakeStatus() {
 describe("Header", () => {
   test("shows working cat face when running", () => {
     const { lastFrame } = render(
-      React.createElement(Header, { status: fakeStatus(), running: true })
+      React.createElement(Header, { running: true })
     );
     expect(lastFrame()).toContain("( ^ ^ )");
   });
 
   test("shows idle cat face when not running", () => {
     const { lastFrame } = render(
-      React.createElement(Header, { status: fakeStatus(), running: false })
+      React.createElement(Header, { running: false })
     );
     expect(lastFrame()).toContain("( = = )");
   });
