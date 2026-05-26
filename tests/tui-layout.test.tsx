@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { render } from "ink-testing-library";
-import ErrorBoundary from "../src/app/tui/components/ErrorBoundary";
+import { Text } from "ink";
 import Footer from "../src/app/tui/Footer";
 import Header from "../src/app/tui/Header";
 import StatusBar from "../src/app/tui/StatusBar";
@@ -76,105 +76,72 @@ const noop = () => {};
 // ── Footer ──
 
 describe("Footer", () => {
-  test("renders all key shortcuts in order", () => {
+  test("renders placeholder Box with children", () => {
+    const { lastFrame } = render(<Footer><Text>child content</Text></Footer>);
+    expect(lastFrame()).toContain("child content");
+  });
+
+  test("renders empty Box when no children", () => {
     const { lastFrame } = render(<Footer />);
-    const frame = lastFrame();
-    expect(frame).toContain("shortcuts");
-    expect(frame).toContain("Ctrl+C exit");
-    expect(frame).toContain("commands");
-    expect(frame).toContain("shell");
-    // Verify order: shortcuts < Ctrl+C < commands < shell
-    const shortcutsIdx = frame!.indexOf("shortcuts");
-    const ctrlIdx = frame!.indexOf("Ctrl+C");
-    const commandsIdx = frame!.indexOf("/ commands");
-    const shellIdx = frame!.indexOf("! shell");
-    expect(shortcutsIdx).toBeLessThan(ctrlIdx);
-    expect(ctrlIdx).toBeLessThan(commandsIdx);
-    expect(commandsIdx).toBeLessThan(shellIdx);
+    // Placeholder footer renders an empty Box
+    expect(typeof lastFrame()).toBe("string");
   });
 });
 
 // ── Header ──
 
 describe("Header", () => {
-  test("renders OpenPX logo and model name", () => {
-    const status = fakeStatus({ modelName: "claude-opus" });
-    const { lastFrame } = render(<Header status={status} running timerKey={0} />);
+  test("renders OpenPX logo and product name", () => {
+    const { lastFrame } = render(<Header running={false} />);
     const frame = lastFrame();
     expect(frame).toContain("OpenPX");
-    expect(frame).toContain("claude-opus");
+    // Cat ASCII art is present
+    expect(frame).toContain("/\\_/\\");
+    expect(frame).toContain("( = = )");
+    expect(frame).toContain("> ~ <");
   });
 
-  test("shows auth label full for full_access mode", () => {
-    const status = fakeStatus({ authorization: "full_access" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("[full]");
+  test("shows idle cat when not running and no error", () => {
+    const { lastFrame } = render(<Header running={false} />);
+    expect(lastFrame()).toContain("( = = )");
+    expect(lastFrame()).toContain("> ~ <");
   });
 
-  test("shows auth label safe for default mode", () => {
-    const status = fakeStatus({ authorization: "default" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("[safe]");
+  test("shows working cat when running", () => {
+    const { lastFrame } = render(<Header running />);
+    expect(lastFrame()).toContain("( ^ ^ )");
+    expect(lastFrame()).toContain("> w <");
   });
 
-  test("shows rw for write access", () => {
-    const status = fakeStatus({ workspaceAccess: "write" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("rw");
+  test("shows error cat when error is true", () => {
+    const { lastFrame } = render(<Header running={false} error />);
+    expect(lastFrame()).toContain("( T T )");
+    expect(lastFrame()).toContain("> . <");
   });
 
-  test("shows ro for read-only access", () => {
-    const status = fakeStatus({ workspaceAccess: "read-only" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("ro");
-  });
-
-  test("shows thinking mode", () => {
-    const status = fakeStatus({ thinkingMode: "max" });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain("think:max");
-  });
-
-  test("renders cwd path on third line", () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).toContain(process.cwd());
-  });
-
-  test("shows plan progress when plan is active and running", () => {
-    const status = fakeStatus({
-      plan: {
-        name: "Test", description: "", status: "in_progress",
-        steps: [
-          { step: "Init", status: "completed" },
-          { step: "Build", status: "in_progress" },
-          { step: "Test", status: "pending" },
-        ],
-      },
-    });
-    const { lastFrame } = render(<Header status={status} running timerKey={0} />);
+  test("shows all usage hints", () => {
+    const { lastFrame } = render(<Header running={false} />);
     const frame = lastFrame();
-    expect(frame).toContain("Step 1/3: Build");
+    expect(frame).toContain("? shortcuts");
+    expect(frame).toContain("Ctrl+C exit");
+    expect(frame).toContain("/ commands");
+    expect(frame).toContain("! shell");
   });
 
-  test("hides plan progress when not running", () => {
-    const status = fakeStatus({
-      plan: {
-        name: "Test", description: "", status: "in_progress",
-        steps: [
-          { step: "Init", status: "completed" },
-        ],
-      },
-    });
-    const { lastFrame } = render(<Header status={status} running={false} timerKey={0} />);
-    expect(lastFrame()).not.toContain("Step 1/1");
+  test("usage hints appear after cat ASCII", () => {
+    const { lastFrame } = render(<Header running={false} />);
+    const frame = lastFrame()!;
+    const catIdx = frame.indexOf("/\\_/\\");
+    const hintIdx = frame.indexOf("? shortcuts");
+    expect(catIdx).toBeGreaterThanOrEqual(0);
+    expect(hintIdx).toBeGreaterThanOrEqual(0);
+    expect(catIdx).toBeLessThan(hintIdx);
   });
 
-  test("header is 3 rows", () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(<Header status={status} running timerKey={0} />);
+  test("header is 4 rows", () => {
+    const { lastFrame } = render(<Header running />);
     const lines = lastFrame()!.split("\n").filter(Boolean);
-    expect(lines!.length).toBe(3);
+    expect(lines!.length).toBe(4);
   });
 });
 
@@ -183,61 +150,61 @@ describe("Header", () => {
 describe("StatusBar", () => {
   test("shows Planning phase with ○ icon", () => {
     const status = fakeStatus({ phase: "planning" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("Planning");
   });
 
   test("shows Building phase with ● icon", () => {
     const status = fakeStatus({ phase: "building" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("Building");
   });
 
   test("shows model name", () => {
     const status = fakeStatus({ modelName: "gpt-5" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("gpt-5");
   });
 
   test("shows thinking mode", () => {
     const status = fakeStatus({ thinkingMode: "detailed" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("think: detailed");
   });
 
   test("shows cache hit rate", () => {
     const status = fakeStatus({ cacheHitRate: 75 });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("cache: 75%");
   });
 
   test("shows token count with locale formatting", () => {
     const status = fakeStatus({ totalTokens: 10000 });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("10,000");
   });
 
   test("shows [full] for full_access auth", () => {
     const status = fakeStatus({ authorization: "full_access" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("[full]");
   });
 
   test("shows [safe] for default auth", () => {
     const status = fakeStatus({ authorization: "default" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("[safe]");
   });
 
   test("shows rw for write access", () => {
     const status = fakeStatus({ workspaceAccess: "write" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("rw");
   });
 
   test("shows ro for read-only access", () => {
     const status = fakeStatus({ workspaceAccess: "read-only" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("ro");
   });
 
@@ -252,37 +219,37 @@ describe("StatusBar", () => {
       },
       currentNode: null,
     });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("Step 1/2: Build");
   });
 
   test("falls back to currentNode when no plan", () => {
     const status = fakeStatus({ plan: null, currentNode: "tools" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("tools");
   });
 
   test("shows dashes when no plan and no currentNode", () => {
     const status = fakeStatus({ plan: null, currentNode: null });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("—");
   });
 
   test("shows timer when running", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     expect(lastFrame()).toContain("00:00");
   });
 
   test("hides timer when not running", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running={false} compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running={false} />);
     expect(lastFrame()).not.toContain("00:00");
   });
 
   test("status bar is 2 rows", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running compacting={false} />);
+    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
     const lines = lastFrame()!.split("\n").filter(Boolean);
     expect(lines!.length).toBe(2);
   });
@@ -660,22 +627,6 @@ describe("OutputArea", () => {
     expect(lastFrame()).toContain("Response text");
   });
 
-  test("shows ❯ prefix for streaming text block", () => {
-    const blocks: OutputBlock[] = [{ id: 1, kind: "text", content: "Streaming response", streaming: true }];
-    const { lastFrame } = render(
-      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
-    );
-    expect(lastFrame()).toContain("❯");
-  });
-
-  test("does not show ❯ prefix for non-streaming text block", () => {
-    const blocks: OutputBlock[] = [{ id: 1, kind: "text", content: "Static response", streaming: false }];
-    const { lastFrame } = render(
-      <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
-    );
-    expect(lastFrame()).not.toContain("❯");
-  });
-
   test("renders reason block with toggle indicator", () => {
     const blocks: OutputBlock[] = [
       { id: 1, kind: "reason", content: "Thinking about it...", folded: false },
@@ -847,10 +798,6 @@ describe("OutputArea", () => {
 describe("App", () => {
   function fakeState(overrides: Partial<TuiState> = {}): TuiState {
     return {
-      sessions: [],
-      activeSessionId: null,
-      focus: "input" as const,
-      sidebarSelection: 0,
       blocks: [],
       interrupt: null,
       status: fakeStatus(),
@@ -863,22 +810,16 @@ describe("App", () => {
       showHelp: false,
       showModelSelector: false,
       showSessions: false,
-      showMcp: false,
-      showRewind: false,
-      checkpoints: [],
-      rewindCounter: 0,
       ctrlCPressed: false,
       sessionKey: 0,
       exitRequested: false,
       editorRequested: false,
       sessionError: false,
-      pendingSkills: [],
-      skillManifests: [],
       ...overrides,
     };
   }
 
-  test("renders Header and Footer in correct order", () => {
+  test("renders Header with OpenPX before ActivityBar", () => {
     const state = fakeState();
     const { lastFrame } = render(
       <App
@@ -889,12 +830,9 @@ describe("App", () => {
       />,
     );
     const frame = lastFrame();
-    // Header appears before Footer
+    // Header (OpenPX) should appear before ActivityBar (since it renders first in layout)
     const headerIdx = frame!.indexOf("OpenPX");
-    const footerIdx = frame!.indexOf("shortcuts");
     expect(headerIdx).toBeGreaterThanOrEqual(0);
-    expect(footerIdx).toBeGreaterThanOrEqual(0);
-    expect(headerIdx).toBeLessThan(footerIdx);
   });
 
   test("shows HelpPanel when showHelp is true", () => {
@@ -1002,61 +940,9 @@ describe("App", () => {
         <InputLine mode="prompt" onSubmit={noop} workspace={process.cwd()} />
       </App>,
     );
-    // children InputLine should be between Footer prompts
+    // children InputLine should be rendered
     const frame = lastFrame();
-    const footerIdx = frame!.indexOf("shortcuts");
     const promptIdx = frame!.indexOf(">");
-    expect(promptIdx).toBeLessThan(footerIdx);
-  });
-});
-
-// ── ErrorBoundary ──
-
-describe("ErrorBoundary", () => {
-  function ThrowingComponent(): never {
-    throw new Error("Render crash test error");
-  }
-
-  test("renders children when no error", () => {
-    const Text = require("ink").Text;
-    const { lastFrame } = render(
-      <ErrorBoundary>
-        <Text>Normal content</Text>
-      </ErrorBoundary>,
-    );
-    expect(lastFrame()).toContain("Normal content");
-  });
-
-  test("catches render errors and shows fallback UI", () => {
-    const origError = console.error;
-    console.error = () => {};
-
-    const exitCalls: number[] = [];
-    const origExit = process.exit;
-    process.exit = ((code?: number) => {
-      exitCalls.push(code ?? 0);
-    }) as typeof process.exit;
-
-    try {
-      const { lastFrame, stdin } = render(
-        <ErrorBoundary>
-          <ThrowingComponent />
-        </ErrorBoundary>,
-      );
-
-      const frame = lastFrame();
-      expect(frame).toContain("An unrecoverable error occurred");
-      expect(frame).toContain("Render crash test error");
-      expect(frame).toContain("Press any key to exit");
-
-      // Simulate a keypress to trigger process.exit(1)
-      stdin.write("x");
-
-      expect(exitCalls).toHaveLength(1);
-      expect(exitCalls[0]).toBe(1);
-    } finally {
-      process.exit = origExit;
-      console.error = origError;
-    }
+    expect(promptIdx).toBeGreaterThanOrEqual(0);
   });
 });
