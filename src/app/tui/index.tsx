@@ -55,7 +55,11 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const conversationHistoryRef = React.useRef<string[]>([]);
   // Lazy init — only create thread when user sends first message
   const threadIdRef = React.useRef<string>("");
-  const pendingSessionRef = React.useRef<string | null>(null);
+  // Generation counter for session loads: a new LOAD_SESSION_PENDING increments this.
+  // Each async handler captures its generation; if a newer load started, the old one
+  // discards its result, preventing the first-to-resolve Promise from overwriting the
+  // later-initiated load's state.
+  const loadGenerationRef = React.useRef(0);
   const editorContentRef = React.useRef<EditorContentHandle | null>(null);
   const thinkingLevelRef = React.useRef<string | null>(null);
   const prevSessionKeyRef = React.useRef(state.sessionKey);
@@ -251,6 +255,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     async (action: any) => {
       // Intercept NEW_SESSION to create runtime via SessionManager
       if (action.type === "NEW_SESSION") {
+        // Supersede any in-flight LOAD_SESSION_PENDING
+        loadGenerationRef.current++;
         const newId = sessionManager.createSession(workspace);
         threadIdRef.current = newId;
         // The reducer will use this threadId to create the snapshot
@@ -261,7 +267,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       // ── existing intercepts for LOAD_SESSION_PENDING, REVERT, FORK ──
       if (action.type === "LOAD_SESSION_PENDING") {
         const threadId = action.threadId;
-        pendingSessionRef.current = threadId;
+        // Increment generation: supersedes any in-flight loads
+        const gen = ++loadGenerationRef.current;
 
         // Ensure SessionManager switches to this session (handles dormant & SessionSelector loads)
         const oldId = sessionManager.getActiveId();
@@ -281,12 +288,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
         try {
           const result = await loadSession(defaultCheckpointPath(), threadId);
-          if (pendingSessionRef.current !== threadId) {
-            pendingSessionRef.current = null;
-            return;
-          }
+          // If a newer LOAD_SESSION_PENDING was issued while this was loading, discard
+          if (loadGenerationRef.current !== gen) return;
           if (!result) {
-            pendingSessionRef.current = null;
             dispatch({
               type: "LOAD_SESSION",
               blocks: [{ id: 1, kind: "text", content: `Session ${threadId} has no saved checkpoints.` }],
@@ -311,6 +315,14 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
             thinkingLevel,
           });
         } catch (e: any) {
+          if (loadGenerationRef.current !== gen) return;
+          // Roll back SessionManager: if we switched to a different session and the
+          // load failed, revert the switch and remove the orphaned runtime.
+          if (oldId !== threadId) {
+            sessionManager.switchSession(threadId, oldId);
+            threadIdRef.current = oldId;
+            sessionManager.removeRuntime(threadId);
+          }
           dispatch({
             type: "LOAD_SESSION",
             blocks: [{ id: 1, kind: "text", content: `Failed to load session: ${e?.message ?? e}` }],
@@ -320,7 +332,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
             thinkingLevel: null,
           });
         }
-        pendingSessionRef.current = null;
         return;
       }
       // Intercept REVERT/FORK to store pending action before reducer closes panel
@@ -437,8 +448,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       dispatch({ type: "SET_RUNNING" });
       dispatch({ type: "DEACTIVATE_SKILL" }); // clear after capture into runtime
 
-      // Update running state — agentLoopActive is managed by SessionRuntime.runTask
-      agentLoopActiveRef.current = true;
+      // Update running state — agentLoopActive is managed by SessionRuntime.runTask internally
       sessionManager.onStatusChange(threadId);
       dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
 
@@ -450,11 +460,14 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           model: injectModel,
         });
       } finally {
-        agentLoopActiveRef.current = false;
-        abortControllerRef.current = null;
+        // Only dispatch global state changes if this session is still active.
+        // A background session that finished must not corrupt the foreground's running/interrupt state.
+        const stillActive = threadIdRef.current === threadId;
         sessionManager.onStatusChange(threadId);
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-        dispatch({ type: "SET_IDLE" });
+        if (stillActive) {
+          dispatch({ type: "SET_IDLE" });
+        }
 
         // Fire-and-forget: generate smart session name once after first message
         (async () => {
@@ -574,13 +587,14 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           const result = execSync(command, { cwd, timeout: 30000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
           const output = result.trim() || "(no output)";
           dispatch({ type: "EVENT", event: { type: "text", data: { text: `\`\`\`\n${output}\n\`\`\`` } } });
-          // 写入当前会话 runtime，避免切换时丢失
+          // 写入当前会话 runtime 和 ref，两者必须同步，否则下一次 runTask 会
+          // 用 ref 中的旧值覆盖 runtime 的历史
+          const entry = `User (shell): ${command}\nResult:\n${output}`;
           const rt = sessionManager.getRuntime(threadIdRef.current);
           if (rt) {
-            rt.conversationHistory.push(`User (shell): ${command}\nResult:\n${output}`);
-          } else {
-            conversationHistoryRef.current.push(`User (shell): ${command}\nResult:\n${output}`);
+            rt.conversationHistory.push(entry);
           }
+          conversationHistoryRef.current.push(entry);
         } catch (err: any) {
           const errorMsg = err.stderr?.trim() || err.message || "command failed";
           dispatch({ type: "EVENT", event: { type: "text", data: { text: `✗ \`${command}\`\n\`\`\`\n${errorMsg}\n\`\`\`` } } });

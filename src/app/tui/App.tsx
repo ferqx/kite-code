@@ -510,6 +510,8 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         blocks: action.blocks,
         interrupt: action.interrupt,
         showSessions: false,    // Close the session selector
+        showRewind: false,      // Close stale rewind panel
+        checkpoints: [],        // Clear stale checkpoint data
         exited: false,          // Reset exit state
         running: false,         // Not running
         compacting: false,      // Not compacting
@@ -579,6 +581,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
+        loadingSession: false,
         showHelp: false,
         showModelSelector: false,
         showSessions: false,
@@ -609,6 +612,8 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         },
         running: target?.running ?? false,
         currentRunReasonId: undefined,
+        showRewind: false,
+        checkpoints: [],
         interrupt: null,
       };
     }

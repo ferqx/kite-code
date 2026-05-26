@@ -72,6 +72,9 @@ export class SessionRuntime {
   // ── 公开 API ──
 
   abort(): void {
+    // 必须先 resolve 挂起的中断，否则 generator 永远卡在 requestAction 的 Promise 上，
+    // runAgent 的 finally 块无法执行，checkpointer.close() 永远不会被调用，导致 DB 句柄泄漏
+    this.resolveInterrupt({ type: "cancel" as const });
     this.abortController?.abort();
     this.abortController = null;
     this.agentLoopActive = false;
@@ -110,7 +113,6 @@ export class SessionRuntime {
     },
   ): Promise<void> {
     if (this.agentLoopActive) return;
-    this.agentLoopActive = true;
 
     // 构建待注入的 skills 内容
     let pendingSkillsContent = "";
@@ -125,7 +127,6 @@ export class SessionRuntime {
     const shellExecutor = createSandboxExecutor({ enabled: true, workspace: this.workspace });
 
     const abortController = new AbortController();
-    this.abortController = abortController;
 
     const runAgentParams = buildRunAgentParams({
       task,
@@ -147,11 +148,14 @@ export class SessionRuntime {
 
     // 始终使用代理提供器 — 事件路由由 _foreground 控制
     const generator = runAgent(this._proxyProvider as any, runAgentParams);
-    this.generator = generator;
 
+    // 所有状态变更必须在 try 块内，防止 buildRunAgentParams/runAgent 抛出时
+    // agentLoopActive 和 abortController 泄漏导致会话永久冻结
     let aborted = false;
-
     try {
+      this.agentLoopActive = true;
+      this.abortController = abortController;
+      this.generator = generator;
       for await (const _ of generator) {
         if (abortController.signal.aborted) {
           aborted = true;
@@ -324,6 +328,8 @@ export class SessionManager {
     // 离开的会话切到后台模式
     const fromRt = this.runtimes.get(fromId);
     if (fromRt) {
+      // 取消旧会话的挂起中断，防止 generator 卡在 requestAction 的 Promise 上
+      fromRt.resolveInterrupt({ type: "cancel" as const });
       fromRt.setForeground(false);
       fromRt.pendingInterrupt = false;
     }
