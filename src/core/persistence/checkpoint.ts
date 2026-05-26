@@ -82,7 +82,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
 
   /** 创建 checkpoint 和 writes 表，开启 WAL 模式 / Create checkpoint and writes tables, enable WAL mode */
   setup(): void {
-    if (this.isClosed) return;
+    if (this.isClosed) throw new Error("Database is closed");
     // 已初始化则跳过 / Skip if already set up
     if (this.isSetup) {
       return;
@@ -120,8 +120,6 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     // 新增 created_at 列用于排序 sessions / Add created_at column for session sorting
     // 如果列已存在则忽略错误 / Ignore error if column already exists
     try {
-      // default 必须为常量（SQLite ALTER TABLE 不允许函数调用），存量行 created_at 保持 NULL
-      // DEFAULT must be constant — existing rows keep NULL
       this.db.exec(
         "ALTER TABLE checkpoints ADD COLUMN created_at TEXT",
       );
@@ -132,6 +130,12 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
         throw e;
       }
     }
+
+    // 存量行回填 created_at：迁移前的行该列为 NULL，必须填充否则 listSessions 会排除它们
+    // Backfill created_at: pre-migration rows have NULL, which would be excluded from listSessions
+    this.db.run(
+      "UPDATE checkpoints SET created_at = datetime('now') WHERE created_at IS NULL",
+    );
 
     this.isSetup = true;
   }
@@ -356,16 +360,6 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
       throw new Error("Checkpoint and metadata serialized to different types");
     }
 
-    if (this.isClosed) {
-      return {
-        configurable: {
-          thread_id: threadId,
-          checkpoint_ns: checkpointNs,
-          checkpoint_id: checkpoint.id,
-        },
-      };
-    }
-
     this.db
       .query(
         `insert or replace into checkpoints
@@ -398,6 +392,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     taskId: string,
   ): Promise<void> {
     this.setup();
+
     const threadId = config.configurable?.thread_id;
     const checkpointId = config.configurable?.checkpoint_id;
     if (!threadId || !checkpointId) {
@@ -426,7 +421,6 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
         ] as const;
       }),
     );
-    if (this.isClosed) return;
     this.db.transaction(() => {
       for (const row of rows) {
         insert.run(...row);

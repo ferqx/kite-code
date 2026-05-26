@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, it, beforeEach, afterEach, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -260,5 +261,114 @@ describe("getCheckpointState", () => {
     expect(state).not.toBeNull();
     // authorization should be undefined (old checkpoints may not have it)
     expect(state!.authorization).toBeUndefined();
+  });
+});
+
+describe("close safety", () => {
+  let saver: BunSqliteSaver;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "openpx-test-"));
+    saver = new BunSqliteSaver(join(tmpDir, "checkpoints.db"));
+    saver.setup();
+  });
+
+  afterEach(() => {
+    try { saver.close(); } catch { /* already closed */ }
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const dummyCheckpoint: Checkpoint = {
+    v: 4,
+    id: "cp-1",
+    ts: new Date().toISOString(),
+    channel_values: {},
+    channel_versions: {},
+    versions_seen: {},
+  };
+
+  it("put throws after close", async () => {
+    saver.close();
+    await expect(
+      saver.put(
+        { configurable: { thread_id: "t" } },
+        dummyCheckpoint,
+        { source: "loop", step: 0, parents: {} },
+      ),
+    ).rejects.toThrow("Database is closed");
+  });
+
+  it("putWrites throws after close", async () => {
+    saver.close();
+    await expect(
+      saver.putWrites(
+        { configurable: { thread_id: "t", checkpoint_id: "cp-1" } },
+        [["channel1", "value1"]],
+        "task-1",
+      ),
+    ).rejects.toThrow("Database is closed");
+  });
+});
+
+describe("created_at migration", () => {
+  let tmpDir: string;
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("backfills NULL created_at for legacy rows so listSessions does not exclude them", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "openpx-test-"));
+    const dbPath = join(tmpDir, "checkpoints.db");
+
+    // Simulate a legacy database: create table without created_at, insert a row, then add column
+    const db = new Database(dbPath);
+    db.run("pragma journal_mode = wal");
+    db.run(`create table if not exists checkpoints (
+      thread_id text not null,
+      checkpoint_ns text not null default '',
+      checkpoint_id text not null,
+      parent_checkpoint_id text,
+      type text,
+      checkpoint text,
+      metadata text,
+      primary key (thread_id, checkpoint_ns, checkpoint_id)
+    )`);
+    db.run(`create table if not exists writes (
+      thread_id text not null,
+      checkpoint_ns text not null default '',
+      checkpoint_id text not null,
+      task_id text not null,
+      idx integer not null,
+      channel text not null,
+      type text,
+      value text,
+      primary key (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+    )`);
+    // Insert a checkpoint row (created_at column doesn't exist yet)
+    db.run(
+      `insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, type, checkpoint, metadata)
+       values (?, '', ?, 'json', '{}', '{}')`,
+      ["legacy-thread", "cp-legacy"],
+    );
+    db.close();
+
+    // Now open with BunSqliteSaver — setup() should add column AND backfill
+    const saver = new BunSqliteSaver(dbPath);
+    saver.setup();
+
+    const db2 = (saver as any).db as Database;
+    const row = db2
+      .query<{ created_at: string | null }, []>(
+        "SELECT created_at FROM checkpoints WHERE thread_id = 'legacy-thread'",
+      )
+      .get();
+    expect(row).not.toBeNull();
+    expect(row!.created_at).not.toBeNull();
+    // Verify it's a valid datetime string
+    expect(new Date(row!.created_at!.replace(" ", "T") + "Z").getTime()).not.toBeNaN();
+
+    saver.close();
   });
 });
