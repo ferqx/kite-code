@@ -135,11 +135,17 @@ function CtrlSafeTextInput({
 
   useInput(
     (input, key) => {
+      // Only block the 3 global Ctrl shortcuts (C/T/E); all other Ctrl+let
+      // no-op (don't insert the char, don't execute anything — safe default)
       if (
-        (key.ctrl && /^[a-zA-Z]$/.test(input)) ||
+        (key.ctrl && /^[cCtTeE]$/.test(input)) ||
         key.tab ||
         (key.shift && key.tab)
       ) {
+        return;
+      }
+      if (key.ctrl) {
+        // Any other Ctrl+key combo: no-op (don't insert character)
         return;
       }
 

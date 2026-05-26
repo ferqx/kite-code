@@ -34,7 +34,6 @@ export interface TuiState {
   runStartTime?: number;
   thinkingVisible: boolean;
   currentRunReasonId?: number;
-  leaderPending: boolean;
   showHelp: boolean;
   showModelSelector: boolean;
   showSessions: boolean;

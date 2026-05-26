@@ -16,7 +16,7 @@ import SessionSelector from "./components/SessionSelector.js";
 
 import Header from "./Header";
 import Footer from "./Footer";
-import { useGlobalKeys, useLeaderKeys } from "./hooks/useGlobalKeys";
+import { useGlobalKeys } from "./hooks/useGlobalKeys";
 
 const MemoHeader = React.memo(Header);
 
@@ -33,15 +33,12 @@ export type Action =
   | { type: "SHOW_HELP" }
   | { type: "HIDE_HELP" }
   | { type: "SET_PHASE"; phase: "planning" | "building" }
-  | { type: "LEADER_PENDING" }
-  | { type: "LEADER_CANCEL" }
   | { type: "ESCAPE" }
   | { type: "CTRL_C" }
   | { type: "SWITCH_AUTH"; mode: string }
   | { type: "COMPACT_CONTEXT" }
   | { type: "EXPORT_SESSION" }
-  | { type: "OPEN_EDITOR" }
-  | { type: "EDITOR_DONE" }
+  | { type: "EXPAND_INPUT" }
   | { type: "SHOW_MODEL_SELECTOR" }
   | { type: "HIDE_MODEL_SELECTOR" }
   | { type: "LIST_MODELS" }
@@ -408,17 +405,14 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     }
     case "SET_PHASE":
       return { ...state, status: { ...state.status, phase: action.phase } };
-    case "LEADER_PENDING":
-      return { ...state, leaderPending: true };
-    case "LEADER_CANCEL":
-      return { ...state, leaderPending: false };
+    case "EXPAND_INPUT":
+      return { ...state, editorRequested: true };
     case "ESCAPE":
       if (state.showHelp) return { ...state, showHelp: false };
       if (state.showSessions) return { ...state, showSessions: false };
       if (state.showModelSelector) return { ...state, showModelSelector: false };
       if (state.showMcp) return { ...state, showMcp: false };
       if (state.showRewind) return { ...state, showRewind: false, checkpoints: [] };
-      if (state.leaderPending) return { ...state, leaderPending: false };
       if (state.running) {
         let next = { ...state, running: false, ctrlCPressed: true };
         if (state.interrupt) {
@@ -476,11 +470,6 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       const block: OutputBlock = { id: nextId++, kind: "text", content: `✓ Session exported to ${filename}` };
       return { ...state, blocks: [...state.blocks, block] };
     }
-    case "OPEN_EDITOR": {
-      return { ...state, editorRequested: true };
-    }
-    case "EDITOR_DONE":
-      return { ...state, editorRequested: false };
     case "SHOW_MODEL_SELECTOR":
       return { ...state, showModelSelector: true };
     case "HIDE_MODEL_SELECTOR":
@@ -579,7 +568,6 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         showModelSelector: false,
         showSessions: false,
         showMcp: false,
-        leaderPending: false,
         rewindCounter: 0,
         currentRunReasonId: undefined,
         sessionKey: state.sessionKey + 1,
@@ -662,7 +650,6 @@ const initialState: TuiState = {
   runCount: 0,
   thinkingVisible: true,
   currentRunReasonId: undefined,
-  leaderPending: false,
   showHelp: false,
   showModelSelector: false,
   showSessions: false,
@@ -700,9 +687,7 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
 }
 
 export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, children }: AppProps) {
-  const overlayActive = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind;
-  useGlobalKeys(dispatch, state.running, overlayActive);
-  useLeaderKeys(dispatch, state.leaderPending, onCompactRequest);
+  useGlobalKeys(dispatch);
 
   const elapsedRef = useRef(0);
 
