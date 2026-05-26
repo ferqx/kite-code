@@ -56,6 +56,60 @@ export function buildModelMessages(role: AgentRole, state: ModelContextState, sk
   return prepareModelContext(role, state, skills).messages;
 }
 
+/**
+ * 确保 tool_call/ToolMessage 配对完整性：移除孤儿消息（有 tool_calls 无 ToolMessage 的 AIMessage
+ * 保留文本内容但清空 tool_calls；移除无匹配 AIMessage 的孤儿 ToolMessage）。
+ * 修复 checkpoint 中因中断/崩溃导致的消息不对齐，防止 DeepSeek API 400 错误。
+ */
+function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
+  // Collect all tool_call_ids from AIMessages in the list
+  const aiToolCallIds = new Set<string>();
+  for (const msg of messages) {
+    if (msg instanceof AIMessage && Array.isArray(msg.tool_calls)) {
+      for (const tc of msg.tool_calls) {
+        if (tc.id) aiToolCallIds.add(tc.id);
+      }
+    }
+  }
+
+  // Collect all tool_call_ids from ToolMessages in the list
+  const toolResultIds = new Set<string>();
+  for (const msg of messages) {
+    if (msg instanceof ToolMessage) {
+      toolResultIds.add(msg.tool_call_id);
+    }
+  }
+
+  // Fix orphaned AIMessages: strip tool_calls that have no matching ToolMessage
+  // Fix orphaned ToolMessages: remove those with no matching AIMessage
+  const result: BaseMessage[] = [];
+  for (const msg of messages) {
+    if (msg instanceof AIMessage && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+      const orphaned = msg.tool_calls.some((tc) => tc.id && !toolResultIds.has(tc.id));
+      if (orphaned) {
+        const validCalls = msg.tool_calls.filter((tc) => !tc.id || toolResultIds.has(tc.id));
+        const newMsg = new AIMessage({
+          id: msg.id,
+          content: msg.content,
+          tool_calls: validCalls,
+          additional_kwargs: { ...msg.additional_kwargs, tool_calls: [] },
+          response_metadata: msg.response_metadata,
+          usage_metadata: msg.usage_metadata,
+        });
+        result.push(newMsg);
+        continue;
+      }
+    }
+    if (msg instanceof ToolMessage && !aiToolCallIds.has(msg.tool_call_id)) {
+      // Orphaned ToolMessage — skip it
+      continue;
+    }
+    result.push(msg);
+  }
+
+  return result;
+}
+
 /** 准备模型上下文（组装系统提示词 + 对话消息，接近阈值时清理旧工具结果） / Prepare model context (assemble, clear old tool results when near threshold) */
 export function prepareModelContext(
   role: AgentRole,
@@ -63,7 +117,7 @@ export function prepareModelContext(
   skills?: SkillManifest[],
 ): PreparedModelContext {
   let msgs = state.messages.length > 0
-    ? state.messages
+    ? sanitizeToolCallPairs(state.messages)
     : [new HumanMessage("")];
 
   // 工具结果清理：估计 token 接近窗口限制时清除旧工具结果 / Tool result clearing: clear old results when estimated tokens near window limit

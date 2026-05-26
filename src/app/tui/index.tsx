@@ -211,8 +211,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     setTimeout(() => process.exit(0), 300);
   }, [dispatch]);
 
-  // Load historical sessions from DB on startup.
-  // Auto-create a new session only when the DB is empty (first run).
+  // Load historical sessions from DB on startup, but always start fresh.
   React.useEffect(() => {
     if (!initialized) return;
     const checkpointPath = defaultCheckpointPath();
@@ -225,16 +224,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         }
       }
 
-      if (dbSessions.length > 0) {
-        // Historical sessions exist: activate the most recent one
-        const mostRecent = dbSessions[0].threadId;
-        sessionManager.switchSession("", mostRecent);
-        threadIdRef.current = mostRecent;
-      } else {
-        // First run: auto-create a new session
-        const newId = sessionManager.createSession(workspace);
-        threadIdRef.current = newId;
-      }
+      // Always start a new session — user switches to historical ones via /sessions
+      const newId = sessionManager.createSession(workspace);
+      threadIdRef.current = newId;
 
       dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
     }).catch(() => {
