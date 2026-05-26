@@ -60,13 +60,14 @@ export type Action =
   | { type: "FORK_FROM_CHECKPOINT"; checkpointId: string }
   | { type: "SET_CHECKPOINTS"; checkpoints: CheckpointEntry[] }
   | { type: "ACTIVATE_SKILL"; name: string; content: string }
-  | { type: "DEACTIVATE_SKILL"; name: string }
+  | { type: "DEACTIVATE_SKILL" }
   | { type: "LIST_SKILLS" }
   | { type: "SET_SKILL_MANIFESTS"; manifests: import("@/core/skills/types").SkillManifest[] }
   // ── 多会话 ──
   | { type: "SWITCH_SESSION"; threadId: string }
   | { type: "SET_SESSIONS"; sessions: import("./types").SessionSnapshot[] }
-  | { type: "SESSION_INTERRUPT_PENDING"; threadId: string };
+  | { type: "SESSION_INTERRUPT_PENDING"; threadId: string }
+  | { type: "DELETE_SESSION"; threadId: string };
 
 let nextId = 1;
 
@@ -303,7 +304,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       const blocks = state.blocks.map((b) =>
         b.kind === "text" && b.streaming ? { ...b, streaming: false } : b
       );
-      return { ...state, running: false, exited: false, interrupt: null, blocks };
+      return { ...state, running: false, exited: false, interrupt: null, blocks, currentRunReasonId: undefined };
     }
     case "TOGGLE_REASON": {
       const blocks = state.blocks.map((b) =>
@@ -416,10 +417,13 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       if (state.showMcp) return { ...state, showMcp: false };
       if (state.showRewind) return { ...state, showRewind: false, checkpoints: [] };
       if (state.running) {
-        let next = { ...state, running: false, ctrlCPressed: true };
+        const cleanedBlocks = state.blocks.map((b) =>
+          b.kind === "text" && b.streaming ? { ...b, streaming: false } : b
+        );
+        let next = { ...state, running: false, ctrlCPressed: true, blocks: cleanedBlocks };
         if (state.interrupt) {
           next.interrupt = null;
-          next.blocks = resolveInterruptBlock(state.blocks, state.interrupt.blockId);
+          next.blocks = resolveInterruptBlock(cleanedBlocks, state.interrupt.blockId);
         }
         return next;
       }
@@ -433,10 +437,13 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return state;
     case "CTRL_C":
       if (state.running) {
-        let next = { ...state, running: false, ctrlCPressed: true };
+        const cleanedBlocks = state.blocks.map((b) =>
+          b.kind === "text" && b.streaming ? { ...b, streaming: false } : b
+        );
+        let next = { ...state, running: false, ctrlCPressed: true, blocks: cleanedBlocks };
         if (state.interrupt) {
           next.interrupt = null;
-          next.blocks = resolveInterruptBlock(state.blocks, state.interrupt.blockId);
+          next.blocks = resolveInterruptBlock(cleanedBlocks, state.interrupt.blockId);
         }
         return next;
       }
@@ -478,18 +485,20 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return { ...state, showModelSelector: false };
     case "EDITOR_DONE":
       return { ...state, editorRequested: false };
-      return { ...state, showModelSelector: false };
     case "LIST_MODELS": {
       const block: OutputBlock = { id: nextId++, kind: "text", content: modelListText(state.status.modelName) };
       return { ...state, blocks: [...state.blocks, block] };
     }
     case "SHOW_SESSIONS":
       return { ...state, showSessions: true };
+    case "DELETE_SESSION":
+      // Actual deletion happens in dispatchSessionLoad interceptor (index.tsx).
+      // The reducer just closes the selector.
+      return { ...state, showSessions: false };
     case "HIDE_SESSIONS":
       return { ...state, showSessions: false };
     case "LOAD_SESSION_PENDING": {
-      // No state change — handled in index.tsx via effect
-      return state;
+      return { ...state, loadingSession: true };
     }
     case "LOAD_SESSION": {
       // Reset block ID counter based on loaded blocks
@@ -505,6 +514,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         running: false,         // Not running
         compacting: false,      // Not compacting
         currentRunReasonId: undefined,
+        loadingSession: false,
         status: {
           ...state.status,
           modelName: action.modelName || state.status.modelName,
@@ -597,6 +607,8 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
           ...state.status,
           totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null,
         },
+        running: target?.running ?? false,
+        currentRunReasonId: undefined,
         interrupt: null,
       };
     }
@@ -667,6 +679,7 @@ const initialState: TuiState = {
   exitRequested: false,
   editorRequested: false,
   sessionError: false,
+  loadingSession: false,
   pendingSkills: [],
   skillManifests: [],
 };
@@ -695,8 +708,6 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
 export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, children }: AppProps) {
   useGlobalKeys(dispatch);
 
-  const elapsedRef = useRef(0);
-
   // Stabilized callbacks for React.memo children
   const hideHelp = useCallback(() => dispatch({ type: "HIDE_HELP" }), [dispatch]);
   const hideModelSelector = useCallback(() => dispatch({ type: "HIDE_MODEL_SELECTOR" }), [dispatch]);
@@ -709,6 +720,12 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
   const selectSession = useCallback(
     (threadId: string) => {
       dispatch({ type: "LOAD_SESSION_PENDING", threadId });
+    },
+    [dispatch],
+  );
+  const deleteSessionAction = useCallback(
+    (threadId: string) => {
+      dispatch({ type: "DELETE_SESSION", threadId });
     },
     [dispatch],
   );
@@ -740,7 +757,11 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
       {/* ── Left: Main content (existing column layout) ── */}
       <Box flexDirection="column" flexGrow={1}>
         <MemoHeader running={state.running} error={state.sessionError} />
-        <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
+        {state.loadingSession ? (
+          <Box paddingY={1}><Text dimColor>Loading session...</Text></Box>
+        ) : (
+          <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind} />
+        )}
         {state.showHelp && <HelpPanel onClose={hideHelp} />}
         {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
           <ApprovalBlock
@@ -760,6 +781,7 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
           <SessionSelector
             onSelect={selectSession}
             onClose={hideSessions}
+            onDelete={deleteSessionAction}
           />
         )}
         {state.showModelSelector && (
@@ -786,7 +808,6 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
           compacting={state.compacting}
           thinkingVisible={state.thinkingVisible}
           timerKey={state.runCount}
-          elapsedRef={elapsedRef}
         >
           {children}
         </Footer>

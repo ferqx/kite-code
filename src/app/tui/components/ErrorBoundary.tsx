@@ -11,11 +11,13 @@ interface ErrorBoundaryState {
 }
 
 function ErrorFallback({ error }: { error: Error }) {
-  // In test environments, just render the error — don't hijack stdin with
-  // process.exit(1), because the next keystroke in a sequential test suite
-  // (e.g. Esc from dismissOverlays in runSlashCommand) would kill the suite.
-  useInput(() => {
-    // no-op: just consume the key so it doesn't leak into the test environment
+  useInput((_input, key: { escape?: boolean; return?: boolean }) => {
+    // Exit on Escape or Return — user explicitly chooses to exit.
+    // Not using process.exit(1) on any key because in test environments
+    // it would kill the suite.
+    if (key.escape || key.return) {
+      process.exit(1);
+    }
   });
 
   return (
@@ -34,7 +36,7 @@ function ErrorFallback({ error }: { error: Error }) {
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text color={darkTheme.warning}>Press any key to exit</Text>
+        <Text color={darkTheme.warning}>Press Enter or Esc to exit</Text>
       </Box>
     </Box>
   );

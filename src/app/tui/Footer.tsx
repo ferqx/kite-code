@@ -1,4 +1,4 @@
-import React, { type ReactNode } from "react";
+import React, { useState, type ReactNode } from "react";
 import { Box } from "ink";
 import StatusBar from "./StatusBar";
 import StatsLine from "./StatsLine";
@@ -10,13 +10,14 @@ interface FooterProps {
   compacting: boolean;
   thinkingVisible: boolean;
   timerKey: number;
-  elapsedRef: React.MutableRefObject<number>;
   children?: ReactNode;
 }
 
 export default function Footer({
-  status, running, compacting, thinkingVisible, timerKey, elapsedRef, children,
+  status, running, compacting, thinkingVisible, timerKey, children,
 }: FooterProps) {
+  const [elapsed, setElapsed] = useState(0);
+
   return (
     <Box flexDirection="column">
       <StatusBar
@@ -24,14 +25,14 @@ export default function Footer({
         running={running}
         compacting={compacting}
         timerKey={timerKey}
-        onTick={(e) => { elapsedRef.current = e; }}
+        onTick={(e) => setElapsed(e)}
       />
       {children}
       <StatsLine
         status={status}
         thinkingVisible={thinkingVisible}
         running={running}
-        elapsed={elapsedRef.current}
+        elapsed={elapsed}
       />
     </Box>
   );

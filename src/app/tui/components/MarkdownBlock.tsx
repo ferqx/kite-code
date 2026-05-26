@@ -1,7 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { useTheme, darkTheme } from "@/app/tui/theme";
-const dt = darkTheme; // for non-component functions
+import { useTheme, type Theme } from "@/app/tui/theme";
 
 interface MarkdownBlockProps {
   content: string;
@@ -84,7 +83,7 @@ function detectLang(fenceLine: string): string {
   return lang || "";
 }
 
-function tokenizeCodeLine(line: string, lang: string): Token[] {
+function tokenizeCodeLine(line: string, lang: string, t: Theme): Token[] {
   if (!lang || !line.trim()) return [{ text: line }];
 
   const tokens: Token[] = [];
@@ -92,15 +91,15 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
 
   while (i < line.length) {
     if ((lang === "ts" || lang === "py" || lang === "sh") && line[i] === "/" && line[i + 1] === "/") {
-      tokens.push({ text: line.slice(i), color: dt.dim });
+      tokens.push({ text: line.slice(i), color: t.dim });
       return tokens;
     }
     if (lang === "py" && line[i] === "#") {
-      tokens.push({ text: line.slice(i), color: dt.dim });
+      tokens.push({ text: line.slice(i), color: t.dim });
       return tokens;
     }
     if (lang === "sh" && line[i] === "#") {
-      tokens.push({ text: line.slice(i), color: dt.dim });
+      tokens.push({ text: line.slice(i), color: t.dim });
       return tokens;
     }
 
@@ -113,7 +112,7 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
       }
       if (j < line.length) j++;
       const str = line.slice(i, j);
-      tokens.push({ text: str, color: dt.success });
+      tokens.push({ text: str, color: t.success });
       i = j;
       continue;
     }
@@ -123,7 +122,7 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
       while (j < line.length && /[0-9a-fA-FxX._]/.test(line[j])) j++;
       const num = line.slice(i, j);
       if (/^[0-9]/.test(num)) {
-        tokens.push({ text: num, color: dt.warning });
+        tokens.push({ text: num, color: t.warning });
         i = j;
         continue;
       }
@@ -135,7 +134,7 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
       const word = line.slice(i, j);
       const kw = lang === "py" ? PY_KEYWORDS : lang === "sh" ? SH_KEYWORDS : TS_KEYWORDS;
       if (kw.has(word)) {
-        tokens.push({ text: word, color: dt.primary, bold: true });
+        tokens.push({ text: word, color: t.primary, bold: true });
       } else {
         tokens.push({ text: word });
       }
@@ -151,15 +150,16 @@ function tokenizeCodeLine(line: string, lang: string): Token[] {
 }
 
 function CodeLine({ line, lang }: { line: string; lang: string }) {
+  const t = useTheme();
   if (!lang) {
-    return <Text color={dt.muted}>{line}</Text>;
+    return <Text color={t.muted}>{line}</Text>;
   }
 
-  const tokens = tokenizeCodeLine(line, lang);
+  const tokens = tokenizeCodeLine(line, lang, t);
   return (
     <Text>
       {tokens.map((tok, i) => (
-        <Text key={i} color={tok.color ?? dt.muted} bold={tok.bold}>
+        <Text key={i} color={tok.color ?? t.muted} bold={tok.bold}>
           {tok.text}
         </Text>
       ))}
@@ -255,67 +255,68 @@ function padCell(text: string, width: number): string {
 }
 
 function TableBlock({ lines }: { lines: string[] }) {
+  const t = useTheme();
   const { headers, rows, widths } = parseTable(lines);
 
   return (
     <Box flexDirection="column">
       {/* header */}
       <Box>
-        <Text color={dt.dim}>┌</Text>
+        <Text color={t.dim}>┌</Text>
         {headers.map((h, ci) => (
           <React.Fragment key={ci}>
-            {ci > 0 && <Text color={dt.dim}>┬</Text>}
-            <Text color={dt.dim}>{"─".repeat(widths[ci] + 2)}</Text>
+            {ci > 0 && <Text color={t.dim}>┬</Text>}
+            <Text color={t.dim}>{"─".repeat(widths[ci] + 2)}</Text>
           </React.Fragment>
         ))}
-        <Text color={dt.dim}>┐</Text>
+        <Text color={t.dim}>┐</Text>
       </Box>
       <Box>
-        <Text color={dt.dim}>│</Text>
+        <Text color={t.dim}>│</Text>
         {headers.map((h, ci) => (
           <React.Fragment key={ci}>
-            {ci > 0 && <Text color={dt.dim}>│</Text>}
-            <Text bold color={dt.primary}> {padCell(h, widths[ci])} </Text>
+            {ci > 0 && <Text color={t.dim}>│</Text>}
+            <Text bold color={t.primary}> {padCell(h, widths[ci])} </Text>
           </React.Fragment>
         ))}
-        <Text color={dt.dim}>│</Text>
+        <Text color={t.dim}>│</Text>
       </Box>
       <Box>
-        <Text color={dt.dim}>├</Text>
+        <Text color={t.dim}>├</Text>
         {widths.map((w, ci) => (
           <React.Fragment key={ci}>
-            {ci > 0 && <Text color={dt.dim}>┼</Text>}
-            <Text color={dt.dim}>{"─".repeat(w + 2)}</Text>
+            {ci > 0 && <Text color={t.dim}>┼</Text>}
+            <Text color={t.dim}>{"─".repeat(w + 2)}</Text>
           </React.Fragment>
         ))}
-        <Text color={dt.dim}>┤</Text>
+        <Text color={t.dim}>┤</Text>
       </Box>
       {/* data rows */}
       {rows.map((row, ri) => (
         <Box key={ri}>
-          <Text color={dt.dim}>│</Text>
+          <Text color={t.dim}>│</Text>
           {row.map((cell, ci) => (
             <React.Fragment key={ci}>
-              {ci > 0 && <Text color={dt.dim}>│</Text>}
-              <Text color={dt.muted}> {padCell(cell, widths[ci])} </Text>
+              {ci > 0 && <Text color={t.dim}>│</Text>}
+              <Text color={t.muted}> {padCell(cell, widths[ci])} </Text>
             </React.Fragment>
           ))}
           {row.length < headers.length && (
-            <Text color={dt.muted}>{" ".repeat(widths.slice(row.length).reduce((a, w) => a + w + 3, 0))}</Text>
+            <Text color={t.muted}>{" ".repeat(widths.slice(row.length).reduce((a, w) => a + w + 3, 0))}</Text>
           )}
-          <Text color={dt.dim}>│</Text>
+          <Text color={t.dim}>│</Text>
         </Box>
       ))}
       {/* bottom border */}
       <Box>
-        <Text color={dt.dim}>└</Text>
+        <Text color={t.dim}>└</Text>
         {widths.map((w, ci) => (
           <React.Fragment key={ci}>
-            {ci > 0 && <Text color={dt.dim}>┴</Text>}
-            <Text color={dt.dim}>{"─".repeat(w + 2)}</Text>
+            {ci > 0 && <Text color={t.dim}>┴</Text>}
+            <Text color={t.dim}>{"─".repeat(w + 2)}</Text>
           </React.Fragment>
         ))}
-        <Text color={dt.dim}>┘</Text>
+        <Text color={t.dim}>┘</Text>
       </Box>
     </Box>
   );
@@ -371,6 +372,7 @@ function groupLines(lines: string[]): LineGroup[] {
 // ── main component ──
 
 export default function MarkdownBlock({ content, streaming, color }: MarkdownBlockProps) {
+  const t = useTheme();
   const lines = content.split("\n");
   const groups = groupLines(lines);
 
@@ -380,14 +382,14 @@ export default function MarkdownBlock({ content, streaming, color }: MarkdownBlo
         if (group.kind === "code") {
           return (
             <Box key={gi} flexDirection="column">
-              <Text color={dt.dim}>┌─ {group.lang || "code"} ─</Text>
+              <Text color={t.dim}>┌─ {group.lang || "code"} ─</Text>
               {group.lines.map((codeLine, ci) => (
                 <Box key={ci} paddingLeft={1}>
-                  <Text color={dt.dim}>│ </Text>
+                  <Text color={t.dim}>│ </Text>
                   <CodeLine line={codeLine} lang={group.lang} />
                 </Box>
               ))}
-              <Text color={dt.dim}>└─</Text>
+              <Text color={t.dim}>└─</Text>
             </Box>
           );
         }
@@ -401,21 +403,21 @@ export default function MarkdownBlock({ content, streaming, color }: MarkdownBlo
 
         if (line.startsWith("### ")) {
           return (
-            <Text key={gi} bold color={dt.primary}>
+            <Text key={gi} bold color={t.primary}>
               {line.slice(4)}
             </Text>
           );
         }
         if (line.startsWith("## ")) {
           return (
-            <Text key={gi} bold color={dt.primary}>
+            <Text key={gi} bold color={t.primary}>
               ── {line.slice(3)} ──
             </Text>
           );
         }
         if (line.startsWith("# ")) {
           return (
-            <Text key={gi} bold color={dt.primary} underline>
+            <Text key={gi} bold color={t.primary} underline>
               {line.slice(2)}
             </Text>
           );
@@ -425,7 +427,7 @@ export default function MarkdownBlock({ content, streaming, color }: MarkdownBlo
           const indent = line.match(/^\s*/)?.[0].length ?? 0;
           return (
             <Box key={gi} paddingLeft={indent}>
-              <Text color={dt.muted}>· </Text>
+              <Text color={t.muted}>· </Text>
               <MarkdownLine content={line.slice(2)} color={color} />
             </Box>
           );
@@ -433,7 +435,7 @@ export default function MarkdownBlock({ content, streaming, color }: MarkdownBlo
 
         if (line.startsWith("> ")) {
           return (
-            <Text key={gi} color={dt.dim}>
+            <Text key={gi} color={t.dim}>
               │ {line.slice(2)}
             </Text>
           );
@@ -445,12 +447,13 @@ export default function MarkdownBlock({ content, streaming, color }: MarkdownBlo
 
         return <MarkdownLine key={gi} content={line} color={color} />;
       })}
-      {streaming && <Text color={dt.primary}>▌</Text>}
+      {streaming && <Text color={t.primary}>▌</Text>}
     </Box>
   );
 }
 
 function MarkdownLine({ content, color }: { content: string; color?: string }) {
+  const t = useTheme();
   const segments = parseInline(content);
 
   if (segments.length === 1 && !segments[0].bold && !segments[0].italic && !segments[0].code) {
@@ -463,8 +466,8 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
         if (seg.link) {
           return (
             <React.Fragment key={j}>
-              <Text bold color={dt.primary}>{seg.text}</Text>
-              <Text color={dt.dim}> ({seg.link})</Text>
+              <Text bold color={t.primary}>{seg.text}</Text>
+              <Text color={t.dim}> ({seg.link})</Text>
             </React.Fragment>
           );
         }
@@ -473,7 +476,7 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
             key={j}
             bold={seg.bold}
             italic={seg.italic}
-            color={seg.code ? dt.warning : (color ?? undefined)}
+            color={seg.code ? t.warning : (color ?? undefined)}
           >
             {seg.text}
           </Text>

@@ -557,12 +557,12 @@ describe("eventReducer (blocks model)", () => {
   });
 
   describe("LOAD_SESSION_PENDING", () => {
-    test("is a no-op — state unchanged", () => {
+    test("sets loadingSession to true while keeping blocks intact", () => {
       const s = fresh();
       s.blocks.push({ id: 1, kind: "text", content: "existing" });
       const next = dispatch(s, { type: "LOAD_SESSION_PENDING", threadId: "t1" });
-      // LOAD_SESSION_PENDING returns the same state (identity preservation)
-      expect(next).toBe(s);
+      expect(next.loadingSession).toBe(true);
+      expect(next.blocks).toBe(s.blocks); // blocks unchanged
     });
   });
 
@@ -708,7 +708,7 @@ describe("eventReducer (blocks model)", () => {
     test("clears pendingSkills", () => {
       const state = createInitialState();
       const withSkills = eventReducer(state, { type: "ACTIVATE_SKILL", name: "tdd", content: "test" });
-      const cleared = eventReducer(withSkills, { type: "DEACTIVATE_SKILL", name: "tdd" });
+      const cleared = eventReducer(withSkills, { type: "DEACTIVATE_SKILL" });
       expect(cleared.pendingSkills).toEqual([]);
     });
   });

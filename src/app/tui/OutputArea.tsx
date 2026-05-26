@@ -10,6 +10,8 @@ interface OutputAreaProps {
   blocks: OutputBlock[];
   onToggleReason: (id: number) => void;
   thinkingVisible: boolean;
+  /** 当 overlay 面板（HelpPanel/SessionSelector/ModelSelector 等）激活时，禁用方向键导航，避免同时触发多个 useInput handler */
+  overlayActive?: boolean;
 }
 
 export function toolColor(status: string): string {
@@ -216,13 +218,14 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
   }
 }
 
-export default function OutputArea({ blocks, onToggleReason, thinkingVisible }: OutputAreaProps) {
+export default function OutputArea({ blocks, onToggleReason, thinkingVisible, overlayActive }: OutputAreaProps) {
   const t = useTheme();
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const focusedIndexRef = useRef(focusedIndex);
   focusedIndexRef.current = focusedIndex;
 
   useInput((_input: unknown, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+    if (overlayActive) return;
     if (key.upArrow) {
       setFocusedIndex((prev) => {
         if (blocks.length === 0) return null;

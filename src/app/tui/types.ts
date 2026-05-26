@@ -48,6 +48,7 @@ export interface TuiState {
   exitRequested: boolean;
   editorRequested: boolean;
   sessionError: boolean;
+  loadingSession: boolean;
 }
 
 export interface InterruptState {

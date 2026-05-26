@@ -77,14 +77,12 @@ const noop = () => {};
 // ── Footer ──
 
 describe("Footer", () => {
-  const mockElapsedRef = { current: 0 };
   const footerProps = {
     status: fakeStatus(),
     running: false,
     compacting: false,
     thinkingVisible: true,
     timerKey: 0,
-    elapsedRef: mockElapsedRef,
   };
 
   test("renders Footer with child content", () => {
@@ -213,16 +211,6 @@ describe("StatusBar", () => {
 });
 
 describe("StatsLine", () => {
-  const elapsedRef = { current: 0 };
-  const footerProps = {
-    status: fakeStatus(),
-    running: false,
-    compacting: false,
-    thinkingVisible: true,
-    timerKey: 0,
-    elapsedRef,
-  };
-
   test("shows model name", () => {
     const status = fakeStatus({ modelName: "gpt-5" });
     const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
