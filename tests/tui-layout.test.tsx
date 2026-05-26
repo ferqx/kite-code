@@ -76,8 +76,18 @@ const noop = () => {};
 // ── Footer ──
 
 describe("Footer", () => {
-  test("renders placeholder Box with children", () => {
-    const { lastFrame } = render(<Footer><Text>child content</Text></Footer>);
+  const mockElapsedRef = { current: 0 };
+  const footerProps = {
+    status: fakeStatus(),
+    running: false,
+    compacting: false,
+    thinkingVisible: true,
+    timerKey: 0,
+    elapsedRef: mockElapsedRef,
+  };
+
+  test("renders Footer with child content", () => {
+    const { lastFrame } = render(<Footer {...footerProps}><Text>child content</Text></Footer>);
     expect(lastFrame()).toContain("child content");
   });
 
@@ -150,61 +160,61 @@ describe("Header", () => {
 describe("StatusBar", () => {
   test("shows Planning phase with ○ icon", () => {
     const status = fakeStatus({ phase: "planning" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("Planning");
   });
 
   test("shows Building phase with ● icon", () => {
     const status = fakeStatus({ phase: "building" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("Building");
   });
 
   test("shows model name", () => {
     const status = fakeStatus({ modelName: "gpt-5" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("gpt-5");
   });
 
   test("shows thinking mode", () => {
     const status = fakeStatus({ thinkingMode: "detailed" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("think: detailed");
   });
 
   test("shows cache hit rate", () => {
     const status = fakeStatus({ cacheHitRate: 75 });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("cache: 75%");
   });
 
   test("shows token count with locale formatting", () => {
     const status = fakeStatus({ totalTokens: 10000 });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("10,000");
   });
 
   test("shows [full] for full_access auth", () => {
     const status = fakeStatus({ authorization: "full_access" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("[full]");
   });
 
   test("shows [safe] for default auth", () => {
     const status = fakeStatus({ authorization: "default" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("[safe]");
   });
 
   test("shows rw for write access", () => {
     const status = fakeStatus({ workspaceAccess: "write" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("rw");
   });
 
   test("shows ro for read-only access", () => {
     const status = fakeStatus({ workspaceAccess: "read-only" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("ro");
   });
 
@@ -219,37 +229,37 @@ describe("StatusBar", () => {
       },
       currentNode: null,
     });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("Step 1/2: Build");
   });
 
   test("falls back to currentNode when no plan", () => {
     const status = fakeStatus({ plan: null, currentNode: "tools" });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("tools");
   });
 
   test("shows dashes when no plan and no currentNode", () => {
     const status = fakeStatus({ plan: null, currentNode: null });
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("—");
   });
 
   test("shows timer when running", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     expect(lastFrame()).toContain("00:00");
   });
 
   test("hides timer when not running", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running={false} />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running={false} />);
     expect(lastFrame()).not.toContain("00:00");
   });
 
   test("status bar is 2 rows", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} thinkingVisible timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
     const lines = lastFrame()!.split("\n").filter(Boolean);
     expect(lines!.length).toBe(2);
   });

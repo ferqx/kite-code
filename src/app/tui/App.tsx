@@ -1,18 +1,21 @@
-import React, { useReducer, useCallback, useMemo, type Dispatch, type ReactNode } from "react";
+import React, { useReducer, useCallback, useMemo, useRef, type Dispatch, type ReactNode } from "react";
 import { Box } from "ink";
 import { sessionExportPath } from "@/core/config/paths";
 import type { AgentEvent } from "@/protocol/events";
-import type { TuiState, OutputBlock, StatusState, InterruptState, FileChangeRecord } from "./types";
+import type { McpManager } from "@/core/mcp";
+import type { TuiState, OutputBlock, StatusState, InterruptState, FileChangeRecord, SessionSnapshot } from "./types";
 import OutputArea from "./OutputArea";
-import ActivityBar from "./ActivityBar";
 import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
 import HelpPanel from "./components/HelpPanel";
+import McpPanel from "./components/McpPanel";
+import CheckpointSelector from "./components/CheckpointSelector";
+import type { CheckpointEntry } from "@/core/persistence/checkpoint";
 import ModelSelector from "./components/ModelSelector";
 import SessionSelector from "./components/SessionSelector.js";
+
 import Header from "./Header";
 import Footer from "./Footer";
-import StatusBar from "./StatusBar";
 import { useGlobalKeys, useLeaderKeys } from "./hooks/useGlobalKeys";
 
 const MemoHeader = React.memo(Header);
@@ -47,9 +50,25 @@ export type Action =
   | { type: "LOAD_SESSION_PENDING"; threadId: string }
   | { type: "LOAD_SESSION"; blocks: OutputBlock[]; interrupt: InterruptState | null; modelProvider: string; modelName: string; thinkingLevel: string | null }
   | { type: "SELECT_MODEL"; modelId: string }
-  | { type: "NEW_SESSION" }
+  | { type: "NEW_SESSION"; threadId: string }
   | { type: "USER_MESSAGE"; text: string }
-  | { type: "SHOW_SETTING" };
+  | { type: "SHOW_SETTING" }
+  | { type: "SHOW_MCP" }
+  | { type: "HIDE_MCP" }
+  | { type: "INJECT_MCP_PROMPT"; server: string; promptName: string }
+  | { type: "SHOW_REWIND" }
+  | { type: "HIDE_REWIND" }
+  | { type: "REVERT_TO_CHECKPOINT"; checkpointId: string }
+  | { type: "FORK_FROM_CHECKPOINT"; checkpointId: string }
+  | { type: "SET_CHECKPOINTS"; checkpoints: CheckpointEntry[] }
+  | { type: "ACTIVATE_SKILL"; name: string; content: string }
+  | { type: "DEACTIVATE_SKILL"; name: string }
+  | { type: "LIST_SKILLS" }
+  | { type: "SET_SKILL_MANIFESTS"; manifests: import("@/core/skills/types").SkillManifest[] }
+  // ── 多会话 ──
+  | { type: "SWITCH_SESSION"; threadId: string }
+  | { type: "SET_SESSIONS"; sessions: import("./types").SessionSnapshot[] }
+  | { type: "SESSION_INTERRUPT_PENDING"; threadId: string };
 
 let nextId = 1;
 
@@ -191,10 +210,6 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
           if (d.authorization) next.authorization = d.authorization.mode;
           if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
           return { ...state, status: next };
-        }
-        case "retry": {
-          const block: OutputBlock = { id: nextId++, kind: "text", content: `⚠ Retry #${event.data.attempt}: ${event.data.reason}` };
-          return { ...state, blocks: [...state.blocks, block] };
         }
         case "model_retry": {
           const block: OutputBlock = { id: nextId++, kind: "text", content: `⟳ Model retry #${event.data.attempt} (${event.data.delayMs}ms): ${event.data.error}` };
@@ -342,6 +357,55 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       return { ...state, showHelp: true };
     case "HIDE_HELP":
       return { ...state, showHelp: false };
+    case "SHOW_MCP":
+      return { ...state, showMcp: true };
+    case "HIDE_MCP":
+      return { ...state, showMcp: false };
+    case "SHOW_REWIND":
+      return { ...state, showRewind: true };
+    case "HIDE_REWIND":
+      return { ...state, showRewind: false, checkpoints: [] };
+    case "SET_CHECKPOINTS":
+      return { ...state, checkpoints: action.checkpoints };
+    case "SET_SKILL_MANIFESTS":
+      return { ...state, skillManifests: action.manifests };
+    case "ACTIVATE_SKILL": {
+      const content = `[SKILL: ${action.name}]\n\n${action.content}\n\n---\n\n`;
+      return { ...state, pendingSkills: [...state.pendingSkills, content] };
+    }
+    case "DEACTIVATE_SKILL":
+      return { ...state, pendingSkills: [] };
+    case "LIST_SKILLS": {
+      if (state.skillManifests.length === 0) {
+        return {
+          ...state,
+          blocks: [...state.blocks, {
+            id: Date.now(),
+            kind: "text" as const,
+            content: "No skills available.",
+          }],
+        };
+      }
+      const lines = state.skillManifests.map(
+        (s) => `- **${s.name}**: ${s.description} (${s.source}/${s.origin})`,
+      );
+      return {
+        ...state,
+        blocks: [...state.blocks, {
+          id: Date.now(),
+          kind: "text" as const,
+          content: "## Available Skills\n\n" + lines.join("\n"),
+        }],
+      };
+    }
+    case "REVERT_TO_CHECKPOINT":
+      return { ...state, showRewind: false, rewindCounter: state.rewindCounter + 1 };
+    case "FORK_FROM_CHECKPOINT":
+      return { ...state, showRewind: false, rewindCounter: state.rewindCounter + 1 };
+    case "INJECT_MCP_PROMPT": {
+      const block: OutputBlock = { id: nextId++, kind: "user", content: `/mcp__${action.server}__${action.promptName}` };
+      return { ...state, blocks: [...state.blocks, block] };
+    }
     case "SET_PHASE":
       return { ...state, status: { ...state.status, phase: action.phase } };
     case "LEADER_PENDING":
@@ -352,6 +416,8 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
       if (state.showHelp) return { ...state, showHelp: false };
       if (state.showSessions) return { ...state, showSessions: false };
       if (state.showModelSelector) return { ...state, showModelSelector: false };
+      if (state.showMcp) return { ...state, showMcp: false };
+      if (state.showRewind) return { ...state, showRewind: false, checkpoints: [] };
       if (state.leaderPending) return { ...state, leaderPending: false };
       if (state.running) {
         let next = { ...state, running: false, ctrlCPressed: true };
@@ -388,7 +454,7 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     }
     case "COMPACT_CONTEXT": {
       if (!state.running) return state;
-      const block: OutputBlock = { id: nextId++, kind: "text", content: "⟳ Manual compaction requested — context will be compacted on next overflow" };
+      const block: OutputBlock = { id: nextId++, kind: "text", content: "⟳ Manual compaction requested — context will be compacted on next agent cycle" };
       return { ...state, blocks: [...state.blocks, block] };
     }
     case "EXPORT_SESSION": {
@@ -479,8 +545,28 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
     }
     case "NEW_SESSION": {
       nextId = 1;
+      // Save current session blocks/status to snapshots before creating new
+      const newSessions = state.sessions.map(s =>
+        s.threadId === state.activeSessionId
+          ? { ...s, blocks: state.blocks, status: state.status, active: false }
+          : s
+      );
+      const newSnapshot: SessionSnapshot = {
+        threadId: action.threadId,
+        name: action.threadId,
+        workspace: state.sessions.find(s => s.threadId === state.activeSessionId)?.workspace ?? "",
+        active: true,
+        running: false,
+        pendingInterrupt: false,
+        plan: null,
+        status: { ...state.status, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null },
+        blocks: [],
+      };
       return {
         ...state,
+        sessions: [...newSessions, newSnapshot],
+        activeSessionId: action.threadId,
+
         blocks: [],
         toolStartTimes: undefined,
         interrupt: null,
@@ -492,18 +578,71 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         showHelp: false,
         showModelSelector: false,
         showSessions: false,
+        showMcp: false,
         leaderPending: false,
+        rewindCounter: 0,
         currentRunReasonId: undefined,
         sessionKey: state.sessionKey + 1,
         status: { ...state.status, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null },
       };
     }
+    case "SWITCH_SESSION": {
+      const sessions = state.sessions.map(s =>
+        s.threadId === state.activeSessionId
+          ? { ...s, blocks: state.blocks, status: state.status, active: false }
+          : s.threadId === action.threadId
+            ? { ...s, active: true }
+            : s
+      );
+      const target = sessions.find(s => s.threadId === action.threadId);
+      return {
+        ...state,
+        sessions,
+        activeSessionId: action.threadId,
+        blocks: target?.blocks ?? [],
+        status: target?.status ?? {
+          ...state.status,
+          totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null,
+        },
+        interrupt: null,
+      };
+    }
+    case "SET_SESSIONS": {
+      // Merge runtime snapshots with existing reducer state: keep blocks/status
+      // that reducers (NEW_SESSION, SWITCH_SESSION) manage, update runtime info
+      // (name, running, pendingInterrupt) from SessionManager.
+      // Also sync activeSessionId from the runtime snapshots.
+      const mergedSessions = action.sessions.map((incoming) => {
+        const existing = state.sessions.find((s) => s.threadId === incoming.threadId);
+        if (existing) {
+          return { ...incoming, blocks: existing.blocks, status: existing.status };
+        }
+        return incoming;
+      });
+      const activeIncoming = action.sessions.find((s) => s.active);
+      return {
+        ...state,
+        sessions: mergedSessions,
+        activeSessionId: activeIncoming?.threadId ?? state.activeSessionId,
+      };
+    }
+    case "SESSION_INTERRUPT_PENDING":
+      return {
+        ...state,
+        sessions: state.sessions.map(s =>
+          s.threadId === action.threadId
+            ? { ...s, pendingInterrupt: true }
+            : s
+        ),
+      };
     default:
       return state;
   }
 }
 
 const initialState: TuiState = {
+  sessions: [],
+  activeSessionId: null,
   blocks: [],
   interrupt: null,
   status: {
@@ -527,11 +666,17 @@ const initialState: TuiState = {
   showHelp: false,
   showModelSelector: false,
   showSessions: false,
+  showMcp: false,
+  showRewind: false,
+  checkpoints: [],
+  rewindCounter: 0,
   ctrlCPressed: false,
   sessionKey: 0,
   exitRequested: false,
   editorRequested: false,
   sessionError: false,
+  pendingSkills: [],
+  skillManifests: [],
 };
 
 export function createInitialState(): TuiState {
@@ -543,6 +688,8 @@ export interface AppProps {
   dispatch: Dispatch<Action>;
   onToggleReason: (id: number) => void;
   provider: import("./provider").TuiUserInputProvider;
+  onCompactRequest?: () => void;
+  mcpManager?: McpManager;
   children?: ReactNode;
 }
 
@@ -552,15 +699,22 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
   return { state, dispatch, onToggleReason };
 }
 
-export default function App({ state, dispatch, onToggleReason, provider, children }: AppProps) {
-  useGlobalKeys(dispatch, state.running);
-  useLeaderKeys(dispatch, state.leaderPending);
+export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, children }: AppProps) {
+  const overlayActive = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind;
+  useGlobalKeys(dispatch, state.running, overlayActive);
+  useLeaderKeys(dispatch, state.leaderPending, onCompactRequest);
+
+  const elapsedRef = useRef(0);
 
   // Stabilized callbacks for React.memo children
   const hideHelp = useCallback(() => dispatch({ type: "HIDE_HELP" }), [dispatch]);
   const hideModelSelector = useCallback(() => dispatch({ type: "HIDE_MODEL_SELECTOR" }), [dispatch]);
   const selectModel = useCallback((modelId: string) => dispatch({ type: "SELECT_MODEL", modelId }), [dispatch]);
   const hideSessions = useCallback(() => dispatch({ type: "HIDE_SESSIONS" }), [dispatch]);
+  const hideMcp = useCallback(() => dispatch({ type: "HIDE_MCP" }), [dispatch]);
+  const hideRewind = useCallback(() => dispatch({ type: "HIDE_REWIND" }), [dispatch]);
+  const handleRevert = useCallback((checkpointId: string) => dispatch({ type: "REVERT_TO_CHECKPOINT", checkpointId }), [dispatch]);
+  const handleFork = useCallback((checkpointId: string) => dispatch({ type: "FORK_FROM_CHECKPOINT", checkpointId }), [dispatch]);
   const selectSession = useCallback(
     (threadId: string) => {
       dispatch({ type: "LOAD_SESSION_PENDING", threadId });
@@ -589,42 +743,63 @@ export default function App({ state, dispatch, onToggleReason, provider, childre
     [dispatch, interruptBlock]
   );
 
+
   return (
     <Box flexDirection="column">
-      <MemoHeader running={state.running} error={state.sessionError} />
-      <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
-      <StatusBar status={state.status} thinkingVisible={state.thinkingVisible} timerKey={state.runCount} running={state.running} />
-      {state.showHelp && <HelpPanel onClose={hideHelp} />}
-      {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
-        <ApprovalBlock
-          approval={interruptBlock.approval}
-          provider={provider}
-          onResolved={resolveApproval}
-        />
-      )}
-      {interruptBlock?.kind === "question" && !interruptBlock.resolved && (
-        <InputBlock
-          question={interruptBlock.question}
-          provider={provider}
-          onResolved={resolveInput}
-        />
-      )}
-      {state.showSessions && (
-        <SessionSelector
-          onSelect={selectSession}
-          onClose={hideSessions}
-        />
-      )}
-      {state.showModelSelector && (
-        <ModelSelector
-          currentModel={state.status.modelName}
-          onSelect={selectModel}
-          onClose={hideModelSelector}
-        />
-      )}
-      <ActivityBar running={state.running} timerKey={state.runCount} />
-      {children}
-      <Footer />
+      {/* ── Left: Main content (existing column layout) ── */}
+      <Box flexDirection="column" flexGrow={1}>
+        <MemoHeader running={state.running} error={state.sessionError} />
+        <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} />
+        {state.showHelp && <HelpPanel onClose={hideHelp} />}
+        {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
+          <ApprovalBlock
+            approval={interruptBlock.approval}
+            provider={provider}
+            onResolved={resolveApproval}
+          />
+        )}
+        {interruptBlock?.kind === "question" && !interruptBlock.resolved && (
+          <InputBlock
+            question={interruptBlock.question}
+            provider={provider}
+            onResolved={resolveInput}
+          />
+        )}
+        {state.showSessions && (
+          <SessionSelector
+            onSelect={selectSession}
+            onClose={hideSessions}
+          />
+        )}
+        {state.showModelSelector && (
+          <ModelSelector
+            currentModel={state.status.modelName}
+            onSelect={selectModel}
+            onClose={hideModelSelector}
+          />
+        )}
+        {state.showMcp && mcpManager && (
+          <McpPanel manager={mcpManager} onClose={hideMcp} />
+        )}
+        {state.showRewind && (
+          <CheckpointSelector
+            checkpoints={state.checkpoints}
+            onRevert={handleRevert}
+            onFork={handleFork}
+            onClose={hideRewind}
+          />
+        )}
+        <Footer
+          status={state.status}
+          running={state.running}
+          compacting={state.compacting}
+          thinkingVisible={state.thinkingVisible}
+          timerKey={state.runCount}
+          elapsedRef={elapsedRef}
+        >
+          {children}
+        </Footer>
+      </Box>
     </Box>
   );
 }
