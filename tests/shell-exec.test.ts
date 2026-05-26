@@ -3,8 +3,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSandboxExecutor } from "../src/core/sandbox/executor";
+import { findSystemBash } from "../src/core/tools/bash-path";
 
 describe("shell execute integration", () => {
+
+  test("findSystemBash excludes WSL stub", () => {
+    const bashPath = findSystemBash();
+    if (bashPath) {
+      // Must NOT be under SystemRoot (C:\Windows) — that's the WSL stub
+      const windir = (process.env.SystemRoot || "C:\\Windows").replace(/\\/g, "/").toLowerCase();
+      expect(bashPath.replace(/\\/g, "/").toLowerCase().startsWith(windir)).toBe(false);
+    }
+  });
   const workspace = join(tmpdir(), "openpx-e2e-shell");
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(workspace, "test.txt"), "hello");
