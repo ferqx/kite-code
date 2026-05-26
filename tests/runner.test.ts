@@ -130,7 +130,7 @@ describe("normalizeGraphStream model retry events", () => {
 describe("chunkToEvents final dedup", () => {
   const cacheStandard = createPromptCacheStandardTracker();
 
-  test("does not emit final when it duplicates a text event", () => {
+  test("emits final even when text content is identical", () => {
     const ai = new AIMessage({ content: "hello world" });
     const chunk = {
       agent: {
@@ -141,7 +141,8 @@ describe("chunkToEvents final dedup", () => {
 
     const events = chunkToEvents(chunk, "write", cacheStandard);
     expect(events.filter((e) => e.type === "text")).toHaveLength(1);
-    expect(events.filter((e) => e.type === "final")).toHaveLength(0);
+    expect(events.filter((e) => e.type === "final")).toHaveLength(1);
+    expect(events.find((e) => e.type === "final")?.data).toBe("hello world");
   });
 
   test("emits final when its content differs from text events", () => {

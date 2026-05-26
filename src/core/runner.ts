@@ -603,7 +603,7 @@ export function chunkToEvents(
 
 
   const final = findFinal(chunk);
-  if (final && !events.some((e) => e.type === "text" && e.data.text === final)) {
+  if (final) {
     events.push({ type: "final", data: final });
   }
 
