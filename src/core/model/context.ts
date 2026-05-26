@@ -1,4 +1,5 @@
 import {
+  AIMessage,
   HumanMessage,
   SystemMessage,
   ToolMessage,
@@ -93,12 +94,44 @@ export function forceContextCompaction(
   const KEEP_FULL = 8;
 
   let fullStart = Math.max(0, messages.length - KEEP_FULL);
+
+  // Walk back past leading ToolMessages at the split boundary
   while (fullStart > 0 && messages[fullStart] instanceof ToolMessage) {
     fullStart--;
   }
 
-  const toSummarize = messages.slice(0, fullStart);
+  // Ensure tool_call/ToolMessage pair integrity: if keepFull contains
+  // any ToolMessage whose matching AIMessage landed in toSummarize, we
+  // must expand the boundary to include that AIMessage.
+  // Otherwise the model API rejects the request with:
+  //   "An assistant message with 'tool_calls' must be followed by
+  //    tool messages responding to each 'tool_call_id'"
   const keepFull = messages.slice(fullStart);
+  const orphanedToolIds = new Set<string>();
+  for (const msg of keepFull) {
+    if (msg instanceof ToolMessage) {
+      orphanedToolIds.add(msg.tool_call_id);
+    }
+  }
+
+  // Walk fullStart backwards to find matching AIMessages for orphaned ToolMessages
+  let expandedStart = fullStart;
+  for (let i = fullStart - 1; i >= 0 && orphanedToolIds.size > 0; i--) {
+    const msg = messages[i];
+    if (msg instanceof AIMessage && Array.isArray(msg.tool_calls)) {
+      for (const tc of msg.tool_calls) {
+        if (orphanedToolIds.has(tc.id ?? "")) {
+          orphanedToolIds.delete(tc.id ?? "");
+          expandedStart = Math.min(expandedStart, i);
+        }
+      }
+    }
+  }
+
+  fullStart = expandedStart;
+
+  const toSummarize = messages.slice(0, fullStart);
+  const finalKeepFull = messages.slice(fullStart);
 
   if (toSummarize.length === 0) {
     return {
@@ -114,7 +147,7 @@ export function forceContextCompaction(
     const conciseText = formatCompactedSummary(summaries, "concise");
     compactedMessages.push(new HumanMessage(conciseText));
   }
-  compactedMessages.push(...keepFull);
+  compactedMessages.push(...finalKeepFull);
 
   return {
     messages: compactedMessages,

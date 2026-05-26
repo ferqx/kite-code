@@ -311,7 +311,7 @@ export function messageWithSingleToolCall(
           "id" in call &&
           call.id === selectedCall.id,
       )
-    : message.additional_kwargs.tool_calls;
+    : [];
 
   const reasoningContent = message.additional_kwargs.reasoning_content as
     | string

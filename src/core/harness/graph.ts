@@ -355,6 +355,32 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 }
 
 /** 将 override 同步到 state.authorization / Sync override to state.authorization */
+/**
+ * Strip leading orphaned ToolMessages whose matching AIMessage is not present.
+ * Prevents the DeepSeek 400 error when compaction/slicing breaks tool_call/ToolMessage pairs.
+ */
+function ensureNoLeadingOrphans(messages: BaseMessage[]): BaseMessage[] {
+  const hasId = new Set<string>();
+  for (const msg of messages) {
+    if (msg instanceof AIMessage && Array.isArray(msg.tool_calls)) {
+      for (const tc of msg.tool_calls) {
+        if (tc.id) hasId.add(tc.id);
+      }
+    }
+  }
+  // Strip leading ToolMessages that have no matching AIMessage present
+  let start = 0;
+  while (start < messages.length) {
+    const msg = messages[start];
+    if (msg instanceof ToolMessage && !hasId.has(msg.tool_call_id)) {
+      start++;
+    } else {
+      break;
+    }
+  }
+  return messages.slice(start);
+}
+
 function authorizationForState(
   state: CodeAgentState,
   override?: AuthorizationOverride,
@@ -420,7 +446,10 @@ async function invokeModel(
         delayMs: 0,
       });
       const summaryMsg = await generateLLMSummary(model, state.messages);
-      const llmMessages = [new HumanMessage(summaryMsg), ...compacted.messages.slice(-8)];
+      const tail = compacted.messages.slice(-8);
+      // Ensure the tail doesn't start with orphaned ToolMessages from the slice
+      const safeTail = ensureNoLeadingOrphans(tail);
+      const llmMessages = [new HumanMessage(summaryMsg), ...safeTail];
       const llmRetry = rebuildMessages("agent", state, llmMessages, skills);
       response = await bindAgentTools(model, tools)
         .invoke(llmRetry) as AIMessage;
