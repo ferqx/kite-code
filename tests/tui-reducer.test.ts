@@ -394,7 +394,7 @@ describe("eventReducer (blocks model)", () => {
     });
     test("NEW_SESSION clears blocks, resets state, increments sessionKey", () => {
       let s = fresh();
-      s = { ...s, blocks: [{ id: 1, kind: "text", content: "old" }], compacting: true, ctrlCPressed: true, interrupt: { kind: "approval", blockId: 1 }, showHelp: true, showModelSelector: true, leaderPending: true, exitRequested: true };
+      s = { ...s, blocks: [{ id: 1, kind: "text", content: "old" }], compacting: true, ctrlCPressed: true, interrupt: { kind: "approval", blockId: 1 }, showHelp: true, showModelSelector: true, exitRequested: true };
       s = dispatch(s, { type: "NEW_SESSION", threadId: "new-session-1" });
       expect(s.blocks).toHaveLength(0);
       expect(s.interrupt).toBeNull();
@@ -403,16 +403,15 @@ describe("eventReducer (blocks model)", () => {
       expect(s.exitRequested).toBe(false);
       expect(s.showHelp).toBe(false);
       expect(s.showModelSelector).toBe(false);
-      expect(s.leaderPending).toBe(false);
       expect(s.sessionKey).toBe(1);
       expect(s.activeSessionId).toBe("new-session-1");
       expect(s.sessions).toHaveLength(1);
       expect(s.sessions[0].threadId).toBe("new-session-1");
       expect(s.sessions[0].active).toBe(true);
     });
-    test("OPEN_EDITOR sets editorRequested", () => {
+    test("EXPAND_INPUT sets editorRequested", () => {
       let s = fresh();
-      s = dispatch(s, { type: "OPEN_EDITOR" });
+      s = dispatch(s, { type: "EXPAND_INPUT" });
       expect(s.editorRequested).toBe(true);
     });
     test("EDITOR_DONE clears editorRequested", () => {
@@ -564,18 +563,6 @@ describe("eventReducer (blocks model)", () => {
       const next = dispatch(s, { type: "LOAD_SESSION_PENDING", threadId: "t1" });
       // LOAD_SESSION_PENDING returns the same state (identity preservation)
       expect(next).toBe(s);
-    });
-  });
-
-  describe("LEADER_PENDING / LEADER_CANCEL", () => {
-    test("LEADER_PENDING sets leaderPending=true", () => {
-      const s = dispatch(fresh(), { type: "LEADER_PENDING" });
-      expect(s.leaderPending).toBe(true);
-    });
-    test("LEADER_CANCEL clears leaderPending", () => {
-      let s = fresh(); s = { ...s, leaderPending: true };
-      s = dispatch(s, { type: "LEADER_CANCEL" });
-      expect(s.leaderPending).toBe(false);
     });
   });
 
