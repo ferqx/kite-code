@@ -97,6 +97,19 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
         }
         mappedIndex++;
       }
+
+      // DeepSeek all-or-nothing requirement: if ANY assistant message has reasoning_content,
+      // ALL assistant messages must have it. Otherwise API returns 400.
+      const anyReasoning = request.messages.some(
+        (m: any) => m.role === "assistant" && typeof m.reasoning_content === "string" && m.reasoning_content.length > 0,
+      );
+      if (anyReasoning) {
+        for (const m of request.messages) {
+          if (m.role === "assistant" && (!("reasoning_content" in m) || m.reasoning_content === undefined)) {
+            m.reasoning_content = "";
+          }
+        }
+      }
     }
     return withTransientModelRetry(
       () => super.completionWithRetry(request, requestOptions),
