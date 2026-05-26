@@ -4,6 +4,7 @@ import { Text } from "ink";
 import Footer from "../src/app/tui/Footer";
 import Header from "../src/app/tui/Header";
 import StatusBar from "../src/app/tui/StatusBar";
+import StatsLine from "../src/app/tui/StatsLine";
 import DiffPreview from "../src/app/tui/DiffPreview";
 import StartupScreen from "../src/app/tui/components/StartupScreen";
 import MarkdownBlock from "../src/app/tui/components/MarkdownBlock";
@@ -170,54 +171,6 @@ describe("StatusBar", () => {
     expect(lastFrame()).toContain("Building");
   });
 
-  test("shows model name", () => {
-    const status = fakeStatus({ modelName: "gpt-5" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("gpt-5");
-  });
-
-  test("shows thinking mode", () => {
-    const status = fakeStatus({ thinkingMode: "detailed" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("think: detailed");
-  });
-
-  test("shows cache hit rate", () => {
-    const status = fakeStatus({ cacheHitRate: 75 });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("cache: 75%");
-  });
-
-  test("shows token count with locale formatting", () => {
-    const status = fakeStatus({ totalTokens: 10000 });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("10,000");
-  });
-
-  test("shows [full] for full_access auth", () => {
-    const status = fakeStatus({ authorization: "full_access" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("[full]");
-  });
-
-  test("shows [safe] for default auth", () => {
-    const status = fakeStatus({ authorization: "default" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("[safe]");
-  });
-
-  test("shows rw for write access", () => {
-    const status = fakeStatus({ workspaceAccess: "write" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("rw");
-  });
-
-  test("shows ro for read-only access", () => {
-    const status = fakeStatus({ workspaceAccess: "read-only" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("ro");
-  });
-
   test("shows plan progress when plan is active", () => {
     const status = fakeStatus({
       plan: {
@@ -239,29 +192,95 @@ describe("StatusBar", () => {
     expect(lastFrame()).toContain("tools");
   });
 
-  test("shows dashes when no plan and no currentNode", () => {
+  test("shows empty when no plan and no currentNode", () => {
     const status = fakeStatus({ plan: null, currentNode: null });
     const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("—");
+    expect(lastFrame()).not.toContain("—");
+  });
+
+  test("shows compacting indicator", () => {
+    const status = fakeStatus();
+    const { lastFrame } = render(<StatusBar status={status} compacting timerKey={0} onTick={noop} running />);
+    expect(lastFrame()).toContain("Compacting");
+  });
+
+  test("status bar is single row", () => {
+    const status = fakeStatus();
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
+    const lines = lastFrame()!.split("\n").filter(Boolean);
+    expect(lines!.length).toBe(1);
+  });
+});
+
+describe("StatsLine", () => {
+  const elapsedRef = { current: 0 };
+  const footerProps = {
+    status: fakeStatus(),
+    running: false,
+    compacting: false,
+    thinkingVisible: true,
+    timerKey: 0,
+    elapsedRef,
+  };
+
+  test("shows model name", () => {
+    const status = fakeStatus({ modelName: "gpt-5" });
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    expect(lastFrame()).toContain("gpt-5");
+  });
+
+  test("shows thinking mode", () => {
+    const status = fakeStatus({ thinkingMode: "detailed" });
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    expect(lastFrame()).toContain("think: detailed");
+  });
+
+  test("shows cache hit rate", () => {
+    const status = fakeStatus({ cacheHitRate: 75 });
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    expect(lastFrame()).toContain("cache: 75%");
+  });
+
+  test("shows token count formatted", () => {
+    const status = fakeStatus({ totalTokens: 10000 });
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    expect(lastFrame()).toContain("10.0k");
+  });
+
+  test("shows [完全] for full_access auth", () => {
+    const status = fakeStatus({ authorization: "full_access" });
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    expect(lastFrame()).toContain("[完全]");
+  });
+
+  test("shows [安全] for default auth", () => {
+    const status = fakeStatus({ authorization: "default" });
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    expect(lastFrame()).toContain("[安全]");
+  });
+
+  test("shows rw for write access", () => {
+    const status = fakeStatus({ workspaceAccess: "write" });
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    expect(lastFrame()).toContain("rw");
+  });
+
+  test("shows ro for read-only access", () => {
+    const status = fakeStatus({ workspaceAccess: "read-only" });
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    expect(lastFrame()).toContain("ro");
   });
 
   test("shows timer when running", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    expect(lastFrame()).toContain("00:00");
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={42} />);
+    expect(lastFrame()).toContain("00:42");
   });
 
   test("hides timer when not running", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running={false} />);
-    expect(lastFrame()).not.toContain("00:00");
-  });
-
-  test("status bar is 2 rows", () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
-    const lines = lastFrame()!.split("\n").filter(Boolean);
-    expect(lines!.length).toBe(2);
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running={false} elapsed={0} />);
+    expect(lastFrame()).not.toContain("│ 00:");
   });
 });
 
@@ -399,13 +418,11 @@ describe("HelpPanel", () => {
 describe("ModelSelector", () => {
   test("renders title and model list", () => {
     const { lastFrame } = render(
-      <ModelSelector currentModel="deepseek-v4" onSelect={noop} onClose={noop} />,
+      <ModelSelector currentModel="deepseek-chat" onSelect={noop} onClose={noop} />,
     );
     const frame = lastFrame();
     expect(frame).toContain("Select Model");
     expect(frame).toContain("DeepSeek V4");
-    expect(frame).toContain("DeepSeek V3");
-    expect(frame).toContain("OpenAI GPT-4o");
     expect(frame).toContain("Claude Sonnet 4");
   });
 
