@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, Static } from "ink";
 import { useInput } from "ink";
 import type { OutputBlock } from "./types";
 import MarkdownBlock from "./components/MarkdownBlock";
@@ -218,28 +218,39 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
   }
 }
 
-export default function OutputArea({ blocks, onToggleReason, thinkingVisible, overlayActive }: OutputAreaProps) {
+const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, overlayActive }: OutputAreaProps) {
   const t = useTheme();
-  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
-  const focusedIndexRef = useRef(focusedIndex);
-  focusedIndexRef.current = focusedIndex;
+
+  // ── Split: completed blocks → <Static>, active block → dynamic tree ──
+  // <Static> renders items once to the terminal scrollback buffer and skips
+  // them in the interactive render pass. This keeps the interactive tree small
+  // so Ink's reconciler + yoga-layout + diff run fast during typing.
+  let lastStreamingIdx = -1;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (blocks[i].kind === "text" && (blocks[i] as { streaming?: boolean }).streaming) {
+      lastStreamingIdx = i;
+      break;
+    }
+  }
+  const completedBlocks = lastStreamingIdx >= 0 ? blocks.slice(0, lastStreamingIdx) : blocks;
+  const activeBlocks = lastStreamingIdx >= 0 ? blocks.slice(lastStreamingIdx) : [];
+
+  // Arrow key navigation for the dynamic (active) section only
+  const [focusedActiveIdx, setFocusedActiveIdx] = useState<number | null>(null);
+  const focusedRef = useRef(focusedActiveIdx);
+  focusedRef.current = focusedActiveIdx;
 
   useInput((_input: unknown, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
     if (overlayActive) return;
+    if (activeBlocks.length === 0) return;
     if (key.upArrow) {
-      setFocusedIndex((prev) => {
-        if (blocks.length === 0) return null;
-        return Math.max(0, (prev ?? blocks.length) - 1);
-      });
+      setFocusedActiveIdx((prev) => Math.max(0, (prev ?? activeBlocks.length) - 1));
     }
     if (key.downArrow) {
-      setFocusedIndex((prev) => {
-        if (blocks.length === 0) return null;
-        return Math.min(blocks.length - 1, (prev ?? -1) + 1);
-      });
+      setFocusedActiveIdx((prev) => Math.min(activeBlocks.length - 1, (prev ?? -1) + 1));
     }
-    if (key.return && focusedIndexRef.current !== null && focusedIndexRef.current < blocks.length) {
-      const block = blocks[focusedIndexRef.current];
+    if (key.return && focusedRef.current !== null && focusedRef.current < activeBlocks.length) {
+      const block = activeBlocks[focusedRef.current];
       if (block && block.kind === "reason") {
         onToggleReason(block.id);
       }
@@ -248,10 +259,17 @@ export default function OutputArea({ blocks, onToggleReason, thinkingVisible, ov
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {blocks.map((block, i) => {
-        const isFocused = i === focusedIndex;
-        return renderBlock(block, isFocused, thinkingVisible, i, blocks[i - 1]);
+      <Static items={completedBlocks}>
+        {(block, index) => renderBlock(block, false, thinkingVisible, index, index > 0 ? completedBlocks[index - 1] : undefined)}
+      </Static>
+      {/* Active blocks stay in the interactive tree for live updates */}
+      {activeBlocks.map((block, i) => {
+        const isFocused = i === focusedActiveIdx;
+        const prevBlock = i > 0 ? activeBlocks[i - 1] : (completedBlocks.length > 0 ? completedBlocks[completedBlocks.length - 1] : undefined);
+        return renderBlock(block, isFocused, thinkingVisible, 0, prevBlock);
       })}
     </Box>
   );
-}
+});
+
+export default OutputArea;
