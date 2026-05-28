@@ -2,8 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "jsonc-parser";
 import { z } from "zod";
-import { defaultConfigPath } from "./paths";
+import { defaultConfigPath, projectConfigPath } from "./paths";
 import type { McpServerConfig } from "../mcp/types";
+
+// ── Zod schemas ──
 
 const providerSchema = z.object({
   type: z.enum(["deepseek", "openai", "openai-compatible", "ollama"]).optional(),
@@ -11,15 +13,39 @@ const providerSchema = z.object({
   baseURL: z.string().url().optional(),
 });
 
-const configSchema = z.object({
-  provider: z.record(z.string(), providerSchema),
+const modelEntrySchema = z.object({
+  provider: z.string().min(1),
+  name: z.string().min(1),
+  label: z.string().optional(),
+  default: z.boolean().optional(),
+});
+
+const mcpServerSchema = z.object({
+  type: z.enum(["stdio", "http"]).optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  url: z.string().optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  risk: z.enum(["read"]).optional(),
+});
+
+export const configSchema = z.object({
+  provider: z.record(z.string(), providerSchema).optional().default({}),
   model: z.object({
     default: z.object({
       provider: z.string().min(1),
       name: z.string().min(1),
     }),
-  }),
+  }).optional(),
+  models: z.array(modelEntrySchema).optional(),
+  theme: z.enum(["dark", "light"]).optional(),
+  mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });
+
+export type OpenpxConfig = z.infer<typeof configSchema>;
+
+// ── Types ──
 
 export type ModelProviderType = "deepseek" | "openai" | "openai-compatible" | "ollama";
 
@@ -49,19 +75,86 @@ export interface LoadAgentConfigOptions {
   modelName?: string;
 }
 
-export { defaultConfigPath, defaultCheckpointPath, editorInputPath, sessionExportPath } from "./paths";
+export { defaultConfigPath, projectConfigPath, defaultCheckpointPath, editorInputPath, sessionExportPath } from "./paths";
+
+// ── Defaults (DeepSeek) ──
+
+const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
+  { provider: "deepseek", name: "deepseek-v4-fast", label: "DeepSeek V4 Fast", isDefault: true },
+  { provider: "deepseek", name: "deepseek-v4-pro", label: "DeepSeek V4 Pro", isDefault: false },
+];
+
+// ── Config file loading ──
+
+/** Read and parse a single config file. Returns null if not found. */
+function readConfigFile(path: string): OpenpxConfig | null {
+  if (!existsSync(path)) return null;
+  const raw = readFileSync(path, "utf8");
+  return configSchema.parse(parse(raw));
+}
+
+/** Merge project config over user config. */
+function mergeConfigs(user: OpenpxConfig, project: OpenpxConfig): OpenpxConfig {
+  return {
+    provider: { ...user.provider, ...project.provider },
+    model: project.model ?? user.model,
+    models: project.models ?? user.models,
+    theme: project.theme ?? user.theme,
+    mcpServers: { ...user.mcpServers, ...project.mcpServers },
+  };
+}
+
+/**
+ * Load and merge user-level (~/.openpx/openpx.jsonc) + project-level (.openpx/openpx.jsonc).
+ * Project overrides user.
+ * When explicitPath is given, loads only that file (no merge).
+ * Falls back to DeepSeek defaults when no config file exists.
+ */
+function loadConfig(workspace?: string, explicitPath?: string): OpenpxConfig {
+  if (explicitPath) {
+    const cfg = readConfigFile(explicitPath);
+    if (!cfg) {
+      throw new Error(`OpenPX config file not found: ${explicitPath}`);
+    }
+    return cfg;
+  }
+  const user = readConfigFile(defaultConfigPath());
+  const project = readConfigFile(projectConfigPath(workspace));
+  if (user && project) return mergeConfigs(user, project);
+  if (user) return user;
+  if (project) return project;
+  // No config file → DeepSeek defaults
+  return defaultOpenpxConfig();
+}
+
+function defaultOpenpxConfig(): OpenpxConfig {
+  return {
+    provider: {
+      deepseek: {
+        type: "deepseek",
+        baseURL: "https://api.deepseek.com/v1",
+      },
+    },
+    model: {
+      default: {
+        provider: "deepseek",
+        name: "deepseek-v4-fast",
+      },
+    },
+    theme: "dark",
+    mcpServers: {},
+  };
+}
+
+// ── Agent config ──
 
 /** 加载并解析 Agent 配置 / Load and parse agent configuration */
 export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConfig {
-  const configPath = options.configPath ?? defaultConfigPath();
-  if (!existsSync(configPath)) {
-    throw new Error(`OpenPX config file not found: ${configPath}`);
-  }
+  const { configPath } = options;
+  const cfg = loadConfig(process.cwd(), configPath);
 
-  const raw = readFileSync(configPath, "utf8");
-  const parsed = configSchema.parse(parse(raw));
-  const providerName = options.providerName ?? parsed.model.default.provider;
-  const provider = parsed.provider[providerName] ?? builtInProvider(providerName);
+  const providerName = options.providerName ?? cfg.model?.default?.provider ?? "deepseek";
+  const provider = cfg.provider?.[providerName] ?? builtInProvider(providerName);
 
   if (!provider) {
     throw new Error(`Model provider '${providerName}' is not configured`);
@@ -72,28 +165,23 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
   return {
     apiKey: resolveProviderApiKey(providerName, providerType, provider.apiKey),
     baseURL: resolveProviderBaseURL(providerName, providerType, provider.baseURL),
-    modelName: options.modelName ?? parsed.model.default.name,
+    modelName: options.modelName ?? cfg.model?.default?.name ?? "deepseek-v4-fast",
     providerName,
     providerType,
   };
 }
 
 function inferProviderType(providerName: string): ModelProviderType {
-  if (providerName === "deepseek") {
-    return "deepseek";
-  }
-  if (providerName === "ollama") {
-    return "ollama";
-  }
+  if (providerName === "deepseek") return "deepseek";
+  if (providerName === "ollama") return "ollama";
   return "openai-compatible";
 }
 
 function builtInProvider(
   providerName: string,
 ): z.infer<typeof providerSchema> | null {
-  if (providerName === "ollama") {
-    return { type: "ollama" };
-  }
+  if (providerName === "ollama") return { type: "ollama" };
+  if (providerName === "deepseek") return { type: "deepseek", baseURL: "https://api.deepseek.com/v1" };
   return null;
 }
 
@@ -102,13 +190,12 @@ function resolveProviderApiKey(
   providerType: ModelProviderType,
   apiKey: string | undefined,
 ): string {
-  if (apiKey) {
-    return apiKey;
-  }
-  if (providerType === "ollama") {
-    return "";
-  }
-  throw new Error(`Model provider '${providerName}' requires apiKey`);
+  if (apiKey) return apiKey;
+  if (providerType === "ollama") return "";
+  // Try env var: PROVIDERNAME_API_KEY
+  const envKey = process.env[`${providerName.toUpperCase()}_API_KEY`];
+  if (envKey) return envKey;
+  throw new Error(`Model provider '${providerName}' requires apiKey (set ${providerName.toUpperCase()}_API_KEY)`);
 }
 
 function resolveProviderBaseURL(
@@ -116,14 +203,16 @@ function resolveProviderBaseURL(
   providerType: ModelProviderType,
   baseURL: string | undefined,
 ): string {
-  if (baseURL) {
-    return baseURL;
-  }
-  if (providerType === "ollama") {
-    return "http://localhost:11434";
-  }
+  if (baseURL) return baseURL;
+  if (providerType === "ollama") return "http://localhost:11434";
+  if (providerType === "deepseek") return "https://api.deepseek.com/v1";
+  // Try env var: PROVIDERNAME_BASE_URL
+  const envURL = process.env[`${providerName.toUpperCase()}_BASE_URL`];
+  if (envURL) return envURL;
   throw new Error(`Model provider '${providerName}' requires baseURL`);
 }
+
+// ── MCP config ──
 
 /** MCP configuration result */
 export interface McpConfig {
@@ -132,34 +221,17 @@ export interface McpConfig {
 
 /**
  * Load MCP server configurations from:
- * 1. openpx.jsonc -> mcpServers section
- * 2. .mcp.json in project root (merged, doesn't override same-name servers)
+ * 1. openpx.jsonc (user + project merged) -> mcpServers section
+ * 2. .mcp.json in project root (merged, project mcp doesn't override same-name servers)
  */
 export function loadMcpConfig(configPath?: string): McpConfig {
   const servers: Record<string, McpServerConfig> = {};
 
-  // 1. openpx.jsonc
-  const primaryPath = configPath ?? defaultConfigPath();
-  if (existsSync(primaryPath)) {
-    const raw = readFileSync(primaryPath, "utf8");
-    const parsed = parse(raw);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "mcpServers" in (parsed as object)
-    ) {
-      const mcpServers = (parsed as Record<string, unknown>).mcpServers;
-      if (mcpServers && typeof mcpServers === "object") {
-        for (const [name, cfg] of Object.entries(
-          mcpServers as Record<string, unknown>,
-        )) {
-          if (cfg && typeof cfg === "object") {
-            servers[name] = normalizeMcpServerConfig(
-              cfg as Record<string, unknown>,
-            );
-          }
-        }
-      }
+  // 1. Merged openpx.jsonc
+  const cfg = configPath ? readConfigFile(configPath) : loadConfig();
+  if (cfg?.mcpServers) {
+    for (const [name, raw] of Object.entries(cfg.mcpServers)) {
+      servers[name] = normalizeMcpServerConfig(raw as Record<string, unknown>);
     }
   }
 
@@ -175,12 +247,12 @@ export function loadMcpConfig(configPath?: string): McpConfig {
     ) {
       const mcpServers = (parsed as Record<string, unknown>).mcpServers;
       if (mcpServers && typeof mcpServers === "object") {
-        for (const [name, cfg] of Object.entries(
+        for (const [name, cfgEntry] of Object.entries(
           mcpServers as Record<string, unknown>,
         )) {
-          if (!servers[name] && cfg && typeof cfg === "object") {
+          if (!servers[name] && cfgEntry && typeof cfgEntry === "object") {
             servers[name] = normalizeMcpServerConfig(
-              cfg as Record<string, unknown>,
+              cfgEntry as Record<string, unknown>,
             );
           }
         }
@@ -240,10 +312,9 @@ function normalizeMcpServerConfig(
   return config;
 }
 
-/**
- * Expand environment variable references in a string.
- * Supports ${VAR} and ${VAR:-default} syntax.
- */
+// ── Available models ──
+
+/** 可用模型 / Available model */
 export interface AvailableModel {
   provider: string;
   name: string;
@@ -251,34 +322,33 @@ export interface AvailableModel {
   isDefault: boolean;
 }
 
-function fallbackModels(): AvailableModel[] {
-  return [
-    { provider: "deepseek", name: "deepseek-chat", label: "DeepSeek V4", isDefault: true },
-    { provider: "deepseek", name: "deepseek-reasoner", label: "DeepSeek R1", isDefault: false },
-    { provider: "openai", name: "gpt-4o", label: "GPT-4o", isDefault: false },
-    { provider: "anthropic", name: "claude-sonnet-4-20250514", label: "Claude Sonnet 4", isDefault: false },
-  ];
-}
-
 export function listAvailableModels(configPath?: string): AvailableModel[] {
-  const path = configPath ?? defaultConfigPath();
-  if (!existsSync(path)) return fallbackModels();
-  try {
-    const raw = readFileSync(path, "utf8");
-    const parsed = parse(raw) as Record<string, unknown>;
-    const models = parsed.models as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(models) || models.length === 0) return fallbackModels();
-    return models.map((m) => ({
-      provider: String(m.provider ?? ""),
-      name: String(m.name ?? ""),
-      label: String(m.label ?? m.name ?? ""),
-      isDefault: Boolean(m.default),
-    }));
-  } catch {
-    return fallbackModels();
-  }
+  const cfg = configPath ? readConfigFile(configPath) : loadConfig();
+  if (!cfg?.models || cfg.models.length === 0) return DEFAULT_DEEPSEEK_MODELS;
+  return cfg.models.map((m) => ({
+    provider: m.provider,
+    name: m.name,
+    label: m.label ?? m.name,
+    isDefault: m.default ?? false,
+  }));
 }
 
+// ── Theme ──
+
+export type ThemeName = "dark" | "light";
+
+/** Read theme from config. Falls back to "dark". */
+export function loadTheme(workspace?: string): ThemeName {
+  const cfg = loadConfig(workspace);
+  return cfg?.theme ?? "dark";
+}
+
+// ── Env var expansion ──
+
+/**
+ * Expand environment variable references in a string.
+ * Supports ${VAR} and ${VAR:-default} syntax.
+ */
 export function expandEnvVars(value: string): string {
   return value.replace(
     /\$\{(\w+)(?::-([^}]*))?\}/g,

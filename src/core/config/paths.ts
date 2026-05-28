@@ -9,6 +9,10 @@ export function defaultConfigPath(): string {
   return join(OPENPX_DIR, "openpx.jsonc");
 }
 
+export function projectConfigPath(workspace?: string): string {
+  return join(workspace ?? process.cwd(), ".openpx", "openpx.jsonc");
+}
+
 export function defaultCheckpointPath(): string {
   return join(OPENPX_DIR, "checkpoints.sqlite");
 }

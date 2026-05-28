@@ -96,6 +96,7 @@ import { listAvailableModels } from "@/core/config";
 
 function modelListText(currentModel: string): string {
   const available = listAvailableModels();
+  if (available.length === 0) return "没有可用模型，请在 openpx.jsonc 中配置 models 列表";
   const lines = ["── Available Models ──"];
   for (const m of available) {
     const marker = m.name === currentModel ? " (current)" : "";

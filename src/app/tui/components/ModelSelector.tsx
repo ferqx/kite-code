@@ -28,7 +28,7 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
   const t = useTheme();
   const models: ModelOption[] = listAvailableModels().map(toModelOption);
   const [selected, setSelected] = useState(
-    Math.max(0, models.findIndex((m) => m.id === currentModel))
+    models.length > 0 ? Math.max(0, models.findIndex((m) => m.id === currentModel)) : 0
   );
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -37,6 +37,7 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
 
   useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) => {
     if (key.escape) { onClose(); return; }
+    if (models.length === 0) return;
     if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
     if (key.downArrow) setSelected((s) => Math.min(models.length - 1, s + 1));
     if (key.return) {
@@ -45,6 +46,18 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
       onClose();
     }
   });
+
+  if (models.length === 0) {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
+        <Text bold color={t.primary}>选择模型</Text>
+        <Box marginY={1}>
+          <Text color={t.muted}>没有可用模型，请在 openpx.jsonc 中配置 models 列表</Text>
+        </Box>
+        <Text color={t.dim}>Esc 关闭</Text>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>

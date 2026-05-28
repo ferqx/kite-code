@@ -1,9 +1,6 @@
 import React from "react";
 import { render } from "ink";
-import { loadAgentConfig, loadMcpConfig, editorInputPath, type AgentConfig } from "@/core/config/index";
-import { existsSync, readFileSync } from "node:fs";
-import { parse as parseJsonc } from "jsonc-parser";
-import { defaultConfigPath } from "@/core/config/paths";
+import { loadAgentConfig, loadMcpConfig, loadTheme, editorInputPath, type AgentConfig } from "@/core/config/index";
 import { ThemeContext, darkTheme, lightTheme } from "./theme";
 import { McpManager } from "@/core/mcp";
 import { createSandboxExecutor } from "@/core/sandbox/index";
@@ -39,17 +36,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const { state, dispatch, onToggleReason } = useTuiState();
   const workspace = process.cwd();
   const config = React.useMemo(() => loadAgentConfig(), []);
-  const theme = React.useMemo(() => {
-    try {
-      const configPath = defaultConfigPath();
-      if (existsSync(configPath)) {
-        const raw = readFileSync(configPath, "utf8");
-        const parsed = parseJsonc(raw) as Record<string, unknown>;
-        if (parsed.theme === "light") return lightTheme;
-      }
-    } catch { /* use default */ }
-    return darkTheme;
-  }, []);
+  const theme = React.useMemo(() => (loadTheme(workspace) === "light" ? lightTheme : darkTheme), []);
   const [initialized, setInitialized] = React.useState(false);
   const prevInterruptRef = React.useRef(state.interrupt);
   const conversationHistoryRef = React.useRef<string[]>([]);
