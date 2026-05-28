@@ -406,13 +406,12 @@ describe("ModelSelector", () => {
     );
     const frame = lastFrame();
     expect(frame).toContain("选择模型");
-    expect(frame).toContain("DeepSeek V4");
-    expect(frame).toContain("Claude Sonnet 4");
+    expect(frame).toContain("deepseek-v4-flash");
   });
 
   test("marks current model", () => {
     const { lastFrame } = render(
-      <ModelSelector currentModel="gpt-4o" onSelect={noop} onClose={noop} />,
+      <ModelSelector currentModel="deepseek-v4-flash" onSelect={noop} onClose={noop} />,
     );
     expect(lastFrame()).toContain("(current)");
   });

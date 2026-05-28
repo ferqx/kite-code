@@ -13,9 +13,7 @@ export interface ModelOption {
 }
 
 function toModelOption(m: AvailableModel): ModelOption {
-  const parts: string[] = [m.label];
-  if (m.isDefault) parts.push("default");
-  return { id: m.name, name: m.label, description: parts.length > 1 ? "default" : "" };
+  return { id: m.name, name: m.name, description: m.isDefault ? "default" : "" };
 }
 
 interface ModelSelectorProps {

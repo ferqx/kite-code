@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import type { SkillManifest } from "@/core/skills/types";
+import { listAvailableModels } from "@/core/config";
 
 export interface SlashCommandDef {
   name: string;
@@ -23,7 +24,6 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
 ];
 
 export const SLASH_COMMANDS = SLASH_COMMAND_DEFS.map((c) => c.name);
-export const MODEL_NAMES = ["deepseek-v4", "deepseek-v3", "gpt-4o", "claude-sonnet-4"];
 
 export interface SuggestionItem {
   command: string;
@@ -49,7 +49,10 @@ export function useSlashSuggestions(
     const modelMatch = inputValue.match(/^\/model\s+(\S*)$/i);
     if (modelMatch) {
       const partial = modelMatch[1].toLowerCase();
-      const models = MODEL_NAMES.filter((m) => m.toLowerCase().startsWith(partial));
+      const available = listAvailableModels();
+      const models = available
+        .map((m) => m.name)
+        .filter((n) => n.toLowerCase().startsWith(partial));
       if (models.length === 0) return null;
       return {
         kind: "model",

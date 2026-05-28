@@ -33,9 +33,9 @@ export interface TuiBootstrapProps {
 }
 
 export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
-  const { state, dispatch, onToggleReason } = useTuiState();
   const workspace = process.cwd();
   const config = React.useMemo(() => loadAgentConfig(), []);
+  const { state, dispatch, onToggleReason } = useTuiState(config.modelName);
   const theme = React.useMemo(() => (loadTheme(workspace) === "light" ? lightTheme : darkTheme), []);
   const [initialized, setInitialized] = React.useState(false);
   const prevInterruptRef = React.useRef(state.interrupt);
@@ -679,7 +679,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   }, [provider]);
 
   if (!initialized) {
-    return <StartupScreen modelName={config.modelName ?? "deepseek-v4"} workspace={workspace} />;
+    return <StartupScreen modelName={config.modelName} workspace={workspace} />;
   }
 
   return (

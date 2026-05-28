@@ -80,8 +80,8 @@ export { defaultConfigPath, projectConfigPath, defaultCheckpointPath, editorInpu
 // ── Defaults (DeepSeek) ──
 
 const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
-  { provider: "deepseek", name: "deepseek-v4-fast", label: "DeepSeek V4 Fast", isDefault: true },
-  { provider: "deepseek", name: "deepseek-v4-pro", label: "DeepSeek V4 Pro", isDefault: false },
+  { provider: "deepseek", name: "deepseek-v4-flash", isDefault: true },
+  { provider: "deepseek", name: "deepseek-v4-pro", isDefault: false },
 ];
 
 // ── Config file loading ──
@@ -318,19 +318,26 @@ function normalizeMcpServerConfig(
 export interface AvailableModel {
   provider: string;
   name: string;
-  label: string;
   isDefault: boolean;
 }
 
 export function listAvailableModels(configPath?: string): AvailableModel[] {
   const cfg = configPath ? readConfigFile(configPath) : loadConfig();
-  if (!cfg?.models || cfg.models.length === 0) return DEFAULT_DEEPSEEK_MODELS;
-  return cfg.models.map((m) => ({
-    provider: m.provider,
-    name: m.name,
-    label: m.label ?? m.name,
-    isDefault: m.default ?? false,
-  }));
+  if (cfg?.models && cfg.models.length > 0) {
+    return cfg.models.map((m) => ({
+      provider: m.provider,
+      name: m.name,
+      isDefault: m.default ?? false,
+    }));
+  }
+  // 没有 models 数组时，只返回 model.default 配置的模型
+  const defaultEntry = cfg?.model?.default;
+  if (!defaultEntry) return DEFAULT_DEEPSEEK_MODELS;
+  return [{
+    provider: defaultEntry.provider,
+    name: defaultEntry.name,
+    isDefault: true,
+  }];
 }
 
 // ── Theme ──

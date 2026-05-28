@@ -9,8 +9,8 @@ import {
   useSlashSuggestions,
   SLASH_COMMANDS,
   SLASH_COMMAND_DEFS,
-  MODEL_NAMES,
 } from "@/app/tui/hooks/useSlashSuggestions";
+import { listAvailableModels } from "@/core/config";
 import { useTheme } from "@/app/tui/theme";
 import { useOverlayHeight } from "../hooks/useOverlayHeight";
 
@@ -80,7 +80,8 @@ function completeSlash(input: string): string | null {
 
   if (cmd === "model" && rest.length >= 1) {
     const partial = rest[0].toLowerCase();
-    const matches = MODEL_NAMES.filter((m) => m.startsWith(partial));
+    const available = listAvailableModels().map((m) => m.name);
+    const matches = available.filter((m) => m.startsWith(partial));
     if (matches.length === 1) return "/model " + matches[0];
     if (matches.length > 1) {
       const prefix = commonPrefix(matches);

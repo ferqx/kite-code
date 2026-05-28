@@ -69,7 +69,7 @@ export function useSlashCommand(
       case "model":
         if (action.name) {
           const available = listAvailableModels();
-          const matched = available.find((m) => m.name.toLowerCase() === action.name!.toLowerCase() || m.label.toLowerCase() === action.name!.toLowerCase());
+          const matched = available.find((m) => m.name.toLowerCase() === action.name!.toLowerCase());
           if (matched) {
             dispatch({ type: "SELECT_MODEL", modelId: matched.name });
           } else {

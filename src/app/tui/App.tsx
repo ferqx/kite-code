@@ -100,7 +100,7 @@ function modelListText(currentModel: string): string {
   const lines = ["── Available Models ──"];
   for (const m of available) {
     const marker = m.name === currentModel ? " (current)" : "";
-    lines.push(`  ${m.name.padEnd(28)} ${m.label}${marker}`);
+    lines.push(`  ${m.name}${marker}`);
   }
   lines.push("", "Use /model to open selector, /model <name> to switch");
   return lines.join("\n");
@@ -238,6 +238,10 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
         }
         case "final": {
           if (event.data.length === 0) return state;
+          // 如果最后一个 text 块内容相同，说明 text 事件已经流式输出了最终文本
+          // 避免重复创建相同的块
+          const lastBlock = state.blocks.at(-1);
+          if (lastBlock?.kind === "text" && lastBlock.content === event.data) return state;
           const block: OutputBlock = { id: nextId++, kind: "text", content: event.data };
           return { ...state, blocks: [...state.blocks, block] };
         }
@@ -718,8 +722,11 @@ export interface AppProps {
   children?: ReactNode;
 }
 
-export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
-  const [state, dispatch] = useReducer(eventReducer, initialState);
+export function useTuiState(initialModelName?: string): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
+  const initState = initialModelName
+    ? { ...initialState, status: { ...initialState.status, modelName: initialModelName } }
+    : initialState;
+  const [state, dispatch] = useReducer(eventReducer, initState);
   const onToggleReason = useCallback((id: number) => dispatch({ type: "TOGGLE_REASON", id }), [dispatch]);
   return { state, dispatch, onToggleReason };
 }
