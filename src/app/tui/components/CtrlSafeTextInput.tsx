@@ -135,6 +135,12 @@ function CtrlSafeTextInput({
 
   useInput(
     (input, key) => {
+      // Filter out CSI escape sequences (e.g., cursor position reports from terminal resize)
+      // These appear as sequences like "[20;1R" or "[6;1R" after ESC
+      if (/[\x1b]/.test(input) || /\[\d+;\d+[A-Z]/.test(input)) {
+        return;
+      }
+
       // Only block the 3 global Ctrl shortcuts (C/T/E); all other Ctrl+let
       // no-op (don't insert the char, don't execute anything — safe default)
       if (

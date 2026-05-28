@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
+import { ScrollList } from "ink-scroll-list";
 import CtrlSafeTextInput from "./CtrlSafeTextInput";
 import type { AtomicBlock } from "./CtrlSafeTextInput";
 import { useFileSearch } from "@/app/tui/hooks/useFileSearch";
@@ -11,6 +12,7 @@ import {
   MODEL_NAMES,
 } from "@/app/tui/hooks/useSlashSuggestions";
 import { useTheme } from "@/app/tui/theme";
+import { useOverlayHeight } from "../hooks/useOverlayHeight";
 
 export const PASTE_THRESHOLD = 100;
 
@@ -91,6 +93,7 @@ function completeSlash(input: string): string | null {
 
 export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef, onSlashSuggestionChange }: InputLineProps) {
   const t = useTheme();
+  const fileMaxHeight = useOverlayHeight(7);
   const [value, setValue] = useState("");
   const valueRef = useRef(value);
   valueRef.current = value;
@@ -476,24 +479,31 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       )}
 
       {/* @file search dropdown */}
-      {fileSearch.active && (
-        <Box flexDirection="column" borderStyle="round" borderColor={t.warning} paddingX={1} marginTop={1}>
-          <Text bold color={t.warning}>── Files matching @{fileSearch.query} ──</Text>
-          {fileSearch.results.map((f, i) => (
-            <Box key={f.path}>
-              <Text color={i === fileSearch.selectedIndex ? t.primary : t.muted}>
-                {i === fileSearch.selectedIndex ? "❯ " : "  "}
-                {f.name}
-              </Text>
-              <Text color={t.dim}> — {f.path}</Text>
-            </Box>
-          ))}
+      {fileSearch.active && (() => {
+        const listHeight = Math.max(3, fileMaxHeight - 2);
+        return (
+        <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginTop={1} flexGrow={1} maxHeight={fileMaxHeight}>
+          <Text bold color={t.primary}>文件匹配 @{fileSearch.query}</Text>
+          <Box flexGrow={1} maxHeight={listHeight}>
+            <ScrollList selectedIndex={fileSearch.selectedIndex} scrollAlignment="auto">
+              {fileSearch.results.map((f, i) => (
+                <Box key={f.path}>
+                  <Text color={i === fileSearch.selectedIndex ? t.primary : t.muted}>
+                    {i === fileSearch.selectedIndex ? "❯ " : "  "}
+                    {f.name}
+                  </Text>
+                  <Text color={t.dim}> — {f.path}</Text>
+                </Box>
+              ))}
+            </ScrollList>
+          </Box>
           {fileSearch.results.length === 0 && (
             <Text color={t.dim}>  No matching files</Text>
           )}
-          <Text color={t.dim}>Tab/Enter select  Esc dismiss</Text>
+          <Text color={t.dim}>Tab/Enter 选择  Esc 关闭</Text>
         </Box>
-      )}
+        );
+      })()}
     </Box>
   );
 }

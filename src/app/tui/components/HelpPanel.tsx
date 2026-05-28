@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
+import { ScrollList } from "ink-scroll-list";
 import { useTheme } from "@/app/tui/theme";
+import { useOverlayHeight } from "../hooks/useOverlayHeight";
 
 interface HelpPanelProps {
   onClose: () => void;
@@ -13,11 +15,10 @@ interface ShortcutGroup {
 }
 
 export default function HelpPanel({ onClose }: HelpPanelProps) {
-  useInput(() => {
-    onClose();
-  });
-
   const t = useTheme();
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const maxContentHeight = useOverlayHeight(8);
+
   const groups: ShortcutGroup[] = [
     {
       title: "Actions",
@@ -81,29 +82,51 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
     },
   ];
 
+  type FlatRow =
+    | { type: "header"; id: string; title: string }
+    | { type: "shortcut"; id: string; key: string; desc: string };
+
+  const flatRows: FlatRow[] = groups.flatMap((group, gi) => [
+    { type: "header" as const, id: `h-${gi}`, title: group.title },
+    ...group.shortcuts.map(([key, desc], si) => ({ type: "shortcut" as const, id: `s-${gi}-${si}`, key, desc })),
+  ]);
+
+  useInput((_input, key) => {
+    if (key.escape) { onClose(); return; }
+    if (key.upArrow) { setScrollOffset((s) => Math.max(0, s - 1)); return; }
+    if (key.downArrow) { setScrollOffset((s) => Math.min(flatRows.length - 1, s + 1)); return; }
+    onClose();
+  });
+
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
       <Text bold color={t.primary}>
-        ══ Keyboard Shortcuts ══
+        快捷键
       </Text>
 
-      {groups.map((group) => (
-        <Box key={group.title} flexDirection="column" marginTop={1}>
-          <Text bold color={t.warning}>
-            {group.title}
-          </Text>
-          {group.shortcuts.map(([key, desc]) => (
-            <Box key={key} paddingLeft={2}>
-              <Text color={t.primary}>{key.padEnd(18)}</Text>
-              <Text color={t.muted}>{desc}</Text>
-            </Box>
-          ))}
-        </Box>
-      ))}
+      <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
+        <ScrollList selectedIndex={scrollOffset} scrollAlignment="auto">
+          {flatRows.map((row, i) => {
+            if (row.type === "header") {
+              return (
+                <Box key={row.id} marginTop={i === 0 ? 0 : 1}>
+                  <Text bold color={t.warning}>{row.title}</Text>
+                </Box>
+              );
+            }
+            return (
+              <Box key={row.id} paddingLeft={2}>
+                <Text color={t.primary}>{row.key.padEnd(18)}</Text>
+                <Text color={t.muted}>{row.desc}</Text>
+              </Box>
+            );
+          })}
+        </ScrollList>
+      </Box>
 
-      <Text color={t.dim} marginTop={1}>
-        Press any key to close
-      </Text>
+      <Box marginTop={1}>
+        <Text color={t.dim}>Esc 关闭  ↑↓ 滚动</Text>
+      </Box>
     </Box>
   );
 }

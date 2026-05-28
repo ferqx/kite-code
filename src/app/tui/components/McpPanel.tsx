@@ -1,26 +1,43 @@
-import React from "react";
+import React, { useState } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
+import { ScrollList } from "ink-scroll-list";
 import type { McpManager } from "@/core/mcp";
 import type { McpServerState } from "@/core/mcp/index";
 import { useTheme } from "../theme";
+import { useOverlayHeight } from "../hooks/useOverlayHeight";
 
 interface McpPanelProps {
   manager: McpManager;
   onClose: () => void;
 }
 
+type FlatRow =
+  | { type: "server"; name: string; statusColor: string; statusIcon: string; transportLabel: string; toolCount: number }
+  | { type: "error"; message: string }
+  | { type: "tool"; serverName: string; toolName: string }
+  | { type: "more-tools"; count: number }
+  | { type: "resources-header" }
+  | { type: "resource"; name: string; uri: string }
+  | { type: "more-resources"; count: number }
+  | { type: "max-tools-notice"; max: number };
+
 export default function McpPanel({ manager, onClose }: McpPanelProps) {
-  useInput(() => {
+  const t = useTheme();
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const maxContentHeight = useOverlayHeight(8);
+  const states = manager.getServerStates();
+
+  useInput((_input, key) => {
+    if (key.escape) { onClose(); return; }
+    if (key.upArrow) { setScrollOffset((s) => Math.max(0, s - 1)); return; }
+    if (key.downArrow) { setScrollOffset((s) => Math.min(flatRows.length - 1, s + 1)); return; }
     onClose();
   });
 
-  const t = useTheme();
-  const states = manager.getServerStates();
-
   if (states.size === 0) {
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor={t.dim} paddingX={1} marginY={1}>
+      <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
         <Text bold color={t.primary}>
           MCP Servers
         </Text>
@@ -31,93 +48,120 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
           </Text>
         </Box>
         <Text color={t.dim}>
-          Press any key to close
+          Esc close
         </Text>
       </Box>
     );
   }
 
-  // Collect all tool entries for truncation at the panel level
-  // Show up to 10 tools total across all servers
+  // Flatten server/tool/resource structure into rows
   let totalToolsShown = 0;
   const MAX_TOOLS = 10;
+  const flatRows: FlatRow[] = [];
+
+  for (const [name, state] of states.entries()) {
+    const connected = state.connected;
+    const statusColor = connected ? t.success : t.error;
+    const statusIcon = connected ? "●" : "○";
+    const transportLabel = state.config.type === "http" ? "http" : "stdio";
+    const toolCount = state.tools.length;
+
+    flatRows.push({ type: "server", name, statusColor, statusIcon, transportLabel, toolCount });
+
+    if (!connected && state.error) {
+      flatRows.push({ type: "error", message: state.error });
+    }
+
+    const remaining = MAX_TOOLS - totalToolsShown;
+    const toolsToShow = state.tools.slice(0, Math.max(0, remaining));
+    const hiddenCount = Math.max(0, state.tools.length - toolsToShow.length);
+    totalToolsShown += toolsToShow.length;
+
+    for (const tool of toolsToShow) {
+      flatRows.push({ type: "tool", serverName: name, toolName: tool.name });
+    }
+    if (hiddenCount > 0) {
+      flatRows.push({ type: "more-tools", count: hiddenCount });
+    }
+
+    if (connected && state.resources && state.resources.length > 0) {
+      flatRows.push({ type: "resources-header" });
+      for (const r of state.resources.slice(0, 10)) {
+        flatRows.push({ type: "resource", name: r.name || r.uri, uri: r.uri });
+      }
+      if (state.resources.length > 10) {
+        flatRows.push({ type: "more-resources", count: state.resources.length - 10 });
+      }
+    }
+
+    if (totalToolsShown >= MAX_TOOLS) {
+      flatRows.push({ type: "max-tools-notice", max: MAX_TOOLS });
+    }
+  }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.dim} paddingX={1} marginY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
       <Text bold color={t.primary}>
         MCP Servers
       </Text>
 
-      {[...states.entries()].map(([name, state]: [string, McpServerState]) => {
-        const connected = state.connected;
-        const statusColor = connected ? t.success : t.error;
-        const statusIcon = connected ? "●" : "○";
-        const transportLabel = state.config.type === "http" ? "http" : "stdio";
-        const toolCount = state.tools.length;
-        const errorMsg = !connected && state.error ? state.error : null;
-
-        // Calculate how many tools to show for this server
-        const remaining = MAX_TOOLS - totalToolsShown;
-        const toolsToShow = state.tools.slice(0, Math.max(0, remaining));
-        const hiddenCount = Math.max(0, state.tools.length - toolsToShow.length);
-        totalToolsShown += toolsToShow.length;
-
-        return (
-          <Box key={name} flexDirection="column" marginTop={1}>
-            <Box>
-              <Text color={statusColor}>{statusIcon} </Text>
-              <Text bold>{name}</Text>
-              <Text color={t.dim}> ({transportLabel})</Text>
-              <Text color={t.muted}> — {toolCount} tool{toolCount !== 1 ? "s" : ""}</Text>
-            </Box>
-
-            {errorMsg && (
-              <Box paddingLeft={2}>
-                <Text color={t.error}>Error: {errorMsg}</Text>
-              </Box>
-            )}
-
-            {toolsToShow.length > 0 && (
-              <Box flexDirection="column" paddingLeft={2}>
-                {toolsToShow.map((tool) => (
-                  <Text key={tool.name} color={t.muted}>
-                    mcp__{name}__{tool.name}
+      <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
+        <ScrollList selectedIndex={scrollOffset} scrollAlignment="auto">
+          {flatRows.map((row, i) => {
+            switch (row.type) {
+              case "server":
+                return (
+                  <Box key={`s-${row.name}`} marginTop={i === 0 ? 0 : 1}>
+                    <Text color={row.statusColor}>{row.statusIcon} </Text>
+                    <Text bold>{row.name}</Text>
+                    <Text color={t.dim}> ({row.transportLabel})</Text>
+                    <Text color={t.muted}> — {row.toolCount} tool{row.toolCount !== 1 ? "s" : ""}</Text>
+                  </Box>
+                );
+              case "error":
+                return (
+                  <Box key={`e-${row.message}`} paddingLeft={2}>
+                    <Text color={t.error}>Error: {row.message}</Text>
+                  </Box>
+                );
+              case "tool":
+                return (
+                  <Text key={`t-${row.serverName}-${row.toolName}`} color={t.muted}>
+                    mcp__{row.serverName}__{row.toolName}
                   </Text>
-                ))}
-                {hiddenCount > 0 && (
-                  <Text color={t.dim}>…and {hiddenCount} more</Text>
-                )}
-              </Box>
-            )}
-
-            {connected && state.resources && state.resources.length > 0 && (
-              <Box flexDirection="column" paddingLeft={2} marginTop={1}>
-                <Text color={t.dim} bold>Resources:</Text>
-                {state.resources.slice(0, 10).map((r) => (
-                  <Text key={r.uri} color={t.muted}>
-                    {"📄"} {r.name || r.uri} ({r.uri})
+                );
+              case "more-tools":
+                return (
+                  <Text key={`mt-${row.count}`} color={t.dim}>…and {row.count} more</Text>
+                );
+              case "resources-header":
+                return (
+                  <Text key="rh" color={t.dim} bold>Resources:</Text>
+                );
+              case "resource":
+                return (
+                  <Text key={`r-${row.uri}`} color={t.muted}>
+                    {"📄"} {row.name} ({row.uri})
                   </Text>
-                ))}
-                {state.resources.length > 10 && (
-                  <Text color={t.dim}>…and {state.resources.length - 10} more</Text>
-                )}
-              </Box>
-            )}
-
-            {totalToolsShown >= MAX_TOOLS && (
-              <Box paddingLeft={2}>
-                <Text color={t.dim}>
-                  (showing first {MAX_TOOLS} tools total)
-                </Text>
-              </Box>
-            )}
-          </Box>
-        );
-      })}
+                );
+              case "more-resources":
+                return (
+                  <Text key={`mr-${row.count}`} color={t.dim}>…and {row.count} more</Text>
+                );
+              case "max-tools-notice":
+                return (
+                  <Text key="mtn" color={t.dim}>
+                    (showing first {row.max} tools total)
+                  </Text>
+                );
+            }
+          })}
+        </ScrollList>
+      </Box>
 
       <Box marginTop={1}>
         <Text color={t.dim}>
-          Press any key to close
+          Esc 关闭  ↑↓ 滚动
         </Text>
       </Box>
     </Box>

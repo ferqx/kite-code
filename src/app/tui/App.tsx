@@ -1,5 +1,6 @@
-import React, { useReducer, useCallback, useMemo, useRef, type Dispatch, type ReactNode } from "react";
+import React, { useReducer, useCallback, useMemo, useRef, useState, useEffect, type Dispatch, type ReactNode } from "react";
 import { Box, Text } from "ink";
+import { ScrollList } from "ink-scroll-list";
 import { sessionExportPath } from "@/core/config/paths";
 import type { AgentEvent } from "@/protocol/events";
 import type { McpManager } from "@/core/mcp";
@@ -18,6 +19,7 @@ import Header from "./Header";
 import Footer from "./Footer";
 import { useGlobalKeys } from "./hooks/useGlobalKeys";
 import { useTheme } from "./theme";
+import { useOverlayHeight } from "./hooks/useOverlayHeight";
 
 const MemoHeader = React.memo(Header);
 
@@ -723,6 +725,7 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
 
 export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, slashSuggestion, children }: AppProps) {
   const theme = useTheme();
+  const slashMaxHeight = useOverlayHeight(7);
   useGlobalKeys(dispatch);
 
   // Stabilized callbacks for React.memo children
@@ -843,35 +846,42 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
           onClose={hideRewind}
         />
       )}
-      {slashSuggestion && (
-        <Box flexDirection="column" borderStyle="round" borderColor={theme.primary} paddingX={1} marginTop={1}>
+      {slashSuggestion && (() => {
+        const listHeight = Math.max(3, slashMaxHeight - 2);
+        return (
+        <Box flexDirection="column" borderStyle="round" borderColor={theme.primary} paddingX={1} marginTop={1} flexGrow={1} maxHeight={slashMaxHeight}>
           <Text bold color={theme.primary}>
             {slashSuggestion.kind === "model"
-              ? `── Models matching "${slashSuggestion.partial}" ──`
-              : `── Commands matching /${slashSuggestion.partial} ──`}
+              ? `模型匹配 "${slashSuggestion.partial}"`
+              : `命令匹配 /${slashSuggestion.partial}`}
           </Text>
-          {slashSuggestion.items.map((item, i) => {
-            const isSelected = i === slashSuggestion.selectedIndex;
-            const aliasStr =
-              slashSuggestion.kind === "command" && item.aliases.length > 0
-                ? ` (${item.aliases.join(", ")})`
-                : "";
-            const argsStr = item.args ? ` ${item.args}` : "";
-            return (
-              <Box key={item.command}>
-                <Text color={isSelected ? theme.primary : theme.muted}>
-                  {isSelected ? "❯ " : "  "}/{item.command}{argsStr}
-                </Text>
-                <Text color={theme.dim}>{aliasStr}</Text>
-                {item.description && (
-                  <Text color={theme.dim}> — {item.description}</Text>
-                )}
-              </Box>
-            );
-          })}
-          <Text color={theme.dim}>↑↓ navigate  Tab/→ complete  Enter commit  Esc dismiss</Text>
+          <Box flexGrow={1} maxHeight={listHeight}>
+            <ScrollList selectedIndex={slashSuggestion.selectedIndex} scrollAlignment="auto">
+              {slashSuggestion.items.map((item, i) => {
+                const isSelected = i === slashSuggestion.selectedIndex;
+                const aliasStr =
+                  slashSuggestion.kind === "command" && item.aliases.length > 0
+                    ? ` (${item.aliases.join(", ")})`
+                    : "";
+                const argsStr = item.args ? ` ${item.args}` : "";
+                return (
+                  <Box key={item.command}>
+                    <Text color={isSelected ? theme.primary : theme.muted}>
+                      {isSelected ? "❯ " : "  "}/{item.command}{argsStr}
+                    </Text>
+                    <Text color={theme.dim}>{aliasStr}</Text>
+                    {item.description && (
+                      <Text color={theme.dim}> — {item.description}</Text>
+                    )}
+                  </Box>
+                );
+              })}
+            </ScrollList>
+          </Box>
+          <Text color={theme.dim}>↑↓ 导航  Tab/→ 补全  Enter 提交  Esc 关闭</Text>
         </Box>
-      )}
+        );
+      })()}
     </Box>
   );
 }

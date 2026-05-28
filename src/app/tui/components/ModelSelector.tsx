@@ -1,8 +1,10 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
+import { ScrollList } from "ink-scroll-list";
 import { useTheme } from "@/app/tui/theme";
 import { listAvailableModels, type AvailableModel } from "@/core/config";
+import { useOverlayHeight } from "../hooks/useOverlayHeight";
 
 export interface ModelOption {
   id: string;
@@ -31,6 +33,8 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
 
+  const maxContentHeight = useOverlayHeight(9);
+
   useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) => {
     if (key.escape) { onClose(); return; }
     if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
@@ -44,19 +48,21 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
-      <Text bold color={t.primary}>── Select Model ──</Text>
-      <Box flexDirection="column" marginTop={1}>
-        {models.map((model, i) => (
-          <Box key={model.id}>
-            <Text color={i === selected ? t.primary : t.muted}>
-              {i === selected ? "❯" : " "} {model.name}{model.id === currentModel ? " (current)" : ""}
-            </Text>
-            {model.description ? <Text color={t.dim}> — {model.description}</Text> : null}
-          </Box>
-        ))}
+      <Text bold color={t.primary}>选择模型</Text>
+      <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
+        <ScrollList selectedIndex={selected} scrollAlignment="auto">
+          {models.map((model, i) => (
+            <Box key={model.id}>
+              <Text color={i === selected ? t.primary : t.muted}>
+                {i === selected ? "❯" : " "} {model.name}{model.id === currentModel ? " (current)" : ""}
+              </Text>
+              {model.description ? <Text color={t.dim}> — {model.description}</Text> : null}
+            </Box>
+          ))}
+        </ScrollList>
       </Box>
       <Box height={1} />
-      <Text color={t.dim}>up/down navigate  Enter select  Esc cancel</Text>
+      <Text color={t.dim}>上/下 导航  Enter 选择  Esc 取消</Text>
     </Box>
   );
 }

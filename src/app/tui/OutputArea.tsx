@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { Box, Text, Static } from "ink";
 import { useInput } from "ink";
 import type { OutputBlock } from "./types";
@@ -230,15 +230,23 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thin
   // <Static> renders items once to the terminal scrollback buffer and skips
   // them in the interactive render pass. This keeps the interactive tree small
   // so Ink's reconciler + yoga-layout + diff run fast during typing.
-  let lastStreamingIdx = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].kind === "text" && (blocks[i] as { streaming?: boolean }).streaming) {
-      lastStreamingIdx = i;
-      break;
+  const lastStreamingIdx = useMemo(() => {
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      if (blocks[i].kind === "text" && (blocks[i] as { streaming?: boolean }).streaming) {
+        return i;
+      }
     }
-  }
-  const completedBlocks = lastStreamingIdx >= 0 ? blocks.slice(0, lastStreamingIdx) : blocks;
-  const activeBlocks = lastStreamingIdx >= 0 ? blocks.slice(lastStreamingIdx) : [];
+    return -1;
+  }, [blocks]);
+
+  const completedBlocks = useMemo(
+    () => lastStreamingIdx >= 0 ? blocks.slice(0, lastStreamingIdx) : blocks,
+    [blocks, lastStreamingIdx]
+  );
+  const activeBlocks = useMemo(
+    () => lastStreamingIdx >= 0 ? blocks.slice(lastStreamingIdx) : [],
+    [blocks, lastStreamingIdx]
+  );
 
   // Arrow key navigation for the dynamic (active) section only
   const [focusedActiveIdx, setFocusedActiveIdx] = useState<number | null>(null);
@@ -266,7 +274,7 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thin
   // index 0 → Header（仅首次渲染时输出，之后 <Static> 跳过）
   // index 1+ → completed blocks（逐条追加到终端 scrollback）
   // sessionKey 变化时 <Static> remount，重新渲染所有项（含 Header）
-  const staticItems = [HEADER_SENTINEL, ...completedBlocks];
+  const staticItems = useMemo(() => [HEADER_SENTINEL, ...completedBlocks], [completedBlocks]);
 
   return (
     <Box flexDirection="column" flexGrow={1}>

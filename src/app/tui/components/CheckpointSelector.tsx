@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
+import { ScrollList } from "ink-scroll-list";
 import { useTheme } from "../theme";
 import type { CheckpointEntry } from "@/core/persistence/checkpoint";
+import { useOverlayHeight } from "../hooks/useOverlayHeight";
 
 export type { CheckpointEntry };
 
@@ -15,6 +17,7 @@ interface CheckpointSelectorProps {
 export default function CheckpointSelector({ checkpoints, onRevert, onFork, onClose }: CheckpointSelectorProps) {
   const t = useTheme();
   const [selected, setSelected] = useState(0);
+  const maxContentHeight = useOverlayHeight(8);
 
   useInput((_input, key) => {
     if (key.escape) {
@@ -49,43 +52,45 @@ export default function CheckpointSelector({ checkpoints, onRevert, onFork, onCl
 
   if (checkpoints.length === 0) {
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor={t.dim} paddingX={1} marginY={1}>
+      <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
         <Text bold color={t.primary}>Rewind</Text>
         <Box marginTop={1}>
           <Text color={t.muted}>No checkpoints found for the current session.</Text>
         </Box>
         <Box marginTop={1}>
-          <Text color={t.dim}>Press any key to close</Text>
+          <Text color={t.dim}>按任意键关闭</Text>
         </Box>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.dim} paddingX={1} marginY={1}>
-      <Text bold color={t.primary}>Rewind — select a checkpoint</Text>
+    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
+      <Text bold color={t.primary}>回退 — 选择检查点</Text>
 
-      <Box flexDirection="column" marginTop={1}>
-        {checkpoints.map((cp, i) => {
-          const isSelected = i === selected;
-          const prefix = isSelected ? "\u2192" : " ";
-          const color = isSelected ? t.primary : t.muted;
-          const displayId = cp.checkpointId.slice(0, 8);
-          const displayMsg = cp.firstUserMessage || "(no message)";
-          const displayTime = cp.createdAt ? cp.createdAt.slice(0, 19) : "";
+      <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
+        <ScrollList selectedIndex={selected} scrollAlignment="auto">
+          {checkpoints.map((cp, i) => {
+            const isSelected = i === selected;
+            const prefix = isSelected ? "\u276f" : " ";
+            const color = isSelected ? t.primary : t.muted;
+            const displayId = cp.checkpointId.slice(0, 8);
+            const displayMsg = cp.firstUserMessage || "(no message)";
+            const displayTime = cp.createdAt ? cp.createdAt.slice(0, 19) : "";
 
-          return (
-            <Text key={cp.checkpointId} color={color}>
-              {prefix} {i + 1}. [{displayId}] {displayMsg}
-              {displayTime ? ` \u2014 ${displayTime}` : ""}
-            </Text>
-          );
-        })}
+            return (
+              <Text key={cp.checkpointId} color={color}>
+                {prefix} {i + 1}. [{displayId}] {displayMsg}
+                {displayTime ? ` \u2014 ${displayTime}` : ""}
+              </Text>
+            );
+          })}
+        </ScrollList>
       </Box>
 
       <Box marginTop={1}>
         <Text color={t.dim}>
-          [Enter]/[R]evert  [F]ork  [Esc] cancel  \u2191\u2193 navigate
+          Enter/R \u56de\u9000  F \u5206\u53c9  Esc \u53d6\u6d88  \u2191\u2193 \u5bfc\u822a
         </Text>
       </Box>
     </Box>
