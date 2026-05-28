@@ -1,5 +1,5 @@
 import React, { useReducer, useCallback, useMemo, useRef, type Dispatch, type ReactNode } from "react";
-import { Box } from "ink";
+import { Box, Text } from "ink";
 import { sessionExportPath } from "@/core/config/paths";
 import type { AgentEvent } from "@/protocol/events";
 import type { McpManager } from "@/core/mcp";
@@ -17,6 +17,7 @@ import SessionSelector from "./components/SessionSelector.js";
 import Header from "./Header";
 import Footer from "./Footer";
 import { useGlobalKeys } from "./hooks/useGlobalKeys";
+import { useTheme } from "./theme";
 
 const MemoHeader = React.memo(Header);
 
@@ -710,6 +711,7 @@ export interface AppProps {
   onCompactRequest?: () => void;
   mcpManager?: McpManager;
   availableModels?: import("@/core/config").AvailableModel[];
+  slashSuggestion?: import("./components/InputLine").SlashSuggestionData | null;
   children?: ReactNode;
 }
 
@@ -719,7 +721,8 @@ export function useTuiState(): { state: TuiState; dispatch: Dispatch<Action>; on
   return { state, dispatch, onToggleReason };
 }
 
-export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, children }: AppProps) {
+export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, slashSuggestion, children }: AppProps) {
+  const theme = useTheme();
   useGlobalKeys(dispatch);
 
   // Stabilized callbacks for React.memo children
@@ -768,7 +771,7 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
 
   return (
     <Box flexDirection="column">
-      {/* ── Left: Main content (existing column layout) ── */}
+      {/* ── Body: OutputArea (flexGrow) ── */}
       <Box flexDirection="column" flexGrow={1}>
         {state.loadingSession ? (
           <>
@@ -785,7 +788,18 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
             header={<MemoHeader running={state.running} error={state.sessionError} />}
           />
         )}
-        {state.showHelp && <HelpPanel onClose={hideHelp} />}
+      </Box>
+
+      {/* ── Footer: 3-row interaction zone ── */}
+      <Footer
+        status={state.status}
+        running={state.running}
+        compacting={state.compacting}
+        thinkingVisible={state.thinkingVisible}
+        timerKey={state.runCount}
+      >
+        {/* Interaction row: input line or approval/input UI, mutually exclusive */}
+        {!state.interrupt && children}
         {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
           <ApprovalBlock
             approval={interruptBlock.approval}
@@ -800,41 +814,64 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
             onResolved={resolveInput}
           />
         )}
-        {state.showSessions && (
-          <SessionSelector
-            onSelect={selectSession}
-            onClose={hideSessions}
-            onDelete={deleteSessionAction}
-          />
-        )}
-        {state.showModelSelector && (
-          <ModelSelector
-            currentModel={state.status.modelName}
-            onSelect={selectModel}
-            onClose={hideModelSelector}
-          />
-        )}
-        {state.showMcp && mcpManager && (
-          <McpPanel manager={mcpManager} onClose={hideMcp} />
-        )}
-        {state.showRewind && (
-          <CheckpointSelector
-            checkpoints={state.checkpoints}
-            onRevert={handleRevert}
-            onFork={handleFork}
-            onClose={hideRewind}
-          />
-        )}
-        <Footer
-          status={state.status}
-          running={state.running}
-          compacting={state.compacting}
-          thinkingVisible={state.thinkingVisible}
-          timerKey={state.runCount}
-        >
-          {children}
-        </Footer>
-      </Box>
+      </Footer>
+
+      {/* ── Overlay: panels below Footer ── */}
+      {state.showHelp && <HelpPanel onClose={hideHelp} />}
+      {state.showSessions && (
+        <SessionSelector
+          onSelect={selectSession}
+          onClose={hideSessions}
+          onDelete={deleteSessionAction}
+        />
+      )}
+      {state.showModelSelector && (
+        <ModelSelector
+          currentModel={state.status.modelName}
+          onSelect={selectModel}
+          onClose={hideModelSelector}
+        />
+      )}
+      {state.showMcp && mcpManager && (
+        <McpPanel manager={mcpManager} onClose={hideMcp} />
+      )}
+      {state.showRewind && (
+        <CheckpointSelector
+          checkpoints={state.checkpoints}
+          onRevert={handleRevert}
+          onFork={handleFork}
+          onClose={hideRewind}
+        />
+      )}
+      {slashSuggestion && (
+        <Box flexDirection="column" borderStyle="round" borderColor={theme.primary} paddingX={1} marginTop={1}>
+          <Text bold color={theme.primary}>
+            {slashSuggestion.kind === "model"
+              ? `── Models matching "${slashSuggestion.partial}" ──`
+              : `── Commands matching /${slashSuggestion.partial} ──`}
+          </Text>
+          {slashSuggestion.items.map((item, i) => {
+            const isSelected = i === slashSuggestion.selectedIndex;
+            const aliasStr =
+              slashSuggestion.kind === "command" && item.aliases.length > 0
+                ? ` (${item.aliases.join(", ")})`
+                : "";
+            const argsStr = item.args ? ` ${item.args}` : "";
+            return (
+              <Box key={item.command}>
+                <Text color={isSelected ? theme.primary : theme.muted}>
+                  {isSelected ? "❯ " : "  "}/{item.command}{argsStr}
+                </Text>
+                <Text color={theme.dim}>{aliasStr}</Text>
+                {item.description && (
+                  <Text color={theme.dim}> — {item.description}</Text>
+                )}
+              </Box>
+            );
+          })}
+          <Text color={theme.dim}>↑↓ navigate  Tab/→ complete  Enter commit  Esc dismiss</Text>
+        </Box>
+      )}
     </Box>
   );
 }

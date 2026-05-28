@@ -115,6 +115,8 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 - `docs/space/` — 设计决策、规则、方案、待办；入口 `docs/space/index.md`
 - `docs/space/plans/index.md` — 方案注册表
 
-**读**：每次重要决策应先对照 `PRODUCT.md` 判断是否在产品边界内。规划新功能应查看 `ROADMAP.md`。
+**读**：
+- 每次重要决策应先对照 `PRODUCT.md` 判断是否在产品边界内。规划新功能应查看 `ROADMAP.md`。
+- **强制规则**：实现功能前，必须先读取 `docs/space/index.md` 的"读取时机"列，找到对应的设计文档（`plans/` 或 `understanding/`），并严格按照文档中的代码示例和布局规范实现。测试全绿 ≠ 实现正确，必须对照设计文档验证布局、结构、交互是否符合规范。
 
 **写**：每次提交前检查是否有新的设计决策、行为约束或实现细节需要记录在 `docs/space/` 中，尤其是 `execution/active/` 下的规则记录。

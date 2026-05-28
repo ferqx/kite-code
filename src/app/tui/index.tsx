@@ -11,7 +11,7 @@ import { isRecoverableError, revertToCheckpoint, forkFromCheckpoint } from "@/co
 import { buildRevertParams, buildForkParams } from "./run-agent";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
-import InputLine, { type EditorContentHandle } from "./components/InputLine";
+import InputLine, { type EditorContentHandle, type SlashSuggestionData } from "./components/InputLine";
 import StartupScreen from "./components/StartupScreen";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useSlashCommand } from "./hooks/useSlashCommand";
@@ -75,6 +75,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const skillOptionsRef = React.useRef<SkillScanOptions | null>(null);
   const pendingSkillsRef = React.useRef<string[]>([]);
   const runTaskRef = React.useRef<(task: string) => Promise<void>>(async () => {});
+  const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
 
   const provider = React.useMemo(
     () =>
@@ -696,7 +697,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
   return (
     <ThemeContext.Provider value={theme}>
-    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }} mcpManager={mcpManager ?? undefined}>
+    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion}>
       <InputLine
         key={state.activeSessionId}
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
@@ -705,6 +706,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         workspace={workspace}
         overlayActive={state.showHelp || state.showModelSelector || state.showSessions}
         editorContentRef={editorContentRef}
+        onSlashSuggestionChange={setSlashSuggestion}
       />
     </App>
     </ThemeContext.Provider>

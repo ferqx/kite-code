@@ -91,7 +91,7 @@ describe("Footer", () => {
   });
 
   test("renders empty Box when no children", () => {
-    const { lastFrame } = render(<Footer />);
+    const { lastFrame } = render(<Footer {...footerProps} />);
     // Placeholder footer renders an empty Box
     expect(typeof lastFrame()).toBe("string");
   });
@@ -821,7 +821,6 @@ describe("App", () => {
       compacting: false,
       runCount: 0,
       thinkingVisible: true,
-      leaderPending: false,
       showHelp: false,
       showModelSelector: false,
       showSessions: false,

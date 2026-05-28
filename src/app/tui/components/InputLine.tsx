@@ -24,6 +24,18 @@ export interface EditorContentHandle {
   handleEditorResult(content: string): void;
 }
 
+export interface SlashSuggestionData {
+  kind: "command" | "model";
+  partial: string;
+  items: Array<{
+    command: string;
+    aliases: string[];
+    description: string;
+    args?: string;
+  }>;
+  selectedIndex: number;
+}
+
 interface InputLineProps {
   mode: "prompt" | "approval" | "question";
   onSubmit: (value: string) => void;
@@ -32,6 +44,7 @@ interface InputLineProps {
   workspace: string;
   overlayActive?: boolean;
   editorContentRef?: React.MutableRefObject<EditorContentHandle | null>;
+  onSlashSuggestionChange?: (data: SlashSuggestionData | null) => void;
 }
 
 function commonPrefix(strings: string[]): string {
@@ -76,7 +89,7 @@ function completeSlash(input: string): string | null {
   return null;
 }
 
-export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef }: InputLineProps) {
+export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef, onSlashSuggestionChange }: InputLineProps) {
   const t = useTheme();
   const [value, setValue] = useState("");
   const valueRef = useRef(value);
@@ -85,6 +98,22 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   const [historyIndex, setHistoryIndex] = useState(-1);
   const fileSearch = useFileSearch(value, workspace);
   const slashSuggestions = useSlashSuggestions(value);
+
+  // Notify parent about slash suggestion changes
+  useEffect(() => {
+    if (onSlashSuggestionChange) {
+      if (slashSuggestions.active && slashSuggestions.result) {
+        onSlashSuggestionChange({
+          kind: slashSuggestions.result.kind,
+          partial: slashSuggestions.result.partial,
+          items: slashSuggestions.result.items,
+          selectedIndex: slashSuggestions.selectedIndex,
+        });
+      } else {
+        onSlashSuggestionChange(null);
+      }
+    }
+  }, [slashSuggestions.active, slashSuggestions.result, slashSuggestions.selectedIndex, onSlashSuggestionChange]);
 
   // Force TextInput remount on programmatic value changes so cursor resets to end.
   // ink-text-input only advances cursorOffset when it exceeds new length, never
@@ -410,8 +439,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
   const promptChar = mode === "approval" ? "[A/S/F/D] " : mode === "question" ? "? " : "❯ ";
 
-  // Suppress slash suggestions when an overlay is active (stack discipline)
-  const showSlashDropdown = slashSuggestions.active && slashSuggestions.result && !overlayActive;
+  // Slash suggestions are rendered in App.tsx Overlay area
 
   return (
     <Box flexDirection="column">
@@ -444,37 +472,6 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       {!pasteState && !slashSuggestions.active && !fileSearch.active && (
         <Box marginTop={1}>
           <Text color={t.dim}>Shift+Enter 换行  Enter 提交</Text>
-        </Box>
-      )}
-
-      {/* Slash command suggestion dropdown */}
-      {showSlashDropdown && (
-        <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginTop={1}>
-          <Text bold color={t.primary}>
-            {slashSuggestions.result!.kind === "model"
-              ? `── Models matching "${slashSuggestions.result!.partial}" ──`
-              : `── Commands matching /${slashSuggestions.result!.partial} ──`}
-          </Text>
-          {slashSuggestions.result!.items.map((item, i) => {
-            const isSelected = i === slashSuggestions.selectedIndex;
-            const aliasStr =
-              slashSuggestions.result!.kind === "command" && item.aliases.length > 0
-                ? ` (${item.aliases.join(", ")})`
-                : "";
-            const argsStr = item.args ? ` ${item.args}` : "";
-            return (
-              <Box key={item.command}>
-                <Text color={isSelected ? t.primary : t.muted}>
-                  {isSelected ? "❯ " : "  "}/{item.command}{argsStr}
-                </Text>
-                <Text color={t.dim}>{aliasStr}</Text>
-                {item.description && (
-                  <Text color={t.dim}> — {item.description}</Text>
-                )}
-              </Box>
-            );
-          })}
-          <Text color={t.dim}>↑↓ navigate  Tab/→ complete  Enter commit  Esc dismiss</Text>
         </Box>
       )}
 
