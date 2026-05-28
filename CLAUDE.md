@@ -79,6 +79,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 | TUI 布局/渲染 | `bun test tests/tui-layout.test.tsx` |
 | TUI e2e（mock agent） | `bun test tests/e2e/` |
 | TUI 启动与输入链路（TuiBootstrap） | `bun test tests/e2e/startup.test.tsx` |
+| TUI 会话切换完整链路 | `bun test tests/tui-session-switch.test.tsx` |
 | 跨模块/不确定 | `bun test` + `bun run typecheck` |
 | 真实模型链路 | `bun run test:real` |
 
@@ -86,6 +87,15 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 
 - **测试是为了发现程序问题，不是为了通过而通过**。如果测试断言与实际行为不符，应优先怀疑程序行为是否正确，而不是为了让测试变绿去迁就当前行为
 - 测试用例名称应描述验证的**行为**，而非实现细节
+
+## TUI 验证
+
+- Ink 渲染管线（`<Static>` → scrollback、Yoga 布局、debug 模式）在
+  `ink-testing-library` 和真实终端中行为不同。TUI 布局/交互类改动仅靠
+  单元/reducer/layout 测试无法验证正确性
+- `src/app/tui/` 下的布局改动和 React `key` 变动有级联影响——改 OutputArea
+  可以破坏 Header/Footer 的渲染位置
+- 测试全绿 ≠ 功能正确，TUI 布局类改动必须在提交前 `bun run tui` 手动验证
 
 ## 平台兼容
 
