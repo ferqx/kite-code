@@ -22,13 +22,10 @@ describe("loadAgentConfig", () => {
         "provider": {
           "deepseek": {
             "apiKey": "sk-test",
-            "baseURL": "https://api.deepseek.com/v1"
-          }
-        },
-        "model": {
-          "default": {
-            "provider": "deepseek",
-            "name": "deepseek-chat"
+            "baseURL": "https://api.deepseek.com/v1",
+            "models": [
+              { "name": "deepseek-chat", "default": true }
+            ]
           }
         }
       }`,
@@ -36,11 +33,8 @@ describe("loadAgentConfig", () => {
 
     const config = loadAgentConfig({ configPath });
 
-    // 检查 API Key 正确解析 / Verify API key parsed correctly
     expect(config.apiKey).toBe("sk-test");
-    // 检查 baseURL 正确解析 / Verify baseURL parsed correctly
     expect(config.baseURL).toBe("https://api.deepseek.com/v1");
-    // 检查模型名称正确解析 / Verify model name parsed correctly
     expect(config.modelName).toBe("deepseek-chat");
     expect(config.providerName).toBe("deepseek");
     expect(config.providerType).toBe("deepseek");
@@ -57,13 +51,10 @@ describe("loadAgentConfig", () => {
           "siliconflow": {
             "type": "openai-compatible",
             "apiKey": "sk-compatible",
-            "baseURL": "https://api.siliconflow.cn/v1"
-          }
-        },
-        "model": {
-          "default": {
-            "provider": "siliconflow",
-            "name": "Qwen/Qwen3-Coder"
+            "baseURL": "https://api.siliconflow.cn/v1",
+            "models": [
+              { "name": "Qwen/Qwen3-Coder", "default": true }
+            ]
           }
         }
       }`,
@@ -86,12 +77,10 @@ describe("loadAgentConfig", () => {
       configPath,
       `{
         "provider": {
-          "ollama": {}
-        },
-        "model": {
-          "default": {
-            "provider": "ollama",
-            "name": "qwen2.5-coder:7b"
+          "ollama": {
+            "models": [
+              { "name": "qwen2.5-coder:7b", "default": true }
+            ]
           }
         }
       }`,
@@ -116,15 +105,12 @@ describe("loadAgentConfig", () => {
         "provider": {
           "deepseek": {
             "apiKey": "sk-test",
-            "baseURL": "https://api.deepseek.com/v1"
+            "baseURL": "https://api.deepseek.com/v1",
+            "models": [
+              { "name": "deepseek-chat", "default": true }
+            ]
           },
           "ollama": {}
-        },
-        "model": {
-          "default": {
-            "provider": "deepseek",
-            "name": "deepseek-chat"
-          }
         }
       }`,
     );
@@ -152,13 +138,10 @@ describe("loadAgentConfig", () => {
         "provider": {
           "deepseek": {
             "apiKey": "sk-test",
-            "baseURL": "https://api.deepseek.com/v1"
-          }
-        },
-        "model": {
-          "default": {
-            "provider": "deepseek",
-            "name": "deepseek-chat"
+            "baseURL": "https://api.deepseek.com/v1",
+            "models": [
+              { "name": "deepseek-chat", "default": true }
+            ]
           }
         }
       }`,

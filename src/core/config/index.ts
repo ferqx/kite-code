@@ -7,16 +7,22 @@ import type { McpServerConfig } from "../mcp/types";
 
 // ── Zod schemas ──
 
+const providerModelEntrySchema = z.object({
+  name: z.string().min(1),
+  default: z.boolean().optional(),
+});
+
 const providerSchema = z.object({
   type: z.enum(["deepseek", "openai", "openai-compatible", "ollama"]).optional(),
   apiKey: z.string().min(1).optional(),
   baseURL: z.string().url().optional(),
+  models: z.array(providerModelEntrySchema).optional(),
 });
 
-const modelEntrySchema = z.object({
+// Deprecated: kept for backward compatibility with old top-level models array
+const legacyModelEntrySchema = z.object({
   provider: z.string().min(1),
   name: z.string().min(1),
-  label: z.string().optional(),
   default: z.boolean().optional(),
 });
 
@@ -32,13 +38,8 @@ const mcpServerSchema = z.object({
 
 export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
-  model: z.object({
-    default: z.object({
-      provider: z.string().min(1),
-      name: z.string().min(1),
-    }),
-  }).optional(),
-  models: z.array(modelEntrySchema).optional(),
+  /** @deprecated Use provider[name].models instead */
+  models: z.array(legacyModelEntrySchema).optional(),
   theme: z.enum(["dark", "light"]).optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });
@@ -97,7 +98,6 @@ function readConfigFile(path: string): OpenpxConfig | null {
 function mergeConfigs(user: OpenpxConfig, project: OpenpxConfig): OpenpxConfig {
   return {
     provider: { ...user.provider, ...project.provider },
-    model: project.model ?? user.model,
     models: project.models ?? user.models,
     theme: project.theme ?? user.theme,
     mcpServers: { ...user.mcpServers, ...project.mcpServers },
@@ -133,12 +133,10 @@ function defaultOpenpxConfig(): OpenpxConfig {
       deepseek: {
         type: "deepseek",
         baseURL: "https://api.deepseek.com/v1",
-      },
-    },
-    model: {
-      default: {
-        provider: "deepseek",
-        name: "deepseek-v4-fast",
+        models: [
+          { name: "deepseek-v4-flash", default: true },
+          { name: "deepseek-v4-pro" },
+        ],
       },
     },
     theme: "dark",
@@ -153,7 +151,9 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
   const { configPath } = options;
   const cfg = loadConfig(process.cwd(), configPath);
 
-  const providerName = options.providerName ?? cfg.model?.default?.provider ?? "deepseek";
+  const defaultModel = findDefaultModel(cfg);
+
+  const providerName = options.providerName ?? defaultModel?.provider ?? "deepseek";
   const provider = cfg.provider?.[providerName] ?? builtInProvider(providerName);
 
   if (!provider) {
@@ -165,7 +165,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
   return {
     apiKey: resolveProviderApiKey(providerName, providerType, provider.apiKey),
     baseURL: resolveProviderBaseURL(providerName, providerType, provider.baseURL),
-    modelName: options.modelName ?? cfg.model?.default?.name ?? "deepseek-v4-fast",
+    modelName: options.modelName ?? defaultModel?.name ?? "deepseek-v4-flash",
     providerName,
     providerType,
   };
@@ -182,6 +182,27 @@ function builtInProvider(
 ): z.infer<typeof providerSchema> | null {
   if (providerName === "ollama") return { type: "ollama" };
   if (providerName === "deepseek") return { type: "deepseek", baseURL: "https://api.deepseek.com/v1" };
+  return null;
+}
+
+/**
+ * Find the default model from config.
+ * Priority: first model with default:true in provider models > first model of first provider > null
+ */
+function findDefaultModel(cfg: OpenpxConfig): { provider: string; name: string } | null {
+  // Look for explicit default in provider models
+  for (const [provName, prov] of Object.entries(cfg.provider)) {
+    if (prov.models) {
+      const def = prov.models.find((m) => m.default);
+      if (def) return { provider: provName, name: def.name };
+    }
+  }
+  // Fallback: first model of first provider
+  for (const [provName, prov] of Object.entries(cfg.provider)) {
+    if (prov.models && prov.models.length > 0) {
+      return { provider: provName, name: prov.models[0].name };
+    }
+  }
   return null;
 }
 
@@ -323,21 +344,29 @@ export interface AvailableModel {
 
 export function listAvailableModels(configPath?: string): AvailableModel[] {
   const cfg = configPath ? readConfigFile(configPath) : loadConfig();
-  if (cfg?.models && cfg.models.length > 0) {
+  if (!cfg) return DEFAULT_DEEPSEEK_MODELS;
+
+  // Backward compat: old top-level models array
+  if (cfg.models && cfg.models.length > 0) {
     return cfg.models.map((m) => ({
       provider: m.provider,
       name: m.name,
       isDefault: m.default ?? false,
     }));
   }
-  // 没有 models 数组时，只返回 model.default 配置的模型
-  const defaultEntry = cfg?.model?.default;
-  if (!defaultEntry) return DEFAULT_DEEPSEEK_MODELS;
-  return [{
-    provider: defaultEntry.provider,
-    name: defaultEntry.name,
-    isDefault: true,
-  }];
+
+  // Collect models from providers
+  const models: AvailableModel[] = [];
+  for (const [provName, prov] of Object.entries(cfg.provider)) {
+    if (prov.models) {
+      for (const m of prov.models) {
+        models.push({ provider: provName, name: m.name, isDefault: m.default ?? false });
+      }
+    }
+  }
+  if (models.length > 0) return models;
+
+  return DEFAULT_DEEPSEEK_MODELS;
 }
 
 // ── Theme ──
