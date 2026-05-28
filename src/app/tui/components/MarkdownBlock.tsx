@@ -447,7 +447,6 @@ export default function MarkdownBlock({ content, streaming, color }: MarkdownBlo
 
         return <MarkdownLine key={gi} content={line} color={color} />;
       })}
-      {streaming && <Text color={t.primary}>▌</Text>}
     </Box>
   );
 }

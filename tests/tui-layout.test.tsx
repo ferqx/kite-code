@@ -343,16 +343,6 @@ describe("MarkdownBlock", () => {
     expect(frame).toContain("const x = 1");
   });
 
-  test("renders streaming cursor when streaming", () => {
-    const { lastFrame } = render(<MarkdownBlock content="loading" streaming />);
-    expect(lastFrame()).toContain("▌");
-  });
-
-  test("no streaming cursor when not streaming", () => {
-    const { lastFrame } = render(<MarkdownBlock content="done" streaming={false} />);
-    expect(lastFrame()).not.toContain("▌");
-  });
-
   test("renders empty lines as spacing", () => {
     const { lastFrame } = render(<MarkdownBlock content="line1\n\nline3" />);
     const lines = lastFrame()!.split("\n");
