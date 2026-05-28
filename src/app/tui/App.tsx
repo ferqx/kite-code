@@ -770,11 +770,20 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
     <Box flexDirection="column">
       {/* ── Left: Main content (existing column layout) ── */}
       <Box flexDirection="column" flexGrow={1}>
-        <MemoHeader running={state.running} error={state.sessionError} />
         {state.loadingSession ? (
-          <Box paddingY={1}><Text dimColor>Loading session...</Text></Box>
+          <>
+            <MemoHeader running={state.running} error={state.sessionError} />
+            <Box paddingY={1}><Text dimColor>Loading session...</Text></Box>
+          </>
         ) : (
-          <OutputArea blocks={state.blocks} onToggleReason={onToggleReason} thinkingVisible={state.thinkingVisible} overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind} />
+          <OutputArea
+            blocks={state.blocks}
+            onToggleReason={onToggleReason}
+            thinkingVisible={state.thinkingVisible}
+            overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind}
+            sessionKey={state.sessionKey}
+            header={<MemoHeader running={state.running} error={state.sessionError} />}
+          />
         )}
         {state.showHelp && <HelpPanel onClose={hideHelp} />}
         {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (

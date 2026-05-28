@@ -94,6 +94,7 @@
 - **代码质量**：TypeScript strict 模式、API 文档生成
 - **性能优化**：前缀缓存命中率监控、checkpoint 压缩、大文件 diff 性能
   - [x] TUI 输入卡顿：用 Ink `<Static>` 将已完成 block 移出交互渲染树（参考 gemini-cli）
+  - [x] `<Static>` Header 顺序修复：Header 注入 `<Static>` items 哨兵值，保持四层布局正确
 
 ### 暂缓项（待需求确认后启动）
 

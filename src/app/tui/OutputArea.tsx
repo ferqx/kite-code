@@ -3,7 +3,7 @@ import { Box, Text, Static } from "ink";
 import { useInput } from "ink";
 import type { OutputBlock } from "./types";
 import MarkdownBlock from "./components/MarkdownBlock";
-import { useTheme, darkTheme } from "./theme";
+import { darkTheme } from "./theme";
 const dt = darkTheme; // for exported utility functions
 
 interface OutputAreaProps {
@@ -12,6 +12,10 @@ interface OutputAreaProps {
   thinkingVisible: boolean;
   /** 当 overlay 面板（HelpPanel/SessionSelector/ModelSelector 等）激活时，禁用方向键导航，避免同时触发多个 useInput handler */
   overlayActive?: boolean;
+  /** 会话切换时强制 <Static> remount，避免累积重复输出 */
+  sessionKey?: number;
+  /** 渲染在 <Static> 最上方的静态头（Header 组件） */
+  header?: React.ReactNode;
 }
 
 export function toolColor(status: string): string {
@@ -218,9 +222,10 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
   }
 }
 
-const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, overlayActive }: OutputAreaProps) {
-  const t = useTheme();
+/** 哨兵值：保证 <Static> items 始终至少有 1 项，使 Header 即使在无 completed block 时也能渲染 */
+const HEADER_SENTINEL = { __header: true } as const;
 
+const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, overlayActive, sessionKey, header }: OutputAreaProps) {
   // ── Split: completed blocks → <Static>, active block → dynamic tree ──
   // <Static> renders items once to the terminal scrollback buffer and skips
   // them in the interactive render pass. This keeps the interactive tree small
@@ -257,10 +262,32 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thin
     }
   });
 
+  // ── <Static> items: [Header sentinel, ...completedBlocks] ──
+  // index 0 → Header（仅首次渲染时输出，之后 <Static> 跳过）
+  // index 1+ → completed blocks（逐条追加到终端 scrollback）
+  // sessionKey 变化时 <Static> remount，重新渲染所有项（含 Header）
+  const staticItems = [HEADER_SENTINEL, ...completedBlocks];
+
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Static items={completedBlocks}>
-        {(block, index) => renderBlock(block, false, thinkingVisible, index, index > 0 ? completedBlocks[index - 1] : undefined)}
+      <Static key={sessionKey} items={staticItems}>
+        {(item, index) => {
+          // 第 0 项：渲染 Header
+          if (index === 0) {
+            return <React.Fragment key="header">{header}</React.Fragment>;
+          }
+          // index 1+：渲染 completed block（index 需减 1 因为 sentinel 占了 index 0）
+          const blockIdx = index - 1;
+          const block = completedBlocks[blockIdx];
+          if (!block) return null;
+          return renderBlock(
+            block,
+            false,
+            thinkingVisible,
+            blockIdx,
+            blockIdx > 0 ? completedBlocks[blockIdx - 1] : undefined,
+          );
+        }}
       </Static>
       {/* Active blocks stay in the interactive tree for live updates */}
       {activeBlocks.map((block, i) => {
