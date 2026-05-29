@@ -95,11 +95,23 @@ export interface TuiHarness {
   getCallCount: () => number;
 }
 
-// ── Cat face indicators (from Header.tsx CAT_LINES) ──
+// ── Agent state indicators ──
+// Header cat faces are rendered inside <Static> and never update.
+// Use StatusBar spinner characters instead to detect running state.
+// StatusBar shows a spinner when running=true and nothing when idle.
 
-const RUNNING_CAT = "( ^ ^ )";
-const ERROR_CAT = "( T T )";
-const IDLE_CAT = "( = = )";
+const RUNNING_CAT = "( ^ ^ )";   // frozen in <Static> — do not use for detection
+const ERROR_CAT   = "( T T )";   // frozen in <Static> — do not use for detection
+const IDLE_CAT    = "( = = )";   // frozen in <Static> — do not use for detection
+
+// Spinner characters from StatusBar.tsx SPINNER array — rendered in dynamic tree
+const SPINNER_CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+function hasRunningSpinner(output: string): boolean {
+  for (const ch of SPINNER_CHARS) {
+    if (output.includes(ch)) return true;
+  }
+  return false;
+}
 
 // ── Temp directory helpers ──
 
@@ -334,28 +346,29 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
 
       getOutput,
 
-      isRunning: () => getOutput().includes(RUNNING_CAT),
-      isIdle: () => {
-        const out = getOutput();
-        return out.includes(IDLE_CAT) && !out.includes(RUNNING_CAT);
-      },
+      isRunning: () => hasRunningSpinner(getOutput()),
+      isIdle: () => !hasRunningSpinner(getOutput()),
 
       async sendMessage(text: string) {
-        stdin.write(text);
-        await tick(100);
+        await tick(10);
+        for (const ch of text) {
+          stdin.write(ch);
+          await tick(2);
+        }
+        await tick(80);
         stdin.write("\r");
-        await tick(100);
+        await tick(150);
       },
 
       async waitForRunning(timeout = stepTimeout) {
-        await poll(() => getOutput().includes(RUNNING_CAT), timeout, "running state (cat face)");
+        await poll(() => hasRunningSpinner(getOutput()), timeout, "running state (spinner)");
       },
 
       async waitForIdle(timeout = stepTimeout) {
         await poll(
           () => {
             const out = getOutput();
-            return (out.includes(IDLE_CAT) || !out.includes(RUNNING_CAT)) && !out.includes("Thinking");
+            return !hasRunningSpinner(out) && !out.includes("Thinking");
           },
           timeout,
           "idle state",
@@ -412,13 +425,13 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
 
       getAuthMode() {
         const out = getOutput();
-        if (out.includes("[full]")) return "full_access";
-        if (out.includes("[safe]")) return "default";
+        if (out.includes("[完全]")) return "full_access";
+        if (out.includes("[安全]")) return "default";
         return null;
       },
 
       async waitForRunningGone(timeout = stepTimeout) {
-        await pollTextGone(lastFrame, RUNNING_CAT, timeout);
+        await poll(() => !hasRunningSpinner(lastFrame() ?? ""), timeout, "running spinner gone");
       },
 
       getCallCount: () => (model as unknown as StreamingMockModel).callCount,

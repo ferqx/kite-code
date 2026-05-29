@@ -798,7 +798,10 @@ describe("OutputArea", () => {
 describe("App", () => {
   function fakeState(overrides: Partial<TuiState> = {}): TuiState {
     return {
+      sessions: [],
+      activeSessionId: null,
       blocks: [],
+      nextBlockId: 1,
       interrupt: null,
       status: fakeStatus(),
       exited: false,
@@ -809,11 +812,18 @@ describe("App", () => {
       showHelp: false,
       showModelSelector: false,
       showSessions: false,
+      showMcp: false,
+      showRewind: false,
+      checkpoints: [],
+      rewindCounter: 0,
+      pendingSkills: [],
+      skillManifests: [],
       ctrlCPressed: false,
       sessionKey: 0,
       exitRequested: false,
       editorRequested: false,
       sessionError: false,
+      loadingSession: false,
       ...overrides,
     };
   }

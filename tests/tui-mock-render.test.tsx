@@ -32,7 +32,7 @@ describe("Header", () => {
 describe("StatusBar", () => {
   test("shows real cache hit rate and token count", () => {
     const { lastFrame } = render(
-      React.createElement(StatusBar, { status: fakeStatus(), thinkingVisible: true, timerKey: 0, running: true, compacting: false })
+      React.createElement(StatusBar, { status: fakeStatus(), thinkingVisible: true, timerKey: 0, running: true, compacting: false, onTick: () => {} })
     );
     const output = lastFrame();
     expect(output).toContain("42%");

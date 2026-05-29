@@ -152,15 +152,19 @@ describe("TUI E2E — P1 Key User Workflows", () => {
       expect(tui.getOutput()).toContain("Got it, skipped the mkdir command");
     }, TIMEOUT);
 
-    test("Ctrl+R switches to full_access → verify auth mode changes", async () => {
+    test("/auth toggles authorization mode (replaces removed Ctrl+R shortcut)", async () => {
       expect(tui.getAuthMode()).toBe("default");
 
-      tui.stdin.write("\x12"); // Ctrl+R
+      tui.stdin.write("/auth");
+      await new Promise((r) => setTimeout(r, 200));
+      tui.stdin.write("\r");
       await new Promise((r) => setTimeout(r, 500));
 
       expect(tui.getAuthMode()).toBe("full_access");
 
-      tui.stdin.write("\x12"); // Ctrl+R
+      tui.stdin.write("/auth");
+      await new Promise((r) => setTimeout(r, 200));
+      tui.stdin.write("\r");
       await new Promise((r) => setTimeout(r, 500));
 
       expect(tui.getAuthMode()).toBe("default");
@@ -214,7 +218,7 @@ describe("TUI E2E — P1 Key User Workflows", () => {
       tui.stdin.write("/");
       await new Promise((r) => setTimeout(r, 500));
 
-      expect(tui.getOutput()).toMatch(/Commands/);
+      expect(tui.getOutput()).toMatch(/命令匹配/);
 
       tui.stdin.write("\x1b");
       await new Promise((r) => setTimeout(r, 200));
@@ -226,11 +230,11 @@ describe("TUI E2E — P1 Key User Workflows", () => {
 
       tui.stdin.write("/");
       await new Promise((r) => setTimeout(r, 400));
-      expect(tui.getOutput()).toMatch(/Commands/);
+      expect(tui.getOutput()).toMatch(/命令匹配/);
 
       tui.stdin.write("\x1b");
       await new Promise((r) => setTimeout(r, 400));
-      expect(tui.getOutput()).not.toMatch(/Commands/);
+      expect(tui.getOutput()).not.toMatch(/命令匹配/);
     }, TIMEOUT);
 
     test("typing /m shows model commands → Tab completes", async () => {
@@ -263,10 +267,10 @@ describe("TUI E2E — P1 Key User Workflows", () => {
 
     test("/help → panel appears → Esc closes", async () => {
       await runSlashCommand(tui, "/help", 500);
-      expect(tui.getOutput()).toContain("Keyboard Shortcuts");
+      expect(tui.getOutput()).toContain("快捷键");
 
       tui.stdin.write("\x1b");
-      await tui.waitForOverlayGone("Keyboard Shortcuts", 3000);
+      await tui.waitForOverlayGone("快捷键", 3000);
       await new Promise((r) => setTimeout(r, 300));
     }, TIMEOUT);
 
@@ -362,7 +366,7 @@ describe("TUI E2E — P1 Key User Workflows", () => {
       tui.stdin.write("@");
       await new Promise((r) => setTimeout(r, 800));
 
-      expect(tui.getOutput()).toMatch(/Files matching/);
+      expect(tui.getOutput()).toMatch(/文件匹配/);
 
       tui.stdin.write("\x1b");
       await new Promise((r) => setTimeout(r, 200));
@@ -390,12 +394,12 @@ describe("TUI E2E — P1 Key User Workflows", () => {
       await new Promise((r) => setTimeout(r, 400));
 
       const output = tui.getOutput();
-      expect(output).toMatch(/Files matching/);
+      expect(output).toMatch(/文件匹配/);
       expect(output).toMatch(/package\.json/);
 
       tui.stdin.write("\x1b");
       await new Promise((r) => setTimeout(r, 300));
-      expect(tui.getOutput()).not.toMatch(/Files matching/);
+      expect(tui.getOutput()).not.toMatch(/文件匹配/);
     }, TIMEOUT);
   });
 

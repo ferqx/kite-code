@@ -62,7 +62,7 @@ const plan = new ResponsePlan([
   { group: "session switch A",            responses: [text("Reply A!")] },
   { group: "session switch B",            responses: [text("Reply B!")] },
   { group: "new session msg",             responses: [text("New session reply!")] },
-  { group: "ctrl+c interrupt",            responses: [text("Processing cancel test...", 200)] },
+  { group: "ctrl+c interrupt",            responses: [text("Processing cancel test...", 800)] },
   { group: "recovery after ctrl+c",       responses: [text("Recovery successful!")] },
 ]);
 
@@ -218,7 +218,7 @@ describe("TUI E2E — Startup & Core Regression (P0)", () => {
     await new Promise((r) => setTimeout(r, 100));
     tui.stdin.write("\r");
     await new Promise((r) => setTimeout(r, 500));
-    expect(tui.getOutput()).toContain("Keyboard Shortcuts");
+    expect(tui.getOutput()).toContain("快捷键");
 
     // Dismiss HelpPanel
     tui.stdin.write("\x1b"); // Escape
@@ -311,31 +311,33 @@ describe("TUI E2E — Startup & Core Regression (P0)", () => {
   // ══════════════════════════════════════════════════════════
 
   test("Escape dismisses HelpPanel and SessionSelector individually", async () => {
-    // Dismiss any lingering overlays first
+    // Clear any leftover characters from previous tests
+    clearInputBuffer();
+    await new Promise((r) => setTimeout(r, 200));
+    // Dismiss any lingering overlays
     tui.stdin.write("\x1b");
     await new Promise((r) => setTimeout(r, 300));
 
     // ── HelpPanel ──
     tui.stdin.write("/help");
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 300));
     tui.stdin.write("\r");
-    await new Promise((r) => setTimeout(r, 500));
-    expect(tui.getOutput()).toContain("Keyboard Shortcuts");
+    await new Promise((r) => setTimeout(r, 800));
+    expect(tui.getOutput()).toContain("快捷键");
 
     // Escape dismisses HelpPanel
     tui.stdin.write("\x1b");
     await new Promise((r) => setTimeout(r, 500));
-    expect(tui.getOutput()).not.toContain("Keyboard Shortcuts");
+    expect(tui.getOutput()).not.toContain("快捷键");
 
-    // ── SessionSelector ──
-    // Clear input buffer before leader keys (backspace any leftover chars)
+    // ── SessionSelector (via /sessions slash command — leader keys removed in shortcut simplification) ──
     clearInputBuffer();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
 
-    tui.stdin.write("\x18"); // Ctrl+X → leader
-    await new Promise((r) => setTimeout(r, 400));
-    tui.stdin.write("l");
-    await new Promise((r) => setTimeout(r, 600));
+    tui.stdin.write("/sessions");
+    await new Promise((r) => setTimeout(r, 300));
+    tui.stdin.write("\r");
+    await new Promise((r) => setTimeout(r, 800));
     expect(tui.getOutput()).toContain("会话列表");
 
     // Escape dismisses SessionSelector
@@ -343,9 +345,8 @@ describe("TUI E2E — Startup & Core Regression (P0)", () => {
     await new Promise((r) => setTimeout(r, 500));
     expect(tui.getOutput()).not.toContain("会话列表");
 
-    // Clean up input buffer (leader "l" may have typed into TextInput)
     clearInputBuffer();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
   }, TIMEOUT);
 
   // ══════════════════════════════════════════════════════════

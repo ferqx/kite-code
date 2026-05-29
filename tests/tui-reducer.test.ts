@@ -146,6 +146,36 @@ describe("eventReducer (blocks model)", () => {
       const s = dispatch(fresh(), { type: "EVENT", event: { type: "final", data: "" } });
       expect(s.blocks).toHaveLength(0);
     });
+    test("deduplicates against earlier text block across interrupt boundary", () => {
+      // Simulate: agent emits text + ask_user tool_call → interrupt →
+      // agent resumes with same text → text + final events
+      let s = fresh();
+      s = dispatch(s, { type: "SET_RUNNING" });
+      s = dispatch(s, textEvt("我看了你的项目环境，这是 OpenPX 项目本身"));
+      s = dispatch(s, tcEvt("c1", "ask_user", { question: "你要什么？" }));
+      s = dispatch(s, { type: "EVENT", event: { type: "need_input", data: question() } });
+      // User answers, interrupt resolved
+      s = dispatch(s, { type: "RESOLVE_INTERRUPT", blockId: s.interrupt!.blockId, resolution: "a" });
+      // Agent resumes, emits same text + final
+      s = dispatch(s, textEvt("我看了你的项目环境，这是 OpenPX 项目本身"));
+      s = dispatch(s, { type: "EVENT", event: { type: "final", data: "我看了你的项目环境，这是 OpenPX 项目本身" } });
+      // Should have only 1 text block with the duplicate content
+      const textBlocks = s.blocks.filter(b => b.kind === "text" && (b as any).content === "我看了你的项目环境，这是 OpenPX 项目本身");
+      expect(textBlocks).toHaveLength(1);
+    });
+    test("deduplicates final against text block separated by tool_card", () => {
+      // Simulate: agent emits text → tool_call → tool_done → final with same text
+      let s = fresh();
+      s = dispatch(s, { type: "SET_RUNNING" });
+      s = dispatch(s, textEvt("分析完成"));
+      s = dispatch(s, tcEvt("c2", "shell_execute", { command: "ls" }));
+      s = dispatch(s, tdEvt("c2", "shell_execute", true, "ok"));
+      // final arrives, last block is tool_card (done), not text
+      s = dispatch(s, { type: "EVENT", event: { type: "final", data: "分析完成" } });
+      // Should not create another text block for the same content
+      const textBlocks = s.blocks.filter(b => b.kind === "text" && (b as any).content === "分析完成");
+      expect(textBlocks).toHaveLength(1);
+    });
   });
 
   describe("EVENT.need_approval / need_input + RESOLVE_INTERRUPT", () => {
@@ -527,19 +557,29 @@ describe("eventReducer (blocks model)", () => {
   });
 
   describe("LOAD_SESSION", () => {
-    test("resets nextId based on loaded blocks max id", () => {
+    test("preserves monotonically increasing nextBlockId without reset", () => {
       const blocks: OutputBlock[] = [
         { id: 5, kind: "text", content: "old" },
         { id: 10, kind: "user", content: "old user" },
       ];
-      let s = dispatch(fresh(), {
+      let s = fresh();
+      // Create some blocks first to advance nextBlockId
+      s = dispatch(s, textEvt("pre-load block"));
+      expect(s.blocks.at(-1)!.id).toBe(1);
+      expect(s.nextBlockId).toBe(2);
+
+      s = dispatch(s, {
         type: "LOAD_SESSION", threadId: "t1", blocks, interrupt: null,
         modelProvider: "test", modelName: "deepseek-v4", thinkingLevel: null,
       });
-      // After LOAD_SESSION with max id = 10, nextId should be 11
+      // nextBlockId should NOT reset after LOAD_SESSION
+      expect(s.nextBlockId).toBe(2);
+      // Loaded blocks have their original IDs
+      expect(s.blocks.map(b => b.id)).toEqual([5, 10]);
+      // New block gets the monotonically increasing nextBlockId
       s = dispatch(s, textEvt("new block after load"));
-      const newBlock = s.blocks[s.blocks.length - 1];
-      expect(newBlock.id).toBe(11);
+      expect(s.nextBlockId).toBe(3);
+      expect(s.blocks.at(-1)!.id).toBe(2);
     });
 
     test("preserves interrupt when loading approval block", () => {

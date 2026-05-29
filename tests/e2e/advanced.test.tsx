@@ -162,7 +162,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
 
   describe("Compact Context via Leader Key", () => {
 
-    test("Ctrl+X c during agent run → compact context block appears", async () => {
+    test("/compact during agent run → compact context block appears (replaces removed Ctrl+X c)", async () => {
       // Send message and immediately trigger leader keys while the agent
       // is still running. Use a longer model delay (800ms) to ensure the
       // window is wide enough for waitForRunning + leader key sequence.
@@ -170,10 +170,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       await sleep(50); // brief settle after sendMessage
 
       // Send leader Ctrl+X + c in rapid succession
-      tui.stdin.write("\x18"); // Ctrl+X → leader
-      await sleep(30);
-      tui.stdin.write("c"); // compact context
-      await sleep(200);
+      tui.stdin.write("/compact"); await sleep(200); tui.stdin.write("\r"); await sleep(300)
 
       await tui.waitForIdle(15000);
 
@@ -223,14 +220,12 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       expect(tui.isIdle() || tui.isRunning()).toBe(true);
     }, TIMEOUT);
 
-    test("Ctrl+X m → opens model selector", async () => {
+    test("/model opens model selector (replaces removed Ctrl+X m)", async () => {
       // Skip: Ink TextInput does not reliably recover stdin focus after overlay interactions in test environment.
       clearInputBuffer(tui);
       await sleep(100);
 
-      tui.stdin.write("\x18"); // Ctrl+X → leader
-      await sleep(300);
-      tui.stdin.write("m");
+      tui.stdin.write("/model"); await sleep(200); tui.stdin.write("\r"); await sleep(600)
       await sleep(600);
 
       expect(tui.getOutput()).toMatch(/Model|model/);
@@ -242,14 +237,12 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       await sleep(100);
     }, TIMEOUT);
 
-    test("Ctrl+X l → opens session selector", async () => {
+    test("/sessions opens session selector (replaces removed Ctrl+X l)", async () => {
       // Skip: Ink TextInput does not reliably recover stdin focus after overlay interactions in test environment.
       clearInputBuffer(tui);
       await sleep(100);
 
-      tui.stdin.write("\x18"); // Ctrl+X → leader
-      await sleep(300);
-      tui.stdin.write("l");
+      tui.stdin.write("/sessions"); await sleep(200); tui.stdin.write("\r"); await sleep(600)
       await sleep(600);
 
       expect(tui.getOutput()).toContain("会话列表");
@@ -268,11 +261,11 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
 
   describe("Global Shortcuts", () => {
 
-    test("Ctrl+R → toggles auth mode", async () => {
+    test("/auth toggles authorization (replaces removed Ctrl+R)", async () => {
       const initialAuth = tui.getAuthMode();
       expect(initialAuth).toBeDefined();
 
-      tui.stdin.write("\x12"); // Ctrl+R
+      tui.stdin.write("/auth"); await sleep(200); tui.stdin.write("\r"); await sleep(500)
       await sleep(500);
 
       const toggledAuth = tui.getAuthMode();
@@ -280,7 +273,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       expect(toggledAuth).not.toBe(initialAuth);
 
       // Toggle back
-      tui.stdin.write("\x12"); // Ctrl+R
+      tui.stdin.write("/auth"); await sleep(200); tui.stdin.write("\r"); await sleep(500)
       await sleep(500);
 
       expect(tui.getAuthMode()).toBe(initialAuth);
@@ -298,11 +291,11 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       await sleep(400);
     }, TIMEOUT);
 
-    test("Ctrl+L → clears output", async () => {
+    test("/clear clears output (replaces removed Ctrl+L)", async () => {
       const outputBefore = tui.getOutput();
       expect(outputBefore.length).toBeGreaterThan(100);
 
-      tui.stdin.write("\x0c"); // Ctrl+L
+      tui.stdin.write("/clear"); await sleep(200); tui.stdin.write("\r")
       await sleep(500);
 
       const outputAfter = tui.getOutput();
@@ -324,7 +317,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       expect(tui.isIdle() || tui.isRunning()).toBe(true);
     }, TIMEOUT);
 
-    test("Ctrl+H → opens help panel", async () => {
+    test("/help opens help panel (replaces removed Ctrl+H)", async () => {
       // Ctrl+H (\x08) does not set the ctrl modifier in ink-testing-library stdin.
       // Use /help + Enter instead — same SHOW_HELP dispatch, proven working.
       // Dismiss any lingering overlays first
@@ -339,13 +332,13 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
       tui.stdin.write("\r");
       await sleep(600);
 
-      expect(tui.getOutput()).toContain("Keyboard Shortcuts");
+      expect(tui.getOutput()).toContain("快捷键");
 
       // Dismiss help panel
       tui.stdin.write("\x1b");
       await sleep(500);
 
-      expect(tui.getOutput()).not.toContain("Keyboard Shortcuts");
+      expect(tui.getOutput()).not.toContain("快捷键");
     }, TIMEOUT);
   });
 
