@@ -2,6 +2,14 @@
 
 > Status: draft
 > Created: 2026-05-12
+> Last code refactor: 2026-05-30
+
+**2026-05-30 架构重构同步**：
+- Reducer 已从单一 `eventReducer`（42 Actions）拆分为 6 子 reducer：`handleEvent` / `ui` / `session` / `checkpoint` / `skill` / `agent`，位于 `src/app/tui/reducers/`
+- `chunkToEvents` 已拆分为 7 子解析函数（`parseAIMessageEvents` / `parseToolResultEvents` / `parseStateChangeEvents` / `parseRetryEvents` / `parseCompactionEvents`），位于 `src/core/runner.ts`
+- TuiBootstrap 副作用已提取为 4 个 custom hook：`useMcpConnection` / `useSkillsLoader` / `useRewindHandler` / `useExternalEditor`
+- E2E 状态检测已从 `<Static>` 猫脸切换为 StatusBar spinner 字符
+- 快捷键已精简：Leader Keys 移除，统一使用斜杠命令
 
 ## 1. 目标
 

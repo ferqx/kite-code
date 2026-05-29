@@ -19,7 +19,7 @@
 
 **相关文件**：
 - `src/protocol/events.ts` — 类型定义（保留）
-- `src/app/tui/App.tsx` — reducer 分支（保留，e2e 使用）
+- `src/app/tui/reducers/agentReducer.ts` — compact_begin/compact_end 处理分支（已从 App.tsx 拆分）
 - `src/core/runner.ts` — 应在压缩/重试时发出这些事件
 
 ## compacting 字段无人读取
@@ -49,7 +49,7 @@ UNDO/REDO Action 类型和 reducer 分支已在 2026-05-20 移除（无键盘绑
 `Ctrl+X C` / `/compact` 仅在 reducer 中插入一条文本提示，无实际 graph 触发机制。Graph 的自动压缩（context overflow 触发）正常工作，但手动触发无后端支持。
 
 **相关文件**：
-- `src/app/tui/App.tsx:369-372` — COMPACT_CONTEXT reducer
+- `src/app/tui/reducers/agentReducer.ts` — COMPACT_CONTEXT 处理（已从 App.tsx 拆分）
 - `src/core/harness/graph.ts` — forceContextCompaction() 需要暴露为可通过事件触发的入口
 
 ## 剩余未修复的低风险项

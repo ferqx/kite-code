@@ -1,20 +1,25 @@
 # 当前规则：TUI E2E 测试标准
 
 状态：active
-最后更新：2026-05-25（e2e 测试体系重构：3 文件 60 测试覆盖 P0-P3 交互全频谱 + 响应分配器 + Harness 增强）
+最后更新：2026-05-30（架构重构：reducer 拆分为 6 子 reducer + TuiBootstrap hooks 提取 + E2E spinner 检测 + sendMessage 逐字输入）
+
 范围：
 
-- `tests/e2e/` — 所有 TUI e2e 测试（3 文件，60 tests）
+- `tests/e2e/` — 所有 TUI e2e 测试（3 文件，22 tests）
 - `tests/e2e/render-tui.tsx` — TuiHarness（含审批流、浮层检测、状态查询方法）
 - `tests/e2e/response-plan.ts` — ResponsePlan 响应分配器
 - `tests/e2e/startup.test.tsx` — P0 核心回归防护（18 tests）
-- `tests/e2e/interaction.test.tsx` — P1 关键用户工作流（24 tests，含 8 skip）
-- `tests/e2e/advanced.test.tsx` — P2+P3 高级交互 + 集成场景（18 tests，含 3 skip）
-- `tests/tui-reducer.test.ts` — reducer 42 种 Action 全覆盖
+- `tests/e2e/interaction.test.tsx` — P1 关键用户工作流（~24 tests）
+- `tests/e2e/advanced.test.tsx` — P2+P3 高级交互 + 集成场景（18 tests）
+- `tests/tui-reducer.test.ts` — reducer 单元测试（100 tests）
+- `src/app/tui/reducers/` — 6 子 reducer（handleEvent / ui / session / checkpoint / skill / agent）
+- `src/app/tui/hooks/useMcpConnection.ts` — MCP 连接管理 hook
+- `src/app/tui/hooks/useSkillsLoader.ts` — Skills 扫描 hook
+- `src/app/tui/hooks/useRewindHandler.ts` — Rewind checkpoint + revert/fork hook
+- `src/app/tui/hooks/useExternalEditor.ts` — 外部编辑器 hook
 - `src/app/tui/index.tsx` — TuiBootstrap 组件
 - `src/app/tui/session-manager.ts` — 多会话管理
-- `src/app/tui/App.tsx` — reducer（42 种 Action）
-- `src/app/tui/components/Sidebar.tsx` — 会话列表
+- `src/app/tui/App.tsx` — 应用布局 + reducer 入口
 - `src/app/tui/components/InputLine.tsx` — 输入行
 - `src/app/tui/components/CtrlSafeTextInput.tsx` — 文本输入
 
@@ -61,10 +66,18 @@ tui.stdin.write("n");         // 普通字符
 
 或使用便捷方法：
 ```typescript
-await tui.sendMessage("hello");         // 写入文字 + Enter + 等待
+await tui.sendMessage("hello");         // 逐字写入 + Enter — CtrlSafeTextInput 需要逐字符处理
 await tui.waitForText("expected", 5000); // 等待文本出现
 await tui.waitForIdle(15000);           // 等待 Agent 完成
 ```
+
+**`sendMessage` 逐字输入机制**：`CtrlSafeTextInput` 通过 `useInput` 逐字符处理输入事件，不支持一次性写入整串文本。`sendMessage` 内部实现为：warm-up tick(10ms) → 逐字 `stdin.write(ch)` + tick(2ms) → tick(80ms) → `stdin.write("\r")` + tick(150ms)。对于 "hello"（5 字符），总耗时约 10 + 5×2 + 80 + 150 ≈ 250ms。测试中如需要 Ctrl+C 中断 mock 模型，响应延迟必须大于此值。
+
+**Agent 状态检测**：Header 猫脸（`( ^ ^ )` / `( = = )`）渲染在 `<Static>` 中，**不会随状态变化更新**。状态检测改用 StatusBar 的 spinner 字符（`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`）：
+- `isRunning()` — `hasRunningSpinner(getOutput())`：检查 spinner 字符是否存在
+- `waitForRunning()` — 轮询 `hasRunningSpinner(getOutput())`
+- `waitForIdle()` — 轮询 `!hasRunningSpinner(out) && !out.includes("Thinking")`
+- `isIdle()` — `!hasRunningSpinner(getOutput())`
 
 ### 3. 测试环境必须提供合法的 AgentConfig
 
@@ -127,15 +140,27 @@ Ink 的键盘事件解析依赖终端协议配置。任何涉及特殊按键（�
 
 | 文件 | 范围 |
 |------|------|
-| `tests/e2e/render-tui.tsx` | createTui helper，渲染真实 TuiBootstrap + StreamingMockModel，含审批流/浮层/状态检测方法 |
+| `tests/e2e/render-tui.tsx` | createTui helper，渲染真实 TuiBootstrap + StreamingMockModel，含审批流/浮层/状态检测方法（spinner 检测） |
 | `tests/e2e/response-plan.ts` | ResponsePlan 响应分配器 + text/modelError/toolCall 快捷辅助 |
-| `tests/e2e/startup.test.tsx` | P0 核心回归防护（18 tests）— 启动/消息/多轮/工具/错误/会话切换/键盘协议/中断恢复 |
-| `tests/e2e/interaction.test.tsx` | P1 关键用户工作流（24 tests，8 skip）— 审批流/提问/Slash 命令/建议下拉/文件搜索/Sidebar 焦点 |
-| `tests/e2e/advanced.test.tsx` | P2+P3 高级交互与集成（18 tests，3 skip）— 输入历史/Leader Keys/Global Shortcuts/虚拟窗口/集成场景 |
-| `tests/mock-model.ts` | StreamingMockModel（响应共享计数器 + public callCount getter） |
-| `tests/tui-reducer.test.ts` | Reducer 42 种 Action 全覆盖（108 tests） |
+| `tests/e2e/startup.test.tsx` | P0 核心回归防护（18 tests）— 启动/消息/多轮/工具/错误/会话切换/中断恢复 |
+| `tests/e2e/interaction.test.tsx` | P1 关键用户工作流（~24 tests）— 审批流/提问/Slash 命令/建议下拉/文件搜索 |
+| `tests/e2e/advanced.test.tsx` | P2+P3 高级交互与集成（18 tests）— 输入历史/快捷键/集成场景 |
+| `tests/mock-model.ts` | StreamingMockModel（响应共享计数器 + public callCount getter + 可配置 delay） |
+| `tests/tui-reducer.test.ts` | Reducer 单元测试（100 tests）— 覆盖 42 种 Action |
+| `src/app/tui/reducers/` | 6 子 reducer：handleEvent（19 种事件）/ ui（面板显隐）/ session（会话管理）/ checkpoint（revert/fork）/ skill / agent |
 
-**已知限制**：P1/P2 中 11 个测试因 Ink TextInput 在浮层交互后无法恢复 stdin 聚焦被 skip。仅影响测试环境，不影响生产 TUI 行为。
+**快捷键变更**（2026-05-26 快捷键精简）：以下 Leader Key / Global Shortcut 已移除，改用斜杠命令替代。E2E 测试已同步更新：
+
+| 已移除 | 替代斜杠命令 |
+|--------|------------|
+| Ctrl+X m (model) | `/model` |
+| Ctrl+X l (sessions) | `/sessions` |
+| Ctrl+X c (compact) | `/compact` |
+| Ctrl+R (auth toggle) | `/auth` |
+| Ctrl+L (clear) | `/clear` |
+| Ctrl+H (help) | `/help` |
+
+**已知限制**：Ctrl+C abort 后 `CtrlSafeTextInput` 需要额外时间恢复，可能导致 recovery 测试不稳定。debug 验证手动字符输入 + 长延迟后可恢复，但集成测试中时序敏感。
 
 ## 关键发现与踩坑记录
 
