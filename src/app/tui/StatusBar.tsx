@@ -15,6 +15,7 @@ interface StatusBarProps {
   compacting: boolean;
   timerKey: number;
   onTick: (elapsed: number) => void;
+  thinkingVisible?: boolean;
 }
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -64,6 +65,10 @@ export default function StatusBar({ status, running, compacting, timerKey, onTic
     return `Step ${done}/${total}${active ? `: ${active.step}` : ""}`;
   }
 
+  const cachePct = `${status.cacheHitRate.toFixed(0)}%`;
+  const tokens = status.totalTokens.toLocaleString();
+  const elapsedStr = formatDuration(elapsed);
+
   return (
     <Box>
       {running && (
@@ -73,6 +78,12 @@ export default function StatusBar({ status, running, compacting, timerKey, onTic
       <Text bold color={t.primary}>{phaseLabel}</Text>
       <Text color={t.dim}> · </Text>
       <Text color={t.muted}>{planLabel()}</Text>
+      <Text color={t.dim}>  </Text>
+      <Text color={t.muted}>{elapsedStr}</Text>
+      <Text color={t.dim}> · </Text>
+      <Text color={t.muted}>{cachePct}</Text>
+      <Text color={t.dim}> · </Text>
+      <Text color={t.muted}>{tokens}</Text>
     </Box>
   );
 }

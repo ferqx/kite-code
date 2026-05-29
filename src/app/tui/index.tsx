@@ -1,11 +1,9 @@
 import React from "react";
 import { render } from "ink";
-import { loadAgentConfig, loadMcpConfig, loadTheme, editorInputPath, type AgentConfig } from "@/core/config/index";
+import { loadAgentConfig, loadTheme, type AgentConfig } from "@/core/config/index";
+import { sessionExportPath } from "@/core/config/paths";
 import { ThemeContext, darkTheme, lightTheme } from "./theme";
 import { McpManager } from "@/core/mcp";
-import { createSandboxExecutor } from "@/core/sandbox/index";
-import { isRecoverableError, revertToCheckpoint, forkFromCheckpoint } from "@/core/runner";
-import { buildRevertParams, buildForkParams } from "./run-agent";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
 import InputLine, { type EditorContentHandle, type SlashSuggestionData } from "./components/InputLine";
@@ -14,11 +12,12 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { useSlashCommand } from "./hooks/useSlashCommand";
 import { loadSession, listSessions, deleteSession } from "../../core/persistence/sessions.js";
 import { defaultCheckpointPath } from "../../core/config/paths.js";
-import { BunSqliteSaver } from "../../core/persistence/checkpoint.js";
-import { scanSkills, getSkillContent } from "@/core/skills/loader";
-import { skillDirs } from "@/core/config/paths";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import { SessionManager } from "./session-manager";
+import { useMcpConnection } from "./hooks/useMcpConnection";
+import { useSkillsLoader } from "./hooks/useSkillsLoader";
+import { useRewindCheckpoints, useRunRewind, type RewindDeps } from "./hooks/useRewindHandler";
+import { useExternalEditor } from "./hooks/useExternalEditor";
 
 function resolveModelForResume(
   currentConfig: AgentConfig,
@@ -36,6 +35,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const workspace = process.cwd();
   const config = React.useMemo(() => loadAgentConfig(), []);
   const { state, dispatch, onToggleReason } = useTuiState(config.modelName);
+  const stateRef = React.useRef(state);
+  stateRef.current = state;
   const theme = React.useMemo(() => (loadTheme(workspace) === "light" ? lightTheme : darkTheme), []);
   const [initialized, setInitialized] = React.useState(false);
   const prevInterruptRef = React.useRef(state.interrupt);
@@ -52,12 +53,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
-  const pendingRewindRef = React.useRef<{ type: "revert"; checkpointId: string } | { type: "fork"; checkpointId: string } | null>(null);
   const mcpManagerRef = React.useRef<McpManager | null>(null);
-  const [mcpManager, setMcpManager] = React.useState<McpManager | null>(null);
-  const [mcpPromptRegistry, setMcpPromptRegistry] = React.useState<
-    Map<string, { server: string; prompt: { name: string; description?: string } }> | undefined
-  >(undefined);
   const skillManifestsRef = React.useRef<SkillManifest[]>([]);
   const skillOptionsRef = React.useRef<SkillScanOptions | null>(null);
   const pendingSkillsRef = React.useRef<string[]>([]);
@@ -98,8 +94,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       conversationHistoryRef.current = [];
       threadIdRef.current = sessionManager.getActiveId();
       thinkingLevelRef.current = null;
-      pendingRewindRef.current = null;
-      prevRewindCounterRef.current = 0;
     }
   }, [state.sessionKey]);
 
@@ -120,80 +114,24 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     }
   }, [state.exitRequested]);
 
-  // Load checkpoint list when Rewind panel is opened
-  React.useEffect(() => {
-    if (!state.showRewind || !threadIdRef.current) return;
+  // Rewind: checkpoint list + revert/fork execution
+  useRewindCheckpoints(state, dispatch, threadIdRef);
 
-    let disposed = false;
-    const checkpointPath = defaultCheckpointPath();
-    const saver = new BunSqliteSaver(checkpointPath);
-    try {
-      saver.listCheckpoints(threadIdRef.current).then((cps) => {
-        if (disposed) return;
-        dispatch({ type: "SET_CHECKPOINTS", checkpoints: cps });
-      }).catch(() => {
-        if (disposed) return;
-        dispatch({ type: "SET_CHECKPOINTS", checkpoints: [] });
-      }).finally(() => {
-        saver.close();
-      });
-    } catch {
-      dispatch({ type: "SET_CHECKPOINTS", checkpoints: [] });
-      saver.close();
-    }
-    return () => {
-      disposed = true;
-      try { saver.close(); } catch { /* already closed */ }
-    };
-  }, [state.showRewind, dispatch]);
+  const rewindDeps: RewindDeps = React.useMemo(() => ({
+    dispatch, provider, config, workspace, sessionManager,
+    threadIdRef, loadGenerationRef, conversationHistoryRef,
+    thinkingLevelRef, skillManifestsRef, skillOptionsRef, mcpManagerRef,
+    agentLoopActiveRef, abortControllerRef,
+  }), [dispatch, provider, config, workspace, sessionManager]);
+  const { runRewind, dispatchSessionLoadInterceptor } = useRunRewind(state, rewindDeps);
+  const runRewindRef = React.useRef(runRewind);
+  runRewindRef.current = runRewind;
 
-  // Execute revert/fork when triggered by CheckpointSelector
-  const prevRewindCounterRef = React.useRef(0);
-  const runRewindRef = React.useRef<((type: "revert" | "fork", checkpointId: string) => void) | null>(null);
-  React.useEffect(() => {
-    if (state.rewindCounter === prevRewindCounterRef.current) return;
-    prevRewindCounterRef.current = state.rewindCounter;
-    if (state.rewindCounter === 0) return;
-
-    const pending = pendingRewindRef.current;
-    pendingRewindRef.current = null;
-    if (!pending) return;
-
-    runRewindRef.current?.(pending.type, pending.checkpointId);
-  }, [state.rewindCounter]);
-
-  // MCP Manager lifecycle: create, connect, disconnect on unmount
-  React.useEffect(() => {
-    const mcpConfig = loadMcpConfig();
-    const manager = new McpManager();
-    mcpManagerRef.current = manager;
-    setMcpManager(manager);
-    sessionManager.updateMcpManager(manager);
-    // Connect and update prompt registry when ready
-    manager.connectAll(mcpConfig.servers).then(() => {
-      setMcpPromptRegistry(new Map(manager.getPromptRegistry()));
-    }).catch((err) => {
-      console.error("[MCP] Failed to connect servers:", err);
-    });
-    return () => {
-      manager.disconnectAll().catch((err) => {
-        console.error("[MCP] Failed to disconnect servers:", err);
-      });
-      mcpManagerRef.current = null;
-      setMcpManager(null);
-      setMcpPromptRegistry(undefined);
-    };
-  }, []);
+  // MCP Manager lifecycle
+  const { mcpManager, mcpPromptRegistry } = useMcpConnection(mcpManagerRef, sessionManager);
 
   // Skills loader: scan on mount
-  React.useEffect(() => {
-    const opts = skillDirs(workspace);
-    skillOptionsRef.current = opts;
-    const manifests = scanSkills(opts);
-    skillManifestsRef.current = manifests;
-    dispatch({ type: "SET_SKILL_MANIFESTS", manifests });
-    sessionManager.updateSkillManifests(manifests);
-  }, [workspace, dispatch]);
+  useSkillsLoader(workspace, dispatch, skillManifestsRef, skillOptionsRef, sessionManager);
 
   // Keep pendingSkills ref in sync for use in runTask callback
   React.useEffect(() => {
@@ -326,11 +264,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         return;
       }
       // Intercept REVERT/FORK to store pending action before reducer closes panel
-      if (action.type === "REVERT_TO_CHECKPOINT") {
-        pendingRewindRef.current = { type: "revert", checkpointId: action.checkpointId };
-      } else if (action.type === "FORK_FROM_CHECKPOINT") {
-        pendingRewindRef.current = { type: "fork", checkpointId: action.checkpointId };
-      }
+      dispatchSessionLoadInterceptor(action);
       // ── 多会话：SWITCH_SESSION 拦截，缓冲回放 ──
       if (action.type === "SWITCH_SESSION") {
         const oldId = sessionManager.getActiveId();
@@ -386,6 +320,33 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         sessionManager.removeRuntime(threadId);
         dispatch(action);
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        return;
+      }
+      // ── EXPORT_SESSION：执行文件写入（取代 reducer 内的 fire-and-forget）──
+      if (action.type === "EXPORT_SESSION") {
+        const s = stateRef.current;
+        const now = new Date().toISOString().replace(/[:.]/g, "-");
+        const filename = sessionExportPath(now);
+        const body = s.blocks
+          .map((b) => {
+            if (b.kind === "user") return `**You:** ${b.content}`;
+            if (b.kind === "text") return b.content;
+            if (b.kind === "reason") return `> ${b.content}`;
+            return "";
+          })
+          .filter(Boolean)
+          .join("\n\n");
+        const header = `# OpenPX Session Export\n\n> ${new Date().toLocaleString()}\n\n---\n\n`;
+        try {
+          const fs = await import("node:fs/promises");
+          const { mkdirSync } = await import("node:fs");
+          const dir = filename.split("/").slice(0, -1).join("/") || ".";
+          mkdirSync(dir, { recursive: true });
+          await fs.writeFile(filename, header + body, "utf-8");
+          dispatch({ type: "EXPORT_SESSION_DONE", filename });
+        } catch (e: any) {
+          dispatch({ type: "EVENT", event: { type: "error", data: { message: `Export failed: ${e?.message ?? e}`, recoverable: false } } });
+        }
         return;
       }
       dispatch(action);
@@ -481,106 +442,21 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;
 
-  // Execute revert/fork when user selects from /rewind panel
-  const runRewind = React.useCallback(
-    async (type: "revert" | "fork", checkpointId: string) => {
-      if (agentLoopActiveRef.current) return;
 
-      dispatch({ type: "SET_RUNNING" });
-
-      const threadId = threadIdRef.current;
-      if (!threadId) {
-        provider.onEvent({
-          type: "error",
-          data: { message: "No active session. Start a conversation first.", recoverable: false },
-        });
-        dispatch({ type: "SET_EXITED" });
-        dispatch({ type: "SET_IDLE" });
-        return;
-      }
-
-      const shellExecutor = createSandboxExecutor({ enabled: true, workspace });
-
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
-      agentLoopActiveRef.current = true;
-
-      const baseRewindParams = {
-        threadId,
-        workspace,
-        config,
-        shellExecutor,
-        signal: abortController.signal,
-        thinkingLevel: thinkingLevelRef.current,
-        skills: skillManifestsRef.current,
-        skillOptions: skillOptionsRef.current,
-        mcpManager: mcpManagerRef.current,
-      };
-
-      let generator: AsyncGenerator<any>;
-      if (type === "revert") {
-        generator = revertToCheckpoint(provider, buildRevertParams({
-          ...baseRewindParams,
-          checkpointId,
-        }));
-      } else {
-        const newThreadId = `tui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-        threadIdRef.current = newThreadId;
-        // FORK 创建新会话，注册到 SessionManager
-        const forkedRt = sessionManager.registerSession(newThreadId, workspace);
-        forkedRt.thinkingLevel = thinkingLevelRef.current;
-        forkedRt.conversationHistory = [...conversationHistoryRef.current];
-        sessionManager.onStatusChange(newThreadId);
-        // 先同步 SessionSnapshot 到 state.sessions，再切换，避免 reducer 中 target 找不到新会话
-        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-        // 切换到分叉的新会话，后续 generator 事件写入正确的 activeSession
-        dispatch({ type: "SWITCH_SESSION", threadId: newThreadId });
-        generator = forkFromCheckpoint(provider, buildForkParams({
-          ...baseRewindParams,
-          oldThreadId: threadId,
-          checkpointId,
-          newThreadId,
-        }));
-      }
-
-      let aborted = false;
-      try {
-        for await (const _ of generator) {
-          if (abortController.signal.aborted) {
-            aborted = true;
-            break;
-          }
-        }
-        if (!aborted) dispatch({ type: "SET_EXITED" });
-      } catch (e: any) {
-        provider.onEvent({
-          type: "error",
-          data: { message: e?.message ?? String(e), recoverable: isRecoverableError(e) },
-        });
-        dispatch({ type: "SET_EXITED" });
-      } finally {
-        abortControllerRef.current = null;
-        agentLoopActiveRef.current = false;
-        provider.reset();
-        dispatch({ type: "SET_IDLE" });
-      }
-    },
-    [provider, workspace, config, dispatch]
-  );
-  runRewindRef.current = runRewind;
-
-  // Execute !shell commands directly
+  // Execute !shell commands directly (async — non-blocking)
   const runShell = React.useCallback(
     (command: string) => {
-      import("node:child_process").then(({ execSync }) => {
+      import("node:child_process").then(async ({ exec }) => {
         try {
           const cwd = process.cwd();
-          const result = execSync(command, { cwd, timeout: 30000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+          const result = await new Promise<string>((resolve, reject) => {
+            exec(command, { cwd, timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+              if (error) reject(Object.assign(error, { stderr: stderr || "" }));
+              else resolve(stdout || "");
+            });
+          });
           const output = result.trim() || "(no output)";
           dispatch({ type: "EVENT", event: { type: "text", data: { text: `\`\`\`\n${output}\n\`\`\`` } } });
-          // 写入当前会话 runtime 和 ref，两者必须同步，否则下一次 runTask 会
-          // 用 ref 中的旧值覆盖 runtime 的历史
-          // Cap at 50 entries to prevent token limit issues in long sessions
           const entry = `User (shell): ${command}\nResult:\n${output}`;
           const rt = sessionManager.getRuntime(threadIdRef.current);
           if (rt) {
@@ -623,54 +499,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     [runTask, handleSlashCommand, sessionManager]
   );
 
-  // Handle external editor: spawn $EDITOR, read content, submit as input
-  React.useEffect(() => {
-    if (!state.editorRequested) return;
-    if (!process.env.EDITOR) {
-      dispatch({ type: "EDITOR_DONE" });
-      return;
-    }
-
-    let cancelled = false;
-    const tmpFile = editorInputPath(Date.now().toString(36));
-
-    import("node:fs").then(({ writeFileSync }) => {
-      const content = editorContentRef.current?.getContent() ?? "";
-      writeFileSync(tmpFile, content, "utf-8");
-    }).then(() =>
-      import("node:child_process")
-    ).then(({ spawn }) => {
-      const proc = spawn(process.env.EDITOR!, [tmpFile], { stdio: "inherit", shell: true });
-      proc.on("exit", () => {
-        if (cancelled) return;
-        import("node:fs").then(({ readFileSync, unlinkSync }) => {
-          try {
-            const content = readFileSync(tmpFile, "utf-8").trim();
-            unlinkSync(tmpFile);
-            if (content) {
-              // Large content → placeholder in input; small → auto-submit
-              editorContentRef.current?.handleEditorResult(content);
-            }
-          } catch {
-            /* file may not exist */
-          }
-          dispatch({ type: "EDITOR_DONE" });
-        });
-      });
-      proc.on("error", () => {
-        if (!cancelled) dispatch({ type: "EDITOR_DONE" });
-      });
-    }).catch(() => {
-      if (!cancelled) dispatch({ type: "EDITOR_DONE" });
-    });
-
-    return () => {
-      cancelled = true;
-      import("node:fs").then(({ unlinkSync }) => {
-        try { unlinkSync(tmpFile); } catch {}
-      }).catch(() => {});
-    };
-  }, [state.editorRequested, workspace, dispatch]);
+  // External editor: spawn $EDITOR, read content, submit as input
+  useExternalEditor(state, workspace, dispatch, editorContentRef);
 
   React.useEffect(() => {
     return () => {

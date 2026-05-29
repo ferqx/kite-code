@@ -24,6 +24,7 @@ export interface TuiState {
 
   // ── 现有字段保留不变 ──
   blocks: OutputBlock[];
+  nextBlockId: number;
   interrupt: InterruptState | null;
   toolStartTimes?: Map<string, number>;
   status: StatusState;
