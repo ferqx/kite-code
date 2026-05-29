@@ -250,6 +250,18 @@ export const APPLY_PATCH_CONTRACT: ToolContract = {
   description: APPLY_PATCH_DESCRIPTION,
 };
 
+export const KNOWN_TOOL_NAMES = [
+  "read_file",
+  "edit_file",
+  "write_file",
+  "shell_execute",
+  "read_mcp_resource",
+  "update_plan",
+  "ask_user",
+  "set_authorization_mode",
+  "apply_patch",
+] as const;
+
 export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ["read_file", READ_FILE_CONTRACT],
   ["edit_file", EDIT_FILE_CONTRACT],

@@ -17,7 +17,7 @@ import {
   formatPlanStateReminder,
 } from "@/core/model/runtime-context";
 import { createChatModel, type SupportedChatModel } from "@/core/model/factory";
-import { type ModelRetryListener } from "@/core/model/deepseek";
+import { type ModelRetryListener, type RetryListenerHost } from "@/core/model/deepseek";
 import { BunSqliteSaver } from "@/core/persistence/checkpoint";
 import type { ShellApprovalGrant } from "@/protocol/events";
 import type { AgentResumeValue, AuthorizationOverride, ModelRetryEvent, ThreadAuthorizationState } from "@/core/types";
@@ -106,7 +106,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         delayMs,
       });
     };
-    (model as unknown as Record<string, unknown>)._retryListener = listener;
+    const host = model as RetryListenerHost;
+    if (host.setRetryListener) host.setRetryListener(listener);
 
     // 手动压缩：在下一次模型调用前压缩上下文
     // Manual compaction: compact context before next model invocation
@@ -129,7 +130,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
 
     try {
-      const { state: result, contextRetries, compactionPerformed: autoCompact } = await invokeModel(model, effectiveState, tools, input.skills);
+      const { state: result, contextRetries, compactionPerformed: autoCompact } = await invokeModel({ model, state: effectiveState, tools, skills: input.skills });
       if (autoCompact && !compactionPerformed) {
         compactionPerformed = autoCompact;
       }
@@ -145,7 +146,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
       return { ...result, ...modelConfigState, authorization: syncedAuth, compactionPerformed };
     } finally {
-      (model as unknown as Record<string, unknown>)._retryListener = null;
+      const host = model as RetryListenerHost;
+      if (host.setRetryListener) host.setRetryListener(null);
     }
   };
 
@@ -392,8 +394,16 @@ function authorizationForState(
   return base;
 }
 
+/** invokeModel 参数 / invokeModel parameters (exported for testing) */
+export interface InvokeModelParams {
+  model: ReturnType<typeof createChatModel>;
+  state: CodeAgentState;
+  tools: ReturnType<typeof createAgentTools>;
+  skills?: import("@/core/skills/types").SkillManifest[];
+}
+
 /** invokeModel 返回值 / Return value of invokeModel */
-interface InvokeModelResult {
+export interface InvokeModelResult {
   /** 图中其他节点可消费的状态更新（不含 modelRetries）/ State update consumed by other graph nodes (without modelRetries) */
   state: Record<string, unknown>;
   /** 上下文溢出重试事件（Layer 1/2），由 agent 节点合并到 modelRetries / Context overflow retry events, merged into modelRetries by agent node */
@@ -402,13 +412,10 @@ interface InvokeModelResult {
   compactionPerformed?: { reason: string; summary: string } | null;
 }
 
-/** 共享的模型调用逻辑 / Shared model invocation logic */
-async function invokeModel(
-  model: ReturnType<typeof createChatModel>,
-  state: CodeAgentState,
-  tools: ReturnType<typeof createAgentTools>,
-  skills?: import("@/core/skills/types").SkillManifest[],
-): Promise<InvokeModelResult> {
+/** 共享的模型调用逻辑 / Shared model invocation logic (exported for testing) */
+export async function invokeModel({
+  model, state, tools, skills,
+}: InvokeModelParams): Promise<InvokeModelResult> {
   let prepared = prepareModelContext("agent", state, skills);
   const contextRetries: ModelRetryEvent[] = [];
   let compactionPerformed: { reason: string; summary: string } | null = null;

@@ -14,7 +14,9 @@ export type AgentEvent =
   | { type: "compact_end"; data: { summary: string } }
   | { type: "cache_metrics"; data: CacheMetricsPayload }
   | { type: "error"; data: { message: string; recoverable: boolean } }
+  /** LangGraph interrupt — payload depends on the interrupted node's resume type, consumed by TUI/CLI for user interaction resolution */
   | { type: "interrupt"; data: unknown }
+  /** Raw LangGraph state update chunk — opaque passthrough for checkpoint/state tracking consumers */
   | { type: "update"; data: unknown }
   | { type: "model_retry"; data: { attempt: number; error: string; delayMs: number } }
   | { type: "final"; data: string };
@@ -56,8 +58,7 @@ export interface UserInputRequest {
 // ── Payload 类型 / Payload types ──
 export interface ToolCallPayload {
   call_id: string;
-  name: "read_file" | "edit_file" | "write_file" | "shell_execute"
-      | "update_plan" | "ask_user" | "set_authorization_mode";
+  name: string;
   args: Record<string, unknown>;
 }
 
@@ -97,7 +98,7 @@ export interface ToolApprovalPayload {
   scope: "once";
   cwd: string;
   threadId: string;
-  tool: ToolCallPayload["name"];
+  tool: string;
   command: string;
   risk: "read" | "plan" | "write_file" | "execute_code" | "destructive" | "network" | "vcs_mutation" | "unknown";
   approvalHash: string;

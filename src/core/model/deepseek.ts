@@ -5,6 +5,11 @@ import type { AgentConfig } from "@/core/config/index";
 /** 模型重试监听器 / Model retry listener */
 export type ModelRetryListener = (attempt: number, error: unknown, delayMs: number) => void;
 
+/** 支持设置 retry listener 的聊天模型接口 / Chat model interface supporting retry listener injection */
+export interface RetryListenerHost {
+  setRetryListener(listener: ModelRetryListener | null): void;
+}
+
 /** 可重试模型连接错误配置 / Retry options for transient model connection errors */
 export interface TransientModelRetryOptions {
   /** 最大尝试次数，包含首次调用 / Max attempts including the first call */
@@ -49,6 +54,11 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
 
   /** 当前调用的重试监听器 / Retry listener for the current invocation */
   _retryListener: ModelRetryListener | null = null;
+
+  /** 设置重试监听器 / Set the retry listener */
+  setRetryListener(listener: ModelRetryListener | null): void {
+    this._retryListener = listener;
+  }
 
   /** @internal */
   override async _generate(

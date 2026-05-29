@@ -342,17 +342,28 @@ export interface AvailableModel {
   isDefault: boolean;
 }
 
+let _cachedModels: AvailableModel[] | null = null;
+
 export function listAvailableModels(configPath?: string): AvailableModel[] {
+  // Cache: config rarely changes at runtime; avoid re-reading file on every render
+  if (!configPath && _cachedModels) return _cachedModels;
+
   const cfg = configPath ? readConfigFile(configPath) : loadConfig();
-  if (!cfg) return DEFAULT_DEEPSEEK_MODELS;
+  if (!cfg) {
+    const fallback = DEFAULT_DEEPSEEK_MODELS;
+    if (!configPath) _cachedModels = fallback;
+    return fallback;
+  }
 
   // Backward compat: old top-level models array
   if (cfg.models && cfg.models.length > 0) {
-    return cfg.models.map((m) => ({
+    const result = cfg.models.map((m) => ({
       provider: m.provider,
       name: m.name,
       isDefault: m.default ?? false,
     }));
+    if (!configPath) _cachedModels = result;
+    return result;
   }
 
   // Collect models from providers
@@ -364,8 +375,12 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
       }
     }
   }
-  if (models.length > 0) return models;
+  if (models.length > 0) {
+    if (!configPath) _cachedModels = models;
+    return models;
+  }
 
+  if (!configPath) _cachedModels = DEFAULT_DEEPSEEK_MODELS;
   return DEFAULT_DEEPSEEK_MODELS;
 }
 

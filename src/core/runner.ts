@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFile, stat as statAsync } from "node:fs/promises";
 import { HumanMessage } from "@langchain/core/messages";
 import { Command, isInterrupted, INTERRUPT } from "@langchain/langgraph";
 import { AIMessage } from "@langchain/core/messages";
@@ -16,7 +16,6 @@ import type {
   AgentEvent,
   CacheMetricsPayload,
   StateChangePayload,
-  ToolCallPayload,
   ToolApprovalPayload,
   UserInputPayload,
   WorkspaceAccess,
@@ -394,7 +393,7 @@ async function processStream(
         if (call) {
           const path = call.args.path;
           if (typeof path === "string") {
-            produceFileChange(events, path, e.data.name);
+            await produceFileChange(events, path, e.data.name);
           }
         }
       }
@@ -472,6 +471,129 @@ function mapActionToResumeValue(action: UserAction): AgentResumeValue {
   }
 }
 
+// ── chunkToEvents 子解析器 ──
+
+/** Parse AIMessage → text, reason, tool_call events */
+function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
+  const events: AgentEvent[] = [];
+  const rawMsg = msg as unknown as Record<string, unknown>;
+  const rc = (rawMsg.reasoning_content as string | undefined)
+    ?? (rawMsg.additional_kwargs as Record<string, unknown> | undefined)?.reasoning_content as string | undefined;
+  if (typeof rc === "string" && rc.length > 0) {
+    events.push({ type: "reason", data: { text: rc } });
+  }
+  if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+    for (const tc of msg.tool_calls) {
+      events.push({
+        type: "tool_call",
+        data: {
+          call_id: tc.id ?? "",
+          name: tc.name,
+          args: tc.args as Record<string, unknown>,
+        },
+      });
+    }
+  }
+  const text = extractText(msg.content);
+  if (text.length > 0) {
+    events.push({ type: "text", data: { text } });
+  }
+  return events;
+}
+
+/** Parse ToolMessage → tool_done event */
+function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null {
+  const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+  let ok = true;
+  let summary = content.slice(0, 200);
+  try {
+    const p = JSON.parse(content);
+    if (p && typeof p === "object") {
+      ok = p.ok !== false;
+      if (p.ok !== false) {
+        summary = (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
+      } else {
+        const reason = (p.rejected as boolean)
+          ? ((p.reason as string) ?? "action rejected")
+          : (p.failure as Record<string, unknown> | undefined)?.reason as string
+            ?? (p.stderr as string)
+            ?? (p.message as string)
+            ?? (p.summary as string)
+            ?? summary;
+        summary = reason;
+      }
+    }
+  } catch { /* use raw content */ }
+  return {
+    type: "tool_done",
+    data: {
+      call_id: (msg.tool_call_id as string) ?? "",
+      name: (msg.name as string) ?? "",
+      ok,
+      summary,
+    },
+  };
+}
+
+/** Parse state changes from a graph node */
+function parseStateChangeEvents(node: Record<string, unknown>): AgentEvent | null {
+  const sc: StateChangePayload = {};
+  const ws = node.workspaceAccess as string | undefined;
+  const phase = node.phase as string | undefined;
+  const plan = node.plan ?? (node.metadata as Record<string, unknown> | undefined)?.plan;
+  const auth = node.authorization;
+  if (ws === "read-only" || ws === "write") sc.workspaceAccess = ws;
+  if (phase === "planning" || phase === "building") sc.phase = phase;
+  if (plan !== undefined) sc.plan = plan as StateChangePayload["plan"];
+  if (auth && typeof auth === "object") {
+    sc.authorization = { mode: (auth as Record<string, unknown>).mode as "default" | "full_access" };
+  }
+  if (Object.keys(sc).length > 0) {
+    return { type: "state_change", data: sc };
+  }
+  return null;
+}
+
+/** Parse retry metadata from a graph node */
+function parseRetryEvents(node: Record<string, unknown>): AgentEvent[] {
+  const events: AgentEvent[] = [];
+  const retries = node.modelRetries;
+  if (Array.isArray(retries)) {
+    for (const r of retries) {
+      if (r && typeof r === "object" && typeof (r as Record<string, unknown>).attempt === "number") {
+        events.push({
+          type: "model_retry",
+          data: {
+            attempt: (r as Record<string, unknown>).attempt as number,
+            error: ((r as Record<string, unknown>).error as string) ?? "unknown",
+            delayMs: ((r as Record<string, unknown>).delayMs as number) ?? 0,
+          },
+        });
+      }
+    }
+  }
+  return events;
+}
+
+/** Parse compaction metadata from a graph node */
+function parseCompactionEvents(node: Record<string, unknown>): AgentEvent[] {
+  const events: AgentEvent[] = [];
+  const cp = node.compactionPerformed;
+  if (cp && typeof cp === "object" && typeof (cp as Record<string, unknown>).reason === "string") {
+    events.push({
+      type: "compact_begin",
+      data: { reason: (cp as Record<string, unknown>).reason as string },
+    });
+    events.push({
+      type: "compact_end",
+      data: { summary: ((cp as Record<string, unknown>).summary as string) ?? "" },
+    });
+  }
+  return events;
+}
+
+// ── chunkToEvents 编排函数 ──
+
 export function chunkToEvents(
   chunk: unknown,
   workspaceAccess: WorkspaceAccess,
@@ -487,125 +609,33 @@ export function chunkToEvents(
 
     events.push({ type: "step_begin", data: { node: key } });
 
+    // 消息解析
     const msgs = node.messages;
     if (Array.isArray(msgs)) {
       for (const msg of msgs) {
         if (AIMessage.isInstance(msg)) {
-          const rawMsg = msg as unknown as Record<string, unknown>;
-          const rc = (rawMsg.reasoning_content as string | undefined)
-            ?? (rawMsg.additional_kwargs as Record<string, unknown> | undefined)?.reasoning_content as string | undefined;
-          if (typeof rc === "string" && rc.length > 0) {
-            events.push({ type: "reason", data: { text: rc } });
-          }
-          if (
-            Array.isArray(msg.tool_calls) &&
-            msg.tool_calls.length > 0
-          ) {
-            for (const tc of msg.tool_calls) {
-              events.push({
-                type: "tool_call",
-                data: {
-                  call_id: tc.id ?? "",
-                  name: tc.name as ToolCallPayload["name"],
-                  args: tc.args as Record<string, unknown>,
-                },
-              });
-            }
-          }
-          const content = msg.content;
-          const text = extractText(content);
-          if (text.length > 0) {
-            events.push({ type: "text", data: { text } });
-          }
-        }
-
-        const tm = msg as Record<string, unknown>;
-        if (isToolMessage(tm)) {
-          const content = typeof tm.content === "string" ? tm.content : JSON.stringify(tm.content);
-          let ok = true;
-          let summary = content.slice(0, 200);
-          try {
-            const p = JSON.parse(content);
-            if (p && typeof p === "object") {
-              ok = p.ok !== false;
-              if (p.ok !== false) {
-                summary = (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
-              } else {
-                const reason = (p.rejected as boolean)
-                  ? ((p.reason as string) ?? "action rejected")
-                  : (p.failure as Record<string, unknown> | undefined)?.reason as string
-                    ?? (p.stderr as string)
-                    ?? (p.message as string)
-                    ?? (p.summary as string)
-                    ?? summary;
-                summary = reason;
-              }
-            }
-          } catch { /* use raw content */ }
-          events.push({
-            type: "tool_done",
-            data: {
-              call_id: (tm.tool_call_id as string) ?? "",
-              name: (tm.name as string) ?? "",
-              ok,
-              summary,
-            },
-          });
+          events.push(...parseAIMessageEvents(msg));
+        } else if (isToolMessage(msg as Record<string, unknown>)) {
+          const evt = parseToolResultEvents(msg as Record<string, unknown>);
+          if (evt) events.push(evt);
         }
       }
     }
 
-    const sc: StateChangePayload = {};
-    const ws = node.workspaceAccess as string | undefined;
-    const phase = node.phase as string | undefined;
-    const plan = node.plan ?? (node.metadata as Record<string, unknown> | undefined)?.plan;
-    const auth = node.authorization;
-    if (ws === "read-only" || ws === "write") sc.workspaceAccess = ws;
-    if (phase === "planning" || phase === "building") sc.phase = phase;
-    if (plan !== undefined) sc.plan = plan as StateChangePayload["plan"];
-    if (auth && typeof auth === "object") {
-      sc.authorization = { mode: (auth as Record<string, unknown>).mode as "default" | "full_access" };
-    }
-    if (Object.keys(sc).length > 0) {
-      events.push({ type: "state_change", data: sc });
-    }
+    // 状态变化
+    const scEvt = parseStateChangeEvents(node);
+    if (scEvt) events.push(scEvt);
 
-    const retries = node.modelRetries;
-    if (Array.isArray(retries)) {
-      for (const r of retries) {
-        if (r && typeof r === "object" && typeof (r as Record<string, unknown>).attempt === "number") {
-          events.push({
-            type: "model_retry",
-            data: {
-              attempt: (r as Record<string, unknown>).attempt as number,
-              error: ((r as Record<string, unknown>).error as string) ?? "unknown",
-              delayMs: ((r as Record<string, unknown>).delayMs as number) ?? 0,
-            },
-          });
-        }
-      }
-    }
-
-    const cp = node.compactionPerformed;
-    if (cp && typeof cp === "object" && typeof (cp as Record<string, unknown>).reason === "string") {
-      events.push({
-        type: "compact_begin",
-        data: { reason: (cp as Record<string, unknown>).reason as string },
-      });
-      events.push({
-        type: "compact_end",
-        data: { summary: ((cp as Record<string, unknown>).summary as string) ?? "" },
-      });
-    }
+    // 重试 / 压缩
+    events.push(...parseRetryEvents(node));
+    events.push(...parseCompactionEvents(node));
 
     events.push({ type: "step_end", data: { node: key } });
   }
 
-
+  // 全局指标（不绑定特定节点）
   const final = findFinal(chunk);
-  if (final) {
-    events.push({ type: "final", data: final });
-  }
+  if (final) events.push({ type: "final", data: final });
 
   const metrics = findCacheMetrics(chunk);
   if (metrics) {
@@ -872,22 +902,26 @@ function* walkValues(value: unknown): Generator<unknown> {
 }
 
 /** Generate a file_change event when a write/edit tool completes */
-function produceFileChange(
+async function produceFileChange(
   events: AgentEvent[],
   path: string,
   toolName: string,
-): void {
+): Promise<void> {
   const kind = toolName === "write_file" ? "add" as const : "edit" as const;
   let linesAdded: number | undefined;
   let linesRemoved: number | undefined;
   let preview: string | undefined;
   try {
-    const content = readFileSync(path, "utf-8");
-    const allLines = content.split("\n");
-    const lineCount = allLines.length;
-    linesAdded = lineCount;
-    preview = allLines.slice(0, 6).join("\n");
-    if (allLines.length > 6) preview += "\n...";
-  } catch { /* file not readable */ }
+    const s = await statAsync(path);
+    if (s.size > 1_000_000) {
+      preview = "(file too large for preview)";
+    } else {
+      const content = await readFile(path, "utf-8");
+      const allLines = content.split("\n");
+      linesAdded = allLines.length;
+      preview = allLines.slice(0, 6).join("\n");
+      if (allLines.length > 6) preview += "\n...";
+    }
+  } catch { preview = "(unable to read file)"; }
   events.push({ type: "file_change", data: { path, kind, linesAdded, linesRemoved, preview } });
 }

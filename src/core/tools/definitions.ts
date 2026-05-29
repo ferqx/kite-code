@@ -33,8 +33,15 @@ export interface CreateAgentToolsInput {
   skillOptions?: import("@/core/skills/types").SkillScanOptions;
 }
 
+// ── 工具缓存 ──
+let _cachedKey: string | null = null;
+let _cachedTools: ReturnType<typeof createAgentTools> | null = null;
+
 /** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
 export function createAgentTools(input: CreateAgentToolsInput) {
+  // 缓存：同一个 agent 迭代中参数不变时避免重建全部工具（包括 MCP 适配）
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${!!input.mcpManager}|${input.skills?.length ?? 0}`;
+  if (cacheKey === _cachedKey && _cachedTools) return _cachedTools;
   const readFileTool = tool(
     async ({ path, offset, limit }) =>
       JSON.stringify(
@@ -180,9 +187,14 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     const mcpTools = mcpEntries.map(({ server, tool }) =>
       adaptMcpTool(server, tool, input.mcpManager!),
     );
-    return [...builtinTools, ...mcpTools];
+    const all = [...builtinTools, ...mcpTools];
+    _cachedKey = cacheKey;
+    _cachedTools = all;
+    return all;
   }
 
+  _cachedKey = cacheKey;
+  _cachedTools = builtinTools;
   return builtinTools;
 }
 

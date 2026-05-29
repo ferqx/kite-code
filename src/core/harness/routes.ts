@@ -7,19 +7,16 @@ import {
   evaluateToolPolicy,
 } from "./tool-policy";
 
-/** START 入口路由：检查是否有待处理工具调用，避免从 checkpoint 恢复时模型收到悬空 tool_calls / Entry routing — check for pending tool calls to avoid dangling tool_calls on checkpoint restore */
-export function routeEntry(
+/** Shared routing logic — resolves pending tool requests to a target node */
+function resolveToolRoute(
   state: CodeAgentState,
   override?: AuthorizationOverride,
   mcpRiskOverride?: Record<string, "read">,
-): "agent" | "approval" | "tools" | "user_input" {
+): "approval" | "tools" | "user_input" | null {
   const request = getPendingToolRequest(state.messages, state.workspace);
-  if (!request) {
-    return "agent";
-  }
-  if (request.name === "ask_user") {
-    return "user_input";
-  }
+  if (!request) return null;
+  if (request.name === "ask_user") return "user_input";
+
   const workspaceAccess = state.workspaceAccess ?? "write";
   const decision = evaluateToolPolicy({
     request,
@@ -36,33 +33,22 @@ export function routeEntry(
   return decision.requiresApproval ? "approval" : "tools";
 }
 
-/** agent 节点后的路由: approval | tools | user_input | END / Routing after agent */
+/** 入口路由：无待处理工具时回退到 agent / Entry routing: fall back to agent when no pending tools */
+export function routeEntry(
+  state: CodeAgentState,
+  override?: AuthorizationOverride,
+  mcpRiskOverride?: Record<string, "read">,
+): "agent" | "approval" | "tools" | "user_input" {
+  return resolveToolRoute(state, override, mcpRiskOverride) ?? "agent";
+}
+
+/** agent 节点后路由：无待处理工具时终止 / After-agent routing: END when no pending tools */
 export function routeAfterAgent(
   state: CodeAgentState,
   override?: AuthorizationOverride,
   mcpRiskOverride?: Record<string, "read">,
 ): "approval" | "tools" | "user_input" | typeof END {
-  const request = getPendingToolRequest(state.messages, state.workspace);
-  if (!request) {
-    return END;
-  }
-  if (request.name === "ask_user") {
-    return "user_input";
-  }
-  const workspaceAccess = state.workspaceAccess ?? "write";
-  const decision = evaluateToolPolicy({
-    request,
-    workspaceAccess,
-    phase: state.phase ?? defaultPhaseForWorkspaceAccess(workspaceAccess),
-    workspace: state.workspace,
-    threadId: state.threadId,
-    authorization: state.authorization,
-    override,
-    mcpRiskOverride,
-  });
-
-  if (!decision.allowed) return "tools";
-  return decision.requiresApproval ? "approval" : "tools";
+  return resolveToolRoute(state, override, mcpRiskOverride) ?? END;
 }
 
 /** approval 节点后的路由逻辑 / Routing after approval node */

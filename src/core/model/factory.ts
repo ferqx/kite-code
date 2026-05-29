@@ -19,6 +19,10 @@ const MODEL_REQUEST_TIMEOUT_MS = 30_000;
 class RetryingChatOpenAI extends ChatOpenAI {
   _retryListener: ModelRetryListener | null = null;
 
+  setRetryListener(listener: ModelRetryListener | null): void {
+    this._retryListener = listener;
+  }
+
   override async _generate(
     messages: BaseMessage[],
     options: this["ParsedCallOptions"],
@@ -40,6 +44,10 @@ class RetryingChatOpenAI extends ChatOpenAI {
  */
 class RetryingChatOllama extends ChatOllama {
   _retryListener: ModelRetryListener | null = null;
+
+  setRetryListener(listener: ModelRetryListener | null): void {
+    this._retryListener = listener;
+  }
 
   override async _generate(
     messages: BaseMessage[],
@@ -69,6 +77,10 @@ export function createChatModel(config: AgentConfig): SupportedChatModel {
       return createOpenAICompatibleModel(config);
     case "ollama":
       return createOllamaModel(config);
+    default: {
+      const _: never = config.providerType;
+      throw new Error(`Unknown provider type: ${_}`);
+    }
   }
 }
 
