@@ -19,7 +19,12 @@ export type AgentEvent =
   /** Raw LangGraph state update chunk — opaque passthrough for checkpoint/state tracking consumers */
   | { type: "update"; data: unknown }
   | { type: "model_retry"; data: { attempt: number; error: string; delayMs: number } }
-  | { type: "final"; data: string };
+  | { type: "final"; data: string }
+  | { type: "subagent_start"; data: SubAgentStartPayload }
+  | { type: "subagent_step"; data: SubAgentStepPayload }
+  | { type: "subagent_tool_result"; data: SubAgentToolResultPayload }
+  | { type: "subagent_done"; data: SubAgentDonePayload }
+  | { type: "subagent_error"; data: SubAgentErrorPayload };
 
 // ── 基础类型 / Base types ──
 export type WorkspaceAccess = "read-only" | "write";
@@ -112,4 +117,37 @@ export interface ToolApprovalPayload {
   expectedObservation?: string;
   failureStrategy?: string;
   suggestedPrefixRule?: string[];
+}
+
+// ── 子 Agent 事件 / Sub-agent events ──
+export type SubAgentRole = "explore" | "code" | "review";
+
+export interface SubAgentStartPayload {
+  id: string;
+  role: SubAgentRole;
+  task: string;
+}
+
+export interface SubAgentStepPayload {
+  id: string;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+}
+
+export interface SubAgentToolResultPayload {
+  id: string;
+  toolName: string;
+  ok: boolean;
+}
+
+export interface SubAgentDonePayload {
+  id: string;
+  summary: string;
+  toolCallCount: number;
+  durationMs: number;
+}
+
+export interface SubAgentErrorPayload {
+  id: string;
+  error: string;
 }
