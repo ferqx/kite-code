@@ -955,3 +955,96 @@ describe("App", () => {
     expect(promptIdx).toBeGreaterThanOrEqual(0);
   });
 });
+
+// ── SubAgent block rendering ──
+import SubAgentBlock from "../src/app/tui/components/SubAgentBlock";
+
+describe("SubAgentBlock rendering", () => {
+  test("renders running subagent block with steps", () => {
+    const block = {
+      id: 1, kind: "subagent" as const,
+      subagentId: "sub-1", role: "code" as const, task: "fix auth bug",
+      status: "running" as const, summary: "", toolCallCount: 0, durationMs: 0,
+      steps: [
+        { toolName: "read_file", toolArgs: { path: "auth.ts" }, ok: true },
+        { toolName: "edit_file", toolArgs: { path: "auth.ts" } },
+      ],
+    };
+    const { lastFrame } = render(
+      <SubAgentBlock block={block} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("▸");
+    expect(frame).toContain("Code");
+    expect(frame).toContain("fix auth bug");
+    expect(frame).toContain("read_file");
+    expect(frame).toContain("edit_file");
+    expect(frame).toContain("✓"); // ok: true on first step
+  });
+
+  test("renders done subagent block with summary", () => {
+    const block = {
+      id: 1, kind: "subagent" as const,
+      subagentId: "sub-1", role: "review" as const, task: "review PR #42",
+      status: "done" as const, summary: "No critical issues found.\n2 warnings in auth.ts.", toolCallCount: 5, durationMs: 3200,
+      steps: [],
+    };
+    const { lastFrame } = render(
+      <SubAgentBlock block={block} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("▼");
+    expect(frame).toContain("Review");
+    expect(frame).toContain("review PR #42");
+    expect(frame).toContain("5 次工具调用");
+    expect(frame).toContain("3.2s");
+    expect(frame).toContain("No critical issues found");
+  });
+
+  test("renders error subagent block", () => {
+    const block = {
+      id: 1, kind: "subagent" as const,
+      subagentId: "sub-1", role: "explore" as const, task: "find refs",
+      status: "error" as const, summary: "", toolCallCount: 0, durationMs: 0,
+      error: "Sub-agent timed out after 1800000ms",
+      steps: [],
+    };
+    const { lastFrame } = render(
+      <SubAgentBlock block={block} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("✗");
+    expect(frame).toContain("Explore");
+    expect(frame).toContain("timed out");
+  });
+
+  test("renders explore role icon and label correctly", () => {
+    const block = {
+      id: 1, kind: "subagent" as const,
+      subagentId: "sub-1", role: "explore" as const, task: "search all",
+      status: "running" as const, summary: "", toolCallCount: 0, durationMs: 0,
+      steps: [],
+    };
+    const { lastFrame } = render(
+      <SubAgentBlock block={block} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("🔍");
+    expect(frame).toContain("Explore");
+  });
+
+  test("long task text is rendered without truncation in block", () => {
+    const longTask = "find all usages of the UserService class across the entire codebase including tests";
+    const block = {
+      id: 1, kind: "subagent" as const,
+      subagentId: "sub-1", role: "code" as const, task: longTask,
+      status: "running" as const, summary: "", toolCallCount: 0, durationMs: 0,
+      steps: [],
+    };
+    const { lastFrame } = render(
+      <SubAgentBlock block={block} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain(longTask);
+  });
+});

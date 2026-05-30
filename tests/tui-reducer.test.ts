@@ -1064,4 +1064,118 @@ describe("eventReducer (blocks model)", () => {
       expect(next.activeSessionId).toBe("a");
     });
   });
+
+  describe("EVENT.subagent_*", () => {
+    function saStart(id: string, role: "explore" | "code" | "review", task: string): Action {
+      return { type: "EVENT", event: { type: "subagent_start", data: { id, role, task } } };
+    }
+    function saStep(id: string, toolName: string, toolArgs: Record<string, unknown> = {}): Action {
+      return { type: "EVENT", event: { type: "subagent_step", data: { id, toolName, toolArgs } } };
+    }
+    function saToolResult(id: string, toolName: string, ok: boolean): Action {
+      return { type: "EVENT", event: { type: "subagent_tool_result", data: { id, toolName, ok } } };
+    }
+    function saDone(id: string, summary: string, toolCallCount: number, durationMs: number): Action {
+      return { type: "EVENT", event: { type: "subagent_done", data: { id, summary, toolCallCount, durationMs } } };
+    }
+    function saError(id: string, error: string): Action {
+      return { type: "EVENT", event: { type: "subagent_error", data: { id, error } } };
+    }
+
+    test("subagent_start creates running subagent block", () => {
+      const s = dispatch(fresh(), saStart("sub-1", "explore", "find usages"));
+      expect(s.blocks).toHaveLength(1);
+      const b = s.blocks[0];
+      expect(b.kind).toBe("subagent");
+      if (b.kind !== "subagent") throw new Error("unexpected kind");
+      expect(b.subagentId).toBe("sub-1");
+      expect(b.role).toBe("explore");
+      expect(b.task).toBe("find usages");
+      expect(b.status).toBe("running");
+      expect(b.steps).toEqual([]);
+      expect(b.toolCallCount).toBe(0);
+    });
+
+    test("subagent_step appends step to matching running block", () => {
+      let s = dispatch(fresh(), saStart("sub-1", "code", "fix bug"));
+      s = dispatch(s, saStep("sub-1", "read_file", { path: "a.ts" }));
+      s = dispatch(s, saStep("sub-1", "edit_file", { path: "a.ts" }));
+      const b = s.blocks[0];
+      if (b.kind !== "subagent") throw new Error("unexpected kind");
+      expect(b.steps).toHaveLength(2);
+      expect(b.steps[0].toolName).toBe("read_file");
+      expect(b.steps[0].toolArgs).toEqual({ path: "a.ts" });
+      expect(b.steps[1].toolName).toBe("edit_file");
+    });
+
+    test("subagent_step does not affect non-matching subagent blocks", () => {
+      let s = dispatch(fresh(), saStart("sub-1", "code", "fix"));
+      s = dispatch(s, saStart("sub-2", "review", "review"));
+      s = dispatch(s, saStep("sub-1", "read_file"));
+      const b1 = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      const b2 = s.blocks[1] as Extract<OutputBlock, { kind: "subagent" }>;
+      expect(b1.steps).toHaveLength(1);
+      expect(b2.steps).toHaveLength(0);
+    });
+
+    test("subagent_tool_result marks last matching step's ok", () => {
+      let s = dispatch(fresh(), saStart("sub-1", "code", "fix"));
+      s = dispatch(s, saStep("sub-1", "read_file", { path: "a.ts" }));
+      s = dispatch(s, saStep("sub-1", "edit_file", { path: "a.ts" }));
+      s = dispatch(s, saToolResult("sub-1", "read_file", true));
+      const b = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      expect(b.steps[0].ok).toBeUndefined(); // not the last step
+      // last step should be updated by second tool_result
+      s = dispatch(s, saToolResult("sub-1", "edit_file", false));
+      const b2 = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      expect(b2.steps[0].ok).toBeUndefined(); // still not last
+    });
+
+    test("subagent_tool_result updates last step ok", () => {
+      let s = dispatch(fresh(), saStart("sub-1", "explore", "search"));
+      s = dispatch(s, saStep("sub-1", "read_file"));
+      s = dispatch(s, saToolResult("sub-1", "read_file", true));
+      const b = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      expect(b.steps[0].ok).toBe(true);
+    });
+
+    test("subagent_done updates running block to done", () => {
+      let s = dispatch(fresh(), saStart("sub-1", "review", "review PR"));
+      s = dispatch(s, saDone("sub-1", "No issues found", 3, 2500));
+      const b = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      expect(b.status).toBe("done");
+      expect(b.summary).toBe("No issues found");
+      expect(b.toolCallCount).toBe(3);
+      expect(b.durationMs).toBe(2500);
+    });
+
+    test("subagent_error updates running block to error", () => {
+      let s = dispatch(fresh(), saStart("sub-1", "code", "impl"));
+      s = dispatch(s, saError("sub-1", "timeout"));
+      const b = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      expect(b.status).toBe("error");
+      expect(b.error).toBe("timeout");
+    });
+
+    test("subagent events interleave correctly with other block types", () => {
+      let s = fresh();
+      s = dispatch(s, textEvt("start working"));
+      s = dispatch(s, saStart("sub-1", "explore", "search"));
+      s = dispatch(s, saStep("sub-1", "read_file"));
+      s = dispatch(s, saToolResult("sub-1", "read_file", true));
+      s = dispatch(s, saDone("sub-1", "found 3 files", 1, 800));
+      s = dispatch(s, textEvt("done"));
+      expect(s.blocks).toHaveLength(3); // text, subagent, text
+      expect(s.blocks[0].kind).toBe("text");
+      expect(s.blocks[1].kind).toBe("subagent");
+      expect(s.blocks[2].kind).toBe("text");
+    });
+
+    test("subagent blocks get unique incrementing ids", () => {
+      let s = fresh();
+      s = dispatch(s, saStart("sub-1", "explore", "task1"));
+      s = dispatch(s, saStart("sub-2", "code", "task2"));
+      expect(s.blocks[0].id).toBeLessThan(s.blocks[1].id);
+    });
+  });
 });
