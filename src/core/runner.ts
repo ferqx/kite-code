@@ -125,19 +125,19 @@ export async function* runAgent(
   const subagentEventSink: import("@/core/subagent/types").SubAgentEventSink = (e) => {
     switch (e.type) {
       case "start":
-        provider.onEvent({ type: "subagent_start", data: e.data as any });
+        provider.onEvent({ type: "subagent_start", data: e.data });
         break;
       case "step":
-        provider.onEvent({ type: "subagent_step", data: e.data as any });
+        provider.onEvent({ type: "subagent_step", data: e.data });
         break;
       case "tool_result":
-        provider.onEvent({ type: "subagent_tool_result", data: e.data as any });
+        provider.onEvent({ type: "subagent_tool_result", data: e.data });
         break;
       case "done":
-        provider.onEvent({ type: "subagent_done", data: e.data as any });
+        provider.onEvent({ type: "subagent_done", data: e.data });
         break;
       case "error":
-        provider.onEvent({ type: "subagent_error", data: e.data as any });
+        provider.onEvent({ type: "subagent_error", data: e.data });
         break;
     }
   };

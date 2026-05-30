@@ -4,7 +4,7 @@ import { ChatOllama } from "@langchain/ollama";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentConfig } from "@/core/config/index";
 import { createChatModel, type SupportedChatModel } from "@/core/model/factory";
-import { createAgentTools } from "@/core/tools/definitions";
+import { createAgentTools, isReadOnlyShellCommand } from "@/core/tools/definitions";
 import type { ShellExecutor } from "@/core/tools/shell";
 import type { McpManager } from "@/core/mcp";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
@@ -37,6 +37,22 @@ function extractText(content: unknown): string {
   return String(content ?? "");
 }
 
+/** 包装 shell executor：只允许只读命令 / Wrap shell executor to allow only read-only commands */
+function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
+  return async (shellInput) => {
+    if (!isReadOnlyShellCommand(shellInput.command)) {
+      return {
+        ok: false,
+        command: shellInput.command,
+        exitCode: -1,
+        stdout: "",
+        stderr: `Command rejected: "${shellInput.command}" is not a read-only command. This sub-agent has read-only access only.`,
+      };
+    }
+    return inner(shellInput);
+  };
+}
+
 /** 绑定模型工具（区分 Ollama）/ Bind tools to model (handle Ollama separately) */
 function bindTools(model: ReturnType<typeof createChatModel>, tools: ReturnType<typeof createAgentTools>) {
   if (model instanceof ChatOllama) return model.bindTools(tools);
@@ -62,10 +78,16 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     data: { id, role: input.role.role, task: input.task },
   });
 
+  // 只读角色：包装 shell executor 限制为只读命令，防止绕过审批
+  // Read-only roles: wrap shell executor to restrict to read-only commands
+  const effectiveShellExecutor = input.role.allowedTools && input.shellExecutor
+    ? wrapReadOnlyShell(input.shellExecutor)
+    : input.shellExecutor;
+
   // 构建工具集：受限角色只提供允许的工具
   const allTools = createAgentTools({
     workspace: input.workspace,
-    shellExecutor: input.shellExecutor,
+    shellExecutor: effectiveShellExecutor,
     mcpManager: input.mcpManager,
     skills: input.skills,
     skillOptions: input.skillOptions,

@@ -322,7 +322,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           signal: input.subagentSignal,
           model: input.model,
         });
-        const toolOutput = await taskTool.invoke(request.args as any);
+        const toolOutput = await taskTool.invoke(request.args);
         let taskOk = true;
         try { const p = JSON.parse(toolOutput); taskOk = p.ok !== false; } catch {}
         const toolMessage = new ToolMessage({

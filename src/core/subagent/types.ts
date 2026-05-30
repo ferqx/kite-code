@@ -1,5 +1,5 @@
 // src/core/subagent/types.ts
-import type { SubAgentRole } from "@/protocol/events";
+import type { SubAgentRole, SubAgentStartPayload, SubAgentStepPayload, SubAgentToolResultPayload, SubAgentDonePayload, SubAgentErrorPayload } from "@/protocol/events";
 
 export type { SubAgentRole };
 
@@ -23,9 +23,9 @@ export interface SubAgentResult {
 
 /** 事件回调：子 agent 运行时向外推送生命周期事件 */
 export type SubAgentEventSink = (event:
-  | { type: "start"; data: { id: string; role: SubAgentRole; task: string } }
-  | { type: "step"; data: { id: string; toolName: string; toolArgs: Record<string, unknown> } }
-  | { type: "tool_result"; data: { id: string; toolName: string; ok: boolean } }
-  | { type: "done"; data: { id: string; summary: string; toolCallCount: number; durationMs: number } }
-  | { type: "error"; data: { id: string; error: string } }
+  | { type: "start"; data: SubAgentStartPayload }
+  | { type: "step"; data: SubAgentStepPayload }
+  | { type: "tool_result"; data: SubAgentToolResultPayload }
+  | { type: "done"; data: SubAgentDonePayload }
+  | { type: "error"; data: SubAgentErrorPayload }
 ) => void;

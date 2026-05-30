@@ -100,6 +100,16 @@ export type PendingToolRequest =
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
       protectedCommand: string;
+    }
+  | {
+      /** 工具调用 ID / Tool call ID */
+      id?: string;
+      name: "task";
+      args: { subagent_type: "explore" | "code" | "review"; task: string };
+      /** 调用原因 / Call reason */
+      reason: string;
+      /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
     };
 
 /** 从消息列表中获取待处理的工具请求 / Get pending tool request from message list
@@ -285,6 +295,20 @@ export function toolRequestFromMessage(
       args: { skill: args.skill || "" },
       reason: "Model requested Skill tool",
       protectedCommand: "Skill",
+    };
+  }
+
+  if (call.name === "task") {
+    const args = call.args as Record<string, unknown> | undefined;
+    return {
+      id: call.id,
+      name: "task",
+      args: {
+        subagent_type: (args?.subagent_type as "explore" | "code" | "review") ?? "explore",
+        task: (args?.task as string) ?? "",
+      },
+      reason: "Model requested sub-agent dispatch",
+      protectedCommand: "task",
     };
   }
 
