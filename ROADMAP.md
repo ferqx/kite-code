@@ -83,6 +83,20 @@
 
 > 详见 [`docs/space/plans/2026-05-26-tui-claude-code-parity.md`](docs/space/plans/2026-05-26-tui-claude-code-parity.md)
 
+### 多 Agent 协作（2026-05-30）
+
+| 任务 | 内容 |
+|------|------|
+| Task Tool 模式 | 主 Agent 通过 `task` 工具派发子 Agent（星型拓扑），独立上下文窗口，单向摘要回报 |
+| 3 个内置角色 | Explore（只读搜索）/ Code（完整工具集）/ Review（批判性审查），Plan 由主 Agent 把控 |
+| 生命周期管理 | 30min 超时、10 并发、深度 0（不可递归）|
+| TUI 渲染 | `subagent` block 类型，运行中/完成/错误三态，折叠+展开 |
+| 审批策略 | 继承主 Agent 授权 + 敏感操作独立审批 |
+
+> 详见 [`docs/space/understanding/2026-05-30-multi-agent-design.md`](docs/space/understanding/2026-05-30-multi-agent-design.md) |
+
+> 详见 [`docs/space/plans/2026-05-26-tui-claude-code-parity.md`](docs/space/plans/2026-05-26-tui-claude-code-parity.md)
+
 ---
 
 ## 🔜 后续方向

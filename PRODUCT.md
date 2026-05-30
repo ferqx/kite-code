@@ -30,6 +30,7 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 | Rewind（会话回溯） | `/rewind` 命令 + `Esc Esc`，checkpoint 列表 → Revert/Fork，对齐 Claude Code Rewind |
 | Skills 系统 | agentskills.io 开放标准，`Skill` 工具 + `/skill-name` 斜杠命令，项目/用户级 skills 目录 |
 | 错误分类 | runner 层区分网络超时/速率限制（可恢复）vs 配置/权限（不可恢复） |
+| 多 Agent 协作 | Task Tool 模式，3 个内置角色（Explore/Code/Review），星型拓扑，上下文隔离，TUI 实时渲染 |
 | 多会话并发 | 独立 AbortController，会话间互不污染 |
 | 双主题 | dark / light，通过 `openpx.jsonc` 的 `theme` 字段切换 |
 
