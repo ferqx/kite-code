@@ -47,6 +47,7 @@
 | `understanding/2026-05-23-skills-system-design.md` | understanding | Skills 系统设计 — 对齐 agentskills.io 开放标准，按需加载 + Skill 工具 + Available Skills 区段 + /skill-name。 |
 | `understanding/2026-05-24-multi-session-concurrency-design.md` | understanding | 多会话并发执行设计规范。 |
 | `understanding/2026-05-26-tui-claude-code-parity-design.md` | understanding | TUI Claude Code 对标设计 — 布局重构、快捷键精简、功能补全、配置、主题、实施记录。 |
+| `understanding/2026-05-30-multi-agent-design.md` | understanding | 多 Agent 架构设计 — Task Tool 模式、3 个内置角色（Explore/Code/Review）、星型拓扑、生命周期、审批策略、TUI 渲染。 |
 
 ## Backlog（工作待办）
 
