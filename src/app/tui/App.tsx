@@ -155,6 +155,7 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
             thinkingVisible={state.thinkingVisible}
             overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind}
             sessionKey={state.sessionKey}
+            interruptBlockId={state.interrupt?.blockId}
             header={<MemoHeader running={state.running} error={state.sessionError} />}
           />
         )}

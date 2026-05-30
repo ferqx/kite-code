@@ -62,13 +62,16 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         updated.push({ ...lastBlock, content: event.data.text });
         return { ...state, blocks: updated };
       }
-      // Dedup: if the most recent text block has identical content, skip
+      // Dedup: if the most recent text block has identical content, skip.
       // Prevents duplication when agent emits same text before and after an
       // interrupt (e.g. ask_user tool_call with preamble text, then same text
       // in follow-up response after user answers).
+      // Only checks the single most recent text block — not all blocks — so
+      // legitimate repetitions across distant turns are not suppressed.
       for (let i = state.blocks.length - 1; i >= 0; i--) {
-        if (state.blocks[i].kind === "text" && state.blocks[i].content === event.data.text) {
-          return state;
+        if (state.blocks[i].kind === "text") {
+          if (state.blocks[i].content === event.data.text) return state;
+          break;
         }
       }
       const id = state.nextBlockId;
@@ -155,13 +158,14 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case "final": {
       if (event.data.length === 0) return state;
-      // Dedup: check last block first (fast path), then search for matching
+      // Dedup: check last block first (fast path), then the most recent
       // text block in case an interrupt block sits between them.
       const lastBlock = state.blocks.at(-1);
       if (lastBlock?.kind === "text" && lastBlock.content === event.data) return state;
       for (let i = state.blocks.length - 1; i >= 0; i--) {
-        if (state.blocks[i].kind === "text" && state.blocks[i].content === event.data) {
-          return state;
+        if (state.blocks[i].kind === "text") {
+          if (state.blocks[i].content === event.data) return state;
+          break;
         }
       }
       const id = state.nextBlockId;
@@ -169,16 +173,28 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, blocks: [...state.blocks, block], nextBlockId: id + 1 };
     }
     case "need_approval": {
+      // Finalize streaming text blocks so they move to <Static> immediately.
+      // This prevents visual duplication when blocks later transition from
+      // the dynamic tree to the terminal scrollback.
+      const finalized = state.blocks.map((b) =>
+        b.kind === "text" && b.streaming ? { ...b, streaming: false as any } : b
+      );
       const blockId = state.nextBlockId;
       const block: OutputBlock = { id: blockId, kind: "approval", approval: event.data };
       const interrupt: InterruptState = { kind: "approval", blockId };
-      return { ...state, blocks: [...state.blocks, block], interrupt, nextBlockId: blockId + 1 };
+      return { ...state, blocks: [...finalized, block], interrupt, nextBlockId: blockId + 1 };
     }
     case "need_input": {
+      // Finalize streaming text blocks so they move to <Static> immediately.
+      // This prevents visual duplication when blocks later transition from
+      // the dynamic tree to the terminal scrollback.
+      const finalized = state.blocks.map((b) =>
+        b.kind === "text" && b.streaming ? { ...b, streaming: false as any } : b
+      );
       const blockId = state.nextBlockId;
       const block: OutputBlock = { id: blockId, kind: "question", question: event.data };
       const interrupt: InterruptState = { kind: "input", blockId };
-      return { ...state, blocks: [...state.blocks, block], interrupt, nextBlockId: blockId + 1 };
+      return { ...state, blocks: [...finalized, block], interrupt, nextBlockId: blockId + 1 };
     }
     case "error": {
       const recoverable = event.data.recoverable;

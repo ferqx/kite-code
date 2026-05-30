@@ -16,6 +16,8 @@ interface OutputAreaProps {
   sessionKey?: number;
   /** 渲染在 <Static> 最上方的静态头（Header 组件） */
   header?: React.ReactNode;
+  /** 中断 block id：当存在中断时，以此 block 为界分割 Static/dynamic，确保中断 block 保持在交互区 */
+  interruptBlockId?: number;
 }
 
 export function toolColor(status: string): string {
@@ -225,27 +227,33 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
 /** 哨兵值：保证 <Static> items 始终至少有 1 项，使 Header 即使在无 completed block 时也能渲染 */
 const HEADER_SENTINEL = { __header: true } as const;
 
-const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, overlayActive, sessionKey, header }: OutputAreaProps) {
+const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, overlayActive, sessionKey, header, interruptBlockId }: OutputAreaProps) {
   // ── Split: completed blocks → <Static>, active block → dynamic tree ──
   // <Static> renders items once to the terminal scrollback buffer and skips
   // them in the interactive render pass. This keeps the interactive tree small
   // so Ink's reconciler + yoga-layout + diff run fast during typing.
-  const lastStreamingIdx = useMemo(() => {
+  // When an interrupt is active, use its block as the boundary so the
+  // question/approval block and everything after it stays interactive.
+  const splitIdx = useMemo(() => {
+    if (interruptBlockId != null) {
+      const idx = blocks.findIndex(b => b.id === interruptBlockId);
+      if (idx >= 0) return idx;
+    }
     for (let i = blocks.length - 1; i >= 0; i--) {
       if (blocks[i].kind === "text" && (blocks[i] as { streaming?: boolean }).streaming) {
         return i;
       }
     }
     return -1;
-  }, [blocks]);
+  }, [blocks, interruptBlockId]);
 
   const completedBlocks = useMemo(
-    () => lastStreamingIdx >= 0 ? blocks.slice(0, lastStreamingIdx) : blocks,
-    [blocks, lastStreamingIdx]
+    () => splitIdx >= 0 ? blocks.slice(0, splitIdx) : blocks,
+    [blocks, splitIdx]
   );
   const activeBlocks = useMemo(
-    () => lastStreamingIdx >= 0 ? blocks.slice(lastStreamingIdx) : [],
-    [blocks, lastStreamingIdx]
+    () => splitIdx >= 0 ? blocks.slice(splitIdx) : [],
+    [blocks, splitIdx]
   );
 
   // Arrow key navigation for the dynamic (active) section only
