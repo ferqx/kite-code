@@ -1,4 +1,10 @@
-import type { ToolCallPayload, ToolApprovalPayload, UserInputPayload, AgentPhase, AgentPlan, AuthorizationMode, WorkspaceAccess } from "@/protocol/events";
+import type { ToolCallPayload, ToolApprovalPayload, UserInputPayload, AgentPhase, AgentPlan, AuthorizationMode, WorkspaceAccess, SubAgentRole } from "@/protocol/events";
+
+export interface SubAgentStepRecord {
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  ok?: boolean;
+}
 
 export type OutputBlock =
   | { id: number; kind: "user"; content: string }
@@ -7,7 +13,8 @@ export type OutputBlock =
   | { id: number; kind: "tool_card"; callId: string; name: string; args: Record<string, unknown>; status: "running" | "done" | "error"; summary: string; preview?: string; elapsedMs?: number; detail?: string }
   | { id: number; kind: "file_change"; changes: FileChangeRecord[] }
   | { id: number; kind: "approval"; approval: ToolApprovalPayload; resolved?: { action: string; grant?: string; pattern?: string } }
-  | { id: number; kind: "question"; question: UserInputPayload; resolved?: string };
+  | { id: number; kind: "question"; question: UserInputPayload; resolved?: string }
+  | { id: number; kind: "subagent"; subagentId: string; role: SubAgentRole; task: string; status: "running" | "done" | "error"; summary: string; toolCallCount: number; durationMs: number; steps: SubAgentStepRecord[]; error?: string };
 
 export interface FileChangeRecord {
   path: string;

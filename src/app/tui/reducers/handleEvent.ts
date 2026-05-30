@@ -231,6 +231,75 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const block: OutputBlock = { id, kind: "text", content: `✓ Compaction complete: ${event.data.summary}` };
       return { ...state, blocks: [...state.blocks, block], compacting: false, nextBlockId: id + 1 };
     }
+    case "subagent_start": {
+      const id = state.nextBlockId;
+      const block: OutputBlock = {
+        id,
+        kind: "subagent",
+        subagentId: event.data.id,
+        role: event.data.role,
+        task: event.data.task,
+        status: "running",
+        summary: "",
+        toolCallCount: 0,
+        durationMs: 0,
+        steps: [],
+      };
+      return { ...state, blocks: [...state.blocks, block], nextBlockId: id + 1 };
+    }
+    case "subagent_step": {
+      const blocks = state.blocks.map((b) => {
+        if (b.kind === "subagent" && b.subagentId === event.data.id) {
+          return {
+            ...b,
+            steps: [...b.steps, {
+              toolName: event.data.toolName,
+              toolArgs: event.data.toolArgs,
+            }],
+          };
+        }
+        return b;
+      });
+      return { ...state, blocks };
+    }
+    case "subagent_tool_result": {
+      const blocks = state.blocks.map((b) => {
+        if (b.kind === "subagent" && b.subagentId === event.data.id) {
+          const steps = b.steps.map((s, i) =>
+            i === b.steps.length - 1 && s.toolName === event.data.toolName
+              ? { ...s, ok: event.data.ok }
+              : s
+          );
+          return { ...b, steps };
+        }
+        return b;
+      });
+      return { ...state, blocks };
+    }
+    case "subagent_done": {
+      const blocks = state.blocks.map((b) => {
+        if (b.kind === "subagent" && b.subagentId === event.data.id) {
+          return {
+            ...b,
+            status: "done" as const,
+            summary: event.data.summary,
+            toolCallCount: event.data.toolCallCount,
+            durationMs: event.data.durationMs,
+          };
+        }
+        return b;
+      });
+      return { ...state, blocks };
+    }
+    case "subagent_error": {
+      const blocks = state.blocks.map((b) => {
+        if (b.kind === "subagent" && b.subagentId === event.data.id) {
+          return { ...b, status: "error" as const, error: event.data.error };
+        }
+        return b;
+      });
+      return { ...state, blocks };
+    }
     default:
       return state;
   }
