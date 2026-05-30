@@ -248,9 +248,13 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thin
       if (idx >= 0) return idx;
     }
     for (let i = blocks.length - 1; i >= 0; i--) {
-      if (blocks[i].kind === "text" && (blocks[i] as { streaming?: boolean }).streaming) {
-        return i;
-      }
+      const b = blocks[i];
+      // Keep streaming text blocks in the dynamic tree
+      if (b.kind === "text" && (b as { streaming?: boolean }).streaming) return i;
+      // Keep running tool_cards dynamic so status updates (→ done/error) are visible
+      if (b.kind === "tool_card" && b.status === "running") return i;
+      // Keep running subagent blocks dynamic for live step updates
+      if (b.kind === "subagent" && b.status === "running") return i;
     }
     return -1;
   }, [blocks, interruptBlockId]);
