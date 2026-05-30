@@ -3,6 +3,7 @@ import { Box, Text, Static } from "ink";
 import { useInput } from "ink";
 import type { OutputBlock } from "./types";
 import MarkdownBlock from "./components/MarkdownBlock";
+import SubAgentBlock from "./components/SubAgentBlock";
 import { darkTheme } from "./theme";
 const dt = darkTheme; // for exported utility functions
 
@@ -218,6 +219,13 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
         </Box>
       );
     }
+
+    case "subagent":
+      return (
+        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
+          <SubAgentBlock block={block} />
+        </Box>
+      );
 
     default:
       return null;
