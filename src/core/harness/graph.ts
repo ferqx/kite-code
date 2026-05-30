@@ -49,6 +49,7 @@ import {
 } from "./tool-policy";
 import { runApprovedTool } from "./tool-runner";
 import { userInputToolMessage } from "./user-input";
+import { createTaskTool } from "@/core/subagent/task-tool";
 
 /** 构建代码 Agent 图的输入 / Build code agent graph input */
 export interface BuildCodeAgentGraphInput {
@@ -309,30 +310,44 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     // Handle task tool (sub-agent dispatch) before runApprovedTool
     if (request.name === "task" && input.subagentEventSink) {
-      const { createTaskTool } = await import("@/core/subagent/task-tool");
-      const taskTool = createTaskTool({
-        config: input.config,
-        workspace: state.workspace,
-        shellExecutor: input.shellExecutor,
-        mcpManager: input.mcpManager,
-        skills: input.skills,
-        skillOptions: input.skillOptions,
-        eventSink: input.subagentEventSink,
-        signal: input.subagentSignal,
-        model: input.model,
-      });
-      const toolOutput = await taskTool.invoke(request.args as any);
-      const toolMessage = new ToolMessage({
-        content: toolOutput,
-        tool_call_id: request.id ?? "missing-tool-call-id",
-        name: request.name,
-        status: "success",
-      });
-      return {
-        approvedToolRequest: null,
-        approvedToolGrant: null,
-        messages: [toolMessage],
-      };
+      try {
+        const taskTool = createTaskTool({
+          config: input.config,
+          workspace: state.workspace,
+          shellExecutor: input.shellExecutor,
+          mcpManager: input.mcpManager,
+          skills: input.skills,
+          skillOptions: input.skillOptions,
+          eventSink: input.subagentEventSink,
+          signal: input.subagentSignal,
+          model: input.model,
+        });
+        const toolOutput = await taskTool.invoke(request.args as any);
+        const toolMessage = new ToolMessage({
+          content: toolOutput,
+          tool_call_id: request.id ?? "missing-tool-call-id",
+          name: request.name,
+          status: "success",
+        });
+        return {
+          approvedToolRequest: null,
+          approvedToolGrant: null,
+          messages: [toolMessage],
+        };
+      } catch (err: any) {
+        const errorMsg = err?.message ?? String(err);
+        const toolMessage = new ToolMessage({
+          content: JSON.stringify({ ok: false, error: errorMsg }),
+          tool_call_id: request.id ?? "missing-tool-call-id",
+          name: request.name,
+          status: "error",
+        });
+        return {
+          approvedToolRequest: null,
+          approvedToolGrant: null,
+          messages: [toolMessage],
+        };
+      }
     }
 
     const result = await runApprovedTool(

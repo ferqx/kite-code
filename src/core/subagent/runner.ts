@@ -58,9 +58,10 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     skills: input.skills,
     skillOptions: input.skillOptions,
   });
+  // Filter: apply role restrictions, then always exclude "task" to enforce depth 0
   const tools = input.role.allowedTools
-    ? allTools.filter((t) => input.role.allowedTools!.has(t.name))
-    : allTools;
+    ? allTools.filter((t) => input.role.allowedTools!.has(t.name) && t.name !== "task")
+    : allTools.filter((t) => t.name !== "task");
 
   const systemMessage = new SystemMessage(input.role.systemPrompt);
   const messages: BaseMessage[] = [systemMessage, new HumanMessage(input.task)];
