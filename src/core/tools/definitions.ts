@@ -19,6 +19,7 @@ import {
 import { adaptMcpTool } from "@/core/mcp/tool-adapter";
 import { createSkillTool } from "@/core/skills/skill-tool";
 import { createTaskTool } from "@/core/subagent/task-tool";
+import type { SupportedChatModel } from "@/core/model/factory";
 
 /** 创建 Agent 工具集输入 / Input for creating agent tools */
 export interface CreateAgentToolsInput {
@@ -38,9 +39,9 @@ export interface CreateAgentToolsInput {
   subagentEventSink?: import("@/core/subagent/types").SubAgentEventSink;
   /** 外部中止信号（用于 task 工具） */
   subagentSignal?: AbortSignal;
+  /** 可选自定义模型实例（用于 E2E mock 注入）/ Optional custom model instance (for E2E mock injection) */
+  model?: SupportedChatModel;
 }
-
-// ── 工具缓存 ──
 let _cachedKey: string | null = null;
 let _cachedTools: ReturnType<typeof createAgentTools> | null = null;
 
@@ -179,6 +180,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
   const taskTool = input.subagentEventSink && input.config
     ? createTaskTool({
         config: input.config,
+        model: input.model,
         workspace: input.workspace,
         shellExecutor: input.shellExecutor,
         mcpManager: input.mcpManager,

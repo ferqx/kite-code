@@ -4,6 +4,7 @@ import type { AgentConfig } from "@/core/config/index";
 import type { ShellExecutor } from "@/core/tools/shell";
 import type { McpManager } from "@/core/mcp";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
+import type { SupportedChatModel } from "@/core/model/factory";
 import type { SubAgentEventSink } from "./types";
 import { getRoleConfig } from "./roles";
 import { runSubAgent } from "./runner";
@@ -17,6 +18,8 @@ export interface TaskToolDeps {
   skillOptions?: SkillScanOptions;
   eventSink: SubAgentEventSink;
   signal?: AbortSignal;
+  /** 可选自定义模型实例（用于 E2E mock）/ Optional custom model instance (for E2E mock) */
+  model?: SupportedChatModel;
 }
 
 /** 最大并发子 agent 数 */
@@ -50,6 +53,7 @@ export function createTaskTool(deps: TaskToolDeps) {
           timeoutMs: 30 * 60 * 1000, // 30 分钟
           signal,
           eventSink: deps.eventSink,
+          model: deps.model,
         });
         return JSON.stringify(result);
       } finally {

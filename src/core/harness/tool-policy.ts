@@ -194,6 +194,15 @@ export function evaluateToolPolicy(input: {
     });
   }
 
+  if (request.name === "task") {
+    return allow({
+      risk: "plan",
+      reason: "Sub-agent dispatch is a coordination tool; sub-agent actions have their own approval flow.",
+      userVisibleSummary: "Dispatch a specialized sub-agent for an isolated task.",
+      expectedEffects: ["Runs a sub-agent in an isolated context", "Sub-agent tool calls follow their own approval rules"],
+    });
+  }
+
   if (request.name === "read_file") {
     return allow({
       risk: "read",

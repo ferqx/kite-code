@@ -103,6 +103,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       config: input.config,
       subagentEventSink: input.subagentEventSink,
       subagentSignal: input.subagentSignal,
+      model: input.model,
     });
     const retryEvents: ModelRetryEvent[] = [];
     let compactionPerformed: { reason: string; summary: string } | null = null;
@@ -304,6 +305,34 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         : "none";
     if (!request) {
       return {};
+    }
+
+    // Handle task tool (sub-agent dispatch) before runApprovedTool
+    if (request.name === "task" && input.subagentEventSink) {
+      const { createTaskTool } = await import("@/core/subagent/task-tool");
+      const taskTool = createTaskTool({
+        config: input.config,
+        workspace: state.workspace,
+        shellExecutor: input.shellExecutor,
+        mcpManager: input.mcpManager,
+        skills: input.skills,
+        skillOptions: input.skillOptions,
+        eventSink: input.subagentEventSink,
+        signal: input.subagentSignal,
+        model: input.model,
+      });
+      const toolOutput = await taskTool.invoke(request.args as any);
+      const toolMessage = new ToolMessage({
+        content: toolOutput,
+        tool_call_id: request.id ?? "missing-tool-call-id",
+        name: request.name,
+        status: "success",
+      });
+      return {
+        approvedToolRequest: null,
+        approvedToolGrant: null,
+        messages: [toolMessage],
+      };
     }
 
     const result = await runApprovedTool(
