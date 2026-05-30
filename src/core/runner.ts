@@ -122,6 +122,26 @@ export async function* runAgent(
   provider: UserInputProvider,
   input: RunAgentInput,
 ): AsyncGenerator<AgentEvent> {
+  const subagentEventSink: import("@/core/subagent/types").SubAgentEventSink = (e) => {
+    switch (e.type) {
+      case "start":
+        provider.onEvent({ type: "subagent_start", data: e.data as any });
+        break;
+      case "step":
+        provider.onEvent({ type: "subagent_step", data: e.data as any });
+        break;
+      case "tool_result":
+        provider.onEvent({ type: "subagent_tool_result", data: e.data as any });
+        break;
+      case "done":
+        provider.onEvent({ type: "subagent_done", data: e.data as any });
+        break;
+      case "error":
+        provider.onEvent({ type: "subagent_error", data: e.data as any });
+        break;
+    }
+  };
+
   const { graph, checkpointer } = buildCodeAgentGraph({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -132,6 +152,8 @@ export async function* runAgent(
     skills: input.skills,
     skillOptions: input.skillOptions,
     mcpManager: input.mcpManager,
+    subagentEventSink,
+    subagentSignal: input.signal,
   });
 
   const signal = input.signal;
@@ -227,6 +249,8 @@ export async function* revertToCheckpoint(
     thinkingLevel: input.thinkingLevel ?? null,
     model: input.model,
     mcpManager: input.mcpManager,
+    subagentEventSink: undefined,
+    subagentSignal: input.signal,
   });
 
   const signal = input.signal;
@@ -292,6 +316,8 @@ export async function* forkFromCheckpoint(
     thinkingLevel: input.thinkingLevel ?? null,
     model: input.model,
     mcpManager: input.mcpManager,
+    subagentEventSink: undefined,
+    subagentSignal: input.signal,
   });
 
   const signal = input.signal;
