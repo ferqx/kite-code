@@ -190,10 +190,6 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thin
   // so Ink's reconciler + yoga-layout + diff run fast during typing.
   // When an interrupt is active, use its block as the boundary so the
   // question/approval block and everything after it stays interactive.
-  // 刚完成的 block ID，多停留一帧避免 <Static> 重复渲染
-  // Block IDs that just completed — keep in active one extra frame to prevent Static duplication
-  const stickyRef = useRef(new Set<number>());
-
   const splitIdx = useMemo(() => {
     if (interruptBlockId != null) {
       const idx = blocks.findIndex(b => b.id === interruptBlockId);
@@ -208,25 +204,8 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thin
       // Keep running subagent blocks dynamic for live step updates
       if (b.kind === "subagent" && b.status === "running") return i;
     }
-    // One-frame delay: keep just-completed blocks in active so Static doesn't duplicate them
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const b = blocks[i];
-      if ((b.kind === "tool_card" || b.kind === "subagent") && b.status !== "running" && stickyRef.current.has(b.id)) {
-        stickyRef.current.delete(b.id);
-        return i;
-      }
-    }
     return -1;
   }, [blocks, interruptBlockId]);
-
-  // Track running blocks so we know which ones just completed
-  useMemo(() => {
-    for (const b of blocks) {
-      if ((b.kind === "tool_card" || b.kind === "subagent") && b.status === "running") {
-        stickyRef.current.add(b.id);
-      }
-    }
-  }, [blocks]);
 
   const completedBlocks = useMemo(
     () => splitIdx >= 0 ? blocks.slice(0, splitIdx) : blocks,
