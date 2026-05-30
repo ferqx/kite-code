@@ -1033,8 +1033,8 @@ describe("SubAgentBlock rendering", () => {
     expect(frame).toContain("Explore");
   });
 
-  test("long task text is rendered without truncation in block", () => {
-    const longTask = "find all usages of the UserService class across the entire codebase including tests";
+  test("long task text is truncated to first line in block", () => {
+    const longTask = "find all usages of the UserService class across the entire codebase including tests\n\nDetailed instructions:\n- Check every file";
     const block = {
       id: 1, kind: "subagent" as const,
       subagentId: "sub-1", role: "code" as const, task: longTask,
@@ -1045,6 +1045,48 @@ describe("SubAgentBlock rendering", () => {
       <SubAgentBlock block={block} />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain(longTask);
+    // First line should be visible
+    expect(frame).toContain("find all usages of the UserService class");
+    // Second line should NOT be visible
+    expect(frame).not.toContain("Detailed instructions");
+  });
+
+  test("done block truncates long summaries", () => {
+    const longSummary = Array.from({ length: 15 }, (_, i) => `Line ${i + 1}`).join("\n");
+    const block = {
+      id: 1, kind: "subagent" as const,
+      subagentId: "sub-1", role: "explore" as const, task: "search",
+      status: "done" as const, summary: longSummary, toolCallCount: 3, durationMs: 1200,
+      steps: [],
+    };
+    const { lastFrame } = render(
+      <SubAgentBlock block={block} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Line 1");
+    expect(frame).toContain("Line 8");
+    expect(frame).toContain("已折叠");
+    expect(frame).not.toContain("Line 9");
+  });
+
+  test("running block limits visible steps", () => {
+    const steps = Array.from({ length: 15 }, (_, i) => ({
+      toolName: `step_${String(i + 1).padStart(2, "0")}`,
+      toolArgs: {},
+    }));
+    const block = {
+      id: 1, kind: "subagent" as const,
+      subagentId: "sub-1", role: "code" as const, task: "fix bug",
+      status: "running" as const, summary: "", toolCallCount: 0, durationMs: 0,
+      steps,
+    };
+    const { lastFrame } = render(
+      <SubAgentBlock block={block} />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("已折叠");
+    expect(frame).toContain("step_15"); // last step should be visible
+    expect(frame).toContain("step_06"); // within last 10
+    expect(frame).not.toContain("step_05"); // too old, folded
   });
 });
