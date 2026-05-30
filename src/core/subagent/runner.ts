@@ -1,5 +1,5 @@
 // src/core/subagent/runner.ts
-import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatOllama } from "@langchain/ollama";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentConfig } from "@/core/config/index";
@@ -65,20 +65,20 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   const systemMessage = new SystemMessage(input.role.systemPrompt);
   const messages: BaseMessage[] = [systemMessage, new HumanMessage(input.task)];
 
+  // 组合超时信号 + 外部 abort 信号，传播到模型 HTTP 请求
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), input.timeoutMs);
+  const combinedSignal = AbortSignal.any([input.signal, timeoutController.signal]);
+
   try {
-    const deadline = Date.now() + input.timeoutMs;
 
     while (true) {
-      if (input.signal.aborted) {
-        throw new Error("Sub-agent aborted");
-      }
-      if (Date.now() > deadline) {
-        throw new Error(`Sub-agent timed out after ${input.timeoutMs}ms`);
-      }
-
-      const response = await bindTools(model, tools).invoke(messages) as AIMessage;
+      const response = await bindTools(model, tools).invoke(messages, { signal: combinedSignal }) as AIMessage;
 
       if (response.tool_calls && response.tool_calls.length > 0) {
+        // 将 AI 消息推入一次（在循环外），避免重复
+        messages.push(response);
+
         // 处理工具调用
         for (const tc of response.tool_calls) {
           const tool = tools.find((t) => t.name === tc.name);
@@ -116,16 +116,15 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
             data: { id, toolName: tc.name, ok },
           });
 
-          messages.push(response);
-          messages.push({
-            type: "tool" as const,
+          messages.push(new ToolMessage({
             content: toolOutput,
             tool_call_id: tc.id ?? "",
             name: tc.name,
-          } as any);
+          }));
         }
       } else {
         // 无工具调用 → 最终文本 = 摘要
+        clearTimeout(timeoutId);
         messages.push(response);
         const summary = typeof response.content === "string"
           ? response.content
@@ -141,6 +140,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
       }
     }
   } catch (e: any) {
+    clearTimeout(timeoutId);
     const durationMs = Date.now() - startTime;
     const error = e?.message ?? String(e);
     input.eventSink({
