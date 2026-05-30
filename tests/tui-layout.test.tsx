@@ -670,17 +670,18 @@ describe("OutputArea", () => {
     expect(frame).toContain("npm test");
   });
 
-  test("renders tool_card with done status, hides summary for success", () => {
+  test("renders tool_card with done status, hides summary for success, shows elapsed", () => {
     const blocks: OutputBlock[] = [
-      { id: 1, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "done", summary: "OK", preview: "foo.ts", elapsedMs: 1234 },
+      { id: 1, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "done", summary: "OK", preview: "foo.ts", elapsedMs: 1234, detail: "Read foo.ts" },
     ];
     const { lastFrame } = render(
       <OutputArea blocks={blocks} onToggleReason={noop} thinkingVisible />,
     );
     const frame = lastFrame();
+    // Summary hidden for success
     expect(frame).not.toContain("OK");
-    expect(frame).toContain("foo.ts");
-    expect(frame).not.toContain("1.2s");
+    // Elapsed time now shown for all tools (not just shell_execute)
+    expect(frame).toContain("1.2s");
   });
 
   test("renders tool_card with error status and shows summary", () => {

@@ -4,6 +4,7 @@ import { useInput } from "ink";
 import type { OutputBlock } from "./types";
 import MarkdownBlock from "./components/MarkdownBlock";
 import SubAgentBlock from "./components/SubAgentBlock";
+import ToolCardBlock from "./components/ToolCardBlock";
 import { darkTheme } from "./theme";
 const dt = darkTheme; // for exported utility functions
 
@@ -61,39 +62,6 @@ function resolveApprovalLabel(resolved?: { action: string; grant?: string; patte
   return `? ${resolved.action}`;
 }
 
-const MAX_TOOL_LINES = 12;
-
-function renderToolSummary(summary: string, isError: boolean) {
-  const prefix = isError ? "✕ " : "⎿ ";
-  const color = isError ? dt.error : dt.dim;
-  const text = summary.trimEnd();
-  const lines = text.split("\n");
-
-  if (lines.length <= 1) {
-    return (
-      <Text color={color}>
-        {prefix}{text.slice(0, 300)}
-      </Text>
-    );
-  }
-
-  const displayLines = lines.slice(0, MAX_TOOL_LINES);
-  const truncated = lines.length > MAX_TOOL_LINES;
-
-  return (
-    <React.Fragment>
-      {displayLines.map((line, i) => (
-        <Text key={i} color={color}>
-          {i === 0 ? prefix : "   "}{line.slice(0, 200)}
-        </Text>
-      ))}
-      {truncated && (
-        <Text color={dt.dim}>   ... ({lines.length - MAX_TOOL_LINES} more lines)</Text>
-      )}
-    </React.Fragment>
-  );
-}
-
 const BLOCK_GAP = 1;
 
 function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: boolean, _i: number, prevBlock?: OutputBlock) {
@@ -136,28 +104,8 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
 
     case "tool_card":
       return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
-          <Box>
-            <Text color={toolColor(block.status)}>⏺ </Text>
-            <Text color={dt.primary}>{block.name}</Text>
-            {block.preview ? (
-              <Text color={dt.muted}> {block.preview}</Text>
-            ) : null}
-            {block.detail ? (
-              <Text color={dt.dim}> {block.detail}</Text>
-            ) : null}
-            {block.status === "running" ? (
-              <Text color={dt.dim}> ...</Text>
-            ) : null}
-            {block.elapsedMs != null && block.name === "shell_execute" && (
-              <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
-            )}
-          </Box>
-          {block.status === "error" && block.summary ? (
-            <Box paddingLeft={3} flexDirection="column">
-              {renderToolSummary(block.summary, true)}
-            </Box>
-          ) : null}
+        <Box key={block.id} marginBottom={BLOCK_GAP}>
+          <ToolCardBlock block={block} />
         </Box>
       );
 

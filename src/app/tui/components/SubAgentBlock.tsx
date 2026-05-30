@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import type { OutputBlock } from "../types";
 import type { SubAgentRole } from "@/protocol/events";
@@ -46,6 +46,17 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const label = roleLabel(block.role);
   const taskSummary = taskLabel(block.task);
 
+  // Live elapsed time for running state
+  const [liveElapsed, setLiveElapsed] = useState(0);
+  const startRef = useRef(Date.now());
+  useEffect(() => {
+    if (block.status !== "running") return;
+    startRef.current = Date.now();
+    setLiveElapsed(0);
+    const timer = setInterval(() => setLiveElapsed(Date.now() - startRef.current), 200);
+    return () => clearInterval(timer);
+  }, [block.status, block.subagentId]);
+
   if (block.status === "running") {
     const stepCount = block.steps.length;
     const visibleSteps = stepCount > MAX_RUNNING_STEPS
@@ -62,6 +73,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           {stepCount > 0 && (
             <Text color={dt.dim}> ({stepCount} 步)</Text>
           )}
+          <Text color={dt.dim}> ({formatDuration(liveElapsed)})</Text>
         </Box>
         {skipped > 0 && (
           <Box paddingLeft={3}>
