@@ -250,6 +250,34 @@ export const APPLY_PATCH_CONTRACT: ToolContract = {
   description: APPLY_PATCH_DESCRIPTION,
 };
 
+export const TASK_CONTRACT: ToolContract = {
+  name: "task",
+  sections: {
+    whenToUse:
+      "Dispatch a task to a specialized sub-agent with an isolated context window. " +
+      "Use for parallel work (multiple sub-agents running simultaneously), role-specific work " +
+      "(explore for search, code for implementation, review for quality checks), " +
+      "and long-running autonomous tasks. " +
+      "The task description MUST be self-contained — include ALL necessary context, file paths, " +
+      "and specific instructions. Sub-agents cannot see the main conversation history. " +
+      "Do NOT use for simple single-file reads or grep commands — use direct tools instead.",
+    commonMistakes:
+      "Providing a vague task description that the sub-agent cannot execute without conversation context. " +
+      "Using 'code' for exploration tasks — use 'explore' for search and evidence gathering. " +
+      "Not including specific file paths or function names in the task description. " +
+      "Expecting the sub-agent to know about decisions made earlier in the conversation.",
+    outputFormat:
+      "JSON: ok (boolean), summary (string — the sub-agent's final output), toolCallCount (number), durationMs (number). " +
+      "On error: ok: false with error field containing the error message.",
+    failureHandling:
+      "If the sub-agent times out (30 min): the task returns an error. Retry with a more focused task description. " +
+      "If max concurrent sub-agents (10) are running: wait for running sub-agents to complete. " +
+      "If the sub-agent returns unclear results: rephrase the task with more precise instructions and retry.",
+  },
+  description: "",
+};
+TASK_CONTRACT.description = buildDescription(TASK_CONTRACT.sections);
+
 export const KNOWN_TOOL_NAMES = [
   "read_file",
   "edit_file",
@@ -260,6 +288,7 @@ export const KNOWN_TOOL_NAMES = [
   "ask_user",
   "set_authorization_mode",
   "apply_patch",
+  "task",
 ] as const;
 
 export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
@@ -272,4 +301,5 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ["ask_user", ASK_USER_CONTRACT],
   ["set_authorization_mode", SET_AUTHORIZATION_MODE_CONTRACT],
   ["apply_patch", APPLY_PATCH_CONTRACT],
+  ["task", TASK_CONTRACT],
 ]);

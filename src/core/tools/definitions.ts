@@ -18,6 +18,7 @@ import {
 } from "./tool-contracts";
 import { adaptMcpTool } from "@/core/mcp/tool-adapter";
 import { createSkillTool } from "@/core/skills/skill-tool";
+import { createTaskTool } from "@/core/subagent/task-tool";
 
 /** 创建 Agent 工具集输入 / Input for creating agent tools */
 export interface CreateAgentToolsInput {
@@ -31,6 +32,12 @@ export interface CreateAgentToolsInput {
   skills?: import("@/core/skills/types").SkillManifest[];
   /** 可选技能扫描选项 / Optional skill scan options */
   skillOptions?: import("@/core/skills/types").SkillScanOptions;
+  /** Agent 配置（task 工具创建模型实例时需要） */
+  config?: import("@/core/config/index").AgentConfig;
+  /** 子 agent 事件回调（用于 task 工具） */
+  subagentEventSink?: import("@/core/subagent/types").SubAgentEventSink;
+  /** 外部中止信号（用于 task 工具） */
+  subagentSignal?: AbortSignal;
 }
 
 // ── 工具缓存 ──
@@ -169,6 +176,19 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     skillTool = createSkillTool(input.skills, input.skillOptions);
   }
 
+  const taskTool = input.subagentEventSink && input.config
+    ? createTaskTool({
+        config: input.config,
+        workspace: input.workspace,
+        shellExecutor: input.shellExecutor,
+        mcpManager: input.mcpManager,
+        skills: input.skills,
+        skillOptions: input.skillOptions,
+        eventSink: input.subagentEventSink,
+        signal: input.subagentSignal,
+      })
+    : null;
+
   const builtinTools = [
     readFileTool,
     editFileTool,
@@ -176,6 +196,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     shellExecute,
     readMcpResource,
     ...(skillTool ? [skillTool] : []),
+    ...(taskTool ? [taskTool] : []),
     createUpdatePlanTool(),
     createAskUserTool(),
     createSetAuthorizationModeTool(),

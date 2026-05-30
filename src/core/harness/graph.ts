@@ -70,6 +70,10 @@ export interface BuildCodeAgentGraphInput {
   skills?: import("@/core/skills/types").SkillManifest[];
   /** 可选技能扫描选项 / Optional skill scan options */
   skillOptions?: import("@/core/skills/types").SkillScanOptions;
+  /** 子 agent 事件回调 */
+  subagentEventSink?: import("@/core/subagent/types").SubAgentEventSink;
+  /** 子 agent 中止信号 */
+  subagentSignal?: AbortSignal;
 }
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
@@ -96,6 +100,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       mcpManager: input.mcpManager,
       skills: input.skills,
       skillOptions: input.skillOptions,
+      config: input.config,
+      subagentEventSink: input.subagentEventSink,
+      subagentSignal: input.subagentSignal,
     });
     const retryEvents: ModelRetryEvent[] = [];
     let compactionPerformed: { reason: string; summary: string } | null = null;
