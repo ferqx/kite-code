@@ -22,7 +22,10 @@ export interface SubAgentResult {
 }
 
 /** 事件回调：子 agent 运行时向外推送生命周期事件 */
-export type SubAgentEventSink = (event: {
-  type: "start" | "step" | "tool_result" | "done" | "error";
-  data: Record<string, unknown>;
-}) => void;
+export type SubAgentEventSink = (event:
+  | { type: "start"; data: { id: string; role: SubAgentRole; task: string } }
+  | { type: "step"; data: { id: string; toolName: string; toolArgs: Record<string, unknown> } }
+  | { type: "tool_result"; data: { id: string; toolName: string; ok: boolean } }
+  | { type: "done"; data: { id: string; summary: string; toolCallCount: number; durationMs: number } }
+  | { type: "error"; data: { id: string; error: string } }
+) => void;

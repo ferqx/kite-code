@@ -64,8 +64,10 @@ const ROLE_CONFIGS: Record<SubAgentRole, SubAgentRoleConfig> = {
 
 /** 按角色名获取配置 */
 export function getRoleConfig(role: SubAgentRole): SubAgentRoleConfig {
-  return ROLE_CONFIGS[role];
+  const cfg = ROLE_CONFIGS[role];
+  if (!cfg.allowedTools) return cfg; // FULL_TOOLS is undefined, safe to share
+  return { ...cfg, allowedTools: new Set(cfg.allowedTools) };
 }
 
 /** 所有内置角色名 */
-export const BUILTIN_ROLES: SubAgentRole[] = ["explore", "code", "review"];
+export const BUILTIN_ROLES: readonly SubAgentRole[] = ["explore", "code", "review"] as const;
