@@ -12,6 +12,8 @@ interface OutputAreaProps {
   blocks: OutputBlock[];
   onToggleReason: (id: number) => void;
   thinkingVisible: boolean;
+  /** Agent 是否正在执行（控制 Static/dynamic 分割策略） */
+  running: boolean;
   /** 当 overlay 面板（HelpPanel/SessionSelector/ModelSelector 等）激活时，禁用方向键导航，避免同时触发多个 useInput handler */
   overlayActive?: boolean;
   /** 会话切换时强制 <Static> remount，避免累积重复输出 */
@@ -183,29 +185,31 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
 /** 哨兵值：保证 <Static> items 始终至少有 1 项，使 Header 即使在无 completed block 时也能渲染 */
 const HEADER_SENTINEL = { __header: true } as const;
 
-const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, overlayActive, sessionKey, header, interruptBlockId }: OutputAreaProps) {
-  // ── Split: completed blocks → <Static>, active block → dynamic tree ──
-  // <Static> renders items once to the terminal scrollback buffer and skips
-  // them in the interactive render pass. This keeps the interactive tree small
-  // so Ink's reconciler + yoga-layout + diff run fast during typing.
-  // When an interrupt is active, use its block as the boundary so the
-  // question/approval block and everything after it stays interactive.
+const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, running, overlayActive, sessionKey, header, interruptBlockId }: OutputAreaProps) {
+  // ── Split: completed blocks → <Static>, current turn → dynamic tree ──
+  // During agent execution (running=true): keep the current "turn" of blocks in
+  // the dynamic tree so running→done transitions happen entirely within dynamic
+  // (no Static duplication). When the agent goes idle, the entire turn flushes
+  // to Static in one atomic transition.
   const splitIdx = useMemo(() => {
     if (interruptBlockId != null) {
       const idx = blocks.findIndex(b => b.id === interruptBlockId);
       if (idx >= 0) return idx;
     }
+    if (!running) return -1;
+    // Find the last "active" block — keep it and everything after in dynamic
     for (let i = blocks.length - 1; i >= 0; i--) {
       const b = blocks[i];
-      // Keep streaming text blocks in the dynamic tree
       if (b.kind === "text" && (b as { streaming?: boolean }).streaming) return i;
-      // Keep running tool_cards dynamic so status updates (→ done/error) are visible
       if (b.kind === "tool_card" && b.status === "running") return i;
-      // Keep running subagent blocks dynamic for live step updates
       if (b.kind === "subagent" && b.status === "running") return i;
     }
+    // No active block but still running: keep from last user message in dynamic
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      if (blocks[i].kind === "user") return i;
+    }
     return -1;
-  }, [blocks, interruptBlockId]);
+  }, [blocks, interruptBlockId, running]);
 
   const completedBlocks = useMemo(
     () => splitIdx >= 0 ? blocks.slice(0, splitIdx) : blocks,

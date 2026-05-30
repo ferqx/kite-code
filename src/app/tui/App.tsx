@@ -153,6 +153,7 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
             blocks={state.blocks}
             onToggleReason={onToggleReason}
             thinkingVisible={state.thinkingVisible}
+            running={state.running}
             overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind}
             sessionKey={state.sessionKey}
             interruptBlockId={state.interrupt?.blockId}
