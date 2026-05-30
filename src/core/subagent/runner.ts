@@ -25,6 +25,18 @@ export interface SubAgentRunnerInput {
   eventSink: SubAgentEventSink;
 }
 
+/** 提取 AIMessage.content 中的纯文本 / Extract plain text from AIMessage.content */
+function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((b: unknown) => (b && typeof b === "object" && "text" in (b as Record<string, unknown>))
+        ? String((b as Record<string, unknown>).text) : "")
+      .join("");
+  }
+  return String(content ?? "");
+}
+
 /** 绑定模型工具（区分 Ollama）/ Bind tools to model (handle Ollama separately) */
 function bindTools(model: ReturnType<typeof createChatModel>, tools: ReturnType<typeof createAgentTools>) {
   if (model instanceof ChatOllama) return model.bindTools(tools);
@@ -72,8 +84,12 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   const combinedSignal = AbortSignal.any([input.signal, timeoutController.signal]);
 
   try {
+    // Yield control so Ink/React can render the subagent_start block before we block on model calls
+    await new Promise((r) => setTimeout(r, 0));
 
     while (true) {
+      // Check abort before blocking on model invoke
+      if (combinedSignal.aborted) throw new Error("Sub-agent aborted");
       const response = await bindTools(model, tools).invoke(messages, { signal: combinedSignal }) as AIMessage;
 
       if (response.tool_calls && response.tool_calls.length > 0) {
@@ -127,9 +143,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
         // 无工具调用 → 最终文本 = 摘要
         clearTimeout(timeoutId);
         messages.push(response);
-        const summary = typeof response.content === "string"
-          ? response.content
-          : JSON.stringify(response.content);
+        const summary = extractText(response.content);
         const durationMs = Date.now() - startTime;
 
         input.eventSink({

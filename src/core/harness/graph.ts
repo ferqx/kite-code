@@ -323,11 +323,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           model: input.model,
         });
         const toolOutput = await taskTool.invoke(request.args as any);
+        let taskOk = true;
+        try { const p = JSON.parse(toolOutput); taskOk = p.ok !== false; } catch {}
         const toolMessage = new ToolMessage({
           content: toolOutput,
           tool_call_id: request.id ?? "missing-tool-call-id",
           name: request.name,
-          status: "success",
+          status: taskOk ? "success" : "error",
         });
         return {
           approvedToolRequest: null,
