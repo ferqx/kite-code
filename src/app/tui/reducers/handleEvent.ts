@@ -95,6 +95,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, blocks: [...state.blocks, block], currentRunReasonId: id, nextBlockId: id + 1 };
     }
     case "tool_call": {
+      // task tool has its own subagent block — skip the redundant tool_card
+      if (event.data.name === "task") return state;
       const preview = getToolPreview(event.data.name, event.data.args);
       const id = state.nextBlockId;
       const block: OutputBlock = {
@@ -107,6 +109,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, blocks: [...state.blocks, block], toolStartTimes: times, nextBlockId: id + 1 };
     }
     case "tool_done": {
+      if (event.data.name === "task") return state;
       const startedAt = state.toolStartTimes?.get(event.data.call_id);
       const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
       const nextTimes = new Map(state.toolStartTimes);
