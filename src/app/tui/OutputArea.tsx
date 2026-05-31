@@ -187,29 +187,75 @@ const HEADER_SENTINEL = { __header: true } as const;
 
 const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, running, overlayActive, sessionKey, header, interruptBlockId }: OutputAreaProps) {
   // ── Split: completed blocks → <Static>, current turn → dynamic tree ──
-  // During agent execution (running=true): keep the current "turn" of blocks in
-  // the dynamic tree so running→done transitions happen entirely within dynamic
-  // (no Static duplication). When the agent goes idle, the entire turn flushes
-  // to Static in one atomic transition.
-  const splitIdx = useMemo(() => {
+  //
+  // Static renders each item ONCE to the terminal scrollback and never
+  // re-renders it — setState calls from spinners/timers are silently dropped,
+  // content mutations are invisible. Therefore any block that needs live
+  // updates MUST stay in the dynamic tree.
+  //
+  // Blocks needing dynamic (all must be in the current turn):
+  //   - text (streaming=true)    — growing content, "❯" cursor
+  //   - tool_card (running)      — spinner animation + elapsed timer
+  //   - subagent (running)       — elapsed timer + step updates
+  //   - approval (!resolved)     — ApprovalBlock component
+  //   - question (!resolved)     — InputBlock component
+  //
+  // Split at the EARLIEST of these boundaries. The monotonic guard below
+  // ensures the split never shrinks, preventing blocks from oscillating
+  // between Static (append-only) and dynamic.
+  //
+  // When agent goes idle, the entire turn flushes to Static atomically.
+  const rawSplitIdx = useMemo(() => {
+    // Find turn start (last user message)
+    let turnStart = -1;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      if (blocks[i].kind === "user") { turnStart = i; break; }
+    }
+
+    // Find the earliest block in this turn that needs live updates
+    let firstDynamic = -1;
+    if (turnStart >= 0) {
+      for (let i = turnStart; i < blocks.length; i++) {
+        const b = blocks[i];
+        if (
+          (b.kind === "text" && (b as { streaming?: boolean }).streaming) ||
+          (b.kind === "tool_card" && b.status === "running") ||
+          (b.kind === "subagent" && b.status === "running")
+        ) {
+          firstDynamic = i;
+          break;
+        }
+      }
+    }
+
+    // Interrupt block must stay in dynamic for user interaction
+    let interruptIdx = -1;
     if (interruptBlockId != null) {
       const idx = blocks.findIndex(b => b.id === interruptBlockId);
-      if (idx >= 0) return idx;
+      if (idx >= 0) interruptIdx = idx;
     }
+
+    // Split at the earliest boundary to keep everything that needs
+    // live updates in the dynamic tree
+    const candidates = [interruptIdx, firstDynamic].filter(c => c >= 0);
+    if (candidates.length > 0) return Math.min(...candidates);
+
     if (!running) return -1;
-    // Find the last "active" block — keep it and everything after in dynamic
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const b = blocks[i];
-      if (b.kind === "text" && (b as { streaming?: boolean }).streaming) return i;
-      if (b.kind === "tool_card" && b.status === "running") return i;
-      if (b.kind === "subagent" && b.status === "running") return i;
-    }
-    // No active block but still running: keep from last user message in dynamic
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      if (blocks[i].kind === "user") return i;
-    }
+    if (turnStart >= 0) return turnStart;
     return -1;
   }, [blocks, interruptBlockId, running]);
+
+  // Monotonic guard: once blocks enter Static (append-only scrollback), they
+  // must never move back to dynamic. Clamp to the running maximum, reset on
+  // session change or agent idle.
+  const maxSplitRef = useRef(-1);
+  const prevSessionKeyRef = useRef(sessionKey);
+  if (!running || sessionKey !== prevSessionKeyRef.current) {
+    maxSplitRef.current = -1;
+    prevSessionKeyRef.current = sessionKey;
+  }
+  const splitIdx = rawSplitIdx >= 0 ? Math.max(rawSplitIdx, maxSplitRef.current) : rawSplitIdx;
+  maxSplitRef.current = splitIdx;
 
   const completedBlocks = useMemo(
     () => splitIdx >= 0 ? blocks.slice(0, splitIdx) : blocks,
