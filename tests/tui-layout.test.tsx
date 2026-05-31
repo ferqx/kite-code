@@ -131,26 +131,25 @@ describe("Header", () => {
   test("shows all usage hints", () => {
     const { lastFrame } = render(<Header running={false} />);
     const frame = lastFrame();
-    expect(frame).toContain("? shortcuts");
+    expect(frame).toContain("/help shortcuts");
     expect(frame).toContain("Ctrl+C exit");
     expect(frame).toContain("/ commands");
-    expect(frame).toContain("! shell");
   });
 
   test("usage hints appear after cat ASCII", () => {
     const { lastFrame } = render(<Header running={false} />);
     const frame = lastFrame()!;
     const catIdx = frame.indexOf("/\\_/\\");
-    const hintIdx = frame.indexOf("? shortcuts");
+    const hintIdx = frame.indexOf("/help shortcuts");
     expect(catIdx).toBeGreaterThanOrEqual(0);
     expect(hintIdx).toBeGreaterThanOrEqual(0);
     expect(catIdx).toBeLessThan(hintIdx);
   });
 
-  test("header is 4 rows", () => {
+  test("header is 3 rows (cat art + hints on middle line)", () => {
     const { lastFrame } = render(<Header running />);
     const lines = lastFrame()!.split("\n").filter(Boolean);
-    expect(lines!.length).toBe(4);
+    expect(lines!.length).toBe(3);
   });
 });
 
@@ -159,13 +158,13 @@ describe("Header", () => {
 describe("StatusBar", () => {
   test("shows Planning phase with ○ icon", () => {
     const status = fakeStatus({ phase: "planning" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
     expect(lastFrame()).toContain("Planning");
   });
 
   test("shows Building phase with ● icon", () => {
     const status = fakeStatus({ phase: "building" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
     expect(lastFrame()).toContain("Building");
   });
 
@@ -180,31 +179,31 @@ describe("StatusBar", () => {
       },
       currentNode: null,
     });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
     expect(lastFrame()).toContain("Step 1/2: Build");
   });
 
   test("falls back to currentNode when no plan", () => {
     const status = fakeStatus({ plan: null, currentNode: "tools" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
     expect(lastFrame()).toContain("tools");
   });
 
   test("shows empty when no plan and no currentNode", () => {
     const status = fakeStatus({ plan: null, currentNode: null });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
     expect(lastFrame()).not.toContain("—");
   });
 
   test("shows compacting indicator", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} compacting timerKey={0} onTick={noop} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting timerKey={0} running />);
     expect(lastFrame()).toContain("Compacting");
   });
 
   test("status bar is single row", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} onTick={noop} running />);
+    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
     const lines = lastFrame()!.split("\n").filter(Boolean);
     expect(lines!.length).toBe(1);
   });
@@ -370,15 +369,14 @@ describe("HelpPanel", () => {
     const { lastFrame } = render(<HelpPanel onClose={noop} />);
     const frame = lastFrame();
     expect(frame).toContain("快捷键");
-    expect(frame).toContain("Actions");
-    // Remaining sections may be clipped by maxHeight in test environment
+    expect(frame).toContain("斜杠命令");
   });
 
   test("shows key bindings", () => {
     const { lastFrame } = render(<HelpPanel onClose={noop} />);
     const frame = lastFrame();
     expect(frame).toContain("Ctrl+C");
-    expect(frame).toContain("Cancel / Stop generation");
+    expect(frame).toContain("中断运行 / 双按退出");
   });
 
   test("shows close hint", () => {

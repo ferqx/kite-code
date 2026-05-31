@@ -11,9 +11,8 @@
 ```
 ┌─ Header (4行) ────────────────────────────────────────────┐
 │   /\_/\    OpenPX                                          │
-│  ( = = )                                                   │
-│  > ~ <                                                     │
-│  ? shortcuts · Ctrl+C exit · / commands · ! shell          │
+│  ( = = )   ? shortcuts · Ctrl+C exit · / commands · ! shell│
+│   > ~ <                                                    │
 ├─ Body (flexGrow) ──────────────────────────────────────────┤
 │  [OutputArea — 纯消息流]                                    │
 │  [Approval/Input 结果记录 — 仅上下文相关的记录块]             │
@@ -22,7 +21,7 @@
 │  > _                           ← 或 Approval/Input 交互UI  │  交互行（互斥切换）
 │  model │ think │ cache │ tokens │ 00:42 │ [安全] │ rw       │  Bottom 状态行
 ├─ Overlay ──────────────────────────────────────────────────┤
-│  [HelpPanel / ModelSelector / SessionSelector /             │
+│  [HelpPanel / ModelSelector / SessionSelector /            │
 │   McpPanel / CheckpointSelector]                           │
 └────────────────────────────────────────────────────────────┘
 ```

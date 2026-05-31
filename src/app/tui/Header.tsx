@@ -1,19 +1,19 @@
-import React from "react";
-import { Box, Text } from "ink";
-import { useTheme } from "./theme";
+import React from 'react';
+import { Box, Text } from 'ink';
+import { useTheme } from './theme';
 
-type CatMood = "working" | "error" | "idle";
+type CatMood = 'working' | 'error' | 'idle';
 
 function catMood(running: boolean, error: boolean): CatMood {
-  if (running) return "working";
-  if (error) return "error";
-  return "idle";
+  if (running) return 'working';
+  if (error) return 'error';
+  return 'idle';
 }
 
 const CAT_LINES: Record<CatMood, [string, string, string]> = {
-  working: ["  /\\_/\\  ", " ( ^ ^ ) ", "  > w <  "],
-  error:   ["  /\\_/\\  ", " ( T T ) ", "  > . <  "],
-  idle:    ["  /\\_/\\  ", " ( = = ) ", "  > ~ <  "],
+  working: ['  /\\_/\\  ', ' ( ^ ^ ) ', '  > w <  '],
+  error: ['  /\\_/\\  ', ' ( T T ) ', '  > . <  '],
+  idle: ['  /\\_/\\  ', ' ( = = ) ', '  > ~ <  ']
 };
 
 interface HeaderProps {
@@ -29,23 +29,18 @@ export default function Header({ running, error }: HeaderProps) {
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={t.primary}>{catTop}  </Text>
-        <Text bold color={t.primary}>OpenPX</Text>
+        <Text color={t.primary}>{catTop} </Text>
+        <Text bold color={t.primary}>
+          OpenPX
+        </Text>
       </Box>
       <Box>
-        <Text color={t.primary}>{catMid}</Text>
-      </Box>
-      <Box marginBottom={1}>
-        <Text color={t.primary}>{catBot}</Text>
+        <Text color={t.primary}>{catMid}   </Text>
+        <Text color={t.dim}>/help shortcuts · Ctrl+C exit</Text>
       </Box>
       <Box>
-        <Text color={t.dim}>? shortcuts</Text>
-        <Text color={t.dim}> · </Text>
-        <Text color={t.dim}>Ctrl+C exit</Text>
-        <Text color={t.dim}> · </Text>
+        <Text color={t.primary}>{catBot}   </Text>
         <Text color={t.dim}>/ commands</Text>
-        <Text color={t.dim}> · </Text>
-        <Text color={t.dim}>! shell</Text>
       </Box>
     </Box>
   );
