@@ -14,19 +14,15 @@ interface StatusBarProps {
   running: boolean;
   compacting: boolean;
   timerKey: number;
-  onTick: (elapsed: number) => void;
-  thinkingVisible?: boolean;
 }
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-export default function StatusBar({ status, running, compacting, timerKey, onTick }: StatusBarProps) {
+export default function StatusBar({ status, running, compacting, timerKey }: StatusBarProps) {
   const t = useTheme();
-  const [elapsed, setElapsed] = useState(0);
   const [spinnerIdx, setSpinnerIdx] = useState(0);
 
   useEffect(() => {
-    setElapsed(0);
     setSpinnerIdx(0);
   }, [timerKey]);
 
@@ -38,19 +34,6 @@ export default function StatusBar({ status, running, compacting, timerKey, onTic
     const timer = setInterval(() => setSpinnerIdx((prev) => (prev + 1) % SPINNER.length), 80);
     return () => clearInterval(timer);
   }, [running]);
-
-  useEffect(() => {
-    if (!running) {
-      setElapsed(0);
-      return;
-    }
-    const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
-    return () => clearInterval(timer);
-  }, [timerKey, running]);
-
-  useEffect(() => {
-    onTick(elapsed);
-  }, [elapsed, onTick]);
 
   const phaseIcon = status.phase === "planning" ? "○" : "●";
   const phaseColor = status.phase === "planning" ? t.warning : t.success;
@@ -65,10 +48,6 @@ export default function StatusBar({ status, running, compacting, timerKey, onTic
     return `Step ${done}/${total}${active ? `: ${active.step}` : ""}`;
   }
 
-  const cachePct = `${status.cacheHitRate.toFixed(0)}%`;
-  const tokens = status.totalTokens.toLocaleString();
-  const elapsedStr = formatDuration(elapsed);
-
   return (
     <Box>
       {running && (
@@ -78,12 +57,6 @@ export default function StatusBar({ status, running, compacting, timerKey, onTic
       <Text bold color={t.primary}>{phaseLabel}</Text>
       <Text color={t.dim}> · </Text>
       <Text color={t.muted}>{planLabel()}</Text>
-      <Text color={t.dim}>  </Text>
-      <Text color={t.muted}>{elapsedStr}</Text>
-      <Text color={t.dim}> · </Text>
-      <Text color={t.muted}>{cachePct}</Text>
-      <Text color={t.dim}> · </Text>
-      <Text color={t.muted}>{tokens}</Text>
     </Box>
   );
 }

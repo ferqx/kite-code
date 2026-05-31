@@ -1,4 +1,4 @@
-import React, { useState, type ReactNode } from "react";
+import React, { useState, useEffect, type ReactNode } from "react";
 import { Box } from "ink";
 import StatusBar from "./StatusBar";
 import StatsLine from "./StatsLine";
@@ -18,6 +18,19 @@ export default function Footer({
 }: FooterProps) {
   const [elapsed, setElapsed] = useState(0);
 
+  useEffect(() => {
+    setElapsed(0);
+  }, [timerKey]);
+
+  useEffect(() => {
+    if (!running) {
+      setElapsed(0);
+      return;
+    }
+    const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [timerKey, running]);
+
   return (
     <Box flexDirection="column">
       <StatusBar
@@ -25,7 +38,6 @@ export default function Footer({
         running={running}
         compacting={compacting}
         timerKey={timerKey}
-        onTick={(e) => setElapsed(e)}
       />
       {children}
       <StatsLine

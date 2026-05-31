@@ -469,13 +469,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
       {pasteState && (
         <Box marginTop={1}>
-          <Text color={t.dim}>Ctrl+E 编辑器查看 | Shift+Enter 换行 | Enter 提交</Text>
-        </Box>
-      )}
-
-      {!pasteState && !slashSuggestions.active && !fileSearch.active && (
-        <Box marginTop={1}>
-          <Text color={t.dim}>Shift+Enter 换行  Enter 提交</Text>
+          <Text color={t.dim}>Ctrl+E 展开粘贴内容</Text>
         </Box>
       )}
 

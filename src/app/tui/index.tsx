@@ -443,39 +443,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   runTaskRef.current = runTask;
 
 
-  // Execute !shell commands directly (async — non-blocking)
-  const runShell = React.useCallback(
-    (command: string) => {
-      import("node:child_process").then(async ({ exec }) => {
-        try {
-          const cwd = process.cwd();
-          const result = await new Promise<string>((resolve, reject) => {
-            exec(command, { cwd, timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
-              if (error) reject(Object.assign(error, { stderr: stderr || "" }));
-              else resolve(stdout || "");
-            });
-          });
-          const output = result.trim() || "(no output)";
-          dispatch({ type: "EVENT", event: { type: "text", data: { text: `\`\`\`\n${output}\n\`\`\`` } } });
-          const entry = `User (shell): ${command}\nResult:\n${output}`;
-          const rt = sessionManager.getRuntime(threadIdRef.current);
-          if (rt) {
-            rt.conversationHistory.push(entry);
-            if (rt.conversationHistory.length > 50) rt.conversationHistory = rt.conversationHistory.slice(-50);
-          }
-          conversationHistoryRef.current.push(entry);
-          if (conversationHistoryRef.current.length > 50) conversationHistoryRef.current = conversationHistoryRef.current.slice(-50);
-        } catch (err: any) {
-          const errorMsg = err.stderr?.trim() || err.message || "command failed";
-          dispatch({ type: "EVENT", event: { type: "text", data: { text: `✗ \`${command}\`\n\`\`\`\n${errorMsg}\n\`\`\`` } } });
-        } finally {
-          dispatch({ type: "SET_IDLE" });
-        }
-      });
-    },
-    [dispatch, sessionManager]
-  );
-
   const handleInput = React.useCallback(
     (value: string) => {
       if (value.startsWith("/")) {
@@ -486,13 +453,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       // 检查当前活跃会话的运行状态，不阻塞其他会话
       const activeRt = sessionManager.getRuntime(threadIdRef.current);
       if (activeRt?.agentLoopActive) return;
-
-      if (value.startsWith("!")) {
-        const command = value.slice(1).trim();
-        dispatch({ type: "USER_MESSAGE", text: value });
-        runShell(command);
-        return;
-      }
 
       runTask(value);
     },

@@ -30,13 +30,24 @@ describe("Header", () => {
 });
 
 describe("StatusBar", () => {
-  test("shows real cache hit rate and token count", () => {
+  test("shows phase label and spinner when running", () => {
     const { lastFrame } = render(
-      React.createElement(StatusBar, { status: fakeStatus(), thinkingVisible: true, timerKey: 0, running: true, compacting: false, onTick: () => {} })
+      React.createElement(StatusBar, { status: fakeStatus(), timerKey: 0, running: true, compacting: false })
     );
     const output = lastFrame();
-    expect(output).toContain("42%");
-    expect(output).toContain("123,456");
-    expect(output).toContain("00:00");
+    expect(output).toContain("Building");
+    // spinner character appears when running
+    expect(output).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+  });
+
+  test("shows only spinner + phase + plan (no metrics)", () => {
+    const { lastFrame } = render(
+      React.createElement(StatusBar, { status: fakeStatus(), timerKey: 0, running: false, compacting: false })
+    );
+    const output = lastFrame();
+    expect(output).toContain("Building");
+    // Metrics are in StatsLine, not StatusBar
+    expect(output).not.toContain("42%");
+    expect(output).not.toContain("123,456");
   });
 });
