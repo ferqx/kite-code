@@ -230,32 +230,6 @@ export function evaluateToolPolicy(input: {
     });
   }
 
-  if (request.name === "set_authorization_mode") {
-    // 切换到 full_access 必须经用户审批，防止 agent 自行提权
-    // Switching to full_access must go through user approval to prevent self-escalation
-    if (request.args.mode === "full_access") {
-      return requireApproval({
-        risk: "plan",
-        reason: "Switching to full_access requires user approval.",
-        userVisibleSummary: `Request to switch authorization mode to: full_access`,
-        expectedEffects: [
-          "All future tool calls in this thread will execute without approval",
-          "Does not mutate workspace files",
-        ],
-      });
-    }
-    // 切换回 default 无需审批 / Switching back to default does not need approval
-    return allow({
-      risk: "plan",
-      reason: "Authorization mode changes do not mutate the workspace.",
-      userVisibleSummary: `Set authorization mode to: ${request.args.mode}`,
-      expectedEffects: [
-        "Changes thread authorization mode",
-        "Does not read or write workspace files",
-      ],
-    });
-  }
-
   if (request.name === "shell_execute") {
     // 兜底：destructive 命令在任何模式下都拒绝，不受 full_access / same_command 影响
     // Safety net: destructive commands are always denied regardless of authorization mode

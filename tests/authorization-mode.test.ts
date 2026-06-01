@@ -67,40 +67,6 @@ describe("authorization mode switch", () => {
     expect(decision.requiresApproval).toBe(false);
   });
 
-  test("set_authorization_mode to full_access requires approval", () => {
-    const decision = evaluateToolPolicy({
-      request: {
-        id: "call-3",
-        name: "set_authorization_mode",
-        args: { mode: "full_access" },
-        reason: "User requested auto-execute",
-        protectedCommand: "set_authorization_mode full_access",
-      },
-      workspaceAccess: "write",
-      phase: "building",
-    });
-    expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(true);
-    expect(decision.risk).toBe("plan");
-  });
-
-  test("set_authorization_mode to default is auto-allowed", () => {
-    const decision = evaluateToolPolicy({
-      request: {
-        id: "call-4",
-        name: "set_authorization_mode",
-        args: { mode: "default" },
-        reason: "Restore default",
-        protectedCommand: "set_authorization_mode default",
-      },
-      workspaceAccess: "write",
-      phase: "building",
-    });
-    expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(false);
-    expect(decision.risk).toBe("plan");
-  });
-
   // ---- routing with override ----
 
   test("routes write_file to approval under default override", () => {
@@ -144,78 +110,7 @@ describe("authorization mode switch", () => {
     ).toBe("tools");
   });
 
-  test("routes set_authorization_mode to full_access through approval", () => {
-    expect(
-      routeAfterAgent(
-        {
-          workspaceAccess: "write",
-          workspace: "/tmp/workspace",
-          messages: [
-            new AIMessage({
-              content: "",
-              tool_calls: [
-                { id: "call-1", name: "set_authorization_mode", args: { mode: "full_access" } },
-              ],
-            }),
-          ],
-        } as unknown as CodeAgentState,
-      ),
-    ).toBe("approval");
-  });
-
   // ---- tool execution ----
-
-  test("set_authorization_mode updates override.current", async () => {
-    const override: { current: "default" | "full_access" } = { current: "default" };
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
-        id: "call-1",
-        name: "set_authorization_mode",
-        args: { mode: "full_access" },
-        reason: "User requested auto mode",
-        protectedCommand: "set_authorization_mode full_access",
-      },
-      undefined,
-      "write",
-      null,
-      "building",
-      defaultAuthorizationState(),
-      "none",
-      "",
-      override,
-    );
-    expect(override.current).toBe("full_access");
-    expect(result.ok).toBe(true);
-    expect(result.authorization).toEqual({
-      mode: "full_access",
-      commandGrants: {},
-    });
-  });
-
-  test("set_authorization_mode returns authorization in result", async () => {
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
-        id: "call-1",
-        name: "set_authorization_mode",
-        args: { mode: "default" },
-        reason: "User requested default mode",
-        protectedCommand: "set_authorization_mode default",
-      },
-      undefined,
-      "write",
-      null,
-      "building",
-      defaultAuthorizationState(),
-      "none",
-      "",
-    );
-    expect(result.authorization).toEqual({
-      mode: "default",
-      commandGrants: {},
-    });
-  });
 
   test("evaluateToolPolicy without override falls back to state authorization", () => {
     const decision = evaluateToolPolicy({

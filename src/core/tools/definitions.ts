@@ -14,7 +14,6 @@ import {
   READ_MCP_RESOURCE_CONTRACT,
   UPDATE_PLAN_CONTRACT,
   ASK_USER_CONTRACT,
-  SET_AUTHORIZATION_MODE_CONTRACT,
 } from "./tool-contracts";
 import { adaptMcpTool } from "@/core/mcp/tool-adapter";
 import { createSkillTool } from "@/core/skills/skill-tool";
@@ -41,6 +40,8 @@ export interface CreateAgentToolsInput {
   subagentSignal?: AbortSignal;
   /** 可选自定义模型实例（用于 E2E mock 注入）/ Optional custom model instance (for E2E mock injection) */
   model?: SupportedChatModel;
+  /** 最大允许子 agent 嵌套深度（0 = 不允许再派生）/ Max sub-agent nesting depth (0 = no further nesting) */
+  maxDepth?: number;
 }
 let _cachedKey: string | null = null;
 let _cachedTools: any[] | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any -- internal cache, breaks circular ReturnType<> reference
@@ -189,6 +190,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
         skillOptions: input.skillOptions,
         eventSink: input.subagentEventSink,
         signal: input.subagentSignal,
+        maxDepth: input.maxDepth,
       })
     : null;
 
@@ -202,7 +204,6 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     ...(taskTool ? [taskTool] : []),
     createUpdatePlanTool(),
     createAskUserTool(),
-    createSetAuthorizationModeTool(),
   ];
 
   // MCP 工具合成
@@ -313,26 +314,6 @@ function createAskUserTool() {
           .string()
           .optional()
           .describe("Short context explaining why this clarification is needed"),
-      }),
-    },
-  );
-}
-
-/** 创建 set_authorization_mode 工具定义，用于切换授权模式 / Create set_authorization_mode tool definition */
-function createSetAuthorizationModeTool() {
-  return tool(
-    async ({ mode }) =>
-      JSON.stringify({
-        ok: true,
-        mode,
-      }),
-    {
-      name: "set_authorization_mode",
-      description: SET_AUTHORIZATION_MODE_CONTRACT.description,
-      schema: z.object({
-        mode: z
-          .enum(["default", "full_access"])
-          .describe("Target authorization mode: 'default' requires confirmation for dangerous tools, 'full_access' executes all tools automatically"),
       }),
     },
   );

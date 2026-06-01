@@ -142,24 +142,6 @@ export async function runApprovedTool(
     });
   }
 
-  if (request.name === "set_authorization_mode") {
-    if (override) {
-      override.current = request.args.mode;
-    }
-    const newAuth: ThreadAuthorizationState = {
-      mode: request.args.mode,
-      commandGrants: authorization?.commandGrants ?? {},
-    };
-    return withFailureGuidance(request, {
-      ok: true,
-      command: `set_authorization_mode ${request.args.mode}`,
-      exitCode: 0,
-      stdout: `Authorization mode set to: ${request.args.mode}`,
-      stderr: "",
-      authorization: newAuth,
-    });
-  }
-
   if (request.name === "read_mcp_resource") {
     if (!mcpManager) {
       return withFailureGuidance(request, {
@@ -370,8 +352,6 @@ function toolUsageGuidance(request: PendingToolRequest): string {
       return "Use update_plan with a complete plan object: name, description, status, and ordered steps with statuses. It must only update planning state and must not mutate the workspace.";
     case "ask_user":
       return "Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.";
-    case "set_authorization_mode":
-      return "Use set_authorization_mode only when the user explicitly requests a mode change. Choose 'full_access' for auto-execute without confirmation, or 'default' to restore confirmation requirements.";
     case "Skill":
       return "Use Skill with the name of a skill from the Available Skills list. The skill name must exactly match. Only use skills listed in the system prompt under Available Skills.";
     default:

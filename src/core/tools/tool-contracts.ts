@@ -204,25 +204,6 @@ export const READ_MCP_RESOURCE_CONTRACT: ToolContract = {
 };
 READ_MCP_RESOURCE_CONTRACT.description = buildDescription(READ_MCP_RESOURCE_CONTRACT.sections);
 
-export const SET_AUTHORIZATION_MODE_CONTRACT: ToolContract = {
-  name: "set_authorization_mode",
-  sections: {
-    whenToUse:
-      "Switch between default (require confirmation) and full_access (auto-execute all) authorization. " +
-      "Call ONLY when the user explicitly requests, e.g. 'switch to auto mode'. " +
-      "Affects how shell_execute, write_file, edit_file are authorized.",
-    commonMistakes:
-      "Calling without the user explicitly asking for a mode change. " +
-      "Calling excessively — one call changes the mode for the entire thread.",
-    outputFormat:
-      "JSON with ok: true and the new mode (default or full_access).",
-    failureHandling:
-      "This tool always succeeds with no error state. Invalid mode defaults to 'default'.",
-  },
-  description: "",
-};
-SET_AUTHORIZATION_MODE_CONTRACT.description = buildDescription(SET_AUTHORIZATION_MODE_CONTRACT.sections);
-
 export const APPLY_PATCH_CONTRACT: ToolContract = {
   name: "apply_patch",
   sections: {
@@ -286,7 +267,6 @@ export const KNOWN_TOOL_NAMES = [
   "read_mcp_resource",
   "update_plan",
   "ask_user",
-  "set_authorization_mode",
   "apply_patch",
   "task",
 ] as const;
@@ -299,7 +279,6 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ["read_mcp_resource", READ_MCP_RESOURCE_CONTRACT],
   ["update_plan", UPDATE_PLAN_CONTRACT],
   ["ask_user", ASK_USER_CONTRACT],
-  ["set_authorization_mode", SET_AUTHORIZATION_MODE_CONTRACT],
   ["apply_patch", APPLY_PATCH_CONTRACT],
   ["task", TASK_CONTRACT],
 ]);
