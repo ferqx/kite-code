@@ -969,7 +969,7 @@ describe("eventReducer (blocks model)", () => {
       expect(state.sessions.length).toBe(2);
       expect(state.sessions[0].threadId).toBe("a");
       expect(state.sessions[0].blocks.length).toBe(2); // blocks saved
-      expect(state.sessions[0].blocks[0].content).toBe("Hello");
+      expect((state.sessions[0].blocks[0] as { content: string }).content).toBe("Hello");
       expect(state.sessions[0].active).toBe(false);
       expect(state.sessions[1].threadId).toBe("b");
       expect(state.sessions[1].active).toBe(true);
@@ -984,7 +984,7 @@ describe("eventReducer (blocks model)", () => {
       state = eventReducer(state, { type: "SET_SESSIONS", sessions: runtimeSnapshots });
       // Merge must preserve blocks from step 1
       expect(state.sessions[0].blocks.length).toBe(2); // preserved!
-      expect(state.sessions[0].blocks[0].content).toBe("Hello");
+      expect((state.sessions[0].blocks[0] as { content: string }).content).toBe("Hello");
       expect(state.sessions[1].blocks.length).toBe(0); // new session, no blocks
       expect(state.activeSessionId).toBe("b"); // synced from runtime
 
@@ -999,11 +999,11 @@ describe("eventReducer (blocks model)", () => {
       expect(state.activeSessionId).toBe("a");
       // A's blocks restored
       expect(state.blocks.length).toBe(2);
-      expect(state.blocks[0].content).toBe("Hello");
-      expect(state.blocks[1].content).toBe("Hi there!");
+      expect((state.blocks[0] as { content: string }).content).toBe("Hello");
+      expect((state.blocks[1] as { content: string }).content).toBe("Hi there!");
       // B's blocks saved to snapshot
       expect(state.sessions[1].blocks.length).toBe(2);
-      expect(state.sessions[1].blocks[0].content).toBe("Msg in B");
+      expect((state.sessions[1].blocks[0] as { content: string }).content).toBe("Msg in B");
     });
 
     test("SESSION_INTERRUPT_PENDING sets flag on correct session", () => {

@@ -186,7 +186,7 @@ describe("forceContextCompaction edge cases", () => {
       new AIMessage("ok 5"),
     ];
 
-    const compacted = forceContextCompaction(msgs, { maxToolOutputChars: 1000 });
+    const compacted = forceContextCompaction(msgs);
     expect(compacted.summary).toContain("Compacted");
     // 无工具调用时保持最近消息，不注入 <compacted> / No <compacted> when no tools
     const content = compacted.messages.map((m) => String(m.content)).join("\n");
@@ -222,7 +222,7 @@ describe("forceContextCompaction edge cases", () => {
       new AIMessage({ content: "done" }),
     ];
 
-    const compacted = forceContextCompaction(msgs, { maxToolOutputChars: 1000 });
+    const compacted = forceContextCompaction(msgs);
     const types = compacted.messages.map((m) => m.getType());
 
     // 保留窗口不能以 ToolMessage 开头 / Kept window must not start with ToolMessage
@@ -339,7 +339,7 @@ describe("three-layer retry chain logic", () => {
     // 15 messages > 8 → triggers compaction
     expect(msgs.length).toBe(15);
 
-    const compacted = forceContextCompaction(msgs, { maxToolOutputChars: 1000 });
+    const compacted = forceContextCompaction(msgs);
     expect(compacted.summary).toContain("Compacted");
     const content = compacted.messages.map((m) => String(m.content)).join("\n");
     expect(content).toContain("<compacted");

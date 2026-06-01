@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildRunAgentParams, buildRevertParams, buildForkParams } from "../src/app/tui/run-agent";
 import type { BaseTuiParams } from "../src/app/tui/run-agent";
-import type { McpManager } from "../../src/core/mcp";
+import type { McpManager } from "../src/core/mcp";
 
 function baseParams(overrides?: Partial<BaseTuiParams>): BaseTuiParams {
   return {

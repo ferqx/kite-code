@@ -115,7 +115,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         delayMs,
       });
     };
-    const host = model as RetryListenerHost;
+    const host = model as unknown as RetryListenerHost;
     if (host.setRetryListener) host.setRetryListener(listener);
 
     // 手动压缩：在下一次模型调用前压缩上下文
@@ -155,7 +155,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
       return { ...result, ...modelConfigState, authorization: syncedAuth, compactionPerformed };
     } finally {
-      const host = model as RetryListenerHost;
+      const host = model as unknown as RetryListenerHost;
       if (host.setRetryListener) host.setRetryListener(null);
     }
   };

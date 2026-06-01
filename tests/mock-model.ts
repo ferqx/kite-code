@@ -4,7 +4,7 @@ import type { BaseLanguageModelCallOptions } from "@langchain/core/language_mode
 import type { ChatResult } from "@langchain/core/outputs";
 
 export interface MockResponse {
-  message: BaseMessage;
+  message?: BaseMessage;
   delay?: number;
   error?: string;
 }
@@ -25,7 +25,7 @@ export class StreamingMockModel extends BaseChatModel {
   }
 
   get responses(): BaseMessage[] {
-    return this._responses.map((r) => r.message);
+    return this._responses.map((r) => r.message).filter((m): m is BaseMessage => m != null);
   }
 
   get callCount(): number {

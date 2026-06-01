@@ -2,7 +2,7 @@ import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import TextInput from "ink-text-input";
-import type { ToolApprovalPayload, ShellApprovalGrant } from "@/app/protocol/events";
+import type { ToolApprovalPayload, ShellApprovalGrant } from "@/protocol/events";
 import type { TuiUserInputProvider } from "@/app/tui/provider";
 import { useTheme } from "@/app/tui/theme";
 

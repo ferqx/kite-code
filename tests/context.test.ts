@@ -358,7 +358,7 @@ describe("forceContextCompaction", () => {
       }),
     ];
 
-    const compacted = forceContextCompaction(msgs, { maxToolOutputChars: 20 });
+    const compacted = forceContextCompaction(msgs);
 
     expect(compacted.summary).toContain("Compacted");
     expect(compacted.summary).toContain("context overflow");
@@ -408,7 +408,7 @@ describe("forceContextCompaction", () => {
       }),
     ];
 
-    const compacted = forceContextCompaction(msgs, { maxToolOutputChars: 1000 });
+    const compacted = forceContextCompaction(msgs);
 
     expect(compacted.summary).toContain("Compacted");
     const allContent = compacted.messages.map((m) => String(m.content)).join("\n");
@@ -422,7 +422,7 @@ describe("forceContextCompaction", () => {
       new AIMessage("hello"),
     ];
 
-    const compacted = forceContextCompaction(msgs, { maxToolOutputChars: 1000 });
+    const compacted = forceContextCompaction(msgs);
 
     // 不超过 8 条时不压缩 / No compaction when <= 8 messages
     expect(compacted.summary).toBe("");

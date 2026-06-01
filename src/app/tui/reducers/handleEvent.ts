@@ -69,8 +69,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // Only checks the single most recent text block — not all blocks — so
       // legitimate repetitions across distant turns are not suppressed.
       for (let i = state.blocks.length - 1; i >= 0; i--) {
-        if (state.blocks[i].kind === "text") {
-          if (state.blocks[i].content === event.data.text) return state;
+        const blk = state.blocks[i];
+        if (blk.kind === "text") {
+          if (blk.content === event.data.text) return state;
           break;
         }
       }
@@ -166,8 +167,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const lastBlock = state.blocks.at(-1);
       if (lastBlock?.kind === "text" && lastBlock.content === event.data) return state;
       for (let i = state.blocks.length - 1; i >= 0; i--) {
-        if (state.blocks[i].kind === "text") {
-          if (state.blocks[i].content === event.data) return state;
+        const blk = state.blocks[i];
+        if (blk.kind === "text") {
+          if (blk.content === event.data) return state;
           break;
         }
       }

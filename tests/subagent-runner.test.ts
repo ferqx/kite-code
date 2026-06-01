@@ -10,9 +10,9 @@ function mockEventSink() {
   const events: Array<{ type: string; data: Record<string, unknown> }> = [];
   return {
     events,
-    sink: (e: { type: string; data: Record<string, unknown> }) => {
+    sink: ((e: { type: string; data: Record<string, unknown> }) => {
       events.push(e);
-    },
+    }) as unknown as import("@/core/subagent/types").SubAgentEventSink,
   };
 }
 
