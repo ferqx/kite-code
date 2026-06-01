@@ -1,14 +1,15 @@
 # 当前规则：项目约定
 
 状态：active
-最后更新：2026-05-07
-最后验证：2026-05-07
+最后更新：2026-06-01
+最后验证：2026-06-01
 范围：
 
 - 所有 Markdown 文档与注释
 - 测试行为与纪律
 - CLI 接口与行为
 - Git 提交与仓库卫生
+- TypeScript 类型安全
 
 读取时机：
 
@@ -59,3 +60,52 @@
 
 - 只改完成当前任务所必需的内容，避免顺手重构无关模块。
 - 如果只是帮助理解代码而不改变行为，可以只补注释，但不要顺手改写逻辑。
+
+## TypeScript 类型安全
+
+类型断言（`as`）和 `any` 是代码结构设计问题的信号，不是常规编码手段。
+
+### 禁止
+
+- **`as any`**：生产代码中禁止。外部 API 约束导致不可避免时，必须注释说明原因。
+- **`as unknown as T` 双重转换**：禁止。应优先使用类型守卫（`in` 操作符、`typeof` 检查、自定义 type guard 函数）。仅在类型守卫不可行且有明确外部约束时允许，必须注释。
+- **`catch (e: any)`**：应改为 `catch (e: unknown)`，配合 `e instanceof Error` 或类型守卫处理。`any` 会绕过所有类型检查，丢失错误信息的类型安全。
+- **用 `as any` 绕过联合类型收窄**：应提取局部变量使 TypeScript 自动收窄，或用 `if` 守卫区分变体。典型错误：`state.blocks[i].content`（`OutputBlock` 联合类型不保证有 `content`）→ 提取 `const blk = state.blocks[i]; if (blk.kind === "text") blk.content`。
+- **用内联 `import()` 规避循环依赖**：`import("@/core/foo").Bar` 不应作为逃避架构问题的手段。如果 `protocol/` 需要引用 `core/` 的类型，说明类型定义放错了层级——应移到 `protocol/`。
+
+### 允许（需注释）
+
+- **`any[]` 缓存变量**：当 `ReturnType<typeof fn>` 导致循环类型引用时，可用 `any[]` 打破循环，但必须注释说明原因。`unknown[]` 会导致返回类型收窄为 `unknown[]`，不可用。
+- **外部 SDK 类型不完整时的断言**：如 MCP SDK 返回类型不精确，可断言但需注释标注 SDK 限制。
+- **测试中的 mock 断言**：测试代码中 `as unknown as MockType` 可接受，因为 mock 不需要完整实现接口。
+
+### 类型定义层级规则
+
+- **协议层类型**（事件 payload、状态快照接口）定义在 `src/protocol/`，不定义在 `src/core/`。
+- **核心层类型**（工具接口、模型类型、配置类型）定义在 `src/core/` 对应模块。
+- 依赖方向：`app/` → `core/` → `protocol/`，不允许反向依赖。
+- 同层模块之间的类型引用用正常 `import`，不用内联 `import()`（除接口字段定义中的紧凑写法外）。
+
+### 联合类型访问规则
+
+`OutputBlock` 等判别联合类型必须通过 `kind` 收窄后访问特有字段：
+
+```typescript
+// ✗ 错误 — TypeScript 无法通过索引访问收窄联合类型
+state.blocks[i].content
+
+// ✓ 正确 — 提取局部变量，收窄后访问
+const blk = state.blocks[i];
+if (blk.kind === "text") blk.content
+
+// ✓ 正确 — 测试中断言已知类型
+(state.blocks[0] as { content: string }).content
+```
+
+### 检查命令
+
+```bash
+bun run typecheck          # 零错误
+grep -rn "as any" src/     # 生产代码中应为 0（外部约束除外）
+grep -rn ": any" src/      # 仅允许 catch(e: any) 和外部 API 签名约束
+```

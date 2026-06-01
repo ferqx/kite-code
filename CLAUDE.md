@@ -62,6 +62,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 - 先看 `git status` + `git diff` + `git log --oneline -5` 确认范围和风格
 - 按变更文件粒度 `git add <file...>`，不 `git add -A`
 - 描述聚焦「改了什么、为什么改」，不列举文件清单
+- 提交前运行 `bun run typecheck` 确保零错误；生产代码（`src/`）中不允许新增 `as any` 或 `: any`（外部 API 约束除外，需注释说明）。详见 `docs/space/execution/active/project-conventions.md` 的「TypeScript 类型安全」章节
 
 ## 测试对应关系
 
