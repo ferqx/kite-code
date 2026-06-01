@@ -73,6 +73,85 @@ export async function listSessions(checkpointPath: string): Promise<SessionInfo[
   }
 }
 
+/** 按关键词搜索会话（匹配会话名或消息内容）/ Search sessions by keyword (matches name or message content) */
+export async function searchSessions(
+  checkpointPath: string,
+  query: string,
+): Promise<SessionInfo[]> {
+  if (!query.trim()) return listSessions(checkpointPath);
+
+  const saver = new BunSqliteSaver(checkpointPath);
+  try {
+    saver.setup();
+    const db = (saver as any).db as Database;
+
+    // Get all sessions (same query as listSessions but with higher limit for search)
+    const nameMatches = db
+      .query<{ thread_id: string; updated_at: string | null; cached_name: string | null }, []>(
+        `SELECT
+           c.thread_id,
+           MAX(c.created_at) AS updated_at,
+           (SELECT json_extract(c2.metadata, '$.session_name')
+            FROM checkpoints c2
+            WHERE c2.thread_id = c.thread_id
+              AND c2.checkpoint_ns = ''
+              AND c2.metadata IS NOT NULL
+              AND json_extract(c2.metadata, '$.session_name') IS NOT NULL
+            ORDER BY c2.checkpoint_id DESC
+            LIMIT 1) AS cached_name
+         FROM checkpoints c
+         WHERE c.checkpoint_ns = '' AND c.created_at IS NOT NULL
+         GROUP BY c.thread_id
+         ORDER BY updated_at DESC
+         LIMIT 200`,
+      )
+      .all();
+
+    const results: SessionInfo[] = [];
+    const lowerQuery = query.toLowerCase();
+
+    for (const row of nameMatches) {
+      const name = row.cached_name ?? await readSessionName(saver, row.thread_id);
+      // Check name match first (fast)
+      if (name.toLowerCase().includes(lowerQuery)) {
+        results.push({
+          threadId: row.thread_id,
+          name,
+          updatedAt: formatLocalTime(row.updated_at),
+        });
+        continue;
+      }
+
+      // Check message content match (slower — need to load checkpoint)
+      try {
+        const tuple = await saver.getTuple({ configurable: { thread_id: row.thread_id } });
+        if (!tuple) continue;
+        const cv = (tuple.checkpoint.channel_values ?? {}) as Record<string, unknown>;
+        const messages = Array.isArray(cv.messages) ? (cv.messages as unknown[]) : [];
+        const hasMatch = messages.some((msg) => {
+          if (!msg || typeof msg !== "object") return false;
+          const m = msg as Record<string, unknown>;
+          const content = typeof m.content === "string" ? m.content : "";
+          return content.toLowerCase().includes(lowerQuery);
+        });
+        if (hasMatch) {
+          results.push({
+            threadId: row.thread_id,
+            name,
+            updatedAt: formatLocalTime(row.updated_at),
+          });
+        }
+      } catch {
+        /* skip */
+      }
+    }
+
+    return results;
+  } finally {
+    saver.close();
+  }
+}
+
 /** 为会话列表中的每个会话惰性生成智能名称（已有 cached 名称的跳过）/ Lazily generate smart names for sessions without cached names */
 export async function enrichSessionNames(
   checkpointPath: string,
