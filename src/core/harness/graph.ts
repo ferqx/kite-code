@@ -115,8 +115,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         delayMs,
       });
     };
-    const host = model as unknown as RetryListenerHost;
-    if (host.setRetryListener) host.setRetryListener(listener);
+    if (hasRetryListener(model)) model.setRetryListener(listener);
 
     // 手动压缩：在下一次模型调用前压缩上下文
     // Manual compaction: compact context before next model invocation
@@ -155,8 +154,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
       return { ...result, ...modelConfigState, authorization: syncedAuth, compactionPerformed };
     } finally {
-      const host = model as unknown as RetryListenerHost;
-      if (host.setRetryListener) host.setRetryListener(null);
+      if (hasRetryListener(model)) model.setRetryListener(null);
     }
   };
 
@@ -407,6 +405,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     .compile({ checkpointer });
 
   return { graph, checkpointer };
+}
+
+/** 检查模型是否支持 RetryListener / Check if model supports RetryListener */
+function hasRetryListener(model: SupportedChatModel): model is SupportedChatModel & RetryListenerHost {
+  return "setRetryListener" in model && typeof (model as { setRetryListener: unknown }).setRetryListener === "function";
 }
 
 /** 将 override 同步到 state.authorization / Sync override to state.authorization */

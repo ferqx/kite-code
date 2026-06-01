@@ -43,7 +43,7 @@ export interface CreateAgentToolsInput {
   model?: SupportedChatModel;
 }
 let _cachedKey: string | null = null;
-let _cachedTools: any[] | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any -- break circular type reference
+let _cachedTools: any[] | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any -- internal cache, breaks circular ReturnType<> reference
 
 /** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
 export function createAgentTools(input: CreateAgentToolsInput) {
