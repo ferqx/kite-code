@@ -12,6 +12,26 @@ export interface SubAgentRoleConfig {
   allowedTools?: Set<string>;
 }
 
+/** 子 agent 运行输入 / Sub-agent runner input */
+export interface SubAgentRunnerInput {
+  config: import("@/core/config/index").AgentConfig;
+  workspace: string;
+  role: SubAgentRoleConfig;
+  task: string;
+  shellExecutor?: import("@/core/tools/shell").ShellExecutor;
+  mcpManager?: import("@/core/mcp").McpManager;
+  skills?: import("@/core/skills/types").SkillManifest[];
+  skillOptions?: import("@/core/skills/types").SkillScanOptions;
+  model?: import("@/core/model/factory").SupportedChatModel;
+  timeoutMs: number;
+  signal: AbortSignal;
+  eventSink: SubAgentEventSink;
+  /** 当前嵌套深度（0 = 主 agent 直接派生）/ Current nesting depth (0 = spawned by main agent) */
+  depth?: number;
+  /** 最大允许嵌套深度（0 = 不允许子 agent 再派生）/ Max nesting depth (0 = no further nesting) */
+  maxDepth?: number;
+}
+
 /** 子 agent 运行结果 */
 export interface SubAgentResult {
   ok: boolean;

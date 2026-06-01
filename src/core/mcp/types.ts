@@ -13,6 +13,8 @@ export interface McpServerConfig {
   url?: string;
   headers?: Record<string, string>;
   risk?: "read";
+  /** 单次工具调用/资源读取超时（毫秒），覆盖默认值 / Per-operation timeout in ms, overrides defaults */
+  timeout?: number;
 }
 
 /** MCP Prompt */

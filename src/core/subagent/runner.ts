@@ -8,22 +8,9 @@ import { createAgentTools, isReadOnlyShellCommand } from "@/core/tools/definitio
 import type { ShellExecutor } from "@/core/tools/shell";
 import type { McpManager } from "@/core/mcp";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
-import type { SubAgentRoleConfig, SubAgentResult, SubAgentEventSink } from "./types";
+import type { SubAgentRoleConfig, SubAgentRunnerInput, SubAgentResult, SubAgentEventSink } from "./types";
 
-export interface SubAgentRunnerInput {
-  config: AgentConfig;
-  workspace: string;
-  role: SubAgentRoleConfig;
-  task: string;
-  shellExecutor?: ShellExecutor;
-  mcpManager?: McpManager;
-  skills?: SkillManifest[];
-  skillOptions?: SkillScanOptions;
-  model?: SupportedChatModel;
-  timeoutMs: number;
-  signal: AbortSignal;
-  eventSink: SubAgentEventSink;
-}
+export type { SubAgentRunnerInput } from "./types";
 
 /** 提取 AIMessage.content 中的纯文本 / Extract plain text from AIMessage.content */
 function extractText(content: unknown): string {
@@ -92,10 +79,13 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     skills: input.skills,
     skillOptions: input.skillOptions,
   });
-  // Filter: apply role restrictions, then always exclude "task" to enforce depth 0
+  // Filter: apply role restrictions, then exclude "task" when depth limit reached
+  const depth = input.depth ?? 0;
+  const maxDepth = input.maxDepth ?? 0;
+  const canSpawnSubAgents = depth < maxDepth;
   const tools = input.role.allowedTools
-    ? allTools.filter((t) => input.role.allowedTools!.has(t.name) && t.name !== "task")
-    : allTools.filter((t) => t.name !== "task");
+    ? allTools.filter((t) => input.role.allowedTools!.has(t.name) && (canSpawnSubAgents || t.name !== "task"))
+    : allTools.filter((t) => canSpawnSubAgents || t.name !== "task");
 
   const systemMessage = new SystemMessage(input.role.systemPrompt);
   const messages: BaseMessage[] = [systemMessage, new HumanMessage(input.task)];

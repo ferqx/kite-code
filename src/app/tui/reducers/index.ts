@@ -11,17 +11,55 @@ import { agentReducer } from "./agentReducer";
 
 export type { Action } from "./actions";
 
+// ── Action → 子 reducer 映射表 ──
+// 每个子 reducer 声明自己处理的 action 类型集合，避免链式穿透开销
+const UI_ACTIONS: ReadonlySet<string> = new Set([
+  "SHOW_HELP", "HIDE_HELP",
+  "SHOW_MODEL_SELECTOR", "HIDE_MODEL_SELECTOR",
+  "SHOW_SESSIONS", "HIDE_SESSIONS",
+  "SHOW_MCP", "HIDE_MCP",
+  "SHOW_REWIND", "HIDE_REWIND",
+  "EDITOR_DONE", "EXPAND_INPUT",
+  "TOGGLE_REASON", "TOGGLE_ALL_REASON", "TOGGLE_THINKING",
+  "CLEAR_OUTPUT",
+]);
+
+const SESSION_ACTIONS: ReadonlySet<string> = new Set([
+  "NEW_SESSION", "LOAD_SESSION_PENDING", "LOAD_SESSION",
+  "SWITCH_SESSION", "SET_SESSIONS", "SESSION_INTERRUPT_PENDING",
+  "DELETE_SESSION", "SELECT_MODEL", "USER_MESSAGE",
+]);
+
+const CHECKPOINT_ACTIONS: ReadonlySet<string> = new Set([
+  "REVERT_TO_CHECKPOINT", "FORK_FROM_CHECKPOINT", "SET_CHECKPOINTS",
+]);
+
+const SKILL_ACTIONS: ReadonlySet<string> = new Set([
+  "SET_SKILL_MANIFESTS", "ACTIVATE_SKILL", "DEACTIVATE_SKILL", "LIST_SKILLS",
+]);
+
+// AGENT_ACTIONS：剩余所有非 EVENT action（SET_RUNNING, SET_IDLE, SET_EXITED,
+// RESOLVE_INTERRUPT, SWITCH_AUTH, COMPACT_CONTEXT, EXPORT_SESSION,
+// EXPORT_SESSION_DONE, LIST_MODELS, SHOW_SETTING, INJECT_MCP_PROMPT,
+// SET_PHASE, CTRL_C, ESCAPE）
+
 export function eventReducer(state: TuiState, action: Action): TuiState {
   // EVENT 动作有独立的子类型分发
   if (action.type === "EVENT") {
     return handleEventAction(state, action.event);
   }
 
-  // 按领域顺序尝试：ui → session → checkpoint → skill → agent
-  return uiReducer(state, action)
-    ?? sessionReducer(state, action)
-    ?? checkpointReducer(state, action)
-    ?? skillReducer(state, action)
-    ?? agentReducer(state, action)
-    ?? state;
+  // ESCAPE 需要链式分发：uiReducer 关面板 → agentReducer 处理中断
+  if (action.type === "ESCAPE") {
+    return uiReducer(state, action)
+      ?? agentReducer(state, action)
+      ?? state;
+  }
+
+  // Set 查找 O(1) 分发到对应子 reducer
+  if (UI_ACTIONS.has(action.type)) return uiReducer(state, action) ?? state;
+  if (SESSION_ACTIONS.has(action.type)) return sessionReducer(state, action) ?? state;
+  if (CHECKPOINT_ACTIONS.has(action.type)) return checkpointReducer(state, action) ?? state;
+  if (SKILL_ACTIONS.has(action.type)) return skillReducer(state, action) ?? state;
+  return agentReducer(state, action) ?? state;
 }

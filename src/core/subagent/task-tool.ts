@@ -20,6 +20,8 @@ export interface TaskToolDeps {
   signal?: AbortSignal;
   /** 可选自定义模型实例（用于 E2E mock）/ Optional custom model instance (for E2E mock) */
   model?: SupportedChatModel;
+  /** 最大允许嵌套深度（0 = 不允许子 agent 再派生）/ Max nesting depth (0 = no further nesting) */
+  maxDepth?: number;
 }
 
 /** 最大并发子 agent 数 */
@@ -54,6 +56,8 @@ export function createTaskTool(deps: TaskToolDeps) {
           signal,
           eventSink: deps.eventSink,
           model: deps.model,
+          depth: 1,
+          maxDepth: deps.maxDepth ?? 0,
         });
         return JSON.stringify(result);
       } finally {

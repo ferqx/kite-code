@@ -34,6 +34,7 @@ const mcpServerSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
   headers: z.record(z.string(), z.string()).optional(),
   risk: z.enum(["read"]).optional(),
+  timeout: z.number().optional(),
 });
 
 export const configSchema = z.object({
@@ -328,6 +329,9 @@ function normalizeMcpServerConfig(
   }
   if (raw.risk === "read") {
     config.risk = "read";
+  }
+  if (typeof raw.timeout === "number" && raw.timeout > 0) {
+    config.timeout = raw.timeout;
   }
 
   return config;

@@ -11,6 +11,8 @@ import type { Tool as SdkTool } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServerConfig, McpPrompt, McpResource, McpServerState } from "./types";
 
 const MCP_STARTUP_TIMEOUT = 5000;
+const MCP_TOOL_CALL_TIMEOUT = 30_000;
+const MCP_RESOURCE_TIMEOUT = 10_000;
 const HTTP_MAX_RECONNECT = 5;
 const HTTP_RECONNECT_BASE_MS = 1000;
 
@@ -211,7 +213,7 @@ export class McpManager {
     const result = await client.callTool(
       { name: toolName, arguments: args },
       undefined,
-      { timeout: MCP_STARTUP_TIMEOUT },
+      { timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT },
     );
     // Extract text content from the result
     if (result.content && Array.isArray(result.content)) {
@@ -243,7 +245,7 @@ export class McpManager {
     const client = state.client as Client;
     const result = await client.readResource(
       { uri },
-      { timeout: MCP_STARTUP_TIMEOUT },
+      { timeout: state.config.timeout ?? MCP_RESOURCE_TIMEOUT },
     );
     // Extract text from resource contents
     if (result.contents && result.contents.length > 0) {
