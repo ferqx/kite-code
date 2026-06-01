@@ -23,7 +23,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 三层架构（protocol → core → app）：
 
 **`src/protocol/` — 协议层**：事件类型、action 类型、provider 接口
-- `events.ts` — `AgentEvent` 19 种子类型定义
+- `events.ts` — `AgentEvent` 23 种子类型定义
 - `actions.ts` — 中断 action、user action 类型
 - `provider.ts` — `UserInputProvider` 接口
 
@@ -34,7 +34,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 - `harness/tool-policy.ts` — 工具安全策略与审批决策
 - `runner.ts` — run / resume 编排与事件流输出
 - `model/context.ts`、`model/runtime-context.ts` — 模型上下文整理、压缩和证据注入
-- `tools/definitions.ts` — 6 个 Agent 工具定义及只读命令分类
+- `tools/definitions.ts` — 9 个 Agent 工具定义及只读命令分类
 - `tools/tool-contracts.ts` — 工具 ACI 契约（一等 UX 文档）
 - `tools/shell.ts`、`tools/file.ts`、`tools/apply-patch.ts` — 底层工具实现
 - `persistence/checkpoint.ts` — Bun SQLite LangGraph checkpointer
@@ -43,7 +43,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 
 **`src/app/` — 应用层**：TUI 前端、CLI 入口
 - `tui/index.tsx` — TUI 入口、agent 生命周期、Kitty 键盘协议
-- `tui/App.tsx` — reducer（42 种 Action）、初始状态、App 布局
+- `tui/App.tsx` — reducer（47 种 Action）、初始状态、App 布局
 - `tui/OutputArea.tsx` — block 渲染（text/reason/tool_card/file_change/approval/question）
 - `tui/components/` — InputLine、MarkdownBlock、ApprovalBlock、InputBlock、HelpPanel、ModelSelector、SessionSelector、StartupScreen、CtrlSafeTextInput
 - `tui/hooks/` — useGlobalKeys、useLeaderKeys、useSlashCommand、useSlashSuggestions、useFileSearch、useSessionList

@@ -72,7 +72,8 @@ openpx resume --thread-id run-abc123 --action approve --grant full-access
     "github": {
       "type": "http",
       "url": "https://mcp.github.com/sse",
-      "headers": { "Authorization": "Bearer ..." }
+      "headers": { "Authorization": "Bearer ..." },
+      "timeout": 30000  // 可选：单次工具调用超时（毫秒）
     }
   }
 }

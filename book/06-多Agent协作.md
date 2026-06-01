@@ -56,7 +56,7 @@ Explore 和 Review 工具集完全相同（都是只读），区别完全在 sys
 |------|-----|------|
 | 超时 | 30 分钟 | 从启动到强制终止的最大时长 |
 | 最大并发 | 10 | 同时运行的子 agent 数量上限 |
-| 嵌套深度 | 0 | 子 agent 不可调用 `task` 工具 |
+| 嵌套深度 | 默认 0，可通过 `maxDepth` 参数配置 | `depth < maxDepth` 时子 agent 可调用 `task` 工具 |
 | 独立 checkpoint | 无 | 子 agent 是一次性的 |
 
 ### 并发控制
@@ -78,12 +78,12 @@ subagent.activeCount ≤ subagent.maxConcurrent (10)
 Code 子 agent 执行工具前：
   1. Explore / Review — 只有只读工具，永不触发审批
   2. Code —
-     a. 查主 agent 的 authorization 状态
-     b. 已授权 → 直接执行
-     c. 未授权 → 敏感操作触发审批
+     a. 检查继承的 authorization 状态
+     b. 已授权（full_access）→ 直接执行
+     c. 未授权且需要审批 → 返回错误，提示用户先在主 agent 授权
 ```
 
-子 agent 触发审批时，TUI 在子 agent block 内嵌入审批卡片，同一时间只有一个子 agent 可以等待审批（串行排队）。
+Code 子 agent 继承主 agent 的授权状态。如果主 agent 未授予 `full_access`，子 agent 的写入操作会被拒绝并返回错误提示，而非无审批执行。这是安全设计——子 agent 不具备交互式审批能力，不能代替用户做安全决策。
 
 ## 6.6 TUI 渲染
 
