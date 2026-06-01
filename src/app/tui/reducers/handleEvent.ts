@@ -181,9 +181,13 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // Finalize streaming text blocks so they move to <Static> immediately.
       // This prevents visual duplication when blocks later transition from
       // the dynamic tree to the terminal scrollback.
-      const finalized = state.blocks.map((b) =>
-        b.kind === "text" && b.streaming ? { ...b, streaming: false as any } : b
-      );
+      const finalized = state.blocks.map((b) => {
+        if (b.kind === "text" && b.streaming) {
+          const { streaming: _, ...rest } = b;
+          return { ...rest, streaming: false } as OutputBlock;
+        }
+        return b;
+      });
       const blockId = state.nextBlockId;
       const block: OutputBlock = { id: blockId, kind: "approval", approval: event.data };
       const interrupt: InterruptState = { kind: "approval", blockId };
@@ -193,9 +197,13 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // Finalize streaming text blocks so they move to <Static> immediately.
       // This prevents visual duplication when blocks later transition from
       // the dynamic tree to the terminal scrollback.
-      const finalized = state.blocks.map((b) =>
-        b.kind === "text" && b.streaming ? { ...b, streaming: false as any } : b
-      );
+      const finalized = state.blocks.map((b) => {
+        if (b.kind === "text" && b.streaming) {
+          const { streaming: _, ...rest } = b;
+          return { ...rest, streaming: false } as OutputBlock;
+        }
+        return b;
+      });
       const blockId = state.nextBlockId;
       const block: OutputBlock = { id: blockId, kind: "question", question: event.data };
       const interrupt: InterruptState = { kind: "input", blockId };

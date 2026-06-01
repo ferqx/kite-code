@@ -96,7 +96,7 @@ export interface CacheMetricsPayload {
   inputTokens: number;
   outputTokens?: number;
   hitRate?: number;
-  standard: Record<string, unknown>;
+  standard: import("@/core/cache-metrics").PromptCacheStandardEvaluation;
 }
 
 export interface ToolApprovalPayload {

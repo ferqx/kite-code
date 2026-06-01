@@ -201,8 +201,8 @@ export async function* runAgent(
       let stream: AsyncIterable<unknown>;
       if (resumeValue) {
         const cmd: Record<string, unknown> = { resume: resumeValue };
-        if (compactRequested) (cmd as any).update = { forceCompact: true };
-        stream = await graph.stream(new Command(cmd) as any, streamConfig);
+        if (compactRequested) cmd.update = { forceCompact: true };
+        stream = await graph.stream(new Command(cmd), streamConfig);
       } else if (compactRequested) {
         stream = await graph.stream({ ...initialState, forceCompact: true }, streamConfig);
       } else {
@@ -279,7 +279,7 @@ export async function* revertToCheckpoint(
     };
 
     const stream = await graph.stream(
-      { messages: [], __revert__: true } as any,
+      { messages: [] },
       streamConfig,
     );
 
@@ -342,10 +342,10 @@ export async function* forkFromCheckpoint(
       workspaceAccess: oldState.workspaceAccess ?? "write",
       phase: oldState.phase ?? "building",
       plan: oldState.plan,
-      messages: (oldState.messages as any[]) ?? [],
+      messages: oldState.messages ?? [],
       authorization: oldState.authorization ?? defaultAuthorizationState(),
       contextSummary: oldState.contextSummary ?? "",
-      contextBudget: undefined as any,
+      contextBudget: undefined,
       modelProvider: input.config.providerName,
       modelName: input.config.modelName,
       thinkingLevel: null as string | null,
@@ -386,7 +386,7 @@ async function processStream(
       return { events: allEvents, kind: "done" };
     }
 
-    const interruptData = extractInterrupt(chunk, isInterrupted, INTERRUPT as unknown as symbol);
+    const interruptData = extractInterrupt(chunk, isInterrupted, INTERRUPT);
     if (interruptData) {
       const event = interruptToEvent(interruptData);
       if (event) {
@@ -437,11 +437,11 @@ async function processStream(
 function extractInterrupt(
   chunk: unknown,
   isInterrupted: (c: unknown) => boolean,
-  INTERRUPT_KEY: symbol,
+  INTERRUPT_KEY: string | symbol,
 ): unknown {
-  if (isInterrupted(chunk)) return (chunk as Record<symbol, unknown>)[INTERRUPT_KEY];
+  if (isInterrupted(chunk)) return (chunk as Record<string | symbol, unknown>)[INTERRUPT_KEY];
   const rec = chunk as Record<string, unknown>;
-  if (INTERRUPT_KEY in rec) return rec[String(INTERRUPT_KEY)];
+  if (typeof INTERRUPT_KEY === "string" && INTERRUPT_KEY in rec) return rec[INTERRUPT_KEY];
   return null;
 }
 
@@ -489,7 +489,10 @@ function eventToInterruptPayload(
 
 function mapActionToResumeValue(action: UserAction): AgentResumeValue {
   switch (action.type) {
-    case "approve": return { approved: true, grant: action.grant as any };
+    case "approve": {
+      const grant = action.grant !== "none" ? action.grant : undefined;
+      return { approved: true, grant };
+    }
     case "reject": return { approved: false };
     case "input": return { answer: action.text };
     case "cancel": return { approved: false };
@@ -502,9 +505,9 @@ function mapActionToResumeValue(action: UserAction): AgentResumeValue {
 /** Parse AIMessage → text, reason, tool_call events */
 function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
   const events: AgentEvent[] = [];
-  const rawMsg = msg as unknown as Record<string, unknown>;
-  const rc = (rawMsg.reasoning_content as string | undefined)
-    ?? (rawMsg.additional_kwargs as Record<string, unknown> | undefined)?.reasoning_content as string | undefined;
+  // DeepSeek puts reasoning_content in additional_kwargs or as a top-level field
+  const rc = (msg.additional_kwargs?.reasoning_content as string | undefined)
+    ?? (msg as unknown as Record<string, unknown>).reasoning_content as string | undefined;
   if (typeof rc === "string" && rc.length > 0) {
     events.push({ type: "reason", data: { text: rc } });
   }
@@ -675,7 +678,7 @@ export function chunkToEvents(
         cacheWriteTokens: 0,
         inputTokens: metrics.inputTokens,
         outputTokens,
-        standard: cacheStandard.record(metrics) as unknown as Record<string, unknown>,
+        standard: cacheStandard.record(metrics),
       } satisfies CacheMetricsPayload,
     });
   }
@@ -758,7 +761,7 @@ export async function* normalizeGraphStream(
   const cacheStandard = createPromptCacheStandardTracker();
   for await (const chunk of stream) {
     if (isInterrupted(chunk)) {
-      yield { type: "interrupt", data: chunk[INTERRUPT as unknown as keyof typeof chunk] };
+      yield { type: "interrupt", data: (chunk as Record<string | symbol, unknown>)[INTERRUPT] };
       continue;
     }
 
@@ -784,7 +787,7 @@ export async function* normalizeGraphStream(
           ...metrics,
           outputTokens: findOutputTokens(chunk),
           cacheWriteTokens: 0,
-          standard: cacheStandard.record(metrics) as unknown as Record<string, unknown>,
+          standard: cacheStandard.record(metrics),
         },
       };
     }

@@ -1,9 +1,12 @@
 import type { AgentEvent } from "@/protocol/events";
+import type { InterruptPayload, UserAction } from "@/protocol/actions";
+import type { UserInputProvider } from "@/protocol/provider";
 import type { AgentConfig } from "@/core/config/index";
 import type { TuiUserInputProvider } from "./provider";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import type { McpManager } from "@/core/mcp";
 import type { SessionSnapshot, StatusState } from "./types";
+import type { Action } from "./App";
 import { runAgent, isRecoverableError } from "@/core/runner";
 import { buildRunAgentParams } from "./run-agent";
 import { createSandboxExecutor } from "@/core/sandbox/index";
@@ -49,10 +52,10 @@ export class SessionRuntime {
   // ── 双模式代理：生成器始终使用 _proxyProvider，通过 _foreground 切换事件路由 ──
   private _foreground = true;
   private _foregroundWake: (() => void) | null = null;
-  private _proxyProvider: TuiUserInputProvider;
+  private _proxyProvider: UserInputProvider & { compactRequested?: boolean };
   /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
-  private _pendingInterrupt: any = null;
-  private _pendingResolve: ((action: any) => void) | null = null;
+  private _pendingInterrupt: InterruptPayload | null = null;
+  private _pendingResolve: ((action: UserAction) => void) | null = null;
 
   constructor(
     threadId: string,
@@ -106,7 +109,7 @@ export class SessionRuntime {
   async runTask(
     task: string,
     deps: {
-      dispatch: (action: any) => void;
+      dispatch: (action: Action) => void;
       provider: TuiUserInputProvider;
       config: AgentConfig;
       model?: import("@/core/model/factory").SupportedChatModel;
@@ -147,7 +150,7 @@ export class SessionRuntime {
     });
 
     // 始终使用代理提供器 — 事件路由由 _foreground 控制
-    const generator = runAgent(this._proxyProvider as any, runAgentParams);
+    const generator = runAgent(this._proxyProvider, runAgentParams);
 
     // 所有状态变更必须在 try 块内，防止 buildRunAgentParams/runAgent 抛出时
     // agentLoopActive 和 abortController 泄漏导致会话永久冻结
@@ -210,7 +213,7 @@ export class SessionRuntime {
   /** 创建代理提供器。interrupt 使用运行时自身状态，永久等待用户处理 */
   private _createProxyProvider(realProvider: TuiUserInputProvider): TuiUserInputProvider {
     const self = this;
-    return {
+    const proxy = {
       onEvent(event: AgentEvent): void {
         if (self._foreground) {
           realProvider.onEvent(event);
@@ -226,13 +229,11 @@ export class SessionRuntime {
         }
       },
 
-      async requestAction(
-        payload: { kind: string; approval?: any; question?: any },
-      ): Promise<any> {
+      async requestAction(payload: InterruptPayload): Promise<UserAction> {
         if (!self._foreground) {
           // user_input in background: auto-cancel (user can't respond)
           // need_approval won't fire due to authorizationOverride, but guard anyway
-          if (payload.kind === "user_input") {
+          if (payload.kind === "input") {
             return { type: "cancel" as const };
           }
           // 后台 tool_approval 中断：标记并等待前台切换
@@ -249,12 +250,12 @@ export class SessionRuntime {
         }
         // 使用运行时自身的中断状态，永久等待用户处理
         self._pendingInterrupt = payload;
-        return new Promise<any>((resolve) => {
+        return new Promise<UserAction>((resolve) => {
           self._pendingResolve = resolve;
         });
       },
 
-      submitAction(action: any): void {
+      submitAction(action: UserAction): void {
         self.resolveInterrupt(action);
       },
 
@@ -262,7 +263,7 @@ export class SessionRuntime {
         self.resolveInterrupt({ type: "cancel" as const });
       },
 
-      getPendingInterrupt(): any {
+      getPendingInterrupt(): InterruptPayload | null {
         return self._pendingInterrupt;
       },
 
@@ -271,13 +272,14 @@ export class SessionRuntime {
         return Promise.resolve();
       },
 
-      get compactRequested(): boolean { return (realProvider as any).compactRequested ?? false; },
-      set compactRequested(v: boolean) { (realProvider as any).compactRequested = v; },
-    } as unknown as TuiUserInputProvider;
+      get compactRequested(): boolean { return realProvider.compactRequested ?? false; },
+      set compactRequested(v: boolean) { realProvider.compactRequested = v; },
+    };
+    return proxy as unknown as TuiUserInputProvider;
   }
 
   /** 解析挂起的中断（由 SessionManager 的中央 bridge 调用）/ Resolve pending interrupt (called by SessionManager's central bridge) */
-  resolveInterrupt(action: any): void {
+  resolveInterrupt(action: UserAction): void {
     if (this._pendingResolve) {
       const r = this._pendingResolve;
       this._pendingResolve = null;
@@ -300,7 +302,7 @@ export class SessionManager {
     // This runs once, avoiding the chain-wrapping anti-pattern of per-runtime bridges.
     if (deps.provider.submitAction) {
       const origSubmit = deps.provider.submitAction.bind(deps.provider);
-      deps.provider.submitAction = (action: any) => {
+      deps.provider.submitAction = (action: UserAction) => {
         origSubmit(action);
         const active = this.runtimes.get(this.activeId);
         active?.resolveInterrupt(action);

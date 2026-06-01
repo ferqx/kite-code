@@ -131,7 +131,7 @@ describe("eventReducer (blocks model)", () => {
   describe("EVENT.cache_metrics", () => {
     test("accumulates totalTokens", () => {
       let s = fresh();
-      s = dispatch(s, { type: "EVENT", event: { type: "cache_metrics", data: { workspaceAccess: "write" as const, cacheHitTokens: 50, cacheMissTokens: 50, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 30, hitRate: 0.5, standard: {} } } });
+      s = dispatch(s, { type: "EVENT", event: { type: "cache_metrics", data: { workspaceAccess: "write" as const, cacheHitTokens: 50, cacheMissTokens: 50, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 30, hitRate: 0.5, standard: {} as import("@/core/cache-metrics").PromptCacheStandardEvaluation } } });
       expect(s.status.totalTokens).toBe(130);
     });
   });
