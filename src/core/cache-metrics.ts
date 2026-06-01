@@ -1,17 +1,13 @@
 import { AIMessage } from "@langchain/core/messages";
-import type { WorkspaceAccess } from "@/protocol/events";
+import type {
+  WorkspaceAccess,
+  PromptCacheMetrics,
+  PromptCacheStandardSummary,
+  PromptCacheStandardEvaluation,
+} from "@/protocol/events";
 
-/** 提示缓存命中指标 / Prompt cache hit metrics */
-export interface PromptCacheMetrics {
-  /** 输入 token 数 / Input token count */
-  inputTokens: number;
-  /** 缓存命中 token 数 / Cache hit token count */
-  cacheHitTokens: number;
-  /** 缓存未命中 token 数 / Cache miss token count */
-  cacheMissTokens: number;
-  /** 缓存命中率 / Cache hit rate (0-1) */
-  hitRate: number;
-}
+// Re-export protocol types for backward compatibility
+export type { PromptCacheMetrics, PromptCacheStandardSummary, PromptCacheStandardEvaluation };
 
 /** coding 场景 prompt cache 命中率目标 / Prompt cache target for coding scenarios */
 export const PROMPT_CACHE_STANDARD_TARGET_HIT_RATE = 0.95;
@@ -21,40 +17,6 @@ const DEFAULT_PROMPT_CACHE_WARMUP_CALLS = 1;
 
 /** 默认最小有效样本 token 数，避免短对话误判 / Default minimum measured tokens to avoid short-context misjudgment */
 const DEFAULT_PROMPT_CACHE_MINIMUM_MEASURED_INPUT_TOKENS = 8000;
-
-/** prompt cache 标准汇总 / Prompt cache standard summary */
-export interface PromptCacheStandardSummary extends PromptCacheMetrics {
-  /** 已观察到的缓存指标调用数 / Observed metric call count */
-  totalCalls: number;
-  /** 被视为 warmup 的调用数 / Calls treated as warmup */
-  warmupCalls: number;
-  /** 计入标准判断的调用数 / Calls included in standard evaluation */
-  measuredCalls: number;
-  /** 目标命中率 / Target hit rate */
-  targetHitRate: number;
-  /** 最小有效计入输入 token 数 / Minimum measured input tokens before judging */
-  minimumMeasuredInputTokens: number;
-  /** 当前样本量是否足够判断 / Whether measured token volume is enough to judge */
-  hasEnoughMeasuredTokens: boolean;
-  /** 是否达到目标；无计入调用时为 null / Whether target is met; null when no measured calls exist */
-  meetsTarget: boolean | null;
-}
-
-/** 单次 cache_metrics 事件上的标准评估 / Standard evaluation attached to one cache_metrics event */
-export interface PromptCacheStandardEvaluation {
-  /** 当前缓存指标调用序号，从 1 开始 / Current metric call index, starting from 1 */
-  callIndex: number;
-  /** 当前调用是否为 warmup / Whether current call is warmup */
-  isWarmup: boolean;
-  /** 当前调用是否计入标准判断 / Whether current call is included in standard evaluation */
-  includedInStandard: boolean;
-  /** 目标命中率 / Target hit rate */
-  targetHitRate: number;
-  /** 最小有效计入输入 token 数 / Minimum measured input tokens before judging */
-  minimumMeasuredInputTokens: number;
-  /** 当前 run 的累计标准汇总 / Accumulated standard summary for current run */
-  summary: PromptCacheStandardSummary;
-}
 
 /** prompt cache 标准跟踪器 / Prompt cache standard tracker */
 export interface PromptCacheStandardTracker {
