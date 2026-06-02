@@ -3,6 +3,19 @@
 import type { AgentEvent } from "@/protocol/events";
 import type { TuiState, OutputBlock, InterruptState, FileChangeRecord } from "../types";
 
+/** Replace a single block by id — keeps references for all other blocks */
+export function replaceBlock(
+  blocks: OutputBlock[],
+  blockId: number,
+  next: OutputBlock,
+): OutputBlock[] {
+  const idx = blocks.findIndex(b => b.id === blockId);
+  if (idx === -1) return blocks;
+  const copy = blocks.slice();
+  copy[idx] = next;
+  return copy;
+}
+
 function getToolPreview(name: string, args: Record<string, unknown>): string {
   switch (name) {
     case "read_file": return String(args.path ?? "");
@@ -91,12 +104,11 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (state.currentRunReasonId != null) {
         const lastBlock = state.blocks.at(-1);
         if (lastBlock?.kind === "reason" && lastBlock.id === state.currentRunReasonId) {
-          const blocks = state.blocks.map((b) =>
-            b.id === state.currentRunReasonId && b.kind === "reason"
-              ? { ...b, content: b.content + "\n\n" + event.data.text }
-              : b
-          );
-          return { ...state, blocks };
+          const updated = replaceBlock(state.blocks, state.currentRunReasonId, {
+            ...lastBlock,
+            content: lastBlock.content + "\n\n" + event.data.text,
+          });
+          return { ...state, blocks: updated };
         }
       }
       const id = state.nextBlockId;
@@ -123,18 +135,25 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
       const nextTimes = new Map(state.toolStartTimes);
       nextTimes.delete(event.data.call_id);
-      const blocks = state.blocks.map((b) => {
+      // Find the matching block from the end (most likely the latest tool)
+      let idx = -1;
+      for (let i = state.blocks.length - 1; i >= 0; i--) {
+        const b = state.blocks[i];
         if (b.kind === "tool_card" && b.callId === event.data.call_id) {
-          return {
-            ...b,
-            status: event.data.ok ? "done" as const : "error" as const,
-            summary: event.data.summary,
-            elapsedMs,
-            detail: computeToolDetail(b.name, b.args),
-          };
+          idx = i; break;
         }
-        return b;
-      });
+      }
+      let blocks = state.blocks;
+      if (idx >= 0) {
+        const b = state.blocks[idx] as OutputBlock & { kind: "tool_card" };
+        blocks = replaceBlock(state.blocks, b.id, {
+          ...b,
+          status: event.data.ok ? "done" as const : "error" as const,
+          summary: event.data.summary,
+          elapsedMs,
+          detail: computeToolDetail(b.name, b.args),
+        });
+      }
       return { ...state, blocks, toolStartTimes: nextTimes };
     }
     case "state_change": {
@@ -188,32 +207,30 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, blocks: [...state.blocks, block], nextBlockId: id + 1 };
     }
     case "need_approval": {
-      // Finalize streaming text blocks so they move to <Static> immediately.
-      // This prevents visual duplication when blocks later transition from
-      // the dynamic tree to the terminal scrollback.
-      const finalized = state.blocks.map((b) => {
+      // Finalize streaming text blocks — only update blocks that need it
+      let finalized = state.blocks;
+      for (let i = 0; i < finalized.length; i++) {
+        const b = finalized[i];
         if (b.kind === "text" && b.streaming) {
           const { streaming: _, ...rest } = b;
-          return { ...rest, streaming: false } as OutputBlock;
+          finalized = replaceBlock(finalized, b.id, { ...rest, streaming: false } as OutputBlock);
         }
-        return b;
-      });
+      }
       const blockId = state.nextBlockId;
       const block: OutputBlock = { id: blockId, kind: "approval", approval: event.data };
       const interrupt: InterruptState = { kind: "approval", blockId };
       return { ...state, blocks: [...finalized, block], interrupt, nextBlockId: blockId + 1 };
     }
     case "need_input": {
-      // Finalize streaming text blocks so they move to <Static> immediately.
-      // This prevents visual duplication when blocks later transition from
-      // the dynamic tree to the terminal scrollback.
-      const finalized = state.blocks.map((b) => {
+      // Finalize streaming text blocks — only update blocks that need it
+      let finalized = state.blocks;
+      for (let i = 0; i < finalized.length; i++) {
+        const b = finalized[i];
         if (b.kind === "text" && b.streaming) {
           const { streaming: _, ...rest } = b;
-          return { ...rest, streaming: false } as OutputBlock;
+          finalized = replaceBlock(finalized, b.id, { ...rest, streaming: false } as OutputBlock);
         }
-        return b;
-      });
+      }
       const blockId = state.nextBlockId;
       const block: OutputBlock = { id: blockId, kind: "question", question: event.data };
       const interrupt: InterruptState = { kind: "input", blockId };
@@ -271,56 +288,47 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, blocks: [...state.blocks, block], nextBlockId: id + 1 };
     }
     case "subagent_step": {
-      const blocks = state.blocks.map((b) => {
-        if (b.kind === "subagent" && b.subagentId === event.data.id) {
-          return {
-            ...b,
-            steps: [...b.steps, {
-              toolName: event.data.toolName,
-              toolArgs: event.data.toolArgs,
-            }],
-          };
-        }
-        return b;
+      const idx = state.blocks.findIndex(b => b.kind === "subagent" && b.subagentId === event.data.id);
+      if (idx === -1) return state;
+      const b = state.blocks[idx] as OutputBlock & { kind: "subagent" };
+      const blocks = replaceBlock(state.blocks, b.id, {
+        ...b,
+        steps: [...b.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }],
       });
       return { ...state, blocks };
     }
     case "subagent_tool_result": {
-      const blocks = state.blocks.map((b) => {
-        if (b.kind === "subagent" && b.subagentId === event.data.id) {
-          const steps = b.steps.map((s, i) =>
-            i === b.steps.length - 1 && s.toolName === event.data.toolName
-              ? { ...s, ok: event.data.ok }
-              : s
-          );
-          return { ...b, steps };
-        }
-        return b;
-      });
+      const idx = state.blocks.findIndex(b => b.kind === "subagent" && b.subagentId === event.data.id);
+      if (idx === -1) return state;
+      const b = state.blocks[idx] as OutputBlock & { kind: "subagent" };
+      const steps = b.steps.map((s, i) =>
+        i === b.steps.length - 1 && s.toolName === event.data.toolName
+          ? { ...s, ok: event.data.ok }
+          : s
+      );
+      // Only update if steps actually changed (guard against no-op updates)
+      if (steps.every((s, i) => s === b.steps[i])) return state;
+      const blocks = replaceBlock(state.blocks, b.id, { ...b, steps });
       return { ...state, blocks };
     }
     case "subagent_done": {
-      const blocks = state.blocks.map((b) => {
-        if (b.kind === "subagent" && b.subagentId === event.data.id) {
-          return {
-            ...b,
-            status: "done" as const,
-            summary: event.data.summary,
-            toolCallCount: event.data.toolCallCount,
-            durationMs: event.data.durationMs,
-          };
-        }
-        return b;
+      const idx = state.blocks.findIndex(b => b.kind === "subagent" && b.subagentId === event.data.id);
+      if (idx === -1) return state;
+      const b = state.blocks[idx] as OutputBlock & { kind: "subagent" };
+      const blocks = replaceBlock(state.blocks, b.id, {
+        ...b,
+        status: "done" as const,
+        summary: event.data.summary,
+        toolCallCount: event.data.toolCallCount,
+        durationMs: event.data.durationMs,
       });
       return { ...state, blocks };
     }
     case "subagent_error": {
-      const blocks = state.blocks.map((b) => {
-        if (b.kind === "subagent" && b.subagentId === event.data.id) {
-          return { ...b, status: "error" as const, error: event.data.error };
-        }
-        return b;
-      });
+      const idx = state.blocks.findIndex(b => b.kind === "subagent" && b.subagentId === event.data.id);
+      if (idx === -1) return state;
+      const b = state.blocks[idx] as OutputBlock & { kind: "subagent" };
+      const blocks = replaceBlock(state.blocks, b.id, { ...b, status: "error" as const, error: event.data.error });
       return { ...state, blocks };
     }
     default:

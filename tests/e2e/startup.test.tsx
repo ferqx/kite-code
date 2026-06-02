@@ -299,7 +299,9 @@ describe("TUI E2E — Startup & Core Regression (P0)", () => {
   test("recovery: TUI accepts new message after Ctrl+C interruption", async () => {
     // After the Ctrl+C interrupt, verify the TUI can accept and process
     // new messages normally.
+    // Wait for agent loop to fully clean up (mock response takes ~800ms)
     await tui.waitForIdle(5000);
+    await new Promise((r) => setTimeout(r, 1200));
     await tui.sendMessage("hello again");
     await tui.waitForText("Recovery successful!", 15000);
     expect(tui.getOutput()).toContain("Recovery successful!");

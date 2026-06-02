@@ -142,26 +142,22 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
 
   return (
     <Box flexDirection="column">
-      {/* ── Body: OutputArea (flexGrow) ── */}
-      <Box flexDirection="column" flexGrow={1}>
-        {state.loadingSession ? (
-          <>
-            <MemoHeader running={state.running} error={state.sessionError} />
-            <Box paddingY={1}><Text dimColor>Loading session...</Text></Box>
-          </>
-        ) : (
-          <OutputArea
-            blocks={state.blocks}
-            onToggleReason={onToggleReason}
-            thinkingVisible={state.thinkingVisible}
-            running={state.running}
-            overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind}
-            sessionKey={state.sessionKey}
-            interruptBlockId={state.interrupt?.blockId}
-            header={<MemoHeader running={state.running} error={state.sessionError} />}
-          />
-        )}
-      </Box>
+      {/* ── Body: OutputArea ── */}
+      {state.loadingSession ? (
+        <>
+          <MemoHeader running={state.running} error={state.sessionError} />
+          <Box paddingY={1}><Text dimColor>Loading session...</Text></Box>
+        </>
+      ) : (
+        <OutputArea
+          blocks={state.blocks}
+          onToggleReason={onToggleReason}
+          thinkingVisible={state.thinkingVisible}
+          running={state.running}
+          overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind}
+          header={<MemoHeader running={state.running} error={state.sessionError} />}
+        />
+      )}
 
       {/* ── Footer: 3-row interaction zone ── */}
       <Footer
@@ -252,6 +248,9 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
         </Box>
         );
       })()}
+      {/* Spacer: fills remaining terminal space below all content.
+          Ensures consistent viewport height for stable scroll position. */}
+      {!slashSuggestion && <Box flexGrow={1} />}
     </Box>
   );
 }

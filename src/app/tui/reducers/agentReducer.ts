@@ -3,13 +3,39 @@
 import type { Action } from "./actions";
 import type { TuiState, OutputBlock } from "../types";
 
-function resolveInterruptBlock(blocks: TuiState["blocks"], blockId: number): TuiState["blocks"] {
-  return blocks.map((b) => {
-    if (b.id !== blockId) return b;
-    if (b.kind === "approval") return { ...b, resolved: { action: "cancelled" } };
-    if (b.kind === "question") return { ...b, resolved: "cancelled" };
-    return b;
-  });
+/** Replace a single block by id — keeps references for all other blocks */
+function replaceBlock(
+  blocks: OutputBlock[],
+  blockId: number,
+  next: OutputBlock,
+): OutputBlock[] {
+  const idx = blocks.findIndex(b => b.id === blockId);
+  if (idx === -1) return blocks;
+  const copy = blocks.slice();
+  copy[idx] = next;
+  return copy;
+}
+
+/** Finalize all streaming text blocks — only creates new refs for changed blocks */
+function finalizeStreaming(blocks: OutputBlock[]): OutputBlock[] {
+  let result = blocks;
+  for (let i = 0; i < result.length; i++) {
+    const b = result[i];
+    if (b.kind === "text" && b.streaming) {
+      const { streaming: _, ...rest } = b;
+      result = replaceBlock(result, b.id, { ...rest, streaming: false } as OutputBlock);
+    }
+  }
+  return result;
+}
+
+function resolveInterruptBlock(blocks: OutputBlock[], blockId: number): OutputBlock[] {
+  const idx = blocks.findIndex(b => b.id === blockId);
+  if (idx === -1) return blocks;
+  const b = blocks[idx];
+  if (b.kind === "approval") return replaceBlock(blocks, blockId, { ...b, resolved: { action: "cancelled" } });
+  if (b.kind === "question") return replaceBlock(blocks, blockId, { ...b, resolved: "cancelled" });
+  return blocks;
 }
 
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
@@ -17,10 +43,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case "SET_RUNNING":
       return { ...state, running: true, exited: false, interrupt: null, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false };
     case "SET_IDLE": {
-      const blocks = state.blocks.map((b) =>
-        b.kind === "text" && b.streaming ? { ...b, streaming: false } : b
-      );
-      return { ...state, running: false, exited: false, interrupt: null, blocks, currentRunReasonId: undefined };
+      return { ...state, running: false, exited: false, interrupt: null, blocks: finalizeStreaming(state.blocks), currentRunReasonId: undefined };
     }
     case "SET_EXITED": {
       const elapsedSec = state.runStartTime ? Math.round((Date.now() - state.runStartTime) / 1000) : 0;
@@ -38,20 +61,21 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       return { ...state, exited: true, blocks: [...state.blocks, block], nextBlockId: id + 1 };
     }
     case "RESOLVE_INTERRUPT": {
-      const blocks = state.blocks.map((b) => {
-        if (b.id !== action.blockId) return b;
-        if (b.kind === "approval") {
-          const r = typeof action.resolution === "string"
-            ? { action: action.resolution }
-            : action.resolution;
-          return { ...b, resolved: r };
-        }
-        if (b.kind === "question") {
-          return { ...b, resolved: typeof action.resolution === "string" ? action.resolution : String(action.resolution) };
-        }
-        return b;
-      });
-      return { ...state, blocks, interrupt: null };
+      const idx = state.blocks.findIndex(b => b.id === action.blockId);
+      if (idx === -1) return { ...state, interrupt: null };
+      const b = state.blocks[idx];
+      let resolved: OutputBlock;
+      if (b.kind === "approval") {
+        const r = typeof action.resolution === "string"
+          ? { action: action.resolution }
+          : action.resolution;
+        resolved = { ...b, resolved: r };
+      } else if (b.kind === "question") {
+        resolved = { ...b, resolved: typeof action.resolution === "string" ? action.resolution : String(action.resolution) };
+      } else {
+        return { ...state, interrupt: null };
+      }
+      return { ...state, blocks: replaceBlock(state.blocks, action.blockId, resolved), interrupt: null };
     }
     case "SWITCH_AUTH": {
       const newMode = action.mode === "toggle"
@@ -108,15 +132,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       return { ...state, status: { ...state.status, phase: action.phase } };
     case "CTRL_C": {
       if (state.running) {
-        const cleanedBlocks = state.blocks.map((b) =>
-          b.kind === "text" && b.streaming ? { ...b, streaming: false } : b
-        );
-        let next = { ...state, running: false, ctrlCPressed: true, blocks: cleanedBlocks };
+        let blocks = finalizeStreaming(state.blocks);
         if (state.interrupt) {
-          next.interrupt = null;
-          next.blocks = resolveInterruptBlock(cleanedBlocks, state.interrupt.blockId);
+          blocks = resolveInterruptBlock(blocks, state.interrupt.blockId);
         }
-        return next;
+        return { ...state, running: false, ctrlCPressed: true, interrupt: null, blocks };
       }
       if (state.ctrlCPressed) return { ...state, exitRequested: true };
       return { ...state, ctrlCPressed: true };
@@ -124,15 +144,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case "ESCAPE": {
       // Interrupt handling (after panel closing tried by uiReducer)
       if (state.running) {
-        const cleanedBlocks = state.blocks.map((b) =>
-          b.kind === "text" && b.streaming ? { ...b, streaming: false } : b
-        );
-        let next = { ...state, running: false, ctrlCPressed: true, blocks: cleanedBlocks };
+        let blocks = finalizeStreaming(state.blocks);
         if (state.interrupt) {
-          next.interrupt = null;
-          next.blocks = resolveInterruptBlock(cleanedBlocks, state.interrupt.blockId);
+          blocks = resolveInterruptBlock(blocks, state.interrupt.blockId);
         }
-        return next;
+        return { ...state, running: false, ctrlCPressed: true, interrupt: null, blocks };
       }
       if (state.interrupt) {
         return {

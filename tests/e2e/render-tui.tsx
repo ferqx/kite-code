@@ -368,7 +368,7 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
         await poll(
           () => {
             const out = getOutput();
-            return !hasRunningSpinner(out) && !out.includes("Thinking");
+            return !hasRunningSpinner(out) && !out.includes("▼ Thinking");
           },
           timeout,
           "idle state",

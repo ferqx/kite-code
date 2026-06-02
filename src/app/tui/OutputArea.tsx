@@ -1,5 +1,5 @@
-import React, { useState, useRef, useMemo } from "react";
-import { Box, Text, Static } from "ink";
+import React, { useState, useRef } from "react";
+import { Box, Text } from "ink";
 import { useInput } from "ink";
 import type { OutputBlock } from "./types";
 import MarkdownBlock from "./components/MarkdownBlock";
@@ -12,16 +12,12 @@ interface OutputAreaProps {
   blocks: OutputBlock[];
   onToggleReason: (id: number) => void;
   thinkingVisible: boolean;
-  /** Agent 是否正在执行（控制 Static/dynamic 分割策略） */
+  /** Agent 是否正在执行（控制 streaming 指示器） */
   running: boolean;
-  /** 当 overlay 面板（HelpPanel/SessionSelector/ModelSelector 等）激活时，禁用方向键导航，避免同时触发多个 useInput handler */
+  /** 当 overlay 面板激活时，禁用方向键导航 */
   overlayActive?: boolean;
-  /** 会话切换时强制 <Static> remount，避免累积重复输出 */
-  sessionKey?: number;
-  /** 渲染在 <Static> 最上方的静态头（Header 组件） */
+  /** 渲染在最上方的 Header 组件 */
   header?: React.ReactNode;
-  /** 中断 block id：当存在中断时，以此 block 为界分割 Static/dynamic，确保中断 block 保持在交互区 */
-  interruptBlockId?: number;
 }
 
 export function toolColor(status: string): string {
@@ -33,7 +29,7 @@ export function toolColor(status: string): string {
   }
 }
 
-function formatElapsed(ms: number): string {
+export function formatElapsed(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
@@ -47,279 +43,190 @@ export function changePrefix(kind: string): { prefix: string; color: string } {
   }
 }
 
-function formatLines(added?: number, removed?: number): string {
-  const parts: string[] = [];
-  if (added != null) parts.push(`+${added}`);
-  if (removed != null) parts.push(`-${removed}`);
-  return parts.length > 0 ? ` (${parts.join(" ")})` : "";
-}
+// ── Memoized block components ──
+// Each block type wrapped in React.memo with its own equality check.
+// Since the reducer maintains reference stability for unchanged blocks,
+// memo prevents terminal re-renders for blocks whose content hasn't changed.
 
-function resolveApprovalLabel(resolved?: { action: string; grant?: string; pattern?: string }): string {
-  if (!resolved) return "";
-  if (resolved.action === "cancelled") return "⊘ Cancelled";
-  if (resolved.action === "denied") return "× Denied";
-  if (resolved.action === "approve_once") return "✓ Approved (once)";
-  if (resolved.action === "same_command") return `✓ Approved (same command)${resolved.pattern ? ` "${resolved.pattern}"` : ""}`;
-  if (resolved.action === "full_access") return "✓ Approved (full access)";
-  return `? ${resolved.action}`;
-}
+const UserBlock = React.memo(function UserBlock({ block }: { block: OutputBlock & { kind: "user" } }) {
+  return (
+    <Box marginBottom={1}>
+      <MarkdownBlock content={"❯ " + block.content} />
+    </Box>
+  );
+});
 
-const BLOCK_GAP = 1;
+const TextBlock = React.memo(function TextBlock({ block, isFocused }: { block: OutputBlock & { kind: "text" }; isFocused: boolean }) {
+  return (
+    <Box marginBottom={1}>
+      {(isFocused || block.streaming) ? <Text color={dt.primary}>❯ </Text> : null}
+      <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? dt.error : undefined} />
+    </Box>
+  );
+});
 
-function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: boolean, _i: number, prevBlock?: OutputBlock) {
+const ReasonBlock = React.memo(function ReasonBlock({ block, isFocused, thinkVisible, isConsecutive }: {
+  block: OutputBlock & { kind: "reason" };
+  isFocused: boolean;
+  thinkVisible: boolean;
+  isConsecutive: boolean;
+}) {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      {!isConsecutive && (
+        <Text color={isFocused ? dt.primary : dt.dim}>
+          {!thinkVisible || block.folded ? "▶ Thinking..." : "▼ Thinking"}
+        </Text>
+      )}
+      {thinkVisible && !block.folded && (
+        <Box paddingLeft={2}>
+          <Text color={dt.muted}>{block.content}</Text>
+        </Box>
+      )}
+      {isConsecutive && (block.folded || !thinkVisible) && (
+        <Text color={dt.dim}>  ...</Text>
+      )}
+    </Box>
+  );
+});
+
+const ToolCard = React.memo(function ToolCard({ block }: { block: OutputBlock & { kind: "tool_card" } }) {
+  return (
+    <Box marginBottom={1}>
+      <ToolCardBlock block={block} />
+    </Box>
+  );
+});
+
+const FileChange = React.memo(function FileChange({ block }: { block: OutputBlock & { kind: "file_change" } }) {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text color={dt.muted}>── File Changes ──</Text>
+      {block.changes.map((change, ci) => {
+        const { prefix, color } = changePrefix(change.kind);
+        const parts: string[] = [];
+        if (change.linesAdded != null) parts.push(`+${change.linesAdded}`);
+        if (change.linesRemoved != null) parts.push(`-${change.linesRemoved}`);
+        const lineInfo = parts.length > 0 ? ` (${parts.join(" ")})` : "";
+        return (
+          <Box key={`${block.id}-${ci}`} flexDirection="column">
+            <Box>
+              <Text color={color}>{prefix} {change.path}</Text>
+              {lineInfo ? <Text color={dt.dim}>{lineInfo}</Text> : null}
+            </Box>
+            {change.preview && (
+              <Box paddingLeft={3} flexDirection="column">
+                {change.preview.split("\n").map((pl, pli) => (
+                  <Text key={pli} color={dt.dim}>
+                    │ {pl}
+                  </Text>
+                ))}
+              </Box>
+            )}
+          </Box>
+        );
+      })}
+    </Box>
+  );
+});
+
+const Approval = React.memo(function Approval({ block }: { block: OutputBlock & { kind: "approval" } }) {
+  const label = (() => {
+    if (!block.resolved) return null;
+    if (block.resolved.action === "cancelled") return "⊘ Cancelled";
+    if (block.resolved.action === "denied") return "× Denied";
+    if (block.resolved.action === "approve_once") return "✓ Approved (once)";
+    if (block.resolved.action === "same_command") return `✓ Approved (same command)${block.resolved.pattern ? ` "${block.resolved.pattern}"` : ""}`;
+    if (block.resolved.action === "full_access") return "✓ Approved (full access)";
+    return `? ${block.resolved.action}`;
+  })();
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      {label ? (
+        <Text color={label.startsWith("✓") ? dt.success : dt.error}>{label}</Text>
+      ) : (
+        <Text color={dt.warning}>⚠ Awaiting approval — {block.approval.command}</Text>
+      )}
+    </Box>
+  );
+});
+
+const Question = React.memo(function Question({ block }: { block: OutputBlock & { kind: "question" } }) {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      {block.resolved ? (
+        block.resolved === "cancelled" ? (
+          <Text color={dt.dim}>⊘ Question cancelled</Text>
+        ) : (
+          <Text>
+            <Text color={dt.success}>✓ Answered: </Text>
+            <Text color={dt.muted}>{block.resolved}</Text>
+          </Text>
+        )
+      ) : (
+        <Text color={dt.primary}>? Question</Text>
+      )}
+    </Box>
+  );
+});
+
+const SubAgent = React.memo(function SubAgent({ block }: { block: OutputBlock & { kind: "subagent" } }) {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <SubAgentBlock block={block} />
+    </Box>
+  );
+});
+
+// ── Block render dispatcher ──
+function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: boolean, prevBlock?: OutputBlock) {
   switch (block.kind) {
-    case "user":
-      return (
-        <Box key={block.id} marginBottom={BLOCK_GAP}>
-          <MarkdownBlock content={"❯ " + block.content} />
-        </Box>
-      );
-
-    case "text":
-      return (
-        <Box key={block.id} marginBottom={BLOCK_GAP}>
-          {(isFocused || block.streaming) ? <Text color={dt.primary}>❯ </Text> : null}
-          <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? dt.error : undefined} />
-        </Box>
-      );
-
+    case "user": return <UserBlock key={block.id} block={block} />;
+    case "text": return <TextBlock key={block.id} block={block} isFocused={isFocused} />;
     case "reason": {
       const isConsecutive = prevBlock?.kind === "reason";
-      return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
-          {!isConsecutive && (
-            <Text color={isFocused ? dt.primary : dt.dim}>
-              {!thinkingVisible || block.folded ? "▶ Thinking..." : "▼ Thinking"}
-            </Text>
-          )}
-          {thinkingVisible && !block.folded && (
-            <Box paddingLeft={2}>
-              <Text color={dt.muted}>{block.content}</Text>
-            </Box>
-          )}
-          {isConsecutive && (block.folded || !thinkingVisible) && (
-            <Text color={dt.dim}>  ...</Text>
-          )}
-        </Box>
-      );
+      return <ReasonBlock key={block.id} block={block} isFocused={isFocused} thinkVisible={thinkingVisible} isConsecutive={isConsecutive} />;
     }
-
-    case "tool_card":
-      return (
-        <Box key={block.id} marginBottom={BLOCK_GAP}>
-          <ToolCardBlock block={block} />
-        </Box>
-      );
-
-    case "file_change":
-      return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
-          <Text color={dt.muted}>── File Changes ──</Text>
-          {block.changes.map((change, ci) => {
-            const { prefix, color } = changePrefix(change.kind);
-            const lineInfo = formatLines(change.linesAdded, change.linesRemoved);
-            return (
-              <Box key={`${block.id}-${ci}`} flexDirection="column">
-                <Box>
-                  <Text color={color}>{prefix} {change.path}</Text>
-                  {lineInfo ? <Text color={dt.dim}>{lineInfo}</Text> : null}
-                </Box>
-                {change.preview && (
-                  <Box paddingLeft={3} flexDirection="column">
-                    {change.preview.split("\n").map((pl, pli) => (
-                      <Text key={pli} color={dt.dim}>
-                        │ {pl}
-                      </Text>
-                    ))}
-                  </Box>
-                )}
-              </Box>
-            );
-          })}
-        </Box>
-      );
-
-    case "approval": {
-      const label = resolveApprovalLabel(block.resolved);
-      return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
-          {label ? (
-            <Text color={label.startsWith("✓") ? dt.success : dt.error}>{label}</Text>
-          ) : (
-            <Text color={dt.warning}>⚠ Awaiting approval — {block.approval.command}</Text>
-          )}
-        </Box>
-      );
-    }
-    case "question": {
-      return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
-          {block.resolved ? (
-            block.resolved === "cancelled" ? (
-              <Text color={dt.dim}>⊘ Question cancelled</Text>
-            ) : (
-              <Text>
-                <Text color={dt.success}>✓ Answered: </Text>
-                <Text color={dt.muted}>{block.resolved}</Text>
-              </Text>
-            )
-          ) : (
-            <Text color={dt.primary}>? Question</Text>
-          )}
-        </Box>
-      );
-    }
-
-    case "subagent":
-      return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
-          <SubAgentBlock block={block} />
-        </Box>
-      );
-
-    default:
-      return null;
+    case "tool_card": return <ToolCard key={block.id} block={block} />;
+    case "file_change": return <FileChange key={block.id} block={block} />;
+    case "approval": return <Approval key={block.id} block={block} />;
+    case "question": return <Question key={block.id} block={block} />;
+    case "subagent": return <SubAgent key={block.id} block={block} />;
+    default: return null;
   }
 }
 
-/** 哨兵值：保证 <Static> items 始终至少有 1 项，使 Header 即使在无 completed block 时也能渲染 */
-const HEADER_SENTINEL = { __header: true } as const;
-
-const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, running, overlayActive, sessionKey, header, interruptBlockId }: OutputAreaProps) {
-  // ── Split: completed blocks → <Static>, current turn → dynamic tree ──
-  //
-  // Static renders each item ONCE to the terminal scrollback and never
-  // re-renders it — setState calls from spinners/timers are silently dropped,
-  // content mutations are invisible. Therefore any block that needs live
-  // updates MUST stay in the dynamic tree.
-  //
-  // Blocks needing dynamic (all must be in the current turn):
-  //   - text (streaming=true)    — growing content, "❯" cursor
-  //   - tool_card (running)      — spinner animation + elapsed timer
-  //   - subagent (running)       — elapsed timer + step updates
-  //   - approval (!resolved)     — ApprovalBlock component
-  //   - question (!resolved)     — InputBlock component
-  //
-  // Split at the EARLIEST of these boundaries. The monotonic guard below
-  // ensures the split never shrinks, preventing blocks from oscillating
-  // between Static (append-only) and dynamic.
-  //
-  // When agent goes idle, the entire turn flushes to Static atomically.
-  const rawSplitIdx = useMemo(() => {
-    // Find turn start (last user message)
-    let turnStart = -1;
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      if (blocks[i].kind === "user") { turnStart = i; break; }
-    }
-
-    // Find the earliest block in this turn that needs live updates
-    let firstDynamic = -1;
-    if (turnStart >= 0) {
-      for (let i = turnStart; i < blocks.length; i++) {
-        const b = blocks[i];
-        if (
-          (b.kind === "text" && (b as { streaming?: boolean }).streaming) ||
-          (b.kind === "tool_card" && b.status === "running") ||
-          (b.kind === "subagent" && b.status === "running")
-        ) {
-          firstDynamic = i;
-          break;
-        }
-      }
-    }
-
-    // Interrupt block must stay in dynamic for user interaction
-    let interruptIdx = -1;
-    if (interruptBlockId != null) {
-      const idx = blocks.findIndex(b => b.id === interruptBlockId);
-      if (idx >= 0) interruptIdx = idx;
-    }
-
-    // Split at the earliest boundary to keep everything that needs
-    // live updates in the dynamic tree
-    const candidates = [interruptIdx, firstDynamic].filter(c => c >= 0);
-    if (candidates.length > 0) return Math.min(...candidates);
-
-    if (!running) return -1;
-    if (turnStart >= 0) return turnStart;
-    return -1;
-  }, [blocks, interruptBlockId, running]);
-
-  // Monotonic guard: once blocks enter Static (append-only scrollback), they
-  // must never move back to dynamic. Clamp to the running maximum, reset on
-  // session change or agent idle.
-  const maxSplitRef = useRef(-1);
-  const prevSessionKeyRef = useRef(sessionKey);
-  if (!running || sessionKey !== prevSessionKeyRef.current) {
-    maxSplitRef.current = -1;
-    prevSessionKeyRef.current = sessionKey;
-  }
-  const splitIdx = rawSplitIdx >= 0 ? Math.max(rawSplitIdx, maxSplitRef.current) : rawSplitIdx;
-  maxSplitRef.current = splitIdx;
-
-  const completedBlocks = useMemo(
-    () => splitIdx >= 0 ? blocks.slice(0, splitIdx) : blocks,
-    [blocks, splitIdx]
-  );
-  const activeBlocks = useMemo(
-    () => splitIdx >= 0 ? blocks.slice(splitIdx) : [],
-    [blocks, splitIdx]
-  );
-
-  // Arrow key navigation for the dynamic (active) section only
-  const [focusedActiveIdx, setFocusedActiveIdx] = useState<number | null>(null);
-  const focusedRef = useRef(focusedActiveIdx);
-  focusedRef.current = focusedActiveIdx;
+// ── OutputArea component ──
+const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, running: _running, overlayActive, header }: OutputAreaProps) {
+  // Arrow key navigation across all blocks
+  const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+  const focusedRef = useRef(focusedIdx);
+  focusedRef.current = focusedIdx;
 
   useInput((_input: unknown, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
     if (overlayActive) return;
-    if (activeBlocks.length === 0) return;
+    if (blocks.length === 0) return;
     if (key.upArrow) {
-      setFocusedActiveIdx((prev) => Math.max(0, (prev ?? activeBlocks.length) - 1));
+      setFocusedIdx((prev) => Math.max(0, (prev ?? blocks.length) - 1));
     }
     if (key.downArrow) {
-      setFocusedActiveIdx((prev) => Math.min(activeBlocks.length - 1, (prev ?? -1) + 1));
+      setFocusedIdx((prev) => Math.min(blocks.length - 1, (prev ?? -1) + 1));
     }
-    if (key.return && focusedRef.current !== null && focusedRef.current < activeBlocks.length) {
-      const block = activeBlocks[focusedRef.current];
+    if (key.return && focusedRef.current !== null && focusedRef.current < blocks.length) {
+      const block = blocks[focusedRef.current];
       if (block && block.kind === "reason") {
         onToggleReason(block.id);
       }
     }
   });
 
-  // ── <Static> items: [Header sentinel, ...completedBlocks] ──
-  // index 0 → Header（仅首次渲染时输出，之后 <Static> 跳过）
-  // index 1+ → completed blocks（逐条追加到终端 scrollback）
-  // sessionKey 变化时 <Static> remount，重新渲染所有项（含 Header）
-  const staticItems = useMemo(() => [HEADER_SENTINEL, ...completedBlocks], [completedBlocks]);
-
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      <Static key={sessionKey} items={staticItems}>
-        {(item, index) => {
-          // 第 0 项：渲染 Header
-          if (index === 0) {
-            return <React.Fragment key="header">{header}</React.Fragment>;
-          }
-          // index 1+：渲染 completed block（index 需减 1 因为 sentinel 占了 index 0）
-          const blockIdx = index - 1;
-          const block = completedBlocks[blockIdx];
-          if (!block) return null;
-          return renderBlock(
-            block,
-            false,
-            thinkingVisible,
-            blockIdx,
-            blockIdx > 0 ? completedBlocks[blockIdx - 1] : undefined,
-          );
-        }}
-      </Static>
-      {/* Active blocks stay in the interactive tree for live updates */}
-      {activeBlocks.map((block, i) => {
-        const isFocused = i === focusedActiveIdx;
-        const prevBlock = i > 0 ? activeBlocks[i - 1] : (completedBlocks.length > 0 ? completedBlocks[completedBlocks.length - 1] : undefined);
-        return renderBlock(block, isFocused, thinkingVisible, 0, prevBlock);
+    <Box flexDirection="column">
+      {header}
+      {blocks.map((block, i) => {
+        const isFocused = i === focusedIdx;
+        const prevBlock = i > 0 ? blocks[i - 1] : undefined;
+        return renderBlock(block, isFocused, thinkingVisible, prevBlock);
       })}
     </Box>
   );
