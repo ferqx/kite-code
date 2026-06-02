@@ -146,6 +146,152 @@ export function getPendingToolRequest(
   return null;
 }
 
+/** 从消息列表中获取最后一个 AIMessage 的所有待处理工具请求 / Get all pending tool requests from the last AIMessage
+
+ 与 getPendingToolRequest 相同的搜索逻辑，但返回所有未解决的 tool_calls，
+ 用于在 tools 节点中批量处理（如并行派发多个子 agent）。
+*/
+export function getAllPendingToolRequests(
+  messages: BaseMessage[],
+  workspace: string,
+): PendingToolRequest[] {
+  const resolvedIds = new Set<string>();
+  for (const msg of messages) {
+    if (isToolMessageInstance(msg)) {
+      const tcId = (msg as unknown as Record<string, string>).tool_call_id;
+      if (tcId) resolvedIds.add(tcId);
+    }
+  }
+
+  // Find the last AIMessage with tool_calls
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!AIMessage.isInstance(msg)) continue;
+    if (!msg.tool_calls || msg.tool_calls.length === 0) continue;
+
+    // Parse all unresolved tool_calls from this AIMessage
+    const requests: PendingToolRequest[] = [];
+    for (const call of msg.tool_calls) {
+      if (!call.id || resolvedIds.has(call.id)) continue;
+      const req = toolRequestFromCall(call, workspace);
+      if (req) requests.push(req);
+    }
+    return requests;
+  }
+
+  return [];
+}
+
+/** 从单个 tool_call 解析工具请求 / Parse tool request from a single tool_call */
+function toolRequestFromCall(
+  call: { id?: string; name: string; args: Record<string, unknown> },
+  _workspace: string,
+): PendingToolRequest | null {
+  if (call.name === "read_file") {
+    const args = call.args as { path?: string; offset?: number; limit?: number };
+    return {
+      id: call.id,
+      name: "read_file",
+      args: { path: args.path || "", offset: args.offset, limit: args.limit },
+      reason: "Model requested read_file",
+      protectedCommand: `read_file ${args.path || ""}`,
+    };
+  }
+
+  if (call.name === "edit_file") {
+    const args = call.args as { path?: string; old_string?: string; new_string?: string; replace_all?: boolean };
+    return {
+      id: call.id,
+      name: "edit_file",
+      args: { path: args.path || "", old_string: args.old_string || "", new_string: args.new_string || "", replace_all: args.replace_all },
+      reason: "Model requested edit_file",
+      protectedCommand: `edit_file ${args.path || ""}`,
+    };
+  }
+
+  if (call.name === "write_file") {
+    const args = call.args as { path?: string; content?: string };
+    return {
+      id: call.id,
+      name: "write_file",
+      args: { path: args.path || "", content: args.content || "" },
+      reason: "Model requested write_file",
+      protectedCommand: `write_file ${args.path || ""}`,
+    };
+  }
+
+  if (call.name === "shell_execute") {
+    const args = normalizeShellActionEnvelope(call.args);
+    return {
+      id: call.id,
+      name: "shell_execute",
+      args,
+      reason: "Model requested shell_execute tool call",
+      protectedCommand: args.command,
+    };
+  }
+
+  if (call.name === "update_plan") {
+    const args = call.args as Partial<AgentPlan>;
+    return {
+      id: call.id,
+      name: "update_plan",
+      args: normalizeAgentPlan(args),
+      reason: "Model requested plan state update",
+      protectedCommand: "update_plan",
+    };
+  }
+
+  if (call.name === "ask_user") {
+    const args = call.args as Partial<UserInputRequest>;
+    return {
+      id: call.id,
+      name: "ask_user",
+      args: normalizeUserInputRequest(args),
+      reason: "Model requested user clarification",
+      protectedCommand: "ask_user",
+    };
+  }
+
+  if (call.name === "read_mcp_resource") {
+    const args = call.args as { server?: string; uri?: string };
+    return {
+      id: call.id,
+      name: "read_mcp_resource",
+      args: { server: args.server || "", uri: args.uri || "" },
+      reason: "Model requested MCP resource read",
+      protectedCommand: `read_mcp_resource ${args.server || ""}`,
+    };
+  }
+
+  if (call.name === "Skill") {
+    const args = call.args as { skill?: string };
+    return {
+      id: call.id,
+      name: "Skill",
+      args: { skill: args.skill || "" },
+      reason: "Model requested Skill tool",
+      protectedCommand: "Skill",
+    };
+  }
+
+  if (call.name === "task") {
+    const args = call.args as Record<string, unknown> | undefined;
+    return {
+      id: call.id,
+      name: "task",
+      args: {
+        subagent_type: (args?.subagent_type as "explore" | "code" | "review") ?? "explore",
+        task: (args?.task as string) ?? "",
+      },
+      reason: "Model requested sub-agent dispatch",
+      protectedCommand: "task",
+    };
+  }
+
+  return null;
+}
+
 /**
  * 检测消息是否为 ToolMessage 实例。
  * 优先使用 _getType() 方法（正确构造的实例），fallback 到检查

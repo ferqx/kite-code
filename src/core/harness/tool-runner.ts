@@ -38,6 +38,7 @@ export async function runApprovedTool(
   mcpRiskOverride?: Record<string, "read">,
   skillManifests?: SkillManifest[],
   skillOptions?: SkillScanOptions,
+  signal?: AbortSignal,
 ): Promise<ToolExecutionResult> {
   const policy = evaluateToolPolicy({
     request,
@@ -267,7 +268,7 @@ export async function runApprovedTool(
   }
 
   if (request.name === "shell_execute") {
-    const result = await runShellForTool(workspace, request.args.command, shellExecutor);
+    const result = await runShellForTool(workspace, request.args.command, shellExecutor, signal);
     return withFailureGuidance(request, {
       ...result,
       action: {
@@ -295,16 +296,18 @@ async function runShellForTool(
   workspace: string,
   command: string,
   shellExecutor?: ShellExecutor,
+  signal?: AbortSignal,
 ): Promise<ShellResult> {
   try {
-    return await (shellExecutor ?? shellTool)({ workspace, command });
+    return await (shellExecutor ?? shellTool)({ workspace, command, signal });
   } catch (error) {
+    const isAbort = error instanceof Error && error.name === "AbortError";
     return {
       ok: false,
       command,
-      exitCode: -1,
+      exitCode: isAbort ? 130 : -1,
       stdout: "",
-      stderr: error instanceof Error ? error.message : String(error),
+      stderr: isAbort ? "Command cancelled by user." : (error instanceof Error ? error.message : String(error)),
     };
   }
 }

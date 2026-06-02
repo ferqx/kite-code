@@ -34,9 +34,9 @@ import {
 } from "./routes";
 import { AgentState, type CodeAgentState } from "./state";
 import {
+  getAllPendingToolRequests,
   getPendingToolRequest,
   messageText,
-  messageWithSingleToolCall,
   toolRequestFromMessage,
 } from "./tool-requests";
 import {
@@ -110,6 +110,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       config: input.config,
       subagentEventSink: input.subagentEventSink,
       subagentSignal: input.subagentSignal,
+      signal: input.subagentSignal,
       model: input.model,
       threadId: state.threadId,
     });
@@ -294,26 +295,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     };
   };
 
-  /** 工具节点：执行已批准的工具调用 / Tools node */
-  const tools = async (state: CodeAgentState) => {
-    const pendingRequest = getPendingToolRequest(state.messages, state.workspace);
-    const request =
-      state.approvedToolRequest &&
-      pendingRequest &&
-      state.approvedToolRequest.id === pendingRequest.id
-        ? state.approvedToolRequest
-        : pendingRequest;
-    const grantUsed =
-      state.approvedToolRequest &&
-      pendingRequest &&
-      state.approvedToolRequest.id === pendingRequest.id
-        ? state.approvedToolGrant ?? "none"
-        : "none";
-    if (!request) {
-      return {};
-    }
-
-    // Handle task tool (sub-agent dispatch) before runApprovedTool
+  /** 执行单个工具调用并返回 ToolMessage / Execute a single tool call and return ToolMessage */
+  async function executeOneTool(
+    request: import("./tool-requests").PendingToolRequest,
+    state: CodeAgentState,
+    grantUsed: string,
+  ): Promise<{ toolMessage: ToolMessage; extra: Record<string, unknown> }> {
+    // Handle task tool (sub-agent dispatch)
     if (request.name === "task" && input.subagentEventSink) {
       try {
         const taskTool = createTaskTool({
@@ -330,29 +318,25 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         const toolOutput = await taskTool.invoke(request.args);
         let taskOk = true;
         try { const p = JSON.parse(toolOutput); taskOk = p.ok !== false; } catch {}
-        const toolMessage = new ToolMessage({
-          content: toolOutput,
-          tool_call_id: request.id ?? "missing-tool-call-id",
-          name: request.name,
-          status: taskOk ? "success" : "error",
-        });
         return {
-          approvedToolRequest: null,
-          approvedToolGrant: null,
-          messages: [toolMessage],
+          toolMessage: new ToolMessage({
+            content: toolOutput,
+            tool_call_id: request.id ?? "missing-tool-call-id",
+            name: request.name,
+            status: taskOk ? "success" : "error",
+          }),
+          extra: {},
         };
       } catch (err: any) {
         const errorMsg = err?.message ?? String(err);
-        const toolMessage = new ToolMessage({
-          content: JSON.stringify({ ok: false, error: errorMsg }),
-          tool_call_id: request.id ?? "missing-tool-call-id",
-          name: request.name,
-          status: "error",
-        });
         return {
-          approvedToolRequest: null,
-          approvedToolGrant: null,
-          messages: [toolMessage],
+          toolMessage: new ToolMessage({
+            content: JSON.stringify({ ok: false, error: errorMsg }),
+            tool_call_id: request.id ?? "missing-tool-call-id",
+            name: request.name,
+            status: "error",
+          }),
+          extra: {},
         };
       }
     }
@@ -365,13 +349,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       state.plan,
       state.phase,
       state.authorization,
-      grantUsed,
+      grantUsed as import("@/protocol/events").ShellGrantUsed,
       state.threadId,
       override,
       input.mcpManager,
       mcpRiskOverride,
       input.skills,
       input.skillOptions,
+      input.subagentSignal,
     );
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
@@ -381,24 +366,69 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     });
 
     const extra: Record<string, unknown> = {};
-    if ("plan" in result) {
-      extra.plan = result.plan;
+    if ("plan" in result) extra.plan = result.plan;
+    if ("workspaceAccess" in result) extra.workspaceAccess = result.workspaceAccess;
+    if ("authorization" in result) extra.authorization = result.authorization;
+    if ("activeSkillInstructions" in result) extra.activeSkillInstructions = result.activeSkillInstructions;
+
+    return { toolMessage, extra };
+  }
+
+  /** 工具节点：执行所有待处理的工具调用 / Tools node — execute all pending tool calls */
+  const tools = async (state: CodeAgentState) => {
+    // 获取所有待处理的工具请求（支持并行派发多个子 agent 等场景）
+    // Get all pending tool requests (supports parallel dispatch of multiple sub-agents etc.)
+    const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
+
+    // 如果有审批过的请求，替换匹配的那个
+    // If there's an approved request, replace the matching one
+    const requests = allRequests.map((r) =>
+      state.approvedToolRequest && r.id === state.approvedToolRequest.id
+        ? state.approvedToolRequest
+        : r,
+    );
+    const approvedId = state.approvedToolRequest?.id;
+    const grantUsed =
+      approvedId && requests.some((r) => r.id === approvedId)
+        ? state.approvedToolGrant ?? "none"
+        : "none";
+
+    if (requests.length === 0) {
+      return {};
     }
-    if ("workspaceAccess" in result) {
-      extra.workspaceAccess = result.workspaceAccess;
+
+    // task 工具并行执行，其他工具顺序执行
+    // Execute task tools in parallel, other tools sequentially
+    const taskRequests = requests.filter((r) => r.name === "task");
+    const otherRequests = requests.filter((r) => r.name !== "task");
+
+    const results: Array<{ toolMessage: ToolMessage; extra: Record<string, unknown> }> = [];
+
+    // 并行执行所有 task 工具
+    if (taskRequests.length > 0) {
+      const taskResults = await Promise.all(
+        taskRequests.map((r) => executeOneTool(r, state, grantUsed)),
+      );
+      results.push(...taskResults);
     }
-    if ("authorization" in result) {
-      extra.authorization = result.authorization;
+
+    // 顺序执行其他工具
+    for (const req of otherRequests) {
+      results.push(await executeOneTool(req, state, grantUsed));
     }
-    if ("activeSkillInstructions" in result) {
-      extra.activeSkillInstructions = result.activeSkillInstructions;
+
+    // 合并所有 ToolMessage 和 extra 状态
+    const messages: ToolMessage[] = results.map((r) => r.toolMessage);
+    const mergedExtra: Record<string, unknown> = {};
+    for (const r of results) {
+      Object.assign(mergedExtra, r.extra);
     }
 
     return {
       approvedToolRequest: null,
       approvedToolGrant: null,
-      ...extra,
-      messages: [toolMessage],
+      ...mergedExtra,
+      messages,
     };
   };
 
@@ -540,7 +570,8 @@ export async function invokeModel({
 
   const request = toolRequestFromMessage(response, state.workspace);
   if (request) {
-    const toolCallMessage = messageWithSingleToolCall(response, request.id);
+    // 保留完整的 AIMessage（含所有 tool_calls），不剥离其他待处理的调用
+    // Keep the full AIMessage with all tool_calls — don't strip other pending calls
     return {
       state: {
         workspaceAccess: state.workspaceAccess,
@@ -549,7 +580,7 @@ export async function invokeModel({
         approvedToolGrant: state.approvedToolGrant,
         authorization: state.authorization,
         contextSummary: prepared.contextSummary,
-        messages: [toolCallMessage],
+        messages: [response],
       },
       contextRetries,
       compactionPerformed,
