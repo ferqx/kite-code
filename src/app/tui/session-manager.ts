@@ -417,6 +417,15 @@ export class SessionManager {
     }
   }
 
+  /** 中止所有运行中的会话（退出时调用）/ Abort all running sessions (called on exit) */
+  abortAll(): void {
+    for (const rt of this.runtimes.values()) {
+      if (rt.agentLoopActive) {
+        rt.abort();
+      }
+    }
+  }
+
   /** 同步 skills 到所有现有运行时（skills 扫描完成后调用）/ Sync skill manifests to all existing runtimes (called after skill scan completes) */
   updateSkillManifests(manifests: SkillManifest[]): void {
     this.deps.skillManifests = manifests;
@@ -441,6 +450,8 @@ function initialStatusSnapshot(): StatusState {
     authorization: "default",
     workspaceAccess: "write",
     cacheHitRate: 0,
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
     totalTokens: 0,
     currentNode: null,
     modelProvider: "",

@@ -19,6 +19,9 @@ import { useSkillsLoader } from "./hooks/useSkillsLoader";
 import { useRewindCheckpoints, useRunRewind, type RewindDeps } from "./hooks/useRewindHandler";
 import { useExternalEditor } from "./hooks/useExternalEditor";
 
+/** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
+let _sessionManagerForExit: SessionManager | null = null;
+
 function resolveModelForResume(
   currentConfig: AgentConfig,
   persistedModelName: string,
@@ -79,6 +82,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     mgr.setSnapshotCallback((threadId) => {
       dispatch({ type: "SESSION_INTERRUPT_PENDING", threadId });
     });
+    _sessionManagerForExit = mgr;
     return mgr;
   }, [config, provider]);
 
@@ -110,9 +114,10 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   // Exit when exitRequested flag is set (double Ctrl+C when not running)
   React.useEffect(() => {
     if (state.exitRequested) {
+      sessionManager.abortAll();
       process.exit(0);
     }
-  }, [state.exitRequested]);
+  }, [state.exitRequested, sessionManager]);
 
   // Rewind: checkpoint list + revert/fork execution
   useRewindCheckpoints(state, dispatch, threadIdRef);
@@ -500,10 +505,12 @@ if (import.meta.main) {
     kittyKeyboard: { mode: 'enabled' },
   });
   process.on("SIGINT", () => {
+    _sessionManagerForExit?.abortAll();
     unmount();
     process.exit(0);
   });
   process.on("SIGTERM", () => {
+    _sessionManagerForExit?.abortAll();
     unmount();
     process.exit(0);
   });

@@ -54,6 +54,14 @@ function computeToolDetail(name: string, args: Record<string, unknown>): string 
 }
 
 export function handleEventAction(state: TuiState, event: AgentEvent): TuiState {
+  // 非 reason 事件清除 currentRunReasonId，让下一个 reason 创建新块。
+  // 避免中间隔了工具调用后两个 reason 块被合并。
+  // Auto-clear currentRunReasonId on any non-reason event,
+  // so the next reason creates a new block instead of appending.
+  if (event.type !== "reason" && state.currentRunReasonId !== undefined) {
+    state = { ...state, currentRunReasonId: undefined };
+  }
+
   switch (event.type) {
     case "text": {
       const lastBlock = state.blocks.at(-1);
