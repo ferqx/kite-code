@@ -7,7 +7,6 @@ interface StatsLineProps {
   status: StatusState;
   thinkingVisible: boolean;
   running: boolean;
-  elapsed: number; // seconds, 0 when not running
   modelProvider?: string;
   modelName?: string;
 }
@@ -15,12 +14,6 @@ interface StatsLineProps {
 function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return n.toLocaleString();
-}
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 /** 估算 token 成本（价格写死常见模型，仅展示用）/ Estimate token cost for display only */
@@ -51,7 +44,7 @@ function estimateCost(provider: string | undefined, modelName: string | undefine
   return "<$0.001";
 }
 
-export default function StatsLine({ status, thinkingVisible, running, elapsed, modelProvider, modelName }: StatsLineProps) {
+export default function StatsLine({ status, thinkingVisible, running, modelProvider, modelName }: StatsLineProps) {
   const t = useTheme();
   const cacheColor = status.cacheHitRate > 50 ? t.success : status.cacheHitRate > 20 ? t.warning : t.muted;
   const authLabel = status.authorization === "full_access" ? "完全" : "安全";
@@ -80,12 +73,6 @@ export default function StatsLine({ status, thinkingVisible, running, elapsed, m
           </>
         )}
       </Text>
-      {running && (
-        <>
-          <Text color={t.dim}> │ </Text>
-          <Text color={t.primary}>{formatDuration(elapsed)}</Text>
-        </>
-      )}
       <Text color={t.dim}> │ </Text>
       <Text color={authColor}>[{authLabel}]</Text>
       <Text color={t.dim}> {status.workspaceAccess === "read-only" ? "ro" : "rw"}</Text>

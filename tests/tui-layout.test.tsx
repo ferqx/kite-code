@@ -213,63 +213,52 @@ describe("StatusBar", () => {
 describe("StatsLine", () => {
   test("shows model name", () => {
     const status = fakeStatus({ modelName: "gpt-5" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
     expect(lastFrame()).toContain("gpt-5");
   });
 
   test("shows thinking mode", () => {
     const status = fakeStatus({ thinkingMode: "detailed" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
     expect(lastFrame()).toContain("think: detailed");
   });
 
   test("shows cache hit rate", () => {
     const status = fakeStatus({ cacheHitRate: 75 });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
     expect(lastFrame()).toContain("cache: 75%");
   });
 
   test("shows token count formatted", () => {
     const status = fakeStatus({ totalTokens: 10000 });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
     expect(lastFrame()).toContain("10.0k");
   });
 
   test("shows [完全] for full_access auth", () => {
     const status = fakeStatus({ authorization: "full_access" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
     expect(lastFrame()).toContain("[完全]");
   });
 
   test("shows [安全] for default auth", () => {
     const status = fakeStatus({ authorization: "default" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
     expect(lastFrame()).toContain("[安全]");
   });
 
   test("shows rw for write access", () => {
     const status = fakeStatus({ workspaceAccess: "write" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
     expect(lastFrame()).toContain("rw");
   });
 
   test("shows ro for read-only access", () => {
     const status = fakeStatus({ workspaceAccess: "read-only" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={0} />);
+    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
     expect(lastFrame()).toContain("ro");
   });
 
-  test("shows timer when running", () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running elapsed={42} />);
-    expect(lastFrame()).toContain("00:42");
-  });
-
-  test("hides timer when not running", () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running={false} elapsed={0} />);
-    expect(lastFrame()).not.toContain("│ 00:");
-  });
 });
 
 // ── DiffPreview ──
@@ -1051,7 +1040,7 @@ describe("SubAgentBlock rendering", () => {
     expect(frame).not.toContain("Detailed instructions");
   });
 
-  test("done block truncates long summaries", () => {
+  test("done block renders full summary with markdown", () => {
     const longSummary = Array.from({ length: 15 }, (_, i) => `Line ${i + 1}`).join("\n");
     const block = {
       id: 1, kind: "subagent" as const,
@@ -1063,10 +1052,10 @@ describe("SubAgentBlock rendering", () => {
       <SubAgentBlock block={block} />,
     );
     const frame = lastFrame() ?? "";
+    // 使用 MarkdownBlock 完整渲染摘要，不再截断
     expect(frame).toContain("Line 1");
     expect(frame).toContain("Line 8");
-    expect(frame).toContain("已折叠");
-    expect(frame).not.toContain("Line 9");
+    expect(frame).toContain("Line 15");
   });
 
   test("running block limits visible steps", () => {

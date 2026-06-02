@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import type { OutputBlock } from "../types";
 import type { SubAgentRole } from "@/protocol/events";
 import { darkTheme as dt } from "../theme";
+import MarkdownBlock from "./MarkdownBlock";
 
 function roleIcon(role: SubAgentRole): string {
   switch (role) {
@@ -35,7 +36,6 @@ function taskLabel(task: string): string {
 }
 
 const MAX_RUNNING_STEPS = 10;
-const MAX_SUMMARY_LINES = 8;
 
 interface SubAgentBlockProps {
   block: OutputBlock & { kind: "subagent" };
@@ -112,10 +112,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     );
   }
 
-  // done
-  const summaryLines = block.summary ? block.summary.split("\n") : [];
-  const linesTruncated = summaryLines.length > MAX_SUMMARY_LINES;
-
+  // done — 使用 MarkdownBlock 渲染摘要，保留 Markdown 格式
   return (
     <Box flexDirection="column">
       <Box>
@@ -124,16 +121,12 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
         <Text color={dt.muted}> · {taskSummary}</Text>
         <Text color={dt.dim}> — {block.toolCallCount} 次工具调用，{formatDuration(block.durationMs)}</Text>
       </Box>
-      {summaryLines.length > 0 && (
+      {block.summary && (
         <Box paddingLeft={3} flexDirection="column">
-          {summaryLines.slice(0, MAX_SUMMARY_LINES).map((line, i) => (
-            <Text key={i} color={dt.dim}>
-              {i === 0 ? "│ " : "  "}{line.slice(0, 300)}
-            </Text>
-          ))}
-          {linesTruncated && (
-            <Text color={dt.dim}>... 以上 {summaryLines.length - MAX_SUMMARY_LINES} 行已折叠</Text>
-          )}
+          <Box paddingLeft={0}>
+            <Text color={dt.dim}>│ </Text>
+          </Box>
+          <MarkdownBlock content={block.summary} color={dt.dim} />
         </Box>
       )}
     </Box>
