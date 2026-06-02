@@ -4,6 +4,13 @@ import { BunSqliteSaver } from "./checkpoint.js";
 import { createChatModel } from "../model/factory.js";
 import { loadAgentConfig, type AgentConfig } from "../config/index.js";
 import type { OutputBlock, InterruptState } from "../../app/tui/types.js";
+import type { SubAgentRole } from "../../protocol/events.js";
+
+/** Pending task tool call info collected from AIMessage tool_calls */
+interface PendingTaskCall {
+  subagentType: SubAgentRole;
+  task: string;
+}
 
 // ── Public types ──
 
@@ -222,6 +229,8 @@ export async function loadSession(
 function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
   const blocks: OutputBlock[] = [];
   let nextId = 1;
+  // Track pending task tool calls: callId → { subagent_type, task }
+  const pendingTasks = new Map<string, PendingTaskCall>();
 
   for (const msg of messages) {
     if (!msg || typeof msg !== "object") continue;
@@ -264,6 +273,14 @@ function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
             const callId = typeof call.id === "string" ? call.id : "";
             const name = typeof call.name === "string" ? call.name : "";
             const args = (call.args as Record<string, unknown>) ?? {};
+
+            // task tool → defer to build subagent block from ToolMessage result
+            if (name === "task") {
+              const subagentType = (args.subagent_type as SubAgentRole) || "explore";
+              const task = typeof args.task === "string" ? args.task : "";
+              pendingTasks.set(callId, { subagentType, task });
+              continue;
+            }
             blocks.push({
               id: nextId++,
               kind: "tool_card",
@@ -290,6 +307,31 @@ function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
     const tm = msg as Record<string, unknown>;
     if (isToolMessageLike(tm)) {
       const callId = (tm.tool_call_id as string) ?? "";
+      const tmName = (tm.name as string) ?? "";
+
+      // task tool result → build subagent block from pending task call + result
+      if (tmName === "task") {
+        const pending = pendingTasks.get(callId) ?? { subagentType: "explore" as const, task: "" };
+        const subId = callId || `sa-${nextId}`;
+        const { ok, summary, toolCallCount, durationMs, error } = parseTaskResult(
+          typeof tm.content === "string" ? tm.content : JSON.stringify(tm.content),
+        );
+        blocks.push({
+          id: nextId++,
+          kind: "subagent",
+          subagentId: subId,
+          role: pending.subagentType,
+          task: pending.task,
+          status: ok ? "done" : "error",
+          summary,
+          toolCallCount,
+          durationMs,
+          steps: [],
+          ...(error ? { error } : {}),
+        });
+        pendingTasks.delete(callId);
+        continue;
+      }
 
       const content = typeof tm.content === "string" ? tm.content : JSON.stringify(tm.content);
       let ok = true;
@@ -343,7 +385,47 @@ function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
     }
   }
 
+  // Any pending task calls without ToolMessage result → create error subagent blocks
+  for (const [callId, pending] of pendingTasks) {
+    blocks.push({
+      id: nextId++,
+      kind: "subagent",
+      subagentId: callId || `sa-${nextId}`,
+      role: pending.subagentType,
+      task: pending.task,
+      status: "error",
+      summary: "",
+      toolCallCount: 0,
+      durationMs: 0,
+      steps: [],
+      error: "Sub-agent result not found in checkpoint",
+    });
+  }
+
   return blocks;
+}
+
+/** Parse task tool ToolMessage content into subagent block fields */
+function parseTaskResult(content: string): {
+  ok: boolean;
+  summary: string;
+  toolCallCount: number;
+  durationMs: number;
+  error?: string;
+} {
+  try {
+    const p = JSON.parse(content);
+    if (p && typeof p === "object") {
+      return {
+        ok: p.ok !== false,
+        summary: (p.summary as string) ?? "",
+        toolCallCount: typeof p.toolCallCount === "number" ? p.toolCallCount : 0,
+        durationMs: typeof p.durationMs === "number" ? p.durationMs : 0,
+        ...(p.error ? { error: p.error as string } : {}),
+      };
+    }
+  } catch { /* fall through */ }
+  return { ok: false, summary: content.slice(0, 200), toolCallCount: 0, durationMs: 0 };
 }
 
 /** 计算回放工具卡片的 preview 文本 / Compute preview text for replayed tool cards */
