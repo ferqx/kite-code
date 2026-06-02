@@ -39,6 +39,7 @@ const initialState: TuiState = {
     cacheHitRate: 0,
     totalTokens: 0,
     currentNode: null,
+    modelProvider: "",
     modelName: "deepseek-v4",
     thinkingMode: "max",
   },

@@ -10,6 +10,7 @@ import {
   buildStaticSystemPrompt,
   prepareModelContext,
   forceContextCompaction,
+  sanitizeToolCallPairs,
 } from "@/core/model/context";
 import {
   buildCacheableRuntimeContext,
@@ -95,6 +96,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
   /** Agent 节点：使用稳定工具 schema，由执行层强制工作区访问边界 / Agent node */
   const agent = async (state: CodeAgentState) => {
+    // 防御层：resume 后清理因 interrupt 产生的孤儿 tool_call/ToolMessage 配对 / Defense: clean up orphaned tool_call/ToolMessage pairs after resume
+    const sanitizedMessages = sanitizeToolCallPairs(state.messages);
+    const sanitizedState = sanitizedMessages !== state.messages
+      ? { ...state, messages: sanitizedMessages }
+      : state;
     const tools = createAgentTools({
       workspace: state.workspace,
       shellExecutor: input.shellExecutor,
@@ -105,6 +111,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       subagentEventSink: input.subagentEventSink,
       subagentSignal: input.subagentSignal,
       model: input.model,
+      threadId: state.threadId,
     });
     const retryEvents: ModelRetryEvent[] = [];
     let compactionPerformed: { reason: string; summary: string } | null = null;
@@ -119,14 +126,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     // 手动压缩：在下一次模型调用前压缩上下文
     // Manual compaction: compact context before next model invocation
-    let effectiveState = state;
-    if (state.forceCompact) {
-      const compacted = forceContextCompaction(state.messages);
-      const newSummary = state.contextSummary
+    let effectiveState = sanitizedState;
+    if (sanitizedState.forceCompact) {
+      const compacted = forceContextCompaction(sanitizedState.messages);
+      const newSummary = sanitizedState.contextSummary
         ? `${state.contextSummary}\n\n${compacted.summary}`.trim()
         : compacted.summary;
       effectiveState = {
-        ...state,
+        ...sanitizedState,
         messages: compacted.messages,
         contextSummary: newSummary,
         forceCompact: false,
@@ -383,6 +390,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     if ("authorization" in result) {
       extra.authorization = result.authorization;
     }
+    if ("activeSkillInstructions" in result) {
+      extra.activeSkillInstructions = result.activeSkillInstructions;
+    }
 
     return {
       approvedToolRequest: null,
@@ -607,7 +617,7 @@ function rebuildMessages(
 ): BaseMessage[] {
   const messages: BaseMessage[] = [];
   messages.push(new SystemMessage(buildStaticSystemPrompt(role, skills)));
-  messages.push(new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "" })));
+  messages.push(new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "", activeSkillInstructions: state.activeSkillInstructions })));
   messages.push(...conversationMessages);
   if (state.workspaceAccess === "read-only") {
     messages.push(new HumanMessage(formatWorkspaceAccessReminder(state.workspaceAccess)));

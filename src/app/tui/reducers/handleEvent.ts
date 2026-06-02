@@ -136,6 +136,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (d.plan !== undefined) next.plan = d.plan;
       if (d.authorization) next.authorization = d.authorization.mode;
       if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
+      if (d.modelProvider) next.modelProvider = d.modelProvider;
+      if (d.modelName) next.modelName = d.modelName;
       return { ...state, status: next };
     }
     case "model_retry": {

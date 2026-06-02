@@ -34,6 +34,8 @@ export interface RuntimeContextInput {
   plan?: AgentPlan | null;
   /** 上下文摘要 / Context summary */
   contextSummary?: string;
+  /** 激活的 Skill 关键指令 / Active skill critical instructions */
+  activeSkillInstructions?: string;
   /** 可注入的当前时间 / Injectable current time */
   now?: Date;
   /** 可注入的时区 / Injectable timezone */
@@ -83,6 +85,14 @@ export function buildCacheableRuntimeContext(input: RuntimeContextInput): string
     `Workspace: ${input.workspace}`,
     `Workspace access policy: ${workspaceAccessPolicy()}`,
   ];
+
+  if (input.activeSkillInstructions) {
+    lines.push(
+      "",
+      "## Active Skill Instructions (MUST follow)",
+      input.activeSkillInstructions,
+    );
+  }
 
   return lines.join("\n");
 }

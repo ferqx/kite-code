@@ -50,6 +50,7 @@ Return your findings organized by severity:
 
 const READ_ONLY_TOOLS = new Set([
   "read_file",
+  "search_code",
   "shell_execute",
   "read_mcp_resource",
 ]);
@@ -57,9 +58,9 @@ const READ_ONLY_TOOLS = new Set([
 const FULL_TOOLS: Set<string> | undefined = undefined; // undefined = all tools available
 
 const ROLE_CONFIGS: Record<SubAgentRole, SubAgentRoleConfig> = {
-  explore: { role: "explore", systemPrompt: EXPLORE_SYSTEM_PROMPT, allowedTools: READ_ONLY_TOOLS },
+  explore: { role: "explore", systemPrompt: EXPLORE_SYSTEM_PROMPT, allowedTools: READ_ONLY_TOOLS, timeoutMs: 5 * 60 * 1000 },
   code:    { role: "code",    systemPrompt: CODE_SYSTEM_PROMPT,    allowedTools: FULL_TOOLS },
-  review:  { role: "review",  systemPrompt: REVIEW_SYSTEM_PROMPT,  allowedTools: READ_ONLY_TOOLS },
+  review:  { role: "review",  systemPrompt: REVIEW_SYSTEM_PROMPT,  allowedTools: READ_ONLY_TOOLS, timeoutMs: 5 * 60 * 1000 },
 };
 
 /** 按角色名获取配置 */

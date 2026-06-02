@@ -55,7 +55,8 @@ function nextSubAgentId(): string {
 /** 运行子 Agent：独立上下文窗口 + 受限工具集 + 循环执行至完成 */
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
   const id = nextSubAgentId();
-  const model = input.model ?? createChatModel(input.config);
+  const model = input.role.model ?? input.model ?? createChatModel(input.config);
+  const effectiveTimeoutMs = input.role.timeoutMs ?? input.timeoutMs;
   const startTime = Date.now();
   let toolCallCount = 0;
 
@@ -92,7 +93,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
 
   // 组合超时信号 + 外部 abort 信号，传播到模型 HTTP 请求
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), input.timeoutMs);
+  const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
   const combinedSignal = AbortSignal.any([input.signal, timeoutController.signal]);
 
   try {

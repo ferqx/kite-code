@@ -26,6 +26,7 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
         ["Ctrl+C", "中断运行 / 双按退出"],
         ["Ctrl+T", "展开/折叠所有 reasoning"],
         ["Ctrl+E", "展开输入框折叠内容"],
+        ["Ctrl+L", "清空输出屏幕"],
         ["Shift+Enter", "换行"],
         ["?", "打开帮助面板（输入为空时）"],
         ["Esc", "取消交互 / 关闭面板"],

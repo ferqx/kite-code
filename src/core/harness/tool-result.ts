@@ -50,4 +50,6 @@ export type ToolExecutionResult = ShellResult & {
   workspaceAccess?: WorkspaceAccess;
   /** 更新后的授权状态 / Updated authorization state */
   authorization?: ThreadAuthorizationState;
+  /** Skill 工具激活的关键指令（从 <EXTREMELY-IMPORTANT> 提取）/ Skill-activated critical instructions extracted from <EXTREMELY-IMPORTANT> */
+  activeSkillInstructions?: string;
 };

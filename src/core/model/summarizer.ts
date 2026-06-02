@@ -75,8 +75,7 @@ function summarizeSegment(segment: BaseMessage[]): StepSummary {
         // 提取文件路径 / Extract file path
         if (typeof result.path === "string") {
           if (
-            result.tool === "write_file" ||
-            result.tool === "apply_patch"
+            result.tool === "write_file"
           ) {
             if (!summary.created.includes(result.path)) {
               summary.created.push(result.path);

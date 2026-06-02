@@ -571,12 +571,16 @@ function parseStateChangeEvents(node: Record<string, unknown>): AgentEvent | nul
   const phase = node.phase as string | undefined;
   const plan = node.plan ?? (node.metadata as Record<string, unknown> | undefined)?.plan;
   const auth = node.authorization;
+  const modelProvider = node.modelProvider as string | undefined;
+  const modelName = node.modelName as string | undefined;
   if (ws === "read-only" || ws === "write") sc.workspaceAccess = ws;
   if (phase === "planning" || phase === "building") sc.phase = phase;
   if (plan !== undefined) sc.plan = plan as StateChangePayload["plan"];
   if (auth && typeof auth === "object") {
     sc.authorization = { mode: (auth as Record<string, unknown>).mode as "default" | "full_access" };
   }
+  if (modelProvider) sc.modelProvider = modelProvider;
+  if (modelName) sc.modelName = modelName;
   if (Object.keys(sc).length > 0) {
     return { type: "state_change", data: sc };
   }

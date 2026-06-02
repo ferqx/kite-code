@@ -212,12 +212,14 @@ export async function runApprovedTool(
         stderr: `Skill not found: ${skillName}`,
       });
     }
+    const important = extractSkillImportant(result.content);
     return withFailureGuidance(request, {
       ok: true,
       command: `Skill ${skillName}`,
       exitCode: 0,
       stdout: `Skill loaded: ${result.name}\n\n${result.content}`,
       stderr: "",
+      ...(important ? { activeSkillInstructions: important } : {}),
     });
   }
 
@@ -347,14 +349,22 @@ function toolUsageGuidance(request: PendingToolRequest): string {
     case "write_file":
       return "Use write_file with a relative path and complete file content when creating or fully overwriting a file. For small changes to an existing file, prefer read_file followed by edit_file.";
     case "shell_execute":
-      return "Use shell_execute with a concrete command and action metadata. Set intent to inspect for read-only checks such as rg, ls, cat, or git status; set intent to verify for tests, typecheck, build, lint, or smoke checks. Provide objective, expected_observation, and failure_strategy when they help review and recovery.";
+      return "Use shell_execute with a concrete command and action metadata. Set intent to inspect for read-only checks such as rg, ls, cat, or git status; set intent to verify for tests, typecheck, build, lint, or smoke checks. Provide description to explain what the command does. Include grant_request for commands needing approval.";
     case "update_plan":
       return "Use update_plan with a complete plan object: name, description, status, and ordered steps with statuses. It must only update planning state and must not mutate the workspace.";
     case "ask_user":
       return "Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.";
+    case "search_code":
+      return "Use search_code with a ripgrep regex pattern. Narrow the pattern or specify a path if results are too broad. Prefer search_code over shell_execute with rg/grep for structured results.";
     case "Skill":
       return "Use Skill with the name of a skill from the Available Skills list. The skill name must exactly match. Only use skills listed in the system prompt under Available Skills.";
     default:
       return "";
   }
+}
+
+/** 从 Skill 内容中提取 <EXTREMELY-IMPORTANT> 标签文本，注入 runtime context / Extract <EXTREMELY-IMPORTANT> content from skill body for runtime context injection */
+function extractSkillImportant(content: string): string | null {
+  const match = content.match(/<EXTREMELY-IMPORTANT>([\s\S]*?)<\/EXTREMELY-IMPORTANT>/);
+  return match ? match[1].trim() : null;
 }

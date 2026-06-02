@@ -10,6 +10,10 @@ export interface SubAgentRoleConfig {
   systemPrompt: string;
   /** 允许使用的工具名称集合（undefined 表示全部可用） */
   allowedTools?: Set<string>;
+  /** 可选独立模型（不指定则使用主 agent 模型）/ Optional model override for this role */
+  model?: import("@/core/model/factory").SupportedChatModel;
+  /** 可选超时毫秒（不指定则使用 SubAgentRunnerInput.timeoutMs）/ Optional timeout in milliseconds */
+  timeoutMs?: number;
 }
 
 /** 子 agent 运行输入 / Sub-agent runner input */

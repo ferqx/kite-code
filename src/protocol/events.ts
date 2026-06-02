@@ -86,6 +86,8 @@ export interface StateChangePayload {
   phase?: AgentPhase;
   plan?: AgentPlan | null;
   authorization?: { mode: AuthorizationMode };
+  modelProvider?: string;
+  modelName?: string;
 }
 
 /** 提示缓存命中指标 / Prompt cache hit metrics */

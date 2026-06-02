@@ -52,7 +52,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
     case "LOAD_SESSION": {
       const sessions = state.sessions.map(s =>
         s.threadId === action.threadId
-          ? { ...s, status: { ...s.status, modelName: action.modelName || s.status.modelName, thinkingMode: action.thinkingLevel || s.status.thinkingMode } }
+          ? { ...s, status: { ...s.status, modelProvider: action.modelProvider || s.status.modelProvider, modelName: action.modelName || s.status.modelName, thinkingMode: action.thinkingLevel || s.status.thinkingMode } }
           : s
       );
       return {
@@ -70,6 +70,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         loadingSession: false,
         status: {
           ...state.status,
+          modelProvider: action.modelProvider || state.status.modelProvider,
           modelName: action.modelName || state.status.modelName,
           thinkingMode: action.thinkingLevel || state.status.thinkingMode,
         },

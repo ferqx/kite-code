@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 
@@ -28,6 +28,8 @@ export interface ReadFileInput {
   path: string;
   offset?: number;
   limit?: number;
+  /** 强制读取二进制文件（默认拒绝） / Force reading a binary file (rejected by default) */
+  force?: boolean;
 }
 
 export interface ReadFileResult {
@@ -53,7 +55,18 @@ export function readFile(input: ReadFileInput): ReadFileResult {
       };
     }
 
-    const content = readFileSync(target, "utf8");
+    const raw = readFileSync(target);
+    // 二进制文件检测：检查 NUL byte / Binary file detection: check for NUL byte
+    if (!input.force && raw.includes(0)) {
+      return {
+        ok: false,
+        path: input.path,
+        content: "",
+        totalLines: 0,
+        error: `Binary file detected: ${input.path}. Use force: true to read anyway.`,
+      };
+    }
+    const content = raw.toString("utf8");
     const allLines = content.split("\n");
     if (allLines.length > 0 && allLines[allLines.length - 1] === "") {
       allLines.pop(); // remove trailing empty from split
@@ -104,6 +117,8 @@ export interface EditFileInput {
   newString: string;
   /** 是否替换所有匹配项 / Replace all occurrences */
   replaceAll?: boolean;
+  /** 匹配模式：exact 逐字匹配，trimmed 逐行 trim 首尾空白后匹配 / Match mode: exact for verbatim match, trimmed for per-line whitespace trimming */
+  matchMode?: "exact" | "trimmed";
 }
 
 export interface EditFileResult {
@@ -127,6 +142,11 @@ export function editFile(input: EditFileInput): EditFileResult {
     }
 
     const content = readFileSync(target, "utf8");
+
+    // 使用匹配模式查找 old_string / Use match mode to find old_string
+    if (input.matchMode === "trimmed") {
+      return editFileTrimmed(target, input.path, content, input.oldString, input.newString, input.replaceAll);
+    }
 
     // 查找 old_string / Find old_string
     const index = content.indexOf(input.oldString);
@@ -162,6 +182,144 @@ export function editFile(input: EditFileInput): EditFileResult {
   } catch (e) {
     return { ok: false, path: input.path, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/** trimmed 模式匹配：逐行 trim 首尾空白后定位 old_string / Trimmed mode: locate old_string by trimming each line */
+function editFileTrimmed(
+  target: string,
+  path: string,
+  content: string,
+  oldString: string,
+  newString: string,
+  replaceAll?: boolean,
+): EditFileResult {
+  const oldLines = oldString.split("\n");
+  const trimmedOldLines = oldLines.map((l) => l.trim());
+  const contentLines = content.split("\n");
+  const trimmedContentLines = contentLines.map((l) => l.trim());
+
+  // 在 trimmed 内容行中搜索 trimmed old_string / Search for trimmed old_string in trimmed content lines
+  let matchLine = -1;
+  for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
+    let mismatch = false;
+    for (let j = 0; j < oldLines.length; j++) {
+      if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
+        mismatch = true;
+        break;
+      }
+    }
+    if (!mismatch) {
+      matchLine = i;
+      break;
+    }
+  }
+
+  if (matchLine === -1) {
+    const snippet = oldString.slice(0, 100).replace(/\n/g, "\\n");
+    return {
+      ok: false,
+      path,
+      error: `old_string not found in ${path} (trimmed mode): "${snippet}..."`,
+    };
+  }
+
+  // 计算原始内容中的字符偏移 / Calculate character offset in original content
+  let charOffset = 0;
+  for (let k = 0; k < matchLine; k++) {
+    charOffset += contentLines[k].length + 1; // +1 for newline
+  }
+
+  // 在原始内容中逐行定位 old_string 的精确起始位置 / Locate exact start of old_string in original content
+  const originalOldLines = contentLines.slice(matchLine, matchLine + oldLines.length).join("\n");
+
+  // 检查多匹配 / Check for duplicate matches in trimmed mode
+  if (!replaceAll) {
+    let matchCount = 0;
+    for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
+      let mismatch = false;
+      for (let j = 0; j < oldLines.length; j++) {
+        if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
+          mismatch = true;
+          break;
+        }
+      }
+      if (!mismatch) matchCount++;
+    }
+    if (matchCount > 1) {
+      const snippet = oldString.slice(0, 100).replace(/\n/g, "\\n");
+      return {
+        ok: false,
+        path,
+        error: `old_string found ${matchCount} times in ${path} (trimmed mode). Use replaceAll: true or make old_string more specific.`,
+      };
+    }
+  }
+
+  return performReplaceTrimmed(path, target, content, contentLines, matchLine, oldLines.length, newString, replaceAll, charOffset);
+}
+
+/** trimmed 模式的文件替换 / File replacement in trimmed mode */
+function performReplaceTrimmed(
+  path: string,
+  target: string,
+  content: string,
+  contentLines: string[],
+  matchLine: number,
+  oldLineCount: number,
+  newStr: string,
+  replaceAll: boolean | undefined,
+  charOffset: number,
+): EditFileResult {
+  let newContent: string;
+
+  if (replaceAll) {
+    const trimmedContentLines = contentLines.map((l) => l.trim());
+    const trimmedOldLines = contentLines.slice(matchLine, matchLine + oldLineCount).map((l) => l.trim());
+    const parts: string[] = [];
+    let i = 0;
+    while (i <= contentLines.length - oldLineCount) {
+      let match = true;
+      for (let j = 0; j < oldLineCount; j++) {
+        if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        parts.push(newStr);
+        i += oldLineCount;
+      } else {
+        parts.push(contentLines[i]);
+        i++;
+      }
+    }
+    // 添加剩余行 / Add remaining lines
+    for (; i < contentLines.length; i++) {
+      parts.push(contentLines[i]);
+    }
+    newContent = parts.join("\n");
+  } else {
+    const before = contentLines.slice(0, matchLine);
+    const after = contentLines.slice(matchLine + oldLineCount);
+    newContent = [...before, newStr, ...after].join("\n");
+  }
+
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, newContent, "utf8");
+
+  // 计算行号 / Calculate line numbers
+  const fromLine = matchLine + 1;
+  const newLines = newStr.split("\n").length;
+  const toLine = fromLine + Math.max(0, newLines - 1);
+
+  return {
+    ok: true,
+    path,
+    content: newContent,
+    fromLine,
+    toLine,
+    replacements: replaceAll ? undefined : 1,
+  };
 }
 
 function performReplace(
@@ -211,6 +369,8 @@ export interface WriteFileInput {
   workspace: string;
   path: string;
   content: string;
+  /** Write mode: overwrite (default) replaces entire file, append adds to end / 模式：overwrite 覆盖，append 追加 */
+  mode?: "overwrite" | "append";
 }
 
 export interface WriteFileResult {
@@ -225,7 +385,12 @@ export function writeFile(input: WriteFileInput): WriteFileResult {
   try {
     const target = resolvePath(input.workspace, input.path);
     mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, input.content, "utf8");
+
+    if (input.mode === "append") {
+      appendFileSync(target, input.content, "utf8");
+    } else {
+      writeFileSync(target, input.content, "utf8");
+    }
 
     const written = readFileSync(target, "utf8");
     const lineCount = written.split("\n").length - (written.endsWith("\n") ? 1 : 0);

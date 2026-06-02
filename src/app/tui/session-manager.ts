@@ -443,6 +443,7 @@ function initialStatusSnapshot(): StatusState {
     cacheHitRate: 0,
     totalTokens: 0,
     currentNode: null,
+    modelProvider: "",
     modelName: "",
     thinkingMode: "",
   };

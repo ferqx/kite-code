@@ -1,4 +1,7 @@
 /**
+ * @reserved — 暂未注册为 Agent 工具，待需求确认后启用
+ * @reserved — not yet registered as an agent tool; pending requirement confirmation
+ *
  * apply_patch 工具：实现 Codex 风格的补丁解析和应用
  * apply_patch tool: Codex-style patch parsing and application
  *

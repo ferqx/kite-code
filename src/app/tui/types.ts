@@ -72,6 +72,7 @@ export interface StatusState {
   cacheHitRate: number;
   totalTokens: number;
   currentNode: string | null;
+  modelProvider: string;
   modelName: string;
   thinkingMode: string;
 }

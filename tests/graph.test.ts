@@ -778,6 +778,7 @@ describe("routeEntry — start-of-graph routing", () => {
     modelName: "",
     thinkingLevel: null,
     forceCompact: false,
+    activeSkillInstructions: "",
     messages: [],
   };
 

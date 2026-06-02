@@ -31,6 +31,7 @@ function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
     cacheHitRate: 45,
     totalTokens: 1234,
     currentNode: "agent",
+    modelProvider: "anthropic",
     modelName: "claude-opus",
     thinkingMode: "detailed",
     ...overrides,

@@ -45,6 +45,8 @@ export default function Footer({
         thinkingVisible={thinkingVisible}
         running={running}
         elapsed={elapsed}
+        modelProvider={status.modelProvider}
+        modelName={status.modelName}
       />
     </Box>
   );

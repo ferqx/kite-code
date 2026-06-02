@@ -15,6 +15,10 @@ export function useGlobalKeys(dispatch: Dispatch<any>) {
       dispatch({ type: "EXPAND_INPUT" });
       return;
     }
+    if (key.ctrl && input === "l") {
+      dispatch({ type: "CLEAR_OUTPUT" });
+      return;
+    }
     if (key.escape) {
       dispatch({ type: "ESCAPE" });
     }

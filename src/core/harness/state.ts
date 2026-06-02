@@ -93,6 +93,11 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => "",
   }),
+  /** 当前激活的 Skill 关键指令（从 <EXTREMELY-IMPORTANT> 标签提取，注入 runtime context）/ Active skill critical instructions extracted from <EXTREMELY-IMPORTANT> tags */
+  activeSkillInstructions: Annotation<string>({
+    reducer: (_left, right) => right,
+    default: () => "",
+  }),
 });
 
 export type CodeAgentState = typeof AgentState.State;

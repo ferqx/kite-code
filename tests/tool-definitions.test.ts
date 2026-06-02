@@ -25,6 +25,7 @@ describe("code agent tool definitions", () => {
       "read_file",
       "edit_file",
       "write_file",
+      "search_code",
       "shell_execute",
       "read_mcp_resource",
       "update_plan",
@@ -98,6 +99,7 @@ describe("code agent tool definitions", () => {
       "read_file",
       "edit_file",
       "write_file",
+      "search_code",
       "shell_execute",
       "read_mcp_resource",
       "update_plan",
@@ -122,10 +124,6 @@ describe("code agent tool definitions", () => {
       shellExecute.schema.safeParse({
         command: "bun test tests/graph.test.ts",
         intent: "verify",
-        objective: "验证图路由行为",
-        justification: "改动涉及 approval 路由，需要运行相关测试。",
-        expected_observation: "graph tests pass",
-        failure_strategy: "读取失败输出并修正最小相关实现。",
         prefix_rule: ["bun", "test"],
         grant_request: "same_command",
       }).success,
@@ -324,6 +322,7 @@ describe("tool contracts (ACI)", () => {
     "read_file",
     "edit_file",
     "write_file",
+    "search_code",
     "shell_execute",
     "update_plan",
     "read_mcp_resource",
@@ -455,11 +454,11 @@ describe("tool contracts (ACI)", () => {
     ).toBe(false);
   });
 
-  // apply_patch 契约已存在但尚未注册为 Agent 工具 / apply_patch contract exists but is not yet registered as an agent tool
-  test("apply_patch contract exists for future wiring", () => {
+  // apply_patch 契约标记为 @reserved，待需求确认后启用 / apply_patch contract is reserved for future enablement
+  test("apply_patch contract is reserved, not wired to agent tools", () => {
     const contract = TOOL_CONTRACTS.get("apply_patch");
-    expect(contract).toBeDefined();
-    expect(contract?.description).toBeTruthy();
-    expect(contract?.sections.whenToUse.length).toBeGreaterThan(20);
+    expect(contract).toBeUndefined();
+    const tools = createAgentTools({ workspace: "/tmp" });
+    expect(tools.find((t) => t.name === "apply_patch")).toBeUndefined();
   });
 });

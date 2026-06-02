@@ -84,6 +84,16 @@ export type PendingToolRequest =
   | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
+      name: "search_code";
+      args: { pattern: string; path?: string };
+      /** 调用原因 / Call reason */
+      reason: string;
+      /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
+    }
+  | {
+      /** 工具调用 ID / Tool call ID */
+      id?: string;
       name: "Skill";
       args: { skill: string };
       /** 调用原因 / Call reason */

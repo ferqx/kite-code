@@ -9,7 +9,7 @@ function fakeStatus() {
     phase: "building" as const, plan: null,
     authorization: "default" as const, workspaceAccess: "write" as const,
     cacheHitRate: 42, totalTokens: 123456, currentNode: null,
-    modelName: "deepseek-v4", thinkingMode: "max",
+    modelProvider: "deepseek" as const, modelName: "deepseek-v4", thinkingMode: "max",
   };
 }
 

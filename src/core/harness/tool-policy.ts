@@ -45,10 +45,6 @@ export interface ToolApprovalPayload {
   summary: string;
   reason: string;
   expectedEffects: string[];
-  modelJustification?: string;
-  objective?: string;
-  expectedObservation?: string;
-  failureStrategy?: string;
   suggestedPrefixRule?: string[];
   grantOptions: ShellApprovalGrant[];
   recommendedGrant: ShellApprovalGrant;
@@ -200,6 +196,15 @@ export function evaluateToolPolicy(input: {
       reason: "Sub-agent dispatch is a coordination tool; sub-agent actions have their own approval flow.",
       userVisibleSummary: "Dispatch a specialized sub-agent for an isolated task.",
       expectedEffects: ["Runs a sub-agent in an isolated context", "Sub-agent tool calls follow their own approval rules"],
+    });
+  }
+
+  if (request.name === "search_code") {
+    return allow({
+      risk: "read",
+      reason: "Read-only code search.",
+      userVisibleSummary: `Search code: ${(request.args.pattern as string) ?? "?"}`,
+      expectedEffects: ["Searches workspace files", "Does not mutate files"],
     });
   }
 
@@ -363,10 +368,6 @@ export function buildToolApproval(input: {
     summary: input.decision.userVisibleSummary,
     reason: input.decision.reason,
     expectedEffects: input.decision.expectedEffects,
-    modelJustification: shellAction?.justification,
-    objective: shellAction?.objective,
-    expectedObservation: shellAction?.expected_observation,
-    failureStrategy: shellAction?.failure_strategy,
     suggestedPrefixRule: shellAction?.prefix_rule,
     grantOptions,
     recommendedGrant:

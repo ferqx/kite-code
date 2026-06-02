@@ -6,6 +6,7 @@ import {
   editFile,
   writeFile,
 } from "./file";
+import { searchCode } from "./search-code";
 import {
   READ_FILE_CONTRACT,
   EDIT_FILE_CONTRACT,
@@ -14,6 +15,7 @@ import {
   READ_MCP_RESOURCE_CONTRACT,
   UPDATE_PLAN_CONTRACT,
   ASK_USER_CONTRACT,
+  SEARCH_CODE_CONTRACT,
 } from "./tool-contracts";
 import { adaptMcpTool } from "@/core/mcp/tool-adapter";
 import { createSkillTool } from "@/core/skills/skill-tool";
@@ -42,16 +44,19 @@ export interface CreateAgentToolsInput {
   model?: SupportedChatModel;
   /** 最大允许子 agent 嵌套深度（0 = 不允许再派生）/ Max sub-agent nesting depth (0 = no further nesting) */
   maxDepth?: number;
+  /** 线程 ID，用于多 session 缓存隔离 / Thread ID for multi-session cache isolation */
+  threadId?: string;
 }
-let _cachedKey: string | null = null;
-let _cachedTools: any[] | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any -- internal cache, breaks circular ReturnType<> reference
+/** 模块级工具缓存：按 cacheKey 隔离，防止多 session 并发时竞态覆盖 / Module-level tool cache isolated by cacheKey to prevent race conditions with concurrent sessions */
+const _toolCache = new Map<string, any[]>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- internal cache, breaks circular ReturnType<> reference
 
 /** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
 export function createAgentTools(input: CreateAgentToolsInput) {
   // 缓存：同一个 agent 迭代中参数不变时避免重建全部工具（包括 MCP 适配）
   // Include subagentEventSink presence to distinguish main-agent tools (with task tool) from sub-agent tools (without)
-  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${!!input.mcpManager}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}`;
-  if (cacheKey === _cachedKey && _cachedTools) return _cachedTools;
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${!!input.mcpManager}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ""}`;
+  const cached = _toolCache.get(cacheKey);
+  if (cached) return cached;
   const readFileTool = tool(
     async ({ path, offset, limit }) =>
       JSON.stringify(
@@ -87,14 +92,15 @@ export function createAgentTools(input: CreateAgentToolsInput) {
         old_string: z.string().describe("The exact text to replace. Must match the file content exactly, including whitespace."),
         new_string: z.string().describe("The new text to replace old_string with"),
         replace_all: z.boolean().optional().describe("Replace all occurrences (default: false, fails if multiple matches found)"),
+        match_mode: z.enum(["exact", "trimmed"]).optional().describe("Match mode: exact (default) for verbatim matching, trimmed for per-line whitespace trimming"),
       }),
     },
   );
 
   const writeFileTool = tool(
-    async ({ path, content }) =>
+    async ({ path, content, mode }) =>
       JSON.stringify(
-        writeFile({ workspace: input.workspace, path, content }),
+        writeFile({ workspace: input.workspace, path, content, mode }),
       ),
     {
       name: "write_file",
@@ -102,6 +108,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       schema: z.object({
         path: z.string().describe("Path to the file (relative to workspace, or absolute)"),
         content: z.string().describe("Complete file content to write"),
+        mode: z.enum(["overwrite", "append"]).optional().describe("Write mode: overwrite (default) replaces entire file, append adds content at end"),
       }),
     },
   );
@@ -124,16 +131,6 @@ export function createAgentTools(input: CreateAgentToolsInput) {
           .enum(["inspect", "verify", "build", "test", "git", "other"])
           .optional()
           .describe("Command intent"),
-        objective: z.string().optional().describe("What this command should accomplish"),
-        justification: z.string().optional().describe("Why this command is needed"),
-        expected_observation: z
-          .string()
-          .optional()
-          .describe("Expected stdout/stderr or observable result"),
-        failure_strategy: z
-          .string()
-          .optional()
-          .describe("How to proceed if the command fails"),
         prefix_rule: z
           .array(z.string())
           .optional()
@@ -194,10 +191,26 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       })
     : null;
 
+  const searchCodeTool = tool(
+    async ({ pattern, path: searchPath }) =>
+      JSON.stringify(
+        await searchCode({ workspace: input.workspace, pattern, path: searchPath }),
+      ),
+    {
+      name: "search_code",
+      description: SEARCH_CODE_CONTRACT.description,
+      schema: z.object({
+        pattern: z.string().describe("Search pattern (ripgrep regex syntax)"),
+        path: z.string().optional().describe("Optional search path (relative to workspace)"),
+      }),
+    },
+  );
+
   const builtinTools = [
     readFileTool,
     editFileTool,
     writeFileTool,
+    searchCodeTool,
     shellExecute,
     readMcpResource,
     ...(skillTool ? [skillTool] : []),
@@ -213,13 +226,11 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       adaptMcpTool(server, tool, input.mcpManager!),
     );
     const all = [...builtinTools, ...mcpTools];
-    _cachedKey = cacheKey;
-    _cachedTools = all;
+    _toolCache.set(cacheKey, all);
     return all;
   }
 
-  _cachedKey = cacheKey;
-  _cachedTools = builtinTools;
+  _toolCache.set(cacheKey, builtinTools);
   return builtinTools;
 }
 
