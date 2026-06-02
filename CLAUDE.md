@@ -91,7 +91,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 
 ## TUI 验证
 
-- Ink 渲染管线（`<Static>` → scrollback、Yoga 布局、debug 模式）在
+- Ink 渲染管线（React.memo block 组件、Yoga 布局、debug 模式）在
   `ink-testing-library` 和真实终端中行为不同。TUI 布局/交互类改动仅靠
   单元/reducer/layout 测试无法验证正确性
 - `src/app/tui/` 下的布局改动和 React `key` 变动有级联影响——改 OutputArea

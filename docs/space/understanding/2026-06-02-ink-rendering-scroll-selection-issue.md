@@ -1,8 +1,9 @@
 # Ink 渲染机制导致的滚动和文本选择问题
 
 日期：2026-06-02
-状态：understanding（待解决）
+状态：understanding（部分解决）
 来源：用户反馈 + 源码分析
+**更新 2026-06-02：移除 `<Static>` 改用 React.memo block 组件，消除了 scrollback/viewport 分割，空白区域问题已修复**
 
 ## 问题描述
 

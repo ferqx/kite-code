@@ -150,8 +150,7 @@
 - **真实场景验证**：使用真实模型链路验收完整体验
 - **代码质量**：TypeScript strict 模式、API 文档生成
 - **性能优化**：前缀缓存命中率监控、checkpoint 压缩、大文件 diff 性能
-  - [x] TUI 输入卡顿：用 Ink `<Static>` 将已完成 block 移出交互渲染树
-  - [x] `<Static>` Header 顺序修复：Header 注入 `<Static>` items 哨兵值
+  - [x] TUI 输入卡顿：~~用 Ink `<Static>`~~ → 改用 React.memo block 组件 + 引用稳定 reducer（2026-06-02 重构）
 
 ### 暂缓项
 

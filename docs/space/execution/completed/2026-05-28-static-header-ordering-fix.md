@@ -1,7 +1,10 @@
 # Ink `<Static>` 与 Header 顺序冲突修复
 
-状态：completed
+状态：superseded
 日期：2026-05-28
+**被替代于：2026-06-02 — 移除 `<Static>`，改用 React.memo + 引用稳定 reducer**
+
+> 2026-06-02：`<Static>` 组件已从 `OutputArea.tsx` 移除。性能优化改用 React.memo block 组件 + reducer 引用稳定性保证。Header 不再需要注入 `<Static>` items，直接渲染在 OutputArea 动态树顶部。本文档仅作历史参考。详见 `docs/superpowers/plans/2025-06-02-remove-static-perf.md`。
 范围：
 
 - `src/app/tui/OutputArea.tsx` — `<Static>` 渲染逻辑、Header 注入
