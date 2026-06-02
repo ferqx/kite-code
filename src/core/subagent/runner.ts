@@ -8,6 +8,8 @@ import { createAgentTools, isReadOnlyShellCommand } from "@/core/tools/definitio
 import type { ShellExecutor } from "@/core/tools/shell";
 import type { McpManager } from "@/core/mcp";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
+import { extractPromptCacheMetrics } from "@/core/cache-metrics";
+import { getRuntimeSystemInfo } from "@/core/model/runtime-context";
 import type { SubAgentRoleConfig, SubAgentRunnerInput, SubAgentResult, SubAgentEventSink } from "./types";
 
 export type { SubAgentRunnerInput } from "./types";
@@ -72,6 +74,11 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     ? wrapReadOnlyShell(input.shellExecutor)
     : input.shellExecutor;
 
+  // 组合超时信号 + 外部 abort 信号，传播到模型调用和工具执行
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
+  const combinedSignal = AbortSignal.any([input.signal, timeoutController.signal]);
+
   // 构建工具集：受限角色只提供允许的工具
   const allTools = createAgentTools({
     workspace: input.workspace,
@@ -79,6 +86,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     mcpManager: input.mcpManager,
     skills: input.skills,
     skillOptions: input.skillOptions,
+    signal: combinedSignal,
   });
   // Filter: apply role restrictions, then exclude "task" when depth limit reached
   const depth = input.depth ?? 0;
@@ -88,13 +96,19 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     ? allTools.filter((t) => input.role.allowedTools!.has(t.name) && (canSpawnSubAgents || t.name !== "task"))
     : allTools.filter((t) => canSpawnSubAgents || t.name !== "task");
 
-  const systemMessage = new SystemMessage(input.role.systemPrompt);
-  const messages: BaseMessage[] = [systemMessage, new HumanMessage(input.task)];
+  // 注入运行时系统信息（OS、Shell），避免子 agent 在 Windows 上生成 PowerShell 命令
+  // Inject runtime system info (OS, Shell) so sub-agents use correct shell syntax on Windows
+  const sysInfo = getRuntimeSystemInfo({ workspace: input.workspace });
+  const runtimeContext = [
+    "",
+    "## Runtime environment",
+    `OS: ${sysInfo.os} (${sysInfo.platform})`,
+    `Shell: ${sysInfo.shell} (use ${sysInfo.shell} syntax, NOT PowerShell or cmd.exe)`,
+    `CWD: ${sysInfo.cwd}`,
+  ].join("\n");
 
-  // 组合超时信号 + 外部 abort 信号，传播到模型 HTTP 请求
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
-  const combinedSignal = AbortSignal.any([input.signal, timeoutController.signal]);
+  const systemMessage = new SystemMessage(input.role.systemPrompt + runtimeContext);
+  const messages: BaseMessage[] = [systemMessage, new HumanMessage(input.task)];
 
   try {
     // Yield control so Ink/React can render the subagent_start block before we block on model calls
@@ -104,6 +118,22 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
       // Check abort before blocking on model invoke
       if (combinedSignal.aborted) throw new Error("Sub-agent aborted");
       const response = await bindTools(model, tools).invoke(messages, { signal: combinedSignal }) as AIMessage;
+      // Check abort after model invoke returns (signal may have fired during the call)
+      if (combinedSignal.aborted) throw new Error("Sub-agent aborted");
+
+      // 提取子 agent 缓存指标并上报 / Extract sub-agent cache metrics and report
+      const cacheMetrics = extractPromptCacheMetrics(response);
+      if (cacheMetrics && (cacheMetrics.cacheHitTokens > 0 || cacheMetrics.cacheMissTokens > 0)) {
+        input.eventSink({
+          type: "cache_metrics",
+          data: {
+            subagentId: id,
+            cacheHitTokens: cacheMetrics.cacheHitTokens,
+            cacheMissTokens: cacheMetrics.cacheMissTokens,
+            inputTokens: cacheMetrics.inputTokens,
+          },
+        });
+      }
 
       if (response.tool_calls && response.tool_calls.length > 0) {
         // 将 AI 消息推入一次（在循环外），避免重复
@@ -111,6 +141,8 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
 
         // 处理工具调用
         for (const tc of response.tool_calls) {
+          // 每个工具调用前检查中止信号 / Check abort signal before each tool invocation
+          if (combinedSignal.aborted) throw new Error("Sub-agent aborted");
           const tool = tools.find((t) => t.name === tc.name);
           if (!tool) continue;
 

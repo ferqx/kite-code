@@ -55,6 +55,31 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
   /** 当前调用的重试监听器 / Retry listener for the current invocation */
   _retryListener: ModelRetryListener | null = null;
 
+  /**
+   * 覆写非流式消息转换，确保 response_metadata.usage 始终包含原始 usage 数据。
+   * 父类仅在 system_fingerprint 存在时才写入 usage，而 DeepSeek 响应可能不带
+   * system_fingerprint，导致 prompt_cache_hit_tokens 等字段丢失。
+   *
+   * Override non-streaming message conversion to ensure response_metadata.usage
+   * always contains the raw usage data. The parent only includes usage when
+   * system_fingerprint is present, but DeepSeek responses may omit it, causing
+   * prompt_cache_hit_tokens etc. to be lost.
+   */
+  override _convertCompletionsMessageToBaseMessage(message: any, rawResponse: any): BaseMessage {
+    const base = super._convertCompletionsMessageToBaseMessage(message, rawResponse);
+    // 如果父类已经写入 usage 且含有缓存字段，直接返回 / If parent already wrote usage with cache fields, return as-is
+    const existing = (base.response_metadata as Record<string, unknown>)?.usage as Record<string, unknown> | undefined;
+    if (existing?.prompt_cache_hit_tokens != null || existing?.prompt_cache_miss_tokens != null) return base;
+    // 父类未写入 usage 或缺少缓存字段：从 rawResponse 补全 / Parent missed usage or cache fields: patch from rawResponse
+    const rawUsage = rawResponse?.usage as Record<string, unknown> | undefined;
+    if (!rawUsage) return base;
+    base.response_metadata = {
+      ...base.response_metadata,
+      usage: { ...rawUsage },
+    };
+    return base;
+  }
+
   /** 设置重试监听器 / Set the retry listener */
   setRetryListener(listener: ModelRetryListener | null): void {
     this._retryListener = listener;

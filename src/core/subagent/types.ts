@@ -45,6 +45,14 @@ export interface SubAgentResult {
   error?: string;
 }
 
+/** 子 agent 缓存指标 / Sub-agent cache metrics */
+export interface SubAgentCacheMetrics {
+  subagentId: string;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  inputTokens: number;
+}
+
 /** 事件回调：子 agent 运行时向外推送生命周期事件 */
 export type SubAgentEventSink = (event:
   | { type: "start"; data: SubAgentStartPayload }
@@ -52,4 +60,5 @@ export type SubAgentEventSink = (event:
   | { type: "tool_result"; data: SubAgentToolResultPayload }
   | { type: "done"; data: SubAgentDonePayload }
   | { type: "error"; data: SubAgentErrorPayload }
+  | { type: "cache_metrics"; data: SubAgentCacheMetrics }
 ) => void;
