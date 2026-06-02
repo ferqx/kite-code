@@ -139,6 +139,12 @@ export async function* runAgent(
       case "error":
         provider.onEvent({ type: "subagent_error", data: e.data });
         break;
+      case "cache_metrics":
+        provider.onEvent({
+          type: "subagent_cache_metrics",
+          data: { subagentId: e.data.subagentId, cacheHitTokens: e.data.cacheHitTokens, cacheMissTokens: e.data.cacheMissTokens, inputTokens: e.data.inputTokens },
+        });
+        break;
     }
   };
 
@@ -682,6 +688,7 @@ export function chunkToEvents(
         cacheWriteTokens: 0,
         inputTokens: metrics.inputTokens,
         outputTokens,
+        hitRate: metrics.hitRate,
         standard: cacheStandard.record(metrics),
       } satisfies CacheMetricsPayload,
     });

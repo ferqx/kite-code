@@ -24,7 +24,8 @@ export type AgentEvent =
   | { type: "subagent_step"; data: SubAgentStepPayload }
   | { type: "subagent_tool_result"; data: SubAgentToolResultPayload }
   | { type: "subagent_done"; data: SubAgentDonePayload }
-  | { type: "subagent_error"; data: SubAgentErrorPayload };
+  | { type: "subagent_error"; data: SubAgentErrorPayload }
+  | { type: "subagent_cache_metrics"; data: SubAgentCacheMetricsPayload };
 
 // ── 基础类型 / Base types ──
 export type WorkspaceAccess = "read-only" | "write";
@@ -198,4 +199,11 @@ export interface SubAgentDonePayload {
 export interface SubAgentErrorPayload {
   id: string;
   error: string;
+}
+
+export interface SubAgentCacheMetricsPayload {
+  subagentId: string;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  inputTokens: number;
 }

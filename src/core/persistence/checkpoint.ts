@@ -343,6 +343,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     checkpoint: Checkpoint,
     metadata: CheckpointMetadata,
   ): Promise<RunnableConfig> {
+    if (this.isClosed) return config;
     this.setup();
     const threadId = config.configurable?.thread_id;
     if (!threadId) {
@@ -393,6 +394,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     writes: PendingWrite[],
     taskId: string,
   ): Promise<void> {
+    if (this.isClosed) return;
     this.setup();
 
     const threadId = config.configurable?.thread_id;
