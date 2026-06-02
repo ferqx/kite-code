@@ -29,6 +29,56 @@ function formatDuration(ms: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 }
 
+/** Extract human-readable label from tool args */
+function toolArgsLabel(name: string, args: Record<string, unknown>): string {
+  switch (name) {
+    case "read_file":
+    case "edit_file":
+    case "write_file": {
+      const p = args.path;
+      return typeof p === "string" ? p.replace(/^.*[/\\]/, "").slice(-50) : "";
+    }
+    case "shell_execute":
+    case "bash": {
+      const c = args.command;
+      return typeof c === "string" ? c.slice(0, 80) : "";
+    }
+    case "search_code":
+    case "grep": {
+      const q = args.pattern ?? args.query;
+      return typeof q === "string" ? `"${q.slice(0, 60)}"` : "";
+    }
+    case "glob": {
+      const p = args.pattern;
+      return typeof p === "string" ? p.slice(0, 60) : "";
+    }
+    case "read_mcp_resource": {
+      const u = args.uri ?? args.resource;
+      return typeof u === "string" ? u.slice(0, 60) : "";
+    }
+    case "ask_user": {
+      const q = args.question;
+      return typeof q === "string" ? q.slice(0, 60) : "";
+    }
+    default: {
+      // pick first string arg that isn't obviously content
+      const keys = Object.keys(args);
+      if (keys.length === 1) {
+        const v = args[keys[0]];
+        return typeof v === "string" ? v.slice(0, 60) : "";
+      }
+      const labelKey = keys.find((k) =>
+        ["path", "name", "command", "pattern", "query", "url", "uri"].includes(k)
+      );
+      if (labelKey) {
+        const v = args[labelKey];
+        return typeof v === "string" ? v.slice(0, 60) : "";
+      }
+      return "";
+    }
+  }
+}
+
 /** Truncate task text to a readable one-liner */
 function taskLabel(task: string): string {
   const firstLine = task.split("\n")[0]?.trim() ?? task;
@@ -84,7 +134,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           <Box key={i} paddingLeft={3}>
             <Text color={dt.dim}>├─ {step.toolName}</Text>
             {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (
-              <Text color={dt.muted}> {JSON.stringify(step.toolArgs).slice(0, 60)}</Text>
+              <Text color={dt.muted}> {toolArgsLabel(step.toolName, step.toolArgs)}</Text>
             )}
             {step.ok !== undefined && (
               <Text color={step.ok ? dt.success : dt.error}>
