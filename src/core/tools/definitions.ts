@@ -40,6 +40,8 @@ export interface CreateAgentToolsInput {
   subagentEventSink?: import("@/core/subagent/types").SubAgentEventSink;
   /** 外部中止信号（用于 task 工具） */
   subagentSignal?: AbortSignal;
+  /** 中止信号，传递给 shell 执行器以 kill 子进程 / Abort signal passed to shell executor to kill child processes */
+  signal?: AbortSignal;
   /** 可选自定义模型实例（用于 E2E mock 注入）/ Optional custom model instance (for E2E mock injection) */
   model?: SupportedChatModel;
   /** 最大允许子 agent 嵌套深度（0 = 不允许再派生）/ Max sub-agent nesting depth (0 = no further nesting) */
@@ -119,6 +121,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
         await (input.shellExecutor ?? shellTool)({
           workspace: input.workspace,
           command,
+          signal: input.signal,
         }),
       ),
     {

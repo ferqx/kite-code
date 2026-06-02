@@ -107,6 +107,7 @@ function createWrappedExecutor(
         stdin: stdin !== undefined ? "pipe" : "inherit",
         stdout: "pipe",
         stderr: "pipe",
+        signal: input.signal,
       });
 
       if (stdin !== undefined && proc.stdin) {
@@ -126,12 +127,13 @@ function createWrappedExecutor(
         stderr,
       };
     } catch (error) {
+      const isAbort = error instanceof Error && error.name === "AbortError";
       return {
         ok: false,
         command: input.command,
-        exitCode: -1,
+        exitCode: isAbort ? 130 : -1,
         stdout: "",
-        stderr: error instanceof Error ? error.message : String(error),
+        stderr: isAbort ? "Command cancelled by user." : (error instanceof Error ? error.message : String(error)),
       };
     }
   };

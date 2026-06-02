@@ -3,6 +3,8 @@ import type { AuthorizationMode, ShellApprovalGrant, ShellGrantUsed, WorkspaceAc
 export interface ShellInput {
   workspace: string;
   command: string;
+  /** 中止信号，取消时 kill 子进程 / Abort signal to kill child process on cancellation */
+  signal?: AbortSignal;
 }
 
 export interface ShellResult {

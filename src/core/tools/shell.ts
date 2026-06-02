@@ -35,6 +35,7 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
         cwd: input.workspace,
         stdout: "pipe",
         stderr: "pipe",
+        signal: input.signal,
       },
     );
     const stdout = await new Response(proc.stdout).text();
@@ -49,12 +50,14 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
       stderr: cleanMsys2Noise(rawStderr),
     };
   } catch (error) {
+    // AbortError 表示用户主动取消，标记为非失败 / AbortError means user cancellation, mark as non-failure
+    const isAbort = error instanceof Error && error.name === "AbortError";
     return {
       ok: false,
       command: input.command,
-      exitCode: -1,
+      exitCode: isAbort ? 130 : -1,
       stdout: "",
-      stderr: error instanceof Error ? error.message : String(error),
+      stderr: isAbort ? "Command cancelled by user." : (error instanceof Error ? error.message : String(error)),
     };
   }
 }

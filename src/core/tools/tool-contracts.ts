@@ -108,6 +108,7 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       "Execute a shell command in the workspace. " +
+      "On Windows the shell is bash (Git Bash / MSYS2), NOT PowerShell or cmd.exe — always use Unix/shell syntax (ls, cat, grep, find, etc.), never PowerShell cmdlets (Get-ChildItem, Get-Content, Select-String, etc.). " +
       "Prefer read_file/edit_file/write_file for file operations; use shell_execute for tests, typecheck, " +
       "installs, git operations, and other terminal-only tasks. " +
       "Set intent=inspect for read-only exploration (listing files, searching, git status/diff/log) — these bypass approval. " +
