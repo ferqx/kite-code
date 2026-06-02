@@ -151,8 +151,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
   const handleExit = React.useCallback(() => {
     dispatch({ type: "EVENT", event: { type: "text", data: { text: "👋 Goodbye!" } } });
+    sessionManager.abortAll();
     setTimeout(() => process.exit(0), 300);
-  }, [dispatch]);
+  }, [dispatch, sessionManager]);
 
   // Load historical sessions from DB on startup, but always start fresh.
   React.useEffect(() => {
