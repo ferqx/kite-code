@@ -288,18 +288,19 @@ describe("close safety", () => {
     versions_seen: {},
   };
 
-  it("put throws after close", async () => {
+  it("put resolves silently after close (graceful shutdown)", async () => {
     saver.close();
+    const config = { configurable: { thread_id: "t" } };
     await expect(
       saver.put(
-        { configurable: { thread_id: "t" } },
+        config,
         dummyCheckpoint,
         { source: "loop", step: 0, parents: {} },
       ),
-    ).rejects.toThrow("Database is closed");
+    ).resolves.toEqual(config);
   });
 
-  it("putWrites throws after close", async () => {
+  it("putWrites resolves silently after close (graceful shutdown)", async () => {
     saver.close();
     await expect(
       saver.putWrites(
@@ -307,7 +308,7 @@ describe("close safety", () => {
         [["channel1", "value1"]],
         "task-1",
       ),
-    ).rejects.toThrow("Database is closed");
+    ).resolves.toBeUndefined();
   });
 });
 

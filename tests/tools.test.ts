@@ -160,4 +160,37 @@ describe("tool safety", () => {
     // MSYS2 bash must not emit /tmp or other spurious warnings to stderr
     expect(result.stderr).toBe("");
   });
+
+  test("shellTool aborts child process when signal fires", async () => {
+    const workspace = join(tmpdir(), "openpx-langgraph-tools-shell-abort");
+    mkdirSync(workspace, { recursive: true });
+
+    const ac = new AbortController();
+    // Abort immediately
+    ac.abort();
+
+    const result = await shellTool({ workspace, command: "sleep 60", signal: ac.signal });
+
+    expect(result.ok).toBe(false);
+    // Bun returns 128+SIGTERM(15)=143 on Unix, or AbortError with exitCode 130
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  test("shellTool kills long-running process on delayed abort", async () => {
+    const workspace = join(tmpdir(), "openpx-langgraph-tools-shell-abort-delayed");
+    mkdirSync(workspace, { recursive: true });
+
+    const ac = new AbortController();
+    // Abort after 100ms
+    setTimeout(() => ac.abort(), 100);
+
+    const start = Date.now();
+    const result = await shellTool({ workspace, command: "sleep 60", signal: ac.signal });
+    const elapsed = Date.now() - start;
+
+    expect(result.ok).toBe(false);
+    expect([130, 143]).toContain(result.exitCode);
+    // Should complete in well under 60 seconds
+    expect(elapsed).toBeLessThan(5000);
+  });
 });

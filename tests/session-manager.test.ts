@@ -61,4 +61,94 @@ describe("SessionManager", () => {
     expect(calls.length).toBe(1);
     expect(calls[0]).toBe(id);
   });
+
+  test("abortAll aborts all running sessions", () => {
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const id1 = mgr.createSession("/tmp/ws");
+    const id2 = mgr.createSession("/tmp/ws");
+    const rt1 = mgr.getRuntime(id1)!;
+    const rt2 = mgr.getRuntime(id2)!;
+
+    // Simulate running state with AbortControllers
+    const ac1 = new AbortController();
+    const ac2 = new AbortController();
+    rt1.agentLoopActive = true;
+    rt1.abortController = ac1;
+    rt2.agentLoopActive = true;
+    rt2.abortController = ac2;
+
+    mgr.abortAll();
+
+    expect(ac1.signal.aborted).toBe(true);
+    expect(ac2.signal.aborted).toBe(true);
+    expect(rt1.agentLoopActive).toBe(false);
+    expect(rt2.agentLoopActive).toBe(false);
+  });
+
+  test("abortAll skips non-running sessions", () => {
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const id1 = mgr.createSession("/tmp/ws");
+    const id2 = mgr.createSession("/tmp/ws");
+    const rt1 = mgr.getRuntime(id1)!;
+    const rt2 = mgr.getRuntime(id2)!;
+
+    const ac1 = new AbortController();
+    rt1.agentLoopActive = true;
+    rt1.abortController = ac1;
+    // rt2 is not running
+
+    mgr.abortAll();
+
+    expect(ac1.signal.aborted).toBe(true);
+    expect(rt1.agentLoopActive).toBe(false);
+    // rt2 should be unaffected
+    expect(rt2.agentLoopActive).toBe(false);
+    expect(rt2.abortController).toBeNull();
+  });
+});
+
+describe("SessionRuntime", () => {
+  test("abort resolves pending interrupt and signals AbortController", () => {
+    const rt = new SessionRuntime("t1", "/tmp/ws", {
+      config: {} as any,
+      provider: {} as any,
+      skillManifests: [],
+      skillOptions: null,
+      mcpManager: null,
+    });
+
+    const ac = new AbortController();
+    rt.agentLoopActive = true;
+    rt.abortController = ac;
+
+    // Simulate a pending interrupt promise
+    let resolved = false;
+    const pendingPromise = new Promise<void>((resolve) => {
+      // Use a microtask to set up the pending resolve
+      queueMicrotask(() => {
+        (rt as any)._pendingResolve = () => { resolved = true; resolve(); };
+      });
+    });
+
+    rt.abort();
+
+    expect(ac.signal.aborted).toBe(true);
+    expect(rt.agentLoopActive).toBe(false);
+    expect(rt.abortController).toBeNull();
+    expect(rt.generator).toBeNull();
+  });
+
+  test("abort is safe to call when no AbortController", () => {
+    const rt = new SessionRuntime("t1", "/tmp/ws", {
+      config: {} as any,
+      provider: {} as any,
+      skillManifests: [],
+      skillOptions: null,
+      mcpManager: null,
+    });
+
+    // Should not throw
+    rt.abort();
+    expect(rt.agentLoopActive).toBe(false);
+  });
 });

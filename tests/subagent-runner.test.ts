@@ -131,4 +131,63 @@ describe("SubAgentRunner integration", () => {
     expect(result.ok).toBe(true);
     expect(events.some(e => e.type === "done")).toBe(true);
   });
+
+  test("aborts mid-execution when signal fires", async () => {
+    const { events, sink } = mockEventSink();
+    const ac = new AbortController();
+
+    // Use a model that delays in invoke, giving us time to abort.
+    let invokeCount = 0;
+    const model = {
+      bindTools: () => model,
+      invoke: async (_msgs: any, opts?: any) => {
+        invokeCount++;
+        // Delay 300ms on first invoke; abort fires at 100ms
+        await new Promise(r => setTimeout(r, 300));
+        return { content: "done" };
+      },
+    } as any;
+
+    // Abort after 100ms — during first model invoke
+    setTimeout(() => ac.abort(), 100);
+
+    const result = await runSubAgent({
+      config: { providerName: "deepseek", modelName: "test" } as any,
+      workspace: "/tmp/test",
+      role: getRoleConfig("explore"),
+      task: "task",
+      timeoutMs: 5000,
+      signal: ac.signal,
+      eventSink: sink,
+      model: model as any,
+    });
+
+    // The abort should cause the subagent to fail
+    expect(result.ok).toBe(false);
+    expect(events.some(e => e.type === "error")).toBe(true);
+  });
+
+  test("aborts immediately when signal is already aborted", async () => {
+    const { events, sink } = mockEventSink();
+    const ac = new AbortController();
+    ac.abort(); // Abort before calling runSubAgent
+
+    const model = new StreamingMockModel({
+      responses: [{ message: { content: "done" } as any, delay: 5 }],
+    }) as any;
+
+    const result = await runSubAgent({
+      config: { providerName: "deepseek", modelName: "test" } as any,
+      workspace: "/tmp/test",
+      role: getRoleConfig("explore"),
+      task: "task",
+      timeoutMs: 5000,
+      signal: ac.signal,
+      eventSink: sink,
+      model: model as any,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(events.some(e => e.type === "error")).toBe(true);
+  });
 });
