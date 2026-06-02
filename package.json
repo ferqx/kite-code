@@ -22,7 +22,7 @@
     "@langchain/ollama": "^1.2.7",
     "@langchain/openai": "^1.4.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "ink": "^7.0.2",
+    "ink": "^7.0.5",
     "ink-scroll-list": "^0.4.1",
     "ink-text-input": "^6.0.0",
     "jsonc-parser": "^3.3.1",
