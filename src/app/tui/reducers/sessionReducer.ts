@@ -1,15 +1,16 @@
 // ── 会话管理（登录/切换/删除）、用户消息、模型选择 ──
 
 import type { Action } from "./actions";
-import type { TuiState, OutputBlock, SessionSnapshot } from "../types";
+import type { TuiState, OutputBlock, SessionSnapshot, Turn } from "../types";
+import { reconstructTurns } from "./helpers";
 
 export function sessionReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case "NEW_SESSION": {
-      // Save current session blocks/status to outgoing snapshot
+      // Save current session turns/status to outgoing snapshot
       const newSessions = state.sessions.map(s =>
         s.threadId === state.activeSessionId
-          ? { ...s, blocks: state.blocks, status: state.status, active: false }
+          ? { ...s, turns: state.turns, status: state.status, active: false }
           : s
       );
       const newSnapshot: SessionSnapshot = {
@@ -20,14 +21,14 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         running: false,
         pendingInterrupt: false,
         plan: null,
-        status: { ...state.status, totalTokens: 0, cacheHitRate: 0, cacheHitTokens: 0, cacheMissTokens: 0, currentNode: null, plan: null },
-        blocks: [],
+        status: { ...state.status, totalTokens: 0, cacheHitRate: 0,currentNode: null, plan: null },
+        turns: [],
       };
       return {
         ...state,
         sessions: [...newSessions, newSnapshot],
         activeSessionId: action.threadId,
-        blocks: [],
+        turns: [],
         toolStartTimes: undefined,
         interrupt: null,
         exited: false,
@@ -44,7 +45,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         rewindCounter: 0,
         currentRunReasonId: undefined,
         sessionKey: state.sessionKey + 1,
-        status: { ...state.status, totalTokens: 0, cacheHitRate: 0, cacheHitTokens: 0, cacheMissTokens: 0, currentNode: null, plan: null },
+        status: { ...state.status, totalTokens: 0, cacheHitRate: 0,currentNode: null, plan: null },
       };
     }
     case "LOAD_SESSION_PENDING":
@@ -58,7 +59,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       return {
         ...state,
         sessions,
-        blocks: action.blocks,
+        turns: reconstructTurns(action.blocks),
         interrupt: action.interrupt,
         showSessions: false,
         showRewind: false,
@@ -79,7 +80,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
     case "SWITCH_SESSION": {
       const sessions = state.sessions.map(s =>
         s.threadId === state.activeSessionId
-          ? { ...s, blocks: state.blocks, status: state.status, active: false }
+          ? { ...s, turns: state.turns, status: state.status, active: false }
           : s.threadId === action.threadId
             ? { ...s, active: true }
             : s
@@ -89,7 +90,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         ...state,
         sessions,
         activeSessionId: action.threadId,
-        blocks: target?.blocks ?? [],
+        turns: target?.turns ?? [],
         status: target?.status ?? state.status,
         interrupt: target?.pendingInterrupt ? state.interrupt : null,
         exited: false,
@@ -111,11 +112,11 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       };
     }
     case "SET_SESSIONS": {
-      // Merge: preserve existing blocks/status for sessions already in state
+      // Merge: preserve existing turns/status for sessions already in state
       const mergedSessions = action.sessions.map((incoming) => {
         const existing = state.sessions.find((s) => s.threadId === incoming.threadId);
         if (existing) {
-          return { ...incoming, blocks: existing.blocks, status: existing.status };
+          return { ...incoming, turns: existing.turns, status: existing.status };
         }
         return incoming;
       });
@@ -133,8 +134,6 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       return { ...state, sessions };
     }
     case "DELETE_SESSION":
-      // Actual deletion happens in dispatchSessionLoad interceptor (index.tsx).
-      // The reducer just closes the selector.
       return { ...state, showSessions: false };
     case "SELECT_MODEL":
       return {
@@ -145,7 +144,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
     case "USER_MESSAGE": {
       const id = state.nextBlockId;
       const block: OutputBlock = { id, kind: "user", content: action.text };
-      return { ...state, blocks: [...state.blocks, block], nextBlockId: id + 1 };
+      const newTurn: Turn = { blocks: [block] };
+      return { ...state, turns: [...state.turns, newTurn], nextBlockId: id + 1 };
     }
     default:
       return null;
