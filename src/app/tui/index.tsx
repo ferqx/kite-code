@@ -333,7 +333,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         const s = stateRef.current;
         const now = new Date().toISOString().replace(/[:.]/g, "-");
         const filename = sessionExportPath(now);
-        const body = s.blocks
+        const body = s.turns.flatMap(t => t.blocks)
           .map((b) => {
             if (b.kind === "user") return `**You:** ${b.content}`;
             if (b.kind === "text") return b.content;

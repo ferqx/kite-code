@@ -28,7 +28,7 @@ export type { Action } from './reducers';
 const initialState: TuiState = {
   sessions: [],
   activeSessionId: null,
-  blocks: [],
+  turns: [],
   nextBlockId: 1,
   interrupt: null,
   status: {
@@ -67,7 +67,7 @@ const initialState: TuiState = {
 };
 
 export function createInitialState(): TuiState {
-  return { ...initialState, blocks: [], interrupt: null };
+  return { ...initialState, turns: [], interrupt: null };
 }
 
 export interface AppProps {
@@ -123,8 +123,12 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
 
   const interruptBlock = useMemo(() => {
     if (!state.interrupt) return undefined;
-    return state.blocks.find((b) => b.id === state.interrupt!.blockId);
-  }, [state.interrupt, state.blocks]);
+    for (const turn of state.turns) {
+      const found = turn.blocks.find((b) => b.id === state.interrupt!.blockId);
+      if (found) return found;
+    }
+    return undefined;
+  }, [state.interrupt, state.turns]);
 
   const resolveApproval = useCallback(
     (action: string, grant?: string, pattern?: string) => {
@@ -153,7 +157,7 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
         </>
       ) : (
         <OutputArea
-          blocks={state.blocks}
+          turns={state.turns}
           onToggleReason={onToggleReason}
           onTogglePlan={onTogglePlan}
           onToggleToolExpand={onToggleToolExpand}

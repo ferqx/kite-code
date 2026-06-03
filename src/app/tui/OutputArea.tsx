@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from "react";
 import { Box, Text, Static } from "ink";
 import { useInput } from "ink";
-import type { OutputBlock } from "./types";
+import type { Turn, OutputBlock } from "./types";
 import MarkdownBlock from "./components/MarkdownBlock";
 import SubAgentBlock from "./components/SubAgentBlock";
 import ToolCardBlock from "./components/ToolCardBlock";
@@ -10,7 +10,7 @@ import { darkTheme } from "./theme";
 const dt = darkTheme; // for exported utility functions
 
 interface OutputAreaProps {
-  blocks: OutputBlock[];
+  turns: Turn[];
   onToggleReason: (id: number) => void;
   onTogglePlan?: (id: number) => void;
   onToggleToolExpand?: (id: number) => void;
@@ -192,84 +192,16 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
 /** Sentinel: ensures <Static> always has ≥1 item so Header renders even with no completed blocks */
 const HEADER_SENTINEL = { __header: true } as const;
 
-const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, thinkingVisible, running, overlayActive, header }: OutputAreaProps) {
-  // ── Split: completed blocks → <Static>, current turn → dynamic tree ──
-  //
-  // Ink's <Static> renders each item once to terminal scrollback and tracks
-  // rendered items by array length (useState counter). This means:
-  //   - staticItems.length must NEVER decrease between renders
-  //   - a shrink-then-grow causes already-rendered items to be re-rendered
-  //     to scrollback, producing duplicate messages
-  //
-  // The monotonic guard (maxSplitRef) prevents this within a single run.
-  // On idle, we set rawSplitIdx = blocks.length (not -1) so the guard can
-  // track the idle position. When the next turn starts, the guard holds
-  // splitIdx at blocks.length, preventing staticItems from shrinking.
-  //
-  // splitIdx semantics:
-  //   -1   → no turn exists yet (no user block); all blocks in Static
-  //   0..N → split position; blocks before it in Static, after in dynamic
-  //
-  // Blocks needing dynamic (must be in the current turn):
-  //   - text (streaming=true)    — growing content, "❯" cursor
-  //   - tool_card (running)      — spinner animation + elapsed timer
-  //   - subagent (running)       — elapsed timer + step updates
-  //   - approval (!resolved)     — ApprovalBlock component
-  //   - question (!resolved)     — InputBlock component
-  const rawSplitIdx = useMemo(() => {
-    // Find turn start (last user message)
-    let turnStart = -1;
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      if (blocks[i].kind === "user") { turnStart = i; break; }
-    }
+const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, thinkingVisible, running, overlayActive, header }: OutputAreaProps) {
+  // ── Turn-based Static/Dynamic split ──
+  //   - running=true  → last turn in Dynamic, all previous in Static
+  //   - running=false → all turns in Static
+  //   Monotonically increasing staticBlocks: settled turns never decrease.
+  const settledTurns = running ? turns.slice(0, -1) : turns;
+  const activeTurn   = running ? turns.at(-1) : undefined;
 
-    // Find the earliest block in this turn that needs live updates
-    let firstDynamic = -1;
-    if (turnStart >= 0) {
-      for (let i = turnStart; i < blocks.length; i++) {
-        const b = blocks[i];
-        if (
-          (b.kind === "text" && (b as { streaming?: boolean }).streaming) ||
-          (b.kind === "tool_card" && b.status === "running") ||
-          (b.kind === "subagent" && b.status === "running") ||
-          (b.kind === "approval" && !(b as { resolved?: unknown }).resolved) ||
-          (b.kind === "question" && !(b as { resolved?: unknown }).resolved)
-        ) {
-          firstDynamic = i;
-          break;
-        }
-      }
-    }
-
-    if (firstDynamic >= 0) return firstDynamic;
-    // Idle: return blocks.length so the monotonic guard can track it.
-    // This prevents staticItems from shrinking when the next turn starts.
-    // -1 is reserved for "no turn exists" (no user block at all).
-    if (!running) return blocks.length;
-    if (turnStart >= 0) return turnStart;
-    return -1;
-  }, [blocks, running]);
-
-  // Monotonic guard: prevents splitIdx from oscillating during a single run.
-  // Reset on agent idle so the next turn can start fresh (splitIdx jumps to
-  // blocks.length, guard records it; next turn's rawSplitIdx = turnStart ≤
-  // blocks.length, so guard holds splitIdx at blocks.length, preventing
-  // staticItems from shrinking).
-  const maxSplitRef = useRef(-1);
-  if (!running) {
-    maxSplitRef.current = -1;
-  }
-  const splitIdx = rawSplitIdx >= 0 ? Math.max(rawSplitIdx, maxSplitRef.current) : rawSplitIdx;
-  maxSplitRef.current = splitIdx;
-
-  const completedBlocks = useMemo(
-    () => splitIdx >= 0 ? blocks.slice(0, splitIdx) : blocks,
-    [blocks, splitIdx]
-  );
-  const activeBlocks = useMemo(
-    () => splitIdx >= 0 ? blocks.slice(splitIdx) : [],
-    [blocks, splitIdx]
-  );
+  const staticBlocks = settledTurns.flatMap(t => t.blocks);
+  const activeBlocks = activeTurn ? activeTurn.blocks : [];
 
   // Arrow key navigation for the dynamic (active) section only
   const [focusedActiveIdx, setFocusedActiveIdx] = useState<number | null>(null);
@@ -310,10 +242,8 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, onTo
     }
   });
 
-  // ── <Static> items: [Header sentinel, ...completedBlocks] ──
-  // index 0 → Header (rendered only on first pass; <Static> skips it after)
-  // index 1+ → completed blocks (appended to terminal scrollback one by one)
-  const staticItems = useMemo(() => [HEADER_SENTINEL, ...completedBlocks], [completedBlocks]);
+  // ── <Static> items: [Header sentinel, ...staticBlocks] ──
+  const staticItems = useMemo(() => [HEADER_SENTINEL, ...staticBlocks], [staticBlocks]);
 
   return (
     <Box flexDirection="column">
@@ -324,14 +254,14 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, onTo
             return <React.Fragment key="header">{header}</React.Fragment>;
           }
           const blockIdx = index - 1;
-          const block = completedBlocks[blockIdx];
+          const block = staticBlocks[blockIdx];
           if (!block) return null;
           return renderBlock(
             block,
             false,
             thinkingVisible,
             blockIdx,
-            blockIdx > 0 ? completedBlocks[blockIdx - 1] : undefined,
+            blockIdx > 0 ? staticBlocks[blockIdx - 1] : undefined,
           );
         }}
       </Static>
@@ -339,7 +269,10 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, onTo
       {/* Active blocks stay in the interactive tree for live updates */}
       {activeBlocks.map((block, i) => {
         const isFocused = i === focusedActiveIdx;
-        const prevBlock = i > 0 ? activeBlocks[i - 1] : (completedBlocks.length > 0 ? completedBlocks[completedBlocks.length - 1] : undefined);
+        const lastSettledBlock = staticBlocks.at(-1);
+        const prevBlock = i > 0
+          ? activeBlocks[i - 1]
+          : lastSettledBlock;
         return renderBlock(block, isFocused, thinkingVisible, 0, prevBlock);
       })}
     </Box>
