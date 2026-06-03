@@ -3,7 +3,7 @@
 日期：2026-06-02
 状态：understanding（部分解决）
 来源：用户反馈 + 源码分析
-**更新 2026-06-02：移除 `<Static>` 改用 React.memo block 组件，消除了 scrollback/viewport 分割，空白区域问题已修复**
+**更新 2026-06-03：恢复 `<Static>` 方案，用 `<Box height={0}>` 消除布局空白。React.memo 方案在 Windows 上因 Ink renderNodeToOutput 全树遍历导致输入卡顿，Static 将已完成消息移出 React 树是唯一有效优化。**
 
 ## 问题描述
 
@@ -51,7 +51,7 @@ Ink.onRender()
 - `node_modules/ink/build/log-update.js` — `render()` 和 `render.clear()`
 - `node_modules/ink/build/cursor-helpers.js` — `buildReturnToBottomPrefix()` 和 `eraseLines`
 - `src/app/tui/index.tsx` — Ink render 配置
-- `src/app/tui/OutputArea.tsx` — `<Static>` 和动态内容的分割策略
+- `src/app/tui/OutputArea.tsx` — Static/dynamic 分割渲染（`<Static>` + `<Box height={0}>`）
 
 ## 已尝试的方案
 

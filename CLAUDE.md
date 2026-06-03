@@ -44,7 +44,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 **`src/app/` — 应用层**：TUI 前端、CLI 入口
 - `tui/index.tsx` — TUI 入口、agent 生命周期、Kitty 键盘协议
 - `tui/App.tsx` — reducer（47 种 Action）、初始状态、App 布局
-- `tui/OutputArea.tsx` — block 渲染（text/reason/tool_card/file_change/approval/question）
+- `tui/OutputArea.tsx` — Static/dynamic 分割渲染：已完成消息通过 `<Static>` 写入终端 scrollback 后移出 React 树，活跃消息在 dynamic 树实时更新
 - `tui/components/` — InputLine、MarkdownBlock、ApprovalBlock、InputBlock、HelpPanel、ModelSelector、SessionSelector、StartupScreen、CtrlSafeTextInput
 - `tui/hooks/` — useGlobalKeys、useLeaderKeys、useSlashCommand、useSlashSuggestions、useFileSearch、useSessionList
 - `cli/index.ts` — CLI 参数解析和入口行为
@@ -91,7 +91,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 
 ## TUI 验证
 
-- Ink 渲染管线（React.memo block 组件、Yoga 布局、debug 模式）在
+- Ink 渲染管线（Static/dynamic 分割、Yoga 布局、debug 模式）在
   `ink-testing-library` 和真实终端中行为不同。TUI 布局/交互类改动仅靠
   单元/reducer/layout 测试无法验证正确性
 - `src/app/tui/` 下的布局改动和 React `key` 变动有级联影响——改 OutputArea

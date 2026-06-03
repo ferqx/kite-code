@@ -73,7 +73,7 @@ await tui.waitForIdle(15000);           // 等待 Agent 完成
 
 **`sendMessage` 逐字输入机制**：`CtrlSafeTextInput` 通过 `useInput` 逐字符处理输入事件，不支持一次性写入整串文本。`sendMessage` 内部实现为：warm-up tick(10ms) → 逐字 `stdin.write(ch)` + tick(2ms) → tick(80ms) → `stdin.write("\r")` + tick(150ms)。对于 "hello"（5 字符），总耗时约 10 + 5×2 + 80 + 150 ≈ 250ms。测试中如需要 Ctrl+C 中断 mock 模型，响应延迟必须大于此值。
 
-**Agent 状态检测**：Header 猫脸（`( ^ ^ )` / `( = = )`）渲染在 `<Static>` 中，**不会随状态变化更新**。状态检测改用 StatusBar 的 spinner 字符（`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`）：
+**Agent 状态检测**：Header 渲染在 `<Static>` 的 sentinel 中（仅首次输出），**不会随状态变化更新**。状态检测改用 StatusBar 的 spinner 字符（`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`）：
 - `isRunning()` — `hasRunningSpinner(getOutput())`：检查 spinner 字符是否存在
 - `waitForRunning()` — 轮询 `hasRunningSpinner(getOutput())`
 - `waitForIdle()` — 轮询 `!hasRunningSpinner(out) && !out.includes("Thinking")`

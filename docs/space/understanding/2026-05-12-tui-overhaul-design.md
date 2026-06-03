@@ -2,13 +2,13 @@
 
 > Status: draft
 > Created: 2026-05-12
-> Last code refactor: 2026-06-02
+> Last code refactor: 2026-06-03
 
-**2026-06-02 渲染管线重构**：
-- 移除 Ink `<Static>` 组件，改为 React.memo block 组件 + 引用稳定 reducer
-- OutputArea 不再分割 completed/active blocks，全部 block 在动态树中渲染
-- App 布局去掉 flexGrow wrapper，Footer 紧跟内容区，底部 spacer 保证高度稳定
-- 详见 `docs/superpowers/plans/2025-06-02-remove-static-perf.md`
+**2026-06-03 渲染管线重构（恢复 Static）**：
+- 恢复 Ink `<Static>` 组件：已完成消息渲染一次写入终端 scrollback 后移出 React 树
+- `<Static>` 容器用 `<Box height={0} overflow="hidden">` 包裹，消除布局空白
+- App 布局移除底部 spacer，Footer 紧跟最后一条消息
+- 原因：React.memo 方案在 Windows 上因 Ink `renderNodeToOutput` 全树遍历导致输入卡顿
 
 **2026-05-30 架构重构同步**：
 - Reducer 已从单一 `eventReducer`（42 Actions）拆分为 6 子 reducer：`handleEvent` / `ui` / `session` / `checkpoint` / `skill` / `agent`，位于 `src/app/tui/reducers/`
@@ -114,16 +114,18 @@
 - 行内代码高亮
 - 链接渲染
 
-### 渲染策略（2026-06-02 更新）
+### 渲染策略（2026-06-03 更新）
 
-- OutputArea 始终渲染全部 block，不做视口剔除
-- 性能优化：reducer 通过 `replaceBlock` 保持未变化 block 引用稳定，OutputArea 中每个 block 类型用 `React.memo` 包裹，未变化 block 跳过 re-render
+- OutputArea 使用 `<Static>` / dynamic 分割渲染
+- 已完成的消息通过 `<Static>` 渲染一次写入终端 scrollback，从 React 树移除
+- 活跃消息（streaming/running/interrupt）保留在 dynamic 树实时更新
+- `<Static>` 容器用 `<Box height={0} overflow="hidden">` 包裹，避免布局空白
 - 内容超出终端可视区域后由终端原生 scrollback 处理滚动
 - ↑ ↓ 键仅移动 focusedIndex（控制 ❯ 视觉指示器），不改变可见范围
-- Enter 键用于展开/折叠 reason block
+- Enter 键用于展开/折叠 reason/tool/subagent block
 - 不做视口居中计算，不做 autoScrollRef 切换
 
-> **历史**：2026-05-16 首次移除视口剔除。2026-05-28 引入 Ink `<Static>` 优化性能（将已完成 block 移出交互渲染树）。2026-06-02 移除 `<Static>`（因其造成 scrollback/viewport 分割导致大量空白区域），改用 React.memo + 引用稳定 reducer 实现等效性能。
+> **历史**：2026-05-16 首次移除视口剔除。2026-05-28 引入 Ink `<Static>`。2026-06-02 移除 `<Static>` 改用 React.memo（因空白区域问题）。2026-06-03 恢复 `<Static>`（因 Windows 上 React.memo 方案输入卡顿），用 `<Box height={0}>` 解决空白问题。
 
 详见 `docs/space/execution/active/tui-no-viewport-culling.md`
 

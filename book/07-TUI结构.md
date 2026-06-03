@@ -97,25 +97,24 @@ eventReducer (入口)
 
 ## 7.4 渲染管线
 
-### React.memo Block 渲染
+### Static/dynamic 分割渲染
 
 ```
 blocks 数组
   │
-  └─ 全部 block 在 OutputArea 中按时间顺序渲染
-      ├─ Header — 固定在最上方
-      ├─ 每个 block 类型用 React.memo 包裹
-      │   └─ reducer 通过 replaceBlock 保持未变化 block 引用稳定
-      │       └─ memo 浅比较发现引用未变 → 跳过 re-render
-      ├─ text (streaming=true) — 引用变化 → re-render，逐 token 追加
-      ├─ tool_card (status=running) — 引用变化 → re-render
-      ├─ subagent (status=running) — 引用变化 → re-render
-      └─ approval/question — resolved 时引用变化一次
+  ├─ 已完成的消息 → <Static> → 渲染一次写入终端 scrollback → 从 React 树移除
+  │   └─ <Box height={0} overflow="hidden"> 包裹，避免布局占位空白
+  │
+  └─ 活跃消息 → dynamic 树 → 实时更新
+      ├─ text (streaming=true) — 逐 token 追加
+      ├─ tool_card (status=running) — spinner + elapsed
+      ├─ subagent (status=running) — elapsed + step 更新
+      └─ approval/question (!resolved) — 交互组件
 ```
 
-**性能原理**：reducer 中仅修改目标 block（`replaceBlock` 替换数组中单个元素），其余 block 保持原引用。`React.memo` 的浅比较在引用不变时跳过渲染，效果等价于 `<Static>` 的"渲染一次"行为。
+**性能原理**：`<Static>` 将已完成消息从 React 树中移除，Ink 的 `renderNodeToOutput` 每帧只遍历 dynamic 树（Header + Footer + 少量活跃 block），不管历史消息有多少。这是 Windows ConPTY 上唯一有效的性能优化——React.memo 只跳过组件函数，但 Ink 的 layout + output 管线仍遍历全部节点。
 
-> **历史**：曾使用 Ink `<Static>` 将已完成 block 移出交互渲染树（2026-05-28），因造成 scrollback/viewport 分割导致内容与 Footer 之间出现大量空白，2026-06-02 改为当前方案。
+> **历史**：2026-05-28 引入 `<Static>`。2026-06-02 移除改用 React.memo（因空白区域问题）。2026-06-03 恢复 `<Static>`（Windows 输入卡顿），用 `<Box height={0}>` 解决空白。
 
 ### Block 类型
 
