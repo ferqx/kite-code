@@ -362,7 +362,7 @@ export class SessionManager {
         pendingInterrupt: rt.pendingInterrupt,
         plan: null,
         status: initialStatusSnapshot(),
-        blocks: [],
+        turns: [],
       });
     }
     return result;
@@ -450,8 +450,6 @@ function initialStatusSnapshot(): StatusState {
     authorization: "default",
     workspaceAccess: "write",
     cacheHitRate: 0,
-    cacheHitTokens: 0,
-    cacheMissTokens: 0,
     totalTokens: 0,
     currentNode: null,
     modelProvider: "",

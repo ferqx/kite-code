@@ -1,7 +1,7 @@
 // ── Skills 管理 ──
 
 import type { Action } from "./actions";
-import type { TuiState } from "../types";
+import type { TuiState, OutputBlock } from "../types";
 
 export function skillReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
@@ -14,27 +14,21 @@ export function skillReducer(state: TuiState, action: Action): TuiState | null {
     case "DEACTIVATE_SKILL":
       return { ...state, pendingSkills: [] };
     case "LIST_SKILLS": {
-      if (state.skillManifests.length === 0) {
-        return {
-          ...state,
-          blocks: [...state.blocks, {
-            id: Date.now(),
-            kind: "text" as const,
-            content: "No skills available.",
-          }],
-        };
+      const block: OutputBlock = state.skillManifests.length === 0
+        ? { id: state.nextBlockId, kind: "text", content: "No skills available." }
+        : {
+            id: state.nextBlockId, kind: "text",
+            content: "## Available Skills\n\n" + state.skillManifests.map(
+              (s) => `- **${s.name}**: ${s.description} (${s.source}/${s.origin})`,
+            ).join("\n"),
+          };
+      const last = state.turns.at(-1);
+      if (last) {
+        const turns = state.turns.slice();
+        turns[turns.length - 1] = { blocks: [...last.blocks, block] };
+        return { ...state, turns, nextBlockId: block.id + 1 };
       }
-      const lines = state.skillManifests.map(
-        (s) => `- **${s.name}**: ${s.description} (${s.source}/${s.origin})`,
-      );
-      return {
-        ...state,
-        blocks: [...state.blocks, {
-          id: Date.now(),
-          kind: "text" as const,
-          content: "## Available Skills\n\n" + lines.join("\n"),
-        }],
-      };
+      return { ...state, turns: [{ blocks: [block] }], nextBlockId: block.id + 1 };
     }
     default:
       return null;
