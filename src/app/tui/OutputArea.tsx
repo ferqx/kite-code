@@ -195,23 +195,27 @@ const HEADER_SENTINEL = { __header: true } as const;
 const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, thinkingVisible, running, overlayActive, header }: OutputAreaProps) {
   // ── Split: completed blocks → <Static>, current turn → dynamic tree ──
   //
-  // Static renders each item ONCE to the terminal scrollback and never
-  // re-renders it — setState calls from spinners/timers are silently dropped,
-  // content mutations are invisible. Therefore any block that needs live
-  // updates MUST stay in the dynamic tree.
+  // Ink's <Static> renders each item once to terminal scrollback and tracks
+  // rendered items by array length (useState counter). This means:
+  //   - staticItems.length must NEVER decrease between renders
+  //   - a shrink-then-grow causes already-rendered items to be re-rendered
+  //     to scrollback, producing duplicate messages
   //
-  // Blocks needing dynamic (all must be in the current turn):
+  // The monotonic guard (maxSplitRef) prevents this within a single run.
+  // On idle, we set rawSplitIdx = blocks.length (not -1) so the guard can
+  // track the idle position. When the next turn starts, the guard holds
+  // splitIdx at blocks.length, preventing staticItems from shrinking.
+  //
+  // splitIdx semantics:
+  //   -1   → no turn exists yet (no user block); all blocks in Static
+  //   0..N → split position; blocks before it in Static, after in dynamic
+  //
+  // Blocks needing dynamic (must be in the current turn):
   //   - text (streaming=true)    — growing content, "❯" cursor
   //   - tool_card (running)      — spinner animation + elapsed timer
   //   - subagent (running)       — elapsed timer + step updates
   //   - approval (!resolved)     — ApprovalBlock component
   //   - question (!resolved)     — InputBlock component
-  //
-  // Split at the EARLIEST of these boundaries. The monotonic guard below
-  // ensures the split never shrinks, preventing blocks from oscillating
-  // between Static (append-only) and dynamic.
-  //
-  // When agent goes idle, the entire turn flushes to Static atomically.
   const rawSplitIdx = useMemo(() => {
     // Find turn start (last user message)
     let turnStart = -1;
@@ -238,13 +242,19 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, onTo
     }
 
     if (firstDynamic >= 0) return firstDynamic;
-    if (!running) return -1;
+    // Idle: return blocks.length so the monotonic guard can track it.
+    // This prevents staticItems from shrinking when the next turn starts.
+    // -1 is reserved for "no turn exists" (no user block at all).
+    if (!running) return blocks.length;
     if (turnStart >= 0) return turnStart;
     return -1;
   }, [blocks, running]);
 
-  // Monotonic guard: once blocks enter Static (append-only scrollback), they
-  // must never move back to dynamic. Clamp to the running maximum, reset on agent idle.
+  // Monotonic guard: prevents splitIdx from oscillating during a single run.
+  // Reset on agent idle so the next turn can start fresh (splitIdx jumps to
+  // blocks.length, guard records it; next turn's rawSplitIdx = turnStart ≤
+  // blocks.length, so guard holds splitIdx at blocks.length, preventing
+  // staticItems from shrinking).
   const maxSplitRef = useRef(-1);
   if (!running) {
     maxSplitRef.current = -1;

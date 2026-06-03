@@ -306,6 +306,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, blocks: [...state.blocks, block], compacting: false, nextBlockId: id + 1 };
     }
     case "subagent_start": {
+      // Dedup: if a subagent block with this ID already exists, skip.
+      // Prevents duplicate blocks when the protocol emits redundant events.
+      const existingIdx = state.blocks.findIndex(b => b.kind === "subagent" && b.subagentId === event.data.id);
+      if (existingIdx !== -1) return state;
       const id = state.nextBlockId;
       const block: OutputBlock = {
         id,
