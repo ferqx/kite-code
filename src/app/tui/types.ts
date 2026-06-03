@@ -17,6 +17,11 @@ export type OutputBlock =
   | { id: number; kind: "question"; question: UserInputPayload; resolved?: string }
   | { id: number; kind: "subagent"; subagentId: string; role: SubAgentRole; task: string; status: "running" | "done" | "error"; summary: string; toolCallCount: number; durationMs: number; steps: SubAgentStepRecord[]; error?: string; expanded?: boolean };
 
+/** 一次完整的「用户提问 → Agent 回复」往返 */
+export interface Turn {
+  blocks: OutputBlock[];
+}
+
 export interface FileChangeRecord {
   path: string;
   kind: "add" | "edit" | "delete";
@@ -31,7 +36,7 @@ export interface TuiState {
   activeSessionId: string | null;
 
   // ── 现有字段保留不变 ──
-  blocks: OutputBlock[];
+  turns: Turn[];
   nextBlockId: number;
   interrupt: InterruptState | null;
   toolStartTimes?: Map<string, number>;
@@ -87,5 +92,5 @@ export interface SessionSnapshot {
   pendingInterrupt: boolean;
   plan: import("@/protocol/events").AgentPlan | null;
   status: StatusState;
-  blocks: OutputBlock[];
+  turns: Turn[];
 }
