@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-06-02
+最后更新：2026-06-03
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -49,6 +49,7 @@
 | `understanding/2026-05-26-tui-claude-code-parity-design.md` | understanding | TUI Claude Code 对标设计 — 布局重构、快捷键精简、功能补全、配置、主题、实施记录。 |
 | `understanding/2026-05-30-multi-agent-design.md` | understanding | 多 Agent 架构设计 — Task Tool 模式、3 个内置角色（Explore/Code/Review）、星型拓扑、生命周期、审批策略、TUI 渲染。 |
 | `understanding/2026-06-02-ink-rendering-scroll-selection-issue.md` | understanding | Ink 渲染机制导致的滚动和文本选择问题 — 根本原因分析、已尝试方案、可能解决方向。 |
+| `understanding/2026-06-03-tui-block-turn-model-design.md` | understanding | TUI 消息列表重构 — 引入 Turn 模型替代 flat OutputBlock[]，简化 Static/Dynamic 分割逻辑。 |
 
 ## Backlog（工作待办）
 
