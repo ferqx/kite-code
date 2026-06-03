@@ -86,6 +86,7 @@ export default function ToolCardBlock({ block }: ToolCardBlockProps) {
   }
 
   // done or error
+  const isExpanded = block.expanded ?? block.status === "error";
   return (
     <Box flexDirection="column">
       <Box>
@@ -98,9 +99,9 @@ export default function ToolCardBlock({ block }: ToolCardBlockProps) {
           <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
         ) : null}
       </Box>
-      {block.status === "error" && block.summary ? (
+      {isExpanded && block.summary ? (
         <Box paddingLeft={3} flexDirection="column">
-          {renderToolSummary(block.summary, true)}
+          {renderToolSummary(block.summary, block.status === "error")}
         </Box>
       ) : null}
     </Box>

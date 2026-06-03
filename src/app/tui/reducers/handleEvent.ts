@@ -1,6 +1,6 @@
 // ── EVENT action handler — 19 event sub-types ──
 
-import type { AgentEvent } from "@/protocol/events";
+import type { AgentEvent, AgentPlanStep, PlanStatus } from "@/protocol/events";
 import type { TuiState, OutputBlock, InterruptState, FileChangeRecord } from "../types";
 
 /** Replace a single block by id — keeps references for all other blocks */
@@ -118,6 +118,22 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case "tool_call": {
       // task tool has its own subagent block — skip the redundant tool_card
       if (event.data.name === "task") return state;
+      // update_plan renders as a plan_card block, not a tool_card
+      if (event.data.name === "update_plan") {
+        const args = event.data.args;
+        const steps: AgentPlanStep[] = Array.isArray(args.steps)
+          ? (args.steps as AgentPlanStep[])
+          : [];
+        const id = state.nextBlockId;
+        const block: OutputBlock = {
+          id, kind: "plan_card",
+          name: String(args.name ?? ""),
+          description: String(args.description ?? ""),
+          planStatus: (args.status as PlanStatus) ?? "pending",
+          steps, folded: false, callId: event.data.call_id,
+        };
+        return { ...state, blocks: [...state.blocks, block], nextBlockId: id + 1 };
+      }
       const preview = getToolPreview(event.data.name, event.data.args);
       const id = state.nextBlockId;
       const block: OutputBlock = {
@@ -131,6 +147,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case "tool_done": {
       if (event.data.name === "task") return state;
+      // update_plan tool_done is a no-op — plan_card already created by tool_call
+      if (event.data.name === "update_plan") return state;
       const startedAt = state.toolStartTimes?.get(event.data.call_id);
       const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
       const nextTimes = new Map(state.toolStartTimes);
@@ -152,6 +170,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           summary: event.data.summary,
           elapsedMs,
           detail: computeToolDetail(b.name, b.args),
+          expanded: !event.data.ok,  // errors expanded, success collapsed
         });
       }
       return { ...state, blocks, toolStartTimes: nextTimes };
@@ -165,7 +184,22 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
       if (d.modelProvider) next.modelProvider = d.modelProvider;
       if (d.modelName) next.modelName = d.modelName;
-      return { ...state, status: next };
+      let blocks = state.blocks;
+      // Update the latest plan_card block when plan changes
+      if (d.plan) {
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const b = blocks[i];
+          if (b.kind === "plan_card") {
+            blocks = replaceBlock(blocks, b.id, {
+              ...b,
+              planStatus: d.plan.status,
+              steps: d.plan.steps,
+            });
+            break;
+          }
+        }
+      }
+      return { ...state, status: next, blocks };
     }
     case "model_retry": {
       const id = state.nextBlockId;
@@ -321,6 +355,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         summary: event.data.summary,
         toolCallCount: event.data.toolCallCount,
         durationMs: event.data.durationMs,
+        expanded: false,
       });
       return { ...state, blocks };
     }

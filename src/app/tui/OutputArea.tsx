@@ -5,12 +5,16 @@ import type { OutputBlock } from "./types";
 import MarkdownBlock from "./components/MarkdownBlock";
 import SubAgentBlock from "./components/SubAgentBlock";
 import ToolCardBlock from "./components/ToolCardBlock";
+import PlanCardBlock from "./components/PlanCardBlock";
 import { darkTheme } from "./theme";
 const dt = darkTheme; // for exported utility functions
 
 interface OutputAreaProps {
   blocks: OutputBlock[];
   onToggleReason: (id: number) => void;
+  onTogglePlan?: (id: number) => void;
+  onToggleToolExpand?: (id: number) => void;
+  onToggleSubagentExpand?: (id: number) => void;
   thinkingVisible: boolean;
   /** Agent 是否正在执行（控制 streaming 指示器） */
   running: boolean;
@@ -178,6 +182,14 @@ const SubAgent = React.memo(function SubAgent({ block }: { block: OutputBlock & 
   );
 });
 
+const PlanCard = React.memo(function PlanCard({ block }: { block: OutputBlock & { kind: "plan_card" } }) {
+  return (
+    <Box marginBottom={1}>
+      <PlanCardBlock block={block} />
+    </Box>
+  );
+});
+
 // ── Block render dispatcher ──
 function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: boolean, prevBlock?: OutputBlock) {
   switch (block.kind) {
@@ -192,16 +204,26 @@ function renderBlock(block: OutputBlock, isFocused: boolean, thinkingVisible: bo
     case "approval": return <Approval key={block.id} block={block} />;
     case "question": return <Question key={block.id} block={block} />;
     case "subagent": return <SubAgent key={block.id} block={block} />;
+    case "plan_card": return <PlanCard key={block.id} block={block} />;
     default: return null;
   }
 }
 
 // ── OutputArea component ──
-const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thinkingVisible, running: _running, overlayActive, header }: OutputAreaProps) {
+const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, thinkingVisible, running: _running, overlayActive, header }: OutputAreaProps) {
   // Arrow key navigation across all blocks
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   const focusedRef = useRef(focusedIdx);
   focusedRef.current = focusedIdx;
+  // Stable callback refs for useInput (Ink 7 stale closure workaround)
+  const onToggleReasonRef = useRef(onToggleReason);
+  onToggleReasonRef.current = onToggleReason;
+  const onTogglePlanRef = useRef(onTogglePlan);
+  onTogglePlanRef.current = onTogglePlan;
+  const onToggleToolRef = useRef(onToggleToolExpand);
+  onToggleToolRef.current = onToggleToolExpand;
+  const onToggleSubagentRef = useRef(onToggleSubagentExpand);
+  onToggleSubagentRef.current = onToggleSubagentExpand;
 
   useInput((_input: unknown, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
     if (overlayActive) return;
@@ -214,8 +236,15 @@ const OutputArea = React.memo(function OutputArea({ blocks, onToggleReason, thin
     }
     if (key.return && focusedRef.current !== null && focusedRef.current < blocks.length) {
       const block = blocks[focusedRef.current];
-      if (block && block.kind === "reason") {
-        onToggleReason(block.id);
+      if (!block) return;
+      if (block.kind === "reason") {
+        onToggleReasonRef.current?.(block.id);
+      } else if (block.kind === "plan_card") {
+        onTogglePlanRef.current?.(block.id);
+      } else if (block.kind === "tool_card") {
+        onToggleToolRef.current?.(block.id);
+      } else if (block.kind === "subagent") {
+        onToggleSubagentRef.current?.(block.id);
       }
     }
   });

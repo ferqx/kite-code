@@ -64,6 +64,24 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       );
       return { ...state, thinkingVisible: true, blocks };
     }
+    case "TOGGLE_PLAN": {
+      const blocks = state.blocks.map((b) =>
+        b.kind === "plan_card" && b.id === action.id ? { ...b, folded: !b.folded } : b
+      );
+      return { ...state, blocks };
+    }
+    case "TOGGLE_TOOL_EXPAND": {
+      const blocks = state.blocks.map((b) =>
+        b.kind === "tool_card" && b.id === action.id ? { ...b, expanded: !b.expanded } : b
+      );
+      return { ...state, blocks };
+    }
+    case "TOGGLE_SUBAGENT_EXPAND": {
+      const blocks = state.blocks.map((b) =>
+        b.kind === "subagent" && b.id === action.id ? { ...b, expanded: !b.expanded } : b
+      );
+      return { ...state, blocks };
+    }
     case "CLEAR_OUTPUT":
       return { ...state, blocks: [], toolStartTimes: undefined, currentRunReasonId: undefined };
     case "ESCAPE": {

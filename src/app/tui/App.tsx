@@ -105,6 +105,9 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
   const hideRewind = useCallback(() => dispatch({ type: "HIDE_REWIND" }), [dispatch]);
   const handleRevert = useCallback((checkpointId: string) => dispatch({ type: "REVERT_TO_CHECKPOINT", checkpointId }), [dispatch]);
   const handleFork = useCallback((checkpointId: string) => dispatch({ type: "FORK_FROM_CHECKPOINT", checkpointId }), [dispatch]);
+  const onTogglePlan = useCallback((id: number) => dispatch({ type: "TOGGLE_PLAN", id }), [dispatch]);
+  const onToggleToolExpand = useCallback((id: number) => dispatch({ type: "TOGGLE_TOOL_EXPAND", id }), [dispatch]);
+  const onToggleSubagentExpand = useCallback((id: number) => dispatch({ type: "TOGGLE_SUBAGENT_EXPAND", id }), [dispatch]);
   const selectSession = useCallback(
     (threadId: string) => {
       dispatch({ type: "LOAD_SESSION_PENDING", threadId });
@@ -152,6 +155,9 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
         <OutputArea
           blocks={state.blocks}
           onToggleReason={onToggleReason}
+          onTogglePlan={onTogglePlan}
+          onToggleToolExpand={onToggleToolExpand}
+          onToggleSubagentExpand={onToggleSubagentExpand}
           thinkingVisible={state.thinkingVisible}
           running={state.running}
           overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind}

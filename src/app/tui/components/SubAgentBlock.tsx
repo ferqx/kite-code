@@ -163,6 +163,44 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   }
 
   // done — 使用 MarkdownBlock 渲染摘要，保留 Markdown 格式
+  if (block.expanded && block.steps.length > 0) {
+    return (
+      <Box flexDirection="column">
+        <Box>
+          <Text color={dt.success}>▼ {icon} </Text>
+          <Text color={dt.primary}>{label}</Text>
+          <Text color={dt.muted}> · {taskSummary}</Text>
+          <Text color={dt.dim}> — {block.toolCallCount} 次工具调用，{formatDuration(block.durationMs)}</Text>
+        </Box>
+        <Box paddingLeft={3} flexDirection="column">
+          <Text color={dt.dim}>── Steps ──</Text>
+          {block.steps.map((step, i) => (
+            <Box key={i} paddingLeft={2}>
+              <Text color={step.ok ? dt.success : step.ok === false ? dt.error : dt.muted}>
+                {step.ok ? "✓" : step.ok === false ? "✗" : "·"}
+              </Text>
+              <Text color={dt.muted}> {step.toolName}</Text>
+              {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (
+                <Text color={dt.dim}> {toolArgsLabel(step.toolName, step.toolArgs)}</Text>
+              )}
+            </Box>
+          ))}
+        </Box>
+        {block.summary && (
+          <Box paddingLeft={3} flexDirection="column" marginTop={1}>
+            <Text color={dt.dim}>── Summary ──</Text>
+            <Box paddingLeft={0}>
+              <MarkdownBlock content={block.summary} color={dt.dim} />
+            </Box>
+          </Box>
+        )}
+        <Box paddingLeft={3}>
+          <Text color={dt.dim}>Enter 折叠</Text>
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column">
       <Box>
@@ -177,6 +215,11 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
             <Text color={dt.dim}>│ </Text>
           </Box>
           <MarkdownBlock content={block.summary} color={dt.dim} />
+        </Box>
+      )}
+      {block.steps.length > 0 && (
+        <Box paddingLeft={3}>
+          <Text color={dt.dim}>Enter 展开步骤详情 ({block.steps.length} 步)</Text>
         </Box>
       )}
     </Box>
