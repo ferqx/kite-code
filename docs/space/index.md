@@ -49,7 +49,7 @@
 | `understanding/2026-05-26-tui-claude-code-parity-design.md` | understanding | TUI Claude Code 对标设计 — 布局重构、快捷键精简、功能补全、配置、主题、实施记录。 |
 | `understanding/2026-05-30-multi-agent-design.md` | understanding | 多 Agent 架构设计 — Task Tool 模式、3 个内置角色（Explore/Code/Review）、星型拓扑、生命周期、审批策略、TUI 渲染。 |
 | `understanding/2026-06-02-ink-rendering-scroll-selection-issue.md` | understanding | Ink 渲染机制导致的滚动和文本选择问题 — 根本原因分析、已尝试方案、可能解决方向。 |
-| `understanding/2026-06-03-tui-block-turn-model-design.md` | understanding | TUI 消息列表重构 — 引入 Turn 模型替代 flat OutputBlock[]，简化 Static/Dynamic 分割逻辑。 |
+| `understanding/2026-06-03-tui-block-turn-model-design.md` | completed | TUI 消息列表重构 — 引入 Turn 模型替代 flat OutputBlock[]，简化 Static/Dynamic 分割逻辑。 |
 
 ## Backlog（工作待办）
 
@@ -91,6 +91,7 @@
 | `execution/completed/2026-05-17-sessions-command-implementation.md` | completed | /sessions 功能的完整实现记录 — 23 文件变更、SessionSelector 覆盖层、checkpoint 消息加载、中断恢复、智能命名、模型配置持久化。 |
 | `execution/completed/2026-06-02-remove-static-react-memo.md` | completed | 移除 Ink `<Static>`，改用 React.memo block 组件 + 引用稳定 reducer。（已被 2026-06-03 方案替代） |
 | `execution/completed/2026-06-03-restore-static-height-zero.md` | completed | 恢复 `<Static>` 渲染架构解决 Windows 输入卡顿，用 `<Box height={0}>` 消除布局空白。 |
+| `execution/completed/2026-06-04-turn-model-refactor.md` | completed | Turn 模型重构 — 引入 `Turn` 替代 flat `OutputBlock[]`，将 Static/Dynamic 分割退化为 `slice(-1)`。 |
 
 ## 参考资料
 
