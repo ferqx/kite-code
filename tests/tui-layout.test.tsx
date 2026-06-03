@@ -602,7 +602,7 @@ describe("OutputArea", () => {
   test("renders user block with chevron prefix", () => {
     const blocks: OutputBlock[] = [{ id: 1, kind: "user", content: "Hello agent" }];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toContain("❯ Hello agent");
   });
@@ -610,7 +610,7 @@ describe("OutputArea", () => {
   test("renders text block", () => {
     const blocks: OutputBlock[] = [{ id: 1, kind: "text", content: "Response text" }];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toContain("Response text");
   });
@@ -620,7 +620,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "reason", content: "Thinking about it...", folded: false },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toContain("Thinking");
   });
@@ -630,7 +630,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "reason", content: "Hidden thoughts", folded: true },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toContain("Thinking...");
   });
@@ -640,7 +640,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "reason", content: "Secret", folded: true },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible={false} />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible={false} />,
     );
     expect(lastFrame()).toContain("Thinking...");
     expect(lastFrame()).not.toContain("Secret");
@@ -651,7 +651,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "shell_execute", args: {}, status: "running", summary: "", preview: "npm test" },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     const frame = lastFrame();
     expect(frame).toContain("shell_execute");
@@ -663,7 +663,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "done", summary: "OK", preview: "foo.ts", elapsedMs: 1234, detail: "Read foo.ts" },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     const frame = lastFrame();
     // Summary hidden for success
@@ -677,7 +677,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "shell_execute", args: {}, status: "error", summary: "command not found", elapsedMs: 100 },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     const frame = lastFrame();
     expect(frame).toContain("command not found");
@@ -689,7 +689,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "edit_file", args: {}, status: "done", summary: "", detail: "+3 -2" },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     const frame = lastFrame();
     expect(frame).toContain("+3 -2");
@@ -703,7 +703,7 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     const frame = lastFrame();
     expect(frame).toContain("File Changes");
@@ -716,7 +716,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "approval", approval: fakeApproval({ command: "npm publish" }) },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toContain("Awaiting approval");
     expect(lastFrame()).toContain("npm publish");
@@ -731,7 +731,7 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toContain("Approved (full access)");
   });
@@ -745,7 +745,7 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toContain("Denied");
   });
@@ -755,7 +755,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "question", question: fakeQuestion({ question: "Continue?" }) },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toContain("Question");
   });
@@ -769,14 +769,14 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={blocks} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toContain("Yes please");
   });
 
   test("renders empty when no blocks", () => {
     const { lastFrame } = render(
-      <OutputArea running={false} blocks={[]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[]} onToggleReason={noop} thinkingVisible />,
     );
     expect(lastFrame()).toBe("");
   });
@@ -789,7 +789,7 @@ describe("App", () => {
     return {
       sessions: [],
       activeSessionId: null,
-      blocks: [],
+      turns: [],
       nextBlockId: 1,
       interrupt: null,
       status: fakeStatus(),
@@ -875,7 +875,7 @@ describe("App", () => {
   test("shows ApprovalBlock when interrupt is approval", () => {
     const approval = fakeApproval();
     const state = fakeState({
-      blocks: [{ id: 1, kind: "approval", approval }],
+      turns: [{ blocks: [{ id: 1, kind: "approval", approval }] }],
       interrupt: { kind: "approval", blockId: 1 },
     });
     const { lastFrame } = render(
@@ -892,7 +892,7 @@ describe("App", () => {
   test("shows InputBlock when interrupt is question", () => {
     const question = fakeQuestion();
     const state = fakeState({
-      blocks: [{ id: 1, kind: "question", question }],
+      turns: [{ blocks: [{ id: 1, kind: "question", question }] }],
       interrupt: { kind: "input", blockId: 1 },
     });
     const { lastFrame } = render(
@@ -909,9 +909,9 @@ describe("App", () => {
   test("does not show ApprovalBlock when resolved", () => {
     const approval = fakeApproval();
     const state = fakeState({
-      blocks: [
+      turns: [{ blocks: [
         { id: 1, kind: "approval", approval, resolved: { action: "approve", grant: "full_access" } },
-      ],
+      ] }],
       interrupt: { kind: "approval", blockId: 1 },
     });
     const { lastFrame } = render(

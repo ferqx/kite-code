@@ -7,6 +7,7 @@ import type { ToolApprovalPayload, UserInputPayload } from "../src/protocol/even
 
 function fresh(): TuiState { return createInitialState(); }
 function dispatch(s: TuiState, a: Action): TuiState { return eventReducer(s, a); }
+function flatBlocks(s: TuiState) { return s.turns.flatMap(t => t.blocks); }
 
 function textEvt(text: string): Action {
   return { type: "EVENT", event: { type: "text", data: { text } } };
@@ -31,16 +32,16 @@ describe("eventReducer (blocks model)", () => {
   describe("EVENT.text", () => {
     test("appends text block", () => {
       const s = dispatch(fresh(), textEvt("hello"));
-      expect(s.blocks).toHaveLength(1);
-      expect(s.blocks[0].kind).toBe("text");
-      expect((s.blocks[0] as any).content).toBe("hello");
+      expect(flatBlocks(s)).toHaveLength(1);
+      expect(flatBlocks(s)[0].kind).toBe("text");
+      expect((flatBlocks(s)[0] as any).content).toBe("hello");
     });
     test("assigns unique incrementing ids to blocks", () => {
       let s = fresh();
       s = dispatch(s, textEvt("a"));
       s = dispatch(s, textEvt("b"));
       s = dispatch(s, textEvt("c"));
-      const ids = s.blocks.map((b) => b.id);
+      const ids = flatBlocks(s).map((b) => b.id);
       expect(new Set(ids).size).toBe(3);
       expect(ids[0]).toBeLessThan(ids[1]);
       expect(ids[1]).toBeLessThan(ids[2]);
@@ -50,8 +51,8 @@ describe("eventReducer (blocks model)", () => {
   describe("EVENT.reason", () => {
     test("appends reason block with folded=true", () => {
       const s = dispatch(fresh(), reasonEvt("thinking..."));
-      expect(s.blocks[0].kind).toBe("reason");
-      const r = s.blocks[0] as Extract<OutputBlock, { kind: "reason" }>;
+      expect(flatBlocks(s)[0].kind).toBe("reason");
+      const r = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "reason" }>;
       expect(r.folded).toBe(true);
     });
   });
@@ -59,7 +60,7 @@ describe("eventReducer (blocks model)", () => {
   describe("EVENT.tool_call / tool_done", () => {
     test("appends tool_card block with running status", () => {
       const s = dispatch(fresh(), tcEvt("c1", "read_file", { path: "a.txt" }));
-      const t = s.blocks[0] as Extract<OutputBlock, { kind: "tool_card" }>;
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "tool_card" }>;
       expect(t.kind).toBe("tool_card");
       expect(t.callId).toBe("c1");
       expect(t.status).toBe("running");
@@ -68,7 +69,7 @@ describe("eventReducer (blocks model)", () => {
       let s = fresh();
       s = dispatch(s, tcEvt("c1", "read_file"));
       s = dispatch(s, tdEvt("c1", "read_file", true, "150 lines"));
-      const t = s.blocks[0] as Extract<OutputBlock, { kind: "tool_card" }>;
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "tool_card" }>;
       expect(t.status).toBe("done");
       expect(t.summary).toBe("150 lines");
       expect(t.elapsedMs).toBeNumber();
@@ -77,7 +78,7 @@ describe("eventReducer (blocks model)", () => {
       let s = fresh();
       s = dispatch(s, tcEvt("c1", "shell_execute"));
       s = dispatch(s, tdEvt("c1", "shell_execute", false, "exit 1"));
-      const t = s.blocks[0] as Extract<OutputBlock, { kind: "tool_card" }>;
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "tool_card" }>;
       expect(t.status).toBe("error");
     });
     test("tool_done only updates matching callId", () => {
@@ -85,8 +86,8 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, tcEvt("c1", "a"));
       s = dispatch(s, tcEvt("c2", "b"));
       s = dispatch(s, tdEvt("c1", "a", true, "ok"));
-      const t1 = s.blocks[0] as Extract<OutputBlock, { kind: "tool_card" }>;
-      const t2 = s.blocks[1] as Extract<OutputBlock, { kind: "tool_card" }>;
+      const t1 = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "tool_card" }>;
+      const t2 = flatBlocks(s)[1] as Extract<OutputBlock, { kind: "tool_card" }>;
       expect(t1.status).toBe("done");
       expect(t2.status).toBe("running");
     });
@@ -110,8 +111,8 @@ describe("eventReducer (blocks model)", () => {
   describe("EVENT.model_retry", () => {
     test("appends text block for model_retry", () => {
       const s = dispatch(fresh(), { type: "EVENT", event: { type: "model_retry", data: { attempt: 2, error: "rate limit", delayMs: 1000 } } });
-      expect(s.blocks[0].kind).toBe("text");
-      expect((s.blocks[0] as any).content).toContain("Model retry #2");
+      expect(flatBlocks(s)[0].kind).toBe("text");
+      expect((flatBlocks(s)[0] as any).content).toContain("Model retry #2");
     });
   });
 
@@ -139,12 +140,12 @@ describe("eventReducer (blocks model)", () => {
   describe("EVENT.final", () => {
     test("appends text block when non-empty", () => {
       const s = dispatch(fresh(), { type: "EVENT", event: { type: "final", data: "done" } });
-      expect(s.blocks).toHaveLength(1);
-      expect((s.blocks[0] as any).content).toBe("done");
+      expect(flatBlocks(s)).toHaveLength(1);
+      expect((flatBlocks(s)[0] as any).content).toBe("done");
     });
     test("no-ops when empty", () => {
       const s = dispatch(fresh(), { type: "EVENT", event: { type: "final", data: "" } });
-      expect(s.blocks).toHaveLength(0);
+      expect(flatBlocks(s)).toHaveLength(0);
     });
     test("deduplicates against earlier text block across interrupt boundary", () => {
       // Simulate: agent emits text + ask_user tool_call → interrupt →
@@ -160,7 +161,7 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, textEvt("我看了你的项目环境，这是 OpenPX 项目本身"));
       s = dispatch(s, { type: "EVENT", event: { type: "final", data: "我看了你的项目环境，这是 OpenPX 项目本身" } });
       // Should have only 1 text block with the duplicate content
-      const textBlocks = s.blocks.filter(b => b.kind === "text" && (b as any).content === "我看了你的项目环境，这是 OpenPX 项目本身");
+      const textBlocks = flatBlocks(s).filter(b => b.kind === "text" && (b as any).content === "我看了你的项目环境，这是 OpenPX 项目本身");
       expect(textBlocks).toHaveLength(1);
     });
     test("deduplicates final against text block separated by tool_card", () => {
@@ -173,7 +174,7 @@ describe("eventReducer (blocks model)", () => {
       // final arrives, last block is tool_card (done), not text
       s = dispatch(s, { type: "EVENT", event: { type: "final", data: "分析完成" } });
       // Should not create another text block for the same content
-      const textBlocks = s.blocks.filter(b => b.kind === "text" && (b as any).content === "分析完成");
+      const textBlocks = flatBlocks(s).filter(b => b.kind === "text" && (b as any).content === "分析完成");
       expect(textBlocks).toHaveLength(1);
     });
   });
@@ -182,15 +183,15 @@ describe("eventReducer (blocks model)", () => {
     test("appends approval block and sets interrupt", () => {
       const a = approval({ command: "rm -rf /" });
       const s = dispatch(fresh(), { type: "EVENT", event: { type: "need_approval", data: a } });
-      expect(s.blocks).toHaveLength(1);
-      expect(s.blocks[0].kind).toBe("approval");
+      expect(flatBlocks(s)).toHaveLength(1);
+      expect(flatBlocks(s)[0].kind).toBe("approval");
       expect(s.interrupt?.kind).toBe("approval");
-      expect(s.interrupt?.blockId).toBe(s.blocks[0].id);
+      expect(s.interrupt?.blockId).toBe(flatBlocks(s)[0].id);
     });
     test("appends question block and sets interrupt", () => {
       const q = question({ question: "Choose color" });
       const s = dispatch(fresh(), { type: "EVENT", event: { type: "need_input", data: q } });
-      expect(s.blocks[0].kind).toBe("question");
+      expect(flatBlocks(s)[0].kind).toBe("question");
       expect(s.interrupt?.kind).toBe("input");
     });
     test("RESOLVE_INTERRUPT marks approval as resolved and clears interrupt", () => {
@@ -199,7 +200,7 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "EVENT", event: { type: "need_approval", data: a } });
       const blockId = s.interrupt!.blockId;
       s = dispatch(s, { type: "RESOLVE_INTERRUPT", blockId, resolution: { action: "approved", grant: "approve_once" } });
-      const b = s.blocks[0] as Extract<OutputBlock, { kind: "approval" }>;
+      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "approval" }>;
       expect(b.resolved?.action).toBe("approved");
       expect(s.interrupt).toBeNull();
     });
@@ -208,7 +209,7 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "EVENT", event: { type: "need_input", data: question() } });
       const blockId = s.interrupt!.blockId;
       s = dispatch(s, { type: "RESOLVE_INTERRUPT", blockId, resolution: "my answer" });
-      const b = s.blocks[0] as Extract<OutputBlock, { kind: "question" }>;
+      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "question" }>;
       expect(b.resolved).toBe("my answer");
       expect(s.interrupt).toBeNull();
     });
@@ -217,14 +218,14 @@ describe("eventReducer (blocks model)", () => {
   describe("EVENT.error", () => {
     test("appends text block with error message", () => {
       const s = dispatch(fresh(), { type: "EVENT", event: { type: "error", data: { message: "boom", recoverable: true } } });
-      expect((s.blocks[0] as any).content).toContain("boom");
+      expect((flatBlocks(s)[0] as any).content).toContain("boom");
     });
   });
 
   describe("EVENT.file_change", () => {
     test("appends file_change block", () => {
       const s = dispatch(fresh(), { type: "EVENT", event: { type: "file_change", data: { path: "a.ts", kind: "add" } } });
-      const fc = s.blocks[0] as Extract<OutputBlock, { kind: "file_change" }>;
+      const fc = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "file_change" }>;
       expect(fc.changes).toHaveLength(1);
       expect(fc.changes[0].path).toBe("a.ts");
     });
@@ -232,8 +233,8 @@ describe("eventReducer (blocks model)", () => {
       let s = fresh();
       s = dispatch(s, { type: "EVENT", event: { type: "file_change", data: { path: "a.ts", kind: "add" } } });
       s = dispatch(s, { type: "EVENT", event: { type: "file_change", data: { path: "b.ts", kind: "edit" } } });
-      expect(s.blocks).toHaveLength(1);
-      const fc = s.blocks[0] as Extract<OutputBlock, { kind: "file_change" }>;
+      expect(flatBlocks(s)).toHaveLength(1);
+      const fc = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "file_change" }>;
       expect(fc.changes).toHaveLength(2);
     });
   });
@@ -241,7 +242,7 @@ describe("eventReducer (blocks model)", () => {
   describe("EVENT.compact_begin / compact_end", () => {
     test("compact_begin appends text block and sets compacting", () => {
       const s = dispatch(fresh(), { type: "EVENT", event: { type: "compact_begin", data: { reason: "limit" } } });
-      expect((s.blocks[0] as any).content).toContain("Compacting");
+      expect((flatBlocks(s)[0] as any).content).toContain("Compacting");
       expect(s.compacting).toBe(true);
     });
     test("compact_end sets compacting=false", () => {
@@ -268,10 +269,10 @@ describe("eventReducer (blocks model)", () => {
     test("TOGGLE_REASON toggles folded on reason block", () => {
       let s = fresh();
       s = dispatch(s, reasonEvt("think"));
-      const id = (s.blocks[0] as Extract<OutputBlock, { kind: "reason" }>).id;
-      expect((s.blocks[0] as any).folded).toBe(true);
+      const id = (flatBlocks(s)[0] as Extract<OutputBlock, { kind: "reason" }>).id;
+      expect((flatBlocks(s)[0] as any).folded).toBe(true);
       s = dispatch(s, { type: "TOGGLE_REASON", id });
-      expect((s.blocks[0] as any).folded).toBe(false);
+      expect((flatBlocks(s)[0] as any).folded).toBe(false);
     });
     test("TOGGLE_ALL_REASON toggles all reason blocks folded", () => {
       let s = fresh();
@@ -279,22 +280,22 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, textEvt("between"));
       s = dispatch(s, reasonEvt("second"));
       // Both start folded
-      expect((s.blocks[0] as any).folded).toBe(true);
-      expect((s.blocks[2] as any).folded).toBe(true);
+      expect((flatBlocks(s)[0] as any).folded).toBe(true);
+      expect((flatBlocks(s)[2] as any).folded).toBe(true);
       // Toggle: expand all
       s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
-      expect((s.blocks[0] as any).folded).toBe(false);
-      expect((s.blocks[2] as any).folded).toBe(false);
+      expect((flatBlocks(s)[0] as any).folded).toBe(false);
+      expect((flatBlocks(s)[2] as any).folded).toBe(false);
       // Toggle: collapse all
       s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
-      expect((s.blocks[0] as any).folded).toBe(true);
-      expect((s.blocks[2] as any).folded).toBe(true);
+      expect((flatBlocks(s)[0] as any).folded).toBe(true);
+      expect((flatBlocks(s)[2] as any).folded).toBe(true);
     });
     test("TOGGLE_ALL_REASON is no-op when no reason blocks", () => {
       let s = dispatch(fresh(), textEvt("hello"));
-      const prev = s.blocks;
+      const prev = flatBlocks(s);
       s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
-      expect(s.blocks).toBe(prev);
+      expect(flatBlocks(s)).toEqual(prev);
     });
     test("TOGGLE_THINKING shows content on first use, hides on second", () => {
       let s = fresh();
@@ -303,7 +304,7 @@ describe("eventReducer (blocks model)", () => {
       // First toggle should SHOW content
       s = dispatch(s, { type: "TOGGLE_THINKING" });
       expect(s.thinkingVisible).toBe(true);
-      expect((s.blocks[0] as any).folded).toBe(false);
+      expect((flatBlocks(s)[0] as any).folded).toBe(false);
       // Second toggle should HIDE content
       s = dispatch(s, { type: "TOGGLE_THINKING" });
       expect(s.thinkingVisible).toBe(false);
@@ -314,12 +315,12 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, reasonEvt("step 1"));
       s = dispatch(s, { type: "TOGGLE_THINKING" });
       expect(s.thinkingVisible).toBe(true);
-      expect((s.blocks[0] as any).folded).toBe(false);
+      expect((flatBlocks(s)[0] as any).folded).toBe(false);
     });
     test("CLEAR_OUTPUT clears blocks", () => {
       let s = dispatch(fresh(), textEvt("hello"));
       s = dispatch(s, { type: "CLEAR_OUTPUT" });
-      expect(s.blocks).toHaveLength(0);
+      expect(flatBlocks(s)).toHaveLength(0);
     });
     test("ESCAPE clears interrupt when active", () => {
       let s = fresh();
@@ -401,16 +402,16 @@ describe("eventReducer (blocks model)", () => {
     test("LIST_MODELS outputs model list as text block", () => {
       let s = fresh();
       s = dispatch(s, { type: "LIST_MODELS" });
-      expect(s.blocks).toHaveLength(1);
-      expect(s.blocks[0].kind).toBe("text");
-      expect((s.blocks[0] as any).content).toContain("Available Models");
+      expect(flatBlocks(s)).toHaveLength(1);
+      expect(flatBlocks(s)[0].kind).toBe("text");
+      expect((flatBlocks(s)[0] as any).content).toContain("Available Models");
     });
     test("SHOW_SETTING outputs current settings as text block", () => {
       let s = fresh();
       s = dispatch(s, { type: "SHOW_SETTING" });
-      expect(s.blocks).toHaveLength(1);
-      expect(s.blocks[0].kind).toBe("text");
-      const c = (s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content;
+      expect(flatBlocks(s)).toHaveLength(1);
+      expect(flatBlocks(s)[0].kind).toBe("text");
+      const c = (flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content;
       expect(c).toContain("Current Settings");
       expect(c).toContain("deepseek-v4");
       expect(c).toContain("building");
@@ -418,15 +419,15 @@ describe("eventReducer (blocks model)", () => {
     test("USER_MESSAGE appends user block", () => {
       let s = fresh();
       s = dispatch(s, { type: "USER_MESSAGE", text: "Hello, AI" });
-      expect(s.blocks).toHaveLength(1);
-      expect(s.blocks[0].kind).toBe("user");
-      expect((s.blocks[0] as any).content).toBe("Hello, AI");
+      expect(flatBlocks(s)).toHaveLength(1);
+      expect(flatBlocks(s)[0].kind).toBe("user");
+      expect((flatBlocks(s)[0] as any).content).toBe("Hello, AI");
     });
     test("NEW_SESSION clears blocks, resets state, increments sessionKey", () => {
       let s = fresh();
-      s = { ...s, blocks: [{ id: 1, kind: "text", content: "old" }], compacting: true, ctrlCPressed: true, interrupt: { kind: "approval", blockId: 1 }, showHelp: true, showModelSelector: true, exitRequested: true };
+      s = { ...s, turns: [{blocks: [{ id: 1, kind: "text", content: "old" }]}], compacting: true, ctrlCPressed: true, interrupt: { kind: "approval", blockId: 1 }, showHelp: true, showModelSelector: true, exitRequested: true };
       s = dispatch(s, { type: "NEW_SESSION", threadId: "new-session-1" });
-      expect(s.blocks).toHaveLength(0);
+      expect(flatBlocks(s)).toHaveLength(0);
       expect(s.interrupt).toBeNull();
       expect(s.compacting).toBe(false);
       expect(s.ctrlCPressed).toBe(false);
@@ -458,22 +459,22 @@ describe("eventReducer (blocks model)", () => {
     test("text blocks have streaming=true when state is running", () => {
       let s = fresh(); s = { ...s, running: true };
       s = dispatch(s, textEvt("hello"));
-      const b = s.blocks[0] as Extract<OutputBlock, { kind: "text" }>;
+      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>;
       expect(b.streaming).toBe(true);
     });
     test("SET_IDLE marks streaming blocks as not streaming", () => {
       let s = fresh(); s = { ...s, running: true };
       s = dispatch(s, textEvt("hello"));
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).streaming).toBe(true);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).streaming).toBe(true);
       s = { ...s, running: true }; // simulate mid-run
       s = dispatch(s, { type: "SET_IDLE" });
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).streaming).toBe(false);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).streaming).toBe(false);
     });
     test("SET_EXITED adds exit summary block and sets exited flag", () => {
       let s = fresh(); s = { ...s, running: true, runStartTime: Date.now() - 5000 };
       s = dispatch(s, { type: "SET_EXITED" });
       expect(s.exited).toBe(true);
-      const last = s.blocks.at(-1) as Extract<OutputBlock, { kind: "text" }>;
+      const last = flatBlocks(s).at(-1) as Extract<OutputBlock, { kind: "text" }>;
       expect(last.kind).toBe("text");
       expect(last.content).toMatch(/^── \d+s ──$/);
     });
@@ -483,7 +484,7 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "EVENT", event: { type: "file_change", data: { path: "a.ts", kind: "add" } } });
       s = dispatch(s, { type: "EVENT", event: { type: "file_change", data: { path: "b.ts", kind: "edit" } } });
       s = dispatch(s, { type: "SET_EXITED" });
-      const last = s.blocks.at(-1) as Extract<OutputBlock, { kind: "text" }>;
+      const last = flatBlocks(s).at(-1) as Extract<OutputBlock, { kind: "text" }>;
       expect(last.content).toContain("2 files");
     });
     test("SET_EXITED + SET_IDLE preserves both the exit summary and content blocks", () => {
@@ -492,10 +493,10 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "SET_EXITED" });
       s = dispatch(s, { type: "SET_IDLE" });
       // All blocks preserved, exit summary at end
-      expect(s.blocks).toHaveLength(2);
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("AI response");
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).streaming).toBe(false);
-      expect((s.blocks[1] as Extract<OutputBlock, { kind: "text" }>).content).toMatch(/^── /);
+      expect(flatBlocks(s)).toHaveLength(2);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("AI response");
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).streaming).toBe(false);
+      expect((flatBlocks(s)[1] as Extract<OutputBlock, { kind: "text" }>).content).toMatch(/^── /);
       expect(s.exited).toBe(false);
       expect(s.running).toBe(false);
     });
@@ -505,8 +506,8 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, textEvt("Hello, world"));
       s = dispatch(s, textEvt("Hello, world!"));
       // Only 1 block — each event replaced the previous streaming block
-      expect(s.blocks).toHaveLength(1);
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("Hello, world!");
+      expect(flatBlocks(s)).toHaveLength(1);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("Hello, world!");
     });
     test("streaming text appends new block when last block is not streaming text", () => {
       let s = fresh(); s = { ...s, running: true };
@@ -516,10 +517,10 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, tcEvt("c1", "read_file"));
       // Next text should be a new block (last is tool_card, not streaming text)
       s = dispatch(s, textEvt("After tool"));
-      expect(s.blocks).toHaveLength(3);
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("Hello");
-      expect(s.blocks[1].kind).toBe("tool_card");
-      expect((s.blocks[2] as Extract<OutputBlock, { kind: "text" }>).content).toBe("After tool");
+      expect(flatBlocks(s)).toHaveLength(3);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("Hello");
+      expect(flatBlocks(s)[1].kind).toBe("tool_card");
+      expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: "text" }>).content).toBe("After tool");
     });
     test("SET_EXITED then SET_IDLE clears exited flag", () => {
       let s = fresh(); s = { ...s, running: true };
@@ -539,9 +540,9 @@ describe("eventReducer (blocks model)", () => {
     test("blocks array is not mutated", () => {
       let s = fresh();
       s = dispatch(s, textEvt("a"));
-      const arr1 = s.blocks;
+      const arr1 = flatBlocks(s);
       s = dispatch(s, textEvt("b"));
-      expect(s.blocks).not.toBe(arr1);
+      expect(flatBlocks(s)).not.toBe(arr1);
       expect(arr1).toHaveLength(1);
     });
   });
@@ -549,7 +550,7 @@ describe("eventReducer (blocks model)", () => {
   describe("createInitialState", () => {
     test("returns fresh state with empty blocks and no interrupt", () => {
       const s = createInitialState();
-      expect(s.blocks).toEqual([]);
+      expect(flatBlocks(s)).toEqual([]);
       expect(s.interrupt).toBeNull();
       expect(s.status.modelName).toBe("deepseek-v4");
       expect(s.thinkingVisible).toBe(true);
@@ -565,7 +566,7 @@ describe("eventReducer (blocks model)", () => {
       let s = fresh();
       // Create some blocks first to advance nextBlockId
       s = dispatch(s, textEvt("pre-load block"));
-      expect(s.blocks.at(-1)!.id).toBe(1);
+      expect(flatBlocks(s).at(-1)!.id).toBe(1);
       expect(s.nextBlockId).toBe(2);
 
       s = dispatch(s, {
@@ -575,11 +576,11 @@ describe("eventReducer (blocks model)", () => {
       // nextBlockId should NOT reset after LOAD_SESSION
       expect(s.nextBlockId).toBe(2);
       // Loaded blocks have their original IDs
-      expect(s.blocks.map(b => b.id)).toEqual([5, 10]);
+      expect(flatBlocks(s).map(b => b.id)).toEqual([5, 10]);
       // New block gets the monotonically increasing nextBlockId
       s = dispatch(s, textEvt("new block after load"));
       expect(s.nextBlockId).toBe(3);
-      expect(s.blocks.at(-1)!.id).toBe(2);
+      expect(flatBlocks(s).at(-1)!.id).toBe(2);
     });
 
     test("preserves interrupt when loading approval block", () => {
@@ -592,17 +593,16 @@ describe("eventReducer (blocks model)", () => {
         modelProvider: "test", modelName: "deepseek-v4", thinkingLevel: null,
       });
       expect(s.interrupt).toEqual(interrupt);
-      expect(s.blocks[0].kind).toBe("approval");
+      expect(flatBlocks(s)[0].kind).toBe("approval");
     });
   });
 
   describe("LOAD_SESSION_PENDING", () => {
     test("sets loadingSession to true while keeping blocks intact", () => {
-      const s = fresh();
-      s.blocks.push({ id: 1, kind: "text", content: "existing" });
+      const s = dispatch(fresh(), textEvt("existing"));
       const next = dispatch(s, { type: "LOAD_SESSION_PENDING", threadId: "t1" });
       expect(next.loadingSession).toBe(true);
-      expect(next.blocks).toBe(s.blocks); // blocks unchanged
+      expect(flatBlocks(next)).toEqual(flatBlocks(s)); // blocks unchanged
     });
   });
 
@@ -610,14 +610,14 @@ describe("eventReducer (blocks model)", () => {
     test("when running appends compaction text block", () => {
       let s = fresh(); s = { ...s, running: true };
       s = dispatch(s, { type: "COMPACT_CONTEXT" });
-      expect(s.blocks).toHaveLength(1);
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Manual compaction requested");
+      expect(flatBlocks(s)).toHaveLength(1);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Manual compaction requested");
     });
     test("when not running is a no-op", () => {
       const s = fresh();
       const next = dispatch(s, { type: "COMPACT_CONTEXT" });
       expect(next).toBe(s);
-      expect(next.blocks).toHaveLength(0);
+      expect(flatBlocks(next)).toHaveLength(0);
     });
   });
 
@@ -684,9 +684,9 @@ describe("eventReducer (blocks model)", () => {
   describe("INJECT_MCP_PROMPT", () => {
     test("appends user block with formatted prompt string", () => {
       const s = dispatch(fresh(), { type: "INJECT_MCP_PROMPT", server: "github", promptName: "create-issue" });
-      expect(s.blocks).toHaveLength(1);
-      expect(s.blocks[0].kind).toBe("user");
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "user" }>).content).toBe("/mcp__github__create-issue");
+      expect(flatBlocks(s)).toHaveLength(1);
+      expect(flatBlocks(s)[0].kind).toBe("user");
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "user" }>).content).toBe("/mcp__github__create-issue");
     });
   });
 
@@ -712,8 +712,8 @@ describe("eventReducer (blocks model)", () => {
         event: { type: "error", data: { message: "fatal error", recoverable: false } },
       });
       expect(s.sessionError).toBe(true);
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Error: fatal error");
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).isError).toBe(true);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Error: fatal error");
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).isError).toBe(true);
     });
     test("recoverable error does NOT set sessionError", () => {
       const s = dispatch(fresh(), {
@@ -721,7 +721,7 @@ describe("eventReducer (blocks model)", () => {
         event: { type: "error", data: { message: "rate limit", recoverable: true } },
       });
       expect(s.sessionError).toBe(false);
-      expect((s.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Recoverable error: rate limit");
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Recoverable error: rate limit");
     });
   });
 
@@ -762,7 +762,7 @@ describe("eventReducer (blocks model)", () => {
         ],
       };
       const next = eventReducer(state, { type: "LIST_SKILLS" });
-      const last = next.blocks[next.blocks.length - 1];
+      const last = flatBlocks(next)[flatBlocks(next).length - 1];
       expect(last.kind).toBe("text");
       if (last.kind === "text") expect(last.content).toContain("tdd");
     });
@@ -770,7 +770,7 @@ describe("eventReducer (blocks model)", () => {
     test("shows no-skills message when manifests empty", () => {
       const state = createInitialState();
       const next = eventReducer(state, { type: "LIST_SKILLS" });
-      const last = next.blocks[next.blocks.length - 1];
+      const last = flatBlocks(next)[flatBlocks(next).length - 1];
       expect(last.kind).toBe("text");
       if (last.kind === "text") expect(last.content).toContain("No skills available");
     });
@@ -800,23 +800,23 @@ describe("eventReducer (blocks model)", () => {
         ...initialState,
         activeSessionId: "t1",
         sessions: [
-          { threadId: "t1", name: "Session 1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+          { threadId: "t1", name: "Session 1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
         ],
-        blocks: [{ id: 1, kind: "text", content: "hello" }],
+        turns: [{blocks: [{ id: 1, kind: "text", content: "hello" }]}],
       };
       const next = eventReducer(s, { type: "NEW_SESSION", threadId: "t2" });
       // Old session should have its blocks saved
       expect(next.sessions).toHaveLength(2);
       const oldSnap = next.sessions.find(sp => sp.threadId === "t1")!;
-      expect(oldSnap.blocks).toHaveLength(1);
-      expect((oldSnap.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("hello");
+      expect(oldSnap.turns[0].blocks).toHaveLength(1);
+      expect((oldSnap.turns[0].blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("hello");
       expect(oldSnap.active).toBe(false);
       // New session should be active with empty blocks
       const newSnap = next.sessions.find(sp => sp.threadId === "t2")!;
       expect(newSnap.active).toBe(true);
-      expect(newSnap.blocks).toEqual([]);
+      expect(newSnap.turns).toEqual([]);
       expect(next.activeSessionId).toBe("t2");
-      expect(next.blocks).toEqual([]);
+      expect(flatBlocks(next)).toEqual([]);
     });
 
     test("SWITCH_SESSION saves current blocks and restores target", () => {
@@ -824,24 +824,24 @@ describe("eventReducer (blocks model)", () => {
         ...initialState,
         activeSessionId: "t1",
         sessions: [
-          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [{ id: 1, kind: "text", content: "A" }] },
-          { threadId: "t2", name: "S2", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [{ id: 10, kind: "text", content: "B" }] },
+          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [{blocks: [{ id: 1, kind: "text", content: "A" }]}] },
+          { threadId: "t2", name: "S2", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [{blocks: [{ id: 10, kind: "text", content: "B" }]}] },
         ],
-        blocks: [{ id: 2, kind: "text", content: "latest in t1" }],
+        turns: [{blocks: [{ id: 2, kind: "text", content: "latest in t1" }]}],
       };
       const next = eventReducer(s, { type: "SWITCH_SESSION", threadId: "t2" });
       // t1 should have latest blocks saved
       const t1 = next.sessions.find(sp => sp.threadId === "t1")!;
-      expect(t1.blocks).toHaveLength(1);
-      expect((t1.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("latest in t1");
+      expect(t1.turns[0].blocks).toHaveLength(1);
+      expect((t1.turns[0].blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("latest in t1");
       expect(t1.active).toBe(false);
       // t2 should be active and its blocks restored
       const t2 = next.sessions.find(sp => sp.threadId === "t2")!;
       expect(t2.active).toBe(true);
-      expect(t2.blocks).toHaveLength(1);
-      expect((t2.blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("B");
+      expect(t2.turns[0].blocks).toHaveLength(1);
+      expect((t2.turns[0].blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("B");
       expect(next.activeSessionId).toBe("t2");
-      expect(next.blocks).toEqual(t2.blocks);
+      expect(flatBlocks(next)).toEqual(t2.turns[0].blocks);
       expect(next.interrupt).toBeNull();
     });
 
@@ -850,18 +850,18 @@ describe("eventReducer (blocks model)", () => {
         ...initialState,
         activeSessionId: "t1",
         sessions: [
-          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
         ],
       };
       const next = eventReducer(s, { type: "SWITCH_SESSION", threadId: "missing" });
-      expect(next.blocks).toEqual([]);
+      expect(flatBlocks(next)).toEqual([]);
       expect(next.activeSessionId).toBe("missing");
     });
 
     test("SESSION_INTERRUPT_PENDING sets pending flag on session", () => {
       const sessions: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
-        { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
       ];
       const next = eventReducer(
         { ...initialState, sessions },
@@ -874,23 +874,23 @@ describe("eventReducer (blocks model)", () => {
     test("SET_SESSIONS merges: preserves existing blocks and syncs activeSessionId", () => {
       // Simulate: state has session with blocks, SET_SESSIONS comes in with empty blocks
       const existing: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 100 }, blocks: [{ id: 1, kind: "text" as const, content: "hello" }] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 100 }, turns: [{blocks: [{ id: 1, kind: "text" as const, content: "hello" }]}] },
       ];
       const incoming: SessionSnapshot[] = [
-        { threadId: "a", name: "A (renamed)", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 0 }, blocks: [] },
+        { threadId: "a", name: "A (renamed)", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 0 }, turns: [] },
       ];
       const state = { ...initialState, sessions: existing, activeSessionId: null };
       const next = eventReducer(state, { type: "SET_SESSIONS", sessions: incoming });
       // Name/running from incoming, blocks/status preserved from existing, activeSessionId synced
       expect(next.sessions[0].name).toBe("A (renamed)");
-      expect(next.sessions[0].blocks).toEqual([{ id: 1, kind: "text", content: "hello" }]);
+      expect(next.sessions[0].turns[0].blocks).toEqual([{ id: 1, kind: "text", content: "hello" }]);
       expect(next.sessions[0].status.totalTokens).toBe(100);
       expect(next.activeSessionId).toBe("a"); // synced from incoming.active
     });
 
     test("SET_SESSIONS handles new session (no existing match)", () => {
       const incoming: SessionSnapshot[] = [
-        { threadId: "new", name: "New", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "new", name: "New", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
       ];
       const next = eventReducer(initialState, { type: "SET_SESSIONS", sessions: incoming });
       expect(next.sessions[0].threadId).toBe("new");
@@ -903,13 +903,13 @@ describe("eventReducer (blocks model)", () => {
           threadId: "a", name: "A", workspace: "/tmp", active: true, running: false,
           pendingInterrupt: false, plan: null,
           status: { ...initialState.status, totalTokens: 100 },
-          blocks: [{ id: 1, kind: "text" as const, content: "session A content" }],
+          turns: [{blocks: [{ id: 1, kind: "text" as const, content: "session A content" }]}],
         },
         {
           threadId: "b", name: "B", workspace: "/tmp", active: false, running: false,
           pendingInterrupt: false, plan: null,
           status: { ...initialState.status, totalTokens: 200 },
-          blocks: [{ id: 1, kind: "text" as const, content: "session B content" }],
+          turns: [{blocks: [{ id: 1, kind: "text" as const, content: "session B content" }]}],
         },
       ];
 
@@ -917,13 +917,13 @@ describe("eventReducer (blocks model)", () => {
         ...initialState,
         sessions,
         activeSessionId: "a",
-        blocks: [{ id: 2, kind: "text" as const, content: "updated A content" }],
+        turns: [{blocks: [{ id: 2, kind: "text" as const, content: "updated A content" }]}],
       };
 
       // Simulate SWITCH_SESSION to "b"
       const newSessions = state.sessions.map(s =>
         s.threadId === state.activeSessionId
-          ? { ...s, blocks: state.blocks, status: state.status, active: false }
+          ? { ...s, turns: state.turns, status: state.status, active: false }
           : s.threadId === "b"
             ? { ...s, active: true }
             : s
@@ -934,42 +934,42 @@ describe("eventReducer (blocks model)", () => {
         ...state,
         sessions: newSessions,
         activeSessionId: "b",
-        blocks: target.blocks,
+        turns: target.turns,
         status: target.status,
         interrupt: null,
       };
 
       // Verify A's blocks were saved
       const savedA = state.sessions.find(s => s.threadId === "a")!;
-      expect(savedA.blocks).toEqual([{ id: 2, kind: "text", content: "updated A content" }] as OutputBlock[]);
+      expect(savedA.turns[0].blocks).toEqual([{ id: 2, kind: "text", content: "updated A content" }] as OutputBlock[]);
       expect(savedA.active).toBe(false);
 
       // Verify B's blocks were restored
-      expect(state.blocks).toEqual([{ id: 1, kind: "text", content: "session B content" }] as OutputBlock[]);
+      expect(flatBlocks(state)).toEqual([{ id: 1, kind: "text", content: "session B content" }] as OutputBlock[]);
       expect(state.activeSessionId).toBe("b");
       expect(state.status.totalTokens).toBe(200);
     });
 
     test("full chain: NEW_SESSION saves blocks → SET_SESSIONS preserves → SWITCH_SESSION restores", () => {
-      // Setup: session A is active with runtime blocks in state.blocks
+      // Setup: session A is active with runtime blocks in flatBlocks(state)
       let state: TuiState = {
         ...initialState,
         sessions: [
-          { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 100 }, blocks: [] },
+          { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 100 }, turns: [] },
         ],
         activeSessionId: "a",
-        blocks: [
+        turns: [{ blocks: [
           { id: 1, kind: "user" as const, content: "Hello" },
           { id: 2, kind: "text" as const, content: "Hi there!" },
-        ],
+        ] }],
       };
 
       // Step 1: NEW_SESSION — should save session A's blocks
       state = eventReducer(state, { type: "NEW_SESSION", threadId: "b" });
       expect(state.sessions.length).toBe(2);
       expect(state.sessions[0].threadId).toBe("a");
-      expect(state.sessions[0].blocks.length).toBe(2); // blocks saved
-      expect((state.sessions[0].blocks[0] as { content: string }).content).toBe("Hello");
+      expect(state.sessions[0].turns[0].blocks.length).toBe(2); // blocks saved
+      expect((state.sessions[0].turns[0].blocks[0] as { content: string }).content).toBe("Hello");
       expect(state.sessions[0].active).toBe(false);
       expect(state.sessions[1].threadId).toBe("b");
       expect(state.sessions[1].active).toBe(true);
@@ -978,32 +978,32 @@ describe("eventReducer (blocks model)", () => {
       // Step 2: SET_SESSIONS from SessionManager.getSnapshot() (blocks are always [])
       // This simulates what happens after dispatchSessionLoad calls SET_SESSIONS
       const runtimeSnapshots: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
-        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
       ];
       state = eventReducer(state, { type: "SET_SESSIONS", sessions: runtimeSnapshots });
       // Merge must preserve blocks from step 1
-      expect(state.sessions[0].blocks.length).toBe(2); // preserved!
-      expect((state.sessions[0].blocks[0] as { content: string }).content).toBe("Hello");
-      expect(state.sessions[1].blocks.length).toBe(0); // new session, no blocks
+      expect(state.sessions[0].turns[0].blocks.length).toBe(2); // preserved!
+      expect((state.sessions[0].turns[0].blocks[0] as { content: string }).content).toBe("Hello");
+      expect(state.sessions[1].turns.length).toBe(0); // new session, no turns
       expect(state.activeSessionId).toBe("b"); // synced from runtime
 
       // Step 3: Add some blocks to session B's runtime (simulating agent response)
-      state = { ...state, blocks: [
+      state = { ...state, turns: [{ blocks: [
         { id: 3, kind: "user" as const, content: "Msg in B" },
         { id: 4, kind: "text" as const, content: "Reply in B" },
-      ]};
+      ] }]};
 
       // Step 4: SWITCH_SESSION back to A — should save B's blocks and restore A's
       state = eventReducer(state, { type: "SWITCH_SESSION", threadId: "a" });
       expect(state.activeSessionId).toBe("a");
       // A's blocks restored
-      expect(state.blocks.length).toBe(2);
-      expect((state.blocks[0] as { content: string }).content).toBe("Hello");
-      expect((state.blocks[1] as { content: string }).content).toBe("Hi there!");
+      expect(flatBlocks(state).length).toBe(2);
+      expect((flatBlocks(state)[0] as { content: string }).content).toBe("Hello");
+      expect((flatBlocks(state)[1] as { content: string }).content).toBe("Hi there!");
       // B's blocks saved to snapshot
-      expect(state.sessions[1].blocks.length).toBe(2);
-      expect((state.sessions[1].blocks[0] as { content: string }).content).toBe("Msg in B");
+      expect(state.sessions[1].turns[0].blocks.length).toBe(2);
+      expect((state.sessions[1].turns[0].blocks[0] as { content: string }).content).toBe("Msg in B");
     });
 
     test("SESSION_INTERRUPT_PENDING sets flag on correct session", () => {
@@ -1011,12 +1011,12 @@ describe("eventReducer (blocks model)", () => {
         {
           threadId: "a", name: "A", workspace: "/tmp", active: true, running: false,
           pendingInterrupt: false, plan: null,
-          status: initialState.status, blocks: [],
+          status: initialState.status, turns: [],
         },
         {
           threadId: "b", name: "B", workspace: "/tmp", active: false, running: true,
           pendingInterrupt: false, plan: null,
-          status: initialState.status, blocks: [],
+          status: initialState.status, turns: [],
         },
       ];
 
@@ -1038,11 +1038,11 @@ describe("eventReducer (blocks model)", () => {
 
     test("SET_SESSIONS with a new session (not in existing) adds it alongside existing sessions", () => {
       const existing: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
       ];
       const incoming: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
-        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
       ];
       const state = { ...initialState, sessions: existing, activeSessionId: "a" };
       const next = eventReducer(state, { type: "SET_SESSIONS", sessions: incoming });
@@ -1054,10 +1054,10 @@ describe("eventReducer (blocks model)", () => {
 
     test("SET_SESSIONS when no incoming session is active preserves existing activeSessionId", () => {
       const existing: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
       ];
       const incoming: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, blocks: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
       ];
       const state = { ...initialState, sessions: existing, activeSessionId: "a" };
       const next = eventReducer(state, { type: "SET_SESSIONS", sessions: incoming });
@@ -1084,8 +1084,8 @@ describe("eventReducer (blocks model)", () => {
 
     test("subagent_start creates running subagent block", () => {
       const s = dispatch(fresh(), saStart("sub-1", "explore", "find usages"));
-      expect(s.blocks).toHaveLength(1);
-      const b = s.blocks[0];
+      expect(flatBlocks(s)).toHaveLength(1);
+      const b = flatBlocks(s)[0];
       expect(b.kind).toBe("subagent");
       if (b.kind !== "subagent") throw new Error("unexpected kind");
       expect(b.subagentId).toBe("sub-1");
@@ -1100,7 +1100,7 @@ describe("eventReducer (blocks model)", () => {
       let s = dispatch(fresh(), saStart("sub-1", "code", "fix bug"));
       s = dispatch(s, saStep("sub-1", "read_file", { path: "a.ts" }));
       s = dispatch(s, saStep("sub-1", "edit_file", { path: "a.ts" }));
-      const b = s.blocks[0];
+      const b = flatBlocks(s)[0];
       if (b.kind !== "subagent") throw new Error("unexpected kind");
       expect(b.steps).toHaveLength(2);
       expect(b.steps[0].toolName).toBe("read_file");
@@ -1112,8 +1112,8 @@ describe("eventReducer (blocks model)", () => {
       let s = dispatch(fresh(), saStart("sub-1", "code", "fix"));
       s = dispatch(s, saStart("sub-2", "review", "review"));
       s = dispatch(s, saStep("sub-1", "read_file"));
-      const b1 = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
-      const b2 = s.blocks[1] as Extract<OutputBlock, { kind: "subagent" }>;
+      const b1 = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      const b2 = flatBlocks(s)[1] as Extract<OutputBlock, { kind: "subagent" }>;
       expect(b1.steps).toHaveLength(1);
       expect(b2.steps).toHaveLength(0);
     });
@@ -1123,11 +1123,11 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, saStep("sub-1", "read_file", { path: "a.ts" }));
       s = dispatch(s, saStep("sub-1", "edit_file", { path: "a.ts" }));
       s = dispatch(s, saToolResult("sub-1", "read_file", true));
-      const b = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
       expect(b.steps[0].ok).toBeUndefined(); // not the last step
       // last step should be updated by second tool_result
       s = dispatch(s, saToolResult("sub-1", "edit_file", false));
-      const b2 = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      const b2 = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
       expect(b2.steps[0].ok).toBeUndefined(); // still not last
     });
 
@@ -1135,14 +1135,14 @@ describe("eventReducer (blocks model)", () => {
       let s = dispatch(fresh(), saStart("sub-1", "explore", "search"));
       s = dispatch(s, saStep("sub-1", "read_file"));
       s = dispatch(s, saToolResult("sub-1", "read_file", true));
-      const b = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
       expect(b.steps[0].ok).toBe(true);
     });
 
     test("subagent_done updates running block to done", () => {
       let s = dispatch(fresh(), saStart("sub-1", "review", "review PR"));
       s = dispatch(s, saDone("sub-1", "No issues found", 3, 2500));
-      const b = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
       expect(b.status).toBe("done");
       expect(b.summary).toBe("No issues found");
       expect(b.toolCallCount).toBe(3);
@@ -1152,7 +1152,7 @@ describe("eventReducer (blocks model)", () => {
     test("subagent_error updates running block to error", () => {
       let s = dispatch(fresh(), saStart("sub-1", "code", "impl"));
       s = dispatch(s, saError("sub-1", "timeout"));
-      const b = s.blocks[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
       expect(b.status).toBe("error");
       expect(b.error).toBe("timeout");
     });
@@ -1165,17 +1165,17 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, saToolResult("sub-1", "read_file", true));
       s = dispatch(s, saDone("sub-1", "found 3 files", 1, 800));
       s = dispatch(s, textEvt("done"));
-      expect(s.blocks).toHaveLength(3); // text, subagent, text
-      expect(s.blocks[0].kind).toBe("text");
-      expect(s.blocks[1].kind).toBe("subagent");
-      expect(s.blocks[2].kind).toBe("text");
+      expect(flatBlocks(s)).toHaveLength(3); // text, subagent, text
+      expect(flatBlocks(s)[0].kind).toBe("text");
+      expect(flatBlocks(s)[1].kind).toBe("subagent");
+      expect(flatBlocks(s)[2].kind).toBe("text");
     });
 
     test("subagent blocks get unique incrementing ids", () => {
       let s = fresh();
       s = dispatch(s, saStart("sub-1", "explore", "task1"));
       s = dispatch(s, saStart("sub-2", "code", "task2"));
-      expect(s.blocks[0].id).toBeLessThan(s.blocks[1].id);
+      expect(flatBlocks(s)[0].id).toBeLessThan(flatBlocks(s)[1].id);
     });
   });
 });
