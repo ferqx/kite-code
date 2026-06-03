@@ -2,21 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import type { OutputBlock } from "../types";
 import { darkTheme as dt } from "../theme";
-
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-function toolColor(status: string): string {
-  switch (status) {
-    case "done": return dt.success;
-    case "error": return dt.error;
-    default: return dt.muted;
-  }
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
+import { SPINNER, toolColor, formatElapsed } from "./render-utils";
 
 const MAX_TOOL_LINES = 12;
 

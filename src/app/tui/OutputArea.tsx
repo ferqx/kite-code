@@ -7,7 +7,10 @@ import SubAgentBlock from "./components/SubAgentBlock";
 import ToolCardBlock from "./components/ToolCardBlock";
 import PlanCardBlock from "./components/PlanCardBlock";
 import { darkTheme } from "./theme";
+import { toolColor, formatElapsed } from "./components/render-utils";
 const dt = darkTheme; // for exported utility functions
+
+export { toolColor } from "./components/render-utils";
 
 interface OutputAreaProps {
   turns: Turn[];
@@ -22,20 +25,6 @@ interface OutputAreaProps {
   overlayActive?: boolean;
   /** 渲染在 <Static> 最上方的静态头（Header 组件） */
   header?: React.ReactNode;
-}
-
-export function toolColor(status: string): string {
-  switch (status) {
-    case "done": return dt.success;
-    case "error": return dt.error;
-    case "running": return dt.warning;
-    default: return dt.muted;
-  }
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 export function changePrefix(kind: string): { prefix: string; color: string } {
