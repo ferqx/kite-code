@@ -254,9 +254,8 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
         </Box>
         );
       })()}
-      {/* Spacer: fills remaining terminal space below all content.
-          Ensures consistent viewport height for stable scroll position. */}
-      {!slashSuggestion && <Box flexGrow={1} />}
+      {/* Spacer removed: with Static rendering, content lives in terminal
+          scrollback and Footer sits right below the last message. */}
     </Box>
   );
 }
