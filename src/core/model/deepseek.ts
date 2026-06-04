@@ -109,28 +109,38 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
       request.messages &&
       Array.isArray(request.messages)
     ) {
-      // 为 messagesMapped 中的每条消息，找到对应原始消息的 reasoning_content 并注入
-      // For each mapped message, find corresponding original message's reasoning_content and inject
+      // 按内容匹配原始 AIMessage 与 API assistant 消息，注入 reasoning_content。
+      // 不使用线性索引，因为 LangChain 的 convertMessagesToCompletionsMessageParams
+      // 可能合并连续 SystemMessage，导致 mapped messages 数量与 originals 不同。
+      //
+      // Match original AIMessages to API assistant messages by content,
+      // not by linear index, because LangChain's converter may merge
+      // consecutive SystemMessages causing count mismatch.
       const originals = this._originalMessages;
-      let mappedIndex = 0;
-      for (let i = 0; i < originals.length && mappedIndex < request.messages.length; i++) {
-        const original = originals[i];
-        if (!AIMessage.isInstance(original)) {
-          mappedIndex++;
-          continue;
-        }
+      const assistantReasoning = new Map<string, string>();
+      for (const original of originals) {
+        if (!AIMessage.isInstance(original)) continue;
         const reasoning = (original.additional_kwargs as Record<string, unknown>)?.reasoning_content;
-        if (typeof reasoning === "string") {
-          const mapped = request.messages[mappedIndex];
-          if (
-            mapped &&
-            mapped.role === "assistant" &&
-            (!("reasoning_content" in mapped) || mapped.reasoning_content === undefined)
-          ) {
-            mapped.reasoning_content = reasoning;
-          }
+        if (typeof reasoning !== "string" || reasoning.length === 0) continue;
+        // 用内容前 200 字符作为匹配 key（避免序列化差异）
+        // Use first 200 chars of content as match key
+        const content = typeof original.content === "string"
+          ? original.content.slice(0, 200)
+          : JSON.stringify(original.content).slice(0, 200);
+        assistantReasoning.set(content, reasoning);
+      }
+
+      for (const mapped of request.messages) {
+        if (mapped.role !== "assistant") continue;
+        if ("reasoning_content" in mapped && mapped.reasoning_content !== undefined) continue;
+        // 尝试匹配原始消息
+        const mappedContent = typeof mapped.content === "string"
+          ? mapped.content.slice(0, 200)
+          : "";
+        const reasoning = assistantReasoning.get(mappedContent);
+        if (reasoning) {
+          mapped.reasoning_content = reasoning;
         }
-        mappedIndex++;
       }
 
       // DeepSeek all-or-nothing requirement: if ANY assistant message has reasoning_content,

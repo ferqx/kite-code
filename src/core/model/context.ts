@@ -286,6 +286,16 @@ export function compactOldToolResults(messages: BaseMessage[], keepRecent: numbe
 
   if (clearedBeforeIndex < 0) return messages;
 
+  // 检查是否已有压缩通知，避免重复追加导致 token 浪费
+  // Check for existing compaction notice to avoid accumulating duplicates
+  const hasNotice = messages.some(
+    (msg) =>
+      msg instanceof HumanMessage &&
+      typeof msg.content === "string" &&
+      msg.content.includes('source="harness.compaction"'),
+  );
+  if (hasNotice) return messages;
+
   // 追加通知，不修改历史 / Append notice, don't modify history
   return [
     ...messages,

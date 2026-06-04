@@ -26,9 +26,12 @@ export interface TaskToolDeps {
 
 /** 最大并发子 agent 数 */
 const MAX_CONCURRENT = 10;
-let activeCount = 0;
 
 export function createTaskTool(deps: TaskToolDeps) {
+  // 按 session 隔离并发计数，避免多 session 互相干扰
+  // Per-session concurrency counter to avoid cross-session interference
+  let activeCount = 0;
+
   return tool(
     async ({ subagent_type, task }) => {
       if (activeCount >= MAX_CONCURRENT) {

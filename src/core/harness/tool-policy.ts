@@ -11,6 +11,7 @@ import type {
   ThreadAuthorizationState,
 } from "@/core/types";
 import { isReadOnlyShellCommand } from "@/core/tools/definitions";
+import { parseMcpToolName } from "@/core/mcp/tool-adapter";
 import type { PendingToolRequest } from "./tool-requests";
 
 export type ToolRisk =
@@ -257,6 +258,9 @@ export function evaluateToolPolicy(input: {
     if (authorized) {
       return authorized;
     }
+
+    // 只读命令在任何 access/phase 下都允许直通
+    // Read-only commands bypass approval regardless of access/phase
     const shellDecision = classifyShellExecute(request.args.command);
     if (
       shellDecision.allowed &&
@@ -265,6 +269,19 @@ export function evaluateToolPolicy(input: {
     ) {
       return shellDecision;
     }
+
+    // 非只读命令需检查 phase/access 限制
+    // Non-read-only commands must pass phase/access restrictions
+    const phaseOrAccessDenial = denyForPlanningOrReadOnly({
+      request,
+      workspaceAccess,
+      phase,
+    });
+    if (phaseOrAccessDenial) {
+      return phaseOrAccessDenial;
+    }
+
+    return shellDecision;
   }
 
   const phaseOrAccessDenial = denyForPlanningOrReadOnly({
@@ -298,22 +315,17 @@ export function evaluateToolPolicy(input: {
     });
   }
 
-  if (request.name === "shell_execute") {
-    return classifyShellExecute(request.args.command);
-  }
-
   if ((request as PendingToolRequest).name.startsWith("mcp__")) {
-    const toolName = (request as PendingToolRequest).name;
-    // mcp__servername__toolname → servername
-    const parts = toolName.split("__");
-    const serverName = parts.length >= 2 ? parts[1] : "";
+    const fullToolName = (request as PendingToolRequest).name;
+    const parsed = parseMcpToolName(fullToolName);
+    const serverName = parsed?.serverName ?? "";
     const serverRisk = serverName ? input.mcpRiskOverride?.[serverName] : undefined;
 
     if (serverRisk === "read") {
       return allow({
         risk: "read",
         reason: `MCP server "${serverName}" risk explicitly lowered to read by config.`,
-        userVisibleSummary: `Run MCP tool: ${toolName}`,
+        userVisibleSummary: `Run MCP tool: ${fullToolName}`,
         expectedEffects: ["Calls MCP server tool (risk lowered by config)"],
       });
     }
@@ -322,7 +334,7 @@ export function evaluateToolPolicy(input: {
       return allow({
         risk: "mcp",
         reason: "full_access is enabled for this thread.",
-        userVisibleSummary: `Run MCP tool under full_access: ${toolName}`,
+        userVisibleSummary: `Run MCP tool under full_access: ${fullToolName}`,
         expectedEffects: ["Calls external MCP server tool", "May have side effects"],
         grantUsed: "full_access",
       });
@@ -331,7 +343,7 @@ export function evaluateToolPolicy(input: {
     return requireApproval({
       risk: "mcp",
       reason: "MCP tools require user approval by default.",
-      userVisibleSummary: `Run MCP tool: ${toolName}`,
+      userVisibleSummary: `Run MCP tool: ${fullToolName}`,
       expectedEffects: ["Calls external MCP server tool", "May have side effects"],
     });
   }
@@ -583,9 +595,18 @@ function isDestructiveShellCommand(command: string): boolean {
   return (
     /(?:(?:^|[;&|]\s*)|\/)sudo\b/.test(normalized) ||
     /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r|-r\s+-f|-f\s+-r|--recursive.*--force|--force.*--recursive)\b/.test(normalized) ||
-    /\bchmod\s+(?:-[^\s]*r|--recursive)\b/.test(normalized) ||
-    /\bchown\s+(?:-[^\s]*r|--recursive)\b/.test(normalized) ||
-    /(?:(?:^|[;&|]\s*)|\/)kill(?:all)?\b/.test(normalized)
+    /\brm\s+-[^\s]*f\b/.test(normalized) ||
+    /\bchmod\s+(?:-[^\s]*[rR]|--recursive)\b/.test(normalized) ||
+    /\bchown\s+(?:-[^\s]*[rR]|--recursive)\b/.test(normalized) ||
+    /(?:(?:^|[;&|]\s*)|\/)kill(?:all)?\b/.test(normalized) ||
+    /\bdd\b.*\bof=\/dev\//.test(normalized) ||
+    /\bmkfs\b/.test(normalized) ||
+    /\b(?:shutdown|reboot|halt|poweroff)\b/.test(normalized) ||
+    /\binit\s+[06]\b/.test(normalized) ||
+    /\bfdisk\b/.test(normalized) ||
+    /\bparted\b/.test(normalized) ||
+    /:\(\)\s*\{.*:.*\|.*:.*\}/.test(normalized) ||
+    />\s*\/dev\/sd/.test(normalized)
   );
 }
 

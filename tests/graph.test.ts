@@ -474,18 +474,17 @@ describe("graph local tool routing", () => {
 
   // 验证 update_plan 工具执行后返回结构化的 plan 状态（名称、状态、步骤） / update_plan returns the structured plan state with name, status, and steps after execution
   test("update_plan returns the next plan state", async () => {
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
+      request: {
         id: "call-1",
         name: "update_plan",
         args: activePlan,
         reason: "Create plan",
         protectedCommand: "update_plan",
       },
-      undefined,
-      "read-only",
-    );
+      workspaceAccess: "read-only",
+    });
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("update_plan");
@@ -498,19 +497,17 @@ describe("graph local tool routing", () => {
 
   // 验证 write 访问下 update_plan 只更新计划，不自动切换访问权限 / update_plan updates plan without switching workspace access
   test("write-access update_plan keeps workspace access unchanged", async () => {
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
+      request: {
         id: "call-1",
         name: "update_plan",
         args: activePlan,
         reason: "Create plan",
         protectedCommand: "update_plan",
       },
-      undefined,
-      "write",
-      null,
-    );
+      workspaceAccess: "write",
+    });
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("update_plan");
@@ -520,26 +517,25 @@ describe("graph local tool routing", () => {
 
   // 验证 read-only 访问下允许通过 shell_execute 执行只读 shell 命令（如 cat）并返回 action 元数据 / shell_execute inspect commands are allowed under read-only access
   test("allows shell_execute inspect commands under read-only access", async () => {
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
+      request: {
         id: "call-1",
         name: "shell_execute",
         args: { intent: "inspect", command: "cat package.json" },
         reason: "Read package",
         protectedCommand: "cat package.json",
       },
-      async (input) => ({
+      shellExecutor: async (input) => ({
         ok: true,
         command: input.command,
         exitCode: 0,
         stdout: "{}",
         stderr: "",
       }),
-      "read-only",
-      null,
-      "planning",
-    );
+      workspaceAccess: "read-only",
+      phase: "planning",
+    });
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("shell_execute");
@@ -549,20 +545,18 @@ describe("graph local tool routing", () => {
 
   // 验证 read-only 访问下拒绝包含写入重定向的 shell 命令 / Shell commands with write redirects are rejected under read-only access
   test("rejects write-like shell commands under read-only access", async () => {
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
+      request: {
         id: "call-1",
         name: "shell_execute",
         args: { command: "echo hi > hello.txt" },
         reason: "Unexpected write",
         protectedCommand: "echo hi > hello.txt",
       },
-      undefined,
-      "read-only",
-      null,
-      "planning",
-    );
+      workspaceAccess: "read-only",
+      phase: "planning",
+    });
 
     expect(result.ok).toBe(false);
     expect((result as ShellResult).stderr).toContain("read-only");
@@ -570,18 +564,17 @@ describe("graph local tool routing", () => {
 
   // 验证 read-only 访问下拒绝非只读工具（如 write_file）的调用 / Non-read tools are rejected under read-only access
   test("rejects non-read tools under read-only access", async () => {
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
+      request: {
         id: "call-1",
         name: "write_file",
         args: { path: "hello.txt", content: "hi" },
         reason: "Unexpected write",
         protectedCommand: "write_file hello.txt",
       },
-      undefined,
-      "read-only",
-    );
+      workspaceAccess: "read-only",
+    });
 
     expect(result.ok).toBe(false);
     expect((result as ShellResult).stderr).toContain("read-only");
@@ -590,16 +583,16 @@ describe("graph local tool routing", () => {
   // 验证 planning phase 是独立的执行边界，执行类工具会在 runner 兜底拒绝 / Planning phase is an execution boundary enforced by the runner
   test("rejects shell_execute under planning phase before running the executor", async () => {
     let called = false;
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
+      request: {
         id: "call-1",
         name: "shell_execute",
         args: { command: "bun test" },
         reason: "Unexpected execution",
         protectedCommand: "bun test",
       },
-      async (input) => {
+      shellExecutor: async (input) => {
         called = true;
         return {
           ok: true,
@@ -609,10 +602,9 @@ describe("graph local tool routing", () => {
           stderr: "",
         };
       },
-      "write",
-      null,
-      "planning",
-    );
+      workspaceAccess: "write",
+      phase: "planning",
+    });
 
     expect(called).toBe(false);
     expect(result.ok).toBe(false);
@@ -621,9 +613,9 @@ describe("graph local tool routing", () => {
 
   // 验证 shell_execute 用 action envelope 执行验证命令，并保留 action 元数据 / shell_execute executes verification intent commands with action metadata
   test("runs shell_execute verification commands with action metadata", async () => {
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
+      request: {
         id: "call-verify",
         name: "shell_execute",
         args: {
@@ -637,19 +629,18 @@ describe("graph local tool routing", () => {
         reason: "Verify graph behavior",
         protectedCommand: "bun test tests/graph.test.ts",
       },
-      async (input) => ({
+      shellExecutor: async (input) => ({
         ok: true,
         command: input.command,
         exitCode: 0,
         stdout: "26 pass",
         stderr: "",
       }),
-      "write",
-      null,
-      "building",
-      defaultAuthorizationState(),
-      "approve_once",
-    );
+      workspaceAccess: "write",
+      phase: "building",
+      authorization: defaultAuthorizationState(),
+      approvedGrant: "approve_once",
+    });
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("shell_execute");
@@ -663,26 +654,25 @@ describe("graph local tool routing", () => {
 
   // 验证失败工具结果会把失败原因和正确用法一并交回模型 / Failed tool results include reason and tool guidance for the model
   test("failed tool results include reason and usage guidance", async () => {
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
+      request: {
         id: "call-1",
         name: "shell_execute",
         args: { intent: "inspect", command: "rg -n Missing src" },
         reason: "Search missing text",
         protectedCommand: "rg -n Missing src",
       },
-      async (input) => ({
+      shellExecutor: async (input) => ({
         ok: false,
         command: input.command,
         exitCode: 2,
         stdout: "",
         stderr: "rg: Missing: No such file or directory",
       }),
-      "read-only",
-      null,
-      "planning",
-    );
+      workspaceAccess: "read-only",
+      phase: "planning",
+    });
 
     const failure = (
       result as ShellResult & {
@@ -699,22 +689,21 @@ describe("graph local tool routing", () => {
 
   // 验证底层 shell 抛错也会转换成工具失败结果，不阻断 ToolMessage 返回 / Shell executor throws are converted to tool failure results
   test("shell executor errors return failed tool results instead of throwing", async () => {
-    const result = await runApprovedTool(
-      "/tmp/workspace",
-      {
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
+      request: {
         id: "call-1",
         name: "shell_execute",
         args: { intent: "inspect", command: "rg -n Plan src" },
         reason: "Search code",
         protectedCommand: "rg -n Plan src",
       },
-      async () => {
+      shellExecutor: async () => {
         throw new Error("spawn failed");
       },
-      "read-only",
-      null,
-      "planning",
-    );
+      workspaceAccess: "read-only",
+      phase: "planning",
+    });
 
     const failure = (
       result as ShellResult & {
@@ -738,20 +727,19 @@ describe("graph local tool routing", () => {
       protectedCommand: "cat package.json",
     };
 
-    const result = await runApprovedTool(
-      "/tmp/workspace",
+    const result = await runApprovedTool({
+      workspace: "/tmp/workspace",
       request,
-      async (input) => ({
+      shellExecutor: async (input) => ({
         ok: true,
         command: input.command,
         exitCode: 0,
         stdout: "package",
         stderr: "",
       }),
-      "read-only",
-      null,
-      "planning",
-    );
+      workspaceAccess: "read-only",
+      phase: "planning",
+    });
 
     expect(result.ok).toBe(true);
     expect((result as ShellResult).stdout).toBe("package");

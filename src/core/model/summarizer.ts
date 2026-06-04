@@ -152,7 +152,13 @@ export function formatCompactedSummary(
 export function estimateMessagesTokens(messages: BaseMessage[]): number {
   let total = 0;
   for (const msg of messages) {
-    total += Math.ceil(textContent(msg.content).length / 3);
+    const text = textContent(msg.content);
+    // CJK 字符通常 1 字符 ≈ 1-2 token，英文约 4 字符 ≈ 1 token
+    // 分别计算以提高估算精度
+    // CJK chars ≈ 1-2 tokens each, English ≈ 1 token per 4 chars
+    const cjkChars = (text.match(/[一-鿿぀-ゟ゠-ヿ가-힯]/g) ?? []).length;
+    const nonCjkChars = text.length - cjkChars;
+    total += Math.ceil(nonCjkChars / 4 + cjkChars * 1.5);
   }
   return total;
 }

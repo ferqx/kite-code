@@ -10,8 +10,10 @@ import type {
   ThreadAuthorizationState,
 } from "@/core/types";
 import { editFile, readFile, writeFile } from "@/core/tools/file";
+import { searchCode } from "@/core/tools/search-code";
 import { shellTool, type ShellExecutor } from "@/core/tools/shell";
 import type { McpManager } from "@/core/mcp";
+import { parseMcpToolName } from "@/core/mcp/tool-adapter";
 import {
   defaultPhaseForWorkspaceAccess,
   evaluateToolPolicy,
@@ -22,24 +24,44 @@ import type { ToolExecutionResult } from "./tool-result";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import { getSkillContent } from "@/core/skills/loader";
 
+/** runApprovedTool 输入参数 / Input for runApprovedTool */
+export interface RunApprovedToolInput {
+  workspace: string;
+  request: PendingToolRequest;
+  shellExecutor?: ShellExecutor;
+  workspaceAccess?: WorkspaceAccess;
+  phase?: AgentPhase;
+  authorization?: ThreadAuthorizationState | null;
+  approvedGrant?: ShellGrantUsed;
+  threadId?: string;
+  override?: AuthorizationOverride;
+  mcpManager?: McpManager;
+  mcpRiskOverride?: Record<string, "read">;
+  skillManifests?: SkillManifest[];
+  skillOptions?: SkillScanOptions;
+  signal?: AbortSignal;
+}
+
 /** 执行经过审批的工具调用 / Execute an approved tool call */
 export async function runApprovedTool(
-  workspace: string,
-  request: PendingToolRequest,
-  shellExecutor?: ShellExecutor,
-  workspaceAccess: WorkspaceAccess = "write",
-  _existingPlan: AgentPlan | null = null,
-  phase: AgentPhase = defaultPhaseForWorkspaceAccess(workspaceAccess),
-  authorization: ThreadAuthorizationState | null = null,
-  approvedGrant: ShellGrantUsed = "none",
-  threadId = "",
-  override?: AuthorizationOverride,
-  mcpManager?: McpManager,
-  mcpRiskOverride?: Record<string, "read">,
-  skillManifests?: SkillManifest[],
-  skillOptions?: SkillScanOptions,
-  signal?: AbortSignal,
+  input: RunApprovedToolInput,
 ): Promise<ToolExecutionResult> {
+  const {
+    workspace,
+    request,
+    shellExecutor,
+    workspaceAccess = "write",
+    phase = defaultPhaseForWorkspaceAccess(workspaceAccess),
+    authorization = null,
+    approvedGrant = "none",
+    threadId = "",
+    override,
+    mcpManager,
+    mcpRiskOverride,
+    skillManifests,
+    skillOptions,
+    signal,
+  } = input;
   const policy = evaluateToolPolicy({
     request,
     workspaceAccess,
@@ -143,6 +165,21 @@ export async function runApprovedTool(
     });
   }
 
+  if (request.name === "search_code") {
+    const result = await searchCode({
+      workspace,
+      pattern: request.args.pattern ?? "",
+      path: request.args.path,
+    });
+    return withFailureGuidance(request, {
+      ok: result.ok,
+      command: `search_code ${request.args.pattern ?? ""}`,
+      exitCode: result.ok ? 0 : -1,
+      stdout: JSON.stringify(result),
+      stderr: result.error ?? "",
+    });
+  }
+
   if (request.name === "read_mcp_resource") {
     if (!mcpManager) {
       return withFailureGuidance(request, {
@@ -234,10 +271,9 @@ export async function runApprovedTool(
         stderr: "MCP manager is not available. No MCP servers are configured.",
       });
     }
-    // mcp__servername__toolname → servername, toolname
-    const parts = request.name.split("__");
-    const serverName = parts[1] ?? "";
-    const toolName = parts.slice(2).join("__");
+    const parsed = parseMcpToolName(request.name);
+    const serverName = parsed?.serverName ?? "";
+    const toolName = parsed?.toolName ?? "";
     if (!serverName || !toolName) {
       return withFailureGuidance(request, {
         ok: false,

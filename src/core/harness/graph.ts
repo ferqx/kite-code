@@ -341,23 +341,22 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
     }
 
-    const result = await runApprovedTool(
-      state.workspace,
+    const result = await runApprovedTool({
+      workspace: state.workspace,
       request,
-      input.shellExecutor,
-      state.workspaceAccess,
-      state.plan,
-      state.phase,
-      state.authorization,
-      grantUsed as import("@/protocol/events").ShellGrantUsed,
-      state.threadId,
+      shellExecutor: input.shellExecutor,
+      workspaceAccess: state.workspaceAccess,
+      phase: state.phase,
+      authorization: state.authorization,
+      approvedGrant: grantUsed as import("@/protocol/events").ShellGrantUsed,
+      threadId: state.threadId,
       override,
-      input.mcpManager,
+      mcpManager: input.mcpManager,
       mcpRiskOverride,
-      input.skills,
-      input.skillOptions,
-      input.subagentSignal,
-    );
+      skillManifests: input.skills,
+      skillOptions: input.skillOptions,
+      signal: input.subagentSignal,
+    });
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
       tool_call_id: request.id ?? "missing-tool-call-id",
@@ -454,10 +453,11 @@ function hasRetryListener(model: SupportedChatModel): model is SupportedChatMode
 
 /** 将 override 同步到 state.authorization / Sync override to state.authorization */
 /**
- * Strip leading orphaned ToolMessages whose matching AIMessage is not present.
+ * Strip all orphaned ToolMessages whose matching AIMessage is not present.
  * Prevents the DeepSeek 400 error when compaction/slicing breaks tool_call/ToolMessage pairs.
+ * Handles orphans at any position (not just leading), which occurs after slice(-8) in layer 2 recovery.
  */
-function ensureNoLeadingOrphans(messages: BaseMessage[]): BaseMessage[] {
+function ensureNoOrphanedToolMessages(messages: BaseMessage[]): BaseMessage[] {
   const hasId = new Set<string>();
   for (const msg of messages) {
     if (msg instanceof AIMessage && Array.isArray(msg.tool_calls)) {
@@ -466,17 +466,9 @@ function ensureNoLeadingOrphans(messages: BaseMessage[]): BaseMessage[] {
       }
     }
   }
-  // Strip leading ToolMessages that have no matching AIMessage present
-  let start = 0;
-  while (start < messages.length) {
-    const msg = messages[start];
-    if (msg instanceof ToolMessage && !hasId.has(msg.tool_call_id)) {
-      start++;
-    } else {
-      break;
-    }
-  }
-  return messages.slice(start);
+  return messages.filter(
+    (msg) => !(msg instanceof ToolMessage && !hasId.has(msg.tool_call_id)),
+  );
 }
 
 function authorizationForState(
@@ -551,7 +543,7 @@ export async function invokeModel({
       const summaryMsg = await generateLLMSummary(model, state.messages);
       const tail = compacted.messages.slice(-8);
       // Ensure the tail doesn't start with orphaned ToolMessages from the slice
-      const safeTail = ensureNoLeadingOrphans(tail);
+      const safeTail = ensureNoOrphanedToolMessages(tail);
       const llmMessages = [new HumanMessage(summaryMsg), ...safeTail];
       const llmRetry = rebuildMessages("agent", state, llmMessages, skills);
       response = await bindAgentTools(model, tools)
@@ -627,8 +619,17 @@ async function generateLLMSummary(
     "</conversation>",
   ].join("\n");
 
-  const summary = await model.invoke([new HumanMessage(prompt)]);
-  return `<summary>${typeof summary.content === "string" ? summary.content : JSON.stringify(summary.content)}</summary>`;
+  try {
+    const summary = await model.invoke([new HumanMessage(prompt)]);
+    return `<summary>${typeof summary.content === "string" ? summary.content : JSON.stringify(summary.content)}</summary>`;
+  } catch (error) {
+    // 摘要调用本身也可能溢出，回退到截断式摘要避免递归
+    // Summary call itself may overflow; fall back to truncation to avoid recursion
+    if (isContextOverflowError(error)) {
+      return `<summary>${conversationText.slice(-2000)}</summary>`;
+    }
+    throw error;
+  }
 }
 
 /** 检测 context overflow 错误 / Detect context overflow errors */

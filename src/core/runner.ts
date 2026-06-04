@@ -217,7 +217,7 @@ export async function* runAgent(
 
       resumeValue = null;
 
-      const result = await processStream(provider, stream, signal);
+      const result = await processStream(provider, stream, signal, input.workspace);
 
       yield* result.events;
 
@@ -289,7 +289,7 @@ export async function* revertToCheckpoint(
       streamConfig,
     );
 
-    const result = await processStream(provider, stream, signal);
+    const result = await processStream(provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
     checkpointer.close();
@@ -365,7 +365,7 @@ export async function* forkFromCheckpoint(
     };
 
     const stream = await graph.stream(initialState, streamConfig);
-    const result = await processStream(provider, stream, signal);
+    const result = await processStream(provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
     checkpointer.close();
@@ -380,6 +380,7 @@ async function processStream(
   provider: UserInputProvider,
   stream: AsyncIterable<unknown>,
   signal?: AbortSignal,
+  workspace?: string,
 ): Promise<StreamResult> {
   const { isInterrupted, INTERRUPT } = await import("@langchain/langgraph");
   const cacheStandard = createPromptCacheStandardTracker();
@@ -425,7 +426,7 @@ async function processStream(
         if (call) {
           const path = call.args.path;
           if (typeof path === "string") {
-            await produceFileChange(events, path, e.data.name);
+            await produceFileChange(events, path, e.data.name, workspace);
           }
         }
       }
@@ -767,10 +768,12 @@ export function taskMessageForInitialAccess(task: string, _workspaceAccess: Work
 
 export async function* normalizeGraphStream(
   stream: AsyncIterable<unknown>,
+  signal?: AbortSignal,
 ): AsyncGenerator<AgentEvent> {
   let currentWorkspaceAccess: WorkspaceAccess | null = null;
   const cacheStandard = createPromptCacheStandardTracker();
   for await (const chunk of stream) {
+    if (signal?.aborted) return;
     if (isInterrupted(chunk)) {
       yield { type: "interrupt", data: (chunk as Record<string | symbol, unknown>)[INTERRUPT] };
       continue;
@@ -850,7 +853,7 @@ export async function* streamCodeAgent(
       graphConfig(input.threadId),
     );
 
-    yield* normalizeGraphStream(stream);
+    yield* normalizeGraphStream(stream, signal);
     streamCompleted = true;
   } finally {
     checkpointer.close();
@@ -878,7 +881,7 @@ export async function* resumeCodeAgent(
       graphConfig(input.threadId),
     );
 
-    yield* normalizeGraphStream(stream);
+    yield* normalizeGraphStream(stream, signal);
     streamCompleted = true;
   } finally {
     checkpointer.close();
@@ -946,17 +949,22 @@ async function produceFileChange(
   events: AgentEvent[],
   path: string,
   toolName: string,
+  workspace?: string,
 ): Promise<void> {
   const kind = toolName === "write_file" ? "add" as const : "edit" as const;
   let linesAdded: number | undefined;
   let linesRemoved: number | undefined;
   let preview: string | undefined;
+  // 将相对路径解析为绝对路径（基于 workspace）
+  // Resolve relative paths to absolute (based on workspace)
+  const { resolve } = await import("node:path");
+  const absolutePath = workspace ? resolve(workspace, path) : path;
   try {
-    const s = await statAsync(path);
+    const s = await statAsync(absolutePath);
     if (s.size > 1_000_000) {
       preview = "(file too large for preview)";
     } else {
-      const content = await readFile(path, "utf-8");
+      const content = await readFile(absolutePath, "utf-8");
       const allLines = content.split("\n");
       linesAdded = allLines.length;
       preview = allLines.slice(0, 6).join("\n");

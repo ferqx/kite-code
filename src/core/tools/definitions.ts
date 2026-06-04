@@ -52,11 +52,17 @@ export interface CreateAgentToolsInput {
 /** 模块级工具缓存：按 cacheKey 隔离，防止多 session 并发时竞态覆盖 / Module-level tool cache isolated by cacheKey to prevent race conditions with concurrent sessions */
 const _toolCache = new Map<string, any[]>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- internal cache, breaks circular ReturnType<> reference
 
+/** 清除工具缓存（MCP server 重连或工具列表变化时调用）/ Clear tool cache (call on MCP reconnect or tool list change) */
+export function clearToolCache(): void {
+  _toolCache.clear();
+}
+
 /** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
 export function createAgentTools(input: CreateAgentToolsInput) {
   // 缓存：同一个 agent 迭代中参数不变时避免重建全部工具（包括 MCP 适配）
-  // Include subagentEventSink presence to distinguish main-agent tools (with task tool) from sub-agent tools (without)
-  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${!!input.mcpManager}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ""}`;
+  // Include subagentEventSink presence and MCP tool count to invalidate on tool list changes
+  const mcpToolCount = input.mcpManager?.getAllTools().length ?? 0;
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpToolCount}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ""}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
   const readFileTool = tool(

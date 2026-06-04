@@ -120,17 +120,12 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     `);
 
     // 新增 created_at 列用于排序 sessions / Add created_at column for session sorting
-    // 如果列已存在则忽略错误 / Ignore error if column already exists
-    try {
-      this.db.exec(
-        "ALTER TABLE checkpoints ADD COLUMN created_at TEXT",
-      );
-    } catch (e: unknown) {
-      if (e instanceof Error && e.message?.includes("duplicate column")) {
-        // Column already exists — ignore
-      } else {
-        throw e;
-      }
+    // 使用 PRAGMA table_info 检查列是否存在，避免依赖 SQLite 错误消息文本
+    // Use PRAGMA table_info to check column existence instead of relying on error message text
+    const columns = this.db.query("PRAGMA table_info(checkpoints)").all() as { name: string }[];
+    const hasCreatedAt = columns.some((c) => c.name === "created_at");
+    if (!hasCreatedAt) {
+      this.db.exec("ALTER TABLE checkpoints ADD COLUMN created_at TEXT");
     }
 
     // 存量行回填 created_at：迁移前的行该列为 NULL，必须填充否则 listSessions 会排除它们
@@ -297,10 +292,14 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     }
 
     const where = clauses.length > 0 ? `where ${clauses.join(" and ")}` : "";
-    const limit = options.limit ? ` limit ${Math.trunc(options.limit)}` : "";
+    const hasLimit = options.limit != null && Number.isFinite(options.limit);
+    const limitClause = hasLimit ? " limit ?" : "";
+    if (hasLimit) {
+      args.push(String(Math.trunc(options.limit!)));
+    }
     const rows = this.db
       .query<CheckpointRow, string[]>(
-        `${selectCheckpointColumns()} from checkpoints ${where} order by checkpoint_id desc${limit}`,
+        `${selectCheckpointColumns()} from checkpoints ${where} order by checkpoint_id desc${limitClause}`,
       )
       .all(...args);
 
@@ -439,6 +438,13 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
       this.db.query("delete from checkpoints where thread_id = ?").run(threadId);
       this.db.query("delete from writes where thread_id = ?").run(threadId);
     })();
+  }
+
+  /** 获取底层数据库实例（供 sessions 等模块直接查询）/ Get underlying database instance for direct queries */
+  getDb(): Database {
+    if (this.isClosed) throw new Error("Database is closed");
+    this.setup();
+    return this.db;
   }
 
   /** 关闭数据库连接 / Close database connection */

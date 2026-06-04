@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { BunSqliteSaver } from "./checkpoint.js";
 import { createChatModel } from "../model/factory.js";
@@ -36,7 +36,7 @@ export async function listSessions(checkpointPath: string): Promise<SessionInfo[
   const saver = new BunSqliteSaver(checkpointPath);
   try {
     saver.setup(); // Ensure tables + created_at column exist
-    const db = (saver as any).db as Database;
+    const db = saver.getDb();
     const rows = db
       .query<
         { thread_id: string; updated_at: string | null; cached_name: string | null },
@@ -90,7 +90,7 @@ export async function searchSessions(
   const saver = new BunSqliteSaver(checkpointPath);
   try {
     saver.setup();
-    const db = (saver as any).db as Database;
+    const db = saver.getDb();
 
     // Get all sessions (same query as listSessions but with higher limit for search)
     const nameMatches = db
@@ -609,7 +609,7 @@ export async function persistSessionName(
     const tuple = await saver.getTuple({ configurable: { thread_id: threadId } });
     if (!tuple) return;
 
-    const db = (saver as any).db as Database;
+    const db = saver.getDb();
     const checkpointId =
       tuple.config?.configurable?.checkpoint_id ?? "";
     if (!checkpointId) return;

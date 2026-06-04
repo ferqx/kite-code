@@ -33,10 +33,9 @@ describe("runApprovedTool — read_mcp_resource", () => {
     const manager = mockMcpManager(async (_server, _uri) => "resource content here");
     const request = makeReadMcpResourceRequest();
 
-    const result = await runApprovedTool(
-      "/ws", request, undefined, "write", null, "building", null, "none", "t1",
-      undefined, manager,
-    );
+    const result = await runApprovedTool({
+      workspace: "/ws", request, mcpManager: manager,
+    });
 
     expect(result.ok).toBe(true);
     expect(result.stdout).toBe("resource content here");
@@ -46,9 +45,9 @@ describe("runApprovedTool — read_mcp_resource", () => {
   it("returns error when mcpManager is not available", async () => {
     const request = makeReadMcpResourceRequest();
 
-    const result = await runApprovedTool(
-      "/ws", request, undefined, "write", null, "building", null, "none", "t1",
-    );
+    const result = await runApprovedTool({
+      workspace: "/ws", request,
+    });
 
     expect(result.ok).toBe(false);
     expect(result.stderr).toContain("MCP manager is not available");
@@ -58,10 +57,9 @@ describe("runApprovedTool — read_mcp_resource", () => {
     const manager = mockMcpManager(async () => "content");
     const request = makeReadMcpResourceRequest({ args: { server: "", uri: "resource://test" } } as any);
 
-    const result = await runApprovedTool(
-      "/ws", request, undefined, "write", null, "building", null, "none", "t1",
-      undefined, manager,
-    );
+    const result = await runApprovedTool({
+      workspace: "/ws", request, mcpManager: manager,
+    });
 
     expect(result.ok).toBe(false);
     expect(result.stderr).toContain("server and uri are required");
@@ -73,10 +71,9 @@ describe("runApprovedTool — read_mcp_resource", () => {
     });
     const request = makeReadMcpResourceRequest();
 
-    const result = await runApprovedTool(
-      "/ws", request, undefined, "write", null, "building", null, "none", "t1",
-      undefined, manager,
-    );
+    const result = await runApprovedTool({
+      workspace: "/ws", request, mcpManager: manager,
+    });
 
     expect(result.ok).toBe(false);
     expect(result.stderr).toContain("Connection refused");

@@ -72,7 +72,7 @@ export function readFile(input: ReadFileInput): ReadFileResult {
       allLines.pop(); // remove trailing empty from split
     }
 
-    const offset = input.offset ?? 1;
+    const offset = input.offset && input.offset > 0 ? input.offset : 1;
     const limit = input.limit ?? allLines.length;
     const fromLine = Math.max(1, offset);
     const toLine = Math.min(allLines.length, offset + limit - 1);
@@ -255,7 +255,7 @@ function editFileTrimmed(
     }
   }
 
-  return performReplaceTrimmed(path, target, content, contentLines, matchLine, oldLines.length, newString, replaceAll, charOffset);
+  return performReplaceTrimmed(path, target, content, contentLines, matchLine, oldLines.length, newString, replaceAll, charOffset, trimmedOldLines);
 }
 
 /** trimmed 模式的文件替换 / File replacement in trimmed mode */
@@ -269,12 +269,13 @@ function performReplaceTrimmed(
   newStr: string,
   replaceAll: boolean | undefined,
   charOffset: number,
+  userTrimmedOldLines: string[],
 ): EditFileResult {
   let newContent: string;
 
   if (replaceAll) {
     const trimmedContentLines = contentLines.map((l) => l.trim());
-    const trimmedOldLines = contentLines.slice(matchLine, matchLine + oldLineCount).map((l) => l.trim());
+    const trimmedOldLines = userTrimmedOldLines;
     const parts: string[] = [];
     let i = 0;
     while (i <= contentLines.length - oldLineCount) {
@@ -392,8 +393,9 @@ export function writeFile(input: WriteFileInput): WriteFileResult {
       writeFileSync(target, input.content, "utf8");
     }
 
-    const written = readFileSync(target, "utf8");
-    const lineCount = written.split("\n").length - (written.endsWith("\n") ? 1 : 0);
+    // 直接对写入内容计算行数，避免 TOCTOU 竞态（写入后重新读取可能被其他进程修改）
+    // Count lines from the written content directly to avoid TOCTOU race condition
+    const lineCount = input.content.split("\n").length - (input.content.endsWith("\n") ? 1 : 0);
 
     return {
       ok: true,

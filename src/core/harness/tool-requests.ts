@@ -134,13 +134,16 @@ export function getPendingToolRequest(
   // Use AIMessage.isInstance() instead of instanceof to handle deserialized
   // messages from checkpoint — isInstance falls back to checking the `type`
   // field when the prototype chain is unavailable (e.g. after JSON round-trip).
+  // Iterate ALL tool_calls (not just [0]) to handle multi-tool-call AIMessages
+  // where the first call is resolved but later ones are not.
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (!AIMessage.isInstance(msg)) continue;
-    const call = msg.tool_calls?.[0];
-    if (!call) continue;
-    if (!call.id || resolvedIds.has(call.id)) continue;
-    return toolRequestFromMessage(msg, workspace);
+    if (!msg.tool_calls || msg.tool_calls.length === 0) continue;
+    for (const call of msg.tool_calls) {
+      if (!call.id || resolvedIds.has(call.id)) continue;
+      return toolRequestFromCall(call, workspace);
+    }
   }
 
   return null;
