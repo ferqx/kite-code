@@ -88,15 +88,6 @@ export function buildCacheableRuntimeContext(input: RuntimeContextInput): string
     `Workspace: ${input.workspace}`,
     `Workspace access policy: ${workspaceAccessPolicy()}`,
   ];
-
-  if (input.activeSkillInstructions) {
-    lines.push(
-      "",
-      "## Active Skill Instructions (MUST follow)",
-      input.activeSkillInstructions,
-    );
-  }
-
   return lines.join("\n");
 }
 
