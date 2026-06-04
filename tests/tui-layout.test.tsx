@@ -808,6 +808,7 @@ describe("App", () => {
       pendingSkills: [],
       skillManifests: [],
       ctrlCPressed: false,
+      blockIndex: {},
       sessionKey: 0,
       exitRequested: false,
       editorRequested: false,

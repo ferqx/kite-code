@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import type { OutputBlock } from "../types";
 import type { SubAgentRole } from "@/protocol/events";
-import { darkTheme as dt } from "../theme";
+import { useTheme } from "../theme";
 import MarkdownBlock from "./MarkdownBlock";
 
 function roleIcon(role: SubAgentRole): string {
@@ -92,6 +92,7 @@ interface SubAgentBlockProps {
 }
 
 export default function SubAgentBlock({ block }: SubAgentBlockProps) {
+  const dt = useTheme();
   const icon = roleIcon(block.role);
   const label = roleLabel(block.role);
   const taskSummary = taskLabel(block.task);

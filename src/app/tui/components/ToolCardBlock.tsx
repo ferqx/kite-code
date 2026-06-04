@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import type { OutputBlock } from "../types";
-import { darkTheme as dt } from "../theme";
+import { useTheme } from "../theme";
 import { SPINNER, toolColor, formatElapsed } from "./render-utils";
 
 const MAX_TOOL_LINES = 12;
 
-function renderToolSummary(summary: string, isError: boolean) {
+function renderToolSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
   const prefix = isError ? "✕ " : "⎿ ";
   const color = isError ? dt.error : dt.dim;
   const text = summary.trimEnd();
@@ -42,6 +42,7 @@ interface ToolCardBlockProps {
 }
 
 export default function ToolCardBlock({ block }: ToolCardBlockProps) {
+  const dt = useTheme();
   const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsed, setLiveElapsed] = useState(0);
   const startRef = useRef(Date.now());
@@ -87,7 +88,7 @@ export default function ToolCardBlock({ block }: ToolCardBlockProps) {
       </Box>
       {isExpanded && block.summary ? (
         <Box paddingLeft={3} flexDirection="column">
-          {renderToolSummary(block.summary, block.status === "error")}
+          {renderToolSummary(block.summary, block.status === "error", dt)}
         </Box>
       ) : null}
     </Box>

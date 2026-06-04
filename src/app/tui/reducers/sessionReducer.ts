@@ -30,6 +30,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         activeSessionId: action.threadId,
         turns: [],
         toolStartTimes: undefined,
+        blockIndex: {},
         interrupt: null,
         exited: false,
         running: false,
@@ -51,15 +52,33 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
     case "LOAD_SESSION_PENDING":
       return { ...state, loadingSession: true };
     case "LOAD_SESSION": {
-      const sessions = state.sessions.map(s =>
+      // Save outgoing session's turns/status before overwriting (same pattern as SWITCH_SESSION / NEW_SESSION)
+      const sessionsWithSaved = state.sessions.map(s =>
+        s.threadId === state.activeSessionId
+          ? { ...s, turns: state.turns, status: state.status, active: false }
+          : s
+      );
+      const sessions = sessionsWithSaved.map(s =>
         s.threadId === action.threadId
-          ? { ...s, status: { ...s.status, modelProvider: action.modelProvider || s.status.modelProvider, modelName: action.modelName || s.status.modelName, thinkingMode: action.thinkingLevel || s.status.thinkingMode } }
+          ? {
+              ...s,
+              active: true,
+              status: {
+                ...s.status,
+                modelProvider: action.modelProvider || s.status.modelProvider,
+                modelName: action.modelName || s.status.modelName,
+                thinkingMode: action.thinkingLevel || s.status.thinkingMode,
+              },
+            }
           : s
       );
       return {
         ...state,
         sessions,
+        activeSessionId: action.threadId,
         turns: reconstructTurns(action.blocks),
+        blockIndex: {},
+        toolStartTimes: undefined,
         interrupt: action.interrupt,
         showSessions: false,
         showRewind: false,
@@ -69,6 +88,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         compacting: false,
         currentRunReasonId: undefined,
         loadingSession: false,
+        sessionKey: state.sessionKey + 1,
+        sessionError: false,
+        ctrlCPressed: false,
+        exitRequested: false,
         status: {
           ...state.status,
           modelProvider: action.modelProvider || state.status.modelProvider,
@@ -91,6 +114,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         sessions,
         activeSessionId: action.threadId,
         turns: target?.turns ?? [],
+        blockIndex: {},
         status: target?.status ?? state.status,
         interrupt: target?.pendingInterrupt ? state.interrupt : null,
         exited: false,

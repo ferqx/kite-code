@@ -2,7 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { OutputBlock } from "../types";
 import type { PlanStatus } from "@/protocol/events";
-import { darkTheme as dt } from "../theme";
+import { useTheme } from "../theme";
 
 function planStatusIcon(status: PlanStatus): string {
   switch (status) {
@@ -12,11 +12,11 @@ function planStatusIcon(status: PlanStatus): string {
   }
 }
 
-function planStatusColor(status: PlanStatus): string {
+function planStatusColor(status: PlanStatus, t: { success: string; warning: string; muted: string }): string {
   switch (status) {
-    case "completed": return dt.success;
-    case "in_progress": return dt.warning;
-    case "pending": return dt.muted;
+    case "completed": return t.success;
+    case "in_progress": return t.warning;
+    case "pending": return t.muted;
   }
 }
 
@@ -41,6 +41,7 @@ interface PlanCardBlockProps {
 }
 
 export default function PlanCardBlock({ block }: PlanCardBlockProps) {
+  const dt = useTheme();
   if (block.folded) {
     return (
       <Box marginBottom={1}>
@@ -53,7 +54,7 @@ export default function PlanCardBlock({ block }: PlanCardBlockProps) {
   }
 
   const icon = planStatusIcon(block.planStatus);
-  const color = planStatusColor(block.planStatus);
+  const color = planStatusColor(block.planStatus, dt);
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={dt.primary} paddingX={1} marginBottom={1}>
@@ -72,7 +73,7 @@ export default function PlanCardBlock({ block }: PlanCardBlockProps) {
       <Box flexDirection="column" marginTop={1}>
         {block.steps.map((step, i) => {
           const sIcon = stepStatusIcon(step.status);
-          const sColor = planStatusColor(step.status);
+          const sColor = planStatusColor(step.status, dt);
           return (
             <Box key={i} paddingLeft={1}>
               <Text color={sColor}>{sIcon} </Text>

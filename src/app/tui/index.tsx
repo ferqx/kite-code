@@ -196,8 +196,85 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     });
   }, [initialized]);
 
+  /** 从 DB 加载指定会话的完整状态（LOAD_SESSION_PENDING 的实际逻辑） */
+  const loadSessionById = React.useCallback(
+    async (threadId: string) => {
+      // Increment generation: supersedes any in-flight loads
+      const gen = ++loadGenerationRef.current;
+
+      // Ensure SessionManager switches to this session (handles dormant & SessionSelector loads)
+      const oldId = sessionManager.getActiveId();
+      if (oldId !== threadId) {
+        if (!sessionManager.hasRuntime(threadId)) {
+          sessionManager.registerSession(threadId, workspace);
+        }
+        sessionManager.switchSession(oldId, threadId);
+        const rt = sessionManager.getRuntime(threadId);
+        if (rt) {
+          rt.setForeground(true);
+          rt.dormant = false;
+        }
+      }
+      threadIdRef.current = threadId;
+      conversationHistoryRef.current = [];
+
+      dispatch({ type: "LOAD_SESSION_PENDING", threadId });
+
+      try {
+        const result = await loadSession(defaultCheckpointPath(), threadId);
+        // If a newer load was issued while this was loading, discard
+        if (loadGenerationRef.current !== gen) return;
+        if (!result) {
+          dispatch({
+            type: "LOAD_SESSION",
+            threadId,
+            blocks: [{ id: 1, kind: "text", content: `Session ${threadId} has no saved checkpoints.` }],
+            interrupt: null,
+            modelProvider: "",
+            modelName: "",
+            thinkingLevel: null,
+          });
+          return;
+        }
+
+        const modelName = resolveModelForResume(config, result.modelName);
+        const thinkingLevel = result.thinkingLevel ?? "max";
+        thinkingLevelRef.current = thinkingLevel;
+
+        dispatch({
+          type: "LOAD_SESSION",
+          threadId,
+          blocks: result.blocks,
+          interrupt: result.interrupt,
+          modelProvider: result.modelProvider,
+          modelName,
+          thinkingLevel,
+        });
+      } catch (e: any) {
+        if (loadGenerationRef.current !== gen) return;
+        // Roll back SessionManager: if we switched to a different session and the
+        // load failed, revert the switch and remove the orphaned runtime.
+        if (oldId !== threadId) {
+          sessionManager.switchSession(threadId, oldId);
+          threadIdRef.current = oldId;
+          sessionManager.removeRuntime(threadId);
+        }
+        dispatch({
+          type: "LOAD_SESSION",
+          threadId,
+          blocks: [{ id: 1, kind: "text", content: `Failed to load session: ${e?.message ?? e}` }],
+          interrupt: null,
+          modelProvider: "",
+          modelName: "",
+          thinkingLevel: null,
+        });
+      }
+    },
+    [dispatch, config, sessionManager, workspace],
+  );
+
   const dispatchSessionLoad = React.useCallback(
-    async (action: any) => {
+    async (action: Action) => {
       // Intercept NEW_SESSION to create runtime via SessionManager
       if (action.type === "NEW_SESSION") {
         // Supersede any in-flight LOAD_SESSION_PENDING
@@ -209,77 +286,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
         return;
       }
-      // ── existing intercepts for LOAD_SESSION_PENDING, REVERT, FORK ──
+      // ── LOAD_SESSION_PENDING：委托给 loadSessionById ──
       if (action.type === "LOAD_SESSION_PENDING") {
-        const threadId = action.threadId;
-        // Increment generation: supersedes any in-flight loads
-        const gen = ++loadGenerationRef.current;
-
-        // Ensure SessionManager switches to this session (handles dormant & SessionSelector loads)
-        const oldId = sessionManager.getActiveId();
-        if (oldId !== threadId) {
-          if (!sessionManager.hasRuntime(threadId)) {
-            sessionManager.registerSession(threadId, workspace);
-          }
-          sessionManager.switchSession(oldId, threadId);
-          const rt = sessionManager.getRuntime(threadId);
-          if (rt) {
-            rt.setForeground(true);
-            rt.dormant = false;
-          }
-        }
-        threadIdRef.current = threadId;
-        conversationHistoryRef.current = [];
-
-        try {
-          const result = await loadSession(defaultCheckpointPath(), threadId);
-          // If a newer LOAD_SESSION_PENDING was issued while this was loading, discard
-          if (loadGenerationRef.current !== gen) return;
-          if (!result) {
-            dispatch({
-              type: "LOAD_SESSION",
-              threadId,
-              blocks: [{ id: 1, kind: "text", content: `Session ${threadId} has no saved checkpoints.` }],
-              interrupt: null,
-              modelProvider: "",
-              modelName: "",
-              thinkingLevel: null,
-            });
-            return;
-          }
-
-          const modelName = resolveModelForResume(config, result.modelName);
-          const thinkingLevel = result.thinkingLevel ?? "max";
-          thinkingLevelRef.current = thinkingLevel;
-
-          dispatch({
-            type: "LOAD_SESSION",
-              threadId,
-            blocks: result.blocks,
-            interrupt: result.interrupt,
-            modelProvider: result.modelProvider,
-            modelName,
-            thinkingLevel,
-          });
-        } catch (e: any) {
-          if (loadGenerationRef.current !== gen) return;
-          // Roll back SessionManager: if we switched to a different session and the
-          // load failed, revert the switch and remove the orphaned runtime.
-          if (oldId !== threadId) {
-            sessionManager.switchSession(threadId, oldId);
-            threadIdRef.current = oldId;
-            sessionManager.removeRuntime(threadId);
-          }
-          dispatch({
-            type: "LOAD_SESSION",
-              threadId,
-            blocks: [{ id: 1, kind: "text", content: `Failed to load session: ${e?.message ?? e}` }],
-            interrupt: null,
-            modelProvider: "",
-            modelName: "",
-            thinkingLevel: null,
-          });
-        }
+        await loadSessionById(action.threadId);
         return;
       }
       // Intercept REVERT/FORK to store pending action before reducer closes panel
@@ -297,7 +306,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
         // Dormant session (loaded from DB, state not yet hydrated): load full state
         if (incomingRt?.dormant) {
-          dispatch({ type: "LOAD_SESSION_PENDING", threadId: newId });
+          await loadSessionById(newId);
           return;
         }
 
@@ -370,7 +379,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       }
       dispatch(action);
     },
-    [dispatch, config, sessionManager, workspace],
+    [dispatch, config, sessionManager, workspace, loadSessionById],
   );
 
   const runTaskBridge = React.useCallback((task: string) => {
@@ -483,9 +492,10 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
   React.useEffect(() => {
     return () => {
+      textBatcher.dispose();
       provider.teardown?.();
     };
-  }, [provider]);
+  }, [provider, textBatcher]);
 
   if (!initialized) {
     return <StartupScreen modelName={config.modelName} workspace={workspace} />;
@@ -514,9 +524,10 @@ if (import.meta.main) {
   // The manual approach enabled Kitty at the terminal level but Ink's parser didn't
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
   const { unmount } = render(<ErrorBoundary><TuiBootstrap /></ErrorBoundary>, {
-    maxFps: 60,
+    maxFps: 30,
     exitOnCtrlC: false,
     kittyKeyboard: { mode: 'enabled' },
+    incrementalRendering: true,
   });
   process.on("SIGINT", () => {
     _sessionManagerForExit?.abortAll();

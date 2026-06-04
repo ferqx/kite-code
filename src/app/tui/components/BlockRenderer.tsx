@@ -5,15 +5,15 @@ import MarkdownBlock from "./MarkdownBlock";
 import SubAgentBlock from "./SubAgentBlock";
 import ToolCardBlock from "./ToolCardBlock";
 import PlanCardBlock from "./PlanCardBlock";
-import { darkTheme } from "../theme";
-const dt = darkTheme;
+import { useTheme } from "../theme";
 
-export function changePrefix(kind: string): { prefix: string; color: string } {
+export function changePrefix(kind: string, theme?: { success: string; warning: string; error: string; muted: string }): { prefix: string; color: string } {
+  const t = theme ?? { success: "#4ADE80", warning: "#FBBF24", error: "#F87171", muted: "#9CA3AF" };
   switch (kind) {
-    case "add": return { prefix: "+", color: dt.success };
-    case "edit": return { prefix: "~", color: dt.warning };
-    case "delete": return { prefix: "-", color: dt.error };
-    default: return { prefix: "?", color: dt.muted };
+    case "add": return { prefix: "+", color: t.success };
+    case "edit": return { prefix: "~", color: t.warning };
+    case "delete": return { prefix: "-", color: t.error };
+    default: return { prefix: "?", color: t.muted };
   }
 }
 
@@ -47,17 +47,18 @@ interface BlockRendererProps {
 const BlockRenderer = React.memo(function BlockRenderer({
   block, isFocused, thinkingVisible, index: _i, prevBlock,
 }: BlockRendererProps) {
+  const dt = useTheme();
   switch (block.kind) {
     case "user":
       return (
-        <Box key={block.id} marginBottom={BLOCK_GAP}>
+        <Box marginBottom={BLOCK_GAP}>
           <MarkdownBlock content={"❯ " + block.content} />
         </Box>
       );
 
     case "text":
       return (
-        <Box key={block.id} marginBottom={BLOCK_GAP}>
+        <Box marginBottom={BLOCK_GAP}>
           {(isFocused || block.streaming) ? <Text color={dt.primary}>❯ </Text> : null}
           <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? dt.error : undefined} />
         </Box>
@@ -66,7 +67,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     case "reason": {
       const isConsecutive = prevBlock?.kind === "reason";
       return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
+        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
           {!isConsecutive && (
             <Text color={isFocused ? dt.primary : dt.dim}>
               {!thinkingVisible || block.folded ? "▶ Thinking..." : "▼ Thinking"}
@@ -86,17 +87,17 @@ const BlockRenderer = React.memo(function BlockRenderer({
 
     case "tool_card":
       return (
-        <Box key={block.id} marginBottom={BLOCK_GAP}>
+        <Box marginBottom={BLOCK_GAP}>
           <ToolCardBlock block={block} />
         </Box>
       );
 
     case "file_change":
       return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
+        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
           <Text color={dt.muted}>── File Changes ──</Text>
           {block.changes.map((change, ci) => {
-            const { prefix, color } = changePrefix(change.kind);
+            const { prefix, color } = changePrefix(change.kind, dt);
             const lineInfo = formatLines(change.linesAdded, change.linesRemoved);
             return (
               <Box key={`${block.id}-${ci}`} flexDirection="column">
@@ -122,7 +123,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     case "approval": {
       const label = resolveApprovalLabel(block.resolved);
       return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
+        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
           {label ? (
             <Text color={label.startsWith("✓") ? dt.success : dt.error}>{label}</Text>
           ) : (
@@ -133,7 +134,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     }
     case "question": {
       return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
+        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
           {block.resolved ? (
             block.resolved === "cancelled" ? (
               <Text color={dt.dim}>⊘ Question cancelled</Text>
@@ -152,14 +153,14 @@ const BlockRenderer = React.memo(function BlockRenderer({
 
     case "subagent":
       return (
-        <Box key={block.id} flexDirection="column" marginBottom={BLOCK_GAP}>
+        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
           <SubAgentBlock block={block} />
         </Box>
       );
 
     case "plan_card":
       return (
-        <Box key={block.id} marginBottom={BLOCK_GAP}>
+        <Box marginBottom={BLOCK_GAP}>
           <PlanCardBlock block={block} />
         </Box>
       );

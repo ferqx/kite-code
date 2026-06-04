@@ -57,6 +57,7 @@ const initialState: TuiState = {
   checkpoints: [],
   rewindCounter: 0,
   ctrlCPressed: false,
+  blockIndex: {},
   sessionKey: 0,
   exitRequested: false,
   editorRequested: false,
@@ -94,7 +95,8 @@ export function useTuiState(initialModelName?: string): { state: TuiState; dispa
 export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, slashSuggestion, children }: AppProps) {
   const theme = useTheme();
   const slashMaxHeight = useOverlayHeight(7);
-  useGlobalKeys(dispatch);
+  const overlayOrInterrupt = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind || !!state.interrupt;
+  useGlobalKeys(dispatch, overlayOrInterrupt);
 
   // Stabilized callbacks for React.memo children
   const hideHelp = useCallback(() => dispatch({ type: "HIDE_HELP" }), [dispatch]);
@@ -110,7 +112,10 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
   const onToggleSubagentExpand = useCallback((id: number) => dispatch({ type: "TOGGLE_SUBAGENT_EXPAND", id }), [dispatch]);
   const selectSession = useCallback(
     (threadId: string) => {
-      dispatch({ type: "LOAD_SESSION_PENDING", threadId });
+      // 派发 SWITCH_SESSION，由 dispatchSessionLoad 拦截器判断：
+      // - dormancy → 重定向到 LOAD_SESSION_PENDING（从 DB 加载）
+      // - 非 dormancy → 内存切换 + 缓冲事件回放
+      dispatch({ type: "SWITCH_SESSION", threadId });
     },
     [dispatch],
   );
@@ -166,6 +171,7 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
           running={state.running}
           overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind}
           header={<MemoHeader running={state.running} error={state.sessionError} />}
+          sessionKey={state.sessionKey}
         />
       )}
 

@@ -50,4 +50,13 @@ export class TextBatcher {
       this.timer = null;
     }
   }
+
+  /** 组件卸载时调用，防止 flush 尝试 dispatch 到已卸载的组件 */
+  dispose() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.pendingText = null;
+  }
 }

@@ -595,6 +595,91 @@ describe("eventReducer (blocks model)", () => {
       expect(s.interrupt).toEqual(interrupt);
       expect(flatBlocks(s)[0].kind).toBe("approval");
     });
+
+    test("sets activeSessionId and increments sessionKey", () => {
+      let s = fresh();
+      expect(s.activeSessionId).toBeNull();
+      expect(s.sessionKey).toBe(0);
+      s = dispatch(s, {
+        type: "LOAD_SESSION", threadId: "t1", blocks: [{ id: 1, kind: "text", content: "hello" }],
+        interrupt: null, modelProvider: "", modelName: "", thinkingLevel: null,
+      });
+      expect(s.activeSessionId).toBe("t1");
+      expect(s.sessionKey).toBe(1);
+    });
+
+    test("saves outgoing session turns before overwriting", () => {
+      let s: TuiState = {
+        ...fresh(),
+        activeSessionId: "old",
+        sessions: [
+          { threadId: "old", name: "Old", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: fresh().status, turns: [] },
+        ],
+        turns: [{ blocks: [{ id: 1, kind: "text" as const, content: "old session content" }] }],
+      };
+      s = dispatch(s, {
+        type: "LOAD_SESSION", threadId: "new", blocks: [{ id: 10, kind: "text", content: "new session content" }],
+        interrupt: null, modelProvider: "", modelName: "", thinkingLevel: null,
+      });
+      // old session's turns should be saved
+      const savedOld = s.sessions.find(sp => sp.threadId === "old")!;
+      expect(savedOld.turns[0].blocks[0].id).toBe(1);
+      expect((savedOld.turns[0].blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("old session content");
+      expect(savedOld.active).toBe(false);
+      // new session should be active with loaded blocks
+      expect(s.activeSessionId).toBe("new");
+      expect(flatBlocks(s)[0].id).toBe(10);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("new session content");
+    });
+
+    test("full chain: load A then load B preserves both sessions", () => {
+      let s: TuiState = {
+        ...fresh(),
+        activeSessionId: "initial",
+        sessions: [
+          { threadId: "initial", name: "Init", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: fresh().status, turns: [] },
+          { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: fresh().status, turns: [] },
+          { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: fresh().status, turns: [] },
+        ],
+        turns: [{ blocks: [{ id: 1, kind: "text" as const, content: "initial content" }] }],
+      };
+
+      // Step 1: Load session A
+      s = dispatch(s, {
+        type: "LOAD_SESSION", threadId: "a", blocks: [{ id: 10, kind: "text", content: "A content" }],
+        interrupt: null, modelProvider: "", modelName: "model-a", thinkingLevel: null,
+      });
+      expect(s.activeSessionId).toBe("a");
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("A content");
+      expect(s.status.modelName).toBe("model-a");
+      // initial session's turns saved
+      const savedInitial = s.sessions.find(sp => sp.threadId === "initial")!;
+      expect((savedInitial.turns[0].blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("initial content");
+
+      // Step 2: Load session B — A's turns should be saved
+      s = dispatch(s, {
+        type: "LOAD_SESSION", threadId: "b", blocks: [{ id: 20, kind: "text", content: "B content" }],
+        interrupt: null, modelProvider: "", modelName: "model-b", thinkingLevel: null,
+      });
+      expect(s.activeSessionId).toBe("b");
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("B content");
+      expect(s.status.modelName).toBe("model-b");
+      // A's turns should be saved
+      const savedA = s.sessions.find(sp => sp.threadId === "a")!;
+      expect((savedA.turns[0].blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("A content");
+      expect(savedA.active).toBe(false);
+
+      // Step 3: Load A again — B's turns should be saved, A's restored from DB
+      s = dispatch(s, {
+        type: "LOAD_SESSION", threadId: "a", blocks: [{ id: 10, kind: "text", content: "A content" }],
+        interrupt: null, modelProvider: "", modelName: "model-a", thinkingLevel: null,
+      });
+      expect(s.activeSessionId).toBe("a");
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("A content");
+      // B's turns should be saved
+      const savedB = s.sessions.find(sp => sp.threadId === "b")!;
+      expect((savedB.turns[0].blocks[0] as Extract<OutputBlock, { kind: "text" }>).content).toBe("B content");
+    });
   });
 
   describe("LOAD_SESSION_PENDING", () => {

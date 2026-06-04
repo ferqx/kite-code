@@ -2,7 +2,7 @@
 
 import type { AgentEvent, AgentPlanStep, PlanStatus } from "@/protocol/events";
 import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
-import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn } from "./helpers";
+import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById } from "./helpers";
 
 function getToolPreview(name: string, args: Record<string, unknown>): string {
   switch (name) {
@@ -128,26 +128,31 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         callId: event.data.call_id, name: event.data.name, args: event.data.args,
         status: "running", summary: "", preview,
       };
-      const times = new Map(state.toolStartTimes);
-      times.set(event.data.call_id, Date.now());
-      return { ...appendBlock(state, block), toolStartTimes: times };
+      const times = { ...state.toolStartTimes, [event.data.call_id]: Date.now() };
+      const blockIndex = { ...state.blockIndex, [event.data.call_id]: id };
+      return { ...appendBlock(state, block), toolStartTimes: times, blockIndex };
     }
     case "tool_done": {
       if (event.data.name === "task") return state;
       if (event.data.name === "update_plan") return state;
-      const startedAt = state.toolStartTimes?.get(event.data.call_id);
+      const startedAt = state.toolStartTimes?.[event.data.call_id];
       const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
-      const nextTimes = new Map(state.toolStartTimes);
-      nextTimes.delete(event.data.call_id);
-      // Find matching tool_card across all turns
-      let matched: (OutputBlock & { kind: "tool_card" }) | undefined;
-      for (const turn of state.turns) {
-        for (const b of turn.blocks) {
-          if (b.kind === "tool_card" && b.callId === event.data.call_id) {
-            matched = b; break;
+      const { [event.data.call_id]: _, ...nextTimes } = state.toolStartTimes ?? {};
+      // O(1) lookup via blockIndex, with full-scan fallback for session-load edge cases
+      const indexedId = state.blockIndex[event.data.call_id];
+      let matched = indexedId != null
+        ? findBlockById(state, indexedId) as (OutputBlock & { kind: "tool_card" }) | undefined
+        : undefined;
+      if (matched && matched.kind !== "tool_card") matched = undefined;
+      if (!matched) {
+        for (const turn of state.turns) {
+          for (const b of turn.blocks) {
+            if (b.kind === "tool_card" && b.callId === event.data.call_id) {
+              matched = b; break;
+            }
           }
+          if (matched) break;
         }
-        if (matched) break;
       }
       if (!matched) return { ...state, toolStartTimes: nextTimes };
       const next: OutputBlock = {
@@ -283,6 +288,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case "subagent_start": {
       // Dedup: if a subagent block with this ID already exists, skip.
+      if (state.blockIndex[event.data.id] != null) return state;
       for (const turn of state.turns) {
         if (turn.blocks.some(b => b.kind === "subagent" && b.subagentId === event.data.id)) return state;
       }
@@ -295,16 +301,23 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         status: "running", summary: "",
         toolCallCount: 0, durationMs: 0, steps: [],
       };
-      return appendBlock(state, block);
+      const blockIndex = { ...state.blockIndex, [event.data.id]: id };
+      return { ...appendBlock(state, block), blockIndex };
     }
     case "subagent_step": {
-      // Find subagent block across all turns
-      let matched: (OutputBlock & { kind: "subagent" }) | undefined;
-      for (const turn of state.turns) {
-        for (const b of turn.blocks) {
-          if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
+      // O(1) lookup via blockIndex, with full-scan fallback
+      const indexedId = state.blockIndex[event.data.id];
+      let matched = indexedId != null
+        ? findBlockById(state, indexedId) as (OutputBlock & { kind: "subagent" }) | undefined
+        : undefined;
+      if (matched && matched.kind !== "subagent") matched = undefined;
+      if (!matched) {
+        for (const turn of state.turns) {
+          for (const b of turn.blocks) {
+            if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
+          }
+          if (matched) break;
         }
-        if (matched) break;
       }
       if (!matched) return state;
       const next: OutputBlock = { ...matched, steps: [...matched.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }] };
@@ -318,12 +331,18 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, turns };
     }
     case "subagent_tool_result": {
-      let matched: (OutputBlock & { kind: "subagent" }) | undefined;
-      for (const turn of state.turns) {
-        for (const b of turn.blocks) {
-          if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
+      const indexedId2 = state.blockIndex[event.data.id];
+      let matched = indexedId2 != null
+        ? findBlockById(state, indexedId2) as (OutputBlock & { kind: "subagent" }) | undefined
+        : undefined;
+      if (matched && matched.kind !== "subagent") matched = undefined;
+      if (!matched) {
+        for (const turn of state.turns) {
+          for (const b of turn.blocks) {
+            if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
+          }
+          if (matched) break;
         }
-        if (matched) break;
       }
       if (!matched) return state;
       const steps = matched.steps.map((s, i) =>
@@ -343,12 +362,18 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, turns };
     }
     case "subagent_done": {
-      let matched: (OutputBlock & { kind: "subagent" }) | undefined;
-      for (const turn of state.turns) {
-        for (const b of turn.blocks) {
-          if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
+      const indexedId3 = state.blockIndex[event.data.id];
+      let matched = indexedId3 != null
+        ? findBlockById(state, indexedId3) as (OutputBlock & { kind: "subagent" }) | undefined
+        : undefined;
+      if (matched && matched.kind !== "subagent") matched = undefined;
+      if (!matched) {
+        for (const turn of state.turns) {
+          for (const b of turn.blocks) {
+            if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
+          }
+          if (matched) break;
         }
-        if (matched) break;
       }
       if (!matched) return state;
       const next: OutputBlock = {
@@ -369,12 +394,18 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, turns };
     }
     case "subagent_error": {
-      let matched: (OutputBlock & { kind: "subagent" }) | undefined;
-      for (const turn of state.turns) {
-        for (const b of turn.blocks) {
-          if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
+      const indexedId4 = state.blockIndex[event.data.id];
+      let matched = indexedId4 != null
+        ? findBlockById(state, indexedId4) as (OutputBlock & { kind: "subagent" }) | undefined
+        : undefined;
+      if (matched && matched.kind !== "subagent") matched = undefined;
+      if (!matched) {
+        for (const turn of state.turns) {
+          for (const b of turn.blocks) {
+            if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
+          }
+          if (matched) break;
         }
-        if (matched) break;
       }
       if (!matched) return state;
       const next: OutputBlock = { ...matched, status: "error" as const, error: event.data.error };
