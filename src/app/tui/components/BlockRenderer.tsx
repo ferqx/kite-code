@@ -36,13 +36,17 @@ function resolveApprovalLabel(resolved?: { action: string; grant?: string; patte
 
 const BLOCK_GAP = 1;
 
-export default function renderBlock(
-  block: OutputBlock,
-  isFocused: boolean,
-  thinkingVisible: boolean,
-  _i: number,
-  prevBlock?: OutputBlock,
-) {
+interface BlockRendererProps {
+  block: OutputBlock;
+  isFocused: boolean;
+  thinkingVisible: boolean;
+  index: number;
+  prevBlock?: OutputBlock;
+}
+
+const BlockRenderer = React.memo(function BlockRenderer({
+  block, isFocused, thinkingVisible, index: _i, prevBlock,
+}: BlockRendererProps) {
   switch (block.kind) {
     case "user":
       return (
@@ -163,4 +167,6 @@ export default function renderBlock(
     default:
       return null;
   }
-}
+});
+
+export default BlockRenderer;

@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo } from "react";
 import { Box, Static } from "ink";
 import { useInput } from "ink";
 import type { Turn } from "./types";
-import renderBlock, { changePrefix } from "./components/BlockRenderer";
+import BlockRenderer, { changePrefix } from "./components/BlockRenderer";
 export { changePrefix } from "./components/BlockRenderer";
 export { toolColor } from "./components/render-utils";
 
@@ -88,13 +88,13 @@ const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTog
           const blockIdx = index - 1;
           const block = staticBlocks[blockIdx];
           if (!block) return null;
-          return renderBlock(
-            block,
-            false,
-            thinkingVisible,
-            blockIdx,
-            blockIdx > 0 ? staticBlocks[blockIdx - 1] : undefined,
-          );
+          return <BlockRenderer
+            block={block}
+            isFocused={false}
+            thinkingVisible={thinkingVisible}
+            index={blockIdx}
+            prevBlock={blockIdx > 0 ? staticBlocks[blockIdx - 1] : undefined}
+          />;
         }}
       </Static>
       </Box>
@@ -105,7 +105,13 @@ const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTog
         const prevBlock = i > 0
           ? activeBlocks[i - 1]
           : lastSettledBlock;
-        return renderBlock(block, isFocused, thinkingVisible, 0, prevBlock);
+        return <BlockRenderer
+          block={block}
+          isFocused={isFocused}
+          thinkingVisible={thinkingVisible}
+          index={0}
+          prevBlock={prevBlock}
+        />;
       })}
     </Box>
   );
