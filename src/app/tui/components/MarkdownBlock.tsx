@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Box, Text } from "ink";
 import { useTheme, type Theme } from "@/app/tui/theme";
 
@@ -371,10 +371,9 @@ function groupLines(lines: string[]): LineGroup[] {
 
 // ── main component ──
 
-export default function MarkdownBlock({ content, streaming, color }: MarkdownBlockProps) {
+export default React.memo(function MarkdownBlock({ content, streaming, color }: MarkdownBlockProps) {
   const t = useTheme();
-  const lines = content.split("\n");
-  const groups = groupLines(lines);
+  const groups = useMemo(() => groupLines(content.split("\n")), [content]);
 
   return (
     <Box flexDirection="column">
@@ -449,7 +448,7 @@ export default function MarkdownBlock({ content, streaming, color }: MarkdownBlo
       })}
     </Box>
   );
-}
+});
 
 function MarkdownLine({ content, color }: { content: string; color?: string }) {
   const t = useTheme();
