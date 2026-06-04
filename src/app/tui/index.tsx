@@ -6,6 +6,7 @@ import { ThemeContext, darkTheme, lightTheme } from "./theme";
 import { McpManager } from "@/core/mcp";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
+import { TextBatcher } from "./text-batcher";
 import InputLine, { type EditorContentHandle, type SlashSuggestionData } from "./components/InputLine";
 import StartupScreen from "./components/StartupScreen";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -40,6 +41,18 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const { state, dispatch, onToggleReason } = useTuiState(config.modelName);
   const stateRef = React.useRef(state);
   stateRef.current = state;
+
+  // TextBatcher: merge consecutive text events to reduce re-renders during streaming
+  const textBatcher = React.useMemo(
+    () => new TextBatcher((action) => dispatch(action), 16),
+    [dispatch],
+  );
+  const textBatcherRef = React.useRef(textBatcher);
+  textBatcherRef.current = textBatcher;
+
+  React.useEffect(() => {
+    textBatcher.setRunning(state.running);
+  }, [state.running, textBatcher]);
   const theme = React.useMemo(() => (loadTheme(workspace) === "light" ? lightTheme : darkTheme), []);
   const [initialized, setInitialized] = React.useState(false);
   const prevInterruptRef = React.useRef(state.interrupt);
@@ -66,9 +79,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const provider = React.useMemo(
     () =>
       new TuiUserInputProvider((event) => {
-        dispatch({ type: "EVENT", event });
+        textBatcherRef.current.push(event);
       }),
-    [dispatch]
+    []
   );
 
   const sessionManager = React.useMemo(() => {
