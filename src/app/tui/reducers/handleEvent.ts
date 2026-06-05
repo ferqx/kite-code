@@ -4,6 +4,32 @@ import type { AgentEvent, AgentPlanStep, PlanStatus } from "@/protocol/events";
 import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
 import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById } from "./helpers";
 
+/** Shared helper: O(1) blockIndex lookup with O(n) full-scan fallback for session-load edge cases.
+ *  Eliminates the duplicate pattern that was repeated 5 times across tool_done / subagent handlers. */
+function findBlockByIndexAndKind<T extends OutputBlock["kind"]>(
+  state: TuiState,
+  indexKey: string,
+  expectedKind: T,
+  scanMatch: (b: Extract<OutputBlock, { kind: T }>) => boolean,
+): (OutputBlock & { kind: T }) | undefined {
+  const indexedId = state.blockIndex[indexKey];
+  if (indexedId != null) {
+    const b = findBlockById(state, indexedId);
+    if (b && b.kind === expectedKind && scanMatch(b as Extract<OutputBlock, { kind: T }>)) {
+      return b as OutputBlock & { kind: T };
+    }
+  }
+  // Full-scan fallback
+  for (const turn of state.turns) {
+    for (const b of turn.blocks) {
+      if (b.kind === expectedKind && scanMatch(b as Extract<OutputBlock, { kind: T }>)) {
+        return b as OutputBlock & { kind: T };
+      }
+    }
+  }
+  return undefined;
+}
+
 function getToolPreview(name: string, args: Record<string, unknown>): string {
   switch (name) {
     case "read_file": return String(args.path ?? "");
@@ -55,6 +81,9 @@ function computeToolDetail(name: string, args: Record<string, unknown>): string 
 }
 
 export function handleEventAction(state: TuiState, event: AgentEvent): TuiState {
+  // Guard: malformed events from corrupted checkpoints must not crash the TUI
+  if (!event.data) return state;
+
   // 非 reason 事件清除 currentRunReasonId，让下一个 reason 创建新块。
   // 避免中间隔了工具调用后两个 reason 块被合并。
   // Auto-clear currentRunReasonId on any non-reason event,
@@ -138,22 +167,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const startedAt = state.toolStartTimes?.[event.data.call_id];
       const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
       const { [event.data.call_id]: _, ...nextTimes } = state.toolStartTimes ?? {};
-      // O(1) lookup via blockIndex, with full-scan fallback for session-load edge cases
-      const indexedId = state.blockIndex[event.data.call_id];
-      let matched = indexedId != null
-        ? findBlockById(state, indexedId) as (OutputBlock & { kind: "tool_card" }) | undefined
-        : undefined;
-      if (matched && matched.kind !== "tool_card") matched = undefined;
-      if (!matched) {
-        for (const turn of state.turns) {
-          for (const b of turn.blocks) {
-            if (b.kind === "tool_card" && b.callId === event.data.call_id) {
-              matched = b; break;
-            }
-          }
-          if (matched) break;
-        }
-      }
+      const matched = findBlockByIndexAndKind(state, event.data.call_id, "tool_card", b => b.callId === event.data.call_id);
       if (!matched) return { ...state, toolStartTimes: nextTimes };
       const next: OutputBlock = {
         ...matched,
@@ -297,62 +311,25 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...appendBlock(state, block), blockIndex };
     }
     case "subagent_step": {
-      // O(1) lookup via blockIndex, with full-scan fallback
-      const indexedId = state.blockIndex[event.data.id];
-      let matched = indexedId != null
-        ? findBlockById(state, indexedId) as (OutputBlock & { kind: "subagent" }) | undefined
-        : undefined;
-      if (matched && matched.kind !== "subagent") matched = undefined;
-      if (!matched) {
-        for (const turn of state.turns) {
-          for (const b of turn.blocks) {
-            if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
-          }
-          if (matched) break;
-        }
-      }
+      const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
       if (!matched) return state;
       const next: OutputBlock = { ...matched, steps: [...matched.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }] };
       return replaceBlockById(state, matched.id, next);
     }
     case "subagent_tool_result": {
-      const indexedId2 = state.blockIndex[event.data.id];
-      let matched = indexedId2 != null
-        ? findBlockById(state, indexedId2) as (OutputBlock & { kind: "subagent" }) | undefined
-        : undefined;
-      if (matched && matched.kind !== "subagent") matched = undefined;
-      if (!matched) {
-        for (const turn of state.turns) {
-          for (const b of turn.blocks) {
-            if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
-          }
-          if (matched) break;
-        }
-      }
+      const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
       if (!matched) return state;
       const steps = matched.steps.map((s, i) =>
-        i === matched!.steps.length - 1 && s.toolName === event.data.toolName
+        i === matched.steps.length - 1 && s.toolName === event.data.toolName
           ? { ...s, ok: event.data.ok }
           : s
       );
-      if (steps.every((s, i) => s === matched!.steps[i])) return state;
+      if (steps.every((s, i) => s === matched.steps[i])) return state;
       const next: OutputBlock = { ...matched, steps };
       return replaceBlockById(state, matched.id, next);
     }
     case "subagent_done": {
-      const indexedId3 = state.blockIndex[event.data.id];
-      let matched = indexedId3 != null
-        ? findBlockById(state, indexedId3) as (OutputBlock & { kind: "subagent" }) | undefined
-        : undefined;
-      if (matched && matched.kind !== "subagent") matched = undefined;
-      if (!matched) {
-        for (const turn of state.turns) {
-          for (const b of turn.blocks) {
-            if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
-          }
-          if (matched) break;
-        }
-      }
+      const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
       if (!matched) return state;
       const next: OutputBlock = {
         ...matched,
@@ -365,23 +342,30 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return replaceBlockById(state, matched.id, next);
     }
     case "subagent_error": {
-      const indexedId4 = state.blockIndex[event.data.id];
-      let matched = indexedId4 != null
-        ? findBlockById(state, indexedId4) as (OutputBlock & { kind: "subagent" }) | undefined
-        : undefined;
-      if (matched && matched.kind !== "subagent") matched = undefined;
-      if (!matched) {
-        for (const turn of state.turns) {
-          for (const b of turn.blocks) {
-            if (b.kind === "subagent" && b.subagentId === event.data.id) { matched = b; break; }
-          }
-          if (matched) break;
-        }
-      }
+      const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
       if (!matched) return state;
       const next: OutputBlock = { ...matched, status: "error" as const, error: event.data.error };
       return replaceBlockById(state, matched.id, next);
     }
+    case "subagent_cache_metrics": {
+      // Merge sub-agent cache/token data into global status
+      // SubAgentCacheMetricsPayload has: subagentId, cacheHitTokens, cacheMissTokens, inputTokens
+      const { cacheHitTokens, cacheMissTokens, inputTokens } = event.data;
+      const totalCacheTokens = cacheHitTokens + cacheMissTokens;
+      const hitRate = totalCacheTokens > 0 ? cacheHitTokens / totalCacheTokens : state.status.cacheHitRate;
+      return {
+        ...state,
+        status: {
+          ...state.status,
+          cacheHitRate: hitRate,
+          totalTokens: state.status.totalTokens + inputTokens,
+        },
+      };
+    }
+    // Raw passthrough events — intentionally no-op for UI consumers
+    case "interrupt":
+    case "update":
+      return state;
     default:
       return state;
   }
