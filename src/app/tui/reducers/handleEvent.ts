@@ -96,9 +96,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case "text": {
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
-      // Stream-append: update the last block if it's a streaming text block.
+      // Stream-append: update the last block only if it's a streaming text block.
+      // Non-streaming text blocks (model_retry, compact, final) should not be overwritten.
       // Skip update if content hasn't changed to avoid unnecessary re-renders.
-      if (state.running && lastBlock?.kind === "text") {
+      if (state.running && lastBlock?.kind === "text" && lastBlock.streaming) {
         if (lastBlock.content === event.data.text) return state;
         return updateLastBlock(state, { ...lastBlock, content: event.data.text });
       }
@@ -129,20 +130,24 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           return updateLastBlock(state, next);
         }
       }
-      const id = state.nextBlockId;
+      // Finalize streaming text so it doesn't enter <Static> with cursor
+      const finalized = finalizeLastTurnStreaming(state);
+      const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: "reason", content: event.data.text, folded: true };
-      return { ...appendBlock(state, block), currentRunReasonId: id };
+      return { ...appendBlock(finalized, block), currentRunReasonId: id };
     }
     case "tool_call": {
       // task tool has its own subagent block — skip the redundant tool_card
       if (event.data.name === "task") return state;
+      // Finalize streaming text so it doesn't enter <Static> with cursor
+      const finalized = finalizeLastTurnStreaming(state);
       // update_plan renders as a plan_card block, not a tool_card
       if (event.data.name === "update_plan") {
         const args = event.data.args;
         const steps: AgentPlanStep[] = Array.isArray(args.steps)
           ? (args.steps as AgentPlanStep[])
           : [];
-        const id = state.nextBlockId;
+        const id = finalized.nextBlockId;
         const block: OutputBlock = {
           id, kind: "plan_card",
           name: String(args.name ?? ""),
@@ -150,18 +155,18 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           planStatus: (args.status as PlanStatus) ?? "pending",
           steps, folded: false, callId: event.data.call_id,
         };
-        return appendBlock(state, block);
+        return appendBlock(finalized, block);
       }
       const preview = getToolPreview(event.data.name, event.data.args);
-      const id = state.nextBlockId;
+      const id = finalized.nextBlockId;
       const block: OutputBlock = {
         id, kind: "tool_card",
         callId: event.data.call_id, name: event.data.name, args: event.data.args,
         status: "running", summary: "", preview,
       };
-      const times = { ...state.toolStartTimes, [event.data.call_id]: Date.now() };
-      const blockIndex = { ...state.blockIndex, [event.data.call_id]: id };
-      return { ...appendBlock(state, block), toolStartTimes: times, blockIndex };
+      const times = { ...finalized.toolStartTimes, [event.data.call_id]: Date.now() };
+      const blockIndex = { ...finalized.blockIndex, [event.data.call_id]: id };
+      return { ...appendBlock(finalized, block), toolStartTimes: times, blockIndex };
     }
     case "tool_done": {
       if (event.data.name === "task") return state;

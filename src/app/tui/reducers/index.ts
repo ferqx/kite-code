@@ -21,6 +21,7 @@ const UI_ACTIONS: ReadonlySet<string> = new Set([
   "SHOW_REWIND", "HIDE_REWIND",
   "EDITOR_DONE", "EXPAND_INPUT",
   "TOGGLE_REASON", "TOGGLE_ALL_REASON", "TOGGLE_THINKING",
+  "TOGGLE_PLAN", "TOGGLE_TOOL_EXPAND", "TOGGLE_SUBAGENT_EXPAND",
   "CLEAR_OUTPUT",
 ]);
 
@@ -51,9 +52,9 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
 
   // ESCAPE 需要链式分发：uiReducer 关面板 → agentReducer 处理中断
   if (action.type === "ESCAPE") {
-    return uiReducer(state, action)
-      ?? agentReducer(state, action)
-      ?? state;
+    let next = uiReducer(state, action);
+    if (next === null) next = state;
+    return agentReducer(next, action) ?? next;
   }
 
   // Set 查找 O(1) 分发到对应子 reducer
