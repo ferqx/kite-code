@@ -102,6 +102,8 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       if (state.ctrlCPressed) return { ...state, exitRequested: true };
       return { ...state, ctrlCPressed: true };
     }
+    case "RESET_CTRL_C":
+      return state.ctrlCPressed ? { ...state, ctrlCPressed: false } : state;
     case "ESCAPE": {
       if (state.running) return cancelInterrupt(state, true);
       if (state.interrupt) {

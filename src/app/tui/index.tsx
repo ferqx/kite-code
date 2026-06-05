@@ -339,6 +339,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           dispatch(action); // just close the selector
           return;
         }
+        // Invalidate any in-flight loadSessionById for this threadId to prevent
+        // stale load from restoring the deleted session.
+        loadGenerationRef.current++;
         try {
           await deleteSession(defaultCheckpointPath(), threadId);
         } catch {
@@ -443,6 +446,10 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         // Only dispatch global state changes if this session is still active.
         // A background session that finished must not corrupt the foreground's running/interrupt state.
         const stillActive = threadIdRef.current === threadId;
+        // Sync conversation history back from runtime so the next run preserves shell context
+        if (stillActive) {
+          conversationHistoryRef.current = [...rt.conversationHistory];
+        }
         sessionManager.onStatusChange(threadId);
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
         if (stillActive) {
@@ -513,7 +520,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         onSubmit={handleInput}
         disabled={!!state.interrupt}
         workspace={workspace}
-        overlayActive={state.showHelp || state.showModelSelector || state.showSessions}
+        overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind || !!state.interrupt}
         editorContentRef={editorContentRef}
         onSlashSuggestionChange={setSlashSuggestion}
       />

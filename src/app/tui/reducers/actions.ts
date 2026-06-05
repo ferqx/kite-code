@@ -20,6 +20,7 @@ export type Action =
   | { type: "SET_PHASE"; phase: "planning" | "building" }
   | { type: "ESCAPE" }
   | { type: "CTRL_C" }
+  | { type: "RESET_CTRL_C" }
   | { type: "SWITCH_AUTH"; mode: string }
   | { type: "COMPACT_CONTEXT" }
   | { type: "EXPORT_SESSION" }

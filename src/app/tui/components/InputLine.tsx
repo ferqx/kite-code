@@ -137,6 +137,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   fileActiveRef.current = fileSearch.active;
 
   const [pasteState, setPasteState] = useState<PasteState | null>(null);
+  const [inputWarning, setInputWarning] = useState<string | null>(null);
   const pasteStateRef = useRef(pasteState);
   pasteStateRef.current = pasteState;
 
@@ -185,6 +186,13 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     }
   }, [value, pasteState]);
 
+  // Auto-dismiss input warning after 3 seconds
+  useEffect(() => {
+    if (!inputWarning) return;
+    const timer = setTimeout(() => setInputWarning(null), 3000);
+    return () => clearTimeout(timer);
+  }, [inputWarning]);
+
   const atomicBlock: AtomicBlock | undefined = pasteState
     ? (() => {
         const idx = value.indexOf(pasteState.placeholder);
@@ -217,7 +225,8 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
       if (!finalValue.trim()) return;
       if (finalValue.length > MAX_INPUT_LENGTH) {
-        // Reject oversized input silently
+        // Reject oversized input with visual feedback
+        setInputWarning(`Input too large (${(finalValue.length / 1000).toFixed(0)}KB > ${(MAX_INPUT_LENGTH / 1000).toFixed(0)}KB limit)`);
         return;
       }
       if (finalValue.startsWith("/") && slashNeedsCommitRef.current) return;
@@ -480,6 +489,11 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       {pasteState && (
         <Box marginTop={1}>
           <Text color={t.dim}>Ctrl+E 展开粘贴内容</Text>
+        </Box>
+      )}
+      {inputWarning && (
+        <Box marginTop={1}>
+          <Text color={t.error}>{inputWarning}</Text>
         </Box>
       )}
 

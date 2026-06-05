@@ -18,6 +18,8 @@ export function useGlobalKeys(dispatch: Dispatch<Action>, overlayActive = false)
       dispatch({ type: "ESCAPE" });
       return;
     }
+    // 在任何其他键按下时重置 ctrlCPressed（避免误触退出记忆跨 session 持久化）
+    dispatch({ type: "RESET_CTRL_C" });
     // overlay 激活时禁用其他全局快捷键
     if (overlayActive) return;
     if (key.ctrl && input === "t") {
