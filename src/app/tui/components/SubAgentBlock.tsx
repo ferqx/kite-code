@@ -164,6 +164,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   }
 
   // done — 使用 MarkdownBlock 渲染摘要，保留 Markdown 格式
+  const doneStepCount = block.steps.length;
   if (block.expanded && block.steps.length > 0) {
     return (
       <Box flexDirection="column">
@@ -175,17 +176,32 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
         </Box>
         <Box paddingLeft={3} flexDirection="column">
           <Text color={dt.dim}>── Steps ──</Text>
-          {block.steps.map((step, i) => (
-            <Box key={i} paddingLeft={2}>
-              <Text color={step.ok ? dt.success : step.ok === false ? dt.error : dt.muted}>
-                {step.ok ? "✓" : step.ok === false ? "✗" : "·"}
-              </Text>
-              <Text color={dt.muted}> {step.toolName}</Text>
-              {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (
-                <Text color={dt.dim}> {toolArgsLabel(step.toolName, step.toolArgs)}</Text>
-              )}
-            </Box>
-          ))}
+          {(() => {
+            const visibleSteps = doneStepCount > MAX_RUNNING_STEPS
+              ? block.steps.slice(-MAX_RUNNING_STEPS)
+              : block.steps;
+            const skipped = doneStepCount - MAX_RUNNING_STEPS;
+            return (
+              <>
+                {skipped > 0 && (
+                  <Box paddingLeft={2}>
+                    <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
+                  </Box>
+                )}
+                {visibleSteps.map((step, i) => (
+                  <Box key={i} paddingLeft={2}>
+                    <Text color={step.ok ? dt.success : step.ok === false ? dt.error : dt.muted}>
+                      {step.ok ? "✓" : step.ok === false ? "✗" : "·"}
+                    </Text>
+                    <Text color={dt.muted}> {step.toolName}</Text>
+                    {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (
+                      <Text color={dt.dim}> {toolArgsLabel(step.toolName, step.toolArgs)}</Text>
+                    )}
+                  </Box>
+                ))}
+              </>
+            );
+          })()}
         </Box>
         {block.summary && (
           <Box paddingLeft={3} flexDirection="column" marginTop={1}>
