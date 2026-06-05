@@ -2,7 +2,7 @@
 
 import type { AgentEvent, AgentPlanStep, PlanStatus } from "@/protocol/events";
 import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
-import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById } from "./helpers";
+import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById } from "./helpers";
 
 function getToolPreview(name: string, args: Record<string, unknown>): string {
   switch (name) {
@@ -163,15 +163,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         detail: computeToolDetail(matched.name, matched.args),
         expanded: !event.data.ok,
       };
-      // Inline replace: same pattern as replaceBlockById but return just turns
-      const turns = state.turns.map(turn => {
-        const idx = turn.blocks.findIndex(b => b.id === matched!.id);
-        if (idx === -1) return turn;
-        const blocks = turn.blocks.slice();
-        blocks[idx] = next;
-        return { blocks };
-      });
-      return { ...state, turns, toolStartTimes: nextTimes };
+      return { ...replaceBlockById(state, matched.id, next), toolStartTimes: nextTimes };
     }
     case "state_change": {
       const d = event.data;
@@ -321,14 +313,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       }
       if (!matched) return state;
       const next: OutputBlock = { ...matched, steps: [...matched.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }] };
-      const turns = state.turns.map(t => {
-        const idx = t.blocks.findIndex(b => b.id === matched!.id);
-        if (idx === -1) return t;
-        const blocks = t.blocks.slice();
-        blocks[idx] = next;
-        return { blocks };
-      });
-      return { ...state, turns };
+      return replaceBlockById(state, matched.id, next);
     }
     case "subagent_tool_result": {
       const indexedId2 = state.blockIndex[event.data.id];
@@ -352,14 +337,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       );
       if (steps.every((s, i) => s === matched!.steps[i])) return state;
       const next: OutputBlock = { ...matched, steps };
-      const turns = state.turns.map(t => {
-        const idx = t.blocks.findIndex(b => b.id === matched!.id);
-        if (idx === -1) return t;
-        const blocks = t.blocks.slice();
-        blocks[idx] = next;
-        return { blocks };
-      });
-      return { ...state, turns };
+      return replaceBlockById(state, matched.id, next);
     }
     case "subagent_done": {
       const indexedId3 = state.blockIndex[event.data.id];
@@ -384,14 +362,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         durationMs: event.data.durationMs,
         expanded: false,
       };
-      const turns = state.turns.map(t => {
-        const idx = t.blocks.findIndex(b => b.id === matched!.id);
-        if (idx === -1) return t;
-        const blocks = t.blocks.slice();
-        blocks[idx] = next;
-        return { blocks };
-      });
-      return { ...state, turns };
+      return replaceBlockById(state, matched.id, next);
     }
     case "subagent_error": {
       const indexedId4 = state.blockIndex[event.data.id];
@@ -409,14 +380,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       }
       if (!matched) return state;
       const next: OutputBlock = { ...matched, status: "error" as const, error: event.data.error };
-      const turns = state.turns.map(t => {
-        const idx = t.blocks.findIndex(b => b.id === matched!.id);
-        if (idx === -1) return t;
-        const blocks = t.blocks.slice();
-        blocks[idx] = next;
-        return { blocks };
-      });
-      return { ...state, turns };
+      return replaceBlockById(state, matched.id, next);
     }
     default:
       return state;
