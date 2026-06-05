@@ -74,6 +74,7 @@ export default function ToolCardBlock({ block }: ToolCardBlockProps) {
 
   // done or error
   const isExpanded = block.expanded ?? block.status === "error";
+  const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
   return (
     <Box flexDirection="column">
       <Box>
@@ -86,9 +87,12 @@ export default function ToolCardBlock({ block }: ToolCardBlockProps) {
           <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
         ) : null}
       </Box>
-      {isExpanded && block.summary ? (
+      {isExpanded && hasSummary ? (
         <Box paddingLeft={3} flexDirection="column">
-          {renderToolSummary(block.summary, block.status === "error", dt)}
+          {renderToolSummary(block.summary!, block.status === "error", dt)}
+          {block.status === "error" && block.summary!.split("\n").length > 3 && (
+            <Text color={dt.dim}>Enter 折叠</Text>
+          )}
         </Box>
       ) : null}
     </Box>

@@ -29,7 +29,7 @@ function resolveApprovalLabel(resolved?: { action: string; grant?: string; patte
   if (resolved.action === "cancelled") return "⊘ Cancelled";
   if (resolved.action === "denied") return "× Denied";
   if (resolved.action === "approve_once") return "✓ Approved (once)";
-  if (resolved.action === "same_command") return `✓ Approved (same command)${resolved.pattern ? ` "${resolved.pattern}"` : ""}`;
+  if (resolved.action === "same_command") return `✓ Approved (same command)${resolved.pattern ? ` ("${resolved.pattern}")` : ""}`;
   if (resolved.action === "full_access") return "✓ Approved (full access)";
   return `? ${resolved.action}`;
 }
@@ -165,8 +165,16 @@ const BlockRenderer = React.memo(function BlockRenderer({
         </Box>
       );
 
-    default:
-      return null;
+    default: {
+      const _exhaustive: never = block;
+      return (
+        <Box marginBottom={BLOCK_GAP}>
+          <Text color={dt.warning}>
+            ? Unknown block kind: {(_exhaustive as OutputBlock).kind}
+          </Text>
+        </Box>
+      );
+    }
   }
 });
 

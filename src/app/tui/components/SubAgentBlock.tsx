@@ -134,9 +134,10 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
         {visibleSteps.map((step, i) => (
           <Box key={i} paddingLeft={3}>
             <Text color={dt.dim}>├─ {step.toolName}</Text>
-            {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (
-              <Text color={dt.muted}> {toolArgsLabel(step.toolName, step.toolArgs)}</Text>
-            )}
+            {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
+              const label = toolArgsLabel(step.toolName, step.toolArgs);
+              return label ? <Text color={dt.muted}> {label}</Text> : null;
+            })()}
             {step.ok !== undefined && (
               <Text color={step.ok ? dt.success : dt.error}>
                 {" "}{step.ok ? "✓" : "✗"}
@@ -165,44 +166,47 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
 
   // done — 使用 MarkdownBlock 渲染摘要，保留 Markdown 格式
   const doneStepCount = block.steps.length;
-  if (block.expanded && block.steps.length > 0) {
+  const doneHeaderText = `${icon} ${label} · ${taskSummary} — ${block.toolCallCount} 次工具调用，${formatDuration(block.durationMs)}`;
+  const isExpandable = doneStepCount > 0;
+
+  if (block.expanded) {
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={dt.success}>▼ {icon} </Text>
-          <Text color={dt.primary}>{label}</Text>
-          <Text color={dt.muted}> · {taskSummary}</Text>
-          <Text color={dt.dim}> — {block.toolCallCount} 次工具调用，{formatDuration(block.durationMs)}</Text>
+          <Text color={dt.success}>▼ {doneHeaderText}</Text>
         </Box>
-        <Box paddingLeft={3} flexDirection="column">
-          <Text color={dt.dim}>── Steps ──</Text>
-          {(() => {
-            const visibleSteps = doneStepCount > MAX_RUNNING_STEPS
-              ? block.steps.slice(-MAX_RUNNING_STEPS)
-              : block.steps;
-            const skipped = doneStepCount - MAX_RUNNING_STEPS;
-            return (
-              <>
-                {skipped > 0 && (
-                  <Box paddingLeft={2}>
-                    <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
-                  </Box>
-                )}
-                {visibleSteps.map((step, i) => (
-                  <Box key={i} paddingLeft={2}>
-                    <Text color={step.ok ? dt.success : step.ok === false ? dt.error : dt.muted}>
-                      {step.ok ? "✓" : step.ok === false ? "✗" : "·"}
-                    </Text>
-                    <Text color={dt.muted}> {step.toolName}</Text>
-                    {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (
-                      <Text color={dt.dim}> {toolArgsLabel(step.toolName, step.toolArgs)}</Text>
-                    )}
-                  </Box>
-                ))}
-              </>
-            );
-          })()}
-        </Box>
+        {isExpandable && (
+          <Box paddingLeft={3} flexDirection="column">
+            <Text color={dt.dim}>── Steps ──</Text>
+            {(() => {
+              const visibleSteps = doneStepCount > MAX_RUNNING_STEPS
+                ? block.steps.slice(-MAX_RUNNING_STEPS)
+                : block.steps;
+              const skipped = doneStepCount - MAX_RUNNING_STEPS;
+              return (
+                <>
+                  {skipped > 0 && (
+                    <Box paddingLeft={2}>
+                      <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
+                    </Box>
+                  )}
+                  {visibleSteps.map((step, i) => (
+                    <Box key={i} paddingLeft={2}>
+                      <Text color={step.ok ? dt.success : step.ok === false ? dt.error : dt.muted}>
+                        {step.ok ? "✓" : step.ok === false ? "✗" : "·"}
+                      </Text>
+                      <Text color={dt.muted}> {step.toolName}</Text>
+                      {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
+                        const label = toolArgsLabel(step.toolName, step.toolArgs);
+                        return label ? <Text color={dt.dim}> {label}</Text> : null;
+                      })()}
+                    </Box>
+                  ))}
+                </>
+              );
+            })()}
+          </Box>
+        )}
         {block.summary && (
           <Box paddingLeft={3} flexDirection="column" marginTop={1}>
             <Text color={dt.dim}>── Summary ──</Text>
@@ -218,13 +222,11 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     );
   }
 
+  // Collapsed done state
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={dt.success}>▼ {icon} </Text>
-        <Text color={dt.primary}>{label}</Text>
-        <Text color={dt.muted}> · {taskSummary}</Text>
-        <Text color={dt.dim}> — {block.toolCallCount} 次工具调用，{formatDuration(block.durationMs)}</Text>
+        <Text color={dt.success}>{isExpandable ? "▶" : "▼"} {doneHeaderText}</Text>
       </Box>
       {block.summary && (
         <Box paddingLeft={3} flexDirection="column">
@@ -234,9 +236,9 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           <MarkdownBlock content={block.summary} color={dt.dim} />
         </Box>
       )}
-      {block.steps.length > 0 && (
+      {isExpandable && (
         <Box paddingLeft={3}>
-          <Text color={dt.dim}>Enter 展开步骤详情 ({block.steps.length} 步)</Text>
+          <Text color={dt.dim}>Enter 展开步骤详情 ({doneStepCount} 步)</Text>
         </Box>
       )}
     </Box>

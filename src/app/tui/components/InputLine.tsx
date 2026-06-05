@@ -424,33 +424,36 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     // CtrlSafeTextInput (multi-line cursor) via onNavigateHistory callback.
   });
 
-  if (editorContentRef) {
-    editorContentRef.current = {
-      getContent: () => {
-        const ps = pasteStateRef.current;
-        if (ps) {
-          const idx = value.indexOf(ps.placeholder);
-          if (idx >= 0) {
-            return value.slice(0, idx) + ps.pastedContent + value.slice(idx + ps.placeholder.length);
+  // Keep editorContentRef in sync via useEffect (not render body) per React purity guidelines
+  useEffect(() => {
+    if (editorContentRef) {
+      editorContentRef.current = {
+        getContent: () => {
+          const ps = pasteStateRef.current;
+          if (ps) {
+            const idx = value.indexOf(ps.placeholder);
+            if (idx >= 0) {
+              return value.slice(0, idx) + ps.pastedContent + value.slice(idx + ps.placeholder.length);
+            }
           }
-        }
-        return value;
-      },
-      handleEditorResult: (content: string) => {
-        if (!content) return;
-        if (content.length >= PASTE_THRESHOLD) {
-          const placeholder = `[已粘贴 ${content.length.toLocaleString()} 字符]`;
-          setPasteState({ pastedContent: content, placeholder });
-          textKeyRef.current++;
-          setValue(placeholder);
-        } else {
-          setPasteState(null);
-          textKeyRef.current++;
-          setValue(content);
-        }
-      },
-    };
-  }
+          return value;
+        },
+        handleEditorResult: (content: string) => {
+          if (!content) return;
+          if (content.length >= PASTE_THRESHOLD) {
+            const placeholder = `[已粘贴 ${content.length.toLocaleString()} 字符]`;
+            setPasteState({ pastedContent: content, placeholder });
+            textKeyRef.current++;
+            setValue(placeholder);
+          } else {
+            setPasteState(null);
+            textKeyRef.current++;
+            setValue(content);
+          }
+        },
+      };
+    }
+  });
 
   if (disabled) {
     return (
@@ -499,6 +502,15 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
       {/* @file search dropdown */}
       {fileSearch.active && (() => {
+        if (fileSearch.results.length === 0) {
+          return (
+            <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginTop={1}>
+              <Text bold color={t.primary}>文件匹配 @{fileSearch.query}</Text>
+              <Text color={t.dim}>  No matching files</Text>
+              <Text color={t.dim}>Esc 关闭</Text>
+            </Box>
+          );
+        }
         const listHeight = Math.max(3, fileMaxHeight - 2);
         return (
         <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginTop={1} flexGrow={1} maxHeight={fileMaxHeight}>
@@ -516,9 +528,6 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
               ))}
             </ScrollList>
           </Box>
-          {fileSearch.results.length === 0 && (
-            <Text color={t.dim}>  No matching files</Text>
-          )}
           <Text color={t.dim}>Tab/Enter 选择  Esc 关闭</Text>
         </Box>
         );

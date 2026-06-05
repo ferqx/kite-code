@@ -26,7 +26,7 @@ interface OutputAreaProps {
 /** Sentinel: ensures <Static> always has ≥1 item so Header renders even with no completed blocks */
 const HEADER_SENTINEL = { __header: true } as const;
 
-const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, thinkingVisible, running, overlayActive, header, sessionKey }: OutputAreaProps) {
+export default function OutputArea({ turns, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, thinkingVisible, running, overlayActive, header, sessionKey }: OutputAreaProps) {
   // ── Two-level Static/Dynamic split ──
   //   Turn level: settled turns → Static, active turn → split further
   //   Block level: within active turn, completed blocks → Static, only the
@@ -34,16 +34,11 @@ const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTog
   const settledTurns = running ? turns.slice(0, -1) : turns;
   const activeTurn   = running ? turns.at(-1) : undefined;
 
-  // ── Turn-level settled blocks ──
-  // Recompute when block count changes (new turn settles) OR session switches.
-  // sessionKey is the single source of truth for "session changed" — no fingerprint guessing.
+  // ── Turn-level settled blocks (cached — only changes when new turns settle or session switches) ──
   const settledBlockCount = settledTurns.reduce((n, t) => n + t.blocks.length, 0);
   const staticBlocksRef = useRef<OutputBlock[]>([]);
-  const activeSettledRef = useRef<OutputBlock[]>([]);
   const prevSessionKeyRef = useRef(sessionKey);
   const prevSettledCountRef = useRef(0);
-  const prevActiveTurnIdRef = useRef<number | undefined>(undefined);
-  const prevActiveLenRef = useRef(0);
 
   // Session switch: clear all caches and clear terminal.
   // Clear must be synchronous in render body so it lands in the same stdout flush
@@ -52,9 +47,6 @@ const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTog
     prevSessionKeyRef.current = sessionKey;
     staticBlocksRef.current = [];
     prevSettledCountRef.current = 0;
-    activeSettledRef.current = [];
-    prevActiveTurnIdRef.current = undefined;
-    prevActiveLenRef.current = 0;
     // eslint-disable-next-line no-restricted-properties -- intentional synchronous clear before Ink flush
     process.stdout.write("\x1B[2J\x1B[H");
   }
@@ -66,30 +58,20 @@ const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTog
   const staticBlocks = staticBlocksRef.current;
 
   // ── Block-level split within the active turn ──
-  // Promote completed blocks in the active turn to Static; keep only the last
-  // block (streaming text, pending approval/question, etc.) in the dynamic tree.
-
-  if (activeTurn) {
+  // Compute directly from props each render — no caching ref that can go stale.
+  // Reserve the last block for the dynamic tree regardless of kind,
+  // so in-place status updates (tool_card/subagent running→done) are always reflected.
+  const activeSettledBlocks = useMemo(() => {
+    if (!activeTurn) return [];
     const allBlocks = activeTurn.blocks;
-    const firstId = allBlocks[0]?.id;
-    const turnChanged = firstId !== prevActiveTurnIdRef.current;
-    if (turnChanged) prevActiveTurnIdRef.current = firstId;
-
-    if (turnChanged || allBlocks.length !== prevActiveLenRef.current) {
-      const lastBlock = allBlocks[allBlocks.length - 1];
-      const isStreamingText = lastBlock?.kind === "text" && lastBlock.streaming;
-      const settledCount = isStreamingText ? allBlocks.length - 1 : allBlocks.length;
-      if (settledCount > 0 && (turnChanged || settledCount !== activeSettledRef.current.length)) {
-        activeSettledRef.current = allBlocks.slice(0, settledCount);
-      }
-      prevActiveLenRef.current = allBlocks.length;
-    }
-  } else if (prevActiveLenRef.current !== 0) {
-    activeSettledRef.current = [];
-    prevActiveLenRef.current = 0;
-    prevActiveTurnIdRef.current = undefined;
-  }
-  const activeSettledBlocks = activeTurn ? activeSettledRef.current : [];
+    if (allBlocks.length === 0) return [];
+    const lastBlock = allBlocks[allBlocks.length - 1];
+    const isStreamingText = lastBlock?.kind === "text" && lastBlock.streaming;
+    // Reserve last block for dynamic tree unless it's a streaming text block
+    // (streaming text: n-1 settled, last stays dynamic; other: n-1 settled, last stays dynamic)
+    const settledCount = isStreamingText ? allBlocks.length - 1 : Math.max(0, allBlocks.length - 1);
+    return settledCount > 0 ? allBlocks.slice(0, settledCount) : [];
+  }, [activeTurn]);
 
   const lastActiveBlock = activeTurn ? activeTurn.blocks[activeTurn.blocks.length - 1] : undefined;
 
@@ -102,27 +84,34 @@ const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTog
   onToggleToolRef.current = onToggleToolExpand;
   const onToggleSubagentRef = useRef(onToggleSubagentExpand);
   onToggleSubagentRef.current = onToggleSubagentExpand;
+  const lastActiveBlockRef = useRef(lastActiveBlock);
+  lastActiveBlockRef.current = lastActiveBlock;
 
   // Arrow key navigation over the last active block only (all prior blocks are in Static)
   useInput((_input: unknown, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
-    if (!lastActiveBlock) return;
-    if (key.return && lastActiveBlock) {
-      if (lastActiveBlock.kind === "reason") {
-        onToggleReasonRef.current?.(lastActiveBlock.id);
-      } else if (lastActiveBlock.kind === "plan_card") {
-        onTogglePlanRef.current?.(lastActiveBlock.id);
-      } else if (lastActiveBlock.kind === "tool_card") {
-        onToggleToolRef.current?.(lastActiveBlock.id);
-      } else if (lastActiveBlock.kind === "subagent") {
-        onToggleSubagentRef.current?.(lastActiveBlock.id);
+    const lab = lastActiveBlockRef.current;
+    if (!lab) return;
+    if (key.return) {
+      if (lab.kind === "reason") {
+        onToggleReasonRef.current?.(lab.id);
+      } else if (lab.kind === "plan_card") {
+        onTogglePlanRef.current?.(lab.id);
+      } else if (lab.kind === "tool_card") {
+        onToggleToolRef.current?.(lab.id);
+      } else if (lab.kind === "subagent") {
+        onToggleSubagentRef.current?.(lab.id);
       }
     }
   }, { isActive: !overlayActive });
 
-  // ── <Static> items: [Header sentinel, ...turn-level settled, ...block-level settled] ──
-  const staticItems = useMemo(
-    () => [HEADER_SENTINEL, ...staticBlocks, ...activeSettledBlocks],
+  // ── Merged static items: [Header sentinel, ...turn-level settled, ...block-level settled] ──
+  const mergedStaticBlocks = useMemo(
+    () => [...staticBlocks, ...activeSettledBlocks],
     [staticBlocks, activeSettledBlocks],
+  );
+  const staticItems = useMemo(
+    () => [HEADER_SENTINEL, ...mergedStaticBlocks],
+    [mergedStaticBlocks],
   );
 
   // Force <Static> to remount on session switch (sessionKey) or agent state change (running).
@@ -142,17 +131,9 @@ const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTog
             return <React.Fragment key="header">{header}</React.Fragment>;
           }
           const blockIdx = index - 1;
-          const block = (index <= staticBlocks.length)
-            ? staticBlocks[blockIdx]
-            : activeSettledBlocks[blockIdx - staticBlocks.length];
+          const block = mergedStaticBlocks[blockIdx];
           if (!block) return null;
-          const prevBlock = blockIdx > 0
-            ? (blockIdx <= staticBlocks.length
-              ? staticBlocks[blockIdx - 1]
-              : blockIdx - 1 < staticBlocks.length
-                ? staticBlocks[staticBlocks.length - 1]
-                : activeSettledBlocks[blockIdx - staticBlocks.length - 1])
-            : undefined;
+          const prevBlock = blockIdx > 0 ? mergedStaticBlocks[blockIdx - 1] : undefined;
           return <BlockRenderer
             key={block.id}
             block={block}
@@ -179,6 +160,4 @@ const OutputArea = React.memo(function OutputArea({ turns, onToggleReason, onTog
       )}
     </Box>
   );
-});
-
-export default OutputArea;
+}

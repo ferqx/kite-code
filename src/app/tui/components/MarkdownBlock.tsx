@@ -346,7 +346,7 @@ function groupLines(lines: string[]): LineGroup[] {
         i++;
       }
       groups.push({ kind: "code", lines: codeLines, lang, startIndex: i });
-      i++; // skip closing ```
+      if (i < lines.length) i++; // skip closing ```
       continue;
     }
 
@@ -427,7 +427,7 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
           return (
             <Box key={gi} paddingLeft={indent}>
               <Text color={t.muted}>· </Text>
-              <MarkdownLine content={line.slice(2)} color={color} />
+              <MarkdownLine content={line.replace(/^\s*[-*]\s+/, "")} color={color} />
             </Box>
           );
         }

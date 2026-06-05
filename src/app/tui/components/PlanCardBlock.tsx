@@ -9,6 +9,7 @@ function planStatusIcon(status: PlanStatus): string {
     case "completed": return "✓";
     case "in_progress": return "●";
     case "pending": return "○";
+    default: { const _exhaustive: never = status; return "?"; }
   }
 }
 
@@ -17,6 +18,7 @@ function planStatusColor(status: PlanStatus, t: { success: string; warning: stri
     case "completed": return t.success;
     case "in_progress": return t.warning;
     case "pending": return t.muted;
+    default: { const _exhaustive: never = status; return t.muted; }
   }
 }
 
@@ -25,6 +27,7 @@ function stepStatusIcon(status: PlanStatus): string {
     case "completed": return "✓";
     case "in_progress": return "▶";
     case "pending": return "·";
+    default: { const _exhaustive: never = status; return "?"; }
   }
 }
 
@@ -33,6 +36,7 @@ function planStatusLabel(status: PlanStatus): string {
     case "completed": return "已完成";
     case "in_progress": return "进行中";
     case "pending": return "待开始";
+    default: { const _exhaustive: never = status; return status; }
   }
 }
 

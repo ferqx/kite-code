@@ -134,7 +134,7 @@ export function useFileSearch(inputValue: string, workspace: string) {
     return scored.map(({ name, path }) => ({ name, path }));
   }, [query]);
 
-  const active = query !== null && results.length > 0;
+  const active = query !== null;
 
   const replaceQuery = (file: FileMatch): string => {
     return inputValue.replace(/@\S*$/, `@${file.path}`);

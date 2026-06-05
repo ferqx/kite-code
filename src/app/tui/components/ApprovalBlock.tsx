@@ -27,11 +27,13 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
 
   const pattern = approval.suggestedPrefixRule?.[0]
     ?? approval.command.split(/[;&|]/)[0].trim();
+  // Only pass pattern to onResolved if non-empty and showPattern is true
+  const effectivePattern = pattern.length > 0 ? pattern : undefined;
 
-  function resolve(grant: ShellApprovalGrant | null, patternStr: string) {
+  function resolve(grant: ShellApprovalGrant | null, patternToUse: string | undefined) {
     if (grant) {
       provider.submitAction({ type: "approve", grant });
-      onResolved(grant, grant, patternStr);
+      onResolved(grant, grant, patternToUse);
     } else {
       provider.submitAction({ type: "reject" });
       onResolved("denied");
@@ -43,8 +45,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
 
     const match = GRANTS.find((g) => g.key === lower);
     if (match) {
-      const patternStr = match.showPattern ? ` ("${pattern}")` : "";
-      resolve(match.grant, patternStr);
+      resolve(match.grant, match.showPattern ? effectivePattern : undefined);
       return;
     }
 
@@ -52,8 +53,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     if (key.downArrow) setSelected((s) => Math.min(GRANTS.length - 1, s + 1));
     if (key.return) {
       const opt = GRANTS[selectedRef.current];
-      const patternStr = opt.showPattern ? ` ("${pattern}")` : "";
-      resolve(opt.grant, patternStr);
+      resolve(opt.grant, opt.showPattern ? effectivePattern : undefined);
     }
   });
 
@@ -79,7 +79,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
         {GRANTS.map((g, i) => (
           <Text key={g.key} color={i === selected ? t.primary : t.muted}>
             {i === selected ? ">" : " "} [{g.key.toUpperCase()}] {g.label}
-            {g.showPattern ? ` ("${pattern}")` : ""}{!g.showPattern && g.desc ? `  ${g.desc}` : ""}
+            {g.showPattern && effectivePattern ? ` ("${effectivePattern}")` : ""}{!g.showPattern && g.desc ? `  ${g.desc}` : ""}
           </Text>
         ))}
       </Box>

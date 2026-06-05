@@ -16,6 +16,7 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
   const t = useTheme();
   const [selected, setSelected] = useState(0);
   const [freeText, setFreeText] = useState("");
+  const [showEmptyHint, setShowEmptyHint] = useState(false);
   const [mode, setMode] = useState<"select" | "type">(
     question.options.length > 0 ? "select" : "type"
   );
@@ -45,6 +46,9 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
     if (value.trim()) {
       provider.submitAction({ type: "input", text: value });
       onResolved(value);
+    } else {
+      setShowEmptyHint(true);
+      setTimeout(() => setShowEmptyHint(false), 2000);
     }
   };
 
@@ -75,6 +79,9 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
             <Text color={t.primary}>{"> "}</Text>
             <TextInput value={freeText} onChange={setFreeText} onSubmit={handleSubmit} placeholder="type your answer..." />
           </Box>
+          {showEmptyHint && (
+            <Text color={t.dim}>  Please type an answer before submitting</Text>
+          )}
         </Box>
       )}
     </Box>
