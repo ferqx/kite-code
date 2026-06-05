@@ -24,7 +24,13 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
   selectedRef.current = selected;
   const options = question.options;
 
-  useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+  useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) => {
+    if (key.escape) {
+      provider.submitAction({ type: "cancel" });
+      onResolved("cancelled");
+      return;
+    }
+
     if (input === "\t" && question.allow_free_text) {
       setMode((m) => (m === "select" ? "type" : "select"));
       return;

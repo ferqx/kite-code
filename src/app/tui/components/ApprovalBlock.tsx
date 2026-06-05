@@ -41,6 +41,12 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
   }
 
   useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) => {
+    if (key.escape) {
+      provider.submitAction({ type: "cancel" });
+      onResolved("cancelled");
+      return;
+    }
+
     const lower = input.toLowerCase();
 
     const match = GRANTS.find((g) => g.key === lower);

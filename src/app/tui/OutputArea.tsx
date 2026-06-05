@@ -34,11 +34,13 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
   const settledTurns = running ? turns.slice(0, -1) : turns;
   const activeTurn   = running ? turns.at(-1) : undefined;
 
-  // ── Turn-level settled blocks (cached — only changes when new turns settle or session switches) ──
-  const settledBlockCount = settledTurns.reduce((n, t) => n + t.blocks.length, 0);
+  // ── Turn-level settled blocks (cached — only changes when settled turns reference changes or session switches) ──
+  // Reference-based comparison: toggling block content (e.g. Ctrl+T after idle)
+  // creates a new turns array, so the ref detects it. Count-based comparison
+  // would miss content-only changes and cause stale renders in <Static>.
   const staticBlocksRef = useRef<OutputBlock[]>([]);
   const prevSessionKeyRef = useRef(sessionKey);
-  const prevSettledCountRef = useRef(0);
+  const prevSettledRef = useRef<Turn[] | null>(null);
 
   // Session switch: clear all caches and clear terminal.
   // Clear must be synchronous in render body so it lands in the same stdout flush
@@ -46,13 +48,13 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
   if (sessionKey !== prevSessionKeyRef.current) {
     prevSessionKeyRef.current = sessionKey;
     staticBlocksRef.current = [];
-    prevSettledCountRef.current = 0;
+    prevSettledRef.current = settledTurns;
     // eslint-disable-next-line no-restricted-properties -- intentional synchronous clear before Ink flush
     process.stdout.write("\x1B[2J\x1B[H");
   }
 
-  if (settledBlockCount !== prevSettledCountRef.current) {
-    prevSettledCountRef.current = settledBlockCount;
+  if (settledTurns !== prevSettledRef.current) {
+    prevSettledRef.current = settledTurns;
     staticBlocksRef.current = settledTurns.flatMap(t => t.blocks);
   }
   const staticBlocks = staticBlocksRef.current;
@@ -114,12 +116,15 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
     [mergedStaticBlocks],
   );
 
-  // Force <Static> to remount on session switch (sessionKey) or agent state change (running).
-  // Ink's Static tracks which items have been written to stdout; remounting resets this
-  // tracking so the Header (first item) re-renders when its props (running/error) change.
+  // Force <Static> to remount on session switch only.
+  // Previously included `running` in the key to force Header (cat) re-render,
+  // but this caused full conversation duplication in scrollback on every run/idle
+  // transition because Ink's Static resets its written-item tracking on remount.
+  // Trade-off: Header cat no longer animates between idle/working states, but
+  // conversation history is preserved correctly.
   const staticKey = useMemo(
-    () => `s-${sessionKey ?? 0}-${running ? 1 : 0}`,
-    [sessionKey, running],
+    () => `s-${sessionKey ?? 0}`,
+    [sessionKey],
   );
 
   return (
