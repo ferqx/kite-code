@@ -15,7 +15,6 @@ interface Props {
   placeholder?: string;
   focus?: boolean;
   mask?: string;
-  highlightPastedText?: boolean;
   showCursor?: boolean;
   onChange: (value: string, meta?: { insertPos: number; insertLen: number }) => void;
   onSubmit?: (value: string) => void;
@@ -32,7 +31,6 @@ function CtrlSafeTextInput({
   placeholder = "",
   focus = true,
   mask,
-  highlightPastedText = false,
   showCursor = true,
   onChange,
   onSubmit,
@@ -41,36 +39,21 @@ function CtrlSafeTextInput({
   onNavigateHistory,
   disableArrowNav,
 }: Props) {
-  const [state, setState] = useState({
-    cursorOffset: (originalValue || "").length,
-    cursorWidth: 0,
-  });
-  const { cursorOffset, cursorWidth } = state;
+  const [cursorOffset, setCursorOffset] = useState((originalValue || "").length);
 
   useEffect(() => {
-    setState((previousState) => {
-      if (!focus || !showCursor) {
-        return previousState;
-      }
-      const newValue = originalValue || "";
-      if (previousState.cursorOffset > newValue.length - 1) {
-        return {
-          cursorOffset: newValue.length,
-          cursorWidth: 0,
-        };
-      }
-      return previousState;
-    });
+    if (!focus || !showCursor) return;
+    const newValue = originalValue || "";
+    if (cursorOffset > newValue.length - 1) {
+      setCursorOffset(newValue.length);
+    }
   }, [originalValue, focus, showCursor]);
 
   useEffect(() => {
     if (!atomicBlock) return;
-    setState((prev) => {
-      if (prev.cursorOffset > atomicBlock.start && prev.cursorOffset <= atomicBlock.end) {
-        return { ...prev, cursorOffset: atomicBlock.end + 1 };
-      }
-      return prev;
-    });
+    if (cursorOffset > atomicBlock.start && cursorOffset <= atomicBlock.end) {
+      setCursorOffset(atomicBlock.end + 1);
+    }
   }, [atomicBlock]);
 
   // Bracketed paste mode: receives the full pasted string in one callback.
@@ -83,11 +66,10 @@ function CtrlSafeTextInput({
       text +
       originalValue.slice(cursorOffset);
     const newCursorOffset = cursorOffset + text.length;
-    setState({ cursorOffset: newCursorOffset, cursorWidth: text.length });
+    setCursorOffset(newCursorOffset);
     onChange(newValue, { insertPos: cursorOffset, insertLen: text.length });
   }, { isActive: focus });
 
-  const cursorActualWidth = highlightPastedText ? cursorWidth : 0;
   const value = mask ? mask.repeat(originalValue.length) : originalValue;
 
   // ── render helper: split into lines, highlight cursor ──
@@ -113,9 +95,7 @@ function CtrlSafeTextInput({
       if (line.length === 0) return chalk.inverse(" ");
       let rendered = "";
       for (let j = 0; j < line.length; j++) {
-        const highlighted =
-          j >= cursorCol - cursorActualWidth && j <= cursorCol;
-        rendered += highlighted ? chalk.inverse(line[j]) : line[j];
+        rendered += line[j];
       }
       if (cursorCol >= line.length) {
         rendered += chalk.inverse(" ");
@@ -176,7 +156,7 @@ function CtrlSafeTextInput({
             const newCol = Math.min(col, lines[lineIdx - 1].length);
             let newOffset = newCol;
             for (let i = 0; i < lineIdx - 1; i++) newOffset += lines[i].length + 1;
-            setState({ cursorOffset: newOffset, cursorWidth: 0 });
+            setCursorOffset(newOffset);
           } else {
             onNavigateHistory?.("up");
           }
@@ -185,7 +165,7 @@ function CtrlSafeTextInput({
             const newCol = Math.min(col, lines[lineIdx + 1].length);
             let newOffset = newCol;
             for (let i = 0; i <= lineIdx; i++) newOffset += lines[i].length + 1;
-            setState({ cursorOffset: newOffset, cursorWidth: 0 });
+            setCursorOffset(newOffset);
           } else {
             onNavigateHistory?.("down");
           }
@@ -195,7 +175,6 @@ function CtrlSafeTextInput({
 
       let nextCursorOffset = cursorOffset;
       let nextValue = originalValue;
-      let nextCursorWidth = 0;
       let insertMeta: { insertPos: number; insertLen: number } | undefined;
       const ab = atomicBlock;
 
@@ -218,7 +197,7 @@ function CtrlSafeTextInput({
               originalValue.slice(0, ab.start) +
               originalValue.slice(ab.end + 1);
             nextCursorOffset = ab.start;
-            setState({ cursorOffset: nextCursorOffset, cursorWidth: 0 });
+            setCursorOffset(nextCursorOffset);
             onChange(nextValue);
             onRemoveAtomicBlock?.();
             return;
@@ -235,7 +214,7 @@ function CtrlSafeTextInput({
               originalValue.slice(0, ab.start) +
               originalValue.slice(ab.end + 1);
             nextCursorOffset = ab.start;
-            setState({ cursorOffset: nextCursorOffset, cursorWidth: 0 });
+            setCursorOffset(nextCursorOffset);
             onChange(nextValue);
             onRemoveAtomicBlock?.();
             return;
@@ -251,9 +230,6 @@ function CtrlSafeTextInput({
             input +
             originalValue.slice(cursorOffset);
           nextCursorOffset += input.length;
-          if (input.length > 1) {
-            nextCursorWidth = input.length;
-          }
           insertMeta = { insertPos: cursorOffset, insertLen: input.length };
         }
       } else {
@@ -279,9 +255,6 @@ function CtrlSafeTextInput({
             originalValue.slice(cursorOffset);
           nextCursorOffset += input.length;
 
-          if (input.length > 1) {
-            nextCursorWidth = input.length;
-          }
           insertMeta = { insertPos: cursorOffset, insertLen: input.length };
         }
       }
@@ -294,10 +267,7 @@ function CtrlSafeTextInput({
         nextCursorOffset = nextValue.length;
       }
 
-      setState({
-        cursorOffset: nextCursorOffset,
-        cursorWidth: nextCursorWidth,
-      });
+      setCursorOffset(nextCursorOffset);
 
       if (nextValue !== originalValue) {
         onChange(nextValue, insertMeta);
