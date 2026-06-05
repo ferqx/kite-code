@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import type { StatusState } from "./types";
 import { useTheme } from "./theme";
+import { SPINNER } from "./components/render-utils";
 
 export function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -15,8 +16,6 @@ interface StatusBarProps {
   compacting: boolean;
   timerKey: number;
 }
-
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 export default function StatusBar({ status, running, compacting, timerKey }: StatusBarProps) {
   const t = useTheme();
