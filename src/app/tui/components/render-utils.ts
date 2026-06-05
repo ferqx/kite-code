@@ -1,14 +1,18 @@
-import { darkTheme } from "../theme";
-const dt = darkTheme;
-
 export const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-export function toolColor(status: string): string {
+export interface ThemeColors {
+  success: string;
+  error: string;
+  warning: string;
+  muted: string;
+}
+
+export function toolColor(status: string, t: ThemeColors): string {
   switch (status) {
-    case "done": return dt.success;
-    case "error": return dt.error;
-    case "running": return dt.warning;
-    default: return dt.muted;
+    case "done": return t.success;
+    case "error": return t.error;
+    case "running": return t.warning;
+    default: return t.muted;
   }
 }
 

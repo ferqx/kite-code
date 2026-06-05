@@ -77,7 +77,7 @@ export default function ToolCardBlock({ block }: ToolCardBlockProps) {
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={toolColor(block.status)}>⏺ </Text>
+        <Text color={toolColor(block.status, dt)}>⏺ </Text>
         <Text color={dt.primary}>{block.name}</Text>
         {block.detail ? (
           <Text color={dt.dim}> {block.detail}</Text>

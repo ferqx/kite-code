@@ -144,11 +144,12 @@ describe("formatDuration", () => {
 // ── OutputArea toolColor ──
 
 describe("toolColor", () => {
+  const t = { success: darkTheme.success, error: darkTheme.error, warning: darkTheme.warning, muted: darkTheme.muted };
   test("returns theme colors for each status", () => {
-    expect(toolColor("done")).toBe(darkTheme.success);
-    expect(toolColor("error")).toBe(darkTheme.error);
-    expect(toolColor("running")).toBe(darkTheme.warning);
-    expect(toolColor("pending")).toBe(darkTheme.muted);
-    expect(toolColor("unknown")).toBe(darkTheme.muted);
+    expect(toolColor("done", t)).toBe(darkTheme.success);
+    expect(toolColor("error", t)).toBe(darkTheme.error);
+    expect(toolColor("running", t)).toBe(darkTheme.warning);
+    expect(toolColor("pending", t)).toBe(darkTheme.muted);
+    expect(toolColor("unknown", t)).toBe(darkTheme.muted);
   });
 });
