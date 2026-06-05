@@ -92,6 +92,8 @@ export interface SessionSnapshot {
   active: boolean;
   running: boolean;
   pendingInterrupt: boolean;
+  /** Full interrupt state for session-switch restoration. Set on switch-away, read on switch-back. */
+  interrupt: InterruptState | null;
   plan: import("@/protocol/events").AgentPlan | null;
   status: StatusState;
   turns: Turn[];

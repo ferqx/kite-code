@@ -2,15 +2,26 @@
 
 import type { Action } from "./actions";
 import type { TuiState, OutputBlock, SessionSnapshot, Turn } from "../types";
-import { reconstructTurns } from "./helpers";
+import { reconstructTurns, appendBlock, buildBlockIndex } from "./helpers";
+
+/** Compute nextBlockId from turns (max block ID + 1, or 0 if empty) */
+function maxBlockIdInTurns(turns: Turn[]): number {
+  let max = 0;
+  for (const turn of turns) {
+    for (const b of turn.blocks) {
+      if (b.id >= max) max = b.id;
+    }
+  }
+  return max;
+}
 
 export function sessionReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case "NEW_SESSION": {
-      // Save current session turns/status to outgoing snapshot
+      // Save current session turns/status/interrupt/running to outgoing snapshot
       const newSessions = state.sessions.map(s =>
         s.threadId === state.activeSessionId
-          ? { ...s, turns: state.turns, status: state.status, active: false }
+          ? { ...s, turns: state.turns, status: state.status, interrupt: state.interrupt, running: state.running, active: false }
           : s
       );
       const newSnapshot: SessionSnapshot = {
@@ -20,6 +31,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         active: true,
         running: false,
         pendingInterrupt: false,
+        interrupt: null,
         plan: null,
         status: { ...state.status, totalTokens: 0, cacheHitRate: 0,currentNode: null, plan: null },
         turns: [],
@@ -29,6 +41,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         sessions: [...newSessions, newSnapshot],
         activeSessionId: action.threadId,
         turns: [],
+        nextBlockId: 0,
         toolStartTimes: undefined,
         blockIndex: {},
         interrupt: null,
@@ -52,10 +65,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
     case "LOAD_SESSION_PENDING":
       return { ...state, loadingSession: true };
     case "LOAD_SESSION": {
-      // Save outgoing session's turns/status before overwriting (same pattern as SWITCH_SESSION / NEW_SESSION)
+      // Save outgoing session's turns/status/interrupt/running before overwriting
       const sessionsWithSaved = state.sessions.map(s =>
         s.threadId === state.activeSessionId
-          ? { ...s, turns: state.turns, status: state.status, active: false }
+          ? { ...s, turns: state.turns, status: state.status, interrupt: state.interrupt, running: state.running, active: false }
           : s
       );
       const sessions = sessionsWithSaved.map(s =>
@@ -72,15 +85,20 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
             }
           : s
       );
+      const target = sessions.find(s => s.threadId === action.threadId);
+      const loadedTurns = reconstructTurns(action.blocks);
       return {
         ...state,
         sessions,
         activeSessionId: action.threadId,
-        turns: reconstructTurns(action.blocks),
-        blockIndex: {},
+        turns: loadedTurns,
+        blockIndex: buildBlockIndex(loadedTurns),
         toolStartTimes: undefined,
         interrupt: action.interrupt,
+        showHelp: false,
         showSessions: false,
+        showModelSelector: false,
+        showMcp: false,
         showRewind: false,
         checkpoints: [],
         exited: false,
@@ -92,31 +110,35 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         sessionError: false,
         ctrlCPressed: false,
         exitRequested: false,
+        editorRequested: false,
         status: {
-          ...state.status,
-          modelProvider: action.modelProvider || state.status.modelProvider,
-          modelName: action.modelName || state.status.modelName,
-          thinkingMode: action.thinkingLevel || state.status.thinkingMode,
+          ...(target?.status ?? state.status),
+          modelProvider: action.modelProvider || target?.status.modelProvider || state.status.modelProvider,
+          modelName: action.modelName || target?.status.modelName || state.status.modelName,
+          thinkingMode: action.thinkingLevel || target?.status.thinkingMode || state.status.thinkingMode,
         },
       };
     }
     case "SWITCH_SESSION": {
       const sessions = state.sessions.map(s =>
         s.threadId === state.activeSessionId
-          ? { ...s, turns: state.turns, status: state.status, active: false }
+          ? { ...s, turns: state.turns, status: state.status, interrupt: state.interrupt, running: state.running, active: false }
           : s.threadId === action.threadId
             ? { ...s, active: true }
             : s
       );
       const target = sessions.find(s => s.threadId === action.threadId);
+      const targetTurns = target?.turns ?? [];
       return {
         ...state,
         sessions,
         activeSessionId: action.threadId,
-        turns: target?.turns ?? [],
-        blockIndex: {},
+        turns: targetTurns,
+        blockIndex: buildBlockIndex(targetTurns),
+        nextBlockId: Math.max(state.nextBlockId, maxBlockIdInTurns(targetTurns) + 1),
         status: target?.status ?? state.status,
-        interrupt: target?.pendingInterrupt ? state.interrupt : null,
+        interrupt: target?.interrupt ?? null,
+        toolStartTimes: undefined,
         exited: false,
         running: target?.running ?? false,
         compacting: false,
@@ -166,10 +188,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         status: { ...state.status, modelName: action.modelId },
       };
     case "USER_MESSAGE": {
-      const id = state.nextBlockId;
-      const block: OutputBlock = { id, kind: "user", content: action.text };
-      const newTurn: Turn = { blocks: [block] };
-      return { ...state, turns: [...state.turns, newTurn], nextBlockId: id + 1 };
+      const block: OutputBlock = { id: state.nextBlockId, kind: "user", content: action.text };
+      return appendBlock(state, block);
     }
     default:
       return null;

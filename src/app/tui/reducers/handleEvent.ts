@@ -96,18 +96,20 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case "text": {
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
-      // Stream-append: update the last block if it's a streaming text block
+      // Stream-append: update the last block if it's a streaming text block.
+      // Skip update if content hasn't changed to avoid unnecessary re-renders.
       if (state.running && lastBlock?.kind === "text") {
+        if (lastBlock.content === event.data.text) return state;
         return updateLastBlock(state, { ...lastBlock, content: event.data.text });
       }
-      // Dedup: check the most recent text block in the last turn
+      // Dedup: check all text blocks in the last turn (not just the most recent one)
       if (lastBlock?.kind === "text" && lastBlock.content === event.data.text) return state;
       if (last) {
         for (let i = last.blocks.length - 1; i >= 0; i--) {
           const blk = last.blocks[i];
           if (blk.kind === "text") {
             if (blk.content === event.data.text) return state;
-            break;
+            // Continue scanning — don't break, as there may be earlier text blocks with same content
           }
         }
       }
@@ -190,20 +192,22 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (d.modelName) next.modelName = d.modelName;
       let nextState = state;
       if (d.plan) {
-        // Find the latest plan_card
+        // Update ALL plan_card blocks (not just the most recent one)
         for (let ti = state.turns.length - 1; ti >= 0; ti--) {
           const turn = state.turns[ti];
+          let turnChanged = false;
+          const blocks = turn.blocks.slice();
           for (let bi = turn.blocks.length - 1; bi >= 0; bi--) {
             const b = turn.blocks[bi];
             if (b.kind === "plan_card") {
-              const blocks = turn.blocks.slice();
-              blocks[bi] = { ...b, planStatus: d.plan.status, steps: d.plan.steps };
-              const turns = state.turns.slice();
-              turns[ti] = { blocks };
-              nextState = { ...nextState, turns };
-              // break label simulation
-              ti = -1; break;
+              blocks[bi] = { ...b, planStatus: d.plan.status ?? b.planStatus, steps: d.plan.steps ?? b.steps };
+              turnChanged = true;
             }
+          }
+          if (turnChanged) {
+            const turns = nextState.turns.slice();
+            turns[ti] = { blocks };
+            nextState = { ...nextState, turns };
           }
         }
       }
@@ -226,7 +230,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         ...state,
         status: {
           ...state.status,
-          cacheHitRate: d.hitRate ?? 0,
+          cacheHitRate: d.hitRate ?? state.status.cacheHitRate,
           totalTokens: state.status.totalTokens + d.inputTokens + (d.outputTokens ?? 0),
         },
       };
@@ -319,10 +323,29 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case "subagent_tool_result": {
       const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
       if (!matched) return state;
+      // Reverse-scan to find the last UNRESOLVED step with matching toolName.
+      // Prefer unresolved steps to handle out-of-order results correctly:
+      // e.g., two read_file steps — first result resolves the last unresolved one,
+      // second result resolves the remaining one.
+      let lastMatchIdx = -1;
+      for (let i = matched.steps.length - 1; i >= 0; i--) {
+        if (matched.steps[i].toolName === event.data.toolName && matched.steps[i].ok === undefined) {
+          lastMatchIdx = i;
+          break;
+        }
+      }
+      // Fallback: if all matching steps already have ok, re-resolve the last one
+      if (lastMatchIdx === -1) {
+        for (let i = matched.steps.length - 1; i >= 0; i--) {
+          if (matched.steps[i].toolName === event.data.toolName) {
+            lastMatchIdx = i;
+            break;
+          }
+        }
+      }
+      if (lastMatchIdx === -1) return state;
       const steps = matched.steps.map((s, i) =>
-        i === matched.steps.length - 1 && s.toolName === event.data.toolName
-          ? { ...s, ok: event.data.ok }
-          : s
+        i === lastMatchIdx ? { ...s, ok: event.data.ok } : s
       );
       if (steps.every((s, i) => s === matched.steps[i])) return state;
       const next: OutputBlock = { ...matched, steps };

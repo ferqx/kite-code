@@ -4,6 +4,17 @@ import type { Action } from "./actions";
 import type { TuiState, OutputBlock } from "../types";
 import { findBlockById, replaceBlockById } from "./helpers";
 
+/** Collect all reason blocks across all turns — shared by TOGGLE_ALL_REASON and TOGGLE_THINKING */
+function collectReasonBlocks(state: TuiState): (OutputBlock & { kind: "reason" })[] {
+  const reasonBlocks: (OutputBlock & { kind: "reason" })[] = [];
+  for (const turn of state.turns) {
+    for (const b of turn.blocks) {
+      if (b.kind === "reason") reasonBlocks.push(b);
+    }
+  }
+  return reasonBlocks;
+}
+
 export function uiReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case "SHOW_HELP":
@@ -36,12 +47,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       return replaceBlockById(state, action.id, { ...block, folded: !block.folded });
     }
     case "TOGGLE_ALL_REASON": {
-      const reasonBlocks: (OutputBlock & { kind: "reason" })[] = [];
-      for (const turn of state.turns) {
-        for (const b of turn.blocks) {
-          if (b.kind === "reason") reasonBlocks.push(b);
-        }
-      }
+      const reasonBlocks = collectReasonBlocks(state);
       if (reasonBlocks.length === 0) return state;
       const anyExpanded = reasonBlocks.some((b) => !b.folded);
       let next = state;
@@ -51,12 +57,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       return next;
     }
     case "TOGGLE_THINKING": {
-      const reasonBlocks: (OutputBlock & { kind: "reason" })[] = [];
-      for (const turn of state.turns) {
-        for (const b of turn.blocks) {
-          if (b.kind === "reason") reasonBlocks.push(b);
-        }
-      }
+      const reasonBlocks = collectReasonBlocks(state);
       const anyExpanded = reasonBlocks.some((b) => !b.folded);
       const isVisible = state.thinkingVisible && anyExpanded;
       if (isVisible) {
@@ -84,7 +85,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       return replaceBlockById(state, action.id, { ...block, expanded: !block.expanded });
     }
     case "CLEAR_OUTPUT":
-      return { ...state, turns: [], toolStartTimes: undefined, currentRunReasonId: undefined };
+      return { ...state, turns: [], nextBlockId: 0, blockIndex: {}, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined };
     case "ESCAPE": {
       if (state.showHelp) return { ...state, showHelp: false };
       if (state.showSessions) return { ...state, showSessions: false };

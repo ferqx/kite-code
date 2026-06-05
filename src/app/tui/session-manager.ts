@@ -360,6 +360,7 @@ export class SessionManager {
         active: threadId === this.activeId,
         running: rt.agentLoopActive,
         pendingInterrupt: rt.pendingInterrupt,
+        interrupt: null,
         plan: null,
         status: initialStatusSnapshot(),
         turns: [],

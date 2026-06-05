@@ -23,36 +23,39 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case "SET_RUNNING":
-      return { ...state, running: true, exited: false, interrupt: null, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false };
+      return { ...state, running: true, exited: false, interrupt: null, toolStartTimes: undefined, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false };
     case "SET_IDLE": {
-      return { ...finalizeLastTurnStreaming(state), running: false, exited: false, interrupt: null, currentRunReasonId: undefined };
+      return { ...finalizeLastTurnStreaming(state), running: false, exited: false, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined };
     }
     case "SET_EXITED": {
-      const elapsedSec = state.runStartTime ? Math.round((Date.now() - state.runStartTime) / 1000) : 0;
+      const s = finalizeLastTurnStreaming(state);
+      const elapsedSec = s.runStartTime ? Math.round((Date.now() - s.runStartTime) / 1000) : 0;
       const elapsedStr = elapsedSec >= 60
         ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
         : `${elapsedSec}s`;
       let changeCount = 0;
-      for (const turn of state.turns) {
+      for (const turn of s.turns) {
         for (const b of turn.blocks) {
           if (b.kind === "file_change") changeCount += (b as Extract<OutputBlock, { kind: "file_change" }>).changes.length;
         }
       }
       const summary = [elapsedStr, changeCount > 0 ? `${changeCount} files` : null].filter(Boolean).join(" · ");
-      const block: OutputBlock = { id: state.nextBlockId, kind: "text", content: `── ${summary} ──` };
-      return { ...state, exited: true, turns: appendBlock(state, block).turns, nextBlockId: state.nextBlockId + 1 };
+      const block: OutputBlock = { id: s.nextBlockId, kind: "text", content: `── ${summary} ──` };
+      const appended = appendBlock(s, block);
+      return { ...appended, exited: true, interrupt: null };
     }
     case "RESOLVE_INTERRUPT": {
       const b = findBlockById(state, action.blockId);
       if (!b || (b.kind !== "approval" && b.kind !== "question")) {
-        return { ...state, interrupt: null };
+        return state;
       }
       let resolved: OutputBlock;
       if (b.kind === "approval") {
         const r = typeof action.resolution === "string" ? { action: action.resolution } : action.resolution;
         resolved = { ...b, resolved: r };
       } else {
-        resolved = { ...b, resolved: typeof action.resolution === "string" ? action.resolution : String(action.resolution) };
+        if (typeof action.resolution !== "string") return state;
+        resolved = { ...b, resolved: action.resolution };
       }
       return { ...replaceBlockById(state, action.blockId, resolved), interrupt: null };
     }

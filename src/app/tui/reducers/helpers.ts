@@ -3,9 +3,22 @@ import type { TuiState, OutputBlock, Turn } from "../types";
 /** Soft cap on turns to prevent unbounded memory growth in long sessions */
 const MAX_TURNS = 500;
 
+/** Rebuild blockIndex from all current turns — used after trimming or clearing */
+export function buildBlockIndex(turns: Turn[]): Record<string, number> {
+  const idx: Record<string, number> = {};
+  for (const turn of turns) {
+    for (const b of turn.blocks) {
+      if (b.kind === "tool_card") idx[b.callId] = b.id;
+      else if (b.kind === "subagent") idx[b.subagentId] = b.id;
+    }
+  }
+  return idx;
+}
+
 function trimTurns(state: TuiState): TuiState {
   if (state.turns.length <= MAX_TURNS) return state;
-  return { ...state, turns: state.turns.slice(state.turns.length - MAX_TURNS) };
+  const trimmed = state.turns.slice(state.turns.length - MAX_TURNS);
+  return { ...state, turns: trimmed, blockIndex: buildBlockIndex(trimmed) };
 }
 
 /** 追加 block 到最后 turn，自增 nextBlockId。
@@ -71,8 +84,7 @@ export function finalizeLastTurnStreaming(state: TuiState): TuiState {
   const blocks = last.blocks.map((b) => {
     if (b.kind === "text" && b.streaming) {
       changed = true;
-      const { streaming: _, ...rest } = b;
-      return { ...rest, streaming: false } as OutputBlock;
+      return { ...b, streaming: false } as typeof b;
     }
     return b;
   });
