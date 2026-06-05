@@ -23,9 +23,6 @@ interface OutputAreaProps {
   sessionKey?: number;
 }
 
-/** Sentinel: ensures <Static> always has ≥1 item so Header renders even with no completed blocks */
-const HEADER_SENTINEL = { __header: true } as const;
-
 export default function OutputArea({ turns, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, thinkingVisible, running, overlayActive, header, sessionKey }: OutputAreaProps) {
   // ── Two-level Static/Dynamic split ──
   //   Turn level: settled turns → Static, active turn → split further
@@ -106,22 +103,13 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
     }
   }, { isActive: !overlayActive });
 
-  // ── Merged static items: [Header sentinel, ...turn-level settled, ...block-level settled] ──
+  // ── Merged static items: all settled blocks for <Static> scrollback ──
+  // Header is rendered in the dynamic tree above, not inside <Static>.
   const mergedStaticBlocks = useMemo(
     () => [...staticBlocks, ...activeSettledBlocks],
     [staticBlocks, activeSettledBlocks],
   );
-  const staticItems = useMemo(
-    () => [HEADER_SENTINEL, ...mergedStaticBlocks],
-    [mergedStaticBlocks],
-  );
 
-  // Force <Static> to remount on session switch only.
-  // Previously included `running` in the key to force Header (cat) re-render,
-  // but this caused full conversation duplication in scrollback on every run/idle
-  // transition because Ink's Static resets its written-item tracking on remount.
-  // Trade-off: Header cat no longer animates between idle/working states, but
-  // conversation history is preserved correctly.
   const staticKey = useMemo(
     () => `s-${sessionKey ?? 0}`,
     [sessionKey],
@@ -129,22 +117,20 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
 
   return (
     <Box flexDirection="column">
+      {/* Header in dynamic tree — always visible at top of viewport.
+          Moved out of <Static> to prevent duplication during TUI initialization
+          (Ink may flush <Static> output in multiple phases when tree changes). */}
+      {header}
       <Box height={0} overflow="hidden">
-      <Static key={staticKey} items={staticItems}>
-        {(item, index) => {
-          if (index === 0) {
-            return <React.Fragment key="header">{header}</React.Fragment>;
-          }
-          const blockIdx = index - 1;
-          const block = mergedStaticBlocks[blockIdx];
-          if (!block) return null;
-          const prevBlock = blockIdx > 0 ? mergedStaticBlocks[blockIdx - 1] : undefined;
+      <Static key={staticKey} items={mergedStaticBlocks}>
+        {(block, index) => {
+          const prevBlock = index > 0 ? mergedStaticBlocks[index - 1] : undefined;
           return <BlockRenderer
             key={block.id}
             block={block}
             isFocused={false}
             thinkingVisible={thinkingVisible}
-            index={blockIdx}
+            index={index}
             prevBlock={prevBlock}
           />;
         }}
@@ -158,9 +144,7 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
           isFocused={false}
           thinkingVisible={thinkingVisible}
           index={0}
-          prevBlock={activeSettledBlocks.length > 0
-            ? activeSettledBlocks[activeSettledBlocks.length - 1]
-            : staticBlocks.at(-1)}
+          prevBlock={mergedStaticBlocks.at(-1)}
         />
       )}
     </Box>
