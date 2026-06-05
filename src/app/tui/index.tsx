@@ -370,7 +370,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           const { mkdirSync } = await import("node:fs");
           const dir = filename.split("/").slice(0, -1).join("/") || ".";
           mkdirSync(dir, { recursive: true });
-          await fs.writeFile(filename, header + body, "utf-8");
+          await fs.writeFile(filename, header + body, { encoding: "utf-8", mode: 0o600 });
           dispatch({ type: "EXPORT_SESSION_DONE", filename });
         } catch (e: any) {
           dispatch({ type: "EVENT", event: { type: "error", data: { message: `Export failed: ${e?.message ?? e}`, recoverable: false } } });
@@ -450,13 +450,16 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         }
 
         // Fire-and-forget: generate smart session name once after first message
+        // Guard: only if the session is still active to prevent cross-session writes.
         (async () => {
           try {
             // Only generate if not already named (name still equals threadId)
             if (rt.name !== threadId) return;
+            const stillActive = threadIdRef.current === threadId;
+            if (!stillActive) return;
             const { generateSessionName, persistSessionName } = await import("../../core/persistence/sessions.js");
             const name = await generateSessionName(task);
-            if (name) {
+            if (name && threadIdRef.current === threadId) {
               await persistSessionName(defaultCheckpointPath(), threadId, name);
               sessionManager.setName(threadId, name);
               dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });

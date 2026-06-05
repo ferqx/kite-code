@@ -18,12 +18,15 @@ export function useMcpConnection(
     mcpManagerRef.current = manager;
     setMcpManager(manager);
     sessionManager.updateMcpManager(manager);
+    let cancelled = false;
     manager.connectAll(mcpConfig.servers).then(() => {
+      if (cancelled) return;
       setMcpPromptRegistry(new Map(manager.getPromptRegistry()));
     }).catch((err) => {
       console.error("[MCP] Failed to connect servers:", err);
     });
     return () => {
+      cancelled = true;
       manager.disconnectAll().catch((err) => {
         console.error("[MCP] Failed to disconnect servers:", err);
       });

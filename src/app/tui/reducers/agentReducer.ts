@@ -4,6 +4,22 @@ import type { Action } from "./actions";
 import type { TuiState, OutputBlock } from "../types";
 import { appendBlock, findBlockById, replaceBlockById, finalizeLastTurnStreaming } from "./helpers";
 
+/** Shared helper: cancel a running interrupt during Ctrl+C or Escape */
+function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
+  let next = finalizeLastTurnStreaming(s);
+  if (s.interrupt) {
+    const b = findBlockById(next, s.interrupt.blockId);
+    if (b) {
+      if (b.kind === "approval") {
+        next = replaceBlockById(next, b.id, { ...b, resolved: { action: "cancelled" } });
+      } else if (b.kind === "question") {
+        next = replaceBlockById(next, b.id, { ...b, resolved: "cancelled" });
+      }
+    }
+  }
+  return { ...next, running: false, ctrlCPressed: setCtrlCPressed, interrupt: null };
+}
+
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case "SET_RUNNING":
@@ -80,39 +96,14 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
     case "SET_PHASE":
       return { ...state, status: { ...state.status, phase: action.phase } };
+
     case "CTRL_C": {
-      if (state.running) {
-        let next = finalizeLastTurnStreaming(state);
-        if (state.interrupt) {
-          const b = findBlockById(next, state.interrupt.blockId);
-          if (b) {
-            if (b.kind === "approval") {
-              next = replaceBlockById(next, b.id, { ...b, resolved: { action: "cancelled" } });
-            } else if (b.kind === "question") {
-              next = replaceBlockById(next, b.id, { ...b, resolved: "cancelled" });
-            }
-          }
-        }
-        return { ...next, running: false, ctrlCPressed: true, interrupt: null };
-      }
+      if (state.running) return cancelInterrupt(state, true);
       if (state.ctrlCPressed) return { ...state, exitRequested: true };
       return { ...state, ctrlCPressed: true };
     }
     case "ESCAPE": {
-      if (state.running) {
-        let next = finalizeLastTurnStreaming(state);
-        if (state.interrupt) {
-          const b = findBlockById(next, state.interrupt.blockId);
-          if (b) {
-            if (b.kind === "approval") {
-              next = replaceBlockById(next, b.id, { ...b, resolved: { action: "cancelled" } });
-            } else if (b.kind === "question") {
-              next = replaceBlockById(next, b.id, { ...b, resolved: "cancelled" });
-            }
-          }
-        }
-        return { ...next, running: false, ctrlCPressed: true, interrupt: null };
-      }
+      if (state.running) return cancelInterrupt(state, true);
       if (state.interrupt) {
         const b = findBlockById(state, state.interrupt.blockId);
         if (b) {

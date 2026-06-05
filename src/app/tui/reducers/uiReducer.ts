@@ -7,23 +7,23 @@ import { findBlockById, replaceBlockById } from "./helpers";
 export function uiReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case "SHOW_HELP":
-      return { ...state, showHelp: true };
+      return { ...state, showHelp: true, showModelSelector: false, showSessions: false, showMcp: false, showRewind: false };
     case "HIDE_HELP":
       return { ...state, showHelp: false };
     case "SHOW_MODEL_SELECTOR":
-      return { ...state, showModelSelector: true };
+      return { ...state, showModelSelector: true, showHelp: false, showSessions: false, showMcp: false, showRewind: false };
     case "HIDE_MODEL_SELECTOR":
       return { ...state, showModelSelector: false };
     case "SHOW_SESSIONS":
-      return { ...state, showSessions: true };
+      return { ...state, showSessions: true, showHelp: false, showModelSelector: false, showMcp: false, showRewind: false };
     case "HIDE_SESSIONS":
       return { ...state, showSessions: false };
     case "SHOW_MCP":
-      return { ...state, showMcp: true };
+      return { ...state, showMcp: true, showHelp: false, showModelSelector: false, showSessions: false, showRewind: false };
     case "HIDE_MCP":
       return { ...state, showMcp: false };
     case "SHOW_REWIND":
-      return { ...state, showRewind: true };
+      return { ...state, showRewind: true, showHelp: false, showModelSelector: false, showSessions: false, showMcp: false };
     case "HIDE_REWIND":
       return { ...state, showRewind: false, checkpoints: [] };
     case "EDITOR_DONE":

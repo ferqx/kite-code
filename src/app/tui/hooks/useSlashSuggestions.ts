@@ -99,7 +99,7 @@ export function useSlashSuggestions(
         args: c.args,
       })),
     };
-  }, [inputValue]);
+  }, [inputValue, skillManifests]);
 
   // Reset selection when results change
   const active = result !== null && result.items.length > 0;
