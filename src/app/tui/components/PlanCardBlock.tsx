@@ -44,7 +44,7 @@ export default function PlanCardBlock({ block }: PlanCardBlockProps) {
   const dt = useTheme();
   if (block.folded) {
     return (
-      <Box marginBottom={1}>
+      <Box>
         <Text color={dt.muted}>
           ▶ Plan: {block.name} ({block.steps.length} 步骤, {planStatusLabel(block.planStatus)})
         </Text>
@@ -57,7 +57,7 @@ export default function PlanCardBlock({ block }: PlanCardBlockProps) {
   const color = planStatusColor(block.planStatus, dt);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={dt.primary} paddingX={1} marginBottom={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={dt.primary} paddingX={1}>
       {/* Header */}
       <Box>
         <Text color={color}>{icon} </Text>
