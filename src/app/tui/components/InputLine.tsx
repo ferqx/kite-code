@@ -15,6 +15,7 @@ import { useTheme } from "@/app/tui/theme";
 import { useOverlayHeight } from "../hooks/useOverlayHeight";
 
 export const PASTE_THRESHOLD = 100;
+const MAX_INPUT_LENGTH = 100_000; // 100KB — reject input exceeding this to prevent DOS
 
 interface PasteState {
   pastedContent: string;
@@ -215,10 +216,19 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       finalValue = finalValue.replace(/\r\n?/g, "\n");
 
       if (!finalValue.trim()) return;
+      if (finalValue.length > MAX_INPUT_LENGTH) {
+        // Reject oversized input silently
+        return;
+      }
       if (finalValue.startsWith("/") && slashNeedsCommitRef.current) return;
       if (fileActiveRef.current) return;
       setPasteState(null);
-      setHistory((prev) => [...prev, finalValue]);
+      setHistory((prev) => {
+        const next = [...prev, finalValue];
+        // Cap history to prevent unbounded memory growth
+        if (next.length > 500) return next.slice(next.length - 500);
+        return next;
+      });
       setHistoryIndex(-1);
       textKeyRef.current++;
       onSubmit(finalValue);
@@ -298,7 +308,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     // Slash command suggestion navigation
     if (slashSuggestions.active && slashSuggestions.result) {
       if (key.escape) {
-        commitValue("");
+        // Dismiss suggestions without clearing input (preserve what user typed)
         return;
       }
       if (key.upArrow) {

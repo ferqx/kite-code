@@ -229,7 +229,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
       {block.summary && (
         <Box paddingLeft={3} flexDirection="column">
           <Box paddingLeft={0}>
-            <Text color={dt.dim}>│ </Text>
+            <Text color={dt.dim}>── Summary ──</Text>
           </Box>
           <MarkdownBlock content={block.summary} color={dt.dim} />
         </Box>

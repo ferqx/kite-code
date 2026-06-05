@@ -1,7 +1,6 @@
 import React, { useState, useRef } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
-import TextInput from "ink-text-input";
 import type { ToolApprovalPayload, ShellApprovalGrant } from "@/protocol/events";
 import type { TuiUserInputProvider } from "@/app/tui/provider";
 import { useTheme } from "@/app/tui/theme";
@@ -22,8 +21,6 @@ const GRANTS: { key: string; label: string; grant: ShellApprovalGrant | null; de
 export default function ApprovalBlock({ approval, provider, onResolved }: ApprovalBlockProps) {
   const t = useTheme();
   const [selected, setSelected] = useState(0);
-  const [editMode, setEditMode] = useState(false);
-  const [editedCommand, setEditedCommand] = useState(approval.command);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const riskColor = t.risk[approval.risk] ?? t.risk.unknown;
@@ -31,33 +28,23 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
   const pattern = approval.suggestedPrefixRule?.[0]
     ?? approval.command.split(/[;&|]/)[0].trim();
 
+  function resolve(grant: ShellApprovalGrant | null, patternStr: string) {
+    if (grant) {
+      provider.submitAction({ type: "approve", grant });
+      onResolved(grant, grant, patternStr);
+    } else {
+      provider.submitAction({ type: "reject" });
+      onResolved("denied");
+    }
+  }
+
   useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) => {
-    if (key.escape && editMode) {
-      setEditMode(false);
-      setEditedCommand(approval.command);
-      return;
-    }
-
-    if (editMode) return; // TextInput handles input when in edit mode
-
     const lower = input.toLowerCase();
-
-    // 'E' key — edit command before approving
-    if (lower === "e" && !editMode) {
-      setEditMode(true);
-      return;
-    }
 
     const match = GRANTS.find((g) => g.key === lower);
     if (match) {
-      if (match.grant) {
-        const patternStr = match.showPattern ? ` ("${pattern}")` : "";
-        provider.submitAction({ type: "approve", grant: match.grant });
-        onResolved(match.grant, match.grant, patternStr);
-      } else {
-        provider.submitAction({ type: "reject" });
-        onResolved("denied");
-      }
+      const patternStr = match.showPattern ? ` ("${pattern}")` : "";
+      resolve(match.grant, patternStr);
       return;
     }
 
@@ -65,14 +52,8 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     if (key.downArrow) setSelected((s) => Math.min(GRANTS.length - 1, s + 1));
     if (key.return) {
       const opt = GRANTS[selectedRef.current];
-      if (opt.grant) {
-        const patternStr = opt.showPattern ? ` ("${pattern}")` : "";
-        provider.submitAction({ type: "approve", grant: opt.grant });
-        onResolved(opt.grant, opt.grant, patternStr);
-      } else {
-        provider.submitAction({ type: "reject" });
-        onResolved("denied");
-      }
+      const patternStr = opt.showPattern ? ` ("${pattern}")` : "";
+      resolve(opt.grant, patternStr);
     }
   });
 
@@ -81,15 +62,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       <Text bold color={riskColor}>⚠ Approval</Text>
       <Text>
         <Text color={t.muted}>Command: </Text>
-        {editMode ? (
-          <TextInput
-            value={editedCommand}
-            onChange={setEditedCommand}
-            onSubmit={() => setEditMode(false)}
-          />
-        ) : (
-          <Text color={t.primary}>{approval.command}</Text>
-        )}
+        <Text color={t.primary}>{approval.command}</Text>
       </Text>
       <Text>
         <Text color={t.muted}>Risk: </Text>
@@ -111,11 +84,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
         ))}
       </Box>
       <Box height={1} />
-      <Text color={t.dim}>
-        {editMode
-          ? "Editing command — Enter to confirm, Esc to cancel"
-          : "Press key to select, E to edit command, up/down + Enter"}
-      </Text>
+      <Text color={t.dim}>Press key to select, up/down + Enter</Text>
     </Box>
   );
 }

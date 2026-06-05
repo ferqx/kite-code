@@ -43,9 +43,10 @@ interface PlanCardBlockProps {
 export default function PlanCardBlock({ block }: PlanCardBlockProps) {
   const dt = useTheme();
   if (block.folded) {
+    const statusColor = planStatusColor(block.planStatus, dt);
     return (
       <Box>
-        <Text color={dt.muted}>
+        <Text color={statusColor}>
           ▶ Plan: {block.name} ({block.steps.length} 步骤, {planStatusLabel(block.planStatus)})
         </Text>
         <Text color={dt.dim}> Enter 展开</Text>

@@ -1,15 +1,23 @@
 import type { TuiState, OutputBlock, Turn } from "../types";
 
+/** Soft cap on turns to prevent unbounded memory growth in long sessions */
+const MAX_TURNS = 500;
+
+function trimTurns(state: TuiState): TuiState {
+  if (state.turns.length <= MAX_TURNS) return state;
+  return { ...state, turns: state.turns.slice(state.turns.length - MAX_TURNS) };
+}
+
 /** 追加 block 到最后 turn，自增 nextBlockId。
  *  若 turns 为空，自动创建首个 turn。 */
 export function appendBlock(state: TuiState, block: OutputBlock): TuiState {
   if (state.turns.length === 0) {
-    return { ...state, turns: [{ blocks: [block] }], nextBlockId: state.nextBlockId + 1 };
+    return trimTurns({ ...state, turns: [{ blocks: [block] }], nextBlockId: state.nextBlockId + 1 });
   }
   const turns = state.turns.slice();
   const last = turns.at(-1)!;
   turns[turns.length - 1] = { blocks: [...last.blocks, block] };
-  return { ...state, turns, nextBlockId: state.nextBlockId + 1 };
+  return trimTurns({ ...state, turns, nextBlockId: state.nextBlockId + 1 });
 }
 
 /** 按 id 查找 block（跨所有 turns） */

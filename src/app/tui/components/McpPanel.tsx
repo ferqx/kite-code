@@ -32,7 +32,7 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
     if (key.escape) { onClose(); return; }
     if (key.upArrow) { setScrollOffset((s) => Math.max(0, s - 1)); return; }
     if (key.downArrow) { setScrollOffset((s) => Math.min(flatRows.length - 1, s + 1)); return; }
-    onClose();
+    // Only close on Escape — other keys are ignored
   });
 
   if (states.size === 0) {
