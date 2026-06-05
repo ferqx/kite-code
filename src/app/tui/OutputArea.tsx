@@ -23,6 +23,9 @@ interface OutputAreaProps {
   sessionKey?: number;
 }
 
+/** Sentinel: ensures <Static> always has ≥1 item so Header renders even with no completed blocks */
+const HEADER_SENTINEL = { __header: true } as const;
+
 export default function OutputArea({ turns, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, thinkingVisible, running, overlayActive, header, sessionKey }: OutputAreaProps) {
   // ── Two-level Static/Dynamic split ──
   //   Turn level: settled turns → Static, active turn → split further
@@ -36,7 +39,10 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
   // creates a new turns array, so the ref detects it. Count-based comparison
   // would miss content-only changes and cause stale renders in <Static>.
   const staticBlocksRef = useRef<OutputBlock[]>([]);
-  const prevSessionKeyRef = useRef(sessionKey);
+  // Initialize with undefined so first render always clears terminal (sessionKey=0 !== undefined).
+  // This ensures a clean slate when transitioning from StartupScreen to App, preventing
+  // any residual content from duplicating with Static's first output.
+  const prevSessionKeyRef = useRef<number | undefined>(undefined);
   const prevSettledRef = useRef<Turn[] | null>(null);
 
   // Session switch: clear all caches and clear terminal.
@@ -103,11 +109,17 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
     }
   }, { isActive: !overlayActive });
 
-  // ── Merged static items: all settled blocks for <Static> scrollback ──
-  // Header is rendered in the dynamic tree above, not inside <Static>.
+  // ── Merged static items: [Header sentinel, ...settled blocks] ──
+  // Header is in <Static> so it appears at the top of terminal scrollback,
+  // above the conversation history. First render clears the terminal to
+  // prevent duplication during StartupScreen → App tree transition.
   const mergedStaticBlocks = useMemo(
     () => [...staticBlocks, ...activeSettledBlocks],
     [staticBlocks, activeSettledBlocks],
+  );
+  const staticItems = useMemo(
+    () => [HEADER_SENTINEL, ...mergedStaticBlocks],
+    [mergedStaticBlocks],
   );
 
   const staticKey = useMemo(
@@ -117,20 +129,22 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
 
   return (
     <Box flexDirection="column">
-      {/* Header in dynamic tree — always visible at top of viewport.
-          Moved out of <Static> to prevent duplication during TUI initialization
-          (Ink may flush <Static> output in multiple phases when tree changes). */}
-      {header}
       <Box height={0} overflow="hidden">
-      <Static key={staticKey} items={mergedStaticBlocks}>
-        {(block, index) => {
-          const prevBlock = index > 0 ? mergedStaticBlocks[index - 1] : undefined;
+      <Static key={staticKey} items={staticItems}>
+        {(item, index) => {
+          if (index === 0) {
+            return <React.Fragment key="header">{header}</React.Fragment>;
+          }
+          const blockIdx = index - 1;
+          const block = mergedStaticBlocks[blockIdx];
+          if (!block) return null;
+          const prevBlock = blockIdx > 0 ? mergedStaticBlocks[blockIdx - 1] : undefined;
           return <BlockRenderer
             key={block.id}
             block={block}
             isFocused={false}
             thinkingVisible={thinkingVisible}
-            index={index}
+            index={blockIdx}
             prevBlock={prevBlock}
           />;
         }}
