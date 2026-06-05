@@ -613,7 +613,7 @@ describe("eventReducer (blocks model)", () => {
         ...fresh(),
         activeSessionId: "old",
         sessions: [
-          { threadId: "old", name: "Old", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: fresh().status, turns: [] },
+          { threadId: "old", name: "Old", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: fresh().status, turns: [] },
         ],
         turns: [{ blocks: [{ id: 1, kind: "text" as const, content: "old session content" }] }],
       };
@@ -637,9 +637,9 @@ describe("eventReducer (blocks model)", () => {
         ...fresh(),
         activeSessionId: "initial",
         sessions: [
-          { threadId: "initial", name: "Init", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: fresh().status, turns: [] },
-          { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: fresh().status, turns: [] },
-          { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: fresh().status, turns: [] },
+          { threadId: "initial", name: "Init", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: fresh().status, turns: [] },
+          { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: fresh().status, turns: [] },
+          { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: fresh().status, turns: [] },
         ],
         turns: [{ blocks: [{ id: 1, kind: "text" as const, content: "initial content" }] }],
       };
@@ -885,7 +885,7 @@ describe("eventReducer (blocks model)", () => {
         ...initialState,
         activeSessionId: "t1",
         sessions: [
-          { threadId: "t1", name: "Session 1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+          { threadId: "t1", name: "Session 1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
         ],
         turns: [{blocks: [{ id: 1, kind: "text", content: "hello" }]}],
       };
@@ -909,8 +909,8 @@ describe("eventReducer (blocks model)", () => {
         ...initialState,
         activeSessionId: "t1",
         sessions: [
-          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [{blocks: [{ id: 1, kind: "text", content: "A" }]}] },
-          { threadId: "t2", name: "S2", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [{blocks: [{ id: 10, kind: "text", content: "B" }]}] },
+          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [{blocks: [{ id: 1, kind: "text", content: "A" }]}] },
+          { threadId: "t2", name: "S2", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [{blocks: [{ id: 10, kind: "text", content: "B" }]}] },
         ],
         turns: [{blocks: [{ id: 2, kind: "text", content: "latest in t1" }]}],
       };
@@ -935,7 +935,7 @@ describe("eventReducer (blocks model)", () => {
         ...initialState,
         activeSessionId: "t1",
         sessions: [
-          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+          { threadId: "t1", name: "S1", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
         ],
       };
       const next = eventReducer(s, { type: "SWITCH_SESSION", threadId: "missing" });
@@ -945,8 +945,8 @@ describe("eventReducer (blocks model)", () => {
 
     test("SESSION_INTERRUPT_PENDING sets pending flag on session", () => {
       const sessions: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
-        { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
       ];
       const next = eventReducer(
         { ...initialState, sessions },
@@ -959,10 +959,10 @@ describe("eventReducer (blocks model)", () => {
     test("SET_SESSIONS merges: preserves existing blocks and syncs activeSessionId", () => {
       // Simulate: state has session with blocks, SET_SESSIONS comes in with empty blocks
       const existing: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 100 }, turns: [{blocks: [{ id: 1, kind: "text" as const, content: "hello" }]}] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: { ...initialState.status, totalTokens: 100 }, turns: [{blocks: [{ id: 1, kind: "text" as const, content: "hello" }]}] },
       ];
       const incoming: SessionSnapshot[] = [
-        { threadId: "a", name: "A (renamed)", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 0 }, turns: [] },
+        { threadId: "a", name: "A (renamed)", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: { ...initialState.status, totalTokens: 0 }, turns: [] },
       ];
       const state = { ...initialState, sessions: existing, activeSessionId: null };
       const next = eventReducer(state, { type: "SET_SESSIONS", sessions: incoming });
@@ -975,7 +975,7 @@ describe("eventReducer (blocks model)", () => {
 
     test("SET_SESSIONS handles new session (no existing match)", () => {
       const incoming: SessionSnapshot[] = [
-        { threadId: "new", name: "New", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "new", name: "New", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
       ];
       const next = eventReducer(initialState, { type: "SET_SESSIONS", sessions: incoming });
       expect(next.sessions[0].threadId).toBe("new");
@@ -986,13 +986,13 @@ describe("eventReducer (blocks model)", () => {
       const sessions: SessionSnapshot[] = [
         {
           threadId: "a", name: "A", workspace: "/tmp", active: true, running: false,
-          pendingInterrupt: false, plan: null,
+          pendingInterrupt: false, interrupt: null, plan: null,
           status: { ...initialState.status, totalTokens: 100 },
           turns: [{blocks: [{ id: 1, kind: "text" as const, content: "session A content" }]}],
         },
         {
           threadId: "b", name: "B", workspace: "/tmp", active: false, running: false,
-          pendingInterrupt: false, plan: null,
+          pendingInterrupt: false, interrupt: null, plan: null,
           status: { ...initialState.status, totalTokens: 200 },
           turns: [{blocks: [{ id: 1, kind: "text" as const, content: "session B content" }]}],
         },
@@ -1040,7 +1040,7 @@ describe("eventReducer (blocks model)", () => {
       let state: TuiState = {
         ...initialState,
         sessions: [
-          { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: { ...initialState.status, totalTokens: 100 }, turns: [] },
+          { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: { ...initialState.status, totalTokens: 100 }, turns: [] },
         ],
         activeSessionId: "a",
         turns: [{ blocks: [
@@ -1063,8 +1063,8 @@ describe("eventReducer (blocks model)", () => {
       // Step 2: SET_SESSIONS from SessionManager.getSnapshot() (blocks are always [])
       // This simulates what happens after dispatchSessionLoad calls SET_SESSIONS
       const runtimeSnapshots: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
-        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
       ];
       state = eventReducer(state, { type: "SET_SESSIONS", sessions: runtimeSnapshots });
       // Merge must preserve blocks from step 1
@@ -1095,12 +1095,12 @@ describe("eventReducer (blocks model)", () => {
       const sessions: SessionSnapshot[] = [
         {
           threadId: "a", name: "A", workspace: "/tmp", active: true, running: false,
-          pendingInterrupt: false, plan: null,
+          pendingInterrupt: false, interrupt: null, plan: null,
           status: initialState.status, turns: [],
         },
         {
           threadId: "b", name: "B", workspace: "/tmp", active: false, running: true,
-          pendingInterrupt: false, plan: null,
+          pendingInterrupt: false, interrupt: null, plan: null,
           status: initialState.status, turns: [],
         },
       ];
@@ -1123,11 +1123,11 @@ describe("eventReducer (blocks model)", () => {
 
     test("SET_SESSIONS with a new session (not in existing) adds it alongside existing sessions", () => {
       const existing: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
       ];
       const incoming: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
-        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
+        { threadId: "b", name: "B", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
       ];
       const state = { ...initialState, sessions: existing, activeSessionId: "a" };
       const next = eventReducer(state, { type: "SET_SESSIONS", sessions: incoming });
@@ -1139,10 +1139,10 @@ describe("eventReducer (blocks model)", () => {
 
     test("SET_SESSIONS when no incoming session is active preserves existing activeSessionId", () => {
       const existing: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: true, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
       ];
       const incoming: SessionSnapshot[] = [
-        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, plan: null, status: initialState.status, turns: [] },
+        { threadId: "a", name: "A", workspace: "/tmp", active: false, running: false, pendingInterrupt: false, interrupt: null, plan: null, status: initialState.status, turns: [] },
       ];
       const state = { ...initialState, sessions: existing, activeSessionId: "a" };
       const next = eventReducer(state, { type: "SET_SESSIONS", sessions: incoming });
@@ -1203,17 +1203,19 @@ describe("eventReducer (blocks model)", () => {
       expect(b2.steps).toHaveLength(0);
     });
 
-    test("subagent_tool_result marks last matching step's ok", () => {
+    test("subagent_tool_result marks matching step by toolName (reverse scan)", () => {
       let s = dispatch(fresh(), saStart("sub-1", "code", "fix"));
       s = dispatch(s, saStep("sub-1", "read_file", { path: "a.ts" }));
       s = dispatch(s, saStep("sub-1", "edit_file", { path: "a.ts" }));
       s = dispatch(s, saToolResult("sub-1", "read_file", true));
       const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
-      expect(b.steps[0].ok).toBeUndefined(); // not the last step
-      // last step should be updated by second tool_result
+      expect(b.steps[0].ok).toBe(true); // matched by toolName (reverse scan)
+      expect(b.steps[1].ok).toBeUndefined(); // not yet resolved
+      // second tool_result marks edit_file
       s = dispatch(s, saToolResult("sub-1", "edit_file", false));
       const b2 = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
-      expect(b2.steps[0].ok).toBeUndefined(); // still not last
+      expect(b2.steps[0].ok).toBe(true); // read_file still ok
+      expect(b2.steps[1].ok).toBe(false); // edit_file marked
     });
 
     test("subagent_tool_result updates last step ok", () => {
@@ -1222,6 +1224,24 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, saToolResult("sub-1", "read_file", true));
       const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
       expect(b.steps[0].ok).toBe(true);
+    });
+
+    test("subagent_tool_result handles out-of-order results (reverse scan)", () => {
+      // Multiple steps with same toolName — result marks the last matching one
+      let s = dispatch(fresh(), saStart("sub-2", "code", "multi-read"));
+      s = dispatch(s, saStep("sub-2", "read_file"));
+      s = dispatch(s, saStep("sub-2", "write_file"));
+      s = dispatch(s, saStep("sub-2", "read_file"));
+      // Out of order: second read_file result arrives before first
+      s = dispatch(s, saToolResult("sub-2", "read_file", false));
+      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      expect(b.steps[0].ok).toBeUndefined(); // first read_file not marked
+      expect(b.steps[2].ok).toBe(false); // last read_file marked (reverse scan)
+      // Now first read_file result arrives
+      s = dispatch(s, saToolResult("sub-2", "read_file", true));
+      const b2 = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
+      expect(b2.steps[0].ok).toBe(true); // first read_file now marked
+      expect(b2.steps[2].ok).toBe(false); // last read_file still false
     });
 
     test("subagent_done updates running block to done", () => {
