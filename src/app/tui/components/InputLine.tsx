@@ -103,6 +103,11 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   const [historyIndex, setHistoryIndex] = useState(-1);
   const fileSearch = useFileSearch(value, workspace);
   const slashSuggestions = useSlashSuggestions(value);
+  // Refs for useInput to avoid Ink 7 stale closure (read latest values)
+  const slashSuggestionsRef = useRef(slashSuggestions);
+  slashSuggestionsRef.current = slashSuggestions;
+  const fileSearchRef = useRef(fileSearch);
+  fileSearchRef.current = fileSearch;
 
   // Notify parent about slash suggestion changes
   useEffect(() => {
@@ -308,39 +313,42 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     // When an overlay is active, yield all keyboard handling to it
     if (overlayActive) return;
 
-    if (key.escape && pasteState) {
+    if (key.escape && pasteStateRef.current) {
       setPasteState(null);
       commitValue("");
       return;
     }
 
+    const ss = slashSuggestionsRef.current;
+    const fs = fileSearchRef.current;
+
     // Slash command suggestion navigation
-    if (slashSuggestions.active && slashSuggestions.result) {
+    if (ss.active && ss.result) {
       if (key.escape) {
         // Dismiss suggestions without clearing input (preserve what user typed)
         return;
       }
       if (key.upArrow) {
-        slashSuggestions.setSelectedIndex((s: number) => Math.max(0, s - 1));
+        ss.setSelectedIndex((s: number) => Math.max(0, s - 1));
         return;
       }
       if (key.downArrow) {
-        slashSuggestions.setSelectedIndex((s: number) =>
-          Math.min(slashSuggestions.result!.items.length - 1, s + 1)
+        ss.setSelectedIndex((s: number) =>
+          Math.min(ss.result!.items.length - 1, s + 1)
         );
         return;
       }
       if (key.tab || key.rightArrow) {
         // Commit ghost text: shell-style common prefix completion
-        const names = slashSuggestions.result.items.map((item) => item.command);
+        const names = ss.result.items.map((item) => item.command);
         const prefix = commonPrefix(names);
-        if (prefix.length > slashSuggestions.result.partial.length) {
-          commitValue(slashSuggestions.result.kind === "model" ? "/model " + prefix : "/" + prefix);
+        if (prefix.length > ss.result.partial.length) {
+          commitValue(ss.result.kind === "model" ? "/model " + prefix : "/" + prefix);
         } else {
           // No common prefix extension — commit the selected item directly
-          const selected = slashSuggestions.result.items[slashSuggestions.selectedIndex];
+          const selected = ss.result.items[ss.selectedIndex];
           if (selected) {
-            commitValue(slashSuggestions.replaceCommand(selected, slashSuggestions.result.kind));
+            commitValue(ss.replaceCommand(selected, ss.result.kind));
           }
         }
         return;
@@ -349,9 +357,9 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         // Commit completed command and submit it inline — TextInput already
         // processed Enter (with the partial text) and was suppressed via
         // slashActiveRef in handleSubmit.
-        const selected = slashSuggestions.result.items[slashSuggestions.selectedIndex];
+        const selected = ss.result.items[ss.selectedIndex];
         if (selected) {
-          const fullCmd = slashSuggestions.replaceCommand(selected, slashSuggestions.result.kind);
+          const fullCmd = ss.replaceCommand(selected, ss.result.kind);
           commitValue(fullCmd);
           setHistory((prev) => [...prev, fullCmd]);
           setHistoryIndex(-1);
@@ -364,24 +372,24 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     }
 
     // @file search navigation
-    if (fileSearch.active) {
+    if (fs.active) {
       if (key.escape) {
         // Remove @query to dismiss the dropdown
-        commitValue(value.replace(/@\S*$/, ""));
+        commitValue(valueRef.current.replace(/@\S*$/, ""));
         return;
       }
       if (key.upArrow) {
-        fileSearch.setSelectedIndex((s: number) => Math.max(0, s - 1));
+        fs.setSelectedIndex((s: number) => Math.max(0, s - 1));
         return;
       }
       if (key.downArrow) {
-        fileSearch.setSelectedIndex((s: number) => Math.min(fileSearch.results.length - 1, s + 1));
+        fs.setSelectedIndex((s: number) => Math.min(fs.results.length - 1, s + 1));
         return;
       }
       if (key.tab) {
-        const selected = fileSearch.results[fileSearch.selectedIndex];
+        const selected = fs.results[fs.selectedIndex];
         if (selected) {
-          commitValue(fileSearch.replaceQuery(selected));
+          commitValue(fs.replaceQuery(selected));
         }
         return;
       }
@@ -389,9 +397,9 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         // Same root cause as slash suggestions: TextInput fires before
         // InputLine and would submit the uncompleted text. Commit + submit
         // inline; handleSubmit suppresses the premature TextInput submit.
-        const selected = fileSearch.results[fileSearch.selectedIndex];
+        const selected = fs.results[fs.selectedIndex];
         if (selected) {
-          const newVal = fileSearch.replaceQuery(selected);
+          const newVal = fs.replaceQuery(selected);
           commitValue(newVal);
           setHistory((prev) => [...prev, newVal]);
           setHistoryIndex(-1);
@@ -405,7 +413,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
     // Tab completion for slash commands (fallback when dropdown is not active)
     if (key.tab) {
-      const completed = completeSlash(value);
+      const completed = completeSlash(valueRef.current);
       if (completed) {
         commitValue(completed);
       }
