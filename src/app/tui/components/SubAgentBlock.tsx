@@ -222,17 +222,10 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     );
   }
 
-  // Collapsed done state — compact single line, summary + steps hidden
+  // Collapsed done state — compact single line
   return (
-    <Box flexDirection="column">
-      <Box>
-        <Text color={dt.success}>{isExpandable ? "▶" : "✓"} {doneHeaderText}</Text>
-      </Box>
-      {isExpandable && (
-        <Box paddingLeft={3}>
-          <Text color={dt.dim}>Enter 展开 ({doneStepCount} 步)</Text>
-        </Box>
-      )}
+    <Box>
+      <Text color={dt.success}>{isExpandable ? "▶" : "✓"} {doneHeaderText}</Text>
     </Box>
   );
 }
