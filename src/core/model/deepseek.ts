@@ -121,7 +121,7 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
       for (const original of originals) {
         if (!AIMessage.isInstance(original)) continue;
         const reasoning = (original.additional_kwargs as Record<string, unknown>)?.reasoning_content;
-        if (typeof reasoning !== "string" || reasoning.length === 0) continue;
+        if (typeof reasoning !== "string") continue;
         // 用内容前 200 字符作为匹配 key（避免序列化差异）
         // Use first 200 chars of content as match key
         const content = typeof original.content === "string"
@@ -138,15 +138,15 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
           ? mapped.content.slice(0, 200)
           : "";
         const reasoning = assistantReasoning.get(mappedContent);
-        if (reasoning) {
+        if (reasoning !== undefined) {
           mapped.reasoning_content = reasoning;
         }
       }
 
       // DeepSeek all-or-nothing requirement: if ANY assistant message has reasoning_content,
-      // ALL assistant messages must have it. Otherwise API returns 400.
+      // ALL assistant messages must have it (even empty strings). Otherwise API returns 400.
       const anyReasoning = request.messages.some(
-        (m: any) => m.role === "assistant" && typeof m.reasoning_content === "string" && m.reasoning_content.length > 0,
+        (m: any) => m.role === "assistant" && "reasoning_content" in m,
       );
       if (anyReasoning) {
         for (const m of request.messages) {

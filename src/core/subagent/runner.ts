@@ -9,7 +9,7 @@ import type { ShellExecutor } from "@/core/tools/shell";
 import type { McpManager } from "@/core/mcp";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import { extractPromptCacheMetrics } from "@/core/cache-metrics";
-import { getRuntimeSystemInfo } from "@/core/model/runtime-context";
+import { buildCacheableRuntimeContext } from "@/core/model/runtime-context";
 import type { SubAgentRoleConfig, SubAgentRunnerInput, SubAgentResult, SubAgentEventSink } from "./types";
 
 export type { SubAgentRunnerInput } from "./types";
@@ -96,19 +96,26 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     ? allTools.filter((t) => input.role.allowedTools!.has(t.name) && (canSpawnSubAgents || t.name !== "task"))
     : allTools.filter((t) => canSpawnSubAgents || t.name !== "task");
 
-  // 注入运行时系统信息（OS、Shell），避免子 agent 在 Windows 上生成 PowerShell 命令
-  // Inject runtime system info (OS, Shell) so sub-agents use correct shell syntax on Windows
-  const sysInfo = getRuntimeSystemInfo({ workspace: input.workspace });
-  const runtimeContext = [
-    "",
-    "## Runtime environment",
-    `OS: ${sysInfo.os} (${sysInfo.platform})`,
-    `Shell: ${sysInfo.shell} (use ${sysInfo.shell} syntax, NOT PowerShell or cmd.exe)`,
-    `CWD: ${sysInfo.cwd}`,
-  ].join("\n");
+  // 构造缓存安全的运行时上下文（对齐主 agent 的布局，不含时间戳/CWD）
+  // Build cache-safe runtime context (same layout as main agent, no timestamps/CWD)
+  const cacheableRuntimeCtx = buildCacheableRuntimeContext({
+    workspace: input.workspace,
+    messages: [],
+  });
 
-  const systemMessage = new SystemMessage(input.role.systemPrompt + runtimeContext);
-  const messages: BaseMessage[] = [systemMessage, new HumanMessage(input.task)];
+  // CWD 嵌入 task HumanMessage：task 每次调用都不同，嵌入 CWD 不增加缓存 miss
+  // Embed CWD in task HumanMessage: task is unique per call, doesn't affect prefix cache
+  const taskWithCwd = `<runtime-state source="harness.subagent">
+CWD: ${process.cwd()}
+</runtime-state>
+
+${input.task}`;
+
+  const messages: BaseMessage[] = [
+    new SystemMessage(input.role.systemPrompt),
+    new SystemMessage(cacheableRuntimeCtx),
+    new HumanMessage(taskWithCwd),
+  ];
 
   try {
     // Yield control so Ink/React can render the subagent_start block before we block on model calls
