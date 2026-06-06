@@ -139,6 +139,12 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case "tool_call": {
       // task tool has its own subagent block — skip the redundant tool_card
       if (event.data.name === "task") return state;
+      // Dedup: if this call_id already has a tool_card block, skip.
+      // Prevents duplicate rendering when the same tool_call event is replayed.
+      if (state.blockIndex[event.data.call_id] != null) {
+        const existing = findBlockById(state, state.blockIndex[event.data.call_id]);
+        if (existing?.kind === "tool_card" && existing.callId === event.data.call_id) return state;
+      }
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
       // update_plan renders as a plan_card block, not a tool_card
@@ -219,9 +225,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...nextState, status: next };
     }
     case "model_retry": {
-      const id = state.nextBlockId;
+      const finalized = finalizeLastTurnStreaming(state);
+      const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: "text", content: `⟳ Model retry #${event.data.attempt} (${event.data.delayMs}ms): ${event.data.error}` };
-      return appendBlock(state, block);
+      return appendBlock(finalized, block);
     }
     case "step_begin": {
       return { ...state, status: { ...state.status, currentNode: event.data.node } };
@@ -242,7 +249,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case "final": {
       if (event.data.length === 0) return state;
-      const last = lastTurn(state);
+      const finalized = finalizeLastTurnStreaming(state);
+      const last = lastTurn(finalized);
       const lastBlock = last?.blocks.at(-1);
       if (lastBlock?.kind === "text" && lastBlock.content === event.data) return state;
       if (last) {
@@ -254,9 +262,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           }
         }
       }
-      const id = state.nextBlockId;
+      const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: "text", content: event.data };
-      return appendBlock(state, block);
+      return appendBlock(finalized, block);
     }
     case "need_approval": {
       const finalized = finalizeLastTurnStreaming(state);
@@ -269,10 +277,11 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...appendBlock(finalized, block), interrupt: { kind: "input", blockId: block.id } };
     }
     case "error": {
+      const finalized = finalizeLastTurnStreaming(state);
       const prefix = event.data.recoverable ? "⟳ Recoverable error" : "Error";
-      const id = state.nextBlockId;
+      const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: "text", content: `${prefix}: ${event.data.message}`, isError: !event.data.recoverable };
-      return { ...appendBlock(state, block), sessionError: !event.data.recoverable };
+      return { ...appendBlock(finalized, block), sessionError: !event.data.recoverable };
     }
     case "file_change": {
       const change: FileChangeRecord = {
@@ -287,19 +296,22 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (lastBlock?.kind === "file_change") {
         return updateLastBlock(state, { ...lastBlock, changes: [...lastBlock.changes, change] });
       }
-      const id = state.nextBlockId;
+      const finalized = finalizeLastTurnStreaming(state);
+      const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: "file_change", changes: [change] };
-      return appendBlock(state, block);
+      return appendBlock(finalized, block);
     }
     case "compact_begin": {
-      const id = state.nextBlockId;
+      const finalized = finalizeLastTurnStreaming(state);
+      const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: "text", content: `⟳ Compacting context: ${event.data.reason}` };
-      return { ...appendBlock(state, block), compacting: true };
+      return { ...appendBlock(finalized, block), compacting: true };
     }
     case "compact_end": {
-      const id = state.nextBlockId;
+      const finalized = finalizeLastTurnStreaming(state);
+      const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: "text", content: `✓ Compaction complete: ${event.data.summary}` };
-      return { ...appendBlock(state, block), compacting: false };
+      return { ...appendBlock(finalized, block), compacting: false };
     }
     case "subagent_start": {
       // Dedup: if a subagent block with this ID already exists, skip.
@@ -307,7 +319,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       for (const turn of state.turns) {
         if (turn.blocks.some(b => b.kind === "subagent" && b.subagentId === event.data.id)) return state;
       }
-      const id = state.nextBlockId;
+      const finalized = finalizeLastTurnStreaming(state);
+      const id = finalized.nextBlockId;
       const block: OutputBlock = {
         id, kind: "subagent",
         subagentId: event.data.id,
@@ -316,8 +329,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         status: "running", summary: "",
         toolCallCount: 0, durationMs: 0, steps: [],
       };
-      const blockIndex = { ...state.blockIndex, [event.data.id]: id };
-      return { ...appendBlock(state, block), blockIndex };
+      const blockIndex = { ...finalized.blockIndex, [event.data.id]: id };
+      return { ...appendBlock(finalized, block), blockIndex };
     }
     case "subagent_step": {
       const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
