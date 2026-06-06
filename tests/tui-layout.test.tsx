@@ -977,7 +977,7 @@ describe("SubAgentBlock rendering", () => {
       id: 1, kind: "subagent" as const,
       subagentId: "sub-1", role: "review" as const, task: "review PR #42",
       status: "done" as const, summary: "No critical issues found.\n2 warnings in auth.ts.", toolCallCount: 5, durationMs: 3200,
-      steps: [],
+      steps: [], expanded: true,
     };
     const { lastFrame } = render(
       <SubAgentBlock block={block} />,
@@ -1047,7 +1047,7 @@ describe("SubAgentBlock rendering", () => {
       id: 1, kind: "subagent" as const,
       subagentId: "sub-1", role: "explore" as const, task: "search",
       status: "done" as const, summary: longSummary, toolCallCount: 3, durationMs: 1200,
-      steps: [],
+      steps: [], expanded: true,
     };
     const { lastFrame } = render(
       <SubAgentBlock block={block} />,
@@ -1076,7 +1076,7 @@ describe("SubAgentBlock rendering", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("已折叠");
     expect(frame).toContain("step_15"); // last step should be visible
-    expect(frame).toContain("step_06"); // within last 10
-    expect(frame).not.toContain("step_05"); // too old, folded
+    expect(frame).toContain("step_11"); // within last 5 (MAX_RUNNING_STEPS = 5)
+    expect(frame).not.toContain("step_10"); // too old, folded
   });
 });

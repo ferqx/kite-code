@@ -85,7 +85,7 @@ function taskLabel(task: string): string {
   return firstLine.length > 80 ? firstLine.slice(0, 77) + "..." : firstLine;
 }
 
-const MAX_RUNNING_STEPS = 10;
+const MAX_RUNNING_STEPS = 5;
 
 interface SubAgentBlockProps {
   block: OutputBlock & { kind: "subagent" };
@@ -222,23 +222,15 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     );
   }
 
-  // Collapsed done state
+  // Collapsed done state — compact single line, summary + steps hidden
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={dt.success}>{isExpandable ? "▶" : "▼"} {doneHeaderText}</Text>
+        <Text color={dt.success}>{isExpandable ? "▶" : "✓"} {doneHeaderText}</Text>
       </Box>
-      {block.summary && (
-        <Box paddingLeft={3} flexDirection="column">
-          <Box paddingLeft={0}>
-            <Text color={dt.dim}>── Summary ──</Text>
-          </Box>
-          <MarkdownBlock content={block.summary} color={dt.dim} />
-        </Box>
-      )}
       {isExpandable && (
         <Box paddingLeft={3}>
-          <Text color={dt.dim}>Enter 展开步骤详情 ({doneStepCount} 步)</Text>
+          <Text color={dt.dim}>Enter 展开 ({doneStepCount} 步)</Text>
         </Box>
       )}
     </Box>
