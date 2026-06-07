@@ -265,37 +265,10 @@ export const TASK_CONTRACT: ToolContract = {
 };
 TASK_CONTRACT.description = buildDescription(TASK_CONTRACT.sections);
 
-export const SEARCH_CODE_CONTRACT: ToolContract = {
-  name: "search_code",
-  sections: {
-    whenToUse:
-      "Search code across the workspace using ripgrep with structured JSON output. " +
-      "Use this for finding symbol definitions, usages, patterns, or text across multiple files. " +
-      "Prefer search_code over shell_execute with rg/grep — it returns structured results (file, line, content). " +
-      "Supports full ripgrep regex syntax and respects .gitignore.",
-    commonMistakes:
-      "Using shell_execute with rg/grep instead of search_code — loses structured results. " +
-      "Providing overly broad patterns that match thousands of lines — narrow the pattern or specify a path. " +
-      "Forgetting that search_code returns structured JSON, not raw text.",
-    outputFormat:
-      "JSON: ok (boolean), matches (array of { file, line, content }). " +
-      "No matches: ok: true with empty matches array. " +
-      "rg not installed: falls back to grep -rn automatically.",
-    failureHandling:
-      "If rg is not installed: automatically falls back to grep -rn. " +
-      "If pattern has no matches: returns ok: true with empty matches array. " +
-      "If pattern syntax is invalid: returns ok: false with error message from rg. " +
-      "If too many results: narrow the pattern or specify a more specific path.",
-  },
-  description: "",
-};
-SEARCH_CODE_CONTRACT.description = buildDescription(SEARCH_CODE_CONTRACT.sections);
-
 export const KNOWN_TOOL_NAMES = [
   "read_file",
   "edit_file",
   "write_file",
-  "search_code",
   "shell_execute",
   "read_mcp_resource",
   "update_plan",
@@ -307,7 +280,6 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ["read_file", READ_FILE_CONTRACT],
   ["edit_file", EDIT_FILE_CONTRACT],
   ["write_file", WRITE_FILE_CONTRACT],
-  ["search_code", SEARCH_CODE_CONTRACT],
   ["shell_execute", SHELL_EXECUTE_CONTRACT],
   ["read_mcp_resource", READ_MCP_RESOURCE_CONTRACT],
   ["update_plan", UPDATE_PLAN_CONTRACT],

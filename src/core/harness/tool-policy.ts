@@ -200,15 +200,6 @@ export function evaluateToolPolicy(input: {
     });
   }
 
-  if (request.name === "search_code") {
-    return allow({
-      risk: "read",
-      reason: "Read-only code search.",
-      userVisibleSummary: `Search code: ${(request.args.pattern as string) ?? "?"}`,
-      expectedEffects: ["Searches workspace files", "Does not mutate files"],
-    });
-  }
-
   if (request.name === "read_file") {
     return allow({
       risk: "read",

@@ -112,7 +112,6 @@
 | **默认推荐模型 + 体验优化** | 围绕一个强模型（建议 Claude 兼容或 DeepSeek V3+）优化 system prompt、工具描述和默认配置。provider-agnostic 是架构原则，但产品层面必须有"开箱即用"的最佳体验路径 | 🔴 待启动 |
 | **跨会话记忆系统** | `.openpx/memory/` 持久记忆目录，agent 自动读写。记忆按 topic 组织（`MEMORY.md` 入口 + 分 topic 文件），跨会话保留用户偏好、技术栈、架构决策、项目约定。对齐 Claude Code auto-memory 体验 | 🔴 待启动 |
 | **Web Search 工具** | 内置 web search 能力（可先对接 MCP web search server，后续内置）。支持查最新文档、API 变更、社区 issue/PR 讨论 | 🔴 待启动 |
-| **专用 search_code 工具** | 新增 `search_code`（底层复用 `rg --json`），返回结构化匹配列表（文件:行号:内容），替代 `shell_execute intent=inspect` 做代码搜索。支持 .gitignore 感知过滤 | 🔴 待启动 |
 | **Token 消耗展示** | TUI StatusBar 展示当前 session 的 token 用量和估算成本，对标 Claude Code | 🔴 待启动 |
 
 ### P1 — 决定深度用户是否留下来

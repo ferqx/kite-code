@@ -10,7 +10,6 @@ import type {
   ThreadAuthorizationState,
 } from "@/core/types";
 import { editFile, readFile, writeFile } from "@/core/tools/file";
-import { searchCode } from "@/core/tools/search-code";
 import { shellTool, type ShellExecutor } from "@/core/tools/shell";
 import type { McpManager } from "@/core/mcp";
 import { parseMcpToolName } from "@/core/mcp/tool-adapter";
@@ -162,21 +161,6 @@ export async function runApprovedTool(
       exitCode: -1,
       stdout: "",
       stderr: "ask_user must be handled by the user_input interrupt node.",
-    });
-  }
-
-  if (request.name === "search_code") {
-    const result = await searchCode({
-      workspace,
-      pattern: request.args.pattern ?? "",
-      path: request.args.path,
-    });
-    return withFailureGuidance(request, {
-      ok: result.ok,
-      command: `search_code ${request.args.pattern ?? ""}`,
-      exitCode: result.ok ? 0 : -1,
-      stdout: JSON.stringify(result),
-      stderr: result.error ?? "",
     });
   }
 
@@ -393,8 +377,6 @@ function toolUsageGuidance(request: PendingToolRequest): string {
       return "Use update_plan with a complete plan object: name, description, status, and ordered steps with statuses. It must only update planning state and must not mutate the workspace.";
     case "ask_user":
       return "Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.";
-    case "search_code":
-      return "Use search_code with a ripgrep regex pattern. Narrow the pattern or specify a path if results are too broad. Prefer search_code over shell_execute with rg/grep for structured results.";
     case "Skill":
       return "Use Skill with the name of a skill from the Available Skills list. The skill name must exactly match. Only use skills listed in the system prompt under Available Skills.";
     default:

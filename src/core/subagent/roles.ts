@@ -50,7 +50,6 @@ Return your findings organized by severity:
 
 const READ_ONLY_TOOLS = new Set([
   "read_file",
-  "search_code",
   "shell_execute",
   "read_mcp_resource",
 ]);

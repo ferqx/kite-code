@@ -43,7 +43,6 @@ function toolArgsLabel(name: string, args: Record<string, unknown>): string {
       const c = args.command;
       return typeof c === "string" ? c.slice(0, 80) : "";
     }
-    case "search_code":
     case "grep": {
       const q = args.pattern ?? args.query;
       return typeof q === "string" ? `"${q.slice(0, 60)}"` : "";

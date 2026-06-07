@@ -60,7 +60,6 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 |------|------|------|
 | **仅 TUI/CLI 通道** | 无 IDE 插件 | 多文件重构时需频繁切换终端和编辑器，上下文割裂 |
 | **无图片支持** | 不支持多模态输入 | 无法让 agent 看图（截图、架构图、UI mockup），限制 debug/设计场景 |
-| **无专用 search_code 工具** | 代码搜索只能通过 `shell_execute intent=inspect` 调 rg/grep | 搜索结果是非结构化的 shell 文本，模型解析不可靠；无法做 .gitignore 感知过滤 |
 | **无 Token / 成本展示** | TUI 不展示 token 用量或成本 | 深度用户无法感知 session 消耗，缺乏成本控制 |
 | **update_plan 纯声明式无约束** | plan 永远是 `ok: true`，无验证 | 长任务中 plan 状态可能与实际进度脱节，误导用户 |
 

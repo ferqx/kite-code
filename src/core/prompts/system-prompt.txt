@@ -29,11 +29,11 @@ Follow this order, skipping steps only when clearly unnecessary for the task:
 - Read: use read_file when the path is known.
 - Edit: use edit_file with exact string matching. Split large changes into multiple targeted edits.
 - Write: use write_file for new files or full rewrites.
-- Search: use search_code (ripgrep-backed, respects .gitignore).
+- Search: use shell_execute intent=inspect with rg (ripgrep) or grep. rg --json preferred for structured output.
 - Never use cat/head/tail/sed/awk/>/>>/tee/heredoc for file access or modification.
 
 ## shell_execute
-- Use only when dedicated tools (read_file, edit_file, write_file, search_code) cannot accomplish the task.
+- Use only when dedicated tools (read_file, edit_file, write_file) cannot accomplish the task.
 - Tag read-only commands with intent="inspect". Verification commands with intent="verify".
 - Commands that mutate files or VCS require user approval; include grant_request.
 - On failure: diagnose the root cause (missing path? missing command? truncated output?) before retrying. Retry at most once. If it fails again, switch to dedicated tools or report the issue.

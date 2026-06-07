@@ -6,7 +6,6 @@ import {
   editFile,
   writeFile,
 } from "./file";
-import { searchCode } from "./search-code";
 import {
   READ_FILE_CONTRACT,
   EDIT_FILE_CONTRACT,
@@ -15,7 +14,6 @@ import {
   READ_MCP_RESOURCE_CONTRACT,
   UPDATE_PLAN_CONTRACT,
   ASK_USER_CONTRACT,
-  SEARCH_CODE_CONTRACT,
 } from "./tool-contracts";
 import { adaptMcpTool } from "@/core/mcp/tool-adapter";
 import { createSkillTool } from "@/core/skills/skill-tool";
@@ -200,26 +198,10 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       })
     : null;
 
-  const searchCodeTool = tool(
-    async ({ pattern, path: searchPath }) =>
-      JSON.stringify(
-        await searchCode({ workspace: input.workspace, pattern, path: searchPath }),
-      ),
-    {
-      name: "search_code",
-      description: SEARCH_CODE_CONTRACT.description,
-      schema: z.object({
-        pattern: z.string().describe("Search pattern (ripgrep regex syntax)"),
-        path: z.string().optional().describe("Optional search path (relative to workspace)"),
-      }),
-    },
-  );
-
   const builtinTools = [
     readFileTool,
     editFileTool,
     writeFileTool,
-    searchCodeTool,
     shellExecute,
     readMcpResource,
     ...(skillTool ? [skillTool] : []),
