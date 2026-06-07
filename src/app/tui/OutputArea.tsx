@@ -12,7 +12,6 @@ interface OutputAreaProps {
   onTogglePlan?: (id: number) => void;
   onToggleToolExpand?: (id: number) => void;
   onToggleSubagentExpand?: (id: number) => void;
-  thinkingVisible: boolean;
   /** Agent 是否正在执行（控制 Static/dynamic 分割策略） */
   running: boolean;
   /** 当 overlay 面板激活时，禁用方向键导航 */
@@ -26,7 +25,7 @@ interface OutputAreaProps {
 /** Sentinel: ensures <Static> always has ≥1 item so Header renders even with no completed blocks */
 const HEADER_SENTINEL = { __header: true } as const;
 
-export default function OutputArea({ turns, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, thinkingVisible, running, overlayActive, header, sessionKey }: OutputAreaProps) {
+export default function OutputArea({ turns, onToggleReason, onTogglePlan, onToggleToolExpand, onToggleSubagentExpand, running, overlayActive, header, sessionKey }: OutputAreaProps) {
   // ── Two-level Static/Dynamic split ──
   //   Turn level: settled turns → Static, active turn → split further
   //   Block level: within active turn, completed blocks → Static, only the
@@ -143,7 +142,6 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
             key={block.id}
             block={block}
             isFocused={false}
-            thinkingVisible={thinkingVisible}
             index={blockIdx}
             prevBlock={prevBlock}
           />;
@@ -156,7 +154,6 @@ export default function OutputArea({ turns, onToggleReason, onTogglePlan, onTogg
           key={lastActiveBlock.id}
           block={lastActiveBlock}
           isFocused={false}
-          thinkingVisible={thinkingVisible}
           index={0}
           prevBlock={mergedStaticBlocks.at(-1)}
         />

@@ -9,13 +9,25 @@ describe("parseSlashCommand", () => {
     expect(parseSlashCommand("  /help")).toBeNull(); // leading space
   });
 
-  // ── /thinking ──
-  test("parses /thinking", () => {
-    expect(parseSlashCommand("/thinking")).toEqual({ type: "thinking" });
+  // ── /effort ──
+  test("parses /effort", () => {
+    expect(parseSlashCommand("/effort")).toEqual({ type: "effort", level: "max" });
   });
 
-  test("parses shorthand /t", () => {
-    expect(parseSlashCommand("/t")).toEqual({ type: "thinking" });
+  test("parses /effort with level", () => {
+    expect(parseSlashCommand("/effort low")).toEqual({ type: "effort", level: "low" });
+  });
+
+  test("parses /effort with medium level", () => {
+    expect(parseSlashCommand("/effort medium")).toEqual({ type: "effort", level: "medium" });
+  });
+
+  test("parses /effort with high level", () => {
+    expect(parseSlashCommand("/effort high")).toEqual({ type: "effort", level: "high" });
+  });
+
+  test("parses /effort with max level", () => {
+    expect(parseSlashCommand("/effort max")).toEqual({ type: "effort", level: "max" });
   });
 
   // ── /model ──
@@ -119,12 +131,12 @@ describe("parseSlashCommand", () => {
 
   // ── edge cases ──
   test("handles extra whitespace between / and command", () => {
-    // parser trims after /, so /   thinking is treated as /thinking
-    expect(parseSlashCommand("/   thinking")).toEqual({ type: "thinking" });
+    // parser trims after /, so /   effort is treated as /effort
+    expect(parseSlashCommand("/   effort")).toEqual({ type: "effort", level: "max" });
   });
 
   test("handles trailing whitespace", () => {
-    expect(parseSlashCommand("/thinking   ")).toEqual({ type: "thinking" });
+    expect(parseSlashCommand("/effort max   ")).toEqual({ type: "effort", level: "max" });
   });
 
   test("handles no input after slash (just '/')", () => {

@@ -5,7 +5,6 @@ import { useTheme } from "./theme";
 
 interface StatsLineProps {
   status: StatusState;
-  thinkingVisible: boolean;
   running: boolean;
   modelProvider?: string;
   modelName?: string;
@@ -44,12 +43,12 @@ function estimateCost(provider: string | undefined, modelName: string | undefine
   return "<$0.001";
 }
 
-export default function StatsLine({ status, thinkingVisible, running, modelProvider, modelName }: StatsLineProps) {
+export default function StatsLine({ status, running, modelProvider, modelName }: StatsLineProps) {
   const t = useTheme();
   const cacheColor = status.cacheHitRate > 50 ? t.success : status.cacheHitRate > 20 ? t.warning : t.muted;
   const authLabel = status.authorization === "full_access" ? "完全" : "安全";
   const authColor = status.authorization === "full_access" ? t.warning : t.success;
-  const thinkColor = thinkingVisible ? t.success : t.muted;
+  const thinkColor = t.success;
   const costEstimate = estimateCost(modelProvider, status.modelName, status.totalTokens);
 
   return (

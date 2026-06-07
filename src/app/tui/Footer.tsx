@@ -8,13 +8,12 @@ interface FooterProps {
   status: StatusState;
   running: boolean;
   compacting: boolean;
-  thinkingVisible: boolean;
   timerKey: number;
   children?: ReactNode;
 }
 
 export default function Footer({
-  status, running, compacting, thinkingVisible, timerKey, children,
+  status, running, compacting, timerKey, children,
 }: FooterProps) {
   return (
     <Box flexDirection="column">
@@ -27,7 +26,6 @@ export default function Footer({
       {children}
       <StatsLine
         status={status}
-        thinkingVisible={thinkingVisible}
         running={running}
         modelProvider={status.modelProvider}
         modelName={status.modelName}

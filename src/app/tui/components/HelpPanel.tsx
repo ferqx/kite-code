@@ -49,7 +49,7 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
         ["/new", "新建会话"],
         ["/clear", "清空输出"],
         ["/compact", "压缩上下文"],
-        ["/thinking", "切换 reasoning 可见性"],
+        ["/effort", "设置推理深度（low/medium/high/max）"],
         ["/auth", "切换授权模式"],
         ["/plan", "切换规划模式"],
         ["/setting", "查看当前设置"],

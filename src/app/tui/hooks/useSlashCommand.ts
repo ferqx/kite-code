@@ -5,7 +5,7 @@ import { getSkillContent } from "@/core/skills/loader";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 
 export type SlashAction =
-  | { type: "thinking" }
+  | { type: "effort"; level: string }
   | { type: "model"; name?: string }
   | { type: "model_list" }
   | { type: "sessions"; id?: string }
@@ -29,7 +29,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
   const arg = args.join(" ");
 
   switch (cmd) {
-    case "thinking": case "t": return { type: "thinking" };
+    case "effort": return { type: "effort", level: arg || "max" };
     case "model":
       if (arg === "list") return { type: "model_list" };
       return { type: "model", name: arg || undefined };
@@ -63,8 +63,8 @@ export function useSlashCommand(
     if (!action) return false;
 
     switch (action.type) {
-      case "thinking":
-        dispatch({ type: "TOGGLE_THINKING" });
+      case "effort":
+        dispatch({ type: "SET_THINKING_LEVEL", level: action.level });
         break;
       case "model":
         if (action.name) {

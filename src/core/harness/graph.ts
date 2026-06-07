@@ -80,7 +80,7 @@ export interface BuildCodeAgentGraphInput {
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
 export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
-  const model = input.model ?? createChatModel(input.config);
+  const model = input.model ?? createChatModel({ ...input.config, reasoningEffort: input.thinkingLevel ?? input.config.reasoningEffort ?? null });
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
   const override = input.authorizationOverride;
 

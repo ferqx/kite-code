@@ -28,7 +28,7 @@ export interface EditorContentHandle {
 }
 
 export interface SlashSuggestionData {
-  kind: "command" | "model";
+  kind: "command" | "model" | "effort";
   partial: string;
   items: Array<{
     command: string;
@@ -343,7 +343,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         const names = ss.result.items.map((item) => item.command);
         const prefix = commonPrefix(names);
         if (prefix.length > ss.result.partial.length) {
-          commitValue(ss.result.kind === "model" ? "/model " + prefix : "/" + prefix);
+          commitValue(ss.result.kind === "model" ? "/model " + prefix : ss.result.kind === "effort" ? "/effort " + prefix : "/" + prefix);
         } else {
           // No common prefix extension — commit the selected item directly
           const selected = ss.result.items[ss.selectedIndex];

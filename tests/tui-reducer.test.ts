@@ -297,25 +297,13 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
       expect(flatBlocks(s)).toEqual(prev);
     });
-    test("TOGGLE_THINKING shows content on first use, hides on second", () => {
+    test("SET_THINKING_LEVEL updates thinkingMode in status", () => {
       let s = fresh();
-      s = dispatch(s, reasonEvt("step 1"));
-      // Default: thinkingVisible=true, folded=true → content NOT visible
-      // First toggle should SHOW content
-      s = dispatch(s, { type: "TOGGLE_THINKING" });
-      expect(s.thinkingVisible).toBe(true);
-      expect((flatBlocks(s)[0] as any).folded).toBe(false);
-      // Second toggle should HIDE content
-      s = dispatch(s, { type: "TOGGLE_THINKING" });
-      expect(s.thinkingVisible).toBe(false);
-    });
-    test("TOGGLE_THINKING shows content when thinking was off", () => {
-      let s = fresh();
-      s = { ...s, thinkingVisible: false };
-      s = dispatch(s, reasonEvt("step 1"));
-      s = dispatch(s, { type: "TOGGLE_THINKING" });
-      expect(s.thinkingVisible).toBe(true);
-      expect((flatBlocks(s)[0] as any).folded).toBe(false);
+      expect(s.status.thinkingMode).toBe("max");
+      s = dispatch(s, { type: "SET_THINKING_LEVEL", level: "low" });
+      expect(s.status.thinkingMode).toBe("low");
+      s = dispatch(s, { type: "SET_THINKING_LEVEL", level: "high" });
+      expect(s.status.thinkingMode).toBe("high");
     });
     test("CLEAR_OUTPUT clears blocks", () => {
       let s = dispatch(fresh(), textEvt("hello"));
@@ -553,7 +541,6 @@ describe("eventReducer (blocks model)", () => {
       expect(flatBlocks(s)).toEqual([]);
       expect(s.interrupt).toBeNull();
       expect(s.status.modelName).toBe("deepseek-v4");
-      expect(s.thinkingVisible).toBe(true);
     });
   });
 

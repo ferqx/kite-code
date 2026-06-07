@@ -47,7 +47,6 @@ const initialState: TuiState = {
   running: false,
   compacting: false,
   runCount: 0,
-  thinkingVisible: true,
   currentRunReasonId: undefined,
   showHelp: false,
   showModelSelector: false,
@@ -167,7 +166,6 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
           onTogglePlan={onTogglePlan}
           onToggleToolExpand={onToggleToolExpand}
           onToggleSubagentExpand={onToggleSubagentExpand}
-          thinkingVisible={state.thinkingVisible}
           running={state.running}
           overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind}
           header={<MemoHeader running={state.running} error={state.sessionError} />}
@@ -180,7 +178,6 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
         status={state.status}
         running={state.running}
         compacting={state.compacting}
-        thinkingVisible={state.thinkingVisible}
         timerKey={state.runCount}
       >
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}
@@ -235,6 +232,8 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
           <Text bold color={theme.primary}>
             {slashSuggestion.kind === "model"
               ? `模型匹配 "${slashSuggestion.partial}"`
+              : slashSuggestion.kind === "effort"
+              ? `推理深度匹配 "${slashSuggestion.partial}"`
               : `命令匹配 /${slashSuggestion.partial}`}
           </Text>
           <Box flexGrow={1} maxHeight={listHeight}>

@@ -48,7 +48,6 @@ export interface TuiState {
   compacting: boolean;
   runCount: number;
   runStartTime?: number;
-  thinkingVisible: boolean;
   currentRunReasonId?: number;
   showHelp: boolean;
   showModelSelector: boolean;

@@ -56,19 +56,6 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       }
       return next;
     }
-    case "TOGGLE_THINKING": {
-      const reasonBlocks = collectReasonBlocks(state);
-      const anyExpanded = reasonBlocks.some((b) => !b.folded);
-      const isVisible = state.thinkingVisible && anyExpanded;
-      if (isVisible) {
-        return { ...state, thinkingVisible: false };
-      }
-      let next = state;
-      for (const b of reasonBlocks) {
-        next = replaceBlockById(next, b.id, { ...b, folded: false });
-      }
-      return { ...next, thinkingVisible: true };
-    }
     case "TOGGLE_PLAN": {
       const block = findBlockById(state, action.id);
       if (!block || block.kind !== "plan_card") return state;

@@ -12,7 +12,7 @@ export type Action =
   | { type: "SET_IDLE" }
   | { type: "TOGGLE_REASON"; id: number }
   | { type: "TOGGLE_ALL_REASON" }
-  | { type: "TOGGLE_THINKING" }
+  | { type: "SET_THINKING_LEVEL"; level: string }
   | { type: "CLEAR_OUTPUT" }
   | { type: "RESOLVE_INTERRUPT"; blockId: number; resolution: string | { action: string; grant?: string; pattern?: string } }
   | { type: "SHOW_HELP" }

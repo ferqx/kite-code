@@ -323,11 +323,11 @@ describe("TUI E2E — P1 Key User Workflows", () => {
       expect(tui.getOutput()).toContain("❯");
     }, TIMEOUT);
 
-    test("/thinking → toggles reasoning visibility (no crash)", async () => {
-      await runSlashCommand(tui, "/thinking", 500);
+    test("/effort → sets reasoning effort (no crash)", async () => {
+      await runSlashCommand(tui, "/effort max", 500);
       expect(tui.isIdle() || tui.isRunning()).toBe(true);
 
-      await runSlashCommand(tui, "/thinking", 500);
+      await runSlashCommand(tui, "/effort low", 500);
     }, TIMEOUT);
 
     test("/sessions → opens session selector → Esc closes", async () => {

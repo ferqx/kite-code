@@ -10,7 +10,7 @@ export interface SlashCommandDef {
 }
 
 export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
-  { name: "thinking", aliases: ["t"], description: "Toggle thinking visibility" },
+  { name: "effort", aliases: [], description: "Set reasoning effort", args: "low|medium|high|max" },
   { name: "model", aliases: [], description: "Switch model", args: "[name]" },
   { name: "sessions", aliases: [], description: "Show sessions", args: "[id]" },
   { name: "new", aliases: [], description: "Start a new session" },
@@ -33,7 +33,7 @@ export interface SuggestionItem {
 }
 
 export interface SlashSuggestionsResult {
-  kind: "command" | "model";
+  kind: "command" | "model" | "effort";
   partial: string;
   items: SuggestionItem[];
 }
@@ -58,6 +58,20 @@ export function useSlashSuggestions(
         kind: "model",
         partial,
         items: models.map((m) => ({ command: m, aliases: [], description: "" })),
+      };
+    }
+
+    // /effort <partial-level>
+    const effortMatch = inputValue.match(/^\/effort\s+(\S*)$/i);
+    if (effortMatch) {
+      const partial = effortMatch[1];
+      const levels = ["low", "medium", "high", "max"];
+      const matched = levels.filter((l) => l.startsWith(partial));
+      if (matched.length === 0) return null;
+      return {
+        kind: "effort",
+        partial,
+        items: matched.map((l) => ({ command: l, aliases: [], description: "" })),
       };
     }
 
@@ -108,9 +122,12 @@ export function useSlashSuggestions(
   const safeSelectedIndex =
     result && selectedIndex >= result.items.length ? 0 : selectedIndex;
 
-  const replaceCommand = (item: SuggestionItem, kind: "command" | "model"): string => {
+  const replaceCommand = (item: SuggestionItem, kind: "command" | "model" | "effort"): string => {
     if (kind === "model") {
       return inputValue.replace(/\/model\s+\S*$/, `/model ${item.command}`);
+    }
+    if (kind === "effort") {
+      return inputValue.replace(/\/effort\s+\S*$/, `/effort ${item.command}`);
     }
     return "/" + item.command;
   };

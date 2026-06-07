@@ -39,13 +39,12 @@ const BLOCK_GAP = 1;
 interface BlockRendererProps {
   block: OutputBlock;
   isFocused: boolean;
-  thinkingVisible: boolean;
   index: number;
   prevBlock?: OutputBlock;
 }
 
 const BlockRenderer = React.memo(function BlockRenderer({
-  block, isFocused, thinkingVisible, index: _i, prevBlock,
+  block, isFocused, index: _i, prevBlock,
 }: BlockRendererProps) {
   const dt = useTheme();
   switch (block.kind) {
@@ -70,15 +69,15 @@ const BlockRenderer = React.memo(function BlockRenderer({
         <Box flexDirection="column" marginBottom={BLOCK_GAP}>
           {!isConsecutive && (
             <Text color={isFocused ? dt.primary : dt.dim}>
-              {!thinkingVisible || block.folded ? "▶ Thinking..." : "▼ Thinking"}
+              {block.folded ? "▶ Thinking..." : "▼ Thinking"}
             </Text>
           )}
-          {thinkingVisible && !block.folded && (
+          {!block.folded && (
             <Box paddingLeft={2}>
               <Text color={dt.muted}>{block.content}</Text>
             </Box>
           )}
-          {isConsecutive && (block.folded || !thinkingVisible) && (
+          {isConsecutive && block.folded && (
             <Text color={dt.dim}>  ...</Text>
           )}
         </Box>

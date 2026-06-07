@@ -181,6 +181,11 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
     }
     case "DELETE_SESSION":
       return { ...state, showSessions: false };
+    case "SET_THINKING_LEVEL":
+      return {
+        ...state,
+        status: { ...state.status, thinkingMode: action.level },
+      };
     case "SELECT_MODEL":
       return {
         ...state,

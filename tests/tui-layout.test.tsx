@@ -213,49 +213,49 @@ describe("StatusBar", () => {
 describe("StatsLine", () => {
   test("shows model name", () => {
     const status = fakeStatus({ modelName: "gpt-5" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
+    const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("gpt-5");
   });
 
   test("shows thinking mode", () => {
     const status = fakeStatus({ thinkingMode: "detailed" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
+    const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("think: detailed");
   });
 
   test("shows cache hit rate", () => {
     const status = fakeStatus({ cacheHitRate: 75 });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
+    const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("cache: 75%");
   });
 
   test("shows token count formatted", () => {
     const status = fakeStatus({ totalTokens: 10000 });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
+    const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("10.0k");
   });
 
   test("shows [完全] for full_access auth", () => {
     const status = fakeStatus({ authorization: "full_access" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
+    const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("[完全]");
   });
 
   test("shows [安全] for default auth", () => {
     const status = fakeStatus({ authorization: "default" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
+    const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("[安全]");
   });
 
   test("shows rw for write access", () => {
     const status = fakeStatus({ workspaceAccess: "write" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
+    const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("rw");
   });
 
   test("shows ro for read-only access", () => {
     const status = fakeStatus({ workspaceAccess: "read-only" });
-    const { lastFrame } = render(<StatsLine status={status} thinkingVisible running />);
+    const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("ro");
   });
 
@@ -602,7 +602,7 @@ describe("OutputArea", () => {
   test("renders user block with chevron prefix", () => {
     const blocks: OutputBlock[] = [{ id: 1, kind: "user", content: "Hello agent" }];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("❯ Hello agent");
   });
@@ -610,7 +610,7 @@ describe("OutputArea", () => {
   test("renders text block", () => {
     const blocks: OutputBlock[] = [{ id: 1, kind: "text", content: "Response text" }];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Response text");
   });
@@ -620,7 +620,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "reason", content: "Thinking about it...", folded: false },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Thinking");
   });
@@ -630,20 +630,9 @@ describe("OutputArea", () => {
       { id: 1, kind: "reason", content: "Hidden thoughts", folded: true },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Thinking...");
-  });
-
-  test("hides reason content when thinkingVisible is false", () => {
-    const blocks: OutputBlock[] = [
-      { id: 1, kind: "reason", content: "Secret", folded: true },
-    ];
-    const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible={false} />,
-    );
-    expect(lastFrame()).toContain("Thinking...");
-    expect(lastFrame()).not.toContain("Secret");
   });
 
   test("renders tool_card with running status", () => {
@@ -651,7 +640,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "shell_execute", args: {}, status: "running", summary: "", preview: "npm test" },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     expect(frame).toContain("shell_execute");
@@ -663,7 +652,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "done", summary: "OK", preview: "foo.ts", elapsedMs: 1234, detail: "Read foo.ts" },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     // Summary hidden for success
@@ -677,7 +666,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "shell_execute", args: {}, status: "error", summary: "command not found", elapsedMs: 100 },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     expect(frame).toContain("command not found");
@@ -689,7 +678,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "edit_file", args: {}, status: "done", summary: "", detail: "+3 -2" },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     expect(frame).toContain("+3 -2");
@@ -703,7 +692,7 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     expect(frame).toContain("File Changes");
@@ -716,7 +705,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "approval", approval: fakeApproval({ command: "npm publish" }) },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Awaiting approval");
     expect(lastFrame()).toContain("npm publish");
@@ -731,7 +720,7 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Approved (full access)");
   });
@@ -745,7 +734,7 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Denied");
   });
@@ -755,7 +744,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "question", question: fakeQuestion({ question: "Continue?" }) },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Question");
   });
@@ -769,14 +758,14 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Yes please");
   });
 
   test("renders empty when no blocks", () => {
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[]} onToggleReason={noop} thinkingVisible />,
+      <OutputArea running={false} turns={[]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toBe("");
   });
@@ -797,7 +786,6 @@ describe("App", () => {
       running: false,
       compacting: false,
       runCount: 0,
-      thinkingVisible: true,
       showHelp: false,
       showModelSelector: false,
       showSessions: false,
