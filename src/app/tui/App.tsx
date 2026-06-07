@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import { ScrollList } from "ink-scroll-list";
 import type { McpManager } from "@/core/mcp";
 import type { TuiState } from "./types";
-import OutputArea from "./OutputArea";
+import OutputArea, { useStaticContent } from "./OutputArea";
 import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
 import HelpPanel from "./components/HelpPanel";
@@ -150,6 +150,22 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
     [dispatch, interruptBlock]
   );
 
+  // ── Static content computation ──
+  // <Static> is rendered at ROOT LEVEL (outside any layout Box) so its
+  // scrollback writes never compete with the dynamic tree's Yoga layout.
+  const header = useMemo(
+    () => <MemoHeader running={state.running} error={state.sessionError} />,
+    [state.running, state.sessionError],
+  );
+
+  const { staticItems, staticKey, header: staticHeader, mergedStaticBlocks, activeDynamicBlocks } = useStaticContent({
+    turns: state.turns,
+    running: state.running,
+    sessionKey: state.sessionKey,
+    header,
+  });
+
+  const overlayActive = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind;
 
   return (
     <Box flexDirection="column">
@@ -161,15 +177,17 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
         </>
       ) : (
         <OutputArea
-          turns={state.turns}
+          key={state.sessionKey}
+          staticItems={staticItems}
+          staticKey={staticKey}
+          staticHeader={staticHeader}
+          activeDynamicBlocks={activeDynamicBlocks}
+          mergedStaticBlocks={mergedStaticBlocks}
           onToggleReason={onToggleReason}
           onTogglePlan={onTogglePlan}
           onToggleToolExpand={onToggleToolExpand}
           onToggleSubagentExpand={onToggleSubagentExpand}
-          running={state.running}
-          overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind}
-          header={<MemoHeader running={state.running} error={state.sessionError} />}
-          sessionKey={state.sessionKey}
+          overlayActive={overlayActive}
         />
       )}
 
@@ -263,8 +281,6 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
         </Box>
         );
       })()}
-      {/* Spacer removed: with Static rendering, content lives in terminal
-          scrollback and Footer sits right below the last message. */}
     </Box>
   );
 }

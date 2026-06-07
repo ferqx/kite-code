@@ -537,7 +537,7 @@ if (import.meta.main) {
     maxFps: 60,
     exitOnCtrlC: false,
     kittyKeyboard: { mode: 'enabled' },
-    incrementalRendering: true,
+    incrementalRendering: false,
   });
   process.on("SIGINT", () => {
     _sessionManagerForExit?.abortAll();

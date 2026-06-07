@@ -255,3 +255,53 @@ describe("TUI E2E — Cursor Behavior", () => {
   }, TIMEOUT);
 
 });
+
+// ═══════════════════════════════════════════════════════════════
+// Tests: Input line must not duplicate when output area has content
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Regression test: when messages are present in the output area,
+ * typing in the input line MUST NOT produce duplicate `❯` lines.
+ * The bug was caused by <Static> + incrementalRendering cursor race.
+ */
+describe("TUI E2E — No duplicate input when output has content", () => {
+  const dupPlan = new ResponsePlan([
+    { group: "fill output", responses: [
+      text("Here is a response with some text to fill up the output area so we can verify the input line does not duplicate."),
+    ]},
+  ]);
+
+  let tui: TuiHarness;
+
+  beforeAll(async () => {
+    tui = await createTui({ modelResponses: dupPlan.flatten() });
+  });
+
+  afterAll(() => {
+    tui?.unmount();
+  });
+
+  test("typing after agent response: no duplicate ❯ below StatsLine", async () => {
+    // Send a message to fill the output area
+    await tui.sendMessage("hello agent");
+    await tui.waitForIdle(10000);
+
+    // Clear input, then type some text WITHOUT submitting
+    await clearInput(tui);
+    await typeString(tui, "no-dup-test");
+
+    const output = stripAnsi(tui.getOutput());
+
+    // The unique typed text must appear exactly once in the output.
+    // If it appears twice, the input line was duplicated (the bug).
+    const matches = output.split("\n").filter((l) => l.includes("no-dup-test"));
+    expect(matches.length).toBe(1);
+
+    // Also verify: no ❯ line exists BELOW the StatsLine
+    const statsIndex = output.indexOf("│ think:");
+    const afterStats = output.slice(statsIndex + 1);
+    const afterLines = afterStats.split("\n").filter((l) => l.trimStart().startsWith("❯"));
+    expect(afterLines.length).toBe(0);
+  }, TIMEOUT);
+});

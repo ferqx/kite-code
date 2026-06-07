@@ -1,3 +1,4 @@
+import React from "react";
 import { describe, test, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import { Text } from "ink";
@@ -13,9 +14,9 @@ import ModelSelector from "../src/app/tui/components/ModelSelector";
 import ApprovalBlock from "../src/app/tui/components/ApprovalBlock";
 import InputBlock from "../src/app/tui/components/InputBlock";
 import InputLine from "../src/app/tui/components/InputLine";
-import OutputArea from "../src/app/tui/OutputArea";
+import OutputArea, { useStaticContent } from "../src/app/tui/OutputArea";
 import App, { type AppProps } from "../src/app/tui/App";
-import type { TuiState, OutputBlock, StatusState, FileChangeRecord } from "../src/app/tui/types";
+import type { TuiState, OutputBlock, StatusState, FileChangeRecord, Turn } from "../src/app/tui/types";
 import type { ToolApprovalPayload, UserInputPayload } from "../src/protocol/events";
 import { TuiUserInputProvider } from "../src/app/tui/provider";
 import type { UserInputProvider } from "../src/protocol/provider";
@@ -598,11 +599,36 @@ describe("InputLine", () => {
 
 // ── OutputArea ──
 
+// Test wrapper: bridges old OutputArea API (running + turns) to new architecture
+// where <Static> rendering is handled externally via useStaticContent.
+function OutputAreaTestWrap({ running, turns, onToggleReason }: {
+  running: boolean;
+  turns: { blocks: OutputBlock[] }[];
+  onToggleReason: () => void;
+}) {
+  const { staticItems, staticKey, header: staticHeader, mergedStaticBlocks, activeDynamicBlocks } = useStaticContent({
+    turns: turns as Turn[],
+    running,
+    sessionKey: 0,
+    header: null,
+  });
+  return (
+    <OutputArea
+      staticItems={staticItems}
+      staticKey={staticKey}
+      staticHeader={staticHeader}
+      activeDynamicBlocks={activeDynamicBlocks}
+      mergedStaticBlocks={mergedStaticBlocks}
+      onToggleReason={onToggleReason}
+    />
+  );
+}
+
 describe("OutputArea", () => {
   test("renders user block with chevron prefix", () => {
     const blocks: OutputBlock[] = [{ id: 1, kind: "user", content: "Hello agent" }];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("❯ Hello agent");
   });
@@ -610,7 +636,7 @@ describe("OutputArea", () => {
   test("renders text block", () => {
     const blocks: OutputBlock[] = [{ id: 1, kind: "text", content: "Response text" }];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Response text");
   });
@@ -620,7 +646,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "reason", content: "Thinking about it...", folded: false },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Thinking");
   });
@@ -630,7 +656,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "reason", content: "Hidden thoughts", folded: true },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Thinking...");
   });
@@ -640,7 +666,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "shell_execute", args: {}, status: "running", summary: "", preview: "npm test" },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     expect(frame).toContain("shell_execute");
@@ -652,7 +678,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "done", summary: "OK", preview: "foo.ts", elapsedMs: 1234, detail: "Read foo.ts" },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     // Summary hidden for success
@@ -666,7 +692,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "shell_execute", args: {}, status: "error", summary: "command not found", elapsedMs: 100 },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     expect(frame).toContain("command not found");
@@ -678,7 +704,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "tool_card", callId: "c1", name: "edit_file", args: {}, status: "done", summary: "", detail: "+3 -2" },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     expect(frame).toContain("+3 -2");
@@ -692,7 +718,7 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
     expect(frame).toContain("File Changes");
@@ -705,7 +731,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "approval", approval: fakeApproval({ command: "npm publish" }) },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Awaiting approval");
     expect(lastFrame()).toContain("npm publish");
@@ -720,7 +746,7 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Approved (full access)");
   });
@@ -734,7 +760,7 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Denied");
   });
@@ -744,7 +770,7 @@ describe("OutputArea", () => {
       { id: 1, kind: "question", question: fakeQuestion({ question: "Continue?" }) },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Question");
   });
@@ -758,14 +784,14 @@ describe("OutputArea", () => {
       },
     ];
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toContain("Yes please");
   });
 
   test("renders empty when no blocks", () => {
     const { lastFrame } = render(
-      <OutputArea running={false} turns={[]} onToggleReason={noop} />,
+      <OutputAreaTestWrap running={false} turns={[]} onToggleReason={noop} />,
     );
     expect(lastFrame()).toBe("");
   });
