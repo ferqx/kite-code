@@ -33,7 +33,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         pendingInterrupt: false,
         interrupt: null,
         plan: null,
-        status: { ...state.status, totalTokens: 0, cacheHitRate: 0,currentNode: null, plan: null },
+        status: { ...state.status, cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null },
         turns: [],
       };
       return {
@@ -59,7 +59,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         rewindCounter: 0,
         currentRunReasonId: undefined,
         sessionKey: state.sessionKey + 1,
-        status: { ...state.status, totalTokens: 0, cacheHitRate: 0,currentNode: null, plan: null },
+        status: { ...state.status, cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null },
       };
     }
     case "LOAD_SESSION_PENDING":

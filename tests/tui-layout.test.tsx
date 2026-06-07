@@ -29,7 +29,9 @@ function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
     plan: null,
     authorization: "full_access",
     workspaceAccess: "write",
-    cacheHitRate: 45,
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+    cacheHitRate: 0.45,
     totalTokens: 1234,
     currentNode: "agent",
     modelProvider: "anthropic",
@@ -219,13 +221,13 @@ describe("StatsLine", () => {
   });
 
   test("shows thinking mode", () => {
-    const status = fakeStatus({ thinkingMode: "detailed" });
+    const status = fakeStatus({ modelProvider: "deepseek", thinkingMode: "detailed" });
     const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("think: detailed");
   });
 
   test("shows cache hit rate", () => {
-    const status = fakeStatus({ cacheHitRate: 75 });
+    const status = fakeStatus({ modelProvider: "deepseek", cacheHitRate: 0.75 });
     const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain("cache: 75%");
   });

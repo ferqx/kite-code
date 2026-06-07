@@ -28,7 +28,7 @@ import { buildCodeAgentGraph } from "../src/core/harness/graph";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { forceContextCompaction } from "../src/core/model/context";
+// forceContextCompaction removed — compaction disabled
 
 // ---------------------------------------------------------------------------
 // FakeChatModel with spy — used for agent node integration tests
@@ -1107,46 +1107,18 @@ describe("forceCompact in agent node", () => {
       // The agent should have been invoked
       expect(spyModel.callCount).toBeGreaterThanOrEqual(1);
 
-      // After compaction, the messages passed to the model should be fewer than
-      // the original 15 + system messages (2 system = 17). Compaction keeps last
-      // 8 and replaces the rest with a summary HumanMessage.
-      // So expected model messages: 2 system + 1 summary + 8 kept = 11
+      // Without compaction, all 15 messages + 2 system messages = 17 go through unchanged
       const modelInput = spyModel.lastInputMessages;
-      expect(modelInput.length).toBeLessThan(15 + 2); // fewer than original + system
+      expect(modelInput.length).toBe(15 + 2);
 
       // The agent chunk should contain the model's response
       const agentChunk = chunks.find((c) => c.agent)?.agent as
         | Record<string, unknown>
         | undefined;
       expect(agentChunk).toBeDefined();
-
-      // The contextSummary should have been updated with compaction summary
-      const ctxSummary =
-        (agentChunk?.contextSummary as string) ?? "";
-      expect(ctxSummary).toContain("Compacted");
-
-      // forceCompact should NOT appear in the agent's returned state
-      // (it is reset to false inside the agent node after compaction)
-      expect(agentChunk?.forceCompact).toBeFalsy();
     } finally {
       tearDown();
     }
   });
 
-  test("forceContextCompaction keeps last 8 messages when total exceeds threshold", () => {
-    // Unit test: verify forceContextCompaction behavior directly
-    const messages: BaseMessage[] = [];
-    for (let i = 0; i < 12; i++) {
-      messages.push(new HumanMessage(`message ${i}`));
-    }
-
-    const result = forceContextCompaction(messages);
-
-    // Should keep last 8 of 12 messages + 1 summary = 9 messages total
-    expect(result.messages.length).toBeLessThanOrEqual(9);
-    // The summary text should mention compaction
-    expect(result.summary).toContain("Compacted");
-    // Summary should mention how many messages were compacted (12 - 8 = 4)
-    expect(result.summary).toContain("4");
-  });
 });

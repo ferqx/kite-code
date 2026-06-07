@@ -736,11 +736,10 @@ function findCacheMetrics(chunk: unknown) {
 }
 
 function findOutputTokens(chunk: unknown): number {
-  if (!chunk || typeof chunk !== "object") return 0;
-  for (const v of Object.values(chunk as Record<string, unknown>)) {
-    if (AIMessage.isInstance(v)) {
-      const um = v.usage_metadata as { output_tokens?: number } | undefined;
-      const ru = v.response_metadata?.usage as { completion_tokens?: number; output_tokens?: number } | undefined;
+  for (const value of walkValues(chunk)) {
+    if (AIMessage.isInstance(value)) {
+      const um = value.usage_metadata as { output_tokens?: number } | undefined;
+      const ru = value.response_metadata?.usage as { completion_tokens?: number; output_tokens?: number } | undefined;
       return um?.output_tokens ?? ru?.output_tokens ?? ru?.completion_tokens ?? 0;
     }
   }

@@ -238,11 +238,16 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case "cache_metrics": {
       const d = event.data;
+      const hit = state.status.cacheHitTokens + d.cacheHitTokens;
+      const miss = state.status.cacheMissTokens + d.cacheMissTokens;
+      const cacheTotal = hit + miss;
       return {
         ...state,
         status: {
           ...state.status,
-          cacheHitRate: d.hitRate ?? state.status.cacheHitRate,
+          cacheHitTokens: hit,
+          cacheMissTokens: miss,
+          cacheHitRate: cacheTotal > 0 ? hit / cacheTotal : 0,
           totalTokens: state.status.totalTokens + d.inputTokens + (d.outputTokens ?? 0),
         },
       };
@@ -390,15 +395,17 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case "subagent_cache_metrics": {
       // Merge sub-agent cache/token data into global status
-      // SubAgentCacheMetricsPayload has: subagentId, cacheHitTokens, cacheMissTokens, inputTokens
       const { cacheHitTokens, cacheMissTokens, inputTokens } = event.data;
-      const totalCacheTokens = cacheHitTokens + cacheMissTokens;
-      const hitRate = totalCacheTokens > 0 ? cacheHitTokens / totalCacheTokens : state.status.cacheHitRate;
+      const hit = state.status.cacheHitTokens + cacheHitTokens;
+      const miss = state.status.cacheMissTokens + cacheMissTokens;
+      const cacheTotal = hit + miss;
       return {
         ...state,
         status: {
           ...state.status,
-          cacheHitRate: hitRate,
+          cacheHitTokens: hit,
+          cacheMissTokens: miss,
+          cacheHitRate: cacheTotal > 0 ? hit / cacheTotal : state.status.cacheHitRate,
           totalTokens: state.status.totalTokens + inputTokens,
         },
       };

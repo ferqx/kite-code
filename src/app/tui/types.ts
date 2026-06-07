@@ -76,6 +76,8 @@ export interface StatusState {
   plan: AgentPlan | null;
   authorization: AuthorizationMode;
   workspaceAccess: WorkspaceAccess;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
   cacheHitRate: number;
   totalTokens: number;
   currentNode: string | null;

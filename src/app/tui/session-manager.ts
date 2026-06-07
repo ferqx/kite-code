@@ -450,6 +450,8 @@ function initialStatusSnapshot(): StatusState {
     plan: null,
     authorization: "default",
     workspaceAccess: "write",
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
     cacheHitRate: 0,
     totalTokens: 0,
     currentNode: null,

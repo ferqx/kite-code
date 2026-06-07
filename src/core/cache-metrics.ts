@@ -111,6 +111,7 @@ export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics 
   const usage = message.response_metadata?.usage as
     | {
         prompt_tokens?: number;
+        input_tokens?: number;
         prompt_cache_hit_tokens?: number;
         prompt_cache_miss_tokens?: number;
       }
@@ -119,8 +120,12 @@ export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics 
     | { cache_read?: number }
     | undefined;
 
+  // 优先从 response_metadata.usage 取 prompt_tokens (OpenAI) 或 input_tokens (Anthropic/DeepSeek v4)，
+  // 其次从 usage_metadata.input_tokens (LangChain 标准字段) 取
+  // Prefer response_metadata.usage.prompt_tokens (OpenAI) or input_tokens (Anthropic/DeepSeek v4),
+  // fall back to usage_metadata.input_tokens (LangChain standard)
   const inputTokens = Number(
-    usage?.prompt_tokens ?? message.usage_metadata?.input_tokens ?? 0,
+    usage?.prompt_tokens ?? usage?.input_tokens ?? message.usage_metadata?.input_tokens ?? 0,
   );
   const cacheHitTokens = Number(
     usage?.prompt_cache_hit_tokens ?? inputTokenDetails?.cache_read ?? 0,

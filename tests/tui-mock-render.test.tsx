@@ -8,7 +8,7 @@ function fakeStatus() {
   return {
     phase: "building" as const, plan: null,
     authorization: "default" as const, workspaceAccess: "write" as const,
-    cacheHitRate: 42, cacheHitTokens: 420, cacheMissTokens: 580, totalTokens: 123456, currentNode: null,
+    cacheHitTokens: 420, cacheMissTokens: 580, cacheHitRate: 0.42, totalTokens: 123456, currentNode: null,
     modelProvider: "deepseek" as const, modelName: "deepseek-v4", thinkingMode: "max",
   };
 }

@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
+import { AIMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import { ChatOllama } from "@langchain/ollama";
 import {
   START,
@@ -7,16 +7,9 @@ import {
 } from "@langchain/langgraph";
 import type { AgentConfig } from "@/core/config/index";
 import {
-  buildStaticSystemPrompt,
   prepareModelContext,
-  forceContextCompaction,
   sanitizeToolCallPairs,
 } from "@/core/model/context";
-import {
-  buildCacheableRuntimeContext,
-  formatWorkspaceAccessReminder,
-  formatPlanStateReminder,
-} from "@/core/model/runtime-context";
 import { createChatModel, type SupportedChatModel } from "@/core/model/factory";
 import { type ModelRetryListener, type RetryListenerHost } from "@/core/model/deepseek";
 import { BunSqliteSaver } from "@/core/persistence/checkpoint";
@@ -115,7 +108,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       threadId: state.threadId,
     });
     const retryEvents: ModelRetryEvent[] = [];
-    let compactionPerformed: { reason: string; summary: string } | null = null;
     const listener: ModelRetryListener = (attempt, error, delayMs) => {
       retryEvents.push({
         attempt,
@@ -125,42 +117,20 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     };
     if (hasRetryListener(model)) model.setRetryListener(listener);
 
-    // 手动压缩：在下一次模型调用前压缩上下文
-    // Manual compaction: compact context before next model invocation
     let effectiveState = sanitizedState;
-    if (sanitizedState.forceCompact) {
-      const compacted = forceContextCompaction(sanitizedState.messages);
-      const newSummary = sanitizedState.contextSummary
-        ? `${state.contextSummary}\n\n${compacted.summary}`.trim()
-        : compacted.summary;
-      effectiveState = {
-        ...sanitizedState,
-        messages: compacted.messages,
-        contextSummary: newSummary,
-        forceCompact: false,
-      } as CodeAgentState;
-      compactionPerformed = {
-        reason: "Manual compaction triggered by /compact or Ctrl+X c",
-        summary: compacted.summary,
-      };
-    }
 
     try {
-      const { state: result, contextRetries, compactionPerformed: autoCompact } = await invokeModel({ model, state: effectiveState, tools, skills: input.skills });
-      if (autoCompact && !compactionPerformed) {
-        compactionPerformed = autoCompact;
-      }
-      const allRetries = [...retryEvents, ...contextRetries];
+      const { state: result } = await invokeModel({ model, state: effectiveState, tools, skills: input.skills });
       const syncedAuth = authorizationForState(state, override);
       const modelConfigState = {
         modelProvider: input.config.providerName,
         modelName: input.config.modelName,
         thinkingLevel: input.thinkingLevel ?? null,
       };
-      if (allRetries.length > 0) {
-        return { ...result, ...modelConfigState, authorization: syncedAuth, modelRetries: allRetries, compactionPerformed };
+      if (retryEvents.length > 0) {
+        return { ...result, ...modelConfigState, authorization: syncedAuth, modelRetries: retryEvents };
       }
-      return { ...result, ...modelConfigState, authorization: syncedAuth, compactionPerformed };
+      return { ...result, ...modelConfigState, authorization: syncedAuth };
     } finally {
       if (hasRetryListener(model)) model.setRetryListener(null);
     }
@@ -452,25 +422,6 @@ function hasRetryListener(model: SupportedChatModel): model is SupportedChatMode
 }
 
 /** 将 override 同步到 state.authorization / Sync override to state.authorization */
-/**
- * Strip all orphaned ToolMessages whose matching AIMessage is not present.
- * Prevents the DeepSeek 400 error when compaction/slicing breaks tool_call/ToolMessage pairs.
- * Handles orphans at any position (not just leading), which occurs after slice(-8) in layer 2 recovery.
- */
-function ensureNoOrphanedToolMessages(messages: BaseMessage[]): BaseMessage[] {
-  const hasId = new Set<string>();
-  for (const msg of messages) {
-    if (msg instanceof AIMessage && Array.isArray(msg.tool_calls)) {
-      for (const tc of msg.tool_calls) {
-        if (tc.id) hasId.add(tc.id);
-      }
-    }
-  }
-  return messages.filter(
-    (msg) => !(msg instanceof ToolMessage && !hasId.has(msg.tool_call_id)),
-  );
-}
-
 function authorizationForState(
   state: CodeAgentState,
   override?: AuthorizationOverride,
@@ -492,78 +443,21 @@ export interface InvokeModelParams {
 
 /** invokeModel 返回值 / Return value of invokeModel */
 export interface InvokeModelResult {
-  /** 图中其他节点可消费的状态更新（不含 modelRetries）/ State update consumed by other graph nodes (without modelRetries) */
+  /** 图中其他节点可消费的状态更新 / State update consumed by other graph nodes */
   state: Record<string, unknown>;
-  /** 上下文溢出重试事件（Layer 1/2），由 agent 节点合并到 modelRetries / Context overflow retry events, merged into modelRetries by agent node */
-  contextRetries: ModelRetryEvent[];
-  /** 压缩触发信息（由 agent 节点检测并 emit compact 事件）/ Compaction trigger info (detected by agent node to emit compact events) */
-  compactionPerformed?: { reason: string; summary: string } | null;
 }
 
 /** 共享的模型调用逻辑 / Shared model invocation logic (exported for testing) */
 export async function invokeModel({
   model, state, tools, skills,
 }: InvokeModelParams): Promise<InvokeModelResult> {
-  let prepared = prepareModelContext("agent", state, skills);
-  const contextRetries: ModelRetryEvent[] = [];
-  let compactionPerformed: { reason: string; summary: string } | null = null;
+  const prepared = prepareModelContext("agent", state, skills);
 
-  let response: AIMessage;
-  try {
-    response = await bindAgentTools(model, tools)
-      .invoke(prepared.messages) as AIMessage;
-  } catch (error) {
-    if (!isContextOverflowError(error)) throw error;
-
-    // 第一层：规则压缩 + 重试 / Layer 1: rules-based compaction + retry
-    contextRetries.push({
-      attempt: 1,
-      error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
-      delayMs: 0,
-    });
-    const compacted = forceContextCompaction(state.messages);
-    const retryMessages = rebuildMessages("agent", state, compacted.messages, skills);
-    try {
-      response = await bindAgentTools(model, tools)
-        .invoke(retryMessages) as AIMessage;
-      compactionPerformed = {
-        reason: "Auto compaction due to context overflow (layer 1: rules-based)",
-        summary: compacted.summary,
-      };
-      prepared = { ...prepared, contextSummary: mergeSummaries(state.contextSummary ?? "", compacted.summary) };
-    } catch (retryError) {
-      if (!isContextOverflowError(retryError)) throw retryError;
-
-      // 第二层：LLM 自总结 + 重试 / Layer 2: LLM summarization + retry
-      contextRetries.push({
-        attempt: 2,
-        error: retryError instanceof Error ? retryError.message.slice(0, 200) : String(retryError).slice(0, 200),
-        delayMs: 0,
-      });
-      const summaryMsg = await generateLLMSummary(model, state.messages);
-      const tail = compacted.messages.slice(-8);
-      // Ensure the tail doesn't start with orphaned ToolMessages from the slice
-      const safeTail = ensureNoOrphanedToolMessages(tail);
-      const llmMessages = [new HumanMessage(summaryMsg), ...safeTail];
-      const llmRetry = rebuildMessages("agent", state, llmMessages, skills);
-      response = await bindAgentTools(model, tools)
-        .invoke(llmRetry) as AIMessage;
-      compactionPerformed = {
-        reason: "Auto compaction due to context overflow (layer 2: LLM summarization)",
-        summary: "Generated conversation summary via LLM",
-      };
-      prepared = {
-        ...prepared,
-        contextSummary: mergeSummaries(state.contextSummary ?? "",
-          `Compacted conversation via LLM summary after repeated context overflow.`),
-      };
-    }
-  }
+  const response = await bindAgentTools(model, tools)
+    .invoke(prepared.messages) as AIMessage;
 
   const request = toolRequestFromMessage(response, state.workspace);
   if (request) {
-    // 保留完整的 AIMessage（含所有 tool_calls），不剥离其他待处理的调用
-    // Keep the full AIMessage with all tool_calls — don't strip other pending calls
     return {
       state: {
         workspaceAccess: state.workspaceAccess,
@@ -574,8 +468,6 @@ export async function invokeModel({
         contextSummary: prepared.contextSummary,
         messages: [response],
       },
-      contextRetries,
-      compactionPerformed,
     };
   }
 
@@ -590,74 +482,7 @@ export async function invokeModel({
       final: messageText(response),
       messages: [response],
     },
-    contextRetries,
-    compactionPerformed,
   };
-}
-
-/** 使用 LLM 生成对话摘要 / Generate conversation summary using LLM */
-async function generateLLMSummary(
-  model: ReturnType<typeof createChatModel>,
-  messages: BaseMessage[],
-): Promise<string> {
-  const conversationText = messages
-    .map((m) => {
-      const role = m.type;
-      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-      return `[${role}] ${content}`;
-    })
-    .join("\n\n")
-    .slice(-8000); // 只取最后 8000 字符作为摘要素材 / Use last 8000 chars as summary material
-
-  const prompt = [
-    "Summarize the following conversation for context compaction.",
-    "Preserve: files created/modified, verification results, errors, plan state, unresolved issues.",
-    "Keep it concise. Output only the summary, no preamble.",
-    "",
-    "<conversation>",
-    conversationText,
-    "</conversation>",
-  ].join("\n");
-
-  try {
-    const summary = await model.invoke([new HumanMessage(prompt)]);
-    return `<summary>${typeof summary.content === "string" ? summary.content : JSON.stringify(summary.content)}</summary>`;
-  } catch (error) {
-    // 摘要调用本身也可能溢出，回退到截断式摘要避免递归
-    // Summary call itself may overflow; fall back to truncation to avoid recursion
-    if (isContextOverflowError(error)) {
-      return `<summary>${conversationText.slice(-2000)}</summary>`;
-    }
-    throw error;
-  }
-}
-
-/** 检测 context overflow 错误 / Detect context overflow errors */
-function isContextOverflowError(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return /context.*(?:length|limit|window|exceed|too\s+long)/i.test(msg) ||
-    /maximum.*(?:context|token|length)/i.test(msg) ||
-    /reduce.*(?:message|context|prompt)/i.test(msg);
-}
-
-/** 用压缩后的对话消息重建完整上下文 / Rebuild full context with compacted conversation messages */
-function rebuildMessages(
-  role: "agent",
-  state: CodeAgentState,
-  conversationMessages: BaseMessage[],
-  skills?: import("@/core/skills/types").SkillManifest[],
-): BaseMessage[] {
-  const messages: BaseMessage[] = [];
-  messages.push(new SystemMessage(buildStaticSystemPrompt(role, skills)));
-  messages.push(new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "", activeSkillInstructions: state.activeSkillInstructions })));
-  messages.push(...conversationMessages);
-  if (state.workspaceAccess === "read-only") {
-    messages.push(new HumanMessage(formatWorkspaceAccessReminder(state.workspaceAccess)));
-  }
-  if (state.plan) {
-    messages.push(new HumanMessage(formatPlanStateReminder(state.plan)));
-  }
-  return messages;
 }
 
 /** 绑定模型工具，按 provider adapter 传入其支持的调用参数 / Bind tools with provider-supported call options */
@@ -669,11 +494,6 @@ function bindAgentTools(
     return model.bindTools(tools);
   }
   return model.bindTools(tools, { tool_choice: "auto" });
-}
-
-/** 合并已有和新生成的摘要 / Merge existing and new summaries */
-function mergeSummaries(existing: string, generated: string): string {
-  return [existing.trim(), generated.trim()].filter(Boolean).join("\n");
 }
 
 function approvalGrantFromResume(
