@@ -1,7 +1,7 @@
 // Patched version of ink-text-input v6 that filters ALL Ctrl+letter input,
 // not just Ctrl+C. This prevents character leakage from TUI shortcuts like
 // Ctrl+T, Ctrl+L, Ctrl+R, Ctrl+H, Ctrl+E, Ctrl+O, Ctrl+X.
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput, usePaste } from "ink";
 import chalk from "chalk";
 
@@ -24,6 +24,8 @@ interface Props {
   onNavigateHistory?: (direction: "up" | "down") => void;
   /** 禁用上下箭头导航（如 slash 建议/文件搜索激活时） / Disable up/down arrow navigation (e.g. when slash suggestions or file search active) */
   disableArrowNav?: boolean;
+  /** 紧跟在光标后的补全预览文字，光标将叠加在其首字符上 */
+  trailingText?: string;
 }
 
 function CtrlSafeTextInput({
@@ -38,20 +40,23 @@ function CtrlSafeTextInput({
   onRemoveAtomicBlock,
   onNavigateHistory,
   disableArrowNav,
+  trailingText,
 }: Props) {
   const [cursorOffset, setCursorOffset] = useState((originalValue || "").length);
+  const cursorOffsetRef = useRef(cursorOffset);
+  cursorOffsetRef.current = cursorOffset;
 
   useEffect(() => {
     if (!focus || !showCursor) return;
     const newValue = originalValue || "";
-    if (cursorOffset > newValue.length - 1) {
+    if (cursorOffsetRef.current > newValue.length - 1) {
       setCursorOffset(newValue.length);
     }
   }, [originalValue, focus, showCursor]);
 
   useEffect(() => {
     if (!atomicBlock) return;
-    if (cursorOffset > atomicBlock.start && cursorOffset <= atomicBlock.end) {
+    if (cursorOffsetRef.current > atomicBlock.start && cursorOffsetRef.current <= atomicBlock.end) {
       setCursorOffset(atomicBlock.end + 1);
     }
   }, [atomicBlock]);
@@ -61,13 +66,14 @@ function CtrlSafeTextInput({
   // and the parent's paste placeholder threshold is never reached.
   usePaste((text) => {
     if (!text) return;
+    const co = cursorOffsetRef.current;
     const newValue =
-      originalValue.slice(0, cursorOffset) +
+      originalValue.slice(0, co) +
       text +
-      originalValue.slice(cursorOffset);
-    const newCursorOffset = cursorOffset + text.length;
+      originalValue.slice(co);
+    const newCursorOffset = co + text.length;
     setCursorOffset(newCursorOffset);
-    onChange(newValue, { insertPos: cursorOffset, insertLen: text.length });
+    onChange(newValue, { insertPos: co, insertLen: text.length });
   }, { isActive: focus });
 
   const value = mask ? mask.repeat(originalValue.length) : originalValue;
@@ -95,10 +101,23 @@ function CtrlSafeTextInput({
       if (line.length === 0) return chalk.inverse(" ");
       let rendered = "";
       for (let j = 0; j < line.length; j++) {
-        rendered += line[j];
+        if (j === cursorCol) {
+          rendered += chalk.inverse(line[j]);
+        } else {
+          rendered += line[j];
+        }
       }
       if (cursorCol >= line.length) {
-        rendered += chalk.inverse(" ");
+        if (trailingText) {
+          rendered += chalk.inverse(trailingText[0]);
+          if (trailingText.length > 1) {
+            rendered += chalk.dim(trailingText.slice(1));
+          }
+        } else {
+          rendered += chalk.inverse(" ");
+        }
+      } else if (trailingText) {
+        rendered += chalk.dim(trailingText);
       }
       return rendered;
     });
@@ -143,9 +162,10 @@ function CtrlSafeTextInput({
 
       // ── Up/Down: multi-line cursor movement or history navigation ──
       if ((key.upArrow || key.downArrow) && !disableArrowNav) {
+        const co = cursorOffsetRef.current;
         const lines = originalValue.length > 0 ? originalValue.split("\n") : [""];
         let lineIdx = 0;
-        let col = cursorOffset;
+        let col = co;
         for (let i = 0; i < lines.length; i++) {
           if (col <= lines[i].length) { lineIdx = i; break; }
           col -= lines[i].length + 1;
@@ -173,26 +193,27 @@ function CtrlSafeTextInput({
         return;
       }
 
-      let nextCursorOffset = cursorOffset;
+      const co = cursorOffsetRef.current;
+      let nextCursorOffset = co;
       let nextValue = originalValue;
       let insertMeta: { insertPos: number; insertLen: number } | undefined;
       const ab = atomicBlock;
 
       if (ab) {
         if (key.leftArrow) {
-          if (cursorOffset > ab.start && cursorOffset <= ab.end + 1) {
+          if (co > ab.start && co <= ab.end + 1) {
             nextCursorOffset = ab.start;
           } else {
-            nextCursorOffset = cursorOffset - 1;
+            nextCursorOffset = co - 1;
           }
         } else if (key.rightArrow) {
-          if (cursorOffset >= ab.start && cursorOffset < ab.end + 1) {
+          if (co >= ab.start && co < ab.end + 1) {
             nextCursorOffset = ab.end + 1;
           } else {
-            nextCursorOffset = cursorOffset + 1;
+            nextCursorOffset = co + 1;
           }
         } else if (key.backspace) {
-          if (cursorOffset > ab.start && cursorOffset <= ab.end + 1) {
+          if (co > ab.start && co <= ab.end + 1) {
             nextValue =
               originalValue.slice(0, ab.start) +
               originalValue.slice(ab.end + 1);
@@ -202,14 +223,14 @@ function CtrlSafeTextInput({
             onRemoveAtomicBlock?.();
             return;
           }
-          if (cursorOffset > 0) {
+          if (co > 0) {
             nextValue =
-              originalValue.slice(0, cursorOffset - 1) +
-              originalValue.slice(cursorOffset);
-            nextCursorOffset = cursorOffset - 1;
+              originalValue.slice(0, co - 1) +
+              originalValue.slice(co);
+            nextCursorOffset = co - 1;
           }
         } else if (key.delete) {
-          if (cursorOffset >= ab.start && cursorOffset < ab.end + 1) {
+          if (co >= ab.start && co < ab.end + 1) {
             nextValue =
               originalValue.slice(0, ab.start) +
               originalValue.slice(ab.end + 1);
@@ -219,43 +240,43 @@ function CtrlSafeTextInput({
             onRemoveAtomicBlock?.();
             return;
           }
-          if (cursorOffset < originalValue.length) {
+          if (co < originalValue.length) {
             nextValue =
-              originalValue.slice(0, cursorOffset) +
-              originalValue.slice(cursorOffset + 1);
+              originalValue.slice(0, co) +
+              originalValue.slice(co + 1);
           }
         } else {
           nextValue =
-            originalValue.slice(0, cursorOffset) +
+            originalValue.slice(0, co) +
             input +
-            originalValue.slice(cursorOffset);
+            originalValue.slice(co);
           nextCursorOffset += input.length;
-          insertMeta = { insertPos: cursorOffset, insertLen: input.length };
+          insertMeta = { insertPos: co, insertLen: input.length };
         }
       } else {
         if (key.leftArrow) {
           if (showCursor) {
-            nextCursorOffset--;
+            nextCursorOffset = co - 1;
           }
         } else if (key.rightArrow) {
           if (showCursor) {
-            nextCursorOffset++;
+            nextCursorOffset = co + 1;
           }
         } else if (key.backspace || key.delete) {
-          if (cursorOffset > 0) {
+          if (co > 0) {
             nextValue =
-              originalValue.slice(0, cursorOffset - 1) +
-              originalValue.slice(cursorOffset);
-            nextCursorOffset--;
+              originalValue.slice(0, co - 1) +
+              originalValue.slice(co);
+            nextCursorOffset = co - 1;
           }
         } else {
           nextValue =
-            originalValue.slice(0, cursorOffset) +
+            originalValue.slice(0, co) +
             input +
-            originalValue.slice(cursorOffset);
-          nextCursorOffset += input.length;
+            originalValue.slice(co);
+          nextCursorOffset = co + input.length;
 
-          insertMeta = { insertPos: cursorOffset, insertLen: input.length };
+          insertMeta = { insertPos: co, insertLen: input.length };
         }
       }
 

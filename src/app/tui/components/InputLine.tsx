@@ -285,6 +285,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       setValue(placeholder);
     } else {
       setPasteState(null);
+      textKeyRef.current++;
       setValue(entry);
     }
   }, []);
@@ -491,10 +492,8 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
           onRemoveAtomicBlock={clearPasteState}
           onNavigateHistory={handleNavigateHistory}
           disableArrowNav={slashSuggestions.active || fileSearch.active}
+          trailingText={slashGhost ?? undefined}
         />
-        {slashGhost && !overlayActive && (
-          <Text color={t.dim}>{slashGhost}</Text>
-        )}
       </Box>
 
       {pasteState && (

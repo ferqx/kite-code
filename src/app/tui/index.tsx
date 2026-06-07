@@ -534,7 +534,7 @@ if (import.meta.main) {
   // The manual approach enabled Kitty at the terminal level but Ink's parser didn't
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
   const { unmount } = render(<ErrorBoundary><TuiBootstrap /></ErrorBoundary>, {
-    maxFps: 30,
+    maxFps: 60,
     exitOnCtrlC: false,
     kittyKeyboard: { mode: 'enabled' },
     incrementalRendering: true,
