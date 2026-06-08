@@ -3,7 +3,6 @@ import { AIMessage } from "@langchain/core/messages";
 import {
   createPromptCacheStandardTracker,
   extractPromptCacheMetrics,
-  summarizePromptCacheMetricsByWorkspaceAccess,
 } from "../src/core/cache-metrics";
 import { normalizeGraphStream } from "../src/core/runner";
 
@@ -278,47 +277,5 @@ describe("extractPromptCacheMetrics", () => {
     });
   });
 
-  // 验证按工作区访问权限汇总多条缓存指标的聚合结果 / Verify aggregating cache metrics by workspace access
-  test("summarizes prompt cache hit rate by workspace access", () => {
-    // read-only 两条记录：100+300=400 输入 token, 25+225=250 命中, 75+75=150 未命中 / Two read-only entries
-    // write 一条记录：200 输入 token, 50 命中, 150 未命中 / One write entry
-    expect(
-      summarizePromptCacheMetricsByWorkspaceAccess([
-        {
-          workspaceAccess: "read-only",
-          inputTokens: 100,
-          cacheHitTokens: 25,
-          cacheMissTokens: 75,
-          hitRate: 0.25,
-        },
-        {
-          workspaceAccess: "read-only",
-          inputTokens: 300,
-          cacheHitTokens: 225,
-          cacheMissTokens: 75,
-          hitRate: 0.75,
-        },
-        {
-          workspaceAccess: "write",
-          inputTokens: 200,
-          cacheHitTokens: 50,
-          cacheMissTokens: 150,
-          hitRate: 0.25,
-        },
-      ]),
-    ).toEqual({
-      "read-only": {
-        inputTokens: 400,
-        cacheHitTokens: 250,
-        cacheMissTokens: 150,
-        hitRate: 0.625,
-      },
-      write: {
-        inputTokens: 200,
-        cacheHitTokens: 50,
-        cacheMissTokens: 150,
-        hitRate: 0.25,
-      },
-    });
-  });
 });
+

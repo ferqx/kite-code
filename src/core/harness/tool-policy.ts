@@ -153,9 +153,9 @@ export function applyApprovalGrant(input: {
 
 /** 从访问权限派生默认执行阶段 / Derive the default phase from workspace access */
 export function defaultPhaseForWorkspaceAccess(
-  workspaceAccess: WorkspaceAccess,
+  _workspaceAccess: WorkspaceAccess,
 ): AgentPhase {
-  return workspaceAccess === "read-only" ? "planning" : "building";
+  return "building";
 }
 
 /** 统一评估工具请求是否允许、是否需要审批以及用户可见风险 / Evaluate the unified tool safety policy */
@@ -261,27 +261,24 @@ export function evaluateToolPolicy(input: {
       return shellDecision;
     }
 
-    // 非只读命令需检查 phase/access 限制
-    // Non-read-only commands must pass phase/access restrictions
-    const phaseOrAccessDenial = denyForPlanningOrReadOnly({
+    // 非只读命令在 planning 阶段仍需审批 / Non-read-only commands still require approval during planning
+    const phaseDenial = denyForPlanningPhase({
       request,
-      workspaceAccess,
       phase,
     });
-    if (phaseOrAccessDenial) {
-      return phaseOrAccessDenial;
+    if (phaseDenial) {
+      return phaseDenial;
     }
 
     return shellDecision;
   }
 
-  const phaseOrAccessDenial = denyForPlanningOrReadOnly({
+  const phaseDenial = denyForPlanningPhase({
     request,
-    workspaceAccess,
     phase,
   });
-  if (phaseOrAccessDenial) {
-    return phaseOrAccessDenial;
+  if (phaseDenial) {
+    return phaseDenial;
   }
 
   if (request.name === "write_file" || request.name === "edit_file") {
@@ -537,20 +534,10 @@ function authorizedShellDecision(input: {
   return null;
 }
 
-function denyForPlanningOrReadOnly(input: {
+function denyForPlanningPhase(input: {
   request: PendingToolRequest;
-  workspaceAccess: WorkspaceAccess;
   phase: AgentPhase;
 }): ToolPolicyDecision | null {
-  if (input.workspaceAccess === "read-only") {
-    return deny({
-      risk: requestRisk(input.request),
-      reason: "read-only workspace access allows read-only tools only.",
-      userVisibleSummary: `Rejected ${input.request.name} under read-only workspace access.`,
-      expectedEffects: ["No workspace mutation or code execution will run"],
-    });
-  }
-
   if (input.phase === "planning") {
     return deny({
       risk: requestRisk(input.request),
@@ -559,7 +546,6 @@ function denyForPlanningOrReadOnly(input: {
       expectedEffects: ["No workspace mutation or code execution will run"],
     });
   }
-
   return null;
 }
 

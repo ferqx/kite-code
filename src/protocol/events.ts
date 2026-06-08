@@ -28,9 +28,10 @@ export type AgentEvent =
   | { type: "subagent_cache_metrics"; data: SubAgentCacheMetricsPayload };
 
 // ── 基础类型 / Base types ──
-export type WorkspaceAccess = "read-only" | "write";
+export type WorkspaceAccess = "write";
 export type AgentPhase = "planning" | "building";
-export type WorkspaceAccessRequest = "auto" | WorkspaceAccess | "plan" | "builder";
+/** 工作区访问请求模式（CLI --mode 参数），已废弃 read-only/plan / Workspace access request mode (CLI --mode), read-only/plan deprecated */
+export type WorkspaceAccessRequest = "auto" | WorkspaceAccess | "builder";
 export type AuthorizationMode = "default" | "full_access";
 export type ShellApprovalGrant = "approve_once" | "same_command" | "full_access";
 export type ShellGrantUsed = "none" | ShellApprovalGrant;

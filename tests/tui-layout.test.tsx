@@ -250,16 +250,11 @@ describe("StatsLine", () => {
     expect(lastFrame()).toContain("[安全]");
   });
 
-  test("shows rw for write access", () => {
+  test("does not show ro/rw indicator (workspace access always write)", () => {
     const status = fakeStatus({ workspaceAccess: "write" });
     const { lastFrame } = render(<StatsLine status={status} running />);
-    expect(lastFrame()).toContain("rw");
-  });
-
-  test("shows ro for read-only access", () => {
-    const status = fakeStatus({ workspaceAccess: "read-only" });
-    const { lastFrame } = render(<StatsLine status={status} running />);
-    expect(lastFrame()).toContain("ro");
+    expect(lastFrame()).not.toContain("ro");
+    expect(lastFrame()).not.toContain("rw");
   });
 
 });

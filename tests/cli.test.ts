@@ -98,13 +98,15 @@ describe("cli argument parsing", () => {
     expect(args.approvalHash).toBe("hash-a");
   });
 
-  // 验证 run 命令支持新的 --mode read-only/write 值，并保留 plan/builder 兼容值 / Verify run accepts workspace access mode values
+  // 验证 run 命令的 --mode 参数（read-only/plan 已移除，退回 auto）/ Verify run --mode accepts write/builder, others default to auto
   test("run accepts explicit workspace access mode values", () => {
     const args = parseArgs(["run", "--mode", "read-only", "--task", "Create hello.txt"]);
-    const legacyArgs = parseArgs(["run", "--mode", "plan", "--task", "Create hello.txt"]);
+    const planArgs = parseArgs(["run", "--mode", "plan", "--task", "Create hello.txt"]);
+    const writeArgs = parseArgs(["run", "--mode", "write", "--task", "Create hello.txt"]);
 
-    expect(args.mode).toBe("read-only");
-    expect(legacyArgs.mode).toBe("plan");
+    expect(args.mode).toBe("auto");
+    expect(planArgs.mode).toBe("auto");
+    expect(writeArgs.mode).toBe("write");
   });
 
   // 验证 --skill 参数解析为单值 / Verify --skill flag is parsed

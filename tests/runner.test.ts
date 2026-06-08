@@ -13,24 +13,21 @@ import type { AgentEvent } from "../src/protocol/index";
 import type { ModelRetryEvent } from "../src/core/types";
 // 测试 runner 的初始工作区访问权限选择逻辑 / Test runner initial workspace access selection logic
 describe("runner initial workspace access selection", () => {
-  // 验证以 /plan 开头的任务自动进入只读工作区访问 / Verify /plan tasks start with read-only workspace access
-  test("starts /plan tasks with read-only workspace access", () => {
-    expect(initialWorkspaceAccessForTask("/plan Create hello.txt")).toBe("read-only");
-    expect(initialWorkspaceAccessForTask("   /plan inspect repo first")).toBe("read-only"); // 前导空格不影响 / Leading whitespace does not matter
+  // 验证所有任务以 write 工作区访问启动 / Verify all tasks start with write workspace access
+  test("starts tasks with write workspace access", () => {
+    expect(initialWorkspaceAccessForTask("/plan Create hello.txt")).toBe("write");
+    expect(initialWorkspaceAccessForTask("   /plan inspect repo first")).toBe("write");
   });
 
-  // 验证显式传入的兼容 mode 参数会映射到工作区访问权限 / Verify explicit legacy mode maps to workspace access
-  test("maps explicit API or CLI mode to workspace access", () => {
-    expect(initialWorkspaceAccessForTask("Create hello.txt", "plan")).toBe("read-only");
-    expect(initialWorkspaceAccessForTask("/plan Create hello.txt", "builder")).toBe("write");
-    expect(initialWorkspaceAccessForTask("Create hello.txt", "read-only")).toBe("read-only");
+  // 验证 initialWorkspaceAccessForTask 始终返回 write / Verify always returns write
+  test("always returns write workspace access", () => {
     expect(initialWorkspaceAccessForTask("Create hello.txt", "write")).toBe("write");
+    expect(initialWorkspaceAccessForTask("Create hello.txt", "builder")).toBe("write");
     expect(initialWorkspaceAccessForTask("Create hello.txt", "auto")).toBe("write");
   });
 
-  // 验证初始 phase 从工作区访问权限派生，规划阶段有独立状态 / Initial phase is derived from workspace access as explicit graph state
+  // 验证初始 phase 始终为 building / Verify initial phase is always building
   test("derives initial agent phase from workspace access", () => {
-    expect(initialAgentPhaseForAccess("read-only")).toBe("planning");
     expect(initialAgentPhaseForAccess("write")).toBe("building");
   });
 
@@ -41,12 +38,12 @@ describe("runner initial workspace access selection", () => {
     expect(initialWorkspaceAccessForTask("Plan first and do not edit files yet")).toBe("write");
   });
 
-  // 验证初始访问权限不会改写用户任务文本，避免把运行状态混入用户消息 / Verify initial access does not rewrite user task text
+  // 验证初始访问权限不会改写用户任务文本 / Verify initial access does not rewrite user task text
   test("keeps initial task messages unchanged", () => {
-    expect(taskMessageForInitialAccess("先计划，不要改代码", "read-only")).toBe(
+    expect(taskMessageForInitialAccess("先计划，不要改代码", "write")).toBe(
       "先计划，不要改代码",
     );
-    expect(taskMessageForInitialAccess("/plan inspect", "read-only")).toBe("/plan inspect");
+    expect(taskMessageForInitialAccess("/plan inspect", "write")).toBe("/plan inspect");
     expect(taskMessageForInitialAccess("Create hello.txt", "write")).toBe(
       "Create hello.txt",
     );

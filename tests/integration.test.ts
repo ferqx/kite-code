@@ -394,7 +394,7 @@ describe("graph integration", () => {
         await graph.stream(
           {
             messages: [new HumanMessage("创建 out.txt")],
-            workspaceAccess: "read-only",
+            workspaceAccess: "write",
             phase: "planning",
             plan: null,
             userId: "test",
@@ -426,7 +426,7 @@ describe("graph integration", () => {
       expect(toolContent.ok).toBe(false);
       expect(
         toolContent.stderr ?? toolContent.failure?.reason ?? "",
-      ).toContain("read-only");
+      ).toContain("planning");
 
       expect(fs.existsSync(path.join(workspace, "out.txt"))).toBe(false);
 

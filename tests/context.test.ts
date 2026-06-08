@@ -33,7 +33,7 @@ describe("model context protocol", () => {
     expect(String(messages[2].content)).not.toContain("Plan:");
     expect(String(messages[2].content)).not.toContain("Tool results:");
     expect(String(messages[1].content)).toContain("Cacheable runtime context:");
-    expect(String(messages[1].content)).toContain("Workspace access policy:");
+    expect(String(messages[1].content)).toContain("Workspace:");
     expect(String(messages[1].content)).not.toContain("Tool policy (builder mode):");
     expect(String(messages[1].content)).not.toContain("Configured model:");
     expect(String(messages[1].content)).not.toContain("User ID:");
@@ -156,11 +156,11 @@ describe("model context protocol", () => {
     expect(String(messages[1].content)).not.toContain("graph.state.plan:");
   });
 
-  // 验证当前只读工作区访问作为尾部合成 HumanMessage 注入，不改变真实会话前缀 / Verify read-only workspace access is projected as trailing HumanMessage
-  test("projects read-only workspace access as trailing HumanMessage after conversation messages", () => {
+  // 验证 write 工作区访问不再注入独立 HumanMessage 提醒 / Verify write workspace access no longer injects a dedicated HumanMessage
+  test("does not inject workspaceAccess reminder when write access", () => {
     const messages = buildModelMessages("agent", {
       workspace: "D:\\workspace",
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       plan: null,
       messages: [new HumanMessage("Inspect before editing")],
       final: "",
@@ -170,22 +170,16 @@ describe("model context protocol", () => {
       "system",
       "system",
       "human",
-      "human",
     ]);
-    expect(messages[3]).toBeInstanceOf(HumanMessage);
-    expect(String(messages[0].content)).not.toContain("Current workspace access: read-only");
+    expect(messages[2]).toBeInstanceOf(HumanMessage);
+    expect(String(messages[0].content)).not.toContain("Current workspace access:");
     expect(String(messages[1].content)).toContain("Cacheable runtime context:");
     expect(String(messages[1].content)).not.toContain("Current workspace access:");
     expect(String(messages[2].content)).toBe("Inspect before editing");
-    expect(String(messages[3].content)).toContain(
-      '<runtime-state source="graph.state.workspaceAccess">',
-    );
-    expect(String(messages[3].content)).toContain("Current workspace access: read-only");
-    expect(String(messages[3].content)).toContain("read-only");
   });
 
-  // 验证 plan 模式常见组合：read-only 和 plan 都用独立尾部 HumanMessage / Verify plan-mode combination keeps runtime states as separate trailing HumanMessages
-  test("projects read-only HumanMessage before plan HumanMessage when both trailing runtime states exist", () => {
+  // 验证 plan 尾部 HumanMessage 仍然注入，但不再有 workspaceAccess 提醒 / Verify plan HumanMessage still injected without workspaceAccess reminder
+  test("projects plan HumanMessage without workspaceAccess reminder", () => {
     const plan = {
       name: "Inspect cache layout",
       description: "Check prompt cache behavior before editing",
@@ -197,7 +191,7 @@ describe("model context protocol", () => {
     };
     const messages = buildModelMessages("agent", {
       workspace: "D:\\workspace",
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       plan,
       messages: [new HumanMessage("/plan inspect cache behavior")],
       final: "",
@@ -208,18 +202,11 @@ describe("model context protocol", () => {
       "system",
       "human",
       "human",
-      "human",
     ]);
     expect(messages[3]).toBeInstanceOf(HumanMessage);
-    expect(messages[4]).toBeInstanceOf(HumanMessage);
     expect(String(messages[2].content)).toBe("/plan inspect cache behavior");
-    expect(String(messages[3].content)).toContain(
-      '<runtime-state source="graph.state.workspaceAccess">',
-    );
-    expect(String(messages[3].content)).toContain("Current workspace access: read-only");
-    expect(String(messages[4].content)).toContain('<runtime-state source="graph.state.plan">');
-    expect(String(messages[4].content)).toContain("Name: Inspect cache layout");
-    expect(String(messages[0].content)).not.toContain("Current workspace access: read-only");
+    expect(String(messages[3].content)).toContain('<runtime-state source="graph.state.plan">');
+    expect(String(messages[3].content)).toContain("Name: Inspect cache layout");
     expect(String(messages[0].content)).not.toContain("Inspect cache layout");
     expect(String(messages[1].content)).not.toContain("<runtime-state");
   });

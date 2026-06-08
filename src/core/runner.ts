@@ -580,7 +580,7 @@ function parseStateChangeEvents(node: Record<string, unknown>): AgentEvent | nul
   const auth = node.authorization;
   const modelProvider = node.modelProvider as string | undefined;
   const modelName = node.modelName as string | undefined;
-  if (ws === "read-only" || ws === "write") sc.workspaceAccess = ws;
+  if (ws === "write") sc.workspaceAccess = ws;
   if (phase === "planning" || phase === "building") sc.phase = phase;
   if (plan !== undefined) sc.plan = plan as StateChangePayload["plan"];
   if (auth && typeof auth === "object") {
@@ -725,7 +725,7 @@ function findWorkspaceAccess(chunk: unknown): WorkspaceAccess | null {
   for (const v of Object.values(chunk as Record<string, unknown>)) {
     if (v && typeof v === "object" && !Array.isArray(v)) {
       const ws = (v as Record<string, unknown>).workspaceAccess;
-      if (ws === "read-only" || ws === "write") return ws;
+      if (ws === "write") return ws;
     }
   }
   return null;
@@ -746,19 +746,16 @@ function findOutputTokens(chunk: unknown): number {
   return 0;
 }
 
-export function initialWorkspaceAccessForTask(task: string, requested: WorkspaceAccessRequest = "auto"): WorkspaceAccess {
-  if (requested === "plan" || requested === "read-only") return "read-only";
-  if (requested === "builder" || requested === "write") return "write";
-  if (task.trimStart().toLowerCase().startsWith("/plan")) return "read-only";
+export function initialWorkspaceAccessForTask(_task: string, _requested: WorkspaceAccessRequest = "auto"): WorkspaceAccess {
   return "write";
 }
 
-export function workspaceAccessToPhase(access: WorkspaceAccess): AgentPhase {
-  return access === "read-only" ? "planning" : "building";
+export function workspaceAccessToPhase(_access: WorkspaceAccess): AgentPhase {
+  return "building";
 }
 
-export function initialAgentPhaseForAccess(workspaceAccess: WorkspaceAccess): AgentPhase {
-  return workspaceAccessToPhase(workspaceAccess);
+export function initialAgentPhaseForAccess(_workspaceAccess: WorkspaceAccess): AgentPhase {
+  return "building";
 }
 
 export function taskMessageForInitialAccess(task: string, _workspaceAccess: WorkspaceAccess): string {

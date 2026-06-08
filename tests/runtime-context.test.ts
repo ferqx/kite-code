@@ -12,7 +12,7 @@ describe("buildRuntimeContext", () => {
     const context = buildRuntimeContext({
       workspace: "D:\\workspace",
       messages: [new HumanMessage("/plan please inspect the repo")],
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       plan: {
         name: "Repository investigation",
         description: "Inspect the current graph implementation before editing.",
@@ -28,9 +28,7 @@ describe("buildRuntimeContext", () => {
     expect(context).toContain("OS:");
     expect(context).toContain("Shell:");
     expect(context).toContain("Workspace: D:\\workspace");
-    expect(context).toContain("Workspace access policy:");
-    expect(context).toContain("ask_user when clarification is needed");
-    expect(context).toContain("read-only access rejects write/delete/execute tools");
+    expect(context).toContain("Workspace: D:\\workspace");
     expect(context).not.toContain("Tool policy (plan mode):");
     expect(context).not.toContain("Configured model:");
     expect(context).not.toContain("User ID:");
@@ -57,9 +55,7 @@ describe("buildRuntimeContext", () => {
       timezone: "Asia/Shanghai",
     });
 
-    expect(context).toContain("Workspace access policy:");
-    expect(context).toContain("ask_user when clarification is needed");
-    expect(context).toContain("write access requires approval for write/delete/execute tools");
+    expect(context).toContain("Workspace: D:\\workspace");
     expect(context).not.toContain("Tool policy (builder mode):");
     expect(context).not.toContain("User ID:");
     expect(context).not.toContain("Thread mode:");
@@ -73,7 +69,7 @@ describe("buildRuntimeContext", () => {
     const readOnlyContext = buildCacheableRuntimeContext({
       workspace: "D:\\workspace",
       messages: [new HumanMessage("inspect")],
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       plan: null,
     });
     const writeContext = buildCacheableRuntimeContext({
@@ -84,7 +80,6 @@ describe("buildRuntimeContext", () => {
     });
 
     expect(readOnlyContext).toBe(writeContext);
-    expect(readOnlyContext).toContain("Workspace access policy:");
     expect(readOnlyContext).not.toContain("Tool policy (plan mode):");
     expect(readOnlyContext).not.toContain("Tool policy (builder mode):");
     expect(readOnlyContext).not.toContain("Current workspace access:");

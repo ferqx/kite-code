@@ -32,7 +32,7 @@ describe("tool policy", () => {
         reason: "Model requested read_file",
         protectedCommand: "read_file package.json",
       },
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       phase: "planning",
     });
 
@@ -389,7 +389,7 @@ describe("tool policy", () => {
         reason: "Model requested MCP resource",
         protectedCommand: "read_mcp_resource",
       },
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       phase: "planning",
     });
     expect(decision.allowed).toBe(true);
@@ -455,7 +455,7 @@ describe("tool policy", () => {
           reason: "Model requested MCP tool",
           protectedCommand: "mcp__playwright__navigate",
         } as unknown as PendingToolRequest,
-        workspaceAccess: "read-only",
+        workspaceAccess: "write",
         phase: "planning",
       });
       expect(decision.allowed).toBe(false);

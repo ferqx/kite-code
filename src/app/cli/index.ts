@@ -207,7 +207,7 @@ function positionalTask(argv: string[]): string {
 }
 
 function parseMode(value: string): WorkspaceAccessRequest {
-  if (value === "read-only" || value === "write" || value === "plan" || value === "builder") return value;
+  if (value === "write" || value === "builder") return value;
   return "auto";
 }
 
@@ -232,7 +232,7 @@ Options:
   --user <id>            User id
   --workspace <path>     Tool workspace
   --checkpoints <path>   SQLite checkpoint path
-  --mode <mode>          auto, read-only, write, plan, or builder
+  --mode <mode>          auto, write, or builder
   --skill <name>         Activate a skill (repeatable)
   --approve              Approve tool call on resume
   --approve-same-command Approve same future commands

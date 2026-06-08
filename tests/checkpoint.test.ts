@@ -212,8 +212,8 @@ describe("getCheckpointState", () => {
           { lc_id: ["langchain", "messages", "HumanMessage"], content: "hi" },
           { lc_id: ["langchain", "messages", "AIMessage"], content: "hey" },
         ],
-        workspaceAccess: "read-only",
-        phase: "planning",
+        workspaceAccess: "write",
+        phase: "building",
         plan: { name: "test", description: "test plan", steps: [] },
         contextSummary: "summary text",
       },
@@ -230,8 +230,8 @@ describe("getCheckpointState", () => {
     expect(state).not.toBeNull();
     if (state) {
       expect(state.messages).toHaveLength(2);
-      expect(state.workspaceAccess).toBe("read-only");
-      expect(state.phase).toBe("planning");
+      expect(state.workspaceAccess).toBe("write");
+      expect(state.phase).toBe("building");
       expect(state.plan?.name).toBe("test");
       expect(state.contextSummary).toBe("summary text");
     }

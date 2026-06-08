@@ -10,7 +10,6 @@ import {
 } from "../src/core/harness/routes";
 import { normalizeUserInputResume } from "../src/core/harness/user-input";
 import { runApprovedTool } from "../src/core/harness/tool-runner";
-import { isReadOnlyWorkspaceAccess } from "../src/core/harness/state";
 import {
   getPendingToolRequest,
   toolRequestFromMessage,
@@ -94,14 +93,10 @@ describe("graph local tool routing", () => {
     expect(routeAfterApproval({ messages: [] } as unknown as CodeAgentState)).toBe("agent");
   });
 
-  // 验证 graph state 中的 workspaceAccess 字段是只读执行边界的唯一权威来源 / workspaceAccess is the source of truth for read-only execution
-  test("uses graph state workspaceAccess as the read-only source of truth", () => {
-    expect(
-      isReadOnlyWorkspaceAccess({ workspaceAccess: "read-only" } as CodeAgentState),
-    ).toBe(true);
-    expect(isReadOnlyWorkspaceAccess({ workspaceAccess: "write" } as CodeAgentState)).toBe(
-      false,
-    );
+  // 验证 graph state 始终使用 write workspaceAccess / Verify graph state always uses write workspaceAccess
+  test("uses write workspaceAccess by default", () => {
+    const s = { workspaceAccess: "write" } as CodeAgentState;
+    expect(s.workspaceAccess).toBe("write");
   });
 
   // 验证 write 访问下 update_plan 工具调用直接路由到 tools，无需审批 / update_plan skips approval under write access
@@ -295,7 +290,7 @@ describe("graph local tool routing", () => {
   test("routes read-only shell_execute inspect calls directly to tools without approval", () => {
     expect(
       routeAfterAgent({
-        workspaceAccess: "read-only",
+        workspaceAccess: "write",
         phase: "planning",
         plan: activePlan,
         workspace: "/tmp/workspace",
@@ -345,7 +340,7 @@ describe("graph local tool routing", () => {
   test("routes ask_user calls to user input under read-only access", () => {
     expect(
       routeAfterAgent({
-        workspaceAccess: "read-only",
+        workspaceAccess: "write",
         workspace: "/tmp/workspace",
         messages: [
           new AIMessage({
@@ -370,7 +365,7 @@ describe("graph local tool routing", () => {
   test("ends read-only completion directly when final exists", () => {
     expect(
       routeAfterAgent({
-        workspaceAccess: "read-only",
+        workspaceAccess: "write",
         plan: activePlan,
         workspace: "/tmp/workspace",
         messages: [],
@@ -383,7 +378,7 @@ describe("graph local tool routing", () => {
   test("routes completed tool updates back to agent", () => {
     expect(
       routeAfterTools({
-        workspaceAccess: "read-only",
+        workspaceAccess: "write",
         plan: activePlan,
         workspace: "/tmp/workspace",
         messages: [],
@@ -392,11 +387,11 @@ describe("graph local tool routing", () => {
     ).toBe("agent");
   });
 
-  // 验证 read-only 访问下写入工具调用不路由到审批，而是直接到 tools 节点以拒绝执行 / Write tools under read-only access route to tools for rejection
-  test("routes unexpected read-only write tool calls to tools for rejection instead of approval", () => {
+  // 验证 write 访问下写入工具调用路由到审批 / Write tools under write access route to approval
+  test("routes write tool calls to approval under write access", () => {
     expect(
       routeAfterAgent({
-        workspaceAccess: "read-only",
+        workspaceAccess: "write",
         plan: activePlan,
         workspace: "/tmp/workspace",
         messages: [
@@ -412,7 +407,7 @@ describe("graph local tool routing", () => {
           }),
         ],
       } as unknown as CodeAgentState),
-    ).toBe("tools");
+    ).toBe("approval");
   });
 
   // 验证 ask_user 工具调用会解析为结构化用户输入请求 / ask_user tool call parses into a structured user input request
@@ -483,7 +478,7 @@ describe("graph local tool routing", () => {
         reason: "Create plan",
         protectedCommand: "update_plan",
       },
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
     });
 
     expect(result.ok).toBe(true);
@@ -533,7 +528,7 @@ describe("graph local tool routing", () => {
         stdout: "{}",
         stderr: "",
       }),
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       phase: "planning",
     });
 
@@ -543,8 +538,8 @@ describe("graph local tool routing", () => {
     expect("action" in result ? result.action?.intent : undefined).toBe("inspect");
   });
 
-  // 验证 read-only 访问下拒绝包含写入重定向的 shell 命令 / Shell commands with write redirects are rejected under read-only access
-  test("rejects write-like shell commands under read-only access", async () => {
+  // 验证 planning 阶段下拒绝 shell 命令 / Shell commands with write redirects are rejected during planning phase
+  test("rejects write-like shell commands during planning phase", async () => {
     const result = await runApprovedTool({
       workspace: "/tmp/workspace",
       request: {
@@ -554,30 +549,30 @@ describe("graph local tool routing", () => {
         reason: "Unexpected write",
         protectedCommand: "echo hi > hello.txt",
       },
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       phase: "planning",
     });
 
     expect(result.ok).toBe(false);
-    expect((result as ShellResult).stderr).toContain("read-only");
+    expect((result as ShellResult).stderr).toContain("planning");
   });
 
-  // 验证 read-only 访问下拒绝非只读工具（如 write_file）的调用 / Non-read tools are rejected under read-only access
-  test("rejects non-read tools under read-only access", async () => {
+  // 验证 building 阶段下 write_file 正常执行 / Write tools execute normally during building phase
+  test("allows write tools during building phase", async () => {
     const result = await runApprovedTool({
       workspace: "/tmp/workspace",
       request: {
         id: "call-1",
         name: "write_file",
         args: { path: "hello.txt", content: "hi" },
-        reason: "Unexpected write",
+        reason: "Write file",
         protectedCommand: "write_file hello.txt",
       },
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
     });
 
-    expect(result.ok).toBe(false);
-    expect((result as ShellResult).stderr).toContain("read-only");
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("write_file");
   });
 
   // 验证 planning phase 是独立的执行边界，执行类工具会在 runner 兜底拒绝 / Planning phase is an execution boundary enforced by the runner
@@ -670,7 +665,7 @@ describe("graph local tool routing", () => {
         stdout: "",
         stderr: "rg: Missing: No such file or directory",
       }),
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       phase: "planning",
     });
 
@@ -701,7 +696,7 @@ describe("graph local tool routing", () => {
       shellExecutor: async () => {
         throw new Error("spawn failed");
       },
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       phase: "planning",
     });
 
@@ -737,7 +732,7 @@ describe("graph local tool routing", () => {
         stdout: "package",
         stderr: "",
       }),
-      workspaceAccess: "read-only",
+      workspaceAccess: "write",
       phase: "planning",
     });
 

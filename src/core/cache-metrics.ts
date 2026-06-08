@@ -1,6 +1,5 @@
 import { AIMessage } from "@langchain/core/messages";
 import type {
-  WorkspaceAccess,
   PromptCacheMetrics,
   PromptCacheStandardSummary,
   PromptCacheStandardEvaluation,
@@ -95,14 +94,6 @@ export function createPromptCacheStandardTracker(input?: {
     },
   };
 }
-
-/** 按工作区访问权限分组的缓存指标 / Cache metrics grouped by workspace access */
-export interface PromptCacheMetricsByWorkspaceAccess extends PromptCacheMetrics {
-  /** 工作区访问权限 / Workspace access */
-  workspaceAccess: WorkspaceAccess;
-}
-
-/** 从 AIMessage 元数据中提取 provider 缓存指标 / Extract provider cache metrics from AIMessage metadata */
 export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics | null {
   if (!AIMessage.isInstance(message)) {
     return null;
@@ -153,37 +144,5 @@ export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics 
     cacheMissTokens,
     // 避免除零 / Avoid division by zero
     hitRate: totalInputTokens > 0 ? cacheHitTokens / totalInputTokens : 0,
-  };
-}
-
-/** 按工作区访问权限汇总缓存指标 / Summarize cache metrics by workspace access */
-export function summarizePromptCacheMetricsByWorkspaceAccess(
-  items: PromptCacheMetricsByWorkspaceAccess[],
-): Record<WorkspaceAccess, PromptCacheMetrics> {
-  const summary: Record<WorkspaceAccess, PromptCacheMetrics> = {
-    "read-only": emptyPromptCacheMetrics(),
-    write: emptyPromptCacheMetrics(),
-  };
-
-  for (const item of items) {
-    const bucket = summary[item.workspaceAccess];
-    bucket.inputTokens += item.inputTokens;
-    bucket.cacheHitTokens += item.cacheHitTokens;
-    bucket.cacheMissTokens += item.cacheMissTokens;
-    // 聚合后重新计算命中率 / Recalculate hit rate after aggregation
-    bucket.hitRate =
-      bucket.inputTokens > 0 ? bucket.cacheHitTokens / bucket.inputTokens : 0;
-  }
-
-  return summary;
-}
-
-/** 生成空的缓存指标对象 / Generate empty cache metrics object */
-function emptyPromptCacheMetrics(): PromptCacheMetrics {
-  return {
-    inputTokens: 0,
-    cacheHitTokens: 0,
-    cacheMissTokens: 0,
-    hitRate: 0,
   };
 }

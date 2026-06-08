@@ -57,7 +57,6 @@ export default function StatsLine({ status, running, modelProvider, modelName }:
       )}
       <Text color={t.dim}> │ </Text>
       <Text color={authColor}>[{authLabel}]</Text>
-      <Text color={t.dim}> {status.workspaceAccess === "read-only" ? "ro" : "rw"}</Text>
     </Box>
   );
 }

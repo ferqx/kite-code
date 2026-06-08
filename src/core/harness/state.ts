@@ -101,10 +101,3 @@ export const AgentState = Annotation.Root({
 });
 
 export type CodeAgentState = typeof AgentState.State;
-
-/** 检查当前是否为只读工作区访问 / Check if current workspace access is read-only */
-export function isReadOnlyWorkspaceAccess(
-  state: Pick<CodeAgentState, "workspaceAccess">,
-): boolean {
-  return state.workspaceAccess === "read-only";
-}

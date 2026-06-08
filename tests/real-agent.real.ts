@@ -813,7 +813,7 @@ interface RunAgentTestInput extends ContinueInput {
   autoApprove?: boolean;
   inputAnswer?: string;
   authorizationOverride?: AuthorizationOverride;
-  mode?: "auto" | "read-only" | "write" | "plan" | "builder";
+  mode?: "auto" | "write" | "builder";
   grant?: "approve_once" | "same_command" | "full_access";
 }
 

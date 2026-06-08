@@ -7,10 +7,9 @@ import {
 } from "@langchain/core/messages";
 import {
   buildCacheableRuntimeContext,
-  formatWorkspaceAccessReminder,
   formatPlanStateReminder,
 } from "./runtime-context";
-import type { AgentPlan, WorkspaceAccess } from "@/protocol/events";
+import type { AgentPlan } from "@/protocol/events";
 import systemPrompt from "@/core/prompts/system-prompt.txt";
 import type { SkillManifest } from "@/core/skills/types";
 /** Agent 角色定义 / Agent role definition */
@@ -24,8 +23,8 @@ export interface ModelContextState {
   messages: BaseMessage[];
   /** 最终回答文本 / Final answer text */
   final: string;
-  /** 工作区访问权限 / Workspace access level */
-  workspaceAccess?: WorkspaceAccess;
+  /** 工作区访问权限 / Workspace access level (always "write") */
+  workspaceAccess?: "write";
   /** 执行计划 / Execution plan */
   plan?: AgentPlan | null;
   /** 上下文摘要 / Context summary */
@@ -126,9 +125,6 @@ export function prepareModelContext(
       new SystemMessage(buildStaticSystemPrompt(role, skills)),
       new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "", activeSkillInstructions: state.activeSkillInstructions })),
       ...msgs,
-      ...(state.workspaceAccess === "read-only"
-        ? [new HumanMessage(formatWorkspaceAccessReminder(state.workspaceAccess))]
-        : []),
       ...(state.plan
         ? [new HumanMessage(formatPlanStateReminder(state.plan))]
         : []),
