@@ -1,6 +1,6 @@
 # OpenPX 路线图
 
-最后更新：2026-06-01
+最后更新：2026-06-08
 
 ---
 
@@ -95,9 +95,7 @@
 | TUI 渲染 | `subagent` block 类型，运行中/完成/错误三态，折叠+展开 |
 | 审批策略 | 继承主 Agent 授权 + 敏感操作独立审批 |
 
-> 详见 [`docs/space/understanding/2026-05-30-multi-agent-design.md`](docs/space/understanding/2026-05-30-multi-agent-design.md) |
-
-> 详见 [`docs/space/plans/2026-05-26-tui-claude-code-parity.md`](docs/space/plans/2026-05-26-tui-claude-code-parity.md)
+> 详见 [`docs/space/understanding/2026-05-30-multi-agent-design.md`](docs/space/understanding/2026-05-30-multi-agent-design.md)
 
 ---
 
@@ -145,11 +143,12 @@
 
 ### 持续工程项
 
-- **文档收尾**：清理已完成的 plan 文件，更新 backlog 状态
+- [x] **文档收尾**：清理已完成的 plan 文件，更新 backlog 状态（2026-06-08 归档 8 个 plan，创建完成记录）
 - **真实场景验证**：使用真实模型链路验收完整体验
 - **代码质量**：TypeScript strict 模式、API 文档生成
 - **性能优化**：前缀缓存命中率监控、checkpoint 压缩、大文件 diff 性能
   - [x] TUI 输入卡顿：用 Ink `<Static>` 将已完成消息移出 React 树，`<Box height={0}>` 消除布局空白（2026-06-03 恢复 Static 方案）
+  - [x] 前缀缓存命中率分析：DeepSeek KV cache 机制、前缀大小与命中率关系、影响因素和优化方向（2026-06-08 归档）
 
 ### 暂缓项
 

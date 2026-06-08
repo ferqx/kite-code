@@ -1,6 +1,6 @@
 # TUI Claude Code Parity Implementation Plan
 
-> Status: completed (2026-05-26)
+> Status: archived (2026-05-26 completed, 2026-06-08 archived)
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 

@@ -21,7 +21,7 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 | Agent 工具 | 9 个内置工具：read_file、edit_file、write_file、shell_execute、read_mcp_resource、update_plan、ask_user、Skill、task |
 | 工具安全策略 | 风险分类（read/plan/write_file/execute_code/destructive/network/vcs_mutation/mcp） |
 | SQLite 持久化 | LangGraph checkpoint，会话回溯和断点续接 |
-| 上下文压缩 | 自动检测 overflow → 规则压缩 → LLM 摘要三层策略，支持手动 `/compact` 触发 |
+| Token / Cache 统计 | `cache-metrics.ts` 提取 prompt cache 指标（命中/未命中 tokens），StatsLine 展示 token 用量（仅 DeepSeek provider 展示 cache/think） |
 | 跨平台 | Windows / Unix 双平台 |
 | 事件协议 | 标准化事件流，TUI 和 CLI 共享同一 runner |
 | 三层架构 | protocol → core → app 清晰分层 |

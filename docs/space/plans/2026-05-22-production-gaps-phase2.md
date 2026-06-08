@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> 状态：archived（2026-06-08 归档）
+
 **Goal:** 实现会话回溯（Revert + Fork）和 MCP Resources 集成，补齐 Phase 2 两个缺口。
 
 **Architecture:** Rewind 复用 LangGraph checkpoint 恢复机制（`configurable.checkpoint_id`），Revert 在同一 thread 恢复，Fork 生成新 threadId 以旧 checkpoint state 启动。MCP Resources 在 Phase 1 McpManager 基础上新增 `listResources`/`readResource` 方法 + 内置工具 `read_mcp_resource` + McpPanel 展示扩展。

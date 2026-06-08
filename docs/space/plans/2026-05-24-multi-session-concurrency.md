@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> 状态：archived（2026-06-08 归档）
+
 **Goal:** 支持 TUI 中多会话并发运行，左侧瀑布流 + 右侧 20 列 Sidebar，后台会话事件缓冲，切换时回放。
 
 **Architecture:** 新增 `SessionManager` + `SessionRuntime` 类，每个会话持有独立的 AbortController/eventBuffer/generator。现有 `runTask`/`runRewind` 逻辑从 `index.tsx` 迁移到 `SessionRuntime`。TUI 布局从单列改为 `flexDirection="row"` 左右分栏。

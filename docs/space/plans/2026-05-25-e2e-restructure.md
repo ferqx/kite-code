@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> 状态：archived（2026-06-08 归档）
+
 **Goal:** Restructure TUI e2e tests from 13 happy-path tests to ~71 tests across P0-P3 tiers with companion unit test coverage for all 42 reducer actions.
 
 **Architecture:** Three e2e test files share a common test harness (`render-tui.tsx`) with enhanced methods for approval flow, overlay detection, and state queries. A new `response-plan.ts` utility manages model response ordering declaratively. Unit tests supplement the 11 currently-untested reducer actions.

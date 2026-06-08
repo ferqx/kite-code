@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> 状态：archived（2026-06-08 归档）
+
 **Goal:** 实现 agentskills.io 开放标准的 Skills 系统 — 按需加载 Markdown 指令文件，通过 `Skill` 工具和 `/skill-name` 斜杠命令触发。
 
 **Architecture:** `src/core/skills/` 新建 4 文件（types/loader/skill-tool/index）负责扫描 4 目录、解析 YAML frontmatter、去重覆盖、按需热加载。`Skill` 工具通过 `createAgentTools` 注册，system prompt 追加 Available Skills 区段。TUI 启动时扫描，斜杠命令动态匹配 skill 名。

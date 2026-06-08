@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> 状态：archived（2026-06-08 归档）
+
 **Goal:** 补齐 MCP 协议支持（对标 Claude Code）、Compact 事件生产路径、Compact UI 消费、Retry 事件清理、Recoverable 错误分类、Session 命名修复。
 
 **Architecture:** 6 个独立任务，按依赖关系排序：简单修复先行（1.6→1.5→1.4→1.2/1.3），MCP 核心（1.1）最后。Compaction 通知使用 graph 节点返回值传递（不经 checkpoint），MCP transport 层复用 `@modelcontextprotocol/sdk`，MCP Prompts 斜杠命令通过 `parseSlashCommand` default 分支查注册表。

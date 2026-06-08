@@ -67,15 +67,15 @@
 | --- | --- | --- |
 | `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
 | `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
-| `plans/2026-05-20-tui-production-roadmap.md` | completed | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
-| `plans/2026-05-22-production-gaps-closure.md` | active | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 📋 就绪，Phase3 ⏳。 |
-| `plans/2026-05-22-production-gaps-phase1.md` | completed | Phase 1 实施记录（8 commits）。 |
-| `plans/2026-05-22-production-gaps-phase2.md` | ready | Phase 2 实施计划（7 tasks）。Rewind + MCP Resources，待执行。 |
+| `plans/2026-05-20-tui-production-roadmap.md` | archived | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
+| `plans/2026-05-22-production-gaps-closure.md` | archived | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 ✅，Phase3 ✅。 |
+| `plans/2026-05-22-production-gaps-phase1.md` | archived | Phase 1 实施记录（8 commits）。MCP + 事件闭环 + 错误分类。 |
+| `plans/2026-05-22-production-gaps-phase2.md` | archived | Phase 2 实施计划（7 tasks）。Rewind + MCP Resources。 |
 | `plans/2026-05-22-skills-system.md` | superseded | 被 [`understanding/2026-05-23-skills-system-design.md`](../understanding/2026-05-23-skills-system-design.md) 替代。 |
-| `plans/2026-05-23-skills-system-phase3.md` | completed | Phase 3 实施计划（Skills 系统，11 tasks）。 |
-| `plans/2026-05-24-multi-session-concurrency.md` | completed | 多会话并发执行（3 tasks）。 |
-| `plans/2026-05-25-e2e-restructure.md` | completed | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
-| `plans/2026-05-26-tui-claude-code-parity.md` | completed | TUI Claude Code 全面对标（14 tasks）：布局、快捷键、功能、配置、主题。 |
+| `plans/2026-05-23-skills-system-phase3.md` | archived | Phase 3 实施计划（Skills 系统，11 tasks）。 |
+| `plans/2026-05-24-multi-session-concurrency.md` | archived | 多会话并发执行（3 tasks）。 |
+| `plans/2026-05-25-e2e-restructure.md` | archived | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
+| `plans/2026-05-26-tui-claude-code-parity.md` | archived | TUI Claude Code 全面对标（14 tasks）：布局、快捷键、功能、配置、主题。 |
 
 ## 完成执行记录
 
@@ -92,6 +92,15 @@
 | `execution/completed/2026-05-10-authorization-mode-switch.md` | completed | 记录授权模式切换功能的实现，包括 AuthorizationOverride、set_authorization_mode 工具、CLI --authorization-mode 标志和测试覆盖。 |
 | `execution/completed/2026-05-16-remove-viewport-culling.md` | completed | 记录移除 TUI 视口剔除逻辑，让终端原生 scrollback 处理溢出；补齐 e2e 验证体系（88 个 e2e 测试、6 种严格断言类型、真实 agent 运行器）。 |
 | `execution/completed/2026-05-17-sessions-command-implementation.md` | completed | /sessions 功能的完整实现记录 — 23 文件变更、SessionSelector 覆盖层、checkpoint 消息加载、中断恢复、智能命名、模型配置持久化。 |
+| `execution/completed/2026-05-20-tui-production-roadmap.md` | archived | TUI 生产就绪四步路线图：感知闭环、防御纵深、手动 Compaction。 |
+| `execution/completed/2026-05-22-production-gaps-closure.md` | archived | 生产就绪补齐 3 阶段统筹方案，Phase 1/2/3 全部完成。 |
+| `execution/completed/2026-05-22-production-gaps-phase1.md` | archived | Phase 1: MCP 核心 + 事件闭环 + 错误分类（8 commits）。 |
+| `execution/completed/2026-05-22-production-gaps-phase2.md` | archived | Phase 2: Rewind + MCP Resources（2 commits）。 |
+| `execution/completed/2026-05-23-skills-system-phase3.md` | archived | Phase 3: Skills 系统，agentskills.io 标准（11 commits）。 |
+| `execution/completed/2026-05-24-multi-session-concurrency.md` | archived | 多会话并发执行：SessionManager + SessionRuntime + Sidebar。 |
+| `execution/completed/2026-05-25-e2e-restructure.md` | archived | E2E 测试套件重构：3 文件 ~71 tests，P0-P3 分层。 |
+| `execution/completed/2026-05-26-tui-claude-code-parity.md` | archived | TUI Claude Code 全面对标：布局、快捷键、功能、配置、主题（14 commits）。 |
+| `execution/completed/2026-05-28-static-header-ordering-fix.md` | completed | 修复 Ink `<Static>` 与 Header 顺序冲突，Header 注入 Static items 保持四层布局。（已被 2026-06-02 方案替代） |
 | `execution/completed/2026-06-02-remove-static-react-memo.md` | completed | 移除 Ink `<Static>`，改用 React.memo block 组件 + 引用稳定 reducer。（已被 2026-06-03 方案替代） |
 | `execution/completed/2026-06-03-restore-static-height-zero.md` | completed | 恢复 `<Static>` 渲染架构解决 Windows 输入卡顿，用 `<Box height={0}>` 消除布局空白。 |
 | `execution/completed/2026-06-04-turn-model-refactor.md` | completed | Turn 模型重构 — 引入 `Turn` 替代 flat `OutputBlock[]`，将 Static/Dynamic 分割退化为 `slice(-1)`。 |
