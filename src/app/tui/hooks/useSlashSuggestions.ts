@@ -17,7 +17,6 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: "plan", aliases: [], description: "Enter planning mode" },
   { name: "auth", aliases: [], description: "Toggle authorization mode", args: "[mode]" },
   { name: "clear", aliases: ["c"], description: "Clear output" },
-  { name: "compact", aliases: [], description: "Compact context" },
   { name: "setting", aliases: ["config"], description: "Show settings" },
   { name: "help", aliases: ["h"], description: "Show help" },
   { name: "exit", aliases: ["quit", "q"], description: "Exit OpenPX" },

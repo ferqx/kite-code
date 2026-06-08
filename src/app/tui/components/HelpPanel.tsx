@@ -48,7 +48,6 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
         ["/sessions", "浏览会话历史"],
         ["/new", "新建会话"],
         ["/clear", "清空输出"],
-        ["/compact", "压缩上下文"],
         ["/effort", "设置推理深度（low/medium/high/max）"],
         ["/auth", "切换授权模式"],
         ["/plan", "切换规划模式"],

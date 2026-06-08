@@ -10,8 +10,6 @@ export type AgentEvent =
   | { type: "need_input"; data: UserInputPayload }
   | { type: "state_change"; data: StateChangePayload }
   | { type: "file_change"; data: { path: string; kind: "add" | "edit" | "delete"; linesAdded?: number; linesRemoved?: number; preview?: string } }
-  | { type: "compact_begin"; data: { reason: string } }
-  | { type: "compact_end"; data: { summary: string } }
   | { type: "cache_metrics"; data: CacheMetricsPayload }
   | { type: "error"; data: { message: string; recoverable: boolean } }
   /** LangGraph interrupt — payload depends on the interrupted node's resume type, consumed by TUI/CLI for user interaction resolution */

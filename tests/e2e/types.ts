@@ -28,7 +28,6 @@ export type Step =
   | { type: "file-change"; path: string; kind: "add" | "edit" | "delete"; linesAdded?: number; linesRemoved?: number; preview?: string }
   | { type: "state-change"; phase?: "planning" | "building"; authorization?: "default" | "full_access"; plan?: { name: string; description: string; steps: { step: string; status: "pending" | "in_progress" | "completed" }[] } | null }
   | { type: "cache-metrics"; hitRate: number; inputTokens: number; outputTokens: number }
-  | { type: "compact"; reason: string; summary: string }
   | { type: "simulate-input"; text: string }
   | { type: "simulate-key"; key: string }
   | { type: "dispatch"; actionType: string; payload?: Record<string, unknown> };

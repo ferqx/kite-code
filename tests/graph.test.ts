@@ -760,7 +760,6 @@ describe("routeEntry — start-of-graph routing", () => {
     modelProvider: "",
     modelName: "",
     thinkingLevel: null,
-    forceCompact: false,
     activeSkillInstructions: "",
     messages: [],
   };
@@ -1038,82 +1037,4 @@ describe("getPendingToolRequest", () => {
   });
 });
 
-// ── forceCompact 集成测试 / forceCompact integration tests ──
-describe("forceCompact in agent node", () => {
-  let workspace: string;
-  let checkpointPath: string;
-
-  function setUp() {
-    workspace = fs.mkdtempSync(
-      path.join(os.tmpdir(), "openpx-graph-"),
-    );
-    checkpointPath = path.join(workspace, "checkpoint.db");
-  }
-
-  function tearDown() {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  }
-
-  test("forceCompact triggers compaction before model invocation", async () => {
-    setUp();
-    try {
-      // Create 15 messages (well over the 8-message keep threshold of forceContextCompaction)
-      const manyMessages: BaseMessage[] = [];
-      for (let i = 0; i < 15; i++) {
-        manyMessages.push(new HumanMessage(`message ${i}`));
-      }
-
-      // Create a spy model that records what it received
-      const aiResponse = new AIMessage({ content: "已完成。" });
-      const spyModel = new SpyFakeChatModel([aiResponse]);
-
-      const { graph, checkpointer } = buildCodeAgentGraph({
-        config: fakeConfig,
-        checkpointPath,
-        model: spyModel as any,
-      });
-
-      const chunks: Record<string, unknown>[] = [];
-      const stream = await graph.stream(
-        {
-          messages: manyMessages,
-          workspaceAccess: "write" as const,
-          phase: "building" as const,
-          plan: null,
-          userId: "test",
-          threadId: "fc1",
-          workspace,
-          contextSummary: "",
-          forceCompact: true,
-        },
-        {
-          configurable: { thread_id: "fc1" },
-          streamMode: "updates" as const,
-          recursionLimit: 60,
-        },
-      );
-
-      for await (const chunk of stream) {
-        chunks.push(chunk);
-      }
-
-      checkpointer.close();
-
-      // The agent should have been invoked
-      expect(spyModel.callCount).toBeGreaterThanOrEqual(1);
-
-      // Without compaction, all 15 messages + 2 system messages = 17 go through unchanged
-      const modelInput = spyModel.lastInputMessages;
-      expect(modelInput.length).toBe(15 + 2);
-
-      // The agent chunk should contain the model's response
-      const agentChunk = chunks.find((c) => c.agent)?.agent as
-        | Record<string, unknown>
-        | undefined;
-      expect(agentChunk).toBeDefined();
-    } finally {
-      tearDown();
-    }
-  });
-
-});
+// forceCompact removed — compaction logic removed

@@ -12,7 +12,6 @@ export type SlashAction =
   | { type: "plan" }
   | { type: "auth"; mode?: string }
   | { type: "clear" }
-  | { type: "compact" }
   | { type: "setting" }
   | { type: "help" }
   | { type: "new" }
@@ -37,7 +36,6 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case "plan": return { type: "plan" };
     case "auth": return { type: "auth", mode: arg || undefined };
     case "clear": case "c": return { type: "clear" };
-    case "compact": return { type: "compact" };
     case "setting": case "config": return { type: "setting" };
     case "help": case "h": return { type: "help" };
     case "new": return { type: "new" };
@@ -52,7 +50,6 @@ export function parseSlashCommand(input: string): SlashAction | null {
 export function useSlashCommand(
   dispatch: Dispatch<any>,
   onExit?: () => void,
-  onCompactRequest?: () => void,
   mcpPromptRegistry?: ReadonlyMap<string, { server: string; prompt: { name: string; description?: string; arguments?: any[] } }>,
   skillManifests?: SkillManifest[],
   skillOptions?: SkillScanOptions,
@@ -102,10 +99,6 @@ export function useSlashCommand(
         break;
       case "clear":
         dispatch({ type: "CLEAR_OUTPUT" });
-        break;
-      case "compact":
-        dispatch({ type: "COMPACT_CONTEXT" });
-        if (onCompactRequest) onCompactRequest();
         break;
       case "setting":
         dispatch({ type: "SHOW_SETTING" });
@@ -159,5 +152,5 @@ export function useSlashCommand(
       }
     }
     return true;
-  }, [dispatch, onExit, onCompactRequest, mcpPromptRegistry, skillManifests, skillOptions, onRunTask]);
+  }, [dispatch, onExit, mcpPromptRegistry, skillManifests, skillOptions, onRunTask]);
 }

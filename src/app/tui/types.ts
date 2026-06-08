@@ -45,7 +45,6 @@ export interface TuiState {
   status: StatusState;
   exited: boolean;
   running: boolean;
-  compacting: boolean;
   runCount: number;
   runStartTime?: number;
   currentRunReasonId?: number;

@@ -25,12 +25,11 @@ const TIMEOUT = 60000;
 //   test "send 2 messages": history msg1          → 1 call
 //   test "send 2 messages": history msg2          → 1 call
 //   test "long message":    long message          → 1 call
-//   test "Ctrl+X c":        compact context msg   → 1 call (delay 200ms)
 //   test "/clear + resume":  resume after clear    → 1 call
 //   test "rapid Ctrl+C":    cancel target msg     → 1 call (delay 500ms)
 //   test "rapid Ctrl+C":    recovery after cancel → 1 call
 //
-// Total consumed: 7
+// Total consumed: 6
 
 const plan = new ResponsePlan([
   {
@@ -44,12 +43,6 @@ const plan = new ResponsePlan([
   {
     group: "long-msg",
     responses: [text("Long message processed successfully.")],
-  },
-  {
-    group: "compact-ctx",
-    // 800ms delay to ensure the running window is wide enough for leader key
-    // interception (Ctrl+X c) before the model finishes.
-    responses: [text("Compact context test complete.", 800)],
   },
   {
     group: "resume-after-clear",
@@ -174,33 +167,7 @@ describe("TUI E2E — P2+P3 Advanced Interactions", () => {
     }, TIMEOUT);
   });
 
-  // ══════════════════════════════════════════════════════════
-  // 2. Compact Context via Leader (consumes model response)
-  // ══════════════════════════════════════════════════════════
-
-  describe("Compact Context via Leader Key", () => {
-
-    test("/compact during agent run → compact context block appears (replaces removed Ctrl+X c)", async () => {
-      // Send message and immediately trigger leader keys while the agent
-      // is still running. Use a longer model delay (800ms) to ensure the
-      // window is wide enough for waitForRunning + leader key sequence.
-      await tui.sendMessage("compact");
-      await sleep(50); // brief settle after sendMessage
-
-      // Send leader Ctrl+X + c in rapid succession
-      tui.stdin.write("/compact"); await sleep(200); tui.stdin.write("\r"); await sleep(300)
-
-      await tui.waitForIdle(15000);
-
-      const output = tui.getOutput();
-      expect(output).toContain("Manual compaction requested");
-      expect(output).toContain("Compact context test complete.");
-
-      // Clean up "c" or "x" that may have leaked into TextInput
-      clearInputBuffer(tui);
-      await sleep(100);
-    }, TIMEOUT);
-  });
+  // Compact Context via Leader Key removed — compaction logic removed
 
   // ══════════════════════════════════════════════════════════
   // 3. Leader Keys

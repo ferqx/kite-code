@@ -97,7 +97,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
       // Stream-append: update the last block only if it's a streaming text block.
-      // Non-streaming text blocks (model_retry, compact, final) should not be overwritten.
+      // Non-streaming text blocks (model_retry, final) should not be overwritten.
       // Skip update if content hasn't changed to avoid unnecessary re-renders.
       if (state.running && lastBlock?.kind === "text" && lastBlock.streaming) {
         if (lastBlock.content === event.data.text) return state;
@@ -305,18 +305,6 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: "file_change", changes: [change] };
       return appendBlock(finalized, block);
-    }
-    case "compact_begin": {
-      const finalized = finalizeLastTurnStreaming(state);
-      const id = finalized.nextBlockId;
-      const block: OutputBlock = { id, kind: "text", content: `⟳ Compacting context: ${event.data.reason}` };
-      return { ...appendBlock(finalized, block), compacting: true };
-    }
-    case "compact_end": {
-      const finalized = finalizeLastTurnStreaming(state);
-      const id = finalized.nextBlockId;
-      const block: OutputBlock = { id, kind: "text", content: `✓ Compaction complete: ${event.data.summary}` };
-      return { ...appendBlock(finalized, block), compacting: false };
     }
     case "subagent_start": {
       // Dedup: if a subagent block with this ID already exists, skip.

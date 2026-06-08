@@ -84,7 +84,6 @@ describe("Footer", () => {
   const footerProps = {
     status: fakeStatus(),
     running: false,
-    compacting: false,
     thinkingVisible: true,
     timerKey: 0,
   };
@@ -162,13 +161,13 @@ describe("Header", () => {
 describe("StatusBar", () => {
   test("shows Planning phase with ○ icon", () => {
     const status = fakeStatus({ phase: "planning" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
     expect(lastFrame()).toContain("Planning");
   });
 
   test("shows Building phase with ● icon", () => {
     const status = fakeStatus({ phase: "building" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
     expect(lastFrame()).toContain("Building");
   });
 
@@ -183,31 +182,25 @@ describe("StatusBar", () => {
       },
       currentNode: null,
     });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
     expect(lastFrame()).toContain("Step 1/2: Build");
   });
 
   test("falls back to currentNode when no plan", () => {
     const status = fakeStatus({ plan: null, currentNode: "tools" });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
     expect(lastFrame()).toContain("tools");
   });
 
   test("shows empty when no plan and no currentNode", () => {
     const status = fakeStatus({ plan: null, currentNode: null });
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
     expect(lastFrame()).not.toContain("—");
-  });
-
-  test("shows compacting indicator", () => {
-    const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} compacting timerKey={0} running />);
-    expect(lastFrame()).toContain("Compacting");
   });
 
   test("status bar is single row", () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} compacting={false} timerKey={0} running />);
+    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
     const lines = lastFrame()!.split("\n").filter(Boolean);
     expect(lines!.length).toBe(1);
   });
@@ -807,7 +800,6 @@ describe("App", () => {
       status: fakeStatus(),
       exited: false,
       running: false,
-      compacting: false,
       runCount: 0,
       showHelp: false,
       showModelSelector: false,

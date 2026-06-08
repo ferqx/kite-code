@@ -392,7 +392,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const handleSlashCommand = useSlashCommand(
     dispatch,
     handleExit,
-    () => { provider.compactRequested = true; },
     mcpPromptRegistry,
     skillManifestsRef.current,
     skillOptionsRef.current ?? undefined,
@@ -513,7 +512,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
   return (
     <ThemeContext.Provider value={theme}>
-    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} onCompactRequest={() => { provider.compactRequested = true; }} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion}>
+    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion}>
       <InputLine
         key={state.activeSessionId}
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}

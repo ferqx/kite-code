@@ -84,10 +84,7 @@ describe("parseSlashCommand", () => {
     expect(parseSlashCommand("/c")).toEqual({ type: "clear" });
   });
 
-  // ── /compact ──
-  test("parses /compact", () => {
-    expect(parseSlashCommand("/compact")).toEqual({ type: "compact" });
-  });
+  // ── /compact removed (compaction logic removed) ──
 
   // ── /setting ──
   test("parses /setting", () => {

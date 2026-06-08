@@ -47,7 +47,6 @@ const initialState: TuiState = {
   },
   exited: false,
   running: false,
-  compacting: false,
   runCount: 0,
   currentRunReasonId: undefined,
   showHelp: false,
@@ -77,7 +76,6 @@ export interface AppProps {
   dispatch: Dispatch<Action>;
   onToggleReason: (id: number) => void;
   provider: import("./provider").TuiUserInputProvider;
-  onCompactRequest?: () => void;
   mcpManager?: McpManager;
   availableModels?: import("@/core/config").AvailableModel[];
   slashSuggestion?: import("./components/InputLine").SlashSuggestionData | null;
@@ -93,7 +91,7 @@ export function useTuiState(initialModelName?: string): { state: TuiState; dispa
   return { state, dispatch, onToggleReason };
 }
 
-export default function App({ state, dispatch, onToggleReason, provider, onCompactRequest, mcpManager, slashSuggestion, children }: AppProps) {
+export default function App({ state, dispatch, onToggleReason, provider, mcpManager, slashSuggestion, children }: AppProps) {
   const theme = useTheme();
   const slashMaxHeight = useOverlayHeight(7);
   const overlayOrInterrupt = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind || !!state.interrupt;
@@ -197,7 +195,6 @@ export default function App({ state, dispatch, onToggleReason, provider, onCompa
       <Footer
         status={state.status}
         running={state.running}
-        compacting={state.compacting}
         timerKey={state.runCount}
       >
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}

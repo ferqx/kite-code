@@ -239,19 +239,6 @@ describe("eventReducer (blocks model)", () => {
     });
   });
 
-  describe("EVENT.compact_begin / compact_end", () => {
-    test("compact_begin appends text block and sets compacting", () => {
-      const s = dispatch(fresh(), { type: "EVENT", event: { type: "compact_begin", data: { reason: "limit" } } });
-      expect((flatBlocks(s)[0] as any).content).toContain("Compacting");
-      expect(s.compacting).toBe(true);
-    });
-    test("compact_end sets compacting=false", () => {
-      let s = fresh(); s = { ...s, compacting: true };
-      s = dispatch(s, { type: "EVENT", event: { type: "compact_end", data: { summary: "done" } } });
-      expect(s.compacting).toBe(false);
-    });
-  });
-
   describe("non-event actions", () => {
     test("SET_RUNNING increments runCount", () => {
       let s = fresh();
@@ -413,11 +400,10 @@ describe("eventReducer (blocks model)", () => {
     });
     test("NEW_SESSION clears blocks, resets state, increments sessionKey", () => {
       let s = fresh();
-      s = { ...s, turns: [{blocks: [{ id: 1, kind: "text", content: "old" }]}], compacting: true, ctrlCPressed: true, interrupt: { kind: "approval", blockId: 1 }, showHelp: true, showModelSelector: true, exitRequested: true };
+      s = { ...s, turns: [{blocks: [{ id: 1, kind: "text", content: "old" }]}], ctrlCPressed: true, interrupt: { kind: "approval", blockId: 1 }, showHelp: true, showModelSelector: true, exitRequested: true };
       s = dispatch(s, { type: "NEW_SESSION", threadId: "new-session-1" });
       expect(flatBlocks(s)).toHaveLength(0);
       expect(s.interrupt).toBeNull();
-      expect(s.compacting).toBe(false);
       expect(s.ctrlCPressed).toBe(false);
       expect(s.exitRequested).toBe(false);
       expect(s.showHelp).toBe(false);
@@ -678,20 +664,7 @@ describe("eventReducer (blocks model)", () => {
     });
   });
 
-  describe("COMPACT_CONTEXT", () => {
-    test("when running appends compaction text block", () => {
-      let s = fresh(); s = { ...s, running: true };
-      s = dispatch(s, { type: "COMPACT_CONTEXT" });
-      expect(flatBlocks(s)).toHaveLength(1);
-      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content).toContain("Manual compaction requested");
-    });
-    test("when not running is a no-op", () => {
-      const s = fresh();
-      const next = dispatch(s, { type: "COMPACT_CONTEXT" });
-      expect(next).toBe(s);
-      expect(flatBlocks(next)).toHaveLength(0);
-    });
-  });
+  // COMPACT_CONTEXT removed (compaction logic removed)
 
   describe("SHOW_SESSIONS / HIDE_SESSIONS + ESCAPE", () => {
     test("SHOW_SESSIONS sets showSessions=true", () => {

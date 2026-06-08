@@ -32,7 +32,7 @@ describe("Header", () => {
 describe("StatusBar", () => {
   test("shows phase label and spinner when running", () => {
     const { lastFrame } = render(
-      React.createElement(StatusBar, { status: fakeStatus(), timerKey: 0, running: true, compacting: false })
+      React.createElement(StatusBar, { status: fakeStatus(), timerKey: 0, running: true })
     );
     const output = lastFrame();
     expect(output).toContain("Building");
@@ -42,7 +42,7 @@ describe("StatusBar", () => {
 
   test("shows only spinner + phase + plan (no metrics)", () => {
     const { lastFrame } = render(
-      React.createElement(StatusBar, { status: fakeStatus(), timerKey: 0, running: false, compacting: false })
+      React.createElement(StatusBar, { status: fakeStatus(), timerKey: 0, running: false })
     );
     const output = lastFrame();
     expect(output).toContain("Building");

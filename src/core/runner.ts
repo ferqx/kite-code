@@ -197,20 +197,10 @@ export async function* runAgent(
         recursionLimit: 60,
       };
 
-      // 检查 provider 是否设置了手动压缩标志 / Check if provider requested manual compaction
-      const providerExt = provider as { compactRequested?: boolean };
-      const compactRequested = providerExt.compactRequested === true;
-      if (compactRequested) {
-        providerExt.compactRequested = false;
-      }
-
       let stream: AsyncIterable<unknown>;
       if (resumeValue) {
         const cmd: Record<string, unknown> = { resume: resumeValue };
-        if (compactRequested) cmd.update = { forceCompact: true };
         stream = await graph.stream(new Command(cmd), streamConfig);
-      } else if (compactRequested) {
-        stream = await graph.stream({ ...initialState, forceCompact: true }, streamConfig);
       } else {
         stream = await graph.stream(initialState, streamConfig);
       }
@@ -355,7 +345,6 @@ export async function* forkFromCheckpoint(
       modelProvider: input.config.providerName,
       modelName: input.config.modelName,
       thinkingLevel: null as string | null,
-      forceCompact: false,
     };
 
     const streamConfig = {
@@ -615,23 +604,6 @@ function parseRetryEvents(node: Record<string, unknown>): AgentEvent[] {
   return events;
 }
 
-/** Parse compaction metadata from a graph node */
-function parseCompactionEvents(node: Record<string, unknown>): AgentEvent[] {
-  const events: AgentEvent[] = [];
-  const cp = node.compactionPerformed;
-  if (cp && typeof cp === "object" && typeof (cp as Record<string, unknown>).reason === "string") {
-    events.push({
-      type: "compact_begin",
-      data: { reason: (cp as Record<string, unknown>).reason as string },
-    });
-    events.push({
-      type: "compact_end",
-      data: { summary: ((cp as Record<string, unknown>).summary as string) ?? "" },
-    });
-  }
-  return events;
-}
-
 // ── chunkToEvents 编排函数 ──
 
 export function chunkToEvents(
@@ -666,9 +638,8 @@ export function chunkToEvents(
     const scEvt = parseStateChangeEvents(node);
     if (scEvt) events.push(scEvt);
 
-    // 重试 / 压缩
+    // 重试
     events.push(...parseRetryEvents(node));
-    events.push(...parseCompactionEvents(node));
 
     events.push({ type: "step_end", data: { node: key } });
   }

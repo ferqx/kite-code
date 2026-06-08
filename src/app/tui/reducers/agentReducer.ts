@@ -65,11 +65,6 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         : action.mode;
       return { ...state, status: { ...state.status, authorization: newMode as "default" | "full_access" } };
     }
-    case "COMPACT_CONTEXT": {
-      if (!state.running) return state;
-      const block: OutputBlock = { id: state.nextBlockId, kind: "text", content: "⟳ Manual compaction requested — context will be compacted on next agent cycle" };
-      return appendBlock(state, block);
-    }
     case "EXPORT_SESSION":
       return state;
     case "EXPORT_SESSION_DONE": {

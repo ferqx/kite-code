@@ -7,20 +7,18 @@ import type { StatusState } from "./types";
 interface FooterProps {
   status: StatusState;
   running: boolean;
-  compacting: boolean;
   timerKey: number;
   children?: ReactNode;
 }
 
 export default function Footer({
-  status, running, compacting, timerKey, children,
+  status, running, timerKey, children,
 }: FooterProps) {
   return (
     <Box flexDirection="column">
       <StatusBar
         status={status}
         running={running}
-        compacting={compacting}
         timerKey={timerKey}
       />
       {children}

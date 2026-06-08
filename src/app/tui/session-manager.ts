@@ -52,7 +52,7 @@ export class SessionRuntime {
   // ── 双模式代理：生成器始终使用 _proxyProvider，通过 _foreground 切换事件路由 ──
   private _foreground = true;
   private _foregroundWake: (() => void) | null = null;
-  private _proxyProvider: UserInputProvider & { compactRequested?: boolean };
+  private _proxyProvider: UserInputProvider;
   /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
   private _pendingInterrupt: InterruptPayload | null = null;
   private _pendingResolve: ((action: UserAction) => void) | null = null;
@@ -271,9 +271,6 @@ export class SessionRuntime {
         self.resolveInterrupt({ type: "cancel" as const });
         return Promise.resolve();
       },
-
-      get compactRequested(): boolean { return realProvider.compactRequested ?? false; },
-      set compactRequested(v: boolean) { realProvider.compactRequested = v; },
     };
     return proxy as unknown as TuiUserInputProvider;
   }

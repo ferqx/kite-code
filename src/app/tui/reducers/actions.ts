@@ -22,7 +22,6 @@ export type Action =
   | { type: "CTRL_C" }
   | { type: "RESET_CTRL_C" }
   | { type: "SWITCH_AUTH"; mode: string }
-  | { type: "COMPACT_CONTEXT" }
   | { type: "EXPORT_SESSION" }
   | { type: "EXPORT_SESSION_DONE"; filename: string }
   | { type: "EXPAND_INPUT" }

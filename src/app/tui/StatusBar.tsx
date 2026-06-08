@@ -13,11 +13,10 @@ export function formatDuration(seconds: number): string {
 interface StatusBarProps {
   status: StatusState;
   running: boolean;
-  compacting: boolean;
   timerKey: number;
 }
 
-export default function StatusBar({ status, running, compacting, timerKey }: StatusBarProps) {
+export default function StatusBar({ status, running, timerKey }: StatusBarProps) {
   const t = useTheme();
   const [spinnerIdx, setSpinnerIdx] = useState(0);
 
@@ -39,7 +38,6 @@ export default function StatusBar({ status, running, compacting, timerKey }: Sta
   const phaseLabel = status.phase === "planning" ? "Planning" : "Building";
 
   function planLabel(): string {
-    if (compacting) return "⟳ Compacting...";
     if (!status.plan) return status.currentNode ?? "";
     const done = status.plan.steps.filter((s) => s.status === "completed").length;
     const total = status.plan.steps.length;
