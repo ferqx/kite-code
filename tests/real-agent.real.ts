@@ -548,6 +548,57 @@ After creating both files, verify they exist and contain the correct content. Re
 });
 
 // ============================================================================
+// Cache: 缓存命中率验证 / Cache hit rate verification
+// 20 轮简单工具调用，验证 warm cache 命中率是否合理
+// 20 simple tool-call rounds, verify warm cache hit rate is reasonable
+// ============================================================================
+describe("Cache: hit rate over 20 rounds", () => {
+  test(
+    "10 rounds of alternating read-write show reasonable cache hit rate",
+    async () => {
+      await ensureRealModelAvailable();
+      const env = createEnv("cache-20-rounds");
+
+      // 10 轮交替读写：每轮必须先读上一轮的输出，再写新文件
+      // 10 rounds of alternating read-write: each round must read previous output before writing
+      const rounds: string[] = [];
+      rounds.push('Use write_file to create cache-01.txt with content "round-1".');
+      for (let i = 2; i <= 10; i++) {
+        const prev = `cache-${String(i - 1).padStart(2, "0")}.txt`;
+        const curr = `cache-${String(i).padStart(2, "0")}.txt`;
+        rounds.push(`Use read_file to read ${prev}, then use write_file to create ${curr} with content "round-${i}".`);
+      }
+      rounds.push("After completing all 10 rounds, give a short summary.");
+
+      const events = await runAgentTest({
+        ...env,
+        task: rounds.join("\n"),
+        authorizationOverride: { current: "full_access" },
+      });
+
+      const cacheEvents = events.filter((e) => e.type === "cache_metrics");
+      // 至少 10 次模型调用（链式读写任务需要多轮）
+      // At least 10 model calls (chain read-write task needs multiple rounds)
+      expect(cacheEvents.length).toBeGreaterThanOrEqual(10);
+
+      logCacheAggregate(events, "cache-10-rounds");
+
+      // 验证整体命中率合理（> 70%）
+      // Verify overall hit rate is reasonable (> 70%)
+      let totalHit = 0, totalInput = 0;
+      for (const e of cacheEvents) {
+        if (e.type !== "cache_metrics") continue;
+        totalHit += e.data.cacheHitTokens;
+        totalInput += e.data.inputTokens;
+      }
+      const overallRate = totalInput > 0 ? totalHit / totalInput : 0;
+      expect(overallRate).toBeGreaterThan(0.7);
+    },
+    600_000,
+  );
+});
+
+// ============================================================================
 // L8: 长时间复杂场景 – 多轮迭代，高 token 量，持续 10 分钟以上
 // L8: Long-running complex scenarios – multi-round iteration, high token volume, 10+ min sustained
 // ============================================================================
@@ -920,20 +971,23 @@ function unescapePosixShellArg(value: string): string {
 function logCacheAggregate(events: AgentEvent[], label: string): void {
   let calls = 0;
   let totalInput = 0;
+  let totalOutput = 0;
   let totalHit = 0;
+  let totalMiss = 0;
   for (const e of events) {
     if (e.type !== "cache_metrics") continue;
-    const d = e.data as unknown as Record<string, unknown> | undefined;
-    if (!d || typeof d.inputTokens !== "number") continue;
+    const d = e.data;
     calls++;
-    totalInput += d.inputTokens as number;
-    totalHit += d.cacheHitTokens as number;
+    totalInput += d.inputTokens;
+    totalOutput += d.outputTokens ?? 0;
+    totalHit += d.cacheHitTokens;
+    totalMiss += d.cacheMissTokens;
   }
   if (calls === 0) return;
+  const totalTokens = totalInput + totalOutput;
   const rate = totalInput > 0 ? (totalHit / totalInput * 100) : 0;
-  const labelPad = label.padEnd(20);
   console.log(
-    `[cache] ${labelPad} ${rate.toFixed(1)}%  (${totalHit}/${totalInput} tokens, ${calls} calls)`,
+    `[cache] ${label.padEnd(20)} ${rate.toFixed(1)}%  (hit: ${totalHit}, miss: ${totalMiss}, input: ${totalInput}, output: ${totalOutput}, total: ${totalTokens}, ${calls} calls)`,
   );
 }
 

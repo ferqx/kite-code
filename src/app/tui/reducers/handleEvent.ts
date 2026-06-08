@@ -393,23 +393,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const next: OutputBlock = { ...matched, status: "error" as const, error: event.data.error };
       return replaceBlockById(state, matched.id, next);
     }
-    case "subagent_cache_metrics": {
-      // Merge sub-agent cache/token data into global status
-      const { cacheHitTokens, cacheMissTokens, inputTokens } = event.data;
-      const hit = state.status.cacheHitTokens + cacheHitTokens;
-      const miss = state.status.cacheMissTokens + cacheMissTokens;
-      const cacheTotal = hit + miss;
-      return {
-        ...state,
-        status: {
-          ...state.status,
-          cacheHitTokens: hit,
-          cacheMissTokens: miss,
-          cacheHitRate: cacheTotal > 0 ? hit / cacheTotal : state.status.cacheHitRate,
-          totalTokens: state.status.totalTokens + inputTokens,
-        },
-      };
-    }
+    case "subagent_cache_metrics":
+      // 子 agent 的 token/cache 属于子 agent 自身的 API 调用，不属于主会话上下文，
+      // 不累计到主 session 的 status 中。
+      return state;
     // Raw passthrough events — intentionally no-op for UI consumers
     case "interrupt":
     case "update":
