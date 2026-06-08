@@ -58,6 +58,8 @@
 | --- | --- | --- |
 | `backlog/README.md` | active | 定义 backlog 目录用途和使用规范。 |
 | `backlog/tui-issues.md` | active | TUI 待修复项清单：已知缺口、清理方向、依赖项。 |
+| `backlog/2026-06-01-deep-user-audit.md` | active | B14-B26 工程债务清单：死代码、缓存竞态、schema 臃肿、语言一致性等。 |
+| `backlog/2026-06-08-product-experience-gaps.md` | active | B27-B33 产品体验缺口：跨会话记忆、Web Search、默认模型、Diff 渲染、Token 展示等。 |
 
 ## Plans（实施计划）
 
