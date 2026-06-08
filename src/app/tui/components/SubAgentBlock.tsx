@@ -165,7 +165,9 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
 
   // done — 使用 MarkdownBlock 渲染摘要，保留 Markdown 格式
   const doneStepCount = block.steps.length;
-  const doneHeaderText = `${icon} ${label} · ${taskSummary} — ${block.toolCallCount} 次工具调用，${formatDuration(block.durationMs)}`;
+  const cacheTotal = (block.cacheHitTokens ?? 0) + (block.cacheMissTokens ?? 0);
+  const cacheHitRate = cacheTotal > 0 ? ((block.cacheHitTokens ?? 0) / cacheTotal * 100).toFixed(0) + "%" : null;
+  const doneHeaderText = `${icon} ${label} · ${taskSummary} — ${block.toolCallCount} 次工具调用，${formatDuration(block.durationMs)}${cacheHitRate ? `，cache: ${cacheHitRate}` : ""}`;
   const isExpandable = doneStepCount > 0;
 
   if (block.expanded) {

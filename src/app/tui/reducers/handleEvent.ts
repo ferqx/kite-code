@@ -381,10 +381,19 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const next: OutputBlock = { ...matched, status: "error" as const, error: event.data.error };
       return replaceBlockById(state, matched.id, next);
     }
-    case "subagent_cache_metrics":
-      // 子 agent 的 token/cache 属于子 agent 自身的 API 调用，不属于主会话上下文，
-      // 不累计到主 session 的 status 中。
-      return state;
+    case "subagent_cache_metrics": {
+      // 累积子 agent 的缓存指标到对应 subagent block 上，供 TUI 展示
+      const matched = findBlockByIndexAndKind(state, event.data.subagentId, "subagent", b => b.subagentId === event.data.subagentId);
+      if (!matched) return state;
+      const prevHit = matched.cacheHitTokens ?? 0;
+      const prevMiss = matched.cacheMissTokens ?? 0;
+      const next: typeof matched = {
+        ...matched,
+        cacheHitTokens: prevHit + event.data.cacheHitTokens,
+        cacheMissTokens: prevMiss + event.data.cacheMissTokens,
+      };
+      return replaceBlockById(state, matched.id, next);
+    }
     // Raw passthrough events — intentionally no-op for UI consumers
     case "interrupt":
     case "update":

@@ -15,7 +15,7 @@ export type OutputBlock =
   | { id: number; kind: "file_change"; changes: FileChangeRecord[] }
   | { id: number; kind: "approval"; approval: ToolApprovalPayload; resolved?: { action: string; grant?: string; pattern?: string } }
   | { id: number; kind: "question"; question: UserInputPayload; resolved?: string }
-  | { id: number; kind: "subagent"; subagentId: string; role: SubAgentRole; task: string; status: "running" | "done" | "error"; summary: string; toolCallCount: number; durationMs: number; steps: SubAgentStepRecord[]; error?: string; expanded?: boolean };
+  | { id: number; kind: "subagent"; subagentId: string; role: SubAgentRole; task: string; status: "running" | "done" | "error"; summary: string; toolCallCount: number; durationMs: number; steps: SubAgentStepRecord[]; error?: string; expanded?: boolean; cacheHitTokens?: number; cacheMissTokens?: number };
 
 /** 一次完整的「用户提问 → Agent 回复」往返 */
 export interface Turn {
