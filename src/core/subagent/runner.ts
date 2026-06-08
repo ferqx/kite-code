@@ -10,6 +10,7 @@ import type { McpManager } from "@/core/mcp";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import { extractPromptCacheMetrics } from "@/core/cache-metrics";
 import { buildCacheableRuntimeContext } from "@/core/model/runtime-context";
+import { buildStaticSystemPrompt } from "@/core/model/context";
 import type { SubAgentRoleConfig, SubAgentRunnerInput, SubAgentResult, SubAgentEventSink } from "./types";
 
 export type { SubAgentRunnerInput } from "./types";
@@ -111,7 +112,14 @@ CWD: ${process.cwd()}
 
 ${input.task}`;
 
+  // System prompt layout (Claude Code-style prefix hierarchy):
+  //   Position 0: SystemMessage(mainSystemPrompt)  — shared, byte-identical to main agent
+  //   Position 1: SystemMessage(role.systemPrompt)  — role-specific (~200 tokens)
+  //   Position 2: SystemMessage(cacheableRuntimeCtx) — shared (~50 tokens)
+  //   Position 3: HumanMessage(task)                — unique per call
+  const sharedSystemPrompt = buildStaticSystemPrompt("agent", input.skills);
   const messages: BaseMessage[] = [
+    new SystemMessage(sharedSystemPrompt),
     new SystemMessage(input.role.systemPrompt),
     new SystemMessage(cacheableRuntimeCtx),
     new HumanMessage(taskWithCwd),
