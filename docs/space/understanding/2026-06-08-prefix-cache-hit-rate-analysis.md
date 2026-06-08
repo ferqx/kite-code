@@ -63,15 +63,48 @@ DeepSeek KV cache 有 5-10 分钟 TTL。请求间隔过长会导致缓存失效�
 
 ## 当前 OpenPX 前缀构成
 
+### 主 agent
+
 ```text
-位置 0: SystemMessage(buildStaticSystemPrompt)    ≈ 1100 tokens（4552 字符）
+位置 0: SystemMessage(buildStaticSystemPrompt)     ≈ 1100 tokens（4552 字符）
 位置 1: SystemMessage(buildCacheableRuntimeContext) ≈ 50 tokens
-位置 2: HumanMessage(用户首条消息)                 ≈ 50 tokens
+位置 2: HumanMessage(用户首条消息)                  ≈ 50 tokens
 ────────────────────────────────────────────
 前缀合计 ≈ 1200 tokens
 ```
 
-system-prompt.txt 内容包含：Core Mandate、Working Principles、Execution Loop、Tool Strategy、Code Modification、Verification、Failure Recovery、Response Style。
+### 子 agent（2026-06-08 优化后）
+
+```text
+位置 0: SystemMessage(buildStaticSystemPrompt)     ≈ 1100 tokens — 与主 agent 字节一致
+位置 1: SystemMessage(role.systemPrompt)           ≈ 160-210 tokens — 角色专用
+位置 2: SystemMessage(buildCacheableRuntimeContext) ≈ 50 tokens
+位置 3: HumanMessage(task)                         ≈ 50 tokens — 每次不同
+────────────────────────────────────────────
+前缀合计 ≈ 1360-1410 tokens
+```
+
+优化前子 agent 只有位置 1+2+3（≈260 tokens），无主 system prompt 共享。优化后前缀从 260 → 1410 tokens，提升 5.4 倍。
+
+## 真实测试数据
+
+### 优化效果（explore 子 agent，39-41 次工具调用）
+
+| 指标 | 优化前 | 优化后 | 提升 |
+|------|--------|--------|------|
+| 聚合 cache 命中率 | ~15% | ~76% | **5.1x** |
+| 首轮 invocation 命中 | 0% (无共享) | ~90% (主 agent 前缀复用) | — |
+| 后续 invocation 命中率 | 15-79% 大幅震荡 | 79-91% 稳定 | — |
+
+### DeepSeek 块缓存行为
+
+实测发现 DeepSeek 按 ~3200 tokens 固定块大小缓存。行为特征：
+
+- **连续命中**：相邻 invocation 前缀完全匹配时，命中率单调递增（模型预测值）
+- **块边界跌落**：约每 3200 tokens 出现一次命中率短暂下跌，下一轮恢复
+- **工具契约注入测试**：尝试注入 1100 tokens 工具契约填充块空间，未显著改善（因工具调用内容差异导致跨块匹配不稳定）
+
+关键结论：DeepSeek 块缓存对对话内容的微小差异（工具调用 ID、响应格式）敏感，中间块频繁失效，但后续 invocation 总能通过"回补"恢复命中——这是 provider 层的固有限制，上层代码无法规避。
 
 ## 影响命中率的因素
 
@@ -96,6 +129,6 @@ system-prompt.txt 内容包含：Core Mandate、Working Principles、Execution L
 
 ## 优化方向
 
-1. **增大前缀**：把工具契约、项目规则、常见模式等稳定内容移入 system prompt，从 1100 tokens 提升到 3000-5000+ tokens。
+1. ~~**增大前缀**：把工具契约、项目规则、常见模式等稳定内容移入 system prompt，从 1100 tokens 提升到 3000-5000+ tokens。~~ — 已测试工具契约注入，未见显著改善，DeepSeek 块缓存机制限制了此项收益。
 2. **减少请求间隔**：优化工具执行速度，减少用户等待时间，避免缓存过期。
-3. **Sub-agent 前缀复用**：让同角色 sub-agent 共享更多前缀内容。
+3. ~~**Sub-agent 前缀复用**~~（2026-06-08 已实施）— 子 agent 共享主 system prompt 前缀，聚合命中率从 15% → 76%。详见 `../../src/core/subagent/runner.ts` 消息布局注释。
