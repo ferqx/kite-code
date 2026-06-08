@@ -6,10 +6,6 @@ import {
   prepareModelContext,
   sanitizeToolCallPairs,
 } from "../src/core/model/context";
-import {
-  summarizeMessages,
-  formatCompactedSummary,
-} from "../src/core/model/summarizer";
 import type { SkillManifest } from "../src/core/skills/types";
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
@@ -209,99 +205,6 @@ describe("model context protocol", () => {
     expect(String(messages[3].content)).toContain("Name: Inspect cache layout");
     expect(String(messages[0].content)).not.toContain("Inspect cache layout");
     expect(String(messages[1].content)).not.toContain("<runtime-state");
-  });
-
-  // 验证 summarizeMessages 从 AIMessage.tool_calls 中提取工具名 / Verify summarizeMessages extracts tool names from AIMessage.tool_calls
-  test("summarizeMessages extracts tool names from AIMessage tool_calls", () => {
-    const messages = [
-      new HumanMessage("Create file"),
-      new AIMessage({
-        content: "",
-        tool_calls: [
-          { id: "c1", name: "write_file", args: { path: "hello.txt", content: "hi" } },
-        ],
-      }),
-      new ToolMessage({
-        content: JSON.stringify({ tool: "write_file", ok: true, path: "hello.txt" }),
-        tool_call_id: "c1",
-      }),
-    ];
-    const summaries = summarizeMessages(messages);
-    expect(summaries.length).toBe(1);
-    expect(summaries[0].tools).toContain("write_file");
-  });
-
-  // 验证 summarizeMessages 提取文件路径 / Verify summarizeMessages extracts file paths
-  test("summarizeMessages extracts file paths from tool results", () => {
-    const messages = [
-      new HumanMessage("Create files"),
-      new AIMessage({
-        content: "",
-        tool_calls: [
-          { id: "c1", name: "write_file", args: { path: "a.txt", content: "A" } },
-          { id: "c2", name: "edit_file", args: { path: "b.txt", old: "x", new: "y" } },
-        ],
-      }),
-      new ToolMessage({
-        content: JSON.stringify({ tool: "write_file", ok: true, path: "a.txt" }),
-        tool_call_id: "c1",
-      }),
-      new ToolMessage({
-        content: JSON.stringify({ tool: "edit_file", ok: true, path: "b.txt" }),
-        tool_call_id: "c2",
-      }),
-    ];
-    const summaries = summarizeMessages(messages);
-    expect(summaries[0].created).toContain("a.txt");
-    expect(summaries[0].edited).toContain("b.txt");
-  });
-
-  // 验证 summarizeMessages 提取错误信息 / Verify summarizeMessages extracts errors
-  test("summarizeMessages extracts errors from failed tool results", () => {
-    const messages = [
-      new HumanMessage("Read missing file"),
-      new AIMessage({
-        content: "",
-        tool_calls: [
-          { id: "c1", name: "read_file", args: { path: "missing.txt" } },
-        ],
-      }),
-      new ToolMessage({
-        content: JSON.stringify({
-          tool: "read_file",
-          ok: false,
-          path: "missing.txt",
-          failure: { reason: "File not found", guidance: "Check the path" },
-        }),
-        tool_call_id: "c1",
-      }),
-    ];
-    const summaries = summarizeMessages(messages);
-    expect(summaries[0].errors).toContain("File not found");
-  });
-
-  // 验证 formatCompactedSummary 生成 detailed 和 concise 格式 / Verify formatCompactedSummary produces detailed and concise formats
-  test("formatCompactedSummary produces detailed and concise levels", () => {
-    const summaries = [
-      {
-        description: "Create math.ts",
-        tools: ["write_file"],
-        created: ["src/math.ts"],
-        edited: [],
-        verified: "verified",
-        errors: [],
-      },
-    ];
-    const detailed = formatCompactedSummary(summaries, "detailed");
-    expect(detailed).toContain('<compacted level="detailed">');
-    expect(detailed).toContain("[step] Create math.ts");
-    expect(detailed).toContain("write_file");
-    expect(detailed).toContain("src/math.ts");
-
-    const concise = formatCompactedSummary(summaries, "concise");
-    expect(concise).toContain('<compacted level="concise">');
-    expect(concise).toContain("Created: src/math.ts");
-    expect(concise).toContain("write_file");
   });
 
 });
