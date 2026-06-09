@@ -529,10 +529,12 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
   const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
   let ok = true;
   let summary = content.slice(0, 200);
+  let totalLines: number | undefined;
   try {
     const p = JSON.parse(content);
     if (p && typeof p === "object") {
       ok = p.ok !== false;
+      if (typeof p.totalLines === "number") totalLines = p.totalLines;
       if (p.ok !== false) {
         summary = (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
       } else {
@@ -554,6 +556,7 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
       name: (msg.name as string) ?? "",
       ok,
       summary,
+      ...(totalLines != null ? { totalLines } : {}),
     },
   };
 }

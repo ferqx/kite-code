@@ -3,6 +3,7 @@
 import type { AgentEvent, AgentPlanStep, PlanStatus } from "@/protocol/events";
 import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
 import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById } from "./helpers";
+import { formatReadFileRange } from "../components/render-utils";
 
 /** 格式化 token 数量（1k+ 用 k 缩写）/ Format token count (abbreviate with k for 1k+) */
 function fmt(n: number): string {
@@ -54,11 +55,12 @@ function getToolPreview(name: string, args: Record<string, unknown>): string {
   }
 }
 
-function computeToolDetail(name: string, args: Record<string, unknown>): string | undefined {
+function computeToolDetail(name: string, args: Record<string, unknown>, totalLines?: number): string | undefined {
   switch (name) {
     case "read_file": {
       const path = typeof args.path === "string" ? args.path : "";
-      return `Read ${path}`;
+      const range = formatReadFileRange(args, totalLines);
+      return `Read ${path}${range}`;
     }
     case "write_file": {
       const path = typeof args.path === "string" ? args.path : "";
@@ -193,7 +195,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         status: event.data.ok ? "done" as const : "error" as const,
         summary: event.data.summary,
         elapsedMs,
-        detail: computeToolDetail(matched.name, matched.args),
+        detail: computeToolDetail(matched.name, matched.args, event.data.totalLines),
         expanded: !event.data.ok,
       };
       return { ...replaceBlockById(state, matched.id, next), toolStartTimes: nextTimes };
@@ -373,7 +375,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       }
       if (lastMatchIdx === -1) return state;
       const steps = matched.steps.map((s, i) =>
-        i === lastMatchIdx ? { ...s, ok: event.data.ok } : s
+        i === lastMatchIdx ? { ...s, ok: event.data.ok, totalLines: event.data.totalLines } : s
       );
       if (steps.every((s, i) => s === matched.steps[i])) return state;
       const next: OutputBlock = { ...matched, steps };

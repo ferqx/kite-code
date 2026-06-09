@@ -4,6 +4,8 @@ export interface SubAgentStepRecord {
   toolName: string;
   toolArgs: Record<string, unknown>;
   ok?: boolean;
+  /** 读取文件时的文件总行数，用于 TUI 行号范围展示 / Total lines in file for read_file, used for TUI line range display */
+  totalLines?: number;
 }
 
 export type OutputBlock =

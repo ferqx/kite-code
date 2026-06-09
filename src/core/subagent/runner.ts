@@ -170,12 +170,14 @@ ${input.task}`;
 
           let toolOutput: string;
           let ok = true;
+          let totalLines: number | undefined;
           try {
             toolOutput = await tool.invoke(tc.args ?? {});
-            // 尝试解析 JSON 判断 ok
+            // 尝试解析 JSON 判断 ok，并提取 totalLines（用于 TUI 行号展示）
             try {
               const parsed = JSON.parse(toolOutput);
               ok = parsed.ok !== false;
+              if (typeof parsed.totalLines === "number") totalLines = parsed.totalLines;
             } catch { /* not JSON */ }
           } catch (e: any) {
             toolOutput = JSON.stringify({ ok: false, error: e?.message ?? String(e) });
@@ -185,7 +187,7 @@ ${input.task}`;
           // 发出 tool_result 事件
           input.eventSink({
             type: "tool_result",
-            data: { id, toolName: tc.name, ok },
+            data: { id, toolName: tc.name, ok, ...(totalLines != null ? { totalLines } : {}) },
           });
 
           messages.push(new ToolMessage({

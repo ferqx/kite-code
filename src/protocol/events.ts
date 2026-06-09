@@ -72,6 +72,8 @@ export interface ToolResultPayload {
   name: string;
   ok: boolean;
   summary: string;
+  /** 读取文件时的文件总行数，用于 TUI 行号范围展示 / Total lines in file for read_file, used for TUI line range display */
+  totalLines?: number;
 }
 
 export interface UserInputPayload {
@@ -186,6 +188,8 @@ export interface SubAgentToolResultPayload {
   id: string;
   toolName: string;
   ok: boolean;
+  /** 读取文件时的文件总行数，用于 TUI 行号范围展示 / Total lines in file for read_file, used for TUI line range display */
+  totalLines?: number;
 }
 
 export interface SubAgentDonePayload {

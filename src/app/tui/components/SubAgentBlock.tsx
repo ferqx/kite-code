@@ -4,6 +4,7 @@ import type { OutputBlock } from "../types";
 import type { SubAgentRole } from "@/protocol/events";
 import { useTheme } from "../theme";
 import MarkdownBlock from "./MarkdownBlock";
+import { formatReadFileRange } from "./render-utils";
 
 function roleIcon(role: SubAgentRole): string {
   switch (role) {
@@ -30,9 +31,14 @@ function formatDuration(ms: number): string {
 }
 
 /** Extract human-readable label from tool args */
-function toolArgsLabel(name: string, args: Record<string, unknown>): string {
+function toolArgsLabel(name: string, args: Record<string, unknown>, totalLines?: number): string {
   switch (name) {
-    case "read_file":
+    case "read_file": {
+      const p = args.path;
+      const filename = typeof p === "string" ? p.replace(/^.*[/\\]/, "").slice(-50) : "";
+      const range = formatReadFileRange(args, totalLines);
+      return `${filename}${range}`;
+    }
     case "edit_file":
     case "write_file": {
       const p = args.path;
@@ -134,7 +140,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           <Box key={i} paddingLeft={3}>
             <Text color={dt.dim}>├─ {step.toolName}</Text>
             {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
-              const label = toolArgsLabel(step.toolName, step.toolArgs);
+              const label = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
               return label ? <Text color={dt.muted}> {label}</Text> : null;
             })()}
             {step.ok !== undefined && (
@@ -198,7 +204,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
                       </Text>
                       <Text color={dt.muted}> {step.toolName}</Text>
                       {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
-                        const label = toolArgsLabel(step.toolName, step.toolArgs);
+                        const label = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
                         return label ? <Text color={dt.dim}> {label}</Text> : null;
                       })()}
                     </Box>
