@@ -457,8 +457,11 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         }
         sessionManager.onStatusChange(threadId);
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-        // 持久化 token 统计 / Persist token stats
-        sessionManager.saveTokenStats(threadId, stateRef.current.status);
+        // 持久化 token 统计。
+        // 延迟到下一个微任务，确保 React 完成渲染后 stateRef.current 已更新为最新状态。
+        // Persist token stats deferred to next microtask so stateRef.current reflects the latest render.
+        const tid = threadId;
+        setTimeout(() => sessionManager.saveTokenStats(tid, stateRef.current.status), 0);
         if (stillActive) {
           dispatch({ type: "SET_IDLE" });
         }
