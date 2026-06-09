@@ -3,7 +3,7 @@ import { SessionManager, SessionRuntime } from "../src/app/tui/session-manager";
 
 describe("SessionManager", () => {
   test("createSession returns unique threadId", () => {
-    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null, checkpointPath: ":memory:" });
     const id1 = mgr.createSession("/tmp/ws");
     const id2 = mgr.createSession("/tmp/ws");
     expect(id1).not.toBe(id2);
@@ -11,7 +11,7 @@ describe("SessionManager", () => {
   });
 
   test("createSession adds snapshot", () => {
-    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null, checkpointPath: ":memory:" });
     const id = mgr.createSession("/tmp/ws");
     const snapshots = mgr.getSnapshot();
     expect(snapshots.length).toBe(1);
@@ -22,7 +22,7 @@ describe("SessionManager", () => {
   });
 
   test("switchSession toggles active flag", () => {
-    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null, checkpointPath: ":memory:" });
     const id1 = mgr.createSession("/tmp/ws");
     const id2 = mgr.createSession("/tmp/ws");
     mgr.switchSession(id1, id2);
@@ -35,7 +35,7 @@ describe("SessionManager", () => {
   });
 
   test("getSnapshot reflects running state", () => {
-    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null, checkpointPath: ":memory:" });
     const id = mgr.createSession("/tmp/ws");
     const rt = mgr.getRuntime(id)!;
     rt.agentLoopActive = true;
@@ -44,7 +44,7 @@ describe("SessionManager", () => {
   });
 
   test("snapshot includes pendingInterrupt from runtime", () => {
-    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null, checkpointPath: ":memory:" });
     const id = mgr.createSession("/tmp/ws");
     const rt = mgr.getRuntime(id)!;
     rt.pendingInterrupt = true;
@@ -53,7 +53,7 @@ describe("SessionManager", () => {
   });
 
   test("snapshotCallback fires on status change", () => {
-    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null, checkpointPath: ":memory:" });
     const calls: string[] = [];
     mgr.setSnapshotCallback((threadId) => calls.push(threadId));
     const id = mgr.createSession("/tmp/ws");
@@ -63,7 +63,7 @@ describe("SessionManager", () => {
   });
 
   test("abortAll aborts all running sessions", () => {
-    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null, checkpointPath: ":memory:" });
     const id1 = mgr.createSession("/tmp/ws");
     const id2 = mgr.createSession("/tmp/ws");
     const rt1 = mgr.getRuntime(id1)!;
@@ -86,7 +86,7 @@ describe("SessionManager", () => {
   });
 
   test("abortAll skips non-running sessions", () => {
-    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null });
+    const mgr = new SessionManager({ config: {} as any, provider: {} as any, skillManifests: [], skillOptions: null, mcpManager: null, checkpointPath: ":memory:" });
     const id1 = mgr.createSession("/tmp/ws");
     const id2 = mgr.createSession("/tmp/ws");
     const rt1 = mgr.getRuntime(id1)!;
@@ -114,7 +114,7 @@ describe("SessionRuntime", () => {
       provider: {} as any,
       skillManifests: [],
       skillOptions: null,
-      mcpManager: null,
+      mcpManager: null, checkpointPath: ":memory:",
     });
 
     const ac = new AbortController();
@@ -144,7 +144,7 @@ describe("SessionRuntime", () => {
       provider: {} as any,
       skillManifests: [],
       skillOptions: null,
-      mcpManager: null,
+      mcpManager: null, checkpointPath: ":memory:",
     });
 
     // Should not throw

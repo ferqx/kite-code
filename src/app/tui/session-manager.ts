@@ -10,6 +10,7 @@ import type { Action } from "./App";
 import { runAgent, isRecoverableError } from "@/core/runner";
 import { buildRunAgentParams } from "./run-agent";
 import { createSandboxExecutor } from "@/core/sandbox/index";
+import { Database } from "bun:sqlite";
 
 /** 可丢弃的缓冲事件类型（text/reason 为非关键信息，丢弃时不丢失用户可见状态） */
 const DISPOSABLE_EVENT_TYPES = new Set(["text", "reason"]);
@@ -21,6 +22,8 @@ export interface SessionDeps {
   skillManifests: SkillManifest[];
   skillOptions: SkillScanOptions | null;
   mcpManager: McpManager | null;
+  /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
+  checkpointPath: string;
 }
 
 /** 单会话运行时：持有独立的 AbortController、generator、缓冲 */
@@ -307,6 +310,55 @@ export class SessionManager {
     }
   }
 
+  /** 持久化 token 统计到 checkpoint DB / Persist token stats to checkpoint DB */
+  saveTokenStats(threadId: string, status: StatusState): void {
+    try {
+      const db = new Database(this.deps.checkpointPath);
+      db.run("pragma busy_timeout = 5000");
+      db.run(`create table if not exists session_stats (
+        thread_id text primary key not null,
+        cache_hit_tokens integer not null default 0,
+        cache_miss_tokens integer not null default 0,
+        total_tokens integer not null default 0,
+        updated_at text not null default (datetime('now')))`);
+      db.run(
+        `insert or replace into session_stats (thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens, updated_at)
+         values (?, ?, ?, ?, datetime('now'))`,
+        [threadId, status.cacheHitTokens, status.cacheMissTokens, status.totalTokens],
+      );
+      db.close();
+    } catch { /* non-critical */ }
+  }
+
+  /** 从 DB 加载 token 统计 / Load token stats from DB */
+  loadTokenStats(threadId: string): Partial<StatusState> | null {
+    try {
+      const db = new Database(this.deps.checkpointPath);
+      db.run("pragma busy_timeout = 5000");
+      db.run(`create table if not exists session_stats (
+        thread_id text primary key not null,
+        cache_hit_tokens integer not null default 0,
+        cache_miss_tokens integer not null default 0,
+        total_tokens integer not null default 0,
+        updated_at text not null default (datetime('now')))`);
+      const row = db
+        .query(`select cache_hit_tokens, cache_miss_tokens, total_tokens
+                 from session_stats where thread_id = ?`)
+        .get(threadId) as
+        | { cache_hit_tokens: number; cache_miss_tokens: number; total_tokens: number }
+        | undefined;
+      db.close();
+      if (row) {
+        return {
+          cacheHitTokens: row.cache_hit_tokens,
+          cacheMissTokens: row.cache_miss_tokens,
+          totalTokens: row.total_tokens,
+        };
+      }
+    } catch { /* non-critical */ }
+    return null;
+  }
+
   createSession(workspace: string): string {
     const threadId = `tui-${Date.now().toString(36)}-${SessionManager.sessionCounter++}`;
     const rt = new SessionRuntime(threadId, workspace, this.deps);
@@ -356,6 +408,8 @@ export class SessionManager {
     const result: SessionSnapshot[] = [];
     for (const [threadId, rt] of this.runtimes) {
       const prevStatus = prevMap.get(threadId);
+      // 从 DB 加载持久化的 token 统计 / Load persisted token stats from DB
+      const dbStats = this.loadTokenStats(threadId);
       result.push({
         threadId,
         name: rt.name,
@@ -365,9 +419,11 @@ export class SessionManager {
         pendingInterrupt: rt.pendingInterrupt,
         interrupt: null,
         plan: null,
-        status: prevStatus
-          ? { ...initialStatusSnapshot(), ...prevStatus }
-          : initialStatusSnapshot(),
+        status: {
+          ...initialStatusSnapshot(),
+          ...(dbStats ?? {}),         // 从 DB 恢复的 token 统计
+          ...(prevStatus ?? {}),      // 内存中保留的状态（优先级最高）
+        },
         turns: [],
       });
     }

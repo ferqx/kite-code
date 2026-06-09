@@ -91,6 +91,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       skillManifests: skillManifestsRef.current,
       skillOptions: skillOptionsRef.current,
       mcpManager: mcpManagerRef.current,
+      checkpointPath: defaultCheckpointPath(),
     });
     mgr.setSnapshotCallback((threadId) => {
       dispatch({ type: "SESSION_INTERRUPT_PENDING", threadId });
@@ -302,6 +303,11 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           return;
         }
 
+        // 持久化离开会话的 token 统计 / Persist outgoing session's token stats
+        if (oldId) {
+          sessionManager.saveTokenStats(oldId, stateRef.current.status);
+        }
+
         const incomingRt = sessionManager.getRuntime(newId);
 
         // Dormant session (loaded from DB, state not yet hydrated): load full state
@@ -451,6 +457,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         }
         sessionManager.onStatusChange(threadId);
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        // 持久化 token 统计 / Persist token stats
+        sessionManager.saveTokenStats(threadId, stateRef.current.status);
         if (stillActive) {
           dispatch({ type: "SET_IDLE" });
         }
