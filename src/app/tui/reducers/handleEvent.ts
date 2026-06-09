@@ -277,16 +277,15 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           totalTokens: state.status.totalTokens + addedTokens,
         },
       };
-      // 每次模型调用后追加一条缓存命中日志到输出区
-      // Append a cache hit log line after each model call
-      if (d.inputTokens > 0) {
-        const hitTokens = d.cacheHitTokens;
-        const missTokens = d.cacheMissTokens;
-        const rate = d.inputTokens > 0 ? (hitTokens / d.inputTokens * 100).toFixed(0) : "0";
-        const log = `⚡ cache: ${fmt(hitTokens)} hit / ${fmt(missTokens)} miss · ${rate}%`;
-        const block: OutputBlock = { id: updated.nextBlockId, kind: "text", content: log };
-        return appendBlock(updated, block);
-      }
+      // 缓存命中日志：调试时取消注释即可启用 / Cache hit log: uncomment to enable for debugging
+      // if (d.inputTokens > 0) {
+      //   const hitTokens = d.cacheHitTokens;
+      //   const missTokens = d.cacheMissTokens;
+      //   const rate = d.inputTokens > 0 ? (hitTokens / d.inputTokens * 100).toFixed(0) : "0";
+      //   const log = `⚡ cache: ${fmt(hitTokens)} hit / ${fmt(missTokens)} miss · ${rate}%`;
+      //   const block: OutputBlock = { id: updated.nextBlockId, kind: "text", content: log };
+      //   return appendBlock(updated, block);
+      // }
       return updated;
     }
     case "final": {
@@ -430,16 +429,16 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         cacheMissTokens: prevMiss + event.data.cacheMissTokens,
       };
       const updated = replaceBlockById(state, matched.id, next);
-      // 追加子 agent 缓存命中日志到输出区
-      const hitTokens = event.data.cacheHitTokens;
-      const missTokens = event.data.cacheMissTokens;
-      const inputTokens = event.data.inputTokens;
-      if (inputTokens > 0) {
-        const rate = (hitTokens / inputTokens * 100).toFixed(0);
-        const log = `  ⚡ sub cache: ${fmt(hitTokens)} hit / ${fmt(missTokens)} miss · ${rate}%`;
-        const block: OutputBlock = { id: updated.nextBlockId, kind: "text", content: log };
-        return appendBlock(updated, block);
-      }
+      // 子 agent 缓存命中日志：调试时取消注释即可启用 / Sub-agent cache hit log: uncomment to enable for debugging
+      // const hitTokens = event.data.cacheHitTokens;
+      // const missTokens = event.data.cacheMissTokens;
+      // const inputTokens = event.data.inputTokens;
+      // if (inputTokens > 0) {
+      //   const rate = (hitTokens / inputTokens * 100).toFixed(0);
+      //   const log = `  ⚡ sub cache: ${fmt(hitTokens)} hit / ${fmt(missTokens)} miss · ${rate}%`;
+      //   const block = { id: updated.nextBlockId, kind: "text" as const, content: log };
+      //   return appendBlock(updated, block);
+      // }
       return updated;
     }
     // Raw passthrough events — intentionally no-op for UI consumers
