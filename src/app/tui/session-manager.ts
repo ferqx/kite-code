@@ -347,9 +347,15 @@ export class SessionManager {
     rt.eventBuffer = [];
   }
 
-  getSnapshot(): SessionSnapshot[] {
+  /** 创建会话快照列表。
+   *  @param prevSessions 前一次 snapshot 数组，用于继承已累积的 token 统计等跨生命周期状态。
+   *  Create session snapshot list.
+   *  @param prevSessions previous snapshot array, used to inherit accumulated token stats across lifecycles. */
+  getSnapshot(prevSessions?: ReadonlyArray<{ threadId: string; status: StatusState }>): SessionSnapshot[] {
+    const prevMap = new Map(prevSessions?.map(s => [s.threadId, s.status]));
     const result: SessionSnapshot[] = [];
     for (const [threadId, rt] of this.runtimes) {
+      const prevStatus = prevMap.get(threadId);
       result.push({
         threadId,
         name: rt.name,
@@ -359,7 +365,9 @@ export class SessionManager {
         pendingInterrupt: rt.pendingInterrupt,
         interrupt: null,
         plan: null,
-        status: initialStatusSnapshot(),
+        status: prevStatus
+          ? { ...initialStatusSnapshot(), ...prevStatus }
+          : initialStatusSnapshot(),
         turns: [],
       });
     }

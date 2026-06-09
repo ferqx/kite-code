@@ -155,11 +155,18 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       };
     }
     case "SET_SESSIONS": {
-      // Merge: preserve existing turns/status for sessions already in state
+      // Merge: preserve existing turns/status for sessions already in state.
+      // For the currently active session, use state.status (live cache metrics etc.)
+      // instead of the snapshot's stale zero-value status.
       const mergedSessions = action.sessions.map((incoming) => {
         const existing = state.sessions.find((s) => s.threadId === incoming.threadId);
+        const isActive = incoming.threadId === state.activeSessionId;
         if (existing) {
-          return { ...incoming, turns: existing.turns, status: existing.status };
+          return {
+            ...incoming,
+            turns: existing.turns,
+            status: isActive ? state.status : existing.status,
+          };
         }
         return incoming;
       });
