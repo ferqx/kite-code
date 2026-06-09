@@ -99,10 +99,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
 
   // 构造缓存安全的运行时上下文（对齐主 agent 的布局，不含时间戳/CWD）
   // Build cache-safe runtime context (same layout as main agent, no timestamps/CWD)
-  const cacheableRuntimeCtx = buildCacheableRuntimeContext({
-    workspace: input.workspace,
-    messages: [],
-  });
+  const cacheableRuntimeCtx = buildCacheableRuntimeContext({ workspace: input.workspace });
 
   // CWD 嵌入 task HumanMessage：task 每次调用都不同，嵌入 CWD 不增加缓存 miss
   // Embed CWD in task HumanMessage: task is unique per call, doesn't affect prefix cache
@@ -112,16 +109,14 @@ CWD: ${process.cwd()}
 
 ${input.task}`;
 
-  // System prompt layout (Claude Code-style prefix hierarchy):
-  //   Position 0: SystemMessage(mainSystemPrompt)  — shared, byte-identical to main agent
-  //   Position 1: SystemMessage(role.systemPrompt)  — role-specific (~200 tokens)
-  //   Position 2: SystemMessage(cacheableRuntimeCtx) — shared (~50 tokens)
-  //   Position 3: HumanMessage(task)                — unique per call
+  // System prompt layout (single merged message for cache stability):
+  //   Merged: sharedSystemPrompt + "\\n\\n" + role.systemPrompt + "\\n\\n" + cacheableRuntimeCtx
+  //   Position 0: SystemMessage(merged)  — cache-stable prefix
+  //   Position 1: HumanMessage(taskWithCwd) — unique per call
   const sharedSystemPrompt = buildStaticSystemPrompt("agent", input.skills);
+  const mergedSystemPrompt = sharedSystemPrompt + "\n\n" + input.role.systemPrompt + "\n\n" + cacheableRuntimeCtx;
   const messages: BaseMessage[] = [
-    new SystemMessage(sharedSystemPrompt),
-    new SystemMessage(input.role.systemPrompt),
-    new SystemMessage(cacheableRuntimeCtx),
+    new SystemMessage(mergedSystemPrompt),
     new HumanMessage(taskWithCwd),
   ];
 

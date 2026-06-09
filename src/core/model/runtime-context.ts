@@ -32,14 +32,16 @@ export interface RuntimeContextInput {
   workspaceAccess?: "write";
   /** 执行计划 / Execution plan */
   plan?: AgentPlan | null;
-  /** 上下文摘要 / Context summary */
-  contextSummary?: string;
-  /** 激活的 Skill 关键指令 / Active skill critical instructions */
-  activeSkillInstructions?: string;
   /** 可注入的当前时间 / Injectable current time */
   now?: Date;
   /** 可注入的时区 / Injectable timezone */
   timezone?: string;
+}
+
+/** 可缓存运行时上下文输入 — 仅包含 session 稳定的字段 / Cacheable runtime context input — only session-stable fields */
+export interface CacheableRuntimeContextInput {
+  /** 工作目录 / Workspace path (stable within a session) */
+  workspace: string;
 }
 
 /** 收集运行时系统信息 / Collect runtime system information */
@@ -77,14 +79,30 @@ export function buildRuntimeContext(input: RuntimeContextInput): string {
   return lines.join("\n");
 }
 
-/** 构建可缓存的运行时上下文（不含时间戳，适合 provider 前缀缓存）/ Build cacheable runtime context (no timestamps, cache-stable for provider prefix caching) */
-export function buildCacheableRuntimeContext(input: RuntimeContextInput): string {
-  const sysInfo = getRuntimeSystemInfo(input);
+/**
+ * 构建可缓存的运行时上下文（不含时间戳，适合 provider 前缀缓存）。
+ *
+ * **缓存契约**：此函数的输出在同一 session 内必须保持稳定。不得在此函数中
+ * 注入任何逐请求变化的值（时间戳、token 计数、动态 skill 指令、上下文摘要等），
+ * 否则会破坏 DeepSeek 等 provider 的前缀缓存命中机制。
+ *
+ * Build cacheable runtime context (no timestamps, cache-stable for provider prefix caching).
+ *
+ * **Cache contract**: The output of this function MUST remain stable within a session.
+ * Do NOT inject any per-request variable values (timestamps, token counts, dynamic skill
+ * instructions, context summaries, etc.) into this function, as it would break prefix cache
+ * hit for providers like DeepSeek.
+ */
+export function buildCacheableRuntimeContext(input: CacheableRuntimeContextInput): string {
+  const { workspace } = input;
+  const osType = type();
+  const osPlatform = platform();
+  const shellPath = process.env.SHELL || "bash";
   const lines = [
     "Cacheable runtime context:",
-    `OS: ${sysInfo.os} (${sysInfo.platform})`,
-    `Shell: ${sysInfo.shell} — use ${sysInfo.shell} syntax for shell_execute, NOT PowerShell or cmd.exe`,
-    `Workspace: ${input.workspace}`,
+    `OS: ${osType} (${osPlatform})`,
+    `Shell: ${shellPath} — use ${shellPath} syntax for shell_execute, NOT PowerShell or cmd.exe`,
+    `Workspace: ${workspace}`,
   ];
   return lines.join("\n");
 }

@@ -263,7 +263,6 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
       phase: cv.phase as import("@/core/harness/state").CodeAgentState["phase"] ?? "building",
       plan: (cv.plan as import("@/core/harness/state").CodeAgentState["plan"]) ?? null,
       authorization: cv.authorization as import("@/core/harness/state").CodeAgentState["authorization"],
-      contextSummary: (cv.contextSummary as string) ?? "",
     };
   }
 

@@ -465,7 +465,6 @@ export async function invokeModel({
         approvedToolRequest: state.approvedToolRequest,
         approvedToolGrant: state.approvedToolGrant,
         authorization: state.authorization,
-        contextSummary: prepared.contextSummary,
         messages: [response],
       },
     };
@@ -478,7 +477,6 @@ export async function invokeModel({
       approvedToolRequest: state.approvedToolRequest,
       approvedToolGrant: state.approvedToolGrant,
       authorization: state.authorization,
-      contextSummary: prepared.contextSummary,
       final: messageText(response),
       messages: [response],
     },

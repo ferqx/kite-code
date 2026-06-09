@@ -5,10 +5,7 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import {
-  buildCacheableRuntimeContext,
-  formatPlanStateReminder,
-} from "./runtime-context";
+import { buildCacheableRuntimeContext, formatPlanStateReminder } from "./runtime-context";
 import type { AgentPlan } from "@/protocol/events";
 import systemPrompt from "@/core/prompts/system-prompt.txt";
 import type { SkillManifest } from "@/core/skills/types";
@@ -27,8 +24,6 @@ export interface ModelContextState {
   workspaceAccess?: "write";
   /** 执行计划 / Execution plan */
   plan?: AgentPlan | null;
-  /** 上下文摘要 / Context summary */
-  contextSummary?: string;
   /** 激活的 Skill 关键指令 / Active skill critical instructions */
   activeSkillInstructions?: string;
 }
@@ -37,12 +32,10 @@ export interface ModelContextState {
 export interface PreparedModelContext {
   /** 组装好的消息列表 / Assembled message list */
   messages: BaseMessage[];
-  /** 上下文摘要 / Context summary */
-  contextSummary: string;
 }
 
 /** 构建模型消息列表 / Build model message list */
-export function buildModelMessages(role: AgentRole, state: ModelContextState, skills?: SkillManifest[]) {
+export function buildModelMessages(role: AgentRole, state: ModelContextState, skills?: SkillManifest[]): BaseMessage[] {
   return prepareModelContext(role, state, skills).messages;
 }
 
@@ -115,15 +108,21 @@ export function prepareModelContext(
   state: ModelContextState,
   skills?: SkillManifest[],
 ): PreparedModelContext {
-  let msgs = state.messages.length > 0
+  const msgs = state.messages.length > 0
     ? sanitizeToolCallPairs(state.messages)
     : [new HumanMessage("")];
 
+  // 合并静态系统提示词与可缓存运行时上下文为单个 SystemMessage，
+  // 避免依赖 LangChain 内部的连续 SystemMessage 合并行为。
+  // Merge static system prompt and cacheable runtime context into one SystemMessage
+  // to avoid relying on LangChain's internal consecutive SystemMessage merging.
+  const systemPrompt = buildStaticSystemPrompt(role, skills)
+    + "\n\n"
+    + buildCacheableRuntimeContext({ workspace: state.workspace });
+
   return {
-    contextSummary: state.contextSummary ?? "",
     messages: [
-      new SystemMessage(buildStaticSystemPrompt(role, skills)),
-      new SystemMessage(buildCacheableRuntimeContext({ ...state, contextSummary: state.contextSummary ?? "", activeSkillInstructions: state.activeSkillInstructions })),
+      new SystemMessage(systemPrompt),
       ...msgs,
       ...(state.plan
         ? [new HumanMessage(formatPlanStateReminder(state.plan))]
