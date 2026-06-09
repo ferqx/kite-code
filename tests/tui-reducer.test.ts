@@ -130,10 +130,15 @@ describe("eventReducer (blocks model)", () => {
   });
 
   describe("EVENT.cache_metrics", () => {
-    test("accumulates totalTokens (API native total_tokens per call)", () => {
+    test("accumulates totalTokens from miss+output (cache hits excluded)", () => {
       let s = fresh();
+      // 1st call: miss=50, output=30 → total=80
       s = dispatch(s, { type: "EVENT", event: { type: "cache_metrics", data: { workspaceAccess: "write" as const, cacheHitTokens: 50, cacheMissTokens: 50, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 30, hitRate: 0.5, standard: {} as import("@/protocol/events").PromptCacheStandardEvaluation } } });
-      expect(s.status.totalTokens).toBe(130); // 100 prompt + 30 completion
+      expect(s.status.totalTokens).toBe(80);
+      // 2nd call: miss=200, output=80 → total should accumulate: 80+280=360
+      // hit=1800 tokens are prefix reuse, excluded from total
+      s = dispatch(s, { type: "EVENT", event: { type: "cache_metrics", data: { workspaceAccess: "write" as const, cacheHitTokens: 1800, cacheMissTokens: 200, cacheWriteTokens: 0, inputTokens: 2000, outputTokens: 80, hitRate: 0.9, standard: {} as import("@/protocol/events").PromptCacheStandardEvaluation } } });
+      expect(s.status.totalTokens).toBe(360);
     });
   });
 

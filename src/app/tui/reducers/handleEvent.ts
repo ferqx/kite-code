@@ -256,9 +256,11 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           cacheHitTokens: hit,
           cacheMissTokens: miss,
           cacheHitRate: cacheTotal > 0 ? hit / cacheTotal : 0,
-          // 累加每轮 API 返回的 total_tokens (prompt + completion)，用于整体统计
-          // Accumulate API native total_tokens per call for overall usage tracking
-          totalTokens: state.status.totalTokens + d.inputTokens + (d.outputTokens ?? 0),
+          // 累加每轮净增量：未命中缓存的输入 + 模型产出。
+          // cacheHitTokens 是前缀缓存复用，已在之前轮次中计入过，不重复累加。
+          // Accumulate net-new tokens per call: cache-miss input + model output.
+          // cacheHitTokens are prefix reuse and already counted in prior calls.
+          totalTokens: state.status.totalTokens + d.cacheMissTokens + (d.outputTokens ?? 0),
         },
       };
       // 每次模型调用后追加一条缓存命中日志到输出区
