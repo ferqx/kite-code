@@ -215,7 +215,6 @@ describe("getCheckpointState", () => {
         workspaceAccess: "write",
         phase: "building",
         plan: { name: "test", description: "test plan", steps: [] },
-        contextSummary: "summary text",
       },
       channel_versions: {},
       versions_seen: {},
@@ -233,7 +232,6 @@ describe("getCheckpointState", () => {
       expect(state.workspaceAccess).toBe("write");
       expect(state.phase).toBe("building");
       expect(state.plan?.name).toBe("test");
-      expect(state.contextSummary).toBe("summary text");
     }
   });
 

@@ -754,7 +754,6 @@ describe("routeEntry — start-of-graph routing", () => {
     approvedToolRequest: null,
     approvedToolGrant: null,
     contextBudget: undefined,
-    contextSummary: "",
     plan: null,
     final: "",
     modelProvider: "",

@@ -146,7 +146,6 @@ describe("graph integration", () => {
             userId: "test",
             threadId: "t1",
             workspace,
-            contextSummary: "",
           },
           {
             configurable: { thread_id: "t1" },
@@ -205,7 +204,6 @@ describe("graph integration", () => {
             userId: "test",
             threadId: "t2",
             workspace,
-            contextSummary: "",
           },
           {
             configurable: { thread_id: "t2" },
@@ -267,7 +265,6 @@ describe("graph integration", () => {
             userId: "test",
             threadId: "t3",
             workspace,
-            contextSummary: "",
           },
           {
             configurable: { thread_id: "t3" },
@@ -323,7 +320,6 @@ describe("graph integration", () => {
           userId: "test",
           threadId: "t4",
           workspace,
-          contextSummary: "",
         },
         {
           configurable: { thread_id: "t4" },
@@ -400,7 +396,6 @@ describe("graph integration", () => {
             userId: "test",
             threadId: "t5",
             workspace,
-            contextSummary: "",
           },
           {
             configurable: { thread_id: "t5" },
@@ -490,7 +485,6 @@ describe("graph integration", () => {
             userId: "test",
             threadId: "t6",
             workspace,
-            contextSummary: "",
           },
           {
             configurable: { thread_id: "t6" },
@@ -559,7 +553,6 @@ describe("graph integration", () => {
             userId: "test",
             threadId: "t7",
             workspace,
-            contextSummary: "",
           },
           {
             configurable: { thread_id: "t7" },
@@ -625,7 +618,6 @@ describe("graph integration", () => {
             userId: "test",
             threadId: "t8",
             workspace,
-            contextSummary: "",
           },
           {
             configurable: { thread_id: "t8" },
@@ -695,7 +687,6 @@ describe("graph integration", () => {
             userId: "test",
             threadId: "t9",
             workspace,
-            contextSummary: "",
           },
           {
             configurable: { thread_id: "t9" },
@@ -782,7 +773,6 @@ describe("sandbox executor in agent graph", () => {
             userId: "test",
             threadId: "sbox-1",
             workspace,
-            contextSummary: "",
           },
           {
             configurable: { thread_id: "sbox-1" },
@@ -866,7 +856,6 @@ describe("checkpoint recovery", () => {
           userId: "test",
           threadId: "ck1",
           workspace,
-          contextSummary: "",
         },
         {
           configurable: { thread_id: "ck1" },
@@ -962,7 +951,6 @@ describe("checkpoint recovery", () => {
           userId: "test",
           threadId: "ck2",
           workspace,
-          contextSummary: "",
         },
         {
           configurable: { thread_id: "ck2" },
@@ -1041,7 +1029,6 @@ describe("checkpoint recovery", () => {
           userId: "test",
           threadId: "ck2b",
           workspace,
-          contextSummary: "",
         },
         {
           configurable: { thread_id: "ck2b" },
@@ -1129,7 +1116,6 @@ describe("checkpoint recovery", () => {
           userId: "test",
           threadId: "ck3",
           workspace,
-          contextSummary: "",
         },
         {
           configurable: { thread_id: "ck3" },

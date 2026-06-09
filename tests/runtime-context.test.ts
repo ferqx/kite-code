@@ -64,24 +64,17 @@ describe("buildRuntimeContext", () => {
     expect(context).not.toContain("Context summary:");
   });
 
-  // 验证可缓存运行时上下文不随 read-only/write 访问变化，避免破坏 provider 前缀缓存 / Verify cacheable runtime context is stable across access values
-  test("keeps cacheable runtime context stable across read-only and write access", () => {
-    const readOnlyContext = buildCacheableRuntimeContext({
-      workspace: "D:\\workspace",
-      messages: [new HumanMessage("inspect")],
-      workspaceAccess: "write",
-      plan: null,
-    });
-    const writeContext = buildCacheableRuntimeContext({
-      workspace: "D:\\workspace",
-      messages: [new HumanMessage("inspect")],
-      workspaceAccess: "write",
-      plan: null,
-    });
+  // 验证可缓存运行时上下文仅接受 workspace 参数，防止注入动态状态破坏 provider 前缀缓存 / Verify cacheable runtime context only accepts workspace, preventing injection of dynamic state
+  test("keeps cacheable runtime context stable across calls with same workspace", () => {
+    const ctx1 = buildCacheableRuntimeContext({ workspace: "D:\\workspace" });
+    const ctx2 = buildCacheableRuntimeContext({ workspace: "D:\\workspace" });
 
-    expect(readOnlyContext).toBe(writeContext);
-    expect(readOnlyContext).not.toContain("Tool policy (plan mode):");
-    expect(readOnlyContext).not.toContain("Tool policy (builder mode):");
-    expect(readOnlyContext).not.toContain("Current workspace access:");
+    expect(ctx1).toBe(ctx2);
+    expect(ctx1).toContain("Cacheable runtime context:");
+    expect(ctx1).toContain("OS:");
+    expect(ctx1).toContain("Shell:");
+    expect(ctx1).toContain("Workspace: D:\\workspace");
+    expect(ctx1).not.toContain("Time:");
+    expect(ctx1).not.toContain("Timezone:");
   });
 });
