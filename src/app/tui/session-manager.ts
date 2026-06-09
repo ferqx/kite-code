@@ -295,6 +295,8 @@ export class SessionManager {
   private activeId = "";
   private snapshotCallback: ((threadId: string) => void) | null = null;
   private static sessionCounter = 0;
+  /** token 统计内存缓存，避免 getSnapshot 每次打开 DB / In-memory token stats cache to avoid DB access in getSnapshot */
+  private tokenStatsCache = new Map<string, { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number }>();
 
   constructor(private deps: SessionDeps) {
     // Central bridge: when UI components (ApprovalBlock, InputBlock) call submitAction
@@ -310,8 +312,10 @@ export class SessionManager {
     }
   }
 
-  /** 持久化 token 统计到 checkpoint DB / Persist token stats to checkpoint DB */
+  /** 持久化 token 统计到 checkpoint DB，同时更新内存缓存 / Persist token stats to DB and update in-memory cache */
   saveTokenStats(threadId: string, status: StatusState): void {
+    const stats = { cacheHitTokens: status.cacheHitTokens, cacheMissTokens: status.cacheMissTokens, totalTokens: status.totalTokens };
+    this.tokenStatsCache.set(threadId, stats);
     try {
       const db = new Database(this.deps.checkpointPath);
       db.run("pragma busy_timeout = 5000");
@@ -324,7 +328,7 @@ export class SessionManager {
       db.run(
         `insert or replace into session_stats (thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens, updated_at)
          values (?, ?, ?, ?, datetime('now'))`,
-        [threadId, status.cacheHitTokens, status.cacheMissTokens, status.totalTokens],
+        [threadId, stats.cacheHitTokens, stats.cacheMissTokens, stats.totalTokens],
       );
       db.close();
     } catch { /* non-critical */ }
@@ -399,17 +403,41 @@ export class SessionManager {
     rt.eventBuffer = [];
   }
 
+  /** 懒加载：首次访问时从 DB 批量载入 token 统计到内存缓存
+   *  Lazy load: populate in-memory cache from DB on first access */
+  private ensureTokenStatsLoaded(): void {
+    if (this.tokenStatsCache.size > 0) return;
+    try {
+      const db = new Database(this.deps.checkpointPath);
+      db.run("pragma busy_timeout = 5000");
+      db.run(`create table if not exists session_stats (
+        thread_id text primary key not null,
+        cache_hit_tokens integer not null default 0,
+        cache_miss_tokens integer not null default 0,
+        total_tokens integer not null default 0,
+        updated_at text not null default (datetime('now')))`);
+      const rows = db
+        .query(`select thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens from session_stats`)
+        .all() as Array<{ thread_id: string; cache_hit_tokens: number; cache_miss_tokens: number; total_tokens: number }>;
+      for (const r of rows) {
+        this.tokenStatsCache.set(r.thread_id, { cacheHitTokens: r.cache_hit_tokens, cacheMissTokens: r.cache_miss_tokens, totalTokens: r.total_tokens });
+      }
+      db.close();
+    } catch { /* non-critical */ }
+  }
+
   /** 创建会话快照列表。
    *  @param prevSessions 前一次 snapshot 数组，用于继承已累积的 token 统计等跨生命周期状态。
    *  Create session snapshot list.
    *  @param prevSessions previous snapshot array, used to inherit accumulated token stats across lifecycles. */
   getSnapshot(prevSessions?: ReadonlyArray<{ threadId: string; status: StatusState }>): SessionSnapshot[] {
+    // 首次调用时从 DB 批量加载到内存缓存 / Bulk load from DB into memory cache on first call
+    this.ensureTokenStatsLoaded();
     const prevMap = new Map(prevSessions?.map(s => [s.threadId, s.status]));
     const result: SessionSnapshot[] = [];
     for (const [threadId, rt] of this.runtimes) {
       const prevStatus = prevMap.get(threadId);
-      // 从 DB 加载持久化的 token 统计 / Load persisted token stats from DB
-      const dbStats = this.loadTokenStats(threadId);
+      const dbStats = this.tokenStatsCache.get(threadId);
       result.push({
         threadId,
         name: rt.name,
