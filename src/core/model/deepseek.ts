@@ -1,5 +1,5 @@
 import { ChatDeepSeek } from "@langchain/deepseek";
-import { AIMessage, type BaseMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import type { AgentConfig } from "@/core/config/index";
 
 /** 模型重试监听器 / Model retry listener */
@@ -109,25 +109,40 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
       request.messages &&
       Array.isArray(request.messages)
     ) {
-      // 按位置顺序收集 reasoning_content（而非按内容匹配）。
-      // SystemMessage 合并不影响 assistant 消息数量，位置匹配是可靠的。
-      // 之前的内容前缀 key（content.slice(0,200)）在多个 tool-call 消息
-      // 共享空 content 时发生 key 碰撞 → 最新消息的 rc 覆盖所有旧消息 →
-      // API 序列化后的 prefix token 与上一轮不同 → DeepSeek 缓存 miss。
+      // 按 HumanMessage 边界划分 user turn。根据 DeepSeek 官方文档：
+      // - 有 tool_calls 的 turn 内，所有 assistant 消息的 reasoning_content 必须回传
+      // - 无 tool_calls 的 turn 内，reasoning_content 回传也会被 API 忽略 → 清空以节省 token、提升缓存
       //
-      // Collect reasoning_content by positional order (rather than content match).
-      // SystemMessage merging doesn't affect assistant message count, so positional
-      // matching is reliable. The previous content-prefix key (content.slice(0,200))
-      // caused key collisions when multiple tool-call messages shared empty content →
-      // the latest message's rc overwrote all prior ones → different serialized prefix
-      // tokens vs the prior request → DeepSeek cache miss.
+      // Split by HumanMessage boundaries into user turns. Per DeepSeek docs:
+      // - Tool-call turns: all reasoning_content must be passed back
+      // - No-tool-call turns: reasoning_content is ignored by API → strip to save tokens & improve cache
       const originals = this._originalMessages;
       const reasonings: string[] = [];
-      for (const original of originals) {
-        if (!AIMessage.isInstance(original)) continue;
-        const reasoning = (original.additional_kwargs as Record<string, unknown>)?.reasoning_content;
-        reasonings.push(typeof reasoning === "string" ? reasoning : "");
+      const pending: string[] = [];
+      let turnHasToolCalls = false;
+
+      function flushTurn() {
+        for (const rc of pending) {
+          reasonings.push(turnHasToolCalls ? rc : "");
+        }
+        pending.length = 0;
+        turnHasToolCalls = false;
       }
+
+      for (const original of originals) {
+        if (HumanMessage.isInstance(original)) {
+          flushTurn();
+          continue;
+        }
+        if (!AIMessage.isInstance(original)) continue;
+
+        const hasToolCalls = Array.isArray(original.tool_calls) && original.tool_calls.length > 0;
+        if (hasToolCalls) turnHasToolCalls = true;
+
+        const reasoning = (original.additional_kwargs as Record<string, unknown>)?.reasoning_content;
+        pending.push(typeof reasoning === "string" ? reasoning : "");
+      }
+      flushTurn();
 
       let assistantIdx = 0;
       for (const mapped of request.messages) {
