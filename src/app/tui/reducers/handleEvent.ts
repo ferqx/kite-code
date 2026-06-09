@@ -256,9 +256,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           cacheHitTokens: hit,
           cacheMissTokens: miss,
           cacheHitRate: cacheTotal > 0 ? hit / cacheTotal : 0,
-          // 当前上下文窗口大小（prompt_tokens = hit+miss），每次调用更新为最新值
-          // Current context window size, updated per call rather than accumulated
-          totalTokens: d.inputTokens,
+          // 累加每轮 API 返回的 total_tokens (prompt + completion)，用于整体统计
+          // Accumulate API native total_tokens per call for overall usage tracking
+          totalTokens: state.status.totalTokens + d.inputTokens + (d.outputTokens ?? 0),
         },
       };
       // 每次模型调用后追加一条缓存命中日志到输出区
