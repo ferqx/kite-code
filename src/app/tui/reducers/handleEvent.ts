@@ -256,7 +256,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           cacheHitTokens: hit,
           cacheMissTokens: miss,
           cacheHitRate: cacheTotal > 0 ? hit / cacheTotal : 0,
-          totalTokens: state.status.totalTokens + d.inputTokens + (d.outputTokens ?? 0),
+          // 只累加未命中缓存的 input + output，避免同一段缓存前缀在多轮调用中被重复计入
+          // Only accumulate cache-miss input + output to prevent counting the same cache prefix across calls
+          totalTokens: state.status.totalTokens + d.cacheMissTokens + (d.outputTokens ?? 0),
         },
       };
       // 每次模型调用后追加一条缓存命中日志到输出区
