@@ -163,6 +163,14 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     thinkingLevelRef.current = state.status.thinkingMode || null;
   }, [state.status.thinkingMode]);
 
+  // 每当 token 统计变化时持久化到 DB，确保最新值始终写入
+  // Persist token stats to DB on every change, guaranteeing latest values
+  React.useEffect(() => {
+    const tid = state.activeSessionId;
+    if (!tid) return;
+    sessionManager.saveTokenStats(tid, state.status);
+  }, [state.status.cacheHitTokens, state.status.cacheMissTokens, state.status.totalTokens, state.activeSessionId]);
+
   const handleExit = React.useCallback(() => {
     dispatch({ type: "EVENT", event: { type: "text", data: { text: "👋 Goodbye!" } } });
     sessionManager.abortAll();
@@ -457,11 +465,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         }
         sessionManager.onStatusChange(threadId);
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-        // 持久化 token 统计。
-        // 延迟到下一个微任务，确保 React 完成渲染后 stateRef.current 已更新为最新状态。
-        // Persist token stats deferred to next microtask so stateRef.current reflects the latest render.
-        const tid = threadId;
-        setTimeout(() => sessionManager.saveTokenStats(tid, stateRef.current.status), 0);
         if (stillActive) {
           dispatch({ type: "SET_IDLE" });
         }
