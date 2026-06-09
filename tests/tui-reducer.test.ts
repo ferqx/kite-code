@@ -130,10 +130,10 @@ describe("eventReducer (blocks model)", () => {
   });
 
   describe("EVENT.cache_metrics", () => {
-    test("accumulates totalTokens from miss+output only", () => {
+    test("sets totalTokens to current context size (inputTokens, not accumulated)", () => {
       let s = fresh();
       s = dispatch(s, { type: "EVENT", event: { type: "cache_metrics", data: { workspaceAccess: "write" as const, cacheHitTokens: 50, cacheMissTokens: 50, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 30, hitRate: 0.5, standard: {} as import("@/protocol/events").PromptCacheStandardEvaluation } } });
-      expect(s.status.totalTokens).toBe(80); // 50 miss + 30 output, cache hits excluded
+      expect(s.status.totalTokens).toBe(100); // d.inputTokens = current prompt size
     });
   });
 

@@ -50,7 +50,7 @@ export default function StatsLine({ status, running, modelProvider, modelName }:
         <>
           <Text color={t.dim}> │ </Text>
           <Text>
-            <Text color={t.muted}>tokens: </Text>
+            <Text color={t.muted}>ctx: </Text>
             <Text>{formatTokens(status.totalTokens)}</Text>
           </Text>
         </>
