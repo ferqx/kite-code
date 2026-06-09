@@ -4,6 +4,12 @@ import type { AgentEvent, AgentPlanStep, PlanStatus } from "@/protocol/events";
 import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
 import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById } from "./helpers";
 
+/** 格式化 token 数量（1k+ 用 k 缩写）/ Format token count (abbreviate with k for 1k+) */
+function fmt(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
 /** Shared helper: O(1) blockIndex lookup with O(n) full-scan fallback for session-load edge cases.
  *  Eliminates the duplicate pattern that was repeated 5 times across tool_done / subagent handlers. */
 function findBlockByIndexAndKind<T extends OutputBlock["kind"]>(
@@ -241,7 +247,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const hit = state.status.cacheHitTokens + d.cacheHitTokens;
       const miss = state.status.cacheMissTokens + d.cacheMissTokens;
       const cacheTotal = hit + miss;
-      return {
+      const updated = {
         ...state,
         status: {
           ...state.status,
@@ -251,6 +257,17 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           totalTokens: state.status.totalTokens + d.inputTokens + (d.outputTokens ?? 0),
         },
       };
+      // 每次模型调用后追加一条缓存命中日志到输出区
+      // Append a cache hit log line after each model call
+      if (d.inputTokens > 0) {
+        const hitTokens = d.cacheHitTokens;
+        const missTokens = d.cacheMissTokens;
+        const rate = d.inputTokens > 0 ? (hitTokens / d.inputTokens * 100).toFixed(0) : "0";
+        const log = `⚡ cache: ${fmt(hitTokens)} hit / ${fmt(missTokens)} miss · ${rate}%`;
+        const block: OutputBlock = { id: updated.nextBlockId, kind: "text", content: log };
+        return appendBlock(updated, block);
+      }
+      return updated;
     }
     case "final": {
       if (event.data.length === 0) return state;
@@ -392,7 +409,18 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         cacheHitTokens: prevHit + event.data.cacheHitTokens,
         cacheMissTokens: prevMiss + event.data.cacheMissTokens,
       };
-      return replaceBlockById(state, matched.id, next);
+      const updated = replaceBlockById(state, matched.id, next);
+      // 追加子 agent 缓存命中日志到输出区
+      const hitTokens = event.data.cacheHitTokens;
+      const missTokens = event.data.cacheMissTokens;
+      const inputTokens = event.data.inputTokens;
+      if (inputTokens > 0) {
+        const rate = (hitTokens / inputTokens * 100).toFixed(0);
+        const log = `  ⚡ sub cache: ${fmt(hitTokens)} hit / ${fmt(missTokens)} miss · ${rate}%`;
+        const block: OutputBlock = { id: updated.nextBlockId, kind: "text", content: log };
+        return appendBlock(updated, block);
+      }
+      return updated;
     }
     // Raw passthrough events — intentionally no-op for UI consumers
     case "interrupt":
