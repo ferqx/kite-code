@@ -41,10 +41,12 @@ interface BlockRendererProps {
   isFocused: boolean;
   index: number;
   prevBlock?: OutputBlock;
+  /** 当主 agent 等待审批时，工具并未真正执行，隐藏计时器 / When awaiting approval, tool isn't actually running, hide timer */
+  awaitingApproval?: boolean;
 }
 
 const BlockRenderer = React.memo(function BlockRenderer({
-  block, isFocused, index: _i, prevBlock,
+  block, isFocused, index: _i, prevBlock, awaitingApproval,
 }: BlockRendererProps) {
   const dt = useTheme();
   switch (block.kind) {
@@ -86,7 +88,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     case "tool_card":
       return (
         <Box marginBottom={BLOCK_GAP}>
-          <ToolCardBlock block={block} />
+          <ToolCardBlock block={block} awaitingApproval={awaitingApproval} />
         </Box>
       );
 

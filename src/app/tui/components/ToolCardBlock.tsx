@@ -39,9 +39,11 @@ function renderToolSummary(summary: string, isError: boolean, dt: { error: strin
 
 interface ToolCardBlockProps {
   block: OutputBlock & { kind: "tool_card" };
+  /** 工具等待审批时隐藏计时器 / Hide timer when tool is awaiting approval */
+  awaitingApproval?: boolean;
 }
 
-export default function ToolCardBlock({ block }: ToolCardBlockProps) {
+export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlockProps) {
   const dt = useTheme();
   const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsed, setLiveElapsed] = useState(0);
@@ -66,7 +68,11 @@ export default function ToolCardBlock({ block }: ToolCardBlockProps) {
           {block.preview ? (
             <Text color={dt.muted}> {block.preview}</Text>
           ) : null}
-          <Text color={dt.dim}> ({formatElapsed(liveElapsed)})</Text>
+          {awaitingApproval ? (
+            <Text color={dt.dim}> (awaiting approval)</Text>
+          ) : (
+            <Text color={dt.dim}> ({formatElapsed(liveElapsed)})</Text>
+          )}
         </Box>
       </Box>
     );

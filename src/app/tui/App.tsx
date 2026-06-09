@@ -134,6 +134,8 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
     return undefined;
   }, [state.interrupt, state.turns]);
 
+  const awaitingApproval = state.interrupt?.kind === "approval";
+
   const resolveApproval = useCallback(
     (action: string, grant?: string, pattern?: string) => {
       if (!interruptBlock) return;
@@ -188,6 +190,7 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
           onToggleToolExpand={onToggleToolExpand}
           onToggleSubagentExpand={onToggleSubagentExpand}
           overlayActive={overlayActive}
+          awaitingApproval={awaitingApproval}
         />
       )}
 

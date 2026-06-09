@@ -21,6 +21,8 @@ interface OutputAreaProps {
   onToggleToolExpand?: (id: number) => void;
   onToggleSubagentExpand?: (id: number) => void;
   overlayActive?: boolean;
+  /** 主 agent 等待审批时隐藏工具计时器 / Hide tool timer when awaiting approval */
+  awaitingApproval?: boolean;
 }
 
 /**
@@ -39,6 +41,7 @@ export default function OutputArea({
   onToggleToolExpand,
   onToggleSubagentExpand,
   overlayActive,
+  awaitingApproval,
 }: OutputAreaProps) {
   const onToggleReasonRef = useRef(onToggleReason);
   onToggleReasonRef.current = onToggleReason;
@@ -94,6 +97,7 @@ export default function OutputArea({
                   isFocused={false}
                   index={index - 1}
                   prevBlock={prevBlock}
+                  awaitingApproval={false}
                 />
               );
             }}
@@ -112,6 +116,7 @@ export default function OutputArea({
             isFocused={false}
             index={mergedStaticBlocks.length + i}
             prevBlock={prevBlock}
+            awaitingApproval={awaitingApproval}
           />
         );
       })}
