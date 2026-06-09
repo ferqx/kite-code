@@ -51,6 +51,7 @@
 | `understanding/2026-06-02-ink-rendering-scroll-selection-issue.md` | understanding | Ink 渲染机制导致的滚动和文本选择问题 — 根本原因分析、已尝试方案、可能解决方向。 |
 | `understanding/2026-06-03-tui-block-turn-model-design.md` | completed | TUI 消息列表重构 — 引入 Turn 模型替代 flat OutputBlock[]，简化 Static/Dynamic 分割逻辑。 |
 | `understanding/2026-06-08-prefix-cache-hit-rate-analysis.md` | understanding | 前缀缓存命中率分析 — DeepSeek KV cache 机制、前缀大小与命中率关系、当前 OpenPX 前缀构成、影响因素和优化方向。 |
+| `understanding/2026-06-09-prompt-cache-optimization.md` | understanding | Prompt Cache 优化：合并 SystemMessage、清理死参数、修复 reasoning_content 注入 key 碰撞、TUI 缓存日志、子 agent 缓存震荡根因、对标 Claude Code/Codex/OpenCode 子 agent 结果回传机制。 |
 
 ## Backlog（工作待办）
 
