@@ -297,6 +297,8 @@ export class SessionManager {
   private static sessionCounter = 0;
   /** token 统计内存缓存，避免 getSnapshot 每次打开 DB / In-memory token stats cache to avoid DB access in getSnapshot */
   private tokenStatsCache = new Map<string, { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number }>();
+  /** 复用的 DB 连接，避免每次 saveTokenStats 开新连接 / Reusable DB connection to avoid opening a new one on every save */
+  private _statsDb: Database | null = null;
 
   constructor(private deps: SessionDeps) {
     // Central bridge: when UI components (ApprovalBlock, InputBlock) call submitAction
@@ -312,55 +314,32 @@ export class SessionManager {
     }
   }
 
+  /** 懒加载 stats DB 连接 / Lazy-load the stats DB connection */
+  private get statsDb(): Database {
+    if (!this._statsDb) {
+      this._statsDb = new Database(this.deps.checkpointPath);
+      this._statsDb.run("pragma busy_timeout = 5000");
+      this._statsDb.run(`create table if not exists session_stats (
+        thread_id text primary key not null,
+        cache_hit_tokens integer not null default 0,
+        cache_miss_tokens integer not null default 0,
+        total_tokens integer not null default 0,
+        updated_at text not null default (datetime('now')))`);
+    }
+    return this._statsDb;
+  }
+
   /** 持久化 token 统计到 checkpoint DB，同时更新内存缓存 / Persist token stats to DB and update in-memory cache */
   saveTokenStats(threadId: string, status: StatusState): void {
     const stats = { cacheHitTokens: status.cacheHitTokens, cacheMissTokens: status.cacheMissTokens, totalTokens: status.totalTokens };
     this.tokenStatsCache.set(threadId, stats);
     try {
-      const db = new Database(this.deps.checkpointPath);
-      db.run("pragma busy_timeout = 5000");
-      db.run(`create table if not exists session_stats (
-        thread_id text primary key not null,
-        cache_hit_tokens integer not null default 0,
-        cache_miss_tokens integer not null default 0,
-        total_tokens integer not null default 0,
-        updated_at text not null default (datetime('now')))`);
-      db.run(
+      this.statsDb.run(
         `insert or replace into session_stats (thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens, updated_at)
          values (?, ?, ?, ?, datetime('now'))`,
         [threadId, stats.cacheHitTokens, stats.cacheMissTokens, stats.totalTokens],
       );
-      db.close();
     } catch { /* non-critical */ }
-  }
-
-  /** 从 DB 加载 token 统计 / Load token stats from DB */
-  loadTokenStats(threadId: string): Partial<StatusState> | null {
-    try {
-      const db = new Database(this.deps.checkpointPath);
-      db.run("pragma busy_timeout = 5000");
-      db.run(`create table if not exists session_stats (
-        thread_id text primary key not null,
-        cache_hit_tokens integer not null default 0,
-        cache_miss_tokens integer not null default 0,
-        total_tokens integer not null default 0,
-        updated_at text not null default (datetime('now')))`);
-      const row = db
-        .query(`select cache_hit_tokens, cache_miss_tokens, total_tokens
-                 from session_stats where thread_id = ?`)
-        .get(threadId) as
-        | { cache_hit_tokens: number; cache_miss_tokens: number; total_tokens: number }
-        | undefined;
-      db.close();
-      if (row) {
-        return {
-          cacheHitTokens: row.cache_hit_tokens,
-          cacheMissTokens: row.cache_miss_tokens,
-          totalTokens: row.total_tokens,
-        };
-      }
-    } catch { /* non-critical */ }
-    return null;
   }
 
   createSession(workspace: string): string {
@@ -408,21 +387,12 @@ export class SessionManager {
   private ensureTokenStatsLoaded(): void {
     if (this.tokenStatsCache.size > 0) return;
     try {
-      const db = new Database(this.deps.checkpointPath);
-      db.run("pragma busy_timeout = 5000");
-      db.run(`create table if not exists session_stats (
-        thread_id text primary key not null,
-        cache_hit_tokens integer not null default 0,
-        cache_miss_tokens integer not null default 0,
-        total_tokens integer not null default 0,
-        updated_at text not null default (datetime('now')))`);
-      const rows = db
+      const rows = this.statsDb
         .query(`select thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens from session_stats`)
         .all() as Array<{ thread_id: string; cache_hit_tokens: number; cache_miss_tokens: number; total_tokens: number }>;
       for (const r of rows) {
         this.tokenStatsCache.set(r.thread_id, { cacheHitTokens: r.cache_hit_tokens, cacheMissTokens: r.cache_miss_tokens, totalTokens: r.total_tokens });
       }
-      db.close();
     } catch { /* non-critical */ }
   }
 

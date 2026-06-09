@@ -5,7 +5,9 @@ import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
 import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById } from "./helpers";
 import { formatReadFileRange } from "../components/render-utils";
 
-/** 格式化 token 数量（1k+ 用 k 缩写）/ Format token count (abbreviate with k for 1k+) */
+/** 格式化 token 数量（1k+ 用 k 缩写）。缓存日志注释解除后需要。
+ *  Format token count (abbreviate with k for 1k+). Needed when cache log is uncommented. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function fmt(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);

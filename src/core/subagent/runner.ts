@@ -11,6 +11,7 @@ import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import { extractPromptCacheMetrics } from "@/core/cache-metrics";
 import { buildCacheableRuntimeContext } from "@/core/model/runtime-context";
 import { buildStaticSystemPrompt } from "@/core/model/context";
+import { countTokens } from "@/core/token-counter";
 import type { SubAgentRoleConfig, SubAgentRunnerInput, SubAgentResult, SubAgentEventSink } from "./types";
 
 export type { SubAgentRunnerInput } from "./types";
@@ -184,10 +185,11 @@ ${input.task}`;
             ok = false;
           }
 
-          // 发出 tool_result 事件
+          // 发出 tool_result 事件（含手动 token 统计）
+          const toolTokenCount = countTokens(toolOutput);
           input.eventSink({
             type: "tool_result",
-            data: { id, toolName: tc.name, ok, ...(totalLines != null ? { totalLines } : {}) },
+            data: { id, toolName: tc.name, ok, ...(totalLines != null ? { totalLines } : {}), ...(toolTokenCount > 0 ? { toolTokenCount } : {}) },
           });
 
           messages.push(new ToolMessage({

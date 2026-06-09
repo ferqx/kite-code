@@ -192,6 +192,8 @@ export interface SubAgentToolResultPayload {
   ok: boolean;
   /** 读取文件时的文件总行数，用于 TUI 行号范围展示 / Total lines in file for read_file, used for TUI line range display */
   totalLines?: number;
+  /** 工具输出的 token 数，用于独立于 provider 的累计统计 / Token count of the tool output for provider-agnostic cumulative tracking */
+  toolTokenCount?: number;
 }
 
 export interface SubAgentDonePayload {

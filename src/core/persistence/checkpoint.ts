@@ -254,41 +254,6 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     return entries;
   }
 
-  /** 加载指定 checkpoint 的完整 state / Load full state from a specific checkpoint */
-  /** 持久化会话 token 统计 / Persist session token stats */
-  saveSessionStats(
-    threadId: string,
-    stats: { cacheHitTokens?: number; cacheMissTokens?: number; totalTokens?: number },
-  ): void {
-    this.setup();
-    this.db.run(
-      `insert or replace into session_stats (thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens, updated_at)
-       values (?, ?, ?, ?, datetime('now'))`,
-      [
-        threadId,
-        stats.cacheHitTokens ?? 0,
-        stats.cacheMissTokens ?? 0,
-        stats.totalTokens ?? 0,
-      ],
-    );
-  }
-
-  /** 加载会话 token 统计 / Load session token stats */
-  loadSessionStats(
-    threadId: string,
-  ): { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number } {
-    this.setup();
-    const row = this.db
-      .query(`select cache_hit_tokens, cache_miss_tokens, total_tokens
-               from session_stats where thread_id = ?`)
-      .get(threadId) as
-      | { cache_hit_tokens: number; cache_miss_tokens: number; total_tokens: number }
-      | undefined;
-    return row
-      ? { cacheHitTokens: row.cache_hit_tokens, cacheMissTokens: row.cache_miss_tokens, totalTokens: row.total_tokens }
-      : { cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0 };
-  }
-
   async getCheckpointState(
     threadId: string,
     checkpointId: string,
