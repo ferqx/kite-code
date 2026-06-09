@@ -31,6 +31,7 @@ import type {
   ThreadAuthorizationState,
 } from "./types";
 import { defaultAuthorizationState } from "./harness/tool-policy";
+import { countTokens } from "./token-counter";
 
 export interface RunAgentInput {
   task: string;
@@ -527,6 +528,9 @@ function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
 /** Parse ToolMessage → tool_done event */
 function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null {
   const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+  // 手动统计工具输出的 token 数，不依赖 provider 的 cache_metrics 字段
+  // Count tool output tokens manually, independent of provider cache_metrics fields
+  const toolTokenCount = countTokens(content);
   let ok = true;
   let summary = content.slice(0, 200);
   let totalLines: number | undefined;
@@ -557,6 +561,7 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
       ok,
       summary,
       ...(totalLines != null ? { totalLines } : {}),
+      ...(toolTokenCount > 0 ? { toolTokenCount } : {}),
     },
   };
 }

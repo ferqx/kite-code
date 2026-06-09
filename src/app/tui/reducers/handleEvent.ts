@@ -198,6 +198,14 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         detail: computeToolDetail(matched.name, matched.args, event.data.totalLines),
         expanded: !event.data.ok,
       };
+      // 工具输出的 token 计入累计统计 / Tool output tokens counted in cumulative total
+      if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {
+        return {
+          ...replaceBlockById(state, matched.id, next),
+          toolStartTimes: nextTimes,
+          status: { ...state.status, totalTokens: state.status.totalTokens + event.data.toolTokenCount },
+        };
+      }
       return { ...replaceBlockById(state, matched.id, next), toolStartTimes: nextTimes };
     }
     case "state_change": {
@@ -249,6 +257,16 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const hit = state.status.cacheHitTokens + d.cacheHitTokens;
       const miss = state.status.cacheMissTokens + d.cacheMissTokens;
       const cacheTotal = hit + miss;
+      // 手动统计 tokens，不依赖 provider 的 cache_miss 字段：
+      // - 首次调用：inputTokens = 全量上下文，作为基准线
+      // - 后续调用：只加模型产出 (outputTokens)，上下文增量由 tool_done 的 toolTokenCount 计入
+      // Manual token counting, provider-agnostic:
+      // - First call: inputTokens = full context baseline
+      // - Subsequent calls: only add model output; context growth tracked via toolTokenCount in tool_done
+      const isFirstCall = state.status.totalTokens === 0;
+      const addedTokens = isFirstCall
+        ? d.inputTokens + (d.outputTokens ?? 0)
+        : (d.outputTokens ?? 0);
       const updated = {
         ...state,
         status: {
@@ -256,11 +274,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           cacheHitTokens: hit,
           cacheMissTokens: miss,
           cacheHitRate: cacheTotal > 0 ? hit / cacheTotal : 0,
-          // 累加每轮净增量：未命中缓存的输入 + 模型产出。
-          // cacheHitTokens 是前缀缓存复用，已在之前轮次中计入过，不重复累加。
-          // Accumulate net-new tokens per call: cache-miss input + model output.
-          // cacheHitTokens are prefix reuse and already counted in prior calls.
-          totalTokens: state.status.totalTokens + d.cacheMissTokens + (d.outputTokens ?? 0),
+          totalTokens: state.status.totalTokens + addedTokens,
         },
       };
       // 每次模型调用后追加一条缓存命中日志到输出区

@@ -130,15 +130,20 @@ describe("eventReducer (blocks model)", () => {
   });
 
   describe("EVENT.cache_metrics", () => {
-    test("accumulates totalTokens from miss+output (cache hits excluded)", () => {
+    test("accumulates totalTokens manually: first call input+output, later calls output+toolCount", () => {
       let s = fresh();
-      // 1st call: miss=50, output=30 → total=80
+      // 1st call (totalTokens===0): use inputTokens + outputTokens as baseline
+      // 100 input + 30 output = 130
       s = dispatch(s, { type: "EVENT", event: { type: "cache_metrics", data: { workspaceAccess: "write" as const, cacheHitTokens: 50, cacheMissTokens: 50, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 30, hitRate: 0.5, standard: {} as import("@/protocol/events").PromptCacheStandardEvaluation } } });
-      expect(s.status.totalTokens).toBe(80);
-      // 2nd call: miss=200, output=80 → total should accumulate: 80+280=360
-      // hit=1800 tokens are prefix reuse, excluded from total
+      expect(s.status.totalTokens).toBe(130);
+      // 2nd call: only add outputTokens (80), cacheMiss (200) is excluded
+      // hit=1800 tokens are cached prefix reuse, also excluded
       s = dispatch(s, { type: "EVENT", event: { type: "cache_metrics", data: { workspaceAccess: "write" as const, cacheHitTokens: 1800, cacheMissTokens: 200, cacheWriteTokens: 0, inputTokens: 2000, outputTokens: 80, hitRate: 0.9, standard: {} as import("@/protocol/events").PromptCacheStandardEvaluation } } });
-      expect(s.status.totalTokens).toBe(360);
+      expect(s.status.totalTokens).toBe(210);
+      // 3rd: tool_done with toolTokenCount adds to total (needs prior tool_call block)
+      s = dispatch(s, tcEvt("c1", "shell_execute"));
+      s = dispatch(s, { type: "EVENT", event: { type: "tool_done", data: { call_id: "c1", name: "shell_execute", ok: true, summary: "ok", toolTokenCount: 500 } } });
+      expect(s.status.totalTokens).toBe(710);
     });
   });
 
