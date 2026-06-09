@@ -433,62 +433,49 @@ describe("StartupScreen", () => {
 // ── ApprovalBlock ──
 
 describe("ApprovalBlock", () => {
-  test("renders approval header and command", () => {
+  test("renders ⚠ icon and command", () => {
     const approval = fakeApproval({ command: "rm -rf /tmp/test" });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain("Approval");
+    expect(frame).toContain("⚠");
     expect(frame).toContain("rm -rf /tmp/test");
   });
 
-  test("shows risk level", () => {
-    const approval = fakeApproval({ risk: "destructive" });
-    const { lastFrame } = render(
-      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
-    );
-    expect(lastFrame()).toContain("destructive");
-  });
-
-  test("shows summary", () => {
-    const approval = fakeApproval({ summary: "Delete temp files" });
-    const { lastFrame } = render(
-      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
-    );
-    expect(lastFrame()).toContain("Delete temp files");
-  });
-
-  test("shows reason when present", () => {
-    const approval = fakeApproval({ reason: "Cleanup needed" });
-    const { lastFrame } = render(
-      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
-    );
-    expect(lastFrame()).toContain("Cleanup needed");
-  });
-
-  test("shows all grant options", () => {
+  test("shows all grant options with compact labels", () => {
     const approval = fakeApproval();
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain("[A]");
-    expect(frame).toContain("[S]");
-    expect(frame).toContain("[F]");
-    expect(frame).toContain("[D]");
-    expect(frame).toContain("Approve once");
-    expect(frame).toContain("Same command");
-    expect(frame).toContain("Full access");
-    expect(frame).toContain("Deny");
+    expect(frame).toContain("[A]approve");
+    expect(frame).toContain("[S]same cmd");
+    expect(frame).toContain("[F]full access");
+    expect(frame).toContain("[D]deny");
   });
 
-  test("shows keyboard hint", () => {
-    const approval = fakeApproval();
+  test("does not show summary, reason, or risk text", () => {
+    const approval = fakeApproval({ summary: "Delete temp files", reason: "Cleanup needed", risk: "destructive" });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    expect(lastFrame()).toContain("Press key to select");
+    const frame = lastFrame();
+    expect(frame).not.toContain("Delete temp files");
+    expect(frame).not.toContain("Cleanup needed");
+    expect(frame).not.toContain("destructive");
+  });
+
+  test("non‑shell tools only show approve and deny", () => {
+    const approval = fakeApproval({ tool: "write_file", grantOptions: ["approve_once"] });
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain("[A]approve");
+    expect(frame).toContain("[D]deny");
+    expect(frame).not.toContain("[S]");
+    expect(frame).not.toContain("[F]");
   });
 });
 
@@ -890,7 +877,7 @@ describe("App", () => {
         provider={fakeProvider()}
       />,
     );
-    expect(lastFrame()).toContain("Approval");
+    expect(lastFrame()).toContain("⚠");
   });
 
   test("shows InputBlock when interrupt is question", () => {
@@ -926,7 +913,7 @@ describe("App", () => {
         provider={fakeProvider()}
       />,
     );
-    expect(lastFrame()).not.toContain("[A] Approve once");
+    expect(lastFrame()).not.toContain("[A]approve");
   });
 
   test("renders children when provided", () => {
