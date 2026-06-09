@@ -168,7 +168,10 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   React.useEffect(() => {
     const tid = state.activeSessionId;
     if (!tid) return;
-    sessionManager.saveTokenStats(tid, state.status);
+    const s = state.status;
+    // 跳过初始零值，避免启动时无意义写入
+    if (s.cacheHitTokens === 0 && s.cacheMissTokens === 0 && s.totalTokens === 0) return;
+    sessionManager.saveTokenStats(tid, s);
   }, [state.status.cacheHitTokens, state.status.cacheMissTokens, state.status.totalTokens, state.activeSessionId]);
 
   const handleExit = React.useCallback(() => {
