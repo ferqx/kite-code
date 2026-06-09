@@ -346,7 +346,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     checkpoint: Checkpoint,
     metadata: CheckpointMetadata,
   ): Promise<RunnableConfig> {
-    if (this.isClosed) return config;
+    if (this.isClosed) throw new Error("Database is closed");
     this.setup();
     const threadId = config.configurable?.thread_id;
     if (!threadId) {
@@ -366,21 +366,28 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
       throw new Error("Checkpoint and metadata serialized to different types");
     }
 
-    this.db
-      .query(
-        `insert or replace into checkpoints
-         (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata, created_at)
-         values (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-      )
-      .run(
-        String(threadId),
-        checkpointNs,
-        checkpoint.id,
-        parentCheckpointId,
-        checkpointType,
-        serializedCheckpoint,
-        serializedMetadata,
+    try {
+      this.db
+        .query(
+          `insert or replace into checkpoints
+           (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata, created_at)
+           values (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        )
+        .run(
+          String(threadId),
+          checkpointNs,
+          checkpoint.id,
+          parentCheckpointId,
+          checkpointType,
+          serializedCheckpoint,
+          serializedMetadata,
+        );
+    } catch (e) {
+      throw new Error(
+        `Failed to persist checkpoint for thread ${String(threadId)}, checkpoint ${checkpoint.id}: ${e instanceof Error ? e.message : String(e)}`,
+        { cause: e },
       );
+    }
 
     return {
       configurable: {
@@ -397,7 +404,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     writes: PendingWrite[],
     taskId: string,
   ): Promise<void> {
-    if (this.isClosed) return;
+    if (this.isClosed) throw new Error("Database is closed");
     this.setup();
 
     const threadId = config.configurable?.thread_id;
@@ -428,11 +435,18 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
         ] as const;
       }),
     );
-    this.db.transaction(() => {
-      for (const row of rows) {
-        insert.run(...row);
-      }
-    })();
+    try {
+      this.db.transaction(() => {
+        for (const row of rows) {
+          insert.run(...row);
+        }
+      })();
+    } catch (e) {
+      throw new Error(
+        `Failed to persist writes for thread ${String(threadId)}, checkpoint ${String(checkpointId)}: ${e instanceof Error ? e.message : String(e)}`,
+        { cause: e },
+      );
+    }
   }
 
   /** 删除整个线程的检查点 / Delete all checkpoints for a thread */
@@ -455,6 +469,9 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
   close(): void {
     if (this.isClosed) return;
     this.isClosed = true;
+    // WAL checkpoint 将 -wal 文件内容合并回主 DB，防止 WAL 无限增长
+    // Merge WAL back into main DB to prevent unbounded WAL file growth
+    try { this.db.run("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* best-effort */ }
     this.db.close();
   }
 

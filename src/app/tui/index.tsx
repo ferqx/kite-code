@@ -559,11 +559,13 @@ if (import.meta.main) {
   });
   process.on("SIGINT", () => {
     _sessionManagerForExit?.abortAll();
+    _sessionManagerForExit?.dispose();
     unmount();
     process.exit(0);
   });
   process.on("SIGTERM", () => {
     _sessionManagerForExit?.abortAll();
+    _sessionManagerForExit?.dispose();
     unmount();
     process.exit(0);
   });

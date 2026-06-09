@@ -353,7 +353,10 @@ export class SessionManager {
     if (existing) clearTimeout(existing);
     this._statsDebounceTimers.set(threadId, setTimeout(() => {
       this._statsDebounceTimers.delete(threadId);
-      this._flushTokenStatsNow(threadId, stats);
+      // 从缓存读取最新值而非闭包捕获，避免跨调用 stale write 风险
+      // Read latest from cache rather than closure-captured value to avoid stale-write risk
+      const latest = this.tokenStatsCache.get(threadId) ?? stats;
+      this._flushTokenStatsNow(threadId, latest);
     }, SessionManager.STATS_DEBOUNCE_MS));
   }
 
@@ -368,7 +371,9 @@ export class SessionManager {
          values (?, ?, ?, ?, datetime('now'))`,
         [threadId, stats.cacheHitTokens, stats.cacheMissTokens, stats.totalTokens],
       );
-    } catch { /* non-critical */ }
+    } catch (e) {
+      console.warn(`[SessionManager] Failed to persist token stats for ${threadId}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   createSession(workspace: string): string {
@@ -422,7 +427,9 @@ export class SessionManager {
       for (const r of rows) {
         this.tokenStatsCache.set(r.thread_id, { cacheHitTokens: r.cache_hit_tokens, cacheMissTokens: r.cache_miss_tokens, totalTokens: r.total_tokens });
       }
-    } catch { /* non-critical */ }
+    } catch (e) {
+      console.warn(`[SessionManager] Failed to load token stats from DB: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   /** 创建会话快照列表。

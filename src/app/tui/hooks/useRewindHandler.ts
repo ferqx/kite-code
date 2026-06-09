@@ -40,8 +40,9 @@ export function useRewindCheckpoints(
 
     let disposed = false;
     const checkpointPath = defaultCheckpointPath();
-    const saver = new BunSqliteSaver(checkpointPath);
+    let saver: BunSqliteSaver | null = null;
     try {
+      saver = new BunSqliteSaver(checkpointPath);
       saver.listCheckpoints(threadIdRef.current).then((cps) => {
         if (disposed) return;
         dispatch({ type: "SET_CHECKPOINTS", checkpoints: cps });
@@ -49,15 +50,15 @@ export function useRewindCheckpoints(
         if (disposed) return;
         dispatch({ type: "SET_CHECKPOINTS", checkpoints: [] });
       }).finally(() => {
-        saver.close();
+        saver?.close();
       });
     } catch {
       dispatch({ type: "SET_CHECKPOINTS", checkpoints: [] });
-      saver.close();
+      saver?.close();
     }
     return () => {
       disposed = true;
-      try { saver.close(); } catch { /* already closed */ }
+      try { saver?.close(); } catch { /* already closed */ }
     };
   }, [state.showRewind, dispatch]);
 }

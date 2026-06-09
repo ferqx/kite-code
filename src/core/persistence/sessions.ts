@@ -530,16 +530,58 @@ function isToolMessageLike(msg: Record<string, unknown>): boolean {
 /** 读取会话名称：优先 cached metadata，兜底截断首条消息 / Read session name: cached > truncation */
 async function readSessionName(saver: BunSqliteSaver, threadId: string): Promise<string> {
   try {
+    // 先用轻量 SQL 提取 metadata.session_name 和首条消息，避免反序列化完整 checkpoint
+    // Lightweight SQL extraction first to avoid full checkpoint deserialization
+    const db = saver.getDb();
+    const row = db
+      .query<{
+        session_name: string | null;
+        msg_type_lc: string | null;
+        msg_type_id: string | null;
+        content_kwargs: string | null;
+        content_plain: string | null;
+      }, [string]>(
+        `SELECT
+           json_extract(metadata, '$.session_name') AS session_name,
+           json_extract(checkpoint, '$.channel_values.messages[0].lc_id[2]') AS msg_type_lc,
+           json_extract(checkpoint, '$.channel_values.messages[0].id[2]') AS msg_type_id,
+           json_extract(checkpoint, '$.channel_values.messages[0].kwargs.content') AS content_kwargs,
+           json_extract(checkpoint, '$.channel_values.messages[0].content') AS content_plain
+         FROM checkpoints
+         WHERE thread_id = ? AND checkpoint_ns = ''
+         ORDER BY checkpoint_id DESC
+         LIMIT 1`,
+      )
+      .get(threadId);
+    if (!row) return threadId;
+
+    // 1. Check cached session_name in metadata (set by smart naming)
+    if (row.session_name && row.session_name.length > 0) {
+      return row.session_name;
+    }
+
+    // 2. Extract first HumanMessage content from json_extract results
+    const msgType = row.msg_type_lc ?? row.msg_type_id;
+    if (msgType === "HumanMessage") {
+      const firstContent = row.content_kwargs ?? row.content_plain;
+      if (firstContent) {
+        const trimmed = typeof firstContent === "string" ? firstContent.trim() : String(firstContent).trim();
+        if (trimmed) {
+          const clean = trimmed.replace(/^User:\s*/, "");
+          if (clean) return clean.length > 40 ? clean.slice(0, 40) + "..." : clean;
+        }
+      }
+    }
+
+    // 3. Fall back to full deserialization for structured content (e.g., multi-modal blocks)
     const tuple = await saver.getTuple({ configurable: { thread_id: threadId } });
     if (!tuple) return threadId;
 
-    // 1. Check cached session_name in metadata (set by smart naming)
     const meta = tuple.metadata as Record<string, unknown> | undefined;
     if (meta?.session_name && typeof meta.session_name === "string" && meta.session_name.length > 0) {
       return meta.session_name;
     }
 
-    // 2. Find first HumanMessage and extract content
     const messages = tuple.checkpoint.channel_values?.messages;
     if (!Array.isArray(messages) || messages.length === 0) return threadId;
 
@@ -550,7 +592,6 @@ async function readSessionName(saver: BunSqliteSaver, threadId: string): Promise
       if (msgType !== "human") continue;
       let content = (typeof m.content === "string" ? m.content : extractText(m.content)).trim();
       if (!content) continue;
-      // Strip conversation history prefix added by runTask
       content = content.replace(/^User:\s*/, "");
       if (!content) continue;
       return content.length > 40 ? content.slice(0, 40) + "..." : content;
