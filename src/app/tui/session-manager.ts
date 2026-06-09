@@ -299,6 +299,11 @@ export class SessionManager {
   private tokenStatsCache = new Map<string, { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number }>();
   /** 复用的 DB 连接，避免每次 saveTokenStats 开新连接 / Reusable DB connection to avoid opening a new one on every save */
   private _statsDb: Database | null = null;
+  /** 防抖定时器：合并高频 token 统计变更为批量写入，避免每个 stream chunk 都写 DB
+   *  Debounce timers: batch high-frequency token stat changes into fewer writes */
+  private _statsDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** 防抖延迟（毫秒）/ Debounce delay in ms */
+  private static readonly STATS_DEBOUNCE_MS = 1000;
 
   constructor(private deps: SessionDeps) {
     // Central bridge: when UI components (ApprovalBlock, InputBlock) call submitAction
@@ -318,6 +323,9 @@ export class SessionManager {
   private get statsDb(): Database {
     if (!this._statsDb) {
       this._statsDb = new Database(this.deps.checkpointPath);
+      // WAL 模式提升并发读写性能，与 BunSqliteSaver 保持一致
+      // Enable WAL mode for consistent concurrent read/write behavior with BunSqliteSaver
+      this._statsDb.run("pragma journal_mode = wal");
       this._statsDb.run("pragma busy_timeout = 5000");
       this._statsDb.run(`create table if not exists session_stats (
         thread_id text primary key not null,
@@ -329,10 +337,31 @@ export class SessionManager {
     return this._statsDb;
   }
 
-  /** 持久化 token 统计到 checkpoint DB，同时更新内存缓存 / Persist token stats to DB and update in-memory cache */
-  saveTokenStats(threadId: string, status: StatusState): void {
+  /** 持久化 token 统计到 checkpoint DB（防抖合并，避免每次 token 变化都写 DB）
+   *  Persist token stats to DB with debounce, avoiding a write on every token change */
+  saveTokenStats(threadId: string, status: StatusState, immediate = false): void {
     const stats = { cacheHitTokens: status.cacheHitTokens, cacheMissTokens: status.cacheMissTokens, totalTokens: status.totalTokens };
     this.tokenStatsCache.set(threadId, stats);
+
+    if (immediate) {
+      this._flushTokenStatsNow(threadId, stats);
+      return;
+    }
+
+    // 清除旧定时器，创建新的合并定时器
+    const existing = this._statsDebounceTimers.get(threadId);
+    if (existing) clearTimeout(existing);
+    this._statsDebounceTimers.set(threadId, setTimeout(() => {
+      this._statsDebounceTimers.delete(threadId);
+      this._flushTokenStatsNow(threadId, stats);
+    }, SessionManager.STATS_DEBOUNCE_MS));
+  }
+
+  /** 立即写入 DB（绕过防抖）/ Immediate DB write (bypasses debounce) */
+  private _flushTokenStatsNow(
+    threadId: string,
+    stats: { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number },
+  ): void {
     try {
       this.statsDb.run(
         `insert or replace into session_stats (thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens, updated_at)
@@ -483,6 +512,25 @@ export class SessionManager {
       if (rt.agentLoopActive) {
         rt.abort();
       }
+    }
+  }
+
+  /** 清理资源：刷新所有防抖写入、关闭 DB 连接 / Cleanup: flush all pending debounce writes, close DB */
+  dispose(): void {
+    // 清除所有防抖定时器并立即写入最新值
+    // Clear all debounce timers and write latest values immediately
+    for (const [threadId, timer] of this._statsDebounceTimers) {
+      clearTimeout(timer);
+      const stats = this.tokenStatsCache.get(threadId);
+      if (stats) this._flushTokenStatsNow(threadId, stats);
+    }
+    this._statsDebounceTimers.clear();
+
+    // 关闭 stats DB 连接，确保 WAL/SHM 文件正确合并
+    // Close stats DB connection to properly merge WAL/SHM files
+    if (this._statsDb) {
+      try { this._statsDb.close(); } catch { /* best-effort */ }
+      this._statsDb = null;
     }
   }
 

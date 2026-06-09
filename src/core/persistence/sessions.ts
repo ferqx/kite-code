@@ -37,26 +37,26 @@ export async function listSessions(checkpointPath: string): Promise<SessionInfo[
   try {
     saver.setup(); // Ensure tables + created_at column exist
     const db = saver.getDb();
+    // 使用 ROW_NUMBER() 窗口函数替代关联子查询 + GROUP BY，单次扫描即可获取每个 thread
+    // 的最新 checkpoint 及其 session_name，避免 O(N * log M) 的关联子查询开销
+    // Use ROW_NUMBER() window function instead of correlated subquery + GROUP BY,
+    // fetching the latest checkpoint per thread in a single scan
     const rows = db
       .query<
         { thread_id: string; updated_at: string | null; cached_name: string | null },
         []
       >(
-        `SELECT
-           c.thread_id,
-           MAX(c.created_at) AS updated_at,
-           (SELECT json_extract(c2.metadata, '$.session_name')
-            FROM checkpoints c2
-            WHERE c2.thread_id = c.thread_id
-              AND c2.checkpoint_ns = ''
-              AND c2.metadata IS NOT NULL
-              AND json_extract(c2.metadata, '$.session_name') IS NOT NULL
-            ORDER BY c2.checkpoint_id DESC
-            LIMIT 1) AS cached_name
-         FROM checkpoints c
-         WHERE c.checkpoint_ns = '' AND c.created_at IS NOT NULL
-         GROUP BY c.thread_id
-         ORDER BY updated_at DESC
+        `WITH latest AS (
+           SELECT thread_id, created_at, metadata,
+             ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY checkpoint_id DESC) as rn
+           FROM checkpoints
+           WHERE checkpoint_ns = '' AND created_at IS NOT NULL
+         )
+         SELECT thread_id, created_at AS updated_at,
+           json_extract(metadata, '$.session_name') AS cached_name
+         FROM latest
+         WHERE rn = 1
+         ORDER BY created_at DESC
          LIMIT 50`,
       )
       .all();
@@ -92,24 +92,20 @@ export async function searchSessions(
     saver.setup();
     const db = saver.getDb();
 
-    // Get all sessions (same query as listSessions but with higher limit for search)
+    // Get all sessions (same ROW_NUMBER() pattern as listSessions, higher limit for search)
     const nameMatches = db
       .query<{ thread_id: string; updated_at: string | null; cached_name: string | null }, []>(
-        `SELECT
-           c.thread_id,
-           MAX(c.created_at) AS updated_at,
-           (SELECT json_extract(c2.metadata, '$.session_name')
-            FROM checkpoints c2
-            WHERE c2.thread_id = c.thread_id
-              AND c2.checkpoint_ns = ''
-              AND c2.metadata IS NOT NULL
-              AND json_extract(c2.metadata, '$.session_name') IS NOT NULL
-            ORDER BY c2.checkpoint_id DESC
-            LIMIT 1) AS cached_name
-         FROM checkpoints c
-         WHERE c.checkpoint_ns = '' AND c.created_at IS NOT NULL
-         GROUP BY c.thread_id
-         ORDER BY updated_at DESC
+        `WITH latest AS (
+           SELECT thread_id, created_at, metadata,
+             ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY checkpoint_id DESC) as rn
+           FROM checkpoints
+           WHERE checkpoint_ns = '' AND created_at IS NOT NULL
+         )
+         SELECT thread_id, created_at AS updated_at,
+           json_extract(metadata, '$.session_name') AS cached_name
+         FROM latest
+         WHERE rn = 1
+         ORDER BY created_at DESC
          LIMIT 200`,
       )
       .all();
@@ -165,24 +161,30 @@ export async function enrichSessionNames(
   sessions: SessionInfo[],
   onNamed: (threadId: string, name: string) => void,
 ): Promise<void> {
-  for (const s of sessions) {
-    // Skip if already has a good name (not just truncated threadId)
-    if (s.name !== s.threadId && !s.name.endsWith("...")) continue;
+  // 复用单个连接避免每个会话打开/关闭 DB 两次 / Reuse a single connection to avoid opening/closing DB twice per session
+  const saver = new BunSqliteSaver(checkpointPath);
+  try {
+    for (const s of sessions) {
+      // Skip if already has a good name (not just truncated threadId)
+      if (s.name !== s.threadId && !s.name.endsWith("...")) continue;
 
-    try {
-      const result = await loadSession(checkpointPath, s.threadId);
-      if (!result) continue;
+      try {
+        const result = await loadSessionWithSaver(saver, s.threadId);
+        if (!result) continue;
 
-      // Find first user message content
-      const userBlock = result.blocks.find((b) => b.kind === "user");
-      if (!userBlock || userBlock.kind !== "user") continue;
+        // Find first user message content
+        const userBlock = result.blocks.find((b) => b.kind === "user");
+        if (!userBlock || userBlock.kind !== "user") continue;
 
-      const generated = await generateSessionName(userBlock.content);
-      if (generated) {
-        await persistSessionName(checkpointPath, s.threadId, generated);
-        onNamed(s.threadId, generated);
-      }
-    } catch { /* skip this session */ }
+        const generated = await generateSessionName(userBlock.content);
+        if (generated) {
+          await persistSessionNameWithSaver(saver, s.threadId, generated);
+          onNamed(s.threadId, generated);
+        }
+      } catch { /* skip this session */ }
+    }
+  } finally {
+    saver.close();
   }
 }
 
@@ -195,32 +197,40 @@ export async function loadSession(
 ): Promise<SessionLoadResult | null> {
   const saver = new BunSqliteSaver(checkpointPath);
   try {
-    const tuple = await saver.getTuple({
-      configurable: { thread_id: threadId },
-    });
-    if (!tuple) return null;
-
-    const cv = (tuple.checkpoint.channel_values ?? {}) as Record<string, unknown>;
-    const messages = Array.isArray(cv.messages) ? (cv.messages as unknown[]) : [];
-    const blocks = messagesToOutputBlocks(messages);
-
-    // Check pending writes for interrupt, not channel_values — interrupt() throws
-    // before state updates are returned, so channel_values.approvedToolRequest
-    // /approvedToolGrant are always null at interrupt checkpoints.
-    const pendingWrites = tuple.pendingWrites as [string, string, unknown][] | undefined;
-    const interrupt = detectInterrupt(pendingWrites, blocks);
-
-    return {
-      threadId,
-      blocks,
-      interrupt,
-      modelProvider: typeof cv.modelProvider === "string" ? cv.modelProvider : "",
-      modelName: typeof cv.modelName === "string" ? cv.modelName : "",
-      thinkingLevel: typeof cv.thinkingLevel === "string" ? cv.thinkingLevel : null,
-    };
+    return await loadSessionWithSaver(saver, threadId);
   } finally {
     saver.close();
   }
+}
+
+/** 使用已有 saver 加载会话（供 enrichSessionNames 复用连接）/ Load session using an existing saver (for connection reuse in enrichSessionNames) */
+async function loadSessionWithSaver(
+  saver: BunSqliteSaver,
+  threadId: string,
+): Promise<SessionLoadResult | null> {
+  const tuple = await saver.getTuple({
+    configurable: { thread_id: threadId },
+  });
+  if (!tuple) return null;
+
+  const cv = (tuple.checkpoint.channel_values ?? {}) as Record<string, unknown>;
+  const messages = Array.isArray(cv.messages) ? (cv.messages as unknown[]) : [];
+  const blocks = messagesToOutputBlocks(messages);
+
+  // Check pending writes for interrupt, not channel_values — interrupt() throws
+  // before state updates are returned, so channel_values.approvedToolRequest
+  // /approvedToolGrant are always null at interrupt checkpoints.
+  const pendingWrites = tuple.pendingWrites as [string, string, unknown][] | undefined;
+  const interrupt = detectInterrupt(pendingWrites, blocks);
+
+  return {
+    threadId,
+    blocks,
+    interrupt,
+    modelProvider: typeof cv.modelProvider === "string" ? cv.modelProvider : "",
+    modelName: typeof cv.modelName === "string" ? cv.modelName : "",
+    thinkingLevel: typeof cv.thinkingLevel === "string" ? cv.thinkingLevel : null,
+  };
 }
 
 // ── Message mapping ──
@@ -606,24 +616,32 @@ export async function persistSessionName(
 ): Promise<void> {
   const saver = new BunSqliteSaver(checkpointPath);
   try {
-    const tuple = await saver.getTuple({ configurable: { thread_id: threadId } });
-    if (!tuple) return;
-
-    const db = saver.getDb();
-    const checkpointId =
-      tuple.config?.configurable?.checkpoint_id ?? "";
-    if (!checkpointId) return;
-
-    db.run(
-      `UPDATE checkpoints SET metadata = json_set(COALESCE(metadata, '{}'), '$.session_name', ?)
-       WHERE thread_id = ? AND checkpoint_ns = '' AND checkpoint_id = ?`,
-      [name, threadId, checkpointId],
-    );
-  } catch {
-    // Non-critical: name will be regenerated on next listing
+    await persistSessionNameWithSaver(saver, threadId, name);
   } finally {
     saver.close();
   }
+}
+
+/** 使用已有 saver 持久化会话名称（供 enrichSessionNames 复用连接）
+ *  Persist session name using an existing saver (for connection reuse in enrichSessionNames) */
+async function persistSessionNameWithSaver(
+  saver: BunSqliteSaver,
+  threadId: string,
+  name: string,
+): Promise<void> {
+  const tuple = await saver.getTuple({ configurable: { thread_id: threadId } });
+  if (!tuple) return;
+
+  const db = saver.getDb();
+  const checkpointId =
+    tuple.config?.configurable?.checkpoint_id ?? "";
+  if (!checkpointId) return;
+
+  db.run(
+    `UPDATE checkpoints SET metadata = json_set(COALESCE(metadata, '{}'), '$.session_name', ?)
+     WHERE thread_id = ? AND checkpoint_ns = '' AND checkpoint_id = ?`,
+    [name, threadId, checkpointId],
+  );
 }
 
 /** 删除整个会话的 checkpoints 和 writes / Delete all checkpoints and writes for a session */

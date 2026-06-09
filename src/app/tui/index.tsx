@@ -177,6 +177,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const handleExit = React.useCallback(() => {
     dispatch({ type: "EVENT", event: { type: "text", data: { text: "👋 Goodbye!" } } });
     sessionManager.abortAll();
+    sessionManager.dispose();
     setTimeout(() => process.exit(0), 300);
   }, [dispatch, sessionManager]);
 
@@ -314,9 +315,10 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           return;
         }
 
-        // 持久化离开会话的 token 统计 / Persist outgoing session's token stats
+        // 持久化离开会话的 token 统计（立即写入，取消旧的防抖定时器）
+        // Persist outgoing session's token stats (immediate write, cancel debounce)
         if (oldId) {
-          sessionManager.saveTokenStats(oldId, stateRef.current.status);
+          sessionManager.saveTokenStats(oldId, stateRef.current.status, true);
         }
 
         const incomingRt = sessionManager.getRuntime(newId);

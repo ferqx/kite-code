@@ -106,15 +106,6 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
       )
     `);
     this.db.run(`
-      create table if not exists session_stats (
-        thread_id text primary key not null,
-        cache_hit_tokens integer not null default 0,
-        cache_miss_tokens integer not null default 0,
-        total_tokens integer not null default 0,
-        updated_at text not null default (datetime('now'))
-      )
-    `);
-    this.db.run(`
       create table if not exists writes (
         thread_id text not null,
         checkpoint_ns text not null default '',
@@ -141,6 +132,12 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     // Backfill created_at: pre-migration rows have NULL, which would be excluded from listSessions
     this.db.run(
       "UPDATE checkpoints SET created_at = datetime('now') WHERE created_at IS NULL",
+    );
+
+    // 会话列表查询索引：加速 WHERE checkpoint_ns='' + ORDER BY created_at DESC
+    // Session listing index: speeds up WHERE checkpoint_ns='' + ORDER BY created_at DESC
+    this.db.run(
+      "CREATE INDEX IF NOT EXISTS idx_checkpoints_ns_created ON checkpoints(checkpoint_ns, created_at)",
     );
 
     this.isSetup = true;
