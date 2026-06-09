@@ -57,7 +57,13 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         if (typeof action.resolution !== "string") return state;
         resolved = { ...b, resolved: action.resolution };
       }
-      return { ...replaceBlockById(state, action.blockId, resolved), interrupt: null };
+      // 重置工具启动时间戳，排除审批等待耗时 / Reset tool start timestamps to exclude approval wait time
+      const now = Date.now();
+      const nextTimes: Record<string, number> = {};
+      if (state.toolStartTimes) {
+        for (const k of Object.keys(state.toolStartTimes)) nextTimes[k] = now;
+      }
+      return { ...replaceBlockById(state, action.blockId, resolved), interrupt: null, toolStartTimes: nextTimes };
     }
     case "SWITCH_AUTH": {
       const newMode = action.mode === "toggle"
@@ -103,7 +109,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case "RESET_CTRL_C":
       return state.ctrlCPressed ? { ...state, ctrlCPressed: false } : state;
     case "ESCAPE": {
-      if (state.running) return cancelInterrupt(state, true);
+      // 审批/提问中 → 只取消中断，继续会话 / Interrupt active → cancel interrupt only
       if (state.interrupt) {
         const b = findBlockById(state, state.interrupt.blockId);
         if (b) {
@@ -114,6 +120,10 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
           }
         }
         return { ...state, interrupt: null };
+      }
+      // 非审批（思考/回复中）→ 停止本轮会话 / Agent running → stop this session
+      if (state.running) {
+        return { ...finalizeLastTurnStreaming(state), running: false, exited: false };
       }
       return state;
     }

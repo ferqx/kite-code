@@ -24,16 +24,6 @@ function formatLines(added?: number, removed?: number): string {
   return parts.length > 0 ? ` (${parts.join(" ")})` : "";
 }
 
-function resolveApprovalLabel(resolved?: { action: string; grant?: string; pattern?: string }): string {
-  if (!resolved) return "";
-  if (resolved.action === "cancelled") return "⊘ Cancelled";
-  if (resolved.action === "denied") return "× Denied";
-  if (resolved.action === "approve_once") return "✓ Approved (once)";
-  if (resolved.action === "same_command") return `✓ Approved (same command)${resolved.pattern ? ` ("${resolved.pattern}")` : ""}`;
-  if (resolved.action === "full_access") return "✓ Approved (full access)";
-  return `? ${resolved.action}`;
-}
-
 const BLOCK_GAP = 1;
 
 interface BlockRendererProps {
@@ -121,16 +111,9 @@ const BlockRenderer = React.memo(function BlockRenderer({
       );
 
     case "approval": {
-      const label = resolveApprovalLabel(block.resolved);
-      return (
-        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
-          {label ? (
-            <Text color={label.startsWith("✓") ? dt.success : dt.error}>{label}</Text>
-          ) : (
-            <Text color={dt.warning}>⚠ Awaiting approval — {block.approval.command}</Text>
-          )}
-        </Box>
-      );
+      // 审批展示在 Footer，输出区无需重复
+      // Approval UI is in Footer, no duplicate needed in output area
+      return null;
     }
     case "question": {
       return (

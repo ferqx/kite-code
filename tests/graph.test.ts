@@ -753,6 +753,7 @@ describe("routeEntry — start-of-graph routing", () => {
     authorization: defaultAuthorizationState(),
     approvedToolRequest: null,
     approvedToolGrant: null,
+    approvedBatch: {} as Record<string, "approve_once" | "same_command" | "full_access">,
     contextBudget: undefined,
     plan: null,
     final: "",

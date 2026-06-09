@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import type { ToolApprovalPayload, ShellApprovalGrant } from "@/protocol/events";
@@ -24,12 +24,14 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
   const options: Option[] = [];
   for (const g of approval.grantOptions) {
     switch (g) {
-      case "approve_once": options.push({ key: "a", label: "approve", grant: "approve_once" }); break;
-      case "same_command": options.push({ key: "s", label: "same cmd", grant: "same_command" }); break;
-      case "full_access": options.push({ key: "f", label: "full access", grant: "full_access" }); break;
+      case "approve_once": options.push({ key: "a", label: "Approve", grant: "approve_once" }); break;
+      case "same_command": options.push({ key: "s", label: "Same Cmd", grant: "same_command" }); break;
+      case "full_access": options.push({ key: "f", label: "Full Access", grant: "full_access" }); break;
     }
   }
-  options.push({ key: "d", label: "deny", grant: null });
+  options.push({ key: "d", label: "Deny", grant: null });
+
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
   const prefix = approval.suggestedPrefixRule?.[0]
     ?? approval.command.split(/[;&|]/)[0]?.trim();
@@ -45,12 +47,25 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     }
   }
 
-  useInput((input: string, key: { escape?: boolean }) => {
+  useInput((input: string, key: { escape?: boolean; upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
     if (key.escape) {
       provider.submitAction({ type: "cancel" });
       onResolved("cancelled");
       return;
     }
+    if (key.upArrow) {
+      setSelectedIndex(i => Math.max(0, i - 1));
+      return;
+    }
+    if (key.downArrow) {
+      setSelectedIndex(i => Math.min(options.length - 1, i + 1));
+      return;
+    }
+    if (key.return) {
+      resolve(options[selectedIndex].grant);
+      return;
+    }
+    // 字母快捷键 / Letter shortcut
     const match = options.find((o) => o.key === input.toLowerCase());
     if (match) resolve(match.grant);
   });
@@ -65,12 +80,15 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
         <Text color={riskColor}>⚠ </Text>
         <Text color={t.primary}>{cmd}</Text>
       </Box>
-      <Box>
-        {options.map((o) => (
-          <Text key={o.key} color={o.grant ? t.muted : t.error}>
-            {"  "}[{o.key.toUpperCase()}]{o.label}
-          </Text>
-        ))}
+      <Box flexDirection="column">
+        {options.map((o, i) => {
+          const isSelected = i === selectedIndex;
+          return (
+            <Text key={o.key} color={isSelected ? t.primary : (o.grant ? t.muted : t.error)}>
+              {isSelected ? "▶ " : "  "}[{o.key.toUpperCase()}]{o.label}
+            </Text>
+          );
+        })}
       </Box>
     </Box>
   );

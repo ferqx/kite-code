@@ -106,6 +106,7 @@ export async function runApprovedTool(
       stdout: result.content,
       stderr: result.error ?? "",
       path: request.args.path,
+      totalLines: result.totalLines,
     });
   }
 

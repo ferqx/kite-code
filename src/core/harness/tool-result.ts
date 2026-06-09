@@ -52,4 +52,6 @@ export type ToolExecutionResult = ShellResult & {
   authorization?: ThreadAuthorizationState;
   /** Skill 工具激活的关键指令（从 <EXTREMELY-IMPORTANT> 提取）/ Skill-activated critical instructions extracted from <EXTREMELY-IMPORTANT> */
   activeSkillInstructions?: string;
+  /** read_file 返回的文件总行数，用于 TUI 展示行号范围 / Total lines in file returned by read_file for TUI line range display */
+  totalLines?: number;
 };

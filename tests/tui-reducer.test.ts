@@ -307,24 +307,22 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, { type: "CLEAR_OUTPUT" });
       expect(flatBlocks(s)).toHaveLength(0);
     });
-    test("ESCAPE clears interrupt when active", () => {
+    test("ESCAPE clears interrupt without stopping session", () => {
       let s = fresh();
       s = { ...s, interrupt: { kind: "approval", blockId: 99 } };
       s = dispatch(s, { type: "ESCAPE" });
       expect(s.interrupt).toBeNull();
     });
-    test("ESCAPE when running cancels the agent", () => {
+    test("ESCAPE when running with interrupt cancels interrupt, keeps running", () => {
+      let s = fresh(); s = { ...s, running: true, interrupt: { kind: "approval", blockId: 99 } };
+      s = dispatch(s, { type: "ESCAPE" });
+      expect(s.interrupt).toBeNull();
+      expect(s.running).toBe(true);
+    });
+    test("ESCAPE when running without interrupt stops the session", () => {
       let s = fresh(); s = { ...s, running: true };
       s = dispatch(s, { type: "ESCAPE" });
       expect(s.running).toBe(false);
-      expect(s.ctrlCPressed).toBe(true);
-    });
-    test("ESCAPE when running with interrupt cancels both", () => {
-      let s = fresh(); s = { ...s, running: true, interrupt: { kind: "approval", blockId: 99 } };
-      s = dispatch(s, { type: "ESCAPE" });
-      expect(s.running).toBe(false);
-      expect(s.ctrlCPressed).toBe(true);
-      expect(s.interrupt).toBeNull();
     });
     test("ESCAPE closes help before modelSelector", () => {
       let s = fresh();

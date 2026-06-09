@@ -43,6 +43,11 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => null,
   }),
+  /** 当前批次中已审批工具的授权映射 (call_id → grant)，tools 节点消费后清空 */
+  approvedBatch: Annotation<Record<string, "approve_once" | "same_command" | "full_access">>({
+    reducer: (_left, right) => right,
+    default: () => ({}),
+  }),
   /** 当前 thread 的 shell 授权状态 / Shell authorization state scoped to the current thread */
   authorization: Annotation<ThreadAuthorizationState>({
     reducer: (_left, right) => right,

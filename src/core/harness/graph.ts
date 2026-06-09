@@ -136,12 +136,28 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
   };
 
-  /** 审批节点：中断等待人工批准 / Approval node */
+  /** 审批节点：中断等待人工批准，支持批量积累 / Approval node with batch accumulation */
   const approval = async (state: CodeAgentState) => {
-    const request = getPendingToolRequest(state.messages, state.workspace);
+    const batch = { ...state.approvedBatch };
+    const hasFullAccess = Object.values(batch).some((g) => g === "full_access");
 
-    if (!request) {
+    // 查找第一个尚未审批的待处理工具（跳过已在 batch 中的）
+    const allPending = getAllPendingToolRequests(state.messages, state.workspace);
+    let request: ReturnType<typeof getPendingToolRequest> = null;
+    for (const r of allPending) {
+      if (r.id && !batch[r.id]) { request = r; break; }
+    }
+
+    if (!request || !request.id) {
       return {};
+    }
+
+    // full_access 已授权 → 自动批准剩余所有工具 / full_access already granted → auto-approve all remaining
+    if (hasFullAccess) {
+      for (const r of allPending) {
+        if (r.id) batch[r.id] = "full_access";
+      }
+      return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
     }
 
     const workspaceAccess = state.workspaceAccess ?? "write";
@@ -190,14 +206,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         approved !== null &&
         approved.approvalHash !== undefined &&
         !validateApprovalHash(approved, approvalPayload.approvalHash);
-      return rejectedToolMessage(
-        request,
-        hashMismatch
-          ? "approved request does not match current tool request"
-          : typeof approved === "object" && approved !== null
-            ? approved.reason ?? "not approved"
-            : "not approved",
-      );
+      return {
+        ...rejectedToolMessage(request,
+          hashMismatch
+            ? "approved request does not match current tool request"
+            : typeof approved === "object" && approved !== null
+              ? approved.reason ?? "not approved"
+              : "not approved",
+        ),
+        approvedBatch: batch,
+      };
     }
 
     let approvedRequest = request;
@@ -209,10 +227,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       try {
         approvedRequest = replaceApprovalCommand(request, approved.replacementCommand);
       } catch (error) {
-        return rejectedToolMessage(
-          request,
-          error instanceof Error ? error.message : String(error),
-        );
+        return {
+          ...rejectedToolMessage(request,
+            error instanceof Error ? error.message : String(error),
+          ),
+          approvedBatch: batch,
+        };
       }
     }
 
@@ -234,13 +254,26 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       override,
     });
     if (!approvedPolicy.allowed) {
-      return rejectedToolMessage(
-        request,
-        `approved command rejected by tool policy: ${approvedPolicy.reason}`,
-      );
+      return {
+        ...rejectedToolMessage(request,
+          `approved command rejected by tool policy: ${approvedPolicy.reason}`,
+        ),
+        approvedBatch: batch,
+      };
+    }
+
+    if (approvedRequest.id) batch[approvedRequest.id] = grant as "approve_once" | "same_command" | "full_access";
+
+    // full_access → auto-approve all remaining in batch
+    if (grant === "full_access") {
+      const allPending = getAllPendingToolRequests(state.messages, state.workspace);
+      for (const r of allPending) {
+        if (r.id && !batch[r.id]) batch[r.id] = "full_access";
+      }
     }
 
     return {
+      approvedBatch: batch,
       approvedToolRequest: approvedRequest,
       approvedToolGrant: grant,
       authorization: nextAuthorization,
@@ -351,39 +384,37 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     // 如果有审批过的请求，替换匹配的那个
     // If there's an approved request, replace the matching one
-    const requests = allRequests.map((r) =>
-      state.approvedToolRequest && r.id === state.approvedToolRequest.id
-        ? state.approvedToolRequest
-        : r,
-    );
-    const approvedId = state.approvedToolRequest?.id;
-    const grantUsed =
-      approvedId && requests.some((r) => r.id === approvedId)
-        ? state.approvedToolGrant ?? "none"
-        : "none";
+    const requests = allRequests;
+    const batch = state.approvedBatch ?? {};
 
     if (requests.length === 0) {
-      return {};
+      return { approvedBatch: {} };
     }
 
-    // task 工具并行执行，其他工具顺序执行
-    // Execute task tools in parallel, other tools sequentially
+    // task 工具并行执行，其他工具也并行执行
+    // Execute task tools in parallel, other tools also in parallel
     const taskRequests = requests.filter((r) => r.name === "task");
     const otherRequests = requests.filter((r) => r.name !== "task");
 
     const results: Array<{ toolMessage: ToolMessage; extra: Record<string, unknown> }> = [];
 
-    // 并行执行所有 task 工具
+    // 并行执行所有 task 工具（sub-agent 自行管理授权）
     if (taskRequests.length > 0) {
       const taskResults = await Promise.all(
-        taskRequests.map((r) => executeOneTool(r, state, grantUsed)),
+        taskRequests.map((r) => executeOneTool(r, state, "none")),
       );
       results.push(...taskResults);
     }
 
-    // 顺序执行其他工具
-    for (const req of otherRequests) {
-      results.push(await executeOneTool(req, state, grantUsed));
+    // 并行执行其他工具，每个工具使用其在 approvedBatch 中的授权
+    if (otherRequests.length > 0) {
+      const otherResults = await Promise.all(
+        otherRequests.map((req) => {
+          const reqGrant = (req.id && batch[req.id]) ? batch[req.id] : "none";
+          return executeOneTool(req, state, reqGrant);
+        }),
+      );
+      results.push(...otherResults);
     }
 
     // 合并所有 ToolMessage 和 extra 状态
@@ -394,6 +425,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
 
     return {
+      approvedBatch: {},
       approvedToolRequest: null,
       approvedToolGrant: null,
       ...mergedExtra,

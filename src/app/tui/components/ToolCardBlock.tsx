@@ -4,7 +4,39 @@ import type { OutputBlock } from "../types";
 import { useTheme } from "../theme";
 import { SPINNER, toolColor, formatElapsed } from "./render-utils";
 
-const MAX_TOOL_LINES = 12;
+const MAX_TOOL_LINES = 5;
+const SHELL_PREFIX = "⎿   ";
+const SHELL_ALIGN = "    ";
+
+function renderShellSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
+  const color = isError ? dt.error : dt.dim;
+  const text = summary.trimEnd();
+  const lines = text.split("\n");
+
+  if (lines.length <= 1) {
+    return (
+      <Text color={color}>
+        {SHELL_PREFIX}{text.slice(0, 300)}
+      </Text>
+    );
+  }
+
+  const displayLines = lines.slice(0, MAX_TOOL_LINES);
+  const truncated = lines.length > MAX_TOOL_LINES;
+
+  return (
+    <React.Fragment>
+      {displayLines.map((line, i) => (
+        <Text key={i} color={color}>
+          {i === 0 ? SHELL_PREFIX : SHELL_ALIGN}{line.slice(0, 200)}
+        </Text>
+      ))}
+      {truncated && (
+        <Text color={dt.dim}>{SHELL_ALIGN}… +{lines.length - MAX_TOOL_LINES} lines</Text>
+      )}
+    </React.Fragment>
+  );
+}
 
 function renderToolSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
   const prefix = isError ? "✕ " : "⎿ ";
@@ -48,15 +80,19 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
   const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsed, setLiveElapsed] = useState(0);
   const startRef = useRef(Date.now());
+  const showElapsed = block.name === "shell_execute";
 
   useEffect(() => {
     if (block.status !== "running") return;
     startRef.current = Date.now();
     setLiveElapsed(0);
     const spinnerTimer = setInterval(() => setSpinnerIdx((i) => (i + 1) % SPINNER.length), 80);
-    const elapsedTimer = setInterval(() => setLiveElapsed(Date.now() - startRef.current), 200);
-    return () => { clearInterval(spinnerTimer); clearInterval(elapsedTimer); };
-  }, [block.status, block.callId]);
+    if (showElapsed) {
+      const elapsedTimer = setInterval(() => setLiveElapsed(Date.now() - startRef.current), 200);
+      return () => { clearInterval(spinnerTimer); clearInterval(elapsedTimer); };
+    }
+    return () => { clearInterval(spinnerTimer); };
+  }, [block.status, block.callId, showElapsed, awaitingApproval]);
 
   if (block.status === "running") {
     const spinner = SPINNER[spinnerIdx];
@@ -70,15 +106,16 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
           ) : null}
           {awaitingApproval ? (
             <Text color={dt.dim}> (awaiting approval)</Text>
-          ) : (
+          ) : showElapsed ? (
             <Text color={dt.dim}> ({formatElapsed(liveElapsed)})</Text>
-          )}
+          ) : null}
         </Box>
       </Box>
     );
   }
 
   // done or error
+  const isShell = block.name === "shell_execute";
   const isExpanded = block.expanded ?? block.status === "error";
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
   return (
@@ -89,17 +126,28 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
         {block.detail ? (
           <Text color={dt.dim}> {block.detail}</Text>
         ) : null}
-        {block.elapsedMs != null ? (
+        {showElapsed && block.elapsedMs != null ? (
           <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
         ) : null}
       </Box>
-      {isExpanded && hasSummary ? (
-        <Box paddingLeft={3} flexDirection="column">
-          {renderToolSummary(block.summary!, block.status === "error", dt)}
-          {block.status === "error" && block.summary!.split("\n").length > 3 && (
-            <Text color={dt.dim}>Enter 折叠</Text>
-          )}
-        </Box>
+      {(isExpanded && hasSummary) || (isExpanded && isShell) ? (
+        isShell ? (
+          <Box paddingLeft={2} flexDirection="column">
+            {hasSummary
+              ? renderShellSummary(block.summary!, block.status === "error", dt)
+              : <Text color={dt.dim}>{SHELL_PREFIX}(No output)</Text>}
+            {block.status === "error" && block.summary!.split("\n").length > 3 && (
+              <Text color={dt.dim}>Enter 折叠</Text>
+            )}
+          </Box>
+        ) : (
+          <Box paddingLeft={3} flexDirection="column">
+            {renderToolSummary(block.summary!, block.status === "error", dt)}
+            {block.status === "error" && block.summary!.split("\n").length > 3 && (
+              <Text color={dt.dim}>Enter 折叠</Text>
+            )}
+          </Box>
+        )
       ) : null}
     </Box>
   );

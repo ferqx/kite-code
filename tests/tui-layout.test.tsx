@@ -449,10 +449,10 @@ describe("ApprovalBlock", () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain("[A]approve");
-    expect(frame).toContain("[S]same cmd");
-    expect(frame).toContain("[F]full access");
-    expect(frame).toContain("[D]deny");
+    expect(frame).toContain("[A]Approve");
+    expect(frame).toContain("[S]Same Cmd");
+    expect(frame).toContain("[F]Full Access");
+    expect(frame).toContain("[D]Deny");
   });
 
   test("does not show summary, reason, or risk text", () => {
@@ -472,8 +472,8 @@ describe("ApprovalBlock", () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain("[A]approve");
-    expect(frame).toContain("[D]deny");
+    expect(frame).toContain("[A]Approve");
+    expect(frame).toContain("[D]Deny");
     expect(frame).not.toContain("[S]");
     expect(frame).not.toContain("[F]");
   });
@@ -544,7 +544,7 @@ describe("InputLine", () => {
     const { lastFrame } = render(
       <InputLine mode="approval" onSubmit={noop} workspace={process.cwd()} />,
     );
-    expect(lastFrame()).toContain("[A/S/F/D]");
+    expect(lastFrame()).toContain("select");
   });
 
   test("renders ? for question mode", () => {
@@ -660,8 +660,8 @@ describe("OutputArea", () => {
     const frame = lastFrame();
     // Summary hidden for success
     expect(frame).not.toContain("OK");
-    // Elapsed time now shown for all tools (not just shell_execute)
-    expect(frame).toContain("1.2s");
+    // Non-shell tools don't show elapsed time
+    expect(frame).not.toContain("1.2s");
   });
 
   test("renders tool_card with error status and shows summary", () => {
@@ -703,18 +703,19 @@ describe("OutputArea", () => {
     expect(frame).toContain("+10");
   });
 
-  test("renders approval block with awaiting message", () => {
+  test("approval block renders nothing (UI in Footer)", () => {
     const blocks: OutputBlock[] = [
       { id: 1, kind: "approval", approval: fakeApproval({ command: "npm publish" }) },
     ];
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).toContain("Awaiting approval");
-    expect(lastFrame()).toContain("npm publish");
+    // Approval UI is in Footer, output area returns null
+    expect(lastFrame()).not.toContain("Awaiting approval");
+    expect(lastFrame()).not.toContain("npm publish");
   });
 
-  test("renders resolved approval block", () => {
+  test("resolved approval block renders nothing", () => {
     const blocks: OutputBlock[] = [
       {
         id: 1, kind: "approval",
@@ -725,10 +726,10 @@ describe("OutputArea", () => {
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).toContain("Approved (full access)");
+    expect(lastFrame()).not.toContain("Approved");
   });
 
-  test("renders denied approval block", () => {
+  test("denied approval block renders nothing", () => {
     const blocks: OutputBlock[] = [
       {
         id: 1, kind: "approval",
@@ -739,7 +740,7 @@ describe("OutputArea", () => {
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).toContain("Denied");
+    expect(lastFrame()).not.toContain("Denied");
   });
 
   test("renders question block", () => {

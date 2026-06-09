@@ -472,7 +472,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
     );
   }
 
-  const promptChar = mode === "approval" ? "[A/S/F/D] " : mode === "question" ? "? " : "❯ ";
+  const promptChar = mode === "approval" ? "↑↓ select · Enter confirm  " : mode === "question" ? "? " : "❯ ";
 
   // Slash suggestions are rendered in App.tsx Overlay area
 

@@ -198,7 +198,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         summary: event.data.summary,
         elapsedMs,
         detail: computeToolDetail(matched.name, matched.args, event.data.totalLines),
-        expanded: !event.data.ok,
+        expanded: !event.data.ok || matched.name === "shell_execute",
       };
       // 工具输出的 token 计入累计统计 / Tool output tokens counted in cumulative total
       if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {

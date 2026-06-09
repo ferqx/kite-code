@@ -1,7 +1,7 @@
 import { END } from "@langchain/langgraph";
 import type { AuthorizationOverride } from "@/core/types";
 import type { CodeAgentState } from "./state";
-import { getPendingToolRequest } from "./tool-requests";
+import { getAllPendingToolRequests, getPendingToolRequest } from "./tool-requests";
 import {
   defaultPhaseForWorkspaceAccess,
   evaluateToolPolicy,
@@ -51,13 +51,30 @@ export function routeAfterAgent(
   return resolveToolRoute(state, override, mcpRiskOverride) ?? END;
 }
 
-/** approval 节点后的路由逻辑 / Routing after approval node */
+/** approval 节点后的路由逻辑 / Routing after approval node
+ *  若同一批次还有工具未审批 → 循环回 approval；全部审批完 → tools */
 export function routeAfterApproval(
   state: CodeAgentState,
-): "tools" | "agent" {
-  if (getPendingToolRequest(state.messages, state.workspace)) {
-    return "tools";
+): "approval" | "tools" | "agent" {
+  const batch = state.approvedBatch ?? {};
+  const hasFullAccess = Object.values(batch).some((g) => g === "full_access");
+
+  // full_access → 不再需要审批，直接执行
+  if (hasFullAccess) {
+    return getPendingToolRequest(state.messages, state.workspace) ? "tools" : "agent";
   }
+
+  // 检查同批次中是否有尚未审批的工具
+  const allPending = getAllPendingToolRequests(state.messages, state.workspace);
+  for (const r of allPending) {
+    if (r.id && !batch[r.id] && r.name !== "ask_user") {
+      // 还有工具未审批 → 循环回 approval 节点
+      return "approval";
+    }
+  }
+
+  // 全部已审批 → 执行
+  if (allPending.length > 0) return "tools";
   return "agent";
 }
 
