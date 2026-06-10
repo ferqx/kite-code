@@ -28,6 +28,9 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 - `provider.ts` — `UserInputProvider` 接口
 
 **`src/core/` — 核心层**：图编排、模型、工具、持久化、配置
+
+> **架构约束**：core 层是纯逻辑库，**禁止** `import` 任何 `app/` 下的符号，**禁止**做展示层文本格式化（截断 + `"... "` + 展示文案）。core 返回中性数据结构（无 `preview`/`detail`/`expanded`/`folded` 等展示字段），由 app 层通过适配器转换为 UI 类型。验证：`grep -rn "from.*app/" src/core/ --include="*.ts"` 应无输出。完整规则见 `docs/space/execution/active/layer-boundary-enforcement.md`。
+
 - `harness/graph.ts` — LangGraph 节点组装和主循环拓扑（单 agent 节点）
 - `harness/routes.ts` — agent / approval / tools / user_input 之间的路由
 - `harness/tool-runner.ts` — 执行经过审批或允许直通的工具请求
@@ -38,7 +41,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 - `tools/tool-contracts.ts` — 工具 ACI 契约（一等 UX 文档）
 - `tools/shell.ts`、`tools/file.ts`、`tools/apply-patch.ts` — 底层工具实现
 - `persistence/checkpoint.ts` — Bun SQLite LangGraph checkpointer
-- `persistence/sessions.ts` — 会话列表、加载、命名
+- `persistence/sessions.ts` — 会话列表、加载、命名（返回 `SessionData`，由 TUI 的 `replay-blocks.ts` 转为 `OutputBlock[]`）
 - `config/index.ts`、`config/paths.ts` — 配置读取与路径管理
 
 **`src/app/` — 应用层**：TUI 前端、CLI 入口
