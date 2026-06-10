@@ -171,6 +171,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       override,
       mcpRiskOverride,
     });
+
+    // 不需要审批的工具（如 read_file）→ 标记为 auto-pass 并直接返回
+    // Non-approval tools (e.g. read_file) → mark as auto-pass and return
+    if (!policy.requiresApproval) {
+      if (request.id) batch[request.id] = "approve_once";
+      return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
+    }
+
     const approvalPayload = buildToolApproval({
       workspace: state.workspace,
       threadId: state.threadId,
