@@ -664,10 +664,10 @@ describe("eventReducer (blocks model)", () => {
   });
 
   describe("LOAD_SESSION_PENDING", () => {
-    test("sets loadingSession to true while keeping blocks intact", () => {
+    test("sets loadingSessionId while keeping blocks intact", () => {
       const s = dispatch(fresh(), textEvt("existing"));
       const next = dispatch(s, { type: "LOAD_SESSION_PENDING", threadId: "t1" });
-      expect(next.loadingSession).toBe(true);
+      expect(next.loadingSessionId).toBe("t1");
       expect(flatBlocks(next)).toEqual(flatBlocks(s)); // blocks unchanged
     });
   });

@@ -50,7 +50,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
-        loadingSession: false,
+        loadingSessionId: null,
         showHelp: false,
         showModelSelector: false,
         showSessions: false,
@@ -62,7 +62,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       };
     }
     case "LOAD_SESSION_PENDING":
-      return { ...state, loadingSession: true };
+      return { ...state, loadingSessionId: action.threadId };
     case "LOAD_SESSION": {
       // Save outgoing session's turns/status/interrupt/running before overwriting
       const sessionsWithSaved = state.sessions.map(s =>
@@ -103,7 +103,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         exited: false,
         running: false,
         currentRunReasonId: undefined,
-        loadingSession: false,
+        loadingSessionId: null,
         sessionKey: state.sessionKey + 1,
         sessionError: false,
         ctrlCPressed: false,
@@ -144,7 +144,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
-        loadingSession: false,
+        loadingSessionId: null,
         editorRequested: false,
         showHelp: false,
         showModelSelector: false,

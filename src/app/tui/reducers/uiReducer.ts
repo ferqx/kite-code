@@ -28,7 +28,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
     case "SHOW_SESSIONS":
       return { ...state, showSessions: true, showHelp: false, showModelSelector: false, showMcp: false, showRewind: false };
     case "HIDE_SESSIONS":
-      return { ...state, showSessions: false };
+      return { ...state, showSessions: false, loadingSessionId: null };
     case "SHOW_MCP":
       return { ...state, showMcp: true, showHelp: false, showModelSelector: false, showSessions: false, showRewind: false };
     case "HIDE_MCP":

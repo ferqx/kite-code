@@ -804,7 +804,7 @@ describe("App", () => {
       exitRequested: false,
       editorRequested: false,
       sessionError: false,
-      loadingSession: false,
+      loadingSessionId: null,
       ...overrides,
     };
   }

@@ -11,9 +11,11 @@ interface SessionSelectorProps {
   onClose: () => void;
   onDelete?: (sessionId: string) => void;
   initialQuery?: string;
+  /** 正在从 DB 加载的会话 ID / ID of the session currently being loaded from DB */
+  loadingSessionId?: string | null;
 }
 
-export default function SessionSelector({ onSelect, onClose, onDelete, initialQuery }: SessionSelectorProps) {
+export default function SessionSelector({ onSelect, onClose, onDelete, initialQuery, loadingSessionId }: SessionSelectorProps) {
   const t = useTheme();
   const { sessions, loading, error, refresh, search } = useSessionList();
   const [selected, setSelected] = useState(0);
@@ -125,12 +127,14 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
           {sessions.map((session, i) => {
             const displayName = session.name.length > 40 ? session.name.slice(0, 40) + "..." : session.name;
+            const isLoading = loadingSessionId === session.threadId;
             return (
               <Box key={session.threadId}>
-                <Text color={i === selected ? t.primary : t.muted}>
-                  {i === selected ? ">" : " "} {displayName}
+                <Text color={isLoading ? t.warning : i === selected ? t.primary : t.muted}>
+                  {isLoading ? "⏳" : i === selected ? ">" : " "} {displayName}
                 </Text>
-                <Text color={t.dim}>  {session.updatedAt}</Text>
+                {isLoading && <Text color={t.warning}>  Loading...</Text>}
+                {!isLoading && <Text color={t.dim}>  {session.updatedAt}</Text>}
               </Box>
             );
           })}

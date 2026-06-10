@@ -3,7 +3,7 @@
 // (tool_card running→done, subagent running→done, streaming text, etc.)
 // stay in the dynamic tree until they become immutable.
 
-import { useRef, useMemo, type ReactNode } from "react";
+import { useRef, useMemo, useState, useEffect, type ReactNode } from "react";
 import type { Turn, OutputBlock } from "../types";
 
 export { changePrefix } from "../components/BlockRenderer";
@@ -79,13 +79,36 @@ export function useStaticContent({
 
   const needsClear = sessionKey !== prevSessionKeyRef.current;
 
+  // ── Two-phase rendering: header first, then content appended ──
+  // When sessionKey changes, clear the screen and render only the header
+  // in the first pass. After that render commits, append all content blocks
+  // via Ink's <Static> append mechanism (same staticKey, new items at the end).
+  // Skip on initial mount to avoid hiding content on startup.
+  const showContentRef = useRef(true);
+  const [, forceUpdate] = useState(0);
+  const isInitialMount = prevSessionKeyRef.current === undefined;
+
   if (needsClear) {
     prevSessionKeyRef.current = sessionKey;
     prevSettledRef.current = settledTurns;
     staticBlocksRef.current = settledTurns.flatMap((t) => t.blocks);
     // eslint-disable-next-line no-restricted-properties -- intentional synchronous clear before Ink flush
     process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
+    if (!isInitialMount) {
+      showContentRef.current = false;
+    }
   }
+
+  // After the header-only render commits, trigger the content phase
+  useEffect(() => {
+    if (!showContentRef.current) {
+      showContentRef.current = true;
+      const id = setTimeout(() => forceUpdate((n) => n + 1), 0);
+      return () => clearTimeout(id);
+    }
+  });
+
+  const showContent = showContentRef.current;
 
   if (settledTurns !== prevSettledRef.current) {
     prevSettledRef.current = settledTurns;
@@ -132,12 +155,15 @@ export function useStaticContent({
     [staticBlocks, activeSettledBlocks],
   );
 
+  // In header-only phase, suppress static content; dynamic blocks always render
+  const phasedStaticBlocks = showContent ? mergedStaticBlocks : [];
+
   const staticItems = useMemo(
-    () => [HEADER_SENTINEL, ...mergedStaticBlocks],
-    [mergedStaticBlocks],
+    () => [HEADER_SENTINEL, ...phasedStaticBlocks],
+    [phasedStaticBlocks],
   );
 
   const staticKey = useMemo(() => `s-${sessionKey ?? 0}`, [sessionKey]);
 
-  return { staticItems, staticKey, header, mergedStaticBlocks, activeDynamicBlocks };
+  return { staticItems, staticKey, header, mergedStaticBlocks: phasedStaticBlocks, activeDynamicBlocks };
 }

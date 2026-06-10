@@ -64,7 +64,8 @@ export interface TuiState {
   exitRequested: boolean;
   editorRequested: boolean;
   sessionError: boolean;
-  loadingSession: boolean;
+  /** 正在从 DB 加载的会话 ID，null 表示未在加载 / ID of the session being loaded from DB, null when not loading */
+  loadingSessionId: string | null;
 }
 
 export interface InterruptState {

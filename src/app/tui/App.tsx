@@ -62,7 +62,7 @@ const initialState: TuiState = {
   exitRequested: false,
   editorRequested: false,
   sessionError: false,
-  loadingSession: false,
+  loadingSessionId: null,
   pendingSkills: [],
   skillManifests: [],
 };
@@ -172,14 +172,7 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
   return (
     <Box flexDirection="column">
       {/* ── Body: OutputArea ── */}
-      {state.loadingSession ? (
-        <>
-          <MemoHeader running={state.running} error={state.sessionError} />
-          <Box paddingY={1}><Text dimColor>Loading session...</Text></Box>
-        </>
-      ) : (
         <OutputArea
-          key={state.sessionKey}
           staticItems={staticItems}
           staticKey={staticKey}
           staticHeader={staticHeader}
@@ -192,7 +185,6 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
           overlayActive={overlayActive}
           awaitingApproval={awaitingApproval}
         />
-      )}
 
       {/* ── Footer: 3-row interaction zone ── */}
       <Footer
@@ -225,6 +217,7 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
           onSelect={selectSession}
           onClose={hideSessions}
           onDelete={deleteSessionAction}
+          loadingSessionId={state.loadingSessionId}
         />
       )}
       {state.showModelSelector && (
