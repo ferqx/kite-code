@@ -123,14 +123,17 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
           <Text color={t.muted}>{isSearching ? "未找到匹配的会话" : "暂无历史会话"}</Text>
         )}
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
-          {sessions.map((session, i) => (
-            <Box key={session.threadId}>
-              <Text color={i === selected ? t.primary : t.muted}>
-                {i === selected ? ">" : " "} {session.name}
-              </Text>
-              <Text color={t.dim}>  {session.updatedAt}</Text>
-            </Box>
-          ))}
+          {sessions.map((session, i) => {
+            const displayName = session.name.length > 40 ? session.name.slice(0, 40) + "..." : session.name;
+            return (
+              <Box key={session.threadId}>
+                <Text color={i === selected ? t.primary : t.muted}>
+                  {i === selected ? ">" : " "} {displayName}
+                </Text>
+                <Text color={t.dim}>  {session.updatedAt}</Text>
+              </Box>
+            );
+          })}
         </ScrollList>
       </Box>
       <Box height={1} />

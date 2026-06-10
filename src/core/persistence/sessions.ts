@@ -10,6 +10,8 @@ export interface SessionInfo {
   threadId: string;
   name: string;
   updatedAt: string; // "YYYY-MM-DD HH:MM:SS" local time
+  /** true if no cached smart name exists (name is raw first message or threadId) */
+  needsSmartName: boolean;
 }
 
 /** 中立会话数据结构（无 UI 依赖），可被任意前端消费
@@ -75,6 +77,7 @@ export async function listSessions(checkpointPath: string): Promise<SessionInfo[
         threadId: row.thread_id,
         name,
         updatedAt: formatLocalTime(row.updated_at),
+        needsSmartName: !row.cached_name,
       });
     }
     return sessions;
@@ -124,6 +127,7 @@ export async function searchSessions(
           threadId: row.thread_id,
           name,
           updatedAt: formatLocalTime(row.updated_at),
+          needsSmartName: !row.cached_name,
         });
         continue;
       }
@@ -145,6 +149,7 @@ export async function searchSessions(
             threadId: row.thread_id,
             name,
             updatedAt: formatLocalTime(row.updated_at),
+            needsSmartName: !row.cached_name,
           });
         }
       } catch {
@@ -168,8 +173,8 @@ export async function enrichSessionNames(
   const saver = new BunSqliteSaver(checkpointPath);
   try {
     for (const s of sessions) {
-      // Skip if already has a good name (not just truncated threadId)
-      if (s.name !== s.threadId && !s.name.endsWith("...")) continue;
+      // Skip if already has a cached smart name
+      if (!s.needsSmartName) continue;
 
       try {
         const result = await loadSessionWithSaver(saver, s.threadId);
@@ -336,7 +341,7 @@ async function readSessionName(saver: BunSqliteSaver, threadId: string): Promise
         const trimmed = typeof firstContent === "string" ? firstContent.trim() : String(firstContent).trim();
         if (trimmed) {
           const clean = trimmed.replace(/^User:\s*/, "");
-          if (clean) return clean.length > 40 ? clean.slice(0, 40) + "..." : clean;
+          if (clean) return clean;
         }
       }
     }
@@ -362,7 +367,7 @@ async function readSessionName(saver: BunSqliteSaver, threadId: string): Promise
       if (!content) continue;
       content = content.replace(/^User:\s*/, "");
       if (!content) continue;
-      return content.length > 40 ? content.slice(0, 40) + "..." : content;
+      return content;
     }
 
     return threadId;

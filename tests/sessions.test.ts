@@ -101,18 +101,15 @@ describe("listSessions", () => {
     expect(sessions[0].name).toContain("Write a function");
   });
 
-  test("truncates session name longer than 40 chars", async () => {
-    const dbPath = makeDbPath("truncate");
+  test("stores full first message in session name when no cached name", async () => {
+    const dbPath = makeDbPath("fullname");
     rmSync(dbPath, { force: true });
     const saver = new BunSqliteSaver(dbPath);
+    const longMsg = "This is a very long task description that should definitely be stored in full";
     await saver.put(
       { configurable: { thread_id: "thread-long" } },
       makeCheckpoint("cp-long", {
-        messages: [
-          new HumanMessage(
-            "This is a very long task description that should definitely be truncated to forty characters",
-          ),
-        ],
+        messages: [new HumanMessage(longMsg)],
       }),
       { source: "input", step: 0, parents: {} },
     );
@@ -120,8 +117,8 @@ describe("listSessions", () => {
 
     const sessions = await listSessions(dbPath);
     expect(sessions.length).toBe(1);
-    expect(sessions[0].name.length).toBeLessThanOrEqual(43); // 40 + "..."
-    expect(sessions[0].name.endsWith("...")).toBe(true);
+    expect(sessions[0].name).toBe(longMsg);
+    expect(sessions[0].needsSmartName).toBe(true);
   });
 
   test("falls back to threadId when no HumanMessage found", async () => {

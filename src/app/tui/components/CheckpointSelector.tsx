@@ -75,7 +75,8 @@ export default function CheckpointSelector({ checkpoints, onRevert, onFork, onCl
             const prefix = isSelected ? "\u276f" : " ";
             const color = isSelected ? t.primary : t.muted;
             const displayId = cp.checkpointId.slice(0, 8);
-            const displayMsg = cp.firstUserMessage || "(no message)";
+            const rawMsg = cp.firstUserMessage || "";
+            const displayMsg = rawMsg.length > 60 ? rawMsg.slice(0, 60) + "..." : rawMsg || "(no message)";
             const displayTime = cp.createdAt ? cp.createdAt.slice(0, 19) : "";
 
             return (

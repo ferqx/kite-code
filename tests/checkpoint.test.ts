@@ -112,7 +112,8 @@ describe("listCheckpoints", () => {
     );
 
     const entries = await saver.listCheckpoints(threadId);
-    expect(entries[0].firstUserMessage.length).toBeLessThanOrEqual(60);
+    // Core stores full message; TUI layer handles truncation for display
+    expect(entries[0].firstUserMessage).toBe(longMsg);
   });
 
   it("returns entries in reverse chronological order", async () => {

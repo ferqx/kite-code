@@ -234,7 +234,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
             const type = msg.lc_id?.[2] ?? msg.id?.[2] ?? "";
             if (type === "HumanMessage") {
               const content = typeof msg.content === "string" ? msg.content : "";
-              firstUserMessage = content.slice(0, 60);
+              firstUserMessage = content;
               break;
             }
           }
