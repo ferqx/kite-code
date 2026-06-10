@@ -194,7 +194,7 @@ export async function* runAgent(
       const streamConfig = {
         configurable: { thread_id: input.threadId },
         streamMode: "updates" as const,
-        recursionLimit: 60,
+        recursionLimit: 9999999,
       };
 
       let stream: AsyncIterable<unknown>;
@@ -271,7 +271,7 @@ export async function* revertToCheckpoint(
         checkpoint_id: input.checkpointId,
       },
       streamMode: "updates" as const,
-      recursionLimit: 60,
+      recursionLimit: 9999999,
     };
 
     const stream = await graph.stream(
@@ -349,7 +349,7 @@ export async function* forkFromCheckpoint(
     const streamConfig = {
       configurable: { thread_id: input.newThreadId },
       streamMode: "updates" as const,
-      recursionLimit: 60,
+      recursionLimit: 9999999,
     };
 
     const stream = await graph.stream(initialState, streamConfig);
@@ -864,7 +864,7 @@ function graphConfig(threadId: string) {
   return {
     configurable: { thread_id: threadId },
     streamMode: "updates" as const,
-    recursionLimit: 60,
+    recursionLimit: 9999999,
   };
 }
 
