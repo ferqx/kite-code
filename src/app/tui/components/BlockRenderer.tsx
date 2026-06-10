@@ -25,6 +25,8 @@ function formatLines(added?: number, removed?: number): string {
 }
 
 const BLOCK_GAP = 1;
+const REASON_INDENT = 2;
+const REASON_MAX_LINES = 5;
 
 interface BlockRendererProps {
   block: OutputBlock;
@@ -56,6 +58,9 @@ const BlockRenderer = React.memo(function BlockRenderer({
 
     case "reason": {
       const isConsecutive = prevBlock?.kind === "reason";
+      const lines = block.content.split("\n");
+      const truncated = lines.length > REASON_MAX_LINES;
+      const display = truncated ? lines.slice(0, REASON_MAX_LINES) : lines;
       return (
         <Box flexDirection="column" marginBottom={BLOCK_GAP}>
           {!isConsecutive && (
@@ -64,8 +69,13 @@ const BlockRenderer = React.memo(function BlockRenderer({
             </Text>
           )}
           {!block.folded && (
-            <Box paddingLeft={2}>
-              <Text color={dt.muted}>{block.content}</Text>
+            <Box flexDirection="column" marginLeft={REASON_INDENT}>
+              {display.map((line, i) => (
+                <Text key={i} color={dt.muted}>{line}</Text>
+              ))}
+              {truncated && (
+                <Text color={dt.dim}>...</Text>
+              )}
             </Box>
           )}
           {isConsecutive && block.folded && (

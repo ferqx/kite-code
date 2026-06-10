@@ -64,6 +64,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
   // Auto-clear currentRunReasonId on any non-reason event,
   // so the next reason creates a new block instead of appending.
   if (event.type !== "reason" && state.currentRunReasonId !== undefined) {
+    const reasonBlock = findBlockById(state, state.currentRunReasonId);
+    if (reasonBlock?.kind === "reason" && reasonBlock.folded) {
+      state = replaceBlockById(state, state.currentRunReasonId, { ...reasonBlock, folded: false });
+    }
     state = { ...state, currentRunReasonId: undefined };
   }
 

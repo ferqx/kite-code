@@ -276,17 +276,17 @@ describe("eventReducer (blocks model)", () => {
       s = dispatch(s, reasonEvt("first"));
       s = dispatch(s, textEvt("between"));
       s = dispatch(s, reasonEvt("second"));
-      // Both start folded
+      // First block auto-expanded on non-reason event, second still folded
+      expect((flatBlocks(s)[0] as any).folded).toBe(false);
+      expect((flatBlocks(s)[2] as any).folded).toBe(true);
+      // Toggle: collapse all (anyExpanded → fold all)
+      s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
       expect((flatBlocks(s)[0] as any).folded).toBe(true);
       expect((flatBlocks(s)[2] as any).folded).toBe(true);
-      // Toggle: expand all
+      // Toggle: expand all (none expanded → unfold all)
       s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
       expect((flatBlocks(s)[0] as any).folded).toBe(false);
       expect((flatBlocks(s)[2] as any).folded).toBe(false);
-      // Toggle: collapse all
-      s = dispatch(s, { type: "TOGGLE_ALL_REASON" });
-      expect((flatBlocks(s)[0] as any).folded).toBe(true);
-      expect((flatBlocks(s)[2] as any).folded).toBe(true);
     });
     test("TOGGLE_ALL_REASON is no-op when no reason blocks", () => {
       let s = dispatch(fresh(), textEvt("hello"));
