@@ -916,7 +916,8 @@ function* walkValues(value: unknown): Generator<unknown> {
   }
 }
 
-/** Generate a file_change event when a write/edit tool completes */
+/** Generate a file_change event when a write/edit tool completes.
+ *  Preview is a raw content snippet (first ~1KB); TUI layer handles display formatting. */
 async function produceFileChange(
   events: AgentEvent[],
   path: string,
@@ -927,21 +928,16 @@ async function produceFileChange(
   let linesAdded: number | undefined;
   let linesRemoved: number | undefined;
   let preview: string | undefined;
-  // 将相对路径解析为绝对路径（基于 workspace）
-  // Resolve relative paths to absolute (based on workspace)
   const { resolve } = await import("node:path");
   const absolutePath = workspace ? resolve(workspace, path) : path;
   try {
     const s = await statAsync(absolutePath);
-    if (s.size > 1_000_000) {
-      preview = "(file too large for preview)";
-    } else {
+    if (s.size <= 1_000_000) {
       const content = await readFile(absolutePath, "utf-8");
       const allLines = content.split("\n");
       linesAdded = allLines.length;
-      preview = allLines.slice(0, 6).join("\n");
-      if (allLines.length > 6) preview += "\n...";
+      preview = content.slice(0, 1024);
     }
-  } catch { preview = "(unable to read file)"; }
+  } catch { /* no preview on read error */ }
   events.push({ type: "file_change", data: { path, kind, linesAdded, linesRemoved, preview } });
 }

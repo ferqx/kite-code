@@ -5,6 +5,22 @@ import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
 import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById } from "./helpers";
 import { formatReadFileRange, getToolPreview, getToolDetail } from "../components/render-utils";
 
+/** 格式化 file_change 事件的原始预览内容，截断到最多 6 行 / Format raw file_change preview, truncating to max 6 lines */
+const MAX_PREVIEW_LINES = 6;
+
+function formatFilePreview(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const lines = raw.split("\n");
+  if (lines.length > MAX_PREVIEW_LINES) {
+    return lines.slice(0, MAX_PREVIEW_LINES).join("\n") + "\n...";
+  }
+  // Remove trailing empty line from exact-slice files (common for files ending with \n)
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
+    return lines.slice(0, -1).join("\n");
+  }
+  return raw;
+}
+
 /** 格式化 token 数量（1k+ 用 k 缩写）。缓存日志注释解除后需要。
  *  Format token count (abbreviate with k for 1k+). Needed when cache log is uncommented. */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -281,7 +297,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         kind: event.data.kind,
         linesAdded: event.data.linesAdded,
         linesRemoved: event.data.linesRemoved,
-        preview: event.data.preview,
+        preview: formatFilePreview(event.data.preview),
       };
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
