@@ -1,17 +1,8 @@
 import type { Database } from "bun:sqlite";
-import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { BunSqliteSaver } from "./checkpoint.js";
 import { createChatModel } from "../model/factory.js";
 import { loadAgentConfig, type AgentConfig } from "../config/index.js";
-import type { OutputBlock, InterruptState } from "../../app/tui/types.js";
-import { getToolDetail, getToolPreview } from "../../app/tui/components/render-utils.js";
-import type { SubAgentRole } from "../../protocol/events.js";
-
-/** Pending task tool call info collected from AIMessage tool_calls */
-interface PendingTaskCall {
-  subagentType: SubAgentRole;
-  task: string;
-}
 
 // ── Public types ──
 
@@ -21,13 +12,24 @@ export interface SessionInfo {
   updatedAt: string; // "YYYY-MM-DD HH:MM:SS" local time
 }
 
-export interface SessionLoadResult {
+/** 中立会话数据结构（无 UI 依赖），可被任意前端消费
+ *  Neutral session data (no UI dependency), consumable by any frontend */
+export interface SessionData {
   threadId: string;
-  blocks: OutputBlock[];
-  interrupt: InterruptState | null;
+  /** 原始 LangGraph 消息数组 / Raw LangGraph message array */
+  messages: unknown[];
+  interrupt: ReplayInterrupt | null;
   modelProvider: string;
   modelName: string;
   thinkingLevel: string | null;
+}
+
+/** 中立中断信息（无 blockId），TUI 端负责映射到具体 block
+ *  Neutral interrupt info (no blockId), TUI layer maps to concrete block */
+export interface ReplayInterrupt {
+  kind: "approval" | "input";
+  /** 触发中断的 tool_call_id（用于 TUI 端 block ID 映射） */
+  callId?: string;
 }
 
 // ── List sessions ──
@@ -173,11 +175,17 @@ export async function enrichSessionNames(
         const result = await loadSessionWithSaver(saver, s.threadId);
         if (!result) continue;
 
-        // Find first user message content
-        const userBlock = result.blocks.find((b) => b.kind === "user");
-        if (!userBlock || userBlock.kind !== "user") continue;
+        // Find first user message content from raw messages
+        const firstHuman = result.messages.find(
+          (m) => m && typeof m === "object" && HumanMessage.isInstance(m as Record<string, unknown>),
+        ) as Record<string, unknown> | undefined;
+        if (!firstHuman) continue;
+        let content = extractText(firstHuman.content);
+        // Strip "User: " prefix (mirrors messagesToOutputBlocks → replay-blocks.ts)
+        content = content.replace(/^User:\s*/, "");
+        if (!content) continue;
 
-        const generated = await generateSessionName(userBlock.content);
+        const generated = await generateSessionName(content);
         if (generated) {
           await persistSessionNameWithSaver(saver, s.threadId, generated);
           onNamed(s.threadId, generated);
@@ -191,11 +199,11 @@ export async function enrichSessionNames(
 
 // ── Load session ──
 
-/** 加载指定会话的最新 checkpoint 并返回结构化的会话数据 / Load latest checkpoint for a thread and return structured session data */
+/** 加载指定会话的最新 checkpoint 并返回中立会话数据 / Load latest checkpoint for a thread and return neutral session data */
 export async function loadSession(
   checkpointPath: string,
   threadId: string,
-): Promise<SessionLoadResult | null> {
+): Promise<SessionData | null> {
   const saver = new BunSqliteSaver(checkpointPath);
   try {
     return await loadSessionWithSaver(saver, threadId);
@@ -208,7 +216,7 @@ export async function loadSession(
 async function loadSessionWithSaver(
   saver: BunSqliteSaver,
   threadId: string,
-): Promise<SessionLoadResult | null> {
+): Promise<SessionData | null> {
   const tuple = await saver.getTuple({
     configurable: { thread_id: threadId },
   });
@@ -216,17 +224,16 @@ async function loadSessionWithSaver(
 
   const cv = (tuple.checkpoint.channel_values ?? {}) as Record<string, unknown>;
   const messages = Array.isArray(cv.messages) ? (cv.messages as unknown[]) : [];
-  const blocks = messagesToOutputBlocks(messages);
 
   // Check pending writes for interrupt, not channel_values — interrupt() throws
   // before state updates are returned, so channel_values.approvedToolRequest
   // /approvedToolGrant are always null at interrupt checkpoints.
   const pendingWrites = tuple.pendingWrites as [string, string, unknown][] | undefined;
-  const interrupt = detectInterrupt(pendingWrites, blocks);
+  const interrupt = detectInterrupt(pendingWrites);
 
   return {
     threadId,
-    blocks,
+    messages,
     interrupt,
     modelProvider: typeof cv.modelProvider === "string" ? cv.modelProvider : "",
     modelName: typeof cv.modelName === "string" ? cv.modelName : "",
@@ -234,220 +241,10 @@ async function loadSessionWithSaver(
   };
 }
 
-// ── Message mapping ──
-
-/** 将 LangChain 消息数组映射为 OutputBlock 数组 / Map LangChain messages to OutputBlock array */
-function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
-  const blocks: OutputBlock[] = [];
-  let nextId = 1;
-  // Track pending task tool calls: callId → { subagent_type, task }
-  const pendingTasks = new Map<string, PendingTaskCall>();
-
-  for (const msg of messages) {
-    if (!msg || typeof msg !== "object") continue;
-
-    // HumanMessage → user block
-    if (HumanMessage.isInstance(msg)) {
-      let content = extractText(msg.content as unknown);
-      // Strip "User: " prefix added by runTask for conversation history
-      content = content.replace(/^User:\s*/, "");
-      if (content.length > 0) {
-        blocks.push({ id: nextId++, kind: "user", content });
-      }
-      continue;
-    }
-
-    // AIMessage
-    if (AIMessage.isInstance(msg)) {
-      const rawMsg = msg as unknown as Record<string, unknown>;
-      const additionalKwargs = (rawMsg.additional_kwargs as Record<string, unknown> | undefined) ?? {};
-
-      // reasoning_content → reason block
-      const reasoningContent =
-        (rawMsg.reasoning_content as string | undefined) ??
-        (additionalKwargs.reasoning_content as string | undefined);
-      if (typeof reasoningContent === "string" && reasoningContent.length > 0) {
-        blocks.push({
-          id: nextId++,
-          kind: "reason",
-          content: reasoningContent,
-          folded: false,
-        });
-      }
-
-      // tool_calls → tool_card blocks (result summary added later from ToolMessage if present)
-      const toolCalls = msg.tool_calls;
-      if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-        for (const tc of toolCalls) {
-          if (tc && typeof tc === "object") {
-            const call = tc as Record<string, unknown>;
-            const callId = typeof call.id === "string" ? call.id : "";
-            const name = typeof call.name === "string" ? call.name : "";
-            const args = (call.args as Record<string, unknown>) ?? {};
-
-            // task tool → defer to build subagent block from ToolMessage result
-            if (name === "task") {
-              const subagentType = (args.subagent_type as SubAgentRole) || "explore";
-              const task = typeof args.task === "string" ? args.task : "";
-              pendingTasks.set(callId, { subagentType, task });
-              continue;
-            }
-            blocks.push({
-              id: nextId++,
-              kind: "tool_card",
-              callId,
-              name,
-              args,
-              status: "done",
-              summary: "",
-              preview: getToolPreview(name, args),
-            });
-          }
-        }
-      }
-
-      // text content → text block
-      const content = extractText(msg.content as unknown);
-      if (content.length > 0) {
-        blocks.push({ id: nextId++, kind: "text", content });
-      }
-      continue;
-    }
-
-    // ToolMessage → update matching AIMessage tool_card with result, or create standalone
-    const tm = msg as Record<string, unknown>;
-    if (isToolMessageLike(tm)) {
-      const callId = (tm.tool_call_id as string) ?? "";
-      const tmName = (tm.name as string) ?? "";
-
-      // task tool result → build subagent block from pending task call + result
-      if (tmName === "task") {
-        const pending = pendingTasks.get(callId) ?? { subagentType: "explore" as const, task: "" };
-        const subId = callId || `sa-${nextId}`;
-        const { ok, summary, toolCallCount, durationMs, error } = parseTaskResult(
-          typeof tm.content === "string" ? tm.content : JSON.stringify(tm.content),
-        );
-        blocks.push({
-          id: nextId++,
-          kind: "subagent",
-          subagentId: subId,
-          role: pending.subagentType,
-          task: pending.task,
-          status: ok ? "done" : "error",
-          summary,
-          toolCallCount,
-          durationMs,
-          steps: [],
-          ...(error ? { error } : {}),
-        });
-        pendingTasks.delete(callId);
-        continue;
-      }
-
-      const content = typeof tm.content === "string" ? tm.content : JSON.stringify(tm.content);
-      let ok = true;
-      let summary = content.slice(0, 200);
-      let totalLines: number | undefined;
-      try {
-        const p = JSON.parse(content);
-        if (p && typeof p === "object") {
-          ok = p.ok !== false;
-          if (typeof p.totalLines === "number") totalLines = p.totalLines;
-          if (p.ok !== false) {
-            summary =
-              (p.stdout as string) ??
-              (p.message as string) ??
-              (p.summary as string) ??
-              summary;
-          } else {
-            summary =
-              (p.reason as string) ??
-              (p.stderr as string) ??
-              (p.message as string) ??
-              (p.summary as string) ??
-              summary;
-          }
-        }
-      } catch {
-        /* use raw content */
-      }
-
-      // Find existing tool_card from AIMessage tool_calls and enrich with result
-      const existingIdx = blocks.findIndex(
-        (b) => b.kind === "tool_card" && b.callId === callId,
-      );
-      if (existingIdx >= 0 && blocks[existingIdx].kind === "tool_card") {
-        const existing = blocks[existingIdx];
-        blocks[existingIdx] = {
-          ...existing,
-          status: ok ? "done" : "error",
-          summary,
-          detail: getToolDetail(existing.name, existing.args, totalLines),
-          expanded: ok ? existing.expanded : true,
-        } as typeof blocks[number];
-      } else {
-        // Standalone ToolMessage (no preceding AIMessage tool_calls)
-        const name = (tm.name as string) ?? "";
-        blocks.push({
-          id: nextId++,
-          kind: "tool_card",
-          callId,
-          name,
-          args: {},
-          status: ok ? "done" : "error",
-          summary,
-        });
-      }
-    }
-  }
-
-  // Any pending task calls without ToolMessage result → create error subagent blocks
-  for (const [callId, pending] of pendingTasks) {
-    blocks.push({
-      id: nextId++,
-      kind: "subagent",
-      subagentId: callId || `sa-${nextId}`,
-      role: pending.subagentType,
-      task: pending.task,
-      status: "error",
-      summary: "",
-      toolCallCount: 0,
-      durationMs: 0,
-      steps: [],
-      error: "Sub-agent result not found in checkpoint",
-    });
-  }
-
-  return blocks;
-}
-
-/** Parse task tool ToolMessage content into subagent block fields */
-function parseTaskResult(content: string): {
-  ok: boolean;
-  summary: string;
-  toolCallCount: number;
-  durationMs: number;
-  error?: string;
-} {
-  try {
-    const p = JSON.parse(content);
-    if (p && typeof p === "object") {
-      return {
-        ok: p.ok !== false,
-        summary: (p.summary as string) ?? "",
-        toolCallCount: typeof p.toolCallCount === "number" ? p.toolCallCount : 0,
-        durationMs: typeof p.durationMs === "number" ? p.durationMs : 0,
-        ...(p.error ? { error: p.error as string } : {}),
-      };
-    }
-  } catch { /* fall through */ }
-  return { ok: false, summary: content.slice(0, 200), toolCallCount: 0, durationMs: 0 };
-}
-
 // ── Helpers ──
 
 /** 提取消息文本内容 / Extract text content from various content formats */
-function extractText(content: unknown): string {
+export function extractText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
@@ -462,51 +259,40 @@ function extractText(content: unknown): string {
   return String(content ?? "");
 }
 
-/** 检测审批或用户输入中断状态 / Detect approval or user input interrupt state
-
-LangGraph 的 `interrupt()` 在执行时抛出 GraphInterrupt，状态更新尚未返回，
-因此 `channel_values.approvedToolRequest`/`approvedToolGrant` 在中断检查点中始终为 null。
-实际的中断值存储在 pending writes 中 `__interrupt__` 通道内。
-
-blockId 从 blocks 中推断：tool_approval 匹配最近的 tool_card block 的 id，
-user_input 使用 0（InputBlock 不需要 blockId 做显示匹配）。
-*/
+/** 检测审批或用户输入中断状态（中立类型，无 UI 依赖）
+ *  Detect approval or user input interrupt state (neutral, no UI dependency)
+ *
+ * LangGraph 的 `interrupt()` 在执行时抛出 GraphInterrupt，状态更新尚未返回，
+ * 因此 `channel_values.approvedToolRequest`/`approvedToolGrant` 在中断检查点中始终为 null。
+ * 实际的中断值存储在 pending writes 中 `__interrupt__` 通道内。
+ *
+ * 从 interrupt value 的 `request.id` 提取 tool_call_id，
+ * TUI 端负责将其映射为具体的 block ID。
+ */
 function detectInterrupt(
   pendingWrites: [string, string, unknown][] | undefined,
-  blocks: OutputBlock[],
-): InterruptState | null {
+): ReplayInterrupt | null {
   if (!pendingWrites || pendingWrites.length === 0) return null;
 
   for (const [, channel, value] of pendingWrites) {
     if (channel === "__interrupt__" && value && typeof value === "object") {
       const v = value as Record<string, unknown>;
+      const request = v.request as Record<string, unknown> | undefined;
       if (v.kind === "tool_approval") {
-        // Find the most recent tool_card block (the one that triggered approval)
-        for (let i = blocks.length - 1; i >= 0; i--) {
-          if (blocks[i].kind === "tool_card") {
-            return { kind: "approval", blockId: blocks[i].id };
-          }
-        }
-        return { kind: "approval", blockId: 0 };
+        return {
+          kind: "approval",
+          callId: typeof request?.id === "string" ? request.id : undefined,
+        };
       }
       if (v.kind === "user_input") {
-        return { kind: "input", blockId: 0 };
+        return {
+          kind: "input",
+          callId: typeof request?.id === "string" ? request.id : undefined,
+        };
       }
     }
   }
   return null;
-}
-
-/** 判断是否为 ToolMessage 类消息 / Check if message is ToolMessage-like */
-function isToolMessageLike(msg: Record<string, unknown>): boolean {
-  try {
-    if (typeof msg._getType === "function") {
-      return (msg._getType as () => string).call(msg) === "tool";
-    }
-  } catch {
-    /* ignore */
-  }
-  return false;
 }
 
 /** 读取会话名称：优先 cached metadata，兜底截断首条消息 / Read session name: cached > truncation */

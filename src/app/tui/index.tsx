@@ -12,6 +12,7 @@ import StartupScreen from "./components/StartupScreen";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useSlashCommand } from "./hooks/useSlashCommand";
 import { loadSession, listSessions, deleteSession } from "../../core/persistence/sessions.js";
+import { sessionDataToUI } from "./replay-blocks.js";
 import { defaultCheckpointPath } from "../../core/config/paths.js";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import { SessionManager } from "./session-manager";
@@ -254,11 +255,12 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         const thinkingLevel = result.thinkingLevel ?? "max";
         thinkingLevelRef.current = thinkingLevel;
 
+        const { blocks, interrupt } = sessionDataToUI(result);
         dispatch({
           type: "LOAD_SESSION",
           threadId,
-          blocks: result.blocks,
-          interrupt: result.interrupt,
+          blocks,
+          interrupt,
           modelProvider: result.modelProvider,
           modelName,
           thinkingLevel,

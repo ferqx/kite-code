@@ -7,6 +7,7 @@ import type { Checkpoint, PendingWrite } from "@langchain/langgraph-checkpoint";
 import { BunSqliteSaver } from "../src/core/persistence/checkpoint";
 import { listSessions, loadSession, generateSessionName } from "../src/core/persistence/sessions";
 import type { SessionInfo } from "../src/core/persistence/sessions";
+import { sessionDataToUI } from "../src/app/tui/replay-blocks";
 
 function makeDbPath(label: string): string {
   return join(tmpdir(), `openpx-sessions-test-${label}.sqlite`);
@@ -215,18 +216,19 @@ describe("loadSession", () => {
     const result = await loadSession(dbPath, "thread-1");
     expect(result).not.toBeNull();
     expect(result!.threadId).toBe("thread-1");
-    expect(result!.blocks.length).toBe(2);
+    const { blocks } = sessionDataToUI(result!);
+    expect(blocks.length).toBe(2);
 
     // First block: user message
-    expect(result!.blocks[0].kind).toBe("user");
-    if (result!.blocks[0].kind === "user") {
-      expect(result!.blocks[0].content).toBe("What is 2+2?");
+    expect(blocks[0].kind).toBe("user");
+    if (blocks[0].kind === "user") {
+      expect(blocks[0].content).toBe("What is 2+2?");
     }
 
     // Second block: text response
-    expect(result!.blocks[1].kind).toBe("text");
-    if (result!.blocks[1].kind === "text") {
-      expect(result!.blocks[1].content).toBe("2+2 equals 4.");
+    expect(blocks[1].kind).toBe("text");
+    if (blocks[1].kind === "text") {
+      expect(blocks[1].content).toBe("2+2 equals 4.");
     }
 
     // Model info
@@ -258,15 +260,16 @@ describe("loadSession", () => {
 
     const result = await loadSession(dbPath, "thread-r");
     expect(result).not.toBeNull();
+    const { blocks } = sessionDataToUI(result!);
     // Should have user → reason → text blocks
-    expect(result!.blocks.length).toBe(3);
-    expect(result!.blocks[0].kind).toBe("user");
-    expect(result!.blocks[1].kind).toBe("reason");
-    if (result!.blocks[1].kind === "reason") {
-      expect(result!.blocks[1].content).toBe("Let me think step by step...");
-      expect(result!.blocks[1].folded).toBe(false);
+    expect(blocks.length).toBe(3);
+    expect(blocks[0].kind).toBe("user");
+    expect(blocks[1].kind).toBe("reason");
+    if (blocks[1].kind === "reason") {
+      expect(blocks[1].content).toBe("Let me think step by step...");
+      expect(blocks[1].folded).toBe(false);
     }
-    expect(result!.blocks[2].kind).toBe("text");
+    expect(blocks[2].kind).toBe("text");
   });
 
   test("loads session with tool_card blocks from AIMessage tool_calls", async () => {
@@ -292,16 +295,17 @@ describe("loadSession", () => {
 
     const result = await loadSession(dbPath, "thread-tc");
     expect(result).not.toBeNull();
+    const { blocks } = sessionDataToUI(result!);
     // user → tool_card (from AIMessage tool_calls, flushed at end) → text
-    expect(result!.blocks.length).toBe(3);
-    expect(result!.blocks[0].kind).toBe("user");
-    expect(result!.blocks[1].kind).toBe("tool_card");
-    expect(result!.blocks[2].kind).toBe("text");
-    if (result!.blocks[1].kind === "tool_card") {
-      expect(result!.blocks[1].callId).toBe("call-1");
-      expect(result!.blocks[1].name).toBe("read_file");
-      expect(result!.blocks[1].args).toEqual({ path: "/tmp/test.txt" });
-      expect(result!.blocks[1].status).toBe("done");
+    expect(blocks.length).toBe(3);
+    expect(blocks[0].kind).toBe("user");
+    expect(blocks[1].kind).toBe("tool_card");
+    expect(blocks[2].kind).toBe("text");
+    if (blocks[1].kind === "tool_card") {
+      expect(blocks[1].callId).toBe("call-1");
+      expect(blocks[1].name).toBe("read_file");
+      expect(blocks[1].args).toEqual({ path: "/tmp/test.txt" });
+      expect(blocks[1].status).toBe("done");
     }
   });
 
@@ -335,7 +339,8 @@ describe("loadSession", () => {
     const result = await loadSession(dbPath, "thread-tm");
     expect(result).not.toBeNull();
     // AIMessage tool_calls → tool_card, then ToolMessage enriches it in place
-    const toolCards = result!.blocks.filter((b) => b.kind === "tool_card");
+    const { blocks } = sessionDataToUI(result!);
+    const toolCards = blocks.filter((b) => b.kind === "tool_card");
     expect(toolCards.length).toBe(1);
     if (toolCards[0].kind === "tool_card") {
       expect(toolCards[0].status).toBe("done");
@@ -379,7 +384,8 @@ describe("loadSession", () => {
 
     const result = await loadSession(dbPath, "thread-err");
     expect(result).not.toBeNull();
-    const toolCards = result!.blocks.filter((b) => b.kind === "tool_card");
+    const { blocks } = sessionDataToUI(result!);
+    const toolCards = blocks.filter((b) => b.kind === "tool_card");
     const lastCard = toolCards[toolCards.length - 1];
     if (lastCard.kind === "tool_card") {
       expect(lastCard.status).toBe("error");
@@ -546,7 +552,8 @@ describe("loadSession", () => {
 
     const result = await loadSession(dbPath, "thread-bid");
     expect(result).not.toBeNull();
-    const ids = result!.blocks.map((b) => b.id);
+    const { blocks } = sessionDataToUI(result!);
+    const ids = blocks.map((b) => b.id);
     expect(ids).toEqual([1, 2, 3, 4]);
   });
 });
