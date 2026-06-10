@@ -29,7 +29,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/open
 
 **`src/core/` — 核心层**：图编排、模型、工具、持久化、配置
 
-> **架构约束**：core 层是纯逻辑库，**禁止** `import` 任何 `app/` 下的符号，**禁止**做展示层文本格式化（截断 + `"... "` + 展示文案）。core 返回中性数据结构（无 `preview`/`detail`/`expanded`/`folded` 等展示字段），由 app 层通过适配器转换为 UI 类型。验证：`grep -rn "from.*app/" src/core/ --include="*.ts"` 应无输出。完整规则见 `docs/space/execution/active/layer-boundary-enforcement.md`。
+> **架构约束**：core 是纯数据逻辑层，**不依赖任何 UI 端**。规则只有一条——`import` 方向：`app → core → protocol`，永不反向。详细边界见 `docs/space/execution/active/layer-boundary-enforcement.md`。
 
 - `harness/graph.ts` — LangGraph 节点组装和主循环拓扑（单 agent 节点）
 - `harness/routes.ts` — agent / approval / tools / user_input 之间的路由
