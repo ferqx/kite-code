@@ -13,9 +13,11 @@ interface SessionSelectorProps {
   initialQuery?: string;
   /** 正在从 DB 加载的会话 ID / ID of the session currently being loaded from DB */
   loadingSessionId?: string | null;
+  /** 当前活跃会话 ID，用于标记显示 / Current active session ID, for visual indicator */
+  activeSessionId?: string | null;
 }
 
-export default function SessionSelector({ onSelect, onClose, onDelete, initialQuery, loadingSessionId }: SessionSelectorProps) {
+export default function SessionSelector({ onSelect, onClose, onDelete, initialQuery, loadingSessionId, activeSessionId }: SessionSelectorProps) {
   const t = useTheme();
   const { sessions, loading, error, refresh, search } = useSessionList();
   const [selected, setSelected] = useState(0);
@@ -27,6 +29,16 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
   deleteConfirmRef.current = deleteConfirm;
   const searchInputRef = useRef(searchInput);
   searchInputRef.current = searchInput;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const onDeleteRef = useRef(onDelete);
+  onDeleteRef.current = onDelete;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const activeSessionRef = useRef(activeSessionId);
+  activeSessionRef.current = activeSessionId;
   const isSearching = searchInput.length > 0;
 
   const maxContentHeight = useOverlayHeight(12);
@@ -45,17 +57,18 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
   }, [initialQuery]);
 
   useInput((input, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean; backspace?: boolean; ctrl?: boolean; meta?: boolean }) => {
+    const s = sessionsRef.current;
     // Delete confirmation mode
     if (deleteConfirmRef.current) {
       if (key.escape) {
         setDeleteConfirm(false);
         return;
       }
-      if (key.return && sessions.length > 0) {
-        const session = sessions[selectedRef.current];
+      if (key.return && s.length > 0) {
+        const session = s[selectedRef.current];
         if (session) {
-          onDelete?.(session.threadId);
-          onClose();
+          onDeleteRef.current?.(session.threadId);
+          onCloseRef.current();
         }
         return;
       }
@@ -67,18 +80,20 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
         setSearchInput("");
         return;
       }
-      onClose();
+      onCloseRef.current();
       return;
     }
 
-    if (key.return && sessions.length > 0) {
-      const session = sessions[selectedRef.current];
-      if (session) onSelect(session.threadId);
+    if (key.return && s.length > 0) {
+      const session = s[selectedRef.current];
+      if (session && session.threadId !== activeSessionRef.current) {
+        onSelectRef.current(session.threadId);
+      }
       return;
     }
 
-    if (key.upArrow) { setSelected((s) => Math.max(0, s - 1)); return; }
-    if (key.downArrow) { setSelected((s) => Math.min(sessions.length - 1, s + 1)); return; }
+    if (key.upArrow) { setSelected((p) => Math.max(0, p - 1)); return; }
+    if (key.downArrow) { setSelected((p) => Math.min(s.length - 1, p + 1)); return; }
 
     // Backspace removes last character from search
     if (key.backspace || input === '\x7f') {
@@ -87,7 +102,7 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
     }
 
     // D to delete (only when search is empty)
-    if ((input === "d" || input === "D") && searchInputRef.current.length === 0 && sessions.length > 0 && onDelete) {
+    if ((input === "d" || input === "D") && searchInputRef.current.length === 0 && s.length > 0 && onDeleteRef.current) {
       setDeleteConfirm(true);
       return;
     }
@@ -112,10 +127,13 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
         <Text color={t.muted}>_</Text>
       </Box>
       {deleteConfirm && selectedSession && (
-        <Box marginTop={1}>
-          <Text color={t.warning}>
+        <Box marginTop={1} flexDirection="column">
+          <Text color={activeSessionId === selectedSession.threadId ? t.error : t.warning}>
             删除 "{selectedSession.name}"? Enter 确认  Esc 取消
           </Text>
+          {activeSessionId === selectedSession.threadId && (
+            <Text color={t.warning}>注意：这是当前活跃会话，删除后将自动创建新会话</Text>
+          )}
         </Box>
       )}
       <Box flexDirection="column" marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
@@ -128,10 +146,13 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
           {sessions.map((session, i) => {
             const displayName = session.name.length > 40 ? session.name.slice(0, 40) + "..." : session.name;
             const isLoading = loadingSessionId === session.threadId;
+            const isActive = activeSessionId === session.threadId;
+            const cursor = isLoading ? "⏳" : i === selected ? ">" : " ";
+            const marker = isActive ? "● " : "";
             return (
               <Box key={session.threadId}>
                 <Text color={isLoading ? t.warning : i === selected ? t.primary : t.muted}>
-                  {isLoading ? "⏳" : i === selected ? ">" : " "} {displayName}
+                  {cursor} {marker}{displayName}
                 </Text>
                 {isLoading && <Text color={t.warning}>  Loading...</Text>}
                 {!isLoading && <Text color={t.dim}>  {session.updatedAt}</Text>}

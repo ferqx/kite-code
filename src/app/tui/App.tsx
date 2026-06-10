@@ -218,6 +218,7 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
           onClose={hideSessions}
           onDelete={deleteSessionAction}
           loadingSessionId={state.loadingSessionId}
+          activeSessionId={state.activeSessionId}
         />
       )}
       {state.showModelSelector && (

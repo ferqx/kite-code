@@ -355,11 +355,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       // ── DELETE_SESSION：删除会话，从 DB 和 SessionManager 中移除 ──
       if (action.type === "DELETE_SESSION") {
         const { threadId } = action;
-        // Don't delete the active session
-        if (threadId === sessionManager.getActiveId()) {
-          dispatch(action); // just close the selector
-          return;
-        }
+        const wasActive = threadId === sessionManager.getActiveId();
         // Invalidate any in-flight loadSessionById for this threadId to prevent
         // stale load from restoring the deleted session.
         loadGenerationRef.current++;
@@ -370,7 +366,14 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         }
         // Remove from SessionManager and refresh snapshots
         sessionManager.removeRuntime(threadId);
-        dispatch(action);
+        if (wasActive) {
+          // Deleted the active session — create a new one so TUI has an active session
+          const newId = sessionManager.createSession(workspace);
+          threadIdRef.current = newId;
+          dispatch({ type: "NEW_SESSION", threadId: newId });
+        } else {
+          dispatch(action);
+        }
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
         return;
       }
