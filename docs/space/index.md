@@ -113,6 +113,7 @@
 | --- | --- | --- |
 | `references/openai-harness-engineering.md` | reference | OpenAI 关于 Codex harness engineering 和仓库知识系统的文章。 |
 | `references/opencode-codex-plan-handling.md` | reference | Opencode 与 Codex 计划处理方式的本地对比。 |
+| `references/claude-code-codex-architecture-research.md` | reference | Claude Code 与 OpenAI Codex 多端架构对比调研 — 入口分离 vs App Server，对 OpenPX 的建议。 |
 
 ## 生成材料边界
 
