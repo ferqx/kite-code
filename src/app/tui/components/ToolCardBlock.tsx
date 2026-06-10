@@ -6,7 +6,9 @@ import { SPINNER, toolColor, formatElapsed } from "./render-utils";
 
 const MAX_TOOL_LINES = 5;
 const SHELL_PREFIX = "⎿   ";
-const SHELL_ALIGN = "    ";
+/** Reuse SHELL_PREFIX glyph for continuation lines — pure whitespace
+ *  (like "    ") is vulnerable to collapsing in Ink's Yoga text layout. */
+const SHELL_ALIGN = SHELL_PREFIX;
 
 function renderShellSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
   const color = isError ? dt.error : dt.dim;
@@ -40,6 +42,9 @@ function renderShellSummary(summary: string, isError: boolean, dt: { error: stri
 
 function renderToolSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
   const prefix = isError ? "✕ " : "⎿ ";
+  /** Same width as prefix for continuation lines — avoids pure-whitespace collapsing and
+   *  fixes a pre-existing 1-column alignment mismatch (was 3 spaces vs 2-char prefix). */
+  const align = prefix;
   const color = isError ? dt.error : dt.dim;
   const text = summary.trimEnd();
   const lines = text.split("\n");
@@ -59,11 +64,11 @@ function renderToolSummary(summary: string, isError: boolean, dt: { error: strin
     <React.Fragment>
       {displayLines.map((line, i) => (
         <Text key={i} color={color}>
-          {i === 0 ? prefix : "   "}{line.slice(0, 200)}
+          {i === 0 ? prefix : align}{line.slice(0, 200)}
         </Text>
       ))}
       {truncated && (
-        <Text color={dt.dim}>   ... ({lines.length - MAX_TOOL_LINES} more lines)</Text>
+        <Text color={dt.dim}>{align}... ({lines.length - MAX_TOOL_LINES} more lines)</Text>
       )}
     </React.Fragment>
   );
