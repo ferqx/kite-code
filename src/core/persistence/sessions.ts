@@ -4,6 +4,7 @@ import { BunSqliteSaver } from "./checkpoint.js";
 import { createChatModel } from "../model/factory.js";
 import { loadAgentConfig, type AgentConfig } from "../config/index.js";
 import type { OutputBlock, InterruptState } from "../../app/tui/types.js";
+import { getToolDetail, getToolPreview } from "../../app/tui/components/render-utils.js";
 import type { SubAgentRole } from "../../protocol/events.js";
 
 /** Pending task tool call info collected from AIMessage tool_calls */
@@ -299,7 +300,7 @@ function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
               args,
               status: "done",
               summary: "",
-              preview: computePreview(name, args),
+              preview: getToolPreview(name, args),
             });
           }
         }
@@ -381,7 +382,7 @@ function messagesToOutputBlocks(messages: unknown[]): OutputBlock[] {
           ...existing,
           status: ok ? "done" : "error",
           summary,
-          detail: computeDetail(existing.name, existing.args, totalLines),
+          detail: getToolDetail(existing.name, existing.args, totalLines),
           expanded: ok ? existing.expanded : true,
         } as typeof blocks[number];
       } else {
@@ -441,71 +442,6 @@ function parseTaskResult(content: string): {
     }
   } catch { /* fall through */ }
   return { ok: false, summary: content.slice(0, 200), toolCallCount: 0, durationMs: 0 };
-}
-
-/** 计算回放工具卡片的 detail 文本 / Compute detail text for replayed tool cards */
-function computeDetail(name: string, args: Record<string, unknown>, totalLines?: number): string | undefined {
-  switch (name) {
-    case "read_file": {
-      const path = typeof args.path === "string" ? args.path : "";
-      const offset = typeof args.offset === "number" && args.offset > 1 ? args.offset : undefined;
-      const limit = typeof args.limit === "number" ? args.limit : undefined;
-      let range = "";
-      if (offset === undefined && limit === undefined) {
-        if (totalLines != null) range = ` [lines 1-${totalLines} / ${totalLines}]`;
-      } else {
-        const start = offset ?? 1;
-        const end = limit !== undefined ? start + limit - 1 : undefined;
-        const suffix = totalLines != null ? ` / ${totalLines}` : "";
-        range = end !== undefined ? ` [lines ${start}-${end}${suffix}]` : ` [lines ${start}-${suffix}]`;
-      }
-      return `Read ${path}${range}`;
-    }
-    case "write_file": {
-      const path = typeof args.path === "string" ? args.path : "";
-      const lines = typeof args.content === "string" ? args.content.split("\n").length : undefined;
-      return lines != null ? `Wrote ${lines} line(s) to ${path}` : `Wrote ${path}`;
-    }
-    case "edit_file": {
-      return `Edited ${typeof args.path === "string" ? args.path : ""}`;
-    }
-    case "shell_execute": {
-      return `Ran: ${typeof args.command === "string" ? args.command.slice(0, 60) : ""}`;
-    }
-    case "update_plan": {
-      return `Plan: ${typeof args.name === "string" ? args.name : ""}`;
-    }
-    case "ask_user": {
-      const q = typeof args.question === "string" ? args.question.slice(0, 40) : "";
-      return `Asked: ${q}${q.length > 40 ? "..." : ""}`;
-    }
-    default:
-      return undefined;
-  }
-}
-
-/** 计算回放工具卡片的 preview 文本 / Compute preview text for replayed tool cards */
-function computePreview(name: string, args: Record<string, unknown>): string | undefined {
-  switch (name) {
-    case "read_file":
-    case "write_file":
-    case "edit_file":
-      return String(args.path ?? "") || undefined;
-    case "shell_execute": {
-      const cmd = String(args.command ?? "");
-      if (!cmd) return undefined;
-      return cmd.length > 60 ? cmd.slice(0, 57) + "..." : cmd;
-    }
-    case "update_plan":
-      return String(args.name ?? "") || undefined;
-    case "ask_user": {
-      const q = String(args.question ?? "");
-      if (!q) return undefined;
-      return q.length > 40 ? q.slice(0, 37) + "..." : q;
-    }
-    default:
-      return undefined;
-  }
 }
 
 // ── Helpers ──

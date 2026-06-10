@@ -3,7 +3,7 @@
 import type { AgentEvent, AgentPlanStep, PlanStatus } from "@/protocol/events";
 import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
 import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById } from "./helpers";
-import { formatReadFileRange } from "../components/render-utils";
+import { formatReadFileRange, getToolPreview, getToolDetail } from "../components/render-utils";
 
 /** 格式化 token 数量（1k+ 用 k 缩写）。缓存日志注释解除后需要。
  *  Format token count (abbreviate with k for 1k+). Needed when cache log is uncommented. */
@@ -37,57 +37,6 @@ function findBlockByIndexAndKind<T extends OutputBlock["kind"]>(
     }
   }
   return undefined;
-}
-
-function getToolPreview(name: string, args: Record<string, unknown>): string {
-  switch (name) {
-    case "read_file": return String(args.path ?? "");
-    case "write_file":
-    case "edit_file": return String(args.path ?? "");
-    case "shell_execute": {
-      const cmd = String(args.command ?? "");
-      return cmd.length > 60 ? cmd.slice(0, 57) + "..." : cmd;
-    }
-    case "update_plan": return String(args.name ?? "");
-    case "ask_user": {
-      const q = String(args.question ?? "");
-      return q.length > 40 ? q.slice(0, 37) + "..." : q;
-    }
-    default: return "";
-  }
-}
-
-function computeToolDetail(name: string, args: Record<string, unknown>, totalLines?: number): string | undefined {
-  switch (name) {
-    case "read_file": {
-      const path = typeof args.path === "string" ? args.path : "";
-      const range = formatReadFileRange(args, totalLines);
-      return `Read ${path}${range}`;
-    }
-    case "write_file": {
-      const path = typeof args.path === "string" ? args.path : "";
-      const lines = typeof args.content === "string" ? args.content.split("\n").length : undefined;
-      return lines != null ? `Wrote ${lines} line(s) to ${path}` : `Wrote ${path}`;
-    }
-    case "edit_file": {
-      const path = typeof args.path === "string" ? args.path : "";
-      return `Edited ${path}`;
-    }
-    case "shell_execute": {
-      const cmd = typeof args.command === "string" ? args.command.slice(0, 60) : "";
-      return `Ran: ${cmd}`;
-    }
-    case "update_plan": {
-      const name = typeof args.name === "string" ? args.name : "";
-      return `Plan: ${name}`;
-    }
-    case "ask_user": {
-      const q = typeof args.question === "string" ? args.question.slice(0, 40) : "";
-      return `Asked: ${q}${q.length > 40 ? "..." : ""}`;
-    }
-    default:
-      return undefined;
-  }
 }
 
 export function handleEventAction(state: TuiState, event: AgentEvent): TuiState {
@@ -197,7 +146,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         status: event.data.ok ? "done" as const : "error" as const,
         summary: event.data.summary,
         elapsedMs,
-        detail: computeToolDetail(matched.name, matched.args, event.data.totalLines),
+        detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
         expanded: !event.data.ok || matched.name === "shell_execute",
       };
       // 工具输出的 token 计入累计统计 / Tool output tokens counted in cumulative total
