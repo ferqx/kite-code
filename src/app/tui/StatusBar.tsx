@@ -45,11 +45,11 @@ export default function StatusBar({ status, running, timerKey }: StatusBarProps)
     return `Step ${done}/${total}${active ? `: ${active.step}` : ""}`;
   }
 
+  if (!running) return null;
+
   return (
     <Box>
-      {running && (
-        <Text color={t.primary}>{SPINNER[spinnerIdx]} </Text>
-      )}
+      <Text color={t.primary}>{SPINNER[spinnerIdx]} </Text>
       <Text color={phaseColor}>{phaseIcon} </Text>
       <Text bold color={t.primary}>{phaseLabel}</Text>
       <Text color={t.dim}> · </Text>
