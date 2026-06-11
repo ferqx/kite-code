@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type { StatusState } from "./types";
 import { useTheme } from "./theme";
 
@@ -15,29 +15,46 @@ function formatTokens(n: number): string {
   return n.toLocaleString();
 }
 
+/** Estimate the visible width of the full stats line. */
+function fullWidth(status: StatusState): number {
+  let w = status.modelName.length;
+  const isDS = status.modelProvider === "deepseek";
+  if (isDS && status.thinkingMode) w += 3 + 7 + String(status.thinkingMode).length; // " │ think: max"
+  if (isDS && status.totalTokens > 0) w += 3 + 7 + 3; // " │ cache: 0%"
+  if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " │ tokens: 78.4k"
+  w += 3 + 4; // " │ [安全]"
+  return w;
+}
+
 export default function StatsLine({ status, running, modelProvider, modelName }: StatsLineProps) {
   const t = useTheme();
+  const { stdout } = useStdout();
   const cachePct = status.cacheHitRate * 100;
   const cacheColor = cachePct > 50 ? t.success : cachePct > 20 ? t.warning : t.muted;
   const authLabel = status.authorization === "full_access" ? "完全" : "安全";
   const authColor = status.authorization === "full_access" ? t.warning : t.success;
 
-  // 仅 DeepSeek 支持 thinking 强度配置和 prompt cache 指标
   const isDeepSeek = status.modelProvider === "deepseek";
   const showThink = isDeepSeek && !!status.thinkingMode;
   const showCache = isDeepSeek && status.totalTokens > 0;
   const showTokens = status.totalTokens > 0;
 
+  // When the full line would exceed the terminal width, render a shorter
+  // version to prevent wrapping — wrapping causes Footer height to jump,
+  // which triggers input box duplication during resize.
+  const cols = stdout?.columns ?? 80;
+  const compact = fullWidth(status) > cols;
+
   return (
     <Box>
       <Text color={t.primary}>{status.modelName}</Text>
-      {showThink && (
+      {!compact && showThink && (
         <>
           <Text color={t.dim}> │ </Text>
           <Text color={t.success}>think: {status.thinkingMode}</Text>
         </>
       )}
-      {showCache && (
+      {!compact && showCache && (
         <>
           <Text color={t.dim}> │ </Text>
           <Text>
@@ -46,7 +63,7 @@ export default function StatsLine({ status, running, modelProvider, modelName }:
           </Text>
         </>
       )}
-      {showTokens && (
+      {!compact && showTokens && (
         <>
           <Text color={t.dim}> │ </Text>
           <Text>
