@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { Box, Text } from "ink";
-import { useInput } from "ink";
+import { Box, Text, useInput, useWindowSize } from "ink";
 import { ScrollList } from "ink-scroll-list";
+import stringWidth from "string-width";
 import CtrlSafeTextInput from "./CtrlSafeTextInput";
 import type { AtomicBlock } from "./CtrlSafeTextInput";
 import { useFileSearch } from "@/app/tui/hooks/useFileSearch";
@@ -95,6 +95,7 @@ function completeSlash(input: string): string | null {
 
 export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef, onSlashSuggestionChange }: InputLineProps) {
   const t = useTheme();
+  const { columns } = useWindowSize();
   const fileMaxHeight = useOverlayHeight(7);
   const [value, setValue] = useState("");
   const valueRef = useRef(value);
@@ -473,6 +474,8 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   }
 
   const promptChar = mode === "approval" ? "↑↓ select · Enter confirm  " : mode === "question" ? "? " : "❯ ";
+  const promptWidth = stringWidth(promptChar);
+  const inputMaxWidth = Math.max(1, columns - promptWidth);
 
   // Slash suggestions are rendered in App.tsx Overlay area
 
@@ -493,6 +496,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
           onNavigateHistory={handleNavigateHistory}
           disableArrowNav={slashSuggestions.active || fileSearch.active}
           trailingText={slashGhost ?? undefined}
+          maxWidth={inputMaxWidth}
         />
       </Box>
 
