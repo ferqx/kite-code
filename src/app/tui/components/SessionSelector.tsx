@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import { useInput } from "ink";
 import { ScrollList } from "ink-scroll-list";
 import { useSessionList } from "../hooks/useSessionList.js";
@@ -19,6 +19,7 @@ interface SessionSelectorProps {
 
 export default function SessionSelector({ onSelect, onClose, onDelete, initialQuery, loadingSessionId, activeSessionId }: SessionSelectorProps) {
   const t = useTheme();
+  const { stdout } = useStdout();
   const { sessions, loading, error, refresh, search } = useSessionList();
   const [selected, setSelected] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -144,21 +145,24 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
         )}
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
           {sessions.map((session, i) => {
-            const displayName = session.name.length > 40 ? session.name.slice(0, 40) + "..." : session.name;
             const isLoading = loadingSessionId === session.threadId;
             const isActive = activeSessionId === session.threadId;
             const cursor = isLoading ? "⏳" : i === selected ? ">" : " ";
             const marker = isActive ? "● " : "";
+            const suffix = isLoading ? "  Loading..." : `  ${session.updatedAt}`;
+            // 预留：border(2) + paddingX(2) + cursor+space(2) + marker(2) ≈ 8，其余给 suffix
+            const cols = stdout?.columns ?? 80;
+            const nameMax = Math.max(8, cols - 10 - suffix.length);
+            const rawName = session.name;
+            const displayName = rawName.length > nameMax
+              ? rawName.slice(0, nameMax - 1) + "…"
+              : rawName;
             return (
               <Box key={session.threadId}>
-                <Text
-                  color={isLoading ? t.warning : i === selected ? t.primary : t.muted}
-                  wrap="truncate-end"
-                >
+                <Text color={isLoading ? t.warning : i === selected ? t.primary : t.muted}>
                   {cursor} {marker}{displayName}
                 </Text>
-                {isLoading && <Text color={t.warning}>  Loading...</Text>}
-                {!isLoading && <Text color={t.dim}>  {session.updatedAt}</Text>}
+                <Text color={isLoading ? t.warning : t.dim}>{suffix}</Text>
               </Box>
             );
           })}
