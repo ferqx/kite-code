@@ -377,6 +377,13 @@ export class SessionManager {
   }
 
   createSession(workspace: string): string {
+    // Deactivate old session before creating new one — same logic as switchSession
+    const oldRt = this.runtimes.get(this.activeId);
+    if (oldRt) {
+      oldRt.resolveInterrupt({ type: "cancel" as const });
+      oldRt.setForeground(false);
+      oldRt.pendingInterrupt = false;
+    }
     const threadId = `tui-${Date.now().toString(36)}-${SessionManager.sessionCounter++}`;
     const rt = new SessionRuntime(threadId, workspace, this.deps);
     rt.notifyInterrupt = () => {
