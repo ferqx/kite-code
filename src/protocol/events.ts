@@ -16,7 +16,7 @@ export type AgentEvent =
   | { type: "interrupt"; data: unknown }
   /** Raw LangGraph state update chunk — opaque passthrough for checkpoint/state tracking consumers */
   | { type: "update"; data: unknown }
-  | { type: "model_retry"; data: { attempt: number; error: string; delayMs: number } }
+  | { type: "model_retry"; data: { attempt: number; maxAttempts: number; error: string; delayMs: number } }
   | { type: "final"; data: string }
   | { type: "subagent_start"; data: SubAgentStartPayload }
   | { type: "subagent_step"; data: SubAgentStepPayload }

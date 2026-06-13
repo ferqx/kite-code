@@ -37,6 +37,7 @@ function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
     modelProvider: "anthropic",
     modelName: "claude-opus",
     thinkingMode: "detailed",
+    retryState: null,
     ...overrides,
   };
 }

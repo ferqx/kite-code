@@ -129,9 +129,9 @@ describe("model transient retry", () => {
     expect(attempts).toBe(3);
   });
 
-  test("calls onRetry callback with attempt, error, and delay on each retry", async () => {
+  test("calls onRetry callback with attempt, maxAttempts, error, and delay on each retry", async () => {
     let attempts = 0;
-    const retryCalls: Array<{ attempt: number; error: unknown; delayMs: number }> = [];
+    const retryCalls: Array<{ attempt: number; maxAttempts: number; error: unknown; delayMs: number }> = [];
 
     await withTransientModelRetry(
       async () => {
@@ -142,18 +142,19 @@ describe("model transient retry", () => {
         return "ok";
       },
       {
+        maxAttempts: 5,
         initialDelayMs: 10,
         jitterMs: 0,
         sleep: async () => {},
-        onRetry: (attempt, error, delayMs) => {
-          retryCalls.push({ attempt, error, delayMs });
+        onRetry: (attempt, maxAttempts, error, delayMs) => {
+          retryCalls.push({ attempt, maxAttempts, error, delayMs });
         },
       },
     );
 
     expect(retryCalls).toHaveLength(2);
-    expect(retryCalls[0]).toEqual({ attempt: 1, error: expect.any(Error), delayMs: 10 });
-    expect(retryCalls[1]).toEqual({ attempt: 2, error: expect.any(Error), delayMs: 20 });
+    expect(retryCalls[0]).toEqual({ attempt: 1, maxAttempts: 5, error: expect.any(Error), delayMs: 10 });
+    expect(retryCalls[1]).toEqual({ attempt: 2, maxAttempts: 5, error: expect.any(Error), delayMs: 20 });
     // onRetry is NOT called for the successful final attempt
     expect(attempts).toBe(3);
   });

@@ -3,7 +3,7 @@ import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messa
 import type { AgentConfig } from "@/core/config/index";
 
 /** 模型重试监听器 / Model retry listener */
-export type ModelRetryListener = (attempt: number, error: unknown, delayMs: number) => void;
+export type ModelRetryListener = (attempt: number, maxAttempts: number, error: unknown, delayMs: number) => void;
 
 /** 支持设置 retry listener 的聊天模型接口 / Chat model interface supporting retry listener injection */
 export interface RetryListenerHost {
@@ -27,7 +27,7 @@ export interface TransientModelRetryOptions {
 }
 
 const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<Omit<TransientModelRetryOptions, "onRetry">> = {
-  maxAttempts: 3,
+  maxAttempts: 5,
   initialDelayMs: 500,
   maxDelayMs: 4_000,
   jitterMs: 250,
@@ -153,7 +153,7 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
           continue;
         }
         const reasoning = reasonings[assistantIdx];
-        if (reasoning) {
+        if (typeof reasoning === "string") {
           mapped.reasoning_content = reasoning;
         }
         assistantIdx++;
@@ -209,7 +209,7 @@ export async function withTransientModelRetry<T>(
           : 0;
       const delayMs = baseDelay + jitter;
       // attempt 即重试次数（1-indexed）：attempt=1 表示第 1 次重试 / attempt is the retry number (1-indexed): attempt=1 means first retry
-      retryOptions.onRetry?.(attempt, error, delayMs);
+      retryOptions.onRetry?.(attempt, retryOptions.maxAttempts, error, delayMs);
       await retryOptions.sleep(delayMs);
     }
   }

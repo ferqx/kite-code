@@ -73,6 +73,13 @@ export interface InterruptState {
   blockId: number;
 }
 
+export interface RetryState {
+  attempt: number;
+  maxAttempts: number;
+  error: string;
+  delayMs: number;
+}
+
 export interface StatusState {
   phase: AgentPhase;
   plan: AgentPlan | null;
@@ -86,6 +93,7 @@ export interface StatusState {
   modelProvider: string;
   modelName: string;
   thinkingMode: string;
+  retryState: RetryState | null;
 }
 
 export interface SessionSnapshot {

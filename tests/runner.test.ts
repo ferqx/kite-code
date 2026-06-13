@@ -59,8 +59,8 @@ describe("runner initial workspace access selection", () => {
 describe("normalizeGraphStream model retry events", () => {
   test("yields model_retry events when agent chunk contains modelRetries", async () => {
     const retries: ModelRetryEvent[] = [
-      { attempt: 1, error: "ECONNRESET", delayMs: 500 },
-      { attempt: 2, error: "ECONNRESET", delayMs: 1000 },
+      { attempt: 1, maxAttempts: 5, error: "ECONNRESET", delayMs: 500 },
+      { attempt: 2, maxAttempts: 5, error: "ECONNRESET", delayMs: 1000 },
     ];
 
     async function* mockStream() {
@@ -103,7 +103,7 @@ describe("normalizeGraphStream model retry events", () => {
 
   test("yields model_retry events correctly ordered (before cache_metrics when applicable)", async () => {
     const retries: ModelRetryEvent[] = [
-      { attempt: 1, error: "500 Internal Error", delayMs: 500 },
+      { attempt: 1, maxAttempts: 5, error: "500 Internal Error", delayMs: 500 },
     ];
 
     async function* mockStream() {

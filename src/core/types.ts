@@ -71,6 +71,7 @@ export interface ContextBudget {}
 
 export interface ModelRetryEvent {
   attempt: number;
+  maxAttempts: number;
   error: string;
   delayMs: number;
 }

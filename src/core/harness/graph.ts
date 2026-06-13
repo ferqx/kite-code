@@ -108,9 +108,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       threadId: state.threadId,
     });
     const retryEvents: ModelRetryEvent[] = [];
-    const listener: ModelRetryListener = (attempt, error, delayMs) => {
+    const listener: ModelRetryListener = (attempt, maxAttempts, error, delayMs) => {
       retryEvents.push({
         attempt,
+        maxAttempts,
         error: typeof error === "string" ? error : String(error).slice(0, 200),
         delayMs,
       });
