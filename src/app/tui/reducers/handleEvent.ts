@@ -75,48 +75,40 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case "text": {
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
-      // When streaming, split cumulative text into per-line blocks.
-      // Complete lines become finalized blocks → enter <Static> immediately.
-      // Only the last (possibly incomplete) line stays as a streaming block.
-      if (state.running && lastBlock?.kind === "text" && lastBlock.streaming) {
-        if (lastBlock.content === event.data.text) return state;
 
-        const newText = event.data.text;
-        // Single-line update: keep existing block ID, just replace content.
-        // Avoids ID churn on character-by-character streaming.
-        if (!newText.includes("\n")) {
-          return updateLastBlock(state, { ...lastBlock, content: newText });
-        }
+      if (state.running && event.data.text.includes("\n")) {
+        // Multi-line during streaming → always split into per-line blocks.
+        // Handles both the first text event (no prior streaming block) and
+        // subsequent updates (replacing an existing streaming block).
 
-        // Multi-line: split cumulative text into per-line blocks.
-        // Complete lines become finalized blocks → enter <Static> immediately.
-        // Only the last (possibly incomplete) line stays as a streaming block.
-
-        // Count already-finalized per-line text blocks before the streaming block.
-        // Supports both old model (single multi-line streaming block → numFinalized=0)
-        // and new model (per-line blocks preceding the streaming block).
+        // Count already-finalized per-line text blocks (0 for first event or old model).
         let numFinalized = 0;
-        for (let i = 0; i < last!.blocks.length - 1; i++) {
-          if (last!.blocks[i].kind === "text") numFinalized++;
+        if (lastBlock?.kind === "text" && lastBlock.streaming) {
+          for (let i = 0; i < last!.blocks.length - 1; i++) {
+            if (last!.blocks[i].kind === "text") numFinalized++;
+          }
         }
-        // Reconstruct previous full text for dedup check
+        // Reconstruct previous full text for dedup
         let prevFullText = "";
         let firstText = true;
-        for (const b of last!.blocks) {
+        for (const b of last?.blocks ?? []) {
           if (b.kind !== "text") continue;
           if (firstText) { prevFullText = b.content; firstText = false; }
           else prevFullText += "\n" + b.content;
         }
-        if (prevFullText === newText) return state;
+        if (prevFullText === event.data.text) return state;
 
-        const newLines = newText.split("\n");
+        const newLines = event.data.text.split("\n");
 
         const turns = state.turns.slice();
+        if (turns.length === 0) turns.push({ blocks: [] });
         const blocks = turns[turns.length - 1].blocks.slice();
         let nextId = state.nextBlockId;
 
-        // Remove old streaming block (always last text block)
-        blocks.pop();
+        // Remove old streaming block if present
+        if (lastBlock?.kind === "text" && lastBlock.streaming) {
+          blocks.pop();
+        }
 
         // Add newly completed lines as finalized blocks
         for (let i = numFinalized; i < newLines.length - 1; i++) {
@@ -130,7 +122,14 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         turns[turns.length - 1] = { blocks };
         return { ...state, turns, nextBlockId: nextId };
       }
-      // Dedup: check all text blocks in the last turn (not just the most recent one)
+
+      // Single-line update: keep existing block ID, just replace content.
+      if (state.running && lastBlock?.kind === "text" && lastBlock.streaming) {
+        if (lastBlock.content === event.data.text) return state;
+        return updateLastBlock(state, { ...lastBlock, content: event.data.text });
+      }
+
+      // Dedup: check all text blocks in the last turn
       if (lastBlock?.kind === "text" && lastBlock.content === event.data.text) return state;
       if (last) {
         for (let i = last.blocks.length - 1; i >= 0; i--) {
