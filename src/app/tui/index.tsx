@@ -66,6 +66,43 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   // later-initiated load's state.
   const loadGenerationRef = React.useRef(0);
   const editorContentRef = React.useRef<EditorContentHandle | null>(null);
+  // Persist input value across resize remounts
+  const inputValueRef = React.useRef("");
+  const handleInputValueChange = React.useCallback((v: string) => {
+    inputValueRef.current = v;
+  }, []);
+
+  // Detect terminal resize via polling and force App remount after
+  // resize settles. Key change on App forces a clean Ink render.
+  // debounce 300ms + maxWait 3s guarantees exactly one refresh per
+  // resize gesture, even during rapid oscillating drag.
+  const [resizeKey, setResizeKey] = React.useState(0);
+  const lastColsRef = React.useRef(process.stdout.columns || 80);
+  React.useEffect(() => {
+    let debounce: ReturnType<typeof setTimeout>;
+    let maxWait: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      clearTimeout(debounce);
+      clearTimeout(maxWait);
+      maxWait = undefined;
+      process.stdout.write("\x1b[2J\x1b[3J");
+      setResizeKey(n => n + 1);
+    };
+    const interval = setInterval(() => {
+      const cur = process.stdout.columns || 80;
+      if (cur !== lastColsRef.current) {
+        lastColsRef.current = cur;
+        clearTimeout(debounce);
+        debounce = setTimeout(refresh, 300);
+        maxWait ??= setTimeout(refresh, 3000);
+      }
+    }, 150);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(debounce);
+      clearTimeout(maxWait);
+    };
+  }, []);
   const thinkingLevelRef = React.useRef<string | null>(null);
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
@@ -536,7 +573,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
   return (
     <ThemeContext.Provider value={theme}>
-    <App state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion}>
+    <App key={resizeKey} state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion}>
       <InputLine
         key={state.activeSessionId}
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
@@ -546,6 +583,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind || !!state.interrupt}
         editorContentRef={editorContentRef}
         onSlashSuggestionChange={setSlashSuggestion}
+        initialValue={inputValueRef.current}
+        onValueChange={handleInputValueChange}
       />
     </App>
     </ThemeContext.Provider>

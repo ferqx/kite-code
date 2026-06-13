@@ -1,64 +1,69 @@
-# TUI Footer 尺寸与终端缩放稳定性
+# TUI 终端缩放刷新方案
 
 状态：active
-范围：`src/app/tui/Footer.tsx`、`src/app/tui/StatusBar.tsx`、`src/app/tui/StatsLine.tsx`、`src/app/tui/components/InputLine.tsx`、`src/app/tui/components/CtrlSafeTextInput.tsx`、`src/app/tui/hooks/useOverlayHeight.ts`
-读取时机：讨论或尝试修复 TUI 缩放时输入行重复/幽灵行问题时必读，避免重复踩坑。
+范围：`src/app/tui/App.tsx`、`src/app/tui/index.tsx`、`src/app/tui/components/InputLine.tsx`、`src/app/tui/OutputArea.tsx`、`src/app/tui/hooks/useOverlayHeight.ts`、`src/app/tui/hooks/useResizeCleanup.ts`
+读取时机：修改 TUI resize 相关逻辑、怀疑缩放行为异常时必读。
 
-## 目的
+## 最终方案（2026-06-14）
 
-记录对“终端缩放时输入行重复/幽灵行”问题的修复尝试与结论，防止后续开发者重复尝试已被证明不可行的方案。
+### 原理
 
-## 核心结论
+终端缩放时 Ink 产生重复输出的根因是：拖拽过程中终端发送 N 次 `SIGWINCH`，Ink 内部 `resized` handler 每次都触发 `onRender()`，但只在宽度变窄时调用 `this.log.clear()`。宽度变宽时旧帧叠加，且 `log-update` 的坐标跟踪在终端 resize 后错位。
 
-在 **保留 `<Static>` 避免长会话输入卡顿** 且 **保留主屏幕 scrollback** 这两个约束下，**缩放时输入行完全不重复在 Ink 中做不到**。根本原因是：
+**当前方案不跟 Ink 内部打，而是在 resize 停止后做一次全量 rebuild：**
 
-1. Ink 底层使用 `log-update`，按上一帧的逻辑坐标覆盖输出。
-2. 终端缩放时，`<Static>` 里的历史消息会被终端模拟器重排，导致 Footer 的物理坐标变化。
-3. Ink 不知道终端重排后的物理坐标，因此旧 Footer 帧会残留。
+1. **Polling + Debounce**：每 150ms 轮询 `process.stdout.columns`，检测到变化后启动 300ms debounce + 3s maxWait
+2. **清屏 + 清 scrollback**：`\x1b[2J\x1b[3J` 清除可见内容和 scrollback
+3. **Key remount**：`setResizeKey(n+1)` → `<App key={resizeKey}>` 强制 React 卸载重建整个 App 组件树
+4. **输入文字保留**：通过 `initialValue` prop 将 InputLine 的值提升到 TuiBootstrap 层，def 在 ref 中，remount 时恢复
 
-## 已尝试并回退的方案
+### 执行流程
 
-以下方案都已在 `dev-tui-new` 分支上实现并测试，最终均因不可接受的 trade-off 被回退到 `6ea4860`。
+```
+polling 150ms → 检测列宽变化
+  ├─ 重置 300ms debounce（正常：停止 resize 即触发）
+  └─ 首次变化启动 3s maxWait（兜底：极限抖动 3s 后强制执行）
+     ↓ 触发
+  \x1b[2J\x1b[3J（清屏 + 清 scrollback）
+  setResizeKey(n+1) → TuiBootstrap 重渲染
+    → 读 inputValueRef.current（最新输入文字）
+    → <App key={resizeKey}> remount
+      → InputLine: useState(initialValue) 恢复文字
+      → <Static> 在空 scrollback 上重建 → 无重复
+```
 
-### 1. 固定 Footer 高度 + 内容截断
+### 关键决策
 
-- `StatusBar` / `StatsLine` 固定 `height={1}` + `width={columns} overflow="hidden"`。
-- `InputLine` 固定 `maxLines={3}`，底部对齐，未使用行显示淡色 `│`。
+| 决策 | 理由 |
+|------|------|
+| `\x1b[3J` 清 scrollback | `<Static>` 的内容在 remount 时会重新渲染，不清 scrollback 会导致双份 |
+| key 在 TuiBootstrap 层（不是 App 内） | TuiBootstrap 重渲染才能读到最新的 `inputValueRef.current` |
+| polling 而不是 `stdout.on("resize")` | macOS zsh + Bun 下 resize 事件行为不确定，polling 更可靠 |
+| `initialValue` prop 而非 `useWindowSize` | remount 后 `useState(initialValue)` 恢复文字，比用 state 可控 |
 
-**结果**：缩放确实不再因 Footer 自身高度变化而重复，但空闲时输入区上方总有 2 行空白/占位，视觉上无法接受。
+### 失败的方案（已记录，避免重试）
 
-### 2. 备用屏幕缓冲区（alternate screen buffer）
+1. **固定 Footer 高度 + 内容截断**：视觉无法接受
+2. **备用屏幕缓冲区 (alternate screen)**：退出时 scrollback 隔离，复杂度高
+3. **Footer 绝对定位**：未能解决幽灵行
+4. **`useWindowSize()` + `emit("resize")` + `useStdout().write("\x1b[2J")`**：双重渲染叠加，log-update 冲突
+5. **`prependListener` 清屏**：handler 在 Ink 之后执行，擦掉新内容
+6. **monkey-patch `process.stdout.on` debounce**：与 `useWindowSize` 双重渲染叠加
+7. **`process.stdout.columns` 实时读取**：单靠这个无法清除拖拽 resize 期间的多帧输出
 
-- 启动时写入 `\x1b[?1049h` 进入备用屏幕。
-- 退出/SIGINT/SIGTERM 时写入 `\x1b[?1049l` 恢复主屏幕。
-- 缩放时清屏强制 Ink 全量重绘。
-- 退出前通过 `dumpSessionToStdout` 把会话以纯文本写回主屏幕以保留 scrollback。
+### 变更文件
 
-**结果**：彻底解决缩放重复，但用户不接受退出时 scrollback 隔离/恢复带来的复杂度和格式损失。
+| 文件 | 变更 |
+|------|------|
+| `src/app/tui/index.tsx` | `inputValueRef` + `resizeKey` state + polling/debounce + `<App key={resizeKey}>` |
+| `src/app/tui/App.tsx` | 移除 `useResizeCleanup()` |
+| `src/app/tui/components/InputLine.tsx` | `useWindowSize()` → `process.stdout.columns` + `initialValue`/`onValueChange` props |
+| `src/app/tui/hooks/useOverlayHeight.ts` | 移除手动 resize 监听，直接读 `stdout.rows` |
+| `src/app/tui/hooks/useResizeCleanup.ts` | 删除（dead code） |
 
-### 3. Footer 绝对定位
-
-- 根容器 `height={stdout.rows}`。
-- Footer 使用 `position="absolute" bottom={0} left={0} right={0}` 钉在终端底部。
-
-**结果**：未能解决幽灵行问题，Ink 的 `log-update` 仍然按逻辑坐标覆盖，物理坐标错位依旧。
-
-## 可行的彻底方案（需突破当前约束）
-
-若未来可以接受以下任一条件，问题可解：
-
-1. **备用屏幕 + 富文本恢复**：运行时隔离，退出前把会话完整写回主屏幕。
-2. **移除 `<Static>`，全部动态渲染**：让 Ink 管理所有行，缩放时全量重绘。代价是长会话输入可能重新出现卡顿。
-
-## 当前状态
-
-相关代码已回退到 `6ea4860`。本记录仅作为知识归档，提醒后续开发者不要在该问题上重复尝试上述已失败的方案。
-
-## 验证：
+### 验证
 
 ```bash
 bun run typecheck
-bun test tests/tui-footer-resize.test.tsx tests/tui-input-maxlines.test.tsx
+bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/tui-edge-cases.test.tsx
 ```
-
-> 注：上述命令验证的是历史实现，当前代码已回退到 `6ea4860`，相关修复不再生效。

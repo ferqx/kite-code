@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { Box, Text, useInput, useWindowSize } from "ink";
+import { Box, Text, useInput } from "ink";
 import { ScrollList } from "ink-scroll-list";
 import stringWidth from "string-width";
 import CtrlSafeTextInput from "./CtrlSafeTextInput";
@@ -48,6 +48,10 @@ interface InputLineProps {
   overlayActive?: boolean;
   editorContentRef?: React.MutableRefObject<EditorContentHandle | null>;
   onSlashSuggestionChange?: (data: SlashSuggestionData | null) => void;
+  /** Initial value — used to restore input text after resize remount. */
+  initialValue?: string;
+  /** Called when the input value changes (for external state sync). */
+  onValueChange?: (value: string) => void;
 }
 
 function commonPrefix(strings: string[]): string {
@@ -93,11 +97,16 @@ function completeSlash(input: string): string | null {
   return null;
 }
 
-export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef, onSlashSuggestionChange }: InputLineProps) {
+export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef, onSlashSuggestionChange, initialValue = "", onValueChange }: InputLineProps) {
   const t = useTheme();
-  const { columns } = useWindowSize();
+  // Read columns live from stdout.
+  const columns = process.stdout.columns || 80;
   const fileMaxHeight = useOverlayHeight(7);
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initialValue);
+  // Sync value changes to parent for resize persistence
+  useEffect(() => {
+    onValueChange?.(value);
+  }, [value, onValueChange]);
   const valueRef = useRef(value);
   valueRef.current = value;
   const [history, setHistory] = useState<string[]>([]);

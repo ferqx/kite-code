@@ -17,7 +17,6 @@ import Footer from "./Footer";
 import { useGlobalKeys } from "./hooks/useGlobalKeys";
 import { useTheme } from "./theme";
 import { useOverlayHeight } from "./hooks/useOverlayHeight";
-import { useResizeCleanup } from "./hooks/useResizeCleanup";
 
 const MemoHeader = React.memo(Header);
 
@@ -98,7 +97,6 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
   const slashMaxHeight = useOverlayHeight(7);
   const overlayOrInterrupt = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind || !!state.interrupt;
   useGlobalKeys(dispatch, overlayOrInterrupt);
-  useResizeCleanup();
 
   // Stabilized callbacks for React.memo children
   const hideHelp = useCallback(() => dispatch({ type: "HIDE_HELP" }), [dispatch]);
