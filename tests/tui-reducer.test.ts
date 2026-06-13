@@ -110,9 +110,10 @@ describe("eventReducer (blocks model)", () => {
 
   describe("EVENT.model_retry", () => {
     test("appends text block for model_retry", () => {
-      const s = dispatch(fresh(), { type: "EVENT", event: { type: "model_retry", data: { attempt: 2, error: "rate limit", delayMs: 1000 } } });
+      const s = dispatch(fresh(), { type: "EVENT", event: { type: "model_retry", data: { attempt: 2, maxAttempts: 5, error: "rate limit", delayMs: 1000 } } });
       expect(flatBlocks(s)[0].kind).toBe("text");
-      expect((flatBlocks(s)[0] as any).content).toContain("Model retry #2");
+      expect((flatBlocks(s)[0] as any).content).toContain("Model retry #2/5");
+      expect(s.status.retryState).toEqual({ attempt: 2, maxAttempts: 5, error: "rate limit", delayMs: 1000 });
     });
   });
 

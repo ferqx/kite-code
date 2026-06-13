@@ -23,9 +23,9 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case "SET_RUNNING":
-      return { ...state, running: true, exited: false, interrupt: null, toolStartTimes: undefined, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false };
+      return { ...state, running: true, exited: false, interrupt: null, toolStartTimes: undefined, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false, status: { ...state.status, retryState: null } };
     case "SET_IDLE": {
-      return { ...finalizeLastTurnStreaming(state), running: false, exited: false, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined };
+      return { ...finalizeLastTurnStreaming(state), running: false, exited: false, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined, status: { ...state.status, retryState: null } };
     }
     case "SET_EXITED": {
       const s = finalizeLastTurnStreaming(state);

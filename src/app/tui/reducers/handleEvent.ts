@@ -261,8 +261,24 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case "model_retry": {
       const finalized = finalizeLastTurnStreaming(state);
       const id = finalized.nextBlockId;
-      const block: OutputBlock = { id, kind: "text", content: `⟳ Model retry #${event.data.attempt} (${event.data.delayMs}ms): ${event.data.error}` };
-      return appendBlock(finalized, block);
+      const maxAttempts = event.data.maxAttempts;
+      const delayLabel = event.data.delayMs >= 1000 ? `${(event.data.delayMs / 1000).toFixed(1)}s` : `${event.data.delayMs}ms`;
+      const block: OutputBlock = { id, kind: "text", content: maxAttempts > 0
+        ? `⟳ Model retry #${event.data.attempt}/${maxAttempts} (${delayLabel}): ${event.data.error}`
+        : `⟳ Model retry #${event.data.attempt} (${delayLabel}): ${event.data.error}`
+      };
+      return {
+        ...appendBlock(finalized, block),
+        status: {
+          ...finalized.status,
+          retryState: {
+            attempt: event.data.attempt,
+            maxAttempts: maxAttempts,
+            error: event.data.error,
+            delayMs: event.data.delayMs,
+          },
+        },
+      };
     }
     case "step_begin": {
       return { ...state, status: { ...state.status, currentNode: event.data.node } };

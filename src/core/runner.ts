@@ -600,6 +600,7 @@ function parseRetryEvents(node: Record<string, unknown>): AgentEvent[] {
           type: "model_retry",
           data: {
             attempt: (r as Record<string, unknown>).attempt as number,
+            maxAttempts: ((r as Record<string, unknown>).maxAttempts as number) ?? 5,
             error: ((r as Record<string, unknown>).error as string) ?? "unknown",
             delayMs: ((r as Record<string, unknown>).delayMs as number) ?? 0,
           },

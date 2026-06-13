@@ -579,5 +579,6 @@ function initialStatusSnapshot(): StatusState {
     modelProvider: "",
     modelName: "",
     thinkingMode: "",
+    retryState: null,
   };
 }

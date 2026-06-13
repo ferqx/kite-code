@@ -45,6 +45,7 @@ const initialState: TuiState = {
     modelProvider: "",
     modelName: "deepseek-v4",
     thinkingMode: "max",
+    retryState: null,
   },
   exited: false,
   running: false,

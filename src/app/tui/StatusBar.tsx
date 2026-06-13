@@ -10,6 +10,11 @@ export function formatDuration(seconds: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function fmtDelay(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${ms}ms`;
+}
+
 interface StatusBarProps {
   status: StatusState;
   running: boolean;
@@ -47,6 +52,8 @@ export default function StatusBar({ status, running, timerKey }: StatusBarProps)
 
   if (!running) return null;
 
+  const retry = status.retryState;
+
   return (
     <Box>
       <Text color={t.primary}>{SPINNER[spinnerIdx]} </Text>
@@ -54,6 +61,14 @@ export default function StatusBar({ status, running, timerKey }: StatusBarProps)
       <Text bold color={t.primary}>{phaseLabel}</Text>
       <Text color={t.dim}> · </Text>
       <Text color={t.muted}>{planLabel()}</Text>
+      {retry && (
+        <>
+          <Text color={t.dim}> ·</Text>
+          <Text color={t.warning}>
+            ⟳ Retry {retry.attempt}{retry.maxAttempts > 0 ? `/${retry.maxAttempts}` : ""} ({fmtDelay(retry.delayMs)})
+          </Text>
+        </>
+      )}
     </Box>
   );
 }

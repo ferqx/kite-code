@@ -810,11 +810,13 @@ describe("Retry: model service error recovery", () => {
         const retryEvents: ModelRetryEvent[] = [];
         (model as unknown as Record<string, unknown>)._retryListener = (
           attempt: number,
+          maxAttempts: number,
           error: unknown,
           delayMs: number,
         ) => {
           retryEvents.push({
             attempt,
+            maxAttempts,
             error: String(error).slice(0, 200),
             delayMs,
           });
