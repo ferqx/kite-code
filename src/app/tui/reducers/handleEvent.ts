@@ -75,12 +75,60 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case "text": {
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
-      // Stream-append: update the last block only if it's a streaming text block.
-      // Non-streaming text blocks (model_retry, final) should not be overwritten.
-      // Skip update if content hasn't changed to avoid unnecessary re-renders.
+      // When streaming, split cumulative text into per-line blocks.
+      // Complete lines become finalized blocks → enter <Static> immediately.
+      // Only the last (possibly incomplete) line stays as a streaming block.
       if (state.running && lastBlock?.kind === "text" && lastBlock.streaming) {
         if (lastBlock.content === event.data.text) return state;
-        return updateLastBlock(state, { ...lastBlock, content: event.data.text });
+
+        const newText = event.data.text;
+        // Single-line update: keep existing block ID, just replace content.
+        // Avoids ID churn on character-by-character streaming.
+        if (!newText.includes("\n")) {
+          return updateLastBlock(state, { ...lastBlock, content: newText });
+        }
+
+        // Multi-line: split cumulative text into per-line blocks.
+        // Complete lines become finalized blocks → enter <Static> immediately.
+        // Only the last (possibly incomplete) line stays as a streaming block.
+
+        // Count already-finalized per-line text blocks before the streaming block.
+        // Supports both old model (single multi-line streaming block → numFinalized=0)
+        // and new model (per-line blocks preceding the streaming block).
+        let numFinalized = 0;
+        for (let i = 0; i < last!.blocks.length - 1; i++) {
+          if (last!.blocks[i].kind === "text") numFinalized++;
+        }
+        // Reconstruct previous full text for dedup check
+        let prevFullText = "";
+        let firstText = true;
+        for (const b of last!.blocks) {
+          if (b.kind !== "text") continue;
+          if (firstText) { prevFullText = b.content; firstText = false; }
+          else prevFullText += "\n" + b.content;
+        }
+        if (prevFullText === newText) return state;
+
+        const newLines = newText.split("\n");
+
+        const turns = state.turns.slice();
+        const blocks = turns[turns.length - 1].blocks.slice();
+        let nextId = state.nextBlockId;
+
+        // Remove old streaming block (always last text block)
+        blocks.pop();
+
+        // Add newly completed lines as finalized blocks
+        for (let i = numFinalized; i < newLines.length - 1; i++) {
+          blocks.push({ id: nextId++, kind: "text", content: newLines[i], streaming: false });
+        }
+
+        // Add new streaming block for the last (possibly incomplete) line
+        const lastLine = newLines[newLines.length - 1];
+        blocks.push({ id: nextId++, kind: "text", content: lastLine, streaming: true });
+
+        turns[turns.length - 1] = { blocks };
+        return { ...state, turns, nextBlockId: nextId };
       }
       // Dedup: check all text blocks in the last turn (not just the most recent one)
       if (lastBlock?.kind === "text" && lastBlock.content === event.data.text) return state;
@@ -89,7 +137,6 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           const blk = last.blocks[i];
           if (blk.kind === "text") {
             if (blk.content === event.data.text) return state;
-            // Continue scanning — don't break, as there may be earlier text blocks with same content
           }
         }
       }
@@ -263,17 +310,16 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (event.data.length === 0) return state;
       const finalized = finalizeLastTurnStreaming(state);
       const last = lastTurn(finalized);
-      const lastBlock = last?.blocks.at(-1);
-      if (lastBlock?.kind === "text" && lastBlock.content === event.data) return state;
-      if (last) {
-        for (let i = last.blocks.length - 1; i >= 0; i--) {
-          const blk = last.blocks[i];
-          if (blk.kind === "text") {
-            if (blk.content === event.data) return state;
-            break;
-          }
-        }
+      // Reconstruct full text from all per-line text blocks in this turn,
+      // since with line-by-line output each block holds only one line.
+      let fullText = "";
+      let firstText = true;
+      for (const b of (last?.blocks ?? [])) {
+        if (b.kind !== "text") continue;
+        if (firstText) { fullText = b.content; firstText = false; }
+        else fullText += "\n" + b.content;
       }
+      if (fullText === event.data) return finalized;
       const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: "text", content: event.data };
       return appendBlock(finalized, block);

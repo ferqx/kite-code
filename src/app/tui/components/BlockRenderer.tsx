@@ -51,9 +51,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
 
     case "text":
       return (
-        <Box marginBottom={BLOCK_GAP}>
-          <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? dt.error : undefined} />
-        </Box>
+        <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? dt.error : undefined} />
       );
 
     case "reason": {
