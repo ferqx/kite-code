@@ -150,19 +150,22 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
             const cursor = isLoading ? "⏳" : i === selected ? ">" : " ";
             const marker = isActive ? "● " : "";
             const suffix = isLoading ? "  Loading..." : `  ${session.updatedAt}`;
-            // 预留：border(2) + paddingX(2) + cursor+space(2) + marker(2) ≈ 8，其余给 suffix
+            // 预留：border(2) + paddingX(2) = 4，Safe margin = 2
             const cols = stdout?.columns ?? 80;
-            const nameMax = Math.max(8, cols - 10 - suffix.length);
-            const rawName = session.name;
-            const displayName = rawName.length > nameMax
-              ? rawName.slice(0, nameMax - 1) + "…"
-              : rawName;
+            const maxWidth = cols - 6;
+            const prefix = `${cursor} ${marker}`;
+            const rawName = session.name.replace(/\n/g, " ");
+            const available = maxWidth - prefix.length - suffix.length - 1;
+            const displayName = available > 4
+              ? (rawName.length > available ? rawName.slice(0, available - 1) + "…" : rawName)
+              : rawName.slice(0, Math.max(4, maxWidth - prefix.length - 4)) + "…";
+            const lineColor = isLoading ? t.warning : i === selected ? t.primary : t.muted;
             return (
-              <Box key={session.threadId}>
-                <Text color={isLoading ? t.warning : i === selected ? t.primary : t.muted}>
-                  {cursor} {marker}{displayName}
+              <Box key={session.threadId} width={maxWidth} flexShrink={0} flexGrow={0}>
+                <Text color={lineColor}>
+                  {prefix}{displayName}
+                  <Text color={isLoading ? t.warning : t.dim}>{suffix}</Text>
                 </Text>
-                <Text color={isLoading ? t.warning : t.dim}>{suffix}</Text>
               </Box>
             );
           })}
