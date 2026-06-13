@@ -68,7 +68,7 @@
 - `tests/tui-edge-cases.test.tsx`
 - `tests/tui-end-key.test.tsx`
 
-## 验证
+## 验证：
 
 ```bash
 bun run typecheck
