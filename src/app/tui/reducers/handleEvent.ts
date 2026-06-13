@@ -320,9 +320,22 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         else fullText += "\n" + b.content;
       }
       if (fullText === event.data) return finalized;
-      const id = finalized.nextBlockId;
-      const block: OutputBlock = { id, kind: "text", content: event.data };
-      return appendBlock(finalized, block);
+      // final 可能比最后一个 text 事件多几个字符 → 只追加增量，不创建全文 block 避免重复
+      if (fullText.length > 0 && event.data.startsWith(fullText)) {
+        const delta = event.data.slice(fullText.length);
+        if (delta.length === 0) return finalized;
+        const id = finalized.nextBlockId;
+        const block: OutputBlock = { id, kind: "text", content: delta };
+        return appendBlock(finalized, block);
+      }
+      // 无前置 text block（纯 tool 调用等）→ 创建全文 block
+      if (fullText.length === 0) {
+        const id = finalized.nextBlockId;
+        const block: OutputBlock = { id, kind: "text", content: event.data };
+        return appendBlock(finalized, block);
+      }
+      // final 内容与已渲染文本不一致 → 保留已有 block，不创建重复
+      return finalized;
     }
     case "need_approval": {
       const finalized = finalizeLastTurnStreaming(state);
