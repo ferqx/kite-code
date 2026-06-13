@@ -429,9 +429,19 @@ function CtrlSafeTextInput({
         return;
       }
 
+      if (key.return && (key.shift || key.meta)) {
+        // Insert newline at cursor position (cursor offset is known here but
+        // not exposed to InputLine, so we handle Shift / Meta+Enter locally).
+        const co = cursorOffsetRef.current;
+        const newValue = originalValue.slice(0, co) + "\n" + originalValue.slice(co);
+        setCursorOffset(co + 1);
+        onChange(newValue);
+        return;
+      }
+
       if (key.return) {
-        // Enter / Shift+Enter handling is in InputLine to have reliable
-        // access to handleSubmit and value without stale-closure risk.
+        // Plain Enter handling is in InputLine to have reliable access to
+        // handleSubmit and value without stale-closure risk.
         return;
       }
 

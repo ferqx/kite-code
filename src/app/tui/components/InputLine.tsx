@@ -424,7 +424,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
     if (key.return) {
       if (key.shift || key.meta) {
-        commitValue(valueRef.current + "\n");
+        // Handled by CtrlSafeTextInput (inserts at cursor position).
         return;
       }
       handleSubmitRef.current(valueRef.current);

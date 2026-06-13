@@ -3,6 +3,17 @@ import { render } from "ink-testing-library";
 import { describe, test, expect } from "bun:test";
 import CtrlSafeTextInput from "../src/app/tui/components/CtrlSafeTextInput";
 
+async function wait(ms = 30) {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+async function pressKeys(stdin: any, seq: string, count = 1, ms = 30) {
+  for (let i = 0; i < count; i++) {
+    stdin.write(seq);
+    await wait(ms);
+  }
+}
+
 describe("CtrlSafeTextInput edge cases", () => {
   test("handles explicit newlines with empty lines", () => {
     const value = "abc\n\nghi";
@@ -71,5 +82,52 @@ describe("CtrlSafeTextInput edge cases", () => {
 
     const lines = (lastFrame() ?? "").split("\n");
     expect(lines.length).toBeGreaterThan(0);
+  });
+
+  test("Shift+Enter inserts newline at cursor position, not at end", async () => {
+    let currentValue = "abcdef";
+    let lastOnChangeValue = "";
+    const onChange = (v: string) => {
+      currentValue = v;
+      lastOnChangeValue = v;
+    };
+    const { lastFrame, stdin, rerender } = render(
+      React.createElement(CtrlSafeTextInput, {
+        value: currentValue,
+        onChange,
+        focus: true,
+        showCursor: true,
+        maxWidth: 20,
+      }),
+    );
+
+    // Move cursor left 3 positions: from end (6) to 3 (after "c").
+    await pressKeys(stdin, "\x1b[D", 3);
+
+    // Send Kitty protocol Shift+Enter: \x1b[13;2u
+    await pressKeys(stdin, "\x1b[13;2u", 1);
+    // Wait for kitty protocol sequence to be flushed (App waits ~20ms)
+    await wait(50);
+
+    // onChange should have been called with newline at cursor position 3
+    expect(lastOnChangeValue).toBe("abc\ndef");
+
+    // Re-render with updated value so CtrlSafeTextInput picks up the new prop
+    rerender(
+      React.createElement(CtrlSafeTextInput, {
+        value: currentValue,
+        onChange,
+        focus: true,
+        showCursor: true,
+        maxWidth: 20,
+      }),
+    );
+
+    // Verify visual output: 2 lines, "abc" on line 1, "def" on line 2
+    const frame = lastFrame() ?? "";
+    const lines = frame.split("\n");
+    expect(lines.length).toBe(2);
+    expect(lines[0]).toContain("abc");
+    expect(lines[1]).toContain("def");
   });
 });
