@@ -151,7 +151,10 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
             const marker = isActive ? "● " : "";
             return (
               <Box key={session.threadId}>
-                <Text color={isLoading ? t.warning : i === selected ? t.primary : t.muted}>
+                <Text
+                  color={isLoading ? t.warning : i === selected ? t.primary : t.muted}
+                  wrap="truncate-end"
+                >
                   {cursor} {marker}{displayName}
                 </Text>
                 {isLoading && <Text color={t.warning}>  Loading...</Text>}
