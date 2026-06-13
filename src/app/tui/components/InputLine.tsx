@@ -483,7 +483,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
 
   const promptChar = mode === "approval" ? "↑↓ select · Enter confirm  " : mode === "question" ? "? " : "❯ ";
   const promptWidth = stringWidth(promptChar);
-  const inputMaxWidth = Math.max(1, columns - promptWidth);
+  const inputMaxWidth = Math.max(1, columns - promptWidth * 2);
 
   // Slash suggestions are rendered in App.tsx Overlay area
 

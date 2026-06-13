@@ -72,20 +72,17 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     inputValueRef.current = v;
   }, []);
 
-  // Terminal resize: debounce native events, clear scrollback + remount App.
+  // Terminal resize: clear scrollback + remount App on every event.
+  // React batches rapid setState calls into a single render, so fast
+  // drag-resize only triggers one layout refresh at the final width.
   const [resizeKey, setResizeKey] = React.useState(0);
   React.useEffect(() => {
-    let debounce: ReturnType<typeof setTimeout>;
     const handler = () => {
-      clearTimeout(debounce);
-      debounce = setTimeout(() => {
-        process.stdout.write("\x1b[2J\x1b[3J");
-        setResizeKey(n => n + 1);
-      }, 300);
+      process.stdout.write("\x1b[2J\x1b[3J");
+      setResizeKey(n => n + 1);
     };
     process.stdout.on("resize", handler);
     return () => {
-      clearTimeout(debounce);
       process.stdout.off("resize", handler);
     };
   }, []);
