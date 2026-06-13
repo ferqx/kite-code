@@ -72,35 +72,21 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     inputValueRef.current = v;
   }, []);
 
-  // Detect terminal resize via polling and force App remount after
-  // resize settles. Key change on App forces a clean Ink render.
-  // debounce 300ms + maxWait 3s guarantees exactly one refresh per
-  // resize gesture, even during rapid oscillating drag.
+  // Terminal resize: debounce native events, clear scrollback + remount App.
   const [resizeKey, setResizeKey] = React.useState(0);
-  const lastColsRef = React.useRef(process.stdout.columns || 80);
   React.useEffect(() => {
     let debounce: ReturnType<typeof setTimeout>;
-    let maxWait: ReturnType<typeof setTimeout> | undefined;
-    const refresh = () => {
+    const handler = () => {
       clearTimeout(debounce);
-      clearTimeout(maxWait);
-      maxWait = undefined;
-      process.stdout.write("\x1b[2J\x1b[3J");
-      setResizeKey(n => n + 1);
+      debounce = setTimeout(() => {
+        process.stdout.write("\x1b[2J\x1b[3J");
+        setResizeKey(n => n + 1);
+      }, 300);
     };
-    const interval = setInterval(() => {
-      const cur = process.stdout.columns || 80;
-      if (cur !== lastColsRef.current) {
-        lastColsRef.current = cur;
-        clearTimeout(debounce);
-        debounce = setTimeout(refresh, 300);
-        maxWait ??= setTimeout(refresh, 3000);
-      }
-    }, 150);
+    process.stdout.on("resize", handler);
     return () => {
-      clearInterval(interval);
       clearTimeout(debounce);
-      clearTimeout(maxWait);
+      process.stdout.off("resize", handler);
     };
   }, []);
   const thinkingLevelRef = React.useRef<string | null>(null);

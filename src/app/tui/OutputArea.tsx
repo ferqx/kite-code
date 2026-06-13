@@ -105,21 +105,21 @@ export default function OutputArea({
         )}
       </Box>
       {activeDynamicBlocks.map((block, i) => {
-          const prevBlock =
-            i > 0
-              ? activeDynamicBlocks[i - 1]
-              : mergedStaticBlocks.at(-1);
-          return (
-            <BlockRenderer
-              key={block.id}
-              block={block}
-              isFocused={false}
-              index={mergedStaticBlocks.length + i}
-              prevBlock={prevBlock}
-              awaitingApproval={awaitingApproval}
-            />
-          );
-        })}
+        const prevBlock =
+          i > 0
+            ? activeDynamicBlocks[i - 1]
+            : mergedStaticBlocks.at(-1);
+        return (
+          <BlockRenderer
+            key={block.id}
+            block={block}
+            isFocused={false}
+            index={mergedStaticBlocks.length + i}
+            prevBlock={prevBlock}
+            awaitingApproval={awaitingApproval}
+          />
+        );
+      })}
     </Box>
   );
 }

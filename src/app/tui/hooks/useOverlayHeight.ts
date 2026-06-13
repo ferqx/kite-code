@@ -5,9 +5,8 @@ const APP_CHROME = 10;
 
 /**
  * Returns the max content height for an overlay panel.
- * App's useWindowSize() triggers re-render on every resize event,
- * so stdout.rows is always current at render time. No need for
- * a separate resize listener.
+ * Reads stdout.rows live at render time — when App remounts on resize
+ * (\x1b[2J\x1b[3J + key change), this hook re-runs with the new value.
  * @param chromeRows - rows consumed by the panel's non-list chrome (border, title, hints, margins)
  */
 export function useOverlayHeight(chromeRows: number): number {

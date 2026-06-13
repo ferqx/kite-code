@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useWindowSize } from "ink";
 import { ScrollList } from "ink-scroll-list";
 import stringWidth from "string-width";
 import CtrlSafeTextInput from "./CtrlSafeTextInput";
@@ -99,8 +99,7 @@ function completeSlash(input: string): string | null {
 
 export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef, onSlashSuggestionChange, initialValue = "", onValueChange }: InputLineProps) {
   const t = useTheme();
-  // Read columns live from stdout.
-  const columns = process.stdout.columns || 80;
+  const { columns } = useWindowSize();
   const fileMaxHeight = useOverlayHeight(7);
   const [value, setValue] = useState(initialValue);
   // Sync value changes to parent for resize persistence
