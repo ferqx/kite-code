@@ -23,6 +23,7 @@ import { useExternalEditor } from "./hooks/useExternalEditor";
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
 let _sessionManagerForExit: SessionManager | null = null;
+let _unmountForExit: (() => void) | null = null;
 
 function resolveModelForResume(
   currentConfig: AgentConfig,
@@ -155,6 +156,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   React.useEffect(() => {
     if (state.exitRequested) {
       sessionManager.abortAll();
+      _unmountForExit?.();
       process.exit(0);
     }
   }, [state.exitRequested, sessionManager]);
@@ -204,7 +206,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     dispatch({ type: "EVENT", event: { type: "text", data: { text: "👋 Goodbye!" } } });
     sessionManager.abortAll();
     sessionManager.dispose();
-    setTimeout(() => process.exit(0), 300);
+    setTimeout(() => { _unmountForExit?.(); process.exit(0); }, 300);
   }, [dispatch, sessionManager]);
 
   // Load historical sessions from DB on startup, but always start fresh.
@@ -460,7 +462,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   React.useEffect(() => {
     if (state.ctrlCPressed && !state.interrupt) {
       const rt = sessionManager.getRuntime(threadIdRef.current);
-      rt?.abortController?.abort();
+      rt?.abort();
     }
   }, [state.ctrlCPressed, state.interrupt, sessionManager]);
 
@@ -473,7 +475,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     prevRunningRef.current = state.running;
     if (wasRunning && !state.running && !state.ctrlCPressed) {
       const rt = sessionManager.getRuntime(threadIdRef.current);
-      rt?.abortController?.abort();
+      rt?.abort();
     }
   }, [state.running, state.ctrlCPressed, sessionManager]);
 
@@ -602,6 +604,11 @@ if (import.meta.main) {
     kittyKeyboard: { mode: 'enabled' },
     incrementalRendering: false,
   });
+
+  // Expose unmount so exit handlers inside the component tree can properly
+  // tear down kitty keyboard protocol before terminating the process.
+  _unmountForExit = unmount;
+
   process.on("SIGINT", () => {
     _sessionManagerForExit?.abortAll();
     _sessionManagerForExit?.dispose();
