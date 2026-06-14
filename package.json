@@ -11,6 +11,7 @@
     "test:mock": "bun test ./tests/mock-compaction.real.ts",
     "test:e2e": "bun test ./tests/e2e/",
     "tui": "bun run src/app/tui/index.tsx",
+    "prod:tui": "NODE_ENV=production bun run src/app/tui/index.tsx",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
