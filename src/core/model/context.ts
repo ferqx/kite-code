@@ -2,7 +2,6 @@ import {
   AIMessage,
   HumanMessage,
   SystemMessage,
-  ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
 import { buildCacheableRuntimeContext, formatPlanStateReminder } from "./runtime-context";
@@ -53,13 +52,31 @@ export function buildModelMessages(role: AgentRole, state: ModelContextState, sk
  *   to the checkpoint. After resume, these messages remain but matching ToolMessages may be missing.
  * - This function cleans up incomplete pairs on every context rebuild to prevent API 400 errors.
  */
+/**
+ * Sanitize orphaned tool-call / tool-result pairs from the message list.
+ *
+ * After checkpoint deserialization, messages may be plain objects that fail
+ * `instanceof` checks. Use field-based detection as fallback to ensure
+ * incomplete tool_call pairs are always cleaned.
+ */
 export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
+  // Helper: get a plain object view of a message for field-based detection
+  const asObj = (msg: BaseMessage): Record<string, unknown> => msg as unknown as Record<string, unknown>;
+
   // Collect all tool_call_ids from AIMessages in the list
   const aiToolCallIds = new Set<string>();
   for (const msg of messages) {
-    if (msg instanceof AIMessage && Array.isArray(msg.tool_calls)) {
-      for (const tc of msg.tool_calls) {
-        if (tc.id) aiToolCallIds.add(tc.id);
+    // Check both tool_calls and additional_kwargs.tool_calls (both can contain tool call data)
+    const m = asObj(msg);
+    const toolCalls = m.tool_calls;
+    const akwToolCalls = (m.additional_kwargs as Record<string, unknown> | undefined)?.tool_calls;
+    for (const tc of [toolCalls, akwToolCalls]) {
+      if (Array.isArray(tc)) {
+        for (const item of tc) {
+          if (item && typeof item === "object" && "id" in item && (item as Record<string, unknown>).id) {
+            aiToolCallIds.add((item as Record<string, unknown>).id as string);
+          }
+        }
       }
     }
   }
@@ -67,39 +84,118 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
   // Collect all tool_call_ids from ToolMessages in the list
   const toolResultIds = new Set<string>();
   for (const msg of messages) {
-    if (msg instanceof ToolMessage) {
-      toolResultIds.add(msg.tool_call_id);
+    const m = asObj(msg);
+    if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0 && !AIMessage.isInstance(msg)) {
+      toolResultIds.add(m.tool_call_id);
     }
   }
 
   // Fix orphaned AIMessages: strip tool_calls that have no matching ToolMessage
-  // Fix orphaned ToolMessages: remove those with no matching AIMessage
-  const result: BaseMessage[] = [];
+  let result: BaseMessage[] = [];
   for (const msg of messages) {
-    if (msg instanceof AIMessage && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-      const orphaned = msg.tool_calls.some((tc) => tc.id && !toolResultIds.has(tc.id));
+    const m = asObj(msg);
+    const toolCalls = m.tool_calls;
+    const akwToolCalls = (m.additional_kwargs as Record<string, unknown> | undefined)?.tool_calls;
+    // Check both tool_calls sources
+    const allToolCalls = (Array.isArray(toolCalls) ? toolCalls : []).concat(
+      Array.isArray(akwToolCalls) ? akwToolCalls : [],
+    );
+    if (allToolCalls.length > 0) {
+      const orphaned = allToolCalls.some((tc: unknown) => {
+        if (!tc || typeof tc !== "object") return true;
+        const id = (tc as Record<string, unknown>).id;
+        return !id || !toolResultIds.has(id as string);
+      });
       if (orphaned) {
-        const validCalls = msg.tool_calls.filter((tc) => !tc.id || toolResultIds.has(tc.id));
+        // Only keep calls that have IDs AND matching ToolMessages
+        const validCalls = (Array.isArray(toolCalls) ? toolCalls : []) as Array<Record<string, unknown>>;
+        const kept = validCalls.filter((tc) => tc.id && toolResultIds.has(tc.id as string));
+        // Rebuild message — preserve non-tool additional_kwargs (e.g. reasoning_content)
+        // and response_metadata while explicitly clearing tool_calls to prevent
+        // stale data from leaking through LangChain's API serialization.
+        const cleanAkw = { ...(msg.additional_kwargs ?? {}) } as Record<string, unknown>;
+        delete cleanAkw.tool_calls;
         const newMsg = new AIMessage({
-          id: msg.id,
-          content: msg.content,
-          tool_calls: validCalls,
-          additional_kwargs: { ...msg.additional_kwargs, tool_calls: [] },
-          response_metadata: msg.response_metadata,
-          usage_metadata: msg.usage_metadata,
+          content: typeof msg.content === "string" ? msg.content : "",
+          tool_calls: kept.length > 0 ? (kept as AIMessage["tool_calls"]) : [],
+          additional_kwargs: cleanAkw,
+          response_metadata: msg.response_metadata ?? {},
         });
         result.push(newMsg);
         continue;
       }
     }
-    if (msg instanceof ToolMessage && !aiToolCallIds.has(msg.tool_call_id)) {
-      // Orphaned ToolMessage — skip it
-      continue;
+    // Check for orphaned ToolMessage
+    if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0 && !AIMessage.isInstance(msg)) {
+      if (!aiToolCallIds.has(m.tool_call_id)) {
+        continue;
+      }
     }
     result.push(msg);
   }
 
+  // Reorder: ensure ToolMessages immediately follow their AIMessage.
+  // The graph's cleanup node adds cancelled ToolMessages for orphaned tool_calls,
+  // but LangGraph's append-only messages reducer places them after any new
+  // HumanMessage. This shim groups each AIMessage with its ToolMessages
+  // before the interleaved user message, satisfying the API requirement.
+  result = reorderInterleavedMessages(result);
+
   return result;
+}
+
+/** Group ToolMessages directly after their AIMessage for API compatibility.
+ *
+ * Uses a two-pass approach: first build a tool_call_id → ToolMessage index,
+ * then emit each AIMessage immediately followed by all its ToolMessages.
+ * This correctly handles multiple consecutive AIMessages, interleaved
+ * human messages, and cancelled ToolMessages appended at the end by cleanup.
+ *
+ * Exported for testing. */
+export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage[] {
+  // Build index: tool_call_id → ToolMessages
+  const toolMsgByCallId = new Map<string, BaseMessage[]>();
+  for (const msg of messages) {
+    const m = msg as unknown as Record<string, unknown>;
+    if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0) {
+      const list = toolMsgByCallId.get(m.tool_call_id);
+      if (list) list.push(msg);
+      else toolMsgByCallId.set(m.tool_call_id, [msg]);
+    }
+  }
+
+  const placed = new Set<BaseMessage>();
+  const ordered: BaseMessage[] = [];
+
+  for (const msg of messages) {
+    if (placed.has(msg)) continue;
+
+    const tcField = (msg as unknown as Record<string, unknown>).tool_calls;
+    if (Array.isArray(tcField) && tcField.length > 0) {
+      ordered.push(msg);
+      placed.add(msg);
+
+      // Emit matching ToolMessages immediately after, in declaration order
+      for (const tc of tcField) {
+        if (tc && typeof tc === "object" && "id" in tc && tc.id) {
+          const tms = toolMsgByCallId.get(tc.id as string);
+          if (tms) {
+            for (const tm of tms) {
+              if (!placed.has(tm)) {
+                ordered.push(tm);
+                placed.add(tm);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      ordered.push(msg);
+      placed.add(msg);
+    }
+  }
+
+  return ordered;
 }
 
 /** 准备模型上下文（组装系统提示词 + 对话消息，接近阈值时清理旧工具结果） / Prepare model context (assemble, clear old tool results when near threshold) */

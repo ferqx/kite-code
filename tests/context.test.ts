@@ -4,6 +4,7 @@ import {
   buildModelMessages,
   buildStaticSystemPrompt,
   prepareModelContext,
+  reorderInterleavedMessages,
   sanitizeToolCallPairs,
 } from "../src/core/model/context";
 import type { SkillManifest } from "../src/core/skills/types";
@@ -400,5 +401,204 @@ describe("sanitizeToolCallPairs", () => {
   test("handles empty array", () => {
     const result = sanitizeToolCallPairs([]);
     expect(result).toHaveLength(0);
+  });
+
+  test("detects orphaned tool_calls on plain objects (checkpoint-deserialized)", () => {
+    // Simulate deserialized message where instanceof fails
+    const msgs: BaseMessage[] = [
+      { content: "run ls", tool_calls: [{ id: "c1", name: "shell_execute", args: { command: "ls" } }], additional_kwargs: { tool_calls: [{ id: "c1", name: "shell_execute", args: { command: "ls" } }] } } as unknown as BaseMessage,
+      { content: "next" } as unknown as BaseMessage,
+    ];
+    const result = sanitizeToolCallPairs(msgs);
+    expect(result).toHaveLength(2);
+    const ai = result[0] as AIMessage;
+    expect(ai.tool_calls).toHaveLength(0);
+  });
+
+  test("detects orphaned tool_calls from additional_kwargs.tool_calls only", () => {
+    // Some LangChain adapters store tool_calls only in additional_kwargs
+    const msgs: BaseMessage[] = [
+      new AIMessage({ content: "ok", additional_kwargs: { tool_calls: [{ id: "c1", name: "shell_execute", args: { command: "ls" } }] } } as any),
+      new HumanMessage("next"),
+    ];
+    const result = sanitizeToolCallPairs(msgs);
+    expect(result).toHaveLength(2);
+    const ai = result[0] as AIMessage;
+    // tool_calls should be stripped since no matching ToolMessage
+    expect(ai.tool_calls).toHaveLength(0);
+    expect(ai.additional_kwargs).toEqual({});
+  });
+
+  test("rebuilds orphaned message preserving non-tool additional_kwargs and response_metadata", () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: "let me check",
+        tool_calls: [{ id: "c1", name: "read_file", args: { path: "x.txt" } }],
+        additional_kwargs: { reasoning_content: "deep analysis", custom_field: "should_be_preserved" } as any,
+        response_metadata: { model: "deepseek", usage: { total_tokens: 100 } },
+      }),
+      new HumanMessage("next"),
+    ];
+    const result = sanitizeToolCallPairs(msgs);
+    expect(result).toHaveLength(2);
+    const ai = result[0] as AIMessage;
+    expect(ai.tool_calls).toHaveLength(0);
+    // Non-tool additional_kwargs preserved
+    expect((ai.additional_kwargs as any).reasoning_content).toBe("deep analysis");
+    expect((ai.additional_kwargs as any).custom_field).toBe("should_be_preserved");
+    // Only tool_calls is removed
+    expect((ai.additional_kwargs as any).tool_calls).toBeUndefined();
+    // response_metadata preserved
+    expect(ai.response_metadata).toEqual({ model: "deepseek", usage: { total_tokens: 100 } });
+  });
+});
+
+// ============================================================================
+// reorderInterleavedMessages — 消息排序
+// 确保 ToolMessage 紧跟在对应 AIMessage 之后，满足 API 格式要求。
+// ============================================================================
+describe("reorderInterleavedMessages", () => {
+  test("passes through messages with no tool_calls unchanged", () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage("hello"),
+      new AIMessage({ content: "hi" }),
+    ];
+    const result = reorderInterleavedMessages(msgs);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe(msgs[0]);
+    expect(result[1]).toBe(msgs[1]);
+  });
+
+  test("passes through already-correct order unchanged", () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage("run ls"),
+      new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "shell_execute", args: { command: "ls" } }] }),
+      new ToolMessage({ content: "output", tool_call_id: "c1" }),
+      new AIMessage({ content: "done" }),
+    ];
+    const result = reorderInterleavedMessages(msgs);
+    expect(result).toHaveLength(4);
+    // Order unchanged
+    expect(result[0]).toBe(msgs[0]);
+    expect(result[1]).toBe(msgs[1]);
+    expect(result[2]).toBe(msgs[2]);
+    expect(result[3]).toBe(msgs[3]);
+  });
+
+  test("moves interleaved HumanMessage after ToolMessages", () => {
+    // Scenario: user interrupted tool execution
+    const msgs: BaseMessage[] = [
+      new HumanMessage("do it"),
+      new AIMessage({ content: "ok", tool_calls: [{ id: "c1", name: "shell_execute", args: { command: "ls" } }] }),
+      new HumanMessage("stop"),  // ← interrupt
+      new ToolMessage({ content: "output", tool_call_id: "c1" }),
+    ];
+    const result = reorderInterleavedMessages(msgs);
+    expect(result).toHaveLength(4);
+    // AIMessage → ToolMessage → HumanMessage
+    expect(result[1]).toBe(msgs[1]); // AIMessage
+    expect((result[2] as ToolMessage).tool_call_id).toBe("c1"); // ToolMessage
+    expect(result[3]).toBe(msgs[2]); // HumanMessage moved after
+  });
+
+  test("handles multiple tool_calls with some interleaved", () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage("go"),
+      new AIMessage({ content: "", tool_calls: [
+        { id: "c1", name: "read_file", args: { path: "a.txt" } },
+        { id: "c2", name: "shell_execute", args: { command: "ls" } },
+      ] }),
+      new ToolMessage({ content: "file content", tool_call_id: "c1" }),
+      new HumanMessage("wait"), // interrupt
+      new ToolMessage({ content: "ls output", tool_call_id: "c2" }),
+    ];
+    const result = reorderInterleavedMessages(msgs);
+    // AIMessage → ToolMessage(c1) → ToolMessage(c2) → HumanMessage
+    expect(result[2]).toBe(msgs[2]); // TM(c1) directly after AI
+    expect(result[3]).toBe(msgs[4]); // TM(c2) also after AI
+    expect(result[4]).toBe(msgs[3]); // HM moved after
+  });
+
+  test("handles multiple consecutive AIMessages with cancelled ToolMessages at end", () => {
+    // Critical case: cleanup node appends all cancelled TMs at the end
+    const msgs: BaseMessage[] = [
+      new HumanMessage("start"),
+      new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "shell_execute", args: { command: "ls" } }] }),
+      new AIMessage({ content: "", tool_calls: [{ id: "c2", name: "read_file", args: { path: "x.txt" } }] }),
+      new HumanMessage("new message"),
+      new ToolMessage({ content: JSON.stringify({ cancelled: true }), tool_call_id: "c1", status: "error" }),
+      new ToolMessage({ content: JSON.stringify({ cancelled: true }), tool_call_id: "c2", status: "error" }),
+    ];
+    const result = reorderInterleavedMessages(msgs);
+    expect(result).toHaveLength(6);
+    // AIMessage(c1) → TM(c1) → AIMessage(c2) → TM(c2) → HM
+    expect(result[1]).toBe(msgs[1]); // AI(c1)
+    expect((result[2] as ToolMessage).tool_call_id).toBe("c1");
+    expect(result[3]).toBe(msgs[2]); // AI(c2)
+    expect((result[4] as ToolMessage).tool_call_id).toBe("c2");
+    expect(result[5]).toBe(msgs[3]); // HM at end
+  });
+
+  test("handles three consecutive AIMessages with mixed interleaving", () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "read_file", args: { path: "a.txt" } }] }),
+      new AIMessage({ content: "", tool_calls: [{ id: "c2", name: "read_file", args: { path: "b.txt" } }] }),
+      new AIMessage({ content: "", tool_calls: [{ id: "c3", name: "read_file", args: { path: "c.txt" } }] }),
+      new HumanMessage("interrupt"),
+      new ToolMessage({ content: "ok", tool_call_id: "c1" }),
+      new ToolMessage({ content: "ok", tool_call_id: "c3" }),
+      new ToolMessage({ content: "ok", tool_call_id: "c2" }),
+    ];
+    const result = reorderInterleavedMessages(msgs);
+    // Each AI gets its TM grouped after it, HM at end
+    expect((result[1] as ToolMessage).tool_call_id).toBe("c1");
+    expect(result[2]).toBe(msgs[1]); // AI(c2)
+    expect((result[3] as ToolMessage).tool_call_id).toBe("c2");
+    expect(result[4]).toBe(msgs[2]); // AI(c3)
+    expect((result[5] as ToolMessage).tool_call_id).toBe("c3");
+    expect(result[6]).toBe(msgs[3]); // HumanMessage at end
+  });
+
+  test("handles multiple HumanMessages between AIMessage and ToolMessages", () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "shell_execute", args: { command: "ls" } }] }),
+      new HumanMessage("stop1"),
+      new HumanMessage("stop2"),
+      new HumanMessage("stop3"),
+      new ToolMessage({ content: "output", tool_call_id: "c1" }),
+    ];
+    const result = reorderInterleavedMessages(msgs);
+    // All HumanMessages should be after ToolMessage
+    expect((result[1] as ToolMessage).tool_call_id).toBe("c1");
+    expect(result[2]).toBe(msgs[1]); // HM1
+    expect(result[3]).toBe(msgs[2]); // HM2
+    expect(result[4]).toBe(msgs[3]); // HM3
+  });
+
+  test("no-op when there are no tool_calls anywhere", () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage("a"),
+      new AIMessage({ content: "b" }),
+      new HumanMessage("c"),
+    ];
+    const result = reorderInterleavedMessages(msgs);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBe(msgs[0]);
+    expect(result[1]).toBe(msgs[1]);
+    expect(result[2]).toBe(msgs[2]);
+  });
+
+  test("does not move orphaned ToolMessages without matching AIMessage", () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage("hello"),
+      new ToolMessage({ content: "orphan", tool_call_id: "ghost" }),
+      new HumanMessage("world"),
+    ];
+    const result = reorderInterleavedMessages(msgs);
+    // ToolMessage stays in original position (no matching AI to group with)
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBe(msgs[0]);
+    expect(result[1]).toBe(msgs[1]);
+    expect(result[2]).toBe(msgs[2]);
   });
 });

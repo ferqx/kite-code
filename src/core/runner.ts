@@ -216,6 +216,12 @@ export async function* runAgent(
       resumeValue = mapActionToResumeValue(result.action);
     }
   } finally {
+    // Yield to the event loop so LangGraph can finish pending checkpoint
+    // writes before we close the database. On abort, LangGraph's internal
+    // runner may still have queued put/putWrites calls that resolve after
+    // the stream consumer breaks.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
     checkpointer.close();
   }
 }
@@ -282,6 +288,7 @@ export async function* revertToCheckpoint(
     const result = await processStream(provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
+    await new Promise(resolve => setTimeout(resolve, 0));
     checkpointer.close();
   }
 }
@@ -356,6 +363,7 @@ export async function* forkFromCheckpoint(
     const result = await processStream(provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
+    await new Promise(resolve => setTimeout(resolve, 0));
     checkpointer.close();
   }
 }
@@ -829,6 +837,7 @@ export async function* streamCodeAgent(
     yield* normalizeGraphStream(stream, signal);
     streamCompleted = true;
   } finally {
+    await new Promise(resolve => setTimeout(resolve, 0));
     checkpointer.close();
   }
 }
@@ -857,6 +866,7 @@ export async function* resumeCodeAgent(
     yield* normalizeGraphStream(stream, signal);
     streamCompleted = true;
   } finally {
+    await new Promise(resolve => setTimeout(resolve, 0));
     checkpointer.close();
   }
 }
