@@ -73,17 +73,21 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     inputValueRef.current = v;
   }, []);
 
-  // Terminal resize: only remount App when width changes.
+  // Terminal resize: only remount App when width shrinks.
   // Height changes (e.g. tmux split, terminal window height drag) don't
   // need a full remount since <Flex> layout handles height automatically.
+  // Width increases don't need a remount — existing content still fits.
   // React batches rapid setState calls into a single render, so fast
   // drag-resize only triggers one layout refresh at the final width.
   const [resizeKey, setResizeKey] = React.useState(0);
   React.useEffect(() => {
     let prevCols = process.stdout.columns;
     const handler = () => {
-      if (process.stdout.columns === prevCols) return;
-      prevCols = process.stdout.columns;
+      const newCols = process.stdout.columns;
+      if (newCols === prevCols) return;
+      const shrunk = newCols < prevCols;
+      prevCols = newCols;
+      if (!shrunk) return;
       process.stdout.write("\x1b[2J\x1b[3J");
       setResizeKey(n => n + 1);
     };
