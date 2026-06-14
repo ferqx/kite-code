@@ -43,7 +43,7 @@ describe("StatusBar", () => {
 
   test("shows only spinner + phase + plan (no metrics)", () => {
     const { lastFrame } = render(
-      React.createElement(StatusBar, { status: fakeStatus(), timerKey: 0, running: false })
+      React.createElement(StatusBar, { status: fakeStatus(), timerKey: 0, running: true })
     );
     const output = lastFrame();
     expect(output).toContain("Building");

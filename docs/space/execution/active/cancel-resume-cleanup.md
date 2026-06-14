@@ -86,3 +86,10 @@ bun test tests/graph.test.ts    # 图路由 + cleanup 节点集成
 bun test tests/integration.test.ts  # 全链路
 bun test tests/runner.test.ts   # runAgent
 ```
+
+## 验证：
+
+```bash
+bun test tests/context.test.ts tests/graph.test.ts tests/integration.test.ts tests/runner.test.ts tests/session-manager.test.ts
+```
+

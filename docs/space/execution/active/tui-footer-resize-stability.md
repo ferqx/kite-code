@@ -66,3 +66,9 @@ resize 事件
 bun run typecheck
 bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/tui-edge-cases.test.tsx
 ```
+
+## 验证：
+
+```bash
+bun test tests/tui-soft-wrap.test.tsx tests/tui-cursor-nav.test.tsx tests/tui-edge-cases.test.tsx
+```
