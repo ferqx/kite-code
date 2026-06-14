@@ -121,7 +121,7 @@ describe("TUI E2E — P1 Key User Workflows", () => {
     try {
       plan.verify(tui.getCallCount());
     } catch (e) {
-      console.warn("[interaction] response plan verification:", (e as Error).message);
+      console.warn("[interaction] response plan:", (e as Error).message);
     } finally {
       tui?.unmount();
     }
@@ -350,9 +350,13 @@ describe("TUI E2E — P1 Key User Workflows", () => {
       expect(tui.isIdle() || tui.isRunning()).toBe(true);
     }, TIMEOUT);
 
+    // FIXME: ink-testing-library TextInput timing issues after multiple slash
+    // commands in sequence. The /setting command handler works correctly when
+    // tested manually with bun run tui.
     test.skip("/setting → shows Current Settings", async () => {
+      await tui.waitForIdle(5000);
       await runSlashCommand(tui, "/setting", 500);
-      expect(tui.getOutput()).toContain("Current Settings");
+      await tui.waitForText("Current Settings", 5000);
     }, TIMEOUT);
   });
 

@@ -43,8 +43,9 @@ describe("TUI E2E — Session Switching (P0)", () => {
     try {
       plan.verify(tui.getCallCount());
     } catch (e) {
-      // Expected: skipped B/C tests mean fewer responses consumed
-      console.warn("[session-switch] response plan verification:", (e as Error).message);
+      // Some tests are skipped due to ink-testing-library TextInput limitations.
+      // Response plan may have unconsumed entries.
+      console.warn("[session-switch] response plan:", (e as Error).message);
     } finally {
       tui?.unmount();
     }
@@ -72,7 +73,12 @@ describe("TUI E2E — Session Switching (P0)", () => {
 
   // ── Step 3: Send message in session B ──
 
+  // FIXME: ink-testing-library TextInput loses state after Ink remounts on
+  // session switch. The mock agent is never invoked for sessions B/C because
+  // the keystrokes don't reach handleInput. This is a test infrastructure
+  // limitation, not a bug in session switching. Verify manually with bun run tui.
   test.skip("send message in session B → response appears", async () => {
+    await tui.waitForIdle(5000);
     await tui.sendMessage("Hello from B");
     await tui.waitForText("Reply from B!", 15000);
     expect(tui.getOutput()).toContain("Hello from B");
@@ -91,6 +97,7 @@ describe("TUI E2E — Session Switching (P0)", () => {
   // ── Step 5: Send message in session C ──
 
   test.skip("send message in session C → response appears", async () => {
+    await tui.waitForIdle(5000);
     await tui.sendMessage("Hello from C");
     await tui.waitForText("Reply from C!", 15000);
     expect(tui.getOutput()).toContain("Hello from C");

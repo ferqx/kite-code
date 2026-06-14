@@ -414,15 +414,6 @@ export class SessionManager {
     this.activeId = toId;
   }
 
-  deactivateSession(threadId: string): void {
-    const rt = this.runtimes.get(threadId);
-    if (!rt) return;
-    if (rt.agentLoopActive) return;
-    rt.abortController = null;
-    rt.generator = null;
-    rt.eventBuffer = [];
-  }
-
   /** 懒加载：首次访问时从 DB 批量载入 token 统计到内存缓存
    *  Lazy load: populate in-memory cache from DB on first access */
   private ensureTokenStatsLoaded(): void {
