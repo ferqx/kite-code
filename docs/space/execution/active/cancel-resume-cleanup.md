@@ -76,15 +76,16 @@ START → cleanup 节点 → routeEntry → agent/approval/tools/user_input → 
 | field-based 检测而非 instanceof | 反序列化后的 plain object 会绕过 instanceof |
 | reorder 在 sanitize 之后 | cleanup 追加的 cancelled ToolMessage 可能排在新 HumanMessage 之后 |
 | `rt.abort()` 而非 `abortController.abort()` | 同步清 `agentLoopActive`，避免 session switch 时的 race condition |
-| `setTimeout(0)` 在 checkpointer.close() 之前 | 让 LangGraph 内部异步写入在关闭前完成 |
+| checkpointer `puts`/`putWrites` 关闭后静默跳过 | LangGraph 异步写入可能在 close() 后才触发，抛错会导致 crash |
 
 ## 测试覆盖
 
 ```bash
-bun test tests/context.test.ts  # sanitizeToolCallPairs + reorderInterleavedMessages (20+ tests)
-bun test tests/graph.test.ts    # 图路由 + cleanup 节点集成
-bun test tests/integration.test.ts  # 全链路
-bun test tests/runner.test.ts   # runAgent
+bun test tests/context.test.ts     # sanitizeToolCallPairs + reorderInterleavedMessages (32 tests)
+bun test tests/graph.test.ts       # 图路由 + cleanup 节点集成
+bun test tests/integration.test.ts # 全链路
+bun test tests/runner.test.ts      # runAgent
+bun test tests/session-manager.test.ts  # 会话生命周期 (43 tests)
 ```
 
 ## 验证：
