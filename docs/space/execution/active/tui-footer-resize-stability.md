@@ -12,11 +12,12 @@
 
 **当前方案不跟 Ink 内部打，而是在每次 resize 事件上做全量 rebuild：**
 
-1. 监听 `process.stdout.on("resize")`，每次事件都触发
-2. `\x1b[2J\x1b[3J` 清除屏幕 + scrollback
-3. `setResizeKey(n+1)` 触发 `<App key={resizeKey}>` 强制 React 卸载重建整个 App 组件树
-4. React 自动将同一帧内的多次 `setResizeKey` 合并为一次渲染 — 快速拖拽时只在最终宽度刷新一次布局
-5. 输入文字通过 `initialValue` prop + `onValueChange` 回调保留在 `inputValueRef` 中，remount 时恢复
+1. 监听 `process.stdout.on("resize")`，仅当 `process.stdout.columns` 变化时才触发
+2. 仅高度变化（tmux 分屏调整、窗口高度拖拽等）不触发，`<Flex>` 布局自动适应高度
+3. `\x1b[2J\x1b[3J` 清除屏幕 + scrollback
+4. `setResizeKey(n+1)` 触发 `<App key={resizeKey}>` 强制 React 卸载重建整个 App 组件树
+5. React 自动将同一帧内的多次 `setResizeKey` 合并为一次渲染 — 快速拖拽时只在最终宽度刷新一次布局
+6. 输入文字通过 `initialValue` prop + `onValueChange` 回调保留在 `inputValueRef` 中，remount 时恢复
 
 ### 为什么不用 debounce
 
@@ -28,6 +29,7 @@
 
 ```
 resize 事件
+  → process.stdout.columns !== prevCols?  // 仅宽度变化才执行
   → process.stdout.write("\x1b[2J\x1b[3J")  // 清屏 + 清 scrollback
   → setResizeKey(n+1)                       // 入队 React state 更新
   → TuiBootstrap 重渲染                      // React 合并同一帧内多次 setState
@@ -41,6 +43,7 @@ resize 事件
 
 | 决策 | 理由 |
 |------|------|
+| 仅宽度变化时触发 | 高度变化（tmux 分屏、窗口高度拖拽）由 `<Flex>` 自动处理，无需 remount |
 | 每次事件都触发（不 debounce） | 快速拖拽时 debounce 永远不触发，导致中间帧累积 |
 | `\x1b[3J` 清 scrollback | `<Static>` 在 remount 时重新渲染，不清会导致双份 |
 | key 在 TuiBootstrap 层（不是 App 内） | TuiBootstrap 重渲染才能读到最新的 `inputValueRef.current` |
