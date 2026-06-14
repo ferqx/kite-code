@@ -121,7 +121,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     let effectiveState = sanitizedState;
 
     try {
-      const { state: result } = await invokeModel({ model, state: effectiveState, tools, skills: input.skills });
+      const { state: result } = await invokeModel({ model, state: effectiveState, tools, skills: input.skills, signal: input.subagentSignal });
       const syncedAuth = authorizationForState(state, override);
       const modelConfigState = {
         modelProvider: input.config.providerName,
@@ -385,6 +385,57 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     return { toolMessage, extra };
   }
 
+  /**
+   * 清理节点：检测因中断/取消产生的孤儿 tool_calls，插入 cancelled ToolMessage。
+   *
+   * 当用户 ESC/Ctrl+C 取消正在执行工具的 agent 后，checkpoint 中的 AIMessage
+   * 仍带有未执行的 tool_calls。resume 时若不处理，graph 会将这些孤儿 tool_calls
+   * 当作"待处理"重新执行，导致：
+   *   1. 安全风险：重复执行已取消的 shell 命令
+   *   2. 顺序错乱：ToolMessage 被追加到新 HumanMessage 之后，导致 DeepSeek API 400 错误
+   *
+   * 本节点在 graph 入口处运行，为所有孤儿 tool_calls 插入 cancelled ToolMessage，
+   * 使其变为"已解决"。后续路由直接跳过 tools 节点，agent 节点看到完整干净的对话历史。
+   */
+  const cleanup = async (state: CodeAgentState) => {
+    // Collect resolved tool_call_ids from existing ToolMessages
+    const resolvedIds = new Set<string>();
+    for (const msg of state.messages) {
+      const m = msg as unknown as Record<string, unknown>;
+      if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0) {
+        resolvedIds.add(m.tool_call_id);
+      }
+    }
+
+    const cancelledToolMessages: ToolMessage[] = [];
+
+    for (const msg of state.messages) {
+      // Use field-based detection (consistent with sanitizeToolCallPairs)
+      // instead of instanceof to handle checkpoint-deserialized plain objects.
+      const m = msg as unknown as Record<string, unknown>;
+      const toolCalls = m.tool_calls;
+      if (!Array.isArray(toolCalls) || toolCalls.length === 0) continue;
+
+      for (const tc of toolCalls) {
+        if (!tc || typeof tc !== "object") continue;
+        const id = (tc as Record<string, unknown>).id;
+        if (!id || resolvedIds.has(id as string)) continue;
+
+        cancelledToolMessages.push(new ToolMessage({
+          content: JSON.stringify({ cancelled: true, reason: "User cancelled the operation" }),
+          tool_call_id: id as string,
+          name: String((tc as Record<string, unknown>).name ?? "unknown"),
+          status: "error",
+        }));
+      }
+    }
+
+    if (cancelledToolMessages.length > 0) {
+      return { messages: cancelledToolMessages };
+    }
+    return {};
+  };
+
   /** 工具节点：执行所有待处理的工具调用 / Tools node — execute all pending tool calls */
   const tools = async (state: CodeAgentState) => {
     // 获取所有待处理的工具请求（支持并行派发多个子 agent 等场景）
@@ -443,11 +494,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   };
 
   const graph = new StateGraph(AgentState)
+    .addNode("cleanup", cleanup)
     .addNode("agent", agent)
     .addNode("approval", approval)
     .addNode("user_input", userInput)
     .addNode("tools", tools)
-    .addConditionalEdges(START, (state: CodeAgentState) => routeEntry(state, override, mcpRiskOverride))
+    .addEdge(START, "cleanup")
+    .addConditionalEdges("cleanup", (state: CodeAgentState) => routeEntry(state, override, mcpRiskOverride))
     .addConditionalEdges("agent", (state: CodeAgentState) => routeAfterAgent(state, override, mcpRiskOverride))
     .addConditionalEdges("approval", routeAfterApproval)
     .addConditionalEdges("user_input", routeAfterUserInput)
@@ -480,6 +533,7 @@ export interface InvokeModelParams {
   state: CodeAgentState;
   tools: ReturnType<typeof createAgentTools>;
   skills?: import("@/core/skills/types").SkillManifest[];
+  signal?: AbortSignal;
 }
 
 /** invokeModel 返回值 / Return value of invokeModel */
@@ -490,12 +544,12 @@ export interface InvokeModelResult {
 
 /** 共享的模型调用逻辑 / Shared model invocation logic (exported for testing) */
 export async function invokeModel({
-  model, state, tools, skills,
+  model, state, tools, skills, signal,
 }: InvokeModelParams): Promise<InvokeModelResult> {
   const prepared = prepareModelContext("agent", state, skills);
 
   const response = await bindAgentTools(model, tools)
-    .invoke(prepared.messages) as AIMessage;
+    .invoke(prepared.messages, { signal }) as AIMessage;
 
   const request = toolRequestFromMessage(response, state.workspace);
   if (request) {

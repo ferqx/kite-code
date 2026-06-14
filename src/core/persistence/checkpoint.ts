@@ -82,7 +82,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
 
   /** 创建 checkpoint 和 writes 表，开启 WAL 模式 / Create checkpoint and writes tables, enable WAL mode */
   setup(): void {
-    if (this.isClosed) throw new Error("Database is closed");
+    if (this.isClosed) return; // silently skip — graph has been aborted
     // 已初始化则跳过 / Skip if already set up
     if (this.isSetup) {
       return;
@@ -346,7 +346,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     checkpoint: Checkpoint,
     metadata: CheckpointMetadata,
   ): Promise<RunnableConfig> {
-    if (this.isClosed) throw new Error("Database is closed");
+    if (this.isClosed) return config; // silently skip — graph has been aborted
     this.setup();
     const threadId = config.configurable?.thread_id;
     if (!threadId) {
@@ -404,7 +404,7 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
     writes: PendingWrite[],
     taskId: string,
   ): Promise<void> {
-    if (this.isClosed) throw new Error("Database is closed");
+    if (this.isClosed) return; // silently skip — graph has been aborted
     this.setup();
 
     const threadId = config.configurable?.thread_id;
