@@ -464,6 +464,19 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     }
   }, [state.ctrlCPressed, state.interrupt, sessionManager]);
 
+  // When Esc stops a running agent, abort the controller so the generator
+  // doesn't keep running in background. Ctrl+C is handled above and already
+  // sets ctrlCPressed, so we skip here to avoid double-abort.
+  const prevRunningRef = React.useRef(state.running);
+  React.useEffect(() => {
+    const wasRunning = prevRunningRef.current;
+    prevRunningRef.current = state.running;
+    if (wasRunning && !state.running && !state.ctrlCPressed) {
+      const rt = sessionManager.getRuntime(threadIdRef.current);
+      rt?.abortController?.abort();
+    }
+  }, [state.running, state.ctrlCPressed, sessionManager]);
+
   const runTask = React.useCallback(
     async (task: string) => {
       const threadId = threadIdRef.current;
