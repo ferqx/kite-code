@@ -13,7 +13,6 @@ export type OutputBlock =
   | { id: number; kind: "text"; content: string; streaming?: boolean; isError?: boolean }
   | { id: number; kind: "reason"; content: string; folded: boolean }
   | { id: number; kind: "tool_card"; callId: string; name: string; args: Record<string, unknown>; status: "running" | "done" | "error"; summary: string; preview?: string; elapsedMs?: number; detail?: string; expanded?: boolean }
-  | { id: number; kind: "plan_card"; name: string; description: string; planStatus: import("@/protocol/events").PlanStatus; steps: import("@/protocol/events").AgentPlanStep[]; folded: boolean; callId: string }
   | { id: number; kind: "file_change"; changes: FileChangeRecord[] }
   | { id: number; kind: "approval"; approval: ToolApprovalPayload; resolved?: { action: string; grant?: string; pattern?: string } }
   | { id: number; kind: "question"; question: UserInputPayload; resolved?: string }

@@ -17,7 +17,6 @@ interface OutputAreaProps {
   /** Blocks kept in the dynamic tree — may still mutate (tool running, streaming text, etc.) */
   activeDynamicBlocks: OutputBlock[];
   onToggleReason: (id: number) => void;
-  onTogglePlan?: (id: number) => void;
   onToggleToolExpand?: (id: number) => void;
   onToggleSubagentExpand?: (id: number) => void;
   overlayActive?: boolean;
@@ -37,7 +36,6 @@ export default function OutputArea({
   activeDynamicBlocks,
   mergedStaticBlocks,
   onToggleReason,
-  onTogglePlan,
   onToggleToolExpand,
   onToggleSubagentExpand,
   overlayActive,
@@ -45,8 +43,6 @@ export default function OutputArea({
 }: OutputAreaProps) {
   const onToggleReasonRef = useRef(onToggleReason);
   onToggleReasonRef.current = onToggleReason;
-  const onTogglePlanRef = useRef(onTogglePlan);
-  onTogglePlanRef.current = onTogglePlan;
   const onToggleToolRef = useRef(onToggleToolExpand);
   onToggleToolRef.current = onToggleToolExpand;
   const onToggleSubagentRef = useRef(onToggleSubagentExpand);
@@ -66,8 +62,6 @@ export default function OutputArea({
       if (key.return) {
         if (last.kind === "reason") {
           onToggleReasonRef.current?.(last.id);
-        } else if (last.kind === "plan_card") {
-          onTogglePlanRef.current?.(last.id);
         } else if (last.kind === "tool_card") {
           onToggleToolRef.current?.(last.id);
         } else if (last.kind === "subagent") {

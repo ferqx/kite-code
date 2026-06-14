@@ -4,7 +4,6 @@ import type { OutputBlock } from "../types";
 import MarkdownBlock from "./MarkdownBlock";
 import SubAgentBlock from "./SubAgentBlock";
 import ToolCardBlock from "./ToolCardBlock";
-import PlanCardBlock from "./PlanCardBlock";
 import { useTheme } from "../theme";
 
 export function changePrefix(kind: string, theme?: { success: string; warning: string; error: string; muted: string }): { prefix: string; color: string } {
@@ -146,13 +145,6 @@ const BlockRenderer = React.memo(function BlockRenderer({
       return (
         <Box flexDirection="column" marginBottom={BLOCK_GAP}>
           <SubAgentBlock block={block} />
-        </Box>
-      );
-
-    case "plan_card":
-      return (
-        <Box marginBottom={BLOCK_GAP}>
-          <PlanCardBlock block={block} />
         </Box>
       );
 

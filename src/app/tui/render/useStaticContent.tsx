@@ -25,8 +25,6 @@ function isSettled(block: OutputBlock): boolean {
       return !block.streaming; // streaming text is still mutating
     case "reason":
       return true; // content is final once emitted
-    case "plan_card":
-      return block.planStatus === "completed";
     case "tool_card":
       return block.status === "done" || block.status === "error";
     case "subagent":

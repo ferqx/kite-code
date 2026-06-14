@@ -1,6 +1,6 @@
 // ── EVENT action handler — 19 event sub-types ──
 
-import type { AgentEvent, AgentPlanStep, PlanStatus } from "@/protocol/events";
+import type { AgentEvent } from "@/protocol/events";
 import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
 import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById } from "./helpers";
 import { formatReadFileRange, getToolPreview, getToolDetail } from "../components/render-utils";
@@ -162,8 +162,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...appendBlock(finalized, block), currentRunReasonId: id };
     }
     case "tool_call": {
-      // task tool has its own subagent block — skip the redundant tool_card
-      if (event.data.name === "task") return state;
+      // task tool has its own subagent block; update_plan progress is shown
+      // in StatusBar — skip rendering both in the message list
+      if (event.data.name === "task" || event.data.name === "update_plan") return state;
       // Dedup: if this call_id already has a tool_card block, skip.
       // Prevents duplicate rendering when the same tool_call event is replayed.
       if (state.blockIndex[event.data.call_id] != null) {
@@ -172,22 +173,6 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       }
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
-      // update_plan renders as a plan_card block, not a tool_card
-      if (event.data.name === "update_plan") {
-        const args = event.data.args;
-        const steps: AgentPlanStep[] = Array.isArray(args.steps)
-          ? (args.steps as AgentPlanStep[])
-          : [];
-        const id = finalized.nextBlockId;
-        const block: OutputBlock = {
-          id, kind: "plan_card",
-          name: String(args.name ?? ""),
-          description: String(args.description ?? ""),
-          planStatus: (args.status as PlanStatus) ?? "pending",
-          steps, folded: false, callId: event.data.call_id,
-        };
-        return appendBlock(finalized, block);
-      }
       const preview = getToolPreview(event.data.name, event.data.args);
       const id = finalized.nextBlockId;
       const block: OutputBlock = {
@@ -234,28 +219,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
       if (d.modelProvider) next.modelProvider = d.modelProvider;
       if (d.modelName) next.modelName = d.modelName;
-      let nextState = state;
-      if (d.plan) {
-        // Update ALL plan_card blocks (not just the most recent one)
-        for (let ti = state.turns.length - 1; ti >= 0; ti--) {
-          const turn = state.turns[ti];
-          let turnChanged = false;
-          const blocks = turn.blocks.slice();
-          for (let bi = turn.blocks.length - 1; bi >= 0; bi--) {
-            const b = turn.blocks[bi];
-            if (b.kind === "plan_card") {
-              blocks[bi] = { ...b, planStatus: d.plan.status ?? b.planStatus, steps: d.plan.steps ?? b.steps };
-              turnChanged = true;
-            }
-          }
-          if (turnChanged) {
-            const turns = nextState.turns.slice();
-            turns[ti] = { blocks };
-            nextState = { ...nextState, turns };
-          }
-        }
-      }
-      return { ...nextState, status: next };
+      return { ...state, status: next };
     }
     case "model_retry": {
       const finalized = finalizeLastTurnStreaming(state);

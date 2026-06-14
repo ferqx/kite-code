@@ -107,7 +107,6 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
   const hideRewind = useCallback(() => dispatch({ type: "HIDE_REWIND" }), [dispatch]);
   const handleRevert = useCallback((checkpointId: string) => dispatch({ type: "REVERT_TO_CHECKPOINT", checkpointId }), [dispatch]);
   const handleFork = useCallback((checkpointId: string) => dispatch({ type: "FORK_FROM_CHECKPOINT", checkpointId }), [dispatch]);
-  const onTogglePlan = useCallback((id: number) => dispatch({ type: "TOGGLE_PLAN", id }), [dispatch]);
   const onToggleToolExpand = useCallback((id: number) => dispatch({ type: "TOGGLE_TOOL_EXPAND", id }), [dispatch]);
   const onToggleSubagentExpand = useCallback((id: number) => dispatch({ type: "TOGGLE_SUBAGENT_EXPAND", id }), [dispatch]);
   const selectSession = useCallback(
@@ -180,7 +179,6 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
           activeDynamicBlocks={activeDynamicBlocks}
           mergedStaticBlocks={mergedStaticBlocks}
           onToggleReason={onToggleReason}
-          onTogglePlan={onTogglePlan}
           onToggleToolExpand={onToggleToolExpand}
           onToggleSubagentExpand={onToggleSubagentExpand}
           overlayActive={overlayActive}

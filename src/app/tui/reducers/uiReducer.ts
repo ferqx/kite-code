@@ -56,11 +56,6 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       }
       return next;
     }
-    case "TOGGLE_PLAN": {
-      const block = findBlockById(state, action.id);
-      if (!block || block.kind !== "plan_card") return state;
-      return replaceBlockById(state, action.id, { ...block, folded: !block.folded });
-    }
     case "TOGGLE_TOOL_EXPAND": {
       const block = findBlockById(state, action.id);
       if (!block || block.kind !== "tool_card") return state;
