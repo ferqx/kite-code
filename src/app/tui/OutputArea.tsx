@@ -79,7 +79,12 @@ export default function OutputArea({
           <Static key={staticKey} items={staticItems}>
             {(item, index) => {
               if (index === 0) {
-                return <React.Fragment key="header">{staticHeader}</React.Fragment>;
+                return (
+                  <React.Fragment key="header">
+                    {staticHeader}
+                    <Box height={1} />
+                  </React.Fragment>
+                );
               }
               const block = mergedStaticBlocks[index - 1];
               if (!block) return null;
