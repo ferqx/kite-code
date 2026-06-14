@@ -90,6 +90,12 @@ export function useRunRewind(
       } = deps;
 
       if (agentLoopActiveRef.current) return;
+      // Also check session runtime — normal agent loop sets rt.agentLoopActive,
+      // which the local ref doesn't track. Prevents concurrent graph operations
+      // on the same threadId (especially dangerous for revert, which reuses the
+      // existing threadId).
+      const rt = sessionManager.getRuntime(threadIdRef.current);
+      if (rt?.agentLoopActive) return;
 
       dispatch({ type: "SET_RUNNING" });
 
