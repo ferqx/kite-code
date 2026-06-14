@@ -30,6 +30,7 @@
 | `execution/active/e2e-test-restructure.md` | active | E2E 测试用例体系重构方案 — 3 文件 60 测试覆盖 P0-P3 | E2E 测试重构、新增测试层级、调整测试文件组织。 |
 | `execution/active/tui-textinput-wrapping-spec.md` | active | `CtrlSafeTextInput` 软换行、光标边界、IME 空格清理、CJK/ASCII 混合输入行为 | 修改 `CtrlSafeTextInput` 软换行、光标移动、IME 处理或 `maxWidth` 传播逻辑时。 |
 | `execution/active/tui-footer-resize-stability.md` | active | TUI 终端缩放刷新方案 — resize 事件驱动 + 清屏 + key remount + 输入保留 | 修改 TUI resize 逻辑、缩放行为异常时必读。 |
+| `execution/active/cancel-resume-cleanup.md` | active | Cancel-Resume 三层清理架构 — graph cleanup 节点 + sanitize + reorder，防止孤儿工具重新执行和 API 400 错误 | 修改 cancel/abort/resume 逻辑、检查点恢复、消息清理时必读。 |
 | `execution/active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
 | `execution/active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
 | `execution/active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
