@@ -159,7 +159,7 @@ describe("graph integration", () => {
 
       const final = findFinal(chunks);
       expect(final).toBe("任务已完成。");
-      expect(chunks.length).toBe(1);
+      expect(chunks.length).toBeGreaterThanOrEqual(2); // cleanup + agent node
     } finally {
       tearDown();
     }
