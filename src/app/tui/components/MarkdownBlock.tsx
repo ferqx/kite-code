@@ -122,7 +122,7 @@ function tokenizeCodeLine(line: string, lang: string, t: Theme): Token[] {
       while (j < line.length && /[0-9a-fA-FxX._]/.test(line[j])) j++;
       const num = line.slice(i, j);
       if (/^[0-9]/.test(num)) {
-        tokens.push({ text: num, color: t.warning });
+        tokens.push({ text: num, color: t.primary });
         i = j;
         continue;
       }
@@ -248,78 +248,141 @@ function parseTable(lines: string[]): { headers: string[]; rows: string[][]; wid
   return { headers, rows, widths };
 }
 
-function padCell(text: string, width: number): string {
-  const current = stringWidth(text);
-  if (current >= width) return text;
-  return text + " ".repeat(width - current);
+// ── responsive table width ──
+// Maximum table width available, accounting for block left-padding in layout
+function tableMaxWidth(): number {
+  const cols = process.stdout.columns ?? 80;
+  return Math.max(40, cols - 4);
+}
+
+/** Split text into lines that fit within maxWidth, padding each line to maxWidth. */
+function wrapCell(text: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [""];
+  const sw = stringWidth(text);
+  if (sw <= maxWidth) return [text + " ".repeat(maxWidth - sw)];
+
+  const lines: string[] = [];
+  let current = "";
+  let currentWidth = 0;
+
+  for (const ch of text) {
+    const cw = charWidth(ch.codePointAt(0) ?? 0);
+    if (cw === 0) continue;
+    if (currentWidth + cw > maxWidth) {
+      lines.push(current + " ".repeat(maxWidth - currentWidth));
+      current = ch;
+      currentWidth = cw;
+      // Trim leading space after a forced break
+      if (ch === " ") { current = ""; currentWidth = 0; }
+    } else {
+      current += ch;
+      currentWidth += cw;
+    }
+  }
+  if (current || lines.length === 0) {
+    lines.push(current + " ".repeat(maxWidth - currentWidth));
+  }
+  return lines;
+}
+
+/** Truncate to single line with "…" — used for headers only. */
+function truncateHeader(text: string, maxWidth: number): string {
+  const sw = stringWidth(text);
+  if (sw <= maxWidth) return text + " ".repeat(maxWidth - sw);
+  const limit = maxWidth - 1;
+  let result = "";
+  let w = 0;
+  for (const ch of text) {
+    const cw = charWidth(ch.codePointAt(0) ?? 0);
+    if (cw === 0) continue;
+    if (w + cw > limit) break;
+    result += ch;
+    w += cw;
+  }
+  return result + "…" + " ".repeat(limit - w);
+}
+
+function computeColumnWidths(
+  headers: string[],
+  rows: string[][],
+  naturalWidths: number[],
+): number[] {
+  const colCount = headers.length;
+  const overhead = 2 + (colCount - 1) + colCount * 2; // ││ + inner │ + padding
+  const maxContentWidth = tableMaxWidth() - overhead;
+  const naturalTotal = naturalWidths.reduce((a, w) => a + w, 0);
+  if (naturalTotal <= maxContentWidth) return naturalWidths;
+  if (maxContentWidth < colCount * 6) {
+    const w = Math.max(6, Math.floor(tableMaxWidth() / colCount) - 3);
+    return headers.map(() => w);
+  }
+  const scale = maxContentWidth / naturalTotal;
+  return naturalWidths.map(w => Math.max(6, Math.floor(w * scale)));
+}
+
+/** Build a single border string: e.g. ┌────┬──────┐ */
+function borderLine(left: string, mid: string, right: string, widths: number[], fill: string): string {
+  return left + widths.map(w => fill.repeat(w + 2)).join(mid) + right;
+}
+
+/** Render a table row that may span multiple lines (cells wrap). */
+function dataRowLines(cells: string[], widths: number[]): string[] {
+  const wrapped = cells.map((c, i) => wrapCell(c, widths[i]));
+  const maxLines = Math.max(1, ...wrapped.map(w => w.length));
+  const lines: string[] = [];
+  for (let li = 0; li < maxLines; li++) {
+    const parts = wrapped.map((w, ci) => {
+      const cell = li < w.length ? w[li] : " ".repeat(widths[ci]);
+      return " " + cell + " ";
+    });
+    lines.push("│" + parts.join("│") + "│");
+  }
+  return lines;
 }
 
 function TableBlock({ lines }: { lines: string[] }) {
   const t = useTheme();
-  const { headers, rows, widths } = parseTable(lines);
+  const { headers, rows, widths: natural } = useMemo(() => parseTable(lines), [lines]);
+  const widths = useMemo(
+    () => computeColumnWidths(headers, rows, natural),
+    [headers, rows, natural],
+  );
+
+  const topBorder  = borderLine("┌", "┬", "┐", widths, "─");
+  const sepBorder  = borderLine("├", "┼", "┤", widths, "─");
+  const botBorder  = borderLine("└", "┴", "┘", widths, "─");
+  const headerLine = "│" + headers.map((h, i) => " " + truncateHeader(h, widths[i]) + " ").join("│") + "│";
 
   return (
     <Box flexDirection="column">
-      {/* header */}
-      <Box>
-        <Text color={t.dim}>┌</Text>
-        {headers.map((h, ci) => (
-          <React.Fragment key={ci}>
-            {ci > 0 && <Text color={t.dim}>┬</Text>}
-            <Text color={t.dim}>{"─".repeat(widths[ci] + 2)}</Text>
-          </React.Fragment>
-        ))}
-        <Text color={t.dim}>┐</Text>
-      </Box>
-      <Box>
-        <Text color={t.dim}>│</Text>
-        {headers.map((h, ci) => (
-          <React.Fragment key={ci}>
-            {ci > 0 && <Text color={t.dim}>│</Text>}
-            <Text bold color={t.primary}> {padCell(h, widths[ci])} </Text>
-          </React.Fragment>
-        ))}
-        <Text color={t.dim}>│</Text>
-      </Box>
-      <Box>
-        <Text color={t.dim}>├</Text>
-        {widths.map((w, ci) => (
-          <React.Fragment key={ci}>
-            {ci > 0 && <Text color={t.dim}>┼</Text>}
-            <Text color={t.dim}>{"─".repeat(w + 2)}</Text>
-          </React.Fragment>
-        ))}
-        <Text color={t.dim}>┤</Text>
-      </Box>
-      {/* data rows */}
-      {rows.map((row, ri) => (
-        <Box key={ri}>
-          <Text color={t.dim}>│</Text>
-          {row.map((cell, ci) => (
-            <React.Fragment key={ci}>
-              {ci > 0 && <Text color={t.dim}>│</Text>}
-              <Text color={t.muted}> {padCell(cell, widths[ci])} </Text>
-            </React.Fragment>
-          ))}
-          {row.length < headers.length && (
-            <Text color={t.muted}>{" ".repeat(widths.slice(row.length).reduce((a, w) => a + w + 3, 0))}</Text>
-          )}
-          <Text color={t.dim}>│</Text>
-        </Box>
-      ))}
-      {/* bottom border */}
-      <Box>
-        <Text color={t.dim}>└</Text>
-        {widths.map((w, ci) => (
-          <React.Fragment key={ci}>
-            {ci > 0 && <Text color={t.dim}>┴</Text>}
-            <Text color={t.dim}>{"─".repeat(w + 2)}</Text>
-          </React.Fragment>
-        ))}
-        <Text color={t.dim}>┘</Text>
-      </Box>
+      <Text color={t.dim}>{topBorder}</Text>
+      <Text bold color={t.primary}>{headerLine}</Text>
+      <Text color={t.dim}>{sepBorder}</Text>
+      {rows.map((row, ri) =>
+        dataRowLines(row, widths).map((line, li) => (
+          <Text key={`${ri}-${li}`} color={t.muted}>{line}</Text>
+        ))
+      )}
+      <Text color={t.dim}>{botBorder}</Text>
     </Box>
   );
+}
+
+// ── HTML entity decoding ──
+// Some models return HTML-escaped content (&#39; &quot; &amp; &lt; &gt;).
+// Decode at render time so terminal displays the actual characters.
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#x22;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)));
 }
 
 // ── line grouping ──
@@ -373,7 +436,7 @@ function groupLines(lines: string[]): LineGroup[] {
 
 export default React.memo(function MarkdownBlock({ content, streaming, color }: MarkdownBlockProps) {
   const t = useTheme();
-  const groups = useMemo(() => groupLines(content.split("\n")), [content]);
+  const groups = useMemo(() => groupLines(decodeHtmlEntities(content).split("\n")), [content]);
 
   return (
     <Box flexDirection="column">
@@ -474,7 +537,7 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
             key={j}
             bold={seg.bold}
             italic={seg.italic}
-            color={seg.code ? t.warning : (color ?? undefined)}
+            color={seg.code ? t.primary : (color ?? undefined)}
           >
             {seg.text}
           </Text>

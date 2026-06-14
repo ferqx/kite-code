@@ -12,7 +12,7 @@ export interface Theme {
 }
 
 export const darkTheme: Theme = {
-  primary: "#6C8AFF",
+  primary: "#569CD6",
   success: "#4ADE80",
   error: "#F87171",
   warning: "#FBBF24",
@@ -32,7 +32,7 @@ export const darkTheme: Theme = {
 };
 
 export const lightTheme: Theme = {
-  primary: "#3B5CCC",
+  primary: "#0451A5",
   success: "#16A34A",
   error: "#DC2626",
   warning: "#CA8A04",
