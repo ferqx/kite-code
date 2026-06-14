@@ -43,7 +43,7 @@ export default function StatusBar({ status, running, timerKey }: StatusBarProps)
   const phaseLabel = status.phase === "planning" ? "Planning" : "Building";
 
   function planLabel(): string {
-    if (!status.plan) return status.currentNode ?? "";
+    if (!status.plan || status.plan.status === "completed") return status.currentNode ?? "";
     const done = status.plan.steps.filter((s) => s.status === "completed").length;
     const total = status.plan.steps.length;
     const active = status.plan.steps.find((s) => s.status === "in_progress");

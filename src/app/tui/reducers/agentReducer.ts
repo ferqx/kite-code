@@ -23,9 +23,9 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case "SET_RUNNING":
-      return { ...state, running: true, exited: false, interrupt: null, toolStartTimes: undefined, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false, status: { ...state.status, retryState: null } };
+      return { ...state, running: true, exited: false, interrupt: null, toolStartTimes: undefined, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false, status: { ...state.status, currentNode: null, plan: null, retryState: null } };
     case "SET_IDLE": {
-      return { ...finalizeLastTurnStreaming(state), running: false, exited: false, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined, status: { ...state.status, retryState: null } };
+      return { ...finalizeLastTurnStreaming(state), running: false, exited: false, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined, status: { ...state.status, currentNode: null, plan: null, retryState: null } };
     }
     case "SET_EXITED": {
       const s = finalizeLastTurnStreaming(state);
@@ -42,7 +42,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       const summary = [elapsedStr, changeCount > 0 ? `${changeCount} files` : null].filter(Boolean).join(" · ");
       const block: OutputBlock = { id: s.nextBlockId, kind: "text", content: `── ${summary} ──` };
       const appended = appendBlock(s, block);
-      return { ...appended, exited: true, interrupt: null };
+      return { ...appended, running: false, exited: true, interrupt: null, status: { ...appended.status, currentNode: null, plan: null } };
     }
     case "RESOLVE_INTERRUPT": {
       const b = findBlockById(state, action.blockId);
