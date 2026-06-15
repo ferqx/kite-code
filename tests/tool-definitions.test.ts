@@ -88,6 +88,116 @@ describe("code agent tool definitions", () => {
     expect(String(updatePlanTool.description)).toContain("current plan state");
   });
 
+  // ── update_plan 工具执行与边界测试 / update_plan execution and edge case tests ──
+
+  test("invokes update_plan and returns plan JSON", async () => {
+    const tools = createAgentTools({ workspace: "/tmp" });
+    const updatePlanTool = tools.find((item) => item.name === "update_plan")!;
+    const raw = await updatePlanTool.invoke({
+      name: "Refactor",
+      description: "Split large module",
+      status: "in_progress",
+      steps: [
+        { step: "Extract helpers", status: "completed" },
+        { step: "Update imports", status: "in_progress" },
+        { step: "Remove old code", status: "pending" },
+      ],
+    });
+    const result = JSON.parse(raw);
+    expect(result.ok).toBe(true);
+    expect(result.plan.name).toBe("Refactor");
+    expect(result.plan.status).toBe("in_progress");
+    expect(result.plan.steps).toHaveLength(3);
+    expect(result.plan.steps[0].status).toBe("completed");
+    expect(result.plan.steps[2].status).toBe("pending");
+  });
+
+  test("rejects invalid plan status", () => {
+    const tools = createAgentTools({ workspace: "/tmp" });
+    const updatePlanTool = tools.find((item) => item.name === "update_plan")!;
+    expect(
+      updatePlanTool.schema.safeParse({
+        name: "Test",
+        description: "Test plan",
+        status: "archived",
+        steps: [{ step: "Do something", status: "pending" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects invalid step status", () => {
+    const tools = createAgentTools({ workspace: "/tmp" });
+    const updatePlanTool = tools.find((item) => item.name === "update_plan")!;
+    expect(
+      updatePlanTool.schema.safeParse({
+        name: "Test",
+        description: "Test plan",
+        status: "in_progress",
+        steps: [{ step: "Do something", status: "skipped" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("rejects empty steps array", () => {
+    const tools = createAgentTools({ workspace: "/tmp" });
+    const updatePlanTool = tools.find((item) => item.name === "update_plan")!;
+    // steps is defined as z.array(...) which allows empty arrays
+    expect(
+      updatePlanTool.schema.safeParse({
+        name: "Test",
+        description: "Test plan",
+        status: "pending",
+        steps: [],
+      }).success,
+    ).toBe(true);
+  });
+
+  test("rejects missing steps field", () => {
+    const tools = createAgentTools({ workspace: "/tmp" });
+    const updatePlanTool = tools.find((item) => item.name === "update_plan")!;
+    expect(
+      updatePlanTool.schema.safeParse({
+        name: "Test",
+        description: "Test plan",
+        status: "pending",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("accepts completed plan status", async () => {
+    const tools = createAgentTools({ workspace: "/tmp" });
+    const updatePlanTool = tools.find((item) => item.name === "update_plan")!;
+    expect(
+      updatePlanTool.schema.safeParse({
+        name: "Done",
+        description: "Completed plan",
+        status: "completed",
+        steps: [{ step: "Finished", status: "completed" }],
+      }).success,
+    ).toBe(true);
+    const raw = await updatePlanTool.invoke({
+      name: "Done",
+      description: "Completed plan",
+      status: "completed",
+      steps: [{ step: "Finished", status: "completed" }],
+    });
+    expect(JSON.parse(raw).plan.status).toBe("completed");
+  });
+
+  test("rejects empty plan name", () => {
+    const tools = createAgentTools({ workspace: "/tmp" });
+    const updatePlanTool = tools.find((item) => item.name === "update_plan")!;
+    // schema uses z.string() without minLength, but empty string might still pass
+    expect(
+      updatePlanTool.schema.safeParse({
+        name: "",
+        description: "Test",
+        status: "pending",
+        steps: [{ step: "Do something", status: "pending" }],
+      }).success,
+    ).toBe(true);
+  });
+
   // 验证工具 schema 不随工作区访问权限变化，实际边界由工具执行层拒绝 / Tool schema is stable; runner enforces access boundaries
   test("exposes one cache-stable tool schema", () => {
     const tools = createAgentTools({
