@@ -8,6 +8,7 @@ export interface Theme {
   muted: string;
   dim: string;
   bg: string;
+  userMsgBg: string;
   risk: Record<string, string>;
 }
 
@@ -19,6 +20,7 @@ export const darkTheme: Theme = {
   muted: "#9CA3AF",
   dim: "#6B7280",
   bg: "#1A1A2E",
+  userMsgBg: "#3E3E50",
   risk: {
     read: "#60A5FA",
     plan: "#818CF8",
@@ -39,6 +41,7 @@ export const lightTheme: Theme = {
   muted: "#6B7280",
   dim: "#9CA3AF",
   bg: "#FFFFFF",
+  userMsgBg: "#F0F0F4",
   risk: {
     read: "#3B82F6",
     plan: "#6366F1",

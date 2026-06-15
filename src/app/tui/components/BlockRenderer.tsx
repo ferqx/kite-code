@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import stringWidth from "string-width";
 import type { OutputBlock } from "../types";
 import MarkdownBlock from "./MarkdownBlock";
 import SubAgentBlock from "./SubAgentBlock";
@@ -40,13 +41,21 @@ const BlockRenderer = React.memo(function BlockRenderer({
   block, isFocused, index: _i, prevBlock, awaitingApproval,
 }: BlockRendererProps) {
   const dt = useTheme();
+  const col = process.stdout.columns ?? 80;
   switch (block.kind) {
-    case "user":
+    case "user": {
+      const prompt = "❯ ";
+      const line = prompt + block.content;
+      const w = stringWidth(line);
+      const pad = col - w;
       return (
         <Box marginBottom={BLOCK_GAP}>
-          <MarkdownBlock content={"❯ " + block.content} />
+          <Text backgroundColor={dt.userMsgBg}>
+            {line}{pad > 0 ? " ".repeat(pad) : ""}
+          </Text>
         </Box>
       );
+    }
 
     case "text":
       return (
