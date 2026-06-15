@@ -409,9 +409,9 @@ function CtrlSafeTextInput({
 
   useInput(
     (rawInput, key) => {
-      // Filter out CSI escape sequences (e.g., cursor position reports from terminal resize)
-      // These appear as sequences like "[20;1R" or "[6;1R" after ESC
-      if (/[\x1b\u001b]/.test(rawInput) || /\[\d+;\d+[A-Z]/.test(rawInput)) {
+      // Filter out CSI escape sequences (e.g., cursor position reports from terminal resize,
+      // terminal focus reports [I / [O when ESC byte is stripped by Ink).
+      if (/[\x1b\u001b]/.test(rawInput) || /\[\d+;\d+[A-Z]/.test(rawInput) || /^\[[IO]$/.test(rawInput)) {
         return;
       }
 

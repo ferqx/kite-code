@@ -13,6 +13,7 @@ import {
 import { listAvailableModels } from "@/core/config";
 import { useTheme } from "@/app/tui/theme";
 import { useOverlayHeight } from "../hooks/useOverlayHeight";
+import { useTerminalFocus } from "../hooks/useTerminalFocus";
 
 export const PASTE_THRESHOLD = 100;
 const MAX_INPUT_LENGTH = 100_000; // 100KB — reject input exceeding this to prevent DOS
@@ -100,6 +101,7 @@ function completeSlash(input: string): string | null {
 export default function InputLine({ mode, onSubmit, disabled, placeholder, workspace, overlayActive, editorContentRef, onSlashSuggestionChange, initialValue = "", onValueChange }: InputLineProps) {
   const t = useTheme();
   const { columns } = useWindowSize();
+  const hasWindowFocus = useTerminalFocus();
   const fileMaxHeight = useOverlayHeight(7);
   const [value, setValue] = useState(initialValue);
   // Sync value changes to parent for resize persistence
@@ -499,7 +501,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
           onChange={handleChange}
           onSubmit={handleSubmit}
           placeholder={placeholder}
-          focus={!overlayActive}
+          focus={!overlayActive && hasWindowFocus}
           atomicBlock={atomicBlock}
           onRemoveAtomicBlock={clearPasteState}
           onNavigateHistory={handleNavigateHistory}
