@@ -619,24 +619,26 @@ describe("OutputArea", () => {
     expect(lastFrame()).toContain("Response text");
   });
 
-  test("renders reason block with toggle indicator", () => {
+  test("hides reason blocks in output", () => {
     const blocks: OutputBlock[] = [
       { id: 1, kind: "reason", content: "Thinking about it...", folded: false },
     ];
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).toContain("Thinking");
+    // Reason blocks are hidden from message list
+    expect(lastFrame()).not.toContain("Thinking");
   });
 
-  test("renders folded reason block", () => {
+  test("hides folded reason blocks in output", () => {
     const blocks: OutputBlock[] = [
       { id: 1, kind: "reason", content: "Hidden thoughts", folded: true },
     ];
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).toContain("Thinking...");
+    // Reason blocks are hidden from message list
+    expect(lastFrame()).not.toContain("Thinking");
   });
 
   test("renders tool_card with running status", () => {

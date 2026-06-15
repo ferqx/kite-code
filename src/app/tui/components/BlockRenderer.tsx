@@ -25,8 +25,6 @@ function formatLines(added?: number, removed?: number): string {
 }
 
 const BLOCK_GAP = 1;
-const REASON_INDENT = 2;
-const REASON_MAX_LINES = 5;
 
 interface BlockRendererProps {
   block: OutputBlock;
@@ -64,36 +62,12 @@ const BlockRenderer = React.memo(function BlockRenderer({
         </Box>
       );
 
-    case "reason": {
-      const isConsecutive = prevBlock?.kind === "reason";
-      const lines = block.content.split("\n");
-      const truncated = lines.length > REASON_MAX_LINES;
-      const display = truncated ? lines.slice(0, REASON_MAX_LINES) : lines;
-      return (
-        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
-          {!isConsecutive && (
-            <Text color={isFocused ? dt.primary : dt.dim}>
-              {block.folded ? "▶ Thinking..." : "▼ Thinking"}
-            </Text>
-          )}
-          {!block.folded && (
-            <Box flexDirection="column" marginLeft={REASON_INDENT}>
-              {display.map((line, i) => (
-                <Text key={i} color={dt.muted}>{line}</Text>
-              ))}
-              {truncated && (
-                <Text color={dt.dim}>...</Text>
-              )}
-            </Box>
-          )}
-          {isConsecutive && block.folded && (
-            <Text color={dt.dim}>  ...</Text>
-          )}
-        </Box>
-      );
-    }
+    case "reason":
+      return null;
 
     case "tool_card":
+      // Plan progress is shown in StatusBar — hide individual update_plan calls
+      if (block.name === "update_plan") return null;
       return (
         <Box marginBottom={BLOCK_GAP}>
           <ToolCardBlock block={block} awaitingApproval={awaitingApproval} />

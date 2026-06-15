@@ -20,7 +20,7 @@ export const darkTheme: Theme = {
   muted: "#9CA3AF",
   dim: "#6B7280",
   bg: "#1A1A2E",
-  userMsgBg: "#3E3E50",
+  userMsgBg: "#4e4e4e",
   risk: {
     read: "#60A5FA",
     plan: "#818CF8",
