@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-06-10（shell 并发/批量审批、token 统计持久化、SQLite 优化归档）
+最后更新：2026-06-15（TUI DEC 同步输出缓冲、StatsLine 样式统一、InputLine 分割线）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -29,7 +29,8 @@
 | `execution/active/tui-e2e-standards.md` | active | TUI E2E 测试标准、响应分配器、Harness 增强、P0-P3 覆盖分层 | 编写或修改 TUI E2E 测试、调整 mock agent 行为、新增 E2E 场景。 |
 | `execution/active/e2e-test-restructure.md` | active | E2E 测试用例体系重构方案 — 3 文件 60 测试覆盖 P0-P3 | E2E 测试重构、新增测试层级、调整测试文件组织。 |
 | `execution/active/tui-textinput-wrapping-spec.md` | active | `CtrlSafeTextInput` 软换行、光标边界、IME 空格清理、CJK/ASCII 混合输入行为 | 修改 `CtrlSafeTextInput` 软换行、光标移动、IME 处理或 `maxWidth` 传播逻辑时。 |
-| `execution/active/tui-footer-resize-stability.md` | active | TUI 终端缩放刷新方案 — resize 事件驱动 + 清屏 + key remount + 输入保留 | 修改 TUI resize 逻辑、缩放行为异常时必读。 |
+| `execution/active/tui-footer-resize-stability.md` | active | TUI 终端缩放刷新方案 — resize 事件驱动 + key remount + 输入保留 + DEC 同步输出缓冲 | 修改 TUI resize 逻辑、缩放行为异常时必读。 |
+| `execution/active/tui-dec-synchronized-output.md` | active | TUI DEC 同步输出缓冲 — `\x1B[?2026h/l` 帧刷新，消除 resize/会话切换的空白期和抖动 | 修改 `useStaticContent`、TUI 屏切换逻辑、缓冲/渲染时序时必读。 |
 | `execution/active/cancel-resume-cleanup.md` | active | Cancel-Resume 三层清理架构 — graph cleanup 节点 + sanitize + reorder，防止孤儿工具重新执行和 API 400 错误 | 修改 cancel/abort/resume 逻辑、检查点恢复、消息清理时必读。 |
 | `execution/active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
 | `execution/active/tui-e2e-testing-limits.md` | active | TUI E2E 测试方案与限制 — ink-testing-library 适用场景、PTY 方案探索结论（Bun PTY / node-pty 均不可用） | 编写 TUI E2E 测试、考虑替代终端测试方案时必读，避免重复踩坑。 |

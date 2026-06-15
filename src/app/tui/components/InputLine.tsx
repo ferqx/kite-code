@@ -490,6 +490,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
   return (
     <Box flexDirection="column">
       {/* Main input line with ghost text */}
+      <Text color={t.primary}>{"─".repeat(inputMaxWidth + promptWidth)}</Text>
       <Box>
         <Text color={t.primary} bold={slashMatched}>{promptChar}</Text>
         <CtrlSafeTextInput
@@ -507,6 +508,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
           maxWidth={inputMaxWidth}
         />
       </Box>
+      <Text color={t.primary}>{"─".repeat(inputMaxWidth + promptWidth)}</Text>
 
       {pasteState && (
         <Box marginTop={1}>

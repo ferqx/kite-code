@@ -2,8 +2,14 @@
 // Only truly immutable blocks go to <Static>. Blocks with mutable state
 // (tool_card running→done, subagent running→done, streaming text, etc.)
 // stay in the dynamic tree until they become immutable.
+//
+// Screen transitions (resize, session switch) use DEC synchronized output
+// (\x1B[?2026h/l) to buffer the full re-render and display it atomically.
+// The enable + clear sequence runs synchronously during the React render
+// phase (before Ink commits output), so ALL TUI rendering — Static,
+// dynamic tree, header, footer — is captured in the buffer.
 
-import { useRef, useMemo, useState, useEffect, type ReactNode } from "react";
+import { useRef, useMemo, useEffect, type ReactNode } from "react";
 import type { Turn, OutputBlock } from "../types";
 
 export { changePrefix } from "../components/BlockRenderer";
@@ -58,6 +64,8 @@ export interface UseStaticContentOptions {
   running: boolean;
   sessionKey?: number;
   header: ReactNode;
+  /** > 0 时表示 resize 重挂载，开启同步输出缓冲消除闪烁 / When > 0, resize remount detected, enables sync output to eliminate flicker */
+  resizeGeneration?: number;
 }
 
 export function useStaticContent({
@@ -65,6 +73,7 @@ export function useStaticContent({
   running,
   sessionKey,
   header,
+  resizeGeneration,
 }: UseStaticContentOptions): StaticContentResult {
   // ── Two-level Static/Dynamic split ──
   const settledTurns = running ? turns.slice(0, -1) : turns;
@@ -76,37 +85,47 @@ export function useStaticContent({
   const prevSettledRef = useRef<Turn[] | null>(null);
 
   const needsClear = sessionKey !== prevSessionKeyRef.current;
-
-  // ── Two-phase rendering: header first, then content appended ──
-  // When sessionKey changes, clear the screen and render only the header
-  // in the first pass. After that render commits, append all content blocks
-  // via Ink's <Static> append mechanism (same staticKey, new items at the end).
-  // Skip on initial mount to avoid hiding content on startup.
-  const showContentRef = useRef(true);
-  const [, forceUpdate] = useState(0);
+  const isResize = (resizeGeneration ?? 0) > 0;
   const isInitialMount = prevSessionKeyRef.current === undefined;
+
+  // Track whether sync output was enabled so we can disable it after commit
+  const syncOutputRef = useRef(false);
 
   if (needsClear) {
     prevSessionKeyRef.current = sessionKey;
     prevSettledRef.current = settledTurns;
     staticBlocksRef.current = settledTurns.flatMap((t) => t.blocks);
-    // eslint-disable-next-line no-restricted-properties -- intentional synchronous clear before Ink flush
-    process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
-    if (!isInitialMount) {
-      showContentRef.current = false;
+
+    if (isResize || !isInitialMount) {
+      // Resize / session switch: scroll to bottom, enable sync, clear.
+      // \x1B[9999H forces viewport to bottom before sync freezes it.
+      // eslint-disable-next-line no-restricted-properties
+      process.stdout.write("\x1B[9999H\x1B[?2026h\x1B[H\x1B[2J\x1B[3J");
+      syncOutputRef.current = true;
+    } else {
+      // Initial mount: clear only, no sync (content appears naturally).
+      // eslint-disable-next-line no-restricted-properties
+      process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
     }
   }
 
-  // After the header-only render commits, trigger the content phase
+  // Disable synchronized output after the first render commits.
+  // The terminal then displays all buffered output in a single frame.
+  // Cleanup handles rapid consecutive transitions that unmount before the effect fires.
   useEffect(() => {
-    if (!showContentRef.current) {
-      showContentRef.current = true;
-      const id = setTimeout(() => forceUpdate((n) => n + 1), 0);
-      return () => clearTimeout(id);
+    if (syncOutputRef.current) {
+      syncOutputRef.current = false;
+      // eslint-disable-next-line no-restricted-properties
+      process.stdout.write("\x1B[?2026l");
     }
+    return () => {
+      if (syncOutputRef.current) {
+        syncOutputRef.current = false;
+        // eslint-disable-next-line no-restricted-properties
+        process.stdout.write("\x1B[?2026l");
+      }
+    };
   });
-
-  const showContent = showContentRef.current;
 
   if (settledTurns !== prevSettledRef.current) {
     prevSettledRef.current = settledTurns;
@@ -138,7 +157,6 @@ export function useStaticContent({
     }
 
     if (leftmostUnsettled === allBlocks.length) {
-      // All blocks are settled — all go to Static
       return { activeSettledBlocks: allBlocks, activeDynamicBlocks: [] };
     }
 
@@ -153,15 +171,12 @@ export function useStaticContent({
     [staticBlocks, activeSettledBlocks],
   );
 
-  // In header-only phase, suppress static content; dynamic blocks always render
-  const phasedStaticBlocks = showContent ? mergedStaticBlocks : [];
-
   const staticItems = useMemo(
-    () => [HEADER_SENTINEL, ...phasedStaticBlocks],
-    [phasedStaticBlocks],
+    () => [HEADER_SENTINEL, ...mergedStaticBlocks],
+    [mergedStaticBlocks],
   );
 
   const staticKey = useMemo(() => `s-${sessionKey ?? 0}`, [sessionKey]);
 
-  return { staticItems, staticKey, header, mergedStaticBlocks: phasedStaticBlocks, activeDynamicBlocks };
+  return { staticItems, staticKey, header, mergedStaticBlocks, activeDynamicBlocks };
 }

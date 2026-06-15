@@ -217,7 +217,7 @@ describe("StatsLine", () => {
   test("shows thinking mode", () => {
     const status = fakeStatus({ modelProvider: "deepseek", thinkingMode: "detailed" });
     const { lastFrame } = render(<StatsLine status={status} running />);
-    expect(lastFrame()).toContain("think: detailed");
+    expect(lastFrame()).toContain("effort: detailed");
   });
 
   test("shows cache hit rate", () => {

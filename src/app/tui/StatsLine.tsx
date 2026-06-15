@@ -19,10 +19,10 @@ function formatTokens(n: number): string {
 function fullWidth(status: StatusState): number {
   let w = status.modelName.length;
   const isDS = status.modelProvider === "deepseek";
-  if (isDS && status.thinkingMode) w += 3 + 7 + String(status.thinkingMode).length; // " │ think: max"
-  if (isDS && status.totalTokens > 0) w += 3 + 7 + 3; // " │ cache: 0%"
-  if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " │ tokens: 78.4k"
-  w += 3 + 4; // " │ [安全]"
+  if (isDS && status.thinkingMode) w += 3 + 7 + String(status.thinkingMode).length; // " · effort: max"
+  if (isDS && status.totalTokens > 0) w += 3 + 7 + 3; // " · cache: 0%"
+  if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " · tokens: 78.4k"
+  w += 3 + 4; // " · [安全]"
   return w;
 }
 
@@ -32,7 +32,6 @@ export default function StatsLine({ status, running, modelProvider, modelName }:
   const cachePct = status.cacheHitRate * 100;
   const cacheColor = cachePct > 50 ? t.success : cachePct > 20 ? t.warning : t.muted;
   const authLabel = status.authorization === "full_access" ? "完全" : "安全";
-  const authColor = status.authorization === "full_access" ? t.warning : t.success;
 
   const isDeepSeek = status.modelProvider === "deepseek";
   const showThink = isDeepSeek && !!status.thinkingMode;
@@ -47,16 +46,16 @@ export default function StatsLine({ status, running, modelProvider, modelName }:
 
   return (
     <Box>
-      <Text color={t.primary}>{status.modelName}</Text>
+      <Text color={t.muted}>{status.modelName}</Text>
       {!compact && showThink && (
         <>
-          <Text color={t.dim}> │ </Text>
-          <Text color={t.success}>think: {status.thinkingMode}</Text>
+          <Text color={t.dim}> · </Text>
+          <Text color={t.success}>effort: {status.thinkingMode}</Text>
         </>
       )}
       {!compact && showCache && (
         <>
-          <Text color={t.dim}> │ </Text>
+          <Text color={t.dim}> · </Text>
           <Text>
             <Text color={t.muted}>cache: </Text>
             <Text color={cacheColor}>{cachePct.toFixed(0)}%</Text>
@@ -65,15 +64,15 @@ export default function StatsLine({ status, running, modelProvider, modelName }:
       )}
       {!compact && showTokens && (
         <>
-          <Text color={t.dim}> │ </Text>
+          <Text color={t.dim}> · </Text>
           <Text>
             <Text color={t.muted}>tokens: </Text>
             <Text>{formatTokens(status.totalTokens)}</Text>
           </Text>
         </>
       )}
-      <Text color={t.dim}> │ </Text>
-      <Text color={authColor}>[{authLabel}]</Text>
+      <Text color={t.dim}> · </Text>
+      <Text color={t.muted}>[{authLabel}]</Text>
     </Box>
   );
 }

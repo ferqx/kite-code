@@ -79,6 +79,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   // Width increases don't need a remount — existing content still fits.
   // React batches rapid setState calls into a single render, so fast
   // drag-resize only triggers one layout refresh at the final width.
+  // Sync output buffering is handled inside useStaticContent.
   const [resizeKey, setResizeKey] = React.useState(0);
   React.useEffect(() => {
     let prevCols = process.stdout.columns;
@@ -88,7 +89,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       const shrunk = newCols < prevCols;
       prevCols = newCols;
       if (!shrunk) return;
-      process.stdout.write("\x1b[2J\x1b[3J");
       setResizeKey(n => n + 1);
     };
     process.stdout.on("resize", handler);
@@ -580,7 +580,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
   return (
     <ThemeContext.Provider value={theme}>
-    <App key={resizeKey} state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion}>
+    <App key={resizeKey} state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion} resizeGeneration={resizeKey}>
       <InputLine
         key={state.activeSessionId}
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
@@ -607,6 +607,7 @@ if (import.meta.main) {
     exitOnCtrlC: false,
     kittyKeyboard: { mode: 'enabled' },
     incrementalRendering: false,
+    concurrent: true
   });
 
   // Expose unmount so exit handlers inside the component tree can properly
