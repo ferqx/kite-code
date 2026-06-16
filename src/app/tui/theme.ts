@@ -16,107 +16,88 @@ export type ThemePreset = "teal" | "blue" | "purple" | "cyan" | "mono";
 
 export const THEME_PRESET_NAMES: ThemePreset[] = ["teal", "blue", "purple", "cyan", "mono"];
 
+/** ANSI palette index for each theme role — OSC 4 reprogrammable slots */
+export const PALETTE_INDEX: Record<keyof Theme, number | undefined> = {
+  primary: 6,   // ANSI cyan
+  success: 2,   // ANSI green
+  error: 1,     // ANSI red
+  warning: 3,   // ANSI yellow
+  muted: 7,     // ANSI white
+  dim: 5,       // ANSI magenta → gray
+  bg: 0,        // untouched (terminal background)
+  userMsgBg: 8, // ANSI bright black → dark gray
+  risk: undefined,
+};
+
+/** RGB values for each preset — used for OSC 4 palette reprogramming */
+const presetRGB: Record<ThemePreset, Record<string, string>> = {
+  teal: { primary: "#4EC9B0", success: "#6A9955", error: "#F44747", warning: "#CCA700", muted: "#CCCCCC", dim: "#808080", userMsgBg: "#333333" },
+  blue: { primary: "#4FC1FF", success: "#6A9955", error: "#F44747", warning: "#CCA700", muted: "#CCCCCC", dim: "#808080", userMsgBg: "#333333" },
+  purple: { primary: "#B392F0", success: "#6A9955", error: "#F44747", warning: "#CCA700", muted: "#CCCCCC", dim: "#808080", userMsgBg: "#333333" },
+  cyan: { primary: "#00BCD4", success: "#6A9955", error: "#F44747", warning: "#CCA700", muted: "#CCCCCC", dim: "#808080", userMsgBg: "#333333" },
+  mono: { primary: "#E0E0E0", success: "#A0A0A0", error: "#F44747", warning: "#CCA700", muted: "#A0A0A0", dim: "#6B6B6B", userMsgBg: "#2A2A2A" },
+};
+
+/** Build OSC 4 sequence: reprogram terminal palette slots to preset colors */
+export function osc4Apply(preset: ThemePreset): string {
+  const colors = presetRGB[preset];
+  let seq = "";
+  for (const [role, hex] of Object.entries(colors)) {
+    const idx = PALETTE_INDEX[role as keyof Theme];
+    if (idx != null && hex) seq += `\u001B]4;${idx};${hex}\u001B\\`;
+  }
+  return seq;
+}
+
+/** Map ANSI index to Ink color name */
+function ansiName(idx: number): string {
+  switch (idx) {
+    case 0: return "black";
+    case 1: return "red";
+    case 2: return "green";
+    case 3: return "yellow";
+    case 4: return "blue";
+    case 5: return "magenta";
+    case 6: return "cyan";
+    case 7: return "white";
+    case 8: return "gray";
+    default: return "white";
+  }
+}
+
+function buildTheme(_p: ThemePreset): Theme {
+  const fg = (role: keyof Theme) => {
+    const idx = PALETTE_INDEX[role];
+    return idx != null ? ansiName(idx) : "white";
+  };
+  return {
+    primary: fg("primary"),
+    success: fg("success"),
+    error: fg("error"),
+    warning: fg("warning"),
+    muted: fg("muted"),
+    dim: fg("dim"),
+    bg: "black",
+    userMsgBg: "gray", // ANSI index 8, used as backgroundColor
+    risk: {
+      read: fg("primary"),
+      plan: fg("dim"),      // same as dim (gray)
+      write_file: fg("warning"),
+      execute_code: fg("error"),
+      destructive: fg("error"),
+      network: fg("error"),
+      vcs_mutation: fg("dim"), // same as dim (gray)
+      unknown: fg("dim"),
+    },
+  };
+}
+
 const darkPresets: Record<ThemePreset, Theme> = {
-  teal: {
-    primary: "#4EC9B0",
-    success: "#6A9955",
-    error: "#F44747",
-    warning: "#CCA700",
-    muted: "#CCCCCC",
-    dim: "#808080",
-    bg: "#1E1E1E",
-    userMsgBg: "#333333",
-    risk: {
-      read: "#4EC9B0",
-      plan: "#C586C0",
-      write_file: "#CCA700",
-      execute_code: "#CE9178",
-      destructive: "#F44747",
-      network: "#CE9178",
-      vcs_mutation: "#C586C0",
-      unknown: "#808080",
-    },
-  },
-  blue: {
-    primary: "#4FC1FF",
-    success: "#6A9955",
-    error: "#F44747",
-    warning: "#CCA700",
-    muted: "#CCCCCC",
-    dim: "#808080",
-    bg: "#1E1E1E",
-    userMsgBg: "#333333",
-    risk: {
-      read: "#4FC1FF",
-      plan: "#C586C0",
-      write_file: "#CCA700",
-      execute_code: "#CE9178",
-      destructive: "#F44747",
-      network: "#CE9178",
-      vcs_mutation: "#C586C0",
-      unknown: "#808080",
-    },
-  },
-  purple: {
-    primary: "#B392F0",
-    success: "#6A9955",
-    error: "#F44747",
-    warning: "#CCA700",
-    muted: "#CCCCCC",
-    dim: "#808080",
-    bg: "#1E1E1E",
-    userMsgBg: "#333333",
-    risk: {
-      read: "#B392F0",
-      plan: "#C586C0",
-      write_file: "#CCA700",
-      execute_code: "#CE9178",
-      destructive: "#F44747",
-      network: "#CE9178",
-      vcs_mutation: "#C586C0",
-      unknown: "#808080",
-    },
-  },
-  cyan: {
-    primary: "#00BCD4",
-    success: "#6A9955",
-    error: "#F44747",
-    warning: "#CCA700",
-    muted: "#CCCCCC",
-    dim: "#808080",
-    bg: "#1E1E1E",
-    userMsgBg: "#333333",
-    risk: {
-      read: "#00BCD4",
-      plan: "#C586C0",
-      write_file: "#CCA700",
-      execute_code: "#CE9178",
-      destructive: "#F44747",
-      network: "#CE9178",
-      vcs_mutation: "#C586C0",
-      unknown: "#808080",
-    },
-  },
-  mono: {
-    primary: "#E0E0E0",
-    success: "#A0A0A0",
-    error: "#F44747",
-    warning: "#CCA700",
-    muted: "#A0A0A0",
-    dim: "#6B6B6B",
-    bg: "#1E1E1E",
-    userMsgBg: "#2A2A2A",
-    risk: {
-      read: "#E0E0E0",
-      plan: "#CCCCCC",
-      write_file: "#A0A0A0",
-      execute_code: "#808080",
-      destructive: "#F44747",
-      network: "#808080",
-      vcs_mutation: "#CCCCCC",
-      unknown: "#6B6B6B",
-    },
-  },
+  teal: buildTheme("teal"),
+  blue: buildTheme("blue"),
+  purple: buildTheme("purple"),
+  cyan: buildTheme("cyan"),
+  mono: buildTheme("mono"),
 };
 
 export function getDarkTheme(preset: ThemePreset): Theme {

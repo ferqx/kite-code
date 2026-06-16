@@ -2,7 +2,7 @@ import React from "react";
 import { render } from "ink";
 import { loadAgentConfig, loadTheme, loadColorPreset, saveColorPreset, type AgentConfig } from "@/core/config/index";
 import { sessionExportPath } from "@/core/config/paths";
-import { ThemeContext, lightTheme, getDarkTheme, type ThemePreset } from "./theme";
+import { ThemeContext, lightTheme, getDarkTheme, osc4Apply, type ThemePreset } from "./theme";
 import { McpManager } from "@/core/mcp";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
@@ -62,6 +62,10 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     }
     return "blue";
   });
+  // Apply OSC 4 palette on startup
+  React.useEffect(() => {
+    process.stdout.write(osc4Apply(themePreset));
+  }, []);
   const [themeGeneration, setThemeGeneration] = React.useState(0);
   const theme = React.useMemo(
     () => (loadTheme(workspace) === "light" ? lightTheme : getDarkTheme(themePreset)),
@@ -484,6 +488,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       const p = preset.toLowerCase();
       if (p === "teal" || p === "blue" || p === "purple" || p === "cyan" || p === "mono") {
         setThemePreset(p);
+        // OSC 4 reprograms terminal palette — existing Static content changes instantly
+        process.stdout.write(osc4Apply(p));
+        // themeGeneration fallback: clear+redraw for terminals that don't support OSC 4
         setThemeGeneration((g) => g + 1);
         saveColorPreset(p);
         dispatchSessionLoad({ type: "USER_MESSAGE", text: `/theme ${p}` });
