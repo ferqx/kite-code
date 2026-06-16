@@ -187,7 +187,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
             </Box>
           ))}
           <Box>
-            <Text color={dt.muted}>  done!</Text>
+            <Text color={dt.muted}>└─ done!</Text>
           </Box>
         </Box>
       )}
