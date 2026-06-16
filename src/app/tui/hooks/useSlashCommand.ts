@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import { listAvailableModels } from "@/core/config";
 import { getSkillContent } from "@/core/skills/loader";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
+import type { Action } from "../reducers/actions";
 
 export type SlashAction =
   | { type: "effort"; level: string }
@@ -48,7 +49,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
 }
 
 export function useSlashCommand(
-  dispatch: Dispatch<any>,
+  dispatch: Dispatch<Action>,
   onExit?: () => void,
   mcpPromptRegistry?: ReadonlyMap<string, { server: string; prompt: { name: string; description?: string; arguments?: any[] } }>,
   skillManifests?: SkillManifest[],
@@ -88,7 +89,7 @@ export function useSlashCommand(
         }
         break;
       case "new":
-        dispatch({ type: "NEW_SESSION" });
+        dispatch({ type: "NEW_SESSION", threadId: "" });
         break;
       case "plan":
         dispatch({ type: "SET_PHASE", phase: "planning" as const });

@@ -66,6 +66,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   // discards its result, preventing the first-to-resolve Promise from overwriting the
   // later-initiated load's state.
   const loadGenerationRef = React.useRef(0);
+  // Prevent concurrent NEW_SESSION from creating ghost sessions
+  const creatingSessionRef = React.useRef(false);
   const editorContentRef = React.useRef<EditorContentHandle | null>(null);
   // Persist input value across resize remounts
   const inputValueRef = React.useRef("");
@@ -172,7 +174,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     dispatch, provider, config, workspace, sessionManager,
     threadIdRef, loadGenerationRef, conversationHistoryRef,
     thinkingLevelRef, skillManifestsRef, skillOptionsRef, mcpManagerRef,
-    agentLoopActiveRef, abortControllerRef,
+    agentLoopActiveRef, abortControllerRef, stateRef,
   }), [dispatch, provider, config, workspace, sessionManager]);
   const { runRewind, dispatchSessionLoadInterceptor } = useRunRewind(state, rewindDeps);
   const runRewindRef = React.useRef(runRewind);
@@ -231,7 +233,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       threadIdRef.current = newId;
 
       dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-    }).catch(() => {
+    }).catch((e) => {
+      console.error(`[TUI] Failed to list historical sessions: ${e instanceof Error ? e.message : String(e)}`);
       // DB may not exist yet (first run) — auto-create
       if (!sessionManager.getActiveId()) {
         const newId = sessionManager.createSession(workspace);
@@ -325,6 +328,12 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       if (action.type === "NEW_SESSION") {
         // Ignore /new if the current session has no user messages yet
         if (stateRef.current.turns.length === 0) return;
+        // Prevent concurrent NEW_SESSION from creating ghost sessions
+        if (creatingSessionRef.current) return;
+        creatingSessionRef.current = true;
+        // Flush token stats for outgoing session before leaving it
+        const oldId = sessionManager.getActiveId();
+        if (oldId) sessionManager.saveTokenStats(oldId, stateRef.current.status, true);
         // Supersede any in-flight LOAD_SESSION_PENDING
         loadGenerationRef.current++;
         const newId = sessionManager.createSession(workspace);
@@ -332,6 +341,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         // The reducer will use this threadId to create the snapshot
         dispatch({ type: "NEW_SESSION", threadId: newId });
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        // Release the lock after the reducer processes the session change.
+        // The next render (triggered by the dispatches above) will reset this.
+        setTimeout(() => { creatingSessionRef.current = false; }, 0);
         return;
       }
       // ── LOAD_SESSION_PENDING：委托给 loadSessionById ──
@@ -398,6 +410,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           // DB error — still remove from runtime list
         }
         // Remove from SessionManager and refresh snapshots
+        // Flush token stats before removing runtime (stats are lost after remove)
+        sessionManager.saveTokenStats(threadId, stateRef.current.status, true);
         sessionManager.removeRuntime(threadId);
         if (wasActive) {
           // Deleted the active session — create a new one so TUI has an active session

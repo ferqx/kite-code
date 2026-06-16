@@ -11,6 +11,7 @@ import type { AgentConfig } from "@/core/config/index";
 import type { McpManager } from "@/core/mcp";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import type { SessionManager } from "../session-manager";
+import type { TuiState } from "../types";
 
 export interface RewindDeps {
   dispatch: Dispatch<Action>;
@@ -27,6 +28,7 @@ export interface RewindDeps {
   mcpManagerRef: React.MutableRefObject<McpManager | null>;
   agentLoopActiveRef: React.MutableRefObject<boolean>;
   abortControllerRef: React.MutableRefObject<AbortController | null>;
+  stateRef: React.MutableRefObject<TuiState>;
 }
 
 /** Load checkpoint list when Rewind panel is opened */
@@ -86,7 +88,7 @@ export function useRunRewind(
         dispatch, provider, config, workspace, sessionManager,
         threadIdRef, conversationHistoryRef, thinkingLevelRef,
         skillManifestsRef, skillOptionsRef, mcpManagerRef,
-        agentLoopActiveRef, abortControllerRef,
+        agentLoopActiveRef, abortControllerRef, stateRef,
       } = deps;
 
       if (agentLoopActiveRef.current) return;
@@ -136,10 +138,14 @@ export function useRunRewind(
         }));
       } else {
         const newThreadId = `tui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-        threadIdRef.current = newThreadId;
         const forkedRt = sessionManager.registerSession(newThreadId, workspace);
+        // Flush token stats for the outgoing session before leaving it
+        sessionManager.saveTokenStats(threadId, stateRef.current.status, true);
+        sessionManager.switchSession(threadId, newThreadId);
+        if (forkedRt) forkedRt.setForeground(true);
         forkedRt.thinkingLevel = thinkingLevelRef.current;
         forkedRt.conversationHistory = [...conversationHistoryRef.current];
+        threadIdRef.current = newThreadId;
         sessionManager.onStatusChange(newThreadId);
         dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
         dispatch({ type: "SWITCH_SESSION", threadId: newThreadId });
