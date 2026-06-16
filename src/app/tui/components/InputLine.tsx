@@ -256,10 +256,11 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
       });
       setHistoryIndex(-1);
       textKeyRef.current++;
+      onValueChange?.(""); // clear ref BEFORE onSubmit: session switch may remount InputLine
       onSubmit(finalValue);
       setValue("");
     },
-    [onSubmit],
+    [onSubmit, onValueChange],
   );
   const handleSubmitRef = useRef(handleSubmit);
   handleSubmitRef.current = handleSubmit;
@@ -372,6 +373,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         const selected = ss.result.items[ss.selectedIndex];
         if (selected) {
           const fullCmd = ss.replaceCommand(selected, ss.result.kind);
+          onValueChange?.(""); // clear ref BEFORE onSubmit so remount sees empty value
           commitValue(fullCmd);
           setHistory((prev) => [...prev, fullCmd]);
           setHistoryIndex(-1);
@@ -412,6 +414,7 @@ export default function InputLine({ mode, onSubmit, disabled, placeholder, works
         const selected = fs.results[fs.selectedIndex];
         if (selected) {
           const newVal = fs.replaceQuery(selected);
+          onValueChange?.(""); // clear ref BEFORE onSubmit so remount sees empty value
           commitValue(newVal);
           setHistory((prev) => [...prev, newVal]);
           setHistoryIndex(-1);
