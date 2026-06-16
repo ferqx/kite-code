@@ -157,8 +157,12 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     );
   }
 
-  // done — same visual style as running, plus done! at the end
+  // done — same visual style as running (truncated steps + fold indicator), plus done! at the end
   const doneStepCount = block.steps.length;
+  const doneVisibleSteps = doneStepCount > MAX_RUNNING_STEPS
+    ? block.steps.slice(-MAX_RUNNING_STEPS)
+    : block.steps;
+  const doneSkipped = doneStepCount - MAX_RUNNING_STEPS;
   const cacheTotal = (block.cacheHitTokens ?? 0) + (block.cacheMissTokens ?? 0);
   const cacheHitRate = cacheTotal > 0 ? ((block.cacheHitTokens ?? 0) / cacheTotal * 100).toFixed(0) + "%" : null;
 
@@ -170,9 +174,14 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
         <Text color={dt.muted}> · {taskSummary}</Text>
         <Text color={dt.dim}> — {block.toolCallCount} 次工具调用，{formatDuration(block.durationMs)}{cacheHitRate ? `，cache: ${cacheHitRate}` : ""}</Text>
       </Box>
+      {doneSkipped > 0 && (
+        <Box paddingLeft={3}>
+          <Text color={dt.dim}>... 以上 {doneSkipped} 步已折叠</Text>
+        </Box>
+      )}
       {doneStepCount > 0 && (
         <Box paddingLeft={3} flexDirection="column">
-          {block.steps.map((step, i) => (
+          {doneVisibleSteps.map((step, i) => (
             <Box key={i}>
               <Text color={dt.dim}>├─ {step.toolName}</Text>
               {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
