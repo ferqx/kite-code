@@ -445,7 +445,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   }, []);
 
   const handleSlashCommand = useSlashCommand(
-    dispatch,
+    dispatchSessionLoad,
     handleExit,
     mcpPromptRegistry,
     skillManifestsRef.current,
