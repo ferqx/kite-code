@@ -6,6 +6,7 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "allowUnreachableCode": false,
     "types": ["bun-types"],
     "allowImportingTsExtensions": true,
     "jsx": "react-jsx",

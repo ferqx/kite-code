@@ -8,12 +8,11 @@ import type { Action } from "../reducers/actions";
 export type SlashAction =
   | { type: "effort"; level: string }
   | { type: "model"; name?: string }
-  | { type: "model_list" }
+  | { type: "theme"; preset?: string }
   | { type: "sessions"; id?: string }
   | { type: "plan" }
   | { type: "auth"; mode?: string }
   | { type: "clear" }
-  | { type: "setting" }
   | { type: "help" }
   | { type: "new" }
   | { type: "exit" }
@@ -31,13 +30,12 @@ export function parseSlashCommand(input: string): SlashAction | null {
   switch (cmd) {
     case "effort": return { type: "effort", level: arg || "max" };
     case "model":
-      if (arg === "list") return { type: "model_list" };
       return { type: "model", name: arg || undefined };
+    case "theme": return { type: "theme", preset: arg || undefined };
     case "sessions": return { type: "sessions", id: arg || undefined };
     case "plan": return { type: "plan" };
     case "auth": return { type: "auth", mode: arg || undefined };
     case "clear": case "c": return { type: "clear" };
-    case "setting": case "config": return { type: "setting" };
     case "help": case "h": return { type: "help" };
     case "new": return { type: "new" };
     case "mcp": return { type: "mcp" };
@@ -55,6 +53,7 @@ export function useSlashCommand(
   skillManifests?: SkillManifest[],
   skillOptions?: SkillScanOptions,
   onRunTask?: (task: string) => void,
+  onTheme?: (preset: string) => void,
 ) {
   return useCallback((input: string): boolean => {
     const action = parseSlashCommand(input);
@@ -77,8 +76,10 @@ export function useSlashCommand(
           dispatch({ type: "SHOW_MODEL_SELECTOR" });
         }
         break;
-      case "model_list":
-        dispatch({ type: "LIST_MODELS" });
+      case "theme":
+        if (onTheme && action.preset) {
+          onTheme(action.preset);
+        }
         break;
       case "sessions":
         if (action.id) {
@@ -100,9 +101,6 @@ export function useSlashCommand(
         break;
       case "clear":
         dispatch({ type: "CLEAR_OUTPUT" });
-        break;
-      case "setting":
-        dispatch({ type: "SHOW_SETTING" });
         break;
       case "help":
         dispatch({ type: "SHOW_HELP" });
@@ -153,5 +151,5 @@ export function useSlashCommand(
       }
     }
     return true;
-  }, [dispatch, onExit, mcpPromptRegistry, skillManifests, skillOptions, onRunTask]);
+  }, [dispatch, onExit, mcpPromptRegistry, skillManifests, skillOptions, onRunTask, onTheme]);
 }

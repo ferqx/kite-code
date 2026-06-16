@@ -1,8 +1,8 @@
 import React from "react";
 import { render } from "ink";
-import { loadAgentConfig, loadTheme, type AgentConfig } from "@/core/config/index";
+import { loadAgentConfig, loadTheme, loadColorPreset, saveColorPreset, type AgentConfig } from "@/core/config/index";
 import { sessionExportPath } from "@/core/config/paths";
-import { ThemeContext, darkTheme, lightTheme } from "./theme";
+import { ThemeContext, lightTheme, getDarkTheme, type ThemePreset } from "./theme";
 import { McpManager } from "@/core/mcp";
 import { TuiUserInputProvider } from "./provider";
 import App, { useTuiState, type Action } from "./App";
@@ -55,7 +55,18 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   React.useEffect(() => {
     textBatcher.setRunning(state.running);
   }, [state.running, textBatcher]);
-  const theme = React.useMemo(() => (loadTheme(workspace) === "light" ? lightTheme : darkTheme), []);
+  const [themePreset, setThemePreset] = React.useState<ThemePreset>(() => {
+    const saved = loadColorPreset(workspace);
+    if (saved === "teal" || saved === "blue" || saved === "purple" || saved === "cyan" || saved === "mono") {
+      return saved;
+    }
+    return "blue";
+  });
+  const [themeGeneration, setThemeGeneration] = React.useState(0);
+  const theme = React.useMemo(
+    () => (loadTheme(workspace) === "light" ? lightTheme : getDarkTheme(themePreset)),
+    [themePreset, workspace],
+  );
   const [initialized, setInitialized] = React.useState(false);
   const prevInterruptRef = React.useRef(state.interrupt);
   const conversationHistoryRef = React.useRef<string[]>([]);
@@ -469,6 +480,17 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     skillManifestsRef.current,
     skillOptionsRef.current ?? undefined,
     runTaskBridge,
+    (preset) => {
+      const p = preset.toLowerCase();
+      if (p === "teal" || p === "blue" || p === "purple" || p === "cyan" || p === "mono") {
+        setThemePreset(p);
+        setThemeGeneration((g) => g + 1);
+        saveColorPreset(p);
+        dispatchSessionLoad({ type: "USER_MESSAGE", text: `/theme ${p}` });
+        dispatchSessionLoad({ type: "EVENT", event: { type: "text", data: { text: `  ⎿  Theme set to ${p}` } } });
+      }
+      // Invalid preset — silently ignored
+    },
   );
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
@@ -598,7 +620,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
   return (
     <ThemeContext.Provider value={theme}>
-    <App key={resizeKey} state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion} resizeGeneration={resizeKey}>
+    <App key={resizeKey} state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion} resizeGeneration={resizeKey} themeGeneration={themeGeneration}>
       <InputLine
         key={state.activeSessionId}
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}

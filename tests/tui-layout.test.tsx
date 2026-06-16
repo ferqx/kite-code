@@ -339,9 +339,29 @@ describe("MarkdownBlock", () => {
     expect(lastFrame()).toContain("normal");
   });
 
-  test("renders inline code", () => {
-    const { lastFrame } = render(<MarkdownBlock content="use `code` here" />);
-    expect(lastFrame()).toContain("code");
+ test("renders inline code", () => {
+   const { lastFrame } = render(<MarkdownBlock content="use `code` here" />);
+   expect(lastFrame()).toContain("code");
+ });
+
+  test("renders nested unordered list with indentation", () => {
+    const { lastFrame } = render(<MarkdownBlock content="- one\n  - nested" />);
+    expect(lastFrame()).toContain("nested");
+  });
+
+  test("renders task list checkbox", () => {
+    const { lastFrame } = render(<MarkdownBlock content="- [x] done" />);
+    expect(lastFrame()).toContain("done");
+  });
+
+  test("renders blockquote with left bar", () => {
+    const { lastFrame } = render(<MarkdownBlock content="> quote" />);
+    expect(lastFrame()).toContain("quote");
+  });
+
+  test("renders code block top border across full width", () => {
+    const { lastFrame } = render(<MarkdownBlock content={"```ts\nx\n```"} />);
+    expect(lastFrame()).toContain("┌─ ts ─");
   });
 });
 
@@ -619,6 +639,285 @@ function OutputAreaTestWrap({ running, turns, onToggleReason }: {
     </>
   );
 }
+
+describe("BlockRenderer", () => {
+  test("renders text block", () => {
+    const block: OutputBlock = { id: 1, kind: "text", content: "Hello world" };
+    const { lastFrame } = render(
+      <BlockRenderer block={block} isFocused={false} index={0} />,
+    );
+    expect(lastFrame()).toContain("Hello world");
+  });
+
+  test("renders user block", () => {
+    const block: OutputBlock = { id: 1, kind: "user", content: "ls -la" };
+    const { lastFrame } = render(
+      <BlockRenderer block={block} isFocused={false} index={0} />,
+    );
+    expect(lastFrame()).toContain("ls -la");
+  });
+
+  test("renders reason block as null (hidden)", () => {
+    const block: OutputBlock = { id: 1, kind: "reason", content: "thinking", folded: false };
+    const { lastFrame } = render(
+      <BlockRenderer block={block} isFocused={false} index={0} />,
+    );
+    expect(lastFrame()).toBe("");
+  });
+
+  test("renders running tool_card", () => {
+    const block: OutputBlock = { id: 1, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "running", summary: "" };
+    const { lastFrame } = render(
+      <BlockRenderer block={block} isFocused={false} index={0} />,
+    );
+    expect(lastFrame()).toContain("read_file");
+  });
+
+  test("renders file_change block", () => {
+    const block: OutputBlock = {
+      id: 1, kind: "file_change",
+      changes: [{ path: "src/a.ts", kind: "add", linesAdded: 5 }],
+    };
+    const { lastFrame } = render(
+      <BlockRenderer block={block} isFocused={false} index={0} />,
+    );
+    expect(lastFrame()).toContain("src/a.ts");
+  });
+
+  test("renders resolved question block", () => {
+    const block: OutputBlock = {
+      id: 1, kind: "question",
+      question: { question: "hello", options: [], allow_free_text: true },
+      resolved: "yes",
+    };
+    const { lastFrame } = render(
+      <BlockRenderer block={block} isFocused={false} index={0} />,
+    );
+    expect(lastFrame()).toContain("Answered");
+  });
+
+  test("renders subagent block", () => {
+    const block: OutputBlock = {
+      id: 1, kind: "subagent",
+      subagentId: "s1", role: "explore", task: "find files",
+      status: "done", summary: "Found 3 files", toolCallCount: 2, durationMs: 500,
+      steps: [],
+    };
+    const { lastFrame } = render(
+      <BlockRenderer block={block} isFocused={false} index={0} />,
+    );
+    expect(lastFrame()).toContain("find files");
+  });
+});
+
+describe("Block spacing", () => {
+  /**
+   * Helper: render two blocks and check there's exactly 1 blank line between them.
+   */
+  function assertGap(prev: OutputBlock, next: OutputBlock, expectedGap: number) {
+    const blocks: OutputBlock[] = [prev, next];
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const lines = (lastFrame() ?? "").split("\n");
+    // Find last content line of prev block and first content line of next block
+    // Use a unique marker for each block
+    const markers = getBlockMarkers(blocks);
+    expect(markers.length).toBe(2);
+    const firstIdx = lines.findIndex(l => l.includes(markers[0]));
+    const secondIdx = lines.findIndex(l => l.includes(markers[1]));
+    expect(firstIdx).toBeGreaterThan(-1);
+    expect(secondIdx).toBeGreaterThan(-1);
+
+    const gap = secondIdx - firstIdx - 1;
+    if (gap !== expectedGap) {
+      throw new Error(
+        `${prev.kind}\u2192${next.kind}: expected ${expectedGap} blank line(s), got ${gap}\n` +
+        lines.slice(Math.max(0, firstIdx - 1), secondIdx + 2)
+          .map((l, j) => l || "(empty)").join("\n")
+      );
+    }
+  }
+
+  /** Get a unique content marker for each block to locate it in output */
+  function getBlockMarkers(blocks: (OutputBlock & { _marker?: string })[]): string[] {
+    return blocks.map((b, i) => b._marker ?? `__BLOCK_${i}__`);
+  }
+
+  test("user → text", () => {
+    assertGap(
+      { id: 1, kind: "user", content: "hello world", _marker: "hello world" } as any,
+      { id: 2, kind: "text", content: "__BLOCK_1__", _marker: "__BLOCK_1__" } as any,
+      1,
+    );
+  });
+
+  test("text → tool_card", () => {
+    assertGap(
+      { id: 1, kind: "text", content: "__BLOCK_0__", _marker: "__BLOCK_0__" } as any,
+      { id: 2, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "done", summary: "done", _marker: "read_file" } as any,
+      1,
+    );
+  });
+
+  test("tool_card → tool_card", () => {
+    assertGap(
+      { id: 1, kind: "tool_card", callId: "c1", name: "tool_a", args: {}, status: "done", summary: "ok", _marker: "tool_a" } as any,
+      { id: 2, kind: "tool_card", callId: "c2", name: "tool_b", args: {}, status: "done", summary: "ok", _marker: "tool_b" } as any,
+      1,
+    );
+  });
+
+  test("tool_card → text", () => {
+    assertGap(
+      { id: 1, kind: "tool_card", callId: "c1", name: "shell_execute", args: {}, status: "done", summary: "result", _marker: "shell_execute" } as any,
+      { id: 2, kind: "text", content: "__BLOCK_1__", _marker: "__BLOCK_1__" } as any,
+      1,
+    );
+  });
+
+  test("text → file_change", () => {
+    assertGap(
+      { id: 1, kind: "text", content: "__BLOCK_0__", _marker: "__BLOCK_0__" } as any,
+      { id: 2, kind: "file_change", changes: [{ path: "f.ts", kind: "add" }], _marker: "File Changes" } as any,
+      1,
+    );
+  });
+
+  test("file_change → text", () => {
+    assertGap(
+      { id: 1, kind: "file_change", changes: [{ path: "f.ts", kind: "add" }], _marker: "f.ts" } as any,
+      { id: 2, kind: "text", content: "__BLOCK_1__", _marker: "__BLOCK_1__" } as any,
+      1,
+    );
+  });
+
+  test("subagent → text", () => {
+    assertGap(
+      { id: 1, kind: "subagent", subagentId: "s1", role: "explore", task: "find", status: "done", summary: "ok", toolCallCount: 1, durationMs: 100, steps: [], _marker: "find" } as any,
+      { id: 2, kind: "text", content: "__BLOCK_1__", _marker: "__BLOCK_1__" } as any,
+      1,
+    );
+  });
+
+  test("slash command user → text (tight)", () => {
+    assertGap(
+      { id: 1, kind: "user", content: "/theme blue", _marker: "/theme blue" } as any,
+      { id: 2, kind: "text", content: "__SLASH_RSLT__", _marker: "__SLASH_RSLT__" } as any,
+      0,
+    );
+  });
+
+  test("consecutive text in same block has 1-line paragraph gap", () => {
+    // Two paragraphs in the same text block separated by \n\n
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "user", content: "hello" },
+      { id: 2, kind: "text", content: "Paragraph one.\n\nParagraph two." },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+
+    const frame = lastFrame() ?? "";
+    const lines = frame.split("\n");
+
+    const p1 = lines.findIndex(l => l.includes("Paragraph one"));
+    const p2 = lines.findIndex(l => l.includes("Paragraph two"));
+    expect(p1).toBeGreaterThan(-1);
+    expect(p2).toBeGreaterThan(-1);
+    expect(p2 - p1).toBe(2); // 1 blank line between paragraphs
+  });
+
+  test("consecutive bullet items have 0 gap", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "user", content: "list" },
+      { id: 2, kind: "text", content: "- item one\n- item two\n\n- item after blank\n- item four" },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+
+    const frame = lastFrame() ?? "";
+    const lines = frame.split("\n");
+
+    // item one and item two should be consecutive (no gap)
+    const i1 = lines.findIndex(l => l.includes("item one"));
+    const i2 = lines.findIndex(l => l.includes("item two"));
+    expect(i1).toBeGreaterThan(-1);
+    expect(i2).toBeGreaterThan(-1);
+    expect(i2 - i1).toBe(1); // consecutive, no blank line
+
+    // item after blank and item four: the blank line in markdown should NOT create a gap
+    const i3 = lines.findIndex(l => l.includes("item after blank"));
+    const i4 = lines.findIndex(l => l.includes("item four"));
+    expect(i3).toBeGreaterThan(-1);
+    expect(i4).toBeGreaterThan(-1);
+    expect(i4 - i3).toBe(1); // consecutive, no blank line
+  });
+
+  test("slash command user block has 0 gap to result", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "user", content: "/theme blue" },
+      { id: 2, kind: "text", content: "  ⎿  Theme set to blue" },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+
+    const frame = lastFrame() ?? "";
+    const lines = frame.split("\n");
+
+    const cmd = lines.findIndex(l => l.includes("/theme blue"));
+    const result = lines.findIndex(l => l.includes("Theme set to blue"));
+    expect(cmd).toBeGreaterThan(-1);
+    expect(result).toBeGreaterThan(-1);
+    expect(result - cmd).toBe(1); // 0 gap, immediate next line
+  });
+
+  test("streaming text after user has 1-line gap (dynamic tree path)", () => {
+    // Simulate a new agent response: user message followed by streaming text.
+    // With running=true, these blocks stay in the dynamic tree (OutputArea).
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "user", content: "hello" },
+      { id: 2, kind: "text", content: "Hi there", streaming: true },
+    ];
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={true} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? "";
+    const lines = frame.split("\n");
+
+    const userLine = lines.findIndex(l => l.includes("❯ hello"));
+    const textLine = lines.findIndex(l => l.includes("Hi there"));
+    expect(userLine).toBeGreaterThan(-1);
+    expect(textLine).toBeGreaterThan(-1);
+    expect(textLine - userLine).toBe(2); // 1 blank line between them
+  });
+
+  test("multi-paragraph streaming text has paragraph gaps", () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: "user", content: "intro" },
+      { id: 2, kind: "text", content: "First paragraph.\n\nSecond paragraph.\n\nThird.", streaming: true },
+    ];
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={true} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? "";
+    const lines = frame.split("\n");
+
+    const p1 = lines.findIndex(l => l.includes("First paragraph"));
+    const p2 = lines.findIndex(l => l.includes("Second paragraph"));
+    const p3 = lines.findIndex(l => l.includes("Third"));
+    expect(p1).toBeGreaterThan(-1);
+    expect(p2).toBeGreaterThan(-1);
+    expect(p3).toBeGreaterThan(-1);
+    expect(p2 - p1).toBe(2); // 1 blank line between paragraphs
+    expect(p3 - p2).toBe(2);
+  });
+});
 
 describe("OutputArea", () => {
   test("renders user block with chevron prefix", () => {
