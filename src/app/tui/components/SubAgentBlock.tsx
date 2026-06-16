@@ -6,15 +6,6 @@ import { useTheme } from "../theme";
 import MarkdownBlock from "./MarkdownBlock";
 import { formatReadFileRange } from "./render-utils";
 
-function roleIcon(role: SubAgentRole): string {
-  switch (role) {
-    case "explore": return "🔍";
-    case "code": return "🔧";
-    case "review": return "👁";
-    default: return "•";
-  }
-}
-
 function roleLabel(role: SubAgentRole): string {
   switch (role) {
     case "explore": return "Explore";
@@ -98,7 +89,6 @@ interface SubAgentBlockProps {
 
 export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const dt = useTheme();
-  const icon = roleIcon(block.role);
   const label = roleLabel(block.role);
   const taskSummary = taskLabel(block.task);
 
@@ -123,7 +113,6 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={dt.warning}>▸ {icon} </Text>
           <Text color={dt.primary}>{label}</Text>
           <Text color={dt.muted}> · {taskSummary}</Text>
           {stepCount > 0 && (
@@ -158,7 +147,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={dt.error}>✗ {icon} </Text>
+          <Text color={dt.error}>✗ </Text>
           <Text color={dt.primary}>{label}</Text>
           <Text color={dt.muted}> · {taskSummary}</Text>
         </Box>
@@ -173,7 +162,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const doneStepCount = block.steps.length;
   const cacheTotal = (block.cacheHitTokens ?? 0) + (block.cacheMissTokens ?? 0);
   const cacheHitRate = cacheTotal > 0 ? ((block.cacheHitTokens ?? 0) / cacheTotal * 100).toFixed(0) + "%" : null;
-  const doneHeaderText = `${icon} ${label} · ${taskSummary} — ${block.toolCallCount} 次工具调用，${formatDuration(block.durationMs)}${cacheHitRate ? `，cache: ${cacheHitRate}` : ""}`;
+  const doneHeaderText = `${label} · ${taskSummary} — ${block.toolCallCount} 次工具调用，${formatDuration(block.durationMs)}${cacheHitRate ? `，cache: ${cacheHitRate}` : ""}`;
   const isExpandable = doneStepCount > 0;
 
   if (block.expanded) {

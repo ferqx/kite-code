@@ -99,6 +99,12 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         if (prevFullText === event.data.text) return state;
 
         const newLines = event.data.text.split("\n");
+        // Drop trailing empty from split (trailing \n artifact).
+        // Otherwise the trailing "" becomes a streaming text block
+        // that renders as a blank line between event dispatches.
+        if (event.data.text.endsWith("\n") && newLines.length > 0) {
+          newLines.pop();
+        }
 
         const turns = state.turns.slice();
         if (turns.length === 0) turns.push({ blocks: [] });

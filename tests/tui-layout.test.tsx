@@ -976,7 +976,6 @@ describe("SubAgentBlock rendering", () => {
       <SubAgentBlock block={block} />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("▸");
     expect(frame).toContain("Code");
     expect(frame).toContain("fix auth bug");
     expect(frame).toContain("read_file");
@@ -1020,7 +1019,7 @@ describe("SubAgentBlock rendering", () => {
     expect(frame).toContain("timed out");
   });
 
-  test("renders explore role icon and label correctly", () => {
+  test("renders explore role label correctly", () => {
     const block = {
       id: 1, kind: "subagent" as const,
       subagentId: "sub-1", role: "explore" as const, task: "search all",
@@ -1031,7 +1030,6 @@ describe("SubAgentBlock rendering", () => {
       <SubAgentBlock block={block} />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("🔍");
     expect(frame).toContain("Explore");
   });
 
