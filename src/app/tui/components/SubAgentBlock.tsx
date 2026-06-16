@@ -157,33 +157,37 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     );
   }
 
-  // done — always fully expanded, no collapse
+  // done — same visual style as running, plus done! at the end
   const doneStepCount = block.steps.length;
   const cacheTotal = (block.cacheHitTokens ?? 0) + (block.cacheMissTokens ?? 0);
   const cacheHitRate = cacheTotal > 0 ? ((block.cacheHitTokens ?? 0) / cacheTotal * 100).toFixed(0) + "%" : null;
-  const doneHeaderText = `${label} · ${taskSummary} — ${block.toolCallCount} 次工具调用，${formatDuration(block.durationMs)}${cacheHitRate ? `，cache: ${cacheHitRate}` : ""}`;
 
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={dt.muted}>▼ {doneHeaderText}</Text>
+        <Text color={dt.muted}>✓ </Text>
+        <Text color={dt.primary}>{label}</Text>
+        <Text color={dt.muted}> · {taskSummary}</Text>
+        <Text color={dt.dim}> — {block.toolCallCount} 次工具调用，{formatDuration(block.durationMs)}{cacheHitRate ? `，cache: ${cacheHitRate}` : ""}</Text>
       </Box>
       {doneStepCount > 0 && (
         <Box paddingLeft={3} flexDirection="column">
           {block.steps.map((step, i) => (
-            <Box key={i} paddingLeft={2}>
-              <Text color={step.ok === false ? dt.error : dt.muted}>
-                {step.ok === false ? "✗" : "·"}
-              </Text>
-              <Text color={dt.muted}> {step.toolName}</Text>
+            <Box key={i}>
+              <Text color={dt.dim}>├─ {step.toolName}</Text>
               {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
                 const label = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
-                return label ? <Text color={dt.dim}> {label}</Text> : null;
+                return label ? <Text color={dt.muted}> {label}</Text> : null;
               })()}
+              {step.ok !== undefined && (
+                <Text color={step.ok ? dt.success : dt.error}>
+                  {" "}{step.ok ? "✓" : "✗"}
+                </Text>
+              )}
             </Box>
           ))}
-          <Box paddingLeft={2}>
-            <Text color={dt.muted}>done!</Text>
+          <Box>
+            <Text color={dt.muted}>  done!</Text>
           </Box>
         </Box>
       )}
