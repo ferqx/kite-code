@@ -983,7 +983,7 @@ describe("SubAgentBlock rendering", () => {
     expect(frame).toContain("✓"); // ok: true on first step
   });
 
-  test("renders done subagent block with summary", () => {
+  test("renders done subagent block", () => {
     const block = {
       id: 1, kind: "subagent" as const,
       subagentId: "sub-1", role: "review" as const, task: "review PR #42",
@@ -999,7 +999,8 @@ describe("SubAgentBlock rendering", () => {
     expect(frame).toContain("review PR #42");
     expect(frame).toContain("5 次工具调用");
     expect(frame).toContain("3.2s");
-    expect(frame).toContain("No critical issues found");
+    // Summary text is NOT rendered in the message list
+    expect(frame).not.toContain("No critical issues found");
   });
 
   test("renders error subagent block", () => {
@@ -1051,22 +1052,23 @@ describe("SubAgentBlock rendering", () => {
     expect(frame).not.toContain("Detailed instructions");
   });
 
-  test("done block renders full summary with markdown", () => {
+  test("done block shows done! after steps", () => {
     const longSummary = Array.from({ length: 15 }, (_, i) => `Line ${i + 1}`).join("\n");
     const block = {
       id: 1, kind: "subagent" as const,
       subagentId: "sub-1", role: "explore" as const, task: "search",
       status: "done" as const, summary: longSummary, toolCallCount: 3, durationMs: 1200,
-      steps: [], expanded: true,
+      steps: [{ toolName: "read_file", toolArgs: {} }],
     };
     const { lastFrame } = render(
       <SubAgentBlock block={block} />,
     );
     const frame = lastFrame() ?? "";
-    // 使用 MarkdownBlock 完整渲染摘要，不再截断
-    expect(frame).toContain("Line 1");
-    expect(frame).toContain("Line 8");
-    expect(frame).toContain("Line 15");
+    // Summary text should NOT be rendered in the message list
+    expect(frame).not.toContain("Line 1");
+    // Should show the header and done! marker
+    expect(frame).toContain("▼");
+    expect(frame).toContain("done!");
   });
 
   test("running block limits visible steps", () => {

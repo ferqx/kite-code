@@ -26,6 +26,11 @@ function formatLines(added?: number, removed?: number): string {
 
 const BLOCK_GAP = 1;
 
+function gapFrom(prevBlock?: OutputBlock) {
+  const afterText = prevBlock?.kind === "text" ? BLOCK_GAP : 0;
+  return { marginTop: afterText, marginBottom: BLOCK_GAP } as const;
+}
+
 interface BlockRendererProps {
   block: OutputBlock;
   isFocused: boolean;
@@ -47,7 +52,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
       const w = stringWidth(line);
       const pad = col - w;
       return (
-        <Box marginBottom={BLOCK_GAP}>
+        <Box {...gapFrom(prevBlock)}>
           <Text backgroundColor={dt.userMsgBg}>
             {line}{pad > 0 ? " ".repeat(pad) : ""}
           </Text>
@@ -57,7 +62,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
 
     case "text":
       return (
-        <Box marginBottom={BLOCK_GAP}>
+        <Box marginBottom={0}>
           <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? dt.error : undefined} />
         </Box>
       );
@@ -69,14 +74,14 @@ const BlockRenderer = React.memo(function BlockRenderer({
       // Plan progress is shown in StatusBar — hide individual update_plan calls
       if (block.name === "update_plan") return null;
       return (
-        <Box marginBottom={BLOCK_GAP}>
+        <Box {...gapFrom(prevBlock)}>
           <ToolCardBlock block={block} awaitingApproval={awaitingApproval} />
         </Box>
       );
 
     case "file_change":
       return (
-        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
+        <Box flexDirection="column" {...gapFrom(prevBlock)}>
           <Text color={dt.muted}>── File Changes ──</Text>
           {block.changes.map((change, ci) => {
             const { prefix, color } = changePrefix(change.kind, dt);
@@ -109,7 +114,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     }
     case "question": {
       return (
-        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
+        <Box flexDirection="column" {...gapFrom(prevBlock)}>
           {block.resolved ? (
             block.resolved === "cancelled" ? (
               <Text color={dt.dim}>⊘ Question cancelled</Text>
@@ -128,7 +133,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
 
     case "subagent":
       return (
-        <Box flexDirection="column" marginBottom={BLOCK_GAP}>
+        <Box flexDirection="column" {...gapFrom(prevBlock)}>
           <SubAgentBlock block={block} />
         </Box>
       );
@@ -136,7 +141,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     default: {
       const _exhaustive: never = block;
       return (
-        <Box marginBottom={BLOCK_GAP}>
+        <Box {...gapFrom(prevBlock)}>
           <Text color={dt.warning}>
             ? Unknown block kind: {(_exhaustive as OutputBlock).kind}
           </Text>

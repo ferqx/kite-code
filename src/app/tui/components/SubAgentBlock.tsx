@@ -3,7 +3,6 @@ import { Box, Text } from "ink";
 import type { OutputBlock } from "../types";
 import type { SubAgentRole } from "@/protocol/events";
 import { useTheme } from "../theme";
-import MarkdownBlock from "./MarkdownBlock";
 import { formatReadFileRange } from "./render-utils";
 
 function roleLabel(role: SubAgentRole): string {
@@ -186,11 +185,6 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           <Box paddingLeft={2}>
             <Text color={dt.muted}>done!</Text>
           </Box>
-        </Box>
-      )}
-      {block.summary && (
-        <Box paddingLeft={3} flexDirection="column" marginTop={1}>
-          <MarkdownBlock content={block.summary} color={dt.dim} />
         </Box>
       )}
     </Box>
