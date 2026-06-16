@@ -323,6 +323,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     async (action: Action) => {
       // Intercept NEW_SESSION to create runtime via SessionManager
       if (action.type === "NEW_SESSION") {
+        // Ignore /new if the current session has no user messages yet
+        if (stateRef.current.turns.length === 0) return;
         // Supersede any in-flight LOAD_SESSION_PENDING
         loadGenerationRef.current++;
         const newId = sessionManager.createSession(workspace);
