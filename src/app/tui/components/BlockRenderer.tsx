@@ -27,8 +27,7 @@ function formatLines(added?: number, removed?: number): string {
 const BLOCK_GAP = 1;
 
 function gapFrom(prevBlock?: OutputBlock) {
-  const afterText = prevBlock?.kind === "text" ? BLOCK_GAP : 0;
-  return { marginTop: afterText, marginBottom: BLOCK_GAP } as const;
+  return { marginTop: 0, marginBottom: BLOCK_GAP } as const;
 }
 
 interface BlockRendererProps {
@@ -51,23 +50,25 @@ const BlockRenderer = React.memo(function BlockRenderer({
       const line = prompt + block.content;
       const w = stringWidth(line);
       const pad = col - w;
+      const isSlashCommand = block.content.startsWith("/");
       return (
-        <Box {...gapFrom(prevBlock)}>
+        <Box marginTop={gapFrom(prevBlock).marginTop} marginBottom={isSlashCommand ? 0 : BLOCK_GAP}>
           <Text backgroundColor={dt.userMsgBg}>
             {line}{pad > 0 ? " ".repeat(pad) : ""}
           </Text>
         </Box>
       );
-    }
+   }
 
-    case "text":
+    case "text": {
       return (
-        <Box marginBottom={0}>
+        <Box marginTop={0} marginBottom={BLOCK_GAP}>
           <MarkdownBlock content={block.content} streaming={block.streaming} color={block.isError ? dt.error : undefined} />
         </Box>
       );
+    }
 
-    case "reason":
+   case "reason":
       return null;
 
     case "tool_card":

@@ -439,11 +439,49 @@ function isHorizontalRule(line: string): boolean {
   return /^\s*([-*_])(\s*\1){2,}\s*$/.test(line);
 }
 
+const HEADING_RE = /^#{1,6}\s/;
+const UNORDERED_LIST_RE = /^(\s*)[-*]\s+(.*)$/;
+const ORDERED_LIST_RE = /^(\s*)(\d+)[.)]\s+(.*)$/;
+
+function isBlankGroup(g: LineGroup | undefined): boolean {
+  return !!g && g.kind === "single" && g.line.trim() === "";
+}
+
+function isHeadingGroup(g: LineGroup | undefined): boolean {
+  return !!g && g.kind === "single" && HEADING_RE.test(g.line);
+}
+
+function isListGroup(g: LineGroup | undefined): boolean {
+  if (!g || g.kind !== "single") return false;
+  const line = g.line;
+  return !isBlankGroup(g) && !isHeadingGroup(g) && !isHorizontalRule(line) && UNORDERED_LIST_RE.test(line);
+}
+
+function isQuoteGroup(g: LineGroup | undefined): boolean {
+  return !!g && g.kind === "single" && g.line.startsWith("> ") && !isBlankGroup(g);
+}
+
 function isStructuralGroup(g: LineGroup | undefined): boolean {
   if (!g) return false;
   if (g.kind === "table" || g.kind === "code") return true;
-  if (g.kind === "single" && isHorizontalRule(g.line)) return true;
+  if (g.kind === "single") {
+    const line = g.line;
+    return isHorizontalRule(line) || isHeadingGroup(g);
+  }
   return false;
+}
+
+function spacingBetween(prev: LineGroup, next: LineGroup, blanks: number): number {
+  if (isListGroup(prev) && isListGroup(next)) return 0;
+  if (isQuoteGroup(prev) && isQuoteGroup(next)) return 0;
+  if (
+    isStructuralGroup(prev) || isStructuralGroup(next) ||
+    isListGroup(prev) || isListGroup(next) ||
+    isQuoteGroup(prev) || isQuoteGroup(next)
+  ) {
+    return Math.max(1, Math.min(blanks, 1));
+  }
+  return Math.min(blanks, 1);
 }
 
 // ── main component ──
@@ -457,105 +495,128 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
     return groupLines(lines);
   }, [content]);
 
+  const nonBlank = groups.reduce<{ group: LineGroup; blanksBefore: number }[]>((acc, g) => {
+    if (isBlankGroup(g)) {
+      if (acc.length === 0) return acc;
+      acc[acc.length - 1].blanksBefore++;
+      return acc;
+    }
+    acc.push({ group: g, blanksBefore: 0 });
+    return acc;
+  }, []);
+
+  function renderGroup(group: LineGroup): React.ReactNode {
+    if (group.kind === "code") {
+      if (group.lines.length === 0) return null;
+      const lang = group.lang || "code";
+      const label = `┌─ ${lang} `;
+      const labelWidth = stringWidth(label);
+      const topFill = Math.max(0, columns - labelWidth);
+      const topBorder = label + "─".repeat(topFill);
+      const bottomBorder = "└" + "─".repeat(Math.max(0, columns - 1));
+      return (
+        <Box flexDirection="column">
+          <Text color={t.dim}>{topBorder}</Text>
+          {group.lines.map((codeLine, ci) => (
+            <Box key={ci} flexDirection="row">
+              <Text color={t.dim}>│ </Text>
+              <CodeLine line={codeLine} lang={group.lang} />
+            </Box>
+          ))}
+          <Text color={t.dim}>{bottomBorder}</Text>
+        </Box>
+      );
+    }
+
+    if (group.kind === "table") {
+      return <TableBlock lines={group.lines} />;
+    }
+
+    const line = group.line;
+
+    if (line.startsWith("### ")) {
+      return (
+        <Text bold color={t.primary}>
+          <MarkdownLine content={line.slice(4)} color={t.primary} />
+        </Text>
+      );
+    }
+    if (line.startsWith("## ")) {
+      return (
+        <Text bold color={t.primary}>
+          ── <MarkdownLine content={line.slice(3)} color={t.primary} /> ──
+        </Text>
+      );
+    }
+    if (line.startsWith("# ")) {
+      return (
+        <Text bold underline color={t.primary}>
+          <MarkdownLine content={line.slice(2)} color={t.primary} />
+        </Text>
+      );
+    }
+
+    if (isHorizontalRule(line)) {
+      return <Text color={t.dim}>{"─".repeat(columns)}</Text>;
+    }
+
+    const ulMatch = line.match(UNORDERED_LIST_RE);
+    if (ulMatch) {
+      const indent = ulMatch[1].length;
+      let item = ulMatch[2];
+      let bullet = "• ";
+      const taskMatch = item.match(/^(\[[ xX]\])\s+(.*)$/);
+      if (taskMatch) {
+        bullet = taskMatch[1] === "[ ]" ? "☐ " : "☑ ";
+        item = taskMatch[2];
+      }
+      return (
+        <Box paddingLeft={indent}>
+          <Text color={t.muted}>{bullet}</Text>
+          <MarkdownLine content={item} color={color} />
+        </Box>
+      );
+    }
+
+    const olMatch = line.match(ORDERED_LIST_RE);
+    if (olMatch && !line.startsWith("```")) {
+      const indent = olMatch[1].length;
+      return (
+        <Box paddingLeft={indent}>
+          <Text color={t.muted}>{olMatch[2]}. </Text>
+          <MarkdownLine content={olMatch[3]} color={color} />
+        </Box>
+      );
+    }
+
+    if (line.startsWith("> ")) {
+      return (
+        <Box flexDirection="row">
+          <Text color={t.dim}>▎ </Text>
+          <MarkdownLine content={line.slice(2)} color={color} />
+        </Box>
+      );
+    }
+
+    return <MarkdownLine content={line} color={color} />;
+  }
+
+  let prevGroup: LineGroup | undefined;
+  let prevBlanks = 0;
   return (
     <Box flexDirection="column">
-      {groups.map((group, gi) => {
-        if (group.kind === "code") {
-          if (group.lines.length === 0) return null;
-          return (
-            <Box key={gi} flexDirection="column">
-              <Text color={t.dim}>┌─ {group.lang || "code"} ─</Text>
-              {group.lines.map((codeLine, ci) => (
-                <Box key={ci} paddingLeft={1}>
-                  <Text color={t.dim}>│ </Text>
-                  <CodeLine line={codeLine} lang={group.lang} />
-                </Box>
-              ))}
-              <Text color={t.dim}>└─</Text>
-            </Box>
-          );
-        }
-
-        if (group.kind === "table") {
-          return <TableBlock key={gi} lines={group.lines} />;
-        }
-
-        // ── single line ──
-        const line = group.line;
-
-        if (line.startsWith("### ")) {
-          return (
-            <Text key={gi} bold color={t.primary}>
-              {line.slice(4)}
-            </Text>
-          );
-        }
-        if (line.startsWith("## ")) {
-          return (
-            <Text key={gi} bold color={t.primary}>
-              ── {line.slice(3)} ──
-            </Text>
-          );
-        }
-        if (line.startsWith("# ")) {
-          return (
-            <Text key={gi} bold color={t.primary} underline>
-              {line.slice(2)}
-            </Text>
-          );
-        }
-
-        // Horizontal rule: check before bullet list so "* * *" is a rule, not a bullet
-        if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
-          return (
-            <Text key={gi} color={t.dim}>
-              {"─".repeat(columns)}
-            </Text>
-          );
-        }
-
-        if (line.startsWith("- ") || line.startsWith("* ")) {
-          const indent = line.match(/^\s*/)?.[0].length ?? 0;
-          return (
-            <Box key={gi} paddingLeft={indent}>
-              <Text color={t.muted}>· </Text>
-              <MarkdownLine content={line.replace(/^\s*[-*]\s+/, "")} color={color} />
-            </Box>
-          );
-        }
-
-        const olMatch = line.match(/^(\s*)(\d+)[.)]\s+(.*)/);
-        if (olMatch && !line.startsWith("```")) {
-          const indent = olMatch[1].length;
-          return (
-            <Box key={gi} paddingLeft={indent}>
-              <Text color={t.muted}>{olMatch[2]}. </Text>
-              <MarkdownLine content={olMatch[3]} color={color} />
-            </Box>
-          );
-        }
-
-        if (line.startsWith("> ")) {
-          return (
-            <Text key={gi} color={t.dim}>
-              │ {line.slice(2)}
-            </Text>
-          );
-        }
-
-        if (line.trim() === "") {
-          const prev = groups[gi - 1];
-          if (prev && prev.kind === "single" && prev.line.trim() === "") {
-            return null;
-          }
-          const next = groups[gi + 1];
-          if (isStructuralGroup(prev) || isStructuralGroup(next)) {
-            return null;
-          }
-          return <Box key={gi} height={1} />;
-        }
-
-        return <MarkdownLine key={gi} content={line} color={color} />;
+      {nonBlank.map(({ group, blanksBefore }, i) => {
+        // blanksBefore on each group is actually blanks AFTER it (accumulated from blank groups).
+        // The spacing between prev and current should use prevBlanks (blanks after prev group).
+        const spacing = prevGroup ? spacingBetween(prevGroup, group, prevBlanks) : 0;
+        prevGroup = group;
+        prevBlanks = blanksBefore;
+        return (
+          <React.Fragment key={i}>
+            {spacing > 0 && <Box height={spacing} />}
+            {renderGroup(group)}
+          </React.Fragment>
+        );
       })}
     </Box>
   );
