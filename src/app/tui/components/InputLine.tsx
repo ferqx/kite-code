@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { Box, Text, useInput, useWindowSize } from "ink";
+import { Box, Text, useInput } from "ink";
+import { useWindowSize } from "@/app/tui/hooks/useWindowSizeSig";
 import { ScrollList } from "ink-scroll-list";
 import stringWidth from "string-width";
 import CtrlSafeTextInput from "./CtrlSafeTextInput";

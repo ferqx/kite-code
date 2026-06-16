@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
-import { Box, Text, useWindowSize } from "ink";
+import { Box, Text } from "ink";
+import { useWindowSize } from "@/app/tui/hooks/useWindowSizeSig";
 import { useTheme, type Theme } from "@/app/tui/theme";
 
 interface MarkdownBlockProps {
