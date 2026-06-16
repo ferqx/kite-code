@@ -176,6 +176,17 @@ describe("listSessions", () => {
     const sessions = await listSessions(dbPath);
     expect(sessions.length).toBeLessThanOrEqual(50);
   });
+
+  test("returns empty array for corrupt database file", async () => {
+    const dbPath = makeDbPath("corrupt");
+    rmSync(dbPath, { force: true });
+    // Create a file that is not a valid SQLite database
+    Bun.write(dbPath, "not a database");
+
+    // listSessions should gracefully handle corrupted files
+    const sessions = await listSessions(dbPath);
+    expect(sessions).toEqual([]);
+  });
 });
 
 describe("loadSession", () => {

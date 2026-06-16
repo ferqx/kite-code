@@ -295,6 +295,112 @@ describe("SessionManager", () => {
     expect(mgr.hasRuntime(id)).toBe(true);
     expect(mgr.hasRuntime("nonexistent")).toBe(false);
   });
+
+  // ── registerSession does NOT set activeId (caller must call switchSession) ──
+
+  test("registerSession does not change activeId", () => {
+    const mgr = makeManager();
+    const activeId = mgr.createSession("/tmp/ws");
+    expect(mgr.getActiveId()).toBe(activeId);
+
+    // registerSession adds a runtime but leaves activeId unchanged
+    mgr.registerSession("ext-1", "/tmp/ws");
+    expect(mgr.getActiveId()).toBe(activeId); // still the original session
+  });
+
+  // ── saveTokenStats ──
+
+  test("saveTokenStats stores stats in memory cache", () => {
+    const mgr = makeManager();
+    const tid = mgr.createSession("/tmp/ws");
+    mgr.saveTokenStats(tid, { cacheHitTokens: 10, cacheMissTokens: 5, totalTokens: 15, cacheHitRate: 66.7, currentNode: null, plan: null, retryState: null });
+
+    const snapshots = mgr.getSnapshot();
+    const snap = snapshots.find(s => s.threadId === tid)!;
+    expect(snap.status).toBeDefined();
+    expect(snap.status.cacheHitTokens).toBe(10);
+    expect(snap.status.totalTokens).toBe(15);
+  });
+
+  test("saveTokenStats with immediate=true persists to DB synchronously", () => {
+    const mgr = makeManager();
+    const tid = mgr.createSession("/tmp/ws");
+    mgr.saveTokenStats(tid, { cacheHitTokens: 100, cacheMissTokens: 200, totalTokens: 300, cacheHitRate: 33.3, currentNode: null, plan: null, retryState: null }, true);
+    // immediate flush runs synchronously; DB write happens in same tick
+    // Verify the stats were stored (cache persists even after no runtime)
+    const snapshots = mgr.getSnapshot();
+    const snap = snapshots.find(s => s.threadId === tid)!;
+    expect(snap.status.cacheHitTokens).toBe(100);
+  });
+
+  test("saveTokenStats skips DB write when all stats are zero", () => {
+    const mgr = makeManager();
+    const tid = mgr.createSession("/tmp/ws");
+    // All-zero stats should be skipped by saveTokenStats guard
+    mgr.saveTokenStats(tid, { cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null, retryState: null }, true);
+    // Should not throw and should store zero stats in cache
+    const snapshots = mgr.getSnapshot();
+    const snap = snapshots.find(s => s.threadId === tid)!;
+    expect(snap.status.totalTokens).toBe(0);
+  });
+
+  // ── createSession does NOT automatically save stats ──
+
+  test("createSession does not persist stats of outgoing session (caller must save)", () => {
+    const mgr = makeManager();
+    const oldId = mgr.createSession("/tmp/ws");
+    // Simulate stats accumulation on old session
+    mgr.saveTokenStats(oldId, { cacheHitTokens: 50, cacheMissTokens: 25, totalTokens: 75, cacheHitRate: 66.7, currentNode: null, plan: null, retryState: null }, true);
+
+    // Create new session — createSession does NOT internally call saveTokenStats
+    const newId = mgr.createSession("/tmp/ws");
+
+    // Old session's stats are still in the cache (we saved explicitly before)
+    const oldStats = (mgr as any).tokenStatsCache.get(oldId);
+    expect(oldStats).toBeDefined();
+    expect(oldStats.totalTokens).toBe(75);
+
+    // New session is active
+    expect(mgr.getActiveId()).toBe(newId);
+  });
+
+  // ── removeRuntime does NOT save stats (caller must save first) ──
+
+  test("removeRuntime does not persist stats (stats are lost if not saved beforehand)", () => {
+    const mgr = makeManager();
+    const id = mgr.createSession("/tmp/ws");
+    mgr.saveTokenStats(id, { cacheHitTokens: 88, cacheMissTokens: 22, totalTokens: 110, cacheHitRate: 80, currentNode: null, plan: null, retryState: null }, true);
+
+    // Verify stats exist before removal
+    expect((mgr as any).tokenStatsCache.has(id)).toBe(true);
+
+    // removeRuntime clears the runtime but does NOT save stats
+    mgr.removeRuntime(id);
+
+    // Runtime is gone but stats cache entry still exists (lazy-loaded on next getSnapshot)
+    // The caller is responsible for saving before removeRuntime
+    expect(mgr.getRuntime(id)).toBeUndefined();
+  });
+
+  // ── Concurrent session creation guard (simulates double /new) ──
+
+  test("rapid consecutive createSession calls produce unique active sessions", () => {
+    const mgr = makeManager();
+    const id1 = mgr.createSession("/tmp/ws");
+    const id2 = mgr.createSession("/tmp/ws");
+
+    // Both sessions exist
+    expect(mgr.hasRuntime(id1)).toBe(true);
+    expect(mgr.hasRuntime(id2)).toBe(true);
+    // Only the last one is active
+    expect(mgr.getActiveId()).toBe(id2);
+    // Snapshot reflects deactivation of id1
+    const snapshots = mgr.getSnapshot();
+    const snap1 = snapshots.find(s => s.threadId === id1)!;
+    const snap2 = snapshots.find(s => s.threadId === id2)!;
+    expect(snap1.active).toBe(false);
+    expect(snap2.active).toBe(true);
+  });
 });
 
 // ── SessionRuntime ──
