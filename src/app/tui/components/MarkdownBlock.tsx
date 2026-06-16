@@ -504,6 +504,11 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
         }
 
         if (line.trim() === "") {
+          // Collapse consecutive blank lines: skip if previous group was also blank
+          const prev = groups[gi - 1];
+          if (prev && prev.kind === "single" && prev.line.trim() === "") {
+            return null;
+          }
           return <Box key={gi} height={1} />;
         }
 
