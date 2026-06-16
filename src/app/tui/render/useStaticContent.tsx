@@ -66,8 +66,6 @@ export interface UseStaticContentOptions {
   header: ReactNode;
   /** > 0 时表示 resize 重挂载，开启同步输出缓冲消除闪烁 / When > 0, resize remount detected, enables sync output to eliminate flicker */
   resizeGeneration?: number;
-  /** 主题切换时递增，强制 Static 重新渲染 / Incremented on theme switch to force Static re-render */
-  themeGeneration?: number;
 }
 
 export function useStaticContent({
@@ -76,7 +74,6 @@ export function useStaticContent({
   sessionKey,
   header,
   resizeGeneration,
-  themeGeneration,
 }: UseStaticContentOptions): StaticContentResult {
   // ── Two-level Static/Dynamic split ──
   const settledTurns = running ? turns.slice(0, -1) : turns;
@@ -85,10 +82,9 @@ export function useStaticContent({
   // ── Turn-level settled blocks cache ──
   const staticBlocksRef = useRef<OutputBlock[]>([]);
   const prevSessionKeyRef = useRef<number | undefined>(undefined);
-  const prevThemeGenRef = useRef<number | undefined>(undefined);
   const prevSettledRef = useRef<Turn[] | null>(null);
 
-  const needsClear = sessionKey !== prevSessionKeyRef.current || themeGeneration !== prevThemeGenRef.current;
+  const needsClear = sessionKey !== prevSessionKeyRef.current;
   const isResize = (resizeGeneration ?? 0) > 0;
   const isInitialMount = prevSessionKeyRef.current === undefined;
 
@@ -97,7 +93,6 @@ export function useStaticContent({
 
   if (needsClear) {
     prevSessionKeyRef.current = sessionKey;
-    prevThemeGenRef.current = themeGeneration;
     prevSettledRef.current = settledTurns;
     staticBlocksRef.current = settledTurns.flatMap((t) => t.blocks);
 
@@ -181,7 +176,7 @@ export function useStaticContent({
     [mergedStaticBlocks],
   );
 
-  const staticKey = useMemo(() => `s-${sessionKey ?? 0}-t${themeGeneration ?? 0}`, [sessionKey, themeGeneration]);
+  const staticKey = useMemo(() => `s-${sessionKey ?? 0}`, [sessionKey]);
 
   return { staticItems, staticKey, header, mergedStaticBlocks, activeDynamicBlocks };
 }

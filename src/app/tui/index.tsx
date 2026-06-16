@@ -66,7 +66,6 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   React.useEffect(() => {
     process.stdout.write(osc4Apply(themePreset));
   }, []);
-  const [themeGeneration, setThemeGeneration] = React.useState(0);
   const theme = React.useMemo(
     () => (loadTheme(workspace) === "light" ? lightTheme : getDarkTheme(themePreset)),
     [themePreset, workspace],
@@ -488,10 +487,8 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       const p = preset.toLowerCase();
       if (p === "teal" || p === "blue" || p === "purple" || p === "cyan" || p === "mono") {
         setThemePreset(p);
-        // OSC 4 reprograms terminal palette — existing Static content changes instantly
+        // OSC 4 reprograms terminal palette — existing Static content changes instantly, no clear needed
         process.stdout.write(osc4Apply(p));
-        // themeGeneration fallback: clear+redraw for terminals that don't support OSC 4
-        setThemeGeneration((g) => g + 1);
         saveColorPreset(p);
         dispatchSessionLoad({ type: "USER_MESSAGE", text: `/theme ${p}` });
         dispatchSessionLoad({ type: "EVENT", event: { type: "text", data: { text: `  ⎿  Theme set to ${p}` } } });
@@ -627,7 +624,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
   return (
     <ThemeContext.Provider value={theme}>
-    <App key={resizeKey} state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion} resizeGeneration={resizeKey} themeGeneration={themeGeneration}>
+    <App key={resizeKey} state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion} resizeGeneration={resizeKey}>
       <InputLine
         key={state.activeSessionId}
         mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}

@@ -82,7 +82,6 @@ export interface AppProps {
   availableModels?: import("@/core/config").AvailableModel[];
   slashSuggestion?: import("./components/InputLine").SlashSuggestionData | null;
   resizeGeneration?: number;
-  themeGeneration?: number;
   children?: ReactNode;
 }
 
@@ -99,7 +98,7 @@ export function useTuiState(initialModelName?: string, initialProviderName?: str
   return { state, dispatch, onToggleReason };
 }
 
-export default function App({ state, dispatch, onToggleReason, provider, mcpManager, slashSuggestion, resizeGeneration, themeGeneration, children }: AppProps) {
+export default function App({ state, dispatch, onToggleReason, provider, mcpManager, slashSuggestion, resizeGeneration, children }: AppProps) {
   const theme = useTheme();
   const slashMaxHeight = useOverlayHeight(7);
   const overlayOrInterrupt = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind || !!state.interrupt;
@@ -173,7 +172,6 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
     sessionKey: state.sessionKey,
     header,
     resizeGeneration,
-    themeGeneration,
   });
 
   const overlayActive = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind;

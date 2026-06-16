@@ -44,7 +44,14 @@ export function osc4Apply(preset: ThemePreset): string {
   let seq = "";
   for (const [role, hex] of Object.entries(colors)) {
     const idx = PALETTE_INDEX[role as keyof Theme];
-    if (idx != null && hex) seq += `\u001B]4;${idx};${hex}\u001B\\`;
+    if (idx != null && hex) {
+      // rgb:RR/GG/BB format — most widely supported across terminals
+      const rrggbb = hex.slice(1);
+      const r = rrggbb.slice(0, 2);
+      const g = rrggbb.slice(2, 4);
+      const b = rrggbb.slice(4, 6);
+      seq += `\u001B]4;${idx};rgb:${r}/${g}/${b}\u0007`;
+    }
   }
   return seq;
 }
@@ -78,15 +85,15 @@ function buildTheme(_p: ThemePreset): Theme {
     muted: fg("muted"),
     dim: fg("dim"),
     bg: "black",
-    userMsgBg: "gray", // ANSI index 8, used as backgroundColor
+    userMsgBg: "gray",
     risk: {
       read: fg("primary"),
-      plan: fg("dim"),      // same as dim (gray)
+      plan: fg("dim"),
       write_file: fg("warning"),
       execute_code: fg("error"),
       destructive: fg("error"),
       network: fg("error"),
-      vcs_mutation: fg("dim"), // same as dim (gray)
+      vcs_mutation: fg("dim"),
       unknown: fg("dim"),
     },
   };
