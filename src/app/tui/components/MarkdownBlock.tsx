@@ -435,6 +435,17 @@ function groupLines(lines: string[]): LineGroup[] {
   return groups;
 }
 
+function isHorizontalRule(line: string): boolean {
+  return /^\s*([-*_])(\s*\1){2,}\s*$/.test(line);
+}
+
+function isStructuralGroup(g: LineGroup | undefined): boolean {
+  if (!g) return false;
+  if (g.kind === "table" || g.kind === "code") return true;
+  if (g.kind === "single" && isHorizontalRule(g.line)) return true;
+  return false;
+}
+
 // ── main component ──
 
 export default React.memo(function MarkdownBlock({ content, streaming, color }: MarkdownBlockProps) {
@@ -446,6 +457,7 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
     <Box flexDirection="column">
       {groups.map((group, gi) => {
         if (group.kind === "code") {
+          if (group.lines.length === 0) return null;
           return (
             <Box key={gi} flexDirection="column">
               <Text color={t.dim}>┌─ {group.lang || "code"} ─</Text>
@@ -528,9 +540,12 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
         }
 
         if (line.trim() === "") {
-          // Collapse consecutive blank lines: skip if previous group was also blank
           const prev = groups[gi - 1];
           if (prev && prev.kind === "single" && prev.line.trim() === "") {
+            return null;
+          }
+          const next = groups[gi + 1];
+          if (isStructuralGroup(prev) || isStructuralGroup(next)) {
             return null;
           }
           return <Box key={gi} height={1} />;
