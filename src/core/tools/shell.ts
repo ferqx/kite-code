@@ -66,9 +66,11 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
 function buildShellInvocation(command: string): string[] {
   if (process.platform === "win32") {
     // Prefer system bash (Git for Windows) — full MSYS2 env, no DLL issues
+    // PATH fix: ensures GNU coreutils (find, grep, sort, etc.) take priority
+    // over Windows System32 equivalents that shadow them on MSYS2 PATH
     const systemBash = findSystemBash();
     if (systemBash) {
-      return [systemBash, "-c", command];
+      return [systemBash, "-c", `export PATH="/usr/bin:$PATH" && ${command}`];
     }
 
     // Fallback to vendored bash with PATH fix for coreutils

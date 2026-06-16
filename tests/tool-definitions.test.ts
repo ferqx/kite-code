@@ -252,6 +252,9 @@ describe("code agent tool definitions", () => {
     expect(isReadOnlyShellCommand("cat package.json | head -n 20")).toBe(true);
     expect(isReadOnlyShellCommand("git status --short")).toBe(true);
     expect(isReadOnlyShellCommand("git diff -- src/app/runner.ts")).toBe(true);
+    // /dev/null 重定向用于抑制输出，应视为只读安全 / /dev/null redirects for output suppression are read-only safe
+    expect(isReadOnlyShellCommand("ls -la src tests 2>/dev/null")).toBe(true);
+    expect(isReadOnlyShellCommand("find . -name '*.ts' >/dev/null 2>&1")).toBe(true);
   });
 
   // 验证可能写入、删除或执行项目代码的 shell 命令不会被分类为只读（sed -i, rm -rf, git add, mkdir 等） / Shell commands that can write, delete, or execute project code (sed -i, rm -rf, git add, mkdir, etc.) are not classified as read-only
