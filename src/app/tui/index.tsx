@@ -410,8 +410,10 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           // DB error — still remove from runtime list
         }
         // Remove from SessionManager and refresh snapshots
-        // Flush token stats before removing runtime (stats are lost after remove)
-        sessionManager.saveTokenStats(threadId, stateRef.current.status, true);
+        if (wasActive) {
+          // Flush token stats before removing runtime (stats are lost after remove)
+          sessionManager.saveTokenStats(threadId, stateRef.current.status, true);
+        }
         sessionManager.removeRuntime(threadId);
         if (wasActive) {
           // Deleted the active session — create a new one so TUI has an active session

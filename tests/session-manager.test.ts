@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { SessionManager, SessionRuntime } from "../src/app/tui/session-manager";
 import type { AgentEvent } from "../src/protocol/events";
+import type { StatusState } from "../src/app/tui/types";
 
 // ── Helpers ──
 
@@ -21,6 +22,25 @@ function makeManager() {
 
 function makeRuntime(threadId = "t1", workspace = "/tmp/ws") {
   return new SessionRuntime(threadId, workspace, makeDeps());
+}
+
+function makeStatus(overrides: Partial<StatusState> = {}): StatusState {
+  return {
+    phase: "building",
+    plan: null,
+    authorization: "default",
+    workspaceAccess: "write",
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+    cacheHitRate: 0,
+    totalTokens: 0,
+    currentNode: null,
+    modelProvider: "",
+    modelName: "",
+    thinkingMode: "",
+    retryState: null,
+    ...overrides,
+  };
 }
 
 // ── SessionManager ──
@@ -313,7 +333,7 @@ describe("SessionManager", () => {
   test("saveTokenStats stores stats in memory cache", () => {
     const mgr = makeManager();
     const tid = mgr.createSession("/tmp/ws");
-    mgr.saveTokenStats(tid, { cacheHitTokens: 10, cacheMissTokens: 5, totalTokens: 15, cacheHitRate: 66.7, currentNode: null, plan: null, retryState: null });
+    mgr.saveTokenStats(tid, makeStatus({ cacheHitTokens: 10, cacheMissTokens: 5, totalTokens: 15, cacheHitRate: 66.7 }));
 
     const snapshots = mgr.getSnapshot();
     const snap = snapshots.find(s => s.threadId === tid)!;
@@ -325,9 +345,7 @@ describe("SessionManager", () => {
   test("saveTokenStats with immediate=true persists to DB synchronously", () => {
     const mgr = makeManager();
     const tid = mgr.createSession("/tmp/ws");
-    mgr.saveTokenStats(tid, { cacheHitTokens: 100, cacheMissTokens: 200, totalTokens: 300, cacheHitRate: 33.3, currentNode: null, plan: null, retryState: null }, true);
-    // immediate flush runs synchronously; DB write happens in same tick
-    // Verify the stats were stored (cache persists even after no runtime)
+    mgr.saveTokenStats(tid, makeStatus({ cacheHitTokens: 100, cacheMissTokens: 200, totalTokens: 300, cacheHitRate: 33.3 }), true);
     const snapshots = mgr.getSnapshot();
     const snap = snapshots.find(s => s.threadId === tid)!;
     expect(snap.status.cacheHitTokens).toBe(100);
@@ -336,9 +354,7 @@ describe("SessionManager", () => {
   test("saveTokenStats skips DB write when all stats are zero", () => {
     const mgr = makeManager();
     const tid = mgr.createSession("/tmp/ws");
-    // All-zero stats should be skipped by saveTokenStats guard
-    mgr.saveTokenStats(tid, { cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null, retryState: null }, true);
-    // Should not throw and should store zero stats in cache
+    mgr.saveTokenStats(tid, makeStatus({ cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0, cacheHitRate: 0 }), true);
     const snapshots = mgr.getSnapshot();
     const snap = snapshots.find(s => s.threadId === tid)!;
     expect(snap.status.totalTokens).toBe(0);
@@ -350,7 +366,7 @@ describe("SessionManager", () => {
     const mgr = makeManager();
     const oldId = mgr.createSession("/tmp/ws");
     // Simulate stats accumulation on old session
-    mgr.saveTokenStats(oldId, { cacheHitTokens: 50, cacheMissTokens: 25, totalTokens: 75, cacheHitRate: 66.7, currentNode: null, plan: null, retryState: null }, true);
+    mgr.saveTokenStats(oldId, makeStatus({ cacheHitTokens: 50, cacheMissTokens: 25, totalTokens: 75, cacheHitRate: 66.7 }), true);
 
     // Create new session — createSession does NOT internally call saveTokenStats
     const newId = mgr.createSession("/tmp/ws");
@@ -369,7 +385,7 @@ describe("SessionManager", () => {
   test("removeRuntime does not persist stats (stats are lost if not saved beforehand)", () => {
     const mgr = makeManager();
     const id = mgr.createSession("/tmp/ws");
-    mgr.saveTokenStats(id, { cacheHitTokens: 88, cacheMissTokens: 22, totalTokens: 110, cacheHitRate: 80, currentNode: null, plan: null, retryState: null }, true);
+    mgr.saveTokenStats(id, makeStatus({ cacheHitTokens: 88, cacheMissTokens: 22, totalTokens: 110, cacheHitRate: 80 }), true);
 
     // Verify stats exist before removal
     expect((mgr as any).tokenStatsCache.has(id)).toBe(true);
