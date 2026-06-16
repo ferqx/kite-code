@@ -1,9 +1,10 @@
 import React, { useReducer, useCallback, useMemo, useRef, type Dispatch, type ReactNode } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, Static } from "ink";
 import { ScrollList } from "ink-scroll-list";
 import type { McpManager } from "@/core/mcp";
 import type { TuiState } from "./types";
 import OutputArea, { useStaticContent } from "./OutputArea";
+import BlockRenderer from "./components/BlockRenderer";
 import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
 import HelpPanel from "./components/HelpPanel";
@@ -172,12 +173,42 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
   const overlayActive = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind;
 
   return (
-    <Box flexDirection="column">
-      {/* ── Body: OutputArea ── */}
+    <>
+      {/* <Static> MUST be at root level (outside any layout Box).
+          When nested inside a Box with height={0}, Ink 7's Yoga
+          layout doesn't track <Static>'s actual scrollback writes,
+          causing dynamic tree re-renders (tool/subagent timers) to
+          write at stale Y positions — producing duplicate lines. */}
+      {staticItems && staticKey && (
+        <Static key={staticKey} items={staticItems}>
+          {(item, index) => {
+            if (index === 0) {
+              return (
+                <React.Fragment key="header">
+                  {staticHeader}
+                  <Box height={1} />
+                </React.Fragment>
+              );
+            }
+            const block = mergedStaticBlocks[index - 1];
+            if (!block) return null;
+            const prevBlock = index > 1 ? mergedStaticBlocks[index - 2] : undefined;
+            return (
+              <BlockRenderer
+                key={block.id}
+                block={block}
+                isFocused={false}
+                index={index - 1}
+                prevBlock={prevBlock}
+                awaitingApproval={false}
+              />
+            );
+          }}
+        </Static>
+      )}
+      <Box flexDirection="column">
+      {/* ── Body: OutputArea (dynamic blocks only) ── */}
         <OutputArea
-          staticItems={staticItems}
-          staticKey={staticKey}
-          staticHeader={staticHeader}
           activeDynamicBlocks={activeDynamicBlocks}
           mergedStaticBlocks={mergedStaticBlocks}
           onToggleReason={onToggleReason}
@@ -279,5 +310,6 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
         );
       })()}
     </Box>
+    </>
   );
 }

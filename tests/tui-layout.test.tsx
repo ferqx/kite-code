@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, test, expect } from "bun:test";
 import { render } from "ink-testing-library";
-import { Text } from "ink";
+import { Text, Static } from "ink";
 import Footer from "../src/app/tui/Footer";
 import Header from "../src/app/tui/Header";
 import StatusBar from "../src/app/tui/StatusBar";
@@ -15,6 +15,7 @@ import ApprovalBlock from "../src/app/tui/components/ApprovalBlock";
 import InputBlock from "../src/app/tui/components/InputBlock";
 import InputLine from "../src/app/tui/components/InputLine";
 import OutputArea, { useStaticContent } from "../src/app/tui/OutputArea";
+import BlockRenderer from "../src/app/tui/components/BlockRenderer";
 import App, { type AppProps } from "../src/app/tui/App";
 import type { TuiState, OutputBlock, StatusState, FileChangeRecord, Turn } from "../src/app/tui/types";
 import type { ToolApprovalPayload, UserInputPayload } from "../src/protocol/events";
@@ -584,21 +585,38 @@ function OutputAreaTestWrap({ running, turns, onToggleReason }: {
   turns: { blocks: OutputBlock[] }[];
   onToggleReason: () => void;
 }) {
-  const { staticItems, staticKey, header: staticHeader, mergedStaticBlocks, activeDynamicBlocks } = useStaticContent({
+  const { staticItems, staticKey, mergedStaticBlocks, activeDynamicBlocks } = useStaticContent({
     turns: turns as Turn[],
     running,
     sessionKey: 0,
     header: null,
   });
   return (
-    <OutputArea
-      staticItems={staticItems}
-      staticKey={staticKey}
-      staticHeader={staticHeader}
-      activeDynamicBlocks={activeDynamicBlocks}
-      mergedStaticBlocks={mergedStaticBlocks}
-      onToggleReason={onToggleReason}
-    />
+    <>
+      <Static key={staticKey} items={staticItems}>
+        {(item, index) => {
+          // index 0 is HEADER_SENTINEL (null header)
+          const block = mergedStaticBlocks[index - 1];
+          if (!block) return null;
+          const prevBlock = index > 1 ? mergedStaticBlocks[index - 2] : undefined;
+          return (
+            <BlockRenderer
+              key={block.id}
+              block={block}
+              isFocused={false}
+              index={index - 1}
+              prevBlock={prevBlock}
+              awaitingApproval={false}
+            />
+          );
+        }}
+      </Static>
+      <OutputArea
+        activeDynamicBlocks={activeDynamicBlocks}
+        mergedStaticBlocks={mergedStaticBlocks}
+        onToggleReason={onToggleReason}
+      />
+    </>
   );
 }
 

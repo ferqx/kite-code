@@ -1,5 +1,5 @@
-import React, { useRef, type ReactNode } from "react";
-import { Box, Static } from "ink";
+import React, { useRef } from "react";
+import { Box } from "ink";
 import { useInput } from "ink";
 import type { OutputBlock } from "./types";
 import BlockRenderer from "./components/BlockRenderer";
@@ -10,9 +10,7 @@ export { useStaticContent } from "./render/useStaticContent";
 export type { StaticContentResult } from "./render/useStaticContent";
 
 interface OutputAreaProps {
-  staticItems?: unknown[];
-  staticKey?: string;
-  staticHeader?: ReactNode;
+  /** All static blocks (immutable, rendered by <Static> in App.tsx) */
   mergedStaticBlocks: OutputBlock[];
   /** Blocks kept in the dynamic tree — may still mutate (tool running, streaming text, etc.) */
   activeDynamicBlocks: OutputBlock[];
@@ -25,14 +23,10 @@ interface OutputAreaProps {
 }
 
 /**
- * OutputArea renders <Static> (immutable settled blocks + header) inline,
- * and all mutable blocks in the dynamic tree. Blocks only enter <Static>
- * once they become truly immutable (tool done, text complete, etc.).
+ * OutputArea renders only mutable blocks in the dynamic tree.
+ * Immutable blocks are rendered by <Static> at the root level in App.tsx.
  */
 export default function OutputArea({
-  staticItems,
-  staticKey,
-  staticHeader,
   activeDynamicBlocks,
   mergedStaticBlocks,
   onToggleReason,
@@ -74,35 +68,6 @@ export default function OutputArea({
 
   return (
     <Box flexDirection="column">
-      <Box height={0} overflow="hidden">
-        {staticItems && staticKey && (
-          <Static key={staticKey} items={staticItems}>
-            {(item, index) => {
-              if (index === 0) {
-                return (
-                  <React.Fragment key="header">
-                    {staticHeader}
-                    <Box height={1} />
-                  </React.Fragment>
-                );
-              }
-              const block = mergedStaticBlocks[index - 1];
-              if (!block) return null;
-              const prevBlock = index > 1 ? mergedStaticBlocks[index - 2] : undefined;
-              return (
-                <BlockRenderer
-                  key={block.id}
-                  block={block}
-                  isFocused={false}
-                  index={index - 1}
-                  prevBlock={prevBlock}
-                  awaitingApproval={false}
-                />
-              );
-            }}
-          </Static>
-        )}
-      </Box>
       {activeDynamicBlocks.map((block, i) => {
         const prevBlock =
           i > 0

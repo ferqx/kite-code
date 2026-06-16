@@ -171,6 +171,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         const existing = findBlockById(state, state.blockIndex[event.data.call_id]);
         if (existing?.kind === "tool_card" && existing.callId === event.data.call_id) return state;
       }
+      // Full-scan fallback: blockIndex may have stale entries after trimTurns rebuild
+      for (const turn of state.turns) {
+        if (turn.blocks.some(b => b.kind === "tool_card" && b.callId === event.data.call_id)) return state;
+      }
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
       const preview = getToolPreview(event.data.name, event.data.args);
@@ -181,8 +185,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         status: "running", summary: "", preview,
       };
       const times = { ...finalized.toolStartTimes, [event.data.call_id]: Date.now() };
-      const blockIndex = { ...finalized.blockIndex, [event.data.call_id]: id };
-      return { ...appendBlock(finalized, block), toolStartTimes: times, blockIndex };
+      const next = appendBlock(finalized, block);
+      const blockIndex = { ...next.blockIndex, [event.data.call_id]: id };
+      return { ...next, toolStartTimes: times, blockIndex };
     }
     case "tool_done": {
       if (event.data.name === "task") return state;
@@ -367,8 +372,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         status: "running", summary: "",
         toolCallCount: 0, durationMs: 0, steps: [],
       };
-      const blockIndex = { ...finalized.blockIndex, [event.data.id]: id };
-      return { ...appendBlock(finalized, block), blockIndex };
+      const next = appendBlock(finalized, block);
+      const blockIndex = { ...next.blockIndex, [event.data.id]: id };
+      return { ...next, blockIndex };
     }
     case "subagent_step": {
       const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
