@@ -28,7 +28,6 @@ export type Action =
   | { type: "SHOW_MODEL_SELECTOR" }
   | { type: "HIDE_MODEL_SELECTOR" }
   | { type: "EDITOR_DONE" }
-  | { type: "LIST_MODELS" }
   | { type: "SHOW_SESSIONS" }
   | { type: "HIDE_SESSIONS" }
   | { type: "LOAD_SESSION_PENDING"; threadId: string }
@@ -36,7 +35,6 @@ export type Action =
   | { type: "SELECT_MODEL"; modelId: string }
   | { type: "NEW_SESSION"; threadId: string }
   | { type: "USER_MESSAGE"; text: string }
-  | { type: "SHOW_SETTING" }
   | { type: "SHOW_MCP" }
   | { type: "HIDE_MCP" }
   | { type: "INJECT_MCP_PROMPT"; server: string; promptName: string }

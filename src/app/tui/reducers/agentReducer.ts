@@ -77,23 +77,6 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       const block: OutputBlock = { id: state.nextBlockId, kind: "text", content: `✓ Session exported to ${action.filename}` };
       return appendBlock(state, block);
     }
-    case "LIST_MODELS": {
-      const models = ["deepseek-v4-flash", "deepseek-v4-pro"];
-      const lines = models.map(m => m === state.status.modelName ? `  ${m} (current)` : `  ${m}`);
-      const block: OutputBlock = { id: state.nextBlockId, kind: "text", content: `── Available Models ──\n${lines.join("\n")}\n\nUse /model to open selector, /model <name> to switch` };
-      return appendBlock(state, block);
-    }
-    case "SHOW_SETTING": {
-      const s = state.status;
-      const info = [
-        "── Current Settings ──",
-        `  Model       ${s.modelName}`, `  Phase       ${s.phase}`, `  Auth        ${s.authorization}`,
-        `  Workspace   ${s.workspaceAccess}`, `  Thinking    ${s.thinkingMode}`,
-        `  Tokens      ${s.totalTokens.toLocaleString()}`, `  Cache       ${s.cacheHitRate.toFixed(0)}%`,
-      ].join("\n");
-      const block: OutputBlock = { id: state.nextBlockId, kind: "text", content: info };
-      return appendBlock(state, block);
-    }
     case "INJECT_MCP_PROMPT": {
       const block: OutputBlock = { id: state.nextBlockId, kind: "user", content: `/mcp__${action.server}__${action.promptName}` };
       return appendBlock(state, block);

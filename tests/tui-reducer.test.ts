@@ -383,23 +383,6 @@ describe("eventReducer (blocks model)", () => {
       expect(s.status.modelName).toBe("gpt-4o");
       expect(s.showModelSelector).toBe(false);
     });
-    test("LIST_MODELS outputs model list as text block", () => {
-      let s = fresh();
-      s = dispatch(s, { type: "LIST_MODELS" });
-      expect(flatBlocks(s)).toHaveLength(1);
-      expect(flatBlocks(s)[0].kind).toBe("text");
-      expect((flatBlocks(s)[0] as any).content).toContain("Available Models");
-    });
-    test("SHOW_SETTING outputs current settings as text block", () => {
-      let s = fresh();
-      s = dispatch(s, { type: "SHOW_SETTING" });
-      expect(flatBlocks(s)).toHaveLength(1);
-      expect(flatBlocks(s)[0].kind).toBe("text");
-      const c = (flatBlocks(s)[0] as Extract<OutputBlock, { kind: "text" }>).content;
-      expect(c).toContain("Current Settings");
-      expect(c).toContain("deepseek-v4");
-      expect(c).toContain("building");
-    });
     test("USER_MESSAGE appends user block", () => {
       let s = fresh();
       s = dispatch(s, { type: "USER_MESSAGE", text: "Hello, AI" });

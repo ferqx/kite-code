@@ -10,7 +10,7 @@
  *   3. Multi-turn Conversation (1 test)
  *   4. Tool Call (1 test)
  *   5. Error Handling (1 test)
- *   6. Slash Commands (2 tests: /help, /setting)
+ *   6. Slash Commands (1 test: /help)
  *   7. Session Switching — Block Preservation (2 tests)
  *   8. Interrupt & Recovery (2 tests: Ctrl+C interrupt, recovery)
  *   9. Escape Overlay Handling (1 test)
@@ -223,14 +223,6 @@ describe("TUI E2E — Startup & Core Regression (P0)", () => {
     // Dismiss HelpPanel
     tui.stdin.write("\x1b"); // Escape
     await new Promise((r) => setTimeout(r, 300));
-  }, TIMEOUT);
-
-  test("/setting shows current configuration", async () => {
-    tui.stdin.write("/setting");
-    await new Promise((r) => setTimeout(r, 100));
-    tui.stdin.write("\r");
-    await new Promise((r) => setTimeout(r, 500));
-    expect(tui.getOutput()).toContain("Current Settings");
   }, TIMEOUT);
 
   // ══════════════════════════════════════════════════════════

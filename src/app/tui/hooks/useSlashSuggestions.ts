@@ -12,12 +12,12 @@ export interface SlashCommandDef {
 export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: "effort", aliases: [], description: "Set reasoning effort", args: "low|medium|high|max" },
   { name: "model", aliases: [], description: "Switch model", args: "[name]" },
+  { name: "theme", aliases: [], description: "Switch color theme", args: "teal|blue|purple|cyan|mono" },
   { name: "sessions", aliases: [], description: "Show sessions", args: "[id]" },
   { name: "new", aliases: [], description: "Start a new session" },
   { name: "plan", aliases: [], description: "Enter planning mode" },
   { name: "auth", aliases: [], description: "Toggle authorization mode", args: "[mode]" },
   { name: "clear", aliases: ["c"], description: "Clear output" },
-  { name: "setting", aliases: ["config"], description: "Show settings" },
   { name: "help", aliases: ["h"], description: "Show help" },
   { name: "exit", aliases: ["quit", "q"], description: "Exit OpenPX" },
 ];
@@ -32,7 +32,7 @@ export interface SuggestionItem {
 }
 
 export interface SlashSuggestionsResult {
-  kind: "command" | "model" | "effort";
+  kind: "command" | "model" | "effort" | "theme";
   partial: string;
   items: SuggestionItem[];
 }
@@ -71,6 +71,20 @@ export function useSlashSuggestions(
         kind: "effort",
         partial,
         items: matched.map((l) => ({ command: l, aliases: [], description: "" })),
+      };
+    }
+
+    // /theme <partial-preset>
+    const themeMatch = inputValue.match(/^\/theme\s+(\S*)$/i);
+    if (themeMatch) {
+      const partial = themeMatch[1].toLowerCase();
+      const presets = ["teal", "blue", "purple", "cyan", "mono"];
+      const matched = presets.filter((p) => p.startsWith(partial));
+      if (matched.length === 0) return null;
+      return {
+        kind: "theme",
+        partial,
+        items: matched.map((p) => ({ command: p, aliases: [], description: "" })),
       };
     }
 
@@ -121,12 +135,15 @@ export function useSlashSuggestions(
   const safeSelectedIndex =
     result && selectedIndex >= result.items.length ? 0 : selectedIndex;
 
-  const replaceCommand = (item: SuggestionItem, kind: "command" | "model" | "effort"): string => {
+  const replaceCommand = (item: SuggestionItem, kind: "command" | "model" | "effort" | "theme"): string => {
     if (kind === "model") {
       return inputValue.replace(/\/model\s+\S*$/, `/model ${item.command}`);
     }
     if (kind === "effort") {
       return inputValue.replace(/\/effort\s+\S*$/, `/effort ${item.command}`);
+    }
+    if (kind === "theme") {
+      return inputValue.replace(/\/theme\s+\S*$/, `/theme ${item.command}`);
     }
     return "/" + item.command;
   };

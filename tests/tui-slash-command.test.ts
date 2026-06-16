@@ -43,13 +43,8 @@ describe("parseSlashCommand", () => {
     expect(parseSlashCommand("/model claude sonnet 4")).toEqual({ type: "model", name: "claude sonnet 4" });
   });
 
-  test("parses /model list", () => {
-    expect(parseSlashCommand("/model list")).toEqual({ type: "model_list" });
-  });
-
-  test("/model list takes priority over name", () => {
-    expect(parseSlashCommand("/model list")).not.toEqual({ type: "model", name: "list" });
-    expect(parseSlashCommand("/model list")).toEqual({ type: "model_list" });
+  test("parses /model name", () => {
+    expect(parseSlashCommand("/model deepseek-v4")).toEqual({ type: "model", name: "deepseek-v4" });
   });
 
   // ── /sessions ──
@@ -82,17 +77,6 @@ describe("parseSlashCommand", () => {
 
   test("parses shorthand /c", () => {
     expect(parseSlashCommand("/c")).toEqual({ type: "clear" });
-  });
-
-  // ── /compact removed (compaction logic removed) ──
-
-  // ── /setting ──
-  test("parses /setting", () => {
-    expect(parseSlashCommand("/setting")).toEqual({ type: "setting" });
-  });
-
-  test("parses alias /config", () => {
-    expect(parseSlashCommand("/config")).toEqual({ type: "setting" });
   });
 
   // ── /help ──

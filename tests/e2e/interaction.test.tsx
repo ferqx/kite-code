@@ -350,19 +350,7 @@ describe("TUI E2E — P1 Key User Workflows", () => {
       expect(tui.isIdle() || tui.isRunning()).toBe(true);
     }, TIMEOUT);
 
-    // FIXME: ink-testing-library TextInput timing issues after multiple slash
-    // commands in sequence. The /setting command handler works correctly when
-    // tested manually with bun run tui.
-    test.skip("/setting → shows Current Settings", async () => {
-      await tui.waitForIdle(5000);
-      await runSlashCommand(tui, "/setting", 500);
-      await tui.waitForText("Current Settings", 5000);
-    }, TIMEOUT);
   });
-
-  // ══════════════════════════════════════════════════════════
-  // 5. @File Search (after slash commands — stdin may be broken, run last)
-  // ══════════════════════════════════════════════════════════
 
   describe("@File Search", () => {
 
