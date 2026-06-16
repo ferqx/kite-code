@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { useTheme, type Theme } from "@/app/tui/theme";
 
 interface MarkdownBlockProps {
@@ -19,7 +19,7 @@ export interface InlineSegment {
 // ── inline markdown parsing ──
 
 export function parseInline(text: string): InlineSegment[] {
-  const allPatterns = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|\[([^\]]+)\]\(([^)]+)\))/g;
+  const allPatterns = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|\[([^\]]+)\]\(([^)]+)\))/g;
   const segments: InlineSegment[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -28,14 +28,16 @@ export function parseInline(text: string): InlineSegment[] {
     if (match.index > lastIndex) {
       segments.push({ text: text.slice(lastIndex, match.index) });
     }
-    if (match[1].startsWith("**") && match[2] !== undefined) {
-      segments.push({ text: match[2], bold: true });
-    } else if (match[1].startsWith("*") && !match[1].startsWith("**") && match[3] !== undefined) {
-      segments.push({ text: match[3], italic: true });
-    } else if (match[4] !== undefined) {
-      segments.push({ text: match[4], code: true });
-    } else if (match[5] !== undefined && match[6] !== undefined) {
-      segments.push({ text: match[5], bold: true, link: match[6] });
+    if (match[1].startsWith("***") && match[2] !== undefined) {
+      segments.push({ text: match[2], bold: true, italic: true });
+    } else if (match[1].startsWith("**") && match[3] !== undefined) {
+      segments.push({ text: match[3], bold: true });
+    } else if (match[1].startsWith("*") && !match[1].startsWith("**") && match[4] !== undefined) {
+      segments.push({ text: match[4], italic: true });
+    } else if (match[5] !== undefined) {
+      segments.push({ text: match[5], code: true });
+    } else if (match[6] !== undefined && match[7] !== undefined) {
+      segments.push({ text: match[6], bold: true, link: match[7] });
     }
     lastIndex = match.index + match[1].length;
   }
@@ -436,6 +438,7 @@ function groupLines(lines: string[]): LineGroup[] {
 
 export default React.memo(function MarkdownBlock({ content, streaming, color }: MarkdownBlockProps) {
   const t = useTheme();
+  const { columns } = useWindowSize();
   const groups = useMemo(() => groupLines(decodeHtmlEntities(content).split("\n")), [content]);
 
   return (
@@ -485,12 +488,32 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
           );
         }
 
+        // Horizontal rule: check before bullet list so "* * *" is a rule, not a bullet
+        if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+          return (
+            <Text key={gi} color={t.dim}>
+              {"─".repeat(columns)}
+            </Text>
+          );
+        }
+
         if (line.startsWith("- ") || line.startsWith("* ")) {
           const indent = line.match(/^\s*/)?.[0].length ?? 0;
           return (
             <Box key={gi} paddingLeft={indent}>
               <Text color={t.muted}>· </Text>
               <MarkdownLine content={line.replace(/^\s*[-*]\s+/, "")} color={color} />
+            </Box>
+          );
+        }
+
+        const olMatch = line.match(/^(\s*)(\d+)[.)]\s+(.*)/);
+        if (olMatch && !line.startsWith("```")) {
+          const indent = olMatch[1].length;
+          return (
+            <Box key={gi} paddingLeft={indent}>
+              <Text color={t.muted}>{olMatch[2]}. </Text>
+              <MarkdownLine content={olMatch[3]} color={color} />
             </Box>
           );
         }
