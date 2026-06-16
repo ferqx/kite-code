@@ -57,8 +57,9 @@ export function getToolDetail(name: string, args: Record<string, unknown>, total
     }
     case "write_file": {
       const path = typeof args.path === "string" ? args.path : "";
-      const lines = typeof args.content === "string" ? args.content.split("\n").length : undefined;
-      return lines != null ? `Wrote ${lines} line(s) to ${path}` : `Wrote ${path}`;
+      const raw = typeof args.content === "string" ? args.content : "";
+      const lineCount = raw ? raw.split("\n").filter((l, i, a) => i < a.length - 1 || l !== "").length : 0;
+      return lineCount > 0 ? `Wrote ${lineCount} line(s) to ${path}` : `Wrote ${path}`;
     }
     case "edit_file": {
       const path = typeof args.path === "string" ? args.path : "";

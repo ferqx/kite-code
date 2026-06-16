@@ -451,7 +451,11 @@ function isStructuralGroup(g: LineGroup | undefined): boolean {
 export default React.memo(function MarkdownBlock({ content, streaming, color }: MarkdownBlockProps) {
   const t = useTheme();
   const { columns } = useWindowSize();
-  const groups = useMemo(() => groupLines(decodeHtmlEntities(content).split("\n")), [content]);
+  const groups = useMemo(() => {
+    const lines = decodeHtmlEntities(content).split("\n");
+    if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+    return groupLines(lines);
+  }, [content]);
 
   return (
     <Box flexDirection="column">
