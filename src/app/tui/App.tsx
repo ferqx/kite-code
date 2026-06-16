@@ -85,9 +85,13 @@ export interface AppProps {
   children?: ReactNode;
 }
 
-export function useTuiState(initialModelName?: string): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
-  const initState = initialModelName
-    ? { ...initialState, status: { ...initialState.status, modelName: initialModelName } }
+export function useTuiState(initialModelName?: string, initialProviderName?: string): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
+  const statusOverrides: Partial<TuiState["status"]> = {};
+  if (initialModelName) statusOverrides.modelName = initialModelName;
+  if (initialProviderName) statusOverrides.modelProvider = initialProviderName;
+  const hasOverrides = Object.keys(statusOverrides).length > 0;
+  const initState = hasOverrides
+    ? { ...initialState, status: { ...initialState.status, ...statusOverrides } }
     : initialState;
   const [state, dispatch] = useReducer(eventReducer, initState);
   const onToggleReason = useCallback((id: number) => dispatch({ type: "TOGGLE_REASON", id }), [dispatch]);

@@ -40,7 +40,7 @@ export interface TuiBootstrapProps {
 export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const workspace = process.cwd();
   const config = React.useMemo(() => loadAgentConfig(), []);
-  const { state, dispatch, onToggleReason } = useTuiState(config.modelName);
+  const { state, dispatch, onToggleReason } = useTuiState(config.modelName, config.providerName);
   const stateRef = React.useRef(state);
   stateRef.current = state;
 

@@ -3,6 +3,7 @@
 import type { Action } from "./actions";
 import type { TuiState, OutputBlock, SessionSnapshot, Turn } from "../types";
 import { reconstructTurns, appendBlock, buildBlockIndex } from "./helpers";
+import { listAvailableModels } from "@/core/config";
 
 /** Compute nextBlockId from turns (max block ID + 1, or 0 if empty) */
 function maxBlockIdInTurns(turns: Turn[]): number {
@@ -190,12 +191,19 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         ...state,
         status: { ...state.status, thinkingMode: action.level },
       };
-    case "SELECT_MODEL":
+    case "SELECT_MODEL": {
+      const models = listAvailableModels();
+      const found = models.find(m => m.name === action.modelId);
       return {
         ...state,
         showModelSelector: false,
-        status: { ...state.status, modelName: action.modelId },
+        status: {
+          ...state.status,
+          modelName: action.modelId,
+          modelProvider: found?.provider ?? state.status.modelProvider,
+        },
       };
+    }
     case "USER_MESSAGE": {
       const block: OutputBlock = { id: state.nextBlockId, kind: "user", content: action.text };
       return appendBlock(state, block);
