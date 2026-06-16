@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "jsonc-parser";
 import { z } from "zod";
@@ -42,6 +42,7 @@ export const configSchema = z.object({
   /** @deprecated Use provider[name].models instead */
   models: z.array(legacyModelEntrySchema).optional(),
   theme: z.enum(["dark", "light"]).optional(),
+  colorPreset: z.string().optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });
 
@@ -101,6 +102,7 @@ function mergeConfigs(user: OpenpxConfig, project: OpenpxConfig): OpenpxConfig {
     provider: { ...user.provider, ...project.provider },
     models: project.models ?? user.models,
     theme: project.theme ?? user.theme,
+    colorPreset: project.colorPreset ?? user.colorPreset,
     mcpServers: { ...user.mcpServers, ...project.mcpServers },
   };
 }
@@ -396,6 +398,53 @@ export type ThemeName = "dark" | "light";
 export function loadTheme(workspace?: string): ThemeName {
   const cfg = loadConfig(workspace);
   return cfg?.theme ?? "dark";
+}
+
+/** Read color preset from config. Falls back to "blue". */
+export function loadColorPreset(workspace?: string): string {
+  const cfg = loadConfig(workspace);
+  return cfg?.colorPreset ?? "blue";
+}
+
+/** Persist colorPreset to the user-level config file (creates file if missing). */
+export function saveColorPreset(preset: string): void {
+  const path = defaultConfigPath();
+  try {
+    let text: string;
+    if (existsSync(path)) {
+      text = readFileSync(path, "utf-8");
+    } else {
+      // Create minimal config file
+      const dir = resolve(path, "..");
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      text = `{\n  "theme": "dark",\n  "colorPreset": "${preset}"\n}\n`;
+      writeFileSync(path, text, "utf-8");
+      return;
+    }
+
+    // Simple line-based edit: find existing "colorPreset" or add it
+    const lines = text.split("\n");
+    const idx = lines.findIndex((l) => /"colorPreset"/.test(l));
+    if (idx >= 0) {
+      lines[idx] = lines[idx].replace(/"colorPreset"\s*:\s*"[^"]*"/, `"colorPreset": "${preset}"`);
+    } else {
+      // Insert before "mcpServers" or before last "}"
+      const insertIdx = lines.findIndex((l) => /"mcpServers"/.test(l));
+      if (insertIdx >= 0) {
+        lines.splice(insertIdx, 0, `  "colorPreset": "${preset}",`);
+      } else {
+        // Insert before closing }
+        const closeIdx = lines.lastIndexOf("}");
+        if (closeIdx >= 0) {
+          const indent = lines[closeIdx].match(/^(\s*)/)?.[1] ?? "";
+          lines.splice(closeIdx, 0, `${indent}"colorPreset": "${preset}"`);
+        }
+      }
+    }
+    writeFileSync(path, lines.join("\n"), "utf-8");
+  } catch {
+    // Non-critical — silently ignore write failures
+  }
 }
 
 // ── Env var expansion ──
