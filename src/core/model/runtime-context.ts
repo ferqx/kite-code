@@ -1,6 +1,11 @@
-import { platform, release, type } from "node:os";
+import { platform as osPlatformFn, release, type as osTypeFn } from "node:os";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentPlan } from "@/protocol/events";
+
+/** 将 Windows 路径转为 MSYS2/POSIX 格式（D:\app → /d/app），避免反斜杠在 bash 中被当作转义符吃掉 */
+export function toPosixPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+}
 
 /** 运行时系统信息 / Runtime system information */
 export interface RuntimeSystemInfo {
@@ -54,8 +59,8 @@ export function getRuntimeSystemInfo(input: {
   return {
     currentTimeIso: now.toISOString(),
     timezone: input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-    os: type(),
-    platform: platform(),
+    os: osTypeFn(),
+    platform: osPlatformFn(),
     release: release(),
     shell: process.env.SHELL || "bash",
     cwd: process.cwd(),
@@ -95,14 +100,15 @@ export function buildRuntimeContext(input: RuntimeContextInput): string {
  */
 export function buildCacheableRuntimeContext(input: CacheableRuntimeContextInput): string {
   const { workspace } = input;
-  const osType = type();
-  const osPlatform = platform();
+  const osType = osTypeFn();
+  const osPlatform = osPlatformFn();
   const shellPath = process.env.SHELL || "bash";
+  const posixWorkspace = toPosixPath(workspace);
   const lines = [
     "Cacheable runtime context:",
     `OS: ${osType} (${osPlatform})`,
-    `Shell: ${shellPath} — use ${shellPath} syntax for shell_execute, NOT PowerShell or cmd.exe`,
-    `Workspace: ${workspace}`,
+    `Shell: ${shellPath} — use ${shellPath} syntax for shell_execute, NOT PowerShell or cmd.exe. Use forward-slashed POSIX paths (e.g. /d/app, not D:\\app) — backslashes are escape characters in bash.`,
+    `Workspace: ${posixWorkspace}`,
   ];
   return lines.join("\n");
 }
