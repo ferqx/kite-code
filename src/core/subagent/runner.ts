@@ -12,7 +12,7 @@ import { extractPromptCacheMetrics } from "@/core/cache-metrics";
 import { buildCacheableRuntimeContext, toPosixPath } from "@/core/model/runtime-context";
 import { buildStaticSystemPrompt } from "@/core/model/context";
 import { countTokens } from "@/core/token-counter";
-import type { SubAgentRoleConfig, SubAgentRunnerInput, SubAgentResult, SubAgentEventSink } from "./types";
+import type { SubAgentRoleConfig, SubAgentRunnerInput, SubAgentResult, SubAgentEventSink, SubAgentStepSnapshot } from "./types";
 
 export type { SubAgentRunnerInput } from "./types";
 
@@ -63,6 +63,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   const effectiveTimeoutMs = input.role.timeoutMs ?? input.timeoutMs;
   const startTime = Date.now();
   let toolCallCount = 0;
+  const steps: SubAgentStepSnapshot[] = [];
 
   // 发出 start 事件
   input.eventSink({
@@ -158,6 +159,11 @@ ${input.task}`;
           if (!tool) continue;
 
           // 发出 step 事件
+          const stepSnapshot: SubAgentStepSnapshot = {
+            toolName: tc.name,
+            toolArgs: (tc.args as Record<string, unknown>) ?? {},
+          };
+          steps.push(stepSnapshot);
           input.eventSink({
             type: "step",
             data: {
@@ -185,6 +191,10 @@ ${input.task}`;
             ok = false;
           }
 
+          // 回填步骤快照的结果 / Backfill step snapshot with result
+          stepSnapshot.ok = ok;
+          if (totalLines != null) stepSnapshot.totalLines = totalLines;
+
           // 发出 tool_result 事件（含手动 token 统计）
           const toolTokenCount = countTokens(toolOutput);
           input.eventSink({
@@ -210,7 +220,7 @@ ${input.task}`;
           data: { id, summary, toolCallCount, durationMs },
         });
 
-        return { ok: true, summary, toolCallCount, durationMs };
+        return { ok: true, summary, toolCallCount, durationMs, steps };
       }
     }
   } catch (e: any) {
@@ -221,6 +231,6 @@ ${input.task}`;
       type: "error",
       data: { id, error },
     });
-    return { ok: false, summary: error, toolCallCount, durationMs, error };
+    return { ok: false, summary: error, toolCallCount, durationMs, error, steps };
   }
 }

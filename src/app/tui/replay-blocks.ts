@@ -7,7 +7,7 @@
  */
 
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
-import type { OutputBlock, InterruptState } from "./types.js";
+import type { OutputBlock, InterruptState, SubAgentStepRecord } from "./types.js";
 import type { SubAgentRole } from "../../protocol/events.js";
 import type { SessionData, ReplayInterrupt } from "../../core/persistence/sessions.js";
 import { extractText } from "../../core/persistence/sessions.js";
@@ -137,7 +137,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
       if (tmName === "task") {
         const pending = pendingTasks.get(callId) ?? { subagentType: "explore" as const, task: "" };
         const subId = callId || `sa-${nextId}`;
-        const { ok, summary, toolCallCount, durationMs, error } = parseTaskResult(
+        const { ok, summary, toolCallCount, durationMs, error, steps } = parseTaskResult(
           typeof tm.content === "string" ? tm.content : JSON.stringify(tm.content),
         );
         blocks.push({
@@ -150,7 +150,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
           summary,
           toolCallCount,
           durationMs,
-          steps: [],
+          steps,
           ...(error ? { error } : {}),
         });
         pendingTasks.delete(callId);
@@ -241,6 +241,7 @@ function parseTaskResult(content: string): {
   toolCallCount: number;
   durationMs: number;
   error?: string;
+  steps: SubAgentStepRecord[];
 } {
   try {
     const p = JSON.parse(content);
@@ -251,10 +252,11 @@ function parseTaskResult(content: string): {
         toolCallCount: typeof p.toolCallCount === "number" ? p.toolCallCount : 0,
         durationMs: typeof p.durationMs === "number" ? p.durationMs : 0,
         ...(p.error ? { error: p.error as string } : {}),
+        steps: Array.isArray(p.steps) ? (p.steps as SubAgentStepRecord[]) : [],
       };
     }
   } catch { /* fall through */ }
-  return { ok: false, summary: content.slice(0, 200), toolCallCount: 0, durationMs: 0 };
+  return { ok: false, summary: content.slice(0, 200), toolCallCount: 0, durationMs: 0, steps: [] };
 }
 
 /** 判断是否为 ToolMessage 类消息 / Check if message is ToolMessage-like */

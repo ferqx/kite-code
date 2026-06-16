@@ -36,6 +36,14 @@ export interface SubAgentRunnerInput {
   maxDepth?: number;
 }
 
+/** 子 agent 步骤记录（用于持久化到 checkpoint） */
+export interface SubAgentStepSnapshot {
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  ok?: boolean;
+  totalLines?: number;
+}
+
 /** 子 agent 运行结果 */
 export interface SubAgentResult {
   ok: boolean;
@@ -43,6 +51,8 @@ export interface SubAgentResult {
   toolCallCount: number;
   durationMs: number;
   error?: string;
+  /** 步骤快照：用于会话重放时恢复步骤树 / Step snapshots for session replay */
+  steps?: SubAgentStepSnapshot[];
 }
 
 /** 子 agent 缓存指标 / Sub-agent cache metrics */
