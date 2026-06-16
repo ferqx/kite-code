@@ -1,10 +1,12 @@
 // Patched version of ink-text-input v6 that filters ALL Ctrl+letter input,
 // not just Ctrl+C. This prevents character leakage from TUI shortcuts like
 // Ctrl+T, Ctrl+L, Ctrl+R, Ctrl+H, Ctrl+E, Ctrl+O, Ctrl+X.
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Box, Text, useInput, usePaste } from "ink";
 import chalk from "chalk";
 import stringWidth from "string-width";
+
+const MAX_VISIBLE_LINES = 40;
 
 export interface AtomicBlock {
   start: number;
@@ -357,22 +359,25 @@ function CtrlSafeTextInput({
     : maxWidth;
 
   // ── render helper: split into lines (soft-wrapped by terminal width), highlight cursor ──
-  const { lines: displayLines, breakpoints } = wrapDisplayLines(value, effectiveMaxWidth);
-
-  const cursorLine = findCursorLine(
-    cursorOffset,
-    breakpoints,
-    displayLines.map((l) => l.length),
+  const { lines: displayLines, breakpoints } = useMemo(
+    () => wrapDisplayLines(value, effectiveMaxWidth),
+    [value, effectiveMaxWidth],
   );
+
+  const lineLengths = useMemo(
+    () => displayLines.map((l) => l.length),
+    [displayLines],
+  );
+
+  const cursorLine = findCursorLine(cursorOffset, breakpoints, lineLengths);
   const cursorCol = cursorOffset - breakpoints[cursorLine];
 
-  const renderedLines = (() => {
+  const renderedLines = useMemo(() => {
     if (!showCursor || !focus) {
       return displayLines.map((l) => l || " ");
     }
     return displayLines.map((line, lineIdx) => {
       if (lineIdx !== cursorLine) return line || " ";
-      // Build line with cursor
       if (line.length === 0) return chalk.inverse(" ");
       let rendered = "";
       for (let j = 0; j < line.length; j++) {
@@ -396,16 +401,21 @@ function CtrlSafeTextInput({
       }
       return rendered;
     });
-  })();
+  }, [displayLines, showCursor, focus, cursorLine, cursorCol, trailingText]);
 
-  const renderedPlaceholder =
-    placeholder
-      ? showCursor && focus
-        ? placeholder.length > 0
-          ? chalk.inverse(placeholder[0]) + chalk.grey(placeholder.slice(1))
-          : chalk.inverse(" ")
-        : chalk.grey(placeholder)
-      : undefined;
+  const renderedPlaceholder = useMemo(
+    () =>
+      placeholder
+        ? showCursor && focus
+          ? placeholder.length > 0
+            ? chalk.inverse(placeholder[0]) + chalk.grey(placeholder.slice(1))
+            : chalk.inverse(" ")
+          : chalk.grey(placeholder)
+        : undefined,
+    [placeholder, showCursor, focus],
+  );
+
+  const needsVirtualized = displayLines.length > MAX_VISIBLE_LINES;
 
   useInput(
     (rawInput, key) => {
@@ -650,7 +660,43 @@ function CtrlSafeTextInput({
     );
   }
 
-  // Multi-line: split across Box column
+  // Multi-line: split across Box column.
+  // When the input is very long, only render a sliding window around the cursor
+  // to keep React element count and terminal I/O bounded.
+  if (needsVirtualized) {
+    const half = Math.floor(MAX_VISIBLE_LINES / 2);
+    let viewStart = Math.max(0, cursorLine - half);
+    let viewEnd = viewStart + MAX_VISIBLE_LINES;
+    if (viewEnd > displayLines.length) {
+      viewEnd = displayLines.length;
+      viewStart = Math.max(0, viewEnd - MAX_VISIBLE_LINES);
+    }
+
+    const nodes: React.ReactNode[] = [];
+
+    if (viewStart > 0) {
+      nodes.push(
+        <Text key="above" dimColor>
+          ... {viewStart} more lines above ...
+        </Text>,
+      );
+    }
+
+    for (let i = viewStart; i < viewEnd; i++) {
+      nodes.push(<Text key={i}>{renderedLines[i]}</Text>);
+    }
+
+    if (viewEnd < displayLines.length) {
+      nodes.push(
+        <Text key="below" dimColor>
+          ... {displayLines.length - viewEnd} more lines below ...
+        </Text>,
+      );
+    }
+
+    return <Box flexDirection="column">{nodes}</Box>;
+  }
+
   return (
     <Box flexDirection="column">
       {placeholder && value.length === 0 ? (
