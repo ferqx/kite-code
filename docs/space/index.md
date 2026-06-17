@@ -61,7 +61,7 @@
 | `understanding/2026-06-08-prefix-cache-hit-rate-analysis.md` | understanding | 前缀缓存命中率分析 — DeepSeek KV cache 机制、前缀大小与命中率关系、当前 OpenPX 前缀构成、影响因素和优化方向。 |
 | `understanding/2026-06-09-prompt-cache-optimization.md` | understanding | Prompt Cache 优化：合并 SystemMessage、清理死参数、修复 reasoning_content 注入 key 碰撞、TUI 缓存日志、子 agent 缓存震荡根因、对标 Claude Code/Codex/OpenCode 子 agent 结果回传机制。 |
 | `understanding/2026-06-09-token-stats-persistence-design.md` | understanding | Token 统计持久化系统：手动统计（不依赖 provider）、SQLite 持久化跨重启保留、useEffect 自动保存消除 stateRef 滞后、getSnapshot 内存缓存消除回车卡顿。 |
-| `understanding/2026-06-10-shell-concurrent-execution-design.md` | understanding | Shell 工具并发执行 + 批量审批流程：`approvedBatch` 状态注解、approval→approval 循环路由、全量并行执行、full_access 自动放行、recursionLimit 9999999。 |
+| `understanding/2026-06-10-shell-concurrent-execution-design.md` | understanding | Shell 工具并发执行 + 批量审批流程 |
 
 ## Backlog（工作待办）
 
@@ -87,6 +87,7 @@
 | `plans/2026-05-24-multi-session-concurrency.md` | archived | 多会话并发执行（3 tasks）。 |
 | `plans/2026-05-25-e2e-restructure.md` | archived | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
 | `plans/2026-05-26-tui-claude-code-parity.md` | archived | TUI Claude Code 全面对标（14 tasks）：布局、快捷键、功能、配置、主题。 |
+| `plans/2026-06-17-background-subagent.md` | draft | 后台子 Agent — `background: true` 异步派发、SessionContext 容器、BackgroundTaskManager、跨 run 并发模型（8 phases）。 |
 
 ## 完成执行记录
 
