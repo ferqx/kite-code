@@ -9,7 +9,7 @@ import type { ShellExecutor } from "@/core/tools/shell";
 import type { McpManager } from "@/core/mcp";
 import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
 import { extractPromptCacheMetrics } from "@/core/cache-metrics";
-import { buildCacheableRuntimeContext, toPosixPath } from "@/core/model/runtime-context";
+import { buildCacheableRuntimeContext } from "@/core/model/runtime-context";
 import { buildStaticSystemPrompt } from "@/core/model/context";
 import { countTokens } from "@/core/token-counter";
 import type { SubAgentRoleConfig, SubAgentRunnerInput, SubAgentResult, SubAgentEventSink, SubAgentStepSnapshot } from "./types";
@@ -106,7 +106,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   // CWD 嵌入 task HumanMessage：task 每次调用都不同，嵌入 CWD 不增加缓存 miss
   // Embed CWD in task HumanMessage: task is unique per call, doesn't affect prefix cache
   const taskWithCwd = `<runtime-state source="harness.subagent">
-CWD: ${toPosixPath(process.cwd())}
+CWD: ${process.cwd()}
 </runtime-state>
 
 ${input.task}`;
@@ -226,11 +226,11 @@ ${input.task}`;
   } catch (e: any) {
     clearTimeout(timeoutId);
     const durationMs = Date.now() - startTime;
-    const error = e?.message ?? String(e);
+    const summary = e instanceof Error && e.name === "AbortError" ? "Cancelled" : (e?.message ?? String(e));
     input.eventSink({
       type: "error",
-      data: { id, error },
+      data: { id, error: summary, summary, toolCallCount, durationMs },
     });
-    return { ok: false, summary: error, toolCallCount, durationMs, error, steps };
+    return { ok: false, summary, toolCallCount, durationMs, error: summary, steps };
   }
 }

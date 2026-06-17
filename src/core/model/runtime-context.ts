@@ -107,9 +107,16 @@ export function buildCacheableRuntimeContext(input: CacheableRuntimeContextInput
   const lines = [
     "Cacheable runtime context:",
     `OS: ${osType} (${osPlatform})`,
-    `Shell: ${shellPath} — use ${shellPath} syntax for shell_execute, NOT PowerShell or cmd.exe. Use forward-slashed POSIX paths (e.g. /d/app, not D:\\app) — backslashes are escape characters in bash.`,
-    `Workspace: ${posixWorkspace}`,
+    `Shell: ${shellPath}`,
+    `Workspace: ${workspace}`,
   ];
+  // 仅 Windows + bash 组合下追加 POSIX 路径提示，避免模型对 file 工具也用 MSYS2 路径
+  // Only add POSIX path hint on Windows+bash, so the model doesn't use MSYS2 paths for file tools
+  if (osPlatform === "win32") {
+    lines.push(
+      `Note: for shell_execute commands, convert Windows paths to POSIX: replace backslashes with /, and change D:\\ to /d/. Example: ${workspace} → ${posixWorkspace}. File tools (read_file, edit_file, write_file) accept Windows paths directly.`,
+    );
+  }
   return lines.join("\n");
 }
 
