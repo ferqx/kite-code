@@ -2,19 +2,8 @@
 
 import type { Action } from "./actions";
 import type { TuiState, OutputBlock, SessionSnapshot, Turn } from "../types";
-import { reconstructTurns, appendBlock, buildBlockIndex } from "./helpers";
+import { reconstructTurns, appendBlock, maxBlockIdInTurns } from "./helpers";
 import { listAvailableModels } from "@/core/config";
-
-/** Compute nextBlockId from turns (max block ID + 1, or 0 if empty) */
-function maxBlockIdInTurns(turns: Turn[]): number {
-  let max = 0;
-  for (const turn of turns) {
-    for (const b of turn.blocks) {
-      if (b.id >= max) max = b.id;
-    }
-  }
-  return max;
-}
 
 export function sessionReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
@@ -44,7 +33,6 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         turns: [],
         nextBlockId: 0,
         toolStartTimes: undefined,
-        blockIndex: {},
         interrupt: null,
         exited: false,
         running: false,
@@ -87,12 +75,13 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       );
       const target = sessions.find(s => s.threadId === action.threadId);
       const loadedTurns = reconstructTurns(action.blocks);
+      const nextId = Math.max(state.nextBlockId, maxBlockIdInTurns(loadedTurns) + 1);
       return {
         ...state,
         sessions,
         activeSessionId: action.threadId,
         turns: loadedTurns,
-        blockIndex: buildBlockIndex(loadedTurns),
+        nextBlockId: nextId,
         toolStartTimes: undefined,
         interrupt: action.interrupt,
         showHelp: false,
@@ -133,7 +122,6 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         sessions,
         activeSessionId: action.threadId,
         turns: targetTurns,
-        blockIndex: buildBlockIndex(targetTurns),
         nextBlockId: Math.max(state.nextBlockId, maxBlockIdInTurns(targetTurns) + 1),
         status: target?.status ?? state.status,
         interrupt: target?.interrupt ?? null,

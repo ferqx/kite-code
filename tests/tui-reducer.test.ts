@@ -523,7 +523,7 @@ describe("eventReducer (blocks model)", () => {
   });
 
   describe("LOAD_SESSION", () => {
-    test("preserves monotonically increasing nextBlockId without reset", () => {
+    test("nextBlockId advances past loaded blocks to prevent ID collisions", () => {
       const blocks: OutputBlock[] = [
         { id: 5, kind: "text", content: "old" },
         { id: 10, kind: "user", content: "old user" },
@@ -538,14 +538,15 @@ describe("eventReducer (blocks model)", () => {
         type: "LOAD_SESSION", threadId: "t1", blocks, interrupt: null,
         modelProvider: "test", modelName: "deepseek-v4", thinkingLevel: null,
       });
-      // nextBlockId should NOT reset after LOAD_SESSION
-      expect(s.nextBlockId).toBe(2);
+      // nextBlockId must be > max loaded block ID to avoid collisions
+      // when new tool_call blocks reuse IDs already present in loaded turns.
+      expect(s.nextBlockId).toBe(11);
       // Loaded blocks have their original IDs
       expect(flatBlocks(s).map(b => b.id)).toEqual([5, 10]);
-      // New block gets the monotonically increasing nextBlockId
+      // New block gets an ID beyond all registered blocks
       s = dispatch(s, textEvt("new block after load"));
-      expect(s.nextBlockId).toBe(3);
-      expect(flatBlocks(s).at(-1)!.id).toBe(2);
+      expect(s.nextBlockId).toBe(12);
+      expect(flatBlocks(s).at(-1)!.id).toBe(11);
     });
 
     test("preserves interrupt when loading approval block", () => {
@@ -1206,12 +1207,13 @@ describe("eventReducer (blocks model)", () => {
       expect(b.durationMs).toBe(2500);
     });
 
-    test("subagent_error updates running block to error", () => {
+    test("subagent_error updates running block to error, preserves steps", () => {
       let s = dispatch(fresh(), saStart("sub-1", "code", "impl"));
       s = dispatch(s, saError("sub-1", "timeout"));
       const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: "subagent" }>;
       expect(b.status).toBe("error");
-      expect(b.error).toBe("timeout");
+      expect(b.summary).toBe("timeout");
+      expect(b.expanded).toBe(false);
     });
 
     test("subagent events interleave correctly with other block types", () => {

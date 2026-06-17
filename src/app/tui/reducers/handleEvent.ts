@@ -2,7 +2,7 @@
 
 import type { AgentEvent } from "@/protocol/events";
 import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
-import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById } from "./helpers";
+import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById, findBlock, hasBlock } from "./helpers";
 import { formatReadFileRange, getToolPreview, getToolDetail } from "../components/render-utils";
 
 /** 格式化 file_change 事件的原始预览内容，截断到最多 6 行 / Format raw file_change preview, truncating to max 6 lines */
@@ -27,32 +27,6 @@ function formatFilePreview(raw: string | undefined): string | undefined {
 function fmt(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
-}
-
-/** Shared helper: O(1) blockIndex lookup with O(n) full-scan fallback for session-load edge cases.
- *  Eliminates the duplicate pattern that was repeated 5 times across tool_done / subagent handlers. */
-function findBlockByIndexAndKind<T extends OutputBlock["kind"]>(
-  state: TuiState,
-  indexKey: string,
-  expectedKind: T,
-  scanMatch: (b: Extract<OutputBlock, { kind: T }>) => boolean,
-): (OutputBlock & { kind: T }) | undefined {
-  const indexedId = state.blockIndex[indexKey];
-  if (indexedId != null) {
-    const b = findBlockById(state, indexedId);
-    if (b && b.kind === expectedKind && scanMatch(b as Extract<OutputBlock, { kind: T }>)) {
-      return b as OutputBlock & { kind: T };
-    }
-  }
-  // Full-scan fallback
-  for (const turn of state.turns) {
-    for (const b of turn.blocks) {
-      if (b.kind === expectedKind && scanMatch(b as Extract<OutputBlock, { kind: T }>)) {
-        return b as OutputBlock & { kind: T };
-      }
-    }
-  }
-  return undefined;
 }
 
 export function handleEventAction(state: TuiState, event: AgentEvent): TuiState {
@@ -171,16 +145,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // task tool has its own subagent block; update_plan progress is shown
       // in StatusBar — skip rendering both in the message list
       if (event.data.name === "task" || event.data.name === "update_plan") return state;
-      // Dedup: if this call_id already has a tool_card block, skip.
-      // Prevents duplicate rendering when the same tool_call event is replayed.
-      if (state.blockIndex[event.data.call_id] != null) {
-        const existing = findBlockById(state, state.blockIndex[event.data.call_id]);
-        if (existing?.kind === "tool_card" && existing.callId === event.data.call_id) return state;
-      }
-      // Full-scan fallback: blockIndex may have stale entries after trimTurns rebuild
-      for (const turn of state.turns) {
-        if (turn.blocks.some(b => b.kind === "tool_card" && b.callId === event.data.call_id)) return state;
-      }
+      // Dedup: skip if a tool_card with this callId already exists
+      if (hasBlock(state, b => b.kind === "tool_card" && b.callId === event.data.call_id)) return state;
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
       const preview = getToolPreview(event.data.name, event.data.args);
@@ -191,9 +157,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         status: "running", summary: "", preview,
       };
       const times = { ...finalized.toolStartTimes, [event.data.call_id]: Date.now() };
-      const next = appendBlock(finalized, block);
-      const blockIndex = { ...next.blockIndex, [event.data.call_id]: id };
-      return { ...next, toolStartTimes: times, blockIndex };
+      return { ...appendBlock(finalized, block), toolStartTimes: times };
     }
     case "tool_done": {
       if (event.data.name === "task") return state;
@@ -201,13 +165,13 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const startedAt = state.toolStartTimes?.[event.data.call_id];
       const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
       const { [event.data.call_id]: _, ...nextTimes } = state.toolStartTimes ?? {};
-      const matched = findBlockByIndexAndKind(state, event.data.call_id, "tool_card", b => b.callId === event.data.call_id);
-      if (!matched) return { ...state, toolStartTimes: nextTimes };
+      const matched = findBlock(state, b => b.kind === "tool_card" && b.callId === event.data.call_id);
+      if (!matched || matched.kind !== "tool_card") return { ...state, toolStartTimes: nextTimes };
       const next: OutputBlock = {
         ...matched,
         status: event.data.ok ? "done" as const : "error" as const,
         summary: event.data.summary,
-        elapsedMs,
+        elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
         expanded: !event.data.ok || matched.name === "shell_execute",
       };
@@ -363,11 +327,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return appendBlock(finalized, block);
     }
     case "subagent_start": {
-      // Dedup: if a subagent block with this ID already exists, skip.
-      if (state.blockIndex[event.data.id] != null) return state;
-      for (const turn of state.turns) {
-        if (turn.blocks.some(b => b.kind === "subagent" && b.subagentId === event.data.id)) return state;
-      }
+      if (hasBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id)) return state;
       const finalized = finalizeLastTurnStreaming(state);
       const id = finalized.nextBlockId;
       const block: OutputBlock = {
@@ -378,19 +338,17 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         status: "running", summary: "",
         toolCallCount: 0, durationMs: 0, steps: [],
       };
-      const next = appendBlock(finalized, block);
-      const blockIndex = { ...next.blockIndex, [event.data.id]: id };
-      return { ...next, blockIndex };
+      return appendBlock(finalized, block);
     }
     case "subagent_step": {
-      const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
-      if (!matched) return state;
+      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id);
+      if (!matched || matched.kind !== "subagent") return state;
       const next: OutputBlock = { ...matched, steps: [...matched.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }] };
       return replaceBlockById(state, matched.id, next);
     }
     case "subagent_tool_result": {
-      const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
-      if (!matched) return state;
+      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id);
+      if (!matched || matched.kind !== "subagent") return state;
       // Reverse-scan to find the last UNRESOLVED step with matching toolName.
       // Prefer unresolved steps to handle out-of-order results correctly:
       // e.g., two read_file steps — first result resolves the last unresolved one,
@@ -420,8 +378,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return replaceBlockById(state, matched.id, next);
     }
     case "subagent_done": {
-      const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
-      if (!matched) return state;
+      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id);
+      if (!matched || matched.kind !== "subagent") return state;
       const next: OutputBlock = {
         ...matched,
         status: "done" as const,
@@ -433,15 +391,21 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return replaceBlockById(state, matched.id, next);
     }
     case "subagent_error": {
-      const matched = findBlockByIndexAndKind(state, event.data.id, "subagent", b => b.subagentId === event.data.id);
-      if (!matched) return state;
-      const next: OutputBlock = { ...matched, status: "error" as const, error: event.data.error };
+      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id);
+      if (!matched || matched.kind !== "subagent") return state;
+      const next: OutputBlock = {
+        ...matched,
+        status: "error" as const,
+        summary: event.data.summary ?? event.data.error,
+        toolCallCount: event.data.toolCallCount ?? matched.toolCallCount,
+        durationMs: event.data.durationMs ?? matched.durationMs,
+        expanded: false,
+      };
       return replaceBlockById(state, matched.id, next);
     }
     case "subagent_cache_metrics": {
-      // 累积子 agent 的缓存指标到对应 subagent block 上，供 TUI 展示
-      const matched = findBlockByIndexAndKind(state, event.data.subagentId, "subagent", b => b.subagentId === event.data.subagentId);
-      if (!matched) return state;
+      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.subagentId);
+      if (!matched || matched.kind !== "subagent") return state;
       const prevHit = matched.cacheHitTokens ?? 0;
       const prevMiss = matched.cacheMissTokens ?? 0;
       const next: typeof matched = {

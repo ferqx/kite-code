@@ -41,8 +41,6 @@ export interface TuiState {
   nextBlockId: number;
   interrupt: InterruptState | null;
   toolStartTimes?: Record<string, number>;
-  /** callId / subagentId → blockId 索引，用于 O(1) 查找 */
-  blockIndex: Record<string, number>;
   status: StatusState;
   exited: boolean;
   running: boolean;

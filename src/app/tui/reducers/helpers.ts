@@ -3,22 +3,34 @@ import type { TuiState, OutputBlock, Turn } from "../types";
 /** Soft cap on turns to prevent unbounded memory growth in long sessions */
 const MAX_TURNS = 500;
 
-/** Rebuild blockIndex from all current turns — used after trimming or clearing */
-export function buildBlockIndex(turns: Turn[]): Record<string, number> {
-  const idx: Record<string, number> = {};
-  for (const turn of turns) {
-    for (const b of turn.blocks) {
-      if (b.kind === "tool_card") idx[b.callId] = b.id;
-      else if (b.kind === "subagent") idx[b.subagentId] = b.id;
-    }
-  }
-  return idx;
-}
-
 function trimTurns(state: TuiState): TuiState {
   if (state.turns.length <= MAX_TURNS) return state;
   const trimmed = state.turns.slice(state.turns.length - MAX_TURNS);
-  return { ...state, turns: trimmed, blockIndex: buildBlockIndex(trimmed) };
+  return { ...state, turns: trimmed };
+}
+
+/** Find the first block matching the predicate across all turns (backward scan). */
+export function findBlock(
+  state: TuiState,
+  match: (b: OutputBlock) => boolean,
+): OutputBlock | undefined {
+  for (let t = state.turns.length - 1; t >= 0; t--) {
+    for (let i = state.turns[t].blocks.length - 1; i >= 0; i--) {
+      if (match(state.turns[t].blocks[i])) return state.turns[t].blocks[i];
+    }
+  }
+  return undefined;
+}
+
+/** Returns true if any block in any turn matches the predicate. */
+export function hasBlock(
+  state: TuiState,
+  match: (b: OutputBlock) => boolean,
+): boolean {
+  for (const turn of state.turns) {
+    if (turn.blocks.some(match)) return true;
+  }
+  return false;
 }
 
 /** 追加 block 到最后 turn，自增 nextBlockId。
@@ -112,4 +124,15 @@ export function reconstructTurns(blocks: OutputBlock[]): Turn[] {
 /** 获取最后 turn */
 export function lastTurn(state: TuiState): Turn | undefined {
   return state.turns.at(-1);
+}
+
+/** Compute next block ID from turns (max ID + 1, or 0 if empty) */
+export function maxBlockIdInTurns(turns: Turn[]): number {
+  let max = 0;
+  for (const turn of turns) {
+    for (const b of turn.blocks) {
+      if (b.id >= max) max = b.id;
+    }
+  }
+  return max;
 }

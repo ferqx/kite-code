@@ -3,7 +3,7 @@ import { Box, Text, Static } from "ink";
 import { ScrollList } from "ink-scroll-list";
 import type { McpManager } from "@/core/mcp";
 import type { TuiState } from "./types";
-import OutputArea, { useStaticContent } from "./OutputArea";
+import OutputArea, { useStaticContent, blockFingerprint } from "./OutputArea";
 import BlockRenderer from "./components/BlockRenderer";
 import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
@@ -59,7 +59,6 @@ const initialState: TuiState = {
   checkpoints: [],
   rewindCounter: 0,
   ctrlCPressed: false,
-  blockIndex: {},
   sessionKey: 0,
   exitRequested: false,
   editorRequested: false,
@@ -199,7 +198,7 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
             const prevBlock = index > 1 ? mergedStaticBlocks[index - 2] : undefined;
             return (
               <BlockRenderer
-                key={block.id}
+                key={blockFingerprint(block)}
                 block={block}
                 isFocused={false}
                 index={index - 1}

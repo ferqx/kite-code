@@ -67,7 +67,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       return replaceBlockById(state, action.id, { ...block, expanded: !block.expanded });
     }
     case "CLEAR_OUTPUT":
-      return { ...state, turns: [], nextBlockId: 0, blockIndex: {}, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined };
+      return { ...state, turns: [], nextBlockId: 0, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined };
     case "ESCAPE": {
       if (state.showHelp) return { ...state, showHelp: false };
       if (state.showSessions) return { ...state, showSessions: false };
