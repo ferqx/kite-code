@@ -66,6 +66,10 @@ bun run typecheck
 bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/tui-edge-cases.test.tsx
 ```
 
+### 关联文档
+
+- [[tui-reference-stability]] — useStaticContent 引用稳定性重构，解决高频渲染下的重复行问题
+
 ## 验证：
 
 ```bash
