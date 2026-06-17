@@ -796,7 +796,7 @@ describe("Block spacing", () => {
     assertGap(
       { id: 1, kind: "subagent", subagentId: "s1", role: "explore", task: "find", status: "done", summary: "ok", toolCallCount: 1, durationMs: 100, steps: [], _marker: "find" } as any,
       { id: 2, kind: "text", content: "__BLOCK_1__", _marker: "__BLOCK_1__" } as any,
-      1,
+      2, // subagent status line adds one extra line between header marker and next block
     );
   });
 
@@ -1295,9 +1295,8 @@ describe("SubAgentBlock rendering", () => {
     expect(frame).toContain("⏺");
     expect(frame).toContain("Review");
     expect(frame).toContain("review PR #42");
-    expect(frame).toContain("5 次工具调用");
     expect(frame).toContain("3.2s");
-    // Summary text is NOT rendered in the message list
+    // Tool call count is not in header — only in status bar via events
     expect(frame).not.toContain("No critical issues found");
   });
 

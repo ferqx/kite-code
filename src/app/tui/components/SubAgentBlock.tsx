@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import stringWidth from "string-width";
 import { Box, Text } from "ink";
 import type { OutputBlock } from "../types";
 import type { SubAgentRole } from "@/protocol/events";
@@ -20,6 +21,25 @@ function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+}
+
+/** 将文本截断到指定宽度，超出部分用 "…" 替代。
+ *  Truncate text to fit within maxWidth columns, appending "…" if truncated. */
+function truncateToFit(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  const w = stringWidth(text);
+  if (w <= maxWidth) return text;
+  const target = maxWidth - 1; // reserve 1 column for "…"
+  if (target <= 0) return "";
+  let result = "";
+  let cw = 0;
+  for (const ch of text) {
+    const chW = stringWidth(ch);
+    if (cw + chW > target) break;
+    result += ch;
+    cw += chW;
+  }
+  return result + "…";
 }
 
 /** Extract human-readable label from tool args */
@@ -92,6 +112,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const dt = useTheme();
   const label = roleLabel(block.role);
   const taskSummary = taskLabel(block.task);
+  const col = process.stdout.columns ?? 80;
 
   // Live elapsed time + spinner for running state
   const [liveElapsed, setLiveElapsed] = useState(0);
@@ -115,16 +136,16 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
       : block.steps;
     const skipped = stepCount - MAX_RUNNING_STEPS;
 
+    const runDur = formatDuration(liveElapsed);
+    const headRunBefore = stringWidth(`${spinner} ${label} · `);
+    const fitRunTask = truncateToFit(taskSummary, Math.max(0, col - headRunBefore - 2));
+
     return (
       <Box flexDirection="column">
         <Box>
           <Text color={dt.warning}>{spinner} </Text>
           <Text color={dt.primary}>{label}</Text>
-          <Text color={dt.muted}> · {taskSummary}</Text>
-          {stepCount > 0 && (
-            <Text color={dt.dim}> ({stepCount} 步)</Text>
-          )}
-          <Text color={dt.dim}> ({formatDuration(liveElapsed)})</Text>
+          <Text color={dt.muted}> · {fitRunTask}</Text>
         </Box>
         {skipped > 0 && (
           <Box paddingLeft={3}>
@@ -135,8 +156,12 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           <Box key={i} paddingLeft={3}>
             <Text color={dt.dim}>├─ {step.toolName}</Text>
             {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
-              const label = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
-              return label ? <Text color={dt.muted}> {label}</Text> : null;
+              const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
+              if (!rawLabel) return null;
+              const stepPreW = stringWidth(`├─ ${step.toolName}`);
+              const stepSufW = step.ok !== undefined ? 2 : 0; // " ✓" or " ✗"
+              const fitLabel = truncateToFit(rawLabel, Math.max(0, col - 3 - stepPreW - stepSufW - 2));
+              return fitLabel ? <Text color={dt.muted}> {fitLabel}</Text> : null;
             })()}
             {step.ok !== undefined && (
               <Text color={step.ok ? dt.success : dt.error}>
@@ -145,6 +170,11 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
             )}
           </Box>
         ))}
+        <Box paddingLeft={3}>
+          <Text color={dt.dim}>
+            └─ 进行中 ({runDur})
+          </Text>
+        </Box>
       </Box>
     );
   }
@@ -157,17 +187,17 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
       ? block.steps.slice(-MAX_RUNNING_STEPS)
       : block.steps;
     const skipped = stepCount - MAX_RUNNING_STEPS;
-    const cacheTotal = (block.cacheHitTokens ?? 0) + (block.cacheMissTokens ?? 0);
-    const cacheHitRate = cacheTotal > 0 ? ((block.cacheHitTokens ?? 0) / cacheTotal * 100).toFixed(0) + "%" : null;
     const isError = block.status === "error";
+    const doneDur = formatDuration(block.durationMs);
+    const headDoneBefore = stringWidth(`⏺ ${label} · `);
+    const fitDoneTask = truncateToFit(taskSummary, Math.max(0, col - headDoneBefore - 2));
 
     return (
       <Box flexDirection="column">
         <Box>
           <Text color={toolColor(block.status, dt)}>⏺ </Text>
           <Text color={dt.primary}>{label}</Text>
-          <Text color={dt.muted}> · {taskSummary}</Text>
-          <Text color={dt.dim}> — {block.toolCallCount} 次工具调用，{formatDuration(block.durationMs)}{cacheHitRate ? `，cache: ${cacheHitRate}` : ""}</Text>
+          <Text color={dt.muted}> · {fitDoneTask}</Text>
         </Box>
         {skipped > 0 && (
           <Box paddingLeft={3}>
@@ -178,8 +208,12 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           <Box key={i} paddingLeft={3}>
             <Text color={dt.dim}>├─ {step.toolName}</Text>
             {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
-              const label = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
-              return label ? <Text color={dt.muted}> {label}</Text> : null;
+              const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
+              if (!rawLabel) return null;
+              const stepPreW = stringWidth(`├─ ${step.toolName}`);
+              const stepSufW = step.ok !== undefined ? 2 : 0; // " ✓" or " ✗"
+              const fitLabel = truncateToFit(rawLabel, Math.max(0, col - 3 - stepPreW - stepSufW - 2));
+              return fitLabel ? <Text color={dt.muted}> {fitLabel}</Text> : null;
             })()}
             {step.ok !== undefined && (
               <Text color={step.ok ? dt.success : dt.error}>
@@ -188,13 +222,25 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
             )}
           </Box>
         ))}
-        {(stepCount > 0 || isError) && (
-          <Box paddingLeft={3}>
-            <Text color={isError ? dt.error : dt.muted}>
-              └─ {isError ? (block.summary || block.error || "Error") : "done!"}
-            </Text>
-          </Box>
-        )}
+        {(() => {
+          if (isError) {
+            const errText = block.error || "Error";
+            const fitErr = truncateToFit(errText, Math.max(0, col - 3 - 3 - 2));
+            return (
+              <Box paddingLeft={3}>
+                <Text color={dt.error}>└─ {fitErr}</Text>
+              </Box>
+            );
+          }
+          // done — show with duration
+          const doneLine = `done! (${doneDur})`;
+          const fitDone = truncateToFit(doneLine, Math.max(0, col - 3 - 3 - 2));
+          return (
+            <Box paddingLeft={3}>
+              <Text color={dt.dim}>└─ {fitDone}</Text>
+            </Box>
+          );
+        })()}
       </Box>
     );
   }
