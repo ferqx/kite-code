@@ -125,6 +125,8 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       "Check stderr for warnings even when exitCode is 0.",
     failureHandling:
       "If exitCode nonzero: read stderr, adjust command, retry. " +
+      "rg (ripgrep) exit code 1 means NO matches found — this is NOT an error, do not retry. " +
+      "grep exit code 1 likewise means no matches. " +
       "If tests fail (intent=verify): read failure output, fix code, re-run. " +
       "If rejected by policy: check intent matches command type; add grant_request for approval. " +
       "If output empty but exitCode 0: try different flags or path.",

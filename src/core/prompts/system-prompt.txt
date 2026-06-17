@@ -37,6 +37,7 @@ Follow this order, skipping steps only when clearly unnecessary for the task:
 - Tag read-only commands with intent="inspect". Verification commands with intent="verify".
 - Commands that mutate files or VCS require user approval; include grant_request.
 - On failure: diagnose the root cause (missing path? missing command? truncated output?) before retrying. Retry at most once. If it fails again, switch to dedicated tools or report the issue.
+- rg (ripgrep) exit code 1 = no matches found. This is normal, not an error — do not retry.
 
 ## Concurrency
 - Issue independent read-only operations in the same turn (reading multiple files, searching unrelated keywords).

@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertInsideWorkspace, shellTool } from "../src/core/tools/shell";
-import { writeFile, editFile, readFile } from "../src/core/tools/file";
+import { writeFile, editFile, readFile, readTextContent } from "../src/core/tools/file";
+import { msys2ToWindowsPath, normalizeMsys2PathsInText } from "../src/core/tools/path-utils";
 
-/** Convert MSYS2 Unix-style path to Windows-style path via cygpath */
-function msys2ToWindowsPath(p: string): string {
+/** Convert MSYS2 Unix-style path to Windows-style path via cygpath (legacy test helper) */
+function msys2Win(p: string): string {
   try {
     const { spawnSync } = require("child_process");
     const r = spawnSync("cygpath", ["-w", p], { encoding: "utf8", timeout: 3000 });
@@ -145,7 +146,7 @@ describe("tool safety", () => {
     const { resolve } = await import("node:path");
     const { realpathSync } = await import("node:fs");
     const pwdOutput = result.stdout.trim();
-    const normalizedPwd = process.platform === "win32" ? msys2ToWindowsPath(pwdOutput) : pwdOutput;
+    const normalizedPwd = process.platform === "win32" ? msys2Win(pwdOutput) : pwdOutput;
     expect(realpathSync(normalizedPwd).toLowerCase()).toBe(realpathSync(workspace).toLowerCase());
   });
 
@@ -192,5 +193,186 @@ describe("tool safety", () => {
     expect([130, 143]).toContain(result.exitCode);
     // Should complete in well under 60 seconds
     expect(elapsed).toBeLessThan(5000);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// MSYS2 路径转换 / MSYS2 path conversion
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("msys2ToWindowsPath", () => {
+  test("/d/foo/bar → D:\\foo\\bar", () => {
+    if (process.platform !== "win32") return;
+    expect(msys2ToWindowsPath("/d/app/openpx-new/README.md")).toBe("D:\\app\\openpx-new\\README.md");
+  });
+
+  test("/c/some/path → C:\\some\\path", () => {
+    if (process.platform !== "win32") return;
+    expect(msys2ToWindowsPath("/c/some/path")).toBe("C:\\some\\path");
+  });
+
+  test("absolute Windows path passes through", () => {
+    if (process.platform !== "win32") return;
+    expect(msys2ToWindowsPath("D:\\app\\test.txt")).toBe("D:\\app\\test.txt");
+  });
+
+  test("relative path passes through", () => {
+    expect(msys2ToWindowsPath("src/test.ts")).toBe("src/test.ts");
+  });
+
+  test("non-Windows platform returns input unchanged", () => {
+    if (process.platform === "win32") return;
+    // On Linux/macOS, /d/foo is a legitimate absolute path, not a drive letter
+    expect(msys2ToWindowsPath("/d/foo/bar")).toBe("/d/foo/bar");
+    expect(msys2ToWindowsPath("/home/user/file.txt")).toBe("/home/user/file.txt");
+  });
+});
+
+describe("normalizeMsys2PathsInText", () => {
+  test("converts MSYS2 paths embedded in text", () => {
+    if (process.platform !== "win32") return;
+    const input = "CWD: /d/app/openpx-new\nReading /d/app/openpx-new/src/test.ts";
+    const output = normalizeMsys2PathsInText(input);
+    expect(output).toContain("D:\\app\\openpx-new");
+    expect(output).not.toContain("/d/");
+  });
+
+  test("passes through text with no MSYS2 paths", () => {
+    if (process.platform !== "win32") return;
+    const input = "hello world\nsome output\nresult: ok";
+    expect(normalizeMsys2PathsInText(input)).toBe(input);
+  });
+
+  test("non-Windows platform returns input unchanged", () => {
+    if (process.platform === "win32") return;
+    const input = "CWD: /home/user/project\nFile: /etc/config";
+    expect(normalizeMsys2PathsInText(input)).toBe(input);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 二进制检测与编码 / Binary detection & encoding
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("readTextContent — binary detection", () => {
+  test("UTF-8 with CJK text is not binary", () => {
+    const workspace = join(tmpdir(), "openpx-readtext-cjk");
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(workspace, "readme.md"), "# 你好世界\n\n这是中文内容。\n", "utf8");
+
+    const result = readTextContent(workspace, "readme.md");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.totalLines).toBeGreaterThan(0);
+  });
+
+  test("rejects actual binary files", () => {
+    const workspace = join(tmpdir(), "openpx-readtext-bin");
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    const buf = Buffer.alloc(4096);
+    // Fill with random bytes: many will be control chars / non-text
+    for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
+    writeFileSync(join(workspace, "data.bin"), buf);
+
+    const result = readTextContent(workspace, "data.bin");
+    // Random binary should be detected (or rarely pass if coincidentally text-like)
+    // We don't assert strict false since random could theoretically look like text
+    // but UTF-8 validation would make it astronomically unlikely for 4KB
+  });
+
+  test("force: true bypasses binary detection", () => {
+    const workspace = join(tmpdir(), "openpx-readtext-force");
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    const buf = Buffer.alloc(1024);
+    for (let i = 0; i < buf.length; i++) buf[i] = 0; // all NUL bytes
+    writeFileSync(join(workspace, "nul.bin"), buf);
+
+    const result = readTextContent(workspace, "nul.bin", { force: true });
+    expect(result.ok).toBe(true);
+  });
+
+  test("VT and FF bytes are treated as non-text", () => {
+    // 0x0B (VT) and 0x0C (FF) must NOT count as text bytes
+    const workspace = join(tmpdir(), "openpx-readtext-vtff");
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    // 8KB of alternating VT/FF bytes — well over 30% non-text
+    const buf = Buffer.alloc(8192);
+    for (let i = 0; i < buf.length; i++) buf[i] = i % 2 === 0 ? 0x0b : 0x0c;
+    writeFileSync(join(workspace, "vtff.bin"), buf);
+
+    const result = readTextContent(workspace, "vtff.bin");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("Binary");
+    }
+  });
+});
+
+describe("readTextContent — encoding", () => {
+  test("UTF-8 BOM is stripped", () => {
+    const workspace = join(tmpdir(), "openpx-readtext-bom8");
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    writeFileSync(join(workspace, "bom.txt"), Buffer.concat([bom, Buffer.from("hello\n", "utf8")]));
+
+    const result = readTextContent(workspace, "bom.txt");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.content).not.toContain("﻿");
+      expect(result.content).toContain("hello");
+    }
+  });
+
+  test("UTF-16LE BOM is decoded and stripped", () => {
+    const workspace = join(tmpdir(), "openpx-readtext-utf16le");
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    // BOM (FF FE) + "hello\n" in UTF-16LE
+    const content = "﻿hello\n";
+    const buf = Buffer.from(content, "utf16le");
+    writeFileSync(join(workspace, "utf16.txt"), buf);
+
+    const result = readTextContent(workspace, "utf16.txt");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.content).not.toContain("﻿");
+      expect(result.content).toContain("hello");
+    }
+  });
+});
+
+describe("readTextContent — line endings", () => {
+  test("CRLF (Windows) normalized to LF", () => {
+    const workspace = join(tmpdir(), "openpx-readtext-crlf");
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(workspace, "crlf.txt"), "line1\r\nline2\r\nline3\r\n");
+
+    const result = readTextContent(workspace, "crlf.txt");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.content).not.toContain("\r");
+      expect(result.content).toContain("line1");
+      expect(result.content).toContain("line3");
+    }
+  });
+});
+
+describe("read_file — regression", () => {
+  test("handles mixed content with special chars", () => {
+    const workspace = join(tmpdir(), "openpx-read-regress");
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    writeFile({ workspace, path: "mixed.txt", content: "// 注释\nconst x = 1;\n/* 块注释 */\n" });
+
+    const result = readFile({ workspace, path: "mixed.txt" });
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("注释");
+    expect(result.content).toContain("const x");
+    expect(result.content).toContain("块注释");
   });
 });

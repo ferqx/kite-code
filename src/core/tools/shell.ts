@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ShellInput, ShellResult } from "@/core/types";
 import { findBashBinary, findSystemBash } from "./bash-path";
+import { normalizeMsys2PathsInText } from "./path-utils";
 
 /** Shell 执行器函数签名 / Shell executor function signature */
 export type ShellExecutor = (input: ShellInput) => Promise<ShellResult>;
@@ -46,8 +47,8 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
       ok: exitCode === 0,
       command: input.command,
       exitCode,
-      stdout,
-      stderr: cleanMsys2Noise(rawStderr),
+      stdout: normalizeMsys2PathsInText(stdout),
+      stderr: cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
     };
   } catch (error) {
     // AbortError 表示用户主动取消，标记为非失败 / AbortError means user cancellation, mark as non-failure
