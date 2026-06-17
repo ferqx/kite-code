@@ -69,6 +69,11 @@ export interface BuildCodeAgentGraphInput {
   subagentEventSink?: import("@/core/subagent/types").SubAgentEventSink;
   /** 子 agent 中止信号 */
   subagentSignal?: AbortSignal;
+  /** 工具完成回调 — 每个工具执行完立即调用，不等 Promise.all 整体返回。
+   *  使 TUI 能在工具并行执行期间逐项展示完成状态，而非等全部结束后一起刷新。
+   *  Per-tool completion callback — called as each tool finishes during
+   *  Promise.all, so the TUI shows progressive completion. */
+  toolResultSink?: (callId: string, toolName: string, ok: boolean, summary: string, totalLines?: number, toolTokenCount?: number) => void;
 }
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
@@ -369,6 +374,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       skillOptions: input.skillOptions,
       signal: input.subagentSignal,
     });
+
+    // 逐个推送完成事件，TUI 在并行执行期间逐项刷新 / Push completion
+    // event per-tool so TUI refreshes progressively during parallel execution.
+    input.toolResultSink?.(
+      request.id ?? "",
+      request.name,
+      result.ok !== false,
+      (result.stdout || result.stderr || "").slice(0, 200),
+      result.totalLines,
+      undefined, // toolTokenCount computed in runner's parseToolResultEvents
+    );
+
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
       tool_call_id: request.id ?? "missing-tool-call-id",
@@ -436,48 +453,27 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     return {};
   };
 
-  /** 工具节点：执行所有待处理的工具调用 / Tools node — execute all pending tool calls */
+  /** 工具节点：并行执行所有待处理的工具调用。
+   *  Tools node — execute all pending tool calls in parallel.
+   *  Each tool completion fires toolResultSink immediately so the TUI
+   *  shows progressive completion without waiting for the full batch. */
   const tools = async (state: CodeAgentState) => {
-    // 获取所有待处理的工具请求（支持并行派发多个子 agent 等场景）
-    // Get all pending tool requests (supports parallel dispatch of multiple sub-agents etc.)
     const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
-
-    // 如果有审批过的请求，替换匹配的那个
-    // If there's an approved request, replace the matching one
-    const requests = allRequests;
     const batch = state.approvedBatch ?? {};
 
-    if (requests.length === 0) {
+    if (allRequests.length === 0) {
       return { approvedBatch: {} };
     }
 
-    // task 工具并行执行，其他工具也并行执行
-    // Execute task tools in parallel, other tools also in parallel
-    const taskRequests = requests.filter((r) => r.name === "task");
-    const otherRequests = requests.filter((r) => r.name !== "task");
+    // 所有工具（含 task/子 agent）放入同一个 Promise.all，真正并行执行。
+    // All tools (including task sub-agents) in a single Promise.all.
+    const results = await Promise.all(
+      allRequests.map((req) => {
+        const reqGrant = (req.id && batch[req.id]) ? batch[req.id] : "none";
+        return executeOneTool(req, state, reqGrant);
+      }),
+    );
 
-    const results: Array<{ toolMessage: ToolMessage; extra: Record<string, unknown> }> = [];
-
-    // 并行执行所有 task 工具（sub-agent 自行管理授权）
-    if (taskRequests.length > 0) {
-      const taskResults = await Promise.all(
-        taskRequests.map((r) => executeOneTool(r, state, "none")),
-      );
-      results.push(...taskResults);
-    }
-
-    // 并行执行其他工具，每个工具使用其在 approvedBatch 中的授权
-    if (otherRequests.length > 0) {
-      const otherResults = await Promise.all(
-        otherRequests.map((req) => {
-          const reqGrant = (req.id && batch[req.id]) ? batch[req.id] : "none";
-          return executeOneTool(req, state, reqGrant);
-        }),
-      );
-      results.push(...otherResults);
-    }
-
-    // 合并所有 ToolMessage 和 extra 状态
     const messages: ToolMessage[] = results.map((r) => r.toolMessage);
     const mergedExtra: Record<string, unknown> = {};
     for (const r of results) {

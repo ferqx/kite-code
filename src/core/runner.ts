@@ -56,6 +56,8 @@ export interface RunAgentInput {
   skillOptions?: import("@/core/skills/types").SkillScanOptions;
   /** 可选 MCP 管理器，提供 MCP 工具和资源 / Optional MCP manager, provides MCP tools and resources */
   mcpManager?: import("@/core/mcp").McpManager;
+  /** 工具完成回调 / Per-tool completion callback for progressive TUI display */
+  toolResultSink?: (callId: string, toolName: string, ok: boolean, summary: string, totalLines?: number, toolTokenCount?: number) => void;
 }
 
 export interface StreamCodeAgentInput {
@@ -149,6 +151,13 @@ export async function* runAgent(
     }
   };
 
+  const toolResultSink = input.toolResultSink ?? ((callId, toolName, ok, summary, totalLines) => {
+    provider.onEvent({
+      type: "tool_done",
+      data: { call_id: callId, name: toolName, ok, summary, ...(totalLines != null ? { totalLines } : {}) },
+    });
+  });
+
   const { graph, checkpointer } = buildCodeAgentGraph({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -161,6 +170,7 @@ export async function* runAgent(
     mcpManager: input.mcpManager,
     subagentEventSink,
     subagentSignal: input.signal,
+    toolResultSink,
   });
 
   const signal = input.signal;
