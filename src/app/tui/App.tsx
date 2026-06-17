@@ -277,7 +277,7 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
       {slashSuggestion && (() => {
         const listHeight = Math.max(3, slashMaxHeight - 2);
         return (
-        <Box flexDirection="column" borderStyle="round" borderColor={theme.primary} paddingX={1} marginTop={1} flexGrow={1} maxHeight={slashMaxHeight}>
+        <Box flexDirection="column" borderStyle="round" borderColor={theme.primary} paddingX={1} marginTop={1}>
           <Text bold color={theme.primary}>
             {slashSuggestion.kind === "model"
               ? `模型匹配 "${slashSuggestion.partial}"`
@@ -287,7 +287,7 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
               ? `主题匹配 "${slashSuggestion.partial}"`
               : `命令匹配 /${slashSuggestion.partial}`}
           </Text>
-          <Box flexGrow={1} maxHeight={listHeight}>
+          <Box height={Math.min(slashSuggestion.items.length, listHeight)}>
             <ScrollList selectedIndex={slashSuggestion.selectedIndex} scrollAlignment="auto">
               {slashSuggestion.items.map((item, i) => {
                 const isSelected = i === slashSuggestion.selectedIndex;
