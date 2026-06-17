@@ -6,7 +6,7 @@ import BlockRenderer from "./components/BlockRenderer";
 
 export { changePrefix } from "./components/BlockRenderer";
 export { toolColor } from "./components/render-utils";
-export { useStaticContent } from "./render/useStaticContent";
+export { useStaticContent, blockFingerprint } from "./render/useStaticContent";
 export type { StaticContentResult } from "./render/useStaticContent";
 
 interface OutputAreaProps {
