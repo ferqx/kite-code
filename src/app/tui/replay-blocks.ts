@@ -246,17 +246,18 @@ function parseTaskResult(content: string): {
   try {
     const p = JSON.parse(content);
     if (p && typeof p === "object") {
+      const steps = Array.isArray(p.steps) ? (p.steps as SubAgentStepRecord[]) : [];
       return {
         ok: p.ok !== false,
-        summary: (p.summary as string) ?? "",
+        summary: (p.summary as string) ?? (p.error as string) ?? "",
         toolCallCount: typeof p.toolCallCount === "number" ? p.toolCallCount : 0,
         durationMs: typeof p.durationMs === "number" ? p.durationMs : 0,
-        ...(p.error ? { error: p.error as string } : {}),
-        steps: Array.isArray(p.steps) ? (p.steps as SubAgentStepRecord[]) : [],
+        ...(p.ok === false ? { error: (p.error as string) || (p.summary as string) || "Aborted" } : {}),
+        steps,
       };
     }
   } catch { /* fall through */ }
-  return { ok: false, summary: content.slice(0, 200), toolCallCount: 0, durationMs: 0, steps: [] };
+  return { ok: false, summary: content.slice(0, 200), toolCallCount: 0, durationMs: 0, steps: [], error: content.slice(0, 200) };
 }
 
 /** 判断是否为 ToolMessage 类消息 / Check if message is ToolMessage-like */

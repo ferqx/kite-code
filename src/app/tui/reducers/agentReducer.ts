@@ -2,7 +2,41 @@
 
 import type { Action } from "./actions";
 import type { TuiState, OutputBlock } from "../types";
-import { appendBlock, findBlockById, replaceBlockById, finalizeLastTurnStreaming } from "./helpers";
+import { appendBlock, findBlockById, replaceBlockById, finalizeLastTurnStreaming, lastTurn } from "./helpers";
+
+/** 将最后 turn 中所有 running 状态的 subagent/tool_card 标记为 cancelled。
+ *  Esc 取消后 running→false，所有 block 移入 Static 冻结。必须在 render
+ *  之前同步收尾，否则 spinner 状态被写入 scrollback 后永远不可恢复。
+ *  Mark all running subagent/tool_card blocks in the last turn as cancelled
+ *  before running flips to false, so they don't get frozen into Static. */
+function cancelRunningBlocks(s: TuiState): TuiState {
+  const last = lastTurn(s);
+  if (!last) return s;
+  const now = Date.now();
+  let changed = false;
+  const blocks = last.blocks.map((b) => {
+    if (b.kind === "subagent" && b.status === "running") {
+      changed = true;
+      return {
+        ...b,
+        status: "error" as const,
+        summary: "Cancelled",
+        toolCallCount: b.steps.length,
+        durationMs: s.runStartTime ? now - s.runStartTime : 0,
+        expanded: false,
+      };
+    }
+    if (b.kind === "tool_card" && b.status === "running") {
+      changed = true;
+      return { ...b, status: "error" as const, summary: "Cancelled" };
+    }
+    return b;
+  });
+  if (!changed) return s;
+  const turns = s.turns.slice();
+  turns[turns.length - 1] = { blocks };
+  return { ...s, turns };
+}
 
 /** Shared helper: cancel a running interrupt during Ctrl+C or Escape */
 function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
@@ -25,7 +59,8 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case "SET_RUNNING":
       return { ...state, running: true, exited: false, interrupt: null, toolStartTimes: undefined, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false, status: { ...state.status, currentNode: null, plan: null, retryState: null } };
     case "SET_IDLE": {
-      return { ...finalizeLastTurnStreaming(state), running: false, exited: false, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined, status: { ...state.status, currentNode: null, plan: null, retryState: null } };
+      const s = cancelRunningBlocks(state);
+      return { ...finalizeLastTurnStreaming(s), running: false, exited: false, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined, status: { ...s.status, currentNode: null, plan: null, retryState: null } };
     }
     case "SET_EXITED": {
       const s = finalizeLastTurnStreaming(state);
@@ -106,7 +141,8 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       }
       // 非审批（思考/回复中）→ 停止本轮会话 / Agent running → stop this session
       if (state.running) {
-        return { ...finalizeLastTurnStreaming(state), running: false, exited: false };
+        const s = cancelRunningBlocks(state);
+        return { ...finalizeLastTurnStreaming(s), running: false, exited: false };
       }
       return state;
     }

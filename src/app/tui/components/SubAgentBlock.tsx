@@ -4,6 +4,8 @@ import type { OutputBlock } from "../types";
 import type { SubAgentRole } from "@/protocol/events";
 import { useTheme } from "../theme";
 import { formatReadFileRange } from "./render-utils";
+import { SPINNER } from "./render-utils";
+import { toolColor } from "./render-utils";
 
 function roleLabel(role: SubAgentRole): string {
   switch (role) {
@@ -91,18 +93,22 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const label = roleLabel(block.role);
   const taskSummary = taskLabel(block.task);
 
-  // Live elapsed time for running state
+  // Live elapsed time + spinner for running state
   const [liveElapsed, setLiveElapsed] = useState(0);
+  const [spinnerIdx, setSpinnerIdx] = useState(0);
   const startRef = useRef(Date.now());
   useEffect(() => {
     if (block.status !== "running") return;
     startRef.current = Date.now();
     setLiveElapsed(0);
-    const timer = setInterval(() => setLiveElapsed(Date.now() - startRef.current), 200);
-    return () => clearInterval(timer);
+    setSpinnerIdx(0);
+    const elapsedTimer = setInterval(() => setLiveElapsed(Date.now() - startRef.current), 200);
+    const spinnerTimer = setInterval(() => setSpinnerIdx((i) => (i + 1) % SPINNER.length), 80);
+    return () => { clearInterval(elapsedTimer); clearInterval(spinnerTimer); };
   }, [block.status, block.subagentId]);
 
   if (block.status === "running") {
+    const spinner = SPINNER[spinnerIdx];
     const stepCount = block.steps.length;
     const visibleSteps = stepCount > MAX_RUNNING_STEPS
       ? block.steps.slice(-MAX_RUNNING_STEPS)
@@ -112,6 +118,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     return (
       <Box flexDirection="column">
         <Box>
+          <Text color={dt.warning}>{spinner} </Text>
           <Text color={dt.primary}>{label}</Text>
           <Text color={dt.muted}> · {taskSummary}</Text>
           {stepCount > 0 && (
@@ -142,64 +149,55 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     );
   }
 
-  if (block.status === "error") {
+  // ── Settled (done or error): same layout as running, with final summary ──
+  const settled = block.status === "done" || block.status === "error";
+  if (settled) {
+    const stepCount = block.steps.length;
+    const visibleSteps = stepCount > MAX_RUNNING_STEPS
+      ? block.steps.slice(-MAX_RUNNING_STEPS)
+      : block.steps;
+    const skipped = stepCount - MAX_RUNNING_STEPS;
+    const cacheTotal = (block.cacheHitTokens ?? 0) + (block.cacheMissTokens ?? 0);
+    const cacheHitRate = cacheTotal > 0 ? ((block.cacheHitTokens ?? 0) / cacheTotal * 100).toFixed(0) + "%" : null;
+    const isError = block.status === "error";
+
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={dt.error}>✗ </Text>
+          <Text color={toolColor(block.status, dt)}>⏺ </Text>
           <Text color={dt.primary}>{label}</Text>
           <Text color={dt.muted}> · {taskSummary}</Text>
+          <Text color={dt.dim}> — {block.toolCallCount} 次工具调用，{formatDuration(block.durationMs)}{cacheHitRate ? `，cache: ${cacheHitRate}` : ""}</Text>
         </Box>
-        <Box paddingLeft={3}>
-          <Text color={dt.error}>{block.error ?? "Unknown error"}</Text>
-        </Box>
+        {skipped > 0 && (
+          <Box paddingLeft={3}>
+            <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
+          </Box>
+        )}
+        {visibleSteps.map((step, i) => (
+          <Box key={i} paddingLeft={3}>
+            <Text color={dt.dim}>├─ {step.toolName}</Text>
+            {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
+              const label = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
+              return label ? <Text color={dt.muted}> {label}</Text> : null;
+            })()}
+            {step.ok !== undefined && (
+              <Text color={step.ok ? dt.success : dt.error}>
+                {" "}{step.ok ? "✓" : "✗"}
+              </Text>
+            )}
+          </Box>
+        ))}
+        {(stepCount > 0 || isError) && (
+          <Box paddingLeft={3}>
+            <Text color={isError ? dt.error : dt.muted}>
+              └─ {isError ? (block.summary || block.error || "Error") : "done!"}
+            </Text>
+          </Box>
+        )}
       </Box>
     );
   }
 
-  // done — same visual style as running (truncated steps + fold indicator), plus done! at the end
-  const doneStepCount = block.steps.length;
-  const doneVisibleSteps = doneStepCount > MAX_RUNNING_STEPS
-    ? block.steps.slice(-MAX_RUNNING_STEPS)
-    : block.steps;
-  const doneSkipped = doneStepCount - MAX_RUNNING_STEPS;
-  const cacheTotal = (block.cacheHitTokens ?? 0) + (block.cacheMissTokens ?? 0);
-  const cacheHitRate = cacheTotal > 0 ? ((block.cacheHitTokens ?? 0) / cacheTotal * 100).toFixed(0) + "%" : null;
-
-  return (
-    <Box flexDirection="column">
-      <Box>
-        <Text color={dt.muted}>✓ </Text>
-        <Text color={dt.primary}>{label}</Text>
-        <Text color={dt.muted}> · {taskSummary}</Text>
-        <Text color={dt.dim}> — {block.toolCallCount} 次工具调用，{formatDuration(block.durationMs)}{cacheHitRate ? `，cache: ${cacheHitRate}` : ""}</Text>
-      </Box>
-      {doneSkipped > 0 && (
-        <Box paddingLeft={3}>
-          <Text color={dt.dim}>... 以上 {doneSkipped} 步已折叠</Text>
-        </Box>
-      )}
-      {doneStepCount > 0 && (
-        <Box paddingLeft={3} flexDirection="column">
-          {doneVisibleSteps.map((step, i) => (
-            <Box key={i}>
-              <Text color={dt.dim}>├─ {step.toolName}</Text>
-              {step.toolArgs && Object.keys(step.toolArgs).length > 0 && (() => {
-                const label = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
-                return label ? <Text color={dt.muted}> {label}</Text> : null;
-              })()}
-              {step.ok !== undefined && (
-                <Text color={step.ok ? dt.success : dt.error}>
-                  {" "}{step.ok ? "✓" : "✗"}
-                </Text>
-              )}
-            </Box>
-          ))}
-          <Box>
-            <Text color={dt.muted}>└─ done!</Text>
-          </Box>
-        </Box>
-      )}
-    </Box>
-  );
+  // ── Running ──
 }

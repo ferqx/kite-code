@@ -206,6 +206,9 @@ export interface SubAgentDonePayload {
 export interface SubAgentErrorPayload {
   id: string;
   error: string;
+  summary?: string;
+  toolCallCount?: number;
+  durationMs?: number;
 }
 
 export interface SubAgentCacheMetricsPayload {
