@@ -2,14 +2,15 @@
  * 从 TUI 状态构建 runAgent / revertToCheckpoint / forkFromCheckpoint 参数。
  * 抽离出 index.tsx，使其可被单元测试覆盖，防止参数遗漏回归。
  */
-import type { ShellExecutor } from "@/core/tools/shell";
-import type { AgentConfig } from "@/core/config/index";
-import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
-import type { McpManager } from "@/core/mcp";
-import type { RunAgentInput, RevertInput, ForkInput } from "@/core/runner";
-import type { AuthorizationOverride } from "@/core/types";
-import type { SupportedChatModel } from "@/core/model/factory";
-import { defaultCheckpointPath } from "@/core/config/paths";
+
+import type { AgentConfig } from '@/core/config/index';
+import { defaultCheckpointPath } from '@/core/config/paths';
+import type { McpManager } from '@/core/mcp';
+import type { SupportedChatModel } from '@/core/model/factory';
+import type { ForkInput, RevertInput, RunAgentInput } from '@/core/runner';
+import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import type { ShellExecutor } from '@/core/tools/shell';
+import type { AuthorizationOverride } from '@/core/types';
 
 export interface BaseTuiParams {
   threadId: string;
@@ -61,7 +62,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): RunAgentInput {
   return {
     ...baseParams(p),
     task: fullTask,
-    userId: "tui-user",
+    userId: 'tui-user',
     threadId: p.threadId,
     skills: p.skills,
     skillOptions: p.skillOptions ?? undefined,

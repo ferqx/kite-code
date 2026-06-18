@@ -1,4 +1,4 @@
-import type { MockResponse } from "../mock-model";
+import type { MockResponse } from '../mock-model';
 
 export interface ResponseGroup {
   group: string;
@@ -35,7 +35,7 @@ export class ResponsePlan {
       }
       throw new Error(
         `Response plan mismatch: consumed ${callCount}, planned ${total}.\n` +
-          `Consumed: ${consumed.join(", ") || "none"}`,
+          `Consumed: ${consumed.join(', ') || 'none'}`,
       );
     }
   }
@@ -48,7 +48,7 @@ export function text(content: string, delay = 50): MockResponse {
 
 /** Shorthand: model error response */
 export function modelError(message: string, delay = 50): MockResponse {
-  return { message: { content: "" } as any, error: message, delay };
+  return { message: { content: '' } as any, error: message, delay };
 }
 
 /** Shorthand: tool call response */
@@ -56,7 +56,7 @@ let _toolSeq = 0;
 export function toolCall(
   name: string,
   args: Record<string, unknown>,
-  content = "let me check",
+  content = 'let me check',
   delay = 30,
 ): MockResponse {
   const id = `tc-${name}-${++_toolSeq}`;

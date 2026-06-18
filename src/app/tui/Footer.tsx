@@ -1,8 +1,8 @@
-import React, { type ReactNode } from "react";
-import { Box } from "ink";
-import StatusBar from "./StatusBar";
-import StatsLine from "./StatsLine";
-import type { StatusState } from "./types";
+import { Box } from 'ink';
+import type { ReactNode } from 'react';
+import StatsLine from './StatsLine';
+import StatusBar from './StatusBar';
+import type { StatusState } from './types';
 
 interface FooterProps {
   status: StatusState;
@@ -11,16 +11,10 @@ interface FooterProps {
   children?: ReactNode;
 }
 
-export default function Footer({
-  status, running, timerKey, children,
-}: FooterProps) {
+export default function Footer({ status, running, timerKey, children }: FooterProps) {
   return (
     <Box flexDirection="column">
-      <StatusBar
-        status={status}
-        running={running}
-        timerKey={timerKey}
-      />
+      <StatusBar status={status} running={running} timerKey={timerKey} />
       {children}
       <StatsLine
         status={status}

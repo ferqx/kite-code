@@ -1,7 +1,10 @@
-import { BaseChatModel, type BaseChatModelParams } from "@langchain/core/language_models/chat_models";
-import { AIMessage, type BaseMessage } from "@langchain/core/messages";
-import type { BaseLanguageModelCallOptions } from "@langchain/core/language_models/base";
-import type { ChatResult } from "@langchain/core/outputs";
+import type { BaseLanguageModelCallOptions } from '@langchain/core/language_models/base';
+import {
+  BaseChatModel,
+  type BaseChatModelParams,
+} from '@langchain/core/language_models/chat_models';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import type { ChatResult } from '@langchain/core/outputs';
 
 export interface MockResponse {
   message?: BaseMessage;
@@ -14,7 +17,7 @@ export interface MockResponse {
  * 仅覆盖 _generate，在每次调用时注入行为。
  */
 export class StreamingMockModel extends BaseChatModel {
-  lc_namespace = ["test", "mock"];
+  override lc_namespace = ['test', 'mock'];
   private _responses: MockResponse[];
   private _callCount: { count: number };
 
@@ -32,12 +35,14 @@ export class StreamingMockModel extends BaseChatModel {
     return this._callCount.count;
   }
 
-  _llmType(): string {
-    return "streaming-mock";
+  override _llmType(): string {
+    return 'streaming-mock';
   }
 
-  bindTools(tools: any[]): this {
-    const Cls = this.constructor as new (params: { responses: MockResponse[] } & BaseChatModelParams) => StreamingMockModel;
+  override bindTools(tools: any[]): this {
+    const Cls = this.constructor as new (
+      params: { responses: MockResponse[] } & BaseChatModelParams,
+    ) => StreamingMockModel;
     // Share the counter across clones so multi-turn tests work.
     // bindTools is called per-agent-run, creating new instances, but the
     // original model is reused across turns via the model prop injection.
@@ -60,7 +65,7 @@ export class StreamingMockModel extends BaseChatModel {
 
     if (!response?.message) {
       return {
-        generations: [{ message: new AIMessage({ content: "", additional_kwargs: {} }), text: "" }],
+        generations: [{ message: new AIMessage({ content: '', additional_kwargs: {} }), text: '' }],
       };
     }
 
@@ -74,7 +79,15 @@ export class StreamingMockModel extends BaseChatModel {
 
     const msg = response.message;
     return {
-      generations: [{ message: msg, text: typeof (msg as AIMessage).content === "string" ? (msg as AIMessage).content as string : "" }],
+      generations: [
+        {
+          message: msg,
+          text:
+            typeof (msg as AIMessage).content === 'string'
+              ? ((msg as AIMessage).content as string)
+              : '',
+        },
+      ],
     };
   }
 }

@@ -1,24 +1,20 @@
-import { tool } from "@langchain/core/tools";
-import { z } from "zod";
-import { shellTool, type ShellExecutor } from "./shell";
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
+import { adaptMcpTool } from '@/core/mcp/tool-adapter';
+import type { SupportedChatModel } from '@/core/model/factory';
+import { createSkillTool } from '@/core/skills/skill-tool';
+import { createTaskTool } from '@/core/subagent/task-tool';
+import { editFile, readFile, writeFile } from './file';
+import { type ShellExecutor, shellTool } from './shell';
 import {
-  readFile,
-  editFile,
-  writeFile,
-} from "./file";
-import {
-  READ_FILE_CONTRACT,
-  EDIT_FILE_CONTRACT,
-  WRITE_FILE_CONTRACT,
-  SHELL_EXECUTE_CONTRACT,
-  READ_MCP_RESOURCE_CONTRACT,
-  UPDATE_PLAN_CONTRACT,
   ASK_USER_CONTRACT,
-} from "./tool-contracts";
-import { adaptMcpTool } from "@/core/mcp/tool-adapter";
-import { createSkillTool } from "@/core/skills/skill-tool";
-import { createTaskTool } from "@/core/subagent/task-tool";
-import type { SupportedChatModel } from "@/core/model/factory";
+  EDIT_FILE_CONTRACT,
+  READ_FILE_CONTRACT,
+  READ_MCP_RESOURCE_CONTRACT,
+  SHELL_EXECUTE_CONTRACT,
+  UPDATE_PLAN_CONTRACT,
+  WRITE_FILE_CONTRACT,
+} from './tool-contracts';
 
 /** 创建 Agent 工具集输入 / Input for creating agent tools */
 export interface CreateAgentToolsInput {
@@ -27,15 +23,15 @@ export interface CreateAgentToolsInput {
   /** 可选 Shell 执行器 / Optional shell executor */
   shellExecutor?: ShellExecutor;
   /** 可选 MCP 管理器 / Optional MCP manager */
-  mcpManager?: import("@/core/mcp/manager").McpManager;
+  mcpManager?: import('@/core/mcp/manager').McpManager;
   /** 可选技能清单 / Optional skill manifests */
-  skills?: import("@/core/skills/types").SkillManifest[];
+  skills?: import('@/core/skills/types').SkillManifest[];
   /** 可选技能扫描选项 / Optional skill scan options */
-  skillOptions?: import("@/core/skills/types").SkillScanOptions;
+  skillOptions?: import('@/core/skills/types').SkillScanOptions;
   /** Agent 配置（task 工具创建模型实例时需要） */
-  config?: import("@/core/config/index").AgentConfig;
+  config?: import('@/core/config/index').AgentConfig;
   /** 子 agent 事件回调（用于 task 工具） */
-  subagentEventSink?: import("@/core/subagent/types").SubAgentEventSink;
+  subagentEventSink?: import('@/core/subagent/types').SubAgentEventSink;
   /** 外部中止信号（用于 task 工具） */
   subagentSignal?: AbortSignal;
   /** 中止信号，传递给 shell 执行器以 kill 子进程 / Abort signal passed to shell executor to kill child processes */
@@ -60,21 +56,19 @@ export function createAgentTools(input: CreateAgentToolsInput) {
   // 缓存：同一个 agent 迭代中参数不变时避免重建全部工具（包括 MCP 适配）
   // Include subagentEventSink presence and MCP tool count to invalidate on tool list changes
   const mcpToolCount = input.mcpManager?.getAllTools().length ?? 0;
-  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpToolCount}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ""}`;
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpToolCount}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
   const readFileTool = tool(
     async ({ path, offset, limit }) =>
-      JSON.stringify(
-        readFile({ workspace: input.workspace, path, offset, limit }),
-      ),
+      JSON.stringify(readFile({ workspace: input.workspace, path, offset, limit })),
     {
-      name: "read_file",
+      name: 'read_file',
       description: READ_FILE_CONTRACT.description,
       schema: z.object({
-        path: z.string().describe("Path to the file (relative to workspace, or absolute)"),
-        offset: z.number().optional().describe("Starting line number (1-indexed, default 1)"),
-        limit: z.number().optional().describe("Maximum number of lines to read"),
+        path: z.string().describe('Path to the file (relative to workspace, or absolute)'),
+        offset: z.number().optional().describe('Starting line number (1-indexed, default 1)'),
+        limit: z.number().optional().describe('Maximum number of lines to read'),
       }),
     },
   );
@@ -91,30 +85,45 @@ export function createAgentTools(input: CreateAgentToolsInput) {
         }),
       ),
     {
-      name: "edit_file",
+      name: 'edit_file',
       description: EDIT_FILE_CONTRACT.description,
       schema: z.object({
-        path: z.string().describe("Path to the file to edit (relative to workspace, or absolute)"),
-        old_string: z.string().describe("The exact text to replace. Must match the file content exactly, including whitespace."),
-        new_string: z.string().describe("The new text to replace old_string with"),
-        replace_all: z.boolean().optional().describe("Replace all occurrences (default: false, fails if multiple matches found)"),
-        match_mode: z.enum(["exact", "trimmed"]).optional().describe("Match mode: exact (default) for verbatim matching, trimmed for per-line whitespace trimming"),
+        path: z.string().describe('Path to the file to edit (relative to workspace, or absolute)'),
+        old_string: z
+          .string()
+          .describe(
+            'The exact text to replace. Must match the file content exactly, including whitespace.',
+          ),
+        new_string: z.string().describe('The new text to replace old_string with'),
+        replace_all: z
+          .boolean()
+          .optional()
+          .describe('Replace all occurrences (default: false, fails if multiple matches found)'),
+        match_mode: z
+          .enum(['exact', 'trimmed'])
+          .optional()
+          .describe(
+            'Match mode: exact (default) for verbatim matching, trimmed for per-line whitespace trimming',
+          ),
       }),
     },
   );
 
   const writeFileTool = tool(
     async ({ path, content, mode }) =>
-      JSON.stringify(
-        writeFile({ workspace: input.workspace, path, content, mode }),
-      ),
+      JSON.stringify(writeFile({ workspace: input.workspace, path, content, mode })),
     {
-      name: "write_file",
+      name: 'write_file',
       description: WRITE_FILE_CONTRACT.description,
       schema: z.object({
-        path: z.string().describe("Path to the file (relative to workspace, or absolute)"),
-        content: z.string().describe("Complete file content to write"),
-        mode: z.enum(["overwrite", "append"]).optional().describe("Write mode: overwrite (default) replaces entire file, append adds content at end"),
+        path: z.string().describe('Path to the file (relative to workspace, or absolute)'),
+        content: z.string().describe('Complete file content to write'),
+        mode: z
+          .enum(['overwrite', 'append'])
+          .optional()
+          .describe(
+            'Write mode: overwrite (default) replaces entire file, append adds content at end',
+          ),
       }),
     },
   );
@@ -129,23 +138,28 @@ export function createAgentTools(input: CreateAgentToolsInput) {
         }),
       ),
     {
-      name: "shell_execute",
+      name: 'shell_execute',
       description: SHELL_EXECUTE_CONTRACT.description,
       schema: z.object({
-        command: z.string().describe("Shell command to execute in the workspace"),
-        description: z.string().optional().describe("Short human-readable description of what this command does (shown to the user)"),
-        intent: z
-          .enum(["inspect", "verify", "build", "test", "git", "other"])
+        command: z.string().describe('Shell command to execute in the workspace'),
+        description: z
+          .string()
           .optional()
-          .describe("Command intent"),
+          .describe(
+            'Short human-readable description of what this command does (shown to the user)',
+          ),
+        intent: z
+          .enum(['inspect', 'verify', 'build', 'test', 'git', 'other'])
+          .optional()
+          .describe('Command intent'),
         prefix_rule: z
           .array(z.string())
           .optional()
-          .describe("Suggested future prefix grant rule for audit only"),
+          .describe('Suggested future prefix grant rule for audit only'),
         grant_request: z
-          .enum(["approve_once", "same_command", "full_access"])
+          .enum(['approve_once', 'same_command', 'full_access'])
           .optional()
-          .describe("Suggested approval grant; the user resume payload decides the actual grant"),
+          .describe('Suggested approval grant; the user resume payload decides the actual grant'),
       }),
     },
   );
@@ -155,7 +169,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       if (!input.mcpManager) {
         return JSON.stringify({
           ok: false,
-          stderr: "No MCP manager available. Configure mcpServers in openpx.jsonc.",
+          stderr: 'No MCP manager available. Configure mcpServers in openpx.jsonc.',
         });
       }
       try {
@@ -169,11 +183,11 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       }
     },
     {
-      name: "read_mcp_resource",
+      name: 'read_mcp_resource',
       description: READ_MCP_RESOURCE_CONTRACT.description,
       schema: z.object({
-        server: z.string().describe("MCP server name"),
-        uri: z.string().describe("Resource URI to read (e.g. file:///docs/api.md)"),
+        server: z.string().describe('MCP server name'),
+        uri: z.string().describe('Resource URI to read (e.g. file:///docs/api.md)'),
       }),
     },
   );
@@ -183,20 +197,21 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     skillTool = createSkillTool(input.skills, input.skillOptions);
   }
 
-  const taskTool = input.subagentEventSink && input.config
-    ? createTaskTool({
-        config: input.config,
-        model: input.model,
-        workspace: input.workspace,
-        shellExecutor: input.shellExecutor,
-        mcpManager: input.mcpManager,
-        skills: input.skills,
-        skillOptions: input.skillOptions,
-        eventSink: input.subagentEventSink,
-        signal: input.subagentSignal,
-        maxDepth: input.maxDepth,
-      })
-    : null;
+  const taskTool =
+    input.subagentEventSink && input.config
+      ? createTaskTool({
+          config: input.config,
+          model: input.model,
+          workspace: input.workspace,
+          shellExecutor: input.shellExecutor,
+          mcpManager: input.mcpManager,
+          skills: input.skills,
+          skillOptions: input.skillOptions,
+          eventSink: input.subagentEventSink,
+          signal: input.subagentSignal,
+          maxDepth: input.maxDepth,
+        })
+      : null;
 
   const builtinTools = [
     readFileTool,
@@ -249,24 +264,24 @@ function createUpdatePlanTool() {
         },
       }),
     {
-      name: "update_plan",
+      name: 'update_plan',
       description: UPDATE_PLAN_CONTRACT.description,
       schema: z.object({
-        name: z.string().describe("Short plan name"),
-        description: z.string().describe("Short plan description"),
+        name: z.string().describe('Short plan name'),
+        description: z.string().describe('Short plan description'),
         status: z
-          .enum(["pending", "in_progress", "completed"])
-          .describe("Current status for the plan"),
+          .enum(['pending', 'in_progress', 'completed'])
+          .describe('Current status for the plan'),
         steps: z
           .array(
             z.object({
-              step: z.string().describe("Plan step"),
+              step: z.string().describe('Plan step'),
               status: z
-                .enum(["pending", "in_progress", "completed"])
-                .describe("Current status for this step"),
+                .enum(['pending', 'in_progress', 'completed'])
+                .describe('Current status for this step'),
             }),
           )
-          .describe("Ordered plan steps"),
+          .describe('Ordered plan steps'),
       }),
     },
   );
@@ -282,40 +297,34 @@ function createAskUserTool() {
         options,
         allow_free_text: allow_free_text ?? true,
         context,
-        stderr: "ask_user is handled by the harness as a user_input interrupt.",
+        stderr: 'ask_user is handled by the harness as a user_input interrupt.',
       }),
     {
-      name: "ask_user",
+      name: 'ask_user',
       description: ASK_USER_CONTRACT.description,
       schema: z.object({
-        question: z
-          .string()
-          .min(1)
-          .describe("One concise question for the user to answer"),
+        question: z.string().min(1).describe('One concise question for the user to answer'),
         options: z
           .array(
             z.object({
-              id: z
-                .string()
-                .optional()
-                .describe("Stable option id, e.g. 'minimal' or 'full'"),
-              label: z.string().min(1).describe("User-facing option label"),
+              id: z.string().optional().describe("Stable option id, e.g. 'minimal' or 'full'"),
+              label: z.string().min(1).describe('User-facing option label'),
               description: z
                 .string()
                 .optional()
-                .describe("Short explanation of the trade-off for this option"),
+                .describe('Short explanation of the trade-off for this option'),
             }),
           )
           .min(1)
-          .describe("Suggested answer options for the user"),
+          .describe('Suggested answer options for the user'),
         allow_free_text: z
           .boolean()
           .optional()
-          .describe("Whether the user may type a custom answer; default true"),
+          .describe('Whether the user may type a custom answer; default true'),
         context: z
           .string()
           .optional()
-          .describe("Short context explaining why this clarification is needed"),
+          .describe('Short context explaining why this clarification is needed'),
       }),
     },
   );
@@ -323,34 +332,34 @@ function createAskUserTool() {
 
 /** shell_execute inspect 允许直通的只读命令白名单 / Read-only command allowlist for shell_execute inspect */
 const PLAN_READ_ONLY_COMMANDS = new Set([
-  "awk",
-  "cat",
-  "du",
-  "echo",
-  "file",
-  "find",
-  "grep",
-  "head",
-  "ls",
-  "nl",
-  "pwd",
-  "rg",
-  "sed",
-  "stat",
-  "tail",
-  "test",
-  "wc",
+  'awk',
+  'cat',
+  'du',
+  'echo',
+  'file',
+  'find',
+  'grep',
+  'head',
+  'ls',
+  'nl',
+  'pwd',
+  'rg',
+  'sed',
+  'stat',
+  'tail',
+  'test',
+  'wc',
 ]);
 
 /** shell_execute inspect 允许直通的 Git 只读子命令白名单 / Read-only git subcommand allowlist for shell_execute inspect */
 const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
-  "branch",
-  "diff",
-  "grep",
-  "log",
-  "ls-files",
-  "show",
-  "status",
+  'branch',
+  'diff',
+  'grep',
+  'log',
+  'ls-files',
+  'show',
+  'status',
 ]);
 
 /** 检查命令是否可作为 shell_execute inspect 直通 / Check if command can bypass approval as shell_execute inspect */
@@ -371,8 +380,8 @@ export function isReadOnlyShellCommand(command: string): boolean {
   // 拒绝裸 & 命令分隔符（cmd.exe: cmd1 & cmd2, bash: cmd1 & cmd2）
   // 允许 &&（逻辑与，已按分隔符拆段）、>&N / N>&M（stderr 重定向）
   // Reject bare & command separator; allow && and >&N stderr redirect
-  const stripped = trimmed.replace(/&&/g, "").replace(/\d?>&\d?/g, "");
-  if (stripped.includes("&")) {
+  const stripped = trimmed.replace(/&&/g, '').replace(/\d?>&\d?/g, '');
+  if (stripped.includes('&')) {
     return false;
   }
 
@@ -396,18 +405,18 @@ function isPlanReadOnlySegment(segment: string): boolean {
   // 将命令段解析为 token 数组，支持引号 / Parse segment into token array, supporting quotes
   const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
   // 第一个 token 为命令名，去除引号后转小写 / First token is the command name, strip quotes and lower-case
-  const command = stripQuotes(tokens[0] ?? "").toLowerCase();
+  const command = stripQuotes(tokens[0] ?? '').toLowerCase();
   if (!command) {
     return false;
   }
 
   // git 命令需额外检查子命令白名单 / Git command requires additional subcommand allowlist check
-  if (command === "git") {
-    return PLAN_READ_ONLY_GIT_SUBCOMMANDS.has(stripQuotes(tokens[1] ?? "").toLowerCase());
+  if (command === 'git') {
+    return PLAN_READ_ONLY_GIT_SUBCOMMANDS.has(stripQuotes(tokens[1] ?? '').toLowerCase());
   }
 
   // sed 命令禁止 -i 原地编辑标志 / sed command forbids -i in-place edit flag
-  if (command === "sed") {
+  if (command === 'sed') {
     return (
       PLAN_READ_ONLY_COMMANDS.has(command) &&
       !tokens.some((token) => /^-.*i/.test(stripQuotes(token)))
@@ -415,15 +424,15 @@ function isPlanReadOnlySegment(segment: string): boolean {
   }
 
   // find 命令禁止 -exec、-execdir、-delete 等危险选项 / find command forbids dangerous options: -exec, -execdir, -delete
-  if (command === "find") {
+  if (command === 'find') {
     return (
       PLAN_READ_ONLY_COMMANDS.has(command) &&
-      !tokens.some((token) => ["-exec", "-execdir", "-delete"].includes(stripQuotes(token)))
+      !tokens.some((token) => ['-exec', '-execdir', '-delete'].includes(stripQuotes(token)))
     );
   }
 
   // awk 命令禁止 system() 调用 / awk command forbids system() call
-  if (command === "awk") {
+  if (command === 'awk') {
     return PLAN_READ_ONLY_COMMANDS.has(command) && !/\bsystem\s*\(/.test(segment);
   }
 
@@ -432,5 +441,5 @@ function isPlanReadOnlySegment(segment: string): boolean {
 
 /** 去除字符串首尾引号 / Strip surrounding quotes from string */
 function stripQuotes(value: string): string {
-  return value.replace(/^["']|["']$/g, "");
+  return value.replace(/^["']|["']$/g, '');
 }

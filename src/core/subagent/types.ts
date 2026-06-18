@@ -1,5 +1,12 @@
 // src/core/subagent/types.ts
-import type { SubAgentRole, SubAgentStartPayload, SubAgentStepPayload, SubAgentToolResultPayload, SubAgentDonePayload, SubAgentErrorPayload } from "@/protocol/events";
+import type {
+  SubAgentDonePayload,
+  SubAgentErrorPayload,
+  SubAgentRole,
+  SubAgentStartPayload,
+  SubAgentStepPayload,
+  SubAgentToolResultPayload,
+} from '@/protocol/events';
 
 export type { SubAgentRole };
 
@@ -11,22 +18,22 @@ export interface SubAgentRoleConfig {
   /** 允许使用的工具名称集合（undefined 表示全部可用） */
   allowedTools?: Set<string>;
   /** 可选独立模型（不指定则使用主 agent 模型）/ Optional model override for this role */
-  model?: import("@/core/model/factory").SupportedChatModel;
+  model?: import('@/core/model/factory').SupportedChatModel;
   /** 可选超时毫秒（不指定则使用 SubAgentRunnerInput.timeoutMs）/ Optional timeout in milliseconds */
   timeoutMs?: number;
 }
 
 /** 子 agent 运行输入 / Sub-agent runner input */
 export interface SubAgentRunnerInput {
-  config: import("@/core/config/index").AgentConfig;
+  config: import('@/core/config/index').AgentConfig;
   workspace: string;
   role: SubAgentRoleConfig;
   task: string;
-  shellExecutor?: import("@/core/tools/shell").ShellExecutor;
-  mcpManager?: import("@/core/mcp").McpManager;
-  skills?: import("@/core/skills/types").SkillManifest[];
-  skillOptions?: import("@/core/skills/types").SkillScanOptions;
-  model?: import("@/core/model/factory").SupportedChatModel;
+  shellExecutor?: import('@/core/tools/shell').ShellExecutor;
+  mcpManager?: import('@/core/mcp').McpManager;
+  skills?: import('@/core/skills/types').SkillManifest[];
+  skillOptions?: import('@/core/skills/types').SkillScanOptions;
+  model?: import('@/core/model/factory').SupportedChatModel;
   timeoutMs: number;
   signal: AbortSignal;
   eventSink: SubAgentEventSink;
@@ -64,11 +71,12 @@ export interface SubAgentCacheMetrics {
 }
 
 /** 事件回调：子 agent 运行时向外推送生命周期事件 */
-export type SubAgentEventSink = (event:
-  | { type: "start"; data: SubAgentStartPayload }
-  | { type: "step"; data: SubAgentStepPayload }
-  | { type: "tool_result"; data: SubAgentToolResultPayload }
-  | { type: "done"; data: SubAgentDonePayload }
-  | { type: "error"; data: SubAgentErrorPayload }
-  | { type: "cache_metrics"; data: SubAgentCacheMetrics }
+export type SubAgentEventSink = (
+  event:
+    | { type: 'start'; data: SubAgentStartPayload }
+    | { type: 'step'; data: SubAgentStepPayload }
+    | { type: 'tool_result'; data: SubAgentToolResultPayload }
+    | { type: 'done'; data: SubAgentDonePayload }
+    | { type: 'error'; data: SubAgentErrorPayload }
+    | { type: 'cache_metrics'; data: SubAgentCacheMetrics },
 ) => void;

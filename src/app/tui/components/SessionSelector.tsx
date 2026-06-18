@@ -1,10 +1,9 @@
-import React, { useState, useRef, useEffect } from "react";
-import { Box, Text, useStdout } from "ink";
-import { useInput } from "ink";
-import { ScrollList } from "ink-scroll-list";
-import { useSessionList } from "../hooks/useSessionList.js";
-import { useTheme } from "@/app/tui/theme";
-import { useOverlayHeight } from "../hooks/useOverlayHeight";
+import { Box, Text, useInput, useStdout } from 'ink';
+import { ScrollList } from 'ink-scroll-list';
+import React, { useEffect, useRef, useState } from 'react';
+import { useTheme } from '@/app/tui/theme';
+import { useOverlayHeight } from '../hooks/useOverlayHeight';
+import { useSessionList } from '../hooks/useSessionList.js';
 
 interface SessionSelectorProps {
   onSelect: (sessionId: string) => void;
@@ -17,13 +16,20 @@ interface SessionSelectorProps {
   activeSessionId?: string | null;
 }
 
-export default function SessionSelector({ onSelect, onClose, onDelete, initialQuery, loadingSessionId, activeSessionId }: SessionSelectorProps) {
+export default function SessionSelector({
+  onSelect,
+  onClose,
+  onDelete,
+  initialQuery,
+  loadingSessionId,
+  activeSessionId,
+}: SessionSelectorProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const { sessions, loading, error, refresh, search } = useSessionList();
   const [selected, setSelected] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [searchInput, setSearchInput] = useState(initialQuery ?? "");
+  const [searchInput, setSearchInput] = useState(initialQuery ?? '');
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const deleteConfirmRef = useRef(deleteConfirm);
@@ -50,78 +56,114 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
   }, [searchInput, search]);
 
   // Re-fetch on mount
-  React.useEffect(() => { refresh(); }, [refresh]);
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   // Apply initial query
   useEffect(() => {
     if (initialQuery) setSearchInput(initialQuery);
   }, [initialQuery]);
 
-  useInput((input, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean; backspace?: boolean; ctrl?: boolean; meta?: boolean }) => {
-    const s = sessionsRef.current;
-    // Delete confirmation mode
-    if (deleteConfirmRef.current) {
-      if (key.escape) {
-        setDeleteConfirm(false);
-        return;
-      }
-      if (key.return && s.length > 0) {
-        const session = s[selectedRef.current];
-        if (session) {
-          onDeleteRef.current?.(session.threadId);
-          onCloseRef.current();
+  useInput(
+    (
+      input,
+      key: {
+        upArrow?: boolean;
+        downArrow?: boolean;
+        return?: boolean;
+        escape?: boolean;
+        backspace?: boolean;
+        ctrl?: boolean;
+        meta?: boolean;
+      },
+    ) => {
+      const s = sessionsRef.current;
+      // Delete confirmation mode
+      if (deleteConfirmRef.current) {
+        if (key.escape) {
+          setDeleteConfirm(false);
+          return;
+        }
+        if (key.return && s.length > 0) {
+          const session = s[selectedRef.current];
+          if (session) {
+            onDeleteRef.current?.(session.threadId);
+            onCloseRef.current();
+          }
+          return;
         }
         return;
       }
-      return;
-    }
 
-    if (key.escape) {
-      if (searchInputRef.current.length > 0) {
-        setSearchInput("");
+      if (key.escape) {
+        if (searchInputRef.current.length > 0) {
+          setSearchInput('');
+          return;
+        }
+        onCloseRef.current();
         return;
       }
-      onCloseRef.current();
-      return;
-    }
 
-    if (key.return && s.length > 0) {
-      const session = s[selectedRef.current];
-      if (session && session.threadId !== activeSessionRef.current) {
-        onSelectRef.current(session.threadId);
+      if (key.return && s.length > 0) {
+        const session = s[selectedRef.current];
+        if (session && session.threadId !== activeSessionRef.current) {
+          onSelectRef.current(session.threadId);
+        }
+        return;
       }
-      return;
-    }
 
-    if (key.upArrow) { setSelected((p) => Math.max(0, p - 1)); return; }
-    if (key.downArrow) { setSelected((p) => Math.min(s.length - 1, p + 1)); return; }
+      if (key.upArrow) {
+        setSelected((p) => Math.max(0, p - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setSelected((p) => Math.min(s.length - 1, p + 1));
+        return;
+      }
 
-    // Backspace removes last character from search
-    if (key.backspace || input === '\x7f') {
-      setSearchInput(prev => prev.slice(0, -1));
-      return;
-    }
+      // Backspace removes last character from search
+      if (key.backspace || input === '\x7f') {
+        setSearchInput((prev) => prev.slice(0, -1));
+        return;
+      }
 
-    // D to delete (only when search is empty)
-    if ((input === "d" || input === "D") && searchInputRef.current.length === 0 && s.length > 0 && onDeleteRef.current) {
-      setDeleteConfirm(true);
-      return;
-    }
+      // D to delete (only when search is empty)
+      if (
+        (input === 'd' || input === 'D') &&
+        searchInputRef.current.length === 0 &&
+        s.length > 0 &&
+        onDeleteRef.current
+      ) {
+        setDeleteConfirm(true);
+        return;
+      }
 
-    // Regular character input goes to search
-    if (input && !key.ctrl && !key.meta && input.length === 1) {
-      setSearchInput(prev => prev + input);
-    }
-  });
+      // Regular character input goes to search
+      if (input && !key.ctrl && !key.meta && input.length === 1) {
+        setSearchInput((prev) => prev + input);
+      }
+    },
+  );
 
   // Reset selection when search results change
-  useEffect(() => { setSelected(0); }, [sessions.length]);
+  useEffect(() => {
+    setSelected(0);
+  }, []);
 
   const selectedSession = sessions[selected];
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
-      <Text bold color={t.primary}>会话列表</Text>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={t.primary}
+      paddingX={1}
+      marginY={1}
+    >
+      <Text bold color={t.primary}>
+        会话列表
+      </Text>
       <Box marginTop={1}>
         <Text color={t.muted}>搜索: </Text>
         <Text color={t.primary}>{searchInput}</Text>
@@ -130,7 +172,7 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
       {deleteConfirm && selectedSession && (
         <Box marginTop={1} flexDirection="column">
           <Text color={activeSessionId === selectedSession.threadId ? t.error : t.warning}>
-            删除 "{selectedSession.name}"? Enter 确认  Esc 取消
+            删除 "{selectedSession.name}"? Enter 确认 Esc 取消
           </Text>
           {activeSessionId === selectedSession.threadId && (
             <Text color={t.warning}>注意：这是当前活跃会话，删除后将自动创建新会话</Text>
@@ -141,29 +183,33 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
         {loading && <Text color={t.muted}>Loading...</Text>}
         {error && <Text color={t.error}>Error: {error}</Text>}
         {!loading && !error && sessions.length === 0 && (
-          <Text color={t.muted}>{isSearching ? "未找到匹配的会话" : "暂无历史会话"}</Text>
+          <Text color={t.muted}>{isSearching ? '未找到匹配的会话' : '暂无历史会话'}</Text>
         )}
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
           {sessions.map((session, i) => {
             const isLoading = loadingSessionId === session.threadId;
             const isActive = activeSessionId === session.threadId;
-            const cursor = isLoading ? "⏳" : i === selected ? ">" : " ";
-            const marker = isActive ? "● " : "";
-            const suffix = isLoading ? "  Loading..." : `  ${session.updatedAt}`;
+            const cursor = isLoading ? '⏳' : i === selected ? '>' : ' ';
+            const marker = isActive ? '● ' : '';
+            const suffix = isLoading ? '  Loading...' : `  ${session.updatedAt}`;
             // 预留：border(2) + paddingX(2) = 4，Safe margin = 2
             const cols = stdout?.columns ?? 80;
             const maxWidth = cols - 6;
             const prefix = `${cursor} ${marker}`;
-            const rawName = session.name.replace(/\n/g, " ");
+            const rawName = session.name.replace(/\n/g, ' ');
             const available = maxWidth - prefix.length - suffix.length - 1;
-            const displayName = available > 4
-              ? (rawName.length > available ? rawName.slice(0, available - 1) + "…" : rawName)
-              : rawName.slice(0, Math.max(4, maxWidth - prefix.length - 4)) + "…";
+            const displayName =
+              available > 4
+                ? rawName.length > available
+                  ? `${rawName.slice(0, available - 1)}…`
+                  : rawName
+                : `${rawName.slice(0, Math.max(4, maxWidth - prefix.length - 4))}…`;
             const lineColor = isLoading ? t.warning : i === selected ? t.primary : t.muted;
             return (
               <Box key={session.threadId} width={maxWidth} flexShrink={0} flexGrow={0}>
                 <Text color={lineColor}>
-                  {prefix}{displayName}
+                  {prefix}
+                  {displayName}
                   <Text color={isLoading ? t.warning : t.dim}>{suffix}</Text>
                 </Text>
               </Box>
@@ -172,7 +218,11 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
         </ScrollList>
       </Box>
       <Box height={1} />
-      <Text color={t.dim}>{onDelete ? "输入搜索  上/下 导航  Enter 选择  D 删除  Esc 关闭" : "输入搜索  上/下 导航  Enter 选择  Esc 关闭"}</Text>
+      <Text color={t.dim}>
+        {onDelete
+          ? '输入搜索  上/下 导航  Enter 选择  D 删除  Esc 关闭'
+          : '输入搜索  上/下 导航  Enter 选择  Esc 关闭'}
+      </Text>
     </Box>
   );
 }

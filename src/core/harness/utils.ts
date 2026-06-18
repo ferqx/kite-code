@@ -1,14 +1,14 @@
 /** 稳定序列化（key 排序）确保相同结构对象生成一致字符串 / Stable stringify for consistent hashing */
 export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
+    return `[${value.map(stableStringify).join(',')}]`;
   }
-  if (value && typeof value === "object") {
+  if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     return `{${Object.keys(record)
       .sort()
       .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-      .join(",")}}`;
+      .join(',')}}`;
   }
   return JSON.stringify(value);
 }

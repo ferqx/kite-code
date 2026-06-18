@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { resolve } from "node:path";
-import { parse } from "jsonc-parser";
-import { z } from "zod";
-import { defaultConfigPath, projectConfigPath } from "./paths";
-import type { McpServerConfig } from "../mcp/types";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { parse } from 'jsonc-parser';
+import { z } from 'zod';
+import type { McpServerConfig } from '../mcp/types';
+import { defaultConfigPath, projectConfigPath } from './paths';
 
 // ── Zod schemas ──
 
@@ -13,7 +13,7 @@ const providerModelEntrySchema = z.object({
 });
 
 const providerSchema = z.object({
-  type: z.enum(["deepseek", "openai", "openai-compatible", "ollama"]).optional(),
+  type: z.enum(['deepseek', 'openai', 'openai-compatible', 'ollama']).optional(),
   apiKey: z.string().min(1).optional(),
   baseURL: z.string().url().optional(),
   models: z.array(providerModelEntrySchema).optional(),
@@ -27,13 +27,13 @@ const legacyModelEntrySchema = z.object({
 });
 
 const mcpServerSchema = z.object({
-  type: z.enum(["stdio", "http"]).optional(),
+  type: z.enum(['stdio', 'http']).optional(),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   url: z.string().optional(),
   env: z.record(z.string(), z.string()).optional(),
   headers: z.record(z.string(), z.string()).optional(),
-  risk: z.enum(["read"]).optional(),
+  risk: z.enum(['read']).optional(),
   timeout: z.number().optional(),
 });
 
@@ -41,7 +41,7 @@ export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
   /** @deprecated Use provider[name].models instead */
   models: z.array(legacyModelEntrySchema).optional(),
-  theme: z.enum(["dark", "light"]).optional(),
+  theme: z.enum(['dark', 'light']).optional(),
   colorPreset: z.string().optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });
@@ -50,7 +50,7 @@ export type OpenpxConfig = z.infer<typeof configSchema>;
 
 // ── Types ──
 
-export type ModelProviderType = "deepseek" | "openai" | "openai-compatible" | "ollama";
+export type ModelProviderType = 'deepseek' | 'openai' | 'openai-compatible' | 'ollama';
 
 /** Agent 配置 / Agent configuration */
 export interface AgentConfig {
@@ -78,13 +78,19 @@ export interface LoadAgentConfigOptions {
   modelName?: string;
 }
 
-export { defaultConfigPath, projectConfigPath, defaultCheckpointPath, editorInputPath, sessionExportPath } from "./paths";
+export {
+  defaultCheckpointPath,
+  defaultConfigPath,
+  editorInputPath,
+  projectConfigPath,
+  sessionExportPath,
+} from './paths';
 
 // ── Defaults (DeepSeek) ──
 
 const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
-  { provider: "deepseek", name: "deepseek-v4-flash", isDefault: true },
-  { provider: "deepseek", name: "deepseek-v4-pro", isDefault: false },
+  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
+  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false },
 ];
 
 // ── Config file loading ──
@@ -92,7 +98,7 @@ const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
 /** Read and parse a single config file. Returns null if not found. */
 function readConfigFile(path: string): OpenpxConfig | null {
   if (!existsSync(path)) return null;
-  const raw = readFileSync(path, "utf8");
+  const raw = readFileSync(path, 'utf8');
   return configSchema.parse(parse(raw));
 }
 
@@ -134,15 +140,12 @@ function defaultOpenpxConfig(): OpenpxConfig {
   return {
     provider: {
       deepseek: {
-        type: "deepseek",
-        baseURL: "https://api.deepseek.com/v1",
-        models: [
-          { name: "deepseek-v4-flash", default: true },
-          { name: "deepseek-v4-pro" },
-        ],
+        type: 'deepseek',
+        baseURL: 'https://api.deepseek.com/v1',
+        models: [{ name: 'deepseek-v4-flash', default: true }, { name: 'deepseek-v4-pro' }],
       },
     },
-    theme: "dark",
+    theme: 'dark',
     mcpServers: {},
   };
 }
@@ -156,7 +159,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
 
   const defaultModel = findDefaultModel(cfg);
 
-  const providerName = options.providerName ?? defaultModel?.provider ?? "deepseek";
+  const providerName = options.providerName ?? defaultModel?.provider ?? 'deepseek';
   const provider = cfg.provider?.[providerName] ?? builtInProvider(providerName);
 
   if (!provider) {
@@ -168,23 +171,22 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
   return {
     apiKey: resolveProviderApiKey(providerName, providerType, provider.apiKey),
     baseURL: resolveProviderBaseURL(providerName, providerType, provider.baseURL),
-    modelName: options.modelName ?? defaultModel?.name ?? "deepseek-v4-flash",
+    modelName: options.modelName ?? defaultModel?.name ?? 'deepseek-v4-flash',
     providerName,
     providerType,
   };
 }
 
 function inferProviderType(providerName: string): ModelProviderType {
-  if (providerName === "deepseek") return "deepseek";
-  if (providerName === "ollama") return "ollama";
-  return "openai-compatible";
+  if (providerName === 'deepseek') return 'deepseek';
+  if (providerName === 'ollama') return 'ollama';
+  return 'openai-compatible';
 }
 
-function builtInProvider(
-  providerName: string,
-): z.infer<typeof providerSchema> | null {
-  if (providerName === "ollama") return { type: "ollama" };
-  if (providerName === "deepseek") return { type: "deepseek", baseURL: "https://api.deepseek.com/v1" };
+function builtInProvider(providerName: string): z.infer<typeof providerSchema> | null {
+  if (providerName === 'ollama') return { type: 'ollama' };
+  if (providerName === 'deepseek')
+    return { type: 'deepseek', baseURL: 'https://api.deepseek.com/v1' };
   return null;
 }
 
@@ -203,7 +205,7 @@ function findDefaultModel(cfg: OpenpxConfig): { provider: string; name: string }
   // Fallback: first model of first provider
   for (const [provName, prov] of Object.entries(cfg.provider)) {
     if (prov.models && prov.models.length > 0) {
-      return { provider: provName, name: prov.models[0].name };
+      return { provider: provName, name: prov.models[0]!.name };
     }
   }
   return null;
@@ -215,11 +217,13 @@ function resolveProviderApiKey(
   apiKey: string | undefined,
 ): string {
   if (apiKey) return apiKey;
-  if (providerType === "ollama") return "";
+  if (providerType === 'ollama') return '';
   // Try env var: PROVIDERNAME_API_KEY
   const envKey = process.env[`${providerName.toUpperCase()}_API_KEY`];
   if (envKey) return envKey;
-  throw new Error(`Model provider '${providerName}' requires apiKey (set ${providerName.toUpperCase()}_API_KEY)`);
+  throw new Error(
+    `Model provider '${providerName}' requires apiKey (set ${providerName.toUpperCase()}_API_KEY)`,
+  );
 }
 
 function resolveProviderBaseURL(
@@ -228,8 +232,8 @@ function resolveProviderBaseURL(
   baseURL: string | undefined,
 ): string {
   if (baseURL) return baseURL;
-  if (providerType === "ollama") return "http://localhost:11434";
-  if (providerType === "deepseek") return "https://api.deepseek.com/v1";
+  if (providerType === 'ollama') return 'http://localhost:11434';
+  if (providerType === 'deepseek') return 'https://api.deepseek.com/v1';
   // Try env var: PROVIDERNAME_BASE_URL
   const envURL = process.env[`${providerName.toUpperCase()}_BASE_URL`];
   if (envURL) return envURL;
@@ -260,24 +264,16 @@ export function loadMcpConfig(configPath?: string): McpConfig {
   }
 
   // 2. .mcp.json
-  const projectMcpPath = resolve(process.cwd(), ".mcp.json");
+  const projectMcpPath = resolve(process.cwd(), '.mcp.json');
   if (existsSync(projectMcpPath)) {
-    const raw = readFileSync(projectMcpPath, "utf8");
+    const raw = readFileSync(projectMcpPath, 'utf8');
     const parsed = parse(raw);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "mcpServers" in (parsed as object)
-    ) {
+    if (parsed && typeof parsed === 'object' && 'mcpServers' in (parsed as object)) {
       const mcpServers = (parsed as Record<string, unknown>).mcpServers;
-      if (mcpServers && typeof mcpServers === "object") {
-        for (const [name, cfgEntry] of Object.entries(
-          mcpServers as Record<string, unknown>,
-        )) {
-          if (!servers[name] && cfgEntry && typeof cfgEntry === "object") {
-            servers[name] = normalizeMcpServerConfig(
-              cfgEntry as Record<string, unknown>,
-            );
+      if (mcpServers && typeof mcpServers === 'object') {
+        for (const [name, cfgEntry] of Object.entries(mcpServers as Record<string, unknown>)) {
+          if (!servers[name] && cfgEntry && typeof cfgEntry === 'object') {
+            servers[name] = normalizeMcpServerConfig(cfgEntry as Record<string, unknown>);
           }
         }
       }
@@ -288,51 +284,42 @@ export function loadMcpConfig(configPath?: string): McpConfig {
 }
 
 /** Normalize a raw MCP server config object */
-function normalizeMcpServerConfig(
-  raw: Record<string, unknown>,
-): McpServerConfig {
-  const type: McpServerConfig["type"] =
-    raw.type === "http" ? "http" : "stdio";
+function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServerConfig {
+  const type: McpServerConfig['type'] = raw.type === 'http' ? 'http' : 'stdio';
 
   const config: McpServerConfig = { type };
 
-  if (typeof raw.command === "string") {
+  if (typeof raw.command === 'string') {
     config.command = expandEnvVars(raw.command);
   }
   if (Array.isArray(raw.args)) {
-    config.args = raw.args
-      .filter((a): a is string => typeof a === "string")
-      .map(expandEnvVars);
+    config.args = raw.args.filter((a): a is string => typeof a === 'string').map(expandEnvVars);
   }
-  if (raw.url && typeof raw.url === "string") {
+  if (raw.url && typeof raw.url === 'string') {
     config.url = expandEnvVars(raw.url);
   }
-  if (raw.env && typeof raw.env === "object") {
+  if (raw.env && typeof raw.env === 'object') {
     const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(
-      raw.env as Record<string, unknown>,
-    )) {
-      if (typeof v === "string") {
+    for (const [k, v] of Object.entries(raw.env as Record<string, unknown>)) {
+      if (typeof v === 'string') {
         env[k] = expandEnvVars(v);
       }
     }
     config.env = env;
   }
-  if (raw.headers && typeof raw.headers === "object") {
+  if (raw.headers && typeof raw.headers === 'object') {
     const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(
-      raw.headers as Record<string, unknown>,
-    )) {
-      if (typeof v === "string") {
+    for (const [k, v] of Object.entries(raw.headers as Record<string, unknown>)) {
+      if (typeof v === 'string') {
         headers[k] = expandEnvVars(v);
       }
     }
     config.headers = headers;
   }
-  if (raw.risk === "read") {
-    config.risk = "read";
+  if (raw.risk === 'read') {
+    config.risk = 'read';
   }
-  if (typeof raw.timeout === "number" && raw.timeout > 0) {
+  if (typeof raw.timeout === 'number' && raw.timeout > 0) {
     config.timeout = raw.timeout;
   }
 
@@ -392,18 +379,18 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
 
 // ── Theme ──
 
-export type ThemeName = "dark" | "light";
+export type ThemeName = 'dark' | 'light';
 
 /** Read theme from config. Falls back to "dark". */
 export function loadTheme(workspace?: string): ThemeName {
   const cfg = loadConfig(workspace);
-  return cfg?.theme ?? "dark";
+  return cfg?.theme ?? 'dark';
 }
 
 /** Read color preset from config. Falls back to "blue". */
 export function loadColorPreset(workspace?: string): string {
   const cfg = loadConfig(workspace);
-  return cfg?.colorPreset ?? "blue";
+  return cfg?.colorPreset ?? 'blue';
 }
 
 /** Persist colorPreset to the user-level config file (creates file if missing). */
@@ -412,21 +399,21 @@ export function saveColorPreset(preset: string): void {
   try {
     let text: string;
     if (existsSync(path)) {
-      text = readFileSync(path, "utf-8");
+      text = readFileSync(path, 'utf-8');
     } else {
       // Create minimal config file
-      const dir = resolve(path, "..");
+      const dir = resolve(path, '..');
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       text = `{\n  "theme": "dark",\n  "colorPreset": "${preset}"\n}\n`;
-      writeFileSync(path, text, "utf-8");
+      writeFileSync(path, text, 'utf-8');
       return;
     }
 
     // Simple line-based edit: find existing "colorPreset" or add it
-    const lines = text.split("\n");
+    const lines = text.split('\n');
     const idx = lines.findIndex((l) => /"colorPreset"/.test(l));
     if (idx >= 0) {
-      lines[idx] = lines[idx].replace(/"colorPreset"\s*:\s*"[^"]*"/, `"colorPreset": "${preset}"`);
+      lines[idx] = lines[idx]!.replace(/"colorPreset"\s*:\s*"[^"]*"/, `"colorPreset": "${preset}"`);
     } else {
       // Insert before "mcpServers" or before last "}"
       const insertIdx = lines.findIndex((l) => /"mcpServers"/.test(l));
@@ -434,14 +421,14 @@ export function saveColorPreset(preset: string): void {
         lines.splice(insertIdx, 0, `  "colorPreset": "${preset}",`);
       } else {
         // Insert before closing }
-        const closeIdx = lines.lastIndexOf("}");
+        const closeIdx = lines.lastIndexOf('}');
         if (closeIdx >= 0) {
-          const indent = lines[closeIdx].match(/^(\s*)/)?.[1] ?? "";
+          const indent = lines[closeIdx]!.match(/^(\s*)/)?.[1] ?? '';
           lines.splice(closeIdx, 0, `${indent}"colorPreset": "${preset}"`);
         }
       }
     }
-    writeFileSync(path, lines.join("\n"), "utf-8");
+    writeFileSync(path, lines.join('\n'), 'utf-8');
   } catch {
     // Non-critical — silently ignore write failures
   }
@@ -458,13 +445,13 @@ export function expandEnvVars(value: string): string {
     /\$\{(\w+)(?::-([^}]*))?\}/g,
     (_match, varName: string, defaultValue: string | undefined) => {
       const envValue = process.env[varName];
-      if (envValue !== undefined && envValue !== "") {
+      if (envValue !== undefined && envValue !== '') {
         return envValue;
       }
       if (defaultValue !== undefined) {
         return defaultValue;
       }
-      return "";
+      return '';
     },
   );
 }

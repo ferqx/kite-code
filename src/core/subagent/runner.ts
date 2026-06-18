@@ -1,31 +1,32 @@
 // src/core/subagent/runner.ts
-import { HumanMessage, SystemMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
-import { ChatOllama } from "@langchain/ollama";
-import type { BaseMessage } from "@langchain/core/messages";
-import type { AgentConfig } from "@/core/config/index";
-import { createChatModel, type SupportedChatModel } from "@/core/model/factory";
-import { createAgentTools, isReadOnlyShellCommand } from "@/core/tools/definitions";
-import type { ShellExecutor } from "@/core/tools/shell";
-import type { McpManager } from "@/core/mcp";
-import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
-import { extractPromptCacheMetrics } from "@/core/cache-metrics";
-import { buildCacheableRuntimeContext } from "@/core/model/runtime-context";
-import { buildStaticSystemPrompt } from "@/core/model/context";
-import { countTokens } from "@/core/token-counter";
-import type { SubAgentRoleConfig, SubAgentRunnerInput, SubAgentResult, SubAgentEventSink, SubAgentStepSnapshot } from "./types";
 
-export type { SubAgentRunnerInput } from "./types";
+import type { BaseMessage } from '@langchain/core/messages';
+import { type AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import { ChatOllama } from '@langchain/ollama';
+import { extractPromptCacheMetrics } from '@/core/cache-metrics';
+import { buildStaticSystemPrompt } from '@/core/model/context';
+import { createChatModel } from '@/core/model/factory';
+import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
+import { countTokens } from '@/core/token-counter';
+import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
+import type { ShellExecutor } from '@/core/tools/shell';
+import type { SubAgentResult, SubAgentRunnerInput, SubAgentStepSnapshot } from './types';
+
+export type { SubAgentRunnerInput } from './types';
 
 /** 提取 AIMessage.content 中的纯文本 / Extract plain text from AIMessage.content */
 function extractText(content: unknown): string {
-  if (typeof content === "string") return content;
+  if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content
-      .map((b: unknown) => (b && typeof b === "object" && "text" in (b as Record<string, unknown>))
-        ? String((b as Record<string, unknown>).text) : "")
-      .join("");
+      .map((b: unknown) =>
+        b && typeof b === 'object' && 'text' in (b as Record<string, unknown>)
+          ? String((b as Record<string, unknown>).text)
+          : '',
+      )
+      .join('');
   }
-  return String(content ?? "");
+  return String(content ?? '');
 }
 
 /** 包装 shell executor：只允许只读命令 / Wrap shell executor to allow only read-only commands */
@@ -36,7 +37,7 @@ function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
         ok: false,
         command: shellInput.command,
         exitCode: -1,
-        stdout: "",
+        stdout: '',
         stderr: `Command rejected: "${shellInput.command}" is not a read-only command. This sub-agent has read-only access only.`,
       };
     }
@@ -45,9 +46,12 @@ function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
 }
 
 /** 绑定模型工具（区分 Ollama）/ Bind tools to model (handle Ollama separately) */
-function bindTools(model: ReturnType<typeof createChatModel>, tools: ReturnType<typeof createAgentTools>) {
+function bindTools(
+  model: ReturnType<typeof createChatModel>,
+  tools: ReturnType<typeof createAgentTools>,
+) {
   if (model instanceof ChatOllama) return model.bindTools(tools);
-  return model.bindTools(tools, { tool_choice: "auto" });
+  return model.bindTools(tools, { tool_choice: 'auto' });
 }
 
 /** 子 agent ID 生成器 */
@@ -67,15 +71,16 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
 
   // 发出 start 事件
   input.eventSink({
-    type: "start",
+    type: 'start',
     data: { id, role: input.role.role, task: input.task },
   });
 
   // 只读角色：包装 shell executor 限制为只读命令，防止绕过审批
   // Read-only roles: wrap shell executor to restrict to read-only commands
-  const effectiveShellExecutor = input.role.allowedTools && input.shellExecutor
-    ? wrapReadOnlyShell(input.shellExecutor)
-    : input.shellExecutor;
+  const effectiveShellExecutor =
+    input.role.allowedTools && input.shellExecutor
+      ? wrapReadOnlyShell(input.shellExecutor)
+      : input.shellExecutor;
 
   // 组合超时信号 + 外部 abort 信号，传播到模型调用和工具执行
   const timeoutController = new AbortController();
@@ -96,8 +101,10 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   const maxDepth = input.maxDepth ?? 0;
   const canSpawnSubAgents = depth < maxDepth;
   const tools = input.role.allowedTools
-    ? allTools.filter((t) => input.role.allowedTools!.has(t.name) && (canSpawnSubAgents || t.name !== "task"))
-    : allTools.filter((t) => canSpawnSubAgents || t.name !== "task");
+    ? allTools.filter(
+        (t) => input.role.allowedTools?.has(t.name) && (canSpawnSubAgents || t.name !== 'task'),
+      )
+    : allTools.filter((t) => canSpawnSubAgents || t.name !== 'task');
 
   // 构造缓存安全的运行时上下文（对齐主 agent 的布局，不含时间戳/CWD）
   // Build cache-safe runtime context (same layout as main agent, no timestamps/CWD)
@@ -115,8 +122,8 @@ ${input.task}`;
   //   Merged: sharedSystemPrompt + "\\n\\n" + role.systemPrompt + "\\n\\n" + cacheableRuntimeCtx
   //   Position 0: SystemMessage(merged)  — cache-stable prefix
   //   Position 1: HumanMessage(taskWithCwd) — unique per call
-  const sharedSystemPrompt = buildStaticSystemPrompt("agent", input.skills);
-  const mergedSystemPrompt = sharedSystemPrompt + "\n\n" + input.role.systemPrompt + "\n\n" + cacheableRuntimeCtx;
+  const sharedSystemPrompt = buildStaticSystemPrompt('agent', input.skills);
+  const mergedSystemPrompt = `${sharedSystemPrompt}\n\n${input.role.systemPrompt}\n\n${cacheableRuntimeCtx}`;
   const messages: BaseMessage[] = [
     new SystemMessage(mergedSystemPrompt),
     new HumanMessage(taskWithCwd),
@@ -128,16 +135,18 @@ ${input.task}`;
 
     while (true) {
       // Check abort before blocking on model invoke
-      if (combinedSignal.aborted) throw new Error("Sub-agent aborted");
-      const response = await bindTools(model, tools).invoke(messages, { signal: combinedSignal }) as AIMessage;
+      if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
+      const response = (await bindTools(model, tools).invoke(messages, {
+        signal: combinedSignal,
+      })) as AIMessage;
       // Check abort after model invoke returns (signal may have fired during the call)
-      if (combinedSignal.aborted) throw new Error("Sub-agent aborted");
+      if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
 
       // 提取子 agent 缓存指标并上报 / Extract sub-agent cache metrics and report
       const cacheMetrics = extractPromptCacheMetrics(response);
       if (cacheMetrics && (cacheMetrics.cacheHitTokens > 0 || cacheMetrics.cacheMissTokens > 0)) {
         input.eventSink({
-          type: "cache_metrics",
+          type: 'cache_metrics',
           data: {
             subagentId: id,
             cacheHitTokens: cacheMetrics.cacheHitTokens,
@@ -154,7 +163,7 @@ ${input.task}`;
         // 处理工具调用
         for (const tc of response.tool_calls) {
           // 每个工具调用前检查中止信号 / Check abort signal before each tool invocation
-          if (combinedSignal.aborted) throw new Error("Sub-agent aborted");
+          if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
           const tool = tools.find((t) => t.name === tc.name);
           if (!tool) continue;
 
@@ -165,7 +174,7 @@ ${input.task}`;
           };
           steps.push(stepSnapshot);
           input.eventSink({
-            type: "step",
+            type: 'step',
             data: {
               id,
               toolName: tc.name,
@@ -184,8 +193,10 @@ ${input.task}`;
             try {
               const parsed = JSON.parse(toolOutput);
               ok = parsed.ok !== false;
-              if (typeof parsed.totalLines === "number") totalLines = parsed.totalLines;
-            } catch { /* not JSON */ }
+              if (typeof parsed.totalLines === 'number') totalLines = parsed.totalLines;
+            } catch {
+              /* not JSON */
+            }
           } catch (e: any) {
             toolOutput = JSON.stringify({ ok: false, error: e?.message ?? String(e) });
             ok = false;
@@ -198,15 +209,23 @@ ${input.task}`;
           // 发出 tool_result 事件（含手动 token 统计）
           const toolTokenCount = countTokens(toolOutput);
           input.eventSink({
-            type: "tool_result",
-            data: { id, toolName: tc.name, ok, ...(totalLines != null ? { totalLines } : {}), ...(toolTokenCount > 0 ? { toolTokenCount } : {}) },
+            type: 'tool_result',
+            data: {
+              id,
+              toolName: tc.name,
+              ok,
+              ...(totalLines != null ? { totalLines } : {}),
+              ...(toolTokenCount > 0 ? { toolTokenCount } : {}),
+            },
           });
 
-          messages.push(new ToolMessage({
-            content: toolOutput,
-            tool_call_id: tc.id ?? "",
-            name: tc.name,
-          }));
+          messages.push(
+            new ToolMessage({
+              content: toolOutput,
+              tool_call_id: tc.id ?? '',
+              name: tc.name,
+            }),
+          );
         }
       } else {
         // 无工具调用 → 最终文本 = 摘要
@@ -216,7 +235,7 @@ ${input.task}`;
         const durationMs = Date.now() - startTime;
 
         input.eventSink({
-          type: "done",
+          type: 'done',
           data: { id, summary, toolCallCount, durationMs },
         });
 
@@ -226,9 +245,10 @@ ${input.task}`;
   } catch (e: any) {
     clearTimeout(timeoutId);
     const durationMs = Date.now() - startTime;
-    const summary = e instanceof Error && e.name === "AbortError" ? "Cancelled" : (e?.message ?? String(e));
+    const summary =
+      e instanceof Error && e.name === 'AbortError' ? 'Cancelled' : (e?.message ?? String(e));
     input.eventSink({
-      type: "error",
+      type: 'error',
       data: { id, error: summary, summary, toolCallCount, durationMs },
     });
     return { ok: false, summary, toolCallCount, durationMs, error: summary, steps };

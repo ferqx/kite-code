@@ -1,8 +1,14 @@
 // ── Agent 生命周期（运行/空闲/退出）、中断、授权、Ctrl+C/Esc ──
 
-import type { Action } from "./actions";
-import type { TuiState, OutputBlock } from "../types";
-import { appendBlock, findBlockById, replaceBlockById, finalizeLastTurnStreaming, lastTurn } from "./helpers";
+import type { OutputBlock, TuiState } from '../types';
+import type { Action } from './actions';
+import {
+  appendBlock,
+  finalizeLastTurnStreaming,
+  findBlockById,
+  lastTurn,
+  replaceBlockById,
+} from './helpers';
 
 /** 将最后 turn 中所有 running 状态的 subagent/tool_card 标记为 cancelled。
  *  Esc 取消后 running→false，所有 block 移入 Static 冻结。必须在 render
@@ -15,20 +21,20 @@ function cancelRunningBlocks(s: TuiState): TuiState {
   const now = Date.now();
   let changed = false;
   const blocks = last.blocks.map((b) => {
-    if (b.kind === "subagent" && b.status === "running") {
+    if (b.kind === 'subagent' && b.status === 'running') {
       changed = true;
       return {
         ...b,
-        status: "error" as const,
-        summary: "Cancelled",
+        status: 'error' as const,
+        summary: 'Cancelled',
         toolCallCount: b.steps.length,
         durationMs: s.runStartTime ? now - s.runStartTime : 0,
         expanded: false,
       };
     }
-    if (b.kind === "tool_card" && b.status === "running") {
+    if (b.kind === 'tool_card' && b.status === 'running') {
       changed = true;
-      return { ...b, status: "error" as const, summary: "Cancelled" };
+      return { ...b, status: 'error' as const, summary: 'Cancelled' };
     }
     return b;
   });
@@ -44,10 +50,10 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
   if (s.interrupt) {
     const b = findBlockById(next, s.interrupt.blockId);
     if (b) {
-      if (b.kind === "approval") {
-        next = replaceBlockById(next, b.id, { ...b, resolved: { action: "cancelled" } });
-      } else if (b.kind === "question") {
-        next = replaceBlockById(next, b.id, { ...b, resolved: "cancelled" });
+      if (b.kind === 'approval') {
+        next = replaceBlockById(next, b.id, { ...b, resolved: { action: 'cancelled' } });
+      } else if (b.kind === 'question') {
+        next = replaceBlockById(next, b.id, { ...b, resolved: 'cancelled' });
       }
     }
   }
@@ -56,40 +62,70 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
 
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
-    case "SET_RUNNING":
-      return { ...state, running: true, exited: false, interrupt: null, toolStartTimes: undefined, runCount: state.runCount + 1, runStartTime: Date.now(), currentRunReasonId: undefined, ctrlCPressed: false, exitRequested: false, sessionError: false, status: { ...state.status, currentNode: null, plan: null, retryState: null } };
-    case "SET_IDLE": {
+    case 'SET_RUNNING':
+      return {
+        ...state,
+        running: true,
+        exited: false,
+        interrupt: null,
+        toolStartTimes: undefined,
+        runCount: state.runCount + 1,
+        runStartTime: Date.now(),
+        currentRunReasonId: undefined,
+        ctrlCPressed: false,
+        exitRequested: false,
+        sessionError: false,
+        status: { ...state.status, currentNode: null, plan: null, retryState: null },
+      };
+    case 'SET_IDLE': {
       const s = cancelRunningBlocks(state);
-      return { ...finalizeLastTurnStreaming(s), running: false, exited: false, interrupt: null, toolStartTimes: undefined, currentRunReasonId: undefined, status: { ...s.status, currentNode: null, plan: null, retryState: null } };
+      return {
+        ...finalizeLastTurnStreaming(s),
+        running: false,
+        exited: false,
+        interrupt: null,
+        toolStartTimes: undefined,
+        currentRunReasonId: undefined,
+        status: { ...s.status, currentNode: null, plan: null, retryState: null },
+      };
     }
-    case "SET_EXITED": {
+    case 'SET_EXITED': {
       const s = finalizeLastTurnStreaming(state);
       const elapsedSec = s.runStartTime ? Math.round((Date.now() - s.runStartTime) / 1000) : 0;
-      const elapsedStr = elapsedSec >= 60
-        ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
-        : `${elapsedSec}s`;
+      const elapsedStr =
+        elapsedSec >= 60 ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s` : `${elapsedSec}s`;
       let changeCount = 0;
       for (const turn of s.turns) {
         for (const b of turn.blocks) {
-          if (b.kind === "file_change") changeCount += (b as Extract<OutputBlock, { kind: "file_change" }>).changes.length;
+          if (b.kind === 'file_change')
+            changeCount += (b as Extract<OutputBlock, { kind: 'file_change' }>).changes.length;
         }
       }
-      const summary = [elapsedStr, changeCount > 0 ? `${changeCount} files` : null].filter(Boolean).join(" · ");
-      const block: OutputBlock = { id: s.nextBlockId, kind: "text", content: `── ${summary} ──` };
+      const summary = [elapsedStr, changeCount > 0 ? `${changeCount} files` : null]
+        .filter(Boolean)
+        .join(' · ');
+      const block: OutputBlock = { id: s.nextBlockId, kind: 'text', content: `── ${summary} ──` };
       const appended = appendBlock(s, block);
-      return { ...appended, running: false, exited: true, interrupt: null, status: { ...appended.status, currentNode: null, plan: null } };
+      return {
+        ...appended,
+        running: false,
+        exited: true,
+        interrupt: null,
+        status: { ...appended.status, currentNode: null, plan: null },
+      };
     }
-    case "RESOLVE_INTERRUPT": {
+    case 'RESOLVE_INTERRUPT': {
       const b = findBlockById(state, action.blockId);
-      if (!b || (b.kind !== "approval" && b.kind !== "question")) {
+      if (!b || (b.kind !== 'approval' && b.kind !== 'question')) {
         return state;
       }
       let resolved: OutputBlock;
-      if (b.kind === "approval") {
-        const r = typeof action.resolution === "string" ? { action: action.resolution } : action.resolution;
+      if (b.kind === 'approval') {
+        const r =
+          typeof action.resolution === 'string' ? { action: action.resolution } : action.resolution;
         resolved = { ...b, resolved: r };
       } else {
-        if (typeof action.resolution !== "string") return state;
+        if (typeof action.resolution !== 'string') return state;
         resolved = { ...b, resolved: action.resolution };
       }
       // 重置工具启动时间戳，排除审批等待耗时 / Reset tool start timestamps to exclude approval wait time
@@ -98,43 +134,67 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       if (state.toolStartTimes) {
         for (const k of Object.keys(state.toolStartTimes)) nextTimes[k] = now;
       }
-      return { ...replaceBlockById(state, action.blockId, resolved), interrupt: null, toolStartTimes: nextTimes };
+      return {
+        ...replaceBlockById(state, action.blockId, resolved),
+        interrupt: null,
+        toolStartTimes: nextTimes,
+      };
     }
-    case "SWITCH_AUTH": {
-      const newMode = action.mode === "toggle"
-        ? (state.status.authorization === "full_access" ? "default" : "full_access")
-        : action.mode;
-      return { ...state, status: { ...state.status, authorization: newMode as "default" | "full_access" } };
+    case 'SWITCH_AUTH': {
+      const newMode =
+        action.mode === 'toggle'
+          ? state.status.authorization === 'full_access'
+            ? 'default'
+            : 'full_access'
+          : action.mode;
+      return {
+        ...state,
+        status: { ...state.status, authorization: newMode as 'default' | 'full_access' },
+      };
     }
-    case "EXPORT_SESSION":
+    case 'EXPORT_SESSION':
       return state;
-    case "EXPORT_SESSION_DONE": {
-      const block: OutputBlock = { id: state.nextBlockId, kind: "text", content: `✓ Session exported to ${action.filename}` };
+    case 'EXPORT_SESSION_DONE': {
+      const block: OutputBlock = {
+        id: state.nextBlockId,
+        kind: 'text',
+        content: `✓ Session exported to ${action.filename}`,
+      };
       return appendBlock(state, block);
     }
-    case "INJECT_MCP_PROMPT": {
-      const block: OutputBlock = { id: state.nextBlockId, kind: "user", content: `/mcp__${action.server}__${action.promptName}` };
+    case 'INJECT_MCP_PROMPT': {
+      const block: OutputBlock = {
+        id: state.nextBlockId,
+        kind: 'user',
+        content: `/mcp__${action.server}__${action.promptName}`,
+      };
       return appendBlock(state, block);
     }
-    case "SET_PHASE":
+    case 'SET_PHASE':
       return { ...state, status: { ...state.status, phase: action.phase } };
 
-    case "CTRL_C": {
+    case 'CTRL_C': {
       if (state.running) return cancelInterrupt(state, true);
       if (state.ctrlCPressed) return { ...state, exitRequested: true };
       return { ...state, ctrlCPressed: true };
     }
-    case "RESET_CTRL_C":
+    case 'RESET_CTRL_C':
       return state.ctrlCPressed ? { ...state, ctrlCPressed: false } : state;
-    case "ESCAPE": {
+    case 'ESCAPE': {
       // 审批/提问中 → 只取消中断，继续会话 / Interrupt active → cancel interrupt only
       if (state.interrupt) {
         const b = findBlockById(state, state.interrupt.blockId);
         if (b) {
-          if (b.kind === "approval") {
-            return { ...replaceBlockById(state, b.id, { ...b, resolved: { action: "cancelled" } }), interrupt: null };
-          } else if (b.kind === "question") {
-            return { ...replaceBlockById(state, b.id, { ...b, resolved: "cancelled" }), interrupt: null };
+          if (b.kind === 'approval') {
+            return {
+              ...replaceBlockById(state, b.id, { ...b, resolved: { action: 'cancelled' } }),
+              interrupt: null,
+            };
+          } else if (b.kind === 'question') {
+            return {
+              ...replaceBlockById(state, b.id, { ...b, resolved: 'cancelled' }),
+              interrupt: null,
+            };
           }
         }
         return { ...state, interrupt: null };

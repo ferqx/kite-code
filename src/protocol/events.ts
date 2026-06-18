@@ -1,39 +1,51 @@
 // ── 核心事件类型 / Core event types ──
 export type AgentEvent =
-  | { type: "step_begin"; data: { node: string } }
-  | { type: "step_end"; data: { node: string } }
-  | { type: "reason"; data: { text: string } }
-  | { type: "text"; data: { text: string } }
-  | { type: "tool_call"; data: ToolCallPayload }
-  | { type: "tool_done"; data: ToolResultPayload }
-  | { type: "need_approval"; data: ToolApprovalPayload }
-  | { type: "need_input"; data: UserInputPayload }
-  | { type: "state_change"; data: StateChangePayload }
-  | { type: "file_change"; data: { path: string; kind: "add" | "edit" | "delete"; linesAdded?: number; linesRemoved?: number; preview?: string } }
-  | { type: "cache_metrics"; data: CacheMetricsPayload }
-  | { type: "error"; data: { message: string; recoverable: boolean } }
+  | { type: 'step_begin'; data: { node: string } }
+  | { type: 'step_end'; data: { node: string } }
+  | { type: 'reason'; data: { text: string } }
+  | { type: 'text'; data: { text: string } }
+  | { type: 'tool_call'; data: ToolCallPayload }
+  | { type: 'tool_done'; data: ToolResultPayload }
+  | { type: 'need_approval'; data: ToolApprovalPayload }
+  | { type: 'need_input'; data: UserInputPayload }
+  | { type: 'state_change'; data: StateChangePayload }
+  | {
+      type: 'file_change';
+      data: {
+        path: string;
+        kind: 'add' | 'edit' | 'delete';
+        linesAdded?: number;
+        linesRemoved?: number;
+        preview?: string;
+      };
+    }
+  | { type: 'cache_metrics'; data: CacheMetricsPayload }
+  | { type: 'error'; data: { message: string; recoverable: boolean } }
   /** LangGraph interrupt — payload depends on the interrupted node's resume type, consumed by TUI/CLI for user interaction resolution */
-  | { type: "interrupt"; data: unknown }
+  | { type: 'interrupt'; data: unknown }
   /** Raw LangGraph state update chunk — opaque passthrough for checkpoint/state tracking consumers */
-  | { type: "update"; data: unknown }
-  | { type: "model_retry"; data: { attempt: number; maxAttempts: number; error: string; delayMs: number } }
-  | { type: "final"; data: string }
-  | { type: "subagent_start"; data: SubAgentStartPayload }
-  | { type: "subagent_step"; data: SubAgentStepPayload }
-  | { type: "subagent_tool_result"; data: SubAgentToolResultPayload }
-  | { type: "subagent_done"; data: SubAgentDonePayload }
-  | { type: "subagent_error"; data: SubAgentErrorPayload }
-  | { type: "subagent_cache_metrics"; data: SubAgentCacheMetricsPayload };
+  | { type: 'update'; data: unknown }
+  | {
+      type: 'model_retry';
+      data: { attempt: number; maxAttempts: number; error: string; delayMs: number };
+    }
+  | { type: 'final'; data: string }
+  | { type: 'subagent_start'; data: SubAgentStartPayload }
+  | { type: 'subagent_step'; data: SubAgentStepPayload }
+  | { type: 'subagent_tool_result'; data: SubAgentToolResultPayload }
+  | { type: 'subagent_done'; data: SubAgentDonePayload }
+  | { type: 'subagent_error'; data: SubAgentErrorPayload }
+  | { type: 'subagent_cache_metrics'; data: SubAgentCacheMetricsPayload };
 
 // ── 基础类型 / Base types ──
-export type WorkspaceAccess = "write";
-export type AgentPhase = "planning" | "building";
+export type WorkspaceAccess = 'write';
+export type AgentPhase = 'planning' | 'building';
 /** 工作区访问请求模式（CLI --mode 参数），已废弃 read-only/plan / Workspace access request mode (CLI --mode), read-only/plan deprecated */
-export type WorkspaceAccessRequest = "auto" | WorkspaceAccess | "builder";
-export type AuthorizationMode = "default" | "full_access";
-export type ShellApprovalGrant = "approve_once" | "same_command" | "full_access";
-export type ShellGrantUsed = "none" | ShellApprovalGrant;
-export type PlanStatus = "pending" | "in_progress" | "completed";
+export type WorkspaceAccessRequest = 'auto' | WorkspaceAccess | 'builder';
+export type AuthorizationMode = 'default' | 'full_access';
+export type ShellApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
+export type ShellGrantUsed = 'none' | ShellApprovalGrant;
+export type PlanStatus = 'pending' | 'in_progress' | 'completed';
 
 export interface AgentPlanStep {
   step: string;
@@ -152,12 +164,20 @@ export interface CacheMetricsPayload {
 }
 
 export interface ToolApprovalPayload {
-  scope: "once";
+  scope: 'once';
   cwd: string;
   threadId: string;
   tool: string;
   command: string;
-  risk: "read" | "plan" | "write_file" | "execute_code" | "destructive" | "network" | "vcs_mutation" | "unknown";
+  risk:
+    | 'read'
+    | 'plan'
+    | 'write_file'
+    | 'execute_code'
+    | 'destructive'
+    | 'network'
+    | 'vcs_mutation'
+    | 'unknown';
   approvalHash: string;
   summary: string;
   reason: string;
@@ -172,7 +192,7 @@ export interface ToolApprovalPayload {
 }
 
 // ── 子 Agent 事件 / Sub-agent events ──
-export type SubAgentRole = "explore" | "code" | "review";
+export type SubAgentRole = 'explore' | 'code' | 'review';
 
 export interface SubAgentStartPayload {
   id: string;

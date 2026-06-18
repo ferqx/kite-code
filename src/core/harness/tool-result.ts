@@ -1,18 +1,10 @@
-import type {
-  AgentPlan,
-  ShellGrantUsed,
-  WorkspaceAccess,
-} from "@/protocol/events";
-import type {
-  ShellResult,
-  ShellIntent,
-  ThreadAuthorizationState,
-} from "@/core/types";
+import type { ShellIntent, ShellResult, ThreadAuthorizationState } from '@/core/types';
+import type { AgentPlan, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 
 /** 工具失败时提供给模型的结构化原因和用法提示 / Structured tool failure guidance for the model */
 export interface ToolFailure {
   /** 固定说明工具执行失败 / Stable failure message */
-  message: "Tool execution failed.";
+  message: 'Tool execution failed.';
   /** 失败的工具名称 / Failed tool name */
   tool: string;
   /** 具体失败原因 / Concrete failure reason */

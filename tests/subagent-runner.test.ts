@@ -1,10 +1,10 @@
-import { describe, test, expect } from "bun:test";
-import { runSubAgent } from "@/core/subagent/runner";
-import { getRoleConfig } from "@/core/subagent/roles";
-import { StreamingMockModel } from "./mock-model";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getRoleConfig } from '@/core/subagent/roles';
+import { runSubAgent } from '@/core/subagent/runner';
+import { StreamingMockModel } from './mock-model';
 
 function mockEventSink() {
   const events: Array<{ type: string; data: Record<string, unknown> }> = [];
@@ -12,22 +12,22 @@ function mockEventSink() {
     events,
     sink: ((e: { type: string; data: Record<string, unknown> }) => {
       events.push(e);
-    }) as unknown as import("@/core/subagent/types").SubAgentEventSink,
+    }) as unknown as import('@/core/subagent/types').SubAgentEventSink,
   };
 }
 
-describe("SubAgentRunner integration", () => {
-  test("explore role: emits start→done events in order", async () => {
+describe('SubAgentRunner integration', () => {
+  test('explore role: emits start→done events in order', async () => {
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
-      responses: [{ message: { content: "Found auth.ts, middleware.ts" } as any, delay: 5 }],
+      responses: [{ message: { content: 'Found auth.ts, middleware.ts' } as any, delay: 5 }],
     }) as any;
 
     const result = await runSubAgent({
-      config: { providerName: "deepseek", modelName: "test" } as any,
-      workspace: "/tmp/test",
-      role: getRoleConfig("explore"),
-      task: "search for UserService",
+      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      workspace: '/tmp/test',
+      role: getRoleConfig('explore'),
+      task: 'search for UserService',
       timeoutMs: 5000,
       signal: new AbortController().signal,
       eventSink: sink,
@@ -35,36 +35,42 @@ describe("SubAgentRunner integration", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.summary).toContain("Found");
+    expect(result.summary).toContain('Found');
     expect(result.toolCallCount).toBe(0);
 
-    expect(events[0].type).toBe("start");
-    expect(events[0].data.role).toBe("explore");
-    expect(events[0].data.task).toBe("search for UserService");
+    expect(events[0]!.type).toBe('start');
+    expect(events[0]!.data.role).toBe('explore');
+    expect(events[0]!.data.task).toBe('search for UserService');
 
-    const doneEvent = events.find(e => e.type === "done")!;
-    expect(doneEvent.data.summary).toContain("Found");
-    expect(typeof doneEvent.data.durationMs).toBe("number");
+    const doneEvent = events.find((e) => e.type === 'done')!;
+    expect(doneEvent.data.summary).toContain('Found');
+    expect(typeof doneEvent.data.durationMs).toBe('number');
   });
 
-  test("code role with real file read via tool call", async () => {
-    const ws = mkdtempSync(join(tmpdir(), "openpx-subagent-test-"));
-    writeFileSync(join(ws, "test.txt"), "hello world\n", "utf-8");
+  test('code role with real file read via tool call', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'openpx-subagent-test-'));
+    writeFileSync(join(ws, 'test.txt'), 'hello world\n', 'utf-8');
 
     try {
       const { events, sink } = mockEventSink();
       const model = new StreamingMockModel({
         responses: [
-          { message: { content: "let me read", tool_calls: [{ id: "tc1", name: "read_file", args: { path: "test.txt" } }] } as any, delay: 5 },
-          { message: { content: "File read, done." } as any, delay: 5 },
+          {
+            message: {
+              content: 'let me read',
+              tool_calls: [{ id: 'tc1', name: 'read_file', args: { path: 'test.txt' } }],
+            } as any,
+            delay: 5,
+          },
+          { message: { content: 'File read, done.' } as any, delay: 5 },
         ],
       }) as any;
 
       const result = await runSubAgent({
-        config: { providerName: "deepseek", modelName: "test" } as any,
+        config: { providerName: 'deepseek', modelName: 'test' } as any,
         workspace: ws,
-        role: getRoleConfig("code"),
-        task: "read test.txt",
+        role: getRoleConfig('code'),
+        task: 'read test.txt',
         timeoutMs: 5000,
         signal: new AbortController().signal,
         eventSink: sink,
@@ -76,25 +82,25 @@ describe("SubAgentRunner integration", () => {
       expect(result.ok !== undefined).toBe(true);
 
       // Step events should be emitted for tool calls
-      const stepEvents = events.filter(e => e.type === "step");
+      const stepEvents = events.filter((e) => e.type === 'step');
       expect(stepEvents.length).toBeGreaterThanOrEqual(1);
-      expect(stepEvents[0].data.toolName).toBe("read_file");
+      expect(stepEvents[0]!.data.toolName).toBe('read_file');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
   });
 
-  test("review role: correct role in start event", async () => {
+  test('review role: correct role in start event', async () => {
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
-      responses: [{ message: { content: "No issues found." } as any, delay: 5 }],
+      responses: [{ message: { content: 'No issues found.' } as any, delay: 5 }],
     }) as any;
 
     const result = await runSubAgent({
-      config: { providerName: "deepseek", modelName: "test" } as any,
-      workspace: "/tmp/test",
-      role: getRoleConfig("review"),
-      task: "review auth.ts",
+      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      workspace: '/tmp/test',
+      role: getRoleConfig('review'),
+      task: 'review auth.ts',
       timeoutMs: 5000,
       signal: new AbortController().signal,
       eventSink: sink,
@@ -102,25 +108,25 @@ describe("SubAgentRunner integration", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(events[0].type).toBe("start");
-    expect(events[0].data.role).toBe("review");
-    expect(events[0].data.task).toBe("review auth.ts");
+    expect(events[0]!.type).toBe('start');
+    expect(events[0]!.data.role).toBe('review');
+    expect(events[0]!.data.task).toBe('review auth.ts');
   });
 
-  test("error event when aborted before model invoke", async () => {
+  test('error event when aborted before model invoke', async () => {
     // NOTE: mock model doesn't respect AbortSignal; the runner's pre-invoke
     // check depends on AbortSignal.any() which may not be available in all Bun versions.
     // The timeout integration is tested indirectly via the timeoutMs parameter in other tests.
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
-      responses: [{ message: { content: "done" } as any, delay: 5 }],
+      responses: [{ message: { content: 'done' } as any, delay: 5 }],
     }) as any;
 
     const result = await runSubAgent({
-      config: { providerName: "deepseek", modelName: "test" } as any,
-      workspace: "/tmp/test",
-      role: getRoleConfig("explore"),
-      task: "quick task",
+      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      workspace: '/tmp/test',
+      role: getRoleConfig('explore'),
+      task: 'quick task',
       timeoutMs: 5000,
       signal: new AbortController().signal,
       eventSink: sink,
@@ -129,22 +135,22 @@ describe("SubAgentRunner integration", () => {
 
     // Should complete successfully with mock model
     expect(result.ok).toBe(true);
-    expect(events.some(e => e.type === "done")).toBe(true);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
   });
 
-  test("aborts mid-execution when signal fires", async () => {
+  test('aborts mid-execution when signal fires', async () => {
     const { events, sink } = mockEventSink();
     const ac = new AbortController();
 
     // Use a model that delays in invoke, giving us time to abort.
-    let invokeCount = 0;
+    let _invokeCount = 0;
     const model = {
       bindTools: () => model,
-      invoke: async (_msgs: any, opts?: any) => {
-        invokeCount++;
+      invoke: async (_msgs: any, _opts?: any) => {
+        _invokeCount++;
         // Delay 300ms on first invoke; abort fires at 100ms
-        await new Promise(r => setTimeout(r, 300));
-        return { content: "done" };
+        await new Promise((r) => setTimeout(r, 300));
+        return { content: 'done' };
       },
     } as any;
 
@@ -152,10 +158,10 @@ describe("SubAgentRunner integration", () => {
     setTimeout(() => ac.abort(), 100);
 
     const result = await runSubAgent({
-      config: { providerName: "deepseek", modelName: "test" } as any,
-      workspace: "/tmp/test",
-      role: getRoleConfig("explore"),
-      task: "task",
+      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      workspace: '/tmp/test',
+      role: getRoleConfig('explore'),
+      task: 'task',
       timeoutMs: 5000,
       signal: ac.signal,
       eventSink: sink,
@@ -164,23 +170,23 @@ describe("SubAgentRunner integration", () => {
 
     // The abort should cause the subagent to fail
     expect(result.ok).toBe(false);
-    expect(events.some(e => e.type === "error")).toBe(true);
+    expect(events.some((e) => e.type === 'error')).toBe(true);
   });
 
-  test("aborts immediately when signal is already aborted", async () => {
+  test('aborts immediately when signal is already aborted', async () => {
     const { events, sink } = mockEventSink();
     const ac = new AbortController();
     ac.abort(); // Abort before calling runSubAgent
 
     const model = new StreamingMockModel({
-      responses: [{ message: { content: "done" } as any, delay: 5 }],
+      responses: [{ message: { content: 'done' } as any, delay: 5 }],
     }) as any;
 
     const result = await runSubAgent({
-      config: { providerName: "deepseek", modelName: "test" } as any,
-      workspace: "/tmp/test",
-      role: getRoleConfig("explore"),
-      task: "task",
+      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      workspace: '/tmp/test',
+      role: getRoleConfig('explore'),
+      task: 'task',
       timeoutMs: 5000,
       signal: ac.signal,
       eventSink: sink,
@@ -188,6 +194,6 @@ describe("SubAgentRunner integration", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(events.some(e => e.type === "error")).toBe(true);
+    expect(events.some((e) => e.type === 'error')).toBe(true);
   });
 });

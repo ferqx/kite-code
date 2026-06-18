@@ -1,14 +1,14 @@
 // src/core/mcp/manager.ts
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import {
-  ToolListChangedNotificationSchema,
   PromptListChangedNotificationSchema,
   ResourceListChangedNotificationSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import type { Tool as SdkTool } from "@modelcontextprotocol/sdk/types.js";
-import type { McpServerConfig, McpPrompt, McpResource, McpServerState } from "./types";
+  ToolListChangedNotificationSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
 
 const MCP_STARTUP_TIMEOUT = 5000;
 const MCP_TOOL_CALL_TIMEOUT = 30_000;
@@ -30,17 +30,15 @@ export class McpManager {
   private promptRegistry = new Map<string, PromptEntry>();
 
   /** Connect to all configured servers in parallel, non-blocking on individual failures */
-  async connectAll(
-    servers: Record<string, McpServerConfig>,
-  ): Promise<void> {
+  async connectAll(servers: Record<string, McpServerConfig>): Promise<void> {
     const entries = Object.entries(servers);
     const results = await Promise.allSettled(
       entries.map(([name, config]) => this.connect(name, config)),
     );
     for (let i = 0; i < results.length; i++) {
-      const result = results[i];
-      if (result.status === "rejected") {
-        const serverName = entries[i][0];
+      const result = results[i]!;
+      if (result.status === 'rejected') {
+        const serverName = entries[i]![0];
         console.error(`[MCP] Failed to connect ${serverName}:`, result.reason);
       }
     }
@@ -49,10 +47,7 @@ export class McpManager {
   /** Connect a single MCP server */
   async connect(name: string, config: McpServerConfig): Promise<void> {
     const transport = createTransport(config);
-    const client = new Client(
-      { name: "openpx", version: "0.1.0" },
-      { capabilities: {} },
-    );
+    const client = new Client({ name: 'openpx', version: '0.1.0' }, { capabilities: {} });
 
     try {
       await client.connect(transport, { timeout: MCP_STARTUP_TIMEOUT });
@@ -104,72 +99,59 @@ export class McpManager {
 
     // Set up list-changed notification handlers
     try {
-      client.setNotificationHandler(
-        ToolListChangedNotificationSchema,
-        async () => {
-          try {
-            const result = await client.listTools();
-            const state = this.servers.get(name);
-            if (state) {
-              state.tools = result.tools as SdkTool[];
-            }
-          } catch (err) {
-            console.error(
-              `[MCP] Failed to refresh tools for ${name}:`,
-              err,
-            );
-          }
-        },
-      );
-    } catch {
-      // handler setup best-effort
-    }
-
-    try {
-      client.setNotificationHandler(
-        PromptListChangedNotificationSchema,
-        async () => {
-          try {
-            const result = await client.listPrompts();
-            const state = this.servers.get(name);
-            if (state) {
-              state.prompts = (result.prompts ?? []) as McpPrompt[];
-              // Refresh prompt registry for this server
-              for (const [key, entry] of this.promptRegistry) {
-                if (entry.server === name) {
-                  this.promptRegistry.delete(key);
-                }
-              }
-              for (const prompt of state.prompts) {
-                const key = `mcp__${name}__${prompt.name}`;
-                this.promptRegistry.set(key, { server: name, prompt });
-              }
-            }
-          } catch (err) {
-            console.error(
-              `[MCP] Failed to refresh prompts for ${name}:`,
-              err,
-            );
-          }
-        },
-      );
-    } catch {
-      // handler setup best-effort
-    }
-
-    try {
-      client.setNotificationHandler(
-        ResourceListChangedNotificationSchema,
-        async () => {
+      client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
+        try {
+          const result = await client.listTools();
           const state = this.servers.get(name);
           if (state) {
-            try {
-              const result = await client.listResources();
-              state.resources = (result.resources ?? []) as McpResource[];
-            } catch { /* ignore */ }
+            state.tools = result.tools as SdkTool[];
           }
-        },
-      );
+        } catch (err) {
+          console.error(`[MCP] Failed to refresh tools for ${name}:`, err);
+        }
+      });
+    } catch {
+      // handler setup best-effort
+    }
+
+    try {
+      client.setNotificationHandler(PromptListChangedNotificationSchema, async () => {
+        try {
+          const result = await client.listPrompts();
+          const state = this.servers.get(name);
+          if (state) {
+            state.prompts = (result.prompts ?? []) as McpPrompt[];
+            // Refresh prompt registry for this server
+            for (const [key, entry] of this.promptRegistry) {
+              if (entry.server === name) {
+                this.promptRegistry.delete(key);
+              }
+            }
+            for (const prompt of state.prompts) {
+              const key = `mcp__${name}__${prompt.name}`;
+              this.promptRegistry.set(key, { server: name, prompt });
+            }
+          }
+        } catch (err) {
+          console.error(`[MCP] Failed to refresh prompts for ${name}:`, err);
+        }
+      });
+    } catch {
+      // handler setup best-effort
+    }
+
+    try {
+      client.setNotificationHandler(ResourceListChangedNotificationSchema, async () => {
+        const state = this.servers.get(name);
+        if (state) {
+          try {
+            const result = await client.listResources();
+            state.resources = (result.resources ?? []) as McpResource[];
+          } catch {
+            /* ignore */
+          }
+        }
+      });
     } catch {
       // handler setup best-effort
     }
@@ -197,11 +179,7 @@ export class McpManager {
   }
 
   /** Execute an MCP tool on the specified server */
-  async callTool(
-    server: string,
-    toolName: string,
-    args: Record<string, unknown>,
-  ): Promise<string> {
+  async callTool(server: string, toolName: string, args: Record<string, unknown>): Promise<string> {
     const state = this.servers.get(server);
     if (!state) {
       throw new Error(`MCP server not found: ${server}`);
@@ -210,17 +188,15 @@ export class McpManager {
       throw new Error(`MCP server not connected: ${server}`);
     }
     const client = state.client as Client;
-    const result = await client.callTool(
-      { name: toolName, arguments: args },
-      undefined,
-      { timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT },
-    );
+    const result = await client.callTool({ name: toolName, arguments: args }, undefined, {
+      timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
+    });
     // Extract text content from the result
     if (result.content && Array.isArray(result.content)) {
       const textParts = result.content
-        .filter((c: { type: string }) => c.type === "text")
+        .filter((c: { type: string }) => c.type === 'text')
         .map((c: { text: string }) => c.text);
-      return textParts.join("\n");
+      return textParts.join('\n');
     }
     return JSON.stringify(result);
   }
@@ -233,7 +209,7 @@ export class McpManager {
   /** 从指定 server 读取资源内容 / Read resource content from a server */
   async readResource(serverName: string, uri: string): Promise<string> {
     if (!serverName || !uri) {
-      throw new Error("server and uri are required");
+      throw new Error('server and uri are required');
     }
     const state = this.servers.get(serverName);
     if (!state) {
@@ -249,7 +225,9 @@ export class McpManager {
     );
     // Extract text from resource contents
     if (result.contents && result.contents.length > 0) {
-      return result.contents.map((c: { text?: string; blob?: string }) => c.text ?? c.blob ?? "").join("\n");
+      return result.contents
+        .map((c: { text?: string; blob?: string }) => c.text ?? c.blob ?? '')
+        .join('\n');
     }
     return JSON.stringify(result);
   }
@@ -286,15 +264,12 @@ export class McpManager {
 
 /** Create transport instance from server config */
 function createTransport(config: McpServerConfig) {
-  if (config.type === "http") {
-    const url = new URL(config.url ?? "http://localhost");
+  if (config.type === 'http') {
+    const url = new URL(config.url ?? 'http://localhost');
     return new StreamableHTTPClientTransport(url, {
-      requestInit: config.headers
-        ? { headers: config.headers }
-        : undefined,
+      requestInit: config.headers ? { headers: config.headers } : undefined,
       reconnectionOptions: {
-        maxReconnectionDelay:
-          HTTP_RECONNECT_BASE_MS * Math.pow(2, HTTP_MAX_RECONNECT),
+        maxReconnectionDelay: HTTP_RECONNECT_BASE_MS * 2 ** HTTP_MAX_RECONNECT,
         initialReconnectionDelay: HTTP_RECONNECT_BASE_MS,
         reconnectionDelayGrowFactor: 2,
         maxRetries: HTTP_MAX_RECONNECT,
@@ -303,7 +278,7 @@ function createTransport(config: McpServerConfig) {
   }
   // Default: stdio
   return new StdioClientTransport({
-    command: config.command ?? "",
+    command: config.command ?? '',
     args: config.args ?? [],
     env: {
       ...process.env,

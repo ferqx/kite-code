@@ -1,15 +1,15 @@
-import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { loadAgentConfig } from "../src/core/config/index";
-import { runAgent } from "../src/core/runner";
-import { TuiUserInputProvider } from "../src/app/tui/provider";
-import type { AgentEvent } from "../src/protocol/events";
+import { describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { TuiUserInputProvider } from '../src/app/tui/provider';
+import { loadAgentConfig } from '../src/core/config/index';
+import { runAgent } from '../src/core/runner';
+import type { AgentEvent } from '../src/protocol/events';
 
-describe("TUI Integration", () => {
-  test("runAgent with TuiUserInputProvider completes without errors for simple task", async () => {
-    const root = join(tmpdir(), "openpx-tui-integration");
+describe('TUI Integration', () => {
+  test('runAgent with TuiUserInputProvider completes without errors for simple task', async () => {
+    const root = join(tmpdir(), 'openpx-tui-integration');
     rmSync(root, { recursive: true, force: true });
     mkdirSync(root, { recursive: true });
 
@@ -20,10 +20,10 @@ describe("TUI Integration", () => {
     const autoResolver = setInterval(() => {
       const interrupt = provider.getPendingInterrupt();
       if (interrupt) {
-        if (interrupt.kind === "approval") {
-          provider.submitAction({ type: "approve", grant: "approve_once" });
+        if (interrupt.kind === 'approval') {
+          provider.submitAction({ type: 'approve', grant: 'approve_once' });
         } else {
-          provider.submitAction({ type: "input", text: "auto answer" });
+          provider.submitAction({ type: 'input', text: 'auto answer' });
         }
       }
     }, 100);
@@ -31,17 +31,17 @@ describe("TUI Integration", () => {
     try {
       const generator = runAgent(provider, {
         task: "Reply with 'hello from TUI integration test' only. Do not use any tools.",
-        userId: "test-user",
+        userId: 'test-user',
         threadId: `tui-int-${Date.now().toString(36)}`,
         workspace: root,
-        checkpointPath: join(root, "checkpoints.sqlite"),
+        checkpointPath: join(root, 'checkpoints.sqlite'),
         config: loadAgentConfig(),
       });
 
       for await (const _ of generator) {
         /* driven by provider */
       }
-    } catch (e) {
+    } catch (_e) {
       // Model might not be configured — that's OK
     } finally {
       clearInterval(autoResolver);
@@ -52,6 +52,6 @@ describe("TUI Integration", () => {
       // Model not configured — skip assertions but don't false-pass
       return;
     }
-    expect(events.some((e) => e.type === "step_begin")).toBe(true);
+    expect(events.some((e) => e.type === 'step_begin')).toBe(true);
   }, 120_000);
 });

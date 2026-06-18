@@ -1,32 +1,33 @@
 // ── EVENT action handler — 19 event sub-types ──
 
-import type { AgentEvent } from "@/protocol/events";
-import type { TuiState, OutputBlock, FileChangeRecord } from "../types";
-import { appendBlock, updateLastBlock, finalizeLastTurnStreaming, lastTurn, findBlockById, replaceBlockById, findBlock, hasBlock } from "./helpers";
-import { formatReadFileRange, getToolPreview, getToolDetail } from "../components/render-utils";
+import type { AgentEvent } from '@/protocol/events';
+import { getToolDetail, getToolPreview } from '../components/render-utils';
+import type { FileChangeRecord, OutputBlock, TuiState } from '../types';
+import {
+  appendBlock,
+  finalizeLastTurnStreaming,
+  findBlock,
+  findBlockById,
+  hasBlock,
+  lastTurn,
+  replaceBlockById,
+  updateLastBlock,
+} from './helpers';
 
 /** 格式化 file_change 事件的原始预览内容，截断到最多 6 行 / Format raw file_change preview, truncating to max 6 lines */
 const MAX_PREVIEW_LINES = 6;
 
 function formatFilePreview(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
-  const lines = raw.split("\n");
+  const lines = raw.split('\n');
   if (lines.length > MAX_PREVIEW_LINES) {
-    return lines.slice(0, MAX_PREVIEW_LINES).join("\n") + "\n...";
+    return `${lines.slice(0, MAX_PREVIEW_LINES).join('\n')}\n...`;
   }
   // Remove trailing empty line from exact-slice files (common for files ending with \n)
-  if (lines.length > 0 && lines[lines.length - 1] === "") {
-    return lines.slice(0, -1).join("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    return lines.slice(0, -1).join('\n');
   }
   return raw;
-}
-
-/** 格式化 token 数量（1k+ 用 k 缩写）。缓存日志注释解除后需要。
- *  Format token count (abbreviate with k for 1k+). Needed when cache log is uncommented. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function fmt(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
 }
 
 export function handleEventAction(state: TuiState, event: AgentEvent): TuiState {
@@ -37,100 +38,107 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
   // 避免中间隔了工具调用后两个 reason 块被合并。
   // Auto-clear currentRunReasonId on any non-reason event,
   // so the next reason creates a new block instead of appending.
-  if (event.type !== "reason" && state.currentRunReasonId !== undefined) {
+  if (event.type !== 'reason' && state.currentRunReasonId !== undefined) {
     const reasonBlock = findBlockById(state, state.currentRunReasonId);
-    if (reasonBlock?.kind === "reason" && reasonBlock.folded) {
+    if (reasonBlock?.kind === 'reason' && reasonBlock.folded) {
       state = replaceBlockById(state, state.currentRunReasonId, { ...reasonBlock, folded: false });
     }
     state = { ...state, currentRunReasonId: undefined };
   }
 
   switch (event.type) {
-    case "text": {
+    case 'text': {
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
 
-      if (state.running && event.data.text.includes("\n")) {
+      if (state.running && event.data.text.includes('\n')) {
         // Multi-line during streaming → always split into per-line blocks.
         // Handles both the first text event (no prior streaming block) and
         // subsequent updates (replacing an existing streaming block).
 
         // Count already-finalized per-line text blocks (0 for first event or old model).
         let numFinalized = 0;
-        if (lastBlock?.kind === "text" && lastBlock.streaming) {
+        if (lastBlock?.kind === 'text' && lastBlock.streaming) {
           for (let i = 0; i < last!.blocks.length - 1; i++) {
-            if (last!.blocks[i].kind === "text") numFinalized++;
+            if (last!.blocks[i]!.kind === 'text') numFinalized++;
           }
         }
         // Reconstruct previous full text for dedup
-        let prevFullText = "";
+        let prevFullText = '';
         let firstText = true;
         for (const b of last?.blocks ?? []) {
-          if (b.kind !== "text") continue;
-          if (firstText) { prevFullText = b.content; firstText = false; }
-          else prevFullText += "\n" + b.content;
+          if (b.kind !== 'text') continue;
+          if (firstText) {
+            prevFullText = b.content;
+            firstText = false;
+          } else prevFullText += `\n${b.content}`;
         }
         if (prevFullText === event.data.text) return state;
 
-        const newLines = event.data.text.split("\n");
+        const newLines = event.data.text.split('\n');
         // Drop trailing empty from split (trailing \n artifact).
         // Otherwise the trailing "" becomes a streaming text block
         // that renders as a blank line between event dispatches.
-        if (event.data.text.endsWith("\n") && newLines.length > 0) {
+        if (event.data.text.endsWith('\n') && newLines.length > 0) {
           newLines.pop();
         }
 
         const turns = state.turns.slice();
         if (turns.length === 0) turns.push({ blocks: [] });
-        const blocks = turns[turns.length - 1].blocks.slice();
+        const blocks = turns[turns.length - 1]!.blocks.slice();
         let nextId = state.nextBlockId;
 
         // Remove old streaming block if present
-        if (lastBlock?.kind === "text" && lastBlock.streaming) {
+        if (lastBlock?.kind === 'text' && lastBlock.streaming) {
           blocks.pop();
         }
 
         // Add newly completed lines as finalized blocks
         for (let i = numFinalized; i < newLines.length - 1; i++) {
-          blocks.push({ id: nextId++, kind: "text", content: newLines[i], streaming: false });
+          blocks.push({ id: nextId++, kind: 'text', content: newLines[i]!, streaming: false });
         }
 
         // Add new streaming block for the last (possibly incomplete) line
-        const lastLine = newLines[newLines.length - 1];
-        blocks.push({ id: nextId++, kind: "text", content: lastLine, streaming: true });
+        const lastLine = newLines[newLines.length - 1]!;
+        blocks.push({ id: nextId++, kind: 'text', content: lastLine, streaming: true });
 
         turns[turns.length - 1] = { blocks };
         return { ...state, turns, nextBlockId: nextId };
       }
 
       // Single-line update: keep existing block ID, just replace content.
-      if (state.running && lastBlock?.kind === "text" && lastBlock.streaming) {
+      if (state.running && lastBlock?.kind === 'text' && lastBlock.streaming) {
         if (lastBlock.content === event.data.text) return state;
         return updateLastBlock(state, { ...lastBlock, content: event.data.text });
       }
 
       // Dedup: check all text blocks in the last turn
-      if (lastBlock?.kind === "text" && lastBlock.content === event.data.text) return state;
+      if (lastBlock?.kind === 'text' && lastBlock.content === event.data.text) return state;
       if (last) {
         for (let i = last.blocks.length - 1; i >= 0; i--) {
-          const blk = last.blocks[i];
-          if (blk.kind === "text") {
+          const blk = last.blocks[i]!;
+          if (blk.kind === 'text') {
             if (blk.content === event.data.text) return state;
           }
         }
       }
       const id = state.nextBlockId;
-      const block: OutputBlock = { id, kind: "text", content: event.data.text, streaming: state.running };
+      const block: OutputBlock = {
+        id,
+        kind: 'text',
+        content: event.data.text,
+        streaming: state.running,
+      };
       return appendBlock(state, block);
     }
-    case "reason": {
+    case 'reason': {
       if (state.currentRunReasonId != null) {
         const last = lastTurn(state);
         const lastBlock = last?.blocks.at(-1);
-        if (lastBlock?.kind === "reason" && lastBlock.id === state.currentRunReasonId) {
+        if (lastBlock?.kind === 'reason' && lastBlock.id === state.currentRunReasonId) {
           const next: OutputBlock = {
             ...lastBlock,
-            content: lastBlock.content + "\n\n" + event.data.text,
+            content: `${lastBlock.content}\n\n${event.data.text}`,
           };
           return updateLastBlock(state, next);
         }
@@ -138,54 +146,66 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
       const id = finalized.nextBlockId;
-      const block: OutputBlock = { id, kind: "reason", content: event.data.text, folded: true };
+      const block: OutputBlock = { id, kind: 'reason', content: event.data.text, folded: true };
       return { ...appendBlock(finalized, block), currentRunReasonId: id };
     }
-    case "tool_call": {
+    case 'tool_call': {
       // task tool has its own subagent block; update_plan progress is shown
       // in StatusBar — skip rendering both in the message list
-      if (event.data.name === "task" || event.data.name === "update_plan") return state;
+      if (event.data.name === 'task' || event.data.name === 'update_plan') return state;
       // Dedup: skip if a tool_card with this callId already exists
-      if (hasBlock(state, b => b.kind === "tool_card" && b.callId === event.data.call_id)) return state;
+      if (hasBlock(state, (b) => b.kind === 'tool_card' && b.callId === event.data.call_id))
+        return state;
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
       const preview = getToolPreview(event.data.name, event.data.args);
       const id = finalized.nextBlockId;
       const block: OutputBlock = {
-        id, kind: "tool_card",
-        callId: event.data.call_id, name: event.data.name, args: event.data.args,
-        status: "running", summary: "", preview,
+        id,
+        kind: 'tool_card',
+        callId: event.data.call_id,
+        name: event.data.name,
+        args: event.data.args,
+        status: 'running',
+        summary: '',
+        preview,
       };
       const times = { ...finalized.toolStartTimes, [event.data.call_id]: Date.now() };
       return { ...appendBlock(finalized, block), toolStartTimes: times };
     }
-    case "tool_done": {
-      if (event.data.name === "task") return state;
-      if (event.data.name === "update_plan") return state;
+    case 'tool_done': {
+      if (event.data.name === 'task') return state;
+      if (event.data.name === 'update_plan') return state;
       const startedAt = state.toolStartTimes?.[event.data.call_id];
       const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
       const { [event.data.call_id]: _, ...nextTimes } = state.toolStartTimes ?? {};
-      const matched = findBlock(state, b => b.kind === "tool_card" && b.callId === event.data.call_id);
-      if (!matched || matched.kind !== "tool_card") return { ...state, toolStartTimes: nextTimes };
+      const matched = findBlock(
+        state,
+        (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
+      );
+      if (matched?.kind !== 'tool_card') return { ...state, toolStartTimes: nextTimes };
       const next: OutputBlock = {
         ...matched,
-        status: event.data.ok ? "done" as const : "error" as const,
+        status: event.data.ok ? ('done' as const) : ('error' as const),
         summary: event.data.summary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
-        expanded: !event.data.ok || matched.name === "shell_execute",
+        expanded: !event.data.ok || matched.name === 'shell_execute',
       };
       // 工具输出的 token 计入累计统计 / Tool output tokens counted in cumulative total
       if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {
         return {
           ...replaceBlockById(state, matched.id, next),
           toolStartTimes: nextTimes,
-          status: { ...state.status, totalTokens: state.status.totalTokens + event.data.toolTokenCount },
+          status: {
+            ...state.status,
+            totalTokens: state.status.totalTokens + event.data.toolTokenCount,
+          },
         };
       }
       return { ...replaceBlockById(state, matched.id, next), toolStartTimes: nextTimes };
     }
-    case "state_change": {
+    case 'state_change': {
       const d = event.data;
       const next = { ...state.status };
       if (d.phase) next.phase = d.phase;
@@ -196,14 +216,21 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (d.modelName) next.modelName = d.modelName;
       return { ...state, status: next };
     }
-    case "model_retry": {
+    case 'model_retry': {
       const finalized = finalizeLastTurnStreaming(state);
       const id = finalized.nextBlockId;
       const maxAttempts = event.data.maxAttempts;
-      const delayLabel = event.data.delayMs >= 1000 ? `${(event.data.delayMs / 1000).toFixed(1)}s` : `${event.data.delayMs}ms`;
-      const block: OutputBlock = { id, kind: "text", content: maxAttempts > 0
-        ? `⟳ Model retry #${event.data.attempt}/${maxAttempts} (${delayLabel}): ${event.data.error}`
-        : `⟳ Model retry #${event.data.attempt} (${delayLabel}): ${event.data.error}`
+      const delayLabel =
+        event.data.delayMs >= 1000
+          ? `${(event.data.delayMs / 1000).toFixed(1)}s`
+          : `${event.data.delayMs}ms`;
+      const block: OutputBlock = {
+        id,
+        kind: 'text',
+        content:
+          maxAttempts > 0
+            ? `⟳ Model retry #${event.data.attempt}/${maxAttempts} (${delayLabel}): ${event.data.error}`
+            : `⟳ Model retry #${event.data.attempt} (${delayLabel}): ${event.data.error}`,
       };
       return {
         ...appendBlock(finalized, block),
@@ -218,13 +245,13 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         },
       };
     }
-    case "step_begin": {
+    case 'step_begin': {
       return { ...state, status: { ...state.status, currentNode: event.data.node } };
     }
-    case "step_end": {
+    case 'step_end': {
       return { ...state, status: { ...state.status, currentNode: null } };
     }
-    case "cache_metrics": {
+    case 'cache_metrics': {
       const d = event.data;
       const hit = state.status.cacheHitTokens + d.cacheHitTokens;
       const miss = state.status.cacheMissTokens + d.cacheMissTokens;
@@ -260,18 +287,20 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // }
       return updated;
     }
-    case "final": {
+    case 'final': {
       if (event.data.length === 0) return state;
       const finalized = finalizeLastTurnStreaming(state);
       const last = lastTurn(finalized);
       // Reconstruct full text from all per-line text blocks in this turn,
       // since with line-by-line output each block holds only one line.
-      let fullText = "";
+      let fullText = '';
       let firstText = true;
-      for (const b of (last?.blocks ?? [])) {
-        if (b.kind !== "text") continue;
-        if (firstText) { fullText = b.content; firstText = false; }
-        else fullText += "\n" + b.content;
+      for (const b of last?.blocks ?? []) {
+        if (b.kind !== 'text') continue;
+        if (firstText) {
+          fullText = b.content;
+          firstText = false;
+        } else fullText += `\n${b.content}`;
       }
       if (fullText === event.data) return finalized;
       // final 可能比最后一个 text 事件多几个字符 → 只追加增量，不创建全文 block 避免重复
@@ -279,36 +308,52 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         const delta = event.data.slice(fullText.length);
         if (delta.length === 0) return finalized;
         const id = finalized.nextBlockId;
-        const block: OutputBlock = { id, kind: "text", content: delta };
+        const block: OutputBlock = { id, kind: 'text', content: delta };
         return appendBlock(finalized, block);
       }
       // 无前置 text block（纯 tool 调用等）→ 创建全文 block
       if (fullText.length === 0) {
         const id = finalized.nextBlockId;
-        const block: OutputBlock = { id, kind: "text", content: event.data };
+        const block: OutputBlock = { id, kind: 'text', content: event.data };
         return appendBlock(finalized, block);
       }
       // final 内容与已渲染文本不一致 → 保留已有 block，不创建重复
       return finalized;
     }
-    case "need_approval": {
+    case 'need_approval': {
       const finalized = finalizeLastTurnStreaming(state);
-      const block: OutputBlock = { id: finalized.nextBlockId, kind: "approval", approval: event.data };
-      return { ...appendBlock(finalized, block), interrupt: { kind: "approval", blockId: block.id } };
+      const block: OutputBlock = {
+        id: finalized.nextBlockId,
+        kind: 'approval',
+        approval: event.data,
+      };
+      return {
+        ...appendBlock(finalized, block),
+        interrupt: { kind: 'approval', blockId: block.id },
+      };
     }
-    case "need_input": {
+    case 'need_input': {
       const finalized = finalizeLastTurnStreaming(state);
-      const block: OutputBlock = { id: finalized.nextBlockId, kind: "question", question: event.data };
-      return { ...appendBlock(finalized, block), interrupt: { kind: "input", blockId: block.id } };
+      const block: OutputBlock = {
+        id: finalized.nextBlockId,
+        kind: 'question',
+        question: event.data,
+      };
+      return { ...appendBlock(finalized, block), interrupt: { kind: 'input', blockId: block.id } };
     }
-    case "error": {
+    case 'error': {
       const finalized = finalizeLastTurnStreaming(state);
-      const prefix = event.data.recoverable ? "⟳ Recoverable error" : "Error";
+      const prefix = event.data.recoverable ? '⟳ Recoverable error' : 'Error';
       const id = finalized.nextBlockId;
-      const block: OutputBlock = { id, kind: "text", content: `${prefix}: ${event.data.message}`, isError: !event.data.recoverable };
+      const block: OutputBlock = {
+        id,
+        kind: 'text',
+        content: `${prefix}: ${event.data.message}`,
+        isError: !event.data.recoverable,
+      };
       return { ...appendBlock(finalized, block), sessionError: !event.data.recoverable };
     }
-    case "file_change": {
+    case 'file_change': {
       const change: FileChangeRecord = {
         path: event.data.path,
         kind: event.data.kind,
@@ -318,44 +363,61 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       };
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
-      if (lastBlock?.kind === "file_change") {
+      if (lastBlock?.kind === 'file_change') {
         return updateLastBlock(state, { ...lastBlock, changes: [...lastBlock.changes, change] });
       }
       const finalized = finalizeLastTurnStreaming(state);
       const id = finalized.nextBlockId;
-      const block: OutputBlock = { id, kind: "file_change", changes: [change] };
+      const block: OutputBlock = { id, kind: 'file_change', changes: [change] };
       return appendBlock(finalized, block);
     }
-    case "subagent_start": {
-      if (hasBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id)) return state;
+    case 'subagent_start': {
+      if (hasBlock(state, (b) => b.kind === 'subagent' && b.subagentId === event.data.id))
+        return state;
       const finalized = finalizeLastTurnStreaming(state);
       const id = finalized.nextBlockId;
       const block: OutputBlock = {
-        id, kind: "subagent",
+        id,
+        kind: 'subagent',
         subagentId: event.data.id,
         role: event.data.role,
         task: event.data.task,
-        status: "running", summary: "",
-        toolCallCount: 0, durationMs: 0, steps: [],
+        status: 'running',
+        summary: '',
+        toolCallCount: 0,
+        durationMs: 0,
+        steps: [],
       };
       return appendBlock(finalized, block);
     }
-    case "subagent_step": {
-      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id);
-      if (!matched || matched.kind !== "subagent") return state;
-      const next: OutputBlock = { ...matched, steps: [...matched.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }] };
+    case 'subagent_step': {
+      const matched = findBlock(
+        state,
+        (b) => b.kind === 'subagent' && b.subagentId === event.data.id,
+      );
+      if (matched?.kind !== 'subagent') return state;
+      const next: OutputBlock = {
+        ...matched,
+        steps: [...matched.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }],
+      };
       return replaceBlockById(state, matched.id, next);
     }
-    case "subagent_tool_result": {
-      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id);
-      if (!matched || matched.kind !== "subagent") return state;
+    case 'subagent_tool_result': {
+      const matched = findBlock(
+        state,
+        (b) => b.kind === 'subagent' && b.subagentId === event.data.id,
+      );
+      if (matched?.kind !== 'subagent') return state;
       // Reverse-scan to find the last UNRESOLVED step with matching toolName.
       // Prefer unresolved steps to handle out-of-order results correctly:
       // e.g., two read_file steps — first result resolves the last unresolved one,
       // second result resolves the remaining one.
       let lastMatchIdx = -1;
       for (let i = matched.steps.length - 1; i >= 0; i--) {
-        if (matched.steps[i].toolName === event.data.toolName && matched.steps[i].ok === undefined) {
+        if (
+          matched.steps[i]!.toolName === event.data.toolName &&
+          matched.steps[i]!.ok === undefined
+        ) {
           lastMatchIdx = i;
           break;
         }
@@ -363,7 +425,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // Fallback: if all matching steps already have ok, re-resolve the last one
       if (lastMatchIdx === -1) {
         for (let i = matched.steps.length - 1; i >= 0; i--) {
-          if (matched.steps[i].toolName === event.data.toolName) {
+          if (matched.steps[i]!.toolName === event.data.toolName) {
             lastMatchIdx = i;
             break;
           }
@@ -371,18 +433,21 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       }
       if (lastMatchIdx === -1) return state;
       const steps = matched.steps.map((s, i) =>
-        i === lastMatchIdx ? { ...s, ok: event.data.ok, totalLines: event.data.totalLines } : s
+        i === lastMatchIdx ? { ...s, ok: event.data.ok, totalLines: event.data.totalLines } : s,
       );
-      if (steps.every((s, i) => s === matched.steps[i])) return state;
+      if (steps.every((s, i) => s === matched.steps[i]!)) return state;
       const next: OutputBlock = { ...matched, steps };
       return replaceBlockById(state, matched.id, next);
     }
-    case "subagent_done": {
-      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id);
-      if (!matched || matched.kind !== "subagent") return state;
+    case 'subagent_done': {
+      const matched = findBlock(
+        state,
+        (b) => b.kind === 'subagent' && b.subagentId === event.data.id,
+      );
+      if (matched?.kind !== 'subagent') return state;
       const next: OutputBlock = {
         ...matched,
-        status: "done" as const,
+        status: 'done' as const,
         summary: event.data.summary,
         toolCallCount: event.data.toolCallCount,
         durationMs: event.data.durationMs,
@@ -390,12 +455,15 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       };
       return replaceBlockById(state, matched.id, next);
     }
-    case "subagent_error": {
-      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.id);
-      if (!matched || matched.kind !== "subagent") return state;
+    case 'subagent_error': {
+      const matched = findBlock(
+        state,
+        (b) => b.kind === 'subagent' && b.subagentId === event.data.id,
+      );
+      if (matched?.kind !== 'subagent') return state;
       const next: OutputBlock = {
         ...matched,
-        status: "error" as const,
+        status: 'error' as const,
         summary: event.data.summary ?? event.data.error,
         toolCallCount: event.data.toolCallCount ?? matched.toolCallCount,
         durationMs: event.data.durationMs ?? matched.durationMs,
@@ -403,9 +471,12 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       };
       return replaceBlockById(state, matched.id, next);
     }
-    case "subagent_cache_metrics": {
-      const matched = findBlock(state, b => b.kind === "subagent" && b.subagentId === event.data.subagentId);
-      if (!matched || matched.kind !== "subagent") return state;
+    case 'subagent_cache_metrics': {
+      const matched = findBlock(
+        state,
+        (b) => b.kind === 'subagent' && b.subagentId === event.data.subagentId,
+      );
+      if (matched?.kind !== 'subagent') return state;
       const prevHit = matched.cacheHitTokens ?? 0;
       const prevMiss = matched.cacheMissTokens ?? 0;
       const next: typeof matched = {
@@ -427,8 +498,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return updated;
     }
     // Raw passthrough events — intentionally no-op for UI consumers
-    case "interrupt":
-    case "update":
+    case 'interrupt':
+    case 'update':
       return state;
     default:
       return state;

@@ -1,21 +1,21 @@
-import React from 'react';
 import { Box, Text } from 'ink';
-import { wrapDisplayLines } from './soft-wrap';
+import React from 'react';
+import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
 import MarkdownBlock from './MarkdownBlock';
 import SubAgentBlock from './SubAgentBlock';
+import { wrapDisplayLines } from './soft-wrap';
 import ToolCardBlock from './ToolCardBlock';
-import { useTheme } from '../theme';
 
 export function changePrefix(
   kind: string,
-  theme?: { success: string; warning: string; error: string; muted: string }
+  theme?: { success: string; warning: string; error: string; muted: string },
 ): { prefix: string; color: string } {
   const t = theme ?? {
     success: '#4ADE80',
     warning: '#FBBF24',
     error: '#F87171',
-    muted: '#9CA3AF'
+    muted: '#9CA3AF',
   };
   switch (kind) {
     case 'add':
@@ -38,7 +38,7 @@ function formatLines(added?: number, removed?: number): string {
 
 const BLOCK_GAP = 1;
 
-function gapFrom(prevBlock?: OutputBlock) {
+function gapFrom(_prevBlock?: OutputBlock) {
   return { marginTop: 0, marginBottom: BLOCK_GAP } as const;
 }
 
@@ -54,11 +54,11 @@ interface BlockRendererProps {
 
 const BlockRenderer = React.memo(function BlockRenderer({
   block,
-  isFocused,
+  isFocused: _isFocused,
   columns,
   index: _i,
   prevBlock,
-  awaitingApproval
+  awaitingApproval,
 }: BlockRendererProps) {
   const dt = useTheme();
   switch (block.kind) {
@@ -73,10 +73,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
 
       const isSlashCommand = block.content.startsWith('/');
       return (
-        <Box
-          marginTop={gapFrom(prevBlock).marginTop}
-          marginBottom={isSlashCommand ? 0 : BLOCK_GAP}
-        >
+        <Box marginTop={gapFrom(prevBlock).marginTop} marginBottom={isSlashCommand ? 0 : BLOCK_GAP}>
           {wrappedLines.map((displayLine, i) => (
             <Box key={i} backgroundColor={dt.userMsgBg} width={columns}>
               <Text>{displayLine}</Text>
@@ -116,10 +113,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
           <Text color={dt.muted}>── File Changes ──</Text>
           {block.changes.map((change, ci) => {
             const { prefix, color } = changePrefix(change.kind, dt);
-            const lineInfo = formatLines(
-              change.linesAdded,
-              change.linesRemoved
-            );
+            const lineInfo = formatLines(change.linesAdded, change.linesRemoved);
             return (
               <Box key={`${block.id}-${ci}`} flexDirection="column">
                 <Box>
@@ -178,9 +172,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
       const _exhaustive: never = block;
       return (
         <Box {...gapFrom(prevBlock)}>
-          <Text color={dt.warning}>
-            ? Unknown block kind: {(_exhaustive as OutputBlock).kind}
-          </Text>
+          <Text color={dt.warning}>? Unknown block kind: {(_exhaustive as OutputBlock).kind}</Text>
         </Box>
       );
     }

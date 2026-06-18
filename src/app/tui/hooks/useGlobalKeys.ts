@@ -1,7 +1,7 @@
-import { useInput } from "ink";
-import { useRef } from "react";
-import type { Dispatch } from "react";
-import type { Action } from "../reducers";
+import { useInput } from 'ink';
+import type { Dispatch } from 'react';
+import { useRef } from 'react';
+import type { Action } from '../reducers';
 
 /**
  * 全局快捷键 hook。
@@ -15,39 +15,39 @@ export function useGlobalKeys(dispatch: Dispatch<Action>, overlayActive = false)
 
   useInput((input: string, key: { ctrl?: boolean; escape?: boolean }) => {
     // Ctrl+C 和 Escape 始终生效
-    if (key.ctrl && input === "c") {
-      dispatch({ type: "CTRL_C" });
+    if (key.ctrl && input === 'c') {
+      dispatch({ type: 'CTRL_C' });
       // Start a timeout to reset ctrlCPressed so double Ctrl+C only triggers
       // exit within a short window (prevents accidental exit hours later).
       if (ctrlCTimerRef.current) clearTimeout(ctrlCTimerRef.current);
       ctrlCTimerRef.current = setTimeout(() => {
-        dispatch({ type: "RESET_CTRL_C" });
+        dispatch({ type: 'RESET_CTRL_C' });
         ctrlCTimerRef.current = null;
       }, 1000);
       return;
     }
     if (key.escape) {
-      dispatch({ type: "ESCAPE" });
+      dispatch({ type: 'ESCAPE' });
       return;
     }
     // 在任何其他键按下时重置 ctrlCPressed（避免误触退出记忆跨 session 持久化）
-    dispatch({ type: "RESET_CTRL_C" });
+    dispatch({ type: 'RESET_CTRL_C' });
     if (ctrlCTimerRef.current) {
       clearTimeout(ctrlCTimerRef.current);
       ctrlCTimerRef.current = null;
     }
     // overlay 激活时禁用其他全局快捷键
     if (overlayActiveRef.current) return;
-    if (key.ctrl && input === "t") {
-      dispatch({ type: "TOGGLE_ALL_REASON" });
+    if (key.ctrl && input === 't') {
+      dispatch({ type: 'TOGGLE_ALL_REASON' });
       return;
     }
-    if (key.ctrl && input === "e") {
-      dispatch({ type: "EXPAND_INPUT" });
+    if (key.ctrl && input === 'e') {
+      dispatch({ type: 'EXPAND_INPUT' });
       return;
     }
-    if (key.ctrl && input === "l") {
-      dispatch({ type: "CLEAR_OUTPUT" });
+    if (key.ctrl && input === 'l') {
+      dispatch({ type: 'CLEAR_OUTPUT' });
       return;
     }
   });

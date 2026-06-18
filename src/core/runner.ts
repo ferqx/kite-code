@@ -1,37 +1,33 @@
-import { readFile, stat as statAsync } from "node:fs/promises";
-import { HumanMessage } from "@langchain/core/messages";
-import { Command, isInterrupted, INTERRUPT } from "@langchain/langgraph";
-import { AIMessage } from "@langchain/core/messages";
-import type { AgentConfig } from "./config/index";
-import type { SupportedChatModel } from "./model/factory";
-import { buildCodeAgentGraph } from "./harness/graph";
-import type { BunSqliteSaver } from "./persistence/checkpoint";
-import type { ShellExecutor } from "./tools/shell";
-import {
-  createPromptCacheStandardTracker,
-  extractPromptCacheMetrics,
-} from "./cache-metrics";
+import { readFile, stat as statAsync } from 'node:fs/promises';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { Command, INTERRUPT, isInterrupted } from '@langchain/langgraph';
+import type { UserAction } from '@/protocol/actions';
 import type {
-  AgentPhase,
   AgentEvent,
+  AgentPhase,
   CacheMetricsPayload,
   StateChangePayload,
   ToolApprovalPayload,
   UserInputPayload,
   WorkspaceAccess,
   WorkspaceAccessRequest,
-} from "@/protocol/events";
-import type { UserAction } from "@/protocol/actions";
-import type { UserInputProvider } from "@/protocol/provider";
+} from '@/protocol/events';
+import type { UserInputProvider } from '@/protocol/provider';
+import { createPromptCacheStandardTracker, extractPromptCacheMetrics } from './cache-metrics';
+import type { AgentConfig } from './config/index';
+import { buildCodeAgentGraph } from './harness/graph';
+import { defaultAuthorizationState } from './harness/tool-policy';
+import type { SupportedChatModel } from './model/factory';
+import type { BunSqliteSaver } from './persistence/checkpoint';
+import { countTokens } from './token-counter';
+import type { ShellExecutor } from './tools/shell';
 import type {
   AgentResumeValue,
   AuthorizationOverride,
   ContextBudget,
   ModelRetryEvent,
   ThreadAuthorizationState,
-} from "./types";
-import { defaultAuthorizationState } from "./harness/tool-policy";
-import { countTokens } from "./token-counter";
+} from './types';
 
 export interface RunAgentInput {
   task: string;
@@ -52,12 +48,19 @@ export interface RunAgentInput {
   signal?: AbortSignal;
   /** 思考级别，映射到 reasoning_effort API 参数 / Thinking level, mapped to reasoning_effort API param */
   thinkingLevel?: string | null;
-  skills?: import("@/core/skills/types").SkillManifest[];
-  skillOptions?: import("@/core/skills/types").SkillScanOptions;
+  skills?: import('@/core/skills/types').SkillManifest[];
+  skillOptions?: import('@/core/skills/types').SkillScanOptions;
   /** 可选 MCP 管理器，提供 MCP 工具和资源 / Optional MCP manager, provides MCP tools and resources */
-  mcpManager?: import("@/core/mcp").McpManager;
+  mcpManager?: import('@/core/mcp').McpManager;
   /** 工具完成回调 / Per-tool completion callback for progressive TUI display */
-  toolResultSink?: (callId: string, toolName: string, ok: boolean, summary: string, totalLines?: number, toolTokenCount?: number) => void;
+  toolResultSink?: (
+    callId: string,
+    toolName: string,
+    ok: boolean,
+    summary: string,
+    totalLines?: number,
+    toolTokenCount?: number,
+  ) => void;
 }
 
 export interface StreamCodeAgentInput {
@@ -76,10 +79,10 @@ export interface StreamCodeAgentInput {
   /** 外部中止信号 / External abort signal */
   signal?: AbortSignal;
   /** 可选 MCP 管理器 / Optional MCP manager */
-  mcpManager?: import("@/core/mcp").McpManager;
+  mcpManager?: import('@/core/mcp').McpManager;
 }
 
-export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, "task"> {
+export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, 'task'> {
   resume: AgentResumeValue;
 }
 
@@ -96,67 +99,78 @@ async function readLastAuthorization(
     const auth = tuple.checkpoint.channel_values?.authorization as
       | ThreadAuthorizationState
       | undefined;
-    if (!auth || typeof auth.mode !== "string") return null;
+    if (!auth || typeof auth.mode !== 'string') return null;
     return auth;
   } catch {
     return null;
   }
 }
 
-
 /** 按错误类型分类是否为可恢复错误 / Classify whether an error is recoverable */
 export function isRecoverableError(error: unknown): boolean {
   if (error instanceof Error) {
-    const msg = error.message?.toLowerCase() ?? "";
-    if (msg.includes("etimedout")) return true;         // TCP 超时
-    if (msg.includes("econnreset")) return true;        // 连接重置
-    if (msg.includes("429")) return true;               // 速率限制
-    if (msg.includes("503") || msg.includes("502")) return true; // 服务不可用
-    if (msg.includes("overloaded")) return true;        // 模型过载
-    if (msg.includes("timeout")) return true;           // 通用超时
-    if (msg.includes("rate limit")) return true;        // 速率限制文字
-    if (error.name === "AbortError") return false;      // 用户主动取消 → 不可恢复
+    const msg = error.message?.toLowerCase() ?? '';
+    if (msg.includes('etimedout')) return true; // TCP 超时
+    if (msg.includes('econnreset')) return true; // 连接重置
+    if (msg.includes('429')) return true; // 速率限制
+    if (msg.includes('503') || msg.includes('502')) return true; // 服务不可用
+    if (msg.includes('overloaded')) return true; // 模型过载
+    if (msg.includes('timeout')) return true; // 通用超时
+    if (msg.includes('rate limit')) return true; // 速率限制文字
+    if (error.name === 'AbortError') return false; // 用户主动取消 → 不可恢复
   }
-  return false;  // 默认不可恢复（配置/权限/未知错误）
+  return false; // 默认不可恢复（配置/权限/未知错误）
 }
-
 
 export async function* runAgent(
   provider: UserInputProvider,
   input: RunAgentInput,
 ): AsyncGenerator<AgentEvent> {
-  const subagentEventSink: import("@/core/subagent/types").SubAgentEventSink = (e) => {
+  const subagentEventSink: import('@/core/subagent/types').SubAgentEventSink = (e) => {
     switch (e.type) {
-      case "start":
-        provider.onEvent({ type: "subagent_start", data: e.data });
+      case 'start':
+        provider.onEvent({ type: 'subagent_start', data: e.data });
         break;
-      case "step":
-        provider.onEvent({ type: "subagent_step", data: e.data });
+      case 'step':
+        provider.onEvent({ type: 'subagent_step', data: e.data });
         break;
-      case "tool_result":
-        provider.onEvent({ type: "subagent_tool_result", data: e.data });
+      case 'tool_result':
+        provider.onEvent({ type: 'subagent_tool_result', data: e.data });
         break;
-      case "done":
-        provider.onEvent({ type: "subagent_done", data: e.data });
+      case 'done':
+        provider.onEvent({ type: 'subagent_done', data: e.data });
         break;
-      case "error":
-        provider.onEvent({ type: "subagent_error", data: e.data });
+      case 'error':
+        provider.onEvent({ type: 'subagent_error', data: e.data });
         break;
-      case "cache_metrics":
+      case 'cache_metrics':
         provider.onEvent({
-          type: "subagent_cache_metrics",
-          data: { subagentId: e.data.subagentId, cacheHitTokens: e.data.cacheHitTokens, cacheMissTokens: e.data.cacheMissTokens, inputTokens: e.data.inputTokens },
+          type: 'subagent_cache_metrics',
+          data: {
+            subagentId: e.data.subagentId,
+            cacheHitTokens: e.data.cacheHitTokens,
+            cacheMissTokens: e.data.cacheMissTokens,
+            inputTokens: e.data.inputTokens,
+          },
         });
         break;
     }
   };
 
-  const toolResultSink = input.toolResultSink ?? ((callId, toolName, ok, summary, totalLines) => {
-    provider.onEvent({
-      type: "tool_done",
-      data: { call_id: callId, name: toolName, ok, summary, ...(totalLines != null ? { totalLines } : {}) },
+  const toolResultSink =
+    input.toolResultSink ??
+    ((callId, toolName, ok, summary, totalLines) => {
+      provider.onEvent({
+        type: 'tool_done',
+        data: {
+          call_id: callId,
+          name: toolName,
+          ok,
+          summary,
+          ...(totalLines != null ? { totalLines } : {}),
+        },
+      });
     });
-  });
 
   const { graph, checkpointer } = buildCodeAgentGraph({
     config: input.config,
@@ -176,7 +190,7 @@ export async function* runAgent(
   const signal = input.signal;
 
   try {
-    const initialAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? "auto");
+    const initialAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? 'auto');
     const initialPhase = workspaceAccessToPhase(initialAccess);
 
     const prevAuth = await readLastAuthorization(checkpointer, input.threadId);
@@ -203,7 +217,7 @@ export async function* runAgent(
 
       const streamConfig = {
         configurable: { thread_id: input.threadId },
-        streamMode: "updates" as const,
+        streamMode: 'updates' as const,
         recursionLimit: 9999999,
       };
 
@@ -221,7 +235,7 @@ export async function* runAgent(
 
       yield* result.events;
 
-      if (result.kind === "done") break;
+      if (result.kind === 'done') break;
 
       resumeValue = mapActionToResumeValue(result.action);
     }
@@ -240,7 +254,7 @@ export interface RevertInput {
   signal?: AbortSignal;
   model?: SupportedChatModel;
   thinkingLevel?: string | null;
-  mcpManager?: import("@/core/mcp").McpManager;
+  mcpManager?: import('@/core/mcp').McpManager;
 }
 
 /** 当前 thread 恢复到指定 checkpoint 继续执行 / Revert current thread to a checkpoint */
@@ -263,14 +277,11 @@ export async function* revertToCheckpoint(
 
   try {
     // Verify checkpoint exists before attempting revert
-    const cpState = await checkpointer.getCheckpointState(
-      input.threadId,
-      input.checkpointId,
-    );
+    const cpState = await checkpointer.getCheckpointState(input.threadId, input.checkpointId);
     if (!cpState) {
       yield {
-        type: "error" as const,
-        data: { message: "Checkpoint not found", recoverable: false },
+        type: 'error' as const,
+        data: { message: 'Checkpoint not found', recoverable: false },
       };
       return;
     }
@@ -280,14 +291,11 @@ export async function* revertToCheckpoint(
         thread_id: input.threadId,
         checkpoint_id: input.checkpointId,
       },
-      streamMode: "updates" as const,
+      streamMode: 'updates' as const,
       recursionLimit: 9999999,
     };
 
-    const stream = await graph.stream(
-      { messages: [] },
-      streamConfig,
-    );
+    const stream = await graph.stream({ messages: [] }, streamConfig);
 
     const result = await processStream(provider, stream, signal, input.workspace);
     yield* result.events;
@@ -307,7 +315,7 @@ export interface ForkInput {
   signal?: AbortSignal;
   model?: SupportedChatModel;
   thinkingLevel?: string | null;
-  mcpManager?: import("@/core/mcp").McpManager;
+  mcpManager?: import('@/core/mcp').McpManager;
 }
 
 /** 从旧 checkpoint fork 新会话 / Fork a new session from an old checkpoint */
@@ -329,24 +337,21 @@ export async function* forkFromCheckpoint(
   const signal = input.signal;
 
   try {
-    const oldState = await checkpointer.getCheckpointState(
-      input.oldThreadId,
-      input.checkpointId,
-    );
+    const oldState = await checkpointer.getCheckpointState(input.oldThreadId, input.checkpointId);
     if (!oldState) {
       yield {
-        type: "error" as const,
-        data: { message: "Checkpoint not found", recoverable: false },
+        type: 'error' as const,
+        data: { message: 'Checkpoint not found', recoverable: false },
       };
       return;
     }
 
     const initialState = {
-      userId: "",
+      userId: '',
       threadId: input.newThreadId,
       workspace: input.workspace,
-      workspaceAccess: oldState.workspaceAccess ?? "write",
-      phase: oldState.phase ?? "building",
+      workspaceAccess: oldState.workspaceAccess ?? 'write',
+      phase: oldState.phase ?? 'building',
       plan: oldState.plan,
       messages: oldState.messages ?? [],
       authorization: oldState.authorization ?? defaultAuthorizationState(),
@@ -358,7 +363,7 @@ export async function* forkFromCheckpoint(
 
     const streamConfig = {
       configurable: { thread_id: input.newThreadId },
-      streamMode: "updates" as const,
+      streamMode: 'updates' as const,
       recursionLimit: 9999999,
     };
 
@@ -371,8 +376,8 @@ export async function* forkFromCheckpoint(
 }
 
 type StreamResult =
-  | { kind: "done"; events: AgentEvent[] }
-  | { kind: "interrupt"; action: UserAction; events: AgentEvent[] };
+  | { kind: 'done'; events: AgentEvent[] }
+  | { kind: 'interrupt'; action: UserAction; events: AgentEvent[] };
 
 async function processStream(
   provider: UserInputProvider,
@@ -380,15 +385,15 @@ async function processStream(
   signal?: AbortSignal,
   workspace?: string,
 ): Promise<StreamResult> {
-  const { isInterrupted, INTERRUPT } = await import("@langchain/langgraph");
+  const { isInterrupted, INTERRUPT } = await import('@langchain/langgraph');
   const cacheStandard = createPromptCacheStandardTracker();
-  let currentAccess: WorkspaceAccess = "write";
+  let currentAccess: WorkspaceAccess = 'write';
   const allEvents: AgentEvent[] = [];
   const pendingToolCalls = new Map<string, { name: string; args: Record<string, unknown> }>();
 
   for await (const chunk of stream) {
     if (signal?.aborted) {
-      return { events: allEvents, kind: "done" };
+      return { events: allEvents, kind: 'done' };
     }
 
     const interruptData = extractInterrupt(chunk, isInterrupted, INTERRUPT);
@@ -400,7 +405,7 @@ async function processStream(
         const payload = eventToInterruptPayload(interruptData, event);
         if (payload) {
           const action = await provider.requestAction(payload);
-          return { events: allEvents, kind: "interrupt", action };
+          return { events: allEvents, kind: 'interrupt', action };
         }
       }
       continue;
@@ -413,17 +418,21 @@ async function processStream(
 
     // Record tool calls for cross-chunk file_change matching
     for (const e of events) {
-      if (e.type === "tool_call") {
+      if (e.type === 'tool_call') {
         pendingToolCalls.set(e.data.call_id, { name: e.data.name, args: e.data.args });
       }
     }
     // Generate file_change events when a write/edit tool completes
     for (const e of events) {
-      if (e.type === "tool_done" && e.data.ok && (e.data.name === "write_file" || e.data.name === "edit_file")) {
+      if (
+        e.type === 'tool_done' &&
+        e.data.ok &&
+        (e.data.name === 'write_file' || e.data.name === 'edit_file')
+      ) {
         const call = pendingToolCalls.get(e.data.call_id);
         if (call) {
           const path = call.args.path;
-          if (typeof path === "string") {
+          if (typeof path === 'string') {
             await produceFileChange(events, path, e.data.name, workspace);
           }
         }
@@ -436,7 +445,7 @@ async function processStream(
     }
   }
 
-  return { events: allEvents, kind: "done" };
+  return { events: allEvents, kind: 'done' };
 }
 
 function extractInterrupt(
@@ -446,7 +455,7 @@ function extractInterrupt(
 ): unknown {
   if (isInterrupted(chunk)) return (chunk as Record<string | symbol, unknown>)[INTERRUPT_KEY];
   const rec = chunk as Record<string, unknown>;
-  if (typeof INTERRUPT_KEY === "string" && INTERRUPT_KEY in rec) return rec[INTERRUPT_KEY];
+  if (typeof INTERRUPT_KEY === 'string' && INTERRUPT_KEY in rec) return rec[INTERRUPT_KEY];
   return null;
 }
 
@@ -454,27 +463,27 @@ function interruptToEvent(data: unknown): AgentEvent | null {
   const arr = data as Record<string, unknown>[] | undefined;
   if (!Array.isArray(arr)) return null;
   for (const item of arr) {
-    if (item && typeof item === "object") {
+    if (item && typeof item === 'object') {
       const inner = (item as Record<string, unknown>).value;
-      if (inner && typeof inner === "object") {
+      if (inner && typeof inner === 'object') {
         const v = inner as Record<string, unknown>;
-        if (v.kind === "tool_approval") {
+        if (v.kind === 'tool_approval') {
           const approval = v.approval as ToolApprovalPayload | undefined;
-          if (approval && typeof approval === "object") {
-            return { type: "need_approval", data: approval };
+          if (approval && typeof approval === 'object') {
+            return { type: 'need_approval', data: approval };
           }
         }
-        if (v.kind === "user_input") {
+        if (v.kind === 'user_input') {
           const request = v.request as Record<string, unknown> | undefined;
-          if (request && typeof request === "object") {
+          if (request && typeof request === 'object') {
             const args = request.args as Record<string, unknown> | undefined;
             const payload: UserInputPayload = {
-              question: (args?.question as string) ?? "User input required",
-              options: (args?.options as UserInputPayload["options"]) ?? [],
+              question: (args?.question as string) ?? 'User input required',
+              options: (args?.options as UserInputPayload['options']) ?? [],
               allow_free_text: (args?.allow_free_text as boolean) ?? true,
-              context: typeof args?.context === "string" ? args.context : undefined,
+              context: typeof args?.context === 'string' ? args.context : undefined,
             };
-            return { type: "need_input", data: payload };
+            return { type: 'need_input', data: payload };
           }
         }
       }
@@ -486,22 +495,29 @@ function interruptToEvent(data: unknown): AgentEvent | null {
 function eventToInterruptPayload(
   _data: unknown,
   event: AgentEvent,
-): { kind: "approval"; approval: ToolApprovalPayload } | { kind: "input"; question: UserInputPayload } | null {
-  if (event.type === "need_approval") return { kind: "approval", approval: event.data };
-  if (event.type === "need_input") return { kind: "input", question: event.data };
+):
+  | { kind: 'approval'; approval: ToolApprovalPayload }
+  | { kind: 'input'; question: UserInputPayload }
+  | null {
+  if (event.type === 'need_approval') return { kind: 'approval', approval: event.data };
+  if (event.type === 'need_input') return { kind: 'input', question: event.data };
   return null;
 }
 
 function mapActionToResumeValue(action: UserAction): AgentResumeValue {
   switch (action.type) {
-    case "approve": {
-      const grant = action.grant !== "none" ? action.grant : undefined;
+    case 'approve': {
+      const grant = action.grant !== 'none' ? action.grant : undefined;
       return { approved: true, grant };
     }
-    case "reject": return { approved: false };
-    case "input": return { answer: action.text };
-    case "cancel": return { approved: false };
-    case "switch_auth": return { approved: false };
+    case 'reject':
+      return { approved: false };
+    case 'input':
+      return { answer: action.text };
+    case 'cancel':
+      return { approved: false };
+    case 'switch_auth':
+      return { approved: false };
   }
 }
 
@@ -511,17 +527,18 @@ function mapActionToResumeValue(action: UserAction): AgentResumeValue {
 function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
   const events: AgentEvent[] = [];
   // DeepSeek puts reasoning_content in additional_kwargs or as a top-level field
-  const rc = (msg.additional_kwargs?.reasoning_content as string | undefined)
-    ?? (msg as unknown as Record<string, unknown>).reasoning_content as string | undefined;
-  if (typeof rc === "string" && rc.length > 0) {
-    events.push({ type: "reason", data: { text: rc } });
+  const rc =
+    (msg.additional_kwargs?.reasoning_content as string | undefined) ??
+    ((msg as unknown as Record<string, unknown>).reasoning_content as string | undefined);
+  if (typeof rc === 'string' && rc.length > 0) {
+    events.push({ type: 'reason', data: { text: rc } });
   }
   if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
     for (const tc of msg.tool_calls) {
       events.push({
-        type: "tool_call",
+        type: 'tool_call',
         data: {
-          call_id: tc.id ?? "",
+          call_id: tc.id ?? '',
           name: tc.name,
           args: tc.args as Record<string, unknown>,
         },
@@ -530,14 +547,14 @@ function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
   }
   const text = extractText(msg.content);
   if (text.length > 0) {
-    events.push({ type: "text", data: { text } });
+    events.push({ type: 'text', data: { text } });
   }
   return events;
 }
 
 /** Parse ToolMessage → tool_done event */
 function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null {
-  const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+  const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
   // 手动统计工具输出的 token 数，不依赖 provider 的 cache_metrics 字段
   // Count tool output tokens manually, independent of provider cache_metrics fields
   const toolTokenCount = countTokens(content);
@@ -546,28 +563,30 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
   let totalLines: number | undefined;
   try {
     const p = JSON.parse(content);
-    if (p && typeof p === "object") {
+    if (p && typeof p === 'object') {
       ok = p.ok !== false;
-      if (typeof p.totalLines === "number") totalLines = p.totalLines;
+      if (typeof p.totalLines === 'number') totalLines = p.totalLines;
       if (p.ok !== false) {
         summary = (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
       } else {
         const reason = (p.rejected as boolean)
-          ? ((p.reason as string) ?? "action rejected")
-          : (p.failure as Record<string, unknown> | undefined)?.reason as string
-            ?? (p.stderr as string)
-            ?? (p.message as string)
-            ?? (p.summary as string)
-            ?? summary;
+          ? ((p.reason as string) ?? 'action rejected')
+          : (((p.failure as Record<string, unknown> | undefined)?.reason as string) ??
+            (p.stderr as string) ??
+            (p.message as string) ??
+            (p.summary as string) ??
+            summary);
         summary = reason;
       }
     }
-  } catch { /* use raw content */ }
+  } catch {
+    /* use raw content */
+  }
   return {
-    type: "tool_done",
+    type: 'tool_done',
     data: {
-      call_id: (msg.tool_call_id as string) ?? "",
-      name: (msg.name as string) ?? "",
+      call_id: (msg.tool_call_id as string) ?? '',
+      name: (msg.name as string) ?? '',
       ok,
       summary,
       ...(totalLines != null ? { totalLines } : {}),
@@ -585,16 +604,18 @@ function parseStateChangeEvents(node: Record<string, unknown>): AgentEvent | nul
   const auth = node.authorization;
   const modelProvider = node.modelProvider as string | undefined;
   const modelName = node.modelName as string | undefined;
-  if (ws === "write") sc.workspaceAccess = ws;
-  if (phase === "planning" || phase === "building") sc.phase = phase;
-  if (plan !== undefined) sc.plan = plan as StateChangePayload["plan"];
-  if (auth && typeof auth === "object") {
-    sc.authorization = { mode: (auth as Record<string, unknown>).mode as "default" | "full_access" };
+  if (ws === 'write') sc.workspaceAccess = ws;
+  if (phase === 'planning' || phase === 'building') sc.phase = phase;
+  if (plan !== undefined) sc.plan = plan as StateChangePayload['plan'];
+  if (auth && typeof auth === 'object') {
+    sc.authorization = {
+      mode: (auth as Record<string, unknown>).mode as 'default' | 'full_access',
+    };
   }
   if (modelProvider) sc.modelProvider = modelProvider;
   if (modelName) sc.modelName = modelName;
   if (Object.keys(sc).length > 0) {
-    return { type: "state_change", data: sc };
+    return { type: 'state_change', data: sc };
   }
   return null;
 }
@@ -605,13 +626,17 @@ function parseRetryEvents(node: Record<string, unknown>): AgentEvent[] {
   const retries = node.modelRetries;
   if (Array.isArray(retries)) {
     for (const r of retries) {
-      if (r && typeof r === "object" && typeof (r as Record<string, unknown>).attempt === "number") {
+      if (
+        r &&
+        typeof r === 'object' &&
+        typeof (r as Record<string, unknown>).attempt === 'number'
+      ) {
         events.push({
-          type: "model_retry",
+          type: 'model_retry',
           data: {
             attempt: (r as Record<string, unknown>).attempt as number,
             maxAttempts: ((r as Record<string, unknown>).maxAttempts as number) ?? 5,
-            error: ((r as Record<string, unknown>).error as string) ?? "unknown",
+            error: ((r as Record<string, unknown>).error as string) ?? 'unknown',
             delayMs: ((r as Record<string, unknown>).delayMs as number) ?? 0,
           },
         });
@@ -629,14 +654,14 @@ export function chunkToEvents(
   cacheStandard: ReturnType<typeof createPromptCacheStandardTracker>,
 ): AgentEvent[] {
   const events: AgentEvent[] = [];
-  if (!chunk || typeof chunk !== "object") return events;
+  if (!chunk || typeof chunk !== 'object') return events;
   const record = chunk as Record<string, unknown>;
 
   for (const key of Object.keys(record)) {
     const node = record[key] as Record<string, unknown> | undefined;
-    if (!node || typeof node !== "object") continue;
+    if (!node || typeof node !== 'object') continue;
 
-    events.push({ type: "step_begin", data: { node: key } });
+    events.push({ type: 'step_begin', data: { node: key } });
 
     // 消息解析
     const msgs = node.messages;
@@ -658,18 +683,18 @@ export function chunkToEvents(
     // 重试
     events.push(...parseRetryEvents(node));
 
-    events.push({ type: "step_end", data: { node: key } });
+    events.push({ type: 'step_end', data: { node: key } });
   }
 
   // 全局指标（不绑定特定节点）
   const final = findFinal(chunk);
-  if (final) events.push({ type: "final", data: final });
+  if (final) events.push({ type: 'final', data: final });
 
   const metrics = findCacheMetrics(chunk);
   if (metrics) {
     const outputTokens = findOutputTokens(chunk);
     events.push({
-      type: "cache_metrics",
+      type: 'cache_metrics',
       data: {
         workspaceAccess,
         cacheHitTokens: metrics.cacheHitTokens,
@@ -688,32 +713,35 @@ export function chunkToEvents(
 
 function isToolMessage(msg: Record<string, unknown>): boolean {
   try {
-    if (typeof msg._getType === "function") return (msg._getType as () => string).call(msg) === "tool";
-  } catch { /* ignore */ }
+    if (typeof msg._getType === 'function')
+      return (msg._getType as () => string).call(msg) === 'tool';
+  } catch {
+    /* ignore */
+  }
   return false;
 }
 
 function extractText(content: unknown): string {
-  if (typeof content === "string") return content;
+  if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content
       .map((block: unknown) => {
-        if (block && typeof block === "object" && "text" in (block as Record<string, unknown>)) {
+        if (block && typeof block === 'object' && 'text' in (block as Record<string, unknown>)) {
           return String((block as Record<string, unknown>).text);
         }
-        return "";
+        return '';
       })
-      .join("");
+      .join('');
   }
-  return String(content ?? "");
+  return String(content ?? '');
 }
 
 function findWorkspaceAccess(chunk: unknown): WorkspaceAccess | null {
-  if (!chunk || typeof chunk !== "object" || Array.isArray(chunk)) return null;
+  if (!chunk || typeof chunk !== 'object' || Array.isArray(chunk)) return null;
   for (const v of Object.values(chunk as Record<string, unknown>)) {
-    if (v && typeof v === "object" && !Array.isArray(v)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
       const ws = (v as Record<string, unknown>).workspaceAccess;
-      if (ws === "write") return ws;
+      if (ws === 'write') return ws;
     }
   }
   return null;
@@ -727,26 +755,34 @@ function findOutputTokens(chunk: unknown): number {
   for (const value of walkValues(chunk)) {
     if (AIMessage.isInstance(value)) {
       const um = value.usage_metadata as { output_tokens?: number } | undefined;
-      const ru = value.response_metadata?.usage as { completion_tokens?: number; output_tokens?: number } | undefined;
+      const ru = value.response_metadata?.usage as
+        | { completion_tokens?: number; output_tokens?: number }
+        | undefined;
       return um?.output_tokens ?? ru?.output_tokens ?? ru?.completion_tokens ?? 0;
     }
   }
   return 0;
 }
 
-export function initialWorkspaceAccessForTask(_task: string, _requested: WorkspaceAccessRequest = "auto"): WorkspaceAccess {
-  return "write";
+export function initialWorkspaceAccessForTask(
+  _task: string,
+  _requested: WorkspaceAccessRequest = 'auto',
+): WorkspaceAccess {
+  return 'write';
 }
 
 export function workspaceAccessToPhase(_access: WorkspaceAccess): AgentPhase {
-  return "building";
+  return 'building';
 }
 
 export function initialAgentPhaseForAccess(_workspaceAccess: WorkspaceAccess): AgentPhase {
-  return "building";
+  return 'building';
 }
 
-export function taskMessageForInitialAccess(task: string, _workspaceAccess: WorkspaceAccess): string {
+export function taskMessageForInitialAccess(
+  task: string,
+  _workspaceAccess: WorkspaceAccess,
+): string {
   return task;
 }
 
@@ -759,27 +795,27 @@ export async function* normalizeGraphStream(
   for await (const chunk of stream) {
     if (signal?.aborted) return;
     if (isInterrupted(chunk)) {
-      yield { type: "interrupt", data: (chunk as Record<string | symbol, unknown>)[INTERRUPT] };
+      yield { type: 'interrupt', data: (chunk as Record<string | symbol, unknown>)[INTERRUPT] };
       continue;
     }
 
     const chunkRecord = chunk as Record<string, unknown>;
     if (INTERRUPT in chunkRecord) {
-      yield { type: "interrupt", data: chunkRecord[String(INTERRUPT)] };
+      yield { type: 'interrupt', data: chunkRecord[String(INTERRUPT)] };
       continue;
     }
 
     currentWorkspaceAccess = findWorkspaceAccess(chunk) ?? currentWorkspaceAccess;
-    yield { type: "update", data: chunk };
+    yield { type: 'update', data: chunk };
 
     for (const retry of findModelRetries(chunk)) {
-      yield { type: "model_retry", data: retry };
+      yield { type: 'model_retry', data: retry };
     }
 
     const metrics = findPromptCacheMetrics(chunk);
     if (metrics && currentWorkspaceAccess) {
       yield {
-        type: "cache_metrics",
+        type: 'cache_metrics',
         data: {
           workspaceAccess: currentWorkspaceAccess,
           ...metrics,
@@ -792,14 +828,12 @@ export async function* normalizeGraphStream(
 
     const final = findFinal(chunk);
     if (final) {
-      yield { type: "final", data: final };
+      yield { type: 'final', data: final };
     }
   }
 }
 
-export async function* streamCodeAgent(
-  input: StreamCodeAgentInput,
-): AsyncGenerator<AgentEvent> {
+export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenerator<AgentEvent> {
   const { graph, checkpointer } = buildCodeAgentGraph({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -811,16 +845,17 @@ export async function* streamCodeAgent(
 
   const signal = input.signal;
 
-  let streamCompleted = false;
   try {
-    const initialWorkspaceAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? "auto");
+    const initialWorkspaceAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? 'auto');
     const initialPhase = initialAgentPhaseForAccess(initialWorkspaceAccess);
 
     const prevAuth = await readLastAuthorization(checkpointer, input.threadId);
 
     const stream = await graph.stream(
       {
-        messages: [new HumanMessage(taskMessageForInitialAccess(input.task, initialWorkspaceAccess))],
+        messages: [
+          new HumanMessage(taskMessageForInitialAccess(input.task, initialWorkspaceAccess)),
+        ],
         workspaceAccess: initialWorkspaceAccess,
         phase: initialPhase,
         plan: null,
@@ -837,15 +872,12 @@ export async function* streamCodeAgent(
     );
 
     yield* normalizeGraphStream(stream, signal);
-    streamCompleted = true;
   } finally {
     checkpointer.close();
   }
 }
 
-export async function* resumeCodeAgent(
-  input: ResumeCodeAgentInput,
-): AsyncGenerator<AgentEvent> {
+export async function* resumeCodeAgent(input: ResumeCodeAgentInput): AsyncGenerator<AgentEvent> {
   const { graph, checkpointer } = buildCodeAgentGraph({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -857,7 +889,6 @@ export async function* resumeCodeAgent(
 
   const signal = input.signal;
 
-  let streamCompleted = false;
   try {
     const stream = await graph.stream(
       new Command({ resume: input.resume }),
@@ -865,7 +896,6 @@ export async function* resumeCodeAgent(
     );
 
     yield* normalizeGraphStream(stream, signal);
-    streamCompleted = true;
   } finally {
     checkpointer.close();
   }
@@ -874,17 +904,17 @@ export async function* resumeCodeAgent(
 function graphConfig(threadId: string) {
   return {
     configurable: { thread_id: threadId },
-    streamMode: "updates" as const,
+    streamMode: 'updates' as const,
     recursionLimit: 9999999,
   };
 }
 
 function findFinal(chunk: unknown): string | null {
-  if (!chunk || typeof chunk !== "object") return null;
+  if (!chunk || typeof chunk !== 'object') return null;
   const record = chunk as Record<string, unknown>;
-  for (const key of ["agent", "agent_plan", "agent_build"]) {
+  for (const key of ['agent', 'agent_plan', 'agent_build']) {
     const node = record[key] as { final?: unknown } | undefined;
-    if (typeof node?.final === "string") return node.final;
+    if (typeof node?.final === 'string') return node.final;
   }
   return null;
 }
@@ -892,11 +922,15 @@ function findFinal(chunk: unknown): string | null {
 function findModelRetries(chunk: unknown): ModelRetryEvent[] {
   const all: ModelRetryEvent[] = [];
   for (const value of walkValues(chunk)) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const modelRetries = (value as Record<string, unknown>).modelRetries;
     if (Array.isArray(modelRetries)) {
       for (const item of modelRetries) {
-        if (item && typeof item === "object" && typeof (item as Record<string, unknown>).attempt === "number") {
+        if (
+          item &&
+          typeof item === 'object' &&
+          typeof (item as Record<string, unknown>).attempt === 'number'
+        ) {
           all.push(item as ModelRetryEvent);
         }
       }
@@ -917,7 +951,7 @@ function findPromptCacheMetrics(chunk: unknown) {
 
 function* walkValues(value: unknown): Generator<unknown> {
   yield value;
-  if (!value || typeof value !== "object") return;
+  if (!value || typeof value !== 'object') return;
   if (Array.isArray(value)) {
     for (const item of value) yield* walkValues(item);
     return;
@@ -935,20 +969,22 @@ async function produceFileChange(
   toolName: string,
   workspace?: string,
 ): Promise<void> {
-  const kind = toolName === "write_file" ? "add" as const : "edit" as const;
+  const kind = toolName === 'write_file' ? ('add' as const) : ('edit' as const);
   let linesAdded: number | undefined;
   let linesRemoved: number | undefined;
   let preview: string | undefined;
-  const { resolve } = await import("node:path");
+  const { resolve } = await import('node:path');
   const absolutePath = workspace ? resolve(workspace, path) : path;
   try {
     const s = await statAsync(absolutePath);
     if (s.size <= 1_000_000) {
-      const content = await readFile(absolutePath, "utf-8");
-      const allLines = content.split("\n");
+      const content = await readFile(absolutePath, 'utf-8');
+      const allLines = content.split('\n');
       linesAdded = allLines.length;
       preview = content.slice(0, 1024);
     }
-  } catch { /* no preview on read error */ }
-  events.push({ type: "file_change", data: { path, kind, linesAdded, linesRemoved, preview } });
+  } catch {
+    /* no preview on read error */
+  }
+  events.push({ type: 'file_change', data: { path, kind, linesAdded, linesRemoved, preview } });
 }

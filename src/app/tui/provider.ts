@@ -1,6 +1,6 @@
-import type { AgentEvent } from "@/protocol/events";
-import type { InterruptPayload, UserAction } from "@/protocol/actions";
-import type { UserInputProvider } from "@/protocol/provider";
+import type { InterruptPayload, UserAction } from '@/protocol/actions';
+import type { AgentEvent } from '@/protocol/events';
+import type { UserInputProvider } from '@/protocol/provider';
 
 export class TuiUserInputProvider implements UserInputProvider {
   private dispatch: (event: AgentEvent) => void;
@@ -40,7 +40,7 @@ export class TuiUserInputProvider implements UserInputProvider {
 
   async teardown(): Promise<void> {
     if (this.pendingResolve) {
-      this.pendingResolve({ type: "cancel" });
+      this.pendingResolve({ type: 'cancel' });
       this.pendingResolve = null;
       this.pendingInterrupt = null;
     }
@@ -48,7 +48,7 @@ export class TuiUserInputProvider implements UserInputProvider {
 
   reset(): void {
     if (this.pendingResolve) {
-      this.pendingResolve({ type: "cancel" });
+      this.pendingResolve({ type: 'cancel' });
     }
     this.pendingResolve = null;
     this.pendingInterrupt = null;

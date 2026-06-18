@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 
 /**
  * 定位 vendored apply-seccomp 二进制
@@ -15,13 +15,13 @@ export function findApplySeccomp(): string | null {
 
   const path = join(
     import.meta.dirname,
-    "..",
-    "..",
-    "..",
-    "vendor",
-    "seccomp",
+    '..',
+    '..',
+    '..',
+    'vendor',
+    'seccomp',
     arch,
-    "apply-seccomp",
+    'apply-seccomp',
   );
   if (existsSync(path)) return path;
 
@@ -42,12 +42,12 @@ export function resolveSeccompPath(binary: string | null, workspace: string): st
 
   const rel = relative(workspace, binary);
   // 在工作区内（不含 ../ 逃逸）= 直接可见 / Within workspace, directly visible
-  if (!rel.startsWith("..") && !rel.startsWith(sep)) return binary;
+  if (!rel.startsWith('..') && !rel.startsWith(sep)) return binary;
 
   // 二进制在工作区外，复制到工作区内的 sandbox-tmp
-  const dest = join(workspace, ".sandbox-tmp", "apply-seccomp");
+  const dest = join(workspace, '.sandbox-tmp', 'apply-seccomp');
   if (!existsSync(dest)) {
-    mkdirSync(join(workspace, ".sandbox-tmp"), { recursive: true });
+    mkdirSync(join(workspace, '.sandbox-tmp'), { recursive: true });
     copyFileSync(binary, dest);
     chmodSync(dest, 0o755);
   }
@@ -56,10 +56,10 @@ export function resolveSeccompPath(binary: string | null, workspace: string): st
 
 function getArch(): string | null {
   switch (process.arch) {
-    case "x64":
-      return "x64";
-    case "arm64":
-      return "arm64";
+    case 'x64':
+      return 'x64';
+    case 'arm64':
+      return 'arm64';
     default:
       return null;
   }

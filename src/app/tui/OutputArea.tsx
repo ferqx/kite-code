@@ -1,14 +1,13 @@
-import React, { useRef, type ReactNode } from 'react';
-import { Box, Static } from 'ink';
-import { useInput } from 'ink';
-import type { OutputBlock } from './types';
+import { Box, Static, useInput } from 'ink';
+import React, { type ReactNode, useRef } from 'react';
 import BlockRenderer from './components/BlockRenderer';
 import { blockFingerprint } from './render/useStaticContent';
+import type { OutputBlock } from './types';
 
 export { changePrefix } from './components/BlockRenderer';
 export { toolColor } from './components/render-utils';
-export { useStaticContent, blockFingerprint } from './render/useStaticContent';
 export type { StaticContentResult } from './render/useStaticContent';
+export { blockFingerprint, useStaticContent } from './render/useStaticContent';
 
 interface OutputAreaProps {
   staticItems?: unknown[];
@@ -43,7 +42,7 @@ export default function OutputArea({
   onToggleSubagentExpand,
   overlayActive,
   awaitingApproval,
-  columns
+  columns,
 }: OutputAreaProps) {
   const onToggleReasonRef = useRef(onToggleReason);
   onToggleReasonRef.current = onToggleReason;
@@ -56,10 +55,7 @@ export default function OutputArea({
 
   // Arrow key Enter-to-toggle on the last dynamic block
   useInput(
-    (
-      _input: unknown,
-      key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }
-    ) => {
+    (_input: unknown, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
       const blocks = dynamicBlocksRef.current;
       const last = blocks[blocks.length - 1];
       if (!last) return;
@@ -73,7 +69,7 @@ export default function OutputArea({
         }
       }
     },
-    { isActive: !overlayActive }
+    { isActive: !overlayActive },
   );
 
   return (
@@ -81,7 +77,7 @@ export default function OutputArea({
       <Box height={0} overflow="hidden">
         {staticItems && staticKey && (
           <Static key={staticKey} items={staticItems}>
-            {(item, index) => {
+            {(_item, index) => {
               if (index === 0) {
                 return (
                   <React.Fragment key="header">
@@ -92,8 +88,7 @@ export default function OutputArea({
               }
               const block = mergedStaticBlocks[index - 1];
               if (!block) return null;
-              const prevBlock =
-                index > 1 ? mergedStaticBlocks[index - 2] : undefined;
+              const prevBlock = index > 1 ? mergedStaticBlocks[index - 2] : undefined;
               return (
                 <BlockRenderer
                   key={blockFingerprint(block)}
@@ -110,8 +105,7 @@ export default function OutputArea({
         )}
       </Box>
       {activeDynamicBlocks.map((block, i) => {
-        const prevBlock =
-          i > 0 ? activeDynamicBlocks[i - 1] : mergedStaticBlocks.at(-1);
+        const prevBlock = i > 0 ? activeDynamicBlocks[i - 1] : mergedStaticBlocks.at(-1);
         return (
           <BlockRenderer
             key={block.id}

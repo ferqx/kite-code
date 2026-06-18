@@ -1,12 +1,10 @@
 // src/core/mcp/tool-adapter.ts
-import { tool } from "@langchain/core/tools";
-import { z } from "zod";
-import type { Tool as SdkTool } from "@modelcontextprotocol/sdk/types.js";
-import type { McpManager } from "./manager";
+import { tool } from '@langchain/core/tools';
+import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
+import type { McpManager } from './manager';
 
-const MAX_MCP_OUTPUT_TOKENS = Number(
-  process.env.OPENPX_MCP_MAX_OUTPUT_TOKENS ?? "25000",
-);
+const MAX_MCP_OUTPUT_TOKENS = Number(process.env.OPENPX_MCP_MAX_OUTPUT_TOKENS ?? '25000');
 
 /** JSON Schema definition shape (simplified subset) */
 export interface JsonSchemaDef {
@@ -33,43 +31,35 @@ export function jsonSchemaToZod(schema: JsonSchemaDef): z.ZodType {
     // Zod enum requires at least one string element
     const values = schema.enum.map(String) as [string, ...string[]];
     const zodEnum = z.enum(values);
-    return schema.description
-      ? zodEnum.describe(schema.description)
-      : zodEnum;
+    return schema.description ? zodEnum.describe(schema.description) : zodEnum;
   }
 
   switch (schema.type) {
-    case "string": {
+    case 'string': {
       const s = z.string();
       return schema.description ? s.describe(schema.description) : s;
     }
-    case "number": {
+    case 'number': {
       const n = z.number();
       return schema.description ? n.describe(schema.description) : n;
     }
-    case "integer": {
+    case 'integer': {
       const n = z.number().int();
       return schema.description ? n.describe(schema.description) : n;
     }
-    case "boolean": {
+    case 'boolean': {
       const b = z.boolean();
       return schema.description ? b.describe(schema.description) : b;
     }
-    case "array": {
-      const itemSchema = schema.items
-        ? jsonSchemaToZod(schema.items)
-        : z.any();
+    case 'array': {
+      const itemSchema = schema.items ? jsonSchemaToZod(schema.items) : z.any();
       const arr = z.array(itemSchema);
-      return schema.description
-        ? arr.describe(schema.description)
-        : arr;
+      return schema.description ? arr.describe(schema.description) : arr;
     }
-    case "object": {
+    case 'object': {
       if (!schema.properties) {
         const obj = z.object({}).passthrough();
-        return schema.description
-          ? obj.describe(schema.description)
-          : obj;
+        return schema.description ? obj.describe(schema.description) : obj;
       }
       const required = new Set(schema.required ?? []);
       const shape: Record<string, z.ZodType> = {};
@@ -78,9 +68,7 @@ export function jsonSchemaToZod(schema: JsonSchemaDef): z.ZodType {
         shape[key] = required.has(key) ? zodProp : zodProp.optional();
       }
       const obj = z.object(shape);
-      return schema.description
-        ? obj.describe(schema.description)
-        : obj;
+      return schema.description ? obj.describe(schema.description) : obj;
     }
     default: {
       // Unsupported or absent type -> any
@@ -96,9 +84,9 @@ export function jsonSchemaToZod(schema: JsonSchemaDef): z.ZodType {
  * Splits on the first two "__" after the "mcp" prefix, so tool names containing "__" are preserved.
  */
 export function parseMcpToolName(name: string): { serverName: string; toolName: string } | null {
-  if (!name.startsWith("mcp__")) return null;
+  if (!name.startsWith('mcp__')) return null;
   const rest = name.slice(5); // remove "mcp__"
-  const sepIndex = rest.indexOf("__");
+  const sepIndex = rest.indexOf('__');
   if (sepIndex < 0) return null;
   return {
     serverName: rest.slice(0, sepIndex),
@@ -110,11 +98,7 @@ export function parseMcpToolName(name: string): { serverName: string; toolName: 
  * Adapt an MCP SDK Tool to a LangChain StructuredTool.
  * Tool name format: mcp__<serverName>__<toolName>
  */
-export function adaptMcpTool(
-  serverName: string,
-  mcpTool: SdkTool,
-  manager: McpManager,
-) {
+export function adaptMcpTool(serverName: string, mcpTool: SdkTool, manager: McpManager) {
   const toolName = `mcp__${serverName}__${mcpTool.name}`;
   const inputSchema = mcpTool.inputSchema as unknown as JsonSchemaDef;
   const zodSchema = jsonSchemaToZod(inputSchema);

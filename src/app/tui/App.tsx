@@ -1,29 +1,28 @@
-import React, { useReducer, useCallback, useMemo, useRef, type Dispatch, type ReactNode } from "react";
-import { Box, Text, useWindowSize } from "ink";
-import { ScrollList } from "ink-scroll-list";
-import type { McpManager } from "@/core/mcp";
-import type { TuiState } from "./types";
-import OutputArea, { useStaticContent } from "./OutputArea";
-import ApprovalBlock from "./components/ApprovalBlock";
-import InputBlock from "./components/InputBlock";
-import HelpPanel from "./components/HelpPanel";
-import McpPanel from "./components/McpPanel";
-import CheckpointSelector from "./components/CheckpointSelector";
-import ModelSelector from "./components/ModelSelector";
-import SessionSelector from "./components/SessionSelector.js";
-
-import Header from "./Header";
-import Footer from "./Footer";
-import { useGlobalKeys } from "./hooks/useGlobalKeys";
-import { useTheme } from "./theme";
-import { useOverlayHeight } from "./hooks/useOverlayHeight";
+import { Box, Text, useWindowSize } from 'ink';
+import { ScrollList } from 'ink-scroll-list';
+import React, { type Dispatch, type ReactNode, useCallback, useMemo, useReducer } from 'react';
+import type { McpManager } from '@/core/mcp';
+import ApprovalBlock from './components/ApprovalBlock';
+import CheckpointSelector from './components/CheckpointSelector';
+import HelpPanel from './components/HelpPanel';
+import InputBlock from './components/InputBlock';
+import McpPanel from './components/McpPanel';
+import ModelSelector from './components/ModelSelector';
+import SessionSelector from './components/SessionSelector.js';
+import Footer from './Footer';
+import Header from './Header';
+import { useGlobalKeys } from './hooks/useGlobalKeys';
+import { useOverlayHeight } from './hooks/useOverlayHeight';
+import OutputArea, { useStaticContent } from './OutputArea';
+import { useTheme } from './theme';
+import type { TuiState } from './types';
 
 const MemoHeader = React.memo(Header);
 
-import { eventReducer, type Action } from './reducers';
-export { eventReducer };
-export type { Action } from './reducers';
+import { type Action, eventReducer } from './reducers';
 
+export type { Action } from './reducers';
+export { eventReducer };
 
 const initialState: TuiState = {
   sessions: [],
@@ -32,18 +31,18 @@ const initialState: TuiState = {
   nextBlockId: 1,
   interrupt: null,
   status: {
-    phase: "building",
+    phase: 'building',
     plan: null,
-    authorization: "default",
-    workspaceAccess: "write",
+    authorization: 'default',
+    workspaceAccess: 'write',
     cacheHitTokens: 0,
     cacheMissTokens: 0,
     cacheHitRate: 0,
     totalTokens: 0,
     currentNode: null,
-    modelProvider: "",
-    modelName: "deepseek-v4",
-    thinkingMode: "max",
+    modelProvider: '',
+    modelName: 'deepseek-v4',
+    thinkingMode: 'max',
     retryState: null,
   },
   exited: false,
@@ -75,16 +74,19 @@ export interface AppProps {
   state: TuiState;
   dispatch: Dispatch<Action>;
   onToggleReason: (id: number) => void;
-  provider: import("./provider").TuiUserInputProvider;
+  provider: import('./provider').TuiUserInputProvider;
   mcpManager?: McpManager;
-  availableModels?: import("@/core/config").AvailableModel[];
-  slashSuggestion?: import("./components/InputLine").SlashSuggestionData | null;
+  availableModels?: import('@/core/config').AvailableModel[];
+  slashSuggestion?: import('./components/InputLine').SlashSuggestionData | null;
   resizeGeneration?: number;
   children?: ReactNode;
 }
 
-export function useTuiState(initialModelName?: string, initialProviderName?: string): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
-  const statusOverrides: Partial<TuiState["status"]> = {};
+export function useTuiState(
+  initialModelName?: string,
+  initialProviderName?: string,
+): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
+  const statusOverrides: Partial<TuiState['status']> = {};
   if (initialModelName) statusOverrides.modelName = initialModelName;
   if (initialProviderName) statusOverrides.modelProvider = initialProviderName;
   const hasOverrides = Object.keys(statusOverrides).length > 0;
@@ -92,40 +94,73 @@ export function useTuiState(initialModelName?: string, initialProviderName?: str
     ? { ...initialState, status: { ...initialState.status, ...statusOverrides } }
     : initialState;
   const [state, dispatch] = useReducer(eventReducer, initState);
-  const onToggleReason = useCallback((id: number) => dispatch({ type: "TOGGLE_REASON", id }), [dispatch]);
+  const onToggleReason = useCallback((id: number) => dispatch({ type: 'TOGGLE_REASON', id }), []);
   return { state, dispatch, onToggleReason };
 }
 
-export default function App({ state, dispatch, onToggleReason, provider, mcpManager, slashSuggestion, resizeGeneration, children }: AppProps) {
+export default function App({
+  state,
+  dispatch,
+  onToggleReason,
+  provider,
+  mcpManager,
+  slashSuggestion,
+  resizeGeneration,
+  children,
+}: AppProps) {
   const theme = useTheme();
   const slashMaxHeight = useOverlayHeight(7);
   const { columns } = useWindowSize();
-  const overlayOrInterrupt = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind || !!state.interrupt;
+  const overlayOrInterrupt =
+    state.showHelp ||
+    state.showModelSelector ||
+    state.showSessions ||
+    state.showMcp ||
+    state.showRewind ||
+    !!state.interrupt;
   useGlobalKeys(dispatch, overlayOrInterrupt);
 
   // Stabilized callbacks for React.memo children
-  const hideHelp = useCallback(() => dispatch({ type: "HIDE_HELP" }), [dispatch]);
-  const hideModelSelector = useCallback(() => dispatch({ type: "HIDE_MODEL_SELECTOR" }), [dispatch]);
-  const selectModel = useCallback((modelId: string) => dispatch({ type: "SELECT_MODEL", modelId }), [dispatch]);
-  const hideSessions = useCallback(() => dispatch({ type: "HIDE_SESSIONS" }), [dispatch]);
-  const hideMcp = useCallback(() => dispatch({ type: "HIDE_MCP" }), [dispatch]);
-  const hideRewind = useCallback(() => dispatch({ type: "HIDE_REWIND" }), [dispatch]);
-  const handleRevert = useCallback((checkpointId: string) => dispatch({ type: "REVERT_TO_CHECKPOINT", checkpointId }), [dispatch]);
-  const handleFork = useCallback((checkpointId: string) => dispatch({ type: "FORK_FROM_CHECKPOINT", checkpointId }), [dispatch]);
-  const onToggleToolExpand = useCallback((id: number) => dispatch({ type: "TOGGLE_TOOL_EXPAND", id }), [dispatch]);
-  const onToggleSubagentExpand = useCallback((id: number) => dispatch({ type: "TOGGLE_SUBAGENT_EXPAND", id }), [dispatch]);
+  const hideHelp = useCallback(() => dispatch({ type: 'HIDE_HELP' }), [dispatch]);
+  const hideModelSelector = useCallback(
+    () => dispatch({ type: 'HIDE_MODEL_SELECTOR' }),
+    [dispatch],
+  );
+  const selectModel = useCallback(
+    (modelId: string) => dispatch({ type: 'SELECT_MODEL', modelId }),
+    [dispatch],
+  );
+  const hideSessions = useCallback(() => dispatch({ type: 'HIDE_SESSIONS' }), [dispatch]);
+  const hideMcp = useCallback(() => dispatch({ type: 'HIDE_MCP' }), [dispatch]);
+  const hideRewind = useCallback(() => dispatch({ type: 'HIDE_REWIND' }), [dispatch]);
+  const handleRevert = useCallback(
+    (checkpointId: string) => dispatch({ type: 'REVERT_TO_CHECKPOINT', checkpointId }),
+    [dispatch],
+  );
+  const handleFork = useCallback(
+    (checkpointId: string) => dispatch({ type: 'FORK_FROM_CHECKPOINT', checkpointId }),
+    [dispatch],
+  );
+  const onToggleToolExpand = useCallback(
+    (id: number) => dispatch({ type: 'TOGGLE_TOOL_EXPAND', id }),
+    [dispatch],
+  );
+  const onToggleSubagentExpand = useCallback(
+    (id: number) => dispatch({ type: 'TOGGLE_SUBAGENT_EXPAND', id }),
+    [dispatch],
+  );
   const selectSession = useCallback(
     (threadId: string) => {
       // 派发 SWITCH_SESSION，由 dispatchSessionLoad 拦截器判断：
       // - dormancy → 重定向到 LOAD_SESSION_PENDING（从 DB 加载）
       // - 非 dormancy → 内存切换 + 缓冲事件回放
-      dispatch({ type: "SWITCH_SESSION", threadId });
+      dispatch({ type: 'SWITCH_SESSION', threadId });
     },
     [dispatch],
   );
   const deleteSessionAction = useCallback(
     (threadId: string) => {
-      dispatch({ type: "DELETE_SESSION", threadId });
+      dispatch({ type: 'DELETE_SESSION', threadId });
     },
     [dispatch],
   );
@@ -133,28 +168,32 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
   const interruptBlock = useMemo(() => {
     if (!state.interrupt) return undefined;
     for (const turn of state.turns) {
-      const found = turn.blocks.find((b) => b.id === state.interrupt!.blockId);
+      const found = turn.blocks.find((b) => b.id === state.interrupt?.blockId);
       if (found) return found;
     }
     return undefined;
   }, [state.interrupt, state.turns]);
 
-  const awaitingApproval = state.interrupt?.kind === "approval";
+  const awaitingApproval = state.interrupt?.kind === 'approval';
 
   const resolveApproval = useCallback(
     (action: string, grant?: string, pattern?: string) => {
       if (!interruptBlock) return;
-      dispatch({ type: "RESOLVE_INTERRUPT", blockId: interruptBlock.id, resolution: { action, grant, pattern } });
+      dispatch({
+        type: 'RESOLVE_INTERRUPT',
+        blockId: interruptBlock.id,
+        resolution: { action, grant, pattern },
+      });
     },
-    [dispatch, interruptBlock]
+    [dispatch, interruptBlock],
   );
 
   const resolveInput = useCallback(
     (answer: string) => {
       if (!interruptBlock) return;
-      dispatch({ type: "RESOLVE_INTERRUPT", blockId: interruptBlock.id, resolution: answer });
+      dispatch({ type: 'RESOLVE_INTERRUPT', blockId: interruptBlock.id, resolution: answer });
     },
-    [dispatch, interruptBlock]
+    [dispatch, interruptBlock],
   );
 
   // ── Static content computation ──
@@ -165,7 +204,13 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
     [state.running, state.sessionError],
   );
 
-  const { staticItems, staticKey, header: staticHeader, mergedStaticBlocks, activeDynamicBlocks } = useStaticContent({
+  const {
+    staticItems,
+    staticKey,
+    header: staticHeader,
+    mergedStaticBlocks,
+    activeDynamicBlocks,
+  } = useStaticContent({
     turns: state.turns,
     running: state.running,
     sessionKey: state.sessionKey,
@@ -173,41 +218,42 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
     resizeGeneration,
   });
 
-  const overlayActive = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind;
+  const overlayActive =
+    state.showHelp ||
+    state.showModelSelector ||
+    state.showSessions ||
+    state.showMcp ||
+    state.showRewind;
 
   return (
     <Box flexDirection="column">
       {/* ── Body: OutputArea ── */}
-        <OutputArea
-          staticItems={staticItems}
-          staticKey={staticKey}
-          staticHeader={staticHeader}
-          activeDynamicBlocks={activeDynamicBlocks}
-          mergedStaticBlocks={mergedStaticBlocks}
-          onToggleReason={onToggleReason}
-          onToggleToolExpand={onToggleToolExpand}
-          onToggleSubagentExpand={onToggleSubagentExpand}
-          overlayActive={overlayActive}
-          awaitingApproval={awaitingApproval}
-          columns={columns}
-        />
+      <OutputArea
+        staticItems={staticItems}
+        staticKey={staticKey}
+        staticHeader={staticHeader}
+        activeDynamicBlocks={activeDynamicBlocks}
+        mergedStaticBlocks={mergedStaticBlocks}
+        onToggleReason={onToggleReason}
+        onToggleToolExpand={onToggleToolExpand}
+        onToggleSubagentExpand={onToggleSubagentExpand}
+        overlayActive={overlayActive}
+        awaitingApproval={awaitingApproval}
+        columns={columns}
+      />
 
       {/* ── Footer: 3-row interaction zone ── */}
-      <Footer
-        status={state.status}
-        running={state.running}
-        timerKey={state.runCount}
-      >
+      <Footer status={state.status} running={state.running} timerKey={state.runCount}>
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}
         {!state.interrupt && children}
-        {interruptBlock?.kind === "approval" && !interruptBlock.resolved && (
+        {interruptBlock?.kind === 'approval' && !interruptBlock.resolved && (
           <ApprovalBlock
             approval={interruptBlock.approval}
             provider={provider}
             onResolved={resolveApproval}
           />
         )}
-        {interruptBlock?.kind === "question" && !interruptBlock.resolved && (
+        {interruptBlock?.kind === 'question' && !interruptBlock.resolved && (
           <InputBlock
             question={interruptBlock.question}
             provider={provider}
@@ -234,9 +280,7 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
           onClose={hideModelSelector}
         />
       )}
-      {state.showMcp && mcpManager && (
-        <McpPanel manager={mcpManager} onClose={hideMcp} />
-      )}
+      {state.showMcp && mcpManager && <McpPanel manager={mcpManager} onClose={hideMcp} />}
       {state.showRewind && (
         <CheckpointSelector
           checkpoints={state.checkpoints}
@@ -245,46 +289,52 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
           onClose={hideRewind}
         />
       )}
-      {slashSuggestion && (() => {
-        const listHeight = Math.max(3, slashMaxHeight - 2);
-        return (
-        <Box flexDirection="column" borderStyle="round" borderColor={theme.primary} paddingX={1} marginTop={1}>
-          <Text bold color={theme.primary}>
-            {slashSuggestion.kind === "model"
-              ? `模型匹配 "${slashSuggestion.partial}"`
-              : slashSuggestion.kind === "effort"
-              ? `推理深度匹配 "${slashSuggestion.partial}"`
-              : slashSuggestion.kind === "theme"
-              ? `主题匹配 "${slashSuggestion.partial}"`
-              : `命令匹配 /${slashSuggestion.partial}`}
-          </Text>
-          <Box height={Math.min(slashSuggestion.items.length, listHeight)}>
-            <ScrollList selectedIndex={slashSuggestion.selectedIndex} scrollAlignment="auto">
-              {slashSuggestion.items.map((item, i) => {
-                const isSelected = i === slashSuggestion.selectedIndex;
-                const aliasStr =
-                  slashSuggestion.kind === "command" && item.aliases.length > 0
-                    ? ` (${item.aliases.join(", ")})`
-                    : "";
-                const argsStr = item.args ? ` ${item.args}` : "";
-                return (
-                  <Box key={item.command}>
-                    <Text color={isSelected ? theme.primary : theme.muted}>
-                      {isSelected ? "❯ " : "  "}/{item.command}{argsStr}
-                    </Text>
-                    <Text color={theme.dim}>{aliasStr}</Text>
-                    {item.description && (
-                      <Text color={theme.dim}> — {item.description}</Text>
-                    )}
-                  </Box>
-                );
-              })}
-            </ScrollList>
-          </Box>
-          <Text color={theme.dim}>↑↓ 导航  Tab/→ 补全  Enter 提交  Esc 关闭</Text>
-        </Box>
-        );
-      })()}
+      {slashSuggestion &&
+        (() => {
+          const listHeight = Math.max(3, slashMaxHeight - 2);
+          return (
+            <Box
+              flexDirection="column"
+              borderStyle="round"
+              borderColor={theme.primary}
+              paddingX={1}
+              marginTop={1}
+            >
+              <Text bold color={theme.primary}>
+                {slashSuggestion.kind === 'model'
+                  ? `模型匹配 "${slashSuggestion.partial}"`
+                  : slashSuggestion.kind === 'effort'
+                    ? `推理深度匹配 "${slashSuggestion.partial}"`
+                    : slashSuggestion.kind === 'theme'
+                      ? `主题匹配 "${slashSuggestion.partial}"`
+                      : `命令匹配 /${slashSuggestion.partial}`}
+              </Text>
+              <Box height={Math.min(slashSuggestion.items.length, listHeight)}>
+                <ScrollList selectedIndex={slashSuggestion.selectedIndex} scrollAlignment="auto">
+                  {slashSuggestion.items.map((item, i) => {
+                    const isSelected = i === slashSuggestion.selectedIndex;
+                    const aliasStr =
+                      slashSuggestion.kind === 'command' && item.aliases.length > 0
+                        ? ` (${item.aliases.join(', ')})`
+                        : '';
+                    const argsStr = item.args ? ` ${item.args}` : '';
+                    return (
+                      <Box key={item.command}>
+                        <Text color={isSelected ? theme.primary : theme.muted}>
+                          {isSelected ? '❯ ' : '  '}/{item.command}
+                          {argsStr}
+                        </Text>
+                        <Text color={theme.dim}>{aliasStr}</Text>
+                        {item.description && <Text color={theme.dim}> — {item.description}</Text>}
+                      </Box>
+                    );
+                  })}
+                </ScrollList>
+              </Box>
+              <Text color={theme.dim}>↑↓ 导航 Tab/→ 补全 Enter 提交 Esc 关闭</Text>
+            </Box>
+          );
+        })()}
     </Box>
   );
 }

@@ -1,49 +1,47 @@
-import { AIMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
-import { ChatOllama } from "@langchain/ollama";
-import {
-  START,
-  StateGraph,
-  interrupt,
-} from "@langchain/langgraph";
-import type { AgentConfig } from "@/core/config/index";
-import {
-  prepareModelContext,
-  sanitizeToolCallPairs,
-} from "@/core/model/context";
-import { createChatModel, type SupportedChatModel } from "@/core/model/factory";
-import { type ModelRetryListener, type RetryListenerHost } from "@/core/model/deepseek";
-import { BunSqliteSaver } from "@/core/persistence/checkpoint";
-import type { ShellApprovalGrant } from "@/protocol/events";
-import type { AgentResumeValue, AuthorizationOverride, ModelRetryEvent, ThreadAuthorizationState } from "@/core/types";
-import { createAgentTools } from "@/core/tools/definitions";
-import type { ShellExecutor } from "@/core/tools/shell";
-import type { McpManager } from "@/core/mcp";
+import { type AIMessage, ToolMessage } from '@langchain/core/messages';
+import { interrupt, START, StateGraph } from '@langchain/langgraph';
+import { ChatOllama } from '@langchain/ollama';
+import type { AgentConfig } from '@/core/config/index';
+import type { McpManager } from '@/core/mcp';
+import { prepareModelContext, sanitizeToolCallPairs } from '@/core/model/context';
+import type { ModelRetryListener, RetryListenerHost } from '@/core/model/deepseek';
+import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
+import { BunSqliteSaver } from '@/core/persistence/checkpoint';
+import { createTaskTool } from '@/core/subagent/task-tool';
+import { createAgentTools } from '@/core/tools/definitions';
+import type { ShellExecutor } from '@/core/tools/shell';
+import type {
+  AgentResumeValue,
+  AuthorizationOverride,
+  ModelRetryEvent,
+  ThreadAuthorizationState,
+} from '@/core/types';
+import type { ShellApprovalGrant } from '@/protocol/events';
 import {
   routeAfterAgent,
   routeAfterApproval,
   routeAfterTools,
   routeAfterUserInput,
   routeEntry,
-} from "./routes";
-import { AgentState, type CodeAgentState } from "./state";
+} from './routes';
+import { AgentState, type CodeAgentState } from './state';
+import {
+  applyApprovalGrant,
+  buildToolApproval,
+  defaultPhaseForWorkspaceAccess,
+  evaluateToolPolicy,
+  normalizeAuthorizationState,
+  replaceApprovalCommand,
+  validateApprovalHash,
+} from './tool-policy';
 import {
   getAllPendingToolRequests,
   getPendingToolRequest,
   messageText,
   toolRequestFromMessage,
-} from "./tool-requests";
-import {
-  buildToolApproval,
-  defaultPhaseForWorkspaceAccess,
-  evaluateToolPolicy,
-  applyApprovalGrant,
-  normalizeAuthorizationState,
-  replaceApprovalCommand,
-  validateApprovalHash,
-} from "./tool-policy";
-import { runApprovedTool } from "./tool-runner";
-import { userInputToolMessage } from "./user-input";
-import { createTaskTool } from "@/core/subagent/task-tool";
+} from './tool-requests';
+import { runApprovedTool } from './tool-runner';
+import { userInputToolMessage } from './user-input';
 
 /** 构建代码 Agent 图的输入 / Build code agent graph input */
 export interface BuildCodeAgentGraphInput {
@@ -62,32 +60,44 @@ export interface BuildCodeAgentGraphInput {
   /** 可选 MCP 管理器 / Optional MCP manager */
   mcpManager?: McpManager;
   /** 可选技能清单 / Optional skill manifests */
-  skills?: import("@/core/skills/types").SkillManifest[];
+  skills?: import('@/core/skills/types').SkillManifest[];
   /** 可选技能扫描选项 / Optional skill scan options */
-  skillOptions?: import("@/core/skills/types").SkillScanOptions;
+  skillOptions?: import('@/core/skills/types').SkillScanOptions;
   /** 子 agent 事件回调 */
-  subagentEventSink?: import("@/core/subagent/types").SubAgentEventSink;
+  subagentEventSink?: import('@/core/subagent/types').SubAgentEventSink;
   /** 子 agent 中止信号 */
   subagentSignal?: AbortSignal;
   /** 工具完成回调 — 每个工具执行完立即调用，不等 Promise.all 整体返回。
    *  使 TUI 能在工具并行执行期间逐项展示完成状态，而非等全部结束后一起刷新。
    *  Per-tool completion callback — called as each tool finishes during
    *  Promise.all, so the TUI shows progressive completion. */
-  toolResultSink?: (callId: string, toolName: string, ok: boolean, summary: string, totalLines?: number, toolTokenCount?: number) => void;
+  toolResultSink?: (
+    callId: string,
+    toolName: string,
+    ok: boolean,
+    summary: string,
+    totalLines?: number,
+    toolTokenCount?: number,
+  ) => void;
 }
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
 export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
-  const model = input.model ?? createChatModel({ ...input.config, reasoningEffort: input.thinkingLevel ?? input.config.reasoningEffort ?? null });
+  const model =
+    input.model ??
+    createChatModel({
+      ...input.config,
+      reasoningEffort: input.thinkingLevel ?? input.config.reasoningEffort ?? null,
+    });
   const checkpointer = new BunSqliteSaver(input.checkpointPath);
   const override = input.authorizationOverride;
 
   // Build MCP risk override map from server configs
-  const mcpRiskOverride: Record<string, "read"> = {};
+  const mcpRiskOverride: Record<string, 'read'> = {};
   if (input.mcpManager) {
     for (const [name, state] of input.mcpManager.getServerStates()) {
-      if (state.config.risk === "read") {
-        mcpRiskOverride[name] = "read";
+      if (state.config.risk === 'read') {
+        mcpRiskOverride[name] = 'read';
       }
     }
   }
@@ -96,9 +106,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const agent = async (state: CodeAgentState) => {
     // 防御层：resume 后清理因 interrupt 产生的孤儿 tool_call/ToolMessage 配对 / Defense: clean up orphaned tool_call/ToolMessage pairs after resume
     const sanitizedMessages = sanitizeToolCallPairs(state.messages);
-    const sanitizedState = sanitizedMessages !== state.messages
-      ? { ...state, messages: sanitizedMessages }
-      : state;
+    const sanitizedState =
+      sanitizedMessages !== state.messages ? { ...state, messages: sanitizedMessages } : state;
     const tools = createAgentTools({
       workspace: state.workspace,
       shellExecutor: input.shellExecutor,
@@ -117,16 +126,22 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       retryEvents.push({
         attempt,
         maxAttempts,
-        error: typeof error === "string" ? error : String(error).slice(0, 200),
+        error: typeof error === 'string' ? error : String(error).slice(0, 200),
         delayMs,
       });
     };
     if (hasRetryListener(model)) model.setRetryListener(listener);
 
-    let effectiveState = sanitizedState;
+    const effectiveState = sanitizedState;
 
     try {
-      const { state: result } = await invokeModel({ model, state: effectiveState, tools, skills: input.skills, signal: input.subagentSignal });
+      const { state: result } = await invokeModel({
+        model,
+        state: effectiveState,
+        tools,
+        skills: input.skills,
+        signal: input.subagentSignal,
+      });
       const syncedAuth = authorizationForState(state, override);
       const modelConfigState = {
         modelProvider: input.config.providerName,
@@ -134,7 +149,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         thinkingLevel: input.thinkingLevel ?? null,
       };
       if (retryEvents.length > 0) {
-        return { ...result, ...modelConfigState, authorization: syncedAuth, modelRetries: retryEvents };
+        return {
+          ...result,
+          ...modelConfigState,
+          authorization: syncedAuth,
+          modelRetries: retryEvents,
+        };
       }
       return { ...result, ...modelConfigState, authorization: syncedAuth };
     } finally {
@@ -145,28 +165,31 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   /** 审批节点：中断等待人工批准，支持批量积累 / Approval node with batch accumulation */
   const approval = async (state: CodeAgentState) => {
     const batch = { ...state.approvedBatch };
-    const hasFullAccess = Object.values(batch).some((g) => g === "full_access");
+    const hasFullAccess = Object.values(batch).some((g) => g === 'full_access');
 
     // 查找第一个尚未审批的待处理工具（跳过已在 batch 中的）
     const allPending = getAllPendingToolRequests(state.messages, state.workspace);
     let request: ReturnType<typeof getPendingToolRequest> = null;
     for (const r of allPending) {
-      if (r.id && !batch[r.id]) { request = r; break; }
+      if (r.id && !batch[r.id]) {
+        request = r;
+        break;
+      }
     }
 
-    if (!request || !request.id) {
+    if (!request?.id) {
       return {};
     }
 
     // full_access 已授权 → 自动批准剩余所有工具 / full_access already granted → auto-approve all remaining
     if (hasFullAccess) {
       for (const r of allPending) {
-        if (r.id) batch[r.id] = "full_access";
+        if (r.id) batch[r.id] = 'full_access';
       }
       return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
     }
 
-    const workspaceAccess = state.workspaceAccess ?? "write";
+    const workspaceAccess = state.workspaceAccess ?? 'write';
     const policy = evaluateToolPolicy({
       request,
       workspaceAccess,
@@ -181,7 +204,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     // 不需要审批的工具（如 read_file）→ 标记为 auto-pass 并直接返回
     // Non-approval tools (e.g. read_file) → mark as auto-pass and return
     if (!policy.requiresApproval) {
-      if (request.id) batch[request.id] = "approve_once";
+      if (request.id) batch[request.id] = 'approve_once';
       return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
     }
 
@@ -193,21 +216,23 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     });
 
     const approved = interrupt({
-      kind: "tool_approval",
+      kind: 'tool_approval',
       request,
       policy,
       approval: approvalPayload,
-    }) as boolean | {
-      approved?: boolean;
-      grant?: ShellApprovalGrant;
-      approvalHash?: string;
-      replacementCommand?: string;
-      reason?: string;
-    };
+    }) as
+      | boolean
+      | {
+          approved?: boolean;
+          grant?: ShellApprovalGrant;
+          approvalHash?: string;
+          replacementCommand?: string;
+          reason?: string;
+        };
     const approvalGrant = approvalGrantFromResume(approved);
     const allowed =
       approved === true ||
-      (typeof approved === "object" &&
+      (typeof approved === 'object' &&
         approved !== null &&
         (approved.approved === true ||
           (approved.approved === undefined && approvalGrant !== null)) &&
@@ -216,41 +241,36 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     if (!allowed) {
       const hashMismatch =
-        typeof approved === "object" &&
+        typeof approved === 'object' &&
         approved !== null &&
         approved.approvalHash !== undefined &&
         !validateApprovalHash(approved, approvalPayload.approvalHash);
       return {
-        ...rejectedToolMessage(request,
+        ...rejectedToolMessage(
+          request,
           hashMismatch
-            ? "approved request does not match current tool request"
-            : typeof approved === "object" && approved !== null
-              ? approved.reason ?? "not approved"
-              : "not approved",
+            ? 'approved request does not match current tool request'
+            : typeof approved === 'object' && approved !== null
+              ? (approved.reason ?? 'not approved')
+              : 'not approved',
         ),
         approvedBatch: batch,
       };
     }
 
     let approvedRequest = request;
-    if (
-      typeof approved === "object" &&
-      approved !== null &&
-      approved.replacementCommand
-    ) {
+    if (typeof approved === 'object' && approved !== null && approved.replacementCommand) {
       try {
         approvedRequest = replaceApprovalCommand(request, approved.replacementCommand);
       } catch (error) {
         return {
-          ...rejectedToolMessage(request,
-            error instanceof Error ? error.message : String(error),
-          ),
+          ...rejectedToolMessage(request, error instanceof Error ? error.message : String(error)),
           approvedBatch: batch,
         };
       }
     }
 
-    const grant = approvalGrant ?? "approve_once";
+    const grant = approvalGrant ?? 'approve_once';
     const nextAuthorization = applyApprovalGrant({
       authorization: state.authorization,
       grant,
@@ -269,20 +289,22 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     });
     if (!approvedPolicy.allowed) {
       return {
-        ...rejectedToolMessage(request,
+        ...rejectedToolMessage(
+          request,
           `approved command rejected by tool policy: ${approvedPolicy.reason}`,
         ),
         approvedBatch: batch,
       };
     }
 
-    if (approvedRequest.id) batch[approvedRequest.id] = grant as "approve_once" | "same_command" | "full_access";
+    if (approvedRequest.id)
+      batch[approvedRequest.id] = grant as 'approve_once' | 'same_command' | 'full_access';
 
     // full_access → auto-approve all remaining in batch
-    if (grant === "full_access") {
+    if (grant === 'full_access') {
       const allPending = getAllPendingToolRequests(state.messages, state.workspace);
       for (const r of allPending) {
-        if (r.id && !batch[r.id]) batch[r.id] = "full_access";
+        if (r.id && !batch[r.id]) batch[r.id] = 'full_access';
       }
     }
 
@@ -298,12 +320,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const userInput = async (state: CodeAgentState) => {
     const request = getPendingToolRequest(state.messages, state.workspace);
 
-    if (!request || request.name !== "ask_user") {
+    if (request?.name !== 'ask_user') {
       return {};
     }
 
     const resume = interrupt({
-      kind: "user_input",
+      kind: 'user_input',
       request,
     }) as AgentResumeValue;
 
@@ -314,12 +336,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
   /** 执行单个工具调用并返回 ToolMessage / Execute a single tool call and return ToolMessage */
   async function executeOneTool(
-    request: import("./tool-requests").PendingToolRequest,
+    request: import('./tool-requests').PendingToolRequest,
     state: CodeAgentState,
     grantUsed: string,
   ): Promise<{ toolMessage: ToolMessage; extra: Record<string, unknown> }> {
     // Handle task tool (sub-agent dispatch)
-    if (request.name === "task" && input.subagentEventSink) {
+    if (request.name === 'task' && input.subagentEventSink) {
       try {
         const taskTool = createTaskTool({
           config: input.config,
@@ -334,13 +356,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         });
         const toolOutput = await taskTool.invoke(request.args);
         let taskOk = true;
-        try { const p = JSON.parse(toolOutput); taskOk = p.ok !== false; } catch {}
+        try {
+          const p = JSON.parse(toolOutput);
+          taskOk = p.ok !== false;
+        } catch {}
         return {
           toolMessage: new ToolMessage({
             content: toolOutput,
-            tool_call_id: request.id ?? "missing-tool-call-id",
+            tool_call_id: request.id ?? 'missing-tool-call-id',
             name: request.name,
-            status: taskOk ? "success" : "error",
+            status: taskOk ? 'success' : 'error',
           }),
           extra: {},
         };
@@ -349,9 +374,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         return {
           toolMessage: new ToolMessage({
             content: JSON.stringify({ ok: false, error: errorMsg }),
-            tool_call_id: request.id ?? "missing-tool-call-id",
+            tool_call_id: request.id ?? 'missing-tool-call-id',
             name: request.name,
-            status: "error",
+            status: 'error',
           }),
           extra: {},
         };
@@ -365,7 +390,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       workspaceAccess: state.workspaceAccess,
       phase: state.phase,
       authorization: state.authorization,
-      approvedGrant: grantUsed as import("@/protocol/events").ShellGrantUsed,
+      approvedGrant: grantUsed as import('@/protocol/events').ShellGrantUsed,
       threadId: state.threadId,
       override,
       mcpManager: input.mcpManager,
@@ -378,26 +403,27 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     // 逐个推送完成事件，TUI 在并行执行期间逐项刷新 / Push completion
     // event per-tool so TUI refreshes progressively during parallel execution.
     input.toolResultSink?.(
-      request.id ?? "",
+      request.id ?? '',
       request.name,
       result.ok !== false,
-      (result.stdout || result.stderr || "").slice(0, 200),
+      (result.stdout || result.stderr || '').slice(0, 200),
       result.totalLines,
       undefined, // toolTokenCount computed in runner's parseToolResultEvents
     );
 
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
-      tool_call_id: request.id ?? "missing-tool-call-id",
+      tool_call_id: request.id ?? 'missing-tool-call-id',
       name: request.name,
-      status: result.ok === false ? "error" : "success",
+      status: result.ok === false ? 'error' : 'success',
     });
 
     const extra: Record<string, unknown> = {};
-    if ("plan" in result) extra.plan = result.plan;
-    if ("workspaceAccess" in result) extra.workspaceAccess = result.workspaceAccess;
-    if ("authorization" in result) extra.authorization = result.authorization;
-    if ("activeSkillInstructions" in result) extra.activeSkillInstructions = result.activeSkillInstructions;
+    if ('plan' in result) extra.plan = result.plan;
+    if ('workspaceAccess' in result) extra.workspaceAccess = result.workspaceAccess;
+    if ('authorization' in result) extra.authorization = result.authorization;
+    if ('activeSkillInstructions' in result)
+      extra.activeSkillInstructions = result.activeSkillInstructions;
 
     return { toolMessage, extra };
   }
@@ -419,7 +445,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     const resolvedIds = new Set<string>();
     for (const msg of state.messages) {
       const m = msg as unknown as Record<string, unknown>;
-      if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0) {
+      if (typeof m.tool_call_id === 'string' && m.tool_call_id.length > 0) {
         resolvedIds.add(m.tool_call_id);
       }
     }
@@ -434,16 +460,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       if (!Array.isArray(toolCalls) || toolCalls.length === 0) continue;
 
       for (const tc of toolCalls) {
-        if (!tc || typeof tc !== "object") continue;
+        if (!tc || typeof tc !== 'object') continue;
         const id = (tc as Record<string, unknown>).id;
         if (!id || resolvedIds.has(id as string)) continue;
 
-        cancelledToolMessages.push(new ToolMessage({
-          content: JSON.stringify({ cancelled: true, reason: "User cancelled the operation" }),
-          tool_call_id: id as string,
-          name: String((tc as Record<string, unknown>).name ?? "unknown"),
-          status: "error",
-        }));
+        cancelledToolMessages.push(
+          new ToolMessage({
+            content: JSON.stringify({ cancelled: true, reason: 'User cancelled the operation' }),
+            tool_call_id: id as string,
+            name: String((tc as Record<string, unknown>).name ?? 'unknown'),
+            status: 'error',
+          }),
+        );
       }
     }
 
@@ -469,7 +497,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     // All tools (including task sub-agents) in a single Promise.all.
     const results = await Promise.all(
       allRequests.map((req) => {
-        const reqGrant = (req.id && batch[req.id]) ? batch[req.id] : "none";
+        const reqGrant = req.id && batch[req.id] ? batch[req.id]! : 'none';
         return executeOneTool(req, state, reqGrant);
       }),
     );
@@ -490,25 +518,34 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   };
 
   const graph = new StateGraph(AgentState)
-    .addNode("cleanup", cleanup)
-    .addNode("agent", agent)
-    .addNode("approval", approval)
-    .addNode("user_input", userInput)
-    .addNode("tools", tools)
-    .addEdge(START, "cleanup")
-    .addConditionalEdges("cleanup", (state: CodeAgentState) => routeEntry(state, override, mcpRiskOverride))
-    .addConditionalEdges("agent", (state: CodeAgentState) => routeAfterAgent(state, override, mcpRiskOverride))
-    .addConditionalEdges("approval", routeAfterApproval)
-    .addConditionalEdges("user_input", routeAfterUserInput)
-    .addConditionalEdges("tools", routeAfterTools)
+    .addNode('cleanup', cleanup)
+    .addNode('agent', agent)
+    .addNode('approval', approval)
+    .addNode('user_input', userInput)
+    .addNode('tools', tools)
+    .addEdge(START, 'cleanup')
+    .addConditionalEdges('cleanup', (state: CodeAgentState) =>
+      routeEntry(state, override, mcpRiskOverride),
+    )
+    .addConditionalEdges('agent', (state: CodeAgentState) =>
+      routeAfterAgent(state, override, mcpRiskOverride),
+    )
+    .addConditionalEdges('approval', routeAfterApproval)
+    .addConditionalEdges('user_input', routeAfterUserInput)
+    .addConditionalEdges('tools', routeAfterTools)
     .compile({ checkpointer });
 
   return { graph, checkpointer };
 }
 
 /** 检查模型是否支持 RetryListener / Check if model supports RetryListener */
-function hasRetryListener(model: SupportedChatModel): model is SupportedChatModel & RetryListenerHost {
-  return "setRetryListener" in model && typeof (model as { setRetryListener: unknown }).setRetryListener === "function";
+function hasRetryListener(
+  model: SupportedChatModel,
+): model is SupportedChatModel & RetryListenerHost {
+  return (
+    'setRetryListener' in model &&
+    typeof (model as { setRetryListener: unknown }).setRetryListener === 'function'
+  );
 }
 
 /** 将 override 同步到 state.authorization / Sync override to state.authorization */
@@ -528,7 +565,7 @@ export interface InvokeModelParams {
   model: ReturnType<typeof createChatModel>;
   state: CodeAgentState;
   tools: ReturnType<typeof createAgentTools>;
-  skills?: import("@/core/skills/types").SkillManifest[];
+  skills?: import('@/core/skills/types').SkillManifest[];
   signal?: AbortSignal;
 }
 
@@ -540,12 +577,17 @@ export interface InvokeModelResult {
 
 /** 共享的模型调用逻辑 / Shared model invocation logic (exported for testing) */
 export async function invokeModel({
-  model, state, tools, skills, signal,
+  model,
+  state,
+  tools,
+  skills,
+  signal,
 }: InvokeModelParams): Promise<InvokeModelResult> {
-  const prepared = prepareModelContext("agent", state, skills);
+  const prepared = prepareModelContext('agent', state, skills);
 
-  const response = await bindAgentTools(model, tools)
-    .invoke(prepared.messages, { signal }) as AIMessage;
+  const response = (await bindAgentTools(model, tools).invoke(prepared.messages, {
+    signal,
+  })) as AIMessage;
 
   const request = toolRequestFromMessage(response, state.workspace);
   if (request) {
@@ -582,21 +624,21 @@ function bindAgentTools(
   if (model instanceof ChatOllama) {
     return model.bindTools(tools);
   }
-  return model.bindTools(tools, { tool_choice: "auto" });
+  return model.bindTools(tools, { tool_choice: 'auto' });
 }
 
 function approvalGrantFromResume(
   resume: boolean | { grant?: ShellApprovalGrant } | null | undefined,
 ): ShellApprovalGrant | null {
   if (resume === true) {
-    return "approve_once";
+    return 'approve_once';
   }
   if (
     resume &&
-    typeof resume === "object" &&
-    (resume.grant === "approve_once" ||
-      resume.grant === "same_command" ||
-      resume.grant === "full_access")
+    typeof resume === 'object' &&
+    (resume.grant === 'approve_once' ||
+      resume.grant === 'same_command' ||
+      resume.grant === 'full_access')
   ) {
     return resume.grant;
   }
@@ -615,9 +657,9 @@ function rejectedToolMessage(
           rejected: true,
           reason,
         }),
-        tool_call_id: request.id ?? "missing-tool-call-id",
+        tool_call_id: request.id ?? 'missing-tool-call-id',
         name: request.name,
-        status: "error",
+        status: 'error',
       }),
     ],
   };

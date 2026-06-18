@@ -1,5 +1,5 @@
 // src/core/subagent/roles.ts
-import type { SubAgentRole, SubAgentRoleConfig } from "./types";
+import type { SubAgentRole, SubAgentRoleConfig } from './types';
 
 const EXPLORE_SYSTEM_PROMPT = `You are an Explore agent. Your role is to search, trace, and gather evidence.
 
@@ -48,18 +48,24 @@ Return your findings organized by severity:
 - **Warning** — issues that could cause problems under certain conditions
 - **Suggestion** — improvements that are nice-to-have but not blocking`;
 
-const READ_ONLY_TOOLS = new Set([
-  "read_file",
-  "shell_execute",
-  "read_mcp_resource",
-]);
+const READ_ONLY_TOOLS = new Set(['read_file', 'shell_execute', 'read_mcp_resource']);
 
 const FULL_TOOLS: Set<string> | undefined = undefined; // undefined = all tools available
 
 const ROLE_CONFIGS: Record<SubAgentRole, SubAgentRoleConfig> = {
-  explore: { role: "explore", systemPrompt: EXPLORE_SYSTEM_PROMPT, allowedTools: READ_ONLY_TOOLS, timeoutMs: 5 * 60 * 1000 },
-  code:    { role: "code",    systemPrompt: CODE_SYSTEM_PROMPT,    allowedTools: FULL_TOOLS },
-  review:  { role: "review",  systemPrompt: REVIEW_SYSTEM_PROMPT,  allowedTools: READ_ONLY_TOOLS, timeoutMs: 5 * 60 * 1000 },
+  explore: {
+    role: 'explore',
+    systemPrompt: EXPLORE_SYSTEM_PROMPT,
+    allowedTools: READ_ONLY_TOOLS,
+    timeoutMs: 5 * 60 * 1000,
+  },
+  code: { role: 'code', systemPrompt: CODE_SYSTEM_PROMPT, allowedTools: FULL_TOOLS },
+  review: {
+    role: 'review',
+    systemPrompt: REVIEW_SYSTEM_PROMPT,
+    allowedTools: READ_ONLY_TOOLS,
+    timeoutMs: 5 * 60 * 1000,
+  },
 };
 
 /** 按角色名获取配置 */
@@ -70,4 +76,4 @@ export function getRoleConfig(role: SubAgentRole): SubAgentRoleConfig {
 }
 
 /** 所有内置角色名 */
-export const BUILTIN_ROLES: readonly SubAgentRole[] = ["explore", "code", "review"] as const;
+export const BUILTIN_ROLES: readonly SubAgentRole[] = ['explore', 'code', 'review'] as const;

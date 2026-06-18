@@ -1,33 +1,33 @@
-import type { ShellExecutor } from "@/core/tools/shell";
-import { shellTool } from "@/core/tools/shell";
-import { generateBwrapArgs } from "./bwrap";
-import { detectSandboxBackend, type SandboxBackend } from "./platform";
-import { findApplySeccomp, resolveSeccompPath } from "./seccomp";
-import { generateSandboxProfile } from "./profile";
+import type { ShellExecutor } from '@/core/tools/shell';
+import { shellTool } from '@/core/tools/shell';
+import { generateBwrapArgs } from './bwrap';
+import { detectSandboxBackend } from './platform';
+import { generateSandboxProfile } from './profile';
+import { findApplySeccomp, resolveSeccompPath } from './seccomp';
 import {
-  buildEnvStripSnippet,
   buildEnvExportSnippet,
+  buildEnvStripSnippet,
   buildHardenedEnv,
   buildUlimitPreamble,
   checkDangerousPaths,
-} from "./shell-wrapper";
-import type { SandboxOptions } from "./types";
+} from './shell-wrapper';
+import type { SandboxOptions } from './types';
 
 /** 创建沙箱化的 ShellExecutor / Create a sandboxed ShellExecutor */
 export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
   const { enabled } = options;
 
   if (!enabled) {
-    warn("Sandbox disabled by flag. Shell commands will run without isolation.");
+    warn('Sandbox disabled by flag. Shell commands will run without isolation.');
     return shellTool;
   }
 
   const backend = detectSandboxBackend();
 
   switch (backend) {
-    case "seatbelt":
+    case 'seatbelt':
       return createSeatbeltExecutor(options);
-    case "bubblewrap":
+    case 'bubblewrap':
       return createBwrapExecutor(options);
     default:
       return shellTool;
@@ -40,14 +40,7 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   const profile = generateSandboxProfile(workspace);
 
   return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => ({
-    cmd: [
-      "/usr/bin/sandbox-exec",
-      "-p",
-      profile,
-      "/bin/sh",
-      "-c",
-      wrappedCommand,
-    ],
+    cmd: ['/usr/bin/sandbox-exec', '-p', profile, '/bin/sh', '-c', wrappedCommand],
   }));
 }
 
@@ -55,13 +48,13 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
 function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
   const bwrapArgs = generateBwrapArgs(workspace);
-  const bwrapPath = Bun.which("bwrap")!;
+  const bwrapPath = Bun.which('bwrap')!;
   const seccompPath = resolveSeccompPath(findApplySeccomp(), workspace);
 
   return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => {
     const innerCmd = seccompPath
-      ? [seccompPath, "/bin/sh", "-c", wrappedCommand]
-      : ["/bin/sh", "-c", wrappedCommand];
+      ? [seccompPath, '/bin/sh', '-c', wrappedCommand]
+      : ['/bin/sh', '-c', wrappedCommand];
     return { cmd: [bwrapPath, ...bwrapArgs, ...innerCmd] };
   });
 }
@@ -72,10 +65,8 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
  */
 function createWrappedExecutor(
   workspace: string,
-  resourceLimits: SandboxOptions["resourceLimits"],
-  buildSpawn: (
-    wrappedCommand: string,
-  ) => { cmd: string[]; stdin?: string },
+  resourceLimits: SandboxOptions['resourceLimits'],
+  buildSpawn: (wrappedCommand: string) => { cmd: string[]; stdin?: string },
 ): ShellExecutor {
   return async (input) => {
     try {
@@ -86,7 +77,7 @@ function createWrappedExecutor(
           ok: false,
           command: input.command,
           exitCode: -1,
-          stdout: "",
+          stdout: '',
           stderr: `Rejected: command references protected path '${dangerous}'`,
         };
       }
@@ -97,16 +88,16 @@ function createWrappedExecutor(
         buildEnvStripSnippet(),
         buildUlimitPreamble(resourceLimits),
         buildEnvExportSnippet(hardenedEnv),
-      ].join(" ");
+      ].join(' ');
 
       const wrappedCommand = `${preamble} ${input.command}`;
       const { cmd, stdin } = buildSpawn(wrappedCommand);
 
       const proc = Bun.spawn(cmd, {
         cwd: workspace,
-        stdin: stdin !== undefined ? "pipe" : "inherit",
-        stdout: "pipe",
-        stderr: "pipe",
+        stdin: stdin !== undefined ? 'pipe' : 'inherit',
+        stdout: 'pipe',
+        stderr: 'pipe',
         signal: input.signal,
       });
 
@@ -127,13 +118,17 @@ function createWrappedExecutor(
         stderr,
       };
     } catch (error) {
-      const isAbort = error instanceof Error && error.name === "AbortError";
+      const isAbort = error instanceof Error && error.name === 'AbortError';
       return {
         ok: false,
         command: input.command,
         exitCode: isAbort ? 130 : -1,
-        stdout: "",
-        stderr: isAbort ? "Command cancelled by user." : (error instanceof Error ? error.message : String(error)),
+        stdout: '',
+        stderr: isAbort
+          ? 'Command cancelled by user.'
+          : error instanceof Error
+            ? error.message
+            : String(error),
       };
     }
   };

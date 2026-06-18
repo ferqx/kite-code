@@ -1,12 +1,12 @@
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage } from '@langchain/core/messages';
 import type {
   PromptCacheMetrics,
-  PromptCacheStandardSummary,
   PromptCacheStandardEvaluation,
-} from "@/protocol/events";
+  PromptCacheStandardSummary,
+} from '@/protocol/events';
 
 // Re-export protocol types for backward compatibility
-export type { PromptCacheMetrics, PromptCacheStandardSummary, PromptCacheStandardEvaluation };
+export type { PromptCacheMetrics, PromptCacheStandardEvaluation, PromptCacheStandardSummary };
 
 /** coding 场景 prompt cache 命中率目标 / Prompt cache target for coding scenarios */
 export const PROMPT_CACHE_STANDARD_TARGET_HIT_RATE = 0.95;
@@ -35,8 +35,7 @@ export function createPromptCacheStandardTracker(input?: {
   const targetHitRate = input?.targetHitRate ?? PROMPT_CACHE_STANDARD_TARGET_HIT_RATE;
   const warmupCallLimit = input?.warmupCalls ?? DEFAULT_PROMPT_CACHE_WARMUP_CALLS;
   const minimumMeasuredInputTokens =
-    input?.minimumMeasuredInputTokens ??
-    DEFAULT_PROMPT_CACHE_MINIMUM_MEASURED_INPUT_TOKENS;
+    input?.minimumMeasuredInputTokens ?? DEFAULT_PROMPT_CACHE_MINIMUM_MEASURED_INPUT_TOKENS;
   const totals = {
     totalCalls: 0,
     warmupCalls: 0,
@@ -62,14 +61,10 @@ export function createPromptCacheStandardTracker(input?: {
         totals.cacheMissTokens += metrics.cacheMissTokens;
       }
 
-      const hitRate =
-        totals.inputTokens > 0 ? totals.cacheHitTokens / totals.inputTokens : 0;
-      const hasEnoughMeasuredTokens =
-        totals.inputTokens >= minimumMeasuredInputTokens;
+      const hitRate = totals.inputTokens > 0 ? totals.cacheHitTokens / totals.inputTokens : 0;
+      const hasEnoughMeasuredTokens = totals.inputTokens >= minimumMeasuredInputTokens;
       const meetsTarget =
-        totals.measuredCalls > 0 && hasEnoughMeasuredTokens
-          ? hitRate >= targetHitRate
-          : null;
+        totals.measuredCalls > 0 && hasEnoughMeasuredTokens ? hitRate >= targetHitRate : null;
 
       return {
         callIndex,

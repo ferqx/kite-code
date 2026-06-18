@@ -1,10 +1,10 @@
-import { ChatOpenAI } from "@langchain/openai";
-import { ChatOllama } from "@langchain/ollama";
-import { BaseMessage } from "@langchain/core/messages";
-import { ChatResult } from "@langchain/core/outputs";
-import { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
-import type { AgentConfig } from "@/core/config/index";
-import { createDeepSeekModel, withTransientModelRetry, type ModelRetryListener } from "./deepseek";
+import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
+import type { BaseMessage } from '@langchain/core/messages';
+import type { ChatResult } from '@langchain/core/outputs';
+import { ChatOllama } from '@langchain/ollama';
+import { ChatOpenAI } from '@langchain/openai';
+import type { AgentConfig } from '@/core/config/index';
+import { createDeepSeekModel, type ModelRetryListener, withTransientModelRetry } from './deepseek';
 
 const MODEL_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -25,13 +25,12 @@ class RetryingChatOpenAI extends ChatOpenAI {
 
   override async _generate(
     messages: BaseMessage[],
-    options: this["ParsedCallOptions"],
+    options: this['ParsedCallOptions'],
     runManager?: CallbackManagerForLLMRun,
   ): Promise<ChatResult> {
-    return withTransientModelRetry(
-      () => super._generate(messages, options, runManager),
-      { onRetry: this._retryListener ?? undefined },
-    );
+    return withTransientModelRetry(() => super._generate(messages, options, runManager), {
+      onRetry: this._retryListener ?? undefined,
+    });
   }
 }
 
@@ -51,31 +50,27 @@ class RetryingChatOllama extends ChatOllama {
 
   override async _generate(
     messages: BaseMessage[],
-    options: this["ParsedCallOptions"],
+    options: this['ParsedCallOptions'],
     runManager?: CallbackManagerForLLMRun,
   ): Promise<ChatResult> {
-    return withTransientModelRetry(
-      () => super._generate(messages, options, runManager),
-      { onRetry: this._retryListener ?? undefined },
-    );
+    return withTransientModelRetry(() => super._generate(messages, options, runManager), {
+      onRetry: this._retryListener ?? undefined,
+    });
   }
 }
 
 /** 支持工具绑定的聊天模型 / Tool-bindable chat model */
-export type SupportedChatModel =
-  | ReturnType<typeof createDeepSeekModel>
-  | ChatOpenAI
-  | ChatOllama;
+export type SupportedChatModel = ReturnType<typeof createDeepSeekModel> | ChatOpenAI | ChatOllama;
 
 /** 根据配置创建 LangChain 聊天模型 / Create a LangChain chat model from config */
 export function createChatModel(config: AgentConfig): SupportedChatModel {
   switch (config.providerType) {
-    case "deepseek":
+    case 'deepseek':
       return createDeepSeekModel(config);
-    case "openai":
-    case "openai-compatible":
+    case 'openai':
+    case 'openai-compatible':
       return createOpenAICompatibleModel(config);
-    case "ollama":
+    case 'ollama':
       return createOllamaModel(config);
     default: {
       const _: never = config.providerType;

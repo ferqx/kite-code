@@ -1,40 +1,46 @@
-import React from "react";
-import { render } from "ink";
-import { loadAgentConfig, loadTheme, loadColorPreset, saveColorPreset, type AgentConfig } from "@/core/config/index";
-import { sessionExportPath } from "@/core/config/paths";
-import { ThemeContext, lightTheme, getDarkTheme, osc4Apply, type ThemePreset } from "./theme";
-import { McpManager } from "@/core/mcp";
-import { TuiUserInputProvider } from "./provider";
-import App, { useTuiState, type Action } from "./App";
-import { TextBatcher } from "./text-batcher";
-import InputLine, { type EditorContentHandle, type SlashSuggestionData } from "./components/InputLine";
-import StartupScreen from "./components/StartupScreen";
-import ErrorBoundary from "./components/ErrorBoundary";
-import { useSlashCommand } from "./hooks/useSlashCommand";
-import { loadSession, listSessions, deleteSession } from "../../core/persistence/sessions.js";
-import { sessionDataToUI } from "./replay-blocks.js";
-import { defaultCheckpointPath } from "../../core/config/paths.js";
-import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
-import { SessionManager } from "./session-manager";
-import { useMcpConnection } from "./hooks/useMcpConnection";
-import { useSkillsLoader } from "./hooks/useSkillsLoader";
-import { useRewindCheckpoints, useRunRewind, type RewindDeps } from "./hooks/useRewindHandler";
-import { useExternalEditor } from "./hooks/useExternalEditor";
+import { render } from 'ink';
+import React from 'react';
+import {
+  type AgentConfig,
+  loadAgentConfig,
+  loadColorPreset,
+  loadTheme,
+  saveColorPreset,
+} from '@/core/config/index';
+import { sessionExportPath } from '@/core/config/paths';
+import type { McpManager } from '@/core/mcp';
+import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import { defaultCheckpointPath } from '../../core/config/paths.js';
+import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
+import App, { type Action, useTuiState } from './App';
+import ErrorBoundary from './components/ErrorBoundary';
+import InputLine, {
+  type EditorContentHandle,
+  type SlashSuggestionData,
+} from './components/InputLine';
+import StartupScreen from './components/StartupScreen';
+import { useExternalEditor } from './hooks/useExternalEditor';
+import { useMcpConnection } from './hooks/useMcpConnection';
+import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
+import { useSkillsLoader } from './hooks/useSkillsLoader';
+import { useSlashCommand } from './hooks/useSlashCommand';
+import { TuiUserInputProvider } from './provider';
+import { sessionDataToUI } from './replay-blocks.js';
+import { SessionManager } from './session-manager';
+import { TextBatcher } from './text-batcher';
+import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } from './theme';
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
 let _sessionManagerForExit: SessionManager | null = null;
 let _unmountForExit: (() => void) | null = null;
 
-function resolveModelForResume(
-  currentConfig: AgentConfig,
-  persistedModelName: string,
-): string {
+function resolveModelForResume(currentConfig: AgentConfig, persistedModelName: string): string {
   return persistedModelName || currentConfig.modelName;
 }
 
 export interface TuiBootstrapProps {
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
-  model?: import("@/core/model/factory").SupportedChatModel;
+  model?: import('@/core/model/factory').SupportedChatModel;
 }
 
 export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
@@ -57,24 +63,30 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   }, [state.running, textBatcher]);
   const [themePreset, setThemePreset] = React.useState<ThemePreset>(() => {
     const saved = loadColorPreset(workspace);
-    if (saved === "teal" || saved === "blue" || saved === "purple" || saved === "cyan" || saved === "mono") {
+    if (
+      saved === 'teal' ||
+      saved === 'blue' ||
+      saved === 'purple' ||
+      saved === 'cyan' ||
+      saved === 'mono'
+    ) {
       return saved;
     }
-    return "blue";
+    return 'blue';
   });
   // Apply OSC 4 palette on startup
   React.useEffect(() => {
     process.stdout.write(osc4Apply(themePreset));
-  }, []);
+  }, [themePreset]);
   const theme = React.useMemo(
-    () => (loadTheme(workspace) === "light" ? lightTheme : getDarkTheme(themePreset)),
+    () => (loadTheme(workspace) === 'light' ? lightTheme : getDarkTheme(themePreset)),
     [themePreset, workspace],
   );
   const [initialized, setInitialized] = React.useState(false);
   const prevInterruptRef = React.useRef(state.interrupt);
   const conversationHistoryRef = React.useRef<string[]>([]);
   // Lazy init — only create thread when user sends first message
-  const threadIdRef = React.useRef<string>("");
+  const threadIdRef = React.useRef<string>('');
   // Generation counter for session loads: a new LOAD_SESSION_PENDING increments this.
   // Each async handler captures its generation; if a newer load started, the old one
   // discards its result, preventing the first-to-resolve Promise from overwriting the
@@ -84,7 +96,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const creatingSessionRef = React.useRef(false);
   const editorContentRef = React.useRef<EditorContentHandle | null>(null);
   // Persist input value across resize remounts
-  const inputValueRef = React.useRef("");
+  const inputValueRef = React.useRef('');
   const handleInputValueChange = React.useCallback((v: string) => {
     inputValueRef.current = v;
   }, []);
@@ -105,11 +117,11 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       const shrunk = newCols < prevCols;
       prevCols = newCols;
       if (!shrunk) return;
-      setResizeKey(n => n + 1);
+      setResizeKey((n) => n + 1);
     };
-    process.stdout.on("resize", handler);
+    process.stdout.on('resize', handler);
     return () => {
-      process.stdout.off("resize", handler);
+      process.stdout.off('resize', handler);
     };
   }, []);
   const thinkingLevelRef = React.useRef<string | null>(null);
@@ -128,7 +140,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       new TuiUserInputProvider((event) => {
         textBatcherRef.current.push(event);
       }),
-    []
+    [],
   );
 
   const sessionManager = React.useMemo(() => {
@@ -141,11 +153,11 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       checkpointPath: defaultCheckpointPath(),
     });
     mgr.setSnapshotCallback((threadId) => {
-      dispatch({ type: "SESSION_INTERRUPT_PENDING", threadId });
+      dispatch({ type: 'SESSION_INTERRUPT_PENDING', threadId });
     });
     _sessionManagerForExit = mgr;
     return mgr;
-  }, [config, provider]);
+  }, [config, provider, dispatch]);
 
   React.useEffect(() => {
     const timer = setTimeout(() => setInitialized(true), 80);
@@ -160,7 +172,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       threadIdRef.current = sessionManager.getActiveId();
       thinkingLevelRef.current = null;
     }
-  }, [state.sessionKey]);
+  }, [state.sessionKey, sessionManager.getActiveId]);
 
   // Sync conversation history from runtime on session switch
   React.useEffect(() => {
@@ -184,12 +196,26 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   // Rewind: checkpoint list + revert/fork execution
   useRewindCheckpoints(state, dispatch, threadIdRef);
 
-  const rewindDeps: RewindDeps = React.useMemo(() => ({
-    dispatch, provider, config, workspace, sessionManager,
-    threadIdRef, loadGenerationRef, conversationHistoryRef,
-    thinkingLevelRef, skillManifestsRef, skillOptionsRef, mcpManagerRef,
-    agentLoopActiveRef, abortControllerRef, stateRef,
-  }), [dispatch, provider, config, workspace, sessionManager]);
+  const rewindDeps: RewindDeps = React.useMemo(
+    () => ({
+      dispatch,
+      provider,
+      config,
+      workspace,
+      sessionManager,
+      threadIdRef,
+      loadGenerationRef,
+      conversationHistoryRef,
+      thinkingLevelRef,
+      skillManifestsRef,
+      skillOptionsRef,
+      mcpManagerRef,
+      agentLoopActiveRef,
+      abortControllerRef,
+      stateRef,
+    }),
+    [dispatch, provider, config, workspace, sessionManager],
+  );
   const { runRewind, dispatchSessionLoadInterceptor } = useRunRewind(state, rewindDeps);
   const runRewindRef = React.useRef(runRewind);
   runRewindRef.current = runRewind;
@@ -220,43 +246,67 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     // 跳过初始零值，避免启动时无意义写入
     if (s.cacheHitTokens === 0 && s.cacheMissTokens === 0 && s.totalTokens === 0) return;
     sessionManager.saveTokenStats(tid, s);
-  }, [state.status.cacheHitTokens, state.status.cacheMissTokens, state.status.totalTokens, state.activeSessionId]);
+  }, [
+    state.status.cacheHitTokens,
+    state.status.cacheMissTokens,
+    state.status.totalTokens,
+    state.activeSessionId,
+    sessionManager.saveTokenStats,
+    state.status,
+  ]);
 
   const handleExit = React.useCallback(() => {
-    dispatch({ type: "EVENT", event: { type: "text", data: { text: "👋 Goodbye!" } } });
+    dispatch({ type: 'EVENT', event: { type: 'text', data: { text: '👋 Goodbye!' } } });
     sessionManager.abortAll();
     sessionManager.dispose();
-    setTimeout(() => { _unmountForExit?.(); process.exit(0); }, 300);
+    setTimeout(() => {
+      _unmountForExit?.();
+      process.exit(0);
+    }, 300);
   }, [dispatch, sessionManager]);
 
   // Load historical sessions from DB on startup, but always start fresh.
   React.useEffect(() => {
     if (!initialized) return;
     const checkpointPath = defaultCheckpointPath();
-    listSessions(checkpointPath).then((dbSessions) => {
-      for (const s of dbSessions) {
-        if (!sessionManager.hasRuntime(s.threadId)) {
-          const rt = sessionManager.registerSession(s.threadId, workspace);
-          rt.dormant = true;
-          sessionManager.setName(s.threadId, s.name);
+    listSessions(checkpointPath)
+      .then((dbSessions) => {
+        for (const s of dbSessions) {
+          if (!sessionManager.hasRuntime(s.threadId)) {
+            const rt = sessionManager.registerSession(s.threadId, workspace);
+            rt.dormant = true;
+            sessionManager.setName(s.threadId, s.name);
+          }
         }
-      }
 
-      // Always start a new session — user switches to historical ones via /sessions
-      const newId = sessionManager.createSession(workspace);
-      threadIdRef.current = newId;
-
-      dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-    }).catch((e) => {
-      console.error(`[TUI] Failed to list historical sessions: ${e instanceof Error ? e.message : String(e)}`);
-      // DB may not exist yet (first run) — auto-create
-      if (!sessionManager.getActiveId()) {
+        // Always start a new session — user switches to historical ones via /sessions
         const newId = sessionManager.createSession(workspace);
         threadIdRef.current = newId;
-        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-      }
-    });
-  }, [initialized]);
+
+        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+      })
+      .catch((e) => {
+        console.error(
+          `[TUI] Failed to list historical sessions: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        // DB may not exist yet (first run) — auto-create
+        if (!sessionManager.getActiveId()) {
+          const newId = sessionManager.createSession(workspace);
+          threadIdRef.current = newId;
+          dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+        }
+      });
+  }, [
+    initialized,
+    sessionManager.registerSession,
+    sessionManager.setName,
+    sessionManager.hasRuntime,
+    sessionManager.createSession,
+    workspace,
+    sessionManager.getSnapshot,
+    sessionManager.getActiveId,
+    dispatch,
+  ]);
 
   /** 从 DB 加载指定会话的完整状态（LOAD_SESSION_PENDING 的实际逻辑） */
   const loadSessionById = React.useCallback(
@@ -280,7 +330,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       threadIdRef.current = threadId;
       conversationHistoryRef.current = [];
 
-      dispatch({ type: "LOAD_SESSION_PENDING", threadId });
+      dispatch({ type: 'LOAD_SESSION_PENDING', threadId });
 
       try {
         const result = await loadSession(defaultCheckpointPath(), threadId);
@@ -288,24 +338,26 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         if (loadGenerationRef.current !== gen) return;
         if (!result) {
           dispatch({
-            type: "LOAD_SESSION",
+            type: 'LOAD_SESSION',
             threadId,
-            blocks: [{ id: 1, kind: "text", content: `Session ${threadId} has no saved checkpoints.` }],
+            blocks: [
+              { id: 1, kind: 'text', content: `Session ${threadId} has no saved checkpoints.` },
+            ],
             interrupt: null,
-            modelProvider: "",
-            modelName: "",
+            modelProvider: '',
+            modelName: '',
             thinkingLevel: null,
           });
           return;
         }
 
         const modelName = resolveModelForResume(config, result.modelName);
-        const thinkingLevel = result.thinkingLevel ?? "max";
+        const thinkingLevel = result.thinkingLevel ?? 'max';
         thinkingLevelRef.current = thinkingLevel;
 
         const { blocks, interrupt } = sessionDataToUI(result);
         dispatch({
-          type: "LOAD_SESSION",
+          type: 'LOAD_SESSION',
           threadId,
           blocks,
           interrupt,
@@ -323,12 +375,12 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           sessionManager.removeRuntime(threadId);
         }
         dispatch({
-          type: "LOAD_SESSION",
+          type: 'LOAD_SESSION',
           threadId,
-          blocks: [{ id: 1, kind: "text", content: `Failed to load session: ${e?.message ?? e}` }],
+          blocks: [{ id: 1, kind: 'text', content: `Failed to load session: ${e?.message ?? e}` }],
           interrupt: null,
-          modelProvider: "",
-          modelName: "",
+          modelProvider: '',
+          modelName: '',
           thinkingLevel: null,
         });
       }
@@ -339,7 +391,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   const dispatchSessionLoad = React.useCallback(
     async (action: Action) => {
       // Intercept NEW_SESSION to create runtime via SessionManager
-      if (action.type === "NEW_SESSION") {
+      if (action.type === 'NEW_SESSION') {
         // Ignore /new if the current session has no user messages yet
         if (stateRef.current.turns.length === 0) return;
         // Prevent concurrent NEW_SESSION from creating ghost sessions
@@ -353,22 +405,24 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         const newId = sessionManager.createSession(workspace);
         threadIdRef.current = newId;
         // The reducer will use this threadId to create the snapshot
-        dispatch({ type: "NEW_SESSION", threadId: newId });
-        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        dispatch({ type: 'NEW_SESSION', threadId: newId });
+        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
         // Release the lock after the reducer processes the session change.
         // The next render (triggered by the dispatches above) will reset this.
-        setTimeout(() => { creatingSessionRef.current = false; }, 0);
+        setTimeout(() => {
+          creatingSessionRef.current = false;
+        }, 0);
         return;
       }
       // ── LOAD_SESSION_PENDING：委托给 loadSessionById ──
-      if (action.type === "LOAD_SESSION_PENDING") {
+      if (action.type === 'LOAD_SESSION_PENDING') {
         await loadSessionById(action.threadId);
         return;
       }
       // Intercept REVERT/FORK to store pending action before reducer closes panel
       dispatchSessionLoadInterceptor(action);
       // ── 多会话：SWITCH_SESSION 拦截，缓冲回放 ──
-      if (action.type === "SWITCH_SESSION") {
+      if (action.type === 'SWITCH_SESSION') {
         const oldId = sessionManager.getActiveId();
         const newId = action.threadId;
         if (oldId === newId) {
@@ -402,9 +456,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
         // 回放目标会话的缓冲事件
         if (incomingRt && incomingRt.eventBuffer.length > 0) {
-          dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+          dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
           for (const event of incomingRt.eventBuffer) {
-            dispatch({ type: "EVENT", event });
+            dispatch({ type: 'EVENT', event });
           }
           incomingRt.eventBuffer = [];
           incomingRt.pendingInterrupt = false;
@@ -412,7 +466,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
         return;
       }
       // ── DELETE_SESSION：删除会话，从 DB 和 SessionManager 中移除 ──
-      if (action.type === "DELETE_SESSION") {
+      if (action.type === 'DELETE_SESSION') {
         const { threadId } = action;
         const wasActive = threadId === sessionManager.getActiveId();
         // Invalidate any in-flight loadSessionById for this threadId to prevent
@@ -433,43 +487,56 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           // Deleted the active session — create a new one so TUI has an active session
           const newId = sessionManager.createSession(workspace);
           threadIdRef.current = newId;
-          dispatch({ type: "NEW_SESSION", threadId: newId });
+          dispatch({ type: 'NEW_SESSION', threadId: newId });
         } else {
           dispatch(action);
         }
-        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
         return;
       }
       // ── EXPORT_SESSION：执行文件写入（取代 reducer 内的 fire-and-forget）──
-      if (action.type === "EXPORT_SESSION") {
+      if (action.type === 'EXPORT_SESSION') {
         const s = stateRef.current;
-        const now = new Date().toISOString().replace(/[:.]/g, "-");
+        const now = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = sessionExportPath(now);
-        const body = s.turns.flatMap(t => t.blocks)
+        const body = s.turns
+          .flatMap((t) => t.blocks)
           .map((b) => {
-            if (b.kind === "user") return `**You:** ${b.content}`;
-            if (b.kind === "text") return b.content;
-            if (b.kind === "reason") return `> ${b.content}`;
-            return "";
+            if (b.kind === 'user') return `**You:** ${b.content}`;
+            if (b.kind === 'text') return b.content;
+            if (b.kind === 'reason') return `> ${b.content}`;
+            return '';
           })
           .filter(Boolean)
-          .join("\n\n");
+          .join('\n\n');
         const header = `# OpenPX Session Export\n\n> ${new Date().toLocaleString()}\n\n---\n\n`;
         try {
-          const fs = await import("node:fs/promises");
-          const { mkdirSync } = await import("node:fs");
-          const dir = filename.split("/").slice(0, -1).join("/") || ".";
+          const fs = await import('node:fs/promises');
+          const { mkdirSync } = await import('node:fs');
+          const dir = filename.split('/').slice(0, -1).join('/') || '.';
           mkdirSync(dir, { recursive: true });
-          await fs.writeFile(filename, header + body, { encoding: "utf-8", mode: 0o600 });
-          dispatch({ type: "EXPORT_SESSION_DONE", filename });
+          await fs.writeFile(filename, header + body, { encoding: 'utf-8', mode: 0o600 });
+          dispatch({ type: 'EXPORT_SESSION_DONE', filename });
         } catch (e: any) {
-          dispatch({ type: "EVENT", event: { type: "error", data: { message: `Export failed: ${e?.message ?? e}`, recoverable: false } } });
+          dispatch({
+            type: 'EVENT',
+            event: {
+              type: 'error',
+              data: { message: `Export failed: ${e?.message ?? e}`, recoverable: false },
+            },
+          });
         }
         return;
       }
       dispatch(action);
     },
-    [dispatch, config, sessionManager, workspace, loadSessionById],
+    [
+      dispatch,
+      sessionManager,
+      workspace,
+      loadSessionById, // Intercept REVERT/FORK to store pending action before reducer closes panel
+      dispatchSessionLoadInterceptor,
+    ],
   );
 
   const runTaskBridge = React.useCallback((task: string) => {
@@ -485,13 +552,16 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     runTaskBridge,
     (preset) => {
       const p = preset.toLowerCase();
-      if (p === "teal" || p === "blue" || p === "purple" || p === "cyan" || p === "mono") {
+      if (p === 'teal' || p === 'blue' || p === 'purple' || p === 'cyan' || p === 'mono') {
         setThemePreset(p);
         // OSC 4 reprograms terminal palette — existing Static content changes instantly, no clear needed
         process.stdout.write(osc4Apply(p));
         saveColorPreset(p);
-        dispatchSessionLoad({ type: "USER_MESSAGE", text: `/theme ${p}` });
-        dispatchSessionLoad({ type: "EVENT", event: { type: "text", data: { text: `  ⎿  Theme set to ${p}` } } });
+        dispatchSessionLoad({ type: 'USER_MESSAGE', text: `/theme ${p}` });
+        dispatchSessionLoad({
+          type: 'EVENT',
+          event: { type: 'text', data: { text: `  ⎿  Theme set to ${p}` } },
+        });
       }
       // Invalid preset — silently ignored
     },
@@ -502,7 +572,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     const prev = prevInterruptRef.current;
     prevInterruptRef.current = state.interrupt;
     if (prev && !state.interrupt) {
-      provider.submitAction({ type: "cancel" });
+      provider.submitAction({ type: 'cancel' });
     }
   }, [state.interrupt, provider]);
 
@@ -538,13 +608,13 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       rt.thinkingLevel = thinkingLevelRef.current;
       rt.conversationHistory = [...conversationHistoryRef.current];
 
-      dispatch({ type: "USER_MESSAGE", text: task });
-      dispatch({ type: "SET_RUNNING" });
-      dispatch({ type: "DEACTIVATE_SKILL" }); // clear after capture into runtime
+      dispatch({ type: 'USER_MESSAGE', text: task });
+      dispatch({ type: 'SET_RUNNING' });
+      dispatch({ type: 'DEACTIVATE_SKILL' }); // clear after capture into runtime
 
       // Update running state — agentLoopActive is managed by SessionRuntime.runTask internally
       sessionManager.onStatusChange(threadId);
-      dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+      dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
 
       try {
         await rt.runTask(task, {
@@ -562,9 +632,9 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
           conversationHistoryRef.current = [...rt.conversationHistory];
         }
         sessionManager.onStatusChange(threadId);
-        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
         if (stillActive) {
-          dispatch({ type: "SET_IDLE" });
+          dispatch({ type: 'SET_IDLE' });
         }
 
         // Fire-and-forget: generate smart session name once after first message
@@ -575,26 +645,29 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
             if (rt.name !== threadId) return;
             const stillActive = threadIdRef.current === threadId;
             if (!stillActive) return;
-            const { generateSessionName, persistSessionName } = await import("../../core/persistence/sessions.js");
+            const { generateSessionName, persistSessionName } = await import(
+              '../../core/persistence/sessions.js'
+            );
             const name = await generateSessionName(task);
             if (name && threadIdRef.current === threadId) {
               await persistSessionName(defaultCheckpointPath(), threadId, name);
               sessionManager.setName(threadId, name);
-              dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
+              dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
             }
-          } catch { /* non-critical */ }
+          } catch {
+            /* non-critical */
+          }
         })();
       }
     },
-    [provider, workspace, config, dispatch, sessionManager],
+    [provider, config, dispatch, sessionManager, injectModel],
   );
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;
 
-
   const handleInput = React.useCallback(
     (value: string) => {
-      if (value.startsWith("/")) {
+      if (value.startsWith('/')) {
         handleSlashCommand(value);
         return;
       }
@@ -605,7 +678,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
       runTask(value);
     },
-    [runTask, handleSlashCommand, sessionManager]
+    [runTask, handleSlashCommand, sessionManager],
   );
 
   // External editor: spawn $EDITOR, read content, submit as input
@@ -624,20 +697,42 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
   return (
     <ThemeContext.Provider value={theme}>
-    <App key={resizeKey} state={state} dispatch={dispatchSessionLoad} onToggleReason={onToggleReason} provider={provider} mcpManager={mcpManager ?? undefined} slashSuggestion={slashSuggestion} resizeGeneration={resizeKey}>
-      <InputLine
-        key={state.activeSessionId}
-        mode={state.interrupt?.kind === "approval" ? "approval" : state.interrupt?.kind === "input" ? "question" : "prompt"}
-        onSubmit={handleInput}
-        disabled={!!state.interrupt}
-        workspace={workspace}
-        overlayActive={state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind || !!state.interrupt}
-        editorContentRef={editorContentRef}
-        onSlashSuggestionChange={setSlashSuggestion}
-        initialValue={inputValueRef.current}
-        onValueChange={handleInputValueChange}
-      />
-    </App>
+      <App
+        key={resizeKey}
+        state={state}
+        dispatch={dispatchSessionLoad}
+        onToggleReason={onToggleReason}
+        provider={provider}
+        mcpManager={mcpManager ?? undefined}
+        slashSuggestion={slashSuggestion}
+        resizeGeneration={resizeKey}
+      >
+        <InputLine
+          key={state.activeSessionId}
+          mode={
+            state.interrupt?.kind === 'approval'
+              ? 'approval'
+              : state.interrupt?.kind === 'input'
+                ? 'question'
+                : 'prompt'
+          }
+          onSubmit={handleInput}
+          disabled={!!state.interrupt}
+          workspace={workspace}
+          overlayActive={
+            state.showHelp ||
+            state.showModelSelector ||
+            state.showSessions ||
+            state.showMcp ||
+            state.showRewind ||
+            !!state.interrupt
+          }
+          editorContentRef={editorContentRef}
+          onSlashSuggestionChange={setSlashSuggestion}
+          initialValue={inputValueRef.current}
+          onValueChange={handleInputValueChange}
+        />
+      </App>
     </ThemeContext.Provider>
   );
 }
@@ -646,25 +741,30 @@ if (import.meta.main) {
   // Use Ink's built-in kittyKeyboard option instead of manual enableKittyKeyboardProtocol().
   // The manual approach enabled Kitty at the terminal level but Ink's parser didn't
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
-  const { unmount } = render(<ErrorBoundary><TuiBootstrap /></ErrorBoundary>, {
-    maxFps: 60,
-    exitOnCtrlC: false,
-    kittyKeyboard: { mode: 'enabled' },
-    incrementalRendering: false,
-    concurrent: true
-  });
+  const { unmount } = render(
+    <ErrorBoundary>
+      <TuiBootstrap />
+    </ErrorBoundary>,
+    {
+      maxFps: 60,
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: 'enabled' },
+      incrementalRendering: false,
+      concurrent: true,
+    },
+  );
 
   // Expose unmount so exit handlers inside the component tree can properly
   // tear down kitty keyboard protocol before terminating the process.
   _unmountForExit = unmount;
 
-  process.on("SIGINT", () => {
+  process.on('SIGINT', () => {
     _sessionManagerForExit?.abortAll();
     _sessionManagerForExit?.dispose();
     unmount();
     process.exit(0);
   });
-  process.on("SIGTERM", () => {
+  process.on('SIGTERM', () => {
     _sessionManagerForExit?.abortAll();
     _sessionManagerForExit?.dispose();
     unmount();

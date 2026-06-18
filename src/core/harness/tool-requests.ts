@@ -1,28 +1,25 @@
-import { AIMessage, type BaseMessage } from "@langchain/core/messages";
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import type { ShellActionEnvelope, ShellIntent } from '@/core/types';
 import type {
   AgentPlan,
   PlanStatus,
   ShellApprovalGrant,
   UserInputOption,
   UserInputRequest,
-} from "@/protocol/events";
-import type {
-  ShellActionEnvelope,
-  ShellIntent,
-} from "@/core/types";
+} from '@/protocol/events';
 
 /** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
 export type PendingToolRequest =
   | {
       id?: string;
-      name: "read_file";
+      name: 'read_file';
       args: { path: string; offset?: number; limit?: number };
       reason: string;
       protectedCommand: string;
     }
   | {
       id?: string;
-      name: "edit_file";
+      name: 'edit_file';
       args: {
         path: string;
         old_string: string;
@@ -34,7 +31,7 @@ export type PendingToolRequest =
     }
   | {
       id?: string;
-      name: "write_file";
+      name: 'write_file';
       args: { path: string; content: string };
       reason: string;
       protectedCommand: string;
@@ -42,7 +39,7 @@ export type PendingToolRequest =
   | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
-      name: "shell_execute";
+      name: 'shell_execute';
       args: ShellActionEnvelope;
       /** 调用原因 / Call reason */
       reason: string;
@@ -52,7 +49,7 @@ export type PendingToolRequest =
   | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
-      name: "update_plan";
+      name: 'update_plan';
       /** 计划数据 / Plan data */
       args: AgentPlan;
       /** 调用原因 / Call reason */
@@ -63,7 +60,7 @@ export type PendingToolRequest =
   | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
-      name: "ask_user";
+      name: 'ask_user';
       /** 用户澄清请求 / User clarification request */
       args: UserInputRequest;
       /** 调用原因 / Call reason */
@@ -74,7 +71,7 @@ export type PendingToolRequest =
   | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
-      name: "read_mcp_resource";
+      name: 'read_mcp_resource';
       args: { server: string; uri: string };
       /** 调用原因 / Call reason */
       reason: string;
@@ -84,7 +81,7 @@ export type PendingToolRequest =
   | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
-      name: "Skill";
+      name: 'Skill';
       args: { skill: string };
       /** 调用原因 / Call reason */
       reason: string;
@@ -94,8 +91,8 @@ export type PendingToolRequest =
   | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
-      name: "task";
-      args: { subagent_type: "explore" | "code" | "review"; task: string };
+      name: 'task';
+      args: { subagent_type: 'explore' | 'code' | 'review'; task: string };
       /** 调用原因 / Call reason */
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
@@ -180,105 +177,115 @@ function toolRequestFromCall(
   call: { id?: string; name: string; args: Record<string, unknown> },
   _workspace: string,
 ): PendingToolRequest | null {
-  if (call.name === "read_file") {
+  if (call.name === 'read_file') {
     const args = call.args as { path?: string; offset?: number; limit?: number };
     return {
       id: call.id,
-      name: "read_file",
-      args: { path: args.path || "", offset: args.offset, limit: args.limit },
-      reason: "Model requested read_file",
-      protectedCommand: `read_file ${args.path || ""}`,
+      name: 'read_file',
+      args: { path: args.path || '', offset: args.offset, limit: args.limit },
+      reason: 'Model requested read_file',
+      protectedCommand: `read_file ${args.path || ''}`,
     };
   }
 
-  if (call.name === "edit_file") {
-    const args = call.args as { path?: string; old_string?: string; new_string?: string; replace_all?: boolean };
+  if (call.name === 'edit_file') {
+    const args = call.args as {
+      path?: string;
+      old_string?: string;
+      new_string?: string;
+      replace_all?: boolean;
+    };
     return {
       id: call.id,
-      name: "edit_file",
-      args: { path: args.path || "", old_string: args.old_string || "", new_string: args.new_string || "", replace_all: args.replace_all },
-      reason: "Model requested edit_file",
-      protectedCommand: `edit_file ${args.path || ""}`,
+      name: 'edit_file',
+      args: {
+        path: args.path || '',
+        old_string: args.old_string || '',
+        new_string: args.new_string || '',
+        replace_all: args.replace_all,
+      },
+      reason: 'Model requested edit_file',
+      protectedCommand: `edit_file ${args.path || ''}`,
     };
   }
 
-  if (call.name === "write_file") {
+  if (call.name === 'write_file') {
     const args = call.args as { path?: string; content?: string };
     return {
       id: call.id,
-      name: "write_file",
-      args: { path: args.path || "", content: args.content || "" },
-      reason: "Model requested write_file",
-      protectedCommand: `write_file ${args.path || ""}`,
+      name: 'write_file',
+      args: { path: args.path || '', content: args.content || '' },
+      reason: 'Model requested write_file',
+      protectedCommand: `write_file ${args.path || ''}`,
     };
   }
 
-  if (call.name === "shell_execute") {
+  if (call.name === 'shell_execute') {
     const args = normalizeShellActionEnvelope(call.args);
     return {
       id: call.id,
-      name: "shell_execute",
+      name: 'shell_execute',
       args,
-      reason: "Model requested shell_execute tool call",
+      reason: 'Model requested shell_execute tool call',
       protectedCommand: args.command,
     };
   }
 
-  if (call.name === "update_plan") {
+  if (call.name === 'update_plan') {
     const args = call.args as Partial<AgentPlan>;
     return {
       id: call.id,
-      name: "update_plan",
+      name: 'update_plan',
       args: normalizeAgentPlan(args),
-      reason: "Model requested plan state update",
-      protectedCommand: "update_plan",
+      reason: 'Model requested plan state update',
+      protectedCommand: 'update_plan',
     };
   }
 
-  if (call.name === "ask_user") {
+  if (call.name === 'ask_user') {
     const args = call.args as Partial<UserInputRequest>;
     return {
       id: call.id,
-      name: "ask_user",
+      name: 'ask_user',
       args: normalizeUserInputRequest(args),
-      reason: "Model requested user clarification",
-      protectedCommand: "ask_user",
+      reason: 'Model requested user clarification',
+      protectedCommand: 'ask_user',
     };
   }
 
-  if (call.name === "read_mcp_resource") {
+  if (call.name === 'read_mcp_resource') {
     const args = call.args as { server?: string; uri?: string };
     return {
       id: call.id,
-      name: "read_mcp_resource",
-      args: { server: args.server || "", uri: args.uri || "" },
-      reason: "Model requested MCP resource read",
-      protectedCommand: `read_mcp_resource ${args.server || ""}`,
+      name: 'read_mcp_resource',
+      args: { server: args.server || '', uri: args.uri || '' },
+      reason: 'Model requested MCP resource read',
+      protectedCommand: `read_mcp_resource ${args.server || ''}`,
     };
   }
 
-  if (call.name === "Skill") {
+  if (call.name === 'Skill') {
     const args = call.args as { skill?: string };
     return {
       id: call.id,
-      name: "Skill",
-      args: { skill: args.skill || "" },
-      reason: "Model requested Skill tool",
-      protectedCommand: "Skill",
+      name: 'Skill',
+      args: { skill: args.skill || '' },
+      reason: 'Model requested Skill tool',
+      protectedCommand: 'Skill',
     };
   }
 
-  if (call.name === "task") {
+  if (call.name === 'task') {
     const args = call.args as Record<string, unknown> | undefined;
     return {
       id: call.id,
-      name: "task",
+      name: 'task',
       args: {
-        subagent_type: (args?.subagent_type as "explore" | "code" | "review") ?? "explore",
-        task: (args?.task as string) ?? "",
+        subagent_type: (args?.subagent_type as 'explore' | 'code' | 'review') ?? 'explore',
+        task: (args?.task as string) ?? '',
       },
-      reason: "Model requested sub-agent dispatch",
-      protectedCommand: "task",
+      reason: 'Model requested sub-agent dispatch',
+      protectedCommand: 'task',
     };
   }
 
@@ -300,14 +307,16 @@ function isToolMessageInstance(msg: unknown): boolean {
 
   // Primary: use _getType() for correctly constructed instances
   try {
-    if (typeof m._getType === "function") {
-      return (m._getType as () => string).call(m) === "tool";
+    if (typeof m._getType === 'function') {
+      return (m._getType as () => string).call(m) === 'tool';
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // Fallback: checkpoint-deserialized messages — check for tool_call_id
   // which is unique to ToolMessage in the LangChain message hierarchy
-  if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0) {
+  if (typeof m.tool_call_id === 'string' && m.tool_call_id.length > 0) {
     // Guard against false positives: AIMessage never has tool_call_id
     if (AIMessage.isInstance(msg)) return false;
     // HumanMessage / SystemMessage never have tool_call_id
@@ -327,18 +336,18 @@ export function toolRequestFromMessage(
     return null;
   }
 
-  if (call.name === "read_file") {
+  if (call.name === 'read_file') {
     const args = call.args as { path?: string; offset?: number; limit?: number };
     return {
       id: call.id,
-      name: "read_file",
-      args: { path: args.path || "", offset: args.offset, limit: args.limit },
-      reason: "Model requested read_file",
-      protectedCommand: `read_file ${args.path || ""}`,
+      name: 'read_file',
+      args: { path: args.path || '', offset: args.offset, limit: args.limit },
+      reason: 'Model requested read_file',
+      protectedCommand: `read_file ${args.path || ''}`,
     };
   }
 
-  if (call.name === "edit_file") {
+  if (call.name === 'edit_file') {
     const args = call.args as {
       path?: string;
       old_string?: string;
@@ -347,95 +356,95 @@ export function toolRequestFromMessage(
     };
     return {
       id: call.id,
-      name: "edit_file",
+      name: 'edit_file',
       args: {
-        path: args.path || "",
-        old_string: args.old_string || "",
-        new_string: args.new_string || "",
+        path: args.path || '',
+        old_string: args.old_string || '',
+        new_string: args.new_string || '',
         replace_all: args.replace_all,
       },
-      reason: "Model requested edit_file",
-      protectedCommand: `edit_file ${args.path || ""}`,
+      reason: 'Model requested edit_file',
+      protectedCommand: `edit_file ${args.path || ''}`,
     };
   }
 
-  if (call.name === "write_file") {
+  if (call.name === 'write_file') {
     const args = call.args as { path?: string; content?: string };
     return {
       id: call.id,
-      name: "write_file",
-      args: { path: args.path || "", content: args.content || "" },
-      reason: "Model requested write_file",
-      protectedCommand: `write_file ${args.path || ""}`,
+      name: 'write_file',
+      args: { path: args.path || '', content: args.content || '' },
+      reason: 'Model requested write_file',
+      protectedCommand: `write_file ${args.path || ''}`,
     };
   }
 
-  if (call.name === "shell_execute") {
+  if (call.name === 'shell_execute') {
     const args = normalizeShellActionEnvelope(call.args);
     return {
       id: call.id,
-      name: "shell_execute",
+      name: 'shell_execute',
       args,
-      reason: "Model requested shell_execute tool call",
+      reason: 'Model requested shell_execute tool call',
       protectedCommand: args.command,
     };
   }
 
-  if (call.name === "update_plan") {
+  if (call.name === 'update_plan') {
     const args = call.args as Partial<AgentPlan>;
     return {
       id: call.id,
-      name: "update_plan",
+      name: 'update_plan',
       args: normalizeAgentPlan(args),
-      reason: "Model requested plan state update",
-      protectedCommand: "update_plan",
+      reason: 'Model requested plan state update',
+      protectedCommand: 'update_plan',
     };
   }
 
-  if (call.name === "ask_user") {
+  if (call.name === 'ask_user') {
     const args = call.args as Partial<UserInputRequest>;
     return {
       id: call.id,
-      name: "ask_user",
+      name: 'ask_user',
       args: normalizeUserInputRequest(args),
-      reason: "Model requested user clarification",
-      protectedCommand: "ask_user",
+      reason: 'Model requested user clarification',
+      protectedCommand: 'ask_user',
     };
   }
 
-  if (call.name === "read_mcp_resource") {
+  if (call.name === 'read_mcp_resource') {
     const args = call.args as { server?: string; uri?: string };
     return {
       id: call.id,
-      name: "read_mcp_resource",
-      args: { server: args.server || "", uri: args.uri || "" },
-      reason: "Model requested MCP resource read",
-      protectedCommand: `read_mcp_resource ${args.server || ""}`,
+      name: 'read_mcp_resource',
+      args: { server: args.server || '', uri: args.uri || '' },
+      reason: 'Model requested MCP resource read',
+      protectedCommand: `read_mcp_resource ${args.server || ''}`,
     };
   }
 
-  if (call.name === "Skill") {
+  if (call.name === 'Skill') {
     const args = call.args as { skill?: string };
     return {
       id: call.id,
-      name: "Skill",
-      args: { skill: args.skill || "" },
-      reason: "Model requested Skill tool",
-      protectedCommand: "Skill",
+      name: 'Skill',
+      args: { skill: args.skill || '' },
+      reason: 'Model requested Skill tool',
+      protectedCommand: 'Skill',
     };
   }
 
-  if (call.name === "task") {
+  if (call.name === 'task') {
     const args = call.args as Record<string, unknown> | undefined;
     return {
       id: call.id,
-      name: "task",
+      name: 'task',
       args: {
-        subagent_type: (args?.subagent_type as "explore" | "code" | "review") ?? "explore",
-        task: (args?.task as string) ?? "",
+        subagent_type: (args?.subagent_type as 'explore' | 'code' | 'review') ?? 'explore',
+        task: (args?.task as string) ?? '',
       },
-      reason: "Model requested sub-agent dispatch",
-      protectedCommand: "task",
+      reason: 'Model requested sub-agent dispatch',
+      protectedCommand: 'task',
     };
   }
 
@@ -443,13 +452,9 @@ export function toolRequestFromMessage(
 }
 
 /** 从 AIMessage 中提取并保留单个工具调用 / Extract and keep a single tool call from AIMessage */
-export function messageWithSingleToolCall(
-  message: AIMessage,
-  toolCallId?: string,
-): AIMessage {
+export function messageWithSingleToolCall(message: AIMessage, toolCallId?: string): AIMessage {
   const selectedCall =
-    message.tool_calls?.find((call) => call.id === toolCallId) ??
-    message.tool_calls?.[0];
+    message.tool_calls?.find((call) => call.id === toolCallId) ?? message.tool_calls?.[0];
   if (!selectedCall) {
     return message;
   }
@@ -457,16 +462,11 @@ export function messageWithSingleToolCall(
   const rawToolCalls = Array.isArray(message.additional_kwargs.tool_calls)
     ? message.additional_kwargs.tool_calls.filter(
         (call) =>
-          typeof call === "object" &&
-          call !== null &&
-          "id" in call &&
-          call.id === selectedCall.id,
+          typeof call === 'object' && call !== null && 'id' in call && call.id === selectedCall.id,
       )
     : [];
 
-  const reasoningContent = message.additional_kwargs.reasoning_content as
-    | string
-    | undefined;
+  const reasoningContent = message.additional_kwargs.reasoning_content as string | undefined;
 
   return new AIMessage({
     id: message.id,
@@ -484,22 +484,20 @@ export function messageWithSingleToolCall(
 
 /** 提取 AIMessage 的文本内容 / Extract text content from AIMessage */
 export function messageText(message: AIMessage): string {
-  return typeof message.content === "string"
-    ? message.content
-    : JSON.stringify(message.content);
+  return typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
 }
 
 /** 规范化 Agent 计划结构，填充默认值 / Normalize Agent plan structure */
 function normalizeAgentPlan(value: Partial<AgentPlan>): AgentPlan {
   const rawSteps: unknown[] = Array.isArray(value.steps) ? (value.steps as unknown[]) : [];
   return {
-    name: typeof value.name === "string" ? value.name : "",
-    description: typeof value.description === "string" ? value.description : "",
+    name: typeof value.name === 'string' ? value.name : '',
+    description: typeof value.description === 'string' ? value.description : '',
     status: normalizePlanStatus(value.status),
     steps: rawSteps
-      .filter((step): step is Record<string, unknown> => !!step && typeof step === "object")
+      .filter((step): step is Record<string, unknown> => !!step && typeof step === 'object')
       .map((step) => ({
-        step: typeof step.step === "string" ? step.step : "",
+        step: typeof step.step === 'string' ? step.step : '',
         status: normalizePlanStatus(step.status),
       })),
   };
@@ -510,31 +508,26 @@ function normalizeUserInputRequest(value: Partial<UserInputRequest>): UserInputR
   const rawOptions = Array.isArray(value.options) ? (value.options as unknown[]) : [];
   const options = rawOptions
     .filter((option): option is Partial<UserInputOption> => {
-      return !!option && typeof option === "object";
+      return !!option && typeof option === 'object';
     })
     .map((option, index) => {
       const id =
-        typeof option.id === "string" && option.id.trim()
-          ? option.id
-          : `option-${index + 1}`;
-      const label =
-        typeof option.label === "string" && option.label.trim()
-          ? option.label
-          : id;
+        typeof option.id === 'string' && option.id.trim() ? option.id : `option-${index + 1}`;
+      const label = typeof option.label === 'string' && option.label.trim() ? option.label : id;
       return {
         id,
         label,
-        ...(typeof option.description === "string" && option.description.trim()
+        ...(typeof option.description === 'string' && option.description.trim()
           ? { description: option.description }
           : {}),
       };
     });
 
   return {
-    question: typeof value.question === "string" ? value.question : "",
+    question: typeof value.question === 'string' ? value.question : '',
     options,
     allow_free_text: value.allow_free_text !== false,
-    ...(typeof value.context === "string" && value.context.trim()
+    ...(typeof value.context === 'string' && value.context.trim()
       ? { context: value.context }
       : {}),
   };
@@ -542,49 +535,48 @@ function normalizeUserInputRequest(value: Partial<UserInputRequest>): UserInputR
 
 /** 规范化计划状态值 / Normalize plan status value */
 function normalizePlanStatus(status: unknown): PlanStatus {
-  return status === "in_progress" || status === "completed" ? status : "pending";
+  return status === 'in_progress' || status === 'completed' ? status : 'pending';
 }
 
 /** 规范化 shell_execute action envelope / Normalize shell_execute action envelope */
 function normalizeShellActionEnvelope(value: unknown): ShellActionEnvelope {
   const record =
-    value && typeof value === "object" && !Array.isArray(value)
+    value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};
-  const command = typeof record.command === "string" && record.command.trim()
-    ? record.command
-    : "pwd";
+  const command =
+    typeof record.command === 'string' && record.command.trim() ? record.command : 'pwd';
   return {
     command,
-    ...(typeof record.description === "string" ? { description: record.description } : {}),
+    ...(typeof record.description === 'string' ? { description: record.description } : {}),
     ...(isShellIntent(record.intent) ? { intent: record.intent } : {}),
-    ...(typeof record.objective === "string" ? { objective: record.objective } : {}),
-    ...(typeof record.justification === "string"
-      ? { justification: record.justification }
-      : {}),
-    ...(typeof record.expected_observation === "string"
+    ...(typeof record.objective === 'string' ? { objective: record.objective } : {}),
+    ...(typeof record.justification === 'string' ? { justification: record.justification } : {}),
+    ...(typeof record.expected_observation === 'string'
       ? { expected_observation: record.expected_observation }
       : {}),
-    ...(typeof record.failure_strategy === "string"
+    ...(typeof record.failure_strategy === 'string'
       ? { failure_strategy: record.failure_strategy }
       : {}),
     ...(Array.isArray(record.prefix_rule)
-      ? { prefix_rule: record.prefix_rule.filter((item): item is string => typeof item === "string") }
+      ? {
+          prefix_rule: record.prefix_rule.filter(
+            (item): item is string => typeof item === 'string',
+          ),
+        }
       : {}),
-    ...(isShellApprovalGrant(record.grant_request)
-      ? { grant_request: record.grant_request }
-      : {}),
+    ...(isShellApprovalGrant(record.grant_request) ? { grant_request: record.grant_request } : {}),
   };
 }
 
 function isShellIntent(value: unknown): value is ShellIntent {
   switch (value) {
-    case "inspect":
-    case "verify":
-    case "build":
-    case "test":
-    case "git":
-    case "other":
+    case 'inspect':
+    case 'verify':
+    case 'build':
+    case 'test':
+    case 'git':
+    case 'other':
       return true;
     default:
       return false;
@@ -593,9 +585,9 @@ function isShellIntent(value: unknown): value is ShellIntent {
 
 export function isShellApprovalGrant(value: unknown): value is ShellApprovalGrant {
   switch (value) {
-    case "approve_once":
-    case "same_command":
-    case "full_access":
+    case 'approve_once':
+    case 'same_command':
+    case 'full_access':
       return true;
     default:
       return false;

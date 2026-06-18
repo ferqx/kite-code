@@ -1,21 +1,22 @@
 // ── Rewind（会话回溯）：checkpoint 面板 + revert/fork 执行 ──
-import React from "react";
-import { isRecoverableError, revertToCheckpoint, forkFromCheckpoint } from "@/core/runner";
-import { buildRevertParams, buildForkParams } from "../run-agent";
-import { createSandboxExecutor } from "@/core/sandbox/index";
-import { BunSqliteSaver } from "@/core/persistence/checkpoint";
-import { defaultCheckpointPath } from "@/core/config/paths";
-import type { Dispatch } from "react";
-import type { Action } from "../reducers/actions";
-import type { AgentConfig } from "@/core/config/index";
-import type { McpManager } from "@/core/mcp";
-import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
-import type { SessionManager } from "../session-manager";
-import type { TuiState } from "../types";
+
+import type { Dispatch } from 'react';
+import React from 'react';
+import type { AgentConfig } from '@/core/config/index';
+import { defaultCheckpointPath } from '@/core/config/paths';
+import type { McpManager } from '@/core/mcp';
+import { BunSqliteSaver } from '@/core/persistence/checkpoint';
+import { forkFromCheckpoint, isRecoverableError, revertToCheckpoint } from '@/core/runner';
+import { createSandboxExecutor } from '@/core/sandbox/index';
+import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import type { Action } from '../reducers/actions';
+import { buildForkParams, buildRevertParams } from '../run-agent';
+import type { SessionManager } from '../session-manager';
+import type { TuiState } from '../types';
 
 export interface RewindDeps {
   dispatch: Dispatch<Action>;
-  provider: import("../provider").TuiUserInputProvider;
+  provider: import('../provider').TuiUserInputProvider;
   config: AgentConfig;
   workspace: string;
   sessionManager: SessionManager;
@@ -45,50 +46,67 @@ export function useRewindCheckpoints(
     let saver: BunSqliteSaver | null = null;
     try {
       saver = new BunSqliteSaver(checkpointPath);
-      saver.listCheckpoints(threadIdRef.current).then((cps) => {
-        if (disposed) return;
-        dispatch({ type: "SET_CHECKPOINTS", checkpoints: cps });
-      }).catch(() => {
-        if (disposed) return;
-        dispatch({ type: "SET_CHECKPOINTS", checkpoints: [] });
-      }).finally(() => {
-        saver?.close();
-      });
+      saver
+        .listCheckpoints(threadIdRef.current)
+        .then((cps) => {
+          if (disposed) return;
+          dispatch({ type: 'SET_CHECKPOINTS', checkpoints: cps });
+        })
+        .catch(() => {
+          if (disposed) return;
+          dispatch({ type: 'SET_CHECKPOINTS', checkpoints: [] });
+        })
+        .finally(() => {
+          saver?.close();
+        });
     } catch {
-      dispatch({ type: "SET_CHECKPOINTS", checkpoints: [] });
+      dispatch({ type: 'SET_CHECKPOINTS', checkpoints: [] });
       saver?.close();
     }
     return () => {
       disposed = true;
-      try { saver?.close(); } catch { /* already closed */ }
+      try {
+        saver?.close();
+      } catch {
+        /* already closed */
+      }
     };
-  }, [state.showRewind, dispatch]);
+  }, [state.showRewind, dispatch, threadIdRef.current]);
 }
 
 /** Execute revert/fork when triggered by CheckpointSelector */
-export function useRunRewind(
-  state: { rewindCounter: number },
-  deps: RewindDeps,
-) {
+export function useRunRewind(state: { rewindCounter: number }, deps: RewindDeps) {
   const prevRewindCounterRef = React.useRef(0);
-  const pendingRewindRef = React.useRef<{ type: "revert"; checkpointId: string } | { type: "fork"; checkpointId: string } | null>(null);
+  const pendingRewindRef = React.useRef<
+    { type: 'revert'; checkpointId: string } | { type: 'fork'; checkpointId: string } | null
+  >(null);
 
   // Store pending rewind action (called from dispatchSessionLoad interceptor)
   const dispatchSessionLoadInterceptor = React.useCallback((action: any) => {
-    if (action.type === "REVERT_TO_CHECKPOINT") {
-      pendingRewindRef.current = { type: "revert", checkpointId: action.checkpointId };
-    } else if (action.type === "FORK_FROM_CHECKPOINT") {
-      pendingRewindRef.current = { type: "fork", checkpointId: action.checkpointId };
+    if (action.type === 'REVERT_TO_CHECKPOINT') {
+      pendingRewindRef.current = { type: 'revert', checkpointId: action.checkpointId };
+    } else if (action.type === 'FORK_FROM_CHECKPOINT') {
+      pendingRewindRef.current = { type: 'fork', checkpointId: action.checkpointId };
     }
   }, []);
 
   const runRewind = React.useCallback(
-    async (type: "revert" | "fork", checkpointId: string) => {
+    async (type: 'revert' | 'fork', checkpointId: string) => {
       const {
-        dispatch, provider, config, workspace, sessionManager,
-        threadIdRef, conversationHistoryRef, thinkingLevelRef,
-        skillManifestsRef, skillOptionsRef, mcpManagerRef,
-        agentLoopActiveRef, abortControllerRef, stateRef,
+        dispatch,
+        provider,
+        config,
+        workspace,
+        sessionManager,
+        threadIdRef,
+        conversationHistoryRef,
+        thinkingLevelRef,
+        skillManifestsRef,
+        skillOptionsRef,
+        mcpManagerRef,
+        agentLoopActiveRef,
+        abortControllerRef,
+        stateRef,
       } = deps;
 
       if (agentLoopActiveRef.current) return;
@@ -99,16 +117,16 @@ export function useRunRewind(
       const rt = sessionManager.getRuntime(threadIdRef.current);
       if (rt?.agentLoopActive) return;
 
-      dispatch({ type: "SET_RUNNING" });
+      dispatch({ type: 'SET_RUNNING' });
 
       const threadId = threadIdRef.current;
       if (!threadId) {
         provider.onEvent({
-          type: "error",
-          data: { message: "No active session. Start a conversation first.", recoverable: false },
+          type: 'error',
+          data: { message: 'No active session. Start a conversation first.', recoverable: false },
         });
-        dispatch({ type: "SET_EXITED" });
-        dispatch({ type: "SET_IDLE" });
+        dispatch({ type: 'SET_EXITED' });
+        dispatch({ type: 'SET_IDLE' });
         return;
       }
 
@@ -131,11 +149,14 @@ export function useRunRewind(
       };
 
       let generator: AsyncGenerator<any>;
-      if (type === "revert") {
-        generator = revertToCheckpoint(provider, buildRevertParams({
-          ...baseRewindParams,
-          checkpointId,
-        }));
+      if (type === 'revert') {
+        generator = revertToCheckpoint(
+          provider,
+          buildRevertParams({
+            ...baseRewindParams,
+            checkpointId,
+          }),
+        );
       } else {
         const newThreadId = `tui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
         const forkedRt = sessionManager.registerSession(newThreadId, workspace);
@@ -147,14 +168,17 @@ export function useRunRewind(
         forkedRt.conversationHistory = [...conversationHistoryRef.current];
         threadIdRef.current = newThreadId;
         sessionManager.onStatusChange(newThreadId);
-        dispatch({ type: "SET_SESSIONS", sessions: sessionManager.getSnapshot() });
-        dispatch({ type: "SWITCH_SESSION", threadId: newThreadId });
-        generator = forkFromCheckpoint(provider, buildForkParams({
-          ...baseRewindParams,
-          oldThreadId: threadId,
-          checkpointId,
-          newThreadId,
-        }));
+        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+        dispatch({ type: 'SWITCH_SESSION', threadId: newThreadId });
+        generator = forkFromCheckpoint(
+          provider,
+          buildForkParams({
+            ...baseRewindParams,
+            oldThreadId: threadId,
+            checkpointId,
+            newThreadId,
+          }),
+        );
       }
 
       let aborted = false;
@@ -165,18 +189,18 @@ export function useRunRewind(
             break;
           }
         }
-        if (!aborted) dispatch({ type: "SET_EXITED" });
+        if (!aborted) dispatch({ type: 'SET_EXITED' });
       } catch (e: any) {
         provider.onEvent({
-          type: "error",
+          type: 'error',
           data: { message: e?.message ?? String(e), recoverable: isRecoverableError(e) },
         });
-        dispatch({ type: "SET_EXITED" });
+        dispatch({ type: 'SET_EXITED' });
       } finally {
         abortControllerRef.current = null;
         agentLoopActiveRef.current = false;
         provider.reset();
-        dispatch({ type: "SET_IDLE" });
+        dispatch({ type: 'SET_IDLE' });
       }
     },
     [deps],
@@ -193,7 +217,7 @@ export function useRunRewind(
     if (!pending) return;
 
     runRewind(pending.type, pending.checkpointId);
-  }, [state.rewindCounter]);
+  }, [state.rewindCounter, runRewind]);
 
   return { runRewind, dispatchSessionLoadInterceptor };
 }

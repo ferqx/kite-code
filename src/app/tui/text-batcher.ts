@@ -1,5 +1,5 @@
-import type { Action } from "./reducers/actions";
-import type { AgentEvent } from "@/protocol/events";
+import type { AgentEvent } from '@/protocol/events';
+import type { Action } from './reducers/actions';
 
 /**
  * TextBatcher 合并连续 text 事件，减少流式渲染期间的 re-render 次数。
@@ -14,17 +14,20 @@ export class TextBatcher {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
 
-  constructor(
-    private dispatch: (action: Action) => void,
-    private interval = 16,
-  ) {}
+  private dispatch: (action: Action) => void;
+  private interval: number;
+
+  constructor(dispatch: (action: Action) => void, interval = 16) {
+    this.dispatch = dispatch;
+    this.interval = interval;
+  }
 
   setRunning(running: boolean) {
     this.running = running;
   }
 
   push(event: AgentEvent) {
-    if (this.running && event.type === "text") {
+    if (this.running && event.type === 'text') {
       // 覆盖：只保留最新的累积文本
       this.pendingText = event.data.text;
       if (!this.timer) {
@@ -33,15 +36,15 @@ export class TextBatcher {
     } else {
       // 非 text 事件：先 flush 再立即 dispatch
       this.flush();
-      this.dispatch({ type: "EVENT", event });
+      this.dispatch({ type: 'EVENT', event });
     }
   }
 
   flush() {
     if (this.pendingText !== null) {
       this.dispatch({
-        type: "EVENT",
-        event: { type: "text", data: { text: this.pendingText } },
+        type: 'EVENT',
+        event: { type: 'text', data: { text: this.pendingText } },
       });
       this.pendingText = null;
     }

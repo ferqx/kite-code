@@ -1,72 +1,69 @@
-import { describe, expect, test, mock } from "bun:test";
-import { AIMessage } from "@langchain/core/messages";
+import { describe, expect, test } from 'bun:test';
+import { AIMessage } from '@langchain/core/messages';
+import { createPromptCacheStandardTracker } from '../src/core/cache-metrics';
 import {
+  chunkToEvents,
   initialAgentPhaseForAccess,
   initialWorkspaceAccessForTask,
+  isRecoverableError,
   normalizeGraphStream,
   taskMessageForInitialAccess,
-  chunkToEvents,
-  isRecoverableError,
-} from "../src/core/runner";
-import { createPromptCacheStandardTracker } from "../src/core/cache-metrics";
-import type { AgentEvent } from "../src/protocol/index";
-import type { ModelRetryEvent } from "../src/core/types";
+} from '../src/core/runner';
+import type { ModelRetryEvent } from '../src/core/types';
+import type { AgentEvent } from '../src/protocol/index';
+
 // 测试 runner 的初始工作区访问权限选择逻辑 / Test runner initial workspace access selection logic
-describe("runner initial workspace access selection", () => {
+describe('runner initial workspace access selection', () => {
   // 验证所有任务以 write 工作区访问启动 / Verify all tasks start with write workspace access
-  test("starts tasks with write workspace access", () => {
-    expect(initialWorkspaceAccessForTask("/plan Create hello.txt")).toBe("write");
-    expect(initialWorkspaceAccessForTask("   /plan inspect repo first")).toBe("write");
+  test('starts tasks with write workspace access', () => {
+    expect(initialWorkspaceAccessForTask('/plan Create hello.txt')).toBe('write');
+    expect(initialWorkspaceAccessForTask('   /plan inspect repo first')).toBe('write');
   });
 
   // 验证 initialWorkspaceAccessForTask 始终返回 write / Verify always returns write
-  test("always returns write workspace access", () => {
-    expect(initialWorkspaceAccessForTask("Create hello.txt", "write")).toBe("write");
-    expect(initialWorkspaceAccessForTask("Create hello.txt", "builder")).toBe("write");
-    expect(initialWorkspaceAccessForTask("Create hello.txt", "auto")).toBe("write");
+  test('always returns write workspace access', () => {
+    expect(initialWorkspaceAccessForTask('Create hello.txt', 'write')).toBe('write');
+    expect(initialWorkspaceAccessForTask('Create hello.txt', 'builder')).toBe('write');
+    expect(initialWorkspaceAccessForTask('Create hello.txt', 'auto')).toBe('write');
   });
 
   // 验证初始 phase 始终为 building / Verify initial phase is always building
-  test("derives initial agent phase from workspace access", () => {
-    expect(initialAgentPhaseForAccess("write")).toBe("building");
+  test('derives initial agent phase from workspace access', () => {
+    expect(initialAgentPhaseForAccess('write')).toBe('building');
   });
 
   // 验证 auto 模式不再用启发式切换到只读，让模型自主决定是否调用 update_plan / Verify auto mode no longer heuristically switches to read-only
-  test("leaves natural-language planning requests with write access in auto mode", () => {
-    expect(initialWorkspaceAccessForTask("先计划，不要改代码，检查 graph 模式")).toBe("write");
-    expect(initialWorkspaceAccessForTask("只计划一下实现方案，不要改文件")).toBe("write");
-    expect(initialWorkspaceAccessForTask("Plan first and do not edit files yet")).toBe("write");
+  test('leaves natural-language planning requests with write access in auto mode', () => {
+    expect(initialWorkspaceAccessForTask('先计划，不要改代码，检查 graph 模式')).toBe('write');
+    expect(initialWorkspaceAccessForTask('只计划一下实现方案，不要改文件')).toBe('write');
+    expect(initialWorkspaceAccessForTask('Plan first and do not edit files yet')).toBe('write');
   });
 
   // 验证初始访问权限不会改写用户任务文本 / Verify initial access does not rewrite user task text
-  test("keeps initial task messages unchanged", () => {
-    expect(taskMessageForInitialAccess("先计划，不要改代码", "write")).toBe(
-      "先计划，不要改代码",
-    );
-    expect(taskMessageForInitialAccess("/plan inspect", "write")).toBe("/plan inspect");
-    expect(taskMessageForInitialAccess("Create hello.txt", "write")).toBe(
-      "Create hello.txt",
-    );
+  test('keeps initial task messages unchanged', () => {
+    expect(taskMessageForInitialAccess('先计划，不要改代码', 'write')).toBe('先计划，不要改代码');
+    expect(taskMessageForInitialAccess('/plan inspect', 'write')).toBe('/plan inspect');
+    expect(taskMessageForInitialAccess('Create hello.txt', 'write')).toBe('Create hello.txt');
   });
 
   // 验证普通任务默认使用可写工作区访问 / Verify normal tasks default to write workspace access
-  test("starts non-plan tasks with write workspace access", () => {
-    expect(initialWorkspaceAccessForTask("Create hello.txt")).toBe("write");
-    expect(initialWorkspaceAccessForTask("")).toBe("write"); // 空任务也走 write / Empty task also uses write
+  test('starts non-plan tasks with write workspace access', () => {
+    expect(initialWorkspaceAccessForTask('Create hello.txt')).toBe('write');
+    expect(initialWorkspaceAccessForTask('')).toBe('write'); // 空任务也走 write / Empty task also uses write
   });
 });
 
-describe("normalizeGraphStream model retry events", () => {
-  test("yields model_retry events when agent chunk contains modelRetries", async () => {
+describe('normalizeGraphStream model retry events', () => {
+  test('yields model_retry events when agent chunk contains modelRetries', async () => {
     const retries: ModelRetryEvent[] = [
-      { attempt: 1, maxAttempts: 5, error: "ECONNRESET", delayMs: 500 },
-      { attempt: 2, maxAttempts: 5, error: "ECONNRESET", delayMs: 1000 },
+      { attempt: 1, maxAttempts: 5, error: 'ECONNRESET', delayMs: 500 },
+      { attempt: 2, maxAttempts: 5, error: 'ECONNRESET', delayMs: 1000 },
     ];
 
     async function* mockStream() {
       yield {
         agent: {
-          messages: [{ type: "ai", content: "done" }],
+          messages: [{ type: 'ai', content: 'done' }],
           modelRetries: retries,
         },
       };
@@ -77,17 +74,20 @@ describe("normalizeGraphStream model retry events", () => {
       events.push(event);
     }
 
-    const retryEvents = events.filter((e): e is AgentEvent & { type: "model_retry"; data: ModelRetryEvent } => e.type === "model_retry");
+    const retryEvents = events.filter(
+      (e): e is AgentEvent & { type: 'model_retry'; data: ModelRetryEvent } =>
+        e.type === 'model_retry',
+    );
     expect(retryEvents).toHaveLength(2);
-    expect(retryEvents[0].data).toEqual(retries[0]);
-    expect(retryEvents[1].data).toEqual(retries[1]);
+    expect(retryEvents[0]!.data).toEqual(retries[0]!);
+    expect(retryEvents[1]!.data).toEqual(retries[1]!);
   });
 
-  test("does not yield model_retry when chunk has no modelRetries", async () => {
+  test('does not yield model_retry when chunk has no modelRetries', async () => {
     async function* mockStream() {
       yield {
         agent: {
-          messages: [{ type: "ai", content: "done" }],
+          messages: [{ type: 'ai', content: 'done' }],
         },
       };
     }
@@ -97,13 +97,13 @@ describe("normalizeGraphStream model retry events", () => {
       events.push(event);
     }
 
-    const retryEvents = events.filter((e) => e.type === "model_retry");
+    const retryEvents = events.filter((e) => e.type === 'model_retry');
     expect(retryEvents).toHaveLength(0);
   });
 
-  test("yields model_retry events correctly ordered (before cache_metrics when applicable)", async () => {
+  test('yields model_retry events correctly ordered (before cache_metrics when applicable)', async () => {
     const retries: ModelRetryEvent[] = [
-      { attempt: 1, maxAttempts: 5, error: "500 Internal Error", delayMs: 500 },
+      { attempt: 1, maxAttempts: 5, error: '500 Internal Error', delayMs: 500 },
     ];
 
     async function* mockStream() {
@@ -120,128 +120,128 @@ describe("normalizeGraphStream model retry events", () => {
     }
 
     // update always comes first, then model_retry
-    expect(events.map((e) => e.type)).toEqual(["update", "model_retry"]);
+    expect(events.map((e) => e.type)).toEqual(['update', 'model_retry']);
   });
 });
 
-describe("chunkToEvents final dedup", () => {
+describe('chunkToEvents final dedup', () => {
   const cacheStandard = createPromptCacheStandardTracker();
 
-  test("emits final even when text content is identical", () => {
-    const ai = new AIMessage({ content: "hello world" });
+  test('emits final even when text content is identical', () => {
+    const ai = new AIMessage({ content: 'hello world' });
     const chunk = {
       agent: {
         messages: [ai],
-        final: "hello world",
+        final: 'hello world',
       },
     };
 
-    const events = chunkToEvents(chunk, "write", cacheStandard);
-    expect(events.filter((e) => e.type === "text")).toHaveLength(1);
-    expect(events.filter((e) => e.type === "final")).toHaveLength(1);
-    expect(events.find((e) => e.type === "final")?.data).toBe("hello world");
+    const events = chunkToEvents(chunk, 'write', cacheStandard);
+    expect(events.filter((e) => e.type === 'text')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
+    expect(events.find((e) => e.type === 'final')?.data).toBe('hello world');
   });
 
-  test("emits final when its content differs from text events", () => {
-    const ai = new AIMessage({ content: "actual response" });
+  test('emits final when its content differs from text events', () => {
+    const ai = new AIMessage({ content: 'actual response' });
     const chunk = {
       agent: {
         messages: [ai],
-        final: "summary of the full conversation",
+        final: 'summary of the full conversation',
       },
     };
 
-    const events = chunkToEvents(chunk, "write", cacheStandard);
-    expect(events.filter((e) => e.type === "text")).toHaveLength(1);
-    expect(events.filter((e) => e.type === "final")).toHaveLength(1);
+    const events = chunkToEvents(chunk, 'write', cacheStandard);
+    expect(events.filter((e) => e.type === 'text')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
   });
 
-  test("emits final when there are no text events", () => {
+  test('emits final when there are no text events', () => {
     const chunk = {
       agent: {
-        final: "done",
+        final: 'done',
       },
     };
 
-    const events = chunkToEvents(chunk, "write", cacheStandard);
-    expect(events.filter((e) => e.type === "final")).toHaveLength(1);
-    expect(events.filter((e) => e.type === "final")[0].data).toBe("done");
+    const events = chunkToEvents(chunk, 'write', cacheStandard);
+    expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'final')[0]!.data).toBe('done');
   });
 
-  test("emits final when text events have different content", () => {
-    const ai1 = new AIMessage({ content: "step 1" });
-    const ai2 = new AIMessage({ content: "step 2" });
+  test('emits final when text events have different content', () => {
+    const ai1 = new AIMessage({ content: 'step 1' });
+    const ai2 = new AIMessage({ content: 'step 2' });
     const chunk = {
       agent: {
         messages: [ai1, ai2],
-        final: "unique summary",
+        final: 'unique summary',
       },
     };
 
-    const events = chunkToEvents(chunk, "write", cacheStandard);
-    expect(events.filter((e) => e.type === "text")).toHaveLength(2);
-    expect(events.filter((e) => e.type === "final")).toHaveLength(1);
+    const events = chunkToEvents(chunk, 'write', cacheStandard);
+    expect(events.filter((e) => e.type === 'text')).toHaveLength(2);
+    expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
   });
 });
 
 // ── checkpointer close 安全测试 / checkpointer close safety test ──
 // 验证 BunSqliteSaver 的 isClosed 守卫正确工作，确保 abort 后 close() 不崩溃
-describe("checkpointer close safety", () => {
-  test("close() is safe to call multiple times (no throw)", async () => {
-    const { BunSqliteSaver } = await import("../src/core/persistence/checkpoint");
-    const saver = new BunSqliteSaver(":memory:");
+describe('checkpointer close safety', () => {
+  test('close() is safe to call multiple times (no throw)', async () => {
+    const { BunSqliteSaver } = await import('../src/core/persistence/checkpoint');
+    const saver = new BunSqliteSaver(':memory:');
     saver.close();
     // 第二次 close() 不应抛出异常 / Second close() should not throw
     expect(() => saver.close()).not.toThrow();
   });
 });
 
-describe("isRecoverableError", () => {
-  test("returns true for ETIMEDOUT", () => {
-    expect(isRecoverableError(new Error("connect ETIMEDOUT"))).toBe(true);
+describe('isRecoverableError', () => {
+  test('returns true for ETIMEDOUT', () => {
+    expect(isRecoverableError(new Error('connect ETIMEDOUT'))).toBe(true);
   });
 
-  test("returns true for ECONNRESET", () => {
-    expect(isRecoverableError(new Error("read ECONNRESET"))).toBe(true);
+  test('returns true for ECONNRESET', () => {
+    expect(isRecoverableError(new Error('read ECONNRESET'))).toBe(true);
   });
 
-  test("returns true for 429", () => {
-    expect(isRecoverableError(new Error("HTTP 429 Too Many Requests"))).toBe(true);
+  test('returns true for 429', () => {
+    expect(isRecoverableError(new Error('HTTP 429 Too Many Requests'))).toBe(true);
   });
 
-  test("returns true for 502/503", () => {
-    expect(isRecoverableError(new Error("503 Service Unavailable"))).toBe(true);
-    expect(isRecoverableError(new Error("502 Bad Gateway"))).toBe(true);
+  test('returns true for 502/503', () => {
+    expect(isRecoverableError(new Error('503 Service Unavailable'))).toBe(true);
+    expect(isRecoverableError(new Error('502 Bad Gateway'))).toBe(true);
   });
 
-  test("returns true for overloaded", () => {
-    expect(isRecoverableError(new Error("Model overloaded"))).toBe(true);
+  test('returns true for overloaded', () => {
+    expect(isRecoverableError(new Error('Model overloaded'))).toBe(true);
   });
 
-  test("returns true for timeout", () => {
-    expect(isRecoverableError(new Error("Request timeout"))).toBe(true);
+  test('returns true for timeout', () => {
+    expect(isRecoverableError(new Error('Request timeout'))).toBe(true);
   });
 
-  test("returns true for rate limit text", () => {
-    expect(isRecoverableError(new Error("Rate limit exceeded"))).toBe(true);
+  test('returns true for rate limit text', () => {
+    expect(isRecoverableError(new Error('Rate limit exceeded'))).toBe(true);
   });
 
-  test("returns false for AbortError", () => {
-    const err = new Error("Aborted");
-    err.name = "AbortError";
+  test('returns false for AbortError', () => {
+    const err = new Error('Aborted');
+    err.name = 'AbortError';
     expect(isRecoverableError(err)).toBe(false);
   });
 
-  test("returns false for config errors", () => {
+  test('returns false for config errors', () => {
     expect(isRecoverableError(new Error("Model provider 'x' requires apiKey"))).toBe(false);
   });
 
-  test("returns false for non-Error types", () => {
-    expect(isRecoverableError("some string")).toBe(false);
+  test('returns false for non-Error types', () => {
+    expect(isRecoverableError('some string')).toBe(false);
   });
 
-  test("is case-insensitive", () => {
-    expect(isRecoverableError(new Error("ETIMEDOUT"))).toBe(true);
-    expect(isRecoverableError(new Error("Rate Limit"))).toBe(true);
+  test('is case-insensitive', () => {
+    expect(isRecoverableError(new Error('ETIMEDOUT'))).toBe(true);
+    expect(isRecoverableError(new Error('Rate Limit'))).toBe(true);
   });
 });

@@ -1,9 +1,14 @@
-import { ChatDeepSeek } from "@langchain/deepseek";
-import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
-import type { AgentConfig } from "@/core/config/index";
+import { AIMessage, type BaseMessage, HumanMessage } from '@langchain/core/messages';
+import { ChatDeepSeek } from '@langchain/deepseek';
+import type { AgentConfig } from '@/core/config/index';
 
 /** 模型重试监听器 / Model retry listener */
-export type ModelRetryListener = (attempt: number, maxAttempts: number, error: unknown, delayMs: number) => void;
+export type ModelRetryListener = (
+  attempt: number,
+  maxAttempts: number,
+  error: unknown,
+  delayMs: number,
+) => void;
 
 /** 支持设置 retry listener 的聊天模型接口 / Chat model interface supporting retry listener injection */
 export interface RetryListenerHost {
@@ -26,7 +31,7 @@ export interface TransientModelRetryOptions {
   onRetry?: ModelRetryListener;
 }
 
-const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<Omit<TransientModelRetryOptions, "onRetry">> = {
+const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<Omit<TransientModelRetryOptions, 'onRetry'>> = {
   maxAttempts: 5,
   initialDelayMs: 500,
   maxDelayMs: 4_000,
@@ -68,8 +73,11 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
   override _convertCompletionsMessageToBaseMessage(message: any, rawResponse: any): BaseMessage {
     const base = super._convertCompletionsMessageToBaseMessage(message, rawResponse);
     // 如果父类已经写入 usage 且含有缓存字段，直接返回 / If parent already wrote usage with cache fields, return as-is
-    const existing = (base.response_metadata as Record<string, unknown>)?.usage as Record<string, unknown> | undefined;
-    if (existing?.prompt_cache_hit_tokens != null || existing?.prompt_cache_miss_tokens != null) return base;
+    const existing = (base.response_metadata as Record<string, unknown>)?.usage as
+      | Record<string, unknown>
+      | undefined;
+    if (existing?.prompt_cache_hit_tokens != null || existing?.prompt_cache_miss_tokens != null)
+      return base;
     // 父类未写入 usage 或缺少缓存字段：从 rawResponse 补全 / Parent missed usage or cache fields: patch from rawResponse
     const rawUsage = rawResponse?.usage as Record<string, unknown> | undefined;
     if (!rawUsage) return base;
@@ -86,11 +94,7 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
   }
 
   /** @internal */
-  override async _generate(
-    messages: BaseMessage[],
-    options: any,
-    runManager?: any,
-  ): Promise<any> {
+  override async _generate(messages: BaseMessage[], options: any, runManager?: any): Promise<any> {
     this._originalMessages = messages;
     try {
       return await super._generate(messages, options, runManager);
@@ -100,15 +104,8 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
   }
 
   /** @internal 在发送前注入 reasoning_content / Inject reasoning_content before sending */
-  override async completionWithRetry(
-    request: any,
-    requestOptions?: any,
-  ): Promise<any> {
-    if (
-      this._originalMessages &&
-      request.messages &&
-      Array.isArray(request.messages)
-    ) {
+  override async completionWithRetry(request: any, requestOptions?: any): Promise<any> {
+    if (this._originalMessages && request.messages && Array.isArray(request.messages)) {
       // 按 HumanMessage 边界划分 user turn。根据 DeepSeek 官方文档：
       // - 有 tool_calls 的 turn 内，所有 assistant 消息的 reasoning_content 必须回传
       // - 无 tool_calls 的 turn 内，reasoning_content 回传也会被 API 忽略 → 清空以节省 token、提升缓存
@@ -123,7 +120,7 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
 
       function flushTurn() {
         for (const rc of pending) {
-          reasonings.push(turnHasToolCalls ? rc : "");
+          reasonings.push(turnHasToolCalls ? rc : '');
         }
         pending.length = 0;
         turnHasToolCalls = false;
@@ -139,21 +136,22 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
         const hasToolCalls = Array.isArray(original.tool_calls) && original.tool_calls.length > 0;
         if (hasToolCalls) turnHasToolCalls = true;
 
-        const reasoning = (original.additional_kwargs as Record<string, unknown>)?.reasoning_content;
-        pending.push(typeof reasoning === "string" ? reasoning : "");
+        const reasoning = (original.additional_kwargs as Record<string, unknown>)
+          ?.reasoning_content;
+        pending.push(typeof reasoning === 'string' ? reasoning : '');
       }
       flushTurn();
 
       let assistantIdx = 0;
       for (const mapped of request.messages) {
-        if (mapped.role !== "assistant") continue;
+        if (mapped.role !== 'assistant') continue;
         if (assistantIdx >= reasonings.length) break;
-        if ("reasoning_content" in mapped && mapped.reasoning_content !== undefined) {
+        if ('reasoning_content' in mapped && mapped.reasoning_content !== undefined) {
           assistantIdx++;
           continue;
         }
         const reasoning = reasonings[assistantIdx];
-        if (typeof reasoning === "string") {
+        if (typeof reasoning === 'string') {
           mapped.reasoning_content = reasoning;
         }
         assistantIdx++;
@@ -162,20 +160,22 @@ class PatchedChatDeepSeek extends ChatDeepSeek {
       // DeepSeek all-or-nothing requirement: if ANY assistant message has reasoning_content,
       // ALL assistant messages must have it (even empty strings). Otherwise API returns 400.
       const anyReasoning = request.messages.some(
-        (m: any) => m.role === "assistant" && "reasoning_content" in m,
+        (m: any) => m.role === 'assistant' && 'reasoning_content' in m,
       );
       if (anyReasoning) {
         for (const m of request.messages) {
-          if (m.role === "assistant" && (!("reasoning_content" in m) || m.reasoning_content === undefined)) {
-            m.reasoning_content = "";
+          if (
+            m.role === 'assistant' &&
+            (!('reasoning_content' in m) || m.reasoning_content === undefined)
+          ) {
+            m.reasoning_content = '';
           }
         }
       }
     }
-    return withTransientModelRetry(
-      () => super.completionWithRetry(request, requestOptions),
-      { onRetry: this._retryListener ?? undefined },
-    );
+    return withTransientModelRetry(() => super.completionWithRetry(request, requestOptions), {
+      onRetry: this._retryListener ?? undefined,
+    });
   }
 }
 
@@ -192,10 +192,7 @@ export async function withTransientModelRetry<T>(
       return await operation();
     } catch (error) {
       lastError = error;
-      if (
-        attempt >= retryOptions.maxAttempts ||
-        !isTransientModelConnectionError(error)
-      ) {
+      if (attempt >= retryOptions.maxAttempts || !isTransientModelConnectionError(error)) {
         throw error;
       }
 
@@ -204,9 +201,7 @@ export async function withTransientModelRetry<T>(
         retryOptions.initialDelayMs * 2 ** (attempt - 1),
       );
       const jitter =
-        retryOptions.jitterMs > 0
-          ? Math.floor(Math.random() * retryOptions.jitterMs)
-          : 0;
+        retryOptions.jitterMs > 0 ? Math.floor(Math.random() * retryOptions.jitterMs) : 0;
       const delayMs = baseDelay + jitter;
       // attempt 即重试次数（1-indexed）：attempt=1 表示第 1 次重试 / attempt is the retry number (1-indexed): attempt=1 means first retry
       retryOptions.onRetry?.(attempt, retryOptions.maxAttempts, error, delayMs);
@@ -219,12 +214,9 @@ export async function withTransientModelRetry<T>(
 
 /** 判断是否为可重试的模型连接错误 / Check whether an error is a retryable model connection error */
 export function isTransientModelConnectionError(error: unknown): boolean {
-  const record =
-    error && typeof error === "object"
-      ? (error as Record<string, unknown>)
-      : {};
+  const record = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
   const status = record.status;
-  if (typeof status === "number") {
+  if (typeof status === 'number') {
     if (status >= 400 && status < 500) return false; // 4xx never retryable
     if (status >= 500) return true; // 5xx always retryable (502/503/504 are transient server errors)
   }
@@ -238,25 +230,25 @@ export function isTransientModelConnectionError(error: unknown): boolean {
 
 function errorText(error: unknown, depth = 0): string {
   if (depth > 3) {
-    return "";
+    return '';
   }
   if (error instanceof Error) {
     const record = error as Error & { code?: unknown; cause?: unknown };
     return [
       error.name,
       error.message,
-      typeof record.code === "string" ? record.code : "",
+      typeof record.code === 'string' ? record.code : '',
       errorText(record.cause, depth + 1),
-    ].join(" ");
+    ].join(' ');
   }
-  if (error && typeof error === "object") {
+  if (error && typeof error === 'object') {
     const record = error as Record<string, unknown>;
     return [
-      typeof record.name === "string" ? record.name : "",
-      typeof record.message === "string" ? record.message : "",
-      typeof record.code === "string" ? record.code : "",
+      typeof record.name === 'string' ? record.name : '',
+      typeof record.message === 'string' ? record.message : '',
+      typeof record.code === 'string' ? record.code : '',
       errorText(record.cause, depth + 1),
-    ].join(" ");
+    ].join(' ');
   }
   return String(error);
 }

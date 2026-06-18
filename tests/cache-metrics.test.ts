@@ -1,17 +1,17 @@
-import { describe, expect, test } from "bun:test";
-import { AIMessage } from "@langchain/core/messages";
+import { describe, expect, test } from 'bun:test';
+import { AIMessage } from '@langchain/core/messages';
 import {
   createPromptCacheStandardTracker,
   extractPromptCacheMetrics,
-} from "../src/core/cache-metrics";
-import { normalizeGraphStream } from "../src/core/runner";
+} from '../src/core/cache-metrics';
+import { normalizeGraphStream } from '../src/core/runner';
 
 // 验证从 AIMessage 响应中提取 prompt cache 指标 / Verify extracting prompt cache metrics from AIMessage responses
-describe("extractPromptCacheMetrics", () => {
+describe('extractPromptCacheMetrics', () => {
   // 验证能正确从 DeepSeek 响应元数据中提取缓存命中/未命中 token 数并计算命中率 / Verify extracting cache hit/miss tokens and hit rate from DeepSeek response metadata
-  test("reads DeepSeek prompt cache hit and miss tokens from response metadata", () => {
+  test('reads DeepSeek prompt cache hit and miss tokens from response metadata', () => {
     const message = new AIMessage({
-      content: "ok",
+      content: 'ok',
       response_metadata: {
         usage: {
           prompt_tokens: 1000,
@@ -31,9 +31,9 @@ describe("extractPromptCacheMetrics", () => {
   });
 
   // 验证 normalizeGraphStream 在流式处理 AI 消息时会发出 cache_metrics 事件 / Verify normalizeGraphStream emits cache_metrics events when processing streamed AI messages
-  test("runner emits cache metrics events from streamed AI messages", async () => {
+  test('runner emits cache metrics events from streamed AI messages', async () => {
     const ai = new AIMessage({
-      content: "done",
+      content: 'done',
       response_metadata: {
         usage: {
           prompt_tokens: 100,
@@ -45,7 +45,7 @@ describe("extractPromptCacheMetrics", () => {
 
     // 模拟图流输出，包含工作区访问权限信息和 AI 消息 / Simulate graph stream output with workspace access info and AI message
     async function* stream() {
-      yield { agent: { workspaceAccess: "write", messages: [ai], final: "done" } };
+      yield { agent: { workspaceAccess: 'write', messages: [ai], final: 'done' } };
     }
 
     const events = [];
@@ -55,9 +55,9 @@ describe("extractPromptCacheMetrics", () => {
 
     // 检查事件流中应包含按工作区访问权限分类的 cache_metrics 事件，并附带缓存标准评估 / Verify cache_metrics event includes standard evaluation
     expect(events).toContainEqual({
-      type: "cache_metrics",
+      type: 'cache_metrics',
       data: {
-        workspaceAccess: "write",
+        workspaceAccess: 'write',
         inputTokens: 100,
         cacheHitTokens: 80,
         cacheMissTokens: 20,
@@ -89,9 +89,9 @@ describe("extractPromptCacheMetrics", () => {
   });
 
   // 验证缓存命中标准跳过第一条 warmup，并用后续 token 加权命中率判断是否达到 95% / Verify cache standard excludes warmup and uses token-weighted hit rate
-  test("evaluates the 95 percent cache standard on cache_metrics events", async () => {
+  test('evaluates the 95 percent cache standard on cache_metrics events', async () => {
     const cold = new AIMessage({
-      content: "inspect",
+      content: 'inspect',
       response_metadata: {
         usage: {
           prompt_tokens: 100,
@@ -101,7 +101,7 @@ describe("extractPromptCacheMetrics", () => {
       },
     });
     const warm = new AIMessage({
-      content: "continue",
+      content: 'continue',
       response_metadata: {
         usage: {
           prompt_tokens: 300,
@@ -112,20 +112,20 @@ describe("extractPromptCacheMetrics", () => {
     });
 
     async function* stream() {
-      yield { agent: { workspaceAccess: "write", messages: [cold] } };
-      yield { agent: { workspaceAccess: "write", messages: [warm], final: "done" } };
+      yield { agent: { workspaceAccess: 'write', messages: [cold] } };
+      yield { agent: { workspaceAccess: 'write', messages: [warm], final: 'done' } };
     }
 
     const cacheEvents = [];
     for await (const event of normalizeGraphStream(stream())) {
-      if (event.type === "cache_metrics") {
+      if (event.type === 'cache_metrics') {
         cacheEvents.push(event.data);
       }
     }
 
     expect(cacheEvents).toEqual([
       {
-        workspaceAccess: "write",
+        workspaceAccess: 'write',
         inputTokens: 100,
         cacheHitTokens: 0,
         cacheMissTokens: 100,
@@ -154,7 +154,7 @@ describe("extractPromptCacheMetrics", () => {
         },
       },
       {
-        workspaceAccess: "write",
+        workspaceAccess: 'write',
         inputTokens: 300,
         cacheHitTokens: 285,
         cacheMissTokens: 15,
@@ -186,7 +186,7 @@ describe("extractPromptCacheMetrics", () => {
   });
 
   // 验证小样本不直接给出达标结论，避免短对话误导缓存标准 / Verify short samples do not produce a pass/fail standard result
-  test("requires enough measured input tokens before judging the cache standard", () => {
+  test('requires enough measured input tokens before judging the cache standard', () => {
     const tracker = createPromptCacheStandardTracker();
 
     tracker.record({
@@ -230,7 +230,7 @@ describe("extractPromptCacheMetrics", () => {
   });
 
   // 验证标准跟踪器按 token 加权聚合，而不是按请求平均 / Verify standard tracker aggregates by tokens, not request average
-  test("tracks the cache standard with weighted token totals", () => {
+  test('tracks the cache standard with weighted token totals', () => {
     const tracker = createPromptCacheStandardTracker({
       minimumMeasuredInputTokens: 0,
     });
@@ -276,6 +276,4 @@ describe("extractPromptCacheMetrics", () => {
       },
     });
   });
-
 });
-

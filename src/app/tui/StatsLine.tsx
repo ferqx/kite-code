@@ -1,7 +1,6 @@
-import React from "react";
-import { Box, Text, useStdout } from "ink";
-import type { StatusState } from "./types";
-import { useTheme } from "./theme";
+import { Box, Text, useStdout } from 'ink';
+import { useTheme } from './theme';
+import type { StatusState } from './types';
 
 interface StatsLineProps {
   status: StatusState;
@@ -18,7 +17,7 @@ function formatTokens(n: number): string {
 /** Estimate the visible width of the full stats line. */
 function fullWidth(status: StatusState): number {
   let w = status.modelName.length;
-  const isDS = status.modelProvider === "deepseek";
+  const isDS = status.modelProvider === 'deepseek';
   if (isDS && status.thinkingMode) w += 3 + 7 + String(status.thinkingMode).length; // " · effort: max"
   if (isDS && status.totalTokens > 0) w += 3 + 7 + 3; // " · cache: 0%"
   if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " · tokens: 78.4k"
@@ -26,14 +25,14 @@ function fullWidth(status: StatusState): number {
   return w;
 }
 
-export default function StatsLine({ status, running, modelProvider, modelName }: StatsLineProps) {
+export default function StatsLine({ status }: StatsLineProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const cachePct = status.cacheHitRate * 100;
   const cacheColor = cachePct > 50 ? t.success : cachePct > 20 ? t.warning : t.muted;
-  const authLabel = status.authorization === "full_access" ? "完全" : "安全";
+  const authLabel = status.authorization === 'full_access' ? '完全' : '安全';
 
-  const isDeepSeek = status.modelProvider === "deepseek";
+  const isDeepSeek = status.modelProvider === 'deepseek';
   const showThink = isDeepSeek && !!status.thinkingMode;
   const showCache = isDeepSeek && status.totalTokens > 0;
   const showTokens = status.totalTokens > 0;

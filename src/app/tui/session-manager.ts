@@ -1,19 +1,19 @@
-import type { AgentEvent } from "@/protocol/events";
-import type { InterruptPayload, UserAction } from "@/protocol/actions";
-import type { UserInputProvider } from "@/protocol/provider";
-import type { AgentConfig } from "@/core/config/index";
-import type { TuiUserInputProvider } from "./provider";
-import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
-import type { McpManager } from "@/core/mcp";
-import type { SessionSnapshot, StatusState } from "./types";
-import type { Action } from "./App";
-import { runAgent, isRecoverableError } from "@/core/runner";
-import { buildRunAgentParams } from "./run-agent";
-import { createSandboxExecutor } from "@/core/sandbox/index";
-import { Database } from "bun:sqlite";
+import { Database } from 'bun:sqlite';
+import type { AgentConfig } from '@/core/config/index';
+import type { McpManager } from '@/core/mcp';
+import { isRecoverableError, runAgent } from '@/core/runner';
+import { createSandboxExecutor } from '@/core/sandbox/index';
+import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import type { InterruptPayload, UserAction } from '@/protocol/actions';
+import type { AgentEvent } from '@/protocol/events';
+import type { UserInputProvider } from '@/protocol/provider';
+import type { Action } from './App';
+import type { TuiUserInputProvider } from './provider';
+import { buildRunAgentParams } from './run-agent';
+import type { SessionSnapshot, StatusState } from './types';
 
 /** 可丢弃的缓冲事件类型（text/reason 为非关键信息，丢弃时不丢失用户可见状态） */
-const DISPOSABLE_EVENT_TYPES = new Set(["text", "reason"]);
+const DISPOSABLE_EVENT_TYPES = new Set(['text', 'reason']);
 
 /** 工厂依赖：注入到每个 SessionRuntime */
 export interface SessionDeps {
@@ -60,11 +60,7 @@ export class SessionRuntime {
   private _pendingInterrupt: InterruptPayload | null = null;
   private _pendingResolve: ((action: UserAction) => void) | null = null;
 
-  constructor(
-    threadId: string,
-    workspace: string,
-    deps: SessionDeps,
-  ) {
+  constructor(threadId: string, workspace: string, deps: SessionDeps) {
     this.threadId = threadId;
     this.workspace = workspace;
     this.name = threadId;
@@ -80,7 +76,7 @@ export class SessionRuntime {
   abort(): void {
     // 必须先 resolve 挂起的中断，否则 generator 永远卡在 requestAction 的 Promise 上，
     // runAgent 的 finally 块无法执行，checkpointer.close() 永远不会被调用，导致 DB 句柄泄漏
-    this.resolveInterrupt({ type: "cancel" as const });
+    this.resolveInterrupt({ type: 'cancel' as const });
     this.abortController?.abort();
     this.abortController = null;
     this.agentLoopActive = false;
@@ -115,21 +111,20 @@ export class SessionRuntime {
       dispatch: (action: Action) => void;
       provider: TuiUserInputProvider;
       config: AgentConfig;
-      model?: import("@/core/model/factory").SupportedChatModel;
+      model?: import('@/core/model/factory').SupportedChatModel;
     },
   ): Promise<void> {
     if (this.agentLoopActive) return;
 
     // 构建待注入的 skills 内容
-    let pendingSkillsContent = "";
+    let pendingSkillsContent = '';
     if (this.pendingSkills.length > 0) {
-      pendingSkillsContent = this.pendingSkills.join("");
+      pendingSkillsContent = this.pendingSkills.join('');
       this.pendingSkills = [];
     }
 
-    const shellContext = this.conversationHistory.length > 0
-      ? "\n" + this.conversationHistory.join("\n")
-      : "";
+    const shellContext =
+      this.conversationHistory.length > 0 ? `\n${this.conversationHistory.join('\n')}` : '';
     const shellExecutor = createSandboxExecutor({ enabled: true, workspace: this.workspace });
 
     const abortController = new AbortController();
@@ -149,7 +144,7 @@ export class SessionRuntime {
       shellContext,
       model: deps.model,
       // 后台会话注入 full_access，避免中断阻塞 generator
-      authorizationOverride: this._foreground ? undefined : { current: "full_access" as const },
+      authorizationOverride: this._foreground ? undefined : { current: 'full_access' as const },
     });
 
     // 始终使用代理提供器 — 事件路由由 _foreground 控制
@@ -169,11 +164,11 @@ export class SessionRuntime {
         }
       }
       if (!aborted && this._foreground) {
-        deps.dispatch({ type: "SET_EXITED" });
+        deps.dispatch({ type: 'SET_EXITED' });
       }
     } catch (e: any) {
       const errorEvent: AgentEvent = {
-        type: "error",
+        type: 'error',
         data: { message: e?.message ?? String(e), recoverable: isRecoverableError(e) },
       };
       if (this._foreground) {
@@ -182,7 +177,7 @@ export class SessionRuntime {
         this._pushToBuffer(errorEvent);
       }
       if (this._foreground) {
-        deps.dispatch({ type: "SET_EXITED" });
+        deps.dispatch({ type: 'SET_EXITED' });
       }
     } finally {
       this.agentLoopActive = false;
@@ -200,9 +195,7 @@ export class SessionRuntime {
   private _pushToBuffer(event: AgentEvent): void {
     if (this.eventBuffer.length >= SessionRuntime.MAX_BUFFER) {
       // 查找第一个可丢弃事件的下标
-      const dropIdx = this.eventBuffer.findIndex(
-        (e) => DISPOSABLE_EVENT_TYPES.has(e.type),
-      );
+      const dropIdx = this.eventBuffer.findIndex((e) => DISPOSABLE_EVENT_TYPES.has(e.type));
       if (dropIdx >= 0) {
         this.eventBuffer.splice(dropIdx, 1);
       } else {
@@ -223,9 +216,9 @@ export class SessionRuntime {
         } else {
           // need_input is auto-cancelled in background (requestAction returns cancel immediately),
           // so don't buffer it — replay would create an unanswerable zombie question
-          if (event.type === "need_input") return;
+          if (event.type === 'need_input') return;
           self._pushToBuffer(event);
-          if (event.type === "need_approval") {
+          if (event.type === 'need_approval') {
             self.pendingInterrupt = true;
             self.notifyInterrupt?.();
           }
@@ -236,8 +229,8 @@ export class SessionRuntime {
         if (!self._foreground) {
           // user_input in background: auto-cancel (user can't respond)
           // need_approval won't fire due to authorizationOverride, but guard anyway
-          if (payload.kind === "input") {
-            return { type: "cancel" as const };
+          if (payload.kind === 'input') {
+            return { type: 'cancel' as const };
           }
           // 后台 tool_approval 中断：标记并等待前台切换
           // Background tool_approval: mark and wait for foreground switch
@@ -247,7 +240,7 @@ export class SessionRuntime {
             self._foregroundWake = resolve;
           });
           if (!self.abortController) {
-            return { type: "cancel" as const };
+            return { type: 'cancel' as const };
           }
           self.pendingInterrupt = false;
         }
@@ -263,7 +256,7 @@ export class SessionRuntime {
       },
 
       reset(): void {
-        self.resolveInterrupt({ type: "cancel" as const });
+        self.resolveInterrupt({ type: 'cancel' as const });
       },
 
       getPendingInterrupt(): InterruptPayload | null {
@@ -271,7 +264,7 @@ export class SessionRuntime {
       },
 
       teardown(): Promise<void> {
-        self.resolveInterrupt({ type: "cancel" as const });
+        self.resolveInterrupt({ type: 'cancel' as const });
         return Promise.resolve();
       },
     };
@@ -292,11 +285,14 @@ export class SessionRuntime {
 /** 多会话管理器：创建/切换/查快照 */
 export class SessionManager {
   private runtimes = new Map<string, SessionRuntime>();
-  private activeId = "";
+  private activeId = '';
   private snapshotCallback: ((threadId: string) => void) | null = null;
   private static sessionCounter = 0;
   /** token 统计内存缓存，避免 getSnapshot 每次打开 DB / In-memory token stats cache to avoid DB access in getSnapshot */
-  private tokenStatsCache = new Map<string, { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number }>();
+  private tokenStatsCache = new Map<
+    string,
+    { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number }
+  >();
   /** 复用的 DB 连接，避免每次 saveTokenStats 开新连接 / Reusable DB connection to avoid opening a new one on every save */
   private _statsDb: Database | null = null;
   /** 防抖定时器：合并高频 token 统计变更为批量写入，避免每个 stream chunk 都写 DB
@@ -305,7 +301,10 @@ export class SessionManager {
   /** 防抖延迟（毫秒）/ Debounce delay in ms */
   private static readonly STATS_DEBOUNCE_MS = 1000;
 
-  constructor(private deps: SessionDeps) {
+  private deps: SessionDeps;
+
+  constructor(deps: SessionDeps) {
+    this.deps = deps;
     // Central bridge: when UI components (ApprovalBlock, InputBlock) call submitAction
     // on the real provider, route to the active runtime's resolveInterrupt.
     // This runs once, avoiding the chain-wrapping anti-pattern of per-runtime bridges.
@@ -325,8 +324,8 @@ export class SessionManager {
       this._statsDb = new Database(this.deps.checkpointPath);
       // WAL 模式提升并发读写性能，与 BunSqliteSaver 保持一致
       // Enable WAL mode for consistent concurrent read/write behavior with BunSqliteSaver
-      this._statsDb.run("pragma journal_mode = wal");
-      this._statsDb.run("pragma busy_timeout = 5000");
+      this._statsDb.run('pragma journal_mode = wal');
+      this._statsDb.run('pragma busy_timeout = 5000');
       this._statsDb.run(`create table if not exists session_stats (
         thread_id text primary key not null,
         cache_hit_tokens integer not null default 0,
@@ -340,7 +339,11 @@ export class SessionManager {
   /** 持久化 token 统计到 checkpoint DB（防抖合并，避免每次 token 变化都写 DB）
    *  Persist token stats to DB with debounce, avoiding a write on every token change */
   saveTokenStats(threadId: string, status: StatusState, immediate = false): void {
-    const stats = { cacheHitTokens: status.cacheHitTokens, cacheMissTokens: status.cacheMissTokens, totalTokens: status.totalTokens };
+    const stats = {
+      cacheHitTokens: status.cacheHitTokens,
+      cacheMissTokens: status.cacheMissTokens,
+      totalTokens: status.totalTokens,
+    };
     this.tokenStatsCache.set(threadId, stats);
 
     if (immediate) {
@@ -351,13 +354,16 @@ export class SessionManager {
     // 清除旧定时器，创建新的合并定时器
     const existing = this._statsDebounceTimers.get(threadId);
     if (existing) clearTimeout(existing);
-    this._statsDebounceTimers.set(threadId, setTimeout(() => {
-      this._statsDebounceTimers.delete(threadId);
-      // 从缓存读取最新值而非闭包捕获，避免跨调用 stale write 风险
-      // Read latest from cache rather than closure-captured value to avoid stale-write risk
-      const latest = this.tokenStatsCache.get(threadId) ?? stats;
-      this._flushTokenStatsNow(threadId, latest);
-    }, SessionManager.STATS_DEBOUNCE_MS));
+    this._statsDebounceTimers.set(
+      threadId,
+      setTimeout(() => {
+        this._statsDebounceTimers.delete(threadId);
+        // 从缓存读取最新值而非闭包捕获，避免跨调用 stale write 风险
+        // Read latest from cache rather than closure-captured value to avoid stale-write risk
+        const latest = this.tokenStatsCache.get(threadId) ?? stats;
+        this._flushTokenStatsNow(threadId, latest);
+      }, SessionManager.STATS_DEBOUNCE_MS),
+    );
   }
 
   /** 立即写入 DB（绕过防抖）/ Immediate DB write (bypasses debounce) */
@@ -372,7 +378,9 @@ export class SessionManager {
         [threadId, stats.cacheHitTokens, stats.cacheMissTokens, stats.totalTokens],
       );
     } catch (e) {
-      console.warn(`[SessionManager] Failed to persist token stats for ${threadId}: ${e instanceof Error ? e.message : String(e)}`);
+      console.warn(
+        `[SessionManager] Failed to persist token stats for ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 
@@ -380,7 +388,7 @@ export class SessionManager {
     // Deactivate old session before creating new one — same logic as switchSession
     const oldRt = this.runtimes.get(this.activeId);
     if (oldRt) {
-      oldRt.resolveInterrupt({ type: "cancel" as const });
+      oldRt.resolveInterrupt({ type: 'cancel' as const });
       oldRt.setForeground(false);
       oldRt.pendingInterrupt = false;
     }
@@ -407,7 +415,7 @@ export class SessionManager {
     const fromRt = this.runtimes.get(fromId);
     if (fromRt) {
       // 取消旧会话的挂起中断，防止 generator 卡在 requestAction 的 Promise 上
-      fromRt.resolveInterrupt({ type: "cancel" as const });
+      fromRt.resolveInterrupt({ type: 'cancel' as const });
       fromRt.setForeground(false);
       fromRt.pendingInterrupt = false;
     }
@@ -420,13 +428,26 @@ export class SessionManager {
     if (this.tokenStatsCache.size > 0) return;
     try {
       const rows = this.statsDb
-        .query(`select thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens from session_stats`)
-        .all() as Array<{ thread_id: string; cache_hit_tokens: number; cache_miss_tokens: number; total_tokens: number }>;
+        .query(
+          `select thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens from session_stats`,
+        )
+        .all() as Array<{
+        thread_id: string;
+        cache_hit_tokens: number;
+        cache_miss_tokens: number;
+        total_tokens: number;
+      }>;
       for (const r of rows) {
-        this.tokenStatsCache.set(r.thread_id, { cacheHitTokens: r.cache_hit_tokens, cacheMissTokens: r.cache_miss_tokens, totalTokens: r.total_tokens });
+        this.tokenStatsCache.set(r.thread_id, {
+          cacheHitTokens: r.cache_hit_tokens,
+          cacheMissTokens: r.cache_miss_tokens,
+          totalTokens: r.total_tokens,
+        });
       }
     } catch (e) {
-      console.warn(`[SessionManager] Failed to load token stats from DB: ${e instanceof Error ? e.message : String(e)}`);
+      console.warn(
+        `[SessionManager] Failed to load token stats from DB: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 
@@ -434,10 +455,12 @@ export class SessionManager {
    *  @param prevSessions 前一次 snapshot 数组，用于继承已累积的 token 统计等跨生命周期状态。
    *  Create session snapshot list.
    *  @param prevSessions previous snapshot array, used to inherit accumulated token stats across lifecycles. */
-  getSnapshot(prevSessions?: ReadonlyArray<{ threadId: string; status: StatusState }>): SessionSnapshot[] {
+  getSnapshot(
+    prevSessions?: ReadonlyArray<{ threadId: string; status: StatusState }>,
+  ): SessionSnapshot[] {
     // 首次调用时从 DB 批量加载到内存缓存 / Bulk load from DB into memory cache on first call
     this.ensureTokenStatsLoaded();
-    const prevMap = new Map(prevSessions?.map(s => [s.threadId, s.status]));
+    const prevMap = new Map(prevSessions?.map((s) => [s.threadId, s.status]));
     const result: SessionSnapshot[] = [];
     for (const [threadId, rt] of this.runtimes) {
       const prevStatus = prevMap.get(threadId);
@@ -453,8 +476,8 @@ export class SessionManager {
         plan: null,
         status: {
           ...initialStatusSnapshot(),
-          ...(dbStats ?? {}),         // 从 DB 恢复的 token 统计
-          ...(prevStatus ?? {}),      // 内存中保留的状态（优先级最高）
+          ...(dbStats ?? {}), // 从 DB 恢复的 token 统计
+          ...(prevStatus ?? {}), // 内存中保留的状态（优先级最高）
         },
         turns: [],
       });
@@ -507,7 +530,7 @@ export class SessionManager {
     this.runtimes.delete(threadId);
     // Don't leave activeId pointing to a deleted session
     if (this.activeId === threadId) {
-      this.activeId = "";
+      this.activeId = '';
     }
   }
 
@@ -534,7 +557,11 @@ export class SessionManager {
     // 关闭 stats DB 连接，确保 WAL/SHM 文件正确合并
     // Close stats DB connection to properly merge WAL/SHM files
     if (this._statsDb) {
-      try { this._statsDb.close(); } catch { /* best-effort */ }
+      try {
+        this._statsDb.close();
+      } catch {
+        /* best-effort */
+      }
       this._statsDb = null;
     }
   }
@@ -558,18 +585,18 @@ export class SessionManager {
 
 function initialStatusSnapshot(): StatusState {
   return {
-    phase: "building",
+    phase: 'building',
     plan: null,
-    authorization: "default",
-    workspaceAccess: "write",
+    authorization: 'default',
+    workspaceAccess: 'write',
     cacheHitTokens: 0,
     cacheMissTokens: 0,
     cacheHitRate: 0,
     totalTokens: 0,
     currentNode: null,
-    modelProvider: "",
-    modelName: "",
-    thinkingMode: "",
+    modelProvider: '',
+    modelName: '',
+    thinkingMode: '',
     retryState: null,
   };
 }

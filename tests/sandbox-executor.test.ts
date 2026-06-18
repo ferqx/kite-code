@@ -5,17 +5,16 @@
  * 这些测试验证 sandbox-exec 的实际隔离效果。在非 macOS 平台上全部跳过。
  * These tests verify actual sandbox-exec isolation. Skipped on non-macOS platforms.
  */
-import { describe, expect, test } from "bun:test";
-import { createSandboxExecutor } from "../src/core/sandbox/executor";
-import { homedir } from "node:os";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createSandboxExecutor } from '../src/core/sandbox/executor';
 
-const isMacOS = process.platform === "darwin";
+const isMacOS = process.platform === 'darwin';
 
 function setupWorkspace() {
-  const ws = mkdtempSync(join(tmpdir(), "openpx-sandbox-test-"));
+  const ws = mkdtempSync(join(tmpdir(), 'openpx-sandbox-test-'));
   return ws;
 }
 
@@ -23,17 +22,17 @@ function cleanupWorkspace(ws: string) {
   rmSync(ws, { recursive: true, force: true });
 }
 
-describe("sandbox executor integration", () => {
+describe('sandbox executor integration', () => {
   if (!isMacOS) {
-    test.skip("sandbox-exec integration tests are macOS-only", () => {});
+    test.skip('sandbox-exec integration tests are macOS-only', () => {});
     return;
   }
 
-  test("executes commands within workspace successfully", async () => {
+  test('executes commands within workspace successfully', async () => {
     const ws = setupWorkspace();
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
-      const result = await executor({ workspace: ws, command: "pwd" });
+      const result = await executor({ workspace: ws, command: 'pwd' });
       expect(result.ok).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain(ws);
@@ -42,39 +41,39 @@ describe("sandbox executor integration", () => {
     }
   });
 
-  test("can read files within workspace", async () => {
+  test('can read files within workspace', async () => {
     const ws = setupWorkspace();
     try {
-      writeFileSync(join(ws, "hello.txt"), "hello sandbox");
+      writeFileSync(join(ws, 'hello.txt'), 'hello sandbox');
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
-      const result = await executor({ workspace: ws, command: "cat hello.txt" });
+      const result = await executor({ workspace: ws, command: 'cat hello.txt' });
       expect(result.ok).toBe(true);
-      expect(result.stdout).toContain("hello sandbox");
+      expect(result.stdout).toContain('hello sandbox');
     } finally {
       cleanupWorkspace(ws);
     }
   });
 
-  test("can write files within workspace", async () => {
+  test('can write files within workspace', async () => {
     const ws = setupWorkspace();
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
-      await executor({ workspace: ws, command: "echo created > sandbox-test.txt" });
-      const result = await executor({ workspace: ws, command: "cat sandbox-test.txt" });
-      expect(result.stdout).toContain("created");
+      await executor({ workspace: ws, command: 'echo created > sandbox-test.txt' });
+      const result = await executor({ workspace: ws, command: 'cat sandbox-test.txt' });
+      expect(result.stdout).toContain('created');
     } finally {
       cleanupWorkspace(ws);
     }
   });
 
-  test("allows file read outside workspace (dev tools need system paths)", async () => {
+  test('allows file read outside workspace (dev tools need system paths)', async () => {
     const ws = setupWorkspace();
     // 文件读取不再被沙箱阻止，以满足 git、xcrun 等开发工具的需求
     // 危险文件访问由 checkDangerousPaths 和工具策略兜底
     // File reads are no longer blocked by sandbox for dev tool compatibility
     // Dangerous file access is caught by checkDangerousPaths and tool policy
     const externalFile = join(homedir(), `.openpx-sandbox-test-${process.pid}`);
-    writeFileSync(externalFile, "secret");
+    writeFileSync(externalFile, 'secret');
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({
@@ -82,14 +81,14 @@ describe("sandbox executor integration", () => {
         command: `cat "${externalFile}"`,
       });
       expect(result.ok).toBe(true);
-      expect(result.stdout).toContain("secret");
+      expect(result.stdout).toContain('secret');
     } finally {
       rmSync(externalFile, { force: true });
       cleanupWorkspace(ws);
     }
   });
 
-  test("allows file write outside workspace (authorization handled by tool-policy)", async () => {
+  test('allows file write outside workspace (authorization handled by tool-policy)', async () => {
     const ws = setupWorkspace();
     const externalFile = join(homedir(), `.openpx-sandbox-test-write-${process.pid}`);
     try {
@@ -108,36 +107,26 @@ describe("sandbox executor integration", () => {
     }
   });
 
-  test("allows external network access (controlled by tool-policy, not sandbox)", async () => {
+  test('allows external network access (controlled by tool-policy, not sandbox)', async () => {
     const ws = setupWorkspace();
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({
         workspace: ws,
-        command:
-          "curl -s --connect-timeout 3 --max-time 5 http://example.com 2>&1 || true",
+        command: 'curl -s --connect-timeout 3 --max-time 5 http://example.com 2>&1 || true',
       });
       // 网络访问由 tool-policy 审批控制，沙箱不再拦截
       // Network access is controlled by tool-policy approval, not sandbox
       const output = result.stdout + result.stderr;
-      const connected =
-        result.exitCode === 0 ||
-        output.includes("Example Domain") ||
-        output.includes("<html") ||
-        output.includes("200 OK") ||
-        output.includes("301") ||
-        output.includes("302");
       // curl may fail due to DNS/timeout, but should NOT fail with sandbox denial
-      const sandboxDenied =
-        output.includes("Operation not permitted") ||
-        output.includes("deny");
+      const sandboxDenied = output.includes('Operation not permitted') || output.includes('deny');
       expect(sandboxDenied).toBe(false);
     } finally {
       cleanupWorkspace(ws);
     }
   });
 
-  test("kills commands exceeding CPU time limit", async () => {
+  test('kills commands exceeding CPU time limit', async () => {
     const ws = setupWorkspace();
     try {
       const executor = createSandboxExecutor({
@@ -148,7 +137,7 @@ describe("sandbox executor integration", () => {
       // 无限循环应在约 3 秒后被 ulimit -t 杀死
       const result = await executor({
         workspace: ws,
-        command: "while true; do :; done",
+        command: 'while true; do :; done',
       });
       expect(result.ok).toBe(false);
       expect(result.exitCode).not.toBe(0);
@@ -157,32 +146,32 @@ describe("sandbox executor integration", () => {
     }
   });
 
-  test("rejects commands targeting dangerous file paths", async () => {
+  test('rejects commands targeting dangerous file paths', async () => {
     const ws = setupWorkspace();
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({
         workspace: ws,
-        command: "echo alias ls=evil >> .bashrc",
+        command: 'echo alias ls=evil >> .bashrc',
       });
       expect(result.ok).toBe(false);
-      expect(result.stderr).toContain("Rejected");
-      expect(result.stderr).toContain(".bashrc");
+      expect(result.stderr).toContain('Rejected');
+      expect(result.stderr).toContain('.bashrc');
     } finally {
       cleanupWorkspace(ws);
     }
   });
 
-  test("disabled executor falls back to unsandboxed execution", async () => {
+  test('disabled executor falls back to unsandboxed execution', async () => {
     const ws = setupWorkspace();
     try {
       const executor = createSandboxExecutor({ enabled: false, workspace: ws });
       const result = await executor({
         workspace: ws,
-        command: "echo unsandboxed",
+        command: 'echo unsandboxed',
       });
       expect(result.ok).toBe(true);
-      expect(result.stdout).toContain("unsandboxed");
+      expect(result.stdout).toContain('unsandboxed');
     } finally {
       cleanupWorkspace(ws);
     }

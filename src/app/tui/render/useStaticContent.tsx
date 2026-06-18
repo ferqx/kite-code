@@ -26,11 +26,11 @@
 // when the fingerprint changes. All downstream values are derived from these
 // stable refs, so references are constant between genuine state transitions.
 
-import { useRef, useMemo, useEffect, type ReactNode } from "react";
-import type { Turn, OutputBlock } from "../types";
+import { type ReactNode, useEffect, useMemo, useRef } from 'react';
+import type { OutputBlock, Turn } from '../types';
 
-export { changePrefix } from "../components/BlockRenderer";
-export { toolColor } from "../components/render-utils";
+export { changePrefix } from '../components/BlockRenderer';
+export { toolColor } from '../components/render-utils';
 
 /** Sentinel: ensures <Static> always has ≥1 item so Header renders even with no completed blocks */
 const HEADER_SENTINEL = { __header: true } as const;
@@ -42,21 +42,21 @@ const HEADER_SENTINEL = { __header: true } as const;
  */
 function isSettled(block: OutputBlock): boolean {
   switch (block.kind) {
-    case "user":
+    case 'user':
       return true; // never changes
-    case "text":
+    case 'text':
       return !block.streaming; // streaming text is still mutating
-    case "reason":
+    case 'reason':
       return true; // content is final once emitted
-    case "tool_card":
-      return block.status === "done" || block.status === "error";
-    case "subagent":
-      return block.status === "done" || block.status === "error";
-    case "approval":
+    case 'tool_card':
+      return block.status === 'done' || block.status === 'error';
+    case 'subagent':
+      return block.status === 'done' || block.status === 'error';
+    case 'approval':
       return block.resolved !== undefined;
-    case "question":
+    case 'question':
       return block.resolved !== undefined;
-    case "file_change":
+    case 'file_change':
       return true; // immutable once created
     default:
       return true;
@@ -69,20 +69,20 @@ function isSettled(block: OutputBlock): boolean {
  * This is the single source of truth for cache invalidation.
  */
 export function blockFingerprint(b: OutputBlock): string {
-  let extra = "";
+  let extra = '';
   switch (b.kind) {
-    case "text":
-      extra = b.streaming ? `:s:${b.content.length}` : ":f";
+    case 'text':
+      extra = b.streaming ? `:s:${b.content.length}` : ':f';
       break;
-    case "tool_card":
+    case 'tool_card':
       extra = `:${b.status}`;
       break;
-    case "subagent":
+    case 'subagent':
       extra = `:${b.status}:${b.steps.length}`;
       break;
-    case "approval":
-    case "question":
-      extra = b.resolved !== undefined ? ":resolved" : ":pending";
+    case 'approval':
+    case 'question':
+      extra = b.resolved !== undefined ? ':resolved' : ':pending';
       break;
   }
   return `${b.id}:${b.kind}${extra}`;
@@ -145,12 +145,12 @@ export function useStaticContent({
       // Resize / session switch: scroll to bottom, enable sync, clear.
       // \x1B[9999H forces viewport to bottom before sync freezes it.
       // eslint-disable-next-line no-restricted-properties
-      process.stdout.write("\x1B[9999H\x1B[?2026h\x1B[H\x1B[2J\x1B[3J");
+      process.stdout.write('\x1B[9999H\x1B[?2026h\x1B[H\x1B[2J\x1B[3J');
       syncOutputRef.current = true;
     } else {
       // Initial mount: clear only, no sync (content appears naturally).
       // eslint-disable-next-line no-restricted-properties
-      process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
+      process.stdout.write('\x1B[2J\x1B[3J\x1B[H');
     }
   }
 
@@ -159,13 +159,13 @@ export function useStaticContent({
     if (syncOutputRef.current) {
       syncOutputRef.current = false;
       // eslint-disable-next-line no-restricted-properties
-      process.stdout.write("\x1B[?2026l");
+      process.stdout.write('\x1B[?2026l');
     }
     return () => {
       if (syncOutputRef.current) {
         syncOutputRef.current = false;
         // eslint-disable-next-line no-restricted-properties
-        process.stdout.write("\x1B[?2026l");
+        process.stdout.write('\x1B[?2026l');
       }
     };
   });
@@ -187,12 +187,10 @@ export function useStaticContent({
   // settled turns. If a block inside it later changes state (e.g. running
   // sub-agent receives subagent_error, tool_card receives tool_done), the
   // count stays the same but the content differs. Fingerprint catches this.
-  const prevSettledFpRef = useRef("");
+  const prevSettledFpRef = useRef('');
   const staticBlocksRef = useRef<OutputBlock[]>([]);
 
-  const settledFp = settledTurns
-    .map((t) => t.blocks.map(blockFingerprint).join(","))
-    .join("|");
+  const settledFp = settledTurns.map((t) => t.blocks.map(blockFingerprint).join(',')).join('|');
 
   if (settledFp !== prevSettledFpRef.current) {
     prevSettledFpRef.current = settledFp;
@@ -202,13 +200,13 @@ export function useStaticContent({
   // ── Active turn Static/Dynamic split: cache by fingerprint ──
   // The fingerprint captures block identity, kind, status, and step count —
   // everything that affects the Static/Dynamic split and visual output.
-  const prevFingerprintRef = useRef("");
+  const prevFingerprintRef = useRef('');
   const activeSettledRef = useRef<OutputBlock[]>([]);
   const activeDynamicRef = useRef<OutputBlock[]>([]);
 
-  let fingerprint = "";
+  let fingerprint = '';
   if (activeTurn) {
-    fingerprint = activeTurn.blocks.map(blockFingerprint).join(",");
+    fingerprint = activeTurn.blocks.map(blockFingerprint).join(',');
   }
 
   if (fingerprint !== prevFingerprintRef.current) {
@@ -225,7 +223,7 @@ export function useStaticContent({
       // → leftmost=2, static=[user, text], dynamic=[tool(ls), tool(find)]
       let leftmostUnsettled = activeTurn.blocks.length;
       for (let i = 0; i < activeTurn.blocks.length; i++) {
-        if (!isSettled(activeTurn.blocks[i])) {
+        if (!isSettled(activeTurn.blocks[i]!)) {
           leftmostUnsettled = i;
           break;
         }
@@ -269,10 +267,7 @@ export function useStaticContent({
     [staticBlocks, activeSettledBlocks],
   );
 
-  const staticItems = useMemo(
-    () => [HEADER_SENTINEL, ...mergedStaticBlocks],
-    [mergedStaticBlocks],
-  );
+  const staticItems = useMemo(() => [HEADER_SENTINEL, ...mergedStaticBlocks], [mergedStaticBlocks]);
 
   const staticKey = useMemo(() => `s-${sessionKey ?? 0}`, [sessionKey]);
 

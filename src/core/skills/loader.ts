@@ -1,18 +1,18 @@
 // src/core/skills/loader.ts
 
-import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
-import type { SkillManifest, ValidatedSkill, SkillScanOptions } from "./types";
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import type { SkillManifest, SkillScanOptions, ValidatedSkill } from './types';
 
 /** Parse YAML frontmatter from SKILL.md content */
 function parseFrontmatter(
   content: string,
 ): { fields: Record<string, string>; body: string } | null {
   // Normalize line endings: CRLF / CR -> LF
-  content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  if (!content.startsWith("---")) return null;
+  content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (!content.startsWith('---')) return null;
   const afterStart = content.slice(3);
-  const nextNewline = afterStart.indexOf("\n");
+  const nextNewline = afterStart.indexOf('\n');
   if (nextNewline === -1) return null;
   const fmStart = nextNewline + 1;
 
@@ -24,18 +24,18 @@ function parseFrontmatter(
   const body = afterStart.slice(bodyStart);
 
   const fields: Record<string, string> = {};
-  const lines = fmText.split("\n");
+  const lines = fmText.split('\n');
   let i = 0;
   while (i < lines.length) {
-    const line = lines[i];
+    const line = lines[i]!;
     const match = line.match(/^(\w[\w-]*):\s*(.*)/);
     if (match) {
-      const key = match[1];
-      let value = match[2].trim();
+      const key = match[1]!;
+      let value = match[2]!.trim();
       // Nested block (e.g. metadata:) -> skip indented continuation lines
-      if (value === "" || value === "|" || value === ">") {
+      if (value === '' || value === '|' || value === '>') {
         i++;
-        while (i < lines.length && (lines[i].startsWith("  ") || lines[i].trim() === "")) {
+        while (i < lines.length && (lines[i]!.startsWith('  ') || lines[i]!.trim() === '')) {
           i++;
         }
         i--; // compensate for the outer i++
@@ -60,8 +60,8 @@ const VALID_SKILL_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 function scanDir(
   dirPath: string,
-  source: "project" | "user",
-  origin: ".openpx" | ".agents",
+  source: 'project' | 'user',
+  origin: '.openpx' | '.agents',
 ): SkillManifest[] {
   const resolved = resolve(dirPath);
   if (!existsSync(resolved)) return [];
@@ -79,10 +79,10 @@ function scanDir(
       const entryPath = join(resolved, entry);
       if (!statSync(entryPath).isDirectory()) continue;
 
-      const skillMdPath = join(entryPath, "SKILL.md");
+      const skillMdPath = join(entryPath, 'SKILL.md');
       if (!existsSync(skillMdPath)) continue;
 
-      const raw = readFileSync(skillMdPath, "utf-8");
+      const raw = readFileSync(skillMdPath, 'utf-8');
       const parsed = parseFrontmatter(raw);
       if (!parsed) continue;
 
@@ -108,10 +108,10 @@ export function scanSkills(options: SkillScanOptions): SkillManifest[] {
   const all: SkillManifest[] = [];
 
   // Priority order: project .openpx > project .agents > user .openpx > user .agents
-  all.push(...scanDir(options.projectOpenpxSkillsDir, "project", ".openpx"));
-  all.push(...scanDir(options.projectAgentsSkillsDir, "project", ".agents"));
-  all.push(...scanDir(options.userOpenpxSkillsDir, "user", ".openpx"));
-  all.push(...scanDir(options.userAgentsSkillsDir, "user", ".agents"));
+  all.push(...scanDir(options.projectOpenpxSkillsDir, 'project', '.openpx'));
+  all.push(...scanDir(options.projectAgentsSkillsDir, 'project', '.agents'));
+  all.push(...scanDir(options.userOpenpxSkillsDir, 'user', '.openpx'));
+  all.push(...scanDir(options.userAgentsSkillsDir, 'user', '.agents'));
 
   // Dedup: first occurrence wins (highest priority)
   const seen = new Set<string>();
@@ -134,14 +134,19 @@ export function getSkillContent(
   const manifest = manifests.find((m) => m.name === name);
   if (!manifest) return null;
 
-  const dirKey = manifest.source === "project"
-    ? (manifest.origin === ".openpx" ? "projectOpenpxSkillsDir" : "projectAgentsSkillsDir")
-    : (manifest.origin === ".openpx" ? "userOpenpxSkillsDir" : "userAgentsSkillsDir");
-  const skillMdPath = join(options[dirKey], manifest.name, "SKILL.md");
+  const dirKey =
+    manifest.source === 'project'
+      ? manifest.origin === '.openpx'
+        ? 'projectOpenpxSkillsDir'
+        : 'projectAgentsSkillsDir'
+      : manifest.origin === '.openpx'
+        ? 'userOpenpxSkillsDir'
+        : 'userAgentsSkillsDir';
+  const skillMdPath = join(options[dirKey], manifest.name, 'SKILL.md');
 
   try {
     if (!existsSync(skillMdPath)) return null;
-    const raw = readFileSync(skillMdPath, "utf-8");
+    const raw = readFileSync(skillMdPath, 'utf-8');
     const parsed = parseFrontmatter(raw);
     if (!parsed) return null;
 

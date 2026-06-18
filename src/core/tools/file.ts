@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
-import { homedir } from "node:os";
-import { msys2ToWindowsPath } from "./path-utils";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, resolve, sep } from 'node:path';
+import { msys2ToWindowsPath } from './path-utils';
 
 // ============================================================================
 // 公用 — 换行符正规化 / Common — line ending normalization
@@ -9,7 +9,7 @@ import { msys2ToWindowsPath } from "./path-utils";
 
 /** Windows (\r\n) / 老 Mac (\r) → Unix (\n) */
 function normalizeEOL(content: string): string {
-  return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
 // ============================================================================
@@ -21,7 +21,7 @@ function resolvePath(workspace: string, filePath: string): string {
   const asWindows = msys2ToWindowsPath(filePath);
   const normalized = asWindows.replace(/[\\/]+/g, sep);
   const expanded =
-    normalized === "~"
+    normalized === '~'
       ? homedir()
       : normalized.startsWith(`~${sep}`)
         ? homedir() + normalized.slice(1)
@@ -46,9 +46,11 @@ function resolvePath(workspace: string, filePath: string): string {
 
 function isTextByte(b: number): boolean {
   return (
-    b === 0x09 || b === 0x0a || b === 0x0d || // TAB, LF, CR
-    (b >= 0x20 && b <= 0x7e) ||                // printable ASCII
-    (b >= 0x80 && b <= 0xfd)                   // UTF-8 multi-byte
+    b === 0x09 ||
+    b === 0x0a ||
+    b === 0x0d || // TAB, LF, CR
+    (b >= 0x20 && b <= 0x7e) || // printable ASCII
+    (b >= 0x80 && b <= 0xfd) // UTF-8 multi-byte
   );
 }
 
@@ -92,21 +94,21 @@ export function readTextContent(
   if (raw.length >= 2 && raw[0] === 0xff && raw[1] === 0xfe) {
     // UTF-16LE BOM
     hasBom = true;
-    content = raw.toString("utf16le");
+    content = raw.toString('utf16le');
     if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
   } else if (raw.length >= 2 && raw[0] === 0xfe && raw[1] === 0xff) {
     // UTF-16BE BOM
     hasBom = true;
     const swapped = Buffer.alloc(raw.length);
     for (let i = 0; i + 1 < raw.length; i += 2) {
-      swapped[i] = raw[i + 1];
-      swapped[i + 1] = raw[i];
+      swapped[i] = raw[i + 1]!;
+      swapped[i + 1] = raw[i]!;
     }
-    content = swapped.toString("utf16le");
+    content = swapped.toString('utf16le');
     if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
   } else {
     // UTF-8（可能带 BOM，也可能不带 BOM）
-    content = raw.toString("utf8");
+    content = raw.toString('utf8');
     if (content.charCodeAt(0) === 0xfeff) {
       hasBom = true;
       content = content.slice(1);
@@ -120,18 +122,22 @@ export function readTextContent(
     const sampleLen = Math.min(raw.length, 8192);
     let nonText = 0;
     for (let i = 0; i < sampleLen; i++) {
-      if (!isTextByte(raw[i])) nonText++;
+      if (!isTextByte(raw[i]!)) nonText++;
     }
     if (nonText > sampleLen * 0.3) {
-      return { ok: false, error: `Binary file detected: ${filePath}. Use force: true to read anyway.`, totalLines: 0 };
+      return {
+        ok: false,
+        error: `Binary file detected: ${filePath}. Use force: true to read anyway.`,
+        totalLines: 0,
+      };
     }
   }
 
   // 换行符正规化 / Line ending normalization
   content = normalizeEOL(content);
 
-  const allLines = content.split("\n");
-  if (allLines.length > 0 && allLines[allLines.length - 1] === "") {
+  const allLines = content.split('\n');
+  if (allLines.length > 0 && allLines[allLines.length - 1] === '') {
     allLines.pop();
   }
 
@@ -164,10 +170,10 @@ export function readFile(input: ReadFileInput): ReadFileResult {
   try {
     const result = readTextContent(input.workspace, input.path, { force: input.force });
     if (!result.ok) {
-      return { ok: false, path: input.path, content: "", totalLines: 0, error: result.error };
+      return { ok: false, path: input.path, content: '', totalLines: 0, error: result.error };
     }
 
-    const allLines = result.content.split("\n");
+    const allLines = result.content.split('\n');
 
     const offset = input.offset && input.offset > 0 ? input.offset : 1;
     const limit = input.limit ?? allLines.length;
@@ -178,10 +184,10 @@ export function readFile(input: ReadFileInput): ReadFileResult {
 
     const numbered = selected
       .map((line, idx) => {
-        const lineNum = String(fromLine + idx).padStart(String(toLine).length, " ");
+        const lineNum = String(fromLine + idx).padStart(String(toLine).length, ' ');
         return `${lineNum}|${line}`;
       })
-      .join("\n");
+      .join('\n');
 
     return {
       ok: true,
@@ -195,7 +201,7 @@ export function readFile(input: ReadFileInput): ReadFileResult {
     return {
       ok: false,
       path: input.path,
-      content: "",
+      content: '',
       totalLines: 0,
       error: e instanceof Error ? e.message : String(e),
     };
@@ -212,7 +218,7 @@ export interface EditFileInput {
   oldString: string;
   newString: string;
   replaceAll?: boolean;
-  matchMode?: "exact" | "trimmed";
+  matchMode?: 'exact' | 'trimmed';
 }
 
 export interface EditFileResult {
@@ -239,8 +245,15 @@ export function editFile(input: EditFileInput): EditFileResult {
     const normalizedOld = normalizeEOL(input.oldString);
     const normalizedNew = normalizeEOL(input.newString);
 
-    if (input.matchMode === "trimmed") {
-      return editFileTrimmed(target, input.path, content, normalizedOld, normalizedNew, input.replaceAll);
+    if (input.matchMode === 'trimmed') {
+      return editFileTrimmed(
+        target,
+        input.path,
+        content,
+        normalizedOld,
+        normalizedNew,
+        input.replaceAll,
+      );
     }
 
     const index = content.indexOf(normalizedOld);
@@ -248,15 +261,26 @@ export function editFile(input: EditFileInput): EditFileResult {
       const trimmedOld = normalizedOld.trimEnd();
       const trimmedIndex = content.indexOf(trimmedOld);
       if (trimmedIndex === -1) {
-        const snippet = normalizedOld.slice(0, 100).replace(/\n/g, "\\n");
-        return { ok: false, path: input.path, error: `old_string not found in ${input.path}: "${snippet}..."` };
+        const snippet = normalizedOld.slice(0, 100).replace(/\n/g, '\\n');
+        return {
+          ok: false,
+          path: input.path,
+          error: `old_string not found in ${input.path}: "${snippet}..."`,
+        };
       }
-      return performReplace(input.path, target, content, trimmedOld, normalizedNew, input.replaceAll, trimmedIndex);
+      return performReplace(
+        input.path,
+        target,
+        content,
+        trimmedOld,
+        normalizedNew,
+        input.replaceAll,
+        trimmedIndex,
+      );
     }
 
     const secondIndex = content.indexOf(normalizedOld, index + 1);
     if (secondIndex !== -1 && !input.replaceAll) {
-      const snippet = normalizedOld.slice(0, 100).replace(/\n/g, "\\n");
       return {
         ok: false,
         path: input.path,
@@ -264,7 +288,15 @@ export function editFile(input: EditFileInput): EditFileResult {
       };
     }
 
-    return performReplace(input.path, target, content, normalizedOld, normalizedNew, input.replaceAll, index);
+    return performReplace(
+      input.path,
+      target,
+      content,
+      normalizedOld,
+      normalizedNew,
+      input.replaceAll,
+      index,
+    );
   } catch (e) {
     return { ok: false, path: input.path, error: e instanceof Error ? e.message : String(e) };
   }
@@ -278,9 +310,9 @@ function editFileTrimmed(
   newString: string,
   replaceAll?: boolean,
 ): EditFileResult {
-  const oldLines = oldString.split("\n");
+  const oldLines = oldString.split('\n');
   const trimmedOldLines = oldLines.map((l) => l.trim());
-  const contentLines = content.split("\n");
+  const contentLines = content.split('\n');
   const trimmedContentLines = contentLines.map((l) => l.trim());
 
   let matchLine = -1;
@@ -299,13 +331,17 @@ function editFileTrimmed(
   }
 
   if (matchLine === -1) {
-    const snippet = oldString.slice(0, 100).replace(/\n/g, "\\n");
-    return { ok: false, path, error: `old_string not found in ${path} (trimmed mode): "${snippet}..."` };
+    const snippet = oldString.slice(0, 100).replace(/\n/g, '\\n');
+    return {
+      ok: false,
+      path,
+      error: `old_string not found in ${path} (trimmed mode): "${snippet}..."`,
+    };
   }
 
   let charOffset = 0;
   for (let k = 0; k < matchLine; k++) {
-    charOffset += contentLines[k].length + 1;
+    charOffset += contentLines[k]!.length + 1;
   }
 
   if (!replaceAll) {
@@ -321,7 +357,6 @@ function editFileTrimmed(
       if (!mismatch) matchCount++;
     }
     if (matchCount > 1) {
-      const snippet = oldString.slice(0, 100).replace(/\n/g, "\\n");
       return {
         ok: false,
         path,
@@ -330,19 +365,30 @@ function editFileTrimmed(
     }
   }
 
-  return performReplaceTrimmed(path, target, content, contentLines, matchLine, oldLines.length, newString, replaceAll, charOffset, trimmedOldLines);
+  return performReplaceTrimmed(
+    path,
+    target,
+    content,
+    contentLines,
+    matchLine,
+    oldLines.length,
+    newString,
+    replaceAll,
+    charOffset,
+    trimmedOldLines,
+  );
 }
 
 function performReplaceTrimmed(
   path: string,
   target: string,
-  content: string,
+  _content: string,
   contentLines: string[],
   matchLine: number,
   oldLineCount: number,
   newStr: string,
   replaceAll: boolean | undefined,
-  charOffset: number,
+  _charOffset: number,
   userTrimmedOldLines: string[],
 ): EditFileResult {
   let newContent: string;
@@ -364,25 +410,25 @@ function performReplaceTrimmed(
         parts.push(newStr);
         i += oldLineCount;
       } else {
-        parts.push(contentLines[i]);
+        parts.push(contentLines[i]!);
         i++;
       }
     }
     for (; i < contentLines.length; i++) {
-      parts.push(contentLines[i]);
+      parts.push(contentLines[i]!);
     }
-    newContent = parts.join("\n");
+    newContent = parts.join('\n');
   } else {
     const before = contentLines.slice(0, matchLine);
     const after = contentLines.slice(matchLine + oldLineCount);
-    newContent = [...before, newStr, ...after].join("\n");
+    newContent = [...before, newStr, ...after].join('\n');
   }
 
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, newContent, "utf8");
+  writeFileSync(target, newContent, 'utf8');
 
   const fromLine = matchLine + 1;
-  const newLines = newStr.split("\n").length;
+  const newLines = newStr.split('\n').length;
   const toLine = fromLine + Math.max(0, newLines - 1);
 
   return {
@@ -416,11 +462,11 @@ function performReplace(
   }
 
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, newContent, "utf8");
+  writeFileSync(target, newContent, 'utf8');
 
-  const before = content.slice(0, firstIndex).split("\n");
+  const before = content.slice(0, firstIndex).split('\n');
   const fromLine = before.length;
-  const newLines = newStr.split("\n").length;
+  const newLines = newStr.split('\n').length;
   const toLine = fromLine + Math.max(0, newLines - 1);
 
   return {
@@ -441,7 +487,7 @@ export interface WriteFileInput {
   workspace: string;
   path: string;
   content: string;
-  mode?: "overwrite" | "append";
+  mode?: 'overwrite' | 'append';
 }
 
 export interface WriteFileResult {
@@ -456,13 +502,13 @@ export function writeFile(input: WriteFileInput): WriteFileResult {
     const target = resolvePath(input.workspace, input.path);
     mkdirSync(dirname(target), { recursive: true });
 
-    if (input.mode === "append") {
-      appendFileSync(target, input.content, "utf8");
+    if (input.mode === 'append') {
+      appendFileSync(target, input.content, 'utf8');
     } else {
-      writeFileSync(target, input.content, "utf8");
+      writeFileSync(target, input.content, 'utf8');
     }
 
-    const lineCount = input.content.split("\n").length - (input.content.endsWith("\n") ? 1 : 0);
+    const lineCount = input.content.split('\n').length - (input.content.endsWith('\n') ? 1 : 0);
 
     return { ok: true, path: input.path, lines: lineCount };
   } catch (e) {

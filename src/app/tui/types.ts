@@ -1,4 +1,12 @@
-import type { ToolCallPayload, ToolApprovalPayload, UserInputPayload, AgentPhase, AgentPlan, AuthorizationMode, WorkspaceAccess, SubAgentRole } from "@/protocol/events";
+import type {
+  AgentPhase,
+  AgentPlan,
+  AuthorizationMode,
+  SubAgentRole,
+  ToolApprovalPayload,
+  UserInputPayload,
+  WorkspaceAccess,
+} from '@/protocol/events';
 
 export interface SubAgentStepRecord {
   toolName: string;
@@ -9,14 +17,46 @@ export interface SubAgentStepRecord {
 }
 
 export type OutputBlock =
-  | { id: number; kind: "user"; content: string }
-  | { id: number; kind: "text"; content: string; streaming?: boolean; isError?: boolean }
-  | { id: number; kind: "reason"; content: string; folded: boolean }
-  | { id: number; kind: "tool_card"; callId: string; name: string; args: Record<string, unknown>; status: "running" | "done" | "error"; summary: string; preview?: string; elapsedMs?: number; detail?: string; expanded?: boolean }
-  | { id: number; kind: "file_change"; changes: FileChangeRecord[] }
-  | { id: number; kind: "approval"; approval: ToolApprovalPayload; resolved?: { action: string; grant?: string; pattern?: string } }
-  | { id: number; kind: "question"; question: UserInputPayload; resolved?: string }
-  | { id: number; kind: "subagent"; subagentId: string; role: SubAgentRole; task: string; status: "running" | "done" | "error"; summary: string; toolCallCount: number; durationMs: number; steps: SubAgentStepRecord[]; error?: string; expanded?: boolean; cacheHitTokens?: number; cacheMissTokens?: number };
+  | { id: number; kind: 'user'; content: string }
+  | { id: number; kind: 'text'; content: string; streaming?: boolean; isError?: boolean }
+  | { id: number; kind: 'reason'; content: string; folded: boolean }
+  | {
+      id: number;
+      kind: 'tool_card';
+      callId: string;
+      name: string;
+      args: Record<string, unknown>;
+      status: 'running' | 'done' | 'error';
+      summary: string;
+      preview?: string;
+      elapsedMs?: number;
+      detail?: string;
+      expanded?: boolean;
+    }
+  | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
+  | {
+      id: number;
+      kind: 'approval';
+      approval: ToolApprovalPayload;
+      resolved?: { action: string; grant?: string; pattern?: string };
+    }
+  | { id: number; kind: 'question'; question: UserInputPayload; resolved?: string }
+  | {
+      id: number;
+      kind: 'subagent';
+      subagentId: string;
+      role: SubAgentRole;
+      task: string;
+      status: 'running' | 'done' | 'error';
+      summary: string;
+      toolCallCount: number;
+      durationMs: number;
+      steps: SubAgentStepRecord[];
+      error?: string;
+      expanded?: boolean;
+      cacheHitTokens?: number;
+      cacheMissTokens?: number;
+    };
 
 /** 一次完整的「用户提问 → Agent 回复」往返 */
 export interface Turn {
@@ -25,7 +65,7 @@ export interface Turn {
 
 export interface FileChangeRecord {
   path: string;
-  kind: "add" | "edit" | "delete";
+  kind: 'add' | 'edit' | 'delete';
   linesAdded?: number;
   linesRemoved?: number;
   preview?: string;
@@ -52,10 +92,10 @@ export interface TuiState {
   showSessions: boolean;
   showMcp: boolean;
   showRewind: boolean;
-  checkpoints: import("@/core/persistence/checkpoint").CheckpointEntry[];
+  checkpoints: import('@/core/persistence/checkpoint').CheckpointEntry[];
   rewindCounter: number;
   pendingSkills: string[];
-  skillManifests: import("@/core/skills/types").SkillManifest[];
+  skillManifests: import('@/core/skills/types').SkillManifest[];
   ctrlCPressed: boolean;
   sessionKey: number;
   exitRequested: boolean;
@@ -66,7 +106,7 @@ export interface TuiState {
 }
 
 export interface InterruptState {
-  kind: "approval" | "input";
+  kind: 'approval' | 'input';
   blockId: number;
 }
 
@@ -102,7 +142,7 @@ export interface SessionSnapshot {
   pendingInterrupt: boolean;
   /** Full interrupt state for session-switch restoration. Set on switch-away, read on switch-back. */
   interrupt: InterruptState | null;
-  plan: import("@/protocol/events").AgentPlan | null;
+  plan: import('@/protocol/events').AgentPlan | null;
   status: StatusState;
   turns: Turn[];
 }

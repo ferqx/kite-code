@@ -1,7 +1,7 @@
-import React, { useMemo } from "react";
-import { Box, Text } from "ink";
-import { useWindowSize } from "@/app/tui/hooks/useWindowSizeSig";
-import { useTheme, type Theme } from "@/app/tui/theme";
+import { Box, Text } from 'ink';
+import React, { useMemo } from 'react';
+import { useWindowSize } from '@/app/tui/hooks/useWindowSizeSig';
+import { type Theme, useTheme } from '@/app/tui/theme';
 
 interface MarkdownBlockProps {
   content: string;
@@ -20,7 +20,8 @@ export interface InlineSegment {
 // ── inline markdown parsing ──
 
 export function parseInline(text: string): InlineSegment[] {
-  const allPatterns = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|\[([^\]]+)\]\(([^)]+)\))/g;
+  const allPatterns =
+    /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|\[([^\]]+)\]\(([^)]+)\))/g;
   const segments: InlineSegment[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -29,18 +30,18 @@ export function parseInline(text: string): InlineSegment[] {
     if (match.index > lastIndex) {
       segments.push({ text: text.slice(lastIndex, match.index) });
     }
-    if (match[1].startsWith("***") && match[2] !== undefined) {
+    if (match[1]?.startsWith('***') && match[2] !== undefined) {
       segments.push({ text: match[2], bold: true, italic: true });
-    } else if (match[1].startsWith("**") && match[3] !== undefined) {
+    } else if (match[1]?.startsWith('**') && match[3] !== undefined) {
       segments.push({ text: match[3], bold: true });
-    } else if (match[1].startsWith("*") && !match[1].startsWith("**") && match[4] !== undefined) {
+    } else if (match[1]?.startsWith('*') && !match[1]?.startsWith('**') && match[4] !== undefined) {
       segments.push({ text: match[4], italic: true });
     } else if (match[5] !== undefined) {
       segments.push({ text: match[5], code: true });
     } else if (match[6] !== undefined && match[7] !== undefined) {
       segments.push({ text: match[6], bold: true, link: match[7] });
     }
-    lastIndex = match.index + match[1].length;
+    lastIndex = match.index + match[1]!.length;
   }
 
   if (lastIndex < text.length) {
@@ -52,38 +53,131 @@ export function parseInline(text: string): InlineSegment[] {
 
 // ── syntax highlighting for code blocks ──
 
-interface Token { text: string; color?: string; bold?: boolean }
+interface Token {
+  text: string;
+  color?: string;
+  bold?: boolean;
+}
 
 const TS_KEYWORDS = new Set([
-  "import", "export", "from", "const", "let", "var", "function", "return",
-  "if", "else", "for", "while", "do", "switch", "case", "break", "continue",
-  "try", "catch", "throw", "new", "class", "extends", "interface", "type",
-  "async", "await", "default", "typeof", "instanceof", "in", "of",
-  "true", "false", "null", "undefined", "this", "super", "yield",
+  'import',
+  'export',
+  'from',
+  'const',
+  'let',
+  'var',
+  'function',
+  'return',
+  'if',
+  'else',
+  'for',
+  'while',
+  'do',
+  'switch',
+  'case',
+  'break',
+  'continue',
+  'try',
+  'catch',
+  'throw',
+  'new',
+  'class',
+  'extends',
+  'interface',
+  'type',
+  'async',
+  'await',
+  'default',
+  'typeof',
+  'instanceof',
+  'in',
+  'of',
+  'true',
+  'false',
+  'null',
+  'undefined',
+  'this',
+  'super',
+  'yield',
 ]);
 
 const PY_KEYWORDS = new Set([
-  "import", "from", "def", "return", "if", "elif", "else", "for", "while",
-  "try", "except", "raise", "class", "with", "as", "pass", "break", "continue",
-  "True", "False", "None", "and", "or", "not", "in", "is", "lambda", "yield",
-  "self", "print",
+  'import',
+  'from',
+  'def',
+  'return',
+  'if',
+  'elif',
+  'else',
+  'for',
+  'while',
+  'try',
+  'except',
+  'raise',
+  'class',
+  'with',
+  'as',
+  'pass',
+  'break',
+  'continue',
+  'True',
+  'False',
+  'None',
+  'and',
+  'or',
+  'not',
+  'in',
+  'is',
+  'lambda',
+  'yield',
+  'self',
+  'print',
 ]);
 
 const SH_KEYWORDS = new Set([
-  "if", "then", "else", "elif", "fi", "for", "while", "do", "done",
-  "case", "esac", "in", "function", "return", "exit", "export",
-  "local", "source", "echo", "cd", "ls", "rm", "mv", "cp", "mkdir",
-  "git", "npm", "yarn", "bun", "node", "python", "pip", "cargo",
+  'if',
+  'then',
+  'else',
+  'elif',
+  'fi',
+  'for',
+  'while',
+  'do',
+  'done',
+  'case',
+  'esac',
+  'in',
+  'function',
+  'return',
+  'exit',
+  'export',
+  'local',
+  'source',
+  'echo',
+  'cd',
+  'ls',
+  'rm',
+  'mv',
+  'cp',
+  'mkdir',
+  'git',
+  'npm',
+  'yarn',
+  'bun',
+  'node',
+  'python',
+  'pip',
+  'cargo',
 ]);
 
 function detectLang(fenceLine: string): string {
   const lang = fenceLine.slice(3).trim().toLowerCase();
-  if (["ts", "tsx", "typescript"].includes(lang)) return "ts";
-  if (["js", "jsx", "javascript"].includes(lang)) return "ts";
-  if (["py", "python"].includes(lang)) return "py";
-  if (["sh", "bash", "shell", "zsh"].includes(lang)) return "sh";
-  if (["json"].includes(lang)) return "json";
-  return lang || "";
+  if (['ts', 'tsx', 'typescript'].includes(lang)) return 'ts';
+  if (['js', 'jsx', 'javascript'].includes(lang)) return 'ts';
+  if (['py', 'python'].includes(lang)) return 'py';
+  if (['sh', 'bash', 'shell', 'zsh'].includes(lang)) return 'sh';
+  if (['json'].includes(lang)) return 'json';
+  return lang || '';
 }
 
 function tokenizeCodeLine(line: string, lang: string, t: Theme): Token[] {
@@ -93,24 +187,28 @@ function tokenizeCodeLine(line: string, lang: string, t: Theme): Token[] {
   let i = 0;
 
   while (i < line.length) {
-    if ((lang === "ts" || lang === "py" || lang === "sh") && line[i] === "/" && line[i + 1] === "/") {
+    if (
+      (lang === 'ts' || lang === 'py' || lang === 'sh') &&
+      line[i]! === '/' &&
+      line[i + 1]! === '/'
+    ) {
       tokens.push({ text: line.slice(i), color: t.dim });
       return tokens;
     }
-    if (lang === "py" && line[i] === "#") {
+    if (lang === 'py' && line[i]! === '#') {
       tokens.push({ text: line.slice(i), color: t.dim });
       return tokens;
     }
-    if (lang === "sh" && line[i] === "#") {
+    if (lang === 'sh' && line[i]! === '#') {
       tokens.push({ text: line.slice(i), color: t.dim });
       return tokens;
     }
 
-    if (line[i] === '"' || line[i] === "'" || line[i] === "`") {
-      const quote = line[i];
+    if (line[i]! === '"' || line[i]! === "'" || line[i]! === '`') {
+      const quote = line[i]!;
       let j = i + 1;
-      while (j < line.length && line[j] !== quote) {
-        if (line[j] === "\\") j++;
+      while (j < line.length && line[j]! !== quote) {
+        if (line[j]! === '\\') j++;
         j++;
       }
       if (j < line.length) j++;
@@ -120,9 +218,9 @@ function tokenizeCodeLine(line: string, lang: string, t: Theme): Token[] {
       continue;
     }
 
-    if (/[0-9]/.test(line[i]) && (i === 0 || /[\s([{=+\-*/%<>,;:]/.test(line[i - 1]))) {
+    if (/[0-9]/.test(line[i]!) && (i === 0 || /[\s([{=+\-*/%<>,;:]/.test(line[i - 1]!))) {
       let j = i;
-      while (j < line.length && /[0-9a-fA-FxX._]/.test(line[j])) j++;
+      while (j < line.length && /[0-9a-fA-FxX._]/.test(line[j]!)) j++;
       const num = line.slice(i, j);
       if (/^[0-9]/.test(num)) {
         tokens.push({ text: num, color: t.primary });
@@ -131,11 +229,11 @@ function tokenizeCodeLine(line: string, lang: string, t: Theme): Token[] {
       }
     }
 
-    if (/[a-zA-Z_$]/.test(line[i])) {
+    if (/[a-zA-Z_$]/.test(line[i]!)) {
       let j = i;
-      while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j])) j++;
+      while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j]!)) j++;
       const word = line.slice(i, j);
-      const kw = lang === "py" ? PY_KEYWORDS : lang === "sh" ? SH_KEYWORDS : TS_KEYWORDS;
+      const kw = lang === 'py' ? PY_KEYWORDS : lang === 'sh' ? SH_KEYWORDS : TS_KEYWORDS;
       if (kw.has(word)) {
         tokens.push({ text: word, color: t.primary, bold: true });
       } else {
@@ -145,7 +243,7 @@ function tokenizeCodeLine(line: string, lang: string, t: Theme): Token[] {
       continue;
     }
 
-    tokens.push({ text: line[i] });
+    tokens.push({ text: line[i]! });
     i++;
   }
 
@@ -187,7 +285,7 @@ function charWidth(code: number): number {
     (code >= 0xff01 && code <= 0xff60) || // Fullwidth forms
     (code >= 0xffe0 && code <= 0xffe6) || // Fullwidth signs
     (code >= 0x1f300 && code <= 0x1f9ff) || // Emoji, pictographs
-    (code >= 0x20000 && code <= 0x2ffff)   // CJK Ext-B+
+    (code >= 0x20000 && code <= 0x2ffff) // CJK Ext-B+
   ) {
     return 2;
   }
@@ -228,20 +326,20 @@ function parseTable(lines: string[]): { headers: string[]; rows: string[][]; wid
   const parseCells = (line: string) => {
     let trimmed = line.trim();
     // Strip leading/trailing pipe │
-    trimmed = trimmed.replace(/^[|│]\s*/, "").replace(/\s*[|│]$/, "");
-    return trimmed.split(PIPE).map(c => c.trim());
+    trimmed = trimmed.replace(/^[|│]\s*/, '').replace(/\s*[|│]$/, '');
+    return trimmed.split(PIPE).map((c) => c.trim());
   };
 
-  const headers = parseCells(lines[0]);
+  const headers = parseCells(lines[0]!);
   const rows: string[][] = [];
   for (let i = 2; i < lines.length; i++) {
-    rows.push(parseCells(lines[i]));
+    rows.push(parseCells(lines[i]!));
   }
 
   const widths = headers.map((h, col) => {
     let max = stringWidth(h);
-    rows.forEach(r => {
-      const cell = r[col] ?? "";
+    rows.forEach((r) => {
+      const cell = r[col] ?? '';
       const w = stringWidth(cell);
       if (w > max) max = w;
     });
@@ -260,30 +358,33 @@ function tableMaxWidth(): number {
 
 /** Split text into lines that fit within maxWidth, padding each line to maxWidth. */
 function wrapCell(text: string, maxWidth: number): string[] {
-  if (maxWidth <= 0) return [""];
+  if (maxWidth <= 0) return [''];
   const sw = stringWidth(text);
-  if (sw <= maxWidth) return [text + " ".repeat(maxWidth - sw)];
+  if (sw <= maxWidth) return [text + ' '.repeat(maxWidth - sw)];
 
   const lines: string[] = [];
-  let current = "";
+  let current = '';
   let currentWidth = 0;
 
   for (const ch of text) {
     const cw = charWidth(ch.codePointAt(0) ?? 0);
     if (cw === 0) continue;
     if (currentWidth + cw > maxWidth) {
-      lines.push(current + " ".repeat(maxWidth - currentWidth));
+      lines.push(current + ' '.repeat(maxWidth - currentWidth));
       current = ch;
       currentWidth = cw;
       // Trim leading space after a forced break
-      if (ch === " ") { current = ""; currentWidth = 0; }
+      if (ch === ' ') {
+        current = '';
+        currentWidth = 0;
+      }
     } else {
       current += ch;
       currentWidth += cw;
     }
   }
   if (current || lines.length === 0) {
-    lines.push(current + " ".repeat(maxWidth - currentWidth));
+    lines.push(current + ' '.repeat(maxWidth - currentWidth));
   }
   return lines;
 }
@@ -291,9 +392,9 @@ function wrapCell(text: string, maxWidth: number): string[] {
 /** Truncate to single line with "…" — used for headers only. */
 function truncateHeader(text: string, maxWidth: number): string {
   const sw = stringWidth(text);
-  if (sw <= maxWidth) return text + " ".repeat(maxWidth - sw);
+  if (sw <= maxWidth) return text + ' '.repeat(maxWidth - sw);
   const limit = maxWidth - 1;
-  let result = "";
+  let result = '';
   let w = 0;
   for (const ch of text) {
     const cw = charWidth(ch.codePointAt(0) ?? 0);
@@ -302,12 +403,12 @@ function truncateHeader(text: string, maxWidth: number): string {
     result += ch;
     w += cw;
   }
-  return result + "…" + " ".repeat(limit - w);
+  return `${result}…${' '.repeat(limit - w)}`;
 }
 
 function computeColumnWidths(
   headers: string[],
-  rows: string[][],
+  _rows: string[][],
   naturalWidths: number[],
 ): number[] {
   const colCount = headers.length;
@@ -320,25 +421,31 @@ function computeColumnWidths(
     return headers.map(() => w);
   }
   const scale = maxContentWidth / naturalTotal;
-  return naturalWidths.map(w => Math.max(6, Math.floor(w * scale)));
+  return naturalWidths.map((w) => Math.max(6, Math.floor(w * scale)));
 }
 
 /** Build a single border string: e.g. ┌────┬──────┐ */
-function borderLine(left: string, mid: string, right: string, widths: number[], fill: string): string {
-  return left + widths.map(w => fill.repeat(w + 2)).join(mid) + right;
+function borderLine(
+  left: string,
+  mid: string,
+  right: string,
+  widths: number[],
+  fill: string,
+): string {
+  return left + widths.map((w) => fill.repeat(w + 2)).join(mid) + right;
 }
 
 /** Render a table row that may span multiple lines (cells wrap). */
 function dataRowLines(cells: string[], widths: number[]): string[] {
-  const wrapped = cells.map((c, i) => wrapCell(c, widths[i]));
-  const maxLines = Math.max(1, ...wrapped.map(w => w.length));
+  const wrapped = cells.map((c, i) => wrapCell(c, widths[i]!));
+  const maxLines = Math.max(1, ...wrapped.map((w) => w.length));
   const lines: string[] = [];
   for (let li = 0; li < maxLines; li++) {
     const parts = wrapped.map((w, ci) => {
-      const cell = li < w.length ? w[li] : " ".repeat(widths[ci]);
-      return " " + cell + " ";
+      const cell = li < w.length ? w[li] : ' '.repeat(widths[ci]!);
+      return ` ${cell} `;
     });
-    lines.push("│" + parts.join("│") + "│");
+    lines.push(`│${parts.join('│')}│`);
   }
   return lines;
 }
@@ -351,20 +458,24 @@ function TableBlock({ lines }: { lines: string[] }) {
     [headers, rows, natural],
   );
 
-  const topBorder  = borderLine("┌", "┬", "┐", widths, "─");
-  const sepBorder  = borderLine("├", "┼", "┤", widths, "─");
-  const botBorder  = borderLine("└", "┴", "┘", widths, "─");
-  const headerLine = "│" + headers.map((h, i) => " " + truncateHeader(h, widths[i]) + " ").join("│") + "│";
+  const topBorder = borderLine('┌', '┬', '┐', widths, '─');
+  const sepBorder = borderLine('├', '┼', '┤', widths, '─');
+  const botBorder = borderLine('└', '┴', '┘', widths, '─');
+  const headerLine = `│${headers.map((h, i) => ` ${truncateHeader(h, widths[i]!)} `).join('│')}│`;
 
   return (
     <Box flexDirection="column">
       <Text color={t.dim}>{topBorder}</Text>
-      <Text bold color={t.primary}>{headerLine}</Text>
+      <Text bold color={t.primary}>
+        {headerLine}
+      </Text>
       <Text color={t.dim}>{sepBorder}</Text>
       {rows.map((row, ri) =>
         dataRowLines(row, widths).map((line, li) => (
-          <Text key={`${ri}-${li}`} color={t.muted}>{line}</Text>
-        ))
+          <Text key={`${ri}-${li}`} color={t.muted}>
+            {line}
+          </Text>
+        )),
       )}
       <Text color={t.dim}>{botBorder}</Text>
     </Box>
@@ -376,9 +487,9 @@ function TableBlock({ lines }: { lines: string[] }) {
 // Decode at render time so terminal displays the actual characters.
 function decodeHtmlEntities(text: string): string {
   return text
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#34;/g, '"')
     .replace(/&#x22;/g, '"')
@@ -391,44 +502,44 @@ function decodeHtmlEntities(text: string): string {
 // ── line grouping ──
 
 type LineGroup =
-  | { kind: "single"; line: string; index: number }
-  | { kind: "code"; lines: string[]; lang: string; startIndex: number }
-  | { kind: "table"; lines: string[]; startIndex: number };
+  | { kind: 'single'; line: string; index: number }
+  | { kind: 'code'; lines: string[]; lang: string; startIndex: number }
+  | { kind: 'table'; lines: string[]; startIndex: number };
 
 function groupLines(lines: string[]): LineGroup[] {
   const groups: LineGroup[] = [];
   let i = 0;
 
   while (i < lines.length) {
-    const line = lines[i];
+    const line = lines[i]!;
 
     // Code block
-    if (line.startsWith("```")) {
+    if (line.startsWith('```')) {
       const lang = detectLang(line);
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
+      while (i < lines.length && !lines[i]!.startsWith('```')) {
+        codeLines.push(lines[i]!);
         i++;
       }
-      groups.push({ kind: "code", lines: codeLines, lang, startIndex: i });
+      groups.push({ kind: 'code', lines: codeLines, lang, startIndex: i });
       if (i < lines.length) i++; // skip closing ```
       continue;
     }
 
     // Table: must have header row + separator row
-    if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
-      const tableLines: string[] = [line, lines[i + 1]];
+    if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1]!)) {
+      const tableLines: string[] = [line, lines[i + 1]!];
       i += 2;
-      while (i < lines.length && isTableRow(lines[i])) {
-        tableLines.push(lines[i]);
+      while (i < lines.length && isTableRow(lines[i]!)) {
+        tableLines.push(lines[i]!);
         i++;
       }
-      groups.push({ kind: "table", lines: tableLines, startIndex: i });
+      groups.push({ kind: 'table', lines: tableLines, startIndex: i });
       continue;
     }
 
-    groups.push({ kind: "single", line, index: i });
+    groups.push({ kind: 'single', line, index: i });
     i++;
   }
 
@@ -444,27 +555,32 @@ const UNORDERED_LIST_RE = /^(\s*)[-*]\s+(.*)$/;
 const ORDERED_LIST_RE = /^(\s*)(\d+)[.)]\s+(.*)$/;
 
 function isBlankGroup(g: LineGroup | undefined): boolean {
-  return !!g && g.kind === "single" && g.line.trim() === "";
+  return !!g && g.kind === 'single' && g.line.trim() === '';
 }
 
 function isHeadingGroup(g: LineGroup | undefined): boolean {
-  return !!g && g.kind === "single" && HEADING_RE.test(g.line);
+  return !!g && g.kind === 'single' && HEADING_RE.test(g.line);
 }
 
 function isListGroup(g: LineGroup | undefined): boolean {
-  if (!g || g.kind !== "single") return false;
+  if (g?.kind !== 'single') return false;
   const line = g.line;
-  return !isBlankGroup(g) && !isHeadingGroup(g) && !isHorizontalRule(line) && UNORDERED_LIST_RE.test(line);
+  return (
+    !isBlankGroup(g) &&
+    !isHeadingGroup(g) &&
+    !isHorizontalRule(line) &&
+    UNORDERED_LIST_RE.test(line)
+  );
 }
 
 function isQuoteGroup(g: LineGroup | undefined): boolean {
-  return !!g && g.kind === "single" && g.line.startsWith("> ") && !isBlankGroup(g);
+  return !!g && g.kind === 'single' && g.line.startsWith('> ') && !isBlankGroup(g);
 }
 
 function isStructuralGroup(g: LineGroup | undefined): boolean {
   if (!g) return false;
-  if (g.kind === "table" || g.kind === "code") return true;
-  if (g.kind === "single") {
+  if (g.kind === 'table' || g.kind === 'code') return true;
+  if (g.kind === 'single') {
     const line = g.line;
     return isHorizontalRule(line) || isHeadingGroup(g);
   }
@@ -475,9 +591,12 @@ function spacingBetween(prev: LineGroup, next: LineGroup, blanks: number): numbe
   if (isListGroup(prev) && isListGroup(next)) return 0;
   if (isQuoteGroup(prev) && isQuoteGroup(next)) return 0;
   if (
-    isStructuralGroup(prev) || isStructuralGroup(next) ||
-    isListGroup(prev) || isListGroup(next) ||
-    isQuoteGroup(prev) || isQuoteGroup(next)
+    isStructuralGroup(prev) ||
+    isStructuralGroup(next) ||
+    isListGroup(prev) ||
+    isListGroup(next) ||
+    isQuoteGroup(prev) ||
+    isQuoteGroup(next)
   ) {
     return Math.max(1, Math.min(blanks, 1));
   }
@@ -486,19 +605,19 @@ function spacingBetween(prev: LineGroup, next: LineGroup, blanks: number): numbe
 
 // ── main component ──
 
-export default React.memo(function MarkdownBlock({ content, streaming, color }: MarkdownBlockProps) {
+export default React.memo(function MarkdownBlock({ content, color }: MarkdownBlockProps) {
   const t = useTheme();
   const { columns } = useWindowSize();
   const groups = useMemo(() => {
-    const lines = decodeHtmlEntities(content).split("\n");
-    if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+    const lines = decodeHtmlEntities(content).split('\n');
+    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
     return groupLines(lines);
   }, [content]);
 
   const nonBlank = groups.reduce<{ group: LineGroup; blanksBefore: number }[]>((acc, g) => {
     if (isBlankGroup(g)) {
       if (acc.length === 0) return acc;
-      acc[acc.length - 1].blanksBefore++;
+      acc[acc.length - 1]!.blanksBefore++;
       return acc;
     }
     acc.push({ group: g, blanksBefore: 0 });
@@ -506,14 +625,14 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
   }, []);
 
   function renderGroup(group: LineGroup): React.ReactNode {
-    if (group.kind === "code") {
+    if (group.kind === 'code') {
       if (group.lines.length === 0) return null;
-      const lang = group.lang || "code";
+      const lang = group.lang || 'code';
       const label = `┌─ ${lang} `;
       const labelWidth = stringWidth(label);
       const topFill = Math.max(0, columns - labelWidth);
-      const topBorder = label + "─".repeat(topFill);
-      const bottomBorder = "└" + "─".repeat(Math.max(0, columns - 1));
+      const topBorder = label + '─'.repeat(topFill);
+      const bottomBorder = `└${'─'.repeat(Math.max(0, columns - 1))}`;
       return (
         <Box flexDirection="column">
           <Text color={t.dim}>{topBorder}</Text>
@@ -528,27 +647,27 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
       );
     }
 
-    if (group.kind === "table") {
+    if (group.kind === 'table') {
       return <TableBlock lines={group.lines} />;
     }
 
     const line = group.line;
 
-    if (line.startsWith("### ")) {
+    if (line.startsWith('### ')) {
       return (
         <Text bold color={t.primary}>
           <MarkdownLine content={line.slice(4)} color={t.primary} />
         </Text>
       );
     }
-    if (line.startsWith("## ")) {
+    if (line.startsWith('## ')) {
       return (
         <Text bold color={t.primary}>
           ── <MarkdownLine content={line.slice(3)} color={t.primary} /> ──
         </Text>
       );
     }
-    if (line.startsWith("# ")) {
+    if (line.startsWith('# ')) {
       return (
         <Text bold underline color={t.primary}>
           <MarkdownLine content={line.slice(2)} color={t.primary} />
@@ -557,18 +676,18 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
     }
 
     if (isHorizontalRule(line)) {
-      return <Text color={t.dim}>{"─".repeat(columns)}</Text>;
+      return <Text color={t.dim}>{'─'.repeat(columns)}</Text>;
     }
 
     const ulMatch = line.match(UNORDERED_LIST_RE);
     if (ulMatch) {
-      const indent = ulMatch[1].length;
-      let item = ulMatch[2];
-      let bullet = "• ";
+      const indent = ulMatch[1]!.length;
+      let item = ulMatch[2]!;
+      let bullet = '• ';
       const taskMatch = item.match(/^(\[[ xX]\])\s+(.*)$/);
       if (taskMatch) {
-        bullet = taskMatch[1] === "[ ]" ? "☐ " : "☑ ";
-        item = taskMatch[2];
+        bullet = taskMatch[1]! === '[ ]' ? '☐ ' : '☑ ';
+        item = taskMatch[2]!;
       }
       return (
         <Box paddingLeft={indent}>
@@ -579,17 +698,17 @@ export default React.memo(function MarkdownBlock({ content, streaming, color }: 
     }
 
     const olMatch = line.match(ORDERED_LIST_RE);
-    if (olMatch && !line.startsWith("```")) {
-      const indent = olMatch[1].length;
+    if (olMatch && !line.startsWith('```')) {
+      const indent = olMatch[1]!.length;
       return (
         <Box paddingLeft={indent}>
-          <Text color={t.muted}>{olMatch[2]}. </Text>
-          <MarkdownLine content={olMatch[3]} color={color} />
+          <Text color={t.muted}>{olMatch[2]!}. </Text>
+          <MarkdownLine content={olMatch[3]!} color={color} />
         </Box>
       );
     }
 
-    if (line.startsWith("> ")) {
+    if (line.startsWith('> ')) {
       return (
         <Box flexDirection="row">
           <Text color={t.dim}>▎ </Text>
@@ -626,7 +745,7 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
   const t = useTheme();
   const segments = parseInline(content);
 
-  if (segments.length === 1 && !segments[0].bold && !segments[0].italic && !segments[0].code) {
+  if (segments.length === 1 && !segments[0]!.bold && !segments[0]!.italic && !segments[0]!.code) {
     return <Text color={color}>{content}</Text>;
   }
 
@@ -636,7 +755,9 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
         if (seg.link) {
           return (
             <React.Fragment key={j}>
-              <Text bold color={t.primary}>{seg.text}</Text>
+              <Text bold color={t.primary}>
+                {seg.text}
+              </Text>
               <Text color={t.dim}> ({seg.link})</Text>
             </React.Fragment>
           );

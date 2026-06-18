@@ -1,29 +1,46 @@
 // ── 会话管理（登录/切换/删除）、用户消息、模型选择 ──
 
-import type { Action } from "./actions";
-import type { TuiState, OutputBlock, SessionSnapshot, Turn } from "../types";
-import { reconstructTurns, appendBlock, maxBlockIdInTurns } from "./helpers";
-import { listAvailableModels } from "@/core/config";
+import { listAvailableModels } from '@/core/config';
+import type { OutputBlock, SessionSnapshot, TuiState } from '../types';
+import type { Action } from './actions';
+import { appendBlock, maxBlockIdInTurns, reconstructTurns } from './helpers';
 
 export function sessionReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
-    case "NEW_SESSION": {
+    case 'NEW_SESSION': {
       // Save current session turns/status/interrupt/running to outgoing snapshot
-      const newSessions = state.sessions.map(s =>
+      const newSessions = state.sessions.map((s) =>
         s.threadId === state.activeSessionId
-          ? { ...s, turns: state.turns, status: state.status, interrupt: state.interrupt, running: state.running, active: false }
-          : s
+          ? {
+              ...s,
+              turns: state.turns,
+              status: state.status,
+              interrupt: state.interrupt,
+              running: state.running,
+              active: false,
+            }
+          : s,
       );
       const newSnapshot: SessionSnapshot = {
         threadId: action.threadId,
         name: action.threadId,
-        workspace: state.sessions.find(s => s.threadId === state.activeSessionId)?.workspace ?? "",
+        workspace:
+          state.sessions.find((s) => s.threadId === state.activeSessionId)?.workspace ?? '',
         active: true,
         running: false,
         pendingInterrupt: false,
         interrupt: null,
         plan: null,
-        status: { ...state.status, cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null, retryState: null },
+        status: {
+          ...state.status,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          totalTokens: 0,
+          cacheHitRate: 0,
+          currentNode: null,
+          plan: null,
+          retryState: null,
+        },
         turns: [],
       };
       return {
@@ -47,19 +64,35 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         rewindCounter: 0,
         currentRunReasonId: undefined,
         sessionKey: state.sessionKey + 1,
-        status: { ...state.status, cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0, cacheHitRate: 0, currentNode: null, plan: null, retryState: null },
+        status: {
+          ...state.status,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          totalTokens: 0,
+          cacheHitRate: 0,
+          currentNode: null,
+          plan: null,
+          retryState: null,
+        },
       };
     }
-    case "LOAD_SESSION_PENDING":
+    case 'LOAD_SESSION_PENDING':
       return { ...state, loadingSessionId: action.threadId };
-    case "LOAD_SESSION": {
+    case 'LOAD_SESSION': {
       // Save outgoing session's turns/status/interrupt/running before overwriting
-      const sessionsWithSaved = state.sessions.map(s =>
+      const sessionsWithSaved = state.sessions.map((s) =>
         s.threadId === state.activeSessionId
-          ? { ...s, turns: state.turns, status: state.status, interrupt: state.interrupt, running: state.running, active: false }
-          : s
+          ? {
+              ...s,
+              turns: state.turns,
+              status: state.status,
+              interrupt: state.interrupt,
+              running: state.running,
+              active: false,
+            }
+          : s,
       );
-      const sessions = sessionsWithSaved.map(s =>
+      const sessions = sessionsWithSaved.map((s) =>
         s.threadId === action.threadId
           ? {
               ...s,
@@ -71,9 +104,9 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
                 thinkingMode: action.thinkingLevel || s.status.thinkingMode,
               },
             }
-          : s
+          : s,
       );
-      const target = sessions.find(s => s.threadId === action.threadId);
+      const target = sessions.find((s) => s.threadId === action.threadId);
       const loadedTurns = reconstructTurns(action.blocks);
       const nextId = Math.max(state.nextBlockId, maxBlockIdInTurns(loadedTurns) + 1);
       return {
@@ -101,21 +134,30 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         editorRequested: false,
         status: {
           ...(target?.status ?? state.status),
-          modelProvider: action.modelProvider || target?.status.modelProvider || state.status.modelProvider,
+          modelProvider:
+            action.modelProvider || target?.status.modelProvider || state.status.modelProvider,
           modelName: action.modelName || target?.status.modelName || state.status.modelName,
-          thinkingMode: action.thinkingLevel || target?.status.thinkingMode || state.status.thinkingMode,
+          thinkingMode:
+            action.thinkingLevel || target?.status.thinkingMode || state.status.thinkingMode,
         },
       };
     }
-    case "SWITCH_SESSION": {
-      const sessions = state.sessions.map(s =>
+    case 'SWITCH_SESSION': {
+      const sessions = state.sessions.map((s) =>
         s.threadId === state.activeSessionId
-          ? { ...s, turns: state.turns, status: state.status, interrupt: state.interrupt, running: state.running, active: false }
+          ? {
+              ...s,
+              turns: state.turns,
+              status: state.status,
+              interrupt: state.interrupt,
+              running: state.running,
+              active: false,
+            }
           : s.threadId === action.threadId
             ? { ...s, active: true }
-            : s
+            : s,
       );
-      const target = sessions.find(s => s.threadId === action.threadId);
+      const target = sessions.find((s) => s.threadId === action.threadId);
       const targetTurns = target?.turns ?? [];
       return {
         ...state,
@@ -143,7 +185,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         checkpoints: [],
       };
     }
-    case "SET_SESSIONS": {
+    case 'SET_SESSIONS': {
       // Merge: preserve existing turns/status for sessions already in state.
       // For the currently active session, use state.status (live cache metrics etc.)
       // instead of the snapshot's stale zero-value status.
@@ -166,22 +208,22 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         activeSessionId: activeIncoming?.threadId ?? state.activeSessionId,
       };
     }
-    case "SESSION_INTERRUPT_PENDING": {
-      const sessions = state.sessions.map(s =>
-        s.threadId === action.threadId ? { ...s, pendingInterrupt: true } : s
+    case 'SESSION_INTERRUPT_PENDING': {
+      const sessions = state.sessions.map((s) =>
+        s.threadId === action.threadId ? { ...s, pendingInterrupt: true } : s,
       );
       return { ...state, sessions };
     }
-    case "DELETE_SESSION":
+    case 'DELETE_SESSION':
       return { ...state, showSessions: false };
-    case "SET_THINKING_LEVEL":
+    case 'SET_THINKING_LEVEL':
       return {
         ...state,
         status: { ...state.status, thinkingMode: action.level },
       };
-    case "SELECT_MODEL": {
+    case 'SELECT_MODEL': {
       const models = listAvailableModels();
-      const found = models.find(m => m.name === action.modelId);
+      const found = models.find((m) => m.name === action.modelId);
       return {
         ...state,
         showModelSelector: false,
@@ -192,8 +234,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         },
       };
     }
-    case "USER_MESSAGE": {
-      const block: OutputBlock = { id: state.nextBlockId, kind: "user", content: action.text };
+    case 'USER_MESSAGE': {
+      const block: OutputBlock = { id: state.nextBlockId, kind: 'user', content: action.text };
       return appendBlock(state, block);
     }
     default:

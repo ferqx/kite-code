@@ -17,7 +17,7 @@ export function generateSandboxProfile(workspace: string): string {
     fileWriteUnlinkPolicy(workspace),
   ]
     .filter(Boolean)
-    .join("\n");
+    .join('\n');
 }
 
 /** 1. 静态基础层 — 进程、系统 IPC、sysctl、IOKit、PTY（参照 Codex seatbelt_base_policy.sbpl）*/
@@ -139,9 +139,4 @@ function fileWritePolicy(_workspace: string): string {
 function fileWriteUnlinkPolicy(_workspace: string): string {
   return `;; ── 文件创建/删除：全局允许，危险路径由 checkDangerousPaths 拦截 ──
 (allow file-write-unlink file-write-create (subpath "/"))`;
-}
-
-/** 转义 SBPL 字符串字面量中的反斜杠 */
-function esc(s: string): string {
-  return s.replace(/\\/g, "\\\\");
 }

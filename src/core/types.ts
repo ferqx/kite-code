@@ -1,4 +1,4 @@
-import type { AuthorizationMode, ShellApprovalGrant, ShellGrantUsed, WorkspaceAccess } from "@/protocol/events";
+import type { AuthorizationMode, ShellApprovalGrant } from '@/protocol/events';
 
 export interface ShellInput {
   workspace: string;
@@ -15,7 +15,7 @@ export interface ShellResult {
   stderr: string;
 }
 
-export type ShellIntent = "inspect" | "verify" | "build" | "test" | "git" | "other";
+export type ShellIntent = 'inspect' | 'verify' | 'build' | 'test' | 'git' | 'other';
 
 export interface ShellActionEnvelope {
   command: string;
@@ -30,7 +30,7 @@ export interface ShellActionEnvelope {
 }
 
 export interface ThreadAuthorizationState {
-  mode: "default" | "full_access";
+  mode: 'default' | 'full_access';
   commandGrants: Record<string, { workspace: string; threadId: string; command: string }>;
 }
 
@@ -63,11 +63,19 @@ export type ToolApprovalResumeValue =
 
 export type UserInputResumeValue =
   | string
-  | { answer?: string; choice?: string; option_id?: string; optionId?: string; free_text?: string; freeText?: string; text?: string };
+  | {
+      answer?: string;
+      choice?: string;
+      option_id?: string;
+      optionId?: string;
+      free_text?: string;
+      freeText?: string;
+      text?: string;
+    };
 
 export type AgentResumeValue = ToolApprovalResumeValue | UserInputResumeValue;
 
-export interface ContextBudget {}
+export type ContextBudget = {};
 
 export interface ModelRetryEvent {
   attempt: number;

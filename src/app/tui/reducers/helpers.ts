@@ -1,4 +1,4 @@
-import type { TuiState, OutputBlock, Turn } from "../types";
+import type { OutputBlock, TuiState, Turn } from '../types';
 
 /** Soft cap on turns to prevent unbounded memory growth in long sessions */
 const MAX_TURNS = 500;
@@ -15,18 +15,15 @@ export function findBlock(
   match: (b: OutputBlock) => boolean,
 ): OutputBlock | undefined {
   for (let t = state.turns.length - 1; t >= 0; t--) {
-    for (let i = state.turns[t].blocks.length - 1; i >= 0; i--) {
-      if (match(state.turns[t].blocks[i])) return state.turns[t].blocks[i];
+    for (let i = state.turns[t]!.blocks.length - 1; i >= 0; i--) {
+      if (match(state.turns[t]!.blocks[i]!)) return state.turns[t]!.blocks[i]!;
     }
   }
   return undefined;
 }
 
 /** Returns true if any block in any turn matches the predicate. */
-export function hasBlock(
-  state: TuiState,
-  match: (b: OutputBlock) => boolean,
-): boolean {
+export function hasBlock(state: TuiState, match: (b: OutputBlock) => boolean): boolean {
   for (const turn of state.turns) {
     if (turn.blocks.some(match)) return true;
   }
@@ -37,7 +34,11 @@ export function hasBlock(
  *  若 turns 为空，自动创建首个 turn。 */
 export function appendBlock(state: TuiState, block: OutputBlock): TuiState {
   if (state.turns.length === 0) {
-    return trimTurns({ ...state, turns: [{ blocks: [block] }], nextBlockId: state.nextBlockId + 1 });
+    return trimTurns({
+      ...state,
+      turns: [{ blocks: [block] }],
+      nextBlockId: state.nextBlockId + 1,
+    });
   }
   const turns = state.turns.slice();
   const last = turns.at(-1)!;
@@ -46,10 +47,7 @@ export function appendBlock(state: TuiState, block: OutputBlock): TuiState {
 }
 
 /** 按 id 查找 block（跨所有 turns） */
-export function findBlockById(
-  state: TuiState,
-  blockId: number,
-): OutputBlock | undefined {
+export function findBlockById(state: TuiState, blockId: number): OutputBlock | undefined {
   for (const turn of state.turns) {
     const found = turn.blocks.find((b) => b.id === blockId);
     if (found) return found;
@@ -59,10 +57,7 @@ export function findBlockById(
 
 /** 替换最后 turn 的最后 block（流式更新 text content）。
  *  前置条件：最后 turn 至少有一个 block。 */
-export function updateLastBlock(
-  state: TuiState,
-  block: OutputBlock,
-): TuiState {
+export function updateLastBlock(state: TuiState, block: OutputBlock): TuiState {
   const turns = state.turns.slice();
   const last = turns.at(-1)!;
   const blocks = last.blocks.slice();
@@ -72,11 +67,7 @@ export function updateLastBlock(
 }
 
 /** 全局按 id 替换 block（toggle 展开/折叠、resolve interrupt 用） */
-export function replaceBlockById(
-  state: TuiState,
-  blockId: number,
-  next: OutputBlock,
-): TuiState {
+export function replaceBlockById(state: TuiState, blockId: number, next: OutputBlock): TuiState {
   const turns = state.turns.map((turn) => {
     const idx = turn.blocks.findIndex((b) => b.id === blockId);
     if (idx === -1) return turn;
@@ -94,7 +85,7 @@ export function finalizeLastTurnStreaming(state: TuiState): TuiState {
   if (!last) return state;
   let changed = false;
   const blocks = last.blocks.map((b) => {
-    if (b.kind === "text" && b.streaming) {
+    if (b.kind === 'text' && b.streaming) {
       changed = true;
       return { ...b, streaming: false } as typeof b;
     }
@@ -111,7 +102,7 @@ export function reconstructTurns(blocks: OutputBlock[]): Turn[] {
   const turns: Turn[] = [];
   let current: OutputBlock[] = [];
   for (const block of blocks) {
-    if (block.kind === "user" && current.length > 0) {
+    if (block.kind === 'user' && current.length > 0) {
       turns.push({ blocks: current });
       current = [];
     }

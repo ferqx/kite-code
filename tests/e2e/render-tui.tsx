@@ -13,15 +13,15 @@
  *   expect(tui.getOutput()).toContain("Hello!");
  *   tui.unmount();
  */
-import React from "react";
-import { render } from "ink-testing-library";
-import { join } from "node:path";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { AIMessage } from "@langchain/core/messages";
-import { StreamingMockModel, type MockResponse } from "../mock-model";
-import { loadAgentConfig } from "../../src/core/config/index";
-import type { SupportedChatModel } from "../../src/core/model/factory";
+
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AIMessage } from '@langchain/core/messages';
+import { render } from 'ink-testing-library';
+import React from 'react';
+import type { SupportedChatModel } from '../../src/core/model/factory';
+import { type MockResponse, StreamingMockModel } from '../mock-model';
 
 // ── Types ──
 
@@ -71,7 +71,7 @@ export interface TuiHarness {
   /** Wait for approval block to appear ([A] marker) */
   waitForApproval: (timeout?: number) => Promise<void>;
   /** Send approval key (A/S/F/D) and wait for result */
-  approve: (key: "A" | "S" | "F" | "D") => Promise<void>;
+  approve: (key: 'A' | 'S' | 'F' | 'D') => Promise<void>;
 
   // ── Question flow ──
   /** Wait for question block to appear */
@@ -87,7 +87,7 @@ export interface TuiHarness {
 
   // ── State queries ──
   /** Get current authorization mode from rendered output */
-  getAuthMode: () => "default" | "full_access" | null;
+  getAuthMode: () => 'default' | 'full_access' | null;
   /** Wait for running cat face to disappear */
   waitForRunningGone: (timeout?: number) => Promise<void>;
 
@@ -100,12 +100,8 @@ export interface TuiHarness {
 // Use StatusBar spinner characters instead to detect running state.
 // StatusBar shows a spinner when running=true and nothing when idle.
 
-const RUNNING_CAT = "( ^ ^ )";   // frozen in <Static> — do not use for detection
-const ERROR_CAT   = "( T T )";   // frozen in <Static> — do not use for detection
-const IDLE_CAT    = "( = = )";   // frozen in <Static> — do not use for detection
-
 // Spinner characters from StatusBar.tsx SPINNER array — rendered in dynamic tree
-const SPINNER_CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+const SPINNER_CHARS = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
 function hasRunningSpinner(output: string): boolean {
   for (const ch of SPINNER_CHARS) {
     if (output.includes(ch)) return true;
@@ -116,22 +112,22 @@ function hasRunningSpinner(output: string): boolean {
 // ── Temp directory helpers ──
 
 function setupTempHome() {
-  const tempHome = mkdtempSync(join(tmpdir(), "openpx-e2e-"));
-  const openpxDir = join(tempHome, ".openpx");
+  const tempHome = mkdtempSync(join(tmpdir(), 'openpx-e2e-'));
+  const openpxDir = join(tempHome, '.openpx');
   mkdirSync(openpxDir, { recursive: true });
   writeFileSync(
-    join(openpxDir, "openpx.jsonc"),
+    join(openpxDir, 'openpx.jsonc'),
     JSON.stringify(
       {
         provider: {
           deepseek: {
-            type: "deepseek",
-            apiKey: "test-key",
-            baseURL: "https://test.api.example.com",
+            type: 'deepseek',
+            apiKey: 'test-key',
+            baseURL: 'https://test.api.example.com',
           },
         },
         model: {
-          default: { provider: "deepseek", name: "deepseek-v4" },
+          default: { provider: 'deepseek', name: 'deepseek-v4' },
         },
       },
       null,
@@ -142,12 +138,12 @@ function setupTempHome() {
 }
 
 function setupTempWorkspace(files?: Record<string, string>): string {
-  const ws = mkdtempSync(join(tmpdir(), "openpx-ws-"));
+  const ws = mkdtempSync(join(tmpdir(), 'openpx-ws-'));
   if (files) {
     for (const [path, content] of Object.entries(files)) {
       const fullPath = join(ws, path);
-      mkdirSync(fullPath.replace(/[/\\][^/\\]+$/, ""), { recursive: true });
-      writeFileSync(fullPath, content, "utf-8");
+      mkdirSync(fullPath.replace(/[/\\][^/\\]+$/, ''), { recursive: true });
+      writeFileSync(fullPath, content, 'utf-8');
     }
   }
   return ws;
@@ -177,11 +173,7 @@ function tick(ms = 50): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function poll(
-  fn: () => boolean,
-  timeout: number,
-  label: string,
-): Promise<void> {
+async function poll(fn: () => boolean, timeout: number, label: string): Promise<void> {
   const start = Date.now();
   while (!fn()) {
     if (Date.now() - start > timeout) {
@@ -198,12 +190,10 @@ async function pollTextPresent(
 ): Promise<void> {
   const start = Date.now();
   while (true) {
-    const output = lastFrame() ?? "";
+    const output = lastFrame() ?? '';
     if (output.includes(text)) return;
     if (Date.now() - start > timeout) {
-      throw new Error(
-        `Timeout (${timeout}ms) waiting for text "${text}" in output`,
-      );
+      throw new Error(`Timeout (${timeout}ms) waiting for text "${text}" in output`);
     }
     await tick();
   }
@@ -216,12 +206,10 @@ async function pollTextGone(
 ): Promise<void> {
   const start = Date.now();
   while (true) {
-    const output = lastFrame() ?? "";
+    const output = lastFrame() ?? '';
     if (!output.includes(text)) return;
     if (Date.now() - start > timeout) {
-      throw new Error(
-        `Timeout (${timeout}ms) waiting for text "${text}" to disappear`,
-      );
+      throw new Error(`Timeout (${timeout}ms) waiting for text "${text}" to disappear`);
     }
     await tick();
   }
@@ -235,7 +223,10 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
 
   let lockReleased = false;
   const unlock = () => {
-    if (!lockReleased) { lockReleased = true; releaseRenderLock(); }
+    if (!lockReleased) {
+      lockReleased = true;
+      releaseRenderLock();
+    }
   };
 
   const tempHome = setupTempHome();
@@ -257,7 +248,7 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
   const normalizedResponses: MockResponse[] = opts.modelResponses.map((r) => {
     const msg = r.message;
     if (AIMessage.isInstance(msg)) return r;
-    const content = (msg as any).content ?? "";
+    const content = (msg as any).content ?? '';
     const toolCalls = (msg as any).tool_calls;
     return {
       ...r,
@@ -273,49 +264,51 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
     responses: normalizedResponses,
   }) as unknown as SupportedChatModel;
 
-  const { TuiBootstrap } = await import("../../src/app/tui/index");
+  const { TuiBootstrap } = await import('../../src/app/tui/index');
   const origError = console.error;
   const origWarn = console.warn;
   console.error = (...args: any[]) => {
-    const msg = String(args[0] ?? "");
-    if (msg.includes("[MCP]")) return;
+    const msg = String(args[0] ?? '');
+    if (msg.includes('[MCP]')) return;
     origError.apply(console, args);
   };
   console.warn = (...args: any[]) => {
-    const msg = String(args[0] ?? "");
-    if (msg.includes("[sandbox]")) return;
+    const msg = String(args[0] ?? '');
+    if (msg.includes('[sandbox]')) return;
     origWarn.apply(console, args);
   };
 
   // Import ErrorBoundary for crash detection in tests
-  const { default: ErrorBoundary } = await import("../../src/app/tui/components/ErrorBoundary");
+  const { default: ErrorBoundary } = await import('../../src/app/tui/components/ErrorBoundary');
 
-  const { stdin, lastFrame, unmount: inkUnmount } = render(
-    React.createElement(ErrorBoundary, null,
-      React.createElement(TuiBootstrap, { model } as any),
-    ),
+  const {
+    stdin,
+    lastFrame,
+    unmount: inkUnmount,
+  } = render(
+    React.createElement(ErrorBoundary, null, React.createElement(TuiBootstrap, { model } as any)),
   );
 
   await poll(
     () => {
-      const out = lastFrame() ?? "";
-      return out.includes("( = = )") || out.includes("( ^ ^ )") || out.includes("❯");
+      const out = lastFrame() ?? '';
+      return out.includes('( = = )') || out.includes('( ^ ^ )') || out.includes('❯');
     },
     10000,
-    "main App (cat face or prompt)",
+    'main App (cat face or prompt)',
   );
 
   // Wait for the TUI to fully render — all initialization complete.
   await poll(
     () => {
-      const out = lastFrame() ?? "";
-      return out.includes("shortcuts · Ctrl+C exit");
+      const out = lastFrame() ?? '';
+      return out.includes('shortcuts · Ctrl+C exit');
     },
     8000,
-    "full TUI render (footer)",
+    'full TUI render (footer)',
   );
 
-  const getOutput = () => lastFrame() ?? "";
+  const getOutput = () => lastFrame() ?? '';
 
   const unmount = () => {
     inkUnmount();
@@ -330,8 +323,12 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
     process.chdir(origCwd);
     process.stdout.columns = origColumns ?? 80;
     process.stdout.rows = origRows ?? 30;
-    try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
-    try { rmSync(workspace, { recursive: true, force: true }); } catch {}
+    try {
+      rmSync(tempHome, { recursive: true, force: true });
+    } catch {}
+    try {
+      rmSync(workspace, { recursive: true, force: true });
+    } catch {}
     unlock();
   };
 
@@ -356,22 +353,22 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
           await tick(2);
         }
         await tick(80);
-        stdin.write("\r");
+        stdin.write('\r');
         await tick(150);
       },
 
       async waitForRunning(timeout = stepTimeout) {
-        await poll(() => hasRunningSpinner(getOutput()), timeout, "running state (spinner)");
+        await poll(() => hasRunningSpinner(getOutput()), timeout, 'running state (spinner)');
       },
 
       async waitForIdle(timeout = stepTimeout) {
         await poll(
           () => {
             const out = getOutput();
-            return !hasRunningSpinner(out) && !out.includes("▼ Thinking");
+            return !hasRunningSpinner(out) && !out.includes('▼ Thinking');
           },
           timeout,
-          "idle state",
+          'idle state',
         );
       },
 
@@ -386,10 +383,10 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
       // ── Approval flow ──
 
       async waitForApproval(timeout = stepTimeout) {
-        await poll(() => getOutput().includes("[A]"), timeout, "approval block ([A] marker)");
+        await poll(() => getOutput().includes('[A]'), timeout, 'approval block ([A] marker)');
       },
 
-      async approve(key: "A" | "S" | "F" | "D") {
+      async approve(key: 'A' | 'S' | 'F' | 'D') {
         stdin.write(key.toLowerCase());
         await tick(300);
       },
@@ -398,16 +395,16 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
 
       async waitForQuestion(timeout = stepTimeout) {
         await poll(
-          () => getOutput().includes("?") && !getOutput().includes("[A]"),
+          () => getOutput().includes('?') && !getOutput().includes('[A]'),
           timeout,
-          "question block",
+          'question block',
         );
       },
 
       async answerQuestion(text: string) {
         stdin.write(text);
         await tick(100);
-        stdin.write("\r");
+        stdin.write('\r');
         await tick(300);
       },
 
@@ -425,13 +422,13 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
 
       getAuthMode() {
         const out = getOutput();
-        if (out.includes("[完全]")) return "full_access";
-        if (out.includes("[安全]")) return "default";
+        if (out.includes('[完全]')) return 'full_access';
+        if (out.includes('[安全]')) return 'default';
         return null;
       },
 
       async waitForRunningGone(timeout = stepTimeout) {
-        await poll(() => !hasRunningSpinner(lastFrame() ?? ""), timeout, "running spinner gone");
+        await poll(() => !hasRunningSpinner(lastFrame() ?? ''), timeout, 'running spinner gone');
       },
 
       getCallCount: () => (model as unknown as StreamingMockModel).callCount,

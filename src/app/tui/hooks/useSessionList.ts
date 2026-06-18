@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import type { SessionInfo } from "@/core/persistence/sessions.js";
-import { listSessions, searchSessions } from "@/core/persistence/sessions.js";
-import { defaultCheckpointPath } from "@/core/config/paths.js";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { defaultCheckpointPath } from '@/core/config/paths.js';
+import type { SessionInfo } from '@/core/persistence/sessions.js';
+import { listSessions, searchSessions } from '@/core/persistence/sessions.js';
 
 interface UseSessionListResult {
   sessions: SessionInfo[];
@@ -19,15 +19,15 @@ export function useSessionList(): UseSessionListResult {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [_refreshKey, setRefreshKey] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
   const mountedRef = useRef(true);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(() => {
     if (mountedRef.current) {
-      setSearchQuery("");
-      setRefreshKey(n => n + 1);
+      setSearchQuery('');
+      setRefreshKey((n) => n + 1);
     }
   }, []);
 
@@ -36,7 +36,7 @@ export function useSessionList(): UseSessionListResult {
     // Debounce 300ms
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
-      if (mountedRef.current) setRefreshKey(n => n + 1);
+      if (mountedRef.current) setRefreshKey((n) => n + 1);
     }, 300);
   }, []);
 
@@ -65,15 +65,17 @@ export function useSessionList(): UseSessionListResult {
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load sessions");
+          setError(e instanceof Error ? e.message : 'Failed to load sessions');
           setLoading(false);
         }
       }
     }
 
     load();
-    return () => { cancelled = true; };
-  }, [refreshKey]);
+    return () => {
+      cancelled = true;
+    };
+  }, [searchQuery.trim, searchQuery]);
 
   return { sessions, loading, error, refresh, search, searchQuery };
 }

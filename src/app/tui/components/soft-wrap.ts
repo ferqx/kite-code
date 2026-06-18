@@ -30,7 +30,7 @@ export function isASCIILetter(char: string): boolean {
 function computeWidth(chars: string[], start: number, end: number): number {
   let width = 0;
   for (let k = start; k < end && k < chars.length; k++) {
-    width += stringWidth(chars[k]);
+    width += stringWidth(chars[k]!);
   }
   return width;
 }
@@ -38,10 +38,10 @@ function computeWidth(chars: string[], start: number, end: number): number {
 /** Split a string into Unicode code points (preserving surrogates). */
 function toCodePoints(text: string): string[] {
   const chars: string[] = [];
-  let pos = 0;
+  let _pos = 0;
   for (const char of text) {
     chars.push(char);
-    pos += char.length;
+    _pos += char.length;
   }
   return chars;
 }
@@ -84,7 +84,7 @@ export function softWrapLine(text: string, maxWidth: number): WrappedLine[] {
   let lineWidth = 0;
 
   for (let i = 0; i < chars.length; i++) {
-    const charWidth = stringWidth(chars[i]);
+    const charWidth = stringWidth(chars[i]!);
 
     if (lineWidth + charWidth > maxWidth && i > lineStart) {
       let breakAt = -1;
@@ -113,9 +113,9 @@ export function softWrapLine(text: string, maxWidth: number): WrappedLine[] {
       // 2. Latest script boundary that fits without wasting usable space.
       if (breakAt < 0) {
         for (let j = i - 1; j >= lineStart; j--) {
-          if (j + 1 < chars.length && isCJK(chars[j]) !== isCJK(chars[j + 1])) {
+          if (j + 1 < chars.length && isCJK(chars[j]!) !== isCJK(chars[j + 1]!)) {
             const widthUpToJ = computeWidth(chars, lineStart, j + 1);
-            const nextCharWidth = stringWidth(chars[j + 1]);
+            const nextCharWidth = stringWidth(chars[j + 1]!);
             if (widthUpToJ <= maxWidth && maxWidth - widthUpToJ < nextCharWidth) {
               breakAt = j;
               excludeBreakChar = false;
@@ -150,7 +150,7 @@ export function softWrapLine(text: string, maxWidth: number): WrappedLine[] {
       lineStartIdx = indices[lineStart] ?? pos;
       lineWidth = 0;
       for (let k = lineStart; k <= i; k++) {
-        lineWidth += stringWidth(chars[k]);
+        lineWidth += stringWidth(chars[k]!);
       }
     } else {
       lineWidth += charWidth;

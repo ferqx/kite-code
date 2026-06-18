@@ -1,23 +1,23 @@
-import { join, resolve } from "node:path";
-import { loadAgentConfig, defaultCheckpointPath } from "@/core/config/index";
-import { skillDirs } from "@/core/config/paths";
-import { scanSkills, getSkillContent } from "@/core/skills/loader";
-import { createSandboxExecutor } from "@/core/sandbox/index";
-import { runAgent } from "@/core/runner";
-import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from "@/protocol/events";
-import type { InterruptPayload, UserAction } from "@/protocol/actions";
-import type { UserInputProvider } from "@/protocol/provider";
-import type { AuthorizationOverride } from "@/core/types";
+import { resolve } from 'node:path';
+import { defaultCheckpointPath, loadAgentConfig } from '@/core/config/index';
+import { skillDirs } from '@/core/config/paths';
+import { runAgent } from '@/core/runner';
+import { createSandboxExecutor } from '@/core/sandbox/index';
+import { getSkillContent, scanSkills } from '@/core/skills/loader';
+import type { AuthorizationOverride } from '@/core/types';
+import type { InterruptPayload, UserAction } from '@/protocol/actions';
+import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
+import type { UserInputProvider } from '@/protocol/provider';
 
 export interface ParsedArgs {
-  command: "run" | "resume" | "help";
+  command: 'run' | 'resume' | 'help';
   task?: string;
   threadId: string;
   userId: string;
   workspace: string;
   checkpointPath: string;
   mode: WorkspaceAccessRequest;
-  authorizationMode?: "default" | "full_access";
+  authorizationMode?: 'default' | 'full_access';
   approve: boolean;
   approvalGrant?: ShellApprovalGrant;
   approvalHash?: string;
@@ -29,7 +29,7 @@ export interface ParsedArgs {
 
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  if (args.command === "help") {
+  if (args.command === 'help') {
     printHelp();
     return;
   }
@@ -41,14 +41,12 @@ export async function main(): Promise<void> {
   });
 
   const authorizationOverride: AuthorizationOverride | undefined =
-    args.authorizationMode !== undefined
-      ? { current: args.authorizationMode }
-      : undefined;
+    args.authorizationMode !== undefined ? { current: args.authorizationMode } : undefined;
 
   // Load skill contents and prepend to task
-  let task = args.task ?? "";
-  let manifests: import("@/core/skills/types").SkillManifest[] = [];
-  let skillOptions: import("@/core/skills/types").SkillScanOptions | undefined;
+  let task = args.task ?? '';
+  let manifests: import('@/core/skills/types').SkillManifest[] = [];
+  let skillOptions: import('@/core/skills/types').SkillScanOptions | undefined;
   if (args.skills.length > 0) {
     skillOptions = skillDirs(args.workspace);
     manifests = scanSkills(skillOptions);
@@ -59,7 +57,7 @@ export async function main(): Promise<void> {
         skillContents.push(`[SKILL: ${result.name}]\n\n${result.content}\n\n---\n\n`);
       }
     }
-    task = skillContents.join("") + task;
+    task = skillContents.join('') + task;
   }
 
   const provider = createCliProvider(args);
@@ -76,13 +74,17 @@ export async function main(): Promise<void> {
     authorizationOverride,
     skills: manifests,
     skillOptions,
-    resume: args.command === "resume"
-      ? (
-        args.answer === undefined
-          ? { approved: args.approve, grant: args.approvalGrant, approvalHash: args.approvalHash, replacementCommand: args.replacementCommand }
+    resume:
+      args.command === 'resume'
+        ? args.answer === undefined
+          ? {
+              approved: args.approve,
+              grant: args.approvalGrant,
+              approvalHash: args.approvalHash,
+              replacementCommand: args.replacementCommand,
+            }
           : { answer: args.answer }
-      )
-      : undefined,
+        : undefined,
   });
 
   for await (const _ of generator) {
@@ -90,34 +92,35 @@ export async function main(): Promise<void> {
   }
 }
 
-function createCliProvider(args: ParsedArgs): UserInputProvider {
+function createCliProvider(_args: ParsedArgs): UserInputProvider {
   return {
     onEvent(event: AgentEvent) {
       console.log(JSON.stringify(event));
     },
     async requestAction(payload: InterruptPayload): Promise<UserAction> {
-      if (payload.kind === "approval") {
+      if (payload.kind === 'approval') {
         const a = payload.approval;
         console.error(`\n[APPROVAL REQUIRED] ${a.tool}: ${a.command}`);
         console.error(`Risk: ${a.risk} | ${a.summary}`);
-        console.error("Type y/yes to approve, n to reject, f/full_access for full access:");
+        console.error('Type y/yes to approve, n to reject, f/full_access for full access:');
       } else {
         const q = payload.question;
         console.error(`\n[QUESTION] ${q.question}`);
         if (q.options.length > 0) {
           q.options.forEach((o, i) => console.error(`  ${i + 1}. ${o.label}`));
         }
-        console.error("Enter your answer:");
+        console.error('Enter your answer:');
       }
 
       const data = await readStdin();
-      if (payload.kind === "approval") {
+      if (payload.kind === 'approval') {
         const lower = data.toLowerCase();
-        if (lower === "f" || lower === "full_access") return { type: "approve", grant: "full_access" };
-        if (lower === "y" || lower === "yes") return { type: "approve", grant: "approve_once" };
-        return { type: "reject" };
+        if (lower === 'f' || lower === 'full_access')
+          return { type: 'approve', grant: 'full_access' };
+        if (lower === 'y' || lower === 'yes') return { type: 'approve', grant: 'approve_once' };
+        return { type: 'reject' };
       }
-      return { type: "input", text: data };
+      return { type: 'input', text: data };
     },
   };
 }
@@ -126,10 +129,10 @@ function readStdin(): Promise<string> {
   return new Promise((resolve) => {
     const { stdin } = process;
     const onData = (chunk: Buffer) => {
-      stdin.removeListener("data", onData);
+      stdin.removeListener('data', onData);
       resolve(chunk.toString().trim());
     };
-    stdin.on("data", onData);
+    stdin.on('data', onData);
     stdin.resume();
   });
 }
@@ -137,30 +140,32 @@ function readStdin(): Promise<string> {
 // ── Argument parsing (unchanged from original cli.ts) ──
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const command = argv[0] === "resume" ? "resume" : argv[0] === "run" ? "run" : "help";
+  const command = argv[0] === 'resume' ? 'resume' : argv[0] === 'run' ? 'run' : 'help';
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
     const index = argv.indexOf(name);
-    return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
+    const next = index >= 0 ? argv[index + 1] : undefined;
+    return next || fallback;
   };
   const optionalValue = (name: string) => {
     const index = argv.indexOf(name);
-    return index >= 0 ? argv[index + 1] ?? "" : undefined;
+    return index >= 0 ? (argv[index + 1] ?? '') : undefined;
   };
-  const noSandbox = argv.includes("--no-sandbox");
-  const explicitThread = value("--thread", "");
-  const mode = parseMode(value("--mode", "auto"));
-  const authorizationMode = parseAuthorizationMode(optionalValue("--authorization-mode") ?? "");
-  const answer = optionalValue("--answer");
-  const approvalHash = optionalValue("--approval-hash");
-  const replacementCommand = optionalValue("--replace-command");
+  const noSandbox = argv.includes('--no-sandbox');
+  const explicitThread = value('--thread', '');
+  const mode = parseMode(value('--mode', 'auto'));
+  const authorizationMode = parseAuthorizationMode(optionalValue('--authorization-mode') ?? '');
+  const answer = optionalValue('--answer');
+  const approvalHash = optionalValue('--approval-hash');
+  const replacementCommand = optionalValue('--replace-command');
   const approvalGrant = parseApprovalGrant(argv);
 
   const multi = (flag: string): string[] => {
     const values: string[] = [];
     for (let i = 0; i < argv.length; i++) {
       if (argv[i] === flag && i + 1 < argv.length) {
-        values.push(argv[i + 1]);
+        const val = argv[i + 1];
+        if (val !== undefined) values.push(val);
         i++;
       }
     }
@@ -169,11 +174,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   return {
     command,
-    task: command === "run" ? value("--task", positionalTask(argv)) : "",
-    threadId: explicitThread || (command === "run" ? freshThreadId() : "default-thread"),
-    userId: value("--user", "default-user"),
-    workspace: resolve(value("--workspace", cwd)),
-    checkpointPath: resolve(value("--checkpoints", defaultCheckpointPath())),
+    task: command === 'run' ? value('--task', positionalTask(argv)) : '',
+    threadId: explicitThread || (command === 'run' ? freshThreadId() : 'default-thread'),
+    userId: value('--user', 'default-user'),
+    workspace: resolve(value('--workspace', cwd)),
+    checkpointPath: resolve(value('--checkpoints', defaultCheckpointPath())),
     mode,
     authorizationMode,
     approve: approvalGrant !== undefined,
@@ -182,38 +187,53 @@ export function parseArgs(argv: string[]): ParsedArgs {
     replacementCommand,
     answer,
     sandbox: !noSandbox,
-    skills: multi("--skill"),
+    skills: multi('--skill'),
   };
 }
 
 function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
-  if (argv.includes("--full-access")) return "full_access";
-  if (argv.includes("--approve-same-command")) return "same_command";
-  if (argv.includes("--approve")) return "approve_once";
+  if (argv.includes('--full-access')) return 'full_access';
+  if (argv.includes('--approve-same-command')) return 'same_command';
+  if (argv.includes('--approve')) return 'approve_once';
   return undefined;
 }
 
 function positionalTask(argv: string[]): string {
-  if (argv[0] !== "run") return "";
-  const optionNamesWithValues = new Set(["--task", "--thread", "--user", "--workspace", "--checkpoints", "--mode", "--answer", "--approval-hash", "--replace-command", "--skill"]);
+  if (argv[0] !== 'run') return '';
+  const optionNamesWithValues = new Set([
+    '--task',
+    '--thread',
+    '--user',
+    '--workspace',
+    '--checkpoints',
+    '--mode',
+    '--answer',
+    '--approval-hash',
+    '--replace-command',
+    '--skill',
+  ]);
   const parts: string[] = [];
   for (let index = 1; index < argv.length; index++) {
     const item = argv[index];
-    if (optionNamesWithValues.has(item)) { index++; continue; }
-    if (item.startsWith("--")) continue;
+    if (item === undefined) continue;
+    if (optionNamesWithValues.has(item)) {
+      index++;
+      continue;
+    }
+    if (item.startsWith('--')) continue;
     parts.push(item);
   }
-  return parts.join(" ").trim();
+  return parts.join(' ').trim();
 }
 
 function parseMode(value: string): WorkspaceAccessRequest {
-  if (value === "write" || value === "builder") return value;
-  return "auto";
+  if (value === 'write' || value === 'builder') return value;
+  return 'auto';
 }
 
-function parseAuthorizationMode(value: string): "default" | "full_access" | undefined {
-  if (value === "full_access" || value === "full-access") return "full_access";
-  if (value === "default") return "default";
+function parseAuthorizationMode(value: string): 'default' | 'full_access' | undefined {
+  if (value === 'full_access' || value === 'full-access') return 'full_access';
+  if (value === 'default') return 'default';
   return undefined;
 }
 

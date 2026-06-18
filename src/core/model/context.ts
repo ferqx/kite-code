@@ -1,15 +1,10 @@
-import {
-  AIMessage,
-  HumanMessage,
-  SystemMessage,
-  type BaseMessage,
-} from "@langchain/core/messages";
-import { buildCacheableRuntimeContext, formatPlanStateReminder } from "./runtime-context";
-import type { AgentPlan } from "@/protocol/events";
-import systemPrompt from "@/core/prompts/system-prompt.txt";
-import type { SkillManifest } from "@/core/skills/types";
+import { AIMessage, type BaseMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import systemPrompt from '@/core/prompts/system-prompt.txt';
+import type { SkillManifest } from '@/core/skills/types';
+import type { AgentPlan } from '@/protocol/events';
+import { buildCacheableRuntimeContext, formatPlanStateReminder } from './runtime-context';
 /** Agent 角色定义 / Agent role definition */
-export type AgentRole = "agent";
+export type AgentRole = 'agent';
 
 /** 模型上下文状态输入 / Model context state input */
 export interface ModelContextState {
@@ -20,7 +15,7 @@ export interface ModelContextState {
   /** 最终回答文本 / Final answer text */
   final: string;
   /** 工作区访问权限 / Workspace access level (always "write") */
-  workspaceAccess?: "write";
+  workspaceAccess?: 'write';
   /** 执行计划 / Execution plan */
   plan?: AgentPlan | null;
   /** 激活的 Skill 关键指令 / Active skill critical instructions */
@@ -34,7 +29,11 @@ export interface PreparedModelContext {
 }
 
 /** 构建模型消息列表 / Build model message list */
-export function buildModelMessages(role: AgentRole, state: ModelContextState, skills?: SkillManifest[]): BaseMessage[] {
+export function buildModelMessages(
+  role: AgentRole,
+  state: ModelContextState,
+  skills?: SkillManifest[],
+): BaseMessage[] {
   return prepareModelContext(role, state, skills).messages;
 }
 
@@ -61,7 +60,8 @@ export function buildModelMessages(role: AgentRole, state: ModelContextState, sk
  */
 export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
   // Helper: get a plain object view of a message for field-based detection
-  const asObj = (msg: BaseMessage): Record<string, unknown> => msg as unknown as Record<string, unknown>;
+  const asObj = (msg: BaseMessage): Record<string, unknown> =>
+    msg as unknown as Record<string, unknown>;
 
   // Collect all tool_call_ids from AIMessages in the list
   const aiToolCallIds = new Set<string>();
@@ -73,7 +73,12 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
     for (const tc of [toolCalls, akwToolCalls]) {
       if (Array.isArray(tc)) {
         for (const item of tc) {
-          if (item && typeof item === "object" && "id" in item && (item as Record<string, unknown>).id) {
+          if (
+            item &&
+            typeof item === 'object' &&
+            'id' in item &&
+            (item as Record<string, unknown>).id
+          ) {
             aiToolCallIds.add((item as Record<string, unknown>).id as string);
           }
         }
@@ -85,7 +90,11 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
   const toolResultIds = new Set<string>();
   for (const msg of messages) {
     const m = asObj(msg);
-    if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0 && !AIMessage.isInstance(msg)) {
+    if (
+      typeof m.tool_call_id === 'string' &&
+      m.tool_call_id.length > 0 &&
+      !AIMessage.isInstance(msg)
+    ) {
       toolResultIds.add(m.tool_call_id);
     }
   }
@@ -102,13 +111,15 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
     );
     if (allToolCalls.length > 0) {
       const orphaned = allToolCalls.some((tc: unknown) => {
-        if (!tc || typeof tc !== "object") return true;
+        if (!tc || typeof tc !== 'object') return true;
         const id = (tc as Record<string, unknown>).id;
         return !id || !toolResultIds.has(id as string);
       });
       if (orphaned) {
         // Only keep calls that have IDs AND matching ToolMessages
-        const validCalls = (Array.isArray(toolCalls) ? toolCalls : []) as Array<Record<string, unknown>>;
+        const validCalls = (Array.isArray(toolCalls) ? toolCalls : []) as Array<
+          Record<string, unknown>
+        >;
         const kept = validCalls.filter((tc) => tc.id && toolResultIds.has(tc.id as string));
         // Rebuild message — preserve non-tool additional_kwargs (e.g. reasoning_content)
         // and response_metadata while explicitly clearing tool_calls to prevent
@@ -116,8 +127,8 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
         const cleanAkw = { ...(msg.additional_kwargs ?? {}) } as Record<string, unknown>;
         delete cleanAkw.tool_calls;
         const newMsg = new AIMessage({
-          content: typeof msg.content === "string" ? msg.content : "",
-          tool_calls: kept.length > 0 ? (kept as AIMessage["tool_calls"]) : [],
+          content: typeof msg.content === 'string' ? msg.content : '',
+          tool_calls: kept.length > 0 ? (kept as AIMessage['tool_calls']) : [],
           additional_kwargs: cleanAkw,
           response_metadata: msg.response_metadata ?? {},
         });
@@ -126,7 +137,11 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
       }
     }
     // Check for orphaned ToolMessage
-    if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0 && !AIMessage.isInstance(msg)) {
+    if (
+      typeof m.tool_call_id === 'string' &&
+      m.tool_call_id.length > 0 &&
+      !AIMessage.isInstance(msg)
+    ) {
       if (!aiToolCallIds.has(m.tool_call_id)) {
         continue;
       }
@@ -157,7 +172,7 @@ export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage
   const toolMsgByCallId = new Map<string, BaseMessage[]>();
   for (const msg of messages) {
     const m = msg as unknown as Record<string, unknown>;
-    if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0) {
+    if (typeof m.tool_call_id === 'string' && m.tool_call_id.length > 0) {
       const list = toolMsgByCallId.get(m.tool_call_id);
       if (list) list.push(msg);
       else toolMsgByCallId.set(m.tool_call_id, [msg]);
@@ -177,7 +192,7 @@ export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage
 
       // Emit matching ToolMessages immediately after, in declaration order
       for (const tc of tcField) {
-        if (tc && typeof tc === "object" && "id" in tc && tc.id) {
+        if (tc && typeof tc === 'object' && 'id' in tc && tc.id) {
           const tms = toolMsgByCallId.get(tc.id as string);
           if (tms) {
             for (const tm of tms) {
@@ -204,50 +219,44 @@ export function prepareModelContext(
   state: ModelContextState,
   skills?: SkillManifest[],
 ): PreparedModelContext {
-  const msgs = state.messages.length > 0
-    ? sanitizeToolCallPairs(state.messages)
-    : [new HumanMessage("")];
+  const msgs =
+    state.messages.length > 0 ? sanitizeToolCallPairs(state.messages) : [new HumanMessage('')];
 
   // 合并静态系统提示词与可缓存运行时上下文为单个 SystemMessage，
   // 避免依赖 LangChain 内部的连续 SystemMessage 合并行为。
   // Merge static system prompt and cacheable runtime context into one SystemMessage
   // to avoid relying on LangChain's internal consecutive SystemMessage merging.
-  const systemPrompt = buildStaticSystemPrompt(role, skills)
-    + "\n\n"
-    + buildCacheableRuntimeContext({ workspace: state.workspace });
+  const systemPrompt =
+    buildStaticSystemPrompt(role, skills) +
+    '\n\n' +
+    buildCacheableRuntimeContext({ workspace: state.workspace });
 
   return {
     messages: [
       new SystemMessage(systemPrompt),
       ...msgs,
-      ...(state.plan
-        ? [new HumanMessage(formatPlanStateReminder(state.plan))]
-        : []),
+      ...(state.plan ? [new HumanMessage(formatPlanStateReminder(state.plan))] : []),
     ],
   };
 }
 
 /** 构建静态系统提示词 / Build static system prompt */
-export function buildStaticSystemPrompt(
-  _role: AgentRole,
-  skills?: SkillManifest[],
-): string {
+export function buildStaticSystemPrompt(_role: AgentRole, skills?: SkillManifest[]): string {
   const base = systemPrompt;
   if (!skills || skills.length === 0) return base;
 
   const lines = skills.map((s) => `- ${s.name}: ${s.description}`);
   const section = [
-    "",
-    "## Available Skills",
-    "",
-    "The following skills are available. Use the `Skill` tool to invoke a skill when its",
-    "description matches your task. Invoking a skill loads detailed instructions you MUST follow.",
-    "",
+    '',
+    '## Available Skills',
+    '',
+    'The following skills are available. Use the `Skill` tool to invoke a skill when its',
+    'description matches your task. Invoking a skill loads detailed instructions you MUST follow.',
+    '',
     ...lines,
-    "",
-    "IMPORTANT: If there is even a 1% chance a skill might apply, invoke it.",
-  ].join("\n");
+    '',
+    'IMPORTANT: If there is even a 1% chance a skill might apply, invoke it.',
+  ].join('\n');
 
   return base + section;
 }
-
