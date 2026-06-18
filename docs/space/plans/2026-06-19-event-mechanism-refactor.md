@@ -1,7 +1,8 @@
 # Agent 事件机制重构方案
 
-状态：draft
+状态：completed
 创建：2026-06-19
+实施：2026-06-19（Phase A + Phase B 完成，见提交 a8b5c3e）
 
 ## 目标
 
