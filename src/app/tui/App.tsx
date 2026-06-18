@@ -1,10 +1,9 @@
 import React, { useReducer, useCallback, useMemo, useRef, type Dispatch, type ReactNode } from "react";
-import { Box, Text, Static } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { ScrollList } from "ink-scroll-list";
 import type { McpManager } from "@/core/mcp";
 import type { TuiState } from "./types";
-import OutputArea, { useStaticContent, blockFingerprint } from "./OutputArea";
-import BlockRenderer from "./components/BlockRenderer";
+import OutputArea, { useStaticContent } from "./OutputArea";
 import ApprovalBlock from "./components/ApprovalBlock";
 import InputBlock from "./components/InputBlock";
 import HelpPanel from "./components/HelpPanel";
@@ -100,6 +99,7 @@ export function useTuiState(initialModelName?: string, initialProviderName?: str
 export default function App({ state, dispatch, onToggleReason, provider, mcpManager, slashSuggestion, resizeGeneration, children }: AppProps) {
   const theme = useTheme();
   const slashMaxHeight = useOverlayHeight(7);
+  const { columns } = useWindowSize();
   const overlayOrInterrupt = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind || !!state.interrupt;
   useGlobalKeys(dispatch, overlayOrInterrupt);
 
@@ -176,42 +176,12 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
   const overlayActive = state.showHelp || state.showModelSelector || state.showSessions || state.showMcp || state.showRewind;
 
   return (
-    <>
-      {/* <Static> MUST be at root level (outside any layout Box).
-          When nested inside a Box with height={0}, Ink 7's Yoga
-          layout doesn't track <Static>'s actual scrollback writes,
-          causing dynamic tree re-renders (tool/subagent timers) to
-          write at stale Y positions — producing duplicate lines. */}
-      {staticItems && staticKey && (
-        <Static key={staticKey} items={staticItems}>
-          {(item, index) => {
-            if (index === 0) {
-              return (
-                <React.Fragment key="header">
-                  {staticHeader}
-                  <Box height={1} />
-                </React.Fragment>
-              );
-            }
-            const block = mergedStaticBlocks[index - 1];
-            if (!block) return null;
-            const prevBlock = index > 1 ? mergedStaticBlocks[index - 2] : undefined;
-            return (
-              <BlockRenderer
-                key={blockFingerprint(block)}
-                block={block}
-                isFocused={false}
-                index={index - 1}
-                prevBlock={prevBlock}
-                awaitingApproval={false}
-              />
-            );
-          }}
-        </Static>
-      )}
-      <Box flexDirection="column">
-      {/* ── Body: OutputArea (dynamic blocks only) ── */}
+    <Box flexDirection="column">
+      {/* ── Body: OutputArea ── */}
         <OutputArea
+          staticItems={staticItems}
+          staticKey={staticKey}
+          staticHeader={staticHeader}
           activeDynamicBlocks={activeDynamicBlocks}
           mergedStaticBlocks={mergedStaticBlocks}
           onToggleReason={onToggleReason}
@@ -219,6 +189,7 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
           onToggleSubagentExpand={onToggleSubagentExpand}
           overlayActive={overlayActive}
           awaitingApproval={awaitingApproval}
+          columns={columns}
         />
 
       {/* ── Footer: 3-row interaction zone ── */}
@@ -315,6 +286,5 @@ export default function App({ state, dispatch, onToggleReason, provider, mcpMana
         );
       })()}
     </Box>
-    </>
   );
 }

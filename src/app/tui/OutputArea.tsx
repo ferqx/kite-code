@@ -1,16 +1,20 @@
-import React, { useRef } from "react";
-import { Box } from "ink";
-import { useInput } from "ink";
-import type { OutputBlock } from "./types";
-import BlockRenderer from "./components/BlockRenderer";
+import React, { useRef, type ReactNode } from 'react';
+import { Box, Static } from 'ink';
+import { useInput } from 'ink';
+import type { OutputBlock } from './types';
+import BlockRenderer from './components/BlockRenderer';
+import { blockFingerprint } from './render/useStaticContent';
 
-export { changePrefix } from "./components/BlockRenderer";
-export { toolColor } from "./components/render-utils";
-export { useStaticContent, blockFingerprint } from "./render/useStaticContent";
-export type { StaticContentResult } from "./render/useStaticContent";
+export { changePrefix } from './components/BlockRenderer';
+export { toolColor } from './components/render-utils';
+export { useStaticContent, blockFingerprint } from './render/useStaticContent';
+export type { StaticContentResult } from './render/useStaticContent';
 
 interface OutputAreaProps {
-  /** All static blocks (immutable, rendered by <Static> in App.tsx) */
+  staticItems?: unknown[];
+  staticKey?: string;
+  staticHeader?: ReactNode;
+  /** All static blocks (immutable, rendered by <Static>) */
   mergedStaticBlocks: OutputBlock[];
   /** Blocks kept in the dynamic tree — may still mutate (tool running, streaming text, etc.) */
   activeDynamicBlocks: OutputBlock[];
@@ -20,13 +24,18 @@ interface OutputAreaProps {
   overlayActive?: boolean;
   /** 主 agent 等待审批时隐藏工具计时器 / Hide tool timer when awaiting approval */
   awaitingApproval?: boolean;
+  columns: number;
 }
 
 /**
- * OutputArea renders only mutable blocks in the dynamic tree.
- * Immutable blocks are rendered by <Static> at the root level in App.tsx.
+ * OutputArea renders <Static> (immutable settled blocks + header) inline,
+ * and all mutable blocks in the dynamic tree. Blocks only enter <Static>
+ * once they become truly immutable (tool done, text complete, etc.).
  */
 export default function OutputArea({
+  staticItems,
+  staticKey,
+  staticHeader,
   activeDynamicBlocks,
   mergedStaticBlocks,
   onToggleReason,
@@ -34,6 +43,7 @@ export default function OutputArea({
   onToggleSubagentExpand,
   overlayActive,
   awaitingApproval,
+  columns
 }: OutputAreaProps) {
   const onToggleReasonRef = useRef(onToggleReason);
   onToggleReasonRef.current = onToggleReason;
@@ -48,39 +58,69 @@ export default function OutputArea({
   useInput(
     (
       _input: unknown,
-      key: { upArrow?: boolean; downArrow?: boolean; return?: boolean },
+      key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }
     ) => {
       const blocks = dynamicBlocksRef.current;
       const last = blocks[blocks.length - 1];
       if (!last) return;
       if (key.return) {
-        if (last.kind === "reason") {
+        if (last.kind === 'reason') {
           onToggleReasonRef.current?.(last.id);
-        } else if (last.kind === "tool_card") {
+        } else if (last.kind === 'tool_card') {
           onToggleToolRef.current?.(last.id);
-        } else if (last.kind === "subagent") {
+        } else if (last.kind === 'subagent') {
           onToggleSubagentRef.current?.(last.id);
         }
       }
     },
-    { isActive: !overlayActive },
+    { isActive: !overlayActive }
   );
 
   return (
     <Box flexDirection="column">
+      <Box height={0} overflow="hidden">
+        {staticItems && staticKey && (
+          <Static key={staticKey} items={staticItems}>
+            {(item, index) => {
+              if (index === 0) {
+                return (
+                  <React.Fragment key="header">
+                    {staticHeader}
+                    <Box height={1} />
+                  </React.Fragment>
+                );
+              }
+              const block = mergedStaticBlocks[index - 1];
+              if (!block) return null;
+              const prevBlock =
+                index > 1 ? mergedStaticBlocks[index - 2] : undefined;
+              return (
+                <BlockRenderer
+                  key={blockFingerprint(block)}
+                  block={block}
+                  isFocused={false}
+                  index={index - 1}
+                  prevBlock={prevBlock}
+                  awaitingApproval={false}
+                  columns={columns}
+                />
+              );
+            }}
+          </Static>
+        )}
+      </Box>
       {activeDynamicBlocks.map((block, i) => {
         const prevBlock =
-          i > 0
-            ? activeDynamicBlocks[i - 1]
-            : mergedStaticBlocks.at(-1);
+          i > 0 ? activeDynamicBlocks[i - 1] : mergedStaticBlocks.at(-1);
         return (
           <BlockRenderer
             key={block.id}
             block={block}
             isFocused={false}
-            index={mergedStaticBlocks.length + i}
+            index={i}
             prevBlock={prevBlock}
             awaitingApproval={awaitingApproval}
+            columns={columns}
           />
         );
       })}

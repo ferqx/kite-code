@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, test, expect } from "bun:test";
 import { render } from "ink-testing-library";
-import { Text, Static } from "ink";
+import { Text } from "ink";
 import Footer from "../src/app/tui/Footer";
 import Header from "../src/app/tui/Header";
 import StatusBar from "../src/app/tui/StatusBar";
@@ -598,45 +598,28 @@ describe("InputLine", () => {
 
 // ── OutputArea ──
 
-// Test wrapper: bridges old OutputArea API (running + turns) to new architecture
-// where <Static> rendering is handled externally via useStaticContent.
+// Test wrapper: bridges old OutputArea API (running + turns) to the OutputArea component.
 function OutputAreaTestWrap({ running, turns, onToggleReason }: {
   running: boolean;
   turns: { blocks: OutputBlock[] }[];
   onToggleReason: () => void;
 }) {
-  const { staticItems, staticKey, mergedStaticBlocks, activeDynamicBlocks } = useStaticContent({
+  const { staticItems, staticKey, header: staticHeader, mergedStaticBlocks, activeDynamicBlocks } = useStaticContent({
     turns: turns as Turn[],
     running,
     sessionKey: 0,
     header: null,
   });
   return (
-    <>
-      <Static key={staticKey} items={staticItems}>
-        {(item, index) => {
-          // index 0 is HEADER_SENTINEL (null header)
-          const block = mergedStaticBlocks[index - 1];
-          if (!block) return null;
-          const prevBlock = index > 1 ? mergedStaticBlocks[index - 2] : undefined;
-          return (
-            <BlockRenderer
-              key={block.id}
-              block={block}
-              isFocused={false}
-              index={index - 1}
-              prevBlock={prevBlock}
-              awaitingApproval={false}
-            />
-          );
-        }}
-      </Static>
-      <OutputArea
-        activeDynamicBlocks={activeDynamicBlocks}
-        mergedStaticBlocks={mergedStaticBlocks}
-        onToggleReason={onToggleReason}
-      />
-    </>
+    <OutputArea
+      staticItems={staticItems}
+      staticKey={staticKey}
+      staticHeader={staticHeader}
+      activeDynamicBlocks={activeDynamicBlocks}
+      mergedStaticBlocks={mergedStaticBlocks}
+      onToggleReason={onToggleReason}
+      columns={80}
+    />
   );
 }
 
@@ -644,7 +627,7 @@ describe("BlockRenderer", () => {
   test("renders text block", () => {
     const block: OutputBlock = { id: 1, kind: "text", content: "Hello world" };
     const { lastFrame } = render(
-      <BlockRenderer block={block} isFocused={false} index={0} />,
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
     expect(lastFrame()).toContain("Hello world");
   });
@@ -652,7 +635,7 @@ describe("BlockRenderer", () => {
   test("renders user block", () => {
     const block: OutputBlock = { id: 1, kind: "user", content: "ls -la" };
     const { lastFrame } = render(
-      <BlockRenderer block={block} isFocused={false} index={0} />,
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
     expect(lastFrame()).toContain("ls -la");
   });
@@ -660,7 +643,7 @@ describe("BlockRenderer", () => {
   test("renders reason block as null (hidden)", () => {
     const block: OutputBlock = { id: 1, kind: "reason", content: "thinking", folded: false };
     const { lastFrame } = render(
-      <BlockRenderer block={block} isFocused={false} index={0} />,
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
     expect(lastFrame()).toBe("");
   });
@@ -668,7 +651,7 @@ describe("BlockRenderer", () => {
   test("renders running tool_card", () => {
     const block: OutputBlock = { id: 1, kind: "tool_card", callId: "c1", name: "read_file", args: {}, status: "running", summary: "" };
     const { lastFrame } = render(
-      <BlockRenderer block={block} isFocused={false} index={0} />,
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
     expect(lastFrame()).toContain("read_file");
   });
@@ -679,7 +662,7 @@ describe("BlockRenderer", () => {
       changes: [{ path: "src/a.ts", kind: "add", linesAdded: 5 }],
     };
     const { lastFrame } = render(
-      <BlockRenderer block={block} isFocused={false} index={0} />,
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
     expect(lastFrame()).toContain("src/a.ts");
   });
@@ -691,7 +674,7 @@ describe("BlockRenderer", () => {
       resolved: "yes",
     };
     const { lastFrame } = render(
-      <BlockRenderer block={block} isFocused={false} index={0} />,
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
     expect(lastFrame()).toContain("Answered");
   });
@@ -704,7 +687,7 @@ describe("BlockRenderer", () => {
       steps: [],
     };
     const { lastFrame } = render(
-      <BlockRenderer block={block} isFocused={false} index={0} />,
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
     expect(lastFrame()).toContain("find files");
   });
