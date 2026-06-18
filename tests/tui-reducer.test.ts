@@ -161,14 +161,20 @@ describe('eventReducer (blocks model)', () => {
     test('step_begin sets currentNode', () => {
       const s = dispatch(fresh(), {
         type: 'EVENT',
-        event: { type: 'step_begin', data: { node: 'agent' } },
+        event: { type: 'step_begin', data: { node: 'agent', spanId: '0000111122223333' } },
       });
       expect(s.status.currentNode).toBe('agent');
     });
     test('step_end clears currentNode', () => {
       let s = fresh();
-      s = dispatch(s, { type: 'EVENT', event: { type: 'step_begin', data: { node: 'tools' } } });
-      s = dispatch(s, { type: 'EVENT', event: { type: 'step_end', data: { node: 'tools' } } });
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'step_begin', data: { node: 'tools', spanId: '1111222233334444' } },
+      });
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'step_end', data: { node: 'tools', spanId: '1111222233334444' } },
+      });
       expect(s.status.currentNode).toBeNull();
     });
   });

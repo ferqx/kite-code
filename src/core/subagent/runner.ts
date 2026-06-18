@@ -7,6 +7,7 @@ import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { buildStaticSystemPrompt } from '@/core/model/context';
 import { createChatModel } from '@/core/model/factory';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
+import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
 import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
 import type { ShellExecutor } from '@/core/tools/shell';
@@ -184,6 +185,7 @@ ${input.task}`;
 
           toolCallCount++;
 
+          const toolStart = Date.now();
           let toolOutput: string;
           let ok = true;
           let totalLines: number | undefined;
@@ -197,16 +199,21 @@ ${input.task}`;
             } catch {
               /* not JSON */
             }
-          } catch (e: any) {
-            toolOutput = JSON.stringify({ ok: false, error: e?.message ?? String(e) });
+          } catch (e) {
+            toolOutput = JSON.stringify({
+              ok: false,
+              error: e instanceof Error ? e.message : String(e),
+            });
             ok = false;
           }
+
+          const durationMs = Date.now() - toolStart;
 
           // 回填步骤快照的结果 / Backfill step snapshot with result
           stepSnapshot.ok = ok;
           if (totalLines != null) stepSnapshot.totalLines = totalLines;
 
-          // 发出 tool_result 事件（含手动 token 统计）
+          // 发出 tool_result 事件（含手动 token 统计 + failure_reason + summary）
           const toolTokenCount = countTokens(toolOutput);
           input.eventSink({
             type: 'tool_result',
@@ -214,8 +221,18 @@ ${input.task}`;
               id,
               toolName: tc.name,
               ok,
+              summary: typeof toolOutput === 'string' ? toolOutput.slice(0, 200) : '',
+              durationMs,
               ...(totalLines != null ? { totalLines } : {}),
               ...(toolTokenCount > 0 ? { toolTokenCount } : {}),
+              ...(!ok
+                ? {
+                    failureReason: classifyToolFailure(
+                      tc.name,
+                      typeof toolOutput === 'string' ? toolOutput.slice(0, 200) : '',
+                    ),
+                  }
+                : {}),
             },
           });
 
@@ -242,11 +259,11 @@ ${input.task}`;
         return { ok: true, summary, toolCallCount, durationMs, steps };
       }
     }
-  } catch (e: any) {
+  } catch (e) {
     clearTimeout(timeoutId);
     const durationMs = Date.now() - startTime;
-    const summary =
-      e instanceof Error && e.name === 'AbortError' ? 'Cancelled' : (e?.message ?? String(e));
+    const errMsg = e instanceof Error ? e.message : String(e);
+    const summary = e instanceof Error && e.name === 'AbortError' ? 'Cancelled' : errMsg;
     input.eventSink({
       type: 'error',
       data: { id, error: summary, summary, toolCallCount, durationMs },

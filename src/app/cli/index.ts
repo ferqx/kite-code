@@ -74,6 +74,7 @@ export async function main(): Promise<void> {
     authorizationOverride,
     skills: manifests,
     skillOptions,
+    frontend: 'cli',
     resume:
       args.command === 'resume'
         ? args.answer === undefined
@@ -107,7 +108,9 @@ function createCliProvider(_args: ParsedArgs): UserInputProvider {
         const q = payload.question;
         console.error(`\n[QUESTION] ${q.question}`);
         if (q.options.length > 0) {
-          q.options.forEach((o, i) => console.error(`  ${i + 1}. ${o.label}`));
+          q.options.forEach((o, i) => {
+            console.error(`  ${i + 1}. ${o.label}`);
+          });
         }
         console.error('Enter your answer:');
       }

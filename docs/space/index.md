@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-06-17（文件读取共享边界 + MSYS2 路径双层转换）
+最后更新：2026-06-18（会话日志方案）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -88,6 +88,9 @@
 | `plans/2026-05-25-e2e-restructure.md` | archived | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
 | `plans/2026-05-26-tui-claude-code-parity.md` | archived | TUI Claude Code 全面对标（14 tasks）：布局、快捷键、功能、配置、主题。 |
 | `plans/2026-06-17-background-subagent.md` | draft | 后台子 Agent — `background: true` 异步派发、SessionContext 容器、BackgroundTaskManager、跨 run 并发模型（8 phases）。 |
+| `plans/2026-06-18-opentelemetry-observability.md` | draft | Agent OpenTelemetry 可观测性 — Trace/Span 建模 + OTLP/HTTP 导出，工具失败分类驱动提示词优化闭环。 |
+| `plans/2026-06-18-session-logger.md` | draft | 会话日志本地记录 — AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断。 |
+| `plans/2026-06-19-event-mechanism-refactor.md` | draft | 事件机制重构 — turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一。 |
 
 ## 完成执行记录
 

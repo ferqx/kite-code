@@ -67,6 +67,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): RunAgentInput {
     skills: p.skills,
     skillOptions: p.skillOptions ?? undefined,
     model: p.model,
+    frontend: 'tui',
   };
 }
 

@@ -35,3 +35,9 @@ export function skillDirs(workspace: string): SkillScanOptions {
     userAgentsSkillsDir: join(homedir(), '.agents', 'skills'),
   };
 }
+
+/** 会话日志目录：~/.openpx/sessions/<frontend>/<threadId>/
+ *  按平台分子目录，Agent 可通过 frontend + threadId 自定位日志。 */
+export function sessionLogDir(frontend: string, threadId: string): string {
+  return join(getOpenpxDir(), 'sessions', frontend, threadId);
+}

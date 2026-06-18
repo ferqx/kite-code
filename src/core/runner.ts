@@ -14,11 +14,19 @@ import type {
 } from '@/protocol/events';
 import type { UserInputProvider } from '@/protocol/provider';
 import { createPromptCacheStandardTracker, extractPromptCacheMetrics } from './cache-metrics';
+import { genSpanId } from './id-utils';
+
+/** 统一事件管道：所有 AgentEvent 通过此接口发送到 TUI + 日志等消费者 */
+interface EventSink {
+  emit(event: AgentEvent): void;
+}
+
 import type { AgentConfig } from './config/index';
 import { buildCodeAgentGraph } from './harness/graph';
 import { defaultAuthorizationState } from './harness/tool-policy';
 import type { SupportedChatModel } from './model/factory';
 import type { BunSqliteSaver } from './persistence/checkpoint';
+import { SessionLogCollector } from './session-logger';
 import { countTokens } from './token-counter';
 import type { ShellExecutor } from './tools/shell';
 import type {
@@ -61,6 +69,8 @@ export interface RunAgentInput {
     totalLines?: number,
     toolTokenCount?: number,
   ) => void;
+  /** 调用端标识 / Frontend identity */
+  frontend?: string;
 }
 
 export interface StreamCodeAgentInput {
@@ -126,25 +136,60 @@ export async function* runAgent(
   provider: UserInputProvider,
   input: RunAgentInput,
 ): AsyncGenerator<AgentEvent> {
+  const signal = input.signal;
+
+  // ── 统一事件管道 ──
+  // sink 必须先于 collector 定义（闭包捕获），collector 在 sink 之后赋值。
+  // subagentEventSink 也使用 sink，因此定义顺序：sink → collector → subagentEventSink → graph。
+  let collector: SessionLogCollector;
+
+  const sink: EventSink = {
+    emit(event: AgentEvent): void {
+      // TUI 端不应该抛异常，但防御纵深包一层
+      try {
+        provider.onEvent(event);
+      } catch {
+        /* TUI 异常不影响 Agent */
+      }
+      try {
+        collector.record(event);
+      } catch {
+        /* 日志失败不影响 Agent */
+      }
+    },
+  };
+
+  collector = new SessionLogCollector(
+    input.threadId,
+    input.workspace,
+    input.frontend ?? 'unknown',
+    { provider: input.config.providerName, name: input.config.modelName },
+  );
+
+  // 用户初始任务 → 事件标准化（resume 时不重复记录）
+  if (!input.resume) {
+    sink.emit({ type: 'user_message', data: { text: input.task, kind: 'task' } });
+  }
+
   const subagentEventSink: import('@/core/subagent/types').SubAgentEventSink = (e) => {
     switch (e.type) {
       case 'start':
-        provider.onEvent({ type: 'subagent_start', data: e.data });
+        sink.emit({ type: 'subagent_start', data: e.data });
         break;
       case 'step':
-        provider.onEvent({ type: 'subagent_step', data: e.data });
+        sink.emit({ type: 'subagent_step', data: e.data });
         break;
       case 'tool_result':
-        provider.onEvent({ type: 'subagent_tool_result', data: e.data });
+        sink.emit({ type: 'subagent_tool_result', data: e.data });
         break;
       case 'done':
-        provider.onEvent({ type: 'subagent_done', data: e.data });
+        sink.emit({ type: 'subagent_done', data: e.data });
         break;
       case 'error':
-        provider.onEvent({ type: 'subagent_error', data: e.data });
+        sink.emit({ type: 'subagent_error', data: e.data });
         break;
       case 'cache_metrics':
-        provider.onEvent({
+        sink.emit({
           type: 'subagent_cache_metrics',
           data: {
             subagentId: e.data.subagentId,
@@ -160,16 +205,21 @@ export async function* runAgent(
   const toolResultSink =
     input.toolResultSink ??
     ((callId, toolName, ok, summary, totalLines) => {
-      provider.onEvent({
-        type: 'tool_done',
-        data: {
-          call_id: callId,
-          name: toolName,
-          ok,
-          summary,
-          ...(totalLines != null ? { totalLines } : {}),
-        },
-      });
+      // 仅推 TUI（processStream 会从 chunk 生成更完整的 tool_done 并写入日志）
+      try {
+        provider.onEvent({
+          type: 'tool_done',
+          data: {
+            call_id: callId,
+            name: toolName,
+            ok,
+            summary,
+            ...(totalLines != null ? { totalLines } : {}),
+          },
+        });
+      } catch {
+        // TUI 异常不影响 Agent
+      }
     });
 
   const { graph, checkpointer } = buildCodeAgentGraph({
@@ -186,8 +236,6 @@ export async function* runAgent(
     subagentSignal: input.signal,
     toolResultSink,
   });
-
-  const signal = input.signal;
 
   try {
     const initialAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? 'auto');
@@ -211,6 +259,7 @@ export async function* runAgent(
     };
 
     let resumeValue: AgentResumeValue | null = input.resume ?? null;
+    let turnIndex = 0;
 
     while (true) {
       if (signal?.aborted) break;
@@ -230,8 +279,13 @@ export async function* runAgent(
       }
 
       resumeValue = null;
+      turnIndex++;
 
-      const result = await processStream(provider, stream, signal, input.workspace);
+      const turnSpanId = genSpanId();
+      collector.nextTurn(turnSpanId);
+      sink.emit({ type: 'turn_begin', data: { index: turnIndex, spanId: turnSpanId } });
+      const result = await processStream(sink, provider, stream, signal, input.workspace);
+      sink.emit({ type: 'turn_end', data: { index: turnIndex } });
 
       yield* result.events;
 
@@ -239,6 +293,13 @@ export async function* runAgent(
 
       resumeValue = mapActionToResumeValue(result.action);
     }
+
+    // 根据退出原因确定最终状态 / Determine final status from exit cause
+    const exitStatus: 'completed' | 'aborted' | 'fatal' = signal?.aborted ? 'aborted' : 'completed';
+    await collector.finalize(exitStatus);
+  } catch (e) {
+    await collector.finalize('fatal');
+    throw e;
   } finally {
     checkpointer.close();
   }
@@ -297,7 +358,12 @@ export async function* revertToCheckpoint(
 
     const stream = await graph.stream({ messages: [] }, streamConfig);
 
-    const result = await processStream(provider, stream, signal, input.workspace);
+    const bareSink: EventSink = {
+      emit(e) {
+        provider.onEvent(e);
+      },
+    };
+    const result = await processStream(bareSink, provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
     checkpointer.close();
@@ -368,7 +434,12 @@ export async function* forkFromCheckpoint(
     };
 
     const stream = await graph.stream(initialState, streamConfig);
-    const result = await processStream(provider, stream, signal, input.workspace);
+    const bareSink: EventSink = {
+      emit(e) {
+        provider.onEvent(e);
+      },
+    };
+    const result = await processStream(bareSink, provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
     checkpointer.close();
@@ -380,6 +451,7 @@ type StreamResult =
   | { kind: 'interrupt'; action: UserAction; events: AgentEvent[] };
 
 async function processStream(
+  sink: EventSink,
   provider: UserInputProvider,
   stream: AsyncIterable<unknown>,
   signal?: AbortSignal,
@@ -400,11 +472,17 @@ async function processStream(
     if (interruptData) {
       const event = interruptToEvent(interruptData);
       if (event) {
-        provider.onEvent(event);
+        sink.emit(event);
         allEvents.push(event);
         const payload = eventToInterruptPayload(interruptData, event);
         if (payload) {
           const action = await provider.requestAction(payload);
+          if (action.type === 'input' && action.text) {
+            sink.emit({
+              type: 'user_message',
+              data: { text: action.text, kind: 'answer', interruptType: 'input' },
+            });
+          }
           return { events: allEvents, kind: 'interrupt', action };
         }
       }
@@ -440,7 +518,7 @@ async function processStream(
     }
 
     for (const e of events) {
-      provider.onEvent(e);
+      sink.emit(e);
       allEvents.push(e);
     }
   }
@@ -657,11 +735,21 @@ export function chunkToEvents(
   if (!chunk || typeof chunk !== 'object') return events;
   const record = chunk as Record<string, unknown>;
 
+  // 预计算：确定此 chunk 中是否有 final 和 cache_metrics
+  let final = findFinal(chunk);
+  let metrics = findCacheMetrics(chunk);
+  const AGENT_KEYS = new Set(['agent', 'agent_plan', 'agent_build']);
+
   for (const key of Object.keys(record)) {
     const node = record[key] as Record<string, unknown> | undefined;
     if (!node || typeof node !== 'object') continue;
 
-    events.push({ type: 'step_begin', data: { node: key } });
+    const nodeSpanId = genSpanId();
+
+    events.push({
+      type: 'step_begin',
+      data: { node: key, spanId: nodeSpanId, internal: key === 'cleanup' },
+    });
 
     // 消息解析
     const msgs = node.messages;
@@ -683,28 +771,34 @@ export function chunkToEvents(
     // 重试
     events.push(...parseRetryEvents(node));
 
-    events.push({ type: 'step_end', data: { node: key } });
-  }
+    // final / cache_metrics 归属到 agent 类 node（在 step_end 之前 emit，只 emit 一次）
+    if (AGENT_KEYS.has(key)) {
+      if (final) {
+        events.push({ type: 'final', data: final });
+        final = null; // 只 emit 一次
+      }
+      if (metrics) {
+        const outputTokens = findOutputTokens(chunk);
+        events.push({
+          type: 'cache_metrics',
+          data: {
+            workspaceAccess,
+            cacheHitTokens: metrics.cacheHitTokens,
+            cacheMissTokens: metrics.cacheMissTokens,
+            cacheWriteTokens: 0,
+            inputTokens: metrics.inputTokens,
+            outputTokens,
+            hitRate: metrics.hitRate,
+            standard: cacheStandard.record(metrics),
+          } satisfies CacheMetricsPayload,
+        });
+        metrics = null; // 只 emit 一次
+      }
+    }
 
-  // 全局指标（不绑定特定节点）
-  const final = findFinal(chunk);
-  if (final) events.push({ type: 'final', data: final });
-
-  const metrics = findCacheMetrics(chunk);
-  if (metrics) {
-    const outputTokens = findOutputTokens(chunk);
     events.push({
-      type: 'cache_metrics',
-      data: {
-        workspaceAccess,
-        cacheHitTokens: metrics.cacheHitTokens,
-        cacheMissTokens: metrics.cacheMissTokens,
-        cacheWriteTokens: 0,
-        inputTokens: metrics.inputTokens,
-        outputTokens,
-        hitRate: metrics.hitRate,
-        standard: cacheStandard.record(metrics),
-      } satisfies CacheMetricsPayload,
+      type: 'step_end',
+      data: { node: key, spanId: nodeSpanId },
     });
   }
 

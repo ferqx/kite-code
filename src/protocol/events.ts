@@ -1,7 +1,7 @@
 // ── 核心事件类型 / Core event types ──
 export type AgentEvent =
-  | { type: 'step_begin'; data: { node: string } }
-  | { type: 'step_end'; data: { node: string } }
+  | { type: 'step_begin'; data: { node: string; spanId: string; internal?: boolean } }
+  | { type: 'step_end'; data: { node: string; spanId: string } }
   | { type: 'reason'; data: { text: string } }
   | { type: 'text'; data: { text: string } }
   | { type: 'tool_call'; data: ToolCallPayload }
@@ -35,7 +35,11 @@ export type AgentEvent =
   | { type: 'subagent_tool_result'; data: SubAgentToolResultPayload }
   | { type: 'subagent_done'; data: SubAgentDonePayload }
   | { type: 'subagent_error'; data: SubAgentErrorPayload }
-  | { type: 'subagent_cache_metrics'; data: SubAgentCacheMetricsPayload };
+  | { type: 'subagent_cache_metrics'; data: SubAgentCacheMetricsPayload }
+  // ── 会话/对话边界 / Conversation turn boundaries ──
+  | { type: 'turn_begin'; data: { index: number; spanId: string } }
+  | { type: 'turn_end'; data: { index: number } }
+  | { type: 'user_message'; data: UserMessagePayload };
 
 // ── 基础类型 / Base types ──
 export type WorkspaceAccess = 'write';
@@ -95,6 +99,14 @@ export interface UserInputPayload {
   options: UserInputOption[];
   allow_free_text: boolean;
   context?: string;
+}
+
+/** 用户输入消息负载 / User message payload */
+export interface UserMessagePayload {
+  text: string;
+  kind: 'task' | 'answer' | 'resume_context';
+  /** 关联的 interrupt 类型，仅 answer 时有值 */
+  interruptType?: 'approval' | 'input';
 }
 
 export interface StateChangePayload {
@@ -204,16 +216,24 @@ export interface SubAgentStepPayload {
   id: string;
   toolName: string;
   toolArgs: Record<string, unknown>;
+  /** 工具耗时（ms，result 回填）/ Duration filled in retroactively by result event */
+  durationMs?: number;
 }
 
 export interface SubAgentToolResultPayload {
   id: string;
   toolName: string;
   ok: boolean;
+  /** 工具输出摘要（截断），用于日志记录 / Tool output summary (truncated) for log recording */
+  summary?: string;
   /** 读取文件时的文件总行数，用于 TUI 行号范围展示 / Total lines in file for read_file, used for TUI line range display */
   totalLines?: number;
   /** 工具输出的 token 数，用于独立于 provider 的累计统计 / Token count of the tool output for provider-agnostic cumulative tracking */
   toolTokenCount?: number;
+  /** 工具执行耗时（ms）/ Tool execution duration */
+  durationMs?: number;
+  /** 失败原因（结构化枚举）/ Structured failure reason */
+  failureReason?: string;
 }
 
 export interface SubAgentDonePayload {

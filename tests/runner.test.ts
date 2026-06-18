@@ -184,6 +184,75 @@ describe('chunkToEvents final dedup', () => {
   });
 });
 
+describe('chunkToEvents event ordering (Phase B)', () => {
+  const cacheStandard = createPromptCacheStandardTracker();
+
+  test('final emitted before step_end for agent node', () => {
+    const chunk = { agent: { messages: [], final: 'summary' } };
+    const events = chunkToEvents(chunk, 'write', cacheStandard);
+    const types = events.map((e) => e.type);
+
+    const stepBeginIdx = types.indexOf('step_begin');
+    const finalIdx = types.indexOf('final');
+    const stepEndIdx = types.lastIndexOf('step_end');
+
+    expect(stepBeginIdx).toBeLessThan(finalIdx);
+    expect(finalIdx).toBeLessThan(stepEndIdx);
+  });
+
+  test('cache_metrics emitted before step_end for agent node', () => {
+    const aiMsg = new AIMessage({
+      content: 'ok',
+      response_metadata: {
+        usage: {
+          prompt_tokens: 100,
+          prompt_cache_hit_tokens: 80,
+          prompt_cache_miss_tokens: 20,
+        },
+      },
+    });
+    const chunk = { agent: { messages: [aiMsg] } };
+    const events = chunkToEvents(chunk, 'write', cacheStandard);
+
+    const types = events.map((e) => e.type);
+    const cacheIdx = types.indexOf('cache_metrics');
+    const stepEndIdx = types.lastIndexOf('step_end');
+
+    expect(cacheIdx).toBeGreaterThan(-1);
+    expect(cacheIdx).toBeLessThan(stepEndIdx);
+  });
+
+  test('final not emitted for non-agent nodes', () => {
+    // findFinal only looks in agent/agent_plan/agent_build keys
+    const chunk = { tools: { messages: [], final: 'should not appear' } };
+    const events = chunkToEvents(chunk, 'write', cacheStandard);
+    expect(events.filter((e) => e.type === 'final')).toHaveLength(0);
+  });
+
+  test('final emitted once with multiple agent-type keys', () => {
+    const chunk = {
+      agent: { messages: [], final: 'first' },
+      agent_plan: { messages: [], final: 'second' },
+    };
+    const events = chunkToEvents(chunk, 'write', cacheStandard);
+    const finals = events.filter((e) => e.type === 'final');
+    expect(finals).toHaveLength(1);
+    expect((finals[0] as unknown as { data: string }).data).toBe('first');
+  });
+
+  test('spanId generated per node and shared by begin/end', () => {
+    const chunk = { agent: { messages: [] } };
+    const events = chunkToEvents(chunk, 'write', cacheStandard);
+    const begin = events.find((e) => e.type === 'step_begin') as unknown as {
+      data: { spanId: string };
+    };
+    const end = events.find((e) => e.type === 'step_end') as unknown as {
+      data: { spanId: string };
+    };
+    expect(begin!.data.spanId).toBe(end!.data.spanId);
+  });
+});
+
 // ── checkpointer close 安全测试 / checkpointer close safety test ──
 // 验证 BunSqliteSaver 的 isClosed 守卫正确工作，确保 abort 后 close() 不崩溃
 describe('checkpointer close safety', () => {
