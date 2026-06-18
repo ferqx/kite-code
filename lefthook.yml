@@ -1,0 +1,9 @@
+pre-commit:
+  commands:
+    format:
+      glob: "*.{ts,tsx,json,jsonc,md,yml,yaml}"
+      run: bun x @biomejs/biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+    typecheck:
+      glob: "*.{ts,tsx}"
+      run: bun run typecheck
