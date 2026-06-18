@@ -31,13 +31,23 @@ turns (新引用, 每帧)
 
 | 提交 | 修了什么 | 为什么不够 |
 |------|---------|-----------|
-| `b244677` Static 提到 root 层 | 解决 Box(height=0) 内 Static 的 Yoga 追踪问题 | 换了位置，引用级联仍在 |
+| `b244677` Static 提到 root 层 | 解决 Box(height=0) 内 Static 的 Yoga 追踪问题 | 换了位置，引用级联仍在；Static 外置后 terminal resize 时静态文本 width={columns} 锁定在渲染时刻，无法随容器自适应 |
+| `a0075d5` 回退 b244677 | Static 退回 OutputArea 内 Box(height=0) | 恢复内嵌架构，解决 resize 自适应问题；引用级联由后续 fingerprint 缓存彻底修复 |
 | `ce68456` DEC 同步输出 | 屏切换时原子显示 | 只覆盖 resize/会话切换路径 |
 | `9078822` resizeGen + staticKey | resize 时重挂载 Static | 只覆盖 resize 路径 |
 | `5ac73bb` Footer 高度跳变修复 | 修复特定布局变化路径 | 换一个 block 类型（subagent）又触发 |
 | `ea03f80` 统一 block 间距 | 修复 block gap 不生效 | 无关，误归类 |
 
 本质原因：每次修复都在打补丁——找到一个触发路径堵一个，但引用级联是全局的，任何新功能引入高频渲染都会重新暴露问题。
+
+### `<Static>` 定位约束
+
+`<Static>` 必须内嵌在 OutputArea 的 `Box(height=0)` 内，**禁止**外置到 App root 层。原因：
+
+- `<Static>` 渲染的 block 使用 `width={columns}` 控制背景宽度
+- `columns` 来自 `useWindowSize()`，终端 resize 时更新
+- 若 `<Static>` 在 root 层，resize 触发 App remount → `<Static>` 重新输出 block 时 `columns` 可能尚未更新（`useWindowSize` state 与 `resizeKey` 更新不在同一微任务），导致静态文本宽度锁定在 resize 前的值
+- 内嵌在 `Box(height=0)` 时，`<Static>` 随 OutputArea 生命周期受 Ink Yoga layout 管理
 
 ## 方案
 
