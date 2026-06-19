@@ -1,8 +1,9 @@
 # Agent 事件机制重构方案
 
-状态：completed
+状态：archived
 创建：2026-06-19
 实施：2026-06-19（Phase A + Phase B 完成，见提交 a8b5c3e）
+归档：2026-06-19（完成记录见 `execution/completed/2026-06-19-event-mechanism-refactor.md`）
 
 ## 目标
 

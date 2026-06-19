@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-06-19（事件机制重构方案）
+最后更新：2026-06-19（session-logger + event-mechanism-refactor 归档）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -33,8 +33,8 @@
 | [`2026-06-14-p0-gap-closure.md`](2026-06-14-p0-gap-closure.md) | draft | P0 | — | — | P0 缺口补齐：Web Search + Token 展示 + 开箱即用 + 工作空间授权（4 大类 19 tasks）。 |
 | [`2026-06-18-opentelemetry-observability.md`](2026-06-18-opentelemetry-observability.md) | draft | P1 | — | — | Agent OpenTelemetry 可观测性：Trace/Span 建模 + OTLP 导出，工具失败分类 → 提示词优化闭环 |
 | [`2026-06-18-openpx-telemetry-collection.md`](2026-06-18-openpx-telemetry-collection.md) | draft | P2 | `opentelemetry-observability` | — | OpenPX 遥测收集：双通道 opt-in，脱敏工具调用统计，驱动工具契约优化 |
-| [`2026-06-18-session-logger.md`](2026-06-18-session-logger.md) | active | P0 | — | — | 会话日志本地记录：AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断 |
-| [`2026-06-19-event-mechanism-refactor.md`](2026-06-19-event-mechanism-refactor.md) | completed | P0 | `session-logger` | — | 事件机制重构：turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一 |
+| [`2026-06-18-session-logger.md`](2026-06-18-session-logger.md) | archived | P0 | — | — | 会话日志本地记录：AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断 |
+| [`2026-06-19-event-mechanism-refactor.md`](2026-06-19-event-mechanism-refactor.md) | archived | P0 | `session-logger` | — | 事件机制重构：turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一 |
 
 ## 计划文件命名规范
 
