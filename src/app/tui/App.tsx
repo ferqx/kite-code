@@ -85,10 +85,12 @@ export interface AppProps {
 export function useTuiState(
   initialModelName?: string,
   initialProviderName?: string,
+  initialThinkingMode?: string | null,
 ): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
   const statusOverrides: Partial<TuiState['status']> = {};
   if (initialModelName) statusOverrides.modelName = initialModelName;
   if (initialProviderName) statusOverrides.modelProvider = initialProviderName;
+  if (initialThinkingMode) statusOverrides.thinkingMode = initialThinkingMode;
   const hasOverrides = Object.keys(statusOverrides).length > 0;
   const initState = hasOverrides
     ? { ...initialState, status: { ...initialState.status, ...statusOverrides } }

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parse } from 'jsonc-parser';
+import { parse, modify, applyEdits } from 'jsonc-parser';
 import { z } from 'zod';
 import type { McpServerConfig } from '../mcp/types';
 import { defaultConfigPath, projectConfigPath } from './paths';
@@ -10,13 +10,23 @@ import { defaultConfigPath, projectConfigPath } from './paths';
 const providerModelEntrySchema = z.object({
   name: z.string().min(1),
   default: z.boolean().optional(),
+  effort: z.string().optional(),
 });
 
 const providerSchema = z.object({
   type: z.enum(['deepseek', 'openai', 'openai-compatible', 'ollama']).optional(),
   apiKey: z.string().min(1).optional(),
   baseURL: z.string().url().optional(),
-  models: z.array(providerModelEntrySchema).optional(),
+  /** Default model name */
+  model: z.string().optional(),
+  /** Reasoning effort (low | medium | high | xhigh | max) */
+  effort: z.string().optional(),
+  /** Whether to pass reasoning_effort to the API. Default: deepseek=true, others=false. */
+  reasoning: z.boolean().optional(),
+  /** Extra kwargs passed through to the LangChain model constructor */
+  modelKwargs: z.record(z.string(), z.any()).optional(),
+  /** Available model names (string[]) */
+  models: z.array(z.any()).optional(),
 });
 
 // Deprecated: kept for backward compatibility with old top-level models array
@@ -64,8 +74,12 @@ export interface AgentConfig {
   providerName: string;
   /** LangChain adapter 类型 / LangChain adapter type */
   providerType: ModelProviderType;
-  /** 思考程度，映射到 reasoning_effort API 参数 / Thinking level, mapped to reasoning_effort API param */
+  /** 思考程度，映射到 reasoning_effort API 参数。仅 reasoning=true 时生效。 */
   reasoningEffort?: string | null;
+  /** 是否启用思考字段回传。缺省时按 providerType 推断：deepseek=true，其他=false。 */
+  reasoning?: boolean;
+  /** 透传给 LangChain 模型构造器的额外参数 */
+  modelKwargs?: Record<string, unknown>;
 }
 
 /** 加载配置选项 / Configuration loading options */
@@ -140,9 +154,9 @@ function defaultOpenpxConfig(): OpenpxConfig {
   return {
     provider: {
       deepseek: {
-        type: 'deepseek',
         baseURL: 'https://api.deepseek.com/v1',
-        models: [{ name: 'deepseek-v4-flash', default: true }, { name: 'deepseek-v4-pro' }],
+        model: 'deepseek-v4-flash',
+        models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
       },
     },
     theme: 'dark',
@@ -168,19 +182,40 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
 
   const providerType = provider.type ?? inferProviderType(providerName);
 
+  const reasoningEffort = provider.effort ?? null;
+  const reasoning = provider.reasoning ?? inferReasoningDefault(providerType);
+
   return {
     apiKey: resolveProviderApiKey(providerName, providerType, provider.apiKey),
     baseURL: resolveProviderBaseURL(providerName, providerType, provider.baseURL),
-    modelName: options.modelName ?? defaultModel?.name ?? 'deepseek-v4-flash',
+    modelName: options.modelName ?? provider.model ?? defaultModel?.name ?? 'deepseek-v4-flash',
     providerName,
     providerType,
+    reasoningEffort,
+    reasoning,
+    modelKwargs: provider.modelKwargs as Record<string, unknown> | undefined,
   };
+}
+
+/** Like loadAgentConfig but returns null instead of throwing when no API key is configured. */
+export function tryLoadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConfig | null {
+  try {
+    return loadAgentConfig(options);
+  } catch {
+    // No config file or missing API key → first-run setup needed
+    return null;
+  }
 }
 
 function inferProviderType(providerName: string): ModelProviderType {
   if (providerName === 'deepseek') return 'deepseek';
   if (providerName === 'ollama') return 'ollama';
   return 'openai-compatible';
+}
+
+/** Default reasoning support: only DeepSeek enables it by default. */
+function inferReasoningDefault(type: ModelProviderType): boolean {
+  return type === 'deepseek';
 }
 
 function builtInProvider(providerName: string): z.infer<typeof providerSchema> | null {
@@ -190,22 +225,36 @@ function builtInProvider(providerName: string): z.infer<typeof providerSchema> |
   return null;
 }
 
+/** Normalize a model entry (string or object) to its name string. */
+function modelEntryName(entry: unknown): string | null {
+  if (typeof entry === 'string') return entry;
+  if (entry && typeof entry === 'object' && 'name' in entry)
+    return (entry as { name: string }).name;
+  return null;
+}
+
 /**
  * Find the default model from config.
- * Priority: first model with default:true in provider models > first model of first provider > null
+ * Priority: provider.model > legacy default:true > first model > null
  */
 function findDefaultModel(cfg: OpenpxConfig): { provider: string; name: string } | null {
-  // Look for explicit default in provider models
   for (const [provName, prov] of Object.entries(cfg.provider)) {
+    if (prov.model && prov.models?.length) return { provider: provName, name: prov.model };
+    // Legacy: model entry with default:true
     if (prov.models) {
-      const def = prov.models.find((m) => m.default);
-      if (def) return { provider: provName, name: def.name };
+      for (const m of prov.models) {
+        if (m && typeof m === 'object' && (m as any).default) {
+          const name = modelEntryName(m);
+          if (name) return { provider: provName, name };
+        }
+      }
     }
   }
-  // Fallback: first model of first provider
+  // Fallback: first model of first provider with models
   for (const [provName, prov] of Object.entries(cfg.provider)) {
-    if (prov.models && prov.models.length > 0) {
-      return { provider: provName, name: prov.models[0]!.name };
+    if (prov.models?.length) {
+      const name = modelEntryName(prov.models[0]);
+      if (name) return { provider: provName, name };
     }
   }
   return null;
@@ -363,8 +412,13 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
   const models: AvailableModel[] = [];
   for (const [provName, prov] of Object.entries(cfg.provider)) {
     if (prov.models) {
+      const defaultName = prov.model ?? null;
       for (const m of prov.models) {
-        models.push({ provider: provName, name: m.name, isDefault: m.default ?? false });
+        const name = modelEntryName(m);
+        if (!name) continue;
+        const isDefault = name === defaultName
+          || (m && typeof m === 'object' && !!(m as any).default);
+        models.push({ provider: provName, name, isDefault });
       }
     }
   }
@@ -431,6 +485,88 @@ export function saveColorPreset(preset: string): void {
     writeFileSync(path, lines.join('\n'), 'utf-8');
   } catch {
     // Non-critical — silently ignore write failures
+  }
+}
+
+// ── Provider config saving ──
+
+/** Input for saving a provider configuration. */
+export interface SaveProviderInput {
+  /** Provider key name (e.g., 'deepseek', 'my-openai') */
+  name: string;
+  /** Provider type */
+  type: ModelProviderType;
+  /** API key (empty string for ollama) */
+  apiKey?: string;
+  /** Base URL (omit to use built-in default) */
+  baseURL?: string;
+  /** Models with their default flag */
+  models?: { name: string; default: boolean }[];
+  /** Reasoning effort (low | medium | high | xhigh | max) */
+  effort?: string;
+  /** Whether to pass reasoning_effort to the API */
+  reasoning?: boolean;
+  /** Extra kwargs passed through to the LangChain model constructor */
+  modelKwargs?: Record<string, unknown>;
+}
+
+/**
+ * Save a provider configuration to the user-level config file.
+ * Creates the file and directory if they don't exist.
+ * Preserves existing config sections (other providers, theme, mcpServers, etc.).
+ */
+/** Sensible default models per provider type (used when no models are provided). */
+function defaultModelsForProvider(type: ModelProviderType): { name: string; default: boolean }[] {
+  switch (type) {
+    case 'deepseek':
+      return [{ name: 'deepseek-v4-flash', default: true }, { name: 'deepseek-v4-pro', default: false }];
+    case 'openai':
+      return [{ name: 'gpt-4o', default: true }, { name: 'gpt-4.1', default: false }];
+    case 'ollama':
+      return [{ name: 'llama3.2', default: true }];
+    default:
+      // openai-compatible — no well-known defaults, let user type their own
+      return [];
+  }
+}
+
+export function saveProviderConfig(input: SaveProviderInput): boolean {
+  const path = defaultConfigPath();
+  try {
+    const dir = resolve(path, '..');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+    let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
+    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+
+    const provPath = ['provider', input.name];
+    text = applyEdits(text, modify(text, provPath, {}, fmt));
+
+    const setField = (jsonPath: string[], value: unknown) => {
+      text = applyEdits(text, modify(text, jsonPath, value, fmt));
+    };
+
+    // type is omitted — inferProviderType handles it from the provider name
+    if (input.apiKey !== undefined) setField([...provPath, 'apiKey'], input.apiKey);
+    if (input.baseURL) setField([...provPath, 'baseURL'], input.baseURL);
+
+    const models = (input.models && input.models.length > 0)
+      ? input.models.map((m) => m.name)
+      : defaultModelsForProvider(input.type).map((m) => m.name);
+    const defaultModel = input.models?.find((m) => m.default)?.name ?? models[0];
+    if (models.length > 0) setField([...provPath, 'models'], models);
+    if (defaultModel) setField([...provPath, 'model'], defaultModel);
+    if (input.effort && input.reasoning !== false) setField([...provPath, 'effort'], input.effort);
+    if (input.reasoning !== undefined) setField([...provPath, 'reasoning'], input.reasoning);
+    if (input.modelKwargs && Object.keys(input.modelKwargs).length > 0) {
+      setField([...provPath, 'modelKwargs'], input.modelKwargs);
+    }
+
+    writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
+    _cachedModels = null;
+    return true;
+  } catch {
+    return false;
   }
 }
 

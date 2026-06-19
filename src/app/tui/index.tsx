@@ -6,6 +6,7 @@ import {
   loadColorPreset,
   loadTheme,
   saveColorPreset,
+  tryLoadAgentConfig,
 } from '@/core/config/index';
 import { sessionExportPath } from '@/core/config/paths';
 import type { McpManager } from '@/core/mcp';
@@ -19,6 +20,7 @@ import InputLine, {
   type SlashSuggestionData,
 } from './components/InputLine';
 import StartupScreen from './components/StartupScreen';
+import SetupWizard from './components/SetupWizard';
 import { useExternalEditor } from './hooks/useExternalEditor';
 import { useMcpConnection } from './hooks/useMcpConnection';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
@@ -43,10 +45,40 @@ export interface TuiBootstrapProps {
   model?: import('@/core/model/factory').SupportedChatModel;
 }
 
+interface TuiAppProps {
+  config: AgentConfig;
+  /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
+  injectModel?: import('@/core/model/factory').SupportedChatModel;
+}
+
 export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
+  // Load config synchronously on first render — avoids a flash of SetupWizard
+  // that would consume keystrokes before TuiApp mounts.
+  const [config, setConfig] = React.useState<AgentConfig | null>(() => tryLoadAgentConfig());
+
+  const handleSetupComplete = React.useCallback(
+    ({ modelName }: { modelName: string }) => {
+      // SetupWizard saved everything (provider + models + effort) to config.
+      const cfg = loadAgentConfig({ modelName });
+      setConfig(cfg);
+    },
+    [],
+  );
+
+  if (!config) {
+    return (
+      <ThemeContext.Provider value={getDarkTheme('blue')}>
+        <SetupWizard onComplete={handleSetupComplete} />
+      </ThemeContext.Provider>
+    );
+  }
+
+  return <TuiApp config={config} injectModel={injectModel} />;
+}
+
+function TuiApp({ config, injectModel }: TuiAppProps) {
   const workspace = process.cwd();
-  const config = React.useMemo(() => loadAgentConfig(), []);
-  const { state, dispatch, onToggleReason } = useTuiState(config.modelName, config.providerName);
+  const { state, dispatch, onToggleReason } = useTuiState(config.modelName, config.providerName, config.reasoningEffort);
   const stateRef = React.useRef(state);
   stateRef.current = state;
 
@@ -124,7 +156,7 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
       process.stdout.off('resize', handler);
     };
   }, []);
-  const thinkingLevelRef = React.useRef<string | null>(null);
+  const thinkingLevelRef = React.useRef<string | null>(config.reasoningEffort ?? null);
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
