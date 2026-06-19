@@ -16,7 +16,7 @@
     "format": "biome check --write .",
     "format:check": "biome check .",
     "lint": "biome lint .",
-    "postinstall": "lefthook install"
+    "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "@langchain/core": "^1.1.42",
