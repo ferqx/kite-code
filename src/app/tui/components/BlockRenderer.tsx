@@ -84,8 +84,15 @@ const BlockRenderer = React.memo(function BlockRenderer({
     }
 
     case 'text': {
+      // 流式渲染期间，text 事件中的 \n 会按行拆分为独立 OutputBlock，
+      // 其中 content === "" 的空行块仅表示段落分隔 — 前一个内容块的
+      // marginBottom 已提供间距，空行块不应额外叠加 margin。
+      // During streaming, \n in text events splits content into per-line
+      // blocks. Empty-string blocks represent paragraph breaks — the
+      // preceding content block's marginBottom already provides spacing.
+      const isEmpty = block.content === '';
       return (
-        <Box marginTop={0} marginBottom={BLOCK_GAP}>
+        <Box marginTop={0} marginBottom={isEmpty ? 0 : BLOCK_GAP}>
           <MarkdownBlock
             content={block.content}
             streaming={block.streaming}

@@ -97,6 +97,59 @@ export function finalizeLastTurnStreaming(state: TuiState): TuiState {
   return { ...state, turns };
 }
 
+/** 合并最后一个 turn 中连续的 text block（中间无其他类型块）。
+ *  流式渲染期间 text 事件按行拆分为独立 OutputBlock，导致段落双倍间距和
+ *  列表项意外间距。合并后 MarkdownBlock 通过 spacingBetween 正确处理。
+ *  Merge consecutive text blocks in the last turn into a single block.
+ *  During streaming, text events are split into per-line blocks, causing
+ *  double paragraph spacing and unwanted list-item gaps. Merging lets
+ *  MarkdownBlock handle spacing correctly via spacingBetween. */
+export function mergeConsecutiveTextBlocksInLastTurn(state: TuiState): TuiState {
+  const last = state.turns.at(-1);
+  if (!last) return state;
+
+  const merged: OutputBlock[] = [];
+  let changed = false;
+  let textBuffer: { id: number; content: string } | null = null;
+
+  for (const b of last.blocks) {
+    if (b.kind === 'text') {
+      if (textBuffer) {
+        // Append to existing text buffer with \n separator
+        textBuffer.content += '\n' + b.content;
+        changed = true;
+      } else {
+        textBuffer = { id: b.id, content: b.content };
+      }
+    } else {
+      if (textBuffer) {
+        merged.push({
+          id: textBuffer.id,
+          kind: 'text',
+          content: textBuffer.content,
+          streaming: false,
+        });
+        textBuffer = null;
+      }
+      merged.push(b);
+    }
+  }
+  // Flush remaining text buffer
+  if (textBuffer) {
+    merged.push({
+      id: textBuffer.id,
+      kind: 'text',
+      content: textBuffer.content,
+      streaming: false,
+    });
+  }
+
+  if (!changed) return state;
+  const turns = state.turns.slice();
+  turns[turns.length - 1] = { blocks: merged };
+  return { ...state, turns };
+}
+
 /** 从扁平的 OutputBlock[] 按 kind === "user" 切分 turns */
 export function reconstructTurns(blocks: OutputBlock[]): Turn[] {
   const turns: Turn[] = [];
