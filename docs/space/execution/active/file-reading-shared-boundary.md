@@ -142,7 +142,7 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
 - `cancelRunningBlocks`：Esc 取消时在 `running: false` 之前同步将 running subagent/tool_card 标记为 `"Cancelled"`，防止状态被 `<Static>` 永久冻结
 - `AbortError` 识别为 `"Cancelled"` 而非 `"The operation was aborted."`
 - `subagent_error` 事件携带 `summary`/`toolCallCount`/`durationMs`，TUI 与 `subagent_done` 一样展示步骤全景
-- done/error/cancelled 三态统一用 `⏺` 圆点（与 `tool_card` 一致），running 态用 `⠋` spinner
+- done/error/cancelled 三态统一用 `●` 圆点（与 `tool_card` 一致），running 态用 `⠋` spinner
 
 ### toolResultSink 渐进展示 + 统一 Promise.all（`graph.ts`、`runner.ts`）
 

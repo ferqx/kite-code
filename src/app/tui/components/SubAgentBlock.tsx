@@ -193,13 +193,13 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     const skipped = stepCount - MAX_RUNNING_STEPS;
     const isError = block.status === 'error';
     const doneDur = formatDuration(block.durationMs);
-    const headDoneBefore = stringWidth(`⏺ ${label} · `);
+    const headDoneBefore = stringWidth(`● ${label} · `);
     const fitDoneTask = truncateToFit(taskSummary, Math.max(0, col - headDoneBefore - 2));
 
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={toolColor(block.status, dt)}>⏺ </Text>
+          <Text color={toolColor(block.status, dt)}>● </Text>
           <Text color={dt.primary}>{label}</Text>
           <Text color={dt.muted}> · {fitDoneTask}</Text>
         </Box>

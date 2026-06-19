@@ -137,7 +137,7 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={toolColor(block.status, dt)}>⏺ </Text>
+        <Text color={toolColor(block.status, dt)}>● </Text>
         <Text color={dt.primary}>{block.name}</Text>
         {block.detail ? <Text color={dt.dim}> {block.detail}</Text> : null}
         {showElapsed && block.elapsedMs != null ? (

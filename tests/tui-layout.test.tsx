@@ -1397,7 +1397,7 @@ describe('SubAgentBlock rendering', () => {
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('⏺');
+    expect(frame).toContain('●');
     expect(frame).toContain('Review');
     expect(frame).toContain('review PR #42');
     expect(frame).toContain('3.2s');
@@ -1421,7 +1421,7 @@ describe('SubAgentBlock rendering', () => {
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('⏺');
+    expect(frame).toContain('●');
     expect(frame).toContain('Explore');
     expect(frame).toContain('timed out');
   });
@@ -1486,7 +1486,7 @@ describe('SubAgentBlock rendering', () => {
     // Summary text should NOT be rendered in the message list
     expect(frame).not.toContain('Line 1');
     // Should show the header and done! marker
-    expect(frame).toContain('⏺');
+    expect(frame).toContain('●');
     expect(frame).toContain('done!');
   });
 
