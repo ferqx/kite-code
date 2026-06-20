@@ -50,15 +50,12 @@ describe('parseSlashCommand', () => {
   });
 
   // ── /sessions ──
-  test('parses /sessions without id', () => {
-    expect(parseSlashCommand('/sessions')).toEqual({ type: 'sessions', id: undefined });
+  test('parses /sessions', () => {
+    expect(parseSlashCommand('/sessions')).toEqual({ type: 'sessions' });
   });
 
-  test('parses /sessions with id', () => {
-    expect(parseSlashCommand('/sessions run-abc123')).toEqual({
-      type: 'sessions',
-      id: 'run-abc123',
-    });
+  test('/sessions ignores extra args', () => {
+    expect(parseSlashCommand('/sessions run-abc123')).toEqual({ type: 'sessions' });
   });
 
   // ── /plan ──

@@ -18,7 +18,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
     description: 'Switch color theme',
     args: 'teal|blue|purple|cyan|mono',
   },
-  { name: 'sessions', aliases: [], description: 'Show sessions', args: '[id]' },
+  { name: 'sessions', aliases: [], description: 'Show sessions' },
   { name: 'new', aliases: [], description: 'Start a new session' },
   { name: 'plan', aliases: [], description: 'Enter planning mode' },
   { name: 'auth', aliases: [], description: 'Toggle authorization mode', args: '[mode]' },

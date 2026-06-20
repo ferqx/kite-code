@@ -9,7 +9,7 @@ export type SlashAction =
   | { type: 'effort'; level: string }
   | { type: 'model'; name?: string }
   | { type: 'theme'; preset?: string }
-  | { type: 'sessions'; id?: string }
+  | { type: 'sessions' }
   | { type: 'plan' }
   | { type: 'auth'; mode?: string }
   | { type: 'clear' }
@@ -35,7 +35,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case 'theme':
       return { type: 'theme', preset: arg || undefined };
     case 'sessions':
-      return { type: 'sessions', id: arg || undefined };
+      return { type: 'sessions' };
     case 'plan':
       return { type: 'plan' };
     case 'auth':
@@ -105,12 +105,7 @@ export function useSlashCommand(
           }
           break;
         case 'sessions':
-          if (action.id) {
-            dispatch({ type: 'LOAD_SESSION_PENDING', threadId: action.id });
-            break;
-          } else {
-            dispatch({ type: 'SHOW_SESSIONS' });
-          }
+          dispatch({ type: 'SHOW_SESSIONS' });
           break;
         case 'new':
           dispatch({ type: 'NEW_SESSION', threadId: '' });
