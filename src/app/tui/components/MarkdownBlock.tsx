@@ -451,7 +451,6 @@ function dataRowLines(cells: string[], widths: number[]): string[] {
 }
 
 function TableBlock({ lines }: { lines: string[] }) {
-  const t = useTheme();
   const { headers, rows, widths: natural } = useMemo(() => parseTable(lines), [lines]);
   const widths = useMemo(
     () => computeColumnWidths(headers, rows, natural),
@@ -463,23 +462,11 @@ function TableBlock({ lines }: { lines: string[] }) {
   const botBorder = borderLine('└', '┴', '┘', widths, '─');
   const headerLine = `│${headers.map((h, i) => ` ${truncateHeader(h, widths[i]!)} `).join('│')}│`;
 
-  return (
-    <Box flexDirection="column">
-      <Text color={t.dim}>{topBorder}</Text>
-      <Text bold color={t.primary}>
-        {headerLine}
-      </Text>
-      <Text color={t.dim}>{sepBorder}</Text>
-      {rows.map((row, ri) =>
-        dataRowLines(row, widths).map((line, li) => (
-          <Text key={`${ri}-${li}`} color={t.muted}>
-            {line}
-          </Text>
-        )),
-      )}
-      <Text color={t.dim}>{botBorder}</Text>
-    </Box>
-  );
+  // Single string avoids Yoga border overlap between adjacent Text nodes
+  const dataRows = rows.flatMap((row) => dataRowLines(row, widths));
+  const output = [topBorder, headerLine, sepBorder, ...dataRows, botBorder].join('\n');
+
+  return <Text>{output}</Text>;
 }
 
 // ── HTML entity decoding ──

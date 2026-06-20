@@ -7,12 +7,6 @@ import { defaultConfigPath, projectConfigPath } from './paths';
 
 // ── Zod schemas ──
 
-const providerModelEntrySchema = z.object({
-  name: z.string().min(1),
-  default: z.boolean().optional(),
-  effort: z.string().optional(),
-});
-
 const providerSchema = z.object({
   type: z.enum(['deepseek', 'openai', 'openai-compatible', 'ollama']).optional(),
   apiKey: z.string().min(1).optional(),
