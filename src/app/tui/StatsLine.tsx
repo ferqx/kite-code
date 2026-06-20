@@ -28,7 +28,8 @@ function fullWidth(status: StatusState): number {
 export default function StatsLine({ status }: StatsLineProps) {
   const t = useTheme();
   const { stdout } = useStdout();
-  const cachePct = status.cacheHitRate * 100;
+  const cacheTotal = status.cacheHitTokens + status.cacheMissTokens;
+  const cachePct = cacheTotal > 0 ? (status.cacheHitTokens / cacheTotal) * 100 : 0;
   const cacheColor = cachePct > 50 ? t.success : cachePct > 20 ? t.warning : t.muted;
   const authLabel = status.authorization === 'full_access' ? '完全' : '安全';
 

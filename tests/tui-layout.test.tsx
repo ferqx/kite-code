@@ -232,7 +232,12 @@ describe('StatsLine', () => {
   });
 
   test('shows cache hit rate', () => {
-    const status = fakeStatus({ modelProvider: 'deepseek', cacheHitRate: 0.75 });
+    const status = fakeStatus({
+      modelProvider: 'deepseek',
+      cacheHitTokens: 75,
+      cacheMissTokens: 25,
+      totalTokens: 1200,
+    });
     const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain('cache: 75%');
   });

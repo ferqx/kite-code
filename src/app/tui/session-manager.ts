@@ -465,6 +465,15 @@ export class SessionManager {
     for (const [threadId, rt] of this.runtimes) {
       const prevStatus = prevMap.get(threadId);
       const dbStats = this.tokenStatsCache.get(threadId);
+      const rawStatus = {
+        ...initialStatusSnapshot(),
+        ...(dbStats ?? {}), // 从 DB 恢复的 token 统计
+        ...(prevStatus ?? {}), // 内存中保留的状态（优先级最高）
+      };
+      // 从恢复的 token 计数重新计算缓存命中率（派生值，不单独持久化）
+      // Recompute cacheHitRate from restored token counts (derived, not persisted separately)
+      const cacheTotal = rawStatus.cacheHitTokens + rawStatus.cacheMissTokens;
+      rawStatus.cacheHitRate = cacheTotal > 0 ? rawStatus.cacheHitTokens / cacheTotal : 0;
       result.push({
         threadId,
         name: rt.name,
@@ -474,11 +483,7 @@ export class SessionManager {
         pendingInterrupt: rt.pendingInterrupt,
         interrupt: null,
         plan: null,
-        status: {
-          ...initialStatusSnapshot(),
-          ...(dbStats ?? {}), // 从 DB 恢复的 token 统计
-          ...(prevStatus ?? {}), // 内存中保留的状态（优先级最高）
-        },
+        status: rawStatus,
         turns: [],
       });
     }
