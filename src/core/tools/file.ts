@@ -228,6 +228,8 @@ export interface EditFileResult {
   fromLine?: number;
   toLine?: number;
   replacements?: number;
+  /** replaceAll 时所有命中行的行号（1-based），用于多 hunk diff 展示 / All match line numbers for replaceAll, used for multi-hunk diff display */
+  matchLines?: number[];
   error?: string;
 }
 
@@ -392,11 +394,13 @@ function performReplaceTrimmed(
   userTrimmedOldLines: string[],
 ): EditFileResult {
   let newContent: string;
+  let matchLines: number[] | undefined;
 
   if (replaceAll) {
     const trimmedContentLines = contentLines.map((l) => l.trim());
     const trimmedOldLines = userTrimmedOldLines;
     const parts: string[] = [];
+    matchLines = [];
     let i = 0;
     while (i <= contentLines.length - oldLineCount) {
       let match = true;
@@ -407,6 +411,7 @@ function performReplaceTrimmed(
         }
       }
       if (match) {
+        matchLines.push(i + 1); // 1-based
         parts.push(newStr);
         i += oldLineCount;
       } else {
@@ -438,6 +443,7 @@ function performReplaceTrimmed(
     fromLine,
     toLine,
     replacements: replaceAll ? undefined : 1,
+    ...(matchLines && matchLines.length > 1 ? { matchLines } : {}),
   };
 }
 
@@ -452,8 +458,27 @@ function performReplace(
 ): EditFileResult {
   let newContent: string;
   let replacements = 1;
+  const matchLines: number[] = [];
 
   if (replaceAll) {
+    // 收集所有命中行号 / Collect all match line numbers
+    let pos = 0;
+    const lineStarts: number[] = [0];
+    for (let i = 0; i < content.length; i++) {
+      if (content[i] === '\n') lineStarts.push(i + 1);
+    }
+    lineStarts.push(content.length + 1); // sentinel
+    while ((pos = content.indexOf(oldStr, pos)) !== -1) {
+      // 二分查找 pos 对应的行号 / Binary search to find line number for pos
+      let lo = 0, hi = lineStarts.length - 2;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (lineStarts[mid]! <= pos) lo = mid + 1;
+        else hi = mid - 1;
+      }
+      matchLines.push(hi + 1); // 1-based
+      pos += oldStr.length;
+    }
     const parts = content.split(oldStr);
     replacements = parts.length - 1;
     newContent = parts.join(newStr);
@@ -476,6 +501,7 @@ function performReplace(
     fromLine,
     toLine,
     replacements,
+    ...(matchLines.length > 1 ? { matchLines } : {}),
   };
 }
 
