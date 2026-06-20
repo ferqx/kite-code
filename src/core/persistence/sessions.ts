@@ -115,7 +115,6 @@ export async function searchSessions(
 
     for (const row of nameMatches) {
       const name = row.cached_name ?? (await readSessionName(saver, row.thread_id));
-      // Check name match first (fast)
       if (name.toLowerCase().includes(lowerQuery)) {
         results.push({
           threadId: row.thread_id,
@@ -123,31 +122,6 @@ export async function searchSessions(
           updatedAt: formatLocalTime(row.updated_at),
           needsSmartName: !row.cached_name,
         });
-        continue;
-      }
-
-      // Check message content match (slower — need to load checkpoint)
-      try {
-        const tuple = await saver.getTuple({ configurable: { thread_id: row.thread_id } });
-        if (!tuple) continue;
-        const cv = (tuple.checkpoint.channel_values ?? {}) as Record<string, unknown>;
-        const messages = Array.isArray(cv.messages) ? (cv.messages as unknown[]) : [];
-        const hasMatch = messages.some((msg) => {
-          if (!msg || typeof msg !== 'object') return false;
-          const m = msg as Record<string, unknown>;
-          const content = typeof m.content === 'string' ? m.content : '';
-          return content.toLowerCase().includes(lowerQuery);
-        });
-        if (hasMatch) {
-          results.push({
-            threadId: row.thread_id,
-            name,
-            updatedAt: formatLocalTime(row.updated_at),
-            needsSmartName: !row.cached_name,
-          });
-        }
-      } catch {
-        /* skip */
       }
     }
 
