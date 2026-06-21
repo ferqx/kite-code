@@ -5,6 +5,8 @@
 读取时机：修改 plan 流程、plan_review 中断、ask_user 多问题、session 持久化时必读。
 验证：`bun test tests/graph.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/integration.test.ts`
 
+> 设计文档：[[plan-mode-design]] — 产品方案与交互设计
+
 ---
 
 ## 概述
