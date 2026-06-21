@@ -10,7 +10,7 @@ export type SlashAction =
   | { type: 'model'; name?: string }
   | { type: 'theme'; preset?: string }
   | { type: 'sessions'; id?: string }
-  | { type: 'plan' }
+  | { type: 'plan'; task?: string }
   | { type: 'auth'; mode?: string }
   | { type: 'clear' }
   | { type: 'help' }
@@ -37,7 +37,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case 'sessions':
       return { type: 'sessions', id: arg || undefined };
     case 'plan':
-      return { type: 'plan' };
+      return { type: 'plan', task: arg || undefined };
     case 'auth':
       return { type: 'auth', mode: arg || undefined };
     case 'clear':
@@ -118,6 +118,10 @@ export function useSlashCommand(
         case 'plan':
           dispatch({ type: 'SET_PHASE', phase: 'planning' as const });
           dispatch({ type: 'SWITCH_AUTH', mode: 'default' });
+          // /plan <task> — 立即提交任务 / submit task immediately
+          if (action.task && onRunTask) {
+            onRunTask(action.task);
+          }
           break;
         case 'auth':
           dispatch({ type: 'SWITCH_AUTH', mode: action.mode ?? 'toggle' });

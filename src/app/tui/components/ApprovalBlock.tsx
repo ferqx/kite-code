@@ -24,13 +24,13 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
   for (const g of approval.grantOptions) {
     switch (g) {
       case 'approve_once':
-        options.push({ key: 'a', label: 'Approve', grant: 'approve_once' });
+        options.push({ key: 'a', label: 'Approve once', grant: 'approve_once' });
         break;
       case 'same_command':
-        options.push({ key: 's', label: 'Same Cmd', grant: 'same_command' });
+        options.push({ key: 's', label: 'Approve same command', grant: 'same_command' });
         break;
       case 'full_access':
-        options.push({ key: 'f', label: 'Full Access', grant: 'full_access' });
+        options.push({ key: 'f', label: 'Approve all · full access', grant: 'full_access' });
         break;
     }
   }
@@ -56,11 +56,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       input: string,
       key: { escape?: boolean; upArrow?: boolean; downArrow?: boolean; return?: boolean },
     ) => {
-      if (key.escape) {
-        provider.submitAction({ type: 'cancel' });
-        onResolved('cancelled');
-        return;
-      }
+      // Esc 由全局 handler 处理 / Esc is handled by global handler
       if (key.upArrow) {
         setSelectedIndex((i) => Math.max(0, i - 1));
         return;
@@ -74,7 +70,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
         if (opt) resolve(opt.grant);
         return;
       }
-      // 字母快捷键 / Letter shortcut
+      // 字母快捷键保留 / Letter shortcuts kept as quick access
       const match = options.find((o) => o.key === input.toLowerCase());
       if (match) resolve(match.grant);
     },
@@ -84,20 +80,35 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     approval.command.length > 100 ? `${approval.command.slice(0, 97)}...` : approval.command;
 
   return (
-    <Box flexDirection="column" marginY={1}>
-      <Box>
-        <Text color={riskColor ?? t.muted}>⚠ </Text>
-        <Text color={t.primary}>{cmd}</Text>
-      </Box>
-      <Box flexDirection="column">
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={t.primary}
+      paddingX={1}
+      marginY={1}
+    >
+      <Text bold color={riskColor}>
+        ● {approval.tool}
+      </Text>
+      <Text color={t.primary}>{cmd}</Text>
+      <Text color={t.dim}>
+        {approval.summary}
+        {approval.risk ? ` · ${approval.risk}` : ''}
+      </Text>
+
+      <Box marginTop={1} flexDirection="column">
+        <Text color={t.dim}>{'─'.repeat(40)}</Text>
         {options.map((o, i) => {
           const isSelected = i === selectedIndex;
+          const isDeny = o.grant === null;
           return (
-            <Text key={o.key} color={isSelected ? t.primary : o.grant ? t.muted : t.error}>
-              {isSelected ? '▶ ' : '  '}[{o.key.toUpperCase()}]{o.label}
+            <Text key={o.key} color={isSelected ? t.primary : isDeny ? t.error : t.muted}>
+              {isSelected ? '▶' : ' '} {i + 1}. {o.label}
             </Text>
           );
         })}
+        <Text color={t.dim}>{'─'.repeat(40)}</Text>
+        <Text color={t.dim}>↑↓ select Enter confirm Esc cancel</Text>
       </Box>
     </Box>
   );

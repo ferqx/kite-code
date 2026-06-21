@@ -22,6 +22,7 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
     {
       title: '快捷键',
       shortcuts: [
+        ['Shift+Tab', '进入/退出方案模式'],
         ['Ctrl+C', '中断运行 / 双按退出'],
         ['Ctrl+T', '展开/折叠所有 reasoning'],
         ['Ctrl+E', '展开输入框折叠内容'],

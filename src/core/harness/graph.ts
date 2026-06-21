@@ -16,10 +16,11 @@ import type {
   ModelRetryEvent,
   ThreadAuthorizationState,
 } from '@/core/types';
-import type { ShellApprovalGrant } from '@/protocol/events';
+import type { AgentPlan, PlanStatus, ShellApprovalGrant } from '@/protocol/events';
 import {
   routeAfterAgent,
   routeAfterApproval,
+  routeAfterPlanReview,
   routeAfterTools,
   routeAfterUserInput,
   routeEntry,
@@ -334,6 +335,61 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     };
   };
 
+  /** plan review 节点：中断等待用户审查计划，支持反馈 / Plan review node: interrupt for user plan review with optional feedback */
+  const planReview = async (state: CodeAgentState) => {
+    const request = getPendingToolRequest(state.messages, state.workspace);
+    if (request?.name !== 'update_plan') return {};
+
+    const planArgs = request.args as {
+      name: string;
+      description: string;
+      status: string;
+      steps: { step: string; status: string }[];
+    };
+    const plan: AgentPlan = {
+      name: planArgs.name,
+      description: planArgs.description,
+      status: (planArgs.status as PlanStatus) ?? 'pending',
+      steps: (planArgs.steps ?? []).map((s) => ({
+        step: s.step,
+        status: (s.status as PlanStatus) ?? 'pending',
+      })),
+    };
+
+    const resume = interrupt({
+      kind: 'plan_review',
+      plan,
+    }) as AgentResumeValue;
+
+    const resumeObj = resume as Record<string, unknown> | null | undefined;
+    const approved =
+      resume === true ||
+      (typeof resume === 'object' && resume !== null && resumeObj?.planApproved === true);
+
+    if (approved) {
+      const mode = (resumeObj?.executionMode as string) === 'manual' ? 'default' : 'full_access';
+      return {
+        messages: [
+          new ToolMessage({
+            content: JSON.stringify({ ok: true, plan }),
+            tool_call_id: request.id ?? 'missing-tool-call-id',
+            name: 'update_plan',
+            status: 'success',
+          }),
+        ],
+        plan,
+        authorization: { ...state.authorization, mode },
+      };
+    }
+
+    const supplement = resumeObj?.planSupplement;
+    if (typeof supplement === 'string' && supplement.length > 0) {
+      return rejectedToolMessage(request, `Plan needs revision. User feedback: ${supplement}`);
+    }
+
+    return rejectedToolMessage(request, 'plan rejected by user');
+  };
+
   /** 执行单个工具调用并返回 ToolMessage / Execute a single tool call and return ToolMessage */
   async function executeOneTool(
     request: import('./tool-requests').PendingToolRequest,
@@ -522,6 +578,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     .addNode('agent', agent)
     .addNode('approval', approval)
     .addNode('user_input', userInput)
+    .addNode('plan_review', planReview)
     .addNode('tools', tools)
     .addEdge(START, 'cleanup')
     .addConditionalEdges('cleanup', (state: CodeAgentState) =>
@@ -532,6 +589,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     )
     .addConditionalEdges('approval', routeAfterApproval)
     .addConditionalEdges('user_input', routeAfterUserInput)
+    .addConditionalEdges('plan_review', routeAfterPlanReview)
     .addConditionalEdges('tools', routeAfterTools)
     .compile({ checkpointer });
 

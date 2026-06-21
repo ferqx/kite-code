@@ -82,7 +82,7 @@ describe('code agent tool definitions', () => {
 
     expect(parsed.success).toBe(true);
     expect(missingName.success).toBe(false);
-    expect(String(updatePlanTool.description)).toContain('current plan state');
+    expect(String(updatePlanTool.description)).toContain('plan proposal');
   });
 
   // ── update_plan 工具执行与边界测试 / update_plan execution and edge case tests ──
@@ -211,7 +211,7 @@ describe('code agent tool definitions', () => {
       'ask_user',
     ]);
     expect(String(tools.find((item) => item.name === 'update_plan')?.description)).toContain(
-      'current plan state',
+      'plan proposal',
     );
     expect(String(tools.find((item) => item.name === 'ask_user')?.description)).toContain(
       'uncertainty',

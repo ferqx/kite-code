@@ -3,13 +3,25 @@ import type { AgentResumeValue } from '@/core/types';
 import type { PendingToolRequest } from './tool-requests';
 
 /** 规范化用户输入恢复值 / Normalize user input resume value */
-export function normalizeUserInputResume(resume: AgentResumeValue): { answer: string } {
+export function normalizeUserInputResume(resume: AgentResumeValue): {
+  answer: string;
+  answers?: Record<string, string>;
+} {
   if (typeof resume === 'string') {
     return { answer: resume };
   }
 
   if (!resume || typeof resume !== 'object') {
     return { answer: '' };
+  }
+
+  // 多问题模式：answers map / Multi-question mode: answers map
+  const answers = (resume as Record<string, unknown>).answers;
+  if (answers && typeof answers === 'object' && !Array.isArray(answers)) {
+    const map = answers as Record<string, string>;
+    // 取第一个非空答案作为兼容 answer 字段
+    const first = Object.values(map).find((v) => v.length > 0) ?? '';
+    return { answer: first, answers: map };
   }
 
   for (const key of [
@@ -35,11 +47,13 @@ export function userInputToolMessage(
   request: Extract<PendingToolRequest, { name: 'ask_user' }>,
   resume: AgentResumeValue,
 ): ToolMessage {
+  const normalized = normalizeUserInputResume(resume);
   return new ToolMessage({
     content: JSON.stringify({
       ok: true,
       tool: request.name,
-      ...normalizeUserInputResume(resume),
+      answer: normalized.answer,
+      ...(normalized.answers ? { answers: normalized.answers } : {}),
     }),
     tool_call_id: request.id ?? 'missing-tool-call-id',
     status: 'success',

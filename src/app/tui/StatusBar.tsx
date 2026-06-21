@@ -50,19 +50,28 @@ export default function StatusBar({ status, running }: StatusBarProps) {
     return `Step ${done}/${total}${active ? `: ${active.step}` : ''}`;
   }
 
-  if (!running) return null;
+  // 方案模式 idle 时也显示状态行，给用户持续的模式感知
+  // Show status bar when idle in plan mode for persistent mode awareness
+  if (!running && status.phase !== 'planning') return null;
 
+  const idlePlanMode = !running && status.phase === 'planning';
   const retry = status.retryState;
 
   return (
     <Box>
-      <Text color={t.primary}>{SPINNER[spinnerIdx]} </Text>
+      {running ? (
+        <Text color={t.primary}>{SPINNER[spinnerIdx]} </Text>
+      ) : (
+        <Text color={t.warning}>○ </Text>
+      )}
       <Text color={phaseColor}>{phaseIcon} </Text>
       <Text bold color={t.primary}>
         {phaseLabel}
       </Text>
       <Text color={t.dim}> · </Text>
-      <Text color={t.muted}>{planLabel()}</Text>
+      <Text color={t.muted}>
+        {idlePlanMode ? 'Shift+Tab to exit · describe your task' : planLabel()}
+      </Text>
       {retry && (
         <>
           <Text color={t.dim}> ·</Text>

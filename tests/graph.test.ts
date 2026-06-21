@@ -45,12 +45,13 @@ describe('graph local tool routing', () => {
     expect(s.workspaceAccess).toBe('write');
   });
 
-  // 验证 write 访问下 update_plan 工具调用直接路由到 tools，无需审批 / update_plan skips approval under write access
-  test('routes update_plan tool calls directly to tools without approval under write access', () => {
+  // 验证 write 访问下 update_plan 首次提交路由到 plan_review / update_plan first submission routes to plan_review
+  test('routes update_plan to plan_review when state.plan is null (first submission)', () => {
     expect(
       routeAfterAgent({
         workspaceAccess: 'write',
         workspace: '/tmp/workspace',
+        plan: null, // 首次提交，未批准任何 plan
         messages: [
           new AIMessage({
             content: '',
@@ -63,6 +64,34 @@ describe('graph local tool routing', () => {
                   description: activePlan.description,
                   status: activePlan.status,
                   steps: activePlan.steps,
+                },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('plan_review');
+  });
+
+  // 验证 update_plan 在已有 plan 时路由到 tools（状态更新） / update_plan after approval routes to tools for status update
+  test('routes update_plan to tools when state.plan already exists (status update)', () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        plan: activePlan, // 已批准的 plan
+        messages: [
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-2',
+                name: 'update_plan',
+                args: {
+                  name: activePlan.name,
+                  description: activePlan.description,
+                  status: 'in_progress',
+                  steps: [{ step: 'Do something', status: 'in_progress' }],
                 },
               },
             ],
@@ -719,7 +748,7 @@ describe('routeEntry — start-of-graph routing', () => {
     expect(routeEntry(state)).toBe('agent');
   });
 
-  test('routes to tools for update_plan (no approval needed)', () => {
+  test('routeEntry routes first update_plan to plan_review when no plan exists', () => {
     const state = {
       ...baseState,
       messages: [
@@ -735,7 +764,7 @@ describe('routeEntry — start-of-graph routing', () => {
         }),
       ],
     } as unknown as CodeAgentState;
-    expect(routeEntry(state)).toBe('tools');
+    expect(routeEntry(state)).toBe('plan_review');
   });
 
   test('routes to approval for write_file tool call', () => {

@@ -5,7 +5,9 @@ import type { UserAction } from '@/protocol/actions';
 import type {
   AgentEvent,
   AgentPhase,
+  AgentPlan,
   CacheMetricsPayload,
+  NeedPlanReviewPayload,
   StateChangePayload,
   ToolApprovalPayload,
   UserInputPayload,
@@ -555,13 +557,38 @@ function interruptToEvent(data: unknown): AgentEvent | null {
           const request = v.request as Record<string, unknown> | undefined;
           if (request && typeof request === 'object') {
             const args = request.args as Record<string, unknown> | undefined;
+            const rawQuestions = args?.questions as Array<Record<string, unknown>> | undefined;
             const payload: UserInputPayload = {
               question: (args?.question as string) ?? 'User input required',
               options: (args?.options as UserInputPayload['options']) ?? [],
               allow_free_text: (args?.allow_free_text as boolean) ?? true,
               context: typeof args?.context === 'string' ? args.context : undefined,
+              questions: rawQuestions?.map((q) => ({
+                id: q.id as string | undefined,
+                question: (q.question as string) ?? '',
+                options: (q.options as UserInputPayload['options']) ?? [],
+                allow_free_text: q.allow_free_text as boolean | undefined,
+              })),
             };
             return { type: 'need_input', data: payload };
+          }
+        }
+        if (v.kind === 'plan_review') {
+          const plan = v.plan as Record<string, unknown> | undefined;
+          if (plan && typeof plan === 'object') {
+            const payload: NeedPlanReviewPayload = {
+              plan: {
+                name: (plan.name as string) ?? '',
+                description: (plan.description as string) ?? '',
+                status: (plan.status as AgentPlan['status']) ?? 'pending',
+                steps:
+                  (plan.steps as Array<Record<string, unknown>> | undefined)?.map((s) => ({
+                    step: (s.step as string) ?? '',
+                    status: (s.status as AgentPlan['status']) ?? 'pending',
+                  })) ?? [],
+              },
+            };
+            return { type: 'need_plan_review', data: payload };
           }
         }
       }
@@ -576,9 +603,11 @@ function eventToInterruptPayload(
 ):
   | { kind: 'approval'; approval: ToolApprovalPayload }
   | { kind: 'input'; question: UserInputPayload }
+  | { kind: 'plan_review'; plan: AgentPlan }
   | null {
   if (event.type === 'need_approval') return { kind: 'approval', approval: event.data };
   if (event.type === 'need_input') return { kind: 'input', question: event.data };
+  if (event.type === 'need_plan_review') return { kind: 'plan_review', plan: event.data.plan };
   return null;
 }
 
@@ -591,11 +620,23 @@ function mapActionToResumeValue(action: UserAction): AgentResumeValue {
     case 'reject':
       return { approved: false };
     case 'input':
-      return { answer: action.text };
+      return action.answers
+        ? { answer: action.text, answers: action.answers }
+        : { answer: action.text };
     case 'cancel':
       return { approved: false };
     case 'switch_auth':
       return { approved: false };
+    case 'approve_plan':
+      return { planApproved: true };
+    case 'approve_plan_auto':
+      return { planApproved: true, executionMode: 'auto' };
+    case 'approve_plan_manual':
+      return { planApproved: true, executionMode: 'manual' };
+    case 'supplement_plan':
+      return { planSupplement: action.feedback };
+    case 'reject_plan':
+      return { planApproved: false };
   }
 }
 
@@ -947,9 +988,7 @@ export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenera
 
     const stream = await graph.stream(
       {
-        messages: [
-          new HumanMessage(taskMessageForInitialAccess(input.task, initialWorkspaceAccess)),
-        ],
+        messages: [new HumanMessage(input.task)],
         workspaceAccess: initialWorkspaceAccess,
         phase: initialPhase,
         plan: null,

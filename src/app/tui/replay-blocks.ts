@@ -35,15 +35,49 @@ export function sessionDataToUI(data: SessionData): {
     }
   }
 
+  // Compute next block ID from existing blocks
+  let nextId = 1;
+  for (const b of blocks) {
+    if (b.id >= nextId) nextId = b.id + 1;
+  }
+
   let interrupt: InterruptState | null = null;
   if (data.interrupt) {
     let blockId = 0;
     if (data.interrupt.kind === 'approval' && data.interrupt.callId) {
       blockId = callIdIndex[data.interrupt.callId] ?? 0;
     }
+    // plan_review 中断 → 创建 plan_review block（标记为待审批，回放时可见）
+    if (data.interrupt.kind === 'plan_review' && data.interrupt.plan) {
+      blockId = nextId++;
+      blocks.push({
+        id: blockId,
+        kind: 'plan_review',
+        plan: data.interrupt.plan,
+        resolved: { action: 'pending_review' },
+      });
+    }
     // user_input 保持 blockId=0（question block 在回放数据中不存在）
-    // user_input keeps blockId=0 (question block doesn't exist in replay data)
     interrupt = { kind: data.interrupt.kind, blockId };
+  }
+
+  // Refine 'approved' action from messages with checkpoint auth mode
+  for (const b of blocks) {
+    if (b.kind === 'plan_review' && b.resolved?.action === 'approved') {
+      const mode = data.planAuthMode === 'full_access' ? 'approved_auto' : 'approved_manual';
+      b.resolved = { action: mode };
+    }
+  }
+
+  // 已批准的方案（从 checkpoint state.plan 提取，消息中没有 update_plan 调用时兜底）
+  if (!data.interrupt && data.plan && !blocks.some((b) => b.kind === 'plan_review')) {
+    const action = data.planAuthMode === 'full_access' ? 'approved_auto' : 'approved_manual';
+    blocks.push({
+      id: nextId++,
+      kind: 'plan_review',
+      plan: data.plan,
+      resolved: { action },
+    });
   }
 
   return { blocks, interrupt };
@@ -55,6 +89,11 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
   let nextId = 1;
   // Track pending task tool calls: callId → { subagent_type, task }
   const pendingTasks = new Map<string, PendingTaskCall>();
+  // Track update_plan calls: callId → plan args (for plan_review block reconstruction)
+  const pendingPlans = new Map<
+    string,
+    { name: string; description: string; steps: { step: string; status: string }[] }
+  >();
 
   for (const msg of messages) {
     if (!msg || typeof msg !== 'object') continue;
@@ -106,6 +145,15 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
               pendingTasks.set(callId, { subagentType, task });
               continue;
             }
+            // update_plan → save plan args, skip tool_card (plan shown as plan_review block)
+            if (name === 'update_plan') {
+              pendingPlans.set(callId, {
+                name: (args.name as string) ?? '',
+                description: (args.description as string) ?? '',
+                steps: (args.steps as Array<{ step: string; status: string }>) ?? [],
+              });
+              continue;
+            }
             blocks.push({
               id: nextId++,
               kind: 'tool_card',
@@ -155,6 +203,33 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
           ...(error ? { error } : {}),
         });
         pendingTasks.delete(callId);
+        continue;
+      }
+
+      // update_plan result → create plan_review block
+      if (tmName === 'update_plan') {
+        const planData = pendingPlans.get(callId);
+        if (planData) {
+          const resolved = parsePlanOutcome(typeof tm.content === 'string' ? tm.content : '');
+          blocks.push({
+            id: nextId++,
+            kind: 'plan_review',
+            plan: {
+              name: planData.name,
+              description: planData.description,
+              status:
+                resolved.action === 'approved_auto' || resolved.action === 'approved_manual'
+                  ? 'in_progress'
+                  : 'pending',
+              steps: planData.steps.map((s) => ({
+                step: s.step,
+                status: s.status as 'pending' | 'in_progress' | 'completed',
+              })),
+            },
+            resolved,
+          });
+        }
+        pendingPlans.delete(callId);
         continue;
       }
 
@@ -229,7 +304,50 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
     });
   }
 
+  // Any pending plan calls without ToolMessage result → create pending_review block
+  for (const [, planData] of pendingPlans) {
+    blocks.push({
+      id: nextId++,
+      kind: 'plan_review',
+      plan: {
+        name: planData.name,
+        description: planData.description,
+        status: 'pending',
+        steps: planData.steps.map((s) => ({
+          step: s.step,
+          status: s.status as 'pending' | 'in_progress' | 'completed',
+        })),
+      },
+      resolved: { action: 'pending_review' },
+    });
+  }
+
   return blocks;
+}
+
+/** Parse update_plan ToolMessage content → plan_review resolved action */
+function parsePlanOutcome(content: string): { action: string; feedback?: string } {
+  try {
+    const p = JSON.parse(content);
+    if (p && typeof p === 'object') {
+      if (p.ok !== false) {
+        return { action: 'approved' };
+      }
+      if (p.rejected) {
+        const reason = (p.reason as string) ?? '';
+        if (reason.includes('User feedback:')) {
+          return {
+            action: 'supplemented',
+            feedback: reason.replace('Plan needs revision. User feedback: ', ''),
+          };
+        }
+        return { action: 'rejected' };
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return { action: 'rejected' };
 }
 
 /** Parse task tool ToolMessage content into subagent block fields */

@@ -1,6 +1,13 @@
 import { Box, Text, useWindowSize } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
-import React, { type Dispatch, type ReactNode, useCallback, useMemo, useReducer } from 'react';
+import React, {
+  type Dispatch,
+  type ReactNode,
+  useCallback,
+  useMemo,
+  useReducer,
+  useRef,
+} from 'react';
 import type { McpManager } from '@/core/mcp';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
@@ -8,7 +15,9 @@ import HelpPanel from './components/HelpPanel';
 import InputBlock from './components/InputBlock';
 import McpPanel from './components/McpPanel';
 import ModelSelector from './components/ModelSelector';
+import PlanReviewBlock from './components/PlanReviewBlock';
 import SessionSelector from './components/SessionSelector.js';
+import TaskProgressBlock from './components/TaskProgressBlock';
 import Footer from './Footer';
 import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
@@ -120,7 +129,8 @@ export default function App({
     state.showMcp ||
     state.showRewind ||
     !!state.interrupt;
-  useGlobalKeys(dispatch, overlayOrInterrupt);
+  const supplementEscRef = useRef(false);
+  useGlobalKeys(dispatch, overlayOrInterrupt, supplementEscRef);
 
   // Stabilized callbacks for React.memo children
   const hideHelp = useCallback(() => dispatch({ type: 'HIDE_HELP' }), [dispatch]);
@@ -191,9 +201,25 @@ export default function App({
   );
 
   const resolveInput = useCallback(
-    (answer: string) => {
+    (answer: string, answers?: Record<string, string>) => {
       if (!interruptBlock) return;
-      dispatch({ type: 'RESOLVE_INTERRUPT', blockId: interruptBlock.id, resolution: answer });
+      dispatch({
+        type: 'RESOLVE_INTERRUPT',
+        blockId: interruptBlock.id,
+        resolution: answers ? { action: 'input', text: answer, answers } : answer,
+      });
+    },
+    [dispatch, interruptBlock],
+  );
+
+  const resolvePlanReview = useCallback(
+    (action: string, feedback?: string) => {
+      if (!interruptBlock) return;
+      dispatch({
+        type: 'RESOLVE_INTERRUPT',
+        blockId: interruptBlock.id,
+        resolution: { action, feedback },
+      });
     },
     [dispatch, interruptBlock],
   );
@@ -245,7 +271,15 @@ export default function App({
       />
 
       {/* ── Footer: 3-row interaction zone ── */}
-      <Footer status={state.status} running={state.running} timerKey={state.runCount}>
+      {/* 审批通过后：任务进度列表 / Post-approval: task progress list */}
+      {!state.interrupt && state.status.plan && state.status.plan.steps.length > 0 && (
+        <TaskProgressBlock plan={state.status.plan} />
+      )}
+      <Footer
+        status={state.status}
+        running={state.running && !state.interrupt}
+        timerKey={state.runCount}
+      >
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}
         {!state.interrupt && children}
         {interruptBlock?.kind === 'approval' && !interruptBlock.resolved && (
@@ -260,6 +294,14 @@ export default function App({
             question={interruptBlock.question}
             provider={provider}
             onResolved={resolveInput}
+          />
+        )}
+        {interruptBlock?.kind === 'plan_review' && !interruptBlock.resolved && (
+          <PlanReviewBlock
+            plan={interruptBlock.plan}
+            provider={provider}
+            onResolved={resolvePlanReview}
+            supplementEscRef={supplementEscRef}
           />
         )}
       </Footer>

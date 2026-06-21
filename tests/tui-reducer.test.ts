@@ -493,6 +493,42 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'SET_PHASE', phase: 'building' });
       expect(s.status.phase).toBe('building');
     });
+    test('TOGGLE_PLAN_MODE toggles phase and resets auth', () => {
+      let s = fresh();
+      // 先设为 full_access / Start with full_access
+      s = dispatch(s, { type: 'SWITCH_AUTH', mode: 'full_access' });
+      expect(s.status.authorization).toBe('full_access');
+      // 切换到 planning / Toggle to planning
+      s = dispatch(s, { type: 'TOGGLE_PLAN_MODE' });
+      expect(s.status.phase).toBe('planning');
+      expect(s.status.authorization).toBe('default');
+      // 切回 building，auth 保持 / Toggle back, auth stays
+      s = dispatch(s, { type: 'TOGGLE_PLAN_MODE' });
+      expect(s.status.phase).toBe('building');
+      expect(s.status.authorization).toBe('default');
+    });
+    test('plan_review resolved with auto/manual shows in block', () => {
+      const eventPayload = {
+        plan: { name: 'Test', description: 'Desc', status: 'pending' as const, steps: [] },
+      };
+      const event: Action = {
+        type: 'EVENT',
+        event: { type: 'need_plan_review' as any, data: eventPayload },
+      };
+      let s = dispatch(fresh(), event);
+      const block = flatBlocks(s).find((b) => b.kind === 'plan_review');
+      expect(block).toBeDefined();
+      expect(s.interrupt?.kind).toBe('plan_review');
+      // Resolve with auto
+      s = dispatch(s, {
+        type: 'RESOLVE_INTERRUPT',
+        blockId: block!.id,
+        resolution: { action: 'approved_auto' },
+      });
+      const resolved = flatBlocks(s).find((b) => b.kind === 'plan_review');
+      expect(resolved?.resolved).toEqual({ action: 'approved_auto' });
+      expect(s.interrupt).toBeNull();
+    });
     test('SHOW_MODEL_SELECTOR / HIDE_MODEL_SELECTOR', () => {
       let s = fresh();
       s = dispatch(s, { type: 'SHOW_MODEL_SELECTOR' });

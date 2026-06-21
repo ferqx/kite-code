@@ -9,7 +9,9 @@ import InputBlock from '../src/app/tui/components/InputBlock';
 import InputLine from '../src/app/tui/components/InputLine';
 import MarkdownBlock from '../src/app/tui/components/MarkdownBlock';
 import ModelSelector from '../src/app/tui/components/ModelSelector';
+import PlanReviewBlock from '../src/app/tui/components/PlanReviewBlock';
 import StartupScreen from '../src/app/tui/components/StartupScreen';
+import TaskProgressBlock from '../src/app/tui/components/TaskProgressBlock';
 import DiffPreview from '../src/app/tui/DiffPreview';
 import Footer from '../src/app/tui/Footer';
 import Header from '../src/app/tui/Header';
@@ -24,7 +26,7 @@ import type {
   TuiState,
   Turn,
 } from '../src/app/tui/types';
-import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
+import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
 
 // ── Shared helpers ──
 
@@ -398,7 +400,7 @@ describe('HelpPanel', () => {
 
   test('shows close hint', () => {
     const { lastFrame } = render(<HelpPanel onClose={noop} />);
-    expect(lastFrame()).toContain('Esc 关闭  ↑↓ 滚动');
+    expect(lastFrame()).toContain('Esc 关闭');
   });
 });
 
@@ -467,41 +469,39 @@ describe('StartupScreen', () => {
 // ── ApprovalBlock ──
 
 describe('ApprovalBlock', () => {
-  test('renders ⚠ icon and command', () => {
+  test('renders tool name and command', () => {
     const approval = fakeApproval({ command: 'rm -rf /tmp/test' });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('⚠');
+    expect(frame).toContain('● shell_execute');
     expect(frame).toContain('rm -rf /tmp/test');
   });
 
-  test('shows all grant options with compact labels', () => {
+  test('shows all grant options with labels', () => {
     const approval = fakeApproval();
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('[A]Approve');
-    expect(frame).toContain('[S]Same Cmd');
-    expect(frame).toContain('[F]Full Access');
-    expect(frame).toContain('[D]Deny');
+    expect(frame).toContain('Approve once');
+    expect(frame).toContain('Approve same command');
+    expect(frame).toContain('Approve all');
+    expect(frame).toContain('Deny');
   });
 
-  test('does not show summary, reason, or risk text', () => {
+  test('shows summary and risk text', () => {
     const approval = fakeApproval({
       summary: 'Delete temp files',
-      reason: 'Cleanup needed',
       risk: 'destructive',
     });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).not.toContain('Delete temp files');
-    expect(frame).not.toContain('Cleanup needed');
-    expect(frame).not.toContain('destructive');
+    expect(frame).toContain('Delete temp files');
+    expect(frame).toContain('destructive');
   });
 
   test('non‑shell tools only show approve and deny', () => {
@@ -510,10 +510,10 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('[A]Approve');
-    expect(frame).toContain('[D]Deny');
-    expect(frame).not.toContain('[S]');
-    expect(frame).not.toContain('[F]');
+    expect(frame).toContain('Approve once');
+    expect(frame).toContain('Deny');
+    expect(frame).not.toContain('Approve same command');
+    expect(frame).not.toContain('Approve all');
   });
 });
 
@@ -564,7 +564,121 @@ describe('InputBlock', () => {
     const { lastFrame } = render(
       <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    expect(lastFrame()).toContain('[Tab]');
+    expect(lastFrame()).toContain('Tab type freely');
+  });
+});
+
+// ── PlanReviewBlock ──
+
+function fakePlan(overrides: Partial<AgentPlan> = {}): AgentPlan {
+  return {
+    name: 'Test Plan',
+    description: 'A test plan description',
+    status: 'pending',
+    steps: [
+      { step: 'Step one', status: 'pending' },
+      { step: 'Step two', status: 'pending' },
+    ],
+    ...overrides,
+  };
+}
+
+describe('TaskProgressBlock', () => {
+  test('renders nothing when steps is empty', () => {
+    const plan = fakePlan({ steps: [] });
+    const { lastFrame } = render(<TaskProgressBlock plan={plan} />);
+    const frame = lastFrame();
+    // 组件应返回 null — 输出中不存在任何步骤图标或步骤名称
+    expect(frame).not.toContain('Step one');
+    expect(frame).not.toContain('✓');
+    expect(frame).not.toContain('▶');
+    expect(frame).not.toContain('○');
+  });
+
+  test('renders step icons matching status', () => {
+    const plan = fakePlan({
+      steps: [
+        { step: 'Done step', status: 'completed' },
+        { step: 'Active step', status: 'in_progress' },
+        { step: 'Waiting step', status: 'pending' },
+      ],
+    });
+    const { lastFrame } = render(<TaskProgressBlock plan={plan} />);
+    const frame = lastFrame();
+    expect(frame).toContain('✓');
+    expect(frame).toContain('▶');
+    expect(frame).toContain('○');
+  });
+
+  test('renders step names in order', () => {
+    const plan = fakePlan({
+      steps: [
+        { step: 'First step', status: 'completed' },
+        { step: 'Second step', status: 'pending' },
+      ],
+    });
+    const { lastFrame } = render(<TaskProgressBlock plan={plan} />);
+    const frame = lastFrame() ?? '';
+    const firstIdx = frame.indexOf('First step');
+    const secondIdx = frame.indexOf('Second step');
+    expect(firstIdx).toBeGreaterThan(-1);
+    expect(secondIdx).toBeGreaterThan(firstIdx);
+  });
+});
+
+describe('PlanReviewBlock', () => {
+  test('renders three options with recommended tag', () => {
+    const plan = fakePlan();
+    const { lastFrame } = render(
+      <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain('Yes, and use auto mode');
+    expect(frame).toContain('(Recommended)');
+    expect(frame).toContain('Yes, manually approve edits');
+    expect(frame).toContain('Tell Agent what to change');
+  });
+
+  test('shows option descriptions', () => {
+    const plan = fakePlan();
+    const { lastFrame } = render(
+      <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain('Plan executes without further approvals');
+    expect(frame).toContain('Each file edit requires confirmation');
+    expect(frame).toContain('Provide feedback to revise the plan');
+  });
+
+  test('shows quick key hint', () => {
+    const plan = fakePlan();
+    const { lastFrame } = render(
+      <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    expect(lastFrame()).toContain('a/m/t quick key');
+  });
+});
+
+// ── InputLine plan mode ──
+
+describe('InputLine plan mode', () => {
+  test('shows plan mode prompt and indicator when planMode=true', () => {
+    const { lastFrame } = render(
+      <InputLine mode="prompt" planMode={true} onSubmit={noop} workspace="/test" />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain('Plan mode');
+    expect(frame).toContain('Shift+Tab');
+    expect(frame).toContain('≻◷');
+  });
+
+  test('shows normal prompt when planMode=false', () => {
+    const { lastFrame } = render(
+      <InputLine mode="prompt" planMode={false} onSubmit={noop} workspace="/test" />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain('❯');
+    expect(frame).not.toContain('Plan mode');
   });
 });
 
@@ -1164,44 +1278,45 @@ describe('OutputArea', () => {
     expect(lastFrame()).not.toContain('npm publish');
   });
 
-  test('resolved approval block renders nothing', () => {
+  test('resolved approval block shows confirmation for scrollback', () => {
     const blocks: OutputBlock[] = [
       {
         id: 1,
         kind: 'approval',
         approval: fakeApproval(),
-        resolved: { action: 'full_access', grant: 'full_access' },
+        resolved: { action: 'approve', grant: 'full_access' },
       },
     ];
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).not.toContain('Approved');
+    expect(lastFrame()).toContain('Approved');
   });
 
-  test('denied approval block renders nothing', () => {
+  test('denied approval block shows rejection for scrollback', () => {
     const blocks: OutputBlock[] = [
       {
         id: 1,
         kind: 'approval',
         approval: fakeApproval(),
-        resolved: { action: 'denied' },
+        resolved: { action: 'reject' },
       },
     ];
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).not.toContain('Denied');
+    expect(lastFrame()).toContain('Rejected');
   });
 
-  test('renders question block', () => {
+  test('renders question text for unresolved question (scrollback marker)', () => {
     const blocks: OutputBlock[] = [
       { id: 1, kind: 'question', question: fakeQuestion({ question: 'Continue?' }) },
     ];
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).toContain('Question');
+    // 显示实际问题文本作为 scrollback 标记 / Shows actual question text as scrollback marker
+    expect(lastFrame()).toContain('Continue?');
   });
 
   test('renders resolved question block', () => {
@@ -1304,7 +1419,7 @@ describe('App', () => {
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    expect(lastFrame()).toContain('⚠');
+    expect(lastFrame()).toContain('● shell_execute');
   });
 
   test('shows InputBlock when interrupt is question', () => {

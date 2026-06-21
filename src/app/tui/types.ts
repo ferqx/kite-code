@@ -40,7 +40,18 @@ export type OutputBlock =
       approval: ToolApprovalPayload;
       resolved?: { action: string; grant?: string; pattern?: string };
     }
-  | { id: number; kind: 'question'; question: UserInputPayload; resolved?: string }
+  | {
+      id: number;
+      kind: 'question';
+      question: UserInputPayload;
+      resolved?: string | { text: string; answers?: Record<string, string> };
+    }
+  | {
+      id: number;
+      kind: 'plan_review';
+      plan: AgentPlan;
+      resolved?: { action: string; feedback?: string };
+    }
   | {
       id: number;
       kind: 'subagent';
@@ -106,7 +117,7 @@ export interface TuiState {
 }
 
 export interface InterruptState {
-  kind: 'approval' | 'input';
+  kind: 'approval' | 'input' | 'plan_review';
   blockId: number;
 }
 

@@ -8,6 +8,7 @@ export type AgentEvent =
   | { type: 'tool_done'; data: ToolResultPayload }
   | { type: 'need_approval'; data: ToolApprovalPayload }
   | { type: 'need_input'; data: UserInputPayload }
+  | { type: 'need_plan_review'; data: NeedPlanReviewPayload }
   | { type: 'state_change'; data: StateChangePayload }
   | {
       type: 'file_change';
@@ -94,11 +95,24 @@ export interface ToolResultPayload {
   toolTokenCount?: number;
 }
 
+export interface UserInputQuestion {
+  id?: string;
+  question: string;
+  options: UserInputOption[];
+  allow_free_text?: boolean;
+}
+
 export interface UserInputPayload {
   question: string;
   options: UserInputOption[];
   allow_free_text: boolean;
   context?: string;
+  /** 多问题模式：一次 ask_user 携带多个问题，TUI 用分步 wizard 渲染 / Multi-question mode: ask multiple at once, TUI renders as step wizard */
+  questions?: UserInputQuestion[];
+}
+
+export interface NeedPlanReviewPayload {
+  plan: AgentPlan;
 }
 
 /** 用户输入消息负载 / User message payload */
@@ -201,6 +215,8 @@ export interface ToolApprovalPayload {
   expectedObservation?: string;
   failureStrategy?: string;
   suggestedPrefixRule?: string[];
+  /** update_plan 的方案数据（审批时嵌入） */
+  plan?: AgentPlan;
 }
 
 // ── 子 Agent 事件 / Sub-agent events ──

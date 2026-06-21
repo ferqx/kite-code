@@ -287,23 +287,52 @@ function createUpdatePlanTool() {
   );
 }
 
-/** 创建 ask_user 工具定义，用于规划时向用户澄清关键不确定性 / Create ask_user tool definition for user clarification */
+/** 创建 ask_user 工具定义，用于规划时向用户澄清关键不确定性。
+ *  支持单问题模式和 questions 数组多问题模式。
+ *  Create ask_user tool definition for user clarification.
+ *  Supports single-question mode and multi-question (questions array) mode. */
 function createAskUserTool() {
+  const questionItemSchema = z.object({
+    id: z.string().optional().describe("Stable identifier, e.g. 'scope' or 'tech'"),
+    question: z.string().min(1).describe('The question text'),
+    options: z
+      .array(
+        z.object({
+          id: z.string().optional().describe("Stable option id, e.g. 'minimal' or 'full'"),
+          label: z.string().min(1).describe('User-facing option label'),
+          description: z
+            .string()
+            .optional()
+            .describe('Short explanation of the trade-off for this option'),
+        }),
+      )
+      .min(1)
+      .describe('Suggested answer options'),
+    allow_free_text: z
+      .boolean()
+      .optional()
+      .describe('Whether user may type custom answer for this question; default true'),
+  });
+
   return tool(
-    async ({ question, options, allow_free_text, context }) =>
+    async ({ question, options, allow_free_text, context, questions }) =>
       JSON.stringify({
         ok: false,
         question,
         options,
         allow_free_text: allow_free_text ?? true,
         context,
+        questions,
         stderr: 'ask_user is handled by the harness as a user_input interrupt.',
       }),
     {
       name: 'ask_user',
       description: ASK_USER_CONTRACT.description,
       schema: z.object({
-        question: z.string().min(1).describe('One concise question for the user to answer'),
+        question: z
+          .string()
+          .min(1)
+          .describe('Main question or summary (used when questions array not provided)'),
         options: z
           .array(
             z.object({
@@ -316,7 +345,7 @@ function createAskUserTool() {
             }),
           )
           .min(1)
-          .describe('Suggested answer options for the user'),
+          .describe('Suggested answer options for single-question mode'),
         allow_free_text: z
           .boolean()
           .optional()
@@ -325,6 +354,12 @@ function createAskUserTool() {
           .string()
           .optional()
           .describe('Short context explaining why this clarification is needed'),
+        questions: z
+          .array(questionItemSchema)
+          .optional()
+          .describe(
+            'Multiple questions at once — TUI renders as a step wizard. Use this to batch clarifications instead of making multiple ask_user calls.',
+          ),
       }),
     },
   );

@@ -61,6 +61,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
   awaitingApproval,
 }: BlockRendererProps) {
   const dt = useTheme();
+
   switch (block.kind) {
     case 'user': {
       const prompt = '❯ ';
@@ -145,25 +146,141 @@ const BlockRenderer = React.memo(function BlockRenderer({
       );
 
     case 'approval': {
-      // 审批展示在 Footer，输出区无需重复
-      // Approval UI is in Footer, no duplicate needed in output area
-      return null;
-    }
-    case 'question': {
+      // 审批中：Footer 渲染 ApprovalBlock，输出区不重复
+      // 已审批：显示简要确认 / Resolved: show brief confirmation for scrollback
+      if (!block.resolved) return null;
+
+      const aRes = block.resolved;
+      const aGrant = aRes.grant ?? aRes.pattern ?? '';
+      const approved = aRes.action !== 'reject' && aRes.action !== 'cancelled';
       return (
         <Box flexDirection="column" {...gapFrom(prevBlock)}>
-          {block.resolved ? (
-            block.resolved === 'cancelled' ? (
-              <Text color={dt.dim}>⊘ Question cancelled</Text>
-            ) : (
-              <Text>
-                <Text color={dt.success}>✓ Answered: </Text>
-                <Text color={dt.muted}>{block.resolved}</Text>
+          <Text>
+            <Text color={approved ? dt.success : dt.error}>{approved ? '✓' : '✗'}</Text>
+            <Text color={dt.muted}>
+              {' '}
+              {approved ? 'Approved' : aRes.action === 'cancelled' ? 'Cancelled' : 'Rejected'}
+              {aGrant ? ` · ${aGrant}` : ''}
+            </Text>
+          </Text>
+        </Box>
+      );
+    }
+    case 'question': {
+      if (!block.resolved) {
+        // 提问进行中：Footer 已渲染完整 UI；输出区显示问题文本作为 scrollback 标记
+        return (
+          <Box flexDirection="column" {...gapFrom(prevBlock)}>
+            <Text color={dt.primary}>? {block.question.question}</Text>
+          </Box>
+        );
+      }
+      if (block.resolved === 'cancelled') {
+        return (
+          <Box flexDirection="column" {...gapFrom(prevBlock)}>
+            <Text color={dt.dim}>Question skipped</Text>
+          </Box>
+        );
+      }
+      if (typeof block.resolved === 'object') {
+        // 多问题模式 / Multi-question mode
+        return (
+          <Box flexDirection="column" {...gapFrom(prevBlock)}>
+            <Text color={dt.success}>✓ Answered:</Text>
+            {block.resolved.answers &&
+              Object.entries(block.resolved.answers).map(([id, val]) => (
+                <Text key={id} color={dt.muted}>
+                  {'  '}
+                  {id}: {val}
+                </Text>
+              ))}
+          </Box>
+        );
+      }
+      return (
+        <Box flexDirection="column" {...gapFrom(prevBlock)}>
+          <Text>
+            <Text color={dt.success}>✓ Answered: </Text>
+            <Text color={dt.muted}>{block.resolved}</Text>
+          </Text>
+        </Box>
+      );
+    }
+
+    case 'plan_review': {
+      // 方案内容直接渲染到 OutputArea（进入 Static），Footer 只渲染确认条
+      // Plan content renders in OutputArea (frozen to Static), Footer only shows confirm bar
+
+      const pRes = block.resolved;
+      const autoMode = pRes?.action === 'approved_auto';
+      const manualMode = pRes?.action === 'approved_manual';
+      const approved = autoMode || manualMode;
+      const supplemented = pRes?.action === 'supplemented';
+      const cancelled = pRes?.action === 'cancelled';
+      const pendingReview = !pRes || pRes.action === 'pending_review';
+
+      const STATUS_ICON: Record<string, string> = {
+        pending: '○',
+        in_progress: '▶',
+        completed: '✓',
+      };
+
+      // 有方案内容时渲染完整卡片（统一风格，仅标签文字区分状态）
+      // Render full plan card — consistent style, status differentiated by label text only
+      if (block.plan) {
+        const label = approved
+          ? ` · ${autoMode ? 'auto mode' : 'manual approval'}`
+          : supplemented
+            ? ' · supplemented'
+            : cancelled
+              ? ' · cancelled'
+              : pendingReview
+                ? ' · awaiting review'
+                : ' · rejected';
+
+        const cardMaxWidth = Math.max(40, columns - 6);
+        return (
+          <Box flexDirection="column" marginY={1} width={cardMaxWidth}>
+            <Box flexDirection="column" borderStyle="round" borderColor={dt.primary} paddingX={1}>
+              <Text bold color={dt.primary}>
+                Plan: {block.plan.name}
+                <Text color={dt.dim}>{label}</Text>
               </Text>
-            )
-          ) : (
-            <Text color={dt.primary}>? Question</Text>
-          )}
+              {block.plan.description && (
+                <Box marginTop={1} flexDirection="column">
+                  <MarkdownBlock content={block.plan.description} />
+                </Box>
+              )}
+              {block.plan.steps.length > 0 && (
+                <Box marginTop={1} flexDirection="column">
+                  {block.plan.steps.map((s, i) => (
+                    <Text key={`${s.step}-${i}`} color={dt.muted}>
+                      {STATUS_ICON[s.status] ?? '○'} {i + 1}. {s.step}
+                    </Text>
+                  ))}
+                </Box>
+              )}
+            </Box>
+          </Box>
+        );
+      }
+
+      // 无方案内容（理论上不应出现）/ No plan content (should not happen)
+      return (
+        <Box flexDirection="column" {...gapFrom(prevBlock)}>
+          <Text>
+            <Text color={approved ? dt.success : dt.error}>
+              {approved ? '✓' : supplemented ? '↩' : '✗'}
+            </Text>
+            <Text color={dt.muted}>
+              {' '}
+              {supplemented
+                ? `Plan supplemented: ${pRes.feedback ?? ''}`
+                : cancelled
+                  ? 'Plan cancelled'
+                  : 'Plan rejected'}
+            </Text>
+          </Text>
         </Box>
       );
     }

@@ -532,7 +532,10 @@ describe('graph integration', () => {
             messages: [new HumanMessage('创建计划')],
             workspaceAccess: 'write',
             phase: 'building',
-            plan: null,
+            // 设置已有 plan 使 update_plan 走 tools 直通路径（状态更新），
+            // 避免触发新的 plan_review 中断 / existing plan routes update_plan
+            // to tools (status update), avoiding the new plan_review interrupt
+            plan: { name: 'existing', description: '', status: 'in_progress', steps: [] },
             userId: 'test',
             threadId: 't7',
             workspace,
@@ -1078,7 +1081,10 @@ describe('checkpoint recovery', () => {
           messages: [new HumanMessage('执行多步任务')],
           workspaceAccess: 'write',
           phase: 'building',
-          plan: null,
+          // 设置已有 plan 使 update_plan 走 tools 直通路径，
+          // 避免触发新的 plan_review 中断 / existing plan routes update_plan
+          // to tools, avoiding the new plan_review interrupt
+          plan: { name: 'existing', description: '', status: 'in_progress', steps: [] },
           userId: 'test',
           threadId: 'ck3',
           workspace,

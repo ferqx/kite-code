@@ -9,10 +9,12 @@ function resolveToolRoute(
   state: CodeAgentState,
   override?: AuthorizationOverride,
   mcpRiskOverride?: Record<string, 'read'>,
-): 'approval' | 'tools' | 'user_input' | null {
+): 'approval' | 'tools' | 'user_input' | 'plan_review' | null {
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) return null;
   if (request.name === 'ask_user') return 'user_input';
+  // 只有首次提交 plan（state.plan 为空）时才触发审查——后续调用是状态更新，直接执行
+  if (request.name === 'update_plan' && !state.plan) return 'plan_review';
 
   const workspaceAccess = state.workspaceAccess ?? 'write';
   const decision = evaluateToolPolicy({
@@ -35,7 +37,7 @@ export function routeEntry(
   state: CodeAgentState,
   override?: AuthorizationOverride,
   mcpRiskOverride?: Record<string, 'read'>,
-): 'agent' | 'approval' | 'tools' | 'user_input' {
+): 'agent' | 'approval' | 'tools' | 'user_input' | 'plan_review' {
   return resolveToolRoute(state, override, mcpRiskOverride) ?? 'agent';
 }
 
@@ -44,7 +46,7 @@ export function routeAfterAgent(
   state: CodeAgentState,
   override?: AuthorizationOverride,
   mcpRiskOverride?: Record<string, 'read'>,
-): 'approval' | 'tools' | 'user_input' | typeof END {
+): 'approval' | 'tools' | 'user_input' | 'plan_review' | typeof END {
   return resolveToolRoute(state, override, mcpRiskOverride) ?? END;
 }
 
@@ -80,5 +82,10 @@ export function routeAfterTools(_state: CodeAgentState): 'agent' {
 
 /** user_input 节点后的路由逻辑 / Routing after user_input node */
 export function routeAfterUserInput(_state: CodeAgentState): 'agent' {
+  return 'agent';
+}
+
+/** plan_review 节点后的路由逻辑 / Routing after plan_review node */
+export function routeAfterPlanReview(_state: CodeAgentState): 'agent' {
   return 'agent';
 }

@@ -55,6 +55,8 @@ interface InputLineProps {
   initialValue?: string;
   /** Called when the input value changes (for external state sync). */
   onValueChange?: (value: string) => void;
+  /** Plan mode — 方案模式下显示专用 prompt 和 indicator bar */
+  planMode?: boolean;
 }
 
 function commonPrefix(strings: string[]): string {
@@ -113,6 +115,7 @@ export default function InputLine({
   onSlashSuggestionChange,
   initialValue = '',
   onValueChange,
+  planMode = false,
 }: InputLineProps) {
   const t = useTheme();
   const { columns } = useWindowSize();
@@ -533,7 +536,13 @@ export default function InputLine({
   }
 
   const promptChar =
-    mode === 'approval' ? '↑↓ select · Enter confirm  ' : mode === 'question' ? '? ' : '❯ ';
+    mode === 'approval'
+      ? '↑↓ select · Enter confirm  '
+      : mode === 'question'
+        ? '? '
+        : planMode
+          ? '≻◷  '
+          : '❯ ';
   const promptWidth = stringWidth(promptChar);
   const inputMaxWidth = Math.max(1, columns - promptWidth * 2);
 
@@ -541,8 +550,18 @@ export default function InputLine({
 
   return (
     <Box flexDirection="column">
+      {/* Plan mode indicator bar */}
+      {planMode && (
+        <Box flexDirection="column">
+          <Box>
+            <Text color={t.primary}>┌ Plan mode</Text>
+            <Text color={t.dim}> Shift+Tab to exit</Text>
+          </Box>
+          <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>
+        </Box>
+      )}
       {/* Main input line with ghost text */}
-      <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>
+      {!planMode && <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
       <Box>
         <Text color={t.primary} bold={slashMatched}>
           {promptChar}
@@ -562,7 +581,9 @@ export default function InputLine({
           maxWidth={inputMaxWidth}
         />
       </Box>
-      <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>
+      {!planMode && <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
+      {/* Plan mode bottom bar */}
+      {planMode && <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
 
       {pasteState && (
         <Box marginTop={1}>

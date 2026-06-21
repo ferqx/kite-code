@@ -104,7 +104,7 @@ function createCliProvider(_args: ParsedArgs): UserInputProvider {
         console.error(`\n[APPROVAL REQUIRED] ${a.tool}: ${a.command}`);
         console.error(`Risk: ${a.risk} | ${a.summary}`);
         console.error('Type y/yes to approve, n to reject, f/full_access for full access:');
-      } else {
+      } else if (payload.kind === 'input') {
         const q = payload.question;
         console.error(`\n[QUESTION] ${q.question}`);
         if (q.options.length > 0) {
@@ -113,6 +113,19 @@ function createCliProvider(_args: ParsedArgs): UserInputProvider {
           });
         }
         console.error('Enter your answer:');
+      } else {
+        // plan_review
+        const p = payload.plan;
+        console.error(`\n[PLAN REVIEW] ${p.name}`);
+        console.error(p.description);
+        if (p.steps.length > 0) {
+          p.steps.forEach((s, i) => {
+            console.error(`  ${i + 1}. ${s.step} [${s.status}]`);
+          });
+        }
+        console.error(
+          'Type a/auto for full access, m/manual for per-edit approval, t/tell to give feedback, r/reject to reject:',
+        );
       }
 
       const data = await readStdin();
@@ -122,6 +135,17 @@ function createCliProvider(_args: ParsedArgs): UserInputProvider {
           return { type: 'approve', grant: 'full_access' };
         if (lower === 'y' || lower === 'yes') return { type: 'approve', grant: 'approve_once' };
         return { type: 'reject' };
+      }
+      if (payload.kind === 'plan_review') {
+        const lower = data.toLowerCase();
+        if (lower === 'a' || lower === 'auto') return { type: 'approve_plan_auto' };
+        if (lower === 'm' || lower === 'manual') return { type: 'approve_plan_manual' };
+        if (lower === 't' || lower === 'tell') {
+          console.error('Enter your feedback:');
+          const feedback = await readStdin();
+          return { type: 'supplement_plan', feedback };
+        }
+        return { type: 'reject_plan' };
       }
       return { type: 'input', text: data };
     },

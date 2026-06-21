@@ -139,14 +139,32 @@ export const UPDATE_PLAN_CONTRACT: ToolContract = {
   name: 'update_plan',
   sections: {
     whenToUse:
-      'Update the current plan state when tracking progress is materially helpful. ' +
-      "Plan steps describe goals, not tool invocations — don't list file edits or shell_execute calls. " +
-      "Don't call update_plan for trivial actions — only when the user benefits from tracking.",
-    commonMistakes:
-      'Including tool calls (file edits, shell commands, installs) as plan steps instead of goals. ' +
-      'Overusing update_plan for trivial progress.',
+      'FIRST CALL (plan proposal): Call update_plan with a thorough plan outline before any other tools. ' +
+      'The plan is shown to the user for review. The user can: ' +
+      '(a) approve — execution begins immediately; ' +
+      '(b) supplement — provide feedback for you to revise the plan, then call update_plan again with the revised plan; ' +
+      '(c) reject — discard the plan. ' +
+      'If the user supplements, you receive their feedback as a rejection reason — revise the plan accordingly and call update_plan again. ' +
+      'SUBSEQUENT CALLS (progress tracking): After plan approval, call update_plan to mark steps as in_progress/completed as you execute. ' +
+      'Once the plan is approved, execution tools (read_file, edit_file, write_file, shell_execute) become available. ' +
+      'Do NOT call update_plan for trivial single-step tasks.',
     outputFormat:
-      'JSON with ok: true and a plan object: name, description, status (pending|in_progress|completed), steps (array of {step, status}).',
+      'JSON: { ok: true, plan: { name, description, status, steps } }.\n' +
+      '- name: short title (one line)\n' +
+      '- description: FULL plan details — architecture, design decisions, file structure, ' +
+      'dependencies, data flow, trade-offs. Put ALL substantive content here. ' +
+      'This is what the user reviews, so make it thorough.\n' +
+      '- status: pending / in_progress / completed\n' +
+      '- steps: SHORT goal markers (3-6 words each) for progress tracking ONLY. ' +
+      'Do NOT put architecture details or file lists in steps.',
+    commonMistakes:
+      'Writing detailed file-by-file descriptions in steps instead of the description field. ' +
+      'Putting architecture and design in steps — steps are progress markers, not the plan. ' +
+      'Including tool calls (file edits, shell commands, installs) as steps instead of goals. ' +
+      'Overusing update_plan for trivial progress. ' +
+      'Giving up after plan rejection — revise based on feedback and resubmit. ' +
+      'Ignoring user supplement feedback and executing the original plan without revision — ' +
+      'when the user supplements, you MUST revise the plan based on their feedback and call update_plan again.',
     failureHandling:
       'This tool is a no-op; it always succeeds. ' +
       'To change direction, call again with updated status or steps. ' +
@@ -160,19 +178,20 @@ export const ASK_USER_CONTRACT: ToolContract = {
   name: 'ask_user',
   sections: {
     whenToUse:
-      'Ask the user one focused question when progress is blocked by uncertainty only the user can resolve. ' +
-      'Provide concrete answer options and context explaining why this blocks progress. ' +
-      'Do NOT ask trivial questions — inspect the workspace with read_file/shell_execute first. ' +
-      'Do NOT over-use — interrupts frustrate users. ' +
-      'In plan mode: use to clarify requirements before producing a plan.',
+      'Ask the user focused questions when progress is blocked by uncertainty only the user can resolve. ' +
+      'Use the `questions` array to batch all unknowns into ONE call — ask everything at once rather than ' +
+      'spreading clarifications across multiple interruptions. Each question gets its own options. ' +
+      'Only use single-question mode (`question` + `options`) for simple choose-one scenarios. ' +
+      'In plan mode: batch all pre-plan clarifications into one ask_user call before calling update_plan.',
     commonMistakes:
+      'Making multiple ask_user calls in sequence instead of batching into one `questions` array. ' +
       'Asking vague questions without concrete options for the user to choose from. ' +
-      'Asking too many questions in sequence without acting on answers already received. ' +
       'Using ask_user for questions the model could answer by reading workspace files. ' +
       'Asking a question without providing any options at all.',
     outputFormat:
       'This tool triggers a user_input interrupt handled by the harness. It returns ok: false (the harness intercepts it). ' +
-      'Response includes question (string), options (array of {id, label, description?}), allow_free_text (boolean, default true), and context (string).',
+      'Single mode: `question` (string), `options` (array of {id, label, description?}), `allow_free_text` (boolean, default true), `context` (string). ' +
+      'Batch mode: as above + `questions` (array of {id, question, options, allow_free_text?}). TUI renders as step wizard.',
     failureHandling:
       'This tool always triggers an interrupt — ok: false is expected and not an error. ' +
       "The user's response will be injected as the next message in the conversation. " +

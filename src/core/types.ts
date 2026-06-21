@@ -71,9 +71,21 @@ export type UserInputResumeValue =
       free_text?: string;
       freeText?: string;
       text?: string;
+      answers?: Record<string, string>;
     };
 
-export type AgentResumeValue = ToolApprovalResumeValue | UserInputResumeValue;
+export type PlanReviewResumeValue =
+  | boolean
+  | {
+      planApproved?: boolean;
+      planSupplement?: string;
+      executionMode?: 'auto' | 'manual';
+    };
+
+export type AgentResumeValue =
+  | ToolApprovalResumeValue
+  | UserInputResumeValue
+  | PlanReviewResumeValue;
 
 export type ContextBudget = {};
 

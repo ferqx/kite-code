@@ -23,14 +23,22 @@ export interface SessionData {
   modelProvider: string;
   modelName: string;
   thinkingLevel: string | null;
+  /** 已批准的方案（从 checkpoint state.plan 提取）/ Approved plan extracted from checkpoint state.plan */
+  plan: AgentPlan | null;
+  /** 方案审批通过时的授权模式（用于推断 auto/manual）/ Authorization mode at plan approval time */
+  planAuthMode: string | null;
 }
+
+import type { AgentPlan } from '../../protocol/events.js';
 
 /** 中立中断信息（无 blockId），TUI 端负责映射到具体 block
  *  Neutral interrupt info (no blockId), TUI layer maps to concrete block */
 export interface ReplayInterrupt {
-  kind: 'approval' | 'input';
+  kind: 'approval' | 'input' | 'plan_review';
   /** 触发中断的 tool_call_id（用于 TUI 端 block ID 映射） */
   callId?: string;
+  /** plan_review 中断时携带的方案数据 / Plan data for plan_review interrupts */
+  plan?: AgentPlan;
 }
 
 // ── List sessions ──
@@ -233,6 +241,10 @@ async function loadSessionWithSaver(
   const pendingWrites = tuple.pendingWrites as [string, string, unknown][] | undefined;
   const interrupt = detectInterrupt(pendingWrites);
 
+  // Extract approved plan from channel_values (set after plan_review approval)
+  const plan = extractPlan(cv);
+  const planAuthMode = extractPlanAuthMode(cv);
+
   return {
     threadId,
     messages,
@@ -240,6 +252,8 @@ async function loadSessionWithSaver(
     modelProvider: typeof cv.modelProvider === 'string' ? cv.modelProvider : '',
     modelName: typeof cv.modelName === 'string' ? cv.modelName : '',
     thinkingLevel: typeof cv.thinkingLevel === 'string' ? cv.thinkingLevel : null,
+    plan,
+    planAuthMode,
   };
 }
 
@@ -292,7 +306,54 @@ function detectInterrupt(
           callId: typeof request?.id === 'string' ? request.id : undefined,
         };
       }
+      if (v.kind === 'plan_review') {
+        return {
+          kind: 'plan_review',
+          plan: parsePlanFromInterrupt(v),
+        };
+      }
     }
+  }
+  return null;
+}
+
+/** 从 interrupt value 解析 AgentPlan / Parse AgentPlan from interrupt value */
+function parsePlanFromInterrupt(v: Record<string, unknown>): AgentPlan | undefined {
+  const p = v.plan as Record<string, unknown> | undefined;
+  if (!p || typeof p !== 'object') return undefined;
+  return {
+    name: (p.name as string) ?? '',
+    description: (p.description as string) ?? '',
+    status: (p.status as AgentPlan['status']) ?? 'pending',
+    steps:
+      (p.steps as Array<Record<string, unknown>> | undefined)?.map((s) => ({
+        step: (s.step as string) ?? '',
+        status: (s.status as AgentPlan['status']) ?? 'pending',
+      })) ?? [],
+  };
+}
+
+/** 从 channel_values 提取已批准的方案 / Extract approved plan from channel_values */
+function extractPlan(cv: Record<string, unknown>): AgentPlan | null {
+  const p = cv.plan as Record<string, unknown> | undefined;
+  if (!p || typeof p !== 'object') return null;
+  return {
+    name: (p.name as string) ?? '',
+    description: (p.description as string) ?? '',
+    status: (p.status as AgentPlan['status']) ?? 'pending',
+    steps:
+      (p.steps as Array<Record<string, unknown>> | undefined)?.map((s) => ({
+        step: (s.step as string) ?? '',
+        status: (s.status as AgentPlan['status']) ?? 'pending',
+      })) ?? [],
+  };
+}
+
+/** 从 channel_values 提取方案审批时的授权模式 / Extract authorization mode at plan approval */
+function extractPlanAuthMode(cv: Record<string, unknown>): string | null {
+  const auth = cv.authorization as Record<string, unknown> | undefined;
+  if (auth && typeof auth.mode === 'string') {
+    return auth.mode;
   }
   return null;
 }

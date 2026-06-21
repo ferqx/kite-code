@@ -17,7 +17,16 @@ export type Action =
   | {
       type: 'RESOLVE_INTERRUPT';
       blockId: number;
-      resolution: string | { action: string; grant?: string; pattern?: string };
+      resolution:
+        | string
+        | {
+            action: string;
+            grant?: string;
+            pattern?: string;
+            feedback?: string;
+            text?: string;
+            answers?: Record<string, string>;
+          };
     }
   | { type: 'SHOW_HELP' }
   | { type: 'HIDE_HELP' }
@@ -63,5 +72,6 @@ export type Action =
   | { type: 'SET_SESSIONS'; sessions: TuiState['sessions'] }
   | { type: 'SESSION_INTERRUPT_PENDING'; threadId: string }
   | { type: 'DELETE_SESSION'; threadId: string }
+  | { type: 'TOGGLE_PLAN_MODE' }
   | { type: 'TOGGLE_TOOL_EXPAND'; id: number }
   | { type: 'TOGGLE_SUBAGENT_EXPAND'; id: number };

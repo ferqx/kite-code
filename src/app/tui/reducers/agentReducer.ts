@@ -55,6 +55,11 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
         next = replaceBlockById(next, b.id, { ...b, resolved: { action: 'cancelled' } });
       } else if (b.kind === 'question') {
         next = replaceBlockById(next, b.id, { ...b, resolved: 'cancelled' });
+      } else if (b.kind === 'plan_review') {
+        next = replaceBlockById(next, b.id, {
+          ...b,
+          resolved: { action: 'cancelled' },
+        });
       }
     }
   }
@@ -93,7 +98,9 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case 'SET_EXITED': {
       const s = finalizeLastTurnStreaming(state);
       const merged = mergeConsecutiveTextBlocksInLastTurn(s);
-      const elapsedSec = merged.runStartTime ? Math.round((Date.now() - merged.runStartTime) / 1000) : 0;
+      const elapsedSec = merged.runStartTime
+        ? Math.round((Date.now() - merged.runStartTime) / 1000)
+        : 0;
       const elapsedStr =
         elapsedSec >= 60 ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s` : `${elapsedSec}s`;
       let changeCount = 0;
@@ -106,7 +113,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       const summary = [elapsedStr, changeCount > 0 ? `${changeCount} files` : null]
         .filter(Boolean)
         .join(' · ');
-      const block: OutputBlock = { id: merged.nextBlockId, kind: 'text', content: `── ${summary} ──` };
+      const block: OutputBlock = {
+        id: merged.nextBlockId,
+        kind: 'text',
+        content: `── ${summary} ──`,
+      };
       const appended = appendBlock(merged, block);
       return {
         ...appended,
@@ -118,7 +129,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
     case 'RESOLVE_INTERRUPT': {
       const b = findBlockById(state, action.blockId);
-      if (!b || (b.kind !== 'approval' && b.kind !== 'question')) {
+      if (!b || (b.kind !== 'approval' && b.kind !== 'question' && b.kind !== 'plan_review')) {
         return state;
       }
       let resolved: OutputBlock;
@@ -126,9 +137,23 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         const r =
           typeof action.resolution === 'string' ? { action: action.resolution } : action.resolution;
         resolved = { ...b, resolved: r };
+      } else if (b.kind === 'plan_review') {
+        const r =
+          typeof action.resolution === 'string' ? { action: action.resolution } : action.resolution;
+        resolved = { ...b, resolved: r };
       } else {
-        if (typeof action.resolution !== 'string') return state;
-        resolved = { ...b, resolved: action.resolution };
+        if (typeof action.resolution === 'string') {
+          resolved = { ...b, resolved: action.resolution };
+        } else {
+          // 多问题模式：resolved 带 answers / Multi-question: resolved with answers
+          const r = action.resolution as unknown as {
+            action?: string;
+            text?: string;
+            answers?: Record<string, string>;
+          };
+          const text = r.text ?? r.action ?? '';
+          resolved = { ...b, resolved: r.answers ? { text, answers: r.answers } : text };
+        }
       }
       // 重置工具启动时间戳，排除审批等待耗时 / Reset tool start timestamps to exclude approval wait time
       const now = Date.now();
@@ -174,6 +199,18 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
     case 'SET_PHASE':
       return { ...state, status: { ...state.status, phase: action.phase } };
+    case 'TOGGLE_PLAN_MODE': {
+      const nextPhase = state.status.phase === 'planning' ? 'building' : 'planning';
+      const nextAuth = nextPhase === 'planning' ? 'default' : state.status.authorization;
+      return {
+        ...state,
+        status: {
+          ...state.status,
+          phase: nextPhase,
+          authorization: nextAuth as 'default' | 'full_access',
+        },
+      };
+    }
 
     case 'CTRL_C': {
       if (state.running) return cancelInterrupt(state, true);
@@ -195,6 +232,17 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
           } else if (b.kind === 'question') {
             return {
               ...replaceBlockById(state, b.id, { ...b, resolved: 'cancelled' }),
+              interrupt: null,
+            };
+          } else if (b.kind === 'plan_review') {
+            // 方案被取消 → 停止 agent，让用户重新输入 / Plan cancelled → stop agent, user re-inputs
+            const s = cancelRunningBlocks(state);
+            return {
+              ...replaceBlockById(finalizeLastTurnStreaming(s), b.id, {
+                ...b,
+                resolved: { action: 'cancelled' },
+              }),
+              running: false,
               interrupt: null,
             };
           }

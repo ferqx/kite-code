@@ -19,8 +19,8 @@ import InputLine, {
   type EditorContentHandle,
   type SlashSuggestionData,
 } from './components/InputLine';
-import StartupScreen from './components/StartupScreen';
 import SetupWizard from './components/SetupWizard';
+import StartupScreen from './components/StartupScreen';
 import { useExternalEditor } from './hooks/useExternalEditor';
 import { useMcpConnection } from './hooks/useMcpConnection';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
@@ -56,14 +56,11 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   // that would consume keystrokes before TuiApp mounts.
   const [config, setConfig] = React.useState<AgentConfig | null>(() => tryLoadAgentConfig());
 
-  const handleSetupComplete = React.useCallback(
-    ({ modelName }: { modelName: string }) => {
-      // SetupWizard saved everything (provider + models + effort) to config.
-      const cfg = loadAgentConfig({ modelName });
-      setConfig(cfg);
-    },
-    [],
-  );
+  const handleSetupComplete = React.useCallback(({ modelName }: { modelName: string }) => {
+    // SetupWizard saved everything (provider + models + effort) to config.
+    const cfg = loadAgentConfig({ modelName });
+    setConfig(cfg);
+  }, []);
 
   if (!config) {
     return (
@@ -78,7 +75,11 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
 
 function TuiApp({ config, injectModel }: TuiAppProps) {
   const workspace = process.cwd();
-  const { state, dispatch, onToggleReason } = useTuiState(config.modelName, config.providerName, config.reasoningEffort);
+  const { state, dispatch, onToggleReason } = useTuiState(
+    config.modelName,
+    config.providerName,
+    config.reasoningEffort,
+  );
   const stateRef = React.useRef(state);
   stateRef.current = state;
 
@@ -763,6 +764,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
           onSlashSuggestionChange={setSlashSuggestion}
           initialValue={inputValueRef.current}
           onValueChange={handleInputValueChange}
+          planMode={state.status.phase === 'planning'}
         />
       </App>
     </ThemeContext.Provider>

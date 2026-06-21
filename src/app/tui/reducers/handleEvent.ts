@@ -152,7 +152,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case 'tool_call': {
       // task tool has its own subagent block; update_plan progress is shown
       // in StatusBar — skip rendering both in the message list
-      if (event.data.name === 'task' || event.data.name === 'update_plan') return state;
+      if (event.data.name === 'task') return state;
       // Dedup: skip if a tool_card with this callId already exists
       if (hasBlock(state, (b) => b.kind === 'tool_card' && b.callId === event.data.call_id))
         return state;
@@ -175,7 +175,6 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case 'tool_done': {
       if (event.data.name === 'task') return state;
-      if (event.data.name === 'update_plan') return state;
       const startedAt = state.toolStartTimes?.[event.data.call_id];
       const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
       const { [event.data.call_id]: _, ...nextTimes } = state.toolStartTimes ?? {};
@@ -340,6 +339,18 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         question: event.data,
       };
       return { ...appendBlock(finalized, block), interrupt: { kind: 'input', blockId: block.id } };
+    }
+    case 'need_plan_review': {
+      const finalized = finalizeLastTurnStreaming(state);
+      const block: OutputBlock = {
+        id: finalized.nextBlockId,
+        kind: 'plan_review',
+        plan: event.data.plan,
+      };
+      return {
+        ...appendBlock(finalized, block),
+        interrupt: { kind: 'plan_review', blockId: block.id },
+      };
     }
     case 'error': {
       const finalized = finalizeLastTurnStreaming(state);
