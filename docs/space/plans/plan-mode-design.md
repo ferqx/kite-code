@@ -71,3 +71,78 @@ Agent 通过 `update_plan` 工具提交方案，字段含义：
 | 驳回（无 feedback） | `rejectedToolMessage("plan rejected by user")`，agent 自行决定下一步 |
 | 补充（有 feedback） | `rejectedToolMessage("Plan needs revision. User feedback: ...")`，agent 修订后重新 `update_plan` → 再次 plan_review |
 | 方案卡片 | 取消/驳回/补充后卡片仍留 scrollback，标签标示状态 |
+
+---
+
+## 附录：原始交互原型
+
+> 以下为设计初期的交互 mockup，记录产品思考过程。最终实现中澄清流程改用 `ask_user` 多问题模式，未做独立的 "Review your answers" 汇总页。
+
+### 原型 1：Pre-plan 澄清问答
+
+```
+←  ☒ 修订后行为  ☐ 补充方式  ☐ 触发时机  ✔ Submit  →
+
+补充方案时，用户输入应该是纯自由文本，还是应该提供结构化的
+补充选项（如：补充某个步骤 / 修改整体方向 / 添加约束条件）？
+
+❯ 1. 纯自由文本 (Recommended)
+    一个文本输入框，用户自由输入。简单直接，模型能理解自然语言。
+    与 InputBlock 的 free-text 模式一致，复用现有代码。
+2. 结构化选项 + 自由文本
+    先选补充类别（步骤/方向/约束），再输入文本。
+    更结构化但增加交互复杂度，且类别划分可能不准确。
+3. Type something.
+
+agent 会给出补充方案的建议，用户可以选择接受或修改。
+```
+
+### 原型 2：确认汇总页
+
+```
+←  ☒ 修订后行为  ☒ 补充方式  ☒ 触发时机  ✔ Submit  →
+
+Review your answers
+
+● 方案磋商循环中，supplement 后 agent 修订方案再次提交，
+  应该再次触发 plan_review 中断让用户审查，还是 agent 修订后直接执行？
+→ 再次中断审查 (Recommended)
+● 补充方案时，用户输入应该是纯自由文本？
+→ 纯自由文本 (Recommended)
+● 首次 update_plan 的触发时机？
+→ 保持 agent 自主判断 (Recommended)
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+4. Cancel
+```
+
+### 原型 3：方案审批页
+
+```
+Plan: 优化 TUI 文件变更渲染 — 统一 diff 格式
+
+Context: 当前 TUI 文件变更渲染存在多个格式，导致维护复杂度高。
+目标是统一 diff 格式，简化维护。
+
+Step1: 分析现有渲染格式，评估差异和维护成本。
+Step2: 设计统一的 diff 格式，确保兼容现有功能。
+Step3: 实施新的 diff 格式，并进行测试验证。
+
+测试验证:
+1. 单元测试：覆盖所有 diff 格式相关的功能，确保新格式正确渲染。
+2. 性能测试：评估新格式对渲染性能的影响，确保没有显著下降。
+...
+────────────────────────────────────────────────────────────────
+Claude has written up a plan and is ready to execute.
+Would you like to proceed?
+
+> 1. Yes, and use auto mode
+2. Yes, manually approve edits
+3. Tell Agent what to change
+
+选择 1 后 agent 直接执行方案步骤，自动处理修改，无需用户干预。
+选择 2 后 agent 每步执行前展示修改，等用户批准后才继续。
+选择 3 后用户输入修改意见，agent 调整并重新生成方案。
+```
