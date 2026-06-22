@@ -185,14 +185,16 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       );
       if (matched?.kind !== 'tool_card') return { ...state, toolStartTimes: nextTimes };
       // update_plan 的拒绝 ToolMessage（来自 plan_review 节点）不降级已有的 done 卡片 / Rejection ToolMessage for update_plan (from plan_review node) must not downgrade existing done card
-      if (matched.name === 'update_plan' && !event.data.ok) return { ...state, toolStartTimes: nextTimes };
+      if (matched.name === 'update_plan' && !event.data.ok)
+        return { ...state, toolStartTimes: nextTimes };
       const next: OutputBlock = {
         ...matched,
         status: event.data.ok ? ('done' as const) : ('error' as const),
         summary: event.data.summary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
-        expanded: !event.data.ok || matched.name === 'shell_execute' || matched.name === 'update_plan',
+        expanded:
+          !event.data.ok || matched.name === 'shell_execute' || matched.name === 'update_plan',
       };
       // 工具输出的 token 计入累计统计 / Tool output tokens counted in cumulative total
       if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parse, modify, applyEdits } from 'jsonc-parser';
+import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
 import type { McpServerConfig } from '../mcp/types';
 import { defaultConfigPath, projectConfigPath } from './paths';
@@ -410,8 +410,8 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
       for (const m of prov.models) {
         const name = modelEntryName(m);
         if (!name) continue;
-        const isDefault = name === defaultName
-          || (m && typeof m === 'object' && !!(m as any).default);
+        const isDefault =
+          name === defaultName || (m && typeof m === 'object' && !!(m as any).default);
         models.push({ provider: provName, name, isDefault });
       }
     }
@@ -513,9 +513,15 @@ export interface SaveProviderInput {
 function defaultModelsForProvider(type: ModelProviderType): { name: string; default: boolean }[] {
   switch (type) {
     case 'deepseek':
-      return [{ name: 'deepseek-v4-flash', default: true }, { name: 'deepseek-v4-pro', default: false }];
+      return [
+        { name: 'deepseek-v4-flash', default: true },
+        { name: 'deepseek-v4-pro', default: false },
+      ];
     case 'openai':
-      return [{ name: 'gpt-4o', default: true }, { name: 'gpt-4.1', default: false }];
+      return [
+        { name: 'gpt-4o', default: true },
+        { name: 'gpt-4.1', default: false },
+      ];
     case 'ollama':
       return [{ name: 'llama3.2', default: true }];
     default:
@@ -544,9 +550,10 @@ export function saveProviderConfig(input: SaveProviderInput): boolean {
     if (input.apiKey !== undefined) setField([...provPath, 'apiKey'], input.apiKey);
     if (input.baseURL) setField([...provPath, 'baseURL'], input.baseURL);
 
-    const models = (input.models && input.models.length > 0)
-      ? input.models.map((m) => m.name)
-      : defaultModelsForProvider(input.type).map((m) => m.name);
+    const models =
+      input.models && input.models.length > 0
+        ? input.models.map((m) => m.name)
+        : defaultModelsForProvider(input.type).map((m) => m.name);
     const defaultModel = input.models?.find((m) => m.default)?.name ?? models[0];
     if (models.length > 0) setField([...provPath, 'models'], models);
     if (defaultModel) setField([...provPath, 'model'], defaultModel);

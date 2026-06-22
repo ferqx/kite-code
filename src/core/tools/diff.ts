@@ -28,11 +28,7 @@ export interface DiffResult {
  * @param newStr  替换后的文本（new_string）
  * @param startLine  变更起始行号（1-based，取 editFile 结果中的 fromLine）
  */
-export function computeLineDiff(
-  oldStr: string,
-  newStr: string,
-  startLine: number,
-): DiffResult {
+export function computeLineDiff(oldStr: string, newStr: string, startLine: number): DiffResult {
   const oldLines = oldStr.split('\n');
   const newLines = newStr.split('\n');
 
@@ -48,8 +44,7 @@ export function computeLineDiff(
   while (
     suffixLen < oldLines.length - prefixLen &&
     suffixLen < newLines.length - prefixLen &&
-    oldLines[oldLines.length - 1 - suffixLen] ===
-      newLines[newLines.length - 1 - suffixLen]
+    oldLines[oldLines.length - 1 - suffixLen] === newLines[newLines.length - 1 - suffixLen]
   ) {
     suffixLen++;
   }
@@ -153,7 +148,9 @@ export function formatMultiHunkDiff(
   const removedCount = oldLines.length - newStr.split('\n').length;
   const addedLabel = addedCount === 1 ? '1 line' : `${addedCount} lines`;
   const removedLabel = removedCount === 1 ? '1 line' : `${removedCount} lines`;
-  parts.push(`Added ${addedLabel}, removed ${removedLabel} (replaced ${replacements} time${replacements > 1 ? 's' : ''})`);
+  parts.push(
+    `Added ${addedLabel}, removed ${removedLabel} (replaced ${replacements} time${replacements > 1 ? 's' : ''})`,
+  );
 
   // 计算每处命中行被 oldStr 占用的行数 / Compute how many lines each match occupies
   const oldLineCount = oldLines.length;
@@ -189,9 +186,15 @@ export function formatMultiHunkDiff(
         for (const line of diff.lines) {
           const num = String(line.lineNumber).padStart(pad, ' ');
           switch (line.type) {
-            case 'context': parts.push(`${num}  ${line.text}`); break;
-            case 'removed': parts.push(`${num} -${line.text}`); break;
-            case 'added':   parts.push(`${num} +${line.text}`); break;
+            case 'context':
+              parts.push(`${num}  ${line.text}`);
+              break;
+            case 'removed':
+              parts.push(`${num} -${line.text}`);
+              break;
+            case 'added':
+              parts.push(`${num} +${line.text}`);
+              break;
           }
         }
       } else {
@@ -225,10 +228,7 @@ export function formatDiffOutput(diff: DiffResult): string {
   parts.push(`Added ${addedLabel}, removed ${removedLabel}`);
 
   // 行号 padding / Line number padding
-  const maxLineNum = diff.lines.reduce(
-    (max, l) => Math.max(max, l.lineNumber),
-    0,
-  );
+  const maxLineNum = diff.lines.reduce((max, l) => Math.max(max, l.lineNumber), 0);
   const pad = Math.max(2, String(maxLineNum).length);
 
   for (const line of diff.lines) {

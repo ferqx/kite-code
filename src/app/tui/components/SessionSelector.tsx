@@ -222,9 +222,7 @@ export default function SessionSelector({
             const marker = isActive ? '● ' : '';
             const timestamp = session.updatedAt;
             // 右列固定宽度：2 空格间隙 + 19 字符时间戳 "YYYY-MM-DD HH:mm:ss"
-            const rightCol = isLoading
-              ? '  Loading...        '
-              : `  ${timestamp}`;
+            const rightCol = isLoading ? '  Loading...        ' : `  ${timestamp}`;
             const rightColWidth = 21;
             // 预留：border(2) + paddingX(2) = 4，Safe margin = 2
             const cols = stdout?.columns ?? 80;
@@ -241,7 +239,10 @@ export default function SessionSelector({
             const dimColor = isLoading ? t.warning : t.dim;
             return (
               <Box key={session.threadId} width={maxWidth} flexShrink={0} flexGrow={0}>
-                <Text color={lineColor}>{prefix}{paddedName}</Text>
+                <Text color={lineColor}>
+                  {prefix}
+                  {paddedName}
+                </Text>
                 <Text color={dimColor}>{rightCol}</Text>
               </Box>
             );

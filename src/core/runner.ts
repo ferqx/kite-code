@@ -504,11 +504,7 @@ async function processStream(
     }
     // Generate file_change events when a write/edit tool completes
     for (const e of events) {
-      if (
-        e.type === 'tool_done' &&
-        e.data.ok &&
-        e.data.name === 'write_file'
-      ) {
+      if (e.type === 'tool_done' && e.data.ok && e.data.name === 'write_file') {
         const call = pendingToolCalls.get(e.data.call_id);
         if (call) {
           const path = call.args.path;

@@ -470,7 +470,8 @@ function performReplace(
     lineStarts.push(content.length + 1); // sentinel
     while ((pos = content.indexOf(oldStr, pos)) !== -1) {
       // 二分查找 pos 对应的行号 / Binary search to find line number for pos
-      let lo = 0, hi = lineStarts.length - 2;
+      let lo = 0,
+        hi = lineStarts.length - 2;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
         if (lineStarts[mid]! <= pos) lo = mid + 1;

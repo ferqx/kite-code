@@ -47,7 +47,7 @@ export default function TaskProgressBlock({ plan }: TaskProgressBlockProps) {
     // 以 center 为中心取窗口 / Window around the center step
     const half = Math.floor((MAX_VISIBLE - 1) / 2);
     let start = Math.max(0, center - half);
-    let end = Math.min(total, start + MAX_VISIBLE);
+    const end = Math.min(total, start + MAX_VISIBLE);
     if (end - start < MAX_VISIBLE) {
       start = Math.max(0, end - MAX_VISIBLE);
     }
@@ -58,21 +58,13 @@ export default function TaskProgressBlock({ plan }: TaskProgressBlockProps) {
 
   return (
     <Box flexDirection="column" marginX={1}>
-      {headSkipped > 0 && (
-        <Text color={t.dim}>
-          ✓ {headSkipped} completed ···
-        </Text>
-      )}
+      {headSkipped > 0 && <Text color={t.dim}>✓ {headSkipped} completed ···</Text>}
       {visible.map((s) => (
         <Text key={`${s.step}-${s.idx}`} color={statusColor(s.status, t)}>
           {STATUS_ICON[s.status]} {s.idx + 1}. {s.step}
         </Text>
       ))}
-      {tailSkipped > 0 && (
-        <Text color={t.dim}>
-          ··· +{tailSkipped} remaining
-        </Text>
-      )}
+      {tailSkipped > 0 && <Text color={t.dim}>··· +{tailSkipped} remaining</Text>}
     </Box>
   );
 }

@@ -378,11 +378,7 @@ import { computeLineDiff, formatDiffOutput } from '../src/core/tools/diff';
 
 describe('computeLineDiff', () => {
   test('single-line change with context', () => {
-    const diff = computeLineDiff(
-      'line 1\nline 2 old\nline 3',
-      'line 1\nline 2 new\nline 3',
-      1,
-    );
+    const diff = computeLineDiff('line 1\nline 2 old\nline 3', 'line 1\nline 2 new\nline 3', 1);
     expect(diff.addedLines).toBe(1);
     expect(diff.removedLines).toBe(1);
     expect(diff.lines).toEqual([
@@ -394,11 +390,7 @@ describe('computeLineDiff', () => {
   });
 
   test('multi-line addition', () => {
-    const diff = computeLineDiff(
-      'header',
-      'header\nnew line 1\nnew line 2',
-      5,
-    );
+    const diff = computeLineDiff('header', 'header\nnew line 1\nnew line 2', 5);
     expect(diff.addedLines).toBe(2);
     expect(diff.removedLines).toBe(0);
     expect(diff.lines).toEqual([
@@ -409,11 +401,7 @@ describe('computeLineDiff', () => {
   });
 
   test('multi-line deletion', () => {
-    const diff = computeLineDiff(
-      'keep\nremove 1\nremove 2',
-      'keep',
-      10,
-    );
+    const diff = computeLineDiff('keep\nremove 1\nremove 2', 'keep', 10);
     expect(diff.addedLines).toBe(0);
     expect(diff.removedLines).toBe(2);
     expect(diff.lines).toEqual([
@@ -427,17 +415,11 @@ describe('computeLineDiff', () => {
     const diff = computeLineDiff('same', 'same', 1);
     expect(diff.addedLines).toBe(0);
     expect(diff.removedLines).toBe(0);
-    expect(diff.lines).toEqual([
-      { type: 'context', lineNumber: 1, text: 'same' },
-    ]);
+    expect(diff.lines).toEqual([{ type: 'context', lineNumber: 1, text: 'same' }]);
   });
 
   test('prefix and suffix context', () => {
-    const diff = computeLineDiff(
-      'keep1\nold1\nold2\nkeep2',
-      'keep1\nnew1\nkeep2',
-      3,
-    );
+    const diff = computeLineDiff('keep1\nold1\nold2\nkeep2', 'keep1\nnew1\nkeep2', 3);
     expect(diff.addedLines).toBe(1);
     expect(diff.removedLines).toBe(2);
     expect(diff.lines).toEqual([
@@ -450,11 +432,7 @@ describe('computeLineDiff', () => {
   });
 
   test('complete replacement (no common prefix/suffix)', () => {
-    const diff = computeLineDiff(
-      'old a\nold b',
-      'new a\nnew b\nnew c',
-      1,
-    );
+    const diff = computeLineDiff('old a\nold b', 'new a\nnew b\nnew c', 1);
     expect(diff.addedLines).toBe(3);
     expect(diff.removedLines).toBe(2);
     expect(diff.lines).toEqual([
@@ -474,11 +452,7 @@ describe('computeLineDiff', () => {
 
 describe('formatDiffOutput', () => {
   test('formats with stats line and numbered diff', () => {
-    const diff = computeLineDiff(
-      '# header\nold line\ntrailer',
-      '# header\nnew line\ntrailer',
-      1,
-    );
+    const diff = computeLineDiff('# header\nold line\ntrailer', '# header\nnew line\ntrailer', 1);
     const output = formatDiffOutput(diff);
     const lines = output.split('\n');
     expect(lines[0]).toBe('Added 1 line, removed 1 line');
