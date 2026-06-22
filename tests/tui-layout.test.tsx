@@ -34,6 +34,7 @@ function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
   return {
     phase: 'building',
     plan: null,
+    pendingPlan: null,
     authorization: 'full_access',
     workspaceAccess: 'write',
     cacheHitTokens: 0,

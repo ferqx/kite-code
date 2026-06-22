@@ -356,9 +356,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       })),
     };
 
+    // 将 scheme content 格式化为工具输出，通过 need_plan_review payload 传递给 TUI
+    // Format scheme content as tool output, passed to TUI via need_plan_review payload
+    const stepsText = plan.steps.map((s, i) => `${i + 1}. ${s.step}`).join('\n');
+    const planSummary = `${plan.description}\n\nSteps:\n${stepsText}`;
+
     const resume = interrupt({
       kind: 'plan_review',
       plan,
+      planSummary,
+      callId: request.id,
     }) as AgentResumeValue;
 
     const resumeObj = resume as Record<string, unknown> | null | undefined;
@@ -371,13 +378,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       return {
         messages: [
           new ToolMessage({
-            content: JSON.stringify({ ok: true, plan }),
+            content: JSON.stringify({ ok: true, plan, stdout: planSummary }),
             tool_call_id: request.id ?? 'missing-tool-call-id',
             name: 'update_plan',
             status: 'success',
           }),
         ],
         plan,
+        planReviewed: true,
         authorization: { ...state.authorization, mode },
       };
     }

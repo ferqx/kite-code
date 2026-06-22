@@ -107,8 +107,6 @@ const BlockRenderer = React.memo(function BlockRenderer({
       return null;
 
     case 'tool_card':
-      // Plan progress is shown in StatusBar — hide individual update_plan calls
-      if (block.name === 'update_plan') return null;
       return (
         <Box {...gapFrom(prevBlock)}>
           <ToolCardBlock block={block} awaitingApproval={awaitingApproval} />
@@ -202,84 +200,6 @@ const BlockRenderer = React.memo(function BlockRenderer({
           <Text>
             <Text color={dt.success}>✓ Answered: </Text>
             <Text color={dt.muted}>{block.resolved}</Text>
-          </Text>
-        </Box>
-      );
-    }
-
-    case 'plan_review': {
-      // 方案内容直接渲染到 OutputArea（进入 Static），Footer 只渲染确认条
-      // Plan content renders in OutputArea (frozen to Static), Footer only shows confirm bar
-
-      const pRes = block.resolved;
-      const autoMode = pRes?.action === 'approved_auto';
-      const manualMode = pRes?.action === 'approved_manual';
-      const approved = autoMode || manualMode;
-      const supplemented = pRes?.action === 'supplemented';
-      const cancelled = pRes?.action === 'cancelled';
-      const pendingReview = !pRes || pRes.action === 'pending_review';
-
-      const STATUS_ICON: Record<string, string> = {
-        pending: '○',
-        in_progress: '▶',
-        completed: '✓',
-      };
-
-      // 有方案内容时渲染完整卡片（统一风格，仅标签文字区分状态）
-      // Render full plan card — consistent style, status differentiated by label text only
-      if (block.plan) {
-        const label = approved
-          ? ` · ${autoMode ? 'auto mode' : 'manual approval'}`
-          : supplemented
-            ? ' · supplemented'
-            : cancelled
-              ? ' · cancelled'
-              : pendingReview
-                ? ' · awaiting review'
-                : ' · rejected';
-
-        const cardMaxWidth = Math.max(40, columns - 6);
-        return (
-          <Box flexDirection="column" marginY={1} width={cardMaxWidth}>
-            <Box flexDirection="column" borderStyle="round" borderColor={dt.primary} paddingX={1}>
-              <Text bold color={dt.primary}>
-                Plan: {block.plan.name}
-                <Text color={dt.dim}>{label}</Text>
-              </Text>
-              {block.plan.description && (
-                <Box marginTop={1} flexDirection="column">
-                  <MarkdownBlock content={block.plan.description} />
-                </Box>
-              )}
-              {block.plan.steps.length > 0 && (
-                <Box marginTop={1} flexDirection="column">
-                  {block.plan.steps.map((s, i) => (
-                    <Text key={`${s.step}-${i}`} color={dt.muted}>
-                      {STATUS_ICON[s.status] ?? '○'} {i + 1}. {s.step}
-                    </Text>
-                  ))}
-                </Box>
-              )}
-            </Box>
-          </Box>
-        );
-      }
-
-      // 无方案内容（理论上不应出现）/ No plan content (should not happen)
-      return (
-        <Box flexDirection="column" {...gapFrom(prevBlock)}>
-          <Text>
-            <Text color={approved ? dt.success : dt.error}>
-              {approved ? '✓' : supplemented ? '↩' : '✗'}
-            </Text>
-            <Text color={dt.muted}>
-              {' '}
-              {supplemented
-                ? `Plan supplemented: ${pRes.feedback ?? ''}`
-                : cancelled
-                  ? 'Plan cancelled'
-                  : 'Plan rejected'}
-            </Text>
           </Text>
         </Box>
       );

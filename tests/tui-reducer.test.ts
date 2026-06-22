@@ -260,7 +260,7 @@ describe('eventReducer (blocks model)', () => {
       // User answers, interrupt resolved
       s = dispatch(s, {
         type: 'RESOLVE_INTERRUPT',
-        blockId: s.interrupt!.blockId,
+        blockId: (s.interrupt as { blockId: number }).blockId,
         resolution: 'a',
       });
       // Agent resumes, emits same text + final
@@ -300,7 +300,7 @@ describe('eventReducer (blocks model)', () => {
       expect(flatBlocks(s)).toHaveLength(1);
       expect(flatBlocks(s)[0]!.kind).toBe('approval');
       expect(s.interrupt?.kind).toBe('approval');
-      expect(s.interrupt?.blockId).toBe(flatBlocks(s)[0]!.id);
+      expect((s.interrupt as any)?.blockId).toBe(flatBlocks(s)[0]!.id);
     });
     test('appends question block and sets interrupt', () => {
       const q = question({ question: 'Choose color' });
@@ -312,7 +312,7 @@ describe('eventReducer (blocks model)', () => {
       let s = fresh();
       const a = approval();
       s = dispatch(s, { type: 'EVENT', event: { type: 'need_approval', data: a } });
-      const blockId = s.interrupt!.blockId;
+      const blockId = (s.interrupt as { blockId: number }).blockId;
       s = dispatch(s, {
         type: 'RESOLVE_INTERRUPT',
         blockId,
@@ -325,7 +325,7 @@ describe('eventReducer (blocks model)', () => {
     test('RESOLVE_INTERRUPT marks question as resolved', () => {
       let s = fresh();
       s = dispatch(s, { type: 'EVENT', event: { type: 'need_input', data: question() } });
-      const blockId = s.interrupt!.blockId;
+      const blockId = (s.interrupt as { blockId: number }).blockId;
       s = dispatch(s, { type: 'RESOLVE_INTERRUPT', blockId, resolution: 'my answer' });
       const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'question' }>;
       expect(b.resolved).toBe('my answer');
@@ -507,7 +507,7 @@ describe('eventReducer (blocks model)', () => {
       expect(s.status.phase).toBe('building');
       expect(s.status.authorization).toBe('default');
     });
-    test('plan_review resolved with auto/manual shows in block', () => {
+    test('need_plan_review sets interrupt and pendingPlan, resolved via RESOLVE_PLAN_REVIEW', () => {
       const eventPayload = {
         plan: { name: 'Test', description: 'Desc', status: 'pending' as const, steps: [] },
       };
@@ -516,18 +516,20 @@ describe('eventReducer (blocks model)', () => {
         event: { type: 'need_plan_review' as any, data: eventPayload },
       };
       let s = dispatch(fresh(), event);
-      const block = flatBlocks(s).find((b) => b.kind === 'plan_review');
-      expect(block).toBeDefined();
+      // No plan_review block created (plan content shown via update_plan tool_card)
+      const block = flatBlocks(s).find((b: any) => b.kind === 'plan_review');
+      expect(block).toBeUndefined();
       expect(s.interrupt?.kind).toBe('plan_review');
+      expect(s.status.pendingPlan).toEqual(eventPayload.plan);
       // Resolve with auto
       s = dispatch(s, {
-        type: 'RESOLVE_INTERRUPT',
-        blockId: block!.id,
+        type: 'RESOLVE_PLAN_REVIEW',
         resolution: { action: 'approved_auto' },
       });
-      const resolved = flatBlocks(s).find((b) => b.kind === 'plan_review');
-      expect(resolved?.resolved).toEqual({ action: 'approved_auto' });
       expect(s.interrupt).toBeNull();
+      // Approved plan promoted to status.plan
+      expect(s.status.plan).toEqual(eventPayload.plan);
+      expect(s.status.pendingPlan).toBeNull();
     });
     test('SHOW_MODEL_SELECTOR / HIDE_MODEL_SELECTOR', () => {
       let s = fresh();

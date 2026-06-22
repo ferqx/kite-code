@@ -28,6 +28,7 @@ function makeStatus(overrides: Partial<StatusState> = {}): StatusState {
   return {
     phase: 'building',
     plan: null,
+    pendingPlan: null,
     authorization: 'default',
     workspaceAccess: 'write',
     cacheHitTokens: 0,

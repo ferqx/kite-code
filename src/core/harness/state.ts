@@ -50,6 +50,11 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => null,
   }),
+  /** plan 是否已通过用户审批。tools 节点产出新 plan 时设为 false，plan_review 审批通过后设为 true / Whether the plan has been approved by the user. Set to false when tools node produces a new plan, set to true after plan_review approval. */
+  planReviewed: Annotation<boolean>({
+    reducer: (_left, right) => right,
+    default: () => false,
+  }),
   /** 上下文预算配置 / Context budget configuration */
   contextBudget: Annotation<ContextBudget | undefined>({
     reducer: (_left, right) => right,

@@ -49,17 +49,18 @@ function cancelRunningBlocks(s: TuiState): TuiState {
 function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
   let next = finalizeLastTurnStreaming(s);
   if (s.interrupt) {
-    const b = findBlockById(next, s.interrupt.blockId);
-    if (b) {
-      if (b.kind === 'approval') {
-        next = replaceBlockById(next, b.id, { ...b, resolved: { action: 'cancelled' } });
-      } else if (b.kind === 'question') {
-        next = replaceBlockById(next, b.id, { ...b, resolved: 'cancelled' });
-      } else if (b.kind === 'plan_review') {
-        next = replaceBlockById(next, b.id, {
-          ...b,
-          resolved: { action: 'cancelled' },
-        });
+    // plan_review 没有 blockId，仅清除 interrupt / plan_review has no blockId, just clear interrupt
+    if (s.interrupt.kind === 'plan_review') {
+      return { ...next, running: false, ctrlCPressed: setCtrlCPressed, interrupt: null };
+    }
+    if (s.interrupt.blockId) {
+      const b = findBlockById(next, s.interrupt.blockId);
+      if (b) {
+        if (b.kind === 'approval') {
+          next = replaceBlockById(next, b.id, { ...b, resolved: { action: 'cancelled' } });
+        } else if (b.kind === 'question') {
+          next = replaceBlockById(next, b.id, { ...b, resolved: 'cancelled' });
+        }
       }
     }
   }
@@ -129,15 +130,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
     case 'RESOLVE_INTERRUPT': {
       const b = findBlockById(state, action.blockId);
-      if (!b || (b.kind !== 'approval' && b.kind !== 'question' && b.kind !== 'plan_review')) {
+      if (!b || (b.kind !== 'approval' && b.kind !== 'question')) {
         return state;
       }
       let resolved: OutputBlock;
       if (b.kind === 'approval') {
-        const r =
-          typeof action.resolution === 'string' ? { action: action.resolution } : action.resolution;
-        resolved = { ...b, resolved: r };
-      } else if (b.kind === 'plan_review') {
         const r =
           typeof action.resolution === 'string' ? { action: action.resolution } : action.resolution;
         resolved = { ...b, resolved: r };
@@ -165,6 +162,19 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         ...replaceBlockById(state, action.blockId, resolved),
         interrupt: null,
         toolStartTimes: nextTimes,
+      };
+    }
+    case 'RESOLVE_PLAN_REVIEW': {
+      const r = action.resolution;
+      const approved = r.action === 'approved_auto' || r.action === 'approved_manual';
+      return {
+        ...state,
+        interrupt: null,
+        status: {
+          ...state.status,
+          plan: approved ? state.status.pendingPlan : state.status.plan,
+          pendingPlan: null,
+        },
       };
     }
     case 'SWITCH_AUTH': {
@@ -222,6 +232,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case 'ESCAPE': {
       // 审批/提问中 → 只取消中断，继续会话 / Interrupt active → cancel interrupt only
       if (state.interrupt) {
+        // plan_review 没有 blockId，直接清除 / plan_review has no blockId, clear directly
+        if (state.interrupt.kind === 'plan_review') {
+          return { ...state, interrupt: null };
+        }
+        if (!state.interrupt.blockId) return state;
         const b = findBlockById(state, state.interrupt.blockId);
         if (b) {
           if (b.kind === 'approval') {
@@ -232,17 +247,6 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
           } else if (b.kind === 'question') {
             return {
               ...replaceBlockById(state, b.id, { ...b, resolved: 'cancelled' }),
-              interrupt: null,
-            };
-          } else if (b.kind === 'plan_review') {
-            // 方案被取消 → 停止 agent，让用户重新输入 / Plan cancelled → stop agent, user re-inputs
-            const s = cancelRunningBlocks(state);
-            return {
-              ...replaceBlockById(finalizeLastTurnStreaming(s), b.id, {
-                ...b,
-                resolved: { action: 'cancelled' },
-              }),
-              running: false,
               interrupt: null,
             };
           }

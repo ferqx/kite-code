@@ -74,4 +74,8 @@ export type Action =
   | { type: 'DELETE_SESSION'; threadId: string }
   | { type: 'TOGGLE_PLAN_MODE' }
   | { type: 'TOGGLE_TOOL_EXPAND'; id: number }
-  | { type: 'TOGGLE_SUBAGENT_EXPAND'; id: number };
+  | { type: 'TOGGLE_SUBAGENT_EXPAND'; id: number }
+  | {
+      type: 'RESOLVE_PLAN_REVIEW';
+      resolution: { action: string; feedback?: string };
+    };

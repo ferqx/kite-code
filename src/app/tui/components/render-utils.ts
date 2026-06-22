@@ -82,8 +82,7 @@ export function getToolDetail(
       return `Ran: ${cmd}`;
     }
     case 'update_plan': {
-      const name = typeof args.name === 'string' ? args.name : '';
-      return `Plan: ${name}`;
+      return '方案已编写完成';
     }
     case 'ask_user': {
       const q = typeof args.question === 'string' ? args.question.slice(0, 40) : '';

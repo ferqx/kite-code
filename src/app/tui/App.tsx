@@ -17,7 +17,6 @@ import McpPanel from './components/McpPanel';
 import ModelSelector from './components/ModelSelector';
 import PlanReviewBlock from './components/PlanReviewBlock';
 import SessionSelector from './components/SessionSelector.js';
-import TaskProgressBlock from './components/TaskProgressBlock';
 import Footer from './Footer';
 import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
@@ -42,6 +41,7 @@ const initialState: TuiState = {
   status: {
     phase: 'building',
     plan: null,
+    pendingPlan: null,
     authorization: 'default',
     workspaceAccess: 'write',
     cacheHitTokens: 0,
@@ -179,8 +179,10 @@ export default function App({
 
   const interruptBlock = useMemo(() => {
     if (!state.interrupt) return undefined;
+    if (state.interrupt.kind === 'plan_review') return undefined; // plan_review 数据从 interrupt.plan 读取
+    const blockId = state.interrupt.blockId;
     for (const turn of state.turns) {
-      const found = turn.blocks.find((b) => b.id === state.interrupt?.blockId);
+      const found = turn.blocks.find((b) => b.id === blockId);
       if (found) return found;
     }
     return undefined;
@@ -214,14 +216,12 @@ export default function App({
 
   const resolvePlanReview = useCallback(
     (action: string, feedback?: string) => {
-      if (!interruptBlock) return;
       dispatch({
-        type: 'RESOLVE_INTERRUPT',
-        blockId: interruptBlock.id,
+        type: 'RESOLVE_PLAN_REVIEW',
         resolution: { action, feedback },
       });
     },
-    [dispatch, interruptBlock],
+    [dispatch],
   );
 
   // ── Static content computation ──
@@ -271,10 +271,6 @@ export default function App({
       />
 
       {/* ── Footer: 3-row interaction zone ── */}
-      {/* 审批通过后：任务进度列表 / Post-approval: task progress list */}
-      {!state.interrupt && state.status.plan && state.status.plan.steps.length > 0 && (
-        <TaskProgressBlock plan={state.status.plan} />
-      )}
       <Footer
         status={state.status}
         running={state.running && !state.interrupt}
@@ -296,9 +292,9 @@ export default function App({
             onResolved={resolveInput}
           />
         )}
-        {interruptBlock?.kind === 'plan_review' && !interruptBlock.resolved && (
+        {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (
           <PlanReviewBlock
-            plan={interruptBlock.plan}
+            plan={state.interrupt.plan}
             provider={provider}
             onResolved={resolvePlanReview}
             supplementEscRef={supplementEscRef}

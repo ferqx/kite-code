@@ -1,8 +1,9 @@
 import { Box, Text } from 'ink';
 import React, { useEffect, useRef, useState } from 'react';
-import { useTheme } from '../theme';
 import type { Theme } from '../theme';
+import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
+import MarkdownBlock from './MarkdownBlock';
 import { ACTION_NAMES, formatElapsed, SPINNER, toolColor } from './render-utils';
 
 const MAX_TOOL_LINES = 5;
@@ -100,7 +101,7 @@ function renderFileSummary(summary: string, dt: Theme) {
 
   return (
     <React.Fragment>
-      <Text color={dt.dim}>⎿  {statsLine}</Text>
+      <Text color={dt.dim}>⎿ {statsLine}</Text>
       {diffLines.length > 0 && isDiff ? (
         <Box paddingLeft={3} flexDirection="column">
           {displayLines.map((line, i) => {
@@ -116,18 +117,16 @@ function renderFileSummary(summary: string, dt: Theme) {
               </Box>
             );
           })}
-          {truncated && (
-            <Text color={dt.dim}>… +{diffLines.length - MAX_TOOL_LINES} lines</Text>
-          )}
+          {truncated && <Text color={dt.dim}>… +{diffLines.length - MAX_TOOL_LINES} lines</Text>}
         </Box>
       ) : diffLines.length > 0 ? (
         <Box paddingLeft={3} flexDirection="column">
           {displayLines.map((line, i) => (
-            <Text key={i} color={dt.dim}>{line}</Text>
+            <Text key={i} color={dt.dim}>
+              {line}
+            </Text>
           ))}
-          {truncated && (
-            <Text color={dt.dim}>… +{diffLines.length - MAX_TOOL_LINES} lines</Text>
-          )}
+          {truncated && <Text color={dt.dim}>… +{diffLines.length - MAX_TOOL_LINES} lines</Text>}
         </Box>
       ) : null}
     </React.Fragment>
@@ -185,6 +184,7 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
   // done or error
   const isShell = block.name === 'shell_execute';
   const isFileTool = block.name === 'edit_file' || block.name === 'write_file';
+  const isPlan = block.name === 'update_plan';
   const isExpanded = block.expanded ?? block.status === 'error';
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
   const displayName = ACTION_NAMES[block.name] ?? block.name;
@@ -198,31 +198,40 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
           <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
         ) : null}
       </Box>
-      {(isExpanded && hasSummary) || (isExpanded && isShell) ? (
-        isShell ? (
-          <Box paddingLeft={2} flexDirection="column">
-            {hasSummary ? (
-              renderShellSummary(block.summary!, block.status === 'error', dt)
-            ) : (
-              <Text color={dt.dim}>{SHELL_PREFIX}(No output)</Text>
-            )}
-            {block.status === 'error' && block.summary?.split('\n').length > 3 && (
-              <Text color={dt.dim}>Enter 折叠</Text>
-            )}
-          </Box>
-        ) : isFileTool ? (
-          <Box paddingLeft={3} flexDirection="column">
-            {renderFileSummary(block.summary!, dt)}
-          </Box>
-        ) : (
-          <Box paddingLeft={3} flexDirection="column">
-            {renderToolSummary(block.summary!, block.status === 'error', dt)}
-            {block.status === 'error' && block.summary?.split('\n').length > 3 && (
-              <Text color={dt.dim}>Enter 折叠</Text>
-            )}
-          </Box>
-        )
-      ) : null}
+      {/* 方案工具：Markdown 完整渲染，不截断 / Plan: full Markdown, no truncation */}
+      {isExpanded && isPlan && hasSummary && (
+        <Box paddingLeft={2} marginTop={1} flexDirection="column">
+          <MarkdownBlock content={block.summary!} />
+        </Box>
+      )}
+      {/* Shell 工具 / Shell */}
+      {isExpanded && isShell && (
+        <Box paddingLeft={2} flexDirection="column">
+          {hasSummary ? (
+            renderShellSummary(block.summary!, block.status === 'error', dt)
+          ) : (
+            <Text color={dt.dim}>{SHELL_PREFIX}(No output)</Text>
+          )}
+          {block.status === 'error' && block.summary?.split('\n').length > 3 && (
+            <Text color={dt.dim}>Enter 折叠</Text>
+          )}
+        </Box>
+      )}
+      {/* 文件工具 / File tools */}
+      {isExpanded && isFileTool && hasSummary && (
+        <Box paddingLeft={3} flexDirection="column">
+          {renderFileSummary(block.summary!, dt)}
+        </Box>
+      )}
+      {/* 其他工具 / Other tools */}
+      {isExpanded && !isPlan && !isShell && !isFileTool && hasSummary && (
+        <Box paddingLeft={3} flexDirection="column">
+          {renderToolSummary(block.summary!, block.status === 'error', dt)}
+          {block.status === 'error' && block.summary?.split('\n').length > 3 && (
+            <Text color={dt.dim}>Enter 折叠</Text>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }

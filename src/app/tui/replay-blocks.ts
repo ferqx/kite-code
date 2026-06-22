@@ -13,7 +13,7 @@ import type { SubAgentRole } from '../../protocol/events.js';
 import { getToolDetail, getToolPreview } from './components/render-utils.js';
 import type { InterruptState, OutputBlock, SubAgentStepRecord } from './types.js';
 
-const AUTO_EXPAND_TOOLS = new Set(['shell_execute', 'edit_file', 'write_file']);
+const AUTO_EXPAND_TOOLS = new Set(['shell_execute', 'edit_file', 'write_file', 'update_plan']);
 
 /** Pending task tool call info collected from AIMessage tool_calls */
 interface PendingTaskCall {
@@ -37,50 +37,22 @@ export function sessionDataToUI(data: SessionData): {
     }
   }
 
-  // Compute next block ID from existing blocks
-  let nextId = 1;
-  for (const b of blocks) {
-    if (b.id >= nextId) nextId = b.id + 1;
-  }
-
   let interrupt: InterruptState | null = null;
   if (data.interrupt) {
-    let blockId = 0;
-    if (data.interrupt.kind === 'approval' && data.interrupt.callId) {
-      blockId = callIdIndex[data.interrupt.callId] ?? 0;
-    }
-    // plan_review 中断 → 创建 plan_review block（标记为待审批，回放时可见）
-    if (data.interrupt.kind === 'plan_review' && data.interrupt.plan) {
-      blockId = nextId++;
-      blocks.push({
-        id: blockId,
-        kind: 'plan_review',
-        plan: data.interrupt.plan,
-        resolved: { action: 'pending_review' },
-      });
-    }
-    // user_input 保持 blockId=0（question block 在回放数据中不存在）
-    interrupt = { kind: data.interrupt.kind, blockId };
-  }
-
-  // Refine 'approved' action from messages with checkpoint auth mode
-  for (const b of blocks) {
-    if (b.kind === 'plan_review' && b.resolved?.action === 'approved') {
-      const mode = data.planAuthMode === 'full_access' ? 'approved_auto' : 'approved_manual';
-      b.resolved = { action: mode };
+    if (data.interrupt.kind === 'plan_review') {
+      // 方案审批中断不创建 block，直接携带 plan 数据 / Plan review interrupt carries plan data directly, no block
+      interrupt = { kind: 'plan_review', plan: data.interrupt.plan };
+    } else {
+      let blockId = 0;
+      if (data.interrupt.kind === 'approval' && data.interrupt.callId) {
+        blockId = callIdIndex[data.interrupt.callId] ?? 0;
+      }
+      interrupt = { kind: data.interrupt.kind, blockId } as InterruptState;
     }
   }
 
-  // 已批准的方案（从 checkpoint state.plan 提取，消息中没有 update_plan 调用时兜底）
-  if (!data.interrupt && data.plan && !blocks.some((b) => b.kind === 'plan_review')) {
-    const action = data.planAuthMode === 'full_access' ? 'approved_auto' : 'approved_manual';
-    blocks.push({
-      id: nextId++,
-      kind: 'plan_review',
-      plan: data.plan,
-      resolved: { action },
-    });
-  }
+  // 已批准的方案信息通过 status 传递，不创建 plan_review block / Approved plan info flows through status, no plan_review block
+  // (handled by the checkpoint loader in runner.ts)
 
   return { blocks, interrupt };
 }
@@ -91,11 +63,6 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
   let nextId = 1;
   // Track pending task tool calls: callId → { subagent_type, task }
   const pendingTasks = new Map<string, PendingTaskCall>();
-  // Track update_plan calls: callId → plan args (for plan_review block reconstruction)
-  const pendingPlans = new Map<
-    string,
-    { name: string; description: string; steps: { step: string; status: string }[] }
-  >();
 
   for (const msg of messages) {
     if (!msg || typeof msg !== 'object') continue;
@@ -147,14 +114,16 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
               pendingTasks.set(callId, { subagentType, task });
               continue;
             }
-            // update_plan → save plan args, skip tool_card (plan shown as plan_review block)
+            // update_plan → 预填 summary（从 args 中提取方案内容），ToolMessage 结果会在下方合并覆盖
+            // Pre-fill summary from plan args; ToolMessage result merges/overrides below
+            let planSummary = '';
             if (name === 'update_plan') {
-              pendingPlans.set(callId, {
-                name: (args.name as string) ?? '',
-                description: (args.description as string) ?? '',
-                steps: (args.steps as Array<{ step: string; status: string }>) ?? [],
-              });
-              continue;
+              const desc = (args.description as string) ?? '';
+              const steps = args.steps as Array<{ step: string }> | undefined;
+              if (desc || (steps && steps.length > 0)) {
+                const stepsText = (steps ?? []).map((s, i) => `${i + 1}. ${s.step}`).join('\n');
+                planSummary = desc ? `${desc}\n\nSteps:\n${stepsText}` : `Steps:\n${stepsText}`;
+              }
             }
             blocks.push({
               id: nextId++,
@@ -163,7 +132,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
               name,
               args,
               status: 'done',
-              summary: '',
+              summary: planSummary,
               preview: getToolPreview(name, args),
             });
           }
@@ -208,32 +177,8 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
         continue;
       }
 
-      // update_plan result → create plan_review block
-      if (tmName === 'update_plan') {
-        const planData = pendingPlans.get(callId);
-        if (planData) {
-          const resolved = parsePlanOutcome(typeof tm.content === 'string' ? tm.content : '');
-          blocks.push({
-            id: nextId++,
-            kind: 'plan_review',
-            plan: {
-              name: planData.name,
-              description: planData.description,
-              status:
-                resolved.action === 'approved_auto' || resolved.action === 'approved_manual'
-                  ? 'in_progress'
-                  : 'pending',
-              steps: planData.steps.map((s) => ({
-                step: s.step,
-                status: s.status as 'pending' | 'in_progress' | 'completed',
-              })),
-            },
-            resolved,
-          });
-        }
-        pendingPlans.delete(callId);
-        continue;
-      }
+      // update_plan result → treat as normal tool_card (plan content shown via tool output)
+      // (previously created a plan_review block; now standard tool_card flow handles it)
 
       const content = typeof tm.content === 'string' ? tm.content : JSON.stringify(tm.content);
       let ok = true;
@@ -266,12 +211,18 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
       if (existingIdx >= 0) {
         const existing = blocks[existingIdx]!;
         if (existing.kind === 'tool_card') {
+          // update_plan 拒绝时：保持 done 状态，拒绝理由追加到方案内容末尾
+          // update_plan on rejection: keep done, append feedback to plan content
+          const finalSummary =
+            existing.name === 'update_plan' && !ok
+              ? `${existing.summary || summary}\n\nUser rejected: ${summary}`
+              : summary || existing.summary;
           blocks[existingIdx] = {
             ...existing,
-            status: ok ? 'done' : 'error',
-            summary,
+            status: existing.name === 'update_plan' ? 'done' : ok ? 'done' : 'error',
+            summary: finalSummary,
             detail: getToolDetail(existing.name, existing.args, totalLines),
-            expanded: !ok || AUTO_EXPAND_TOOLS.has(existing.name),
+            expanded: AUTO_EXPAND_TOOLS.has(existing.name),
           } as (typeof blocks)[number];
         }
       } else {
@@ -308,50 +259,10 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
     });
   }
 
-  // Any pending plan calls without ToolMessage result → create pending_review block
-  for (const [, planData] of pendingPlans) {
-    blocks.push({
-      id: nextId++,
-      kind: 'plan_review',
-      plan: {
-        name: planData.name,
-        description: planData.description,
-        status: 'pending',
-        steps: planData.steps.map((s) => ({
-          step: s.step,
-          status: s.status as 'pending' | 'in_progress' | 'completed',
-        })),
-      },
-      resolved: { action: 'pending_review' },
-    });
-  }
+  // update_plan tool calls without ToolMessage results are handled by the standard
+  // tool_card pipeline — orphaned calls remain as 'done' tool_cards.
 
   return blocks;
-}
-
-/** Parse update_plan ToolMessage content → plan_review resolved action */
-function parsePlanOutcome(content: string): { action: string; feedback?: string } {
-  try {
-    const p = JSON.parse(content);
-    if (p && typeof p === 'object') {
-      if (p.ok !== false) {
-        return { action: 'approved' };
-      }
-      if (p.rejected) {
-        const reason = (p.reason as string) ?? '';
-        if (reason.includes('User feedback:')) {
-          return {
-            action: 'supplemented',
-            feedback: reason.replace('Plan needs revision. User feedback: ', ''),
-          };
-        }
-        return { action: 'rejected' };
-      }
-    }
-  } catch {
-    /* fall through */
-  }
-  return { action: 'rejected' };
 }
 
 /** Parse task tool ToolMessage content into subagent block fields */

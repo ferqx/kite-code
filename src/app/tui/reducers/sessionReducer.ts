@@ -134,6 +134,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         editorRequested: false,
         status: {
           ...(target?.status ?? state.status),
+          // 恢复 pendingPlan 以便 Footer PlanReviewBlock 读取 / Restore pendingPlan for Footer PlanReviewBlock
+          pendingPlan: action.interrupt?.kind === 'plan_review' ? (action.interrupt.plan ?? null) : null,
           modelProvider:
             action.modelProvider || target?.status.modelProvider || state.status.modelProvider,
           modelName: action.modelName || target?.status.modelName || state.status.modelName,

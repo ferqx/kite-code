@@ -8,6 +8,7 @@ function fakeStatus() {
   return {
     phase: 'building' as const,
     plan: null,
+    pendingPlan: null,
     authorization: 'default' as const,
     workspaceAccess: 'write' as const,
     cacheHitTokens: 420,

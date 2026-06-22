@@ -112,11 +112,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         return updateLastBlock(state, { ...lastBlock, content: event.data.text });
       }
 
-      // Dedup: skip if exact same text already exists as the immediate last block.
-      // When running (streaming), also scan all text blocks in the turn to avoid
-      // re-inserting multi-line streaming chunks that were already finalized.
+      // Dedup: check all text blocks in the last turn
       if (lastBlock?.kind === 'text' && lastBlock.content === event.data.text) return state;
-      if (state.running && last) {
+      if (last) {
         for (let i = last.blocks.length - 1; i >= 0; i--) {
           const blk = last.blocks[i]!;
           if (blk.kind === 'text') {
@@ -152,9 +150,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...appendBlock(finalized, block), currentRunReasonId: id };
     }
     case 'tool_call': {
-      // task tool has its own subagent block; update_plan progress is shown
-      // in StatusBar — skip rendering both in the message list
+      // task tool has its own subagent block
       if (event.data.name === 'task') return state;
+      // 已审批方案后的 update_plan 调用是进度追踪，不在消息列表中展示 / Subsequent update_plan calls after approval are progress tracking, hidden from message list
+      if (event.data.name === 'update_plan' && state.status.plan !== null) return state;
       // Dedup: skip if a tool_card with this callId already exists
       if (hasBlock(state, (b) => b.kind === 'tool_card' && b.callId === event.data.call_id))
         return state;
@@ -185,14 +184,15 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
       );
       if (matched?.kind !== 'tool_card') return { ...state, toolStartTimes: nextTimes };
-      const AUTO_EXPAND_TOOLS = new Set(['shell_execute', 'edit_file', 'write_file']);
+      // update_plan 的拒绝 ToolMessage（来自 plan_review 节点）不降级已有的 done 卡片 / Rejection ToolMessage for update_plan (from plan_review node) must not downgrade existing done card
+      if (matched.name === 'update_plan' && !event.data.ok) return { ...state, toolStartTimes: nextTimes };
       const next: OutputBlock = {
         ...matched,
         status: event.data.ok ? ('done' as const) : ('error' as const),
         summary: event.data.summary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
-        expanded: !event.data.ok || AUTO_EXPAND_TOOLS.has(matched.name),
+        expanded: !event.data.ok || matched.name === 'shell_execute' || matched.name === 'update_plan',
       };
       // 工具输出的 token 计入累计统计 / Tool output tokens counted in cumulative total
       if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {
@@ -344,15 +344,30 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...appendBlock(finalized, block), interrupt: { kind: 'input', blockId: block.id } };
     }
     case 'need_plan_review': {
-      const finalized = finalizeLastTurnStreaming(state);
-      const block: OutputBlock = {
-        id: finalized.nextBlockId,
-        kind: 'plan_review',
-        plan: event.data.plan,
-      };
+      // 找到最后一条 running 状态的 update_plan tool_card，更新为 done 并填充方案内容
+      // Find the last running update_plan tool_card, transition to done and populate with plan content
+      const planCard = findBlock(
+        state,
+        (b) => b.kind === 'tool_card' && b.name === 'update_plan' && b.status === 'running',
+      );
+      let next = state;
+      if (planCard?.kind === 'tool_card') {
+        const stepsText = (event.data.plan.steps ?? [])
+          .map((s: { step: string }, i: number) => `${i + 1}. ${s.step}`)
+          .join('\n');
+        const summary = `${event.data.plan.description}\n\nSteps:\n${stepsText}`;
+        next = replaceBlockById(next, planCard.id, {
+          ...planCard,
+          status: 'done' as const,
+          summary,
+          detail: getToolDetail(planCard.name, planCard.args),
+          expanded: true,
+        });
+      }
       return {
-        ...appendBlock(finalized, block),
-        interrupt: { kind: 'plan_review', blockId: block.id },
+        ...next,
+        interrupt: { kind: 'plan_review', plan: event.data.plan },
+        status: { ...next.status, pendingPlan: event.data.plan },
       };
     }
     case 'error': {

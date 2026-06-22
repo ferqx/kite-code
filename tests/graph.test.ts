@@ -728,6 +728,7 @@ describe('routeEntry — start-of-graph routing', () => {
     approvedBatch: {} as Record<string, 'approve_once' | 'same_command' | 'full_access'>,
     contextBudget: undefined,
     plan: null,
+    planReviewed: false,
     final: '',
     modelProvider: '',
     modelName: '',

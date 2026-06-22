@@ -48,12 +48,6 @@ export type OutputBlock =
     }
   | {
       id: number;
-      kind: 'plan_review';
-      plan: AgentPlan;
-      resolved?: { action: string; feedback?: string };
-    }
-  | {
-      id: number;
       kind: 'subagent';
       subagentId: string;
       role: SubAgentRole;
@@ -116,10 +110,10 @@ export interface TuiState {
   loadingSessionId: string | null;
 }
 
-export interface InterruptState {
-  kind: 'approval' | 'input' | 'plan_review';
-  blockId: number;
-}
+export type InterruptState =
+  | { kind: 'approval'; blockId: number }
+  | { kind: 'input'; blockId: number }
+  | { kind: 'plan_review'; plan?: import('@/protocol/events').AgentPlan };
 
 export interface RetryState {
   attempt: number;
@@ -131,6 +125,8 @@ export interface RetryState {
 export interface StatusState {
   phase: AgentPhase;
   plan: AgentPlan | null;
+  /** 待审批的方案（区别于已审批的 plan）/ Pending plan awaiting review (distinct from approved plan) */
+  pendingPlan: AgentPlan | null;
   authorization: AuthorizationMode;
   workspaceAccess: WorkspaceAccess;
   cacheHitTokens: number;
