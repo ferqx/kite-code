@@ -32,7 +32,7 @@ export type PendingToolRequest =
   | {
       id?: string;
       name: 'write_file';
-      args: { path: string; content: string };
+      args: { path: string; content: string; mode?: 'overwrite' | 'append' };
       reason: string;
       protectedCommand: string;
     }
@@ -210,11 +210,11 @@ function toolRequestFromCall(
   }
 
   if (call.name === 'write_file') {
-    const args = call.args as { path?: string; content?: string };
+    const args = call.args as { path?: string; content?: string; mode?: 'overwrite' | 'append' };
     return {
       id: call.id,
       name: 'write_file',
-      args: { path: args.path || '', content: args.content || '' },
+      args: { path: args.path || '', content: args.content || '', mode: args.mode },
       reason: 'Model requested write_file',
       protectedCommand: `write_file ${args.path || ''}`,
     };
@@ -369,11 +369,11 @@ export function toolRequestFromMessage(
   }
 
   if (call.name === 'write_file') {
-    const args = call.args as { path?: string; content?: string };
+    const args = call.args as { path?: string; content?: string; mode?: 'overwrite' | 'append' };
     return {
       id: call.id,
       name: 'write_file',
-      args: { path: args.path || '', content: args.content || '' },
+      args: { path: args.path || '', content: args.content || '', mode: args.mode },
       reason: 'Model requested write_file',
       protectedCommand: `write_file ${args.path || ''}`,
     };

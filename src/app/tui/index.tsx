@@ -20,7 +20,6 @@ import InputLine, {
   type SlashSuggestionData,
 } from './components/InputLine';
 import SetupWizard from './components/SetupWizard';
-import StartupScreen from './components/StartupScreen';
 import { useExternalEditor } from './hooks/useExternalEditor';
 import { useMcpConnection } from './hooks/useMcpConnection';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
@@ -115,7 +114,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     () => (loadTheme(workspace) === 'light' ? lightTheme : getDarkTheme(themePreset)),
     [themePreset, workspace],
   );
-  const [initialized, setInitialized] = React.useState(false);
   const prevInterruptRef = React.useRef(state.interrupt);
   const conversationHistoryRef = React.useRef<string[]>([]);
   // Lazy init — only create thread when user sends first message
@@ -191,11 +189,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     _sessionManagerForExit = mgr;
     return mgr;
   }, [config, provider, dispatch]);
-
-  React.useEffect(() => {
-    const timer = setTimeout(() => setInitialized(true), 80);
-    return () => clearTimeout(timer);
-  }, []);
 
   // Reset conversation history and thread on new session
   React.useEffect(() => {
@@ -300,7 +293,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
 
   // Load historical sessions from DB on startup, but always start fresh.
   React.useEffect(() => {
-    if (!initialized) return;
     const checkpointPath = defaultCheckpointPath();
     listSessions(checkpointPath)
       .then((dbSessions) => {
@@ -330,7 +322,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         }
       });
   }, [
-    initialized,
     sessionManager.registerSession,
     sessionManager.setName,
     sessionManager.hasRuntime,
@@ -724,10 +715,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     };
   }, [provider, textBatcher]);
 
-  if (!initialized) {
-    return <StartupScreen modelName={config.modelName} workspace={workspace} />;
-  }
-
   return (
     <ThemeContext.Provider value={theme}>
       <App
@@ -772,6 +759,21 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
 }
 
 if (import.meta.main) {
+  // 在 Ink 初始化前禁用终端回显 + 隐藏光标 + 清屏
+  // 否则 cooked-mode 下用户按键会被终端驱动回显到屏幕上，出现残留字符
+  // Disable terminal echo + hide cursor + clear screen before Ink init,
+  // otherwise keystrokes in cooked mode are echoed by the terminal driver
+  function disableEchoAndClear() {
+    try {
+      // Unix: stty -echo disables terminal echo at the TTY level
+      Bun.spawnSync(['stty', '-echo'], { stdio: ['inherit', 'inherit', 'inherit'] });
+    } catch {
+      // Windows / unsupported platforms: stty not available, skip
+    }
+    process.stdout.write('\x1b[?25l\x1b[2J\x1b[3J\x1b[H');
+  }
+  disableEchoAndClear();
+
   // Use Ink's built-in kittyKeyboard option instead of manual enableKittyKeyboardProtocol().
   // The manual approach enabled Kitty at the terminal level but Ink's parser didn't
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.

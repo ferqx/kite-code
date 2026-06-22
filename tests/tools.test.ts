@@ -369,3 +369,131 @@ describe('read_file — regression', () => {
     expect(result.content).toContain('块注释');
   });
 });
+
+// ============================================================================
+// computeLineDiff tests
+// ============================================================================
+
+import { computeLineDiff, formatDiffOutput } from '../src/core/tools/diff';
+
+describe('computeLineDiff', () => {
+  test('single-line change with context', () => {
+    const diff = computeLineDiff(
+      'line 1\nline 2 old\nline 3',
+      'line 1\nline 2 new\nline 3',
+      1,
+    );
+    expect(diff.addedLines).toBe(1);
+    expect(diff.removedLines).toBe(1);
+    expect(diff.lines).toEqual([
+      { type: 'context', lineNumber: 1, text: 'line 1' },
+      { type: 'removed', lineNumber: 2, text: 'line 2 old' },
+      { type: 'added', lineNumber: 2, text: 'line 2 new' },
+      { type: 'context', lineNumber: 3, text: 'line 3' },
+    ]);
+  });
+
+  test('multi-line addition', () => {
+    const diff = computeLineDiff(
+      'header',
+      'header\nnew line 1\nnew line 2',
+      5,
+    );
+    expect(diff.addedLines).toBe(2);
+    expect(diff.removedLines).toBe(0);
+    expect(diff.lines).toEqual([
+      { type: 'context', lineNumber: 5, text: 'header' },
+      { type: 'added', lineNumber: 6, text: 'new line 1' },
+      { type: 'added', lineNumber: 7, text: 'new line 2' },
+    ]);
+  });
+
+  test('multi-line deletion', () => {
+    const diff = computeLineDiff(
+      'keep\nremove 1\nremove 2',
+      'keep',
+      10,
+    );
+    expect(diff.addedLines).toBe(0);
+    expect(diff.removedLines).toBe(2);
+    expect(diff.lines).toEqual([
+      { type: 'context', lineNumber: 10, text: 'keep' },
+      { type: 'removed', lineNumber: 11, text: 'remove 1' },
+      { type: 'removed', lineNumber: 12, text: 'remove 2' },
+    ]);
+  });
+
+  test('no change', () => {
+    const diff = computeLineDiff('same', 'same', 1);
+    expect(diff.addedLines).toBe(0);
+    expect(diff.removedLines).toBe(0);
+    expect(diff.lines).toEqual([
+      { type: 'context', lineNumber: 1, text: 'same' },
+    ]);
+  });
+
+  test('prefix and suffix context', () => {
+    const diff = computeLineDiff(
+      'keep1\nold1\nold2\nkeep2',
+      'keep1\nnew1\nkeep2',
+      3,
+    );
+    expect(diff.addedLines).toBe(1);
+    expect(diff.removedLines).toBe(2);
+    expect(diff.lines).toEqual([
+      { type: 'context', lineNumber: 3, text: 'keep1' },
+      { type: 'removed', lineNumber: 4, text: 'old1' },
+      { type: 'removed', lineNumber: 5, text: 'old2' },
+      { type: 'added', lineNumber: 4, text: 'new1' },
+      { type: 'context', lineNumber: 6, text: 'keep2' },
+    ]);
+  });
+
+  test('complete replacement (no common prefix/suffix)', () => {
+    const diff = computeLineDiff(
+      'old a\nold b',
+      'new a\nnew b\nnew c',
+      1,
+    );
+    expect(diff.addedLines).toBe(3);
+    expect(diff.removedLines).toBe(2);
+    expect(diff.lines).toEqual([
+      { type: 'removed', lineNumber: 1, text: 'old a' },
+      { type: 'removed', lineNumber: 2, text: 'old b' },
+      { type: 'added', lineNumber: 1, text: 'new a' },
+      { type: 'added', lineNumber: 2, text: 'new b' },
+      { type: 'added', lineNumber: 3, text: 'new c' },
+    ]);
+  });
+
+  test('startLine offset', () => {
+    const diff = computeLineDiff('old', 'new', 42);
+    expect(diff.lines[0]!.lineNumber).toBe(42);
+  });
+});
+
+describe('formatDiffOutput', () => {
+  test('formats with stats line and numbered diff', () => {
+    const diff = computeLineDiff(
+      '# header\nold line\ntrailer',
+      '# header\nnew line\ntrailer',
+      1,
+    );
+    const output = formatDiffOutput(diff);
+    const lines = output.split('\n');
+    expect(lines[0]).toBe('Added 1 line, removed 1 line');
+    expect(lines[1]).toBe(' 1  # header');
+    expect(lines[2]).toBe(' 2 -old line');
+    expect(lines[3]).toBe(' 2 +new line');
+    expect(lines[4]).toBe(' 3  trailer');
+  });
+
+  test('pad width matches max line number', () => {
+    const diff = computeLineDiff('x', 'x\ny', 100);
+    const output = formatDiffOutput(diff);
+    // line numbers should be padded to 3 chars (since max is 100)
+    const lines = output.split('\n');
+    expect(lines[1]!.startsWith('100  x')).toBe(true);
+    expect(lines[2]!.startsWith('101 +y')).toBe(true);
+  });
+});

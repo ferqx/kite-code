@@ -13,6 +13,8 @@ import type { SubAgentRole } from '../../protocol/events.js';
 import { getToolDetail, getToolPreview } from './components/render-utils.js';
 import type { InterruptState, OutputBlock, SubAgentStepRecord } from './types.js';
 
+const AUTO_EXPAND_TOOLS = new Set(['shell_execute', 'edit_file', 'write_file']);
+
 /** Pending task tool call info collected from AIMessage tool_calls */
 interface PendingTaskCall {
   subagentType: SubAgentRole;
@@ -235,7 +237,8 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
 
       const content = typeof tm.content === 'string' ? tm.content : JSON.stringify(tm.content);
       let ok = true;
-      let summary = content.slice(0, 200);
+      const summaryMaxLen = tmName === 'edit_file' || tmName === 'write_file' ? 2000 : 200;
+      let summary = content.slice(0, summaryMaxLen);
       let totalLines: number | undefined;
       try {
         const p = JSON.parse(content);
@@ -268,7 +271,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
             status: ok ? 'done' : 'error',
             summary,
             detail: getToolDetail(existing.name, existing.args, totalLines),
-            expanded: ok ? existing.expanded : true,
+            expanded: !ok || AUTO_EXPAND_TOOLS.has(existing.name),
           } as (typeof blocks)[number];
         }
       } else {
@@ -282,6 +285,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
           args: {},
           status: ok ? 'done' : 'error',
           summary,
+          expanded: !ok || AUTO_EXPAND_TOOLS.has(name),
         });
       }
     }

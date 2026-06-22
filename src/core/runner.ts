@@ -507,7 +507,7 @@ async function processStream(
       if (
         e.type === 'tool_done' &&
         e.data.ok &&
-        (e.data.name === 'write_file' || e.data.name === 'edit_file')
+        e.data.name === 'write_file'
       ) {
         const call = pendingToolCalls.get(e.data.call_id);
         if (call) {
@@ -678,7 +678,8 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
   // Count tool output tokens manually, independent of provider cache_metrics fields
   const toolTokenCount = countTokens(content);
   let ok = true;
-  let summary = content.slice(0, 200);
+  const summaryMaxLen = (msg.name as string) === 'edit_file' ? 2000 : 200;
+  let summary = content.slice(0, summaryMaxLen);
   let totalLines: number | undefined;
   try {
     const p = JSON.parse(content);

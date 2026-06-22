@@ -10,6 +10,14 @@ export interface Theme {
   bg: string;
   userMsgBg: string;
   risk: Record<string, string>;
+  /** diff 新增行背景色 / diff addition background */
+  diffAddedBg: string;
+  /** diff 新增行文字色 / diff addition foreground */
+  diffAddedFg: string;
+  /** diff 删除行背景色 / diff removal background */
+  diffRemovedBg: string;
+  /** diff 删除行文字色 / diff removal foreground */
+  diffRemovedFg: string;
 }
 
 export type ThemePreset = 'teal' | 'blue' | 'purple' | 'cyan' | 'mono';
@@ -23,58 +31,83 @@ export const PALETTE_INDEX: Record<keyof Theme, number | undefined> = {
   error: 1, // ANSI red
   warning: 3, // ANSI yellow
   muted: 7, // ANSI white
-  dim: 5, // ANSI magenta → gray
+  dim: undefined, // hex direct — no ANSI slot needed (constant across dark presets)
   bg: 0, // untouched (terminal background)
   userMsgBg: 8, // ANSI bright black → dark gray
   risk: undefined,
+  diffAddedBg: 4, // ANSI blue → dark green (#1B4A2B)
+  diffAddedFg: undefined,
+  diffRemovedBg: 5, // ANSI magenta → dark red (#3D2020)
+  diffRemovedFg: undefined,
 };
 
-/** RGB values for each preset — used for OSC 4 palette reprogramming */
+/** RGB values for each preset — used for OSC 4 palette reprogramming
+ *  VS Code Dark+ inspired palette */
 const presetRGB: Record<ThemePreset, Record<string, string>> = {
   teal: {
-    primary: '#4EC9B0',
-    success: '#6A9955',
-    error: '#F44747',
+    primary: '#4EC9B0', // VS Code type teal
+    success: '#6A9955', // comment green
+    error: '#E03A3A',
     warning: '#CCA700',
-    muted: '#CCCCCC',
-    dim: '#808080',
-    userMsgBg: '#333333',
+    muted: '#D4D4D4', // VS Code foreground
+    dim: '#6A6A6A',
+    userMsgBg: '#252526', // VS Code sidebar bg
+    diffAddedBg: '#062E12',
+    diffAddedFg: '#86EFAC',
+    diffRemovedBg: '#3E0A10',
+    diffRemovedFg: '#FCA5A5',
   },
   blue: {
-    primary: '#4FC1FF',
+    primary: '#569CD6', // VS Code keyword blue
     success: '#6A9955',
-    error: '#F44747',
+    error: '#E03A3A',
     warning: '#CCA700',
-    muted: '#CCCCCC',
-    dim: '#808080',
-    userMsgBg: '#333333',
+    muted: '#D4D4D4',
+    dim: '#6A6A6A',
+    userMsgBg: '#252526',
+    diffAddedBg: '#062E12',
+    diffAddedFg: '#86EFAC',
+    diffRemovedBg: '#3E0A10',
+    diffRemovedFg: '#FCA5A5',
   },
   purple: {
-    primary: '#B392F0',
+    primary: '#C586C0', // VS Code-ish purple
     success: '#6A9955',
-    error: '#F44747',
+    error: '#E03A3A',
     warning: '#CCA700',
-    muted: '#CCCCCC',
-    dim: '#808080',
-    userMsgBg: '#333333',
+    muted: '#D4D4D4',
+    dim: '#6A6A6A',
+    userMsgBg: '#252526',
+    diffAddedBg: '#062E12',
+    diffAddedFg: '#86EFAC',
+    diffRemovedBg: '#3E0A10',
+    diffRemovedFg: '#FCA5A5',
   },
   cyan: {
-    primary: '#00BCD4',
+    primary: '#11A8CD', // VS Code terminal cyan
     success: '#6A9955',
-    error: '#F44747',
+    error: '#E03A3A',
     warning: '#CCA700',
-    muted: '#CCCCCC',
-    dim: '#808080',
-    userMsgBg: '#333333',
+    muted: '#D4D4D4',
+    dim: '#6A6A6A',
+    userMsgBg: '#252526',
+    diffAddedBg: '#062E12',
+    diffAddedFg: '#86EFAC',
+    diffRemovedBg: '#3E0A10',
+    diffRemovedFg: '#FCA5A5',
   },
   mono: {
     primary: '#E0E0E0',
     success: '#A0A0A0',
-    error: '#F44747',
+    error: '#D01C1C',
     warning: '#CCA700',
     muted: '#A0A0A0',
     dim: '#6B6B6B',
     userMsgBg: '#2A2A2A',
+    diffAddedBg: '#062A10',
+    diffAddedFg: '#A0A0A0',
+    diffRemovedBg: '#38090D',
+    diffRemovedFg: '#CCCCCC',
   },
 };
 
@@ -123,6 +156,7 @@ function ansiName(idx: number): string {
 }
 
 function buildTheme(_p: ThemePreset): Theme {
+  const colors = presetRGB[_p];
   const fg = (role: keyof Theme) => {
     const idx = PALETTE_INDEX[role];
     return idx != null ? ansiName(idx) : 'white';
@@ -133,7 +167,7 @@ function buildTheme(_p: ThemePreset): Theme {
     error: fg('error'),
     warning: fg('warning'),
     muted: fg('muted'),
-    dim: fg('dim'),
+    dim: colors.dim!,
     bg: 'black',
     userMsgBg: 'gray',
     risk: {
@@ -146,6 +180,10 @@ function buildTheme(_p: ThemePreset): Theme {
       vcs_mutation: fg('dim'),
       unknown: fg('dim'),
     },
+    diffAddedBg: fg('diffAddedBg'),
+    diffAddedFg: colors.diffAddedFg!,
+    diffRemovedBg: fg('diffRemovedBg'),
+    diffRemovedFg: colors.diffRemovedFg!,
   };
 }
 
@@ -164,7 +202,7 @@ export function getDarkTheme(preset: ThemePreset): Theme {
 export const darkTheme = darkPresets.blue;
 
 export const lightTheme: Theme = {
-  primary: '#007ACC',
+  primary: '#007ACC', // VS Code blue
   success: '#388A34',
   error: '#D01C1C',
   warning: '#AD8A00',
@@ -182,6 +220,10 @@ export const lightTheme: Theme = {
     vcs_mutation: '#A315E0',
     unknown: '#A0A0A0',
   },
+  diffAddedBg: '#DDF4E1',
+  diffAddedFg: '#1A5C2A',
+  diffRemovedBg: '#FDE8E8',
+  diffRemovedFg: '#8B1A1A',
 };
 
 export const ThemeContext = createContext<Theme>(darkTheme);

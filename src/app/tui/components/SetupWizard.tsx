@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from '../theme';
 import {
   type ModelProviderType,
@@ -118,7 +118,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
   // ── Step 1: Provider ──
   useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) => {
     if (stepRef.current !== 'provider') return;
-    if (key.escape) { process.exit(0); return; }
+    if (key.escape) { process.exit(0); }
     if (key.upArrow)   { setSelectedIndex((s) => Math.max(0, s - 1)); return; }
     if (key.downArrow) { setSelectedIndex((s) => Math.min(PROVIDER_OPTIONS.length - 1, s + 1)); return; }
     if (key.return) {
@@ -170,17 +170,16 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
     if (stepRef.current !== 'model') return;
     if (key.escape) { goToStep('credentials'); return; }
     if (key.tab) {
-      const order = selReasoningRef.current
-        ? (['models', 'reasoning', 'effort'] as const)
-        : (['models', 'reasoning'] as const);
+      const order: readonly string[] = selReasoningRef.current
+        ? ['models', 'reasoning', 'effort']
+        : ['models', 'reasoning'];
       const idx = order.indexOf(modelFocus);
-      setModelFocus(order[(idx + 1) % order.length]!);
+      setModelFocus(order[(idx + 1) % order.length]! as typeof modelFocus);
       return;
     }
     const mi = modelIndexRef.current;
     const si = selModelIndexRef.current;
     const ti = thinkingIndexRef.current;
-    const sti = selThinkingIndexRef.current;
     const hasList = availableModels.length > 0;
     const textInputActive = modelFocus === 'models'
       && ((hasList && mi < 0) || !hasList);
@@ -189,7 +188,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
         setError('Please enter a model name');
         return;
       }
-      const name = hasList && si >= 0 ? availableModels[si]?.name : customModelRef.current;
+      const name = hasList && si >= 0 ? (availableModels[si]?.name ?? '') : customModelRef.current;
       confirmSetup(name);
       return;
     }

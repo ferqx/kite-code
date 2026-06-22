@@ -75,7 +75,8 @@ export function useSessionList(): UseSessionListResult {
     return () => {
       cancelled = true;
     };
-  }, [searchQuery.trim, searchQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_refreshKey]);
 
   return { sessions, loading, error, refresh, search, searchQuery };
 }

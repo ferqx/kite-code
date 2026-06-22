@@ -2,7 +2,8 @@ import type { McpManager } from '@/core/mcp';
 import { parseMcpToolName } from '@/core/mcp/tool-adapter';
 import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
-import { editFile, readFile, writeFile } from '@/core/tools/file';
+import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
+import { editFile, readFile, readTextContent, writeFile } from '@/core/tools/file';
 import { type ShellExecutor, shellTool } from '@/core/tools/shell';
 import type { AuthorizationOverride, ShellResult, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
@@ -116,29 +117,73 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       newString: request.args.new_string ?? '',
       replaceAll: request.args.replace_all,
     });
+    let stdout = '';
+    if (result.ok) {
+      const diff = computeLineDiff(
+        request.args.old_string,
+        request.args.new_string ?? '',
+        result.fromLine ?? 1,
+      );
+      const parts: string[] = [];
+      if (request.args.replace_all) {
+        const count = result.replacements ?? 1;
+        parts.push(`(replaced ${count} time${count > 1 ? 's' : ''})`);
+      }
+      parts.push(formatDiffOutput(diff));
+      // 保护 LLM 上下文：diff 超长时截断
+      // Cap for LLM context: truncate overlong diff output
+      stdout = parts.join('\n');
+      if (stdout.length > 2000) {
+        stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
+      }
+    }
     return withFailureGuidance(request, {
       ok: result.ok,
       command: `edit_file ${request.args.path ?? ''}`,
       exitCode: result.ok ? 0 : -1,
-      stdout: result.ok
-        ? `Replaced ${result.replacements ?? 1} occurrence(s) at line ${result.fromLine}-${result.toLine}`
-        : '',
+      stdout,
       stderr: result.error ?? '',
       path: request.args.path,
     });
   }
 
   if (request.name === 'write_file') {
+    // 写入前读取旧内容，用于生成 diff / Read old content before writing for diff
+    const oldRead = readTextContent(workspace, request.args.path ?? '');
+    const oldExisted = oldRead.ok;
+
     const result = writeFile({
       workspace,
       path: request.args.path ?? '',
       content: request.args.content ?? '',
+      mode: request.args.mode,
     });
+
+    let stdout = '';
+    if (result.ok) {
+      if (oldExisted && request.args.mode !== 'append') {
+        // 覆写已有文件：diff 旧内容 → 新内容
+        // Overwrite existing file: diff old → new
+        const diff = computeLineDiff(oldRead.content, request.args.content ?? '', 1);
+        stdout = formatDiffOutput(diff);
+      } else {
+        // 新建文件 / 追加模式：展示带行号的纯文本内容，无需 diff 样式
+        // New file or append: show plain content with line numbers, no diff markers
+        const verb = request.args.mode === 'append' ? 'Appended' : 'Wrote';
+        const header = `${verb} ${result.lines ?? 0} lines to ${request.args.path}`;
+        stdout = formatContentOutput(request.args.content ?? '', header);
+      }
+      // 保护 LLM 上下文：超长时截断 / Cap for LLM context
+      if (stdout.length > 2000) {
+        stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
+      }
+    }
+
     return withFailureGuidance(request, {
       ok: result.ok,
       command: `write_file ${request.args.path ?? ''}`,
       exitCode: result.ok ? 0 : -1,
-      stdout: result.ok ? `Wrote ${result.lines ?? 0} line(s) to ${request.args.path}` : '',
+      stdout,
       stderr: result.error ?? '',
       path: request.args.path,
     });

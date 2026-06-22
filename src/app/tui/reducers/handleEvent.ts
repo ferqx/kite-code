@@ -112,9 +112,11 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         return updateLastBlock(state, { ...lastBlock, content: event.data.text });
       }
 
-      // Dedup: check all text blocks in the last turn
+      // Dedup: skip if exact same text already exists as the immediate last block.
+      // When running (streaming), also scan all text blocks in the turn to avoid
+      // re-inserting multi-line streaming chunks that were already finalized.
       if (lastBlock?.kind === 'text' && lastBlock.content === event.data.text) return state;
-      if (last) {
+      if (state.running && last) {
         for (let i = last.blocks.length - 1; i >= 0; i--) {
           const blk = last.blocks[i]!;
           if (blk.kind === 'text') {
@@ -183,13 +185,14 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
       );
       if (matched?.kind !== 'tool_card') return { ...state, toolStartTimes: nextTimes };
+      const AUTO_EXPAND_TOOLS = new Set(['shell_execute', 'edit_file', 'write_file']);
       const next: OutputBlock = {
         ...matched,
         status: event.data.ok ? ('done' as const) : ('error' as const),
         summary: event.data.summary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
-        expanded: !event.data.ok || matched.name === 'shell_execute',
+        expanded: !event.data.ok || AUTO_EXPAND_TOOLS.has(matched.name),
       };
       // 工具输出的 token 计入累计统计 / Tool output tokens counted in cumulative total
       if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {

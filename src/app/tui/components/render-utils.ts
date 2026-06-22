@@ -1,5 +1,11 @@
 export const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
+/** 工具名 → 用户界面友好名称映射 / Tool name → user-friendly display name mapping */
+export const ACTION_NAMES: Record<string, string> = {
+  edit_file: 'Update',
+  write_file: 'Create',
+};
+
 export interface ThemeColors {
   success: string;
   error: string;
@@ -65,15 +71,11 @@ export function getToolDetail(
     }
     case 'write_file': {
       const path = typeof args.path === 'string' ? args.path : '';
-      const raw = typeof args.content === 'string' ? args.content : '';
-      const lineCount = raw
-        ? raw.split('\n').filter((l, i, a) => i < a.length - 1 || l !== '').length
-        : 0;
-      return lineCount > 0 ? `Wrote ${lineCount} line(s) to ${path}` : `Wrote ${path}`;
+      return `(${path})`;
     }
     case 'edit_file': {
       const path = typeof args.path === 'string' ? args.path : '';
-      return `Edited ${path}`;
+      return `(${path})`;
     }
     case 'shell_execute': {
       const cmd = typeof args.command === 'string' ? args.command.slice(0, 60) : '';

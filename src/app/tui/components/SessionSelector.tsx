@@ -1,9 +1,26 @@
 import { Box, Text, useInput, useStdout } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import React, { useEffect, useRef, useState } from 'react';
+import stringWidth from 'string-width';
 import { useTheme } from '@/app/tui/theme';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useSessionList } from '../hooks/useSessionList.js';
+
+/** Truncate `text` so its terminal display width ≤ `maxCols`, appending `…` when truncated. */
+function truncateByDisplayWidth(text: string, maxCols: number): string {
+  if (maxCols <= 0) return '';
+  if (stringWidth(text) <= maxCols) return text;
+  const ellipsisWidth = stringWidth('…');
+  let result = '';
+  let used = 0;
+  for (const char of text) {
+    const cw = stringWidth(char);
+    if (used + cw + ellipsisWidth > maxCols) break;
+    result += char;
+    used += cw;
+  }
+  return result ? result + '…' : text.slice(0, 1) + '…';
+}
 
 interface SessionSelectorProps {
   onSelect: (sessionId: string) => void;
@@ -139,9 +156,21 @@ export default function SessionSelector({
         return;
       }
 
-      // Regular character input goes to search
-      if (input && !key.ctrl && !key.meta && input.length === 1) {
-        setSearchInput((prev) => prev + input);
+      // Regular character input goes to search.
+      // Some IMEs (e.g. macOS Chinese) prepend a space when switching between
+      // CJK composition and ASCII — strip it to avoid a leading space artifact.
+      if (input && !key.ctrl && !key.meta) {
+        let text = input;
+        const prev = searchInputRef.current;
+        if (
+          text.length >= 2 &&
+          text[0] === ' ' &&
+          text[1] !== ' ' &&
+          (prev.length === 0 || prev[prev.length - 1] !== ' ')
+        ) {
+          text = text.slice(1);
+        }
+        setSearchInput((p) => p + text);
       }
     },
   );
@@ -191,27 +220,29 @@ export default function SessionSelector({
             const isActive = activeSessionId === session.threadId;
             const cursor = isLoading ? '⏳' : i === selected ? '>' : ' ';
             const marker = isActive ? '● ' : '';
-            const suffix = isLoading ? '  Loading...' : `  ${session.updatedAt}`;
+            const timestamp = session.updatedAt;
+            // 右列固定宽度：2 空格间隙 + 19 字符时间戳 "YYYY-MM-DD HH:mm:ss"
+            const rightCol = isLoading
+              ? '  Loading...        '
+              : `  ${timestamp}`;
+            const rightColWidth = 21;
             // 预留：border(2) + paddingX(2) = 4，Safe margin = 2
             const cols = stdout?.columns ?? 80;
             const maxWidth = cols - 6;
             const prefix = `${cursor} ${marker}`;
             const rawName = session.name.replace(/\n/g, ' ');
-            const available = maxWidth - prefix.length - suffix.length - 1;
-            const displayName =
-              available > 4
-                ? rawName.length > available
-                  ? `${rawName.slice(0, available - 1)}…`
-                  : rawName
-                : `${rawName.slice(0, Math.max(4, maxWidth - prefix.length - 4))}…`;
+            const prefixWidth = stringWidth(prefix);
+            const nameMaxCols = Math.max(4, maxWidth - prefixWidth - rightColWidth);
+            const displayName = truncateByDisplayWidth(rawName, nameMaxCols);
+            // 用空格填充至固定列宽，确保时间戳列对齐
+            const namePad = Math.max(0, nameMaxCols - stringWidth(displayName));
+            const paddedName = displayName + ' '.repeat(namePad);
             const lineColor = isLoading ? t.warning : i === selected ? t.primary : t.muted;
+            const dimColor = isLoading ? t.warning : t.dim;
             return (
               <Box key={session.threadId} width={maxWidth} flexShrink={0} flexGrow={0}>
-                <Text color={lineColor}>
-                  {prefix}
-                  {displayName}
-                  <Text color={isLoading ? t.warning : t.dim}>{suffix}</Text>
-                </Text>
+                <Text color={lineColor}>{prefix}{paddedName}</Text>
+                <Text color={dimColor}>{rightCol}</Text>
               </Box>
             );
           })}
