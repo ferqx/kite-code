@@ -121,7 +121,7 @@
 | **Hooks 系统** | `PreToolUse` / `PostToolUse` shell hook，定义 hook 接口和触发时机。原为暂缓项，现提升为 P1 | 🟡 已升优先级 |
 | **Diff 渲染** | TUI 中 `edit_file` / `write_file` / `apply_patch` 结果以 diff 形式展示（对标 Claude Code），非仅 old_string/new_string 匹配成功/失败文本 | 🔴 待启动 |
 | **`shell_execute` schema 精简** | 8 个可选元数据字段 → 保留 `description` + `intent` + `grant_request`，其余砍掉或确保审批 UI 真正消费。减少 token 浪费和模型填写错误 | 🔴 待启动 |
-| **`edit_file` 容错匹配** | 支持忽略行首尾空白的匹配模式，减少因 trailing space 导致的匹配失败 | 🔴 待启动 |
+| **`edit_file` 容错匹配** | 支持忽略行首尾空白的匹配模式，减少因 trailing space 导致的匹配失败 | ✅ 已完成（2026-06-23） |
 | **二进制文件检测** | `read_file` 前检测文件类型，二进制文件直接拒绝并提示，防止 agent 误读 | 🔴 待启动 |
 
 ### P2 — 扩大适用场景
@@ -140,7 +140,7 @@
 | 任务 | 内容 | 状态 |
 |------|------|------|
 | **模块级缓存并发隔离** | `definitions.ts` 中 `_cachedKey/_cachedTools` 加入 `threadId` 隔离或改用 WeakMap | 🔴 待启动 |
-| **checkpoint 一致性修复** | 定位 `sanitizeToolCallPairs` 的上游根因（interrupt/resume 时消息不对齐），从事后补丁改为源头消除 | 🔴 待启动 |
+| **checkpoint 一致性修复** | 定位 `sanitizeToolCallPairs` 的上游根因（interrupt/resume 时消息不对齐），从事后补丁改为源头消除 | ✅ 已完成（2026-06-23） |
 | **全局快捷键补充** | 至少补上 Ctrl+L（清屏/重绘），评估恢复常用 leader key | 🔴 待启动 |
 
 ### 持续工程项

@@ -3,7 +3,7 @@ import { interrupt, START, StateGraph } from '@langchain/langgraph';
 import { ChatOllama } from '@langchain/ollama';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
-import { prepareModelContext, sanitizeToolCallPairs } from '@/core/model/context';
+import { prepareModelContext } from '@/core/model/context';
 import type { ModelRetryListener, RetryListenerHost } from '@/core/model/deepseek';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { BunSqliteSaver } from '@/core/persistence/checkpoint';
@@ -104,10 +104,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
   /** Agent 节点：使用稳定工具 schema，由执行层强制工作区访问边界 / Agent node */
   const agent = async (state: CodeAgentState) => {
-    // 防御层：resume 后清理因 interrupt 产生的孤儿 tool_call/ToolMessage 配对 / Defense: clean up orphaned tool_call/ToolMessage pairs after resume
-    const sanitizedMessages = sanitizeToolCallPairs(state.messages);
-    const sanitizedState =
-      sanitizedMessages !== state.messages ? { ...state, messages: sanitizedMessages } : state;
+    // cleanup 节点已在 agent 之前为所有孤儿 tool_calls 注入 cancelled ToolMessage，
+    // 不再需要 sanitizeToolCallPairs 的重复防御。
+    // The cleanup node already injects cancelled ToolMessages for all orphan tool_calls
+    // before agent runs, so the duplicate sanitize pass is unnecessary here.
     const tools = createAgentTools({
       workspace: state.workspace,
       shellExecutor: input.shellExecutor,
@@ -132,12 +132,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     };
     if (hasRetryListener(model)) model.setRetryListener(listener);
 
-    const effectiveState = sanitizedState;
-
     try {
       const { state: result } = await invokeModel({
         model,
-        state: effectiveState,
+        state,
         tools,
         skills: input.skills,
         signal: input.subagentSignal,
@@ -369,8 +367,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           }),
           extra: {},
         };
-      } catch (err: any) {
-        const errorMsg = err?.message ?? String(err);
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         return {
           toolMessage: new ToolMessage({
             content: JSON.stringify({ ok: false, error: errorMsg }),

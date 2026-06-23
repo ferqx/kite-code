@@ -58,19 +58,23 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       'Replace specific text in an existing file. Use for targeted, small-to-medium edits. ' +
+      'old_string MUST come from verified content — a recent read_file, a shell tool output, ' +
+      'or a file you just wrote. NEVER fabricate old_string from memory or guesswork. ' +
       'Do NOT use for creating new files — use write_file. ' +
       'Do NOT use to rewrite the entire file — use write_file.',
     commonMistakes:
+      'Fabricating old_string from memory instead of using verified content — the #1 cause of edit failure. ' +
       "old_string doesn't match the file exactly — whitespace, indentation, or blank lines differ. " +
-      'Calling edit_file without read_file first, so old_string is guesswork. ' +
       'Same old_string appears multiple times without replace_all: true — causes duplicate-match error. ' +
       'Not including enough surrounding context in old_string to make it unique.',
     outputFormat:
       'JSON: ok (boolean), replacements (count), fromLine/toLine (line range), error (empty on success). ' +
       "Success: 'Replaced N occurrence(s) at line L1-L2'.",
     failureHandling:
-      'If old_string not found with exact mode: re-read the file with read_file, then retry with verified content. ' +
-      "If whitespace mismatch is the issue, try match_mode: 'trimmed' to match lines ignoring leading/trailing whitespace. " +
+      'If old_string not found: the tool auto-retries with 3 progressive fallback levels. ' +
+      'Level 1: trimEnd (trailing whitespace mismatch). Level 2: per-line trim (leading/trailing whitespace mismatch). ' +
+      'Only if all levels fail: re-read the file with read_file, then retry with exact content. ' +
+      "For intentional whitespace-insensitive matching, set match_mode: 'trimmed' to skip straight to per-line matching. " +
       'If duplicate match: add more surrounding context to old_string (preferred) or set replace_all: true. ' +
       'Always verify the edit with read_file afterward.',
   },

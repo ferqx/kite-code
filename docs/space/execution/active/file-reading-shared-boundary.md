@@ -85,6 +85,18 @@ readFileSync → 编码检测(BOM) → 解码+剥离BOM → 二进制检测(无B
 
 读入后统一 `\r\n → \n`、`\r → \n`。`editFile` 的 `old_string` / `new_string` 同步做相同正规化，保证匹配一致性。
 
+### edit_file 三级自动回退（`file.ts:269-304`，2026-06-23）
+
+`editFile` 的 `old_string` 匹配在精确失败后自动尝试两级宽松匹配：
+1. trimEnd（去除 old_string 行尾空白）
+2. 逐行 trim（old_string 和文件内容均逐行去前导/尾随空白后比较）
+
+模型不再需要显式 `matchMode: 'trimmed'` 来处理常见空白不匹配。仅在多行且多命中时返回模糊错误。
+
+### shell_execute 输出截断（`tool-runner.ts:353-363`，2026-06-23）
+
+`truncateToolOutput` 对超过 4000 字符的 stdout/stderr 做 head+tail 截断，中间标注省略行数。仅截断不改写（零幻觉），保留首尾信息。
+
 ### rg exit code 1 ≠ error（`tool-contracts.ts`、`system-prompt.txt`）
 
 `rg`（ripgrep）无匹配时 exit code 1，`shellTool` 判定 `ok: false`。子 agent 看到 failure 后反复重试造成恶性循环。在 shell_execute 合约和 system prompt 中显式说明：rg exit code 1 = 无匹配，非错误，不重试。

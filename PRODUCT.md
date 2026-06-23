@@ -72,9 +72,9 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 | `apply_patch` 是死代码 — 契约和实现存在但 `createAgentTools()` 未注册 | `tool-contracts.ts`, `apply-patch.ts`, `definitions.ts` | 中 |
 | `shell_execute` schema 臃肿 — 8 个可选元数据字段，多数不参与执行逻辑 | `definitions.ts` | 低（累积效应） |
 | 模块级可变缓存 `_cachedKey/_cachedTools` — 多 session 并发时可能竞态覆盖 | `definitions.ts` | 中 |
-| `sanitizeToolCallPairs` 是 checkpoint 不一致的事后补丁 | `context.ts` | 中 |
+| `sanitizeToolCallPairs` 是 checkpoint 不一致的事后补丁 | `context.ts` | ✅ 已修复（2026-06-23） |
 | 系统提示中文 vs 工具描述英文 — 语言不一致 | `system-prompt.txt`, `definitions.ts` | 低 |
-| `edit_file` 无容错匹配 — 多余空白即失败 | `file.ts` | 中 |
+| `edit_file` 无容错匹配 — 多余空白即失败 | `file.ts` | ✅ 已修复（2026-06-23） |
 | `write_file` 无 append 模式 — 追加内容必须传完整文件 | `file.ts` | 低 |
 | 无二进制文件检测机制 | `file.ts` | 中 |
 | 子 Agent 无独立模型/thinking 配置 — Explore/Code/Review 共用主 agent 模型 | `subagent/` | 低 |
