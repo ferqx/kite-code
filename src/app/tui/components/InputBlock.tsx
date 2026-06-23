@@ -1,6 +1,6 @@
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { UserInputPayload } from '@/protocol/events';
@@ -30,7 +30,7 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
   return <SingleQuestion question={question} provider={provider} onResolved={onResolved} t={t} />;
 }
 
-// ── 单问题模式：保持现有行为 / Single-question mode: existing behavior ──
+// ── 单问题模式：选项 + ⭐ 推荐 + ✎ 自定义 / Single-question mode ──
 
 function SingleQuestion({
   question,
@@ -43,13 +43,14 @@ function SingleQuestion({
   onResolved: (answer: string, answers?: Record<string, string>) => void;
   t: ReturnType<typeof useTheme>;
 }) {
+  const options = question.options;
+  const hasCustom = question.allow_free_text !== false;
+  // 选项总数 = 实际选项 + 自定义入口 / Total = options + custom input slot
+  const totalSlots = options.length + (hasCustom ? 1 : 0);
   const [selected, setSelected] = useState(0);
   const [freeText, setFreeText] = useState('');
   const [showEmptyHint, setShowEmptyHint] = useState(false);
-  const [mode, setMode] = useState<'select' | 'type'>(
-    question.options.length > 0 ? 'select' : 'type',
-  );
-  const options = question.options;
+  const [mode, setMode] = useState<'select' | 'type'>(options.length > 0 ? 'select' : 'type');
 
   useInput(
     (
@@ -62,12 +63,19 @@ function SingleQuestion({
       }
       if (mode === 'select') {
         if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
-        if (key.downArrow) setSelected((s) => Math.min(options.length - 1, s + 1));
-        if (key.return && options.length > 0) {
-          const opt = options[selected];
-          if (opt) {
-            provider.submitAction({ type: 'input', text: opt.label });
-            onResolved(opt.label);
+        if (key.downArrow) setSelected((s) => Math.min(totalSlots - 1, s + 1));
+        if (key.return) {
+          if (hasCustom && selected === totalSlots - 1) {
+            // 选中「✎ 其他」→ 切换到自定义输入 / Selected "✎ Other" → switch to type mode
+            setMode('type');
+            return;
+          }
+          if (options.length > 0) {
+            const opt = options[selected];
+            if (opt) {
+              provider.submitAction({ type: 'input', text: opt.label });
+              onResolved(opt.label);
+            }
           }
         }
       }
@@ -85,13 +93,7 @@ function SingleQuestion({
   };
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={t.primary}
-      paddingX={1}
-      marginY={1}
-    >
+    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
       <Text bold color={t.primary}>
         ? {question.question}
       </Text>
@@ -102,13 +104,20 @@ function SingleQuestion({
           <Text color={t.dim}>{'─'.repeat(40)}</Text>
           {options.map((opt, i) => {
             const isSelected = i === selected;
+            const isRec = question.recommended != null && opt.id === question.recommended;
             return (
               <Text key={opt.id ?? i} color={isSelected ? t.primary : t.muted}>
                 {isSelected ? '▶' : ' '} {i + 1}. {opt.label}
+                {isRec ? ' ⭐ 推荐' : ''}
                 {opt.description ? ` — ${opt.description}` : ''}
               </Text>
             );
           })}
+          {hasCustom && (
+            <Text color={selected === totalSlots - 1 ? t.primary : t.muted}>
+              {selected === totalSlots - 1 ? '▶' : ' '} ✎ 其他（自定义输入）
+            </Text>
+          )}
           <Text color={t.dim}>{'─'.repeat(40)}</Text>
           <Text color={t.dim}>↑↓ select Enter confirm Tab type freely Esc cancel</Text>
         </Box>
@@ -124,7 +133,7 @@ function SingleQuestion({
             />
           </Box>
           {showEmptyHint && <Text color={t.dim}> Please type an answer before submitting</Text>}
-          {question.options.length > 0 && <Text color={t.dim}>Tab back to select Esc cancel</Text>}
+          {options.length > 0 && <Text color={t.dim}>Tab back to select Esc cancel</Text>}
         </Box>
       )}
     </Box>
@@ -132,6 +141,125 @@ function SingleQuestion({
 }
 
 // ── 多问题 Wizard 模式 / Multi-question wizard mode ──
+
+/** Web-style 水平步骤条：☒ 已完成 ☐ 待处理，超宽自折叠 …，✔ Submit 固尾
+ *  Web-style horizontal step bar: ☒ done ☐ pending, auto-collapse …, ✔ Submit pinned right */
+function StepBar({
+  items,
+  current,
+  t,
+  width,
+}: {
+  items: Array<{ question: string }>;
+  current: number;
+  t: ReturnType<typeof useTheme>;
+  width: number;
+}) {
+  const total = items.length;
+  if (total === 0) return null;
+
+  const PREFIX = '← ';
+  const SUFFIX = ' ✔ Submit →';
+  const ELLIPSIS = ' ... ';
+  const SPACER = 2; // between steps
+  const fixedOverhead = PREFIX.length + SUFFIX.length;
+
+  // 全量步骤字符串 / Full step strings (unbounded)
+  const steps = items.map((item, i) => ({
+    text: `${i < current ? '☒' : '☐'} ${item.question.length > 20 ? `${item.question.slice(0, 20)}…` : item.question}`,
+    done: i < current,
+    active: i === current,
+  }));
+
+  function stepWidth(s: (typeof steps)[number]) {
+    return s.text.length + SPACER;
+  }
+
+  const allStepsWidth = steps.reduce((sum, s) => sum + stepWidth(s), 0) - SPACER;
+
+  // 放得下 → 全量渲染 / All fit → render everything
+  if (allStepsWidth + fixedOverhead <= width) {
+    return (
+      <Box flexDirection="row">
+        <Text>{PREFIX}</Text>
+        {steps.map((s, i) => (
+          <Text key={i} color={s.done ? t.success : s.active ? t.primary : t.muted}>
+            {s.text}
+            {i < total - 1 ? '  ' : ''}
+          </Text>
+        ))}
+        <Text color={t.primary}>{SUFFIX}</Text>
+      </Box>
+    );
+  }
+
+  // 放不下 → 以 current 为中心开窗，超出折叠 … / Overflow → sliding window around current
+  const windowSteps: typeof steps = [];
+  let windowLeft: number | null = null;
+  let windowRight: number | null = null;
+  let used = 0;
+
+  // 始终包含 current
+  windowSteps[current] = steps[current]!;
+  used += stepWidth(steps[current]!);
+
+  let lo = current - 1;
+  let hi = current + 1;
+
+  // 左右交替扩展，尽量对称 / Expand left-right symmetrically
+  const available = width - fixedOverhead - ELLIPSIS.length * 2; // reserve for two … slots
+  while (lo >= 0 || hi < total) {
+    let added = false;
+    // 优先向右（靠近 submit） / Prefer right side (closer to submit)
+    if (hi < total) {
+      const w = stepWidth(steps[hi]!);
+      if (used + w <= available) {
+        windowSteps[hi] = steps[hi]!;
+        used += w;
+        windowRight = hi;
+        hi++;
+        added = true;
+      }
+    }
+    if (lo >= 0) {
+      const w = stepWidth(steps[lo]!);
+      if (used + w <= available) {
+        windowSteps[lo] = steps[lo]!;
+        used += w;
+        windowLeft = lo;
+        lo--;
+        added = true;
+      }
+    }
+    if (!added) break;
+  }
+
+  const showLeftEllipsis = windowLeft !== null && windowLeft > 0;
+  const showRightEllipsis = windowRight !== null && windowRight < total - 1;
+
+  // 组装渲染 / Assemble
+  const visible: Array<{ step: (typeof steps)[number]; index: number }> = [];
+  for (let i = 0; i < total; i++) {
+    if (windowSteps[i]) {
+      visible.push({ step: windowSteps[i]!, index: i });
+    }
+  }
+
+  return (
+    <Box flexDirection="row">
+      <Text color={t.muted}>{PREFIX}</Text>
+      {showLeftEllipsis && <Text color={t.muted}>{ELLIPSIS}</Text>}
+      {visible.map(({ step: s, index }) => (
+        <React.Fragment key={index}>
+          <Text color={s.done ? t.success : s.active ? t.primary : t.muted}>{s.text}</Text>
+          {index < (visible[visible.length - 1]?.index ?? 0) ? <Text> </Text> : null}
+        </React.Fragment>
+      ))}
+      {showRightEllipsis && <Text color={t.muted}>{ELLIPSIS}</Text>}
+      <Text color={t.primary}>{SUFFIX}</Text>
+    </Box>
+  );
+}
 
 function MultiQuestionWizard({
   question,
@@ -147,6 +275,8 @@ function MultiQuestionWizard({
   t: ReturnType<typeof useTheme>;
 }) {
   const total = items.length;
+  const { stdout } = useStdout();
+  const termWidth = stdout?.columns ?? 80;
   const [step, setStep] = useState(0);
   const [selected, setSelected] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -157,6 +287,8 @@ function MultiQuestionWizard({
   const cur = items[step]!;
   const curId = cur.id ?? String(step);
   const options = cur.options ?? [];
+  const hasCustom = cur.allow_free_text !== false;
+  const totalSlots = options.length + (hasCustom ? 1 : 0);
 
   useInput(
     (
@@ -171,8 +303,13 @@ function MultiQuestionWizard({
         return;
       }
       if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
-      if (key.downArrow) setSelected((s) => Math.min(options.length - 1, s + 1));
+      if (key.downArrow) setSelected((s) => Math.min(totalSlots - 1, s + 1));
       if (key.return) {
+        if (hasCustom && selected === totalSlots - 1) {
+          // 选中「✎ 其他」→ 切换到自定义输入 / Selected "✎ Other" → switch to type mode
+          setMode('type');
+          return;
+        }
         if (options.length > 0) {
           const opt = options[selected];
           if (opt) {
@@ -232,22 +369,16 @@ function MultiQuestionWizard({
   }
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={t.primary}
-      paddingX={1}
-      marginY={1}
-    >
-      {/* 上下文 + 进度 / Context + progress */}
+    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
+      {/* 主问题 + 上下文 / Main question + context */}
       <Text bold color={t.primary}>
         ? {question.question}
       </Text>
       {question.context && <Text color={t.dim}>{question.context}</Text>}
+
+      {/* 步骤条 / Step progress bar */}
       <Box marginTop={1}>
-        <Text color={t.muted}>
-          Question {step + 1}/{total}
-        </Text>
+        <StepBar items={items} current={step} t={t} width={termWidth} />
       </Box>
 
       {/* 当前问题 / Current question */}
@@ -259,13 +390,20 @@ function MultiQuestionWizard({
           <>
             {options.map((opt, i) => {
               const isSelected = i === selected;
+              const isRec = cur.recommended != null && opt.id === cur.recommended;
               return (
                 <Text key={opt.id ?? i} color={isSelected ? t.primary : t.muted}>
                   {isSelected ? '▶' : ' '} {i + 1}. {opt.label}
+                  {isRec ? ' ⭐ 推荐' : ''}
                   {opt.description ? ` — ${opt.description}` : ''}
                 </Text>
               );
             })}
+            {hasCustom && (
+              <Text color={selected === totalSlots - 1 ? t.primary : t.muted}>
+                {selected === totalSlots - 1 ? '▶' : ' '} ✎ 其他（自定义输入）
+              </Text>
+            )}
             <Text color={t.dim}>{'─'.repeat(40)}</Text>
             <Text color={t.dim}>
               ↑↓ select Enter {step < total - 1 ? 'next' : 'submit'} Tab type freely Esc cancel
@@ -290,18 +428,6 @@ function MultiQuestionWizard({
           </Box>
         )}
       </Box>
-
-      {/* 已回答摘要 / Answered summary */}
-      {Object.keys(answers).length > 0 && (
-        <Box marginTop={1} flexDirection="column">
-          <Text color={t.dim}>Answered:</Text>
-          {Object.entries(answers).map(([id, val]) => (
-            <Text key={id} color={t.muted}>
-              ✓ {id}: {val}
-            </Text>
-          ))}
-        </Box>
-      )}
     </Box>
   );
 }

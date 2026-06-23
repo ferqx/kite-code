@@ -47,9 +47,7 @@ export function getToolPreview(name: string, args: Record<string, unknown>): str
     case 'update_plan':
       return String(args.name ?? '') || undefined;
     case 'ask_user': {
-      const q = String(args.question ?? '');
-      if (!q) return undefined;
-      return q.length > 40 ? `${q.slice(0, 37)}...` : q;
+      return 'Asking...';
     }
     default:
       return undefined;
@@ -85,8 +83,7 @@ export function getToolDetail(
       return '方案已编写完成';
     }
     case 'ask_user': {
-      const q = typeof args.question === 'string' ? args.question.slice(0, 40) : '';
-      return `Asked: ${q}${q.length > 40 ? '...' : ''}`;
+      return 'Asked';
     }
     default:
       return undefined;

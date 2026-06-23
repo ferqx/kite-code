@@ -144,65 +144,14 @@ const BlockRenderer = React.memo(function BlockRenderer({
       );
 
     case 'approval': {
-      // 审批中：Footer 渲染 ApprovalBlock，输出区不重复
-      // 已审批：显示简要确认 / Resolved: show brief confirmation for scrollback
-      if (!block.resolved) return null;
-
-      const aRes = block.resolved;
-      const aGrant = aRes.grant ?? aRes.pattern ?? '';
-      const approved = aRes.action !== 'reject' && aRes.action !== 'cancelled';
-      return (
-        <Box flexDirection="column" {...gapFrom(prevBlock)}>
-          <Text>
-            <Text color={approved ? dt.success : dt.error}>{approved ? '✓' : '✗'}</Text>
-            <Text color={dt.muted}>
-              {' '}
-              {approved ? 'Approved' : aRes.action === 'cancelled' ? 'Cancelled' : 'Rejected'}
-              {aGrant ? ` · ${aGrant}` : ''}
-            </Text>
-          </Text>
-        </Box>
-      );
+      // 审批中/已审批均由 tool_card 和 Footer 完整渲染，此处不重复
+      // Approval pending/resolved is fully rendered by tool_card + Footer
+      return null;
     }
     case 'question': {
-      if (!block.resolved) {
-        // 提问进行中：Footer 已渲染完整 UI；输出区显示问题文本作为 scrollback 标记
-        return (
-          <Box flexDirection="column" {...gapFrom(prevBlock)}>
-            <Text color={dt.primary}>? {block.question.question}</Text>
-          </Box>
-        );
-      }
-      if (block.resolved === 'cancelled') {
-        return (
-          <Box flexDirection="column" {...gapFrom(prevBlock)}>
-            <Text color={dt.dim}>Question skipped</Text>
-          </Box>
-        );
-      }
-      if (typeof block.resolved === 'object') {
-        // 多问题模式 / Multi-question mode
-        return (
-          <Box flexDirection="column" {...gapFrom(prevBlock)}>
-            <Text color={dt.success}>✓ Answered:</Text>
-            {block.resolved.answers &&
-              Object.entries(block.resolved.answers).map(([id, val]) => (
-                <Text key={id} color={dt.muted}>
-                  {'  '}
-                  {id}: {val}
-                </Text>
-              ))}
-          </Box>
-        );
-      }
-      return (
-        <Box flexDirection="column" {...gapFrom(prevBlock)}>
-          <Text>
-            <Text color={dt.success}>✓ Answered: </Text>
-            <Text color={dt.muted}>{block.resolved}</Text>
-          </Text>
-        </Box>
-      );
+      // 提问/回答/取消均由 tool_card 完整渲染，此处不重复
+      // Question, answer, and cancellation are all fully rendered by the tool_card
+      return null;
     }
 
     case 'subagent':

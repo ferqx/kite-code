@@ -77,7 +77,8 @@ function toolArgsLabel(name: string, args: Record<string, unknown>, totalLines?:
     }
     case 'ask_user': {
       const q = args.question;
-      return typeof q === 'string' ? q.slice(0, 60) : '';
+      const firstLine = typeof q === 'string' ? q.split('\n')[0]! : '';
+      return firstLine.slice(0, 60);
     }
     default: {
       // pick first string arg that isn't obviously content

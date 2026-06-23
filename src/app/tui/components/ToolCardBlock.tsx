@@ -12,6 +12,118 @@ const SHELL_PREFIX = '⎿   ';
  *  (like "    ") is vulnerable to collapsing in Ink's Yoga text layout. */
 const SHELL_ALIGN = SHELL_PREFIX;
 
+/** ask_user 工具传入的选项类型 / Option type from ask_user tool args */
+interface AskOption {
+  id?: string;
+  label: string;
+  description?: string;
+}
+
+/** ask_user 工具传入的多问题项类型 / Multi-question item type from ask_user tool args */
+interface AskQuestionItem {
+  id?: string;
+  question: string;
+  options?: AskOption[];
+  recommended?: string;
+  allow_free_text?: boolean;
+}
+
+/** 格式化选项列表，推荐的选项用 ● ⭐ 标记，末尾固定附一个自定义输入入口
+ *  Format option list; recommended gets ● ⭐ marker, custom input slot always appended. */
+function formatOptions(
+  options?: AskOption[],
+  recommended?: string,
+  allowFreeText?: boolean,
+): string {
+  const lines: string[] = [];
+  if (options && options.length > 0) {
+    for (const o of options) {
+      const isRec = recommended != null && o.id != null && o.id === recommended;
+      const marker = isRec ? '●' : '○';
+      const star = isRec ? ' ⭐ 推荐' : '';
+      const desc = o.description ? ` — ${o.description}` : '';
+      lines.push(`  ${marker} ${o.label}${star}${desc}`);
+    }
+  }
+  // 自定义输入入口，默认开启 / Custom input slot, enabled by default
+  if (allowFreeText !== false) {
+    lines.push('  ✎ 其他（自定义输入）');
+  }
+  return lines.join('\n');
+}
+
+/** 截断多行答案——自定义输入可能很长，只展示首行加 … / Truncate multi-line answer to first line + … */
+function truncateAnswer(a: string): string {
+  if (a === '(no answer)') return a;
+  const lines = a.split('\n');
+  if (lines.length <= 1) return a.length > 200 ? `${a.slice(0, 197)}…` : a;
+  return `${lines[0]!.slice(0, 100)}…`;
+}
+
+/** 从 ask_user 的 args + summary 中提取人可读的问题、选项和答案
+ *  Extract human-readable question + options + answer from ask_user args and summary.
+ *  summary 可能是裸 JSON `{"ok":true,"tool":"ask_user","answer":"..."}` 或已提取的纯文本。
+ *
+ *  已回答：只展示问题 + User 回答，不重复选项 / Answered: question + User reply only, no options
+ *  待回答：展示问题 + 选项 / Pending: question + options */
+function formatAskUserContent(args: Record<string, unknown>, summary: string): string {
+  const questions = args.questions as AskQuestionItem[] | undefined;
+
+  // 解析 summary 中的答案（兼容裸 JSON 和纯文本）
+  let answer: string | undefined;
+  let answerMap: Record<string, string> | undefined;
+  try {
+    const p = JSON.parse(summary) as Record<string, unknown> | undefined;
+    if (p && typeof p === 'object') {
+      const am = p.answers as Record<string, string> | undefined;
+      if (am && Object.keys(am).length > 0) answerMap = am;
+      const a = p.answer as string | undefined;
+      if (typeof a === 'string') answer = a || '(no answer)';
+    }
+  } catch {
+    answer = summary;
+  }
+
+  const isAnswered = answer != null && answer !== '(no answer)';
+  const isCancelled = answer === 'Cancelled' || summary === 'Cancelled';
+
+  // 多问题模式 / Multi-question mode
+  if (questions && questions.length > 0) {
+    if (isCancelled) {
+      return questions.map((q, i) => `${i + 1}. **${q.question}**\n   *Cancelled*`).join('\n\n');
+    }
+    return questions
+      .map((q, i) => {
+        const a = truncateAnswer(answerMap?.[q.id ?? String(i)] ?? '(no answer)');
+        const answered = a !== '(no answer)';
+        const opts = answered ? '' : formatOptions(q.options, q.recommended, q.allow_free_text);
+        const questionLine = `${i + 1}. **${q.question}**`;
+        const answerLine = answered ? `   **User:** ${a}` : opts ? `   → ${a}` : `   → ${a}`;
+        return opts ? `${questionLine}\n${opts}\n${answerLine}` : `${questionLine}\n${answerLine}`;
+      })
+      .join('\n\n');
+  }
+
+  // 单问题模式 / Single question mode
+  const questionText = (args.question as string) ?? '';
+  const ans = truncateAnswer(answer ?? '(no answer)');
+
+  if (!questionText) return ans;
+  if (isCancelled) return `${questionText}\n\n**User:** Cancelled`;
+  if (!isAnswered) {
+    // 待回答：展示问题 + 选项 / Pending: show question + options
+    const opts = formatOptions(
+      args.options as AskOption[] | undefined,
+      args.recommended as string | undefined,
+      args.allow_free_text as boolean | undefined,
+    );
+    const body = opts ? `${questionText}\n\n${opts}` : questionText;
+    return ans === '(no answer)' ? `${body}\n\n*User: (no answer)*` : `${body}\n\n**User:** ${ans}`;
+  }
+  // 已回答：只展示问题 + 用户选择 / Answered: question + user choice only
+  return `${questionText}\n\n**User:** ${ans}`;
+}
+
 function renderShellSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
   const color = isError ? dt.error : dt.dim;
   const text = summary.trimEnd();
@@ -164,11 +276,13 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
   }, [block.status, showElapsed]);
 
   if (block.status === 'running') {
-    const spinner = SPINNER[spinnerIdx];
+    // 等待审批/输入时用静态 ○ 代替轮播 spinner / Static dot for tools awaiting approval or input
+    const isWaiting = awaitingApproval || block.name === 'ask_user';
+    const spinner = isWaiting ? '○' : SPINNER[spinnerIdx];
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={dt.warning}>{spinner} </Text>
+          <Text color={isWaiting ? dt.muted : dt.warning}>{spinner} </Text>
           <Text color={dt.primary}>{block.name}</Text>
           {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
           {awaitingApproval ? (
@@ -185,6 +299,7 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
   const isShell = block.name === 'shell_execute';
   const isFileTool = block.name === 'edit_file' || block.name === 'write_file';
   const isPlan = block.name === 'update_plan';
+  const isAskUser = block.name === 'ask_user';
   const isExpanded = block.expanded ?? block.status === 'error';
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
   const displayName = ACTION_NAMES[block.name] ?? block.name;
@@ -202,6 +317,12 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
       {isExpanded && isPlan && hasSummary && (
         <Box paddingLeft={2} marginTop={1} flexDirection="column">
           <MarkdownBlock content={block.summary!} />
+        </Box>
+      )}
+      {/* ask_user 工具：完整渲染问题 + 答案 / ask_user: render full question + answer */}
+      {isExpanded && isAskUser && (
+        <Box paddingLeft={2} marginTop={1} flexDirection="column">
+          <MarkdownBlock content={formatAskUserContent(block.args, block.summary || '')} />
         </Box>
       )}
       {/* Shell 工具 / Shell */}
@@ -224,7 +345,7 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
         </Box>
       )}
       {/* 其他工具 / Other tools */}
-      {isExpanded && !isPlan && !isShell && !isFileTool && hasSummary && (
+      {isExpanded && !isPlan && !isAskUser && !isShell && !isFileTool && hasSummary && (
         <Box paddingLeft={3} flexDirection="column">
           {renderToolSummary(block.summary!, block.status === 'error', dt)}
           {block.status === 'error' && block.summary?.split('\n').length > 3 && (

@@ -80,13 +80,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     approval.command.length > 100 ? `${approval.command.slice(0, 97)}...` : approval.command;
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={t.primary}
-      paddingX={1}
-      marginY={1}
-    >
+    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
       <Text bold color={riskColor}>
         ● {approval.tool}
       </Text>
