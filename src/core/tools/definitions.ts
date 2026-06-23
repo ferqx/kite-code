@@ -290,24 +290,41 @@ function createUpdatePlanTool() {
 /** 创建 ask_user 工具定义，用于规划时向用户澄清关键不确定性。
  *  支持单问题模式和 questions 数组多问题模式。
  *  Create ask_user tool definition for user clarification.
- *  Supports single-question mode and multi-question (questions array) mode. */
+ *  Supports single-question mode and multi-question (questions array) mode.
+ *
+ *  每个问题最多 3 个选项，必须标记一个为 recommended。
+ *  Each question has at most 3 options, one must be marked as recommended. */
 function createAskUserTool() {
+  const optionSchema = z.object({
+    id: z
+      .string()
+      .describe(
+        "Stable option id, e.g. 'minimal' or 'full'. Required — referenced by recommended.",
+      ),
+    label: z.string().min(1).describe('User-facing option label'),
+    description: z
+      .string()
+      .optional()
+      .describe('Short explanation of the trade-off for this option'),
+  });
+
   const questionItemSchema = z.object({
     id: z.string().optional().describe("Stable identifier, e.g. 'scope' or 'tech'"),
     question: z.string().min(1).describe('The question text'),
     options: z
-      .array(
-        z.object({
-          id: z.string().optional().describe("Stable option id, e.g. 'minimal' or 'full'"),
-          label: z.string().min(1).describe('User-facing option label'),
-          description: z
-            .string()
-            .optional()
-            .describe('Short explanation of the trade-off for this option'),
-        }),
-      )
+      .array(optionSchema)
       .min(1)
-      .describe('Suggested answer options'),
+      .max(3)
+      .optional()
+      .describe(
+        'Suggested answer options (max 3). Always provide options to help non-expert users.',
+      ),
+    recommended: z
+      .string()
+      .optional()
+      .describe(
+        "Option id of the recommended choice. Mark exactly ONE option — this helps users who don't know which to pick.",
+      ),
     allow_free_text: z
       .boolean()
       .optional()
@@ -334,18 +351,17 @@ function createAskUserTool() {
           .min(1)
           .describe('Main question or summary (used when questions array not provided)'),
         options: z
-          .array(
-            z.object({
-              id: z.string().optional().describe("Stable option id, e.g. 'minimal' or 'full'"),
-              label: z.string().min(1).describe('User-facing option label'),
-              description: z
-                .string()
-                .optional()
-                .describe('Short explanation of the trade-off for this option'),
-            }),
-          )
+          .array(optionSchema)
           .min(1)
-          .describe('Suggested answer options for single-question mode'),
+          .max(3)
+          .optional()
+          .describe(
+            'Suggested answer options for single-question mode (max 3). Always provide options.',
+          ),
+        recommended: z
+          .string()
+          .optional()
+          .describe('Option id of the recommended choice for single-question mode.'),
         allow_free_text: z
           .boolean()
           .optional()

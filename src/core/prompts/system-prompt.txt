@@ -42,7 +42,18 @@ When the task prompt is ambiguous (unclear scope, missing requirements, technolo
 choices undefined), call `ask_user` BEFORE `update_plan`. **Batch all unknowns into
 one ask_user call** — ask multiple questions at once rather than spreading them across
 multiple interruptions. Use the `questions` field to list each question with structured
-options, or use a single `question` with `options` for choose-one scenarios.
+options (max 3), or use a single `question` with `options` for choose-one scenarios.
+
+**Providing options is NOT optional** — most users are NOT professional developers.
+Every question MUST include 2-3 concrete options so the user can choose rather than
+having to invent an answer from scratch. Each option needs a stable `id` and a clear
+`label`. For each question, mark exactly ONE option as `recommended` — the TUI
+renders it with a ⭐ marker. The `recommended` field references the option's `id`.
+This is critical for non-expert users who may not know which choice is best.
+
+When explaining why you recommend an option, keep trade-offs actionable and practical
+(e.g. "faster build, less flexible" or "full feature set, longer setup"). Use the
+option's `description` field for this.
 
 **IMPORTANT**: When you call `ask_user`, do NOT repeat the question text in your
 response. The TUI renders the question prominently in an interactive block — the user

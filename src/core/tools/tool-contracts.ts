@@ -180,18 +180,20 @@ export const ASK_USER_CONTRACT: ToolContract = {
     whenToUse:
       'Ask the user focused questions when progress is blocked by uncertainty only the user can resolve. ' +
       'Use the `questions` array to batch all unknowns into ONE call — ask everything at once rather than ' +
-      'spreading clarifications across multiple interruptions. Each question gets its own options. ' +
+      'spreading clarifications across multiple interruptions. Each question gets its own options (max 3). ' +
       'Only use single-question mode (`question` + `options`) for simple choose-one scenarios. ' +
       'In plan mode: batch all pre-plan clarifications into one ask_user call before calling update_plan.',
     commonMistakes:
       'Making multiple ask_user calls in sequence instead of batching into one `questions` array. ' +
-      'Asking vague questions without concrete options for the user to choose from. ' +
+      'Asking vague questions without concrete options — always provide 2-3 options to help non-expert users decide. ' +
       'Using ask_user for questions the model could answer by reading workspace files. ' +
-      'Asking a question without providing any options at all.',
+      'Asking a question without providing any options at all. ' +
+      'Forgetting to set `recommended` on the most suitable option — users may not know which to pick.',
     outputFormat:
       'This tool triggers a user_input interrupt handled by the harness. It returns ok: false (the harness intercepts it). ' +
-      'Single mode: `question` (string), `options` (array of {id, label, description?}), `allow_free_text` (boolean, default true), `context` (string). ' +
-      'Batch mode: as above + `questions` (array of {id, question, options, allow_free_text?}). TUI renders as step wizard.',
+      'Single mode: `question` (string), `options` (array of {id, label, description?}, max 3), `recommended` (option id), `allow_free_text` (boolean, default true), `context` (string). ' +
+      'Batch mode: `questions` (array of {id, question, options[max 3], recommended?, allow_free_text?}). ' +
+      'Always mark exactly one option as `recommended` — the TUI renders it with a ⭐ marker.',
     failureHandling:
       'This tool always triggers an interrupt — ok: false is expected and not an error. ' +
       "The user's response will be injected as the next message in the conversation. " +

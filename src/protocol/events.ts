@@ -75,6 +75,8 @@ export interface UserInputRequest {
   options: UserInputOption[];
   allow_free_text: boolean;
   context?: string;
+  /** 推荐的选项 id / Recommended option id */
+  recommended?: string;
 }
 
 // ── Payload 类型 / Payload types ──
@@ -99,6 +101,8 @@ export interface UserInputQuestion {
   id?: string;
   question: string;
   options: UserInputOption[];
+  /** 推荐的选项 id（对应 options 中某一项的 id），TUI 渲染时展示 ⭐ 推荐标记 */
+  recommended?: string;
   allow_free_text?: boolean;
 }
 
@@ -107,6 +111,8 @@ export interface UserInputPayload {
   options: UserInputOption[];
   allow_free_text: boolean;
   context?: string;
+  /** 推荐的选项 id / Recommended option id */
+  recommended?: string;
   /** 多问题模式：一次 ask_user 携带多个问题，TUI 用分步 wizard 渲染 / Multi-question mode: ask multiple at once, TUI renders as step wizard */
   questions?: UserInputQuestion[];
 }

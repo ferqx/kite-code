@@ -293,6 +293,15 @@ export async function* runAgent(
 
       if (result.kind === 'done') break;
 
+      // 用户在 ask_user 提问中按 ESC → 终止对话，不回注空答案 / ESC during ask_user → terminate, don't inject empty answer
+      if (
+        result.kind === 'interrupt' &&
+        result.action.type === 'cancel' &&
+        result.interruptKind === 'input'
+      ) {
+        break;
+      }
+
       resumeValue = mapActionToResumeValue(result.action);
     }
 
@@ -450,7 +459,12 @@ export async function* forkFromCheckpoint(
 
 type StreamResult =
   | { kind: 'done'; events: AgentEvent[] }
-  | { kind: 'interrupt'; action: UserAction; events: AgentEvent[] };
+  | {
+      kind: 'interrupt';
+      action: UserAction;
+      events: AgentEvent[];
+      interruptKind: 'approval' | 'input' | 'plan_review';
+    };
 
 async function processStream(
   sink: EventSink,
@@ -485,7 +499,13 @@ async function processStream(
               data: { text: action.text, kind: 'answer', interruptType: 'input' },
             });
           }
-          return { events: allEvents, kind: 'interrupt', action };
+          const interruptKind =
+            event.type === 'need_approval'
+              ? ('approval' as const)
+              : event.type === 'need_input'
+                ? ('input' as const)
+                : ('plan_review' as const);
+          return { events: allEvents, kind: 'interrupt', action, interruptKind };
         }
       }
       continue;
@@ -558,11 +578,13 @@ function interruptToEvent(data: unknown): AgentEvent | null {
               question: (args?.question as string) ?? 'User input required',
               options: (args?.options as UserInputPayload['options']) ?? [],
               allow_free_text: (args?.allow_free_text as boolean) ?? true,
+              recommended: typeof args?.recommended === 'string' ? args.recommended : undefined,
               context: typeof args?.context === 'string' ? args.context : undefined,
               questions: rawQuestions?.map((q) => ({
                 id: q.id as string | undefined,
                 question: (q.question as string) ?? '',
                 options: (q.options as UserInputPayload['options']) ?? [],
+                recommended: typeof q.recommended === 'string' ? q.recommended : undefined,
                 allow_free_text: q.allow_free_text as boolean | undefined,
               })),
             };
@@ -693,6 +715,19 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
             (p.summary as string) ??
             summary);
         summary = reason;
+      }
+      // ask_user: extract human-readable answer from ToolMessage JSON
+      // instead of showing raw JSON
+      if ((msg.name as string) === 'ask_user') {
+        const answer = p.answer as string | undefined;
+        const answers = p.answers as Record<string, string> | undefined;
+        if (answers && Object.keys(answers).length > 0) {
+          summary = Object.entries(answers)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join('\n');
+        } else if (typeof answer === 'string') {
+          summary = answer || '(no answer)';
+        }
       }
     }
   } catch {

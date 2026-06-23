@@ -56,6 +56,7 @@ export function userInputToolMessage(
       ...(normalized.answers ? { answers: normalized.answers } : {}),
     }),
     tool_call_id: request.id ?? 'missing-tool-call-id',
+    name: 'ask_user',
     status: 'success',
   });
 }
