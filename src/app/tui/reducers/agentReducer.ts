@@ -5,6 +5,7 @@ import type { Action } from './actions';
 import {
   appendBlock,
   finalizeLastTurnStreaming,
+  findBlock,
   findBlockById,
   lastTurn,
   mergeConsecutiveTextBlocksInLastTurn,
@@ -245,10 +246,21 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
               interrupt: null,
             };
           } else if (b.kind === 'question') {
-            return {
-              ...replaceBlockById(state, b.id, { ...b, resolved: 'cancelled' }),
-              interrupt: null,
-            };
+            // 同时更新关联的 ask_user tool_card 为 Cancelled / Also update associated ask_user tool_card
+            const toolCard = findBlock(
+              state,
+              (blk) => blk.kind === 'tool_card' && blk.name === 'ask_user' && blk.status === 'running',
+            );
+            let next = replaceBlockById(state, b.id, { ...b, resolved: 'cancelled' });
+            if (toolCard?.kind === 'tool_card') {
+              next = replaceBlockById(next, toolCard.id, {
+                ...toolCard,
+                status: 'done',
+                summary: 'Cancelled',
+                expanded: true,
+              });
+            }
+            return { ...next, interrupt: null };
           }
         }
         return { ...state, interrupt: null };

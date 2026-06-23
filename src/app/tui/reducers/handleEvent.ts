@@ -187,14 +187,37 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // update_plan 的拒绝 ToolMessage（来自 plan_review 节点）不降级已有的 done 卡片 / Rejection ToolMessage for update_plan (from plan_review node) must not downgrade existing done card
       if (matched.name === 'update_plan' && !event.data.ok)
         return { ...state, toolStartTimes: nextTimes };
+      // ask_user: 防御性提取人类可读的答案，避免裸 JSON 渲染 / ask_user: defensively extract human-readable answer
+      let summary = event.data.summary;
+      if (matched.name === 'ask_user') {
+        try {
+          const p = JSON.parse(summary);
+          if (p && typeof p === 'object') {
+            const answer = p.answer as string | undefined;
+            const answers = p.answers as Record<string, string> | undefined;
+            if (answers && Object.keys(answers).length > 0) {
+              summary = Object.entries(answers)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join('\n');
+            } else if (typeof answer === 'string') {
+              summary = answer || '(no answer)';
+            }
+          }
+        } catch {
+          /* not JSON, use raw summary */
+        }
+      }
       const next: OutputBlock = {
         ...matched,
         status: event.data.ok ? ('done' as const) : ('error' as const),
-        summary: event.data.summary,
+        summary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
         expanded:
-          !event.data.ok || matched.name === 'shell_execute' || matched.name === 'update_plan',
+          !event.data.ok ||
+          matched.name === 'shell_execute' ||
+          matched.name === 'update_plan' ||
+          matched.name === 'ask_user',
       };
       // 工具输出的 token 计入累计统计 / Tool output tokens counted in cumulative total
       if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {
@@ -346,24 +369,19 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...appendBlock(finalized, block), interrupt: { kind: 'input', blockId: block.id } };
     }
     case 'need_plan_review': {
-      // 找到最后一条 running 状态的 update_plan tool_card，更新为 done 并填充方案内容
-      // Find the last running update_plan tool_card, transition to done and populate with plan content
+      // 方案内容由 Footer 的 PlanReviewBlock 完整渲染，tool_card 只保留详情行，
+      // 不展开不填充 summary，避免消息区重复 / Plan content rendered by Footer PlanReviewBlock;
+      // tool_card stays compact to avoid duplication in message area
       const planCard = findBlock(
         state,
         (b) => b.kind === 'tool_card' && b.name === 'update_plan' && b.status === 'running',
       );
       let next = state;
       if (planCard?.kind === 'tool_card') {
-        const stepsText = (event.data.plan.steps ?? [])
-          .map((s: { step: string }, i: number) => `${i + 1}. ${s.step}`)
-          .join('\n');
-        const summary = `${event.data.plan.description}\n\nSteps:\n${stepsText}`;
         next = replaceBlockById(next, planCard.id, {
           ...planCard,
           status: 'done' as const,
-          summary,
           detail: getToolDetail(planCard.name, planCard.args),
-          expanded: true,
         });
       }
       return {

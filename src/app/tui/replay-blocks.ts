@@ -13,7 +13,7 @@ import type { SubAgentRole } from '../../protocol/events.js';
 import { getToolDetail, getToolPreview } from './components/render-utils.js';
 import type { InterruptState, OutputBlock, SubAgentStepRecord } from './types.js';
 
-const AUTO_EXPAND_TOOLS = new Set(['shell_execute', 'edit_file', 'write_file', 'update_plan']);
+const AUTO_EXPAND_TOOLS = new Set(['shell_execute', 'edit_file', 'write_file', 'update_plan', 'ask_user']);
 
 /** Pending task tool call info collected from AIMessage tool_calls */
 interface PendingTaskCall {
@@ -200,6 +200,18 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
               (p.message as string) ??
               (p.summary as string) ??
               summary;
+          }
+          // ask_user: extract human-readable answer instead of raw JSON
+          if (tmName === 'ask_user') {
+            const answer = p.answer as string | undefined;
+            const answers = p.answers as Record<string, string> | undefined;
+            if (answers && Object.keys(answers).length > 0) {
+              summary = Object.entries(answers)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join('\n');
+            } else if (typeof answer === 'string') {
+              summary = answer || '(no answer)';
+            }
           }
         }
       } catch {
