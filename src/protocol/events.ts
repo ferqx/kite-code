@@ -77,6 +77,8 @@ export interface UserInputRequest {
   context?: string;
   /** 推荐的选项 id / Recommended option id */
   recommended?: string;
+  /** 多问题模式：一次 ask_user 携带多个问题，TUI 用分步 wizard 渲染 / Multi-question mode */
+  questions?: UserInputQuestion[];
 }
 
 // ── Payload 类型 / Payload types ──

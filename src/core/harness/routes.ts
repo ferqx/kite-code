@@ -1,5 +1,6 @@
 import { END } from '@langchain/langgraph';
 import type { AuthorizationOverride } from '@/core/types';
+import type { AgentPlan } from '@/protocol/events';
 import type { CodeAgentState } from './state';
 import { defaultPhaseForWorkspaceAccess, evaluateToolPolicy } from './tool-policy';
 import { getAllPendingToolRequests, getPendingToolRequest } from './tool-requests';
@@ -13,8 +14,11 @@ function resolveToolRoute(
   const request = getPendingToolRequest(state.messages, state.workspace);
   if (!request) return null;
   if (request.name === 'ask_user') return 'user_input';
-  // 只有首次提交 plan（state.plan 为空）时才触发审查——后续调用是状态更新，直接执行
-  if (request.name === 'update_plan' && !state.plan) return 'plan_review';
+  // 只有纯进度更新（名称/描述/步骤文本不变，仅 status 变化）可直通；
+  // 首次提交或结构性修改必须重新审查。
+  if (request.name === 'update_plan' && !isPlanProgressOnlyUpdate(state.plan, request.args)) {
+    return 'plan_review';
+  }
 
   const workspaceAccess = state.workspaceAccess ?? 'write';
   const decision = evaluateToolPolicy({
@@ -88,4 +92,12 @@ export function routeAfterUserInput(_state: CodeAgentState): 'agent' {
 /** plan_review 节点后的路由逻辑 / Routing after plan_review node */
 export function routeAfterPlanReview(_state: CodeAgentState): 'agent' {
   return 'agent';
+}
+
+function isPlanProgressOnlyUpdate(current: AgentPlan | null | undefined, next: AgentPlan): boolean {
+  if (!current) return false;
+  if (current.name !== next.name) return false;
+  if (current.description !== next.description) return false;
+  if (current.steps.length !== next.steps.length) return false;
+  return current.steps.every((step, index) => step.step === next.steps[index]?.step);
 }

@@ -73,6 +73,8 @@ export interface RunAgentInput {
   ) => void;
   /** 调用端标识 / Frontend identity */
   frontend?: string;
+  /** 初始执行阶段；TUI plan mode 会传入 planning / Initial execution phase */
+  initialPhase?: AgentPhase;
 }
 
 export interface StreamCodeAgentInput {
@@ -241,7 +243,7 @@ export async function* runAgent(
 
   try {
     const initialAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? 'auto');
-    const initialPhase = workspaceAccessToPhase(initialAccess);
+    const initialPhase = input.initialPhase ?? workspaceAccessToPhase(initialAccess);
 
     const prevAuth = await readLastAuthorization(checkpointer, input.threadId);
 
@@ -594,15 +596,17 @@ function interruptToEvent(data: unknown): AgentEvent | null {
         if (v.kind === 'plan_review') {
           const plan = v.plan as Record<string, unknown> | undefined;
           if (plan && typeof plan === 'object') {
+            const planStatus = (p: unknown): AgentPlan['status'] =>
+              p === 'in_progress' || p === 'completed' ? p : 'pending';
             const payload: NeedPlanReviewPayload = {
               plan: {
                 name: (plan.name as string) ?? '',
                 description: (plan.description as string) ?? '',
-                status: (plan.status as AgentPlan['status']) ?? 'pending',
+                status: planStatus(plan.status),
                 steps:
                   (plan.steps as Array<Record<string, unknown>> | undefined)?.map((s) => ({
                     step: (s.step as string) ?? '',
-                    status: (s.status as AgentPlan['status']) ?? 'pending',
+                    status: planStatus(s.status),
                   })) ?? [],
               },
             };
@@ -643,6 +647,8 @@ function mapActionToResumeValue(action: UserAction): AgentResumeValue {
         : { answer: action.text };
     case 'cancel':
       return { approved: false };
+    // switch_auth 由 TUI reducer 直接处理（SWITCH_AUTH action），不经 graph interrupt。
+    // 此处仅作为兜底：若通过 provider.submitAction 提交，graph 当作拒绝处理。
     case 'switch_auth':
       return { approved: false };
     case 'approve_plan':

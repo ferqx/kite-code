@@ -291,6 +291,11 @@ function detectInterrupt(
   return null;
 }
 
+/** 规范化计划状态值用于回放，与 tool-requests 的 normalizePlanStatus 一致 / Normalize plan status for replay */
+function normalizePlanStatusForReplay(status: unknown): AgentPlan['status'] {
+  return status === 'in_progress' || status === 'completed' ? status : 'pending';
+}
+
 /** 从 interrupt value 解析 AgentPlan / Parse AgentPlan from interrupt value */
 function parsePlanFromInterrupt(v: Record<string, unknown>): AgentPlan | undefined {
   const p = v.plan as Record<string, unknown> | undefined;
@@ -298,11 +303,11 @@ function parsePlanFromInterrupt(v: Record<string, unknown>): AgentPlan | undefin
   return {
     name: (p.name as string) ?? '',
     description: (p.description as string) ?? '',
-    status: (p.status as AgentPlan['status']) ?? 'pending',
+    status: normalizePlanStatusForReplay(p.status),
     steps:
       (p.steps as Array<Record<string, unknown>> | undefined)?.map((s) => ({
         step: (s.step as string) ?? '',
-        status: (s.status as AgentPlan['status']) ?? 'pending',
+        status: normalizePlanStatusForReplay(s.status),
       })) ?? [],
   };
 }
@@ -314,11 +319,11 @@ function extractPlan(cv: Record<string, unknown>): AgentPlan | null {
   return {
     name: (p.name as string) ?? '',
     description: (p.description as string) ?? '',
-    status: (p.status as AgentPlan['status']) ?? 'pending',
+    status: normalizePlanStatusForReplay(p.status),
     steps:
       (p.steps as Array<Record<string, unknown>> | undefined)?.map((s) => ({
         step: (s.step as string) ?? '',
-        status: (s.status as AgentPlan['status']) ?? 'pending',
+        status: normalizePlanStatusForReplay(s.status),
       })) ?? [],
   };
 }

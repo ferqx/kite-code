@@ -503,25 +503,41 @@ function normalizeAgentPlan(value: Partial<AgentPlan>): AgentPlan {
   };
 }
 
-/** 规范化用户澄清请求 / Normalize user clarification request */
-function normalizeUserInputRequest(value: Partial<UserInputRequest>): UserInputRequest {
-  const rawOptions = Array.isArray(value.options) ? (value.options as unknown[]) : [];
-  const options = rawOptions
-    .filter((option): option is Partial<UserInputOption> => {
-      return !!option && typeof option === 'object';
-    })
+/** 规范化所有选项（单个问题级别）/ Normalize options for a single question */
+function normalizeOptions(raw: unknown[]): UserInputOption[] {
+  return raw
+    .filter((option): option is Partial<UserInputOption> => !!option && typeof option === 'object')
     .map((option, index) => {
       const id =
         typeof option.id === 'string' && option.id.trim() ? option.id : `option-${index + 1}`;
       const label = typeof option.label === 'string' && option.label.trim() ? option.label : id;
+      const normalized: UserInputOption = { id, label };
+      if (typeof option.description === 'string' && option.description.trim())
+        normalized.description = option.description;
+      return normalized;
+    });
+}
+
+/** 规范化用户澄清请求 / Normalize user clarification request */
+function normalizeUserInputRequest(value: Partial<UserInputRequest>): UserInputRequest {
+  const rawOptions = Array.isArray(value.options) ? (value.options as unknown[]) : [];
+  const options = normalizeOptions(rawOptions);
+
+  // 规范化多问题列表 / Normalize multi-question items
+  let questions: UserInputRequest['questions'];
+  if (Array.isArray(value.questions)) {
+    questions = (value.questions as unknown[]).map((q: unknown) => {
+      const item = q as Record<string, unknown>;
+      const itemOptions = Array.isArray(item.options) ? (item.options as unknown[]) : [];
       return {
-        id,
-        label,
-        ...(typeof option.description === 'string' && option.description.trim()
-          ? { description: option.description }
-          : {}),
+        question: typeof item.question === 'string' ? item.question : '',
+        options: normalizeOptions(itemOptions),
+        allow_free_text: item.allow_free_text !== false,
+        ...(typeof item.id === 'string' && item.id.trim() ? { id: item.id } : {}),
+        ...(typeof item.recommended === 'string' ? { recommended: item.recommended } : {}),
       };
     });
+  }
 
   return {
     question: typeof value.question === 'string' ? value.question : '',
@@ -530,6 +546,10 @@ function normalizeUserInputRequest(value: Partial<UserInputRequest>): UserInputR
     ...(typeof value.context === 'string' && value.context.trim()
       ? { context: value.context }
       : {}),
+    ...(typeof value.recommended === 'string' && value.recommended.trim()
+      ? { recommended: value.recommended }
+      : {}),
+    ...(questions ? { questions } : {}),
   };
 }
 

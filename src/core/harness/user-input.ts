@@ -24,6 +24,11 @@ export function normalizeUserInputResume(resume: AgentResumeValue): {
     return { answer: first, answers: map };
   }
 
+  // 用户取消（Esc / Ctrl+C）→ 标记为 Cancelled / User cancelled → mark as Cancelled
+  if ((resume as Record<string, unknown>).type === 'cancel') {
+    return { answer: 'Cancelled' };
+  }
+
   for (const key of [
     'answer',
     'choice',
