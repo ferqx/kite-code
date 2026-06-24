@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-06-19（session-logger + event-mechanism-refactor 归档）
+最后更新：2026-06-25（plan-review-interrupt 归档 + implementation 更新）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -28,7 +28,7 @@
 | [`2026-05-24-multi-session-concurrency.md`](2026-05-24-multi-session-concurrency.md) | archived | P0 | — | — | 多会话并发执行（3 tasks）。 |
 | [`2026-05-25-e2e-restructure.md`](2026-05-25-e2e-restructure.md) | archived | P1 | — | — | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
 | [`2026-05-26-tui-claude-code-parity.md`](2026-05-26-tui-claude-code-parity.md) | archived | P0 | — | — | TUI Claude Code 全面对标：布局重构、快捷键精简、功能补全、配置、主题（14 tasks）。 |
-| [`2026-06-16-plan-review-interrupt.md`](2026-06-16-plan-review-interrupt.md) | draft | P1 | — | — | 为 update_plan 增加 plan_review 中断，复刻 EnterPlanMode 的 plan-review-approve 工作流 |
+| [`2026-06-16-plan-review-interrupt.md`](2026-06-16-plan-review-interrupt.md) | archived | P1 | — | — | 为 update_plan 增加 plan_review 中断。实际实现有偏差，参见 [[plan-mode-implementation]] |
 | [`2026-06-17-background-subagent.md`](2026-06-17-background-subagent.md) | draft | P0 | `understanding/2026-05-30-multi-agent-design.md` | — | 后台子 Agent：`background: true` 异步派发、SessionContext 容器、BackgroundTaskManager、跨 run 注入与中止（8 phases）。 |
 | [`2026-06-14-p0-gap-closure.md`](2026-06-14-p0-gap-closure.md) | draft | P0 | — | — | P0 缺口补齐：Web Search + Token 展示 + 开箱即用 + 工作空间授权（4 大类 19 tasks）。 |
 | [`2026-06-18-opentelemetry-observability.md`](2026-06-18-opentelemetry-observability.md) | draft | P1 | — | — | Agent OpenTelemetry 可观测性：Trace/Span 建模 + OTLP 导出，工具失败分类 → 提示词优化闭环 |

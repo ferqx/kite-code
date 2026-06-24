@@ -1,7 +1,7 @@
 # Plan-Review-Approve：为 update_plan 增加用户审查中断
 
 创建日期：2026-06-16
-状态：draft
+状态：archived
 优先级：P1
 依赖：无
 替代/分叉：无
@@ -331,7 +331,19 @@ bun run tui  # 手动：agent 提 plan → PlanReviewBlock → 批准/拒绝 →
 | `src/core/prompts/system-prompt.txt` | 编辑 | 更新 plan 工作流描述 |
 | `src/core/tools/tool-contracts.ts` | 编辑 | 更新 `update_plan` 契约 |
 
-## 流程示意
+## 实际实现偏差
+
+> 2026-06-25 归档。实施见 [[plan-mode-implementation]]，与原始设计有以下关键偏差：
+
+| 设计 | 实际 |
+|------|------|
+| 新建 `plan_review` OutputBlock 类型 | 复用 `update_plan` tool_card，填充 summary + expanded: true，用 MarkdownBlock 渲染 |
+| interrupt 通过 blockId 关联 block | `state.interrupt = { kind: "plan_review", plan }` 直接存 plan，无 blockId |
+| `RESOLVE_INTERRUPT` 统一处理 | 专用 `RESOLVE_PLAN_REVIEW` action，设置 `state.status.plan` + `pendingPlan` |
+| Enter → `approve_plan` action | 三选项：`approve_plan_auto` / `approve_plan_manual` / `supplement_plan` + `reject_plan` |
+| Esc → cancel（agent 继续） | Esc → `running: false`，等同 Ctrl+C 停止会话 |
+| PlanReviewBlock 完整渲染方案 | Footer 仅确认操作条，方案内容 OutputArea tool_card Markdown 渲染 |
+| `update_plan` 首次调用触发审查 | `isPlanProgressOnlyUpdate`：仅结构性修改（name/description/steps）触发审查，纯状态更新直通 |
 
 ```
 agent 调用 update_plan
