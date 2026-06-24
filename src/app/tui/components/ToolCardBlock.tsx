@@ -28,30 +28,6 @@ interface AskQuestionItem {
   allow_free_text?: boolean;
 }
 
-/** 格式化选项列表，推荐的选项用 ● ⭐ 标记，末尾固定附一个自定义输入入口
- *  Format option list; recommended gets ● ⭐ marker, custom input slot always appended. */
-function formatOptions(
-  options?: AskOption[],
-  recommended?: string,
-  allowFreeText?: boolean,
-): string {
-  const lines: string[] = [];
-  if (options && options.length > 0) {
-    for (const o of options) {
-      const isRec = recommended != null && o.id != null && o.id === recommended;
-      const marker = isRec ? '●' : '○';
-      const star = isRec ? ' ⭐ 推荐' : '';
-      const desc = o.description ? ` — ${o.description}` : '';
-      lines.push(`  ${marker} ${o.label}${star}${desc}`);
-    }
-  }
-  // 自定义输入入口，默认开启 / Custom input slot, enabled by default
-  if (allowFreeText !== false) {
-    lines.push('  ✎ 其他（自定义输入）');
-  }
-  return lines.join('\n');
-}
-
 /** 截断多行答案——自定义输入可能很长，只展示首行加 … / Truncate multi-line answer to first line + … */
 function truncateAnswer(a: string): string {
   if (a === '(no answer)') return a;
@@ -60,16 +36,19 @@ function truncateAnswer(a: string): string {
   return `${lines[0]!.slice(0, 100)}…`;
 }
 
-/** 从 ask_user 的 args + summary 中提取人可读的问题、选项和答案
- *  Extract human-readable question + options + answer from ask_user args and summary.
- *  summary 可能是裸 JSON `{"ok":true,"tool":"ask_user","answer":"..."}` 或已提取的纯文本。
- *
- *  已回答：只展示问题 + User 回答，不重复选项 / Answered: question + User reply only, no options
- *  待回答：展示问题 + 选项 / Pending: question + options */
-function formatAskUserContent(args: Record<string, unknown>, summary: string): string {
+/** 解析 ask_user summary 中的答案（兼容裸 JSON 和上游已转纯文本格式）
+ *  Parse ask_user answer from summary (compatible with raw JSON and upstream plain-text).
+ *  上游 parseToolResultEvents 会将 JSON 转为 "key: value\n..." 纯文本，
+ *  所以 JSON.parse 失败后还需按纯文本格式解析 answerMap。 */
+function parseAskUserAnswers(
+  args: Record<string, unknown>,
+  summary: string,
+): {
+  answer: string;
+  answerMap: Record<string, string> | undefined;
+  isCancelled: boolean;
+} {
   const questions = args.questions as AskQuestionItem[] | undefined;
-
-  // 解析 summary 中的答案（兼容裸 JSON 和纯文本）
   let answer: string | undefined;
   let answerMap: Record<string, string> | undefined;
   try {
@@ -82,46 +61,62 @@ function formatAskUserContent(args: Record<string, unknown>, summary: string): s
     }
   } catch {
     answer = summary;
-  }
-
-  const isAnswered = answer != null && answer !== '(no answer)';
-  const isCancelled = answer === 'Cancelled' || summary === 'Cancelled';
-
-  // 多问题模式 / Multi-question mode
-  if (questions && questions.length > 0) {
-    if (isCancelled) {
-      return questions.map((q, i) => `${i + 1}. **${q.question}**\n   *Cancelled*`).join('\n\n');
+    if (questions && questions.length > 0) {
+      const map: Record<string, string> = {};
+      const lines = summary.split('\n');
+      for (const line of lines) {
+        const colonIdx = line.indexOf(': ');
+        if (colonIdx > 0) {
+          map[line.slice(0, colonIdx)] = line.slice(colonIdx + 2);
+        }
+      }
+      if (Object.keys(map).length > 0) {
+        answerMap = map;
+        answer = Object.values(map).find((v) => v.length > 0) ?? '(no answer)';
+      }
     }
-    return questions
-      .map((q, i) => {
-        const a = truncateAnswer(answerMap?.[q.id ?? String(i)] ?? '(no answer)');
-        const answered = a !== '(no answer)';
-        const opts = answered ? '' : formatOptions(q.options, q.recommended, q.allow_free_text);
-        const questionLine = `${i + 1}. **${q.question}**`;
-        const answerLine = answered ? `   **User:** ${a}` : opts ? `   → ${a}` : `   → ${a}`;
-        return opts ? `${questionLine}\n${opts}\n${answerLine}` : `${questionLine}\n${answerLine}`;
-      })
-      .join('\n\n');
+  }
+  const isCancelled = answer === 'Cancelled' || summary === 'Cancelled';
+  return { answer: answer ?? '(no answer)', answerMap, isCancelled };
+}
+
+/** ask_user 紧凑摘要渲染：每行 ⎿ 前缀，单行答案，仿 shell_execute 布局
+ *  Compact ask_user summary: ⎿-prefixed single-line answers, shell_execute style.
+ *  单问题：⎿   User: answer
+ *  多步骤：⎿  Step1 sub_q User: answer / ⎿  Step2 sub_q User: answer */
+function renderAskUserSummary(
+  args: Record<string, unknown>,
+  summary: string,
+  dt: Theme,
+): React.ReactNode {
+  const questions = args.questions as AskQuestionItem[] | undefined;
+  const { answer, answerMap, isCancelled } = parseAskUserAnswers(args, summary);
+
+  if (isCancelled) {
+    return <Text color={dt.dim}>⎿ Cancelled</Text>;
   }
 
-  // 单问题模式 / Single question mode
-  const questionText = (args.question as string) ?? '';
-  const ans = truncateAnswer(answer ?? '(no answer)');
-
-  if (!questionText) return ans;
-  if (isCancelled) return `${questionText}\n\n**User:** Cancelled`;
-  if (!isAnswered) {
-    // 待回答：展示问题 + 选项 / Pending: show question + options
-    const opts = formatOptions(
-      args.options as AskOption[] | undefined,
-      args.recommended as string | undefined,
-      args.allow_free_text as boolean | undefined,
+  // 多问题模式：每步一行 / Multi-question: one line per step
+  if (questions && questions.length > 0 && answerMap) {
+    return (
+      <>
+        {questions.map((q, i) => {
+          const id = q.id ?? String(i);
+          const a = answerMap[id] ?? '';
+          const qShort = q.question.length > 40 ? `${q.question.slice(0, 37)}...` : q.question;
+          const line = `Step${i + 1} ${qShort} User: ${truncateAnswer(a || '(no answer)')}`;
+          return (
+            <Text key={q.id ?? `q-${i}`} color={dt.dim}>
+              ⎿ {line.slice(0, 200)}
+            </Text>
+          );
+        })}
+      </>
     );
-    const body = opts ? `${questionText}\n\n${opts}` : questionText;
-    return ans === '(no answer)' ? `${body}\n\n*User: (no answer)*` : `${body}\n\n**User:** ${ans}`;
   }
-  // 已回答：只展示问题 + 用户选择 / Answered: question + user choice only
-  return `${questionText}\n\n**User:** ${ans}`;
+
+  // 单问题模式 / Single question
+  return <Text color={dt.dim}>⎿ User: {truncateAnswer(answer)}</Text>;
 }
 
 function renderShellSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
@@ -279,6 +274,7 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
     // 等待审批/输入时用静态 ○ 代替轮播 spinner / Static dot for tools awaiting approval or input
     const isWaiting = awaitingApproval || block.name === 'ask_user';
     const spinner = isWaiting ? '○' : SPINNER[spinnerIdx];
+    // isAskUserRunning 已移除：running 状态的问题由 Footer InputBlock 渲染，scrollback 不重复
     return (
       <Box flexDirection="column">
         <Box>
@@ -291,6 +287,7 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
             <Text color={dt.dim}> ({formatElapsed(liveElapsed)})</Text>
           ) : null}
         </Box>
+        {/* ask_user 运行时问题由 Footer InputBlock 渲染，scrollback 不重复展示 */}
       </Box>
     );
   }
@@ -319,10 +316,10 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
           <MarkdownBlock content={block.summary!} />
         </Box>
       )}
-      {/* ask_user 工具：完整渲染问题 + 答案 / ask_user: render full question + answer */}
-      {isExpanded && isAskUser && (
-        <Box paddingLeft={2} marginTop={1} flexDirection="column">
-          <MarkdownBlock content={formatAskUserContent(block.args, block.summary || '')} />
+      {/* ask_user 工具：紧凑渲染答案，每行 ⎿ 前缀，仿 shell_execute 布局 / ask_user: compact ⎿-prefixed lines, shell_execute style */}
+      {isExpanded && isAskUser && hasSummary && (
+        <Box paddingLeft={2} flexDirection="column">
+          {renderAskUserSummary(block.args, block.summary!, dt)}
         </Box>
       )}
       {/* Shell 工具 / Shell */}

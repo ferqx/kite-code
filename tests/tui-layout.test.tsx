@@ -658,6 +658,20 @@ describe('PlanReviewBlock', () => {
     );
     expect(lastFrame()).toContain('a/m/t quick key');
   });
+
+  test('renders plan review confirmation bar', () => {
+    const plan = fakePlan();
+    const { lastFrame } = render(
+      <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame();
+    // 方案内容移至 OutputArea tool_card Markdown 渲染，Footer 仅显示确认操作条
+    // Plan content moved to OutputArea tool_card Markdown; Footer only shows confirmation bar
+    expect(frame).toContain('Review the plan above');
+    expect(frame).toContain('Yes, and use auto mode');
+    expect(frame).toContain('Yes, manually approve edits');
+    expect(frame).toContain('Tell Agent what to change');
+  });
 });
 
 // ── InputLine plan mode ──

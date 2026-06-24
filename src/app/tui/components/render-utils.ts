@@ -47,7 +47,16 @@ export function getToolPreview(name: string, args: Record<string, unknown>): str
     case 'update_plan':
       return String(args.name ?? '') || undefined;
     case 'ask_user': {
-      return 'Asking...';
+      const q = typeof args.question === 'string' ? args.question : '';
+      if (!q) return undefined;
+      return q.length > 60 ? `${q.slice(0, 57)}...` : q;
+    }
+    case 'read_mcp_resource': {
+      const uri = typeof args.uri === 'string' ? args.uri : '';
+      const server = typeof args.server === 'string' ? args.server : '';
+      if (!uri) return undefined;
+      const label = server ? `${server}:${uri}` : uri;
+      return label.length > 60 ? `${label.slice(0, 57)}...` : label;
     }
     default:
       return undefined;
@@ -80,10 +89,17 @@ export function getToolDetail(
       return `Ran: ${cmd}`;
     }
     case 'update_plan': {
-      return '方案已编写完成';
+      return typeof args.name === 'string' ? args.name : undefined;
     }
     case 'ask_user': {
-      return 'Asked';
+      const q = typeof args.question === 'string' ? args.question : '';
+      if (!q) return 'Asked';
+      return q.length > 50 ? `${q.slice(0, 47)}...` : q;
+    }
+    case 'read_mcp_resource': {
+      const uri = typeof args.uri === 'string' ? args.uri : '';
+      const server = typeof args.server === 'string' ? args.server : '';
+      return server ? `Read ${server}:${uri}` : `Read ${uri}`;
     }
     default:
       return undefined;

@@ -531,6 +531,61 @@ describe('eventReducer (blocks model)', () => {
       expect(s.status.plan).toEqual(eventPayload.plan);
       expect(s.status.pendingPlan).toBeNull();
     });
+
+    test('need_plan_review populates tool_card summary and expanded', () => {
+      // First create a tool_call for update_plan (simulating the agent calling the tool)
+      let s = dispatch(fresh(), {
+        type: 'EVENT',
+        event: {
+          type: 'tool_call' as any,
+          data: {
+            call_id: 'plan-1',
+            name: 'update_plan',
+            args: {
+              name: 'Test Plan',
+              description: 'A great plan',
+              status: 'pending',
+              steps: [{ step: 'Do thing', status: 'pending' }],
+            },
+          },
+        },
+      });
+      // Verify tool_card created with running status
+      const cards = flatBlocks(s).filter(
+        (b: any) => b.kind === 'tool_card' && b.name === 'update_plan',
+      );
+      expect(cards.length).toBe(1);
+      const card = cards[0] as any;
+      expect(card.status).toBe('running');
+      expect(card.summary).toBe('');
+      expect(card.expanded).toBeUndefined();
+
+      // Then fire need_plan_review
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: {
+          type: 'need_plan_review' as any,
+          data: {
+            plan: {
+              name: 'Test Plan',
+              description: 'A great plan',
+              status: 'pending' as const,
+              steps: [{ step: 'Do thing', status: 'pending' as const }],
+            },
+          },
+        },
+      });
+      const doneCards = flatBlocks(s).filter(
+        (b: any) => b.kind === 'tool_card' && b.name === 'update_plan',
+      );
+      expect(doneCards.length).toBe(1);
+      const doneCard = doneCards[0] as any;
+      expect(doneCard.status).toBe('done');
+      expect(doneCard.summary).toContain('A great plan');
+      expect(doneCard.summary).toContain('Steps:');
+      expect(doneCard.summary).toContain('Do thing');
+      expect(doneCard.expanded).toBe(true);
+    });
     test('SHOW_MODEL_SELECTOR / HIDE_MODEL_SELECTOR', () => {
       let s = fresh();
       s = dispatch(s, { type: 'SHOW_MODEL_SELECTOR' });

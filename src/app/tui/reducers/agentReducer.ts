@@ -233,9 +233,10 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case 'ESCAPE': {
       // 审批/提问中 → 只取消中断，继续会话 / Interrupt active → cancel interrupt only
       if (state.interrupt) {
-        // plan_review 没有 blockId，直接清除 / plan_review has no blockId, clear directly
+        // plan_review Esc → 等同 Ctrl+C 停止会话 / plan_review Esc → same as Ctrl+C, stop session
         if (state.interrupt.kind === 'plan_review') {
-          return { ...state, interrupt: null };
+          const s = cancelRunningBlocks(state);
+          return { ...finalizeLastTurnStreaming(s), running: false, interrupt: null };
         }
         if (!state.interrupt.blockId) return state;
         const b = findBlockById(state, state.interrupt.blockId);
@@ -249,7 +250,8 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
             // 同时更新关联的 ask_user tool_card 为 Cancelled / Also update associated ask_user tool_card
             const toolCard = findBlock(
               state,
-              (blk) => blk.kind === 'tool_card' && blk.name === 'ask_user' && blk.status === 'running',
+              (blk) =>
+                blk.kind === 'tool_card' && blk.name === 'ask_user' && blk.status === 'running',
             );
             let next = replaceBlockById(state, b.id, { ...b, resolved: 'cancelled' });
             if (toolCard?.kind === 'tool_card') {

@@ -13,7 +13,13 @@ import type { SubAgentRole } from '../../protocol/events.js';
 import { getToolDetail, getToolPreview } from './components/render-utils.js';
 import type { InterruptState, OutputBlock, SubAgentStepRecord } from './types.js';
 
-const AUTO_EXPAND_TOOLS = new Set(['shell_execute', 'edit_file', 'write_file', 'update_plan', 'ask_user']);
+const AUTO_EXPAND_TOOLS = new Set([
+  'shell_execute',
+  'edit_file',
+  'write_file',
+  'update_plan',
+  'ask_user',
+]);
 
 /** Pending task tool call info collected from AIMessage tool_calls */
 interface PendingTaskCall {
@@ -134,6 +140,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
               status: 'done',
               summary: planSummary,
               preview: getToolPreview(name, args),
+              expanded: AUTO_EXPAND_TOOLS.has(name),
             });
           }
         }

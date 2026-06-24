@@ -131,8 +131,8 @@ export default function PlanReviewBlock({
     },
   );
 
-  // 方案内容已在 OutputArea 渲染，Footer 只显示确认操作条
-  // Plan content is rendered in OutputArea; Footer only shows the confirmation bar
+  // 方案内容已在 OutputArea 以 Markdown tool_card 渲染，Footer 只显示确认操作条
+  // Plan content is rendered in OutputArea as Markdown tool_card; Footer only shows the confirmation bar
   return (
     <Box
       flexDirection="column"

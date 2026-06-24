@@ -369,19 +369,27 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...appendBlock(finalized, block), interrupt: { kind: 'input', blockId: block.id } };
     }
     case 'need_plan_review': {
-      // 方案内容由 Footer 的 PlanReviewBlock 完整渲染，tool_card 只保留详情行，
-      // 不展开不填充 summary，避免消息区重复 / Plan content rendered by Footer PlanReviewBlock;
-      // tool_card stays compact to avoid duplication in message area
+      // 方案内容在 OutputArea 以 Markdown tool_card 渲染，同时 Footer PlanReviewBlock
+      // 展示确认操作条。填充 summary + expanded 以便 MarkdownBlock 展开渲染。
+      // Plan content rendered in OutputArea as Markdown tool_card; Footer PlanReviewBlock
+      // shows the confirmation bar. Populate summary + expanded for MarkdownBlock rendering.
       const planCard = findBlock(
         state,
         (b) => b.kind === 'tool_card' && b.name === 'update_plan' && b.status === 'running',
       );
+      const plan = event.data.plan;
+      const stepsText = (plan.steps ?? []).map((s, i) => `${i + 1}. ${s.step}`).join('\n');
+      const planSummary = plan.description
+        ? `${plan.description}\n\nSteps:\n${stepsText}`
+        : `Steps:\n${stepsText}`;
       let next = state;
       if (planCard?.kind === 'tool_card') {
         next = replaceBlockById(next, planCard.id, {
           ...planCard,
           status: 'done' as const,
+          summary: planSummary,
           detail: getToolDetail(planCard.name, planCard.args),
+          expanded: true,
         });
       }
       return {
