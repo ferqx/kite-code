@@ -7,6 +7,8 @@ interface MarkdownBlockProps {
   content: string;
   streaming?: boolean;
   color?: string;
+  /** 覆盖 useWindowSize 的 columns，用于容器已缩进时限制可用宽度 */
+  maxWidth?: number;
 }
 
 export interface InlineSegment {
@@ -292,10 +294,27 @@ function charWidth(code: number): number {
   return 1;
 }
 
+/** 代码行中 tab 的展宽列数 — 大多数终端默认 4 或 8，此处保守取 4 */
+const TAB_WIDTH = 4;
+
 function stringWidth(s: string): number {
   let width = 0;
   for (const ch of s) {
     width += charWidth(ch.codePointAt(0) ?? 0);
+  }
+  return width;
+}
+
+/** 计算代码行在终端中的实际展宽，\t 按 TAB_WIDTH 展开
+ *  Measure a code line's visual width with tab expansion. */
+function codeLineWidth(line: string): number {
+  let width = 0;
+  for (const ch of line) {
+    if (ch === '\t') {
+      width += TAB_WIDTH;
+    } else {
+      width += charWidth(ch.codePointAt(0) ?? 0);
+    }
   }
   return width;
 }
@@ -592,9 +611,10 @@ function spacingBetween(prev: LineGroup, next: LineGroup, blanks: number): numbe
 
 // ── main component ──
 
-export default React.memo(function MarkdownBlock({ content, color }: MarkdownBlockProps) {
+export default React.memo(function MarkdownBlock({ content, color, maxWidth }: MarkdownBlockProps) {
   const t = useTheme();
-  const { columns } = useWindowSize();
+  const { columns: termColumns } = useWindowSize();
+  const columns = maxWidth ?? termColumns;
   const groups = useMemo(() => {
     const lines = decodeHtmlEntities(content).split('\n');
     if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
@@ -615,20 +635,32 @@ export default React.memo(function MarkdownBlock({ content, color }: MarkdownBlo
     if (group.kind === 'code') {
       if (group.lines.length === 0) return null;
       const lang = group.lang || 'code';
+      // 顶边框 / Top border — 不够放完整 label 时退化为无标签模式
       const label = `┌─ ${lang} `;
       const labelWidth = stringWidth(label);
-      const topFill = Math.max(0, columns - labelWidth);
-      const topBorder = label + '─'.repeat(topFill);
-      const bottomBorder = `└${'─'.repeat(Math.max(0, columns - 1))}`;
+      let topBorder: string;
+      if (columns > labelWidth + 1) {
+        topBorder = `${label}${'─'.repeat(columns - labelWidth - 1)}┐`;
+      } else {
+        topBorder = `┌${'─'.repeat(Math.max(0, columns - 2))}┐`;
+      }
+      // 底边框 / Bottom border
+      const bottomBorder = `└${'─'.repeat(Math.max(0, columns - 2))}┘`;
       return (
         <Box flexDirection="column">
           <Text color={t.dim}>{topBorder}</Text>
-          {group.lines.map((codeLine, ci) => (
-            <Box key={ci} flexDirection="row">
-              <Text color={t.dim}>│ </Text>
-              <CodeLine line={codeLine} lang={group.lang} />
-            </Box>
-          ))}
+          {group.lines.map((codeLine, ci) => {
+            // 用 tab 展开后的视觉宽度计算右填充 / Use tab-expanded visual width for right padding
+            const lineVisualWidth = codeLineWidth(codeLine);
+            const padLen = Math.max(0, columns - 3 - lineVisualWidth);
+            return (
+              <Box key={ci} flexDirection="row">
+                <Text color={t.dim}>│ </Text>
+                <CodeLine line={codeLine} lang={group.lang} />
+                <Text color={t.dim}>{' '.repeat(padLen)}│</Text>
+              </Box>
+            );
+          })}
           <Text color={t.dim}>{bottomBorder}</Text>
         </Box>
       );
