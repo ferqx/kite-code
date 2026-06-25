@@ -283,7 +283,7 @@ function renderFileSummary(summary: string, dt: Theme) {
 
   // 检测是否为 diff 格式：任意内容行以 "行号 +" 或 "行号 -" 开头
   // Detect diff format: any content line starts with "lineNum +" or "lineNum -"
-  const isDiff = diffLines.length > 0 && /^\s*\d+\s+[-+]/.test(diffLines[0]!);
+  const isDiff = diffLines.length > 0 && diffLines.some((line) => /^\s*\d+\s+[-+]/.test(line));
 
   const displayLines = diffLines.slice(0, MAX_TOOL_LINES);
   const truncated = diffLines.length > MAX_TOOL_LINES;
@@ -326,23 +326,37 @@ interface ToolCardBlockProps {
   block: OutputBlock & { kind: 'tool_card' };
   /** 工具等待审批时隐藏计时器 / Hide timer when tool is awaiting approval */
   awaitingApproval?: boolean;
+  /** 可用列宽（从 BlockRenderer 传入）/ Available terminal columns */
+  columns?: number;
 }
 
-export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlockProps) {
+export default function ToolCardBlock({
+  block,
+  awaitingApproval,
+  columns = 80,
+}: ToolCardBlockProps) {
   const dt = useTheme();
-  const { stdout } = useStdout();
-  const [spinnerIdx, setSpinnerIdx] = useState(0);
-  const [liveElapsed, setLiveElapsed] = useState(0);
-  const startRef = useRef(Date.now());
   const showElapsed = block.name === 'shell_execute';
+
+  // ── 计时器：useState + setInterval 由 React 批量合并，不产生重复渲染 ──
+  // startedAt 存在 block 上，重挂载时 lazy init 自动恢复正确的已流逝时间。
+  // Timer: useState + setInterval, batched by React — no duplicate renders.
+  // startedAt lives on the block; lazy init restores correct elapsed on remount.
+  const [spinnerIdx, setSpinnerIdx] = useState(0);
+  const [liveElapsed, setLiveElapsed] = useState(() =>
+    block.status === 'running' && block.startedAt ? Date.now() - block.startedAt : 0,
+  );
+  const startedAtRef = useRef(block.startedAt);
+  startedAtRef.current = block.startedAt;
 
   useEffect(() => {
     if (block.status !== 'running') return;
-    startRef.current = Date.now();
-    setLiveElapsed(0);
     const spinnerTimer = setInterval(() => setSpinnerIdx((i) => (i + 1) % SPINNER.length), 80);
     if (showElapsed) {
-      const elapsedTimer = setInterval(() => setLiveElapsed(Date.now() - startRef.current), 200);
+      const elapsedTimer = setInterval(() => {
+        const at = startedAtRef.current;
+        if (at != null) setLiveElapsed(Date.now() - at);
+      }, 200);
       return () => {
         clearInterval(spinnerTimer);
         clearInterval(elapsedTimer);
@@ -397,7 +411,7 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
       {/* 方案工具：Markdown 完整渲染，不截断 / Plan: full Markdown, no truncation */}
       {isExpanded && isPlan && hasSummary && (
         <Box paddingLeft={2} marginTop={1} flexDirection="column">
-          <MarkdownBlock content={block.summary!} />
+          <MarkdownBlock content={block.summary!} maxWidth={columns - 2} />
         </Box>
       )}
       {/* ask_user 工具：紧凑渲染答案，每行 ⎿ 前缀，仿 shell_execute 布局

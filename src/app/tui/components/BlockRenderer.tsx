@@ -109,7 +109,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     case 'tool_card':
       return (
         <Box {...gapFrom(prevBlock)}>
-          <ToolCardBlock block={block} awaitingApproval={awaitingApproval} />
+          <ToolCardBlock block={block} awaitingApproval={awaitingApproval} columns={columns} />
         </Box>
       );
 

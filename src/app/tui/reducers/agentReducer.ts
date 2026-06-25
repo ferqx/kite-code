@@ -181,8 +181,22 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       if (state.toolStartTimes) {
         for (const k of Object.keys(state.toolStartTimes)) nextTimes[k] = now;
       }
+      // 同步更新 block 上的 startedAt，排除审批等待耗时 / Sync startedAt on blocks to exclude approval wait
+      const withResolved = replaceBlockById(state, action.blockId, resolved);
+      const updatedTurns = withResolved.turns.map((turn) => {
+        let changed = false;
+        const blocks = turn.blocks.map((blk) => {
+          if ((blk.kind === 'tool_card' || blk.kind === 'subagent') && blk.status === 'running') {
+            changed = true;
+            return { ...blk, startedAt: now };
+          }
+          return blk;
+        });
+        return changed ? { blocks } : turn;
+      });
       return {
-        ...replaceBlockById(state, action.blockId, resolved),
+        ...withResolved,
+        turns: updatedTurns,
         interrupt: null,
         toolStartTimes: nextTimes,
       };

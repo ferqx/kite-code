@@ -27,8 +27,11 @@ export function toolColor(status: string, t: ThemeColors): string {
 }
 
 export function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s}s`;
 }
 
 /** 从工具 args 提取人类可读的 preview 文本（文件名/命令名等）

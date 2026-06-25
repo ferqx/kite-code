@@ -1239,7 +1239,7 @@ describe('OutputArea', () => {
     );
     const frame = lastFrame();
     expect(frame).toContain('command not found');
-    expect(frame).toContain('100ms');
+    expect(frame).toContain('0s');
   });
 
   test('renders tool_card with detail annotation', () => {
@@ -1533,7 +1533,7 @@ describe('SubAgentBlock rendering', () => {
     expect(frame).toContain('●');
     expect(frame).toContain('Review');
     expect(frame).toContain('review PR #42');
-    expect(frame).toContain('3.2s');
+    expect(frame).toContain('3s');
     // Tool call count is not in header — only in status bar via events
     expect(frame).not.toContain('No critical issues found');
   });

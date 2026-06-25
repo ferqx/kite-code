@@ -20,9 +20,11 @@ function roleLabel(role: SubAgentRole): string {
 }
 
 function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s}s`;
 }
 
 /** 将文本截断到指定宽度，超出部分用 "…" 替代。
@@ -117,16 +119,23 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const taskSummary = taskLabel(block.task);
   const col = process.stdout.columns ?? 80;
 
-  // Live elapsed time + spinner for running state
-  const [liveElapsed, setLiveElapsed] = useState(0);
+  // ── 计时器：useState + setInterval 由 React 批量合并，不产生重复渲染 ──
+  // startedAt 存在 block 上，重挂载时 lazy init 自动恢复正确的已流逝时间。
+  // Timer: useState + setInterval, batched by React — no duplicate renders.
+  // startedAt lives on the block; lazy init restores correct elapsed on remount.
   const [spinnerIdx, setSpinnerIdx] = useState(0);
-  const startRef = useRef(Date.now());
+  const [liveElapsed, setLiveElapsed] = useState(() =>
+    block.status === 'running' && block.startedAt ? Date.now() - block.startedAt : 0,
+  );
+  const startedAtRef = useRef(block.startedAt);
+  startedAtRef.current = block.startedAt;
+
   useEffect(() => {
     if (block.status !== 'running') return;
-    startRef.current = Date.now();
-    setLiveElapsed(0);
-    setSpinnerIdx(0);
-    const elapsedTimer = setInterval(() => setLiveElapsed(Date.now() - startRef.current), 200);
+    const elapsedTimer = setInterval(() => {
+      const at = startedAtRef.current;
+      if (at != null) setLiveElapsed(Date.now() - at);
+    }, 200);
     const spinnerTimer = setInterval(() => setSpinnerIdx((i) => (i + 1) % SPINNER.length), 80);
     return () => {
       clearInterval(elapsedTimer);
