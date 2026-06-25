@@ -445,38 +445,12 @@ export function loadColorPreset(workspace?: string): string {
 export function saveColorPreset(preset: string): void {
   const path = defaultConfigPath();
   try {
-    let text: string;
-    if (existsSync(path)) {
-      text = readFileSync(path, 'utf-8');
-    } else {
-      // Create minimal config file
-      const dir = resolve(path, '..');
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      text = `{\n  "theme": "dark",\n  "colorPreset": "${preset}"\n}\n`;
-      writeFileSync(path, text, 'utf-8');
-      return;
-    }
-
-    // Simple line-based edit: find existing "colorPreset" or add it
-    const lines = text.split('\n');
-    const idx = lines.findIndex((l) => /"colorPreset"/.test(l));
-    if (idx >= 0) {
-      lines[idx] = lines[idx]!.replace(/"colorPreset"\s*:\s*"[^"]*"/, `"colorPreset": "${preset}"`);
-    } else {
-      // Insert before "mcpServers" or before last "}"
-      const insertIdx = lines.findIndex((l) => /"mcpServers"/.test(l));
-      if (insertIdx >= 0) {
-        lines.splice(insertIdx, 0, `  "colorPreset": "${preset}",`);
-      } else {
-        // Insert before closing }
-        const closeIdx = lines.lastIndexOf('}');
-        if (closeIdx >= 0) {
-          const indent = lines[closeIdx]!.match(/^(\s*)/)?.[1] ?? '';
-          lines.splice(closeIdx, 0, `${indent}"colorPreset": "${preset}"`);
-        }
-      }
-    }
-    writeFileSync(path, lines.join('\n'), 'utf-8');
+    const dir = resolve(path, '..');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
+    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+    text = applyEdits(text, modify(text, ['colorPreset'], preset, fmt));
+    writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
   } catch {
     // Non-critical — silently ignore write failures
   }
