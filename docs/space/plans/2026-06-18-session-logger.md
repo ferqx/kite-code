@@ -244,5 +244,5 @@ bun test tests/runner.test.ts
 
 - [[2026-06-19-event-mechanism-refactor]] — 事件机制重构，turn/user_message 事件化 + EventSink 统一管道
 - [[2026-06-18-opentelemetry-observability]] — OTel 遥测，共用 classifier 逻辑
-- [[2026-06-18-openpx-telemetry-collection]] — 遥测脱敏方案
+- [[2026-06-18-kite-code-telemetry-collection]] — 遥测脱敏方案
 - [[layer-boundary-enforcement]] — core 层边界约束

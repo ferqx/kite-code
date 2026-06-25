@@ -95,7 +95,7 @@ describe('tool safety', () => {
   });
 
   test('edit_file auto-retry trimEnd: trailing whitespace mismatch succeeds', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-autofix');
+    const workspace = join(tmpdir(), 'kite-code-tools-autofix');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
@@ -117,7 +117,7 @@ describe('tool safety', () => {
   });
 
   test('edit_file auto-retry per-line: leading whitespace mismatch succeeds', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-autofix-ml');
+    const workspace = join(tmpdir(), 'kite-code-tools-autofix-ml');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 

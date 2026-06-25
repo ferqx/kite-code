@@ -44,7 +44,7 @@
 - 所有匹配基于文件内容（非修改后），零副作用
 
 ### 行业调研
-Claude Code、Codex CLI、Cline 等主流 coding agent 均未在工具层做自动回退——它们依赖模型在失败后 read_file 重试。OpenPX 在此向前一步，将常见空白容错下沉到工具层，减少无效模型往返。
+Claude Code、Codex CLI、Cline 等主流 coding agent 均未在工具层做自动回退——它们依赖模型在失败后 read_file 重试。Kite Code 在此向前一步，将常见空白容错下沉到工具层，减少无效模型往返。
 
 ### 测试
 

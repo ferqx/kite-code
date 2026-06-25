@@ -474,7 +474,7 @@ import { realpathSync } from "node:fs";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { getOpenpxDir } from "./paths";
+import { getKiteCodeDir } from "./paths";
 
 const TRUSTED_WORKSPACES_FILE = "trusted_workspaces.json";
 

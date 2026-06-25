@@ -121,7 +121,7 @@ Span 全部属性                        遥测通道
     // Kite Code 遥测（opt-in）
     "allowKiteCodeTelemetry": false,          // 默认 false。true → 开启
     "kiteCodeEndpoint": "https://telemetry.kite-code.dev/v1/traces",
-    "kiteCodeHeaders": "Authorization=Bearer openpx-token-xxx"
+    "kiteCodeHeaders": "Authorization=Bearer kite-code-token-xxx"
   }
 }
 ```
@@ -171,10 +171,10 @@ export function scrubSpan(span: OtlpSpanData, workspace?: string): OtlpSpanData 
           s.attributes[i] = { key: a.key, value: { stringValue: cmd } };
         }
         break;
-      case 'openpx.tool.error_summary':
+      case 'kite_code.tool.error_summary':
         // 已在 attribute 层截断
         break;
-      case 'openpx.tool.error_stderr':
+      case 'kite_code.tool.error_stderr':
         // 已在 attribute 层截断
         break;
       // 其他属性原样保留
@@ -225,7 +225,7 @@ import { version as bunVersion } from 'bun';
   'kite_code.kite-code_version': '0.0.1', // ← 从 package.json 读取
   // 终端环境（TUI 特有，渲染兼容性诊断用）
   ...(process.env.TERM_PROGRAM ? { 'kite_code.terminal': process.env.TERM_PROGRAM } : {}),
-  ...(process.env.TERM ? { 'openpx.term_type': process.env.TERM } : {}),
+  ...(process.env.TERM ? { 'kite_code.term_type': process.env.TERM } : {}),
 }
 ```
 
@@ -234,7 +234,7 @@ import { version as bunVersion } from 'bun';
 ```typescript
 export class KiteCodeTracerProvider implements TracerProvider {
   private _userExporter: OTLPHttpExporter;
-  private _openpxExporter: OTLPHttpExporter | null = null;
+  private _kiteCodeExporter: OTLPHttpExporter | null = null;
   private _workspace: string;
 
   constructor(config: TelemetryConfig, workspace?: string) {
@@ -243,15 +243,15 @@ export class KiteCodeTracerProvider implements TracerProvider {
     // 用户自配通道（始终启用，只要配置了 endpoint）
     this._userExporter = new OTLPHttpExporter(
       config.otlpEndpoint!,
-      process.env.OTEL_SERVICE_NAME || 'openpx',
+      process.env.OTEL_SERVICE_NAME || 'kite-code',
       parseOtlpHeaders(config.otlpHeaders),
     );
 
     // Kite Code 遥测通道（opt-in）
     if (config.allowKiteCodeTelemetry && config.kite-codeEndpoint) {
-      this._openpxExporter = new OTLPHttpExporter(
+      this._kiteCodeExporter = new OTLPHttpExporter(
         config.kite-codeEndpoint,
-        process.env.OTEL_SERVICE_NAME || 'openpx',
+        process.env.OTEL_SERVICE_NAME || 'kite-code',
         parseOtlpHeaders(config.kite-codeHeaders),
       );
     }
@@ -268,7 +268,7 @@ export class KiteCodeTracerProvider implements TracerProvider {
     const spans = this._pendingSpans.splice(0);
     await this._userExporter.export(spans);
 
-    if (this._openpxExporter) {
+    if (this._kiteCodeExporter) {
       // 脱敏后再发送
       const scrubbed = spans.map((s) => {
         const scrubbedSpan = new KiteCodeSpan({
@@ -282,7 +282,7 @@ export class KiteCodeTracerProvider implements TracerProvider {
         // ... 构建脱敏 span
         return s; // TODO: 实际构建脱敏 KiteCodeSpan
       });
-      await this._openpxExporter.export(scrubbed);
+      await this._kiteCodeExporter.export(scrubbed);
     }
   }
 }
@@ -307,7 +307,7 @@ Grafana Dashboard（内部）：
    平均 token 消耗、重试率、缓存命中率
    → 评估不同模型的性价比
 
-4. 版本对比（按 openpx.version 属性分组）
+4. 版本对比（按 kite_code.kite-code_version 属性分组）
    新版本发布后 tool failure rate 上升还是下降？
 ```
 
