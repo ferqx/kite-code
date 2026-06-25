@@ -1,6 +1,6 @@
 import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
-import React, { useState } from 'react';
+import React, { type MutableRefObject, useEffect, useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { UserInputPayload } from '@/protocol/events';
@@ -9,9 +9,16 @@ interface InputBlockProps {
   question: UserInputPayload;
   provider: TuiUserInputProvider;
   onResolved: (answer: string, answers?: Record<string, string>) => void;
+  /** MultiQuestionWizard 设置此 ref（step>0），Esc 回退上一步而不取消 */
+  wizardEscBackRef?: MutableRefObject<boolean>;
 }
 
-export default function InputBlock({ question, provider, onResolved }: InputBlockProps) {
+export default function InputBlock({
+  question,
+  provider,
+  onResolved,
+  wizardEscBackRef,
+}: InputBlockProps) {
   const t = useTheme();
   const items = question.questions && question.questions.length > 0 ? question.questions : null;
 
@@ -23,6 +30,7 @@ export default function InputBlock({ question, provider, onResolved }: InputBloc
         provider={provider}
         onResolved={onResolved}
         t={t}
+        wizardEscBackRef={wizardEscBackRef}
       />
     );
   }
@@ -142,8 +150,8 @@ function SingleQuestion({
 
 // ── 多问题 Wizard 模式 / Multi-question wizard mode ──
 
-/** Web-style 水平步骤条：☒ 已完成 ☐ 待处理，超宽自折叠 …，✔ Submit 固尾
- *  Web-style horizontal step bar: ☒ done ☐ pending, auto-collapse …, ✔ Submit pinned right */
+/** Web-style 水平步骤条：☑ 已完成 ☐ 待处理，超宽自折叠 …，✔ Submit 固尾
+ *  Web-style horizontal step bar: ☑ done ☐ pending, auto-collapse …, ✔ Submit pinned right */
 function StepBar({
   items,
   current,
@@ -166,7 +174,7 @@ function StepBar({
 
   // 全量步骤字符串 / Full step strings (unbounded)
   const steps = items.map((item, i) => ({
-    text: `${i < current ? '☒' : '☐'} ${item.question.length > 20 ? `${item.question.slice(0, 20)}…` : item.question}`,
+    text: `${i < current ? '☑' : '☐'} ${item.question.length > 20 ? `${item.question.slice(0, 20)}…` : item.question}`,
     done: i < current,
     active: i === current,
   }));
@@ -267,12 +275,14 @@ function MultiQuestionWizard({
   provider,
   onResolved,
   t,
+  wizardEscBackRef,
 }: {
   question: UserInputPayload;
   items: NonNullable<UserInputPayload['questions']>;
   provider: TuiUserInputProvider;
   onResolved: (answer: string, answers?: Record<string, string>) => void;
   t: ReturnType<typeof useTheme>;
+  wizardEscBackRef?: MutableRefObject<boolean>;
 }) {
   const total = items.length;
   const { stdout } = useStdout();
@@ -283,6 +293,17 @@ function MultiQuestionWizard({
   const [freeText, setFreeText] = useState('');
   const [mode, setMode] = useState<'select' | 'type'>('select');
   const [done, setDone] = useState(false);
+
+  // 同步 step 到 ref，供全局 ESC handler 判断是否应回退而非取消
+  // Sync step to ref so global ESC handler knows to skip (back vs cancel)
+  if (wizardEscBackRef) wizardEscBackRef.current = step > 0;
+  // 卸载时清理 ref，防止泄漏导致后续 Esc 被全局吞掉
+  // Clean ref on unmount to prevent leak that would swallow future global Esc
+  useEffect(() => {
+    return () => {
+      if (wizardEscBackRef) wizardEscBackRef.current = false;
+    };
+  }, [wizardEscBackRef]);
 
   const cur = items[step]!;
   const curId = cur.id ?? String(step);
@@ -296,6 +317,19 @@ function MultiQuestionWizard({
       key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean },
     ) => {
       if (done) return;
+
+      // Esc 回退：step>0 → 返回上一步；step===0 → 由全局 handler 取消
+      // Esc back: step>0 → go back; step===0 → let global handler cancel
+      if (key.escape) {
+        if (step > 0) {
+          setStep(step - 1);
+          setSelected(0);
+          setFreeText('');
+          setMode('select');
+        }
+        return;
+      }
+
       if (mode === 'type') return; // TextInput handles input when typing
 
       if (input === '\t') {
@@ -406,7 +440,8 @@ function MultiQuestionWizard({
             )}
             <Text color={t.dim}>{'─'.repeat(40)}</Text>
             <Text color={t.dim}>
-              ↑↓ select Enter {step < total - 1 ? 'next' : 'submit'} Tab type freely Esc cancel
+              ↑↓ select Enter {step < total - 1 ? 'next' : 'submit'} Tab type freely{' '}
+              {step > 0 ? 'Esc back' : 'Esc cancel'}
             </Text>
           </>
         ) : (
@@ -422,7 +457,8 @@ function MultiQuestionWizard({
             </Box>
             {options.length > 0 && (
               <Text color={t.dim}>
-                Tab back to select Enter {step < total - 1 ? 'next' : 'submit'} Esc cancel
+                Tab back to select Enter {step < total - 1 ? 'next' : 'submit'}{' '}
+                {step > 0 ? 'Esc back' : 'Esc cancel'}
               </Text>
             )}
           </Box>

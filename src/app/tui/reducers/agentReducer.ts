@@ -46,6 +46,28 @@ function cancelRunningBlocks(s: TuiState): TuiState {
   return { ...s, turns };
 }
 
+/** 取消 ask_user 问题块时同步更新关联的 tool_card 为 Cancelled
+ *  When cancelling an ask_user question block, also update its tool_card. */
+function cancelAskUserToolCard(s: TuiState, questionBlockId: number): TuiState {
+  let next = replaceBlockById(s, questionBlockId, {
+    ...findBlockById(s, questionBlockId)!,
+    resolved: 'cancelled',
+  } as OutputBlock);
+  const toolCard = findBlock(
+    next,
+    (blk) => blk.kind === 'tool_card' && blk.name === 'ask_user' && blk.status === 'running',
+  );
+  if (toolCard?.kind === 'tool_card') {
+    next = replaceBlockById(next, toolCard.id, {
+      ...toolCard,
+      status: 'done' as const,
+      summary: 'Cancelled',
+      expanded: true,
+    });
+  }
+  return next;
+}
+
 /** Shared helper: cancel a running interrupt during Ctrl+C or Escape */
 function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
   let next = finalizeLastTurnStreaming(s);
@@ -60,7 +82,7 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
         if (b.kind === 'approval') {
           next = replaceBlockById(next, b.id, { ...b, resolved: { action: 'cancelled' } });
         } else if (b.kind === 'question') {
-          next = replaceBlockById(next, b.id, { ...b, resolved: 'cancelled' });
+          next = cancelAskUserToolCard(next, b.id);
         }
       }
     }
@@ -247,22 +269,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
               interrupt: null,
             };
           } else if (b.kind === 'question') {
-            // 同时更新关联的 ask_user tool_card 为 Cancelled / Also update associated ask_user tool_card
-            const toolCard = findBlock(
-              state,
-              (blk) =>
-                blk.kind === 'tool_card' && blk.name === 'ask_user' && blk.status === 'running',
-            );
-            let next = replaceBlockById(state, b.id, { ...b, resolved: 'cancelled' });
-            if (toolCard?.kind === 'tool_card') {
-              next = replaceBlockById(next, toolCard.id, {
-                ...toolCard,
-                status: 'done',
-                summary: 'Cancelled',
-                expanded: true,
-              });
-            }
-            return { ...next, interrupt: null };
+            return { ...cancelAskUserToolCard(state, b.id), interrupt: null };
           }
         }
         return { ...state, interrupt: null };

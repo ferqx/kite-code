@@ -1,5 +1,6 @@
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import React, { useEffect, useRef, useState } from 'react';
+import stringWidth from 'string-width';
 import type { Theme } from '../theme';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
@@ -11,6 +12,13 @@ const SHELL_PREFIX = '⎿   ';
 /** Reuse SHELL_PREFIX glyph for continuation lines — pure whitespace
  *  (like "    ") is vulnerable to collapsing in Ink's Yoga text layout. */
 const SHELL_ALIGN = SHELL_PREFIX;
+
+/** 从工具参数中提取可读的文件路径（仅末级文件名）/ Extract readable path label from tool args (filename only) */
+function pathLabel(args: Record<string, unknown>): string {
+  const p = args.path;
+  if (typeof p !== 'string' || p.length === 0) return '(unknown)';
+  return p.replace(/^.*[/\\]/, '').slice(-50);
+}
 
 /** ask_user 工具传入的选项类型 / Option type from ask_user tool args */
 interface AskOption {
@@ -28,12 +36,33 @@ interface AskQuestionItem {
   allow_free_text?: boolean;
 }
 
-/** 截断多行答案——自定义输入可能很长，只展示首行加 … / Truncate multi-line answer to first line + … */
-function truncateAnswer(a: string): string {
+const ELLIPSIS = '…';
+const ELLIPSIS_W = stringWidth(ELLIPSIS); // CJK 环境下可能为 2 / may be 2 in CJK locales
+
+/** 按显示宽度硬截断字符串 / Hard-truncate string by display width */
+function clip(s: string, maxWidth: number): string {
+  if (maxWidth <= 0) return '';
+  if (stringWidth(s) <= maxWidth) return s;
+  if (maxWidth <= ELLIPSIS_W) return ELLIPSIS;
+  let result = '';
+  let w = 0;
+  const limit = maxWidth - ELLIPSIS_W;
+  for (const ch of s) {
+    const cw = stringWidth(ch);
+    if (w + cw > limit) break;
+    result += ch;
+    w += cw;
+  }
+  return `${result}${ELLIPSIS}`;
+}
+
+/** 截断答案——多行取首行，超长截断加 …，禁止换行
+ *  Truncate answer — single-line first, cap with … to prevent wrapping */
+function truncateAnswer(a: string, maxWidth: number): string {
   if (a === '(no answer)') return a;
   const lines = a.split('\n');
-  if (lines.length <= 1) return a.length > 200 ? `${a.slice(0, 197)}…` : a;
-  return `${lines[0]!.slice(0, 100)}…`;
+  if (lines.length <= 1) return clip(a, maxWidth);
+  return clip(lines[0]!, Math.min(maxWidth, 40));
 }
 
 /** 解析 ask_user summary 中的答案（兼容裸 JSON 和上游已转纯文本格式）
@@ -88,26 +117,72 @@ function renderAskUserSummary(
   args: Record<string, unknown>,
   summary: string,
   dt: Theme,
+  maxLine: number,
 ): React.ReactNode {
   const questions = args.questions as AskQuestionItem[] | undefined;
   const { answer, answerMap, isCancelled } = parseAskUserAnswers(args, summary);
 
-  if (isCancelled) {
+  // 已取消（summary 为空或 "Cancelled"）→ 展示所有问题 + Cancelled 标记
+  // Cancelled (empty summary or "Cancelled") → show all questions with Cancelled label
+  const cancelled = isCancelled || !summary || summary.trim().length === 0;
+  if (cancelled) {
+    if (questions && questions.length > 0) {
+      return (
+        <>
+          {questions.map((q, i) => {
+            const prefix = `⎿ Step${i + 1} `;
+            const suffix = ` Cancelled`;
+            const qMax = Math.max(0, maxLine - stringWidth(prefix) - stringWidth(suffix));
+            const qShort = clip(q.question, qMax);
+            return (
+              <Text key={q.id ?? `q-${i}`} color={dt.dim}>
+                {prefix}
+                {qShort}
+                {suffix}
+              </Text>
+            );
+          })}
+        </>
+      );
+    }
+    const question = args.question as string | undefined;
+    if (question) {
+      const prefix = '⎿ ';
+      const suffix = ' Cancelled';
+      const qMax = Math.max(0, maxLine - stringWidth(prefix) - stringWidth(suffix));
+      return (
+        <Text color={dt.dim}>
+          {prefix}
+          {clip(question, qMax)}
+          {suffix}
+        </Text>
+      );
+    }
     return <Text color={dt.dim}>⎿ Cancelled</Text>;
   }
 
-  // 多问题模式：每步一行 / Multi-question: one line per step
+  // 多问题模式：每步一行，问题和答案均分可用宽度 / Multi-question: one line per step, split width between Q and A
   if (questions && questions.length > 0 && answerMap) {
     return (
       <>
         {questions.map((q, i) => {
           const id = q.id ?? String(i);
-          const a = answerMap[id] ?? '';
-          const qShort = q.question.length > 40 ? `${q.question.slice(0, 37)}...` : q.question;
-          const line = `Step${i + 1} ${qShort} User: ${truncateAnswer(a || '(no answer)')}`;
+          const raw = answerMap[id] ?? '';
+          const prefix = `⎿ Step${i + 1} `;
+          const midfix = ` User: `;
+          const contentWidth = maxLine - stringWidth(prefix) - stringWidth(midfix);
+          // 确保 qMax + aMax = contentWidth，窄终端不会溢出 / Guarantee sum fits contentWidth
+          const rawQMax = Math.floor(contentWidth * 0.45);
+          const qMax = Math.max(10, Math.min(rawQMax, contentWidth - 10));
+          const aMax = contentWidth - qMax;
+          const qShort = clip(q.question, qMax);
+          const aShort = truncateAnswer(raw || '(no answer)', aMax);
           return (
             <Text key={q.id ?? `q-${i}`} color={dt.dim}>
-              ⎿ {line.slice(0, 200)}
+              {prefix}
+              {qShort}
+              {midfix}
+              {aShort}
             </Text>
           );
         })}
@@ -116,7 +191,14 @@ function renderAskUserSummary(
   }
 
   // 单问题模式 / Single question
-  return <Text color={dt.dim}>⎿ User: {truncateAnswer(answer)}</Text>;
+  const prefix = '⎿ User: ';
+  const aMax = Math.max(0, maxLine - stringWidth(prefix));
+  return (
+    <Text color={dt.dim}>
+      {prefix}
+      {truncateAnswer(answer, aMax)}
+    </Text>
+  );
 }
 
 function renderShellSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
@@ -248,6 +330,7 @@ interface ToolCardBlockProps {
 
 export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlockProps) {
   const dt = useTheme();
+  const { stdout } = useStdout();
   const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsed, setLiveElapsed] = useState(0);
   const startRef = useRef(Date.now());
@@ -293,6 +376,7 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
   }
 
   // done or error
+  const col = stdout?.columns ?? 80;
   const isShell = block.name === 'shell_execute';
   const isFileTool = block.name === 'edit_file' || block.name === 'write_file';
   const isPlan = block.name === 'update_plan';
@@ -316,10 +400,13 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
           <MarkdownBlock content={block.summary!} />
         </Box>
       )}
-      {/* ask_user 工具：紧凑渲染答案，每行 ⎿ 前缀，仿 shell_execute 布局 / ask_user: compact ⎿-prefixed lines, shell_execute style */}
-      {isExpanded && isAskUser && hasSummary && (
+      {/* ask_user 工具：紧凑渲染答案，每行 ⎿ 前缀，仿 shell_execute 布局
+          ask_user: compact ⎿-prefixed lines, shell_execute style.
+          不依赖 hasSummary — 问题文本存在 args 中，summary 为空时仍渲染问题列表。
+          自适应截断：maxLine = 终端列宽 − paddingLeft */}
+      {isExpanded && isAskUser && (
         <Box paddingLeft={2} flexDirection="column">
-          {renderAskUserSummary(block.args, block.summary!, dt)}
+          {renderAskUserSummary(block.args, block.summary ?? '', dt, col - 2)}
         </Box>
       )}
       {/* Shell 工具 / Shell */}
@@ -335,10 +422,14 @@ export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlock
           )}
         </Box>
       )}
-      {/* 文件工具 / File tools */}
-      {isExpanded && isFileTool && hasSummary && (
+      {/* 文件工具 / File tools — 无 summary 时展示文件路径（如工具被取消无 ToolMessage） */}
+      {isExpanded && isFileTool && (
         <Box paddingLeft={3} flexDirection="column">
-          {renderFileSummary(block.summary!, dt)}
+          {hasSummary ? (
+            renderFileSummary(block.summary!, dt)
+          ) : (
+            <Text color={dt.dim}>⎿ {pathLabel(block.args)} (no result)</Text>
+          )}
         </Box>
       )}
       {/* 其他工具 / Other tools */}

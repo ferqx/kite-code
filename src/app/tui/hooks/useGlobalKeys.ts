@@ -8,11 +8,13 @@ import type { Action } from '../reducers';
  * @param overlayActive — overlay 面板或中断激活时，仅保留 Ctrl+C / Escape，
  *   禁用 Ctrl+T/E/L 等修饰快捷键，避免与面板输入冲突。
  * @param supplementEscRef — PlanReviewBlock 设置此 ref 时，Esc 被局部消费（返回选项页），不触发全局 ESCAPE
+ * @param wizardEscBackRef — MultiQuestionWizard 设置此 ref 时（step>0），Esc 回退上一步，不触发全局取消
  */
 export function useGlobalKeys(
   dispatch: Dispatch<Action>,
   overlayActive = false,
   supplementEscRef?: MutableRefObject<boolean>,
+  wizardEscBackRef?: MutableRefObject<boolean>,
 ) {
   const overlayActiveRef = useRef(overlayActive);
   overlayActiveRef.current = overlayActive;
@@ -49,8 +51,10 @@ export function useGlobalKeys(
       }
       // Escape 键（非箭头键）
       // supplement 模式下 Esc 由 PlanReviewBlock 局部处理（返回选项页），不触发全局取消
+      // wizard back 模式下 Esc 由 MultiQuestionWizard 局部处理（回退上一步），不触发全局取消
       if (key.escape && !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow) {
         if (supplementEscRef?.current) return;
+        if (wizardEscBackRef?.current) return;
         dispatch({ type: 'ESCAPE' });
         return;
       }

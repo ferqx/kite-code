@@ -130,7 +130,8 @@ export default function App({
     state.showRewind ||
     !!state.interrupt;
   const supplementEscRef = useRef(false);
-  useGlobalKeys(dispatch, overlayOrInterrupt, supplementEscRef);
+  const wizardEscBackRef = useRef(false);
+  useGlobalKeys(dispatch, overlayOrInterrupt, supplementEscRef, wizardEscBackRef);
 
   // Stabilized callbacks for React.memo children
   const hideHelp = useCallback(() => dispatch({ type: 'HIDE_HELP' }), [dispatch]);
@@ -290,6 +291,7 @@ export default function App({
             question={interruptBlock.question}
             provider={provider}
             onResolved={resolveInput}
+            wizardEscBackRef={wizardEscBackRef}
           />
         )}
         {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (

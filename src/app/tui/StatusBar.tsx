@@ -44,10 +44,16 @@ export default function StatusBar({ status, running }: StatusBarProps) {
 
   function planLabel(): string {
     if (!status.plan || status.plan.status === 'completed') return status.currentNode ?? '';
-    const done = status.plan.steps.filter((s) => s.status === 'completed').length;
     const total = status.plan.steps.length;
-    const active = status.plan.steps.find((s) => s.status === 'in_progress');
-    return `Step ${done}/${total}${active ? `: ${active.step}` : ''}`;
+    const activeIdx = status.plan.steps.findIndex((s) => s.status === 'in_progress');
+    // 显示当前步骤序号（1-based），无 in_progress 时回退到已完成数
+    // Show current step index (1-based), fallback to completed count
+    const current =
+      activeIdx >= 0
+        ? activeIdx + 1
+        : status.plan.steps.filter((s) => s.status === 'completed').length;
+    const active = activeIdx >= 0 ? status.plan.steps[activeIdx]! : undefined;
+    return `Step ${current}/${total}${active ? `: ${active.step}` : ''}`;
   }
 
   // 方案模式 idle 时也显示状态行，给用户持续的模式感知

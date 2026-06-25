@@ -198,7 +198,7 @@ describe('StatusBar', () => {
       currentNode: null,
     });
     const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
-    expect(lastFrame()).toContain('Step 1/2: Build');
+    expect(lastFrame()).toContain('Step 2/2: Build');
   });
 
   test('falls back to currentNode when no plan', () => {
