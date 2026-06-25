@@ -29,6 +29,8 @@ export type OutputBlock =
       status: 'running' | 'done' | 'error';
       summary: string;
       preview?: string;
+      /** 工具实际开始执行的时间戳（用于 live 计时器），排除审批等待后会被重置 / Wall-clock timestamp when tool actually began executing (for live timer), reset after approval to exclude wait time */
+      startedAt?: number;
       elapsedMs?: number;
       detail?: string;
       expanded?: boolean;
@@ -57,6 +59,8 @@ export type OutputBlock =
       toolCallCount: number;
       durationMs: number;
       steps: SubAgentStepRecord[];
+      /** 子 agent 实际开始执行的时间戳（用于 live 计时器）/ Wall-clock timestamp when sub-agent actually started (for live timer) */
+      startedAt?: number;
       error?: string;
       expanded?: boolean;
       cacheHitTokens?: number;

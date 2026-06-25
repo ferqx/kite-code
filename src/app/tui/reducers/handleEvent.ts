@@ -161,6 +161,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const finalized = finalizeLastTurnStreaming(state);
       const preview = getToolPreview(event.data.name, event.data.args);
       const id = finalized.nextBlockId;
+      const now = Date.now();
       const block: OutputBlock = {
         id,
         kind: 'tool_card',
@@ -170,8 +171,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         status: 'running',
         summary: '',
         preview,
+        startedAt: now,
       };
-      const times = { ...finalized.toolStartTimes, [event.data.call_id]: Date.now() };
+      const times = { ...finalized.toolStartTimes, [event.data.call_id]: now };
       return { ...appendBlock(finalized, block), toolStartTimes: times };
     }
     case 'tool_done': {
@@ -444,6 +446,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         toolCallCount: 0,
         durationMs: 0,
         steps: [],
+        startedAt: Date.now(),
       };
       return appendBlock(finalized, block);
     }

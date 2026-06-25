@@ -248,18 +248,27 @@ interface ToolCardBlockProps {
 
 export default function ToolCardBlock({ block, awaitingApproval }: ToolCardBlockProps) {
   const dt = useTheme();
-  const [spinnerIdx, setSpinnerIdx] = useState(0);
-  const [liveElapsed, setLiveElapsed] = useState(0);
-  const startRef = useRef(Date.now());
   const showElapsed = block.name === 'shell_execute';
+
+  // ── 计时器：useState + setInterval 由 React 批量合并，不产生重复渲染 ──
+  // startedAt 存在 block 上，重挂载时 lazy init 自动恢复正确的已流逝时间。
+  // Timer: useState + setInterval, batched by React — no duplicate renders.
+  // startedAt lives on the block; lazy init restores correct elapsed on remount.
+  const [spinnerIdx, setSpinnerIdx] = useState(0);
+  const [liveElapsed, setLiveElapsed] = useState(() =>
+    block.status === 'running' && block.startedAt ? Date.now() - block.startedAt : 0,
+  );
+  const startedAtRef = useRef(block.startedAt);
+  startedAtRef.current = block.startedAt;
 
   useEffect(() => {
     if (block.status !== 'running') return;
-    startRef.current = Date.now();
-    setLiveElapsed(0);
     const spinnerTimer = setInterval(() => setSpinnerIdx((i) => (i + 1) % SPINNER.length), 80);
     if (showElapsed) {
-      const elapsedTimer = setInterval(() => setLiveElapsed(Date.now() - startRef.current), 200);
+      const elapsedTimer = setInterval(() => {
+        const at = startedAtRef.current;
+        if (at != null) setLiveElapsed(Date.now() - at);
+      }, 200);
       return () => {
         clearInterval(spinnerTimer);
         clearInterval(elapsedTimer);
