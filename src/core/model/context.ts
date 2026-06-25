@@ -220,7 +220,7 @@ export function prepareModelContext(
   skills?: SkillManifest[],
 ): PreparedModelContext {
   const msgs =
-    state.messages.length > 0 ? sanitizeToolCallPairs(state.messages) : [new HumanMessage('')];
+    state.messages.length > 0 ? reorderInterleavedMessages(state.messages) : [new HumanMessage('')];
 
   // 合并静态系统提示词与可缓存运行时上下文为单个 SystemMessage，
   // 避免依赖 LangChain 内部的连续 SystemMessage 合并行为。

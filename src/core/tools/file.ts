@@ -258,50 +258,185 @@ export function editFile(input: EditFileInput): EditFileResult {
       );
     }
 
-    const index = content.indexOf(normalizedOld);
-    if (index === -1) {
-      const trimmedOld = normalizedOld.trimEnd();
-      const trimmedIndex = content.indexOf(trimmedOld);
-      if (trimmedIndex === -1) {
-        const snippet = normalizedOld.slice(0, 100).replace(/\n/g, '\\n');
-        return {
-          ok: false,
-          path: input.path,
-          error: `old_string not found in ${input.path}: "${snippet}..."`,
-        };
-      }
-      return performReplace(
-        input.path,
-        target,
-        content,
-        trimmedOld,
-        normalizedNew,
-        input.replaceAll,
-        trimmedIndex,
-      );
-    }
-
-    const secondIndex = content.indexOf(normalizedOld, index + 1);
-    if (secondIndex !== -1 && !input.replaceAll) {
-      return {
-        ok: false,
-        path: input.path,
-        error: `old_string found ${content.split(normalizedOld).length - 1} times in ${input.path}. Use replaceAll: true or make old_string more specific. First match at offset ${index}.`,
-      };
-    }
-
-    return performReplace(
-      input.path,
+    return tryExactMatch(
       target,
+      input.path,
       content,
       normalizedOld,
       normalizedNew,
       input.replaceAll,
-      index,
     );
   } catch (e) {
     return { ok: false, path: input.path, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/** Try exact match → fallback to trimEnd → fallback to per-line trimming.
+ *  Auto-retry layer: when exact match fails, try progressively looser matching
+ *  before reporting failure to the model, saving a model round-trip for
+ *  common whitespace mismatches (trailing spaces, inconsistent line endings). */
+function tryExactMatch(
+  target: string,
+  path: string,
+  content: string,
+  oldStr: string,
+  newStr: string,
+  replaceAll?: boolean,
+): EditFileResult {
+  // 1st attempt: exact match
+  const index = content.indexOf(oldStr);
+  if (index !== -1) {
+    const secondIndex = content.indexOf(oldStr, index + 1);
+    if (secondIndex !== -1 && !replaceAll) {
+      return {
+        ok: false,
+        path,
+        error: `old_string found ${content.split(oldStr).length - 1} times in ${path}. Use replaceAll: true or make old_string more specific. First match at offset ${index}.`,
+      };
+    }
+    return performReplace(path, target, content, oldStr, newStr, replaceAll, index);
+  }
+
+  // 2nd attempt: trim trailing whitespace from old_string (handles trailing-space mismatch)
+  const trimmedOld = oldStr.trimEnd();
+  if (trimmedOld !== oldStr) {
+    const trimmedIndex = content.indexOf(trimmedOld);
+    if (trimmedIndex !== -1) {
+      return performReplace(path, target, content, trimmedOld, newStr, replaceAll, trimmedIndex);
+    }
+  }
+
+  // 3rd attempt: per-line trim (handles mixed leading/trailing whitespace)
+  const multiLineAttempt = tryMultiLineTrimmedMatch(
+    target,
+    path,
+    content,
+    oldStr,
+    newStr,
+    replaceAll,
+  );
+  if (multiLineAttempt) return multiLineAttempt;
+
+  const snippet = oldStr.slice(0, 100).replace(/\n/g, '\\n');
+  return {
+    ok: false,
+    path,
+    error: `old_string not found in ${path}: "${snippet}..."`,
+  };
+}
+
+/** Per-line trimmed match: both old_str and file content lines are trimmed before
+ *  comparison. Only succeeds when there is exactly one match (or replaceAll is set). */
+function tryMultiLineTrimmedMatch(
+  target: string,
+  path: string,
+  content: string,
+  oldStr: string,
+  newStr: string,
+  replaceAll?: boolean,
+): EditFileResult | null {
+  const oldLines = oldStr.split('\n');
+  if (oldLines.length < 2) return null; // single-line → trimEnd already covered; skip
+
+  const trimmedOldLines = oldLines.map((l) => l.trim());
+  const contentLines = content.split('\n');
+  const trimmedContentLines = contentLines.map((l) => l.trim());
+
+  let matchLine = -1;
+  for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
+    let mismatch = false;
+    for (let j = 0; j < oldLines.length; j++) {
+      if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
+        mismatch = true;
+        break;
+      }
+    }
+    if (!mismatch) {
+      matchLine = i;
+      break;
+    }
+  }
+
+  if (matchLine === -1) return null;
+
+  // Count matches for non-replaceAll
+  if (!replaceAll) {
+    let matchCount = 0;
+    for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
+      let mismatch = false;
+      for (let j = 0; j < oldLines.length; j++) {
+        if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
+          mismatch = true;
+          break;
+        }
+      }
+      if (!mismatch) matchCount++;
+    }
+    if (matchCount > 1) return null; // ambiguous
+  }
+
+  // Compute exact char offset from matched line position
+  let charOffset = 0;
+  for (let k = 0; k < matchLine; k++) {
+    charOffset += contentLines[k]!.length + 1; // +1 for \n
+  }
+  // Find the exact old_string span starting at charOffset (preserves original spacing)
+  const exactOld = content.slice(charOffset, charOffset + oldStr.length);
+
+  const result: EditFileResult = replaceAll
+    ? performReplaceAllTrimmed(path, target, contentLines, oldLines.length, newStr, trimmedOldLines)
+    : performReplace(path, target, content, exactOld, newStr, false, charOffset);
+
+  return result;
+}
+
+/** Replace all trimmed-matched occurrences in the file, preserving original line text. */
+function performReplaceAllTrimmed(
+  path: string,
+  target: string,
+  contentLines: string[],
+  oldLineCount: number,
+  newStr: string,
+  trimmedOldLines: string[],
+): EditFileResult {
+  const trimmedContentLines = contentLines.map((l) => l.trim());
+  const parts: string[] = [];
+  const matchLines: number[] = [];
+  let i = 0;
+  while (i <= contentLines.length - oldLineCount) {
+    let match = true;
+    for (let j = 0; j < oldLineCount; j++) {
+      if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      matchLines.push(i + 1); // 1-based
+      parts.push(newStr);
+      i += oldLineCount;
+    } else {
+      parts.push(contentLines[i]!);
+      i++;
+    }
+  }
+  for (; i < contentLines.length; i++) {
+    parts.push(contentLines[i]!);
+  }
+  const newContent = parts.join('\n');
+
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, newContent, 'utf8');
+
+  return {
+    ok: true,
+    path,
+    content: newContent,
+    fromLine: matchLines[0] ?? 1,
+    toLine: matchLines[0] ?? 1,
+    replacements: matchLines.length,
+    ...(matchLines.length > 1 ? { matchLines } : {}),
+  };
 }
 
 function editFileTrimmed(
@@ -468,7 +603,8 @@ function performReplace(
       if (content[i] === '\n') lineStarts.push(i + 1);
     }
     lineStarts.push(content.length + 1); // sentinel
-    while ((pos = content.indexOf(oldStr, pos)) !== -1) {
+    pos = content.indexOf(oldStr, pos);
+    while (pos !== -1) {
       // 二分查找 pos 对应的行号 / Binary search to find line number for pos
       let lo = 0,
         hi = lineStarts.length - 2;
@@ -479,6 +615,7 @@ function performReplace(
       }
       matchLines.push(hi + 1); // 1-based
       pos += oldStr.length;
+      pos = content.indexOf(oldStr, pos);
     }
     const parts = content.split(oldStr);
     replacements = parts.length - 1;

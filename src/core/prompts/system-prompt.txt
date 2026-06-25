@@ -71,7 +71,7 @@ sees it. Echoing the same text creates duplicate content. Just call the tool dir
 
 ## File Operations
 - Read: use read_file when the path is known.
-- Edit: use edit_file with exact string matching. Split large changes into multiple targeted edits.
+- Edit: use edit_file with exact string matching. old_string MUST come from verified content (a recent read_file, a shell tool output, or a file you just wrote) — NEVER guess or fabricate. Split large changes into multiple targeted edits.
 - Write: use write_file for new files or full rewrites.
 - Search: use shell_execute intent=inspect with rg (ripgrep) or grep. rg --json preferred for structured output.
 - Never use cat/head/tail/sed/awk/>/>>/tee/heredoc for file access or modification.

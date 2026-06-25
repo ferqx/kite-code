@@ -327,7 +327,12 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'shell_execute') {
-    const result = await runShellForTool(workspace, request.args.command, shellExecutor, signal);
+    const raw = await runShellForTool(workspace, request.args.command, shellExecutor, signal);
+    const result: ShellResult = {
+      ...raw,
+      stdout: truncateToolOutput(raw.stdout),
+      stderr: truncateToolOutput(raw.stderr),
+    };
     return withFailureGuidance(request, {
       ...result,
       action: {
@@ -350,7 +355,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   };
 }
 
-/** 执行 shell 并把异常转换为工具失败结果，避免阻断 ToolMessage 返回 / Convert shell exceptions into failed tool results */
+/** 共享截断函数：保留头部 + 尾部，中间标注省略行数。
+ *  Shared truncation: keep head + tail with omitted-line marker in between.
+ *  Zero hallucination risk — preserves verbatim content, just drops the middle. */
+export function truncateToolOutput(output: string, maxLen = 4000): string {
+  if (output.length <= maxLen) return output;
+  const keep = Math.floor(maxLen / 2);
+  const head = output.slice(0, keep);
+  const tail = output.slice(-keep);
+  const omittedLines = output.slice(keep, -keep).split('\n').filter(Boolean).length;
+  return `${head}\n... [${omittedLines} lines omitted, ${output.length - 2 * keep} total chars truncated]\n${tail}`;
+}
 async function runShellForTool(
   workspace: string,
   command: string,

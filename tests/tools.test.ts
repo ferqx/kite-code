@@ -94,6 +94,49 @@ describe('tool safety', () => {
     expect(readFileSync(join(workspace, 'config.ts'), 'utf8')).toContain('debug: false');
   });
 
+  test('edit_file auto-retry trimEnd: trailing whitespace mismatch succeeds', () => {
+    const workspace = join(tmpdir(), 'openpx-langgraph-tools-autofix');
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+
+    // File content has no trailing spaces
+    writeFile({ workspace, path: 'cfg.ts', content: '  debug: true,\n  env: prod,\n' });
+
+    // oldString has trailing spaces — exact match fails, trimEnd rescues
+    const result = editFile({
+      workspace,
+      path: 'cfg.ts',
+      oldString: '  debug: true,  ',
+      newString: '  debug: false,',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.replacements).toBe(1);
+    const content = readFileSync(join(workspace, 'cfg.ts'), 'utf8');
+    expect(content).toContain('debug: false');
+  });
+
+  test('edit_file auto-retry per-line: leading whitespace mismatch succeeds', () => {
+    const workspace = join(tmpdir(), 'openpx-langgraph-tools-autofix-ml');
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+
+    writeFile({ workspace, path: 'f.ts', content: '  const x = 1;\n  const y = 2;\n' });
+
+    // oldString stripped of indent — exact + trimEnd fail, per-line trim rescues
+    const result = editFile({
+      workspace,
+      path: 'f.ts',
+      oldString: 'const x = 1;\nconst y = 2;',
+      newString: 'const x = 10;\nconst y = 20;',
+    });
+
+    expect(result.ok).toBe(true);
+    const content = readFileSync(join(workspace, 'f.ts'), 'utf8');
+    expect(content).toContain('const x = 10;');
+    expect(content).toContain('const y = 20;');
+  });
+
   test('edit_file fails when old_string not found', () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-edit-nf');
     mkdirSync(workspace, { recursive: true });
