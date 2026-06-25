@@ -133,21 +133,24 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
     if (key.ctrl && input === 'c') process.exit(0);
   });
 
-  const goToStep = useCallback((next: SetupStep) => {
-    setError(null);
-    if (next === 'credentials') {
-      setCredFocus('apiKey');
-      const opt = PROVIDER_OPTIONS.find((o) => o.type === providerTypeRef.current);
-      if (opt) setBaseURL(opt.defaultBaseURL);
-    }
-    if (next === 'model') {
-      setCustomModel('');
-      setModelIndex(0);
-      setSelModelIndex(0);
-      setThinkingIndex(selThinkingIndex);
-    }
-    setStep(next);
-  }, []);
+  const goToStep = useCallback(
+    (next: SetupStep) => {
+      setError(null);
+      if (next === 'credentials') {
+        setCredFocus('apiKey');
+        const opt = PROVIDER_OPTIONS.find((o) => o.type === providerTypeRef.current);
+        if (opt) setBaseURL(opt.defaultBaseURL);
+      }
+      if (next === 'model') {
+        setCustomModel('');
+        setModelIndex(0);
+        setSelModelIndex(0);
+        setThinkingIndex(selThinkingIndex);
+      }
+      setStep(next);
+    },
+    [selThinkingIndex],
+  );
 
   // ── Step 1: Provider ──
   useInput(
@@ -366,7 +369,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
           paddingY={1}
         >
           <Text bold color={t.primary}>
-            Setup OpenPX ({idx('provider')}/3)
+            Setup Kite Code ({idx('provider')}/3)
           </Text>
           <Text color={t.muted}>Choose your model provider.</Text>
           <Box marginTop={1} flexDirection="column">

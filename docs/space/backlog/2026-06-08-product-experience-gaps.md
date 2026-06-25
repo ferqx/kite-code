@@ -1,7 +1,7 @@
 # 产品体验缺口
 
 日期：2026-06-08
-来源：OpenPX 项目审查 — 从"能工作的 agent 框架"到"愿意日常使用的 agent 产品"之间的关键缺口
+来源：Kite Code 项目审查 — 从"能工作的 agent 框架"到"愿意日常使用的 agent 产品"之间的关键缺口
 
 ---
 
@@ -10,7 +10,7 @@
 - **位置**：全局（新系统）
 - **问题**：仅支持同会话内 checkpoint 回溯，无跨会话持久记忆。每次新会话 agent 不记得用户偏好、技术栈、架构决策、项目约定。
 - **影响**：P0（一票否决级）。重度使用场景不可接受，与 Claude Code auto-memory 差距明显。
-- **建议方向**：`.openpx/memory/` 持久记忆目录，`MEMORY.md` 入口 + 分 topic 文件。agent 在会话开始时自动读取，结束时写入更新。
+- **建议方向**：`.kite-code/memory/` 持久记忆目录，`MEMORY.md` 入口 + 分 topic 文件。agent 在会话开始时自动读取，结束时写入更新。
 - **参考**：PRODUCT.md 已知产品缺口章节
 
 ---
@@ -29,7 +29,7 @@
 - **位置**：`src/core/model/`、`src/core/config/`
 - **问题**：provider-agnostic 将模型选择风险转嫁用户。用户接入弱模型后 agent 连续犯错，第一反应是换产品而非调配置。
 - **影响**：P0。阻碍首次体验，用户留存的关键瓶颈。
-- **建议方向**：提供 `openpx.jsonc` 默认配置模板，针对一个强模型（DeepSeek V3+ 或 Claude 兼容）优化 system prompt 和工具描述，首次启动引导。
+- **建议方向**：提供 `kite-code.jsonc` 默认配置模板，针对一个强模型（DeepSeek V3+ 或 Claude 兼容）优化 system prompt 和工具描述，首次启动引导。
 
 ---
 
@@ -65,7 +65,7 @@
 - **位置**：产品层面（架构 vs 产品定位）
 - **问题**："多 provider" 和 "好用的产品" 之间存在内在矛盾。架构层已经做到 provider 无关，但产品层需要绑定一个推荐模型来定义"好的体验"。当前没有任何机制帮用户选择或调优。
 - **影响**：P0-P1 跨层问题。影响首次体验和深度用户双端。
-- **建议方向**：在 `openpx.jsonc` 中支持 `defaultPreset` 字段，预置针对 DeepSeek / OpenAI / Ollama 的调优配置（system prompt、温度、max tokens 等）。用户选择 preset 即可获得该 provider 下的最优体验，同时保留细粒度覆盖能力。
+- **建议方向**：在 `kite-code.jsonc` 中支持 `defaultPreset` 字段，预置针对 DeepSeek / OpenAI / Ollama 的调优配置（system prompt、温度、max tokens 等）。用户选择 preset 即可获得该 provider 下的最优体验，同时保留细粒度覆盖能力。
 
 ---
 

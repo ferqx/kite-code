@@ -10,7 +10,7 @@ import { BunSqliteSaver } from '../src/core/persistence/checkpoint';
 import { generateSessionName, listSessions, loadSession } from '../src/core/persistence/sessions';
 
 function makeDbPath(label: string): string {
-  return join(tmpdir(), `openpx-sessions-test-${label}.sqlite`);
+  return join(tmpdir(), `kite-code-sessions-test-${label}.sqlite`);
 }
 
 function makeCheckpoint(

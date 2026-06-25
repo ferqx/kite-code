@@ -8,9 +8,9 @@ import type { SkillScanOptions } from '../../src/core/skills/types';
 
 function makeOptions(base: string): SkillScanOptions {
   return {
-    projectOpenpxSkillsDir: join(base, 'project-openpx'),
+    projectKiteCodeSkillsDir: join(base, 'project-kite-code'),
     projectAgentsSkillsDir: join(base, 'project-agents'),
-    userOpenpxSkillsDir: join(base, 'user-openpx'),
+    userKiteCodeSkillsDir: join(base, 'user-kite-code'),
     userAgentsSkillsDir: join(base, 'user-agents'),
   };
 }
@@ -20,10 +20,10 @@ describe('createSkillTool', () => {
   let opts: SkillScanOptions;
 
   beforeEach(() => {
-    tmp = join(tmpdir(), `openpx-st-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    tmp = join(tmpdir(), `kite-code-st-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     mkdirSync(tmp, { recursive: true });
     opts = makeOptions(tmp);
-    const dir = join(opts.projectOpenpxSkillsDir, 'tdd');
+    const dir = join(opts.projectKiteCodeSkillsDir, 'tdd');
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, 'SKILL.md'),

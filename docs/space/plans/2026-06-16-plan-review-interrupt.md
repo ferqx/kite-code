@@ -31,7 +31,7 @@
 
 ## 架构：复用中断基础设施
 
-OpenPX 已有 `tool_approval` 和 `user_input` 两种中断，贯穿三层：
+Kite Code 已有 `tool_approval` 和 `user_input` 两种中断，贯穿三层：
 
 ```
 graph.ts: interrupt()

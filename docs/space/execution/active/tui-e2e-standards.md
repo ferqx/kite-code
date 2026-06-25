@@ -81,10 +81,10 @@ await tui.waitForIdle(15000);           // 等待 Agent 完成
 
 ### 3. 测试环境必须提供合法的 AgentConfig
 
-`createTui` 自动创建临时 HOME 目录并写入合法配置文件。通过 `process.env.OPENPX_HOME` 隔离 checkpoint 数据库。
+`createTui` 自动创建临时 HOME 目录并写入合法配置文件。通过 `process.env.KITE_CODE_HOME` 隔离 checkpoint 数据库。
 
 测试辅助环境变量：
-- `process.env.HOME` / `process.env.OPENPX_HOME` — 临时 HOME 目录
+- `process.env.HOME` / `process.env.KITE_CODE_HOME` — 临时 HOME 目录
 - `process.stdout.columns` — 终端宽度（默认 120）
 - `process.stdout.rows` — 终端高度（默认 40，用于 Sidebar 虚拟窗口计算）
 

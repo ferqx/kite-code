@@ -13,8 +13,8 @@
 `buildCacheableRuntimeContext` 原先的逻辑：
 
 ```
-Shell: bash — use bash syntax, use POSIX paths (e.g. /d/app, not D:\app)
-Workspace: /d/app/openpx-new
+Shell: bash — use bash syntax, use POSIX paths (e.g. /d/work, not D:\work)
+Workspace: /d/work/my-project
 ```
 
 模型忠实地对所有工具使用 POSIX 路径。这对 `shell_execute` 正确（MSYS2 bash 理解 `/d/...`），但对 `read_file` 致命（Node.js `fs` 无法解析）。
@@ -95,7 +95,7 @@ readFileSync → 编码检测(BOM) → 解码+剥离BOM → 二进制检测(无B
 
 ### Runtime context 路径格式（`runtime-context.ts`、`subagent/runner.ts`）
 
-`Workspace` 字段用 Windows 原生格式（`D:\app\openpx-new`）。仅在 `osPlatform === "win32"` 时追加一条 `shell_execute` 专用的 POSIX 转换提示，并明确说明 file 工具直接用 Windows 路径。
+`Workspace` 字段用 Windows 原生格式（`D:\work\my-project`）。仅在 `osPlatform === "win32"` 时追加一条 `shell_execute` 专用的 POSIX 转换提示，并明确说明 file 工具直接用 Windows 路径。
 
 subagent CWD 使用 `process.cwd()` 原生格式，不再通过 `toPosixPath` 转换。
 

@@ -753,7 +753,7 @@ describe('Retry: model service error recovery', () => {
 // ============================================================================
 
 function createEnv(name: string): ContinueInput {
-  const root = join(tmpdir(), `openpx-${name}`);
+  const root = join(tmpdir(), `kite-code-${name}`);
   const workspace = join(root, 'workspace');
   const dataDir = join(root, 'data');
   rmSync(root, { recursive: true, force: true });

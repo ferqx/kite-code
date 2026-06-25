@@ -64,7 +64,7 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
         <Box marginTop={1} flexDirection="column">
           <Text color={t.muted}>No MCP servers configured.</Text>
           <Text color={t.dim}>
-            Add mcpServers to ~/.openpx/openpx.jsonc or .mcp.json in your project root.
+            Add mcpServers to ~/.kite-code/kite-code.jsonc or .mcp.json in your project root.
           </Text>
         </Box>
         <Text color={t.dim}>Esc close</Text>
@@ -187,6 +187,8 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
                     (showing first {row.max} tools total)
                   </Text>
                 );
+              default:
+                return null;
             }
           })}
         </ScrollList>

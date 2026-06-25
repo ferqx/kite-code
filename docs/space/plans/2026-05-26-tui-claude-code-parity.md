@@ -4,7 +4,7 @@
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Goal:** Bring OpenPX TUI to Claude Code parity across 5 dimensions — layout restructure (Header/Body/Footer/Overlay), shortcut simplification (3 keys), feature completion (markdown links, .gitignore-aware file search, /export), dynamic model list, and theme support.
+**Goal:** Bring Kite Code TUI to Claude Code parity across 5 dimensions — layout restructure (Header/Body/Footer/Overlay), shortcut simplification (3 keys), feature completion (markdown links, .gitignore-aware file search, /export), dynamic model list, and theme support.
 
 **Architecture:** Restructure the TUI into a 4-layer vertical flow: Header (branding + hints), Body (message stream, flexGrow), Footer (3-row: top status + interaction row + bottom stats), Overlay (panels below Footer). Simplify global shortcuts from 10+leader-keys to just Ctrl+C/T/E. Replace hardcoded model list with config-driven loading; add light theme support.
 
@@ -83,7 +83,7 @@ export default function Header({ running, error }: HeaderProps) {
     <Box flexDirection="column">
       <Box>
         <Text color={t.primary}>{catTop}  </Text>
-        <Text bold color={t.primary}>OpenPX</Text>
+        <Text bold color={t.primary}>Kite Code</Text>
       </Box>
       <Box>
         <Text color={t.primary}>{catMid}</Text>
@@ -843,7 +843,7 @@ Replace the `listFiles` function in `src/app/tui/hooks/useFileSearch.ts` with th
 ```typescript
 function listFiles(dir: string, base: string, maxFiles: number = 500): string[] {
   const files: string[] = [];
-  const skip = new Set(["node_modules", ".git", ".openpx", "dist", "build", "__pycache__", ".DS_Store", "coverage"]);
+  const skip = new Set(["node_modules", ".git", ".kite-code", "dist", "build", "__pycache__", ".DS_Store", "coverage"]);
   const accumulatedGitignore: string[] = [];
 
   function gitignorePatternToRegex(pattern: string): RegExp {
@@ -1064,7 +1064,7 @@ Expected: PASS or fix test expectations for dynamic model list
 
 ```bash
 git add src/core/config/index.ts src/app/tui/App.tsx src/app/tui/components/ModelSelector.tsx src/app/tui/index.tsx
-git commit -m "feat: 模型列表从 openpx.jsonc 动态加载，替换硬编码"
+git commit -m "feat: 模型列表从 kite-code.jsonc 动态加载，替换硬编码"
 ```
 
 ---
@@ -1189,7 +1189,7 @@ Expected: PASS
 
 ```bash
 git add src/app/tui/theme.ts src/app/tui/index.tsx src/app/tui/Header.tsx src/app/tui/StatusBar.tsx src/app/tui/StatsLine.tsx src/app/tui/Footer.tsx src/app/tui/OutputArea.tsx src/app/tui/components/MarkdownBlock.tsx src/app/tui/components/ApprovalBlock.tsx src/app/tui/components/InputBlock.tsx src/app/tui/components/HelpPanel.tsx src/app/tui/components/ModelSelector.tsx src/app/tui/components/SessionSelector.tsx src/app/tui/components/McpPanel.tsx src/app/tui/components/CheckpointSelector.tsx src/app/tui/components/InputLine.tsx
-git commit -m "feat: 新增 light 主题支持，通过 openpx.jsonc theme 字段配置，默认 dark"
+git commit -m "feat: 新增 light 主题支持，通过 kite-code.jsonc theme 字段配置，默认 dark"
 ```
 
 ---
@@ -1215,7 +1215,7 @@ Search for tests that use these key combinations and update them to use the slas
 
 - [ ] **Step 2: Update layout assertion tests**
 
-Search tests for assertions about old Header content (modelName, auth, workspace path displayed). Update assertions to match new simplified Header (only cat + "OpenPX" + hints).
+Search tests for assertions about old Header content (modelName, auth, workspace path displayed). Update assertions to match new simplified Header (only cat + "Kite Code" + hints).
 
 Search for references to `ActivityBar` spinner text — remove or update.
 

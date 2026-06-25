@@ -6,7 +6,7 @@ TUI 采用四层布局，对齐 Claude Code 的终端体验：
 
 ```
 ┌─ Header (4行) ────────────────────────────────────────────┐
-│   /\_/\    OpenPX                                          │
+│   /\_/\    Kite Code                                          │
 │  ( = = )   /help shortcuts · Ctrl+C exit                   │
 │   > ~ <    / commands                                       │
 ├─ Body ─────────────────────────────────────────────────────┤
@@ -158,4 +158,4 @@ interface Theme {
 }
 ```
 
-支持 `dark`（默认）和 `light` 两套主题，通过 `openpx.jsonc` 的 `theme` 字段切换。
+支持 `dark`（默认）和 `light` 两套主题，通过 `kite-code.jsonc` 的 `theme` 字段切换。

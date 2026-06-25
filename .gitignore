@@ -4,7 +4,7 @@ node_modules
 # output
 out
 dist
-.openpx/
+.kite-code/
 *.sqlite
 *.sqlite3
 *.tgz
@@ -42,7 +42,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # e2e test fixtures (generated, not archived)
 tests/e2e/fixtures/
 
-.claude.openpx-tmp/
+.claude.kite-code-tmp/
 .claude/
 
 bun.lock

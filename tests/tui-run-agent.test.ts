@@ -26,14 +26,14 @@ function baseParams(overrides?: Partial<BaseTuiParams>): BaseTuiParams {
         name: 'tdd',
         description: 'TDD workflow',
         source: 'project' as const,
-        origin: '.openpx' as const,
+        origin: '.kite-code' as const,
       },
     ],
     skillOptions: {
-      projectOpenpxSkillsDir: '/tmp/.openpx/skills',
+      projectKiteCodeSkillsDir: '/tmp/.kite-code/skills',
       projectAgentsSkillsDir: '/tmp/.agents/skills',
-      userOpenpxSkillsDir: '/home/user/.openpx/skills',
-      userAgentsSkillsDir: '/home/user/.agents/skills',
+      userKiteCodeSkillsDir: '/tmp/user-kite-code/skills',
+      userAgentsSkillsDir: '/tmp/user-agents/skills',
     },
     mcpManager: null,
     ...overrides,
@@ -80,12 +80,17 @@ describe('buildRunAgentParams', () => {
 
   test('includes skills and skillOptions', () => {
     const skills = [
-      { name: 'tdd', description: 'TDD', source: 'project' as const, origin: '.openpx' as const },
+      {
+        name: 'tdd',
+        description: 'TDD',
+        source: 'project' as const,
+        origin: '.kite-code' as const,
+      },
     ];
     const skillOptions = {
-      projectOpenpxSkillsDir: '/p',
+      projectKiteCodeSkillsDir: '/p',
       projectAgentsSkillsDir: '/a',
-      userOpenpxSkillsDir: '/u',
+      userKiteCodeSkillsDir: '/u',
       userAgentsSkillsDir: '/g',
     };
     const params = buildRunAgentParams({

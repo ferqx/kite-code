@@ -10,7 +10,7 @@ import {
 } from '../src/core/tools/bash-path';
 
 describe('shell execute integration', () => {
-  const workspace = join(tmpdir(), 'openpx-e2e-shell');
+  const workspace = join(tmpdir(), 'kite-code-e2e-shell');
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(workspace, 'test.txt'), 'hello');
 

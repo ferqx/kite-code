@@ -9,7 +9,7 @@ import type { AgentEvent } from '../src/protocol/events';
 
 describe('TUI Integration', () => {
   test('runAgent with TuiUserInputProvider completes without errors for simple task', async () => {
-    const root = join(tmpdir(), 'openpx-tui-integration');
+    const root = join(tmpdir(), 'kite-code-tui-integration');
     rmSync(root, { recursive: true, force: true });
     mkdirSync(root, { recursive: true });
 

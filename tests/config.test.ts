@@ -6,16 +6,16 @@ import { defaultConfigPath, loadAgentConfig } from '../src/core/config/index';
 
 // 验证 loadAgentConfig 配置加载功能 / Verify loadAgentConfig configuration loading
 describe('loadAgentConfig', () => {
-  // 验证默认配置路径始终指向用户 home 目录下的 openpx.jsonc / Verify default config path always resolves to openpx.jsonc under user home
+  // 验证默认配置路径始终指向用户 home 目录下的 kite-code.jsonc / Verify default config path always resolves to kite-code.jsonc under user home
   test('uses a user-home default config path across operating systems', () => {
-    expect(defaultConfigPath()).toBe(join(homedir(), '.openpx', 'openpx.jsonc'));
+    expect(defaultConfigPath()).toBe(join(homedir(), '.kite-code', 'kite-code.jsonc'));
   });
 
   // 验证能正确解析 JSONC 文件中的 DeepSeek provider 和模型配置 / Verify parsing DeepSeek provider and model config from JSONC file
   test('loads DeepSeek provider and default model from JSONC', () => {
     const dir = join(import.meta.dir, '.tmp-config');
     mkdirSync(dir, { recursive: true });
-    const configPath = join(dir, 'openpx.jsonc');
+    const configPath = join(dir, 'kite-code.jsonc');
     writeFileSync(
       configPath,
       `{

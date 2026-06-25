@@ -308,7 +308,7 @@ describe('TUI E2E — P1 Key User Workflows', () => {
       async () => {
         await runSlashCommand(tui, '/model', 800);
         // First overlay after agent flow may or may not render; check TUI health
-        expect(tui.getOutput()).toContain('OpenPX');
+        expect(tui.getOutput()).toContain('Kite Code');
         tui.stdin.write('\x1b');
         await new Promise((r) => setTimeout(r, 300));
       },

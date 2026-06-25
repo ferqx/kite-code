@@ -53,7 +53,7 @@ package 脚本应尊重调用者的代理环境。不要增加默认 `env -u ...
 
 真实套件在 `tests/real-agent.real.ts` 内按测试设置 timeout，包括多步骤 agent flow 的更长限制。不要依赖 package 级 `--timeout`。
 
-真实套件默认使用 `~/.openpx/openpx.jsonc` 的默认模型，也允许通过 Bun test 参数临时覆盖 provider 和模型：
+真实套件默认使用 `~/.kite-code/kite-code.jsonc` 的默认模型，也允许通过 Bun test 参数临时覆盖 provider 和模型：
 
 ```bash
 bun run test:real --provider=ollama --model=gemma4:31b-cloud

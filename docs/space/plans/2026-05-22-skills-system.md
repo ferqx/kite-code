@@ -4,7 +4,7 @@
 
 ## 概述
 
-为 OpenPX 实现 Skills（技能）系统，与 Claude Code 的对齐点为：
+为 Kite Code 实现 Skills（技能）系统，与 Claude Code 的对齐点为：
 
 1. **Skill 是 Markdown 文件** — YAML frontmatter（name, description）+ Markdown body（指令/提示词）
 2. **Skill 是工具** — 通过 `Skill` 工具按需加载内容，而非预注入 system prompt
@@ -14,10 +14,10 @@
 
 ### 与 Claude Code 的对齐对比
 
-| 维度 | Claude Code | OpenPX 本方案 | 对齐 |
+| 维度 | Claude Code | Kite Code 本方案 | 对齐 |
 |------|------------|-------------|------|
 | Skill 格式 | YAML frontmatter + Markdown body | 同 | ✅ |
-| 存放位置 | `~/.claude/skills/` + `.claude/skills/` | `~/.openpx/skills/` + `.openpx/skills/` | ✅ |
+| 存放位置 | `~/.claude/skills/` + `.claude/skills/` | `~/.kite-code/skills/` + `.kite-code/skills/` | ✅ |
 | 内容加载 | 按需加载，不在 system prompt 中 | 同 | ✅ |
 | 用户触发 | `/skill-name` 斜杠命令 | 同 | ✅ |
 | Agent 触发 | Agent 调用 Skill 工具 | 同 | ✅ |
@@ -31,13 +31,13 @@
 ### 目录结构
 
 ```
-~/.openpx/skills/              # 用户级（跨所有项目可用）
+~/.kite-code/skills/              # 用户级（跨所有项目可用）
   my-skill/
     SKILL.md                   # 必需：YAML frontmatter + Markdown body
     heavy-reference.md         # 可选：超长参考文档（body 内按名引用）
     scripts/                   # 可选：可执行资源
 
-.openpx/skills/                # 项目级（跟随 git，团队成员共享）
+.kite-code/skills/                # 项目级（跟随 git，团队成员共享）
   project-rule/
     SKILL.md
 ```
@@ -254,7 +254,7 @@ Skill 内容中的特殊标签原样传递给 agent，由 agent 自行解读：
 | `<EXTREMELY-IMPORTANT>` | 最高优先级的指令，覆盖默认行为 |
 | `<SUBAGENT-STOP>` | 标记子 agent/子任务应忽略的内容块 |
 
-这些标签不在 OpenPX 运行时解析，保留在 skill body 中由模型理解。
+这些标签不在 Kite Code 运行时解析，保留在 skill body 中由模型理解。
 
 ## TUI 集成
 

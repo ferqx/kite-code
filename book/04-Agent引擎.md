@@ -2,7 +2,7 @@
 
 ## 4.1 LangGraph 图拓扑
 
-OpenPX 的 Agent 核心是一个 LangGraph `StateGraph`，包含 4 个节点和确定性路由：
+Kite Code 的 Agent 核心是一个 LangGraph `StateGraph`，包含 4 个节点和确定性路由：
 
 ```
                     ┌──────────────────┐
@@ -177,7 +177,7 @@ function createChatModel(config: AgentConfig): SupportedChatModel
 
 ## 4.6 Prompt Cache 优化
 
-OpenPX 针对 DeepSeek 的 prompt cache 机制做了专门优化：
+Kite Code 针对 DeepSeek 的 prompt cache 机制做了专门优化：
 
 1. **静态 system prompt**：不变部分放在消息开头，最大化缓存命中
 2. **工具 schema 稳定**：基集工具顺序固定，MCP 工具追加在末尾

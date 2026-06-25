@@ -88,16 +88,16 @@ export class SessionLogCollector {
       kind: 1,
       timestamp: new Date().toISOString(),
       attributes: {
-        'openpx.thread_id': threadId,
-        'openpx.frontend': frontend,
-        'openpx.workspace': workspace,
+        'kite_code.thread_id': threadId,
+        'kite_code.frontend': frontend,
+        'kite_code.workspace': workspace,
         'gen_ai.system': model.provider,
         'gen_ai.request.model': model.name,
-        'openpx.os': platform(),
-        'openpx.os_version': release(),
-        'openpx.arch': arch(),
-        'openpx.bun_version': Bun.version,
-        ...(process.env.TERM_PROGRAM ? { 'openpx.terminal': process.env.TERM_PROGRAM } : {}),
+        'kite_code.os': platform(),
+        'kite_code.os_version': release(),
+        'kite_code.arch': arch(),
+        'kite_code.bun_version': Bun.version,
+        ...(process.env.TERM_PROGRAM ? { 'kite_code.terminal': process.env.TERM_PROGRAM } : {}),
       },
       status: { code: 'OK', message: '' },
     });
@@ -183,7 +183,7 @@ export class SessionLogCollector {
       name: 'session.end',
       kind: 1,
       timestamp: new Date().toISOString(),
-      attributes: { 'openpx.session.status': status },
+      attributes: { 'kite_code.session.status': status },
       status: { code: status === 'completed' ? 'OK' : 'ERROR', message: status },
     });
 
@@ -225,7 +225,7 @@ export class SessionLogCollector {
     if (argsKey) {
       const args = this._pendingArgs.get(argsKey);
       if (args) {
-        rec.attributes['openpx.tool.args'] = JSON.stringify(args).slice(0, 4096);
+        rec.attributes['kite_code.tool.args'] = JSON.stringify(args).slice(0, 4096);
       }
     }
 

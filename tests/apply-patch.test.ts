@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { applyPatch, parsePatch } from '../src/core/tools/apply-patch';
 
 function createWorkspace(): string {
-  const dir = join(tmpdir(), `openpx-patch-${Math.random().toString(36).slice(2, 8)}`);
+  const dir = join(tmpdir(), `kite-code-patch-${Math.random().toString(36).slice(2, 8)}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   return dir;

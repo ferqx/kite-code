@@ -1,4 +1,4 @@
-# OpenPX 路线图
+# Kite Code 路线图
 
 最后更新：2026-06-08
 
@@ -6,7 +6,7 @@
 
 ## 当前阶段：从 Agent 框架到 Agent 产品
 
-基础设施已完备（MCP、Rewind、Skills、多 Agent 协作），但深度用户反馈揭示了从"能工作"到"愿意日常使用"之间的关键差距。当前阶段聚焦补齐这些产品化缺口，将 OpenPX 从"好的 agent 框架"升级为"好的 agent 产品"。
+基础设施已完备（MCP、Rewind、Skills、多 Agent 协作），但深度用户反馈揭示了从"能工作"到"愿意日常使用"之间的关键差距。当前阶段聚焦补齐这些产品化缺口，将 Kite Code 从"好的 agent 框架"升级为"好的 agent 产品"。
 
 核心矛盾：架构优雅（三层分离、事件协议、provider 无关）≠ 产品竞争力。产品竞争力来自**模型能力 + 功能深度**。
 
@@ -51,7 +51,7 @@
 
 | 任务 | 内容 |
 |------|------|
-| Skills 系统 | agentskills.io 标准，`Skill` 工具 + `/skill-name` 斜杠命令，`.openpx/skills/` → `~/.openpx/skills/` 路径查找，容错静默跳过 |
+| Skills 系统 | agentskills.io 标准，`Skill` 工具 + `/skill-name` 斜杠命令，`.kite-code/skills/` → `~/.kite-code/skills/` 路径查找，容错静默跳过 |
 
 > 详见 [`docs/space/plans/2026-05-23-skills-system-phase3.md`](docs/space/plans/2026-05-23-skills-system-phase3.md)
 
@@ -80,7 +80,7 @@
 | Markdown 链接 | `[text](url)` 渲染支持 |
 | .gitignore 感知搜索 | @file 搜索遵循 .gitignore 规则 |
 | /export 命令 | 会话导出接线 |
-| 动态模型列表 | 模型列表从 `openpx.jsonc` 加载，替换硬编码 |
+| 动态模型列表 | 模型列表从 `kite-code.jsonc` 加载，替换硬编码 |
 | 主题支持 | dark / light 双主题，通过 `theme` 字段配置 |
 
 > 详见 [`docs/space/plans/2026-05-26-tui-claude-code-parity.md`](docs/space/plans/2026-05-26-tui-claude-code-parity.md)
@@ -107,7 +107,7 @@
 
 | 任务 | 内容 | 状态 |
 |------|------|------|
-| **跨会话记忆系统** | `.openpx/memory/` 持久记忆目录，agent 自动读写。记忆按 topic 组织（`MEMORY.md` 入口 + 分 topic 文件），跨会话保留用户偏好、技术栈、架构决策、项目约定。对齐 Claude Code auto-memory 体验 | 🔴 待启动 |
+| **跨会话记忆系统** | `.kite-code/memory/` 持久记忆目录，agent 自动读写。记忆按 topic 组织（`MEMORY.md` 入口 + 分 topic 文件），跨会话保留用户偏好、技术栈、架构决策、项目约定。对齐 Claude Code auto-memory 体验 | 🔴 待启动 |
 | **Web Search 工具** |内置 web search 能力（DuckDuckGo fallback + MCP server 优先），支持查最新文档、API 变更、社区 issue/PR 讨论 | 🟡 已规划 |
 | **Token 消耗展示** | TUI StatusBar 展示当前 session 的 token 用量（input/output），非 DeepSeek provider 也覆盖 | 🟡 已规划 |
 | **默认推荐模型 + 首次体验** | 内置 presets（DeepSeek/Ollama），首次启动交互式引导，ModelSelector 推荐标签，配置模板生成 | 🟡 已规划 |
@@ -128,7 +128,7 @@
 
 | 任务 | 内容 | 状态 |
 |------|------|------|
-| **自定义子 Agent 配置** | `.openpx/agents/*.md` 定义角色（system prompt + 工具集），超越内置 3 个。评估放开 depth > 0 嵌套 | 🔴 待启动 |
+| **自定义子 Agent 配置** | `.kite-code/agents/*.md` 定义角色（system prompt + 工具集），超越内置 3 个。评估放开 depth > 0 嵌套 | 🔴 待启动 |
 | **图片输入支持** | 多模态输入，支持截图（debug）、架构图（design review）、UI mockup（前端开发） | 🔴 待启动 |
 | **`write_file` append 模式** | 支持追加写入，避免修改大文件时必须传完整内容 | 🔴 待启动 |
 | **子 Agent 独立模型配置** | Explore/Code/Review 可按角色指定不同模型（Explore 用便宜模型，Code 用强模型），独立超时设置 | 🔴 待启动 |
@@ -168,7 +168,7 @@
 
 ### 从 Agent 框架到 Agent 产品
 
-当前 protocol → core → app 三层已运行，基础设施完备。下一步：让 OpenPX 成为开发者**愿意每天使用**的产品，而非仅能展示架构能力的框架。补齐 P0/P1 能力后，TUI 体验可对标 Claude Code CLI。
+当前 protocol → core → app 三层已运行，基础设施完备。下一步：让 Kite Code 成为开发者**愿意每天使用**的产品，而非仅能展示架构能力的框架。补齐 P0/P1 能力后，TUI 体验可对标 Claude Code CLI。
 
 ### 三层架构收官
 

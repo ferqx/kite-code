@@ -18,7 +18,7 @@ describe('recordEvent — 全量映射', () => {
     expect(r1.kind).toBe(3); // CLIENT
     expect(r1.traceId).toBe(TRACE);
     expect(r1.parentSpanId).toBe(PARENT);
-    expect(r1.attributes['openpx.node']).toBe('agent');
+    expect(r1.attributes['kite_code.node']).toBe('agent');
 
     const r2 = recordEvent(
       { type: 'step_end', data: { node: 'agent', spanId: '0000111122223333' } },
@@ -26,14 +26,14 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r2.name).toBe('node.agent.end');
-    expect(r2.attributes['openpx.node']).toBe('agent');
+    expect(r2.attributes['kite_code.node']).toBe('agent');
   });
 
   test('text — 记录实际内容而非仅长度', () => {
     const r = recordEvent({ type: 'text', data: { text: 'hello world' } }, TRACE, PARENT);
     expect(r.name).toBe('text');
-    expect(r.attributes['openpx.text.length']).toBe(11);
-    expect(r.attributes['openpx.text.content']).toBe('hello world');
+    expect(r.attributes['kite_code.text.length']).toBe(11);
+    expect(r.attributes['kite_code.text.content']).toBe('hello world');
   });
 
   test('reason — 记录实际推理内容', () => {
@@ -43,17 +43,17 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('reason');
-    expect(r.attributes['openpx.reason.length']).toBe(26);
-    expect(r.attributes['openpx.reason.content']).toBe('Let me think about this...');
+    expect(r.attributes['kite_code.reason.length']).toBe(26);
+    expect(r.attributes['kite_code.reason.content']).toBe('Let me think about this...');
   });
 
   test('text 超长内容截断', () => {
     const longText = 'x'.repeat(15_000);
     const r = recordEvent({ type: 'text', data: { text: longText } }, TRACE, PARENT);
-    const content = r.attributes['openpx.text.content'] as string;
+    const content = r.attributes['kite_code.text.content'] as string;
     expect(content.length).toBeLessThan(longText.length);
     expect(content).toContain('(truncated');
-    expect(r.attributes['openpx.text.length']).toBe(15_000);
+    expect(r.attributes['kite_code.text.length']).toBe(15_000);
   });
 
   test('tool_call — 记录工具参数', () => {
@@ -70,9 +70,9 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('tool.read_file.call');
-    expect(r.attributes['openpx.tool.name']).toBe('read_file');
-    expect(r.attributes['openpx.tool.call_id']).toBe('c1');
-    const args = JSON.parse(r.attributes['openpx.tool.args'] as string);
+    expect(r.attributes['kite_code.tool.name']).toBe('read_file');
+    expect(r.attributes['kite_code.tool.call_id']).toBe('c1');
+    const args = JSON.parse(r.attributes['kite_code.tool.args'] as string);
     expect(args.path).toBe('src/a.ts');
     expect(args.offset).toBe(1);
   });
@@ -93,9 +93,9 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('tool.read_file');
-    expect(r.attributes['openpx.tool.ok']).toBe(true);
-    expect(r.attributes['openpx.tool.total_lines']).toBe(42);
-    expect(r.attributes['openpx.tool.summary']).toBe('line 1\nline 2\nline 3');
+    expect(r.attributes['kite_code.tool.ok']).toBe(true);
+    expect(r.attributes['kite_code.tool.total_lines']).toBe(42);
+    expect(r.attributes['kite_code.tool.summary']).toBe('line 1\nline 2\nline 3');
     expect(r.status.code).toBe('OK');
   });
 
@@ -115,8 +115,8 @@ describe('recordEvent — 全量映射', () => {
     );
     expect(r.name).toBe('tool.shell_execute');
     expect(r.status.code).toBe('ERROR');
-    expect(r.attributes['openpx.tool.failure_reason']).toBe('shell_command_not_found');
-    expect(r.attributes['openpx.tool.summary']).toBe('command not found: jest');
+    expect(r.attributes['kite_code.tool.failure_reason']).toBe('shell_command_not_found');
+    expect(r.attributes['kite_code.tool.summary']).toBe('command not found: jest');
     expect(r.events).toBeDefined();
     expect(r.events![0]!.name).toBe('tool.error');
     expect(r.events![0]!.attributes['tool.failure_reason']).toBe('shell_command_not_found');
@@ -147,15 +147,15 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('approval');
-    expect(r.attributes['openpx.approval.tool']).toBe('shell_execute');
-    expect(r.attributes['openpx.approval.risk']).toBe('execute_code');
-    expect(r.attributes['openpx.approval.command']).toContain('npm test');
-    expect(r.attributes['openpx.approval.reason']).toBe('Need to verify changes');
-    expect(r.attributes['openpx.approval.expected_effects']).toContain('Runs test suite');
-    expect(r.attributes['openpx.approval.model_justification']).toBe(
+    expect(r.attributes['kite_code.approval.tool']).toBe('shell_execute');
+    expect(r.attributes['kite_code.approval.risk']).toBe('execute_code');
+    expect(r.attributes['kite_code.approval.command']).toContain('npm test');
+    expect(r.attributes['kite_code.approval.reason']).toBe('Need to verify changes');
+    expect(r.attributes['kite_code.approval.expected_effects']).toContain('Runs test suite');
+    expect(r.attributes['kite_code.approval.model_justification']).toBe(
       'Tests must pass before proceeding',
     );
-    expect(r.attributes['openpx.approval.objective']).toBe('Verify code correctness');
+    expect(r.attributes['kite_code.approval.objective']).toBe('Verify code correctness');
   });
 
   test('need_input — 记录 options 和 context', () => {
@@ -173,11 +173,11 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('user_input');
-    expect(r.attributes['openpx.input.question']).toBe('Which library should we use?');
-    expect(r.attributes['openpx.input.options']).toBeDefined();
-    const opts = JSON.parse(r.attributes['openpx.input.options'] as string);
+    expect(r.attributes['kite_code.input.question']).toBe('Which library should we use?');
+    expect(r.attributes['kite_code.input.options']).toBeDefined();
+    const opts = JSON.parse(r.attributes['kite_code.input.options'] as string);
     expect(opts[0].id).toBe('a');
-    expect(r.attributes['openpx.input.context']).toBe('We need a date formatting library');
+    expect(r.attributes['kite_code.input.context']).toBe('We need a date formatting library');
   });
 
   test('state_change — 记录 plan 和 authorization', () => {
@@ -195,18 +195,18 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('state_change');
-    expect(r.attributes['openpx.phase']).toBe('building');
-    expect(r.attributes['openpx.authorization_mode']).toBe('full_access');
-    expect(r.attributes['openpx.plan']).toBeDefined();
-    const plan = JSON.parse(r.attributes['openpx.plan'] as string);
+    expect(r.attributes['kite_code.phase']).toBe('building');
+    expect(r.attributes['kite_code.authorization_mode']).toBe('full_access');
+    expect(r.attributes['kite_code.plan']).toBeDefined();
+    const plan = JSON.parse(r.attributes['kite_code.plan'] as string);
     expect(plan.name).toBe('my-plan');
   });
 
   test('final — 记录实际内容', () => {
     const r = recordEvent({ type: 'final', data: 'Task completed successfully!' }, TRACE, PARENT);
     expect(r.name).toBe('final');
-    expect(r.attributes['openpx.final.length']).toBe(28);
-    expect(r.attributes['openpx.final.content']).toBe('Task completed successfully!');
+    expect(r.attributes['kite_code.final.length']).toBe(28);
+    expect(r.attributes['kite_code.final.content']).toBe('Task completed successfully!');
   });
 
   test('cache_metrics', () => {
@@ -246,7 +246,7 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('cache_metrics');
-    expect(r.attributes['openpx.cache.hit_tokens']).toBe(100);
+    expect(r.attributes['kite_code.cache.hit_tokens']).toBe(100);
   });
 
   test('model_retry', () => {
@@ -259,7 +259,7 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('model.retry');
-    expect(r.attributes['openpx.retry.attempt']).toBe(3);
+    expect(r.attributes['kite_code.retry.attempt']).toBe(3);
     expect(r.events![0]!.name).toBe('model.retry');
     expect(r.events![0]!.attributes['model.retry.error']).toBe('ETIMEDOUT');
   });
@@ -275,8 +275,8 @@ describe('recordEvent — 全量映射', () => {
     );
     expect(r.name).toBe('error');
     expect(r.status.code).toBe('ERROR');
-    expect(r.attributes['openpx.error.recoverable']).toBe(false);
-    expect(r.attributes['openpx.error.message']).toBe('something broke');
+    expect(r.attributes['kite_code.error.recoverable']).toBe(false);
+    expect(r.attributes['kite_code.error.message']).toBe('something broke');
   });
 
   test('subagent_start / subagent_step / subagent_done / subagent_error — 含内容', () => {
@@ -289,8 +289,8 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r1.name).toBe('subagent.start');
-    expect(r1.attributes['openpx.subagent.role']).toBe('explore');
-    expect(r1.attributes['openpx.subagent.task']).toBe('find all security bugs in the codebase');
+    expect(r1.attributes['kite_code.subagent.role']).toBe('explore');
+    expect(r1.attributes['kite_code.subagent.task']).toBe('find all security bugs in the codebase');
 
     const rStep = recordEvent(
       {
@@ -301,7 +301,7 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(rStep.name).toBe('subagent.tool.read_file');
-    const stepArgs = JSON.parse(rStep.attributes['openpx.tool.args'] as string);
+    const stepArgs = JSON.parse(rStep.attributes['kite_code.tool.args'] as string);
     expect(stepArgs.path).toBe('src/a.ts');
 
     const r2 = recordEvent(
@@ -313,7 +313,7 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r2.name).toBe('subagent.done');
-    expect(r2.attributes['openpx.subagent.summary']).toBe('found 3 critical bugs');
+    expect(r2.attributes['kite_code.subagent.summary']).toBe('found 3 critical bugs');
     expect(r2.status.code).toBe('OK');
 
     const r3 = recordEvent(
@@ -332,7 +332,7 @@ describe('recordEvent — 全量映射', () => {
     );
     expect(r3.name).toBe('subagent.error');
     expect(r3.status.code).toBe('ERROR');
-    expect(r3.attributes['openpx.subagent.summary']).toBe('partially completed');
+    expect(r3.attributes['kite_code.subagent.summary']).toBe('partially completed');
   });
 
   test('subagent_tool_result — 记录 summary（成功时）', () => {
@@ -351,9 +351,9 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('subagent.tool.read_file.result');
-    expect(r.attributes['openpx.tool.ok']).toBe(true);
-    expect(r.attributes['openpx.tool.summary']).toBe('line 1\nline 2');
-    expect(r.attributes['openpx.tool.duration_ms']).toBe(15);
+    expect(r.attributes['kite_code.tool.ok']).toBe(true);
+    expect(r.attributes['kite_code.tool.summary']).toBe('line 1\nline 2');
+    expect(r.attributes['kite_code.tool.duration_ms']).toBe(15);
     expect(r.status.code).toBe('OK');
   });
 
@@ -367,8 +367,8 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('subagent.cache_metrics');
-    expect(r.attributes['openpx.subagent.id']).toBe('sub-1');
-    expect(r.attributes['openpx.cache.hit_tokens']).toBe(50);
+    expect(r.attributes['kite_code.subagent.id']).toBe('sub-1');
+    expect(r.attributes['kite_code.cache.hit_tokens']).toBe(50);
   });
 
   test('interrupt / update — 记录原始数据', () => {
@@ -381,8 +381,8 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(ri.name).toBe('interrupt');
-    expect(ri.attributes['openpx.interrupt.data']).toBeDefined();
-    expect(ri.attributes['openpx.interrupt.data'] as string).toContain('tool_approval');
+    expect(ri.attributes['kite_code.interrupt.data']).toBeDefined();
+    expect(ri.attributes['kite_code.interrupt.data'] as string).toContain('tool_approval');
 
     const ru = recordEvent(
       {
@@ -393,7 +393,7 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(ru.name).toBe('graph.update');
-    expect(ru.attributes['openpx.update.data']).toBeDefined();
+    expect(ru.attributes['kite_code.update.data']).toBeDefined();
   });
 
   test('turn_begin / turn_end', () => {
@@ -403,11 +403,11 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r1.name).toBe('agent.turn.begin');
-    expect(r1.attributes['openpx.turn.index']).toBe(1);
+    expect(r1.attributes['kite_code.turn.index']).toBe(1);
 
     const r2 = recordEvent({ type: 'turn_end', data: { index: 2 } }, TRACE, PARENT);
     expect(r2.name).toBe('agent.turn.end');
-    expect(r2.attributes['openpx.turn.index']).toBe(2);
+    expect(r2.attributes['kite_code.turn.index']).toBe(2);
   });
 
   test('user_message — task', () => {
@@ -420,8 +420,8 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('user.task');
-    expect(r.attributes['openpx.user.message']).toBe('Create hello.txt');
-    expect(r.attributes['openpx.user.kind']).toBe('task');
+    expect(r.attributes['kite_code.user.message']).toBe('Create hello.txt');
+    expect(r.attributes['kite_code.user.kind']).toBe('task');
   });
 
   test('user_message — answer with interruptType', () => {
@@ -434,7 +434,7 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r.name).toBe('user.answer');
-    expect(r.attributes['openpx.user.interrupt_type']).toBe('approval');
+    expect(r.attributes['kite_code.user.interrupt_type']).toBe('approval');
   });
 
   test('step_begin uses spanId from event data', () => {
@@ -458,7 +458,7 @@ describe('recordEvent — 全量映射', () => {
       TRACE,
       PARENT,
     );
-    expect(r.attributes['openpx.internal']).toBe(true);
+    expect(r.attributes['kite_code.internal']).toBe(true);
   });
 
   test('step_begin without internal flag does not record it', () => {
@@ -470,7 +470,7 @@ describe('recordEvent — 全量映射', () => {
       TRACE,
       PARENT,
     );
-    expect(r.attributes['openpx.internal']).toBeUndefined();
+    expect(r.attributes['kite_code.internal']).toBeUndefined();
   });
 
   test('每条记录都有唯一 spanId (auto-generated for non-step events)', () => {

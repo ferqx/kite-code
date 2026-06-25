@@ -533,7 +533,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
           })
           .filter(Boolean)
           .join('\n\n');
-        const header = `# OpenPX Session Export\n\n> ${new Date().toLocaleString()}\n\n---\n\n`;
+        const header = `# Kite Code Session Export\n\n> ${new Date().toLocaleString()}\n\n---\n\n`;
         try {
           const fs = await import('node:fs/promises');
           const { mkdirSync } = await import('node:fs');

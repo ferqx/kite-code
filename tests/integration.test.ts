@@ -110,7 +110,7 @@ describe('graph integration', () => {
   let checkpointPath: string;
 
   function setUp() {
-    workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'openpx-integration-'));
+    workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'kite-code-integration-'));
     checkpointPath = path.join(workspace, 'checkpoint.db');
   }
 
@@ -701,7 +701,7 @@ describe('sandbox executor in agent graph', () => {
   let checkpointPath: string;
 
   function setUp() {
-    workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'openpx-sandbox-int-'));
+    workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'kite-code-sandbox-int-'));
     checkpointPath = path.join(workspace, 'checkpoint.db');
   }
 
@@ -785,7 +785,7 @@ describe('checkpoint recovery', () => {
   let checkpointPath: string;
 
   function setUp() {
-    workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'openpx-ckpt-'));
+    workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'kite-code-ckpt-'));
     checkpointPath = path.join(workspace, 'checkpoint.db');
   }
 

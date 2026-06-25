@@ -38,7 +38,7 @@ function ErrorFallback({ error }: { error: Error }) {
       ) : null}
       <Box marginTop={1}>
         <Text color={darkTheme.warning}>
-          Press Enter or Esc to exit · Run "openpx setup" to configure your model provider
+          Press Enter or Esc to exit · Run "kite-code setup" to configure your model provider
         </Text>
       </Box>
     </Box>

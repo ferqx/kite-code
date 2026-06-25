@@ -10,7 +10,7 @@ import type { AgentEvent } from '../src/protocol/events';
 import { type MockResponse, StreamingMockModel } from './mock-model';
 
 function tempWorkspace() {
-  const root = join(tmpdir(), `openpx-int-${Date.now().toString(36)}`);
+  const root = join(tmpdir(), `kite-code-int-${Date.now().toString(36)}`);
   rmSync(root, { recursive: true, force: true });
   mkdirSync(root, { recursive: true });
   return root;

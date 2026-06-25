@@ -10,7 +10,7 @@ import { BunSqliteSaver } from '../src/core/persistence/checkpoint';
 describe('BunSqliteSaver', () => {
   // 验证 checkpoint 写入后可通过同一 thread_id 完整读取数据 / Verify checkpoint can be fully read back after write via same thread_id
   test('persists and reads a checkpoint tuple', async () => {
-    const dbPath = join(tmpdir(), 'openpx-langgraph-checkpoint-test.sqlite');
+    const dbPath = join(tmpdir(), 'kite-code-langgraph-checkpoint-test.sqlite');
     rmSync(dbPath, { force: true });
 
     const saver = new BunSqliteSaver(dbPath);
@@ -50,7 +50,7 @@ describe('listCheckpoints', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'openpx-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'kite-code-test-'));
     saver = new BunSqliteSaver(join(tmpDir, 'checkpoints.db'));
     saver.setup();
   });
@@ -194,7 +194,7 @@ describe('getCheckpointState', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'openpx-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'kite-code-test-'));
     saver = new BunSqliteSaver(join(tmpDir, 'checkpoints.db'));
     saver.setup();
   });
@@ -273,7 +273,7 @@ describe('close safety', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'openpx-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'kite-code-test-'));
     saver = new BunSqliteSaver(join(tmpDir, 'checkpoints.db'));
     saver.setup();
   });
@@ -324,7 +324,7 @@ describe('created_at migration', () => {
   });
 
   it('backfills NULL created_at for legacy rows so listSessions does not exclude them', () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'openpx-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'kite-code-test-'));
     const dbPath = join(tmpDir, 'checkpoints.db');
 
     // Simulate a legacy database: create table without created_at, insert a row, then add column

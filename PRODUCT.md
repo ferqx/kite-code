@@ -1,8 +1,8 @@
-# OpenPX 产品定义
+# Kite Code 产品定义
 
 ## 一句话定位
 
-OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不绑定特定 AI provider，在 LangGraph 生态之上提供可审计的人机协作编程体验。
+Kite Code 是一个开源、多模型、跨平台的终端代码 Agent —— 不绑定特定 AI provider，在 LangGraph 生态之上提供可审计的人机协作编程体验。
 
 ## 目标用户
 
@@ -32,7 +32,7 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 | 错误分类 | runner 层区分网络超时/速率限制（可恢复）vs 配置/权限（不可恢复） |
 | 多 Agent 协作 | Task Tool 模式，3 个内置角色（Explore/Code/Review），星型拓扑，上下文隔离，TUI 实时渲染 |
 | 多会话并发 | 独立 AbortController，会话间互不污染 |
-| 双主题 | dark / light，通过 `openpx.jsonc` 的 `theme` 字段切换 |
+| 双主题 | dark / light，通过 `kite-code.jsonc` 的 `theme` 字段切换 |
 
 ## 已知产品缺口（深度用户反馈）
 
@@ -87,11 +87,11 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 | 优先级 | 方向 | 状态 | 说明 |
 |--------|------|------|------|
 | **P0** | 默认推荐模型 + 体验优化 | 待启动 | 围绕一个强模型优化 system prompt、工具描述和默认配置，确保开箱即用体验对标 Claude Code |
-| **P0** | 跨会话记忆系统 | 待启动 | agent 在 `.openpx/memory/` 下维护持久记忆，自动读写，记住用户偏好、技术栈、架构决策 |
+| **P0** | 跨会话记忆系统 | 待启动 | agent 在 `.kite-code/memory/` 下维护持久记忆，自动读写，记住用户偏好、技术栈、架构决策 |
 | **P0** | Web Search 工具 | 待启动 | 内置 web search 能力，支持查最新文档、API 变更、社区讨论 |
 | **P1** | Hooks 系统 | 提升优先级 | PreToolUse / PostToolUse shell hook，原为「缓后」，现提升为 P1 |
 | **P1** | Diff 渲染 | 待启动 | TUI 中展示实际 diff（对标 Claude Code），非仅 old_string/new_string 匹配结果 |
-| **P2** | 自定义子 Agent 配置 | 待启动 | `.openpx/agents/*.md` 定义角色，超越内置 3 个；评估放开 depth > 0 |
+| **P2** | 自定义子 Agent 配置 | 待启动 | `.kite-code/agents/*.md` 定义角色，超越内置 3 个；评估放开 depth > 0 |
 | **P2** | 图片输入支持 | 待启动 | 多模态输入，支持截图、架构图、UI mockup |
 | — | 自定义斜杠命令 | 缓后 | `customCommands` 配置段，`/` 补全集成，可复用 Skills 机制实现 |
 
@@ -124,7 +124,7 @@ OpenPX 是一个开源、多模型、跨平台的终端代码 Agent —— 不�
 
 ## 与竞品的差异
 
-| 维度 | OpenPX | Claude Code | Open Code |
+| 维度 | Kite Code | Claude Code | Open Code |
 |------|--------|-------------|-----------|
 | 模型绑定 | 无（多 provider） | 绑定 Claude | 无 |
 | 前端形式 | TUI + CLI | TUI + IDE 插件 | IDE + TUI |

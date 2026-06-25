@@ -9,9 +9,9 @@ import type { SkillScanOptions } from '../../src/core/skills/types';
 
 function makeOptions(base: string): SkillScanOptions {
   return {
-    projectOpenpxSkillsDir: join(base, 'project-openpx'),
+    projectKiteCodeSkillsDir: join(base, 'project-kite-code'),
     projectAgentsSkillsDir: join(base, 'project-agents'),
-    userOpenpxSkillsDir: join(base, 'user-openpx'),
+    userKiteCodeSkillsDir: join(base, 'user-kite-code'),
     userAgentsSkillsDir: join(base, 'user-agents'),
   };
 }
@@ -34,7 +34,10 @@ describe('scanSkills', () => {
   let tmp: string;
 
   beforeEach(() => {
-    tmp = join(tmpdir(), `openpx-skills-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    tmp = join(
+      tmpdir(),
+      `kite-code-skills-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
     mkdirSync(tmp, { recursive: true });
   });
 
@@ -48,7 +51,7 @@ describe('scanSkills', () => {
 
   it('scans a single dir and returns valid skills', () => {
     const opts = makeOptions(tmp);
-    writeSkill(opts.userOpenpxSkillsDir, 'my-skill', {
+    writeSkill(opts.userKiteCodeSkillsDir, 'my-skill', {
       name: 'my-skill',
       description: 'A test skill',
     });
@@ -56,30 +59,30 @@ describe('scanSkills', () => {
     expect(ms).toHaveLength(1);
     expect(ms[0]!.name).toBe('my-skill');
     expect(ms[0]!.source).toBe('user');
-    expect(ms[0]!.origin).toBe('.openpx');
+    expect(ms[0]!.origin).toBe('.kite-code');
   });
 
   it('skips dir without SKILL.md', () => {
     const opts = makeOptions(tmp);
-    mkdirSync(join(opts.userOpenpxSkillsDir, 'empty-skill'), { recursive: true });
+    mkdirSync(join(opts.userKiteCodeSkillsDir, 'empty-skill'), { recursive: true });
     expect(scanSkills(opts)).toEqual([]);
   });
 
   it('skips skill with missing name', () => {
     const opts = makeOptions(tmp);
-    writeSkill(opts.projectOpenpxSkillsDir, 'bad-skill', { description: 'No name' });
+    writeSkill(opts.projectKiteCodeSkillsDir, 'bad-skill', { description: 'No name' });
     expect(scanSkills(opts)).toEqual([]);
   });
 
   it('skips skill with missing description', () => {
     const opts = makeOptions(tmp);
-    writeSkill(opts.projectOpenpxSkillsDir, 'no-desc', { name: 'no-desc' });
+    writeSkill(opts.projectKiteCodeSkillsDir, 'no-desc', { name: 'no-desc' });
     expect(scanSkills(opts)).toEqual([]);
   });
 
   it('skips skill with uppercase name', () => {
     const opts = makeOptions(tmp);
-    writeSkill(opts.projectOpenpxSkillsDir, 'Bad-Name', {
+    writeSkill(opts.projectKiteCodeSkillsDir, 'Bad-Name', {
       name: 'Bad-Name',
       description: 'Uppercase invalid',
     });
@@ -88,7 +91,7 @@ describe('scanSkills', () => {
 
   it('skips skill where name != directory name', () => {
     const opts = makeOptions(tmp);
-    writeSkill(opts.projectOpenpxSkillsDir, 'my-skill', {
+    writeSkill(opts.projectKiteCodeSkillsDir, 'my-skill', {
       name: 'other-name',
       description: 'Mismatch',
     });
@@ -97,7 +100,7 @@ describe('scanSkills', () => {
 
   it('skips name starting with hyphen', () => {
     const opts = makeOptions(tmp);
-    writeSkill(opts.projectOpenpxSkillsDir, '-bad', {
+    writeSkill(opts.projectKiteCodeSkillsDir, '-bad', {
       name: '-bad',
       description: 'Starts with hyphen',
     });
@@ -106,36 +109,39 @@ describe('scanSkills', () => {
 
   it('skips name with consecutive hyphens', () => {
     const opts = makeOptions(tmp);
-    writeSkill(opts.projectOpenpxSkillsDir, 'bad--skill', {
+    writeSkill(opts.projectKiteCodeSkillsDir, 'bad--skill', {
       name: 'bad--skill',
       description: 'Consecutive hyphens',
     });
     expect(scanSkills(opts)).toEqual([]);
   });
 
-  it('deduplicates: project .openpx overrides user .openpx', () => {
+  it('deduplicates: project .kite-code overrides user .kite-code', () => {
     const opts = makeOptions(tmp);
-    writeSkill(opts.userOpenpxSkillsDir, 'shared', { name: 'shared', description: 'User' });
-    writeSkill(opts.projectOpenpxSkillsDir, 'shared', { name: 'shared', description: 'Project' });
+    writeSkill(opts.userKiteCodeSkillsDir, 'shared', { name: 'shared', description: 'User' });
+    writeSkill(opts.projectKiteCodeSkillsDir, 'shared', { name: 'shared', description: 'Project' });
     const ms = scanSkills(opts);
     expect(ms).toHaveLength(1);
     expect(ms[0]!.description).toBe('Project');
     expect(ms[0]!.source).toBe('project');
   });
 
-  it('deduplicates: project .openpx overrides project .agents', () => {
+  it('deduplicates: project .kite-code overrides project .agents', () => {
     const opts = makeOptions(tmp);
     writeSkill(opts.projectAgentsSkillsDir, 'shared', { name: 'shared', description: '.agents' });
-    writeSkill(opts.projectOpenpxSkillsDir, 'shared', { name: 'shared', description: '.openpx' });
+    writeSkill(opts.projectKiteCodeSkillsDir, 'shared', {
+      name: 'shared',
+      description: '.kite-code',
+    });
     const ms = scanSkills(opts);
     expect(ms).toHaveLength(1);
-    expect(ms[0]!.description).toBe('.openpx');
+    expect(ms[0]!.description).toBe('.kite-code');
   });
 
   it('sorts by priority: high to low', () => {
     const opts = makeOptions(tmp);
     writeSkill(opts.userAgentsSkillsDir, 'low', { name: 'low', description: 'Lowest' });
-    writeSkill(opts.projectOpenpxSkillsDir, 'high', { name: 'high', description: 'Highest' });
+    writeSkill(opts.projectKiteCodeSkillsDir, 'high', { name: 'high', description: 'Highest' });
     const ms = scanSkills(opts);
     expect(ms[0]!.name).toBe('high');
     expect(ms[1]!.name).toBe('low');
@@ -143,7 +149,7 @@ describe('scanSkills', () => {
 
   it('handles frontmatter with metadata block (nested YAML)', () => {
     const opts = makeOptions(tmp);
-    const dir = join(opts.projectOpenpxSkillsDir, 'meta-skill');
+    const dir = join(opts.projectKiteCodeSkillsDir, 'meta-skill');
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, 'SKILL.md'),
@@ -164,7 +170,7 @@ Body here.`,
 
   it('handles empty body', () => {
     const opts = makeOptions(tmp);
-    const dir = join(opts.projectOpenpxSkillsDir, 'empty-body');
+    const dir = join(opts.projectKiteCodeSkillsDir, 'empty-body');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'SKILL.md'), '---\nname: empty-body\ndescription: No content\n---\n');
     const ms = scanSkills(opts);
@@ -173,7 +179,7 @@ Body here.`,
 
   it('skips name ending with hyphen', () => {
     const opts = makeOptions(tmp);
-    writeSkill(opts.projectOpenpxSkillsDir, 'bad-', {
+    writeSkill(opts.projectKiteCodeSkillsDir, 'bad-', {
       name: 'bad-',
       description: 'Ends with hyphen',
     });
@@ -182,7 +188,7 @@ Body here.`,
 
   it('handles CRLF line endings', () => {
     const opts = makeOptions(tmp);
-    const dir = join(opts.projectOpenpxSkillsDir, 'crlf-skill');
+    const dir = join(opts.projectKiteCodeSkillsDir, 'crlf-skill');
     mkdirSync(dir, { recursive: true });
     // Use \r\n line endings
     writeFileSync(
@@ -196,7 +202,7 @@ Body here.`,
 
   it('parses fields after metadata block', () => {
     const opts = makeOptions(tmp);
-    const dir = join(opts.projectOpenpxSkillsDir, 'after-meta');
+    const dir = join(opts.projectKiteCodeSkillsDir, 'after-meta');
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, 'SKILL.md'),
@@ -220,11 +226,14 @@ describe('getSkillContent', () => {
   let opts: SkillScanOptions;
 
   beforeEach(() => {
-    tmp = join(tmpdir(), `openpx-skills-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    tmp = join(
+      tmpdir(),
+      `kite-code-skills-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
     mkdirSync(tmp, { recursive: true });
     opts = makeOptions(tmp);
     writeSkill(
-      opts.projectOpenpxSkillsDir,
+      opts.projectKiteCodeSkillsDir,
       'tdd',
       { name: 'tdd', description: 'Write tests first' },
       'Step 1: Red.\nStep 2: Green.',
@@ -255,7 +264,7 @@ describe('getSkillContent', () => {
     const ms = scanSkills(opts);
     expect(getSkillContent(ms, 'tdd', opts)?.content).toContain('Step 1:');
 
-    const p = join(opts.projectOpenpxSkillsDir, 'tdd', 'SKILL.md');
+    const p = join(opts.projectKiteCodeSkillsDir, 'tdd', 'SKILL.md');
     writeFileSync(p, '---\nname: tdd\ndescription: Updated\n---\nUpdated content.');
     expect(getSkillContent(ms, 'tdd', opts)?.content).toBe('Updated content.');
   });
@@ -263,7 +272,7 @@ describe('getSkillContent', () => {
   it('truncates body over 100KB', () => {
     const bigBody = 'x'.repeat(101_000);
     writeSkill(
-      opts.projectOpenpxSkillsDir,
+      opts.projectKiteCodeSkillsDir,
       'big',
       { name: 'big', description: 'Big skill' },
       bigBody,
@@ -276,7 +285,7 @@ describe('getSkillContent', () => {
 
   it('returns null when SKILL.md deleted after scan', () => {
     const ms = scanSkills(opts);
-    rmSync(join(opts.projectOpenpxSkillsDir, 'tdd'), { recursive: true, force: true });
+    rmSync(join(opts.projectKiteCodeSkillsDir, 'tdd'), { recursive: true, force: true });
     expect(getSkillContent(ms, 'tdd', opts)).toBeNull();
   });
 });

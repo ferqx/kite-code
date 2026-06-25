@@ -1,5 +1,5 @@
-export const REAL_TEST_PROVIDER_ENV = 'OPENPX_REAL_PROVIDER';
-export const REAL_TEST_MODEL_ENV = 'OPENPX_REAL_MODEL';
+export const REAL_TEST_PROVIDER_ENV = 'KITE_CODE_REAL_PROVIDER';
+export const REAL_TEST_MODEL_ENV = 'KITE_CODE_REAL_MODEL';
 
 export interface RealTestOptions {
   providerName?: string;

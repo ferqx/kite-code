@@ -127,9 +127,9 @@ describe('TUI E2E — Startup & Core Regression (P0)', () => {
     const output = tui.getOutput();
     expect(output.length).toBeGreaterThan(10);
     const lower = output.toLowerCase();
-    expect(lower.includes('openpx') || lower.includes('( = = )') || lower.includes('( ^ ^ )')).toBe(
-      true,
-    );
+    expect(
+      lower.includes('kite code') || lower.includes('( = = )') || lower.includes('( ^ ^ )'),
+    ).toBe(true);
   });
 
   test('auto-creates session — TUI renders normally (no crash)', () => {

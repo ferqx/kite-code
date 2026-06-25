@@ -78,7 +78,7 @@ Turn N+3: 新 AI₃(rc="think_v3") → 再次覆盖 → miss → 3%
 
 ### 对标分析：Claude Code / Codex / OpenCode 子 agent 结果回传机制
 
-| 维度 | Claude Code | Codex (OpenAI) | OpenCode | OpenPX |
+| 维度 | Claude Code | Codex (OpenAI) | OpenCode | Kite Code |
 |------|------------|----------------|----------|--------|
 | 子 agent 上下文 | 完全隔离（sub_messages 丢弃） | 独立上下文 | 每次调用 = 全新 stateless session | 完全隔离（local messages 丢弃） |
 | 中间过程 | 留在子 agent，父不可见 | 同 | 同 | 同 |

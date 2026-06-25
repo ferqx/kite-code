@@ -9,7 +9,7 @@ Agent 运行期间存在工具异常、子 Agent 异常、模型连接错误等�
 
 基于 OpenTelemetry 协议，将 Agent 执行过程建模为 Trace + Span 树，通过 OTLP/HTTP 导出到第三方可观测平台（Grafana Tempo / Jaeger / SigNoz / Honeycomb 等），实现：
 
-1. **工具失败排查闭环**：Span 上携带 `openpx.tool.failure_reason`（结构化枚举），聚合查询即可定位最高频失败原因 → 驱动提示词/工具契约优化
+1. **工具失败排查闭环**：Span 上携带 `kite_code.tool.failure_reason`（结构化枚举），聚合查询即可定位最高频失败原因 → 驱动提示词/工具契约优化
 2. **Agent 评估数据基础**：Span 层级天然表达执行树，属性携带质量维度（ok/fail、duration、retry），后续评估层直接消费
 
 ## 范围
@@ -31,9 +31,9 @@ src/core/telemetry/
 ├── attributes.ts           ← 属性 key 常量 + FailureReason 枚举
 ├── classifier.ts           ← AgentEvent + tool_done summary → failure_reason
 ├── config.ts               ← TelemetryConfig + 环境变量读取
-├── span.ts                 ← OpenpxSpan implements Span (OTel API)
-├── tracer.ts               ← OpenpxTracer implements Tracer
-├── provider.ts             ← OpenpxTracerProvider implements TracerProvider
+├── span.ts                 ← KiteCodeSpan implements Span (OTel API)
+├── tracer.ts               ← KiteCodeTracer implements Tracer
+├── provider.ts             ← KiteCodeTracerProvider implements TracerProvider
 ├── exporter.ts             ← OTLPHttpExporter (Span[] → OTLP JSON → fetch)
 ├── run-tracer.ts           ← RunTracer 便捷类（面向 runner.ts 的高层 API）
 └── index.ts                ← initTelemetry() + shutdownTelemetry() 公开入口
@@ -63,7 +63,7 @@ tests/telemetry/
 - **core 层 instrumentation，app 层初始化**：Span 创建在 `runner.ts` 内部闭环，各端（TUI/CLI/Desktop）只负责调用 `initTelemetry()` 一次
 - **零侵入工具/图节点**：所有信息从现有 `AgentEvent` 流提取，不修改 `graph.ts`、`tool-runner.ts`
 - **未配置 endpoint → 全 no-op**：无 OTLP endpoint 时 `initTelemetry()` 不注册 provider，`trace.getTracer()` 返回 no-op tracer（零开销）
-- **环境变量 + 配置文件双层控制**：`openpx.jsonc` 中的 `telemetry` 节为主配置，环境变量 `OPENPX_TELEMETRY_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` 为覆盖层；不提供 CLI flag
+- **环境变量 + 配置文件双层控制**：`kite-code.jsonc` 中的 `telemetry` 节为主配置，环境变量 `KITE_CODE_TELEMETRY_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` 为覆盖层；不提供 CLI flag
 
 ## 不做什么
 
@@ -78,7 +78,7 @@ tests/telemetry/
 Trace: agent-run-<threadId>-<runIndex>
 │
 ├── Span "agent.turn" [1]                         ← while(true) 的每次迭代
-│   ├── attr: openpx.turn.index = 1
+│   ├── attr: kite_code.turn.index = 1
 │   │
 │   ├── Span "node.cleanup"
 │   ├── Span "node.agent"                         ← 模型调用
@@ -86,27 +86,27 @@ Trace: agent-run-<threadId>-<runIndex>
 │   │   ├── attr: gen_ai.request.model = "deepseek-v4-flash"
 │   │   ├── attr: gen_ai.usage.input_tokens = 12000
 │   │   ├── attr: gen_ai.usage.output_tokens = 500
-│   │   ├── attr: openpx.cache.hit_tokens = 10000
-│   │   ├── attr: openpx.cache.miss_tokens = 2000
+│   │   ├── attr: kite_code.cache.hit_tokens = 10000
+│   │   ├── attr: kite_code.cache.miss_tokens = 2000
 │   │   ├── event: "model.retry" (per retry)
 │   │   └── status: ERROR (if all retries exhausted)
 │   │
 │   ├── Span "node.approval"
-│   │   ├── attr: openpx.approval.tool = "shell_execute"
-│   │   ├── attr: openpx.approval.risk = "execute_code"
-│   │   └── attr: openpx.approval.decision = "approve_once" | "reject"
+│   │   ├── attr: kite_code.approval.tool = "shell_execute"
+│   │   ├── attr: kite_code.approval.risk = "execute_code"
+│   │   └── attr: kite_code.approval.decision = "approve_once" | "reject"
 │   │
 │   ├── Span "node.tools"
 │   │   ├── Span "tool.shell_execute"
-│   │   │   ├── attr: openpx.tool.ok = false
-│   │   │   ├── attr: openpx.tool.exit_code = 1
-│   │   │   ├── attr: openpx.tool.failure_reason = "shell_nonzero_exit"
-│   │   │   ├── attr: openpx.tool.duration_ms = 3200
+│   │   │   ├── attr: kite_code.tool.ok = false
+│   │   │   ├── attr: kite_code.tool.exit_code = 1
+│   │   │   ├── attr: kite_code.tool.failure_reason = "shell_nonzero_exit"
+│   │   │   ├── attr: kite_code.tool.duration_ms = 3200
 │   │   │   ├── event: "tool.error" { stderr_preview, intent }
 │   │   │   └── status: ERROR
 │   │   │
 │   │   ├── Span "tool.edit_file"
-│   │   │   ├── attr: openpx.tool.failure_reason = "edit_no_match"
+│   │   │   ├── attr: kite_code.tool.failure_reason = "edit_no_match"
 │   │   │   └── event: "tool.error" { old_string_preview, reason }
 │   │   │
 │   │   └── Span "tool.task"                     ← 子 Agent
@@ -135,31 +135,31 @@ Trace: agent-run-<threadId>-<runIndex>
 | `gen_ai.usage.input_tokens` | number |
 | `gen_ai.usage.output_tokens` | number |
 
-### 自定义 `openpx.*`
+### 自定义 `kite_code.*`
 
 | 属性 | 类型 | 位置 |
 |------|------|------|
-| `openpx.thread_id` | string | root |
-| `openpx.frontend` | `"tui"` / `"cli"` | root |
-| `openpx.workspace` | string | root |
-| `openpx.turn.index` | int | turn |
-| `openpx.tool.name` | string | tool |
-| `openpx.tool.call_id` | string | tool |
-| `openpx.tool.ok` | bool | tool |
-| `openpx.tool.exit_code` | int | tool |
-| `openpx.tool.failure_reason` | string | tool |
-| `openpx.tool.file` | string | tool |
-| `openpx.tool.command` | string | shell |
-| `openpx.tool.duration_ms` | int | tool |
-| `openpx.cache.hit_tokens` | int | agent |
-| `openpx.cache.miss_tokens` | int | agent |
-| `openpx.retry.attempt` | int | retry event |
-| `openpx.subagent.role` | `"explore"` / `"code"` / `"review"` | subagent |
-| `openpx.subagent.id` | string | subagent |
-| `openpx.error.category` | string | error span |
-| `openpx.error.recoverable` | bool | error span |
+| `kite_code.thread_id` | string | root |
+| `kite_code.frontend` | `"tui"` / `"cli"` | root |
+| `kite_code.workspace` | string | root |
+| `kite_code.turn.index` | int | turn |
+| `kite_code.tool.name` | string | tool |
+| `kite_code.tool.call_id` | string | tool |
+| `kite_code.tool.ok` | bool | tool |
+| `kite_code.tool.exit_code` | int | tool |
+| `kite_code.tool.failure_reason` | string | tool |
+| `kite_code.tool.file` | string | tool |
+| `kite_code.tool.command` | string | shell |
+| `kite_code.tool.duration_ms` | int | tool |
+| `kite_code.cache.hit_tokens` | int | agent |
+| `kite_code.cache.miss_tokens` | int | agent |
+| `kite_code.retry.attempt` | int | retry event |
+| `kite_code.subagent.role` | `"explore"` / `"code"` / `"review"` | subagent |
+| `kite_code.subagent.id` | string | subagent |
+| `kite_code.error.category` | string | error span |
+| `kite_code.error.recoverable` | bool | error span |
 
-### `openpx.tool.failure_reason` 枚举
+### `kite_code.tool.failure_reason` 枚举
 
 ```typescript
 const FailureReason = {
@@ -250,7 +250,7 @@ interface ResourceSpans {
 
 interface ScopeSpans {
   scope: {
-    name: "openpx";              // instrumentation scope
+    name: "kite-code";              // instrumentation scope
     version: "0.0.1";
   };
   spans: OTLPSpan[];
@@ -297,7 +297,7 @@ interface SpanEvent {
 配置文件为主，环境变量为覆盖——和现有 `deepseek_api_key` 等模式一致。
 
 ```jsonc
-// ~/.openpx/openpx.jsonc
+// ~/.kite-code/kite-code.jsonc
 {
   "telemetry": {
     "enabled": true,                            // 默认 true，false → 全链路 no-op
@@ -310,16 +310,16 @@ interface SpanEvent {
 
 | 变量 | 覆盖字段 |
 |------|---------|
-| `OPENPX_TELEMETRY_ENABLED=0` | 禁用所有遥测（覆盖配置文件的 `enabled: true`） |
+| `KITE_CODE_TELEMETRY_ENABLED=0` | 禁用所有遥测（覆盖配置文件的 `enabled: true`） |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 覆盖 `telemetry.otlpEndpoint` |
-| `OTEL_SERVICE_NAME` | 服务名，默认 `"openpx"` |
+| `OTEL_SERVICE_NAME` | 服务名，默认 `"kite-code"` |
 
 ## 入口 API
 
 ```typescript
 // src/core/telemetry/index.ts
 
-/** 初始化 Telemetry。幂等。未配置 endpoint 或 OPENPX_TELEMETRY_ENABLED=0 → no-op。 */
+/** 初始化 Telemetry。幂等。未配置 endpoint 或 KITE_CODE_TELEMETRY_ENABLED=0 → no-op。 */
 export function initTelemetry(cfg?: TelemetryConfig): void;
 
 /** 进程退出前调用，flush 所有未发送 span。 */
@@ -418,21 +418,21 @@ for (const e of events) {
 // src/core/subagent/runner.ts
 
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
-  const tracer = trace.getTracer('openpx');
+  const tracer = trace.getTracer('kite-code');
 
   // 父 trace 上下文（由 task-tool.ts 在调用时传入）
   const span = tracer.startSpan('subagent.run', {
     attributes: {
-      'openpx.subagent.id': id,
-      'openpx.subagent.role': input.role.role,
-      ...(input.traceParent ? { 'openpx.parent_trace_id': input.traceParent.traceId } : {}),
+      'kite_code.subagent.id': id,
+      'kite_code.subagent.role': input.role.role,
+      ...(input.traceParent ? { 'kite_code.parent_trace_id': input.traceParent.traceId } : {}),
     },
   }, input.traceParent ? trace.setSpanContext(ROOT_CONTEXT, input.traceParent) : undefined);
 
   try {
     for (const tc of response.tool_calls) {
       const toolSpan = tracer.startSpan(`subagent.tool.${tc.name}`);
-      toolSpan.setAttribute('openpx.tool.ok', ok);
+      toolSpan.setAttribute('kite_code.tool.ok', ok);
       toolSpan.end();
     }
     span.setStatus({ code: SpanStatusCode.OK });
@@ -496,10 +496,10 @@ bun add @opentelemetry/api
 
 1. `attributes.ts` — 属性常量 + FailureReason 枚举（零依赖）
 2. `config.ts` — TelemetryConfig + env 读取（依赖 attributes）
-3. `span.ts` — OpenpxSpan（依赖 @opentelemetry/api + attributes）
-4. `tracer.ts` — OpenpxTracer（依赖 span）
+3. `span.ts` — KiteCodeSpan（依赖 @opentelemetry/api + attributes）
+4. `tracer.ts` — KiteCodeTracer（依赖 span）
 5. `exporter.ts` — OTLPHttpExporter（依赖 span）
-6. `provider.ts` — OpenpxTracerProvider（依赖 tracer + exporter + config）
+6. `provider.ts` — KiteCodeTracerProvider（依赖 tracer + exporter + config）
 7. `index.ts` — initTelemetry() / shutdownTelemetry()（依赖 provider + config）
 8. `classifier.ts` — AgentEvent → failure_reason（依赖 attributes）
 9. `run-tracer.ts` — RunTracer 便捷类（依赖 index + classifier）
@@ -533,7 +533,7 @@ CLI：`src/app/cli/index.ts` 同上。
 
 | 测试文件 | 覆盖 |
 |---------|------|
-| `tests/telemetry/span.test.ts` | OpenpxSpan 创建/属性/事件/序列化 |
+| `tests/telemetry/span.test.ts` | KiteCodeSpan 创建/属性/事件/序列化 |
 | `tests/telemetry/classifier.test.ts` | AgentEvent → failure_reason 分类正确性 |
 | `tests/telemetry/run-tracer.test.ts` | RunTracer 生命周期 + Span 层级 |
 | `tests/telemetry/exporter.test.ts` | OTLP JSON 格式 + fetch mock |
@@ -544,7 +544,7 @@ CLI：`src/app/cli/index.ts` 同上。
 
 ```bash
 # 禁用验证（零开销）
-OPENPX_TELEMETRY_ENABLED=0 bun run tui
+KITE_CODE_TELEMETRY_ENABLED=0 bun run tui
 
 # 集成测试（需本地 OTel Collector）
 docker run --rm -p 4318:4318 otel/opentelemetry-collector-contrib
@@ -555,12 +555,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces bun run tui
 
 ```
 initTelemetry()
-  ├─ OPENPX_TELEMETRY_ENABLED=0  → return（TracerProvider 不注册）
+  ├─ KITE_CODE_TELEMETRY_ENABLED=0  → return（TracerProvider 不注册）
   ├─ OTLP endpoint 未配置        → return（TracerProvider 不注册）
-  └─ 正常配置                   → 注册 OpenpxTracerProvider
+  └─ 正常配置                   → 注册 KiteCodeTracerProvider
 
 createRunTracer()
-  └─ trace.getTracer('openpx')  ← 无 provider → OTel API 返回 NoopTracer
+  └─ trace.getTracer('kite-code')  ← 无 provider → OTel API 返回 NoopTracer
      └─ .startSpan() → NoopSpan ← 所有方法空操作，仅一次 trivial 对象分配
 ```
 

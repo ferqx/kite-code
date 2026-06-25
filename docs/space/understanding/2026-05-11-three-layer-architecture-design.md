@@ -5,7 +5,7 @@
 
 ## 1. 目标
 
-将 openpx 重构为 Codex 风格的三层分离架构，使 Agent 核心成为纯逻辑库（零 I/O），支持 TUI、Desktop、CLI 等多前端接入。
+将 kite code 重构为 Codex 风格的三层分离架构，使 Agent 核心成为纯逻辑库（零 I/O），支持 TUI、Desktop、CLI 等多前端接入。
 
 本次迭代范围：**纯架构重构** — 建立协议层 + Runner 解耦 + 输入抽象。TUI 和 Desktop 后续接入。
 

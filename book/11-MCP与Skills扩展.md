@@ -34,7 +34,7 @@ MCP 工具默认需要审批（risk: mcp）
 | 工具调用 | 30 秒 | 是（per-server `timeout` 字段） |
 | 资源读取 | 10 秒 | 是（per-server `timeout` 字段） |
 
-在 `openpx.jsonc` 的 `mcpServers` 中可为每个 server 配置 `timeout`（毫秒），覆盖默认值。
+在 `kite-code.jsonc` 的 `mcpServers` 中可为每个 server 配置 `timeout`（毫秒），覆盖默认值。
 
 ### MCP 连接生命周期
 
@@ -91,8 +91,8 @@ Skills 系统对齐 [agentskills.io](https://agentskills.io) 开放标准，允�
 ### 技能文件结构
 
 ```
-.openpx/skills/          # 项目级（优先）
-~/.openpx/skills/        # 用户级（fallback）
+.kite-code/skills/          # 项目级（优先）
+~/.kite-code/skills/        # 用户级（fallback）
 ├── code-review/
 │   └── SKILL.md
 ├── refactor/

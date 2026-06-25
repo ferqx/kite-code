@@ -254,7 +254,7 @@ describe('eventReducer (blocks model)', () => {
       // agent resumes with same text → text + final events
       let s = fresh();
       s = dispatch(s, { type: 'SET_RUNNING' });
-      s = dispatch(s, textEvt('我看了你的项目环境，这是 OpenPX 项目本身'));
+      s = dispatch(s, textEvt('我看了你的项目环境，这是 Kite Code 项目本身'));
       s = dispatch(s, tcEvt('c1', 'ask_user', { question: '你要什么？' }));
       s = dispatch(s, { type: 'EVENT', event: { type: 'need_input', data: question() } });
       // User answers, interrupt resolved
@@ -264,15 +264,15 @@ describe('eventReducer (blocks model)', () => {
         resolution: 'a',
       });
       // Agent resumes, emits same text + final
-      s = dispatch(s, textEvt('我看了你的项目环境，这是 OpenPX 项目本身'));
+      s = dispatch(s, textEvt('我看了你的项目环境，这是 Kite Code 项目本身'));
       s = dispatch(s, {
         type: 'EVENT',
-        event: { type: 'final', data: '我看了你的项目环境，这是 OpenPX 项目本身' },
+        event: { type: 'final', data: '我看了你的项目环境，这是 Kite Code 项目本身' },
       });
       // Should have only 1 text block with the duplicate content
       const textBlocks = flatBlocks(s).filter(
         (b) =>
-          b.kind === 'text' && (b as any).content === '我看了你的项目环境，这是 OpenPX 项目本身',
+          b.kind === 'text' && (b as any).content === '我看了你的项目环境，这是 Kite Code 项目本身',
       );
       expect(textBlocks).toHaveLength(1);
     });
@@ -1167,7 +1167,7 @@ describe('eventReducer (blocks model)', () => {
       const state: TuiState = {
         ...createInitialState(),
         skillManifests: [
-          { name: 'tdd', description: 'Write tests', source: 'project', origin: '.openpx' },
+          { name: 'tdd', description: 'Write tests', source: 'project', origin: '.kite-code' },
         ],
       };
       const next = eventReducer(state, { type: 'LIST_SKILLS' });
@@ -1193,7 +1193,7 @@ describe('eventReducer (blocks model)', () => {
           name: 'tdd',
           description: 'Write tests',
           source: 'project' as const,
-          origin: '.openpx' as const,
+          origin: '.kite-code' as const,
         },
       ];
       const next = eventReducer(state, { type: 'SET_SKILL_MANIFESTS', manifests });

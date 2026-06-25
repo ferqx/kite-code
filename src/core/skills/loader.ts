@@ -61,7 +61,7 @@ const VALID_SKILL_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 function scanDir(
   dirPath: string,
   source: 'project' | 'user',
-  origin: '.openpx' | '.agents',
+  origin: '.kite-code' | '.agents',
 ): SkillManifest[] {
   const resolved = resolve(dirPath);
   if (!existsSync(resolved)) return [];
@@ -107,10 +107,10 @@ function scanDir(
 export function scanSkills(options: SkillScanOptions): SkillManifest[] {
   const all: SkillManifest[] = [];
 
-  // Priority order: project .openpx > project .agents > user .openpx > user .agents
-  all.push(...scanDir(options.projectOpenpxSkillsDir, 'project', '.openpx'));
+  // Priority order: project .kite-code > project .agents > user .kite-code > user .agents
+  all.push(...scanDir(options.projectKiteCodeSkillsDir, 'project', '.kite-code'));
   all.push(...scanDir(options.projectAgentsSkillsDir, 'project', '.agents'));
-  all.push(...scanDir(options.userOpenpxSkillsDir, 'user', '.openpx'));
+  all.push(...scanDir(options.userKiteCodeSkillsDir, 'user', '.kite-code'));
   all.push(...scanDir(options.userAgentsSkillsDir, 'user', '.agents'));
 
   // Dedup: first occurrence wins (highest priority)
@@ -136,11 +136,11 @@ export function getSkillContent(
 
   const dirKey =
     manifest.source === 'project'
-      ? manifest.origin === '.openpx'
-        ? 'projectOpenpxSkillsDir'
+      ? manifest.origin === '.kite-code'
+        ? 'projectKiteCodeSkillsDir'
         : 'projectAgentsSkillsDir'
-      : manifest.origin === '.openpx'
-        ? 'userOpenpxSkillsDir'
+      : manifest.origin === '.kite-code'
+        ? 'userKiteCodeSkillsDir'
         : 'userAgentsSkillsDir';
   const skillMdPath = join(options[dirKey], manifest.name, 'SKILL.md');
 

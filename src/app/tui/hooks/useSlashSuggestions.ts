@@ -24,7 +24,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'auth', aliases: [], description: 'Toggle authorization mode', args: '[mode]' },
   { name: 'clear', aliases: ['c'], description: 'Clear output' },
   { name: 'help', aliases: ['h'], description: 'Show help' },
-  { name: 'exit', aliases: ['quit', 'q'], description: 'Exit OpenPX' },
+  { name: 'exit', aliases: ['quit', 'q'], description: 'Exit Kite Code' },
 ];
 
 export const SLASH_COMMANDS = SLASH_COMMAND_DEFS.map((c) => c.name);

@@ -2,7 +2,7 @@ export interface SkillManifest {
   name: string; // frontmatter name, unique identifier
   description: string; // frontmatter description
   source: 'project' | 'user';
-  origin: '.openpx' | '.agents';
+  origin: '.kite-code' | '.agents';
 }
 
 export interface ValidatedSkill {
@@ -12,8 +12,8 @@ export interface ValidatedSkill {
 }
 
 export interface SkillScanOptions {
-  userOpenpxSkillsDir: string;
+  userKiteCodeSkillsDir: string;
   userAgentsSkillsDir: string;
-  projectOpenpxSkillsDir: string;
+  projectKiteCodeSkillsDir: string;
   projectAgentsSkillsDir: string;
 }

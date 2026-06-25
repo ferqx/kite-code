@@ -26,7 +26,7 @@
 - `src/model/`：模型适配器工厂、OpenAI-compatible provider 适配、Ollama provider 适配、DeepSeek 专用 patch、静态 prompt、运行时上下文和上下文压缩。
 - `src/tools/`：模型工具定义，以及文件、shell、patch 工具实现。
 - `src/persistence/`：Bun SQLite LangGraph checkpointer。
-- `src/config/`：本地 `~/.openpx/openpx.jsonc` 配置加载器。
+- `src/config/`：本地 `~/.kite-code/kite-code.jsonc` 配置加载器。
 - `tests/e2e/`：TUI 端到端测试套件（mock agent，88 个场景，覆盖斜杠命令、键盘快捷键、设置/会话、真实 agent 对话、视口回归）。
 - `src/shared/`：共享类型和 prompt cache 指标。
 
@@ -41,10 +41,10 @@ bun install
 默认模型配置从当前用户目录读取：
 
 ```text
-~/.openpx/openpx.jsonc
+~/.kite-code/kite-code.jsonc
 ```
 
-示例路径：Windows 为 `C:\Users\<user>\.openpx\openpx.jsonc`，macOS 为 `/Users/<user>/.openpx/openpx.jsonc`，Linux 为 `/home/<user>/.openpx/openpx.jsonc`。
+示例路径：Windows 为 `C:\Users\<user>\.kite-code\kite-code.jsonc`，macOS 为 `/Users/<user>/.kite-code/kite-code.jsonc`，Linux 为 `/home/<user>/.kite-code/kite-code.jsonc`。
 
 配置结构使用命名 provider 和默认模型：
 
@@ -172,7 +172,7 @@ bun run agent resume --thread demo --user local --full-access --approval-hash "<
 bun run agent resume --thread demo --user local --answer "使用最小实现，暂不支持批量配置"
 ```
 
-默认情况下，CLI 会把 checkpoint SQLite 文件写入当前工作区的 `.openpx/` 目录。可以用 `--checkpoints` 覆盖路径。
+默认情况下，CLI 会把 checkpoint SQLite 文件写入当前工作区的 `.kite-code/` 目录。可以用 `--checkpoints` 覆盖路径。
 
 ### 缓存命中标准
 
@@ -208,7 +208,7 @@ bun test tests/e2e/
 bun run test:real
 ```
 
-可以在运行真实测试时临时覆盖默认 provider 和模型。除内置 `ollama` provider 会使用本地默认连接参数外，provider 名称必须已经存在于 `~/.openpx/openpx.jsonc` 的 `provider` 配置中；命令行只覆盖选择哪个 provider 和哪个模型，不传递密钥：
+可以在运行真实测试时临时覆盖默认 provider 和模型。除内置 `ollama` provider 会使用本地默认连接参数外，provider 名称必须已经存在于 `~/.kite-code/kite-code.jsonc` 的 `provider` 配置中；命令行只覆盖选择哪个 provider 和哪个模型，不传递密钥：
 
 ```bash
 bun run test:real --provider=ollama --model=gemma4:31b-cloud

@@ -116,10 +116,10 @@ describe('Footer', () => {
 // ── Header ──
 
 describe('Header', () => {
-  test('renders OpenPX logo and product name', () => {
+  test('renders Kite Code logo and product name', () => {
     const { lastFrame } = render(<Header running={false} />);
     const frame = lastFrame();
-    expect(frame).toContain('OpenPX');
+    expect(frame).toContain('Kite Code');
     // Cat ASCII art is present
     expect(frame).toContain('/\\_/\\');
     expect(frame).toContain('( = = )');
@@ -441,22 +441,20 @@ describe('StartupScreen', () => {
       <StartupScreen modelName="claude-opus" workspace="/tmp/test-project" />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('openpx');
+    expect(frame).toContain('kite code');
     expect(frame).toContain('claude-opus');
   });
 
   test('shows project name from workspace path', () => {
     const { lastFrame } = render(
-      <StartupScreen modelName="deepseek" workspace="/home/user/my-project" />,
+      <StartupScreen modelName="deepseek" workspace="/tmp/my-project" />,
     );
     expect(lastFrame()).toContain('my-project');
   });
 
   test('shows workspace path', () => {
-    const { lastFrame } = render(
-      <StartupScreen modelName="gpt-4o" workspace="/home/user/my-project" />,
-    );
-    expect(lastFrame()).toContain('/home/user/my-project');
+    const { lastFrame } = render(<StartupScreen modelName="gpt-4o" workspace="/tmp/my-project" />);
+    expect(lastFrame()).toContain('/tmp/my-project');
   });
 
   test('shows help tips', () => {
@@ -1390,14 +1388,14 @@ describe('App', () => {
     };
   }
 
-  test('renders Header with OpenPX before ActivityBar', () => {
+  test('renders Header with Kite Code before ActivityBar', () => {
     const state = fakeState();
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame();
-    // Header (OpenPX) should appear before ActivityBar (since it renders first in layout)
-    const headerIdx = frame?.indexOf('OpenPX');
+    // Header (Kite Code) should appear before ActivityBar (since it renders first in layout)
+    const headerIdx = frame?.indexOf('Kite Code');
     expect(headerIdx).toBeGreaterThanOrEqual(0);
   });
 

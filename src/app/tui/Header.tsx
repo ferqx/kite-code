@@ -30,7 +30,7 @@ export default function Header({ running, error }: HeaderProps) {
       <Box>
         <Text color={t.primary}>{catTop} </Text>
         <Text bold color={t.primary}>
-          OpenPX
+          Kite Code
         </Text>
       </Box>
       <Box>

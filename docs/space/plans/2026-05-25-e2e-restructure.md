@@ -315,7 +315,7 @@ describe("P0: Core Regression", () => {
     test("renders without crash (output > 10 chars)", () => {
       const output = tui.getOutput();
       expect(output.length).toBeGreaterThan(10);
-      expect(output.toLowerCase()).toContain("openpx");
+      expect(output.toLowerCase()).toContain("kite-code");
     });
 
     test("auto-creates session — sidebar shows session entry", () => {
@@ -1197,7 +1197,7 @@ describe("P2+P3: Advanced Scenarios", () => {
       // Output area should be cleared (chrome still visible)
       const out = tui.getOutput();
       expect(out).not.toContain("Reply"); // user/agent messages gone
-      expect(out).toContain("OpenPX"); // chrome still there
+      expect(out).toContain("Kite Code"); // chrome still there
     });
 
     test("Ctrl+N — creates new session", async () => {

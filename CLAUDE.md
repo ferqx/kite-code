@@ -15,7 +15,7 @@ bun test             # 运行默认测试（不含真实模型/网络端到端�
 bun test tests/graph.test.ts  # 运行单个测试文件
 bun test tests/e2e/            # 运行 TUI e2e 套件（mock agent，无需真实模型）
 bun run typecheck    # 类型检查
-bun run test:real    # 运行真实端到端测试（需先配置 ~/.openpx/openpx.jsonc）
+bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/kite-code.jsonc）
 ```
 
 ## 项目架构

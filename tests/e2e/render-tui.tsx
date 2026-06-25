@@ -112,11 +112,11 @@ function hasRunningSpinner(output: string): boolean {
 // ── Temp directory helpers ──
 
 function setupTempHome() {
-  const tempHome = mkdtempSync(join(tmpdir(), 'openpx-e2e-'));
-  const openpxDir = join(tempHome, '.openpx');
-  mkdirSync(openpxDir, { recursive: true });
+  const tempHome = mkdtempSync(join(tmpdir(), 'kite-code-e2e-'));
+  const kiteCodeDir = join(tempHome, '.kite-code');
+  mkdirSync(kiteCodeDir, { recursive: true });
   writeFileSync(
-    join(openpxDir, 'openpx.jsonc'),
+    join(kiteCodeDir, 'kite-code.jsonc'),
     JSON.stringify(
       {
         provider: {
@@ -138,7 +138,7 @@ function setupTempHome() {
 }
 
 function setupTempWorkspace(files?: Record<string, string>): string {
-  const ws = mkdtempSync(join(tmpdir(), 'openpx-ws-'));
+  const ws = mkdtempSync(join(tmpdir(), 'kite-code-ws-'));
   if (files) {
     for (const [path, content] of Object.entries(files)) {
       const fullPath = join(ws, path);
@@ -235,12 +235,12 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
   const stepTimeout = opts.stepTimeout ?? 15000;
 
   const origHome = process.env.HOME;
-  const origOpenpxHome = process.env.OPENPX_HOME;
+  const origKiteCodeHome = process.env.KITE_CODE_HOME;
   const origCwd = process.cwd();
   const origColumns = process.stdout.columns;
   const origRows = process.stdout.rows;
   process.env.HOME = tempHome;
-  process.env.OPENPX_HOME = tempHome;
+  process.env.KITE_CODE_HOME = tempHome;
   process.chdir(workspace);
   process.stdout.columns = terminalWidth;
   process.stdout.rows = 40; // sufficient for sidebar virtual window tests
@@ -315,10 +315,10 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
     console.error = origError;
     console.warn = origWarn;
     process.env.HOME = origHome;
-    if (origOpenpxHome !== undefined) {
-      process.env.OPENPX_HOME = origOpenpxHome;
+    if (origKiteCodeHome !== undefined) {
+      process.env.KITE_CODE_HOME = origKiteCodeHome;
     } else {
-      delete process.env.OPENPX_HOME;
+      delete process.env.KITE_CODE_HOME;
     }
     process.chdir(origCwd);
     process.stdout.columns = origColumns ?? 80;

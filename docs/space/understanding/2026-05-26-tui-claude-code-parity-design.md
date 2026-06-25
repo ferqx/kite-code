@@ -10,7 +10,7 @@
 
 ```
 ┌─ Header (4行) ────────────────────────────────────────────┐
-│   /\_/\    OpenPX                                          │
+│   /\_/\    Kite Code                                          │
 │  ( = = )   ? shortcuts · Ctrl+C exit · / commands · ! shell│
 │   > ~ <                                                    │
 ├─ Body (flexGrow) ──────────────────────────────────────────┤
@@ -37,7 +37,7 @@
 
 | 文件 | 操作 |
 |------|------|
-| `Header.tsx` | 简化：cat + "OpenPX" + 使用提示行（原 Footer 内容移入） |
+| `Header.tsx` | 简化：cat + "Kite Code" + 使用提示行（原 Footer 内容移入） |
 | `StatusBar.tsx` | 重写为 Footer Top 状态行：spinner + phase + plan 进度。移除 @deprecated |
 | `ActivityBar.tsx` | **删除**，spinner 和计时器融入 Footer |
 | `StatsLine.tsx` | **新建** Bottom 状态行：model \| think \| cache \| tokens \| timer \| [安全] \| rw |
@@ -163,7 +163,7 @@ deepseek-v4 │ think: max │ cache: 52% │ tokens: 2.4k │ 00:42 │ [安全
 
 ### 6.1 动态模型列表
 
-从 `openpx.jsonc` 读取模型列表，替换硬编码。
+从 `kite-code.jsonc` 读取模型列表，替换硬编码。
 
 配置 schema 扩展：
 

@@ -50,7 +50,7 @@ export const configSchema = z.object({
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });
 
-export type OpenpxConfig = z.infer<typeof configSchema>;
+export type KiteCodeConfig = z.infer<typeof configSchema>;
 
 // ── Types ──
 
@@ -104,14 +104,14 @@ const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
 // ── Config file loading ──
 
 /** Read and parse a single config file. Returns null if not found. */
-function readConfigFile(path: string): OpenpxConfig | null {
+function readConfigFile(path: string): KiteCodeConfig | null {
   if (!existsSync(path)) return null;
   const raw = readFileSync(path, 'utf8');
   return configSchema.parse(parse(raw));
 }
 
 /** Merge project config over user config. */
-function mergeConfigs(user: OpenpxConfig, project: OpenpxConfig): OpenpxConfig {
+function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeConfig {
   return {
     provider: { ...user.provider, ...project.provider },
     models: project.models ?? user.models,
@@ -122,16 +122,16 @@ function mergeConfigs(user: OpenpxConfig, project: OpenpxConfig): OpenpxConfig {
 }
 
 /**
- * Load and merge user-level (~/.openpx/openpx.jsonc) + project-level (.openpx/openpx.jsonc).
+ * Load and merge user-level (~/.kite-code/kite-code.jsonc) + project-level (.kite-code/kite-code.jsonc).
  * Project overrides user.
  * When explicitPath is given, loads only that file (no merge).
  * Falls back to DeepSeek defaults when no config file exists.
  */
-function loadConfig(workspace?: string, explicitPath?: string): OpenpxConfig {
+function loadConfig(workspace?: string, explicitPath?: string): KiteCodeConfig {
   if (explicitPath) {
     const cfg = readConfigFile(explicitPath);
     if (!cfg) {
-      throw new Error(`OpenPX config file not found: ${explicitPath}`);
+      throw new Error(`Kite Code config file not found: ${explicitPath}`);
     }
     return cfg;
   }
@@ -141,10 +141,10 @@ function loadConfig(workspace?: string, explicitPath?: string): OpenpxConfig {
   if (user) return user;
   if (project) return project;
   // No config file → DeepSeek defaults
-  return defaultOpenpxConfig();
+  return defaultKiteCodeConfig();
 }
 
-function defaultOpenpxConfig(): OpenpxConfig {
+function defaultKiteCodeConfig(): KiteCodeConfig {
   return {
     provider: {
       deepseek: {
@@ -231,7 +231,7 @@ function modelEntryName(entry: unknown): string | null {
  * Find the default model from config.
  * Priority: provider.model > legacy default:true > first model > null
  */
-function findDefaultModel(cfg: OpenpxConfig): { provider: string; name: string } | null {
+function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string } | null {
   for (const [provName, prov] of Object.entries(cfg.provider)) {
     if (prov.model && prov.models?.length) return { provider: provName, name: prov.model };
     // Legacy: model entry with default:true
@@ -292,13 +292,13 @@ export interface McpConfig {
 
 /**
  * Load MCP server configurations from:
- * 1. openpx.jsonc (user + project merged) -> mcpServers section
+ * 1. kite-code.jsonc (user + project merged) -> mcpServers section
  * 2. .mcp.json in project root (merged, project mcp doesn't override same-name servers)
  */
 export function loadMcpConfig(configPath?: string): McpConfig {
   const servers: Record<string, McpServerConfig> = {};
 
-  // 1. Merged openpx.jsonc
+  // 1. Merged kite-code.jsonc
   const cfg = configPath ? readConfigFile(configPath) : loadConfig();
   if (cfg?.mcpServers) {
     for (const [name, raw] of Object.entries(cfg.mcpServers)) {

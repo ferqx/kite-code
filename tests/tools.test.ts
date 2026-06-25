@@ -25,23 +25,23 @@ function msys2Win(p: string): string {
 
 describe('tool safety', () => {
   test('allows paths inside the workspace', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-safe');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-safe');
     expect(assertInsideWorkspace(workspace, 'inside.txt')).toBe(join(workspace, 'inside.txt'));
   });
 
   test('allows workspace files whose names start with dots', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-safe');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-safe');
     expect(assertInsideWorkspace(workspace, '..notes.txt')).toBe(join(workspace, '..notes.txt'));
   });
 
   test('rejects paths outside the workspace', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-safe');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-safe');
     expect(() => assertInsideWorkspace(workspace, '..\\outside.txt')).toThrow(/outside workspace/);
     expect(() => assertInsideWorkspace(workspace, '../outside.txt')).toThrow(/outside workspace/);
   });
 
   test('write_file creates files inside the workspace', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-write');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
@@ -58,7 +58,7 @@ describe('tool safety', () => {
   });
 
   test('write_file accepts absolute paths inside the workspace', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-write-absolute');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write-absolute');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     const absolutePath = join(workspace, 'nested', 'hello.txt');
@@ -76,7 +76,7 @@ describe('tool safety', () => {
   });
 
   test('edit_file finds and replaces text', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-edit');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-edit');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
@@ -95,7 +95,7 @@ describe('tool safety', () => {
   });
 
   test('edit_file fails when old_string not found', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-edit-nf');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-edit-nf');
     mkdirSync(workspace, { recursive: true });
 
     writeFile({ workspace, path: 'f.txt', content: 'hello\n' });
@@ -112,7 +112,7 @@ describe('tool safety', () => {
   });
 
   test('read_file reads file with line numbers', () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-read');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-read');
     mkdirSync(workspace, { recursive: true });
 
     writeFile({ workspace, path: 'test.txt', content: 'line1\nline2\nline3\n' });
@@ -125,7 +125,7 @@ describe('tool safety', () => {
   });
 
   test('returns structured shell command results', async () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-shell');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-shell');
     mkdirSync(workspace, { recursive: true });
 
     const result = await shellTool({ workspace, command: 'pwd' });
@@ -142,7 +142,7 @@ describe('tool safety', () => {
   });
 
   test('shell_execute produces no stderr noise on standard commands', async () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-shell-clean');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-shell-clean');
     mkdirSync(workspace, { recursive: true });
 
     const result = await shellTool({ workspace, command: 'ls' });
@@ -154,7 +154,7 @@ describe('tool safety', () => {
   });
 
   test('shellTool aborts child process when signal fires', async () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-shell-abort');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-shell-abort');
     mkdirSync(workspace, { recursive: true });
 
     const ac = new AbortController();
@@ -169,7 +169,7 @@ describe('tool safety', () => {
   });
 
   test('shellTool kills long-running process on delayed abort', async () => {
-    const workspace = join(tmpdir(), 'openpx-langgraph-tools-shell-abort-delayed');
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-shell-abort-delayed');
     mkdirSync(workspace, { recursive: true });
 
     const ac = new AbortController();
@@ -194,8 +194,8 @@ describe('tool safety', () => {
 describe('msys2ToWindowsPath', () => {
   test('/d/foo/bar → D:\\foo\\bar', () => {
     if (process.platform !== 'win32') return;
-    expect(msys2ToWindowsPath('/d/app/openpx-new/README.md')).toBe(
-      'D:\\app\\openpx-new\\README.md',
+    expect(msys2ToWindowsPath('/d/work/my-project/README.md')).toBe(
+      'D:\\work\\my-project\\README.md',
     );
   });
 
@@ -217,16 +217,16 @@ describe('msys2ToWindowsPath', () => {
     if (process.platform === 'win32') return;
     // On Linux/macOS, /d/foo is a legitimate absolute path, not a drive letter
     expect(msys2ToWindowsPath('/d/foo/bar')).toBe('/d/foo/bar');
-    expect(msys2ToWindowsPath('/home/user/file.txt')).toBe('/home/user/file.txt');
+    expect(msys2ToWindowsPath('/tmp/test/file.txt')).toBe('/tmp/test/file.txt');
   });
 });
 
 describe('normalizeMsys2PathsInText', () => {
   test('converts MSYS2 paths embedded in text', () => {
     if (process.platform !== 'win32') return;
-    const input = 'CWD: /d/app/openpx-new\nReading /d/app/openpx-new/src/test.ts';
+    const input = 'CWD: /d/work/my-project\nReading /d/work/my-project/src/test.ts';
     const output = normalizeMsys2PathsInText(input);
-    expect(output).toContain('D:\\app\\openpx-new');
+    expect(output).toContain('D:\\work\\my-project');
     expect(output).not.toContain('/d/');
   });
 
@@ -238,7 +238,7 @@ describe('normalizeMsys2PathsInText', () => {
 
   test('non-Windows platform returns input unchanged', () => {
     if (process.platform === 'win32') return;
-    const input = 'CWD: /home/user/project\nFile: /etc/config';
+    const input = 'CWD: /tmp/project\nFile: /etc/config';
     expect(normalizeMsys2PathsInText(input)).toBe(input);
   });
 });
@@ -249,7 +249,7 @@ describe('normalizeMsys2PathsInText', () => {
 
 describe('readTextContent — binary detection', () => {
   test('UTF-8 with CJK text is not binary', () => {
-    const workspace = join(tmpdir(), 'openpx-readtext-cjk');
+    const workspace = join(tmpdir(), 'kite-code-readtext-cjk');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     writeFileSync(join(workspace, 'readme.md'), '# 你好世界\n\n这是中文内容。\n', 'utf8');
@@ -260,7 +260,7 @@ describe('readTextContent — binary detection', () => {
   });
 
   test('rejects actual binary files', () => {
-    const workspace = join(tmpdir(), 'openpx-readtext-bin');
+    const workspace = join(tmpdir(), 'kite-code-readtext-bin');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     const buf = Buffer.alloc(4096);
@@ -275,7 +275,7 @@ describe('readTextContent — binary detection', () => {
   });
 
   test('force: true bypasses binary detection', () => {
-    const workspace = join(tmpdir(), 'openpx-readtext-force');
+    const workspace = join(tmpdir(), 'kite-code-readtext-force');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     const buf = Buffer.alloc(1024);
@@ -288,7 +288,7 @@ describe('readTextContent — binary detection', () => {
 
   test('VT and FF bytes are treated as non-text', () => {
     // 0x0B (VT) and 0x0C (FF) must NOT count as text bytes
-    const workspace = join(tmpdir(), 'openpx-readtext-vtff');
+    const workspace = join(tmpdir(), 'kite-code-readtext-vtff');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     // 8KB of alternating VT/FF bytes — well over 30% non-text
@@ -306,7 +306,7 @@ describe('readTextContent — binary detection', () => {
 
 describe('readTextContent — encoding', () => {
   test('UTF-8 BOM is stripped', () => {
-    const workspace = join(tmpdir(), 'openpx-readtext-bom8');
+    const workspace = join(tmpdir(), 'kite-code-readtext-bom8');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     const bom = Buffer.from([0xef, 0xbb, 0xbf]);
@@ -321,7 +321,7 @@ describe('readTextContent — encoding', () => {
   });
 
   test('UTF-16LE BOM is decoded and stripped', () => {
-    const workspace = join(tmpdir(), 'openpx-readtext-utf16le');
+    const workspace = join(tmpdir(), 'kite-code-readtext-utf16le');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     // BOM (FF FE) + "hello\n" in UTF-16LE
@@ -340,7 +340,7 @@ describe('readTextContent — encoding', () => {
 
 describe('readTextContent — line endings', () => {
   test('CRLF (Windows) normalized to LF', () => {
-    const workspace = join(tmpdir(), 'openpx-readtext-crlf');
+    const workspace = join(tmpdir(), 'kite-code-readtext-crlf');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     writeFileSync(join(workspace, 'crlf.txt'), 'line1\r\nline2\r\nline3\r\n');
@@ -357,7 +357,7 @@ describe('readTextContent — line endings', () => {
 
 describe('read_file — regression', () => {
   test('handles mixed content with special chars', () => {
-    const workspace = join(tmpdir(), 'openpx-read-regress');
+    const workspace = join(tmpdir(), 'kite-code-read-regress');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     writeFile({ workspace, path: 'mixed.txt', content: '// 注释\nconst x = 1;\n/* 块注释 */\n' });

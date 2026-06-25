@@ -4,7 +4,7 @@ import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { McpManager } from './manager';
 
-const MAX_MCP_OUTPUT_TOKENS = Number(process.env.OPENPX_MCP_MAX_OUTPUT_TOKENS ?? '25000');
+const MAX_MCP_OUTPUT_TOKENS = Number(process.env.KITE_CODE_MCP_MAX_OUTPUT_TOKENS ?? '25000');
 
 /** JSON Schema definition shape (simplified subset) */
 export interface JsonSchemaDef {

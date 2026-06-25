@@ -48,7 +48,7 @@ describe('SubAgentRunner integration', () => {
   });
 
   test('code role with real file read via tool call', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'openpx-subagent-test-'));
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-test-'));
     writeFileSync(join(ws, 'test.txt'), 'hello world\n', 'utf-8');
 
     try {

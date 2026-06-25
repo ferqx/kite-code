@@ -6,7 +6,7 @@
 
 ## 调研目的
 
-OpenPX 当前是单 TUI 前端直接调用 core。未来引入 Web/客户端后，需要一个不引入过度复杂度的多端架构方案。本调研分析 Claude Code 和 OpenAI Codex 的架构设计，提取可复用的模式。
+Kite Code 当前是单 TUI 前端直接调用 core。未来引入 Web/客户端后，需要一个不引入过度复杂度的多端架构方案。本调研分析 Claude Code 和 OpenAI Codex 的架构设计，提取可复用的模式。
 
 ---
 
@@ -106,9 +106,9 @@ Codex 最初尝试用 MCP 做 IDE 集成层，发现 MCP 的 tool-oriented 模�
 
 ---
 
-## 4. 对 OpenPX 的建议
+## 4. 对 Kite Code 的建议
 
-OpenPX 当前已具备两个关键资产：
+Kite Code 当前已具备两个关键资产：
 
 - `AgentEvent` 协议（23 种事件类型）— 天然 wire format
 - `SessionData` / `ReplayInterrupt` — 中性可序列化数据结构

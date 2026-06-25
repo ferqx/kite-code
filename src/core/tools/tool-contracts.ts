@@ -224,9 +224,9 @@ export const READ_MCP_RESOURCE_CONTRACT: ToolContract = {
       'Multiple resource parts are joined with newlines. ' +
       'No MCP manager: ok: false with stderr explaining configuration is needed.',
     failureHandling:
-      "If 'Unknown MCP server': verify the server name matches the configuration in openpx.jsonc or .mcp.json. " +
+      "If 'Unknown MCP server': verify the server name matches the configuration in kite-code.jsonc or .mcp.json. " +
       "If 'MCP server not connected': check /mcp panel for connection status and errors. " +
-      "If 'No MCP manager available': configure mcpServers in openpx.jsonc to enable MCP integration. " +
+      "If 'No MCP manager available': configure mcpServers in kite-code.jsonc to enable MCP integration. " +
       'If the resource content is unexpectedly empty: verify the URI with list_resources and try again.',
   },
   description: '',

@@ -69,30 +69,30 @@ export function recordEvent(
       base.name = `node.${event.data.node}`;
       base.kind = event.data.node === 'agent' ? 3 : 1; // CLIENT for agent (API call)
       base.attributes = {
-        'openpx.node': event.data.node,
-        ...(event.data.internal ? { 'openpx.internal': true } : {}),
+        'kite_code.node': event.data.node,
+        ...(event.data.internal ? { 'kite_code.internal': true } : {}),
       };
       break;
 
     case 'step_end':
       base.name = `node.${event.data.node}.end`;
-      base.attributes = { 'openpx.node': event.data.node };
+      base.attributes = { 'kite_code.node': event.data.node };
       break;
 
     // ── 模型产出 ──
     case 'text':
       base.name = 'text';
       base.attributes = {
-        'openpx.text.length': event.data.text.length,
-        'openpx.text.content': trunc(event.data.text, TRUNC_CONTENT),
+        'kite_code.text.length': event.data.text.length,
+        'kite_code.text.content': trunc(event.data.text, TRUNC_CONTENT),
       };
       break;
 
     case 'reason':
       base.name = 'reason';
       base.attributes = {
-        'openpx.reason.length': event.data.text.length,
-        'openpx.reason.content': trunc(event.data.text, TRUNC_CONTENT),
+        'kite_code.reason.length': event.data.text.length,
+        'kite_code.reason.content': trunc(event.data.text, TRUNC_CONTENT),
       };
       break;
 
@@ -100,26 +100,26 @@ export function recordEvent(
     case 'tool_call':
       base.name = `tool.${event.data.name}.call`;
       base.attributes = {
-        'openpx.tool.name': event.data.name,
-        'openpx.tool.call_id': event.data.call_id,
-        'openpx.tool.args': safeStringify(event.data.args, TRUNC_ARGS),
+        'kite_code.tool.name': event.data.name,
+        'kite_code.tool.call_id': event.data.call_id,
+        'kite_code.tool.args': safeStringify(event.data.args, TRUNC_ARGS),
       };
       break;
 
     case 'tool_done':
       base.name = `tool.${event.data.name}`;
       base.attributes = {
-        'openpx.tool.name': event.data.name,
-        'openpx.tool.call_id': event.data.call_id,
-        'openpx.tool.ok': event.data.ok,
-        'openpx.tool.summary': trunc(event.data.summary, TRUNC_SUMMARY),
+        'kite_code.tool.name': event.data.name,
+        'kite_code.tool.call_id': event.data.call_id,
+        'kite_code.tool.ok': event.data.ok,
+        'kite_code.tool.summary': trunc(event.data.summary, TRUNC_SUMMARY),
       };
       if (event.data.totalLines != null) {
-        base.attributes['openpx.tool.total_lines'] = event.data.totalLines;
+        base.attributes['kite_code.tool.total_lines'] = event.data.totalLines;
       }
       if (!event.data.ok) {
         const reason = classifyToolFailure(event.data.name, event.data.summary);
-        base.attributes['openpx.tool.failure_reason'] = reason;
+        base.attributes['kite_code.tool.failure_reason'] = reason;
         base.status = { code: 'ERROR', message: reason };
         base.events = [
           {
@@ -138,38 +138,44 @@ export function recordEvent(
     case 'need_approval':
       base.name = 'approval';
       base.attributes = {
-        'openpx.approval.tool': event.data.tool,
-        'openpx.approval.risk': event.data.risk,
-        'openpx.approval.command': trunc(event.data.command, TRUNC_COMMAND),
-        'openpx.approval.reason': trunc(event.data.reason, TRUNC_SUMMARY),
+        'kite_code.approval.tool': event.data.tool,
+        'kite_code.approval.risk': event.data.risk,
+        'kite_code.approval.command': trunc(event.data.command, TRUNC_COMMAND),
+        'kite_code.approval.reason': trunc(event.data.reason, TRUNC_SUMMARY),
       };
       if (event.data.expectedEffects && event.data.expectedEffects.length > 0) {
-        base.attributes['openpx.approval.expected_effects'] = trunc(
+        base.attributes['kite_code.approval.expected_effects'] = trunc(
           event.data.expectedEffects.join('; '),
           TRUNC_SUMMARY,
         );
       }
       if (event.data.modelJustification) {
-        base.attributes['openpx.approval.model_justification'] = trunc(
+        base.attributes['kite_code.approval.model_justification'] = trunc(
           event.data.modelJustification,
           TRUNC_SUMMARY,
         );
       }
       if (event.data.objective) {
-        base.attributes['openpx.approval.objective'] = trunc(event.data.objective, TRUNC_SUMMARY);
+        base.attributes['kite_code.approval.objective'] = trunc(
+          event.data.objective,
+          TRUNC_SUMMARY,
+        );
       }
       break;
 
     case 'need_input':
       base.name = 'user_input';
       base.attributes = {
-        'openpx.input.question': trunc(event.data.question, TRUNC_QUESTION),
+        'kite_code.input.question': trunc(event.data.question, TRUNC_QUESTION),
       };
       if (event.data.options && event.data.options.length > 0) {
-        base.attributes['openpx.input.options'] = safeStringify(event.data.options, TRUNC_SUMMARY);
+        base.attributes['kite_code.input.options'] = safeStringify(
+          event.data.options,
+          TRUNC_SUMMARY,
+        );
       }
       if (event.data.context) {
-        base.attributes['openpx.input.context'] = trunc(event.data.context, TRUNC_SUMMARY);
+        base.attributes['kite_code.input.context'] = trunc(event.data.context, TRUNC_SUMMARY);
       }
       break;
 
@@ -178,30 +184,30 @@ export function recordEvent(
       base.name = 'state_change';
       base.attributes = {};
       if (event.data.workspaceAccess)
-        base.attributes['openpx.workspace_access'] = event.data.workspaceAccess;
-      if (event.data.phase) base.attributes['openpx.phase'] = event.data.phase;
+        base.attributes['kite_code.workspace_access'] = event.data.workspaceAccess;
+      if (event.data.phase) base.attributes['kite_code.phase'] = event.data.phase;
       if (event.data.modelProvider) base.attributes['gen_ai.system'] = event.data.modelProvider;
       if (event.data.modelName) base.attributes['gen_ai.request.model'] = event.data.modelName;
       if (event.data.plan) {
-        base.attributes['openpx.plan'] = safeStringify(event.data.plan, TRUNC_SUMMARY);
+        base.attributes['kite_code.plan'] = safeStringify(event.data.plan, TRUNC_SUMMARY);
       }
       if (event.data.authorization) {
-        base.attributes['openpx.authorization_mode'] = event.data.authorization.mode;
+        base.attributes['kite_code.authorization_mode'] = event.data.authorization.mode;
       }
       break;
 
     case 'file_change':
       base.name = 'file_change';
       base.attributes = {
-        'openpx.file.path': event.data.path,
-        'openpx.file.kind': event.data.kind,
+        'kite_code.file.path': event.data.path,
+        'kite_code.file.kind': event.data.kind,
       };
       if (event.data.linesAdded != null)
-        base.attributes['openpx.file.lines_added'] = event.data.linesAdded;
+        base.attributes['kite_code.file.lines_added'] = event.data.linesAdded;
       if (event.data.linesRemoved != null)
-        base.attributes['openpx.file.lines_removed'] = event.data.linesRemoved;
+        base.attributes['kite_code.file.lines_removed'] = event.data.linesRemoved;
       if (event.data.preview)
-        base.attributes['openpx.file.preview'] = trunc(event.data.preview, TRUNC_CONTENT);
+        base.attributes['kite_code.file.preview'] = trunc(event.data.preview, TRUNC_CONTENT);
       break;
 
     // ── 缓存指标 ──
@@ -210,8 +216,8 @@ export function recordEvent(
       base.attributes = {
         'gen_ai.usage.input_tokens': event.data.inputTokens,
         'gen_ai.usage.output_tokens': event.data.outputTokens ?? 0,
-        'openpx.cache.hit_tokens': event.data.cacheHitTokens,
-        'openpx.cache.miss_tokens': event.data.cacheMissTokens,
+        'kite_code.cache.hit_tokens': event.data.cacheHitTokens,
+        'kite_code.cache.miss_tokens': event.data.cacheMissTokens,
       };
       break;
 
@@ -219,8 +225,8 @@ export function recordEvent(
     case 'model_retry':
       base.name = 'model.retry';
       base.attributes = {
-        'openpx.retry.attempt': event.data.attempt,
-        'openpx.retry.max_attempts': event.data.maxAttempts,
+        'kite_code.retry.attempt': event.data.attempt,
+        'kite_code.retry.max_attempts': event.data.maxAttempts,
         'model.retry.delay_ms': event.data.delayMs,
       };
       base.events = [
@@ -237,8 +243,8 @@ export function recordEvent(
       base.name = 'error';
       base.status = { code: 'ERROR', message: trunc(event.data.message, TRUNC_ERROR) };
       base.attributes = {
-        'openpx.error.recoverable': event.data.recoverable,
-        'openpx.error.message': trunc(event.data.message, TRUNC_ERROR),
+        'kite_code.error.recoverable': event.data.recoverable,
+        'kite_code.error.message': trunc(event.data.message, TRUNC_ERROR),
       };
       break;
 
@@ -246,8 +252,8 @@ export function recordEvent(
     case 'final':
       base.name = 'final';
       base.attributes = {
-        'openpx.final.length': event.data.length,
-        'openpx.final.content': trunc(event.data, TRUNC_CONTENT),
+        'kite_code.final.length': event.data.length,
+        'kite_code.final.content': trunc(event.data, TRUNC_CONTENT),
       };
       break;
 
@@ -255,36 +261,36 @@ export function recordEvent(
     case 'subagent_start':
       base.name = 'subagent.start';
       base.attributes = {
-        'openpx.subagent.id': event.data.id,
-        'openpx.subagent.role': event.data.role,
-        'openpx.subagent.task': trunc(event.data.task, TRUNC_SUMMARY),
+        'kite_code.subagent.id': event.data.id,
+        'kite_code.subagent.role': event.data.role,
+        'kite_code.subagent.task': trunc(event.data.task, TRUNC_SUMMARY),
       };
       break;
 
     case 'subagent_step':
       base.name = `subagent.tool.${event.data.toolName}`;
       base.attributes = {
-        'openpx.subagent.id': event.data.id,
-        'openpx.tool.name': event.data.toolName,
-        'openpx.tool.args': safeStringify(event.data.toolArgs, TRUNC_ARGS),
+        'kite_code.subagent.id': event.data.id,
+        'kite_code.tool.name': event.data.toolName,
+        'kite_code.tool.args': safeStringify(event.data.toolArgs, TRUNC_ARGS),
       };
       break;
 
     case 'subagent_tool_result':
       base.name = `subagent.tool.${event.data.toolName}.result`;
       base.attributes = {
-        'openpx.subagent.id': event.data.id,
-        'openpx.tool.name': event.data.toolName,
-        'openpx.tool.ok': event.data.ok,
+        'kite_code.subagent.id': event.data.id,
+        'kite_code.tool.name': event.data.toolName,
+        'kite_code.tool.ok': event.data.ok,
       };
       if (event.data.summary) {
-        base.attributes['openpx.tool.summary'] = trunc(event.data.summary, TRUNC_SUMMARY);
+        base.attributes['kite_code.tool.summary'] = trunc(event.data.summary, TRUNC_SUMMARY);
       }
       if (event.data.durationMs != null) {
-        base.attributes['openpx.tool.duration_ms'] = event.data.durationMs;
+        base.attributes['kite_code.tool.duration_ms'] = event.data.durationMs;
       }
       if (event.data.failureReason) {
-        base.attributes['openpx.tool.failure_reason'] = event.data.failureReason;
+        base.attributes['kite_code.tool.failure_reason'] = event.data.failureReason;
       }
       if (!event.data.ok) {
         base.status = { code: 'ERROR', message: event.data.failureReason ?? 'tool failed' };
@@ -294,10 +300,10 @@ export function recordEvent(
     case 'subagent_done':
       base.name = 'subagent.done';
       base.attributes = {
-        'openpx.subagent.id': event.data.id,
-        'openpx.subagent.tool_call_count': event.data.toolCallCount,
-        'openpx.subagent.duration_ms': event.data.durationMs,
-        'openpx.subagent.summary': trunc(event.data.summary, TRUNC_SUMMARY),
+        'kite_code.subagent.id': event.data.id,
+        'kite_code.subagent.tool_call_count': event.data.toolCallCount,
+        'kite_code.subagent.duration_ms': event.data.durationMs,
+        'kite_code.subagent.summary': trunc(event.data.summary, TRUNC_SUMMARY),
       };
       break;
 
@@ -305,23 +311,23 @@ export function recordEvent(
       base.name = 'subagent.error';
       base.status = { code: 'ERROR', message: trunc(event.data.error, TRUNC_ERROR) };
       base.attributes = {
-        'openpx.subagent.id': event.data.id,
-        'openpx.subagent.error': trunc(event.data.error, TRUNC_ERROR),
+        'kite_code.subagent.id': event.data.id,
+        'kite_code.subagent.error': trunc(event.data.error, TRUNC_ERROR),
       };
       if (event.data.toolCallCount != null)
-        base.attributes['openpx.subagent.tool_call_count'] = event.data.toolCallCount;
+        base.attributes['kite_code.subagent.tool_call_count'] = event.data.toolCallCount;
       if (event.data.durationMs != null)
-        base.attributes['openpx.subagent.duration_ms'] = event.data.durationMs;
+        base.attributes['kite_code.subagent.duration_ms'] = event.data.durationMs;
       if (event.data.summary)
-        base.attributes['openpx.subagent.summary'] = trunc(event.data.summary, TRUNC_SUMMARY);
+        base.attributes['kite_code.subagent.summary'] = trunc(event.data.summary, TRUNC_SUMMARY);
       break;
 
     case 'subagent_cache_metrics':
       base.name = 'subagent.cache_metrics';
       base.attributes = {
-        'openpx.subagent.id': event.data.subagentId,
-        'openpx.cache.hit_tokens': event.data.cacheHitTokens,
-        'openpx.cache.miss_tokens': event.data.cacheMissTokens,
+        'kite_code.subagent.id': event.data.subagentId,
+        'kite_code.cache.hit_tokens': event.data.cacheHitTokens,
+        'kite_code.cache.miss_tokens': event.data.cacheMissTokens,
         'gen_ai.usage.input_tokens': event.data.inputTokens,
       };
       break;
@@ -329,23 +335,23 @@ export function recordEvent(
     // ── Turn 边界 ──
     case 'turn_begin':
       base.name = 'agent.turn.begin';
-      base.attributes = { 'openpx.turn.index': event.data.index };
+      base.attributes = { 'kite_code.turn.index': event.data.index };
       break;
 
     case 'turn_end':
       base.name = 'agent.turn.end';
-      base.attributes = { 'openpx.turn.index': event.data.index };
+      base.attributes = { 'kite_code.turn.index': event.data.index };
       break;
 
     // ── 用户消息 ──
     case 'user_message':
       base.name = event.data.kind === 'task' ? 'user.task' : 'user.answer';
       base.attributes = {
-        'openpx.user.message': trunc(event.data.text, TRUNC_CONTENT),
-        'openpx.user.kind': event.data.kind,
+        'kite_code.user.message': trunc(event.data.text, TRUNC_CONTENT),
+        'kite_code.user.kind': event.data.kind,
       };
       if (event.data.interruptType) {
-        base.attributes['openpx.user.interrupt_type'] = event.data.interruptType;
+        base.attributes['kite_code.user.interrupt_type'] = event.data.interruptType;
       }
       break;
 
@@ -353,15 +359,15 @@ export function recordEvent(
     case 'interrupt':
       base.name = 'interrupt';
       base.attributes = {
-        'openpx.interrupt.type': 'graph_interrupt',
-        'openpx.interrupt.data': safeStringify(event.data, TRUNC_SUMMARY),
+        'kite_code.interrupt.type': 'graph_interrupt',
+        'kite_code.interrupt.data': safeStringify(event.data, TRUNC_SUMMARY),
       };
       break;
 
     case 'update':
       base.name = 'graph.update';
       base.attributes = {
-        'openpx.update.data': safeStringify(event.data, TRUNC_SUMMARY),
+        'kite_code.update.data': safeStringify(event.data, TRUNC_SUMMARY),
       };
       break;
   }

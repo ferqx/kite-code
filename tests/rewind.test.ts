@@ -56,7 +56,7 @@ describe('revertToCheckpoint', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'openpx-rewind-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'kite-code-rewind-test-'));
   });
 
   afterEach(() => {
@@ -133,7 +133,7 @@ describe('forkFromCheckpoint', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'openpx-fork-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'kite-code-fork-test-'));
   });
 
   afterEach(() => {

@@ -206,7 +206,12 @@ describe('model context protocol', () => {
 describe('buildStaticSystemPrompt with skills', () => {
   test('includes Available Skills section when skills provided', () => {
     const skills: SkillManifest[] = [
-      { name: 'tdd', description: 'Use when writing tests', source: 'project', origin: '.openpx' },
+      {
+        name: 'tdd',
+        description: 'Use when writing tests',
+        source: 'project',
+        origin: '.kite-code',
+      },
       { name: 'debugging', description: 'Use when debugging', source: 'user', origin: '.agents' },
     ];
     const prompt = buildStaticSystemPrompt('agent', skills);
@@ -231,7 +236,12 @@ describe('buildStaticSystemPrompt with skills', () => {
   test('base prompt is prefix of skills-included prompt', () => {
     const base = buildStaticSystemPrompt('agent');
     const skills: SkillManifest[] = [
-      { name: 'tdd', description: 'Test-driven development', source: 'project', origin: '.openpx' },
+      {
+        name: 'tdd',
+        description: 'Test-driven development',
+        source: 'project',
+        origin: '.kite-code',
+      },
     ];
     const withSkills = buildStaticSystemPrompt('agent', skills);
     // 技能追加在末尾，不破坏 base 前缀缓存
@@ -241,7 +251,7 @@ describe('buildStaticSystemPrompt with skills', () => {
   test('skills appended at end, not injected in middle', () => {
     const base = buildStaticSystemPrompt('agent');
     const skills: SkillManifest[] = [
-      { name: 'tdd', description: 'TDD workflow', source: 'project', origin: '.openpx' },
+      { name: 'tdd', description: 'TDD workflow', source: 'project', origin: '.kite-code' },
     ];
     const withSkills = buildStaticSystemPrompt('agent', skills);
     // 验证技能 section 出现在 base 之后（base + 换行间隔）
@@ -255,7 +265,7 @@ describe('buildStaticSystemPrompt with skills', () => {
 
   test('prompt is idempotent for same skills', () => {
     const skills: SkillManifest[] = [
-      { name: 'tdd', description: 'TDD workflow', source: 'project', origin: '.openpx' },
+      { name: 'tdd', description: 'TDD workflow', source: 'project', origin: '.kite-code' },
     ];
     const prompt1 = buildStaticSystemPrompt('agent', skills);
     const prompt2 = buildStaticSystemPrompt('agent', skills);
@@ -264,8 +274,8 @@ describe('buildStaticSystemPrompt with skills', () => {
 
   test('multiple skills preserved in stable input order', () => {
     const skills: SkillManifest[] = [
-      { name: 'z-skill', description: 'Z description', source: 'project', origin: '.openpx' },
-      { name: 'a-skill', description: 'A description', source: 'project', origin: '.openpx' },
+      { name: 'z-skill', description: 'Z description', source: 'project', origin: '.kite-code' },
+      { name: 'a-skill', description: 'A description', source: 'project', origin: '.kite-code' },
     ];
     const prompt = buildStaticSystemPrompt('agent', skills);
     // 技能按输入顺序列出（不重新排序），保持可预测性

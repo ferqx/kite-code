@@ -320,16 +320,21 @@ describe('code agent tool definitions', () => {
 
   test('Skill tool inserted before update_plan, not at end', () => {
     const skills: SkillManifest[] = [
-      { name: 'tdd', description: 'Test-driven development', source: 'project', origin: '.openpx' },
+      {
+        name: 'tdd',
+        description: 'Test-driven development',
+        source: 'project',
+        origin: '.kite-code',
+      },
     ];
 
     const tools = createAgentTools({
       workspace: '/tmp',
       skills,
       skillOptions: {
-        projectOpenpxSkillsDir: '/tmp/.openpx/skills',
+        projectKiteCodeSkillsDir: '/tmp/.kite-code/skills',
         projectAgentsSkillsDir: '/tmp/.agents/skills',
-        userOpenpxSkillsDir: '/tmp/user-skills',
+        userKiteCodeSkillsDir: '/tmp/user-skills',
         userAgentsSkillsDir: '/tmp/user-agents-skills',
       },
     });
@@ -351,16 +356,16 @@ describe('code agent tool definitions', () => {
     const baseNames = createAgentTools({ workspace: '/tmp' }).map((t) => t.name);
 
     const skills: SkillManifest[] = [
-      { name: 'tdd', description: 'TDD workflow', source: 'project', origin: '.openpx' },
+      { name: 'tdd', description: 'TDD workflow', source: 'project', origin: '.kite-code' },
     ];
 
     const withSkill = createAgentTools({
       workspace: '/tmp',
       skills,
       skillOptions: {
-        projectOpenpxSkillsDir: '/tmp/.openpx/skills',
+        projectKiteCodeSkillsDir: '/tmp/.kite-code/skills',
         projectAgentsSkillsDir: '/tmp/.agents/skills',
-        userOpenpxSkillsDir: '/tmp/user-skills',
+        userKiteCodeSkillsDir: '/tmp/user-skills',
         userAgentsSkillsDir: '/tmp/user-agents-skills',
       },
     });
@@ -376,7 +381,7 @@ describe('code agent tool definitions', () => {
     const baseNames = createAgentTools({ workspace: '/tmp' }).map((t) => t.name);
 
     const skills: SkillManifest[] = [
-      { name: 'tdd', description: 'TDD', source: 'project', origin: '.openpx' },
+      { name: 'tdd', description: 'TDD', source: 'project', origin: '.kite-code' },
     ];
 
     const mockMcpManager = {
@@ -397,9 +402,9 @@ describe('code agent tool definitions', () => {
       workspace: '/tmp',
       skills,
       skillOptions: {
-        projectOpenpxSkillsDir: '/tmp/.openpx/skills',
+        projectKiteCodeSkillsDir: '/tmp/.kite-code/skills',
         projectAgentsSkillsDir: '/tmp/.agents/skills',
-        userOpenpxSkillsDir: '/tmp/user-skills',
+        userKiteCodeSkillsDir: '/tmp/user-skills',
         userAgentsSkillsDir: '/tmp/user-agents-skills',
       },
       mcpManager: mockMcpManager as any,

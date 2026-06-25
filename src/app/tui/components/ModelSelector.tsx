@@ -70,7 +70,7 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
           选择模型
         </Text>
         <Box marginY={1}>
-          <Text color={t.muted}>没有可用模型，请在 openpx.jsonc 中配置 models 列表</Text>
+          <Text color={t.muted}>没有可用模型，请在 kite-code.jsonc 中配置 models 列表</Text>
         </Box>
         <Text color={t.dim}>Esc 关闭</Text>
       </Box>

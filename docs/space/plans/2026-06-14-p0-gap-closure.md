@@ -8,7 +8,7 @@
 
 ## 目标
 
-补齐 3 个 P0（一票否决级）功能缺口，让 OpenPX 具备现代编码 agent 的基础能力面。
+补齐 3 个 P0（一票否决级）功能缺口，让 Kite Code 具备现代编码 agent 的基础能力面。
 
 ## 范围
 
@@ -17,7 +17,7 @@
 | Web Search + WebFetch | protocol（新事件）、core/tools（2 个新工具）、core/harness（风险分类）、TUI（渲染 block） |
 | Token 展示增强 | protocol（补充 output tokens）、core/cache-metrics（提取 output tokens）、core/model（非 DeepSeek provider 回调）、TUI（StatsLine 展示 output tokens） |
 | 默认推荐模型 + 首次体验 | core/config（presets）、TUI（OnboardingWizard、ModelSelector 推荐标签、配置模板生成） |
-| 工作空间授权 | TUI（WorkspaceConfirmOverlay）、`~/.openpx/trusted_workspaces.json`（受信目录持久化） |
+| 工作空间授权 | TUI（WorkspaceConfirmOverlay）、`~/.kite-code/trusted_workspaces.json`（受信目录持久化） |
 
 明确不做（本计划）：
 - 跨会话记忆系统（独立方案，另行计划）
@@ -31,7 +31,7 @@
 
 ### 总体策略
 
-Agent 工具集中内置 `web_search` 和 `web_fetch`，但搜索能力**完全由用户自配的 MCP server 提供**。OpenPX 自身不内置任何搜索 API 调用，避免：
+Agent 工具集中内置 `web_search` 和 `web_fetch`，但搜索能力**完全由用户自配的 MCP server 提供**。Kite Code 自身不内置任何搜索 API 调用，避免：
 
 1. 共享免费搜索端点导致速率限制和不可用
 2. 将第三方搜索资源消耗转嫁给开源项目
@@ -378,12 +378,12 @@ const BUILTIN_PRESETS: ModelPreset[] = [
 - **依赖**：Task 3.1
 - **改动内容**：
 
-触发条件：无 `~/.openpx/openpx.jsonc` 且无 `.openpx/openpx.jsonc`
+触发条件：无 `~/.kite-code/kite-code.jsonc` 且无 `.kite-code/kite-code.jsonc`
 
 三步骤交互流程：
 1. **Provider 选择**：列表展示 BUILTIN_PRESETS，默认选中 `recommended: true` 的 preset。方向键导航、Enter 确认。
 2. **API Key 输入**：文本输入框，提示 `export {ENV_VAR}=xxx` 或直接输入。Ctrl+C 可跳过（生成空配置文件）
-3. **确认写入**：展示配置摘要，提示生成的文件路径 `~/.openpx/openpx.jsonc`，Enter 启动。Skip 则使用 DeepSeek 默认值
+3. **确认写入**：展示配置摘要，提示生成的文件路径 `~/.kite-code/kite-code.jsonc`，Enter 启动。Skip 则使用 DeepSeek 默认值
 
 UI 样式：作为 Overlay 层弹出（类似 ModelSelector），使用 `borderStyle="round"` 卡片 + 步骤指示器 `● Step 1/3`
 
@@ -438,9 +438,9 @@ TUI state 新增字段：`showOnboarding: boolean`（`src/app/tui/types.ts`）
 - **依赖**：Task 3.1
 - **改动内容**：
 
-当前 `defaultOpenpxConfig()` 只返回 DeepSeek provider。保持不变——无配置文件的默认值不变，确保向后兼容。
+当前 `defaultKiteCodeConfig()` 只返回 DeepSeek provider。保持不变——无配置文件的默认值不变，确保向后兼容。
 
-首次启动时 OnboardingWizard 会让用户显式选择，如果跳过则使用当前 `defaultOpenpxConfig()`。
+首次启动时 OnboardingWizard 会让用户显式选择，如果跳过则使用当前 `defaultKiteCodeConfig()`。
 
 - **验证**：`bun test tests/cli.test.ts`
 
@@ -450,12 +450,12 @@ TUI state 新增字段：`showOnboarding: boolean`（`src/app/tui/types.ts`）
 
 ### 总体策略
 
-对标 Claude Code 的 `respectGitignore` 权限体系和新目录权限确认。OpenPX 是一个能读、写、执行 shell 命令的 agent，需要在进入新工作空间时获得用户明示授权，防止在非预期目录运行。
+对标 Claude Code 的 `respectGitignore` 权限体系和新目录权限确认。Kite Code 是一个能读、写、执行 shell 命令的 agent，需要在进入新工作空间时获得用户明示授权，防止在非预期目录运行。
 
-**受信工作空间持久化**：`~/.openpx/trusted_workspaces.json`，格式为 JSON 数组，每项为 `realpath` 解析后的绝对路径。
+**受信工作空间持久化**：`~/.kite-code/trusted_workspaces.json`，格式为 JSON 数组，每项为 `realpath` 解析后的绝对路径。
 
 ```json
-["/Users/chenchao/Code/ai/openpx-new", "/Users/chenchao/work/other-project"]
+["/Users/user/project-one", "/Users/user/work/other-project"]
 ```
 
 每次 TUI 启动时检查 `process.cwd()` 的 realpath 是否在受信列表中。不在则弹出确认覆盖层；用户确认后写入列表。
@@ -468,7 +468,7 @@ TUI state 新增字段：`showOnboarding: boolean`（`src/app/tui/types.ts`）
 
 ```typescript
 // 受信工作空间持久化 / Trusted workspace persistence
-// 文件：~/.openpx/trusted_workspaces.json
+// 文件：~/.kite-code/trusted_workspaces.json
 
 import { realpathSync } from "node:fs";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -479,7 +479,7 @@ import { getOpenpxDir } from "./paths";
 const TRUSTED_WORKSPACES_FILE = "trusted_workspaces.json";
 
 function trustedFile(): string {
-  return join(getOpenpxDir(), TRUSTED_WORKSPACES_FILE);
+  return join(getKiteCodeDir(), TRUSTED_WORKSPACES_FILE);
 }
 
 export function isWorkspaceTrusted(workspace: string): boolean {
@@ -523,11 +523,11 @@ Ink 组件，样式类似 OnboardingWizard 的卡片式覆盖层：
 
 ```
 ┌──────────────────────────────────────────────┐
-│  OpenPX — 工作空间授权                         │
+│  Kite Code — 工作空间授权                         │
 │                                               │
-│  OpenPX 请求访问工作目录：                       │
+│  Kite Code 请求访问工作目录：                       │
 │                                               │
-│  /Users/chenchao/Code/new-project              │
+│  /Users/user/work/new-project                 │
 │                                               │
 │  Agent 拥有在此目录下 读写文件 / 执行 shell       │
 │  的能力。请确认这是你预期的工作目录。              │
@@ -563,7 +563,7 @@ React.useEffect(() => {
 拒绝时 dispatch `DENY_WORKSPACE`，调用 `handleExit()` 退出。
 
 - **验证**：`bun test tests/e2e/startup.test.tsx` — 新增 workspace 授权场景
-  - env `OPENPX_SKIP_WORKSPACE_CONFIRM=true` 或 `OPENPX_PTY=true` 时跳过授权（避免阻塞 CI/E2E 测试）
+  - env `KITE_CODE_SKIP_WORKSPACE_CONFIRM=true` 或 `KITE_CODE_PTY=true` 时跳过授权（避免阻塞 CI/E2E 测试）
 
 ### Task 4.4 — 与 OnboardingWizard 的协作
 
@@ -620,5 +620,5 @@ Task 4.1 (trust store) ── Task 4.2 (confirm overlay) ── Task 4.3 (startu
 | 风险 | 缓解 |
 |------|------|
 | 新用户可能不知道如何配置 MCP web search server | 工具返回错误时附带清晰的配置示例（`.mcp.json` 片段，推荐 server 列表）；可在 `system-prompt.txt` 中内置推荐说明 |
-| 首次引导流程与 E2E 测试冲突 | 在测试环境中通过环境变量 `OPENPX_SKIP_ONBOARDING=true` 跳过引导 |
-| 工作空间授权阻塞 CI/E2E | 通过 `OPENPX_SKIP_WORKSPACE_CONFIRM=true` 跳过授权检查 |
+| 首次引导流程与 E2E 测试冲突 | 在测试环境中通过环境变量 `KITE_CODE_SKIP_ONBOARDING=true` 跳过引导 |
+| 工作空间授权阻塞 CI/E2E | 通过 `KITE_CODE_SKIP_WORKSPACE_CONFIRM=true` 跳过授权检查 |

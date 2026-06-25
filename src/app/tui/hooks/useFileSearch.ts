@@ -35,7 +35,7 @@ function listFiles(dir: string, base: string, maxFiles: number = 500): string[] 
   const skip = new Set([
     'node_modules',
     '.git',
-    '.openpx',
+    '.kite-code',
     'dist',
     'build',
     '__pycache__',

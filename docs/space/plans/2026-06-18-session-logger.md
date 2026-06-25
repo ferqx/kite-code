@@ -19,7 +19,7 @@ Agent 运行期间所有事件（模型产出、工具调用、审批交互、�
 
 | 维度 | OTel 遥测 (`core/telemetry/`) | 会话日志 (`core/session-logger/`) |
 |------|-------------------------------|----------------------------------|
-| 存储位置 | 第三方平台 (Grafana/Jaeger/…)，OTLP/HTTP | 本地 `~/.openpx/sessions/<frontend>/<threadId>/` |
+| 存储位置 | 第三方平台 (Grafana/Jaeger/…)，OTLP/HTTP | 本地 `~/.kite-code/sessions/<frontend>/<threadId>/` |
 | 记录粒度 | Span 树（层级 + 属性），适合聚合查询 | 全量事件流，26 种 AgentEvent → TraceRecord |
 | 内容范围 | 工具失败原因、token 用量等结构属性 | **完整内容**：模型文本/推理、工具参数/输出、审批详情 |
 | 依赖 | `@opentelemetry/api` | 零外部依赖，自建 OTel 兼容类型 |
@@ -47,7 +47,7 @@ tests/session-logger/
 ## 输出文件
 
 ```
-~/.openpx/sessions/<frontend>/<threadId>/
+~/.kite-code/sessions/<frontend>/<threadId>/
 ├── events.jsonl             ← 全量事件（每行一条 TraceRecord JSON）
 ├── errors.jsonl             ← 仅异常事件（dev 模式，NODE_ENV !== 'production'）
 └── summary.json             ← RunSummary 聚合统计

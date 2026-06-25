@@ -21,7 +21,7 @@ export default function StartupScreen({ modelName, workspace }: StartupScreenPro
         paddingY={1}
       >
         <Text bold color={t.primary}>
-          ⚡ openpx
+          ⚡ kite code
         </Text>
         <Text color={t.dim}>Interactive coding agent TUI</Text>
       </Box>

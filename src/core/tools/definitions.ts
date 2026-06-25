@@ -169,7 +169,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       if (!input.mcpManager) {
         return JSON.stringify({
           ok: false,
-          stderr: 'No MCP manager available. Configure mcpServers in openpx.jsonc.',
+          stderr: 'No MCP manager available. Configure mcpServers in kite-code.jsonc.',
         });
       }
       try {

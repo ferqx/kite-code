@@ -497,11 +497,11 @@ export interface LoadedMcpConfig {
   servers: Record<string, McpServerConfig>;
 }
 
-/** 加载 MCP 配置 / Load MCP configuration from openpx.jsonc and .mcp.json */
+/** 加载 MCP 配置 / Load MCP configuration from kite-code.jsonc and .mcp.json */
 export function loadMcpConfig(configPath?: string): LoadedMcpConfig {
   const servers: Record<string, McpServerConfig> = {};
 
-  // 1. 从 openpx.jsonc 读取 mcpServers 段
+  // 1. 从 kite-code.jsonc 读取 mcpServers 段
   const primaryPath = configPath ?? defaultConfigPath();
   if (existsSync(primaryPath)) {
     const raw = readFileSync(primaryPath, "utf8");
@@ -613,7 +613,7 @@ export class McpManager {
     try {
       const transport = this.createTransport(config);
       const client = new Client(
-        { name: "openpx", version: "0.1.0" },
+        { name: "kite-code", version: "0.1.0" },
         { capabilities: {} }
       );
 
@@ -718,7 +718,7 @@ export class McpManager {
     return new StdioClientTransport({
       command: config.command!,
       args: config.args,
-      env: { ...process.env, OPENPX_PROJECT_DIR: process.cwd(), ...config.env } as Record<string, string>,
+      env: { ...process.env, KITE_CODE_PROJECT_DIR: process.cwd(), ...config.env } as Record<string, string>,
     });
   }
 
@@ -1193,7 +1193,7 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
         </Box>
         <Box marginTop={1}>
           <Text color={t.dim}>
-            Add mcpServers to ~/.openpx/openpx.jsonc or .mcp.json
+            Add mcpServers to ~/.kite-code/kite-code.jsonc or .mcp.json
           </Text>
         </Box>
       </Box>

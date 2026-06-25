@@ -47,7 +47,7 @@ export class McpManager {
   /** Connect a single MCP server */
   async connect(name: string, config: McpServerConfig): Promise<void> {
     const transport = createTransport(config);
-    const client = new Client({ name: 'openpx', version: '0.1.0' }, { capabilities: {} });
+    const client = new Client({ name: 'kite-code', version: '0.1.0' }, { capabilities: {} });
 
     try {
       await client.connect(transport, { timeout: MCP_STARTUP_TIMEOUT });
@@ -282,7 +282,7 @@ function createTransport(config: McpServerConfig) {
     args: config.args ?? [],
     env: {
       ...process.env,
-      OPENPX_PROJECT_DIR: process.cwd(),
+      KITE_CODE_PROJECT_DIR: process.cwd(),
       ...config.env,
     } as Record<string, string>,
   });

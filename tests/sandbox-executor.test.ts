@@ -14,7 +14,7 @@ import { createSandboxExecutor } from '../src/core/sandbox/executor';
 const isMacOS = process.platform === 'darwin';
 
 function setupWorkspace() {
-  const ws = mkdtempSync(join(tmpdir(), 'openpx-sandbox-test-'));
+  const ws = mkdtempSync(join(tmpdir(), 'kite-code-sandbox-test-'));
   return ws;
 }
 
@@ -72,7 +72,7 @@ describe('sandbox executor integration', () => {
     // 危险文件访问由 checkDangerousPaths 和工具策略兜底
     // File reads are no longer blocked by sandbox for dev tool compatibility
     // Dangerous file access is caught by checkDangerousPaths and tool policy
-    const externalFile = join(homedir(), `.openpx-sandbox-test-${process.pid}`);
+    const externalFile = join(homedir(), `.kite-code-sandbox-test-${process.pid}`);
     writeFileSync(externalFile, 'secret');
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
@@ -90,7 +90,7 @@ describe('sandbox executor integration', () => {
 
   test('allows file write outside workspace (authorization handled by tool-policy)', async () => {
     const ws = setupWorkspace();
-    const externalFile = join(homedir(), `.openpx-sandbox-test-write-${process.pid}`);
+    const externalFile = join(homedir(), `.kite-code-sandbox-test-write-${process.pid}`);
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({

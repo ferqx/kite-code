@@ -17,7 +17,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 const server = new McpServer(
-  { name: 'openpx-test-mcp', version: '0.1.0' },
+  { name: 'kite-code-test-mcp', version: '0.1.0' },
   { capabilities: { tools: {}, prompts: {}, resources: { subscribe: true } } },
 );
 
@@ -59,7 +59,7 @@ server.registerTool(
       {
         type: 'text' as const,
         text: JSON.stringify({
-          name: 'openpx-test-mcp',
+          name: 'kite-code-test-mcp',
           version: '0.1.0',
           tools: ['echo', 'add', 'get_info'],
         }),

@@ -8,10 +8,10 @@ CLI 提供 `run`（首次运行）和 `resume`（恢复运行）两种模式，�
 
 ```bash
 # 首次运行
-openpx run "帮我重构这个函数" --workspace ./my-project
+kite-code run "帮我重构这个函数" --workspace ./my-project
 
 # 恢复运行（从 checkpoint）
-openpx resume --thread-id run-abc123 --action approve --grant full-access
+kite-code resume --thread-id run-abc123 --action approve --grant full-access
 ```
 
 ### CLI 与 TUI 的区别
@@ -29,8 +29,8 @@ openpx resume --thread-id run-abc123 --action approve --grant full-access
 
 | 文件 | 位置 | 用途 |
 |------|------|------|
-| 全局配置 | `~/.openpx/openpx.jsonc` | 模型、provider、MCP 服务器 |
-| 项目配置 | `<workspace>/.openpx/openpx.jsonc` | 项目级覆盖 |
+| 全局配置 | `~/.kite-code/kite-code.jsonc` | 模型、provider、MCP 服务器 |
+| 项目配置 | `<workspace>/.kite-code/kite-code.jsonc` | 项目级覆盖 |
 
 ### 配置 Schema
 
@@ -92,8 +92,8 @@ openpx resume --thread-id run-abc123 --action approve --grant full-access
 
 ```
 loadAgentConfig()
-  → 读取 ~/.openpx/openpx.jsonc（全局）
-  → 读取 <workspace>/.openpx/openpx.jsonc（项目级，覆盖全局）
+  → 读取 ~/.kite-code/kite-code.jsonc（全局）
+  → 读取 <workspace>/.kite-code/kite-code.jsonc（项目级，覆盖全局）
   → Zod schema 校验
   → 返回 AgentConfig
 ```
@@ -102,9 +102,9 @@ loadAgentConfig()
 
 | 路径 | 用途 |
 |------|------|
-| `~/.openpx/openpx.jsonc` | 全局配置 |
-| `~/.openpx/checkpoints.db` | SQLite checkpoint 数据库 |
-| `~/.openpx/sessions/<date>.md` | 导出的会话文件 |
-| `<workspace>/.openpx/openpx.jsonc` | 项目配置 |
-| `<workspace>/.openpx/skills/` | 项目级 Skills 目录 |
-| `~/.openpx/skills/` | 用户级 Skills 目录 |
+| `~/.kite-code/kite-code.jsonc` | 全局配置 |
+| `~/.kite-code/checkpoints.db` | SQLite checkpoint 数据库 |
+| `~/.kite-code/sessions/<date>.md` | 导出的会话文件 |
+| `<workspace>/.kite-code/kite-code.jsonc` | 项目配置 |
+| `<workspace>/.kite-code/skills/` | 项目级 Skills 目录 |
+| `~/.kite-code/skills/` | 用户级 Skills 目录 |

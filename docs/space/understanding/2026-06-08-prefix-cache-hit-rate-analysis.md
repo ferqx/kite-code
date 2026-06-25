@@ -59,9 +59,9 @@ DeepSeek KV cache 有 5-10 分钟 TTL。请求间隔过长会导致缓存失效�
 - 每次请求的命中率随对话增长而**升高**（因为前缀占总输入比例增大），不会"稀释"。
 - 前缀越大，首次请求 0% 的"拖累"越小，累计命中率越高。
 - Claude Code 达到 95%+ 的核心原因：system prompt + CLAUDE.md + 工具定义加起来很可能在 10K+ tokens 级别。
-- 当前 OpenPX 的 system prompt 约 1100 tokens，理论累计命中率上限约 65%。
+- 当前 Kite Code 的 system prompt 约 1100 tokens，理论累计命中率上限约 65%。
 
-## 当前 OpenPX 前缀构成
+## 当前 Kite Code 前缀构成
 
 ### 主 agent
 

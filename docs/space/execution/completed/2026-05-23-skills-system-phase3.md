@@ -10,7 +10,7 @@
 ### 核心机制
 
 - **按需加载**：Skill 是 Markdown 文件（YAML frontmatter + body），通过 `Skill` 工具和 `/skill-name` 斜杠命令触发
-- **目录优先级**：`.openpx/skills/` > `.agents/skills/`（项目级）> `~/.openpx/skills/` > `~/.agents/skills/`（用户级）
+- **目录优先级**：`.kite-code/skills/` > `.agents/skills/`（项目级）> `~/.kite-code/skills/` > `~/.agents/skills/`（用户级）
 - **去重覆盖**：项目级覆盖用户级同名 skill
 - **容错**：校验异常静默跳过，不 throw、不 crash
 
