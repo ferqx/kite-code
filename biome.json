@@ -23,6 +23,9 @@
       "style": {
         "useImportType": "error",
         "noNonNullAssertion": "off"
+      },
+      "suspicious": {
+        "noArrayIndexKey": "off"
       }
     }
   },
