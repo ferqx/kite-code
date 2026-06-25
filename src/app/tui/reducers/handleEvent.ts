@@ -218,6 +218,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         expanded:
           !event.data.ok ||
           matched.name === 'shell_execute' ||
+          matched.name === 'edit_file' ||
+          matched.name === 'write_file' ||
           matched.name === 'update_plan' ||
           matched.name === 'ask_user',
       };
