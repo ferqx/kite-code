@@ -336,6 +336,7 @@ export default function ToolCardBlock({
   columns = 80,
 }: ToolCardBlockProps) {
   const dt = useTheme();
+  const { stdout } = useStdout();
   const showElapsed = block.name === 'shell_execute';
 
   // ── 计时器：useState + setInterval 由 React 批量合并，不产生重复渲染 ──
