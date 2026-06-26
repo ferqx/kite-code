@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from 'ink';
+import { Box, Text } from 'ink';
 import React, { useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import type { Theme } from '../theme';
@@ -336,7 +336,6 @@ export default function ToolCardBlock({
   columns = 80,
 }: ToolCardBlockProps) {
   const dt = useTheme();
-  const { stdout } = useStdout();
   const showElapsed = block.name === 'shell_execute';
 
   // ── 计时器：useState + setInterval 由 React 批量合并，不产生重复渲染 ──
@@ -352,6 +351,12 @@ export default function ToolCardBlock({
 
   useEffect(() => {
     if (block.status !== 'running') return;
+    // No spinner animation for tools waiting for user input or approval —
+    // the 80ms setInterval triggers React re-renders that cause Ink's
+    // log-update to briefly move the terminal cursor, which can force
+    // the viewport to scroll-jitter to the bottom, making text selection
+    // and scrollbar interaction impossible.
+    if (awaitingApproval || block.name === 'ask_user') return;
     const spinnerTimer = setInterval(() => setSpinnerIdx((i) => (i + 1) % SPINNER.length), 80);
     if (showElapsed) {
       const elapsedTimer = setInterval(() => {
@@ -366,7 +371,7 @@ export default function ToolCardBlock({
     return () => {
       clearInterval(spinnerTimer);
     };
-  }, [block.status, showElapsed]);
+  }, [block.status, showElapsed, awaitingApproval, block.name]);
 
   if (block.status === 'running') {
     // 等待审批/输入时用静态 ○ 代替轮播 spinner / Static dot for tools awaiting approval or input
@@ -391,7 +396,6 @@ export default function ToolCardBlock({
   }
 
   // done or error
-  const col = stdout?.columns ?? 80;
   const isShell = block.name === 'shell_execute';
   const isFileTool = block.name === 'edit_file' || block.name === 'write_file';
   const isPlan = block.name === 'update_plan';
@@ -421,7 +425,7 @@ export default function ToolCardBlock({
           自适应截断：maxLine = 终端列宽 − paddingLeft */}
       {isExpanded && isAskUser && (
         <Box paddingLeft={2} flexDirection="column">
-          {renderAskUserSummary(block.args, block.summary ?? '', dt, col - 2)}
+          {renderAskUserSummary(block.args, block.summary ?? '', dt, columns - 2)}
         </Box>
       )}
       {/* Shell 工具 / Shell */}
