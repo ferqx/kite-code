@@ -56,7 +56,6 @@ export function userInputToolMessage(
   return new ToolMessage({
     content: JSON.stringify({
       ok: true,
-      tool: request.name,
       answer: normalized.answer,
       ...(normalized.answers ? { answers: normalized.answers } : {}),
     }),
