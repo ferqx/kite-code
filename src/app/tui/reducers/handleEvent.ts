@@ -221,9 +221,14 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           /* not JSON, use raw summary */
         }
       }
+      const cancelled = !event.data.ok && summary === 'Cancelled';
       const next: OutputBlock = {
         ...matched,
-        status: event.data.ok ? ('done' as const) : ('error' as const),
+        status: event.data.ok
+          ? ('done' as const)
+          : cancelled
+            ? ('cancelled' as const)
+            : ('error' as const),
         summary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
@@ -536,10 +541,13 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         (b) => b.kind === 'subagent' && b.subagentId === event.data.id,
       );
       if (matched?.kind !== 'subagent') return state;
+      const summary = event.data.summary ?? event.data.error;
+      const cancelled = summary === 'Cancelled';
       const next: OutputBlock = {
         ...matched,
-        status: 'error' as const,
-        summary: event.data.summary ?? event.data.error,
+        status: cancelled ? ('cancelled' as const) : ('error' as const),
+        summary,
+        error: summary || undefined,
         toolCallCount: event.data.toolCallCount ?? matched.toolCallCount,
         durationMs: event.data.durationMs ?? matched.durationMs,
         expanded: false,

@@ -49,9 +49,9 @@ function isSettled(block: OutputBlock): boolean {
     case 'reason':
       return true; // content is final once emitted
     case 'tool_card':
-      return block.status === 'done' || block.status === 'error';
+      return block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
     case 'subagent':
-      return block.status === 'done' || block.status === 'error';
+      return block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
     case 'approval':
       return block.resolved !== undefined;
     case 'question':

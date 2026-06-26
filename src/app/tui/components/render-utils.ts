@@ -20,6 +20,8 @@ export function toolColor(status: string, t: ThemeColors): string {
       return t.success;
     case 'error':
       return t.error;
+    case 'cancelled':
+      return t.warning;
     case 'running':
       return t.primary;
     default:

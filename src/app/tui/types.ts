@@ -26,7 +26,7 @@ export type OutputBlock =
       callId: string;
       name: string;
       args: Record<string, unknown>;
-      status: 'running' | 'done' | 'error';
+      status: 'running' | 'done' | 'error' | 'cancelled';
       summary: string;
       preview?: string;
       /** 工具实际开始执行的时间戳（用于 live 计时器），排除审批等待后会被重置 / Wall-clock timestamp when tool actually began executing (for live timer), reset after approval to exclude wait time */
@@ -54,7 +54,7 @@ export type OutputBlock =
       subagentId: string;
       role: SubAgentRole;
       task: string;
-      status: 'running' | 'done' | 'error';
+      status: 'running' | 'done' | 'error' | 'cancelled';
       summary: string;
       toolCallCount: number;
       durationMs: number;

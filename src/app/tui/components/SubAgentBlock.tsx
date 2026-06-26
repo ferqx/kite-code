@@ -194,14 +194,16 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     );
   }
 
-  // ── Settled (done or error): same layout as running, with final summary ──
-  const settled = block.status === 'done' || block.status === 'error';
+  // ── Settled (done, error, or cancelled): same layout as running, with final summary ──
+  const settled =
+    block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
   if (settled) {
     const stepCount = block.steps.length;
     const visibleSteps =
       stepCount > MAX_RUNNING_STEPS ? block.steps.slice(-MAX_RUNNING_STEPS) : block.steps;
     const skipped = stepCount - MAX_RUNNING_STEPS;
     const isError = block.status === 'error';
+    const isCancelled = block.status === 'cancelled';
     const doneDur = formatDuration(block.durationMs);
     const headDoneBefore = stringWidth(`● ${label} · `);
     const fitDoneTask = truncateToFit(taskSummary, Math.max(0, col - headDoneBefore - 2));
@@ -240,6 +242,15 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           </Box>
         ))}
         {(() => {
+          if (isCancelled) {
+            const cancelText = block.error || block.summary || 'Cancelled';
+            const fitCancel = truncateToFit(cancelText, Math.max(0, col - 3 - 3 - 2));
+            return (
+              <Box paddingLeft={3}>
+                <Text color={dt.dim}>└─ {fitCancel}</Text>
+              </Box>
+            );
+          }
           if (isError) {
             const errText = block.error || 'Error';
             const fitErr = truncateToFit(errText, Math.max(0, col - 3 - 3 - 2));

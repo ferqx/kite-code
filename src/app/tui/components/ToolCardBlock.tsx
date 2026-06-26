@@ -400,7 +400,7 @@ export default function ToolCardBlock({
   const isFileTool = block.name === 'edit_file' || block.name === 'write_file';
   const isPlan = block.name === 'update_plan';
   const isAskUser = block.name === 'ask_user';
-  const isExpanded = block.expanded ?? block.status === 'error';
+  const isExpanded = block.expanded ?? (block.status === 'error' || block.status === 'cancelled');
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
   const displayName = ACTION_NAMES[block.name] ?? block.name;
   return (

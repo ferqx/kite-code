@@ -27,8 +27,9 @@ function cancelRunningBlocks(s: TuiState): TuiState {
       changed = true;
       return {
         ...b,
-        status: 'error' as const,
+        status: 'cancelled' as const,
         summary: 'Cancelled',
+        error: 'Cancelled',
         toolCallCount: b.steps.length,
         durationMs: s.runStartTime ? now - s.runStartTime : 0,
         expanded: false,
@@ -36,7 +37,7 @@ function cancelRunningBlocks(s: TuiState): TuiState {
     }
     if (b.kind === 'tool_card' && b.status === 'running') {
       changed = true;
-      return { ...b, status: 'error' as const, summary: 'Cancelled' };
+      return { ...b, status: 'cancelled' as const, summary: 'Cancelled' };
     }
     return b;
   });

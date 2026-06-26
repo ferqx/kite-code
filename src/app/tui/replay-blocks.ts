@@ -168,13 +168,14 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
         const { ok, summary, toolCallCount, durationMs, error, steps } = parseTaskResult(
           typeof tm.content === 'string' ? tm.content : JSON.stringify(tm.content),
         );
+        const cancelled = !ok && summary === 'Cancelled';
         blocks.push({
           id: nextId++,
           kind: 'subagent',
           subagentId: subId,
           role: pending.subagentType,
           task: pending.task,
-          status: ok ? 'done' : 'error',
+          status: ok ? 'done' : cancelled ? 'cancelled' : 'error',
           summary,
           toolCallCount,
           durationMs,
