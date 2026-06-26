@@ -140,6 +140,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
               status: 'done',
               summary: planSummary,
               preview: getToolPreview(name, args),
+              detail: getToolDetail(name, args),
               expanded: AUTO_EXPAND_TOOLS.has(name),
             });
           }
@@ -230,19 +231,29 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
       if (existingIdx >= 0) {
         const existing = blocks[existingIdx]!;
         if (existing.kind === 'tool_card') {
-          // update_plan 拒绝时：保持 done 状态，拒绝理由追加到方案内容末尾
-          // update_plan on rejection: keep done, append feedback to plan content
-          const finalSummary =
-            existing.name === 'update_plan' && !ok
-              ? `${existing.summary || summary}\n\nUser rejected: ${summary}`
-              : summary || existing.summary;
-          blocks[existingIdx] = {
-            ...existing,
-            status: existing.name === 'update_plan' ? 'done' : ok ? 'done' : 'error',
-            summary: finalSummary,
-            detail: getToolDetail(existing.name, existing.args, totalLines),
-            expanded: AUTO_EXPAND_TOOLS.has(existing.name),
-          } as (typeof blocks)[number];
+          // update_plan 拒绝时：标记 error 保留原方案内容，插入分隔线
+          // update_plan on rejection: mark error, keep original plan content, insert separator
+          if (existing.name === 'update_plan' && !ok) {
+            blocks[existingIdx] = {
+              ...existing,
+              status: 'done' as const,
+              expanded: true,
+            } as (typeof blocks)[number];
+            blocks.splice(existingIdx + 1, 0, {
+              id: nextId++,
+              kind: 'text',
+              content: '  ── Plan declined ──',
+            });
+          } else {
+            const finalSummary = summary || existing.summary;
+            blocks[existingIdx] = {
+              ...existing,
+              status: ok ? 'done' : 'error',
+              summary: finalSummary,
+              detail: getToolDetail(existing.name, existing.args, totalLines),
+              expanded: AUTO_EXPAND_TOOLS.has(existing.name),
+            } as (typeof blocks)[number];
+          }
         }
       } else {
         // Standalone ToolMessage (no preceding AIMessage tool_calls)

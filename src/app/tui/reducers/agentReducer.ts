@@ -74,7 +74,25 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
   if (s.interrupt) {
     // plan_review 没有 blockId，仅清除 interrupt / plan_review has no blockId, just clear interrupt
     if (s.interrupt.kind === 'plan_review') {
-      return { ...next, running: false, ctrlCPressed: setCtrlCPressed, interrupt: null };
+      const planCard = findBlock(next, (b) => b.kind === 'tool_card' && b.name === 'update_plan');
+      if (planCard?.kind === 'tool_card') {
+        next = replaceBlockById(next, planCard.id, {
+          ...planCard,
+          status: 'done' as const,
+          expanded: true,
+        });
+      }
+      const block: OutputBlock = {
+        id: next.nextBlockId,
+        kind: 'text',
+        content: '  ── Plan declined ──',
+      };
+      return {
+        ...appendBlock(next, block),
+        running: false,
+        ctrlCPressed: setCtrlCPressed,
+        interrupt: null,
+      };
     }
     if (s.interrupt.blockId) {
       const b = findBlockById(next, s.interrupt.blockId);
@@ -269,10 +287,31 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case 'ESCAPE': {
       // 审批/提问中 → 只取消中断，继续会话 / Interrupt active → cancel interrupt only
       if (state.interrupt) {
-        // plan_review Esc → 等同 Ctrl+C 停止会话 / plan_review Esc → same as Ctrl+C, stop session
+        // plan_review Esc → 只取消审查中断，不停止会话；graph 继续处理 rejection 落盘 checkpoint
+        // plan_review Esc → cancel review only, keep session alive so graph persists rejection to checkpoint
         if (state.interrupt.kind === 'plan_review') {
           const s = cancelRunningBlocks(state);
-          return { ...finalizeLastTurnStreaming(s), running: false, interrupt: null };
+          const finalized = finalizeLastTurnStreaming(s);
+          // card 已被 need_plan_review 设为 done；工具执行成功，仅用户拒绝，保持 done
+          // card already set to done by need_plan_review; tool succeeded, user just declined, keep done
+          const planCard = findBlock(
+            finalized,
+            (b) => b.kind === 'tool_card' && b.name === 'update_plan',
+          );
+          let next = finalized;
+          if (planCard?.kind === 'tool_card') {
+            next = replaceBlockById(next, planCard.id, {
+              ...planCard,
+              status: 'done' as const,
+              expanded: true,
+            });
+          }
+          const block: OutputBlock = {
+            id: next.nextBlockId,
+            kind: 'text',
+            content: '  ── Plan declined ──',
+          };
+          return { ...appendBlock(next, block), interrupt: null };
         }
         if (!state.interrupt.blockId) return state;
         const b = findBlockById(state, state.interrupt.blockId);

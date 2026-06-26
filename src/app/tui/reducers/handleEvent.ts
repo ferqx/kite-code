@@ -191,9 +191,16 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
       );
       if (matched?.kind !== 'tool_card') return { ...state, toolStartTimes: nextTimes };
-      // update_plan 的拒绝 ToolMessage（来自 plan_review 节点）不降级已有的 done 卡片 / Rejection ToolMessage for update_plan (from plan_review node) must not downgrade existing done card
-      if (matched.name === 'update_plan' && !event.data.ok)
-        return { ...state, toolStartTimes: nextTimes };
+      // update_plan 被拒绝（ESC 取消 / reject）：标记为 Plan declined，替代 ignore 以保证 checkpoint 重放可见
+      // update_plan declined (ESC cancel / reject): mark as error, keep original plan content
+      if (matched.name === 'update_plan' && !event.data.ok) {
+        const declined: OutputBlock = {
+          ...matched,
+          status: 'done' as const,
+          expanded: true,
+        };
+        return { ...replaceBlockById(state, matched.id, declined), toolStartTimes: nextTimes };
+      }
       // ask_user: 防御性提取人类可读的答案，避免裸 JSON 渲染 / ask_user: defensively extract human-readable answer
       let summary = event.data.summary;
       if (matched.name === 'ask_user') {
