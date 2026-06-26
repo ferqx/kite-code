@@ -7,6 +7,7 @@ export const ACTION_NAMES: Record<string, string> = {
 };
 
 export interface ThemeColors {
+  primary: string;
   success: string;
   error: string;
   warning: string;
@@ -20,7 +21,7 @@ export function toolColor(status: string, t: ThemeColors): string {
     case 'error':
       return t.error;
     case 'running':
-      return t.warning;
+      return t.primary;
     default:
       return t.muted;
   }

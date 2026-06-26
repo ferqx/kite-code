@@ -72,14 +72,15 @@ export default function OutputArea({
     { isActive: !overlayActive },
   );
 
-  // 与 Footer 的 ApprovalBlock / PlanReviewBlock / InputBlock 的 paddingX={1} 对齐，
-  // 确保 body 区与 Footer 交互区的左右边距一致。
-  // Align with Footer interaction blocks' paddingX={1} for consistent horizontal margins.
-  const innerColumns = Math.max(20, columns - 2);
+  // 与 Footer 的 ApprovalBlock / PlanReviewBlock / InputBlock 的 border 内部 paddingX={1} 对齐，
+  // 确保 body 区与 Footer 交互区的文本起始列一致。
+  // Match text start column with Footer interaction blocks' inner paddingX={1}.
+  const innerColumns = Math.max(20, columns);
+  const hasMessages = mergedStaticBlocks.length + activeDynamicBlocks.length > 0;
 
   return (
-    <Box flexDirection="column">
-      <Box height={0} overflow="hidden" paddingX={1}>
+    <Box flexDirection="column" marginBottom={hasMessages ? 1 : 0}>
+      <Box height={0} overflow="hidden">
         {staticItems && staticKey && (
           <Static key={staticKey} items={staticItems}>
             {(_item, index) => {
@@ -109,7 +110,7 @@ export default function OutputArea({
           </Static>
         )}
       </Box>
-      <Box flexDirection="column" paddingX={1}>
+      <Box flexDirection="column">
         {activeDynamicBlocks.map((block, i) => {
           const prevBlock = i > 0 ? activeDynamicBlocks[i - 1] : mergedStaticBlocks.at(-1);
           return (

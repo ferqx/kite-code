@@ -159,12 +159,13 @@ describe('toolColor', () => {
     success: darkTheme.success,
     error: darkTheme.error,
     warning: darkTheme.warning,
+    primary: darkTheme.primary,
     muted: darkTheme.muted,
   };
   test('returns theme colors for each status', () => {
     expect(toolColor('done', t)).toBe(darkTheme.success);
     expect(toolColor('error', t)).toBe(darkTheme.error);
-    expect(toolColor('running', t)).toBe(darkTheme.warning);
+    expect(toolColor('running', t)).toBe(darkTheme.primary);
     expect(toolColor('pending', t)).toBe(darkTheme.muted);
     expect(toolColor('unknown', t)).toBe(darkTheme.muted);
   });

@@ -13,7 +13,7 @@ interface FooterProps {
 
 export default function Footer({ status, running, timerKey, children }: FooterProps) {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column">
       <StatusBar status={status} running={running} timerKey={timerKey} />
       {children}
       <StatsLine
