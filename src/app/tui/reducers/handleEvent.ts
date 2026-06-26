@@ -122,6 +122,11 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           }
         }
       }
+      // 纯空白文本（含 Unicode 空白）不创建 block — MarkdownBlock 不渲染，
+      // 但 block 本身会通过 gapFrom 的 marginTop 产生多余空白行。
+      // Blank/whitespace-only text (incl. Unicode whitespace) creates no
+      // visual output but its marginTop adds unwanted blank lines.
+      if (!/\S/u.test(event.data.text)) return state;
       const id = state.nextBlockId;
       const block: OutputBlock = {
         id,
@@ -337,13 +342,14 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // final 可能比最后一个 text 事件多几个字符 → 只追加增量，不创建全文 block 避免重复
       if (fullText.length > 0 && event.data.startsWith(fullText)) {
         const delta = event.data.slice(fullText.length);
-        if (delta.length === 0) return finalized;
+        if (delta.length === 0 || !/\S/u.test(delta)) return finalized;
         const id = finalized.nextBlockId;
         const block: OutputBlock = { id, kind: 'text', content: delta };
         return appendBlock(finalized, block);
       }
       // 无前置 text block（纯 tool 调用等）→ 创建全文 block
       if (fullText.length === 0) {
+        if (!/\S/u.test(event.data)) return finalized;
         const id = finalized.nextBlockId;
         const block: OutputBlock = { id, kind: 'text', content: event.data };
         return appendBlock(finalized, block);
