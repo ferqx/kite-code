@@ -72,9 +72,14 @@ export default function OutputArea({
     { isActive: !overlayActive },
   );
 
+  // 与 Footer 的 ApprovalBlock / PlanReviewBlock / InputBlock 的 paddingX={1} 对齐，
+  // 确保 body 区与 Footer 交互区的左右边距一致。
+  // Align with Footer interaction blocks' paddingX={1} for consistent horizontal margins.
+  const innerColumns = Math.max(20, columns - 2);
+
   return (
     <Box flexDirection="column">
-      <Box height={0} overflow="hidden">
+      <Box height={0} overflow="hidden" paddingX={1}>
         {staticItems && staticKey && (
           <Static key={staticKey} items={staticItems}>
             {(_item, index) => {
@@ -97,27 +102,29 @@ export default function OutputArea({
                   index={index - 1}
                   prevBlock={prevBlock}
                   awaitingApproval={false}
-                  columns={columns}
+                  columns={innerColumns}
                 />
               );
             }}
           </Static>
         )}
       </Box>
-      {activeDynamicBlocks.map((block, i) => {
-        const prevBlock = i > 0 ? activeDynamicBlocks[i - 1] : mergedStaticBlocks.at(-1);
-        return (
-          <BlockRenderer
-            key={block.id}
-            block={block}
-            isFocused={false}
-            index={i}
-            prevBlock={prevBlock}
-            awaitingApproval={awaitingApproval}
-            columns={columns}
-          />
-        );
-      })}
+      <Box flexDirection="column" paddingX={1}>
+        {activeDynamicBlocks.map((block, i) => {
+          const prevBlock = i > 0 ? activeDynamicBlocks[i - 1] : mergedStaticBlocks.at(-1);
+          return (
+            <BlockRenderer
+              key={block.id}
+              block={block}
+              isFocused={false}
+              index={i}
+              prevBlock={prevBlock}
+              awaitingApproval={awaitingApproval}
+              columns={innerColumns}
+            />
+          );
+        })}
+      </Box>
     </Box>
   );
 }

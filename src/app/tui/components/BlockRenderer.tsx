@@ -38,8 +38,21 @@ function formatLines(added?: number, removed?: number): string {
 
 const BLOCK_GAP = 1;
 
-function gapFrom(_prevBlock?: OutputBlock) {
-  return { marginTop: 0, marginBottom: BLOCK_GAP } as const;
+/** 每个 block 自己负责与上一个 block 的间距（marginTop），而非依赖前一个 block 的 marginBottom。
+ *  这样避免了 Static/Dynamic 边界和 block 状态转换时 marginBottom 在 Ink Yoga 布局中被丢失的问题。
+ *  Each block owns its own spacing from the previous block via marginTop,
+ *  rather than relying on the previous block's marginBottom. This avoids
+ *  marginBottom being lost across Static/Dynamic boundaries and state transitions.
+ *
+ *  斜杠命令是唯一的例外 — 命令结果应紧跟命令本身，0 间距。
+ *  Slash commands are the only exception — results should directly follow the command. */
+function gapFrom(prevBlock?: OutputBlock) {
+  if (!prevBlock) return { marginTop: 0, marginBottom: 0 } as const;
+  // 斜杠命令结果紧跟命令，无间距 / Slash command results follow commands directly, no gap
+  if (prevBlock.kind === 'user' && prevBlock.content.startsWith('/')) {
+    return { marginTop: 0, marginBottom: 0 } as const;
+  }
+  return { marginTop: BLOCK_GAP, marginBottom: 0 } as const;
 }
 
 interface BlockRendererProps {
@@ -72,9 +85,8 @@ const BlockRenderer = React.memo(function BlockRenderer({
       const fullText = prompt + block.content;
       const wrappedLines = wrapDisplayLines(fullText, wrapWidth);
 
-      const isSlashCommand = block.content.startsWith('/');
       return (
-        <Box marginTop={gapFrom(prevBlock).marginTop} marginBottom={isSlashCommand ? 0 : BLOCK_GAP}>
+        <Box marginTop={gapFrom(prevBlock).marginTop} marginBottom={0}>
           {wrappedLines.map((displayLine, i) => (
             <Box key={i} backgroundColor={dt.userMsgBg} width={columns}>
               <Text>{displayLine}</Text>
@@ -85,15 +97,18 @@ const BlockRenderer = React.memo(function BlockRenderer({
     }
 
     case 'text': {
-      // 流式渲染期间，text 事件中的 \n 会按行拆分为独立 OutputBlock，
-      // 其中 content === "" 的空行块仅表示段落分隔 — 前一个内容块的
-      // marginBottom 已提供间距，空行块不应额外叠加 margin。
-      // During streaming, \n in text events splits content into per-line
-      // blocks. Empty-string blocks represent paragraph breaks — the
-      // preceding content block's marginBottom already provides spacing.
-      const isEmpty = block.content === '';
+      // 空白内容块（ASCII/Unicode 空白、控制字符等）不应渲染任何可见元素。
+      // trim() 只能移除 ASCII 空白，\S 正则（Unicode 模式）可捕获各类
+      // 不可见 Unicode 字符（ , ​ 等），避免 MarkdownBlock
+      // 将其当作有效行渲染，导致 gapFrom marginTop 叠加产生双倍间距。
+      // Blank/whitespace-only blocks (incl. Unicode whitespace) should
+      // render nothing — trim() only catches ASCII whitespace; /\S/u
+      // catches invisible Unicode characters that would otherwise
+      // produce double-spacing via stacked marginTop.
+      const hasVisible = /\S/u.test(block.content);
+      if (!hasVisible) return null;
       return (
-        <Box marginTop={0} marginBottom={isEmpty ? 0 : BLOCK_GAP}>
+        <Box marginTop={gapFrom(prevBlock).marginTop} marginBottom={0}>
           <MarkdownBlock
             content={block.content}
             streaming={block.streaming}

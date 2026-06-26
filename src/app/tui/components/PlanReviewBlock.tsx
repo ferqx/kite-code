@@ -134,13 +134,7 @@ export default function PlanReviewBlock({
   // 方案内容已在 OutputArea 以 Markdown tool_card 渲染，Footer 只显示确认操作条
   // Plan content is rendered in OutputArea as Markdown tool_card; Footer only shows the confirmation bar
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={t.primary}
-      paddingX={1}
-      marginY={1}
-    >
+    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
       {mode === 'options' ? (
         <>
           <Text color={t.primary}>Review the plan above and choose:</Text>
