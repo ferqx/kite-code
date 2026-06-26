@@ -4,7 +4,6 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { type AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import { ChatOllama } from '@langchain/ollama';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
-import { buildStaticSystemPrompt } from '@/core/model/context';
 import { createChatModel } from '@/core/model/factory';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
@@ -120,15 +119,23 @@ CWD: ${process.cwd()}
 ${input.task}`;
 
   // System prompt layout (single merged message for cache stability):
-  //   Merged: sharedSystemPrompt + "\\n\\n" + role.systemPrompt + "\\n\\n" + cacheableRuntimeCtx
-  //   Position 0: SystemMessage(merged)  — cache-stable prefix
+  //   Role-specific self-contained prompt (no shared prefix contamination).
+  //   Code role appends skills if present; all roles append cacheableRuntimeCtx at end.
+  //   Position 0: SystemMessage(merged)  — cache-stable prefix (role prompt is deterministic per role)
   //   Position 1: HumanMessage(taskWithCwd) — unique per call
-  const sharedSystemPrompt = buildStaticSystemPrompt('agent', input.skills);
-  const mergedSystemPrompt = `${sharedSystemPrompt}\n\n${input.role.systemPrompt}\n\n${cacheableRuntimeCtx}`;
-  const messages: BaseMessage[] = [
-    new SystemMessage(mergedSystemPrompt),
-    new HumanMessage(taskWithCwd),
-  ];
+  let systemPrompt = input.role.systemPrompt;
+  // Code sub-agent: append available skills (it has Skill tool access)
+  if (input.role.role === 'code' && input.skills && input.skills.length > 0) {
+    const skillLines = input.skills.map((s) => `- ${s.name}: ${s.description}`);
+    systemPrompt += [
+      '',
+      '## Available Skills',
+      'Use the Skill tool to invoke a skill when its description matches your task.',
+      ...skillLines,
+    ].join('\n');
+  }
+  systemPrompt += `\n\n${cacheableRuntimeCtx}`;
+  const messages: BaseMessage[] = [new SystemMessage(systemPrompt), new HumanMessage(taskWithCwd)];
 
   try {
     // Yield control so Ink/React can render the subagent_start block before we block on model calls

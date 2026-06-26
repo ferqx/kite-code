@@ -1720,7 +1720,11 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('EVENT.subagent_*', () => {
-    function saStart(id: string, role: 'explore' | 'code' | 'review', task: string): Action {
+    function saStart(
+      id: string,
+      role: 'explore' | 'plan' | 'code' | 'review',
+      task: string,
+    ): Action {
       return { type: 'EVENT', event: { type: 'subagent_start', data: { id, role, task } } };
     }
     function saStep(id: string, toolName: string, toolArgs: Record<string, unknown> = {}): Action {

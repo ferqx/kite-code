@@ -240,7 +240,7 @@ export interface ToolApprovalPayload {
 }
 
 // ── 子 Agent 事件 / Sub-agent events ──
-export type SubAgentRole = 'explore' | 'code' | 'review';
+export type SubAgentRole = 'explore' | 'plan' | 'code' | 'review';
 
 export interface SubAgentStartPayload {
   id: string;

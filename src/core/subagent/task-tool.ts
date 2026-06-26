@@ -87,6 +87,7 @@ export function createTaskTool(deps: TaskToolDeps) {
         '',
         'Available types:',
         '- explore: Read-only search across the codebase. Best for: finding usages, tracing call chains, gathering evidence.',
+        '- plan: Read-only architecture design. Best for: designing implementation approaches, evaluating trade-offs, proposing file structures.',
         '- code: Full read/write/execute. Best for: implementing features, fixing bugs, running tests.',
         '- review: Read-only critical review. Best for: security audit, code quality check, regression detection.',
         '',
@@ -94,7 +95,7 @@ export function createTaskTool(deps: TaskToolDeps) {
       ].join('\n'),
       schema: z.object({
         subagent_type: z
-          .enum(['explore', 'code', 'review'])
+          .enum(['explore', 'plan', 'code', 'review'])
           .describe('Type of sub-agent to invoke'),
         task: z
           .string()

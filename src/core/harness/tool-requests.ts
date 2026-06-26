@@ -92,7 +92,7 @@ export type PendingToolRequest =
       /** 工具调用 ID / Tool call ID */
       id?: string;
       name: 'task';
-      args: { subagent_type: 'explore' | 'code' | 'review'; task: string };
+      args: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string };
       /** 调用原因 / Call reason */
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
@@ -281,7 +281,7 @@ function toolRequestFromCall(
       id: call.id,
       name: 'task',
       args: {
-        subagent_type: (args?.subagent_type as 'explore' | 'code' | 'review') ?? 'explore',
+        subagent_type: (args?.subagent_type as 'explore' | 'plan' | 'code' | 'review') ?? 'explore',
         task: (args?.task as string) ?? '',
       },
       reason: 'Model requested sub-agent dispatch',
@@ -440,7 +440,7 @@ export function toolRequestFromMessage(
       id: call.id,
       name: 'task',
       args: {
-        subagent_type: (args?.subagent_type as 'explore' | 'code' | 'review') ?? 'explore',
+        subagent_type: (args?.subagent_type as 'explore' | 'plan' | 'code' | 'review') ?? 'explore',
         task: (args?.task as string) ?? '',
       },
       reason: 'Model requested sub-agent dispatch',
