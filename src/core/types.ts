@@ -5,6 +5,8 @@ export interface ShellInput {
   command: string;
   /** 中止信号，取消时 kill 子进程 / Abort signal to kill child process on cancellation */
   signal?: AbortSignal;
+  /** 实时输出回调 — shell 进程每产生一行文本时调用 / Called per output line while shell process is running */
+  onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
 }
 
 export interface ShellResult {

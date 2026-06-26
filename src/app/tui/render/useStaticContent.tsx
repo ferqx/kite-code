@@ -75,7 +75,12 @@ export function blockFingerprint(b: OutputBlock): string {
       extra = b.streaming ? `:s:${b.content.length}` : ':f';
       break;
     case 'tool_card':
-      extra = `:${b.status}`;
+      // liveOutput 头尾各 8 字符 + totalLines 做指纹：窗口滑动 → 头部变；新增行 → 尾部变 / 计数变
+      extra =
+        `:${b.status}` +
+        (b.liveOutput
+          ? `:lo${b.liveOutput.length}:${b.liveOutput.slice(0, 8)}:${b.liveOutput.slice(-8)}:t${b.liveTotalLines ?? 0}`
+          : '');
       break;
     case 'subagent':
       extra = `:${b.status}:${b.steps.length}`;

@@ -226,6 +226,23 @@ export async function* runAgent(
       }
     });
 
+  // Shell 实时输出 → TUI 事件 / Live shell output → TUI event
+  const toolProgressSink = (
+    callId: string,
+    toolName: string,
+    chunk: string,
+    stream: 'stdout' | 'stderr',
+  ) => {
+    try {
+      provider.onEvent({
+        type: 'tool_progress',
+        data: { call_id: callId, name: toolName, chunk, stream },
+      });
+    } catch {
+      // TUI 异常不影响 Agent
+    }
+  };
+
   const { graph, checkpointer } = buildCodeAgentGraph({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -239,6 +256,7 @@ export async function* runAgent(
     subagentEventSink,
     subagentSignal: input.signal,
     toolResultSink,
+    toolProgressSink,
   });
 
   try {

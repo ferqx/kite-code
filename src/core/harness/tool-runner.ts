@@ -31,6 +31,8 @@ export interface RunApprovedToolInput {
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   signal?: AbortSignal;
+  /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
+  onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -327,7 +329,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'shell_execute') {
-    const raw = await runShellForTool(workspace, request.args.command, shellExecutor, signal);
+    const raw = await runShellForTool(workspace, request.args.command, shellExecutor, signal, input.onShellProgress);
     const result: ShellResult = {
       ...raw,
       stdout: truncateToolOutput(raw.stdout),
@@ -371,9 +373,10 @@ async function runShellForTool(
   command: string,
   shellExecutor?: ShellExecutor,
   signal?: AbortSignal,
+  onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void,
 ): Promise<ShellResult> {
   try {
-    return await (shellExecutor ?? shellTool)({ workspace, command, signal });
+    return await (shellExecutor ?? shellTool)({ workspace, command, signal, onProgress });
   } catch (error) {
     const isAbort = error instanceof Error && error.name === 'AbortError';
     return {

@@ -37,6 +37,8 @@ export type AgentEvent =
   | { type: 'subagent_done'; data: SubAgentDonePayload }
   | { type: 'subagent_error'; data: SubAgentErrorPayload }
   | { type: 'subagent_cache_metrics'; data: SubAgentCacheMetricsPayload }
+  /** Shell 工具实时输出 — 进程运行期间逐行推送 stdout/stderr，使 TUI 实时展示执行进度 */
+  | { type: 'tool_progress'; data: ToolProgressPayload }
   // ── 会话/对话边界 / Conversation turn boundaries ──
   | { type: 'turn_begin'; data: { index: number; spanId: string } }
   | { type: 'turn_end'; data: { index: number } }
@@ -86,6 +88,16 @@ export interface ToolCallPayload {
   call_id: string;
   name: string;
   args: Record<string, unknown>;
+}
+
+/** Shell 工具实时输出负载 — 进程运行期间逐行推送 / Per-line progress payload emitted during shell execution */
+export interface ToolProgressPayload {
+  call_id: string;
+  name: string;
+  /** 单行文本（不含换行符）/ Single line of output (no newline) */
+  chunk: string;
+  /** 来源流 / Source stream */
+  stream: 'stdout' | 'stderr';
 }
 
 export interface ToolResultPayload {

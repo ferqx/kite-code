@@ -80,6 +80,15 @@ export interface BuildCodeAgentGraphInput {
     totalLines?: number,
     toolTokenCount?: number,
   ) => void;
+  /** 工具进度回调 — shell 进程产生输出时逐行调用，使 TUI 实时展示。
+   *  Per-line progress callback — called for each stdout/stderr line during
+   *  shell execution, so the TUI shows live output. */
+  toolProgressSink?: (
+    callId: string,
+    toolName: string,
+    chunk: string,
+    stream: 'stdout' | 'stderr',
+  ) => void;
 }
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
@@ -449,6 +458,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
     }
 
+    // 构造 shell 实时输出回调（仅对 shell_execute 生效）
+    const onShellProgress = input.toolProgressSink
+      ? (chunk: string, stream: 'stdout' | 'stderr') => {
+          input.toolProgressSink!(request.id ?? '', request.name, chunk, stream);
+        }
+      : undefined;
+
     const result = await runApprovedTool({
       workspace: state.workspace,
       request,
@@ -464,7 +480,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       skillManifests: input.skills,
       skillOptions: input.skillOptions,
       signal: input.subagentSignal,
+      onShellProgress,
     });
+
+    // Flush React re-renders before dispatching tool_done, so intermediate
+    // tool_progress updates (liveOutput) are rendered before status → done.
+    // Only needed when this tool emitted progress events; skip otherwise.
+    if (onShellProgress) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
 
     // 逐个推送完成事件，TUI 在并行执行期间逐项刷新 / Push completion
     // event per-tool so TUI refreshes progressively during parallel execution.

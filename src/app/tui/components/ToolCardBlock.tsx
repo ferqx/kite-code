@@ -7,7 +7,7 @@ import type { OutputBlock } from '../types';
 import MarkdownBlock from './MarkdownBlock';
 import { ACTION_NAMES, formatElapsed, SPINNER, toolColor } from './render-utils';
 
-const MAX_TOOL_LINES = 5;
+export const MAX_TOOL_LINES = 5;
 const SHELL_PREFIX = '⎿   ';
 /** Reuse SHELL_PREFIX glyph for continuation lines — pure whitespace
  *  (like "    ") is vulnerable to collapsing in Ink's Yoga text layout. */
@@ -201,37 +201,30 @@ function renderAskUserSummary(
   );
 }
 
-function renderShellSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
-  const color = isError ? dt.error : dt.dim;
-  const text = summary.trimEnd();
-  const lines = text.split('\n');
+const SHELL_PREFIX_W = stringWidth(SHELL_PREFIX);
 
-  if (lines.length <= 1) {
-    return (
-      <Text color={color}>
-        {SHELL_PREFIX}
-        {text.slice(0, 300)}
-      </Text>
-    );
-  }
-
-  const displayLines = lines.slice(0, MAX_TOOL_LINES);
-  const truncated = lines.length > MAX_TOOL_LINES;
+/** 统一的 shell 输出渲染：SHELL_PREFIX + 终端宽度截断 + 5 行窗口 + 尾行展示最新 N 行。
+ *  始终 fragment + map 渲染（消除单/多行分支切换导致的 reconciliation 问题）。
+ *  Unified shell output renderer: shears common logic from renderShellSummary + renderLiveShellOutput. */
+function renderShellLines(text: string, color: string, maxLine: number, totalLines?: number) {
+  const lines = text.trimEnd().split('\n');
+  const contentWidth = Math.max(10, maxLine - SHELL_PREFIX_W);
+  const displayLines = lines.slice(-MAX_TOOL_LINES);
+  const skipped = (totalLines ?? lines.length) - MAX_TOOL_LINES;
 
   return (
-    <React.Fragment>
-      {displayLines.map((line, i) => (
-        <Text key={i} color={color}>
-          {i === 0 ? SHELL_PREFIX : SHELL_ALIGN}
-          {line.slice(0, 200)}
-        </Text>
-      ))}
-      {truncated && (
-        <Text color={dt.dim}>
-          {SHELL_ALIGN}… +{lines.length - MAX_TOOL_LINES} lines
+    <>
+      {skipped > 0 && (
+        <Text color={color}>
+          {SHELL_ALIGN}… +{skipped} lines
         </Text>
       )}
-    </React.Fragment>
+      {displayLines.map((line, i) => (
+        <Text key={i} color={color}>
+          {SHELL_PREFIX}{clip(line, contentWidth)}
+        </Text>
+      ))}
+    </>
   );
 }
 
@@ -373,6 +366,8 @@ export default function ToolCardBlock({
     };
   }, [block.status, showElapsed, awaitingApproval, block.name]);
 
+  const isShell = block.name === 'shell_execute';
+
   if (block.status === 'running') {
     // 等待审批/输入时用静态 ○ 代替轮播 spinner / Static dot for tools awaiting approval or input
     const isWaiting = awaitingApproval || block.name === 'ask_user';
@@ -391,12 +386,17 @@ export default function ToolCardBlock({
           ) : null}
         </Box>
         {/* ask_user 运行时问题由 Footer InputBlock 渲染，scrollback 不重复展示 */}
+        {/* Shell 实时输出 — tail-follow 最近 5 行，与 renderShellSummary 保持视觉一致 */}
+        {isShell && block.liveOutput && (
+          <Box paddingLeft={2} flexDirection="column">
+            {renderShellLines(block.liveOutput, dt.dim, columns - 2, block.liveTotalLines)}
+          </Box>
+        )}
       </Box>
     );
   }
 
   // done or error
-  const isShell = block.name === 'shell_execute';
   const isFileTool = block.name === 'edit_file' || block.name === 'write_file';
   const isPlan = block.name === 'update_plan';
   const isAskUser = block.name === 'ask_user';
@@ -432,10 +432,17 @@ export default function ToolCardBlock({
       {isExpanded && isShell && (
         <Box paddingLeft={2} flexDirection="column">
           {hasSummary ? (
-            renderShellSummary(block.summary!, block.status === 'error', dt)
+            renderShellLines(block.summary!, block.status === 'error' ? dt.error : dt.dim, columns - 2)
           ) : (
             <Text color={dt.dim}>{SHELL_PREFIX}(No output)</Text>
           )}
+          {/* 状态尾行：exit code / cancelled / Status footer */}
+          <Text color={dt.dim}>
+            {SHELL_PREFIX}
+            {block.summary?.startsWith('Command cancelled') || block.summary?.includes('"cancelled":true')
+              ? 'cancelled'
+              : `exit: ${block.status === 'error' ? 'error' : '0'}`}
+          </Text>
           {block.status === 'error' && block.summary?.split('\n').length > 3 && (
             <Text color={dt.dim}>Enter 折叠</Text>
           )}

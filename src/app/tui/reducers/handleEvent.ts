@@ -2,6 +2,7 @@
 
 import type { AgentEvent } from '@/protocol/events';
 import { getToolDetail, getToolPreview } from '../components/render-utils';
+import { MAX_TOOL_LINES } from '../components/ToolCardBlock';
 import type { FileChangeRecord, OutputBlock, TuiState } from '../types';
 import {
   appendBlock,
@@ -579,6 +580,33 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       //   return appendBlock(updated, block);
       // }
       return updated;
+    }
+    case 'tool_progress': {
+      const matched = findBlock(
+        state,
+        (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
+      );
+      if (matched?.kind !== 'tool_card' || matched.status !== 'running') return state;
+
+      const prev = matched.liveOutput ?? '';
+      const line = event.data.chunk;
+      const next = prev ? `${prev}\n${line}` : line;
+
+      // Tail-follow：固定窗口，保留最近 N 行（与 ToolCardBlock.MAX_TOOL_LINES 一致）
+      const lines = next.split('\n');
+      const capped =
+        lines.length > MAX_TOOL_LINES ? lines.slice(-MAX_TOOL_LINES).join('\n') : next;
+
+      // 累计总行数：基于上一次的 total + 新行数（非完整行不计数）
+      const prevTotal = matched.liveTotalLines ?? 0;
+      const prevLineCount = prev ? prev.split('\n').length : 0;
+      const newCompleteLines = lines.length - prevLineCount;
+
+      return replaceBlockById(state, matched.id, {
+        ...matched,
+        liveOutput: capped,
+        liveTotalLines: prevTotal + Math.max(0, newCompleteLines),
+      });
     }
     // Raw passthrough events — intentionally no-op for UI consumers
     case 'interrupt':

@@ -22,6 +22,46 @@ export function assertInsideWorkspace(workspace: string, targetPath: string): st
   return absoluteTarget;
 }
 
+/** 逐行读取 ReadableStream，每行触发 onLine，返回完整文本。
+ *  Line-by-line stream reader — emits per-line callbacks as data arrives,
+ *  returns accumulated full text when stream closes. */
+async function readWithProgress(
+  stream: ReadableStream<Uint8Array>,
+  onLine: (line: string) => void,
+): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let result = '';
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const text = decoder.decode(value, { stream: true });
+      result += text;
+      buffer += text;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) onLine(line);
+    }
+    // Flush partial multi-byte sequences from TextDecoder internal buffer
+    if (buffer.length > 0) {
+      const flushed = decoder.decode();
+      if (flushed) { buffer += flushed; result += flushed; }
+      onLine(buffer);
+    }
+  } catch {
+    // Stream interrupted (e.g. process killed) — return what we have
+    if (buffer.length > 0) {
+      onLine(buffer);
+    }
+  } finally {
+    // Release reader lock to avoid leaks
+    try { reader.releaseLock(); } catch { /* already released */ }
+  }
+  return result;
+}
+
 /** 通过 Bun.spawn 执行 Shell 命令，返回结构化结果 / Execute shell command via Bun.spawn, return structured result */
 export async function shellTool(input: ShellInput): Promise<ShellResult> {
   try {
@@ -31,6 +71,26 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
       stderr: 'pipe',
       signal: input.signal,
     });
+
+    if (input.onProgress) {
+      // 顺序流式读取：stdout → stderr，逐行触发 onProgress。
+      // 顺序读避免 Bun reader.read() 在并发模式下的挂起问题。
+      // Sequential streaming: stdout → stderr with per-line progress.
+      // Sequential reads avoid Bun reader.read() hangs in concurrent mode.
+      const stdout = await readWithProgress(proc.stdout, (line) => input.onProgress!(line, 'stdout'));
+      const rawStderr = await readWithProgress(proc.stderr, (line) => input.onProgress!(line, 'stderr'));
+      const exitCode = await proc.exited;
+
+      return {
+        ok: exitCode === 0,
+        command: input.command,
+        exitCode,
+        stdout: normalizeMsys2PathsInText(stdout),
+        stderr: cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+      };
+    }
+
+    // 无 onProgress → 原始路径，零开销
     const stdout = await new Response(proc.stdout).text();
     const rawStderr = await new Response(proc.stderr).text();
     const exitCode = await proc.exited;

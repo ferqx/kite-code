@@ -34,6 +34,10 @@ export type OutputBlock =
       elapsedMs?: number;
       detail?: string;
       expanded?: boolean;
+      /** 工具运行期间的实时输出（逐行追加，tail-follow 最近 5 行），done/error 后由 summary 替代渲染 */
+      liveOutput?: string;
+      /** liveOutput 被截断前的总行数，用于展示截断计数 */
+      liveTotalLines?: number;
     }
   | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
   | {
