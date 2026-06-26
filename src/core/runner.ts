@@ -666,7 +666,9 @@ function mapActionToResumeValue(action: UserAction): AgentResumeValue {
 
 // ── chunkToEvents 子解析器 ──
 
-/** Parse AIMessage → text, reason, tool_call events */
+/** Parse AIMessage → text, reason, tool_call events.
+ *  LLM 响应中 text 始终先于 tool_calls，事件顺序必须与此一致。
+ *  Text always precedes tool_calls in the LLM response; events must match. */
 function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
   const events: AgentEvent[] = [];
   // DeepSeek puts reasoning_content in additional_kwargs or as a top-level field
@@ -675,6 +677,11 @@ function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
     ((msg as unknown as Record<string, unknown>).reasoning_content as string | undefined);
   if (typeof rc === 'string' && rc.length > 0) {
     events.push({ type: 'reason', data: { text: rc } });
+  }
+
+  const text = extractText(msg.content);
+  if (text.length > 0) {
+    events.push({ type: 'text', data: { text } });
   }
   if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
     for (const tc of msg.tool_calls) {
@@ -687,10 +694,6 @@ function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
         },
       });
     }
-  }
-  const text = extractText(msg.content);
-  if (text.length > 0) {
-    events.push({ type: 'text', data: { text } });
   }
   return events;
 }
