@@ -266,7 +266,9 @@ export async function* runAgent(
     let turnIndex = 0;
 
     while (true) {
-      if (signal?.aborted) break;
+      // 若 resumeValue 待处理（plan 拒绝等），先让 graph 落盘再响应 abort
+      // If resumeValue is pending (e.g. plan rejection), let graph persist state before abort
+      if (signal?.aborted && !resumeValue) break;
 
       const streamConfig = {
         configurable: { thread_id: input.threadId },
@@ -482,10 +484,6 @@ async function processStream(
   const pendingToolCalls = new Map<string, { name: string; args: Record<string, unknown> }>();
 
   for await (const chunk of stream) {
-    if (signal?.aborted) {
-      return { events: allEvents, kind: 'done' };
-    }
-
     const interruptData = extractInterrupt(chunk, isInterrupted, INTERRUPT);
     if (interruptData) {
       const event = interruptToEvent(interruptData);
@@ -540,6 +538,12 @@ async function processStream(
     for (const e of events) {
       sink.emit(e);
       allEvents.push(e);
+    }
+
+    // 先处理 chunk 再检查 abort，避免丢弃已接收的 graph 输出（如 plan 拒绝的 ToolMessage）
+    // Check abort after processing, so received graph outputs (e.g. rejected plan ToolMessage) are not dropped
+    if (signal?.aborted) {
+      return { events: allEvents, kind: 'done' };
     }
   }
 
@@ -969,15 +973,17 @@ export async function* normalizeGraphStream(
   let currentWorkspaceAccess: WorkspaceAccess | null = null;
   const cacheStandard = createPromptCacheStandardTracker();
   for await (const chunk of stream) {
-    if (signal?.aborted) return;
     if (isInterrupted(chunk)) {
       yield { type: 'interrupt', data: (chunk as Record<string | symbol, unknown>)[INTERRUPT] };
+      // 中断 chunk 同样需要检查 abort，避免消费方已取消仍继续生成事件
+      if (signal?.aborted) return;
       continue;
     }
 
     const chunkRecord = chunk as Record<string, unknown>;
     if (INTERRUPT in chunkRecord) {
       yield { type: 'interrupt', data: chunkRecord[String(INTERRUPT)] };
+      if (signal?.aborted) return;
       continue;
     }
 
@@ -987,6 +993,8 @@ export async function* normalizeGraphStream(
     for (const retry of findModelRetries(chunk)) {
       yield { type: 'model_retry', data: retry };
     }
+
+    if (signal?.aborted) return;
 
     const metrics = findPromptCacheMetrics(chunk);
     if (metrics && currentWorkspaceAccess) {
