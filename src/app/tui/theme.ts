@@ -111,19 +111,25 @@ const presetRGB: Record<ThemePreset, Record<string, string>> = {
   },
 };
 
-/** Build OSC 4 sequence: reprogram terminal palette slots to preset colors */
+/** Build OSC 4 sequence: reprogram terminal palette slots to preset colors.
+ *  Bold text in terminals often uses bright ANSI slots (8-15) instead of
+ *  the base palette. We reprogram BOTH the normal slot and its bright
+ *  counterpart (slot + 8) so bold-colored text also follows the theme. */
 export function osc4Apply(preset: ThemePreset): string {
   const colors = presetRGB[preset];
   let seq = '';
   for (const [role, hex] of Object.entries(colors)) {
     const idx = PALETTE_INDEX[role as keyof Theme];
-    if (idx != null && hex) {
-      // rgb:RR/GG/BB format — most widely supported across terminals
-      const rrggbb = hex.slice(1);
-      const r = rrggbb.slice(0, 2);
-      const g = rrggbb.slice(2, 4);
-      const b = rrggbb.slice(4, 6);
-      seq += `\u001B]4;${idx};rgb:${r}/${g}/${b}\u0007`;
+    if (idx == null || !hex) continue;
+    const rrggbb = hex.slice(1);
+    const r = rrggbb.slice(0, 2);
+    const g = rrggbb.slice(2, 4);
+    const b = rrggbb.slice(4, 6);
+    seq += `\u001B]4;${idx};rgb:${r}/${g}/${b}\u0007`;
+    // Bold text uses bright ANSI slots (8-15). Reprogram the bright
+    // counterpart so bold-text follows the theme preset.
+    if (idx < 8) {
+      seq += `\u001B]4;${idx + 8};rgb:${r}/${g}/${b}\u0007`;
     }
   }
   return seq;

@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-06-27（shell 实时输出方案完成）
+最后更新：2026-06-27（OSC 4 高亮槽修复 + shell 实时输出）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -63,6 +63,7 @@
 | `understanding/2026-06-09-prompt-cache-optimization.md` | understanding | Prompt Cache 优化：合并 SystemMessage、清理死参数、修复 reasoning_content 注入 key 碰撞、TUI 缓存日志、子 agent 缓存震荡根因、对标 Claude Code/Codex/OpenCode 子 agent 结果回传机制。 |
 | `understanding/2026-06-09-token-stats-persistence-design.md` | understanding | Token 统计持久化系统：手动统计（不依赖 provider）、SQLite 持久化跨重启保留、useEffect 自动保存消除 stateRef 滞后、getSnapshot 内存缓存消除回车卡顿。 |
 | `understanding/2026-06-10-shell-concurrent-execution-design.md` | understanding | Shell 工具并发执行 + 批量审批流程 |
+| `understanding/2026-06-27-osc4-bold-bright-slot.md` | understanding | OSC 4 高亮调色槽发现：终端 bold 文本使用 slot 8-15，OSC 4 需同时重编程基础槽和高亮槽才能让 bold+color 文本跟随主题 |
 
 ## Backlog（工作待办）
 
