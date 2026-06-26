@@ -373,10 +373,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     if (approved) {
       const mode = (resumeObj?.executionMode as string) === 'manual' ? 'default' : 'full_access';
+      // 方案数据已在 AIMessage.tool_calls.args 中，ToolMessage 只需标记 ok + 简短摘要。
+      // 重复放入完整 plan 对象会浪费 token 并降低后续调用前缀缓存命中率。
+      // The plan data is already in AIMessage.tool_calls.args; ToolMessage only needs ok + brief summary.
+      // Including the full plan redundantly wastes tokens and degrades prefix cache hit rates.
       return {
         messages: [
           new ToolMessage({
-            content: JSON.stringify({ ok: true, plan, stdout: planSummary }),
+            content: JSON.stringify({ ok: true, stdout: planSummary.slice(0, 200) }),
             tool_call_id: request.id ?? 'missing-tool-call-id',
             name: 'update_plan',
             status: 'success',
