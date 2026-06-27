@@ -5,6 +5,7 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '@/core/tools/file';
 import { type ShellExecutor, shellTool } from '@/core/tools/shell';
+import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type { AuthorizationOverride, ShellResult, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 import {
@@ -53,6 +54,26 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     skillOptions,
     signal,
   } = input;
+  // 合成调用：parseToolCall 失败后由 invokeModel 注入 _raw_invalid_args 标记。
+  // 跳过正常执行，直接生成工具特定的错误反馈让模型重试。
+  // Synthetic call: injected by invokeModel after parseToolCall failure.
+  // Skip normal execution, generate tool-specific error so model can retry.
+  const args = (request.args ?? {}) as Record<string, unknown>;
+  if (typeof args._raw_invalid_args === 'string') {
+    const errDetail = formatToolParseError(
+      request.name,
+      args._raw_invalid_args,
+      (args._parse_error as string) ?? 'invalid JSON arguments',
+    );
+    return {
+      ok: false,
+      command: request.name,
+      exitCode: -1,
+      stdout: '',
+      stderr: errDetail,
+    };
+  }
+
   const policy = evaluateToolPolicy({
     request,
     workspaceAccess,
@@ -329,7 +350,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'shell_execute') {
-    const raw = await runShellForTool(workspace, request.args.command, shellExecutor, signal, input.onShellProgress);
+    const raw = await runShellForTool(
+      workspace,
+      request.args.command,
+      shellExecutor,
+      signal,
+      input.onShellProgress,
+    );
     const result: ShellResult = {
       ...raw,
       stdout: truncateToolOutput(raw.stdout),

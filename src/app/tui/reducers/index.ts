@@ -24,8 +24,6 @@ const UI_ACTIONS: ReadonlySet<string> = new Set([
   'HIDE_MCP',
   'SHOW_REWIND',
   'HIDE_REWIND',
-  'EDITOR_DONE',
-  'EXPAND_INPUT',
   'TOGGLE_REASON',
   'TOGGLE_ALL_REASON',
   'TOGGLE_TOOL_EXPAND',

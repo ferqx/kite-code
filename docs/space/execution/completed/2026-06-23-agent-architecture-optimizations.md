@@ -134,6 +134,16 @@ bun test tests/checkpoint.test.ts # 13 pass
 
 ## 关联文档
 
-- [[cancel-resume-cleanup]] — 更新为两层架构
+- [[cancel-resume-cleanup]] — 更新为两层架构（2026-06-23），2026-06-27 恢复为三层架构
 - [[tool-description-contracts]] — edit_file 契约更新
 - [[../understanding/2026-06-08-prefix-cache-hit-rate-analysis]] — 前缀缓存影响因素
+
+## 后续修正
+
+**2026-06-27**：第 3 项（sanitizeToolCallPairs 热路径移除）被**部分回滚**。
+
+根因：cleanup 节点只检查 `m.tool_calls`（顶层字段），不检查 `m.additional_kwargs.tool_calls`。当 LLM 的 tool call 参数 JSON 不合法导致 `parseToolCall()` 失败时，`tool_calls` 为空但 `additional_kwargs.tool_calls` 保留原始数据。cleanup 漏检此场景，残留数据通过 LangChain converter fallback 发送到 API，触发 400 错误。
+
+修复：在 `prepareModelContext` 中恢复 `sanitizeToolCallPairs` 调用（`context.ts:224`），该函数同时检查两个来源并清理不一致字段。
+
+详见 [[cancel-resume-cleanup]] 2026-06-27 更新。

@@ -72,10 +72,6 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       };
     case 'HIDE_REWIND':
       return { ...state, showRewind: false, checkpoints: [] };
-    case 'EDITOR_DONE':
-      return { ...state, editorRequested: false };
-    case 'EXPAND_INPUT':
-      return { ...state, editorRequested: true };
     case 'TOGGLE_REASON': {
       const block = findBlockById(state, action.id);
       if (block?.kind !== 'reason') return state;

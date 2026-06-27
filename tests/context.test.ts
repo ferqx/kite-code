@@ -383,7 +383,7 @@ describe('sanitizeToolCallPairs', () => {
     // Paired AIMessage keeps tool_calls
     const pairedAi = result[1] as AIMessage;
     expect(pairedAi.tool_calls).toHaveLength(1);
-    expect(pairedAi.tool_calls?.[0]!.id).toBe('c1');
+    expect(pairedAi.tool_calls?.[0]?.id).toBe('c1');
 
     // Orphan AIMessage: tool_calls stripped, text kept
     const orphanAi = result[4] as AIMessage;
@@ -412,7 +412,7 @@ describe('sanitizeToolCallPairs', () => {
     const ai = result[0] as AIMessage;
     // Only c1 survives
     expect(ai.tool_calls).toHaveLength(1);
-    expect(ai.tool_calls?.[0]!.id).toBe('c1');
+    expect(ai.tool_calls?.[0]?.id).toBe('c1');
   });
 
   test('handles empty array', () => {
@@ -481,6 +481,75 @@ describe('sanitizeToolCallPairs', () => {
     expect((ai.additional_kwargs as any).tool_calls).toBeUndefined();
     // response_metadata preserved
     expect(ai.response_metadata).toEqual({ model: 'deepseek', usage: { total_tokens: 100 } });
+  });
+  test('strips additional_kwargs.tool_calls when they have IDs not in top-level tool_calls (akwDangling)', () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: '',
+        // top-level tool_calls is empty — parseToolCall all failed
+        tool_calls: [],
+        invalid_tool_calls: [
+          { id: 'bad-1', name: 'shell_execute', args: '{broken', error: 'Unexpected token' },
+        ],
+        additional_kwargs: {
+          // raw API data still present in additional_kwargs
+          tool_calls: [
+            {
+              id: 'bad-1',
+              type: 'function',
+              function: { name: 'shell_execute', arguments: '{broken' },
+            },
+          ],
+        } as any,
+        response_metadata: {},
+      }),
+    ];
+    const result = sanitizeToolCallPairs(msgs);
+    expect(result).toHaveLength(1);
+    const ai = result[0]! as AIMessage;
+    // additional_kwargs.tool_calls should be deleted because top-level tool_calls doesn't have it
+    const akw = ai.additional_kwargs as Record<string, unknown> | undefined;
+    expect(akw?.tool_calls).toBeUndefined();
+    // tool_calls remains empty
+    expect(ai.tool_calls).toHaveLength(0);
+    // content preserved
+    expect(ai.content).toBe('');
+  });
+
+  test('rebuilds checkpoint-deserialized plain-object AIMessage as proper instance', () => {
+    // Simulate checkpoint deserialized plain object (no _getType method)
+    const plainObj = {
+      type: 'ai',
+      content: 'checking...',
+      tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'f.txt' } }],
+      additional_kwargs: {
+        tool_calls: [
+          {
+            id: 'c1',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"path":"f.txt"}' },
+          },
+        ],
+      },
+      response_metadata: { model: 'deepseek' },
+    } as unknown as BaseMessage;
+
+    // Matching ToolMessage
+    const tm = new ToolMessage({
+      content: JSON.stringify({ ok: true }),
+      tool_call_id: 'c1',
+      name: 'read_file',
+      status: 'success',
+    });
+
+    const result = sanitizeToolCallPairs([plainObj, tm]);
+    expect(result).toHaveLength(2);
+    // Rebuilt as proper AIMessage instance
+    expect(AIMessage.isInstance(result[0]!)).toBe(true);
+    // tool_calls preserved
+    const rebuilt = result[0]! as AIMessage;
+    expect(rebuilt.tool_calls).toHaveLength(1);
+    expect(rebuilt.tool_calls?.[0]?.id).toBe('c1');
   });
 });
 

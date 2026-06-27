@@ -304,6 +304,11 @@ export const KNOWN_TOOL_NAMES = [
   'task',
 ] as const;
 
+/** 按名称查找工具契约 / Look up a tool contract by name */
+export function getToolContract(toolName: string): ToolContract | undefined {
+  return TOOL_CONTRACTS.get(toolName);
+}
+
 export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ['read_file', READ_FILE_CONTRACT],
   ['edit_file', EDIT_FILE_CONTRACT],

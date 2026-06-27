@@ -92,7 +92,7 @@ export type PendingToolRequest =
       /** 工具调用 ID / Tool call ID */
       id?: string;
       name: 'task';
-      args: { subagent_type: 'explore' | 'code' | 'review'; task: string };
+      args: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string };
       /** 调用原因 / Call reason */
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
@@ -177,6 +177,20 @@ function toolRequestFromCall(
   call: { id?: string; name: string; args: Record<string, unknown> },
   _workspace: string,
 ): PendingToolRequest | null {
+  // 合成调用：invokeModel 在 parseToolCall 失败后注入 _raw_invalid_args 标记。
+  // 跳过工具特定的 args 规范化，保留标记字段直通 runApprovedTool 生成错误反馈。
+  // Synthetic call: injected by invokeModel after parseToolCall failure.
+  // Skip per-tool args normalization, preserve markers for runApprovedTool.
+  if (typeof call.args._raw_invalid_args === 'string') {
+    return {
+      id: call.id,
+      name: call.name,
+      args: call.args,
+      reason: `Model requested ${call.name} (synthetic — parse failure)`,
+      protectedCommand: call.name,
+    } as PendingToolRequest;
+  }
+
   if (call.name === 'read_file') {
     const args = call.args as { path?: string; offset?: number; limit?: number };
     return {
@@ -281,7 +295,7 @@ function toolRequestFromCall(
       id: call.id,
       name: 'task',
       args: {
-        subagent_type: (args?.subagent_type as 'explore' | 'code' | 'review') ?? 'explore',
+        subagent_type: (args?.subagent_type as 'explore' | 'plan' | 'code' | 'review') ?? 'explore',
         task: (args?.task as string) ?? '',
       },
       reason: 'Model requested sub-agent dispatch',
@@ -440,7 +454,7 @@ export function toolRequestFromMessage(
       id: call.id,
       name: 'task',
       args: {
-        subagent_type: (args?.subagent_type as 'explore' | 'code' | 'review') ?? 'explore',
+        subagent_type: (args?.subagent_type as 'explore' | 'plan' | 'code' | 'review') ?? 'explore',
         task: (args?.task as string) ?? '',
       },
       reason: 'Model requested sub-agent dispatch',

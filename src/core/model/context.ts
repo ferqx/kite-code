@@ -99,15 +99,24 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
     }
   }
 
-  // Fix orphaned AIMessages: strip tool_calls that have no matching ToolMessage
+  // 修复 AIMessage 中的 tool_calls 一致性问题：
+  // 1. 孤儿 tool_calls（无匹配 ToolMessage）→ 移除
+  // 2. additional_kwargs.tool_calls 残留 → 无条件删除（LangChain converter
+  //    仅在 tool_calls 为空时 fallback 使用它，会导致 400 错误）
+  //
+  // Fix tool_calls consistency in AIMessages:
+  // 1. Orphaned tool_calls (no matching ToolMessage) → remove
+  // 2. additional_kwargs.tool_calls leakage → always delete (LangChain converter
+  //    fallback path triggers 400 when tool_calls is empty)
   let result: BaseMessage[] = [];
   for (const msg of messages) {
     const m = asObj(msg);
     const toolCalls = m.tool_calls;
     const akwToolCalls = (m.additional_kwargs as Record<string, unknown> | undefined)?.tool_calls;
+    const hasAkwToolCalls = Array.isArray(akwToolCalls) && akwToolCalls.length > 0;
     // Check both tool_calls sources
     const allToolCalls = (Array.isArray(toolCalls) ? toolCalls : []).concat(
-      Array.isArray(akwToolCalls) ? akwToolCalls : [],
+      hasAkwToolCalls ? akwToolCalls : [],
     );
     if (allToolCalls.length > 0) {
       const orphaned = allToolCalls.some((tc: unknown) => {
@@ -115,7 +124,32 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
         const id = (tc as Record<string, unknown>).id;
         return !id || !toolResultIds.has(id as string);
       });
-      if (orphaned) {
+
+      // akwDangling: additional_kwargs.tool_calls 中有条目但顶层 tool_calls 中
+      // 没有对应 ID。若不清除，LangChain converter 在 tool_calls 为空时
+      // fallback 使用 additional_kwargs.tool_calls → 触发 API 400。
+      // akwDangling: entries in additional_kwargs.tool_calls with no matching
+      // entry in top-level tool_calls. Must be cleaned to prevent converter fallback.
+      const topLevelIds = new Set(
+        (Array.isArray(toolCalls) ? toolCalls : [])
+          .filter((tc) => tc && typeof tc === 'object' && 'id' in tc)
+          .map((tc) => (tc as Record<string, unknown>).id),
+      );
+      const akwDangling =
+        hasAkwToolCalls &&
+        akwToolCalls.some(
+          (tc) =>
+            tc &&
+            typeof tc === 'object' &&
+            'id' in tc &&
+            !topLevelIds.has((tc as Record<string, unknown>).id),
+        );
+
+      // 重建条件：孤儿调用、additional_kwargs 残留、或 checkpoint 反序列化后
+      // 变成 plain object（AIMessage.isInstance = false）——converter 可能因
+      // isInstance 失败而跳过 tool_calls 序列化，fallback 到 additional_kwargs 触发 400。
+      // Rebuild when: orphaned, akw dangling, or deserialized plain object.
+      if (orphaned || akwDangling || !AIMessage.isInstance(msg)) {
         // Only keep calls that have IDs AND matching ToolMessages
         const validCalls = (Array.isArray(toolCalls) ? toolCalls : []) as Array<
           Record<string, unknown>
@@ -131,6 +165,7 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
           tool_calls: kept.length > 0 ? (kept as AIMessage['tool_calls']) : [],
           additional_kwargs: cleanAkw,
           response_metadata: msg.response_metadata ?? {},
+          usage_metadata: m.usage_metadata as AIMessage['usage_metadata'],
         });
         result.push(newMsg);
         continue;
@@ -213,14 +248,16 @@ export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage
   return ordered;
 }
 
-/** 准备模型上下文（组装系统提示词 + 对话消息，接近阈值时清理旧工具结果） / Prepare model context (assemble, clear old tool results when near threshold) */
+/** 准备模型上下文（组装系统提示词 + 对话消息） / Prepare model context (assemble, clear old tool results when near threshold) */
 export function prepareModelContext(
   role: AgentRole,
   state: ModelContextState,
   skills?: SkillManifest[],
 ): PreparedModelContext {
   const msgs =
-    state.messages.length > 0 ? reorderInterleavedMessages(state.messages) : [new HumanMessage('')];
+    state.messages.length > 0
+      ? reorderInterleavedMessages(sanitizeToolCallPairs(state.messages))
+      : [new HumanMessage('')];
 
   // 合并静态系统提示词与可缓存运行时上下文为单个 SystemMessage，
   // 避免依赖 LangChain 内部的连续 SystemMessage 合并行为。

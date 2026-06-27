@@ -114,7 +114,7 @@ function SingleQuestion({
             const isSelected = i === selected;
             const isRec = question.recommended != null && opt.id === question.recommended;
             return (
-              <Text key={opt.id ?? i} color={isSelected ? t.primary : t.muted}>
+              <Text key={`${opt.id ?? 'opt'}-${i}`} color={isSelected ? t.primary : t.muted}>
                 {isSelected ? '▶' : ' '} {i + 1}. {opt.label}
                 {isRec ? ' ⭐ 推荐' : ''}
                 {opt.description ? ` — ${opt.description}` : ''}
@@ -393,8 +393,8 @@ function MultiQuestionWizard({
         <Text bold color={t.success}>
           ✓ Answers submitted
         </Text>
-        {Object.entries(answers).map(([id, val]) => (
-          <Text key={id} color={t.muted}>
+        {Object.entries(answers).map(([id, val], i) => (
+          <Text key={`${id}-${i}`} color={t.muted}>
             {id}: {val}
           </Text>
         ))}
@@ -426,7 +426,7 @@ function MultiQuestionWizard({
               const isSelected = i === selected;
               const isRec = cur.recommended != null && opt.id === cur.recommended;
               return (
-                <Text key={opt.id ?? i} color={isSelected ? t.primary : t.muted}>
+                <Text key={`${opt.id ?? 'opt'}-${i}`} color={isSelected ? t.primary : t.muted}>
                   {isSelected ? '▶' : ' '} {i + 1}. {opt.label}
                   {isRec ? ' ⭐ 推荐' : ''}
                   {opt.description ? ` — ${opt.description}` : ''}

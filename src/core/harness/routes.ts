@@ -91,8 +91,6 @@ export function routeAfterUserInput(_state: CodeAgentState): 'agent' {
 
 /** plan_review 节点后的路由逻辑 / Routing after plan_review node */
 export function routeAfterPlanReview(state: CodeAgentState): 'agent' | typeof END {
-  // 方案被拒绝后直接结束，避免 agent 对 rejection 做无意义回复
-  // End immediately after plan rejection to avoid agent producing irrelevant responses
   const msgs = state.messages;
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i] as Record<string, unknown> | undefined;
@@ -100,7 +98,14 @@ export function routeAfterPlanReview(state: CodeAgentState): 'agent' | typeof EN
     const content = typeof m?.content === 'string' ? m.content : '';
     try {
       const p = JSON.parse(content);
-      if (p?.ok === false) return END;
+      if (p?.ok === false) {
+        // Supplement feedback: route to agent so it can revise and re-call update_plan
+        // Hard reject (Esc/Ctrl+C): route to END
+        if (typeof p?.reason === 'string' && p.reason.startsWith('Plan needs revision')) {
+          return 'agent';
+        }
+        return END;
+      }
     } catch {
       /* not JSON */
     }

@@ -36,6 +36,7 @@
 | [`2026-06-18-session-logger.md`](2026-06-18-session-logger.md) | archived | P0 | — | — | 会话日志本地记录：AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断 |
 | [`2026-06-19-event-mechanism-refactor.md`](2026-06-19-event-mechanism-refactor.md) | archived | P0 | `session-logger` | — | 事件机制重构：turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一 |
 | [`2026-06-26-shell-live-output.md`](2026-06-26-shell-live-output.md) | completed | P0 | — | — | Shell 工具实时输出展示：`tool_progress` 事件 + 流式 stdout/stderr 读取 + TUI tail-follow 渲染 |
+| [`2026-06-27-plan-subagent-role-design.md`](2026-06-27-plan-subagent-role-design.md) | draft | P1 | — | — | Plan 子 Agent 角色：只读架构设计专家，多视角并行设计方案，主 agent 合并后调 `update_plan` |
 
 ## 计划文件命名规范
 

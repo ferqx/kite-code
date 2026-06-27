@@ -15,12 +15,8 @@ import { defaultCheckpointPath } from '../../core/config/paths.js';
 import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
 import App, { type Action, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
-import InputLine, {
-  type EditorContentHandle,
-  type SlashSuggestionData,
-} from './components/InputLine';
+import InputLine, { type SlashSuggestionData } from './components/InputLine';
 import SetupWizard from './components/SetupWizard';
-import { useExternalEditor } from './hooks/useExternalEditor';
 import { useMcpConnection } from './hooks/useMcpConnection';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
 import { useSkillsLoader } from './hooks/useSkillsLoader';
@@ -125,8 +121,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   const loadGenerationRef = React.useRef(0);
   // Prevent concurrent NEW_SESSION from creating ghost sessions
   const creatingSessionRef = React.useRef(false);
-  const editorContentRef = React.useRef<EditorContentHandle | null>(null);
-  // Persist input value across resize remounts
   const inputValueRef = React.useRef('');
   const handleInputValueChange = React.useCallback((v: string) => {
     inputValueRef.current = v;
@@ -714,9 +708,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     [runTask, handleSlashCommand, sessionManager],
   );
 
-  // External editor: spawn $EDITOR, read content, submit as input
-  useExternalEditor(state, workspace, dispatch, editorContentRef);
-
   React.useEffect(() => {
     return () => {
       textBatcher.dispose();
@@ -756,7 +747,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
             state.showRewind ||
             !!state.interrupt
           }
-          editorContentRef={editorContentRef}
           onSlashSuggestionChange={setSlashSuggestion}
           initialValue={inputValueRef.current}
           onValueChange={handleInputValueChange}

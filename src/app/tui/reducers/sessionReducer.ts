@@ -131,7 +131,6 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         sessionError: false,
         ctrlCPressed: false,
         exitRequested: false,
-        editorRequested: false,
         status: {
           ...(target?.status ?? state.status),
           // 恢复 pendingPlan 以便 Footer PlanReviewBlock 读取 / Restore pendingPlan for Footer PlanReviewBlock
@@ -179,7 +178,6 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         exitRequested: false,
         sessionError: false,
         loadingSessionId: null,
-        editorRequested: false,
         showHelp: false,
         showModelSelector: false,
         showSessions: false,

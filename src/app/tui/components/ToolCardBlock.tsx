@@ -135,7 +135,7 @@ function renderAskUserSummary(
             const qMax = Math.max(0, maxLine - stringWidth(prefix) - stringWidth(suffix));
             const qShort = clip(q.question, qMax);
             return (
-              <Text key={q.id ?? `q-${i}`} color={dt.dim}>
+              <Text key={`${q.id ?? 'q'}-${i}`} color={dt.dim}>
                 {prefix}
                 {qShort}
                 {suffix}
@@ -178,7 +178,7 @@ function renderAskUserSummary(
           const qShort = clip(q.question, qMax);
           const aShort = truncateAnswer(raw || '(no answer)', aMax);
           return (
-            <Text key={q.id ?? `q-${i}`} color={dt.dim}>
+            <Text key={`${q.id ?? 'q'}-${i}`} color={dt.dim}>
               {prefix}
               {qShort}
               {midfix}
@@ -221,7 +221,8 @@ function renderShellLines(text: string, color: string, maxLine: number, totalLin
       )}
       {displayLines.map((line, i) => (
         <Text key={i} color={color}>
-          {SHELL_PREFIX}{clip(line, contentWidth)}
+          {SHELL_PREFIX}
+          {clip(line, contentWidth)}
         </Text>
       ))}
     </>
@@ -432,14 +433,19 @@ export default function ToolCardBlock({
       {isExpanded && isShell && (
         <Box paddingLeft={2} flexDirection="column">
           {hasSummary ? (
-            renderShellLines(block.summary!, block.status === 'error' ? dt.error : dt.dim, columns - 2)
+            renderShellLines(
+              block.summary!,
+              block.status === 'error' ? dt.error : dt.dim,
+              columns - 2,
+            )
           ) : (
             <Text color={dt.dim}>{SHELL_PREFIX}(No output)</Text>
           )}
           {/* 状态尾行：exit code / cancelled / Status footer */}
           <Text color={dt.dim}>
             {SHELL_PREFIX}
-            {block.summary?.startsWith('Command cancelled') || block.summary?.includes('"cancelled":true')
+            {block.summary?.startsWith('Command cancelled') ||
+            block.summary?.includes('"cancelled":true')
               ? 'cancelled'
               : `exit: ${block.status === 'error' ? 'error' : '0'}`}
           </Text>

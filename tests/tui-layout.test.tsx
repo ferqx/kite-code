@@ -1381,7 +1381,6 @@ describe('App', () => {
       ctrlCPressed: false,
       sessionKey: 0,
       exitRequested: false,
-      editorRequested: false,
       sessionError: false,
       loadingSessionId: null,
       ...overrides,

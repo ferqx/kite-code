@@ -208,14 +208,21 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         try {
           const p = JSON.parse(summary);
           if (p && typeof p === 'object') {
-            const answer = p.answer as string | undefined;
-            const answers = p.answers as Record<string, string> | undefined;
-            if (answers && Object.keys(answers).length > 0) {
-              summary = Object.entries(answers)
-                .map(([k, v]) => `${k}: ${v}`)
-                .join('\n');
-            } else if (typeof answer === 'string') {
-              summary = answer || '(no answer)';
+            // 工具参数解析失败 → 显示错误详情而非裸 JSON / Parse failure → show error detail
+            if (p.ok === false) {
+              const detail = p.detail as string | undefined;
+              const stderr = p.stderr as string | undefined;
+              summary = detail || stderr || 'ask_user failed: invalid arguments';
+            } else {
+              const answer = p.answer as string | undefined;
+              const answers = p.answers as Record<string, string> | undefined;
+              if (answers && Object.keys(answers).length > 0) {
+                summary = Object.entries(answers)
+                  .map(([k, v]) => `${k}: ${v}`)
+                  .join('\n');
+              } else if (typeof answer === 'string') {
+                summary = answer || '(no answer)';
+              }
             }
           }
         } catch {
@@ -594,8 +601,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
 
       // Tail-follow：固定窗口，保留最近 N 行（与 ToolCardBlock.MAX_TOOL_LINES 一致）
       const lines = next.split('\n');
-      const capped =
-        lines.length > MAX_TOOL_LINES ? lines.slice(-MAX_TOOL_LINES).join('\n') : next;
+      const capped = lines.length > MAX_TOOL_LINES ? lines.slice(-MAX_TOOL_LINES).join('\n') : next;
 
       // 累计总行数：基于上一次的 total + 新行数（非完整行不计数）
       const prevTotal = matched.liveTotalLines ?? 0;

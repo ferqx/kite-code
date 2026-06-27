@@ -71,10 +71,6 @@ export function useGlobalKeys(
         dispatch({ type: 'TOGGLE_ALL_REASON' });
         return;
       }
-      if (key.ctrl && (input === 'e' || input === 'E')) {
-        dispatch({ type: 'EXPAND_INPUT' });
-        return;
-      }
       if (key.ctrl && (input === 'l' || input === 'L')) {
         dispatch({ type: 'CLEAR_OUTPUT' });
         return;
