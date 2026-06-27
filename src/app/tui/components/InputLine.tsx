@@ -513,7 +513,7 @@ export default function InputLine({
           ? '≻◷  '
           : '❯ ';
   const promptWidth = stringWidth(promptChar);
-  const inputMaxWidth = Math.max(1, columns - promptWidth * 2);
+  const inputMaxWidth = Math.max(1, columns - promptWidth);
 
   // Slash suggestions are rendered in App.tsx Overlay area
 
