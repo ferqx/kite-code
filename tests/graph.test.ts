@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage, ToolMessage } from '@langchain/core/messages';
 import {
   routeAfterAgent,
   routeAfterApproval,
@@ -712,6 +712,29 @@ describe('graph local tool routing', () => {
     expect(result.ok).toBe(true);
     expect((result as ShellResult).stdout).toBe('package');
   });
+
+  test('returns parse error for synthetic tool call with _raw_invalid_args marker', async () => {
+    const request = {
+      id: 'synth-1',
+      name: 'shell_execute' as const,
+      args: {
+        _raw_invalid_args: '{"command": "bad json',
+        _parse_error: 'Unexpected token at position 20',
+      } as unknown as any,
+      reason: 'Model requested shell_execute (synthetic — parse failure)',
+      protectedCommand: 'shell_execute',
+    };
+
+    const result = await runApprovedTool({ request, workspace: '/tmp/workspace' } as any);
+
+    expect(result.ok).toBe(false);
+    expect(result.command).toBe('shell_execute');
+    expect(result.stderr).toContain('shell_execute');
+    expect(result.stderr).toContain('bad json');
+    expect(result.stderr).toContain('Unexpected token');
+    // Should NOT execute the shell (stdout is empty)
+    expect(result.stdout).toBe('');
+  });
 });
 
 // ── routeEntry 与 getPendingToolRequest 测试 / routeEntry and getPendingToolRequest tests ──
@@ -985,6 +1008,35 @@ describe('getPendingToolRequest', () => {
     expect(result).not.toBeNull();
     expect(result?.name).toBe('shell_execute');
     expect(result?.id).toBe('call-d');
+  });
+
+  test('returns synthetic request with _raw_invalid_args marker preserved via toolRequestFromCall', () => {
+    const workspace = '/tmp/workspace';
+    const messages: BaseMessage[] = [
+      new AIMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'synth-1',
+            name: 'shell_execute',
+            args: {
+              _raw_invalid_args: '{"command":"bad json',
+              _parse_error: 'Unexpected token',
+            },
+          },
+        ],
+      }),
+      // No ToolMessage — caller is unresolved, should be returned as pending
+    ];
+
+    const result = getPendingToolRequest(messages, workspace);
+    expect(result).not.toBeNull();
+    expect(result?.name).toBe('shell_execute');
+    expect(result?.id).toBe('synth-1');
+    // Marker args preserved (not stripped by per-tool normalization)
+    const args = result?.args as Record<string, unknown> | undefined;
+    expect(args?._raw_invalid_args).toBe('{"command":"bad json');
+    expect(args?._parse_error).toBe('Unexpected token');
   });
 });
 
