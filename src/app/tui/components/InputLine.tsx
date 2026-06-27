@@ -38,6 +38,7 @@ export interface SlashSuggestionData {
     aliases: string[];
     description: string;
     args?: string;
+    isActive?: boolean;
   }>;
   selectedIndex: number;
 }
@@ -57,6 +58,8 @@ interface InputLineProps {
   onValueChange?: (value: string) => void;
   /** Plan mode — 方案模式下显示专用 prompt 和 indicator bar */
   planMode?: boolean;
+  /** Active selections for slash suggestion kind → value mapping (theme preset, model name, etc.) */
+  activeSelections?: import('../hooks/useSlashSuggestions').ActiveSelections;
 }
 
 function commonPrefix(strings: string[]): string {
@@ -116,6 +119,7 @@ export default function InputLine({
   initialValue = '',
   onValueChange,
   planMode = false,
+  activeSelections,
 }: InputLineProps) {
   const t = useTheme();
   const { columns } = useWindowSize();
@@ -137,7 +141,7 @@ export default function InputLine({
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const fileSearch = useFileSearch(value, workspace);
-  const slashSuggestions = useSlashSuggestions(value);
+  const slashSuggestions = useSlashSuggestions(value, undefined, activeSelections);
   // Refs for useInput to avoid Ink 7 stale closure (read latest values)
   const slashSuggestionsRef = useRef(slashSuggestions);
   slashSuggestionsRef.current = slashSuggestions;

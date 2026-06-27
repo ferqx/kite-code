@@ -17,6 +17,7 @@ import McpPanel from './components/McpPanel';
 import ModelSelector from './components/ModelSelector';
 import PlanReviewBlock from './components/PlanReviewBlock';
 import SessionSelector from './components/SessionSelector.js';
+import { ACTIVE_DOT, INACTIVE_DOT } from './constants';
 import Footer from './Footer';
 import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
@@ -360,10 +361,11 @@ export default function App({
                         ? ` (${item.aliases.join(', ')})`
                         : '';
                     const argsStr = item.args ? ` ${item.args}` : '';
+                    const activeDot = item.isActive ? ACTIVE_DOT : INACTIVE_DOT;
                     return (
                       <Box key={item.command}>
                         <Text color={isSelected ? theme.primary : theme.muted}>
-                          {isSelected ? '❯ ' : '  '}/{item.command}
+                          {isSelected ? '❯' : ' '} {activeDot}/{item.command}
                           {argsStr}
                         </Text>
                         <Text color={theme.dim}>{aliasStr}</Text>

@@ -577,6 +577,8 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     (preset) => {
       const p = preset.toLowerCase();
       if (p === 'teal' || p === 'blue' || p === 'purple' || p === 'cyan' || p === 'mono') {
+        // No-op if already the active theme — avoids duplicate messages
+        if (p === themePreset) return;
         setThemePreset(p);
         // OSC 4 reprograms terminal palette — existing Static content changes instantly, no clear needed
         process.stdout.write(osc4Apply(p));
@@ -752,6 +754,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
           initialValue={inputValueRef.current}
           onValueChange={handleInputValueChange}
           planMode={state.status.phase === 'planning'}
+          activeSelections={{ theme: themePreset, model: state.status.modelName }}
         />
       </App>
     </ThemeContext.Provider>
