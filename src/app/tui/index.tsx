@@ -593,6 +593,13 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     },
   );
 
+  // Stable reference — avoids re-creating the object on every render and causing
+  // an infinite re-render loop through useSlashSuggestions → setSlashSuggestion.
+  const activeSelections = React.useMemo(
+    () => ({ theme: themePreset, model: state.status.modelName }),
+    [themePreset, state.status.modelName],
+  );
+
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
   React.useEffect(() => {
     const prev = prevInterruptRef.current;
@@ -754,7 +761,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
           initialValue={inputValueRef.current}
           onValueChange={handleInputValueChange}
           planMode={state.status.phase === 'planning'}
-          activeSelections={{ theme: themePreset, model: state.status.modelName }}
+          activeSelections={activeSelections}
         />
       </App>
     </ThemeContext.Provider>
