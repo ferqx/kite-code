@@ -1,13 +1,13 @@
 import { Box, Text, useInput, useStdout } from 'ink';
-import { ScrollList } from 'ink-scroll-list';
-import React, { useEffect, useRef, useState } from 'react';
+import { VirtualList } from 'ink-virtual-list';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import { ACTIVE_DOT, INACTIVE_DOT } from '@/app/tui/constants';
 import { useTheme } from '@/app/tui/theme';
+import type { SessionInfo } from '@/core/persistence/sessions.js';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useSessionList } from '../hooks/useSessionList.js';
 
-/** Truncate `text` so its terminal display width ≤ `maxCols`, appending `…` when truncated. */
 function truncateByDisplayWidth(text: string, maxCols: number): string {
   if (maxCols <= 0) return '';
   if (stringWidth(text) <= maxCols) return text;
@@ -20,7 +20,7 @@ function truncateByDisplayWidth(text: string, maxCols: number): string {
     result += char;
     used += cw;
   }
-  return result ? result + '…' : text.slice(0, 1) + '…';
+  return result ? `${result}…` : `${text.slice(0, 1)}…`;
 }
 
 interface SessionSelectorProps {
@@ -28,9 +28,7 @@ interface SessionSelectorProps {
   onClose: () => void;
   onDelete?: (sessionId: string) => void;
   initialQuery?: string;
-  /** 正在从 DB 加载的会话 ID / ID of the session currently being loaded from DB */
   loadingSessionId?: string | null;
-  /** 当前活跃会话 ID，用于标记显示 / Current active session ID, for visual indicator */
   activeSessionId?: string | null;
 }
 
@@ -68,24 +66,21 @@ export default function SessionSelector({
 
   const maxContentHeight = useOverlayHeight(12);
 
-  // Trigger search when input changes
   useEffect(() => {
     search(searchInput);
   }, [searchInput, search]);
 
-  // Re-fetch on mount
-  React.useEffect(() => {
+  useEffect(() => {
     refresh();
   }, [refresh]);
 
-  // Apply initial query
   useEffect(() => {
     if (initialQuery) setSearchInput(initialQuery);
   }, [initialQuery]);
 
-  useInput(
+  const handleInput = useCallback(
     (
-      input,
+      input: string,
       key: {
         upArrow?: boolean;
         downArrow?: boolean;
@@ -97,7 +92,6 @@ export default function SessionSelector({
       },
     ) => {
       const s = sessionsRef.current;
-      // Delete confirmation mode
       if (deleteConfirmRef.current) {
         if (key.escape) {
           setDeleteConfirm(false);
@@ -113,7 +107,6 @@ export default function SessionSelector({
         }
         return;
       }
-
       if (key.escape) {
         if (searchInputRef.current.length > 0) {
           setSearchInput('');
@@ -122,7 +115,6 @@ export default function SessionSelector({
         onCloseRef.current();
         return;
       }
-
       if (key.return && s.length > 0) {
         const session = s[selectedRef.current];
         if (session && session.threadId !== activeSessionRef.current) {
@@ -130,7 +122,6 @@ export default function SessionSelector({
         }
         return;
       }
-
       if (key.upArrow) {
         setSelected((p) => Math.max(0, p - 1));
         return;
@@ -139,14 +130,10 @@ export default function SessionSelector({
         setSelected((p) => Math.min(s.length - 1, p + 1));
         return;
       }
-
-      // Backspace removes last character from search
       if (key.backspace || input === '\x7f') {
         setSearchInput((prev) => prev.slice(0, -1));
         return;
       }
-
-      // D to delete (only when search is empty)
       if (
         (input === 'd' || input === 'D') &&
         searchInputRef.current.length === 0 &&
@@ -156,10 +143,6 @@ export default function SessionSelector({
         setDeleteConfirm(true);
         return;
       }
-
-      // Regular character input goes to search.
-      // Some IMEs (e.g. macOS Chinese) prepend a space when switching between
-      // CJK composition and ASCII — strip it to avoid a leading space artifact.
       if (input && !key.ctrl && !key.meta) {
         let text = input;
         const prev = searchInputRef.current;
@@ -174,14 +157,54 @@ export default function SessionSelector({
         setSearchInput((p) => p + text);
       }
     },
+    [],
   );
 
-  // Reset selection when search results change
+  useInput(handleInput);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset selection when search results change
   useEffect(() => {
     setSelected(0);
-  }, []);
+  }, [sessions]);
 
   const selectedSession = sessions[selected];
+
+  // Precompute display strings — NOT dependent on `selected`, so arrow keys
+  // don't re-trigger expensive stringWidth / truncation.
+  const cols = stdout?.columns ?? 80;
+  const maxWidth = cols - 6;
+  const rightColWidth = 21;
+  const nameMaxCols = Math.max(4, maxWidth - 4 - rightColWidth);
+
+  const renderItem = useCallback(
+    ({ index, isSelected }: { item: SessionInfo; index: number; isSelected: boolean }) => {
+      const session = sessions[index];
+      if (!session) return null;
+
+      const isLoading = loadingSessionId === session.threadId;
+      const isActive = activeSessionId === session.threadId;
+      const cursor = isLoading ? '⏳' : isSelected ? '>' : ' ';
+      const activeDot = isActive ? ACTIVE_DOT : INACTIVE_DOT;
+      const rightCol = isLoading ? '  Loading...        ' : `  ${session.updatedAt}`;
+      const rawName = session.name.replace(/\n/g, ' ');
+      const displayName = truncateByDisplayWidth(rawName, nameMaxCols);
+      const namePad = Math.max(0, nameMaxCols - stringWidth(displayName));
+      const paddedName = displayName + ' '.repeat(namePad);
+      const lineColor = isLoading ? t.warning : isSelected ? t.primary : t.muted;
+      const dimColor = isLoading ? t.warning : t.dim;
+
+      return (
+        <Box width={maxWidth} flexShrink={0} flexGrow={0}>
+          <Text color={lineColor}>
+            {cursor} {activeDot}
+            {paddedName}
+          </Text>
+          <Text color={dimColor}>{rightCol}</Text>
+        </Box>
+      );
+    },
+    [sessions, loadingSessionId, activeSessionId, nameMaxCols, maxWidth, t],
+  );
 
   return (
     <Box
@@ -215,40 +238,15 @@ export default function SessionSelector({
         {!loading && !error && sessions.length === 0 && (
           <Text color={t.muted}>{isSearching ? '未找到匹配的会话' : '暂无历史会话'}</Text>
         )}
-        <ScrollList selectedIndex={selected} scrollAlignment="auto">
-          {sessions.map((session, i) => {
-            const isLoading = loadingSessionId === session.threadId;
-            const isActive = activeSessionId === session.threadId;
-            const cursor = isLoading ? '⏳' : i === selected ? '>' : ' ';
-            const activeDot = isActive ? ACTIVE_DOT : INACTIVE_DOT;
-            const timestamp = session.updatedAt;
-            // 右列固定宽度：2 空格间隙 + 19 字符时间戳 "YYYY-MM-DD HH:mm:ss"
-            const rightCol = isLoading ? '  Loading...        ' : `  ${timestamp}`;
-            const rightColWidth = 21;
-            // 预留：border(2) + paddingX(2) = 4，Safe margin = 2
-            const cols = stdout?.columns ?? 80;
-            const maxWidth = cols - 6;
-            const prefix = `${cursor} ${activeDot}`;
-            const rawName = session.name.replace(/\n/g, ' ');
-            const prefixWidth = stringWidth(prefix);
-            const nameMaxCols = Math.max(4, maxWidth - prefixWidth - rightColWidth);
-            const displayName = truncateByDisplayWidth(rawName, nameMaxCols);
-            // 用空格填充至固定列宽，确保时间戳列对齐
-            const namePad = Math.max(0, nameMaxCols - stringWidth(displayName));
-            const paddedName = displayName + ' '.repeat(namePad);
-            const lineColor = isLoading ? t.warning : i === selected ? t.primary : t.muted;
-            const dimColor = isLoading ? t.warning : t.dim;
-            return (
-              <Box key={session.threadId} width={maxWidth} flexShrink={0} flexGrow={0}>
-                <Text color={lineColor}>
-                  {prefix}
-                  {paddedName}
-                </Text>
-                <Text color={dimColor}>{rightCol}</Text>
-              </Box>
-            );
-          })}
-        </ScrollList>
+        <VirtualList<SessionInfo>
+          items={sessions}
+          selectedIndex={selected}
+          renderItem={renderItem}
+          keyExtractor={(s) => s.threadId}
+          height={maxContentHeight}
+          itemHeight={1}
+          showOverflowIndicators={true}
+        />
       </Box>
       <Box height={1} />
       <Text color={t.dim}>

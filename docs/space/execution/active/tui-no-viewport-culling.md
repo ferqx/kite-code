@@ -64,6 +64,39 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
 - 不要实现基于 focusedIndex 的视口居中计算
 - 不要在 `<Static>` 容器上省略 `height={0}`——会导致布局空白
 
+## Overlay 面板的视口裁剪
+
+**OutputArea 不能用视口裁剪，但 overlay 面板可以。** 区别在于：
+
+- OutputArea：消息必须保留在终端 scrollback 中，用户可以用原生滚动查看历史
+- Overlay 面板（SessionSelector、ModelSelector 等）：固定高度、模态弹出、不需要 scrollback
+
+因此 overlay 面板是 `ink-virtual-list` 的理想使用场景。VirtualList 通过 `items.slice(viewportOffset, viewportOffset + visibleCount)` 只渲染可见行，将 Yoga 树从 O(N) 降为 O(visibleCount)。
+
+### SessionSelector 的 VirtualList 使用
+
+```tsx
+// 只需渲染视口内的 ~13 行，而非全部 50+ 行
+<VirtualList<SessionInfo>
+  items={sessions}
+  selectedIndex={selected}
+  renderItem={renderItem}
+  keyExtractor={(s) => s.threadId}
+  height={maxContentHeight}
+  itemHeight={1}
+  showOverflowIndicators={true}
+/>
+```
+
+**renderItem 性能规则**：
+- `stringWidth` / `truncateByDisplayWidth` 等 Unicode 字符串计算应在 renderItem 内做 —— VirtualList 只对可见行调用 renderItem，天然 O(visibleCount)
+- 不要用 `useMemo` 预计算全部行的显示数据、然后把 selectedIndex 加入依赖 —— 方向键每帧都触发 O(N) 重算
+- 颜色值等不变 props 用 ref 持有，避免 `useCallback` 依赖导致 renderItem 引用不稳定
+
+### React.memo 在 Ink 中的局限性
+
+React.memo 跳过组件函数执行，但 Ink 的 `renderNodeToOutput` 管线仍然遍历 Yoga 树中的所有节点。**减少 Yoga 节点数**（通过 VirtualList 的视口裁剪）是唯一有效的优化手段。这一原则同时适用于 OutputArea（用 `<Static>` 移除已完成节点）和 overlay 面板（用 VirtualList 只渲染可见行）。
+
 ## 测试期望
 
 - viewport-culling.ts 中的回归测试验证所有 block 类型（user、tool_card、text）在渲染输出中可见
