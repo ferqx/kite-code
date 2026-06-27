@@ -37,10 +37,8 @@ export type Action =
   | { type: 'SWITCH_AUTH'; mode: string }
   | { type: 'EXPORT_SESSION' }
   | { type: 'EXPORT_SESSION_DONE'; filename: string }
-  | { type: 'EXPAND_INPUT' }
   | { type: 'SHOW_MODEL_SELECTOR' }
   | { type: 'HIDE_MODEL_SELECTOR' }
-  | { type: 'EDITOR_DONE' }
   | { type: 'SHOW_SESSIONS' }
   | { type: 'HIDE_SESSIONS' }
   | { type: 'LOAD_SESSION_PENDING'; threadId: string }

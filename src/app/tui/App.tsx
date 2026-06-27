@@ -69,7 +69,6 @@ const initialState: TuiState = {
   ctrlCPressed: false,
   sessionKey: 0,
   exitRequested: false,
-  editorRequested: false,
   sessionError: false,
   loadingSessionId: null,
   pendingSkills: [],

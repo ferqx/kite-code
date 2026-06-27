@@ -631,17 +631,6 @@ describe('eventReducer (blocks model)', () => {
       expect(s.sessions[0]!.threadId).toBe('new-session-1');
       expect(s.sessions[0]!.active).toBe(true);
     });
-    test('EXPAND_INPUT sets editorRequested', () => {
-      let s = fresh();
-      s = dispatch(s, { type: 'EXPAND_INPUT' });
-      expect(s.editorRequested).toBe(true);
-    });
-    test('EDITOR_DONE clears editorRequested', () => {
-      let s = fresh();
-      s = { ...s, editorRequested: true };
-      s = dispatch(s, { type: 'EDITOR_DONE' });
-      expect(s.editorRequested).toBe(false);
-    });
     test('SET_RUNNING resets ctrlCPressed and exitRequested', () => {
       let s = fresh();
       s = { ...s, ctrlCPressed: true, exitRequested: true };

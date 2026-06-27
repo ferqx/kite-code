@@ -1,6 +1,5 @@
 import { Box, Text, useInput } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
-import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import { useFileSearch } from '@/app/tui/hooks/useFileSearch';
@@ -25,11 +24,6 @@ interface PasteState {
   placeholder: string;
 }
 
-export interface EditorContentHandle {
-  getContent(): string;
-  handleEditorResult(content: string): void;
-}
-
 export interface SlashSuggestionData {
   kind: 'command' | 'model' | 'effort' | 'theme';
   partial: string;
@@ -50,7 +44,6 @@ interface InputLineProps {
   placeholder?: string;
   workspace: string;
   overlayActive?: boolean;
-  editorContentRef?: React.MutableRefObject<EditorContentHandle | null>;
   onSlashSuggestionChange?: (data: SlashSuggestionData | null) => void;
   /** Initial value — used to restore input text after resize remount. */
   initialValue?: string;
@@ -114,7 +107,6 @@ export default function InputLine({
   placeholder,
   workspace,
   overlayActive,
-  editorContentRef,
   onSlashSuggestionChange,
   initialValue = '',
   onValueChange,
@@ -504,39 +496,6 @@ export default function InputLine({
     },
   );
 
-  // Keep editorContentRef in sync via useEffect (not render body) per React purity guidelines
-  useEffect(() => {
-    if (editorContentRef) {
-      editorContentRef.current = {
-        getContent: () => {
-          const ps = pasteStateRef.current;
-          if (ps) {
-            const idx = value.indexOf(ps.placeholder);
-            if (idx >= 0) {
-              return (
-                value.slice(0, idx) + ps.pastedContent + value.slice(idx + ps.placeholder.length)
-              );
-            }
-          }
-          return value;
-        },
-        handleEditorResult: (content: string) => {
-          if (!content) return;
-          if (content.length >= PASTE_THRESHOLD) {
-            const placeholder = `[已粘贴 ${content.length.toLocaleString()} 字符]`;
-            setPasteState({ pastedContent: content, placeholder });
-            textKeyRef.current++;
-            setValue(placeholder);
-          } else {
-            setPasteState(null);
-            textKeyRef.current++;
-            setValue(content);
-          }
-        },
-      };
-    }
-  });
-
   if (disabled) {
     return (
       <Box>
@@ -595,11 +554,6 @@ export default function InputLine({
       {/* Plan mode bottom bar */}
       {planMode && <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
 
-      {pasteState && (
-        <Box marginTop={1}>
-          <Text color={t.dim}>Ctrl+E 展开粘贴内容</Text>
-        </Box>
-      )}
       {inputWarning && (
         <Box marginTop={1}>
           <Text color={t.error}>{inputWarning}</Text>
