@@ -393,8 +393,8 @@ function MultiQuestionWizard({
         <Text bold color={t.success}>
           ✓ Answers submitted
         </Text>
-        {Object.entries(answers).map(([id, val]) => (
-          <Text key={id} color={t.muted}>
+        {Object.entries(answers).map(([id, val], i) => (
+          <Text key={`${id}-${i}`} color={t.muted}>
             {id}: {val}
           </Text>
         ))}
