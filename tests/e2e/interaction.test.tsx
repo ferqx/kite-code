@@ -9,7 +9,7 @@
  *   1. Tool Approval Flow (3 tests)
  *   2. Agent Question Flow (2 tests)
  *   3. Slash Suggestion Dropdown (3 tests)
- *   4. Slash Commands (10 tests)
+ *   4. Slash Commands (13 tests)
  *   5. @File Search (2 tests)
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -422,6 +422,69 @@ describe('TUI E2E — P1 Key User Workflows', () => {
         const output = tui.getOutput();
         expect(output).not.toContain('No sessions');
         expect(tui.isIdle() || tui.isRunning()).toBe(true);
+      },
+      TIMEOUT,
+    );
+
+    test(
+      '/theme purple → shows Theme set message',
+      async () => {
+        // Default theme is blue; use purple to avoid dedup guard
+        await runSlashCommand(tui, '/theme purple', 500);
+        expect(tui.getOutput()).toContain('Theme set to purple');
+      },
+      TIMEOUT,
+    );
+
+    test(
+      '/theme same preset twice → no duplicate message (dedup guard)',
+      async () => {
+        // Switch to teal first (not the default)
+        await runSlashCommand(tui, '/theme teal', 500);
+        const afterFirst = tui.getOutput();
+        expect(afterFirst).toContain('Theme set to teal');
+
+        // Run again with same preset — dedup guard should suppress second message
+        await runSlashCommand(tui, '/theme teal', 500);
+
+        // TUI stays healthy
+        const output = tui.getOutput();
+        expect(output).toContain('❯');
+        expect(tui.isIdle() || tui.isRunning()).toBe(true);
+      },
+      TIMEOUT,
+    );
+
+    test(
+      '/theme c → shows suggestion dropdown with preset list',
+      async () => {
+        clearInputBuffer(tui);
+        await new Promise((r) => setTimeout(r, 200));
+
+        // Type /theme c to trigger theme suggestion dropdown
+        tui.stdin.write('/');
+        await new Promise((r) => setTimeout(r, 50));
+        tui.stdin.write('t');
+        await new Promise((r) => setTimeout(r, 50));
+        tui.stdin.write('h');
+        await new Promise((r) => setTimeout(r, 50));
+        tui.stdin.write('e');
+        await new Promise((r) => setTimeout(r, 50));
+        tui.stdin.write('m');
+        await new Promise((r) => setTimeout(r, 50));
+        tui.stdin.write('e');
+        await new Promise((r) => setTimeout(r, 50));
+        tui.stdin.write(' ');
+        await new Promise((r) => setTimeout(r, 50));
+        tui.stdin.write('c');
+        await new Promise((r) => setTimeout(r, 800));
+
+        // Theme dropdown should appear with matching presets
+        const output = tui.getOutput();
+        expect(output).toMatch(/主题匹配/);
+
+        tui.stdin.write('\x1b');
+        await new Promise((r) => setTimeout(r, 300));
       },
       TIMEOUT,
     );

@@ -34,6 +34,8 @@ export interface SuggestionItem {
   aliases: string[];
   description: string;
   args?: string;
+  /** Whether this item is the currently active selection (e.g. active theme preset) */
+  isActive?: boolean;
 }
 
 export interface SlashSuggestionsResult {
@@ -42,7 +44,16 @@ export interface SlashSuggestionsResult {
   items: SuggestionItem[];
 }
 
-export function useSlashSuggestions(inputValue: string, skillManifests?: SkillManifest[]) {
+export interface ActiveSelections {
+  theme?: string;
+  model?: string;
+}
+
+export function useSlashSuggestions(
+  inputValue: string,
+  skillManifests?: SkillManifest[],
+  activeSelections?: ActiveSelections,
+) {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const result = useMemo((): SlashSuggestionsResult | null => {
@@ -58,7 +69,12 @@ export function useSlashSuggestions(inputValue: string, skillManifests?: SkillMa
       return {
         kind: 'model',
         partial,
-        items: models.map((m) => ({ command: m, aliases: [], description: '' })),
+        items: models.map((m) => ({
+          command: m,
+          aliases: [],
+          description: '',
+          isActive: m === activeSelections?.model,
+        })),
       };
     }
 
@@ -86,7 +102,12 @@ export function useSlashSuggestions(inputValue: string, skillManifests?: SkillMa
       return {
         kind: 'theme',
         partial,
-        items: matched.map((p) => ({ command: p, aliases: [], description: '' })),
+        items: matched.map((p) => ({
+          command: p,
+          aliases: [],
+          description: '',
+          isActive: p === activeSelections?.theme,
+        })),
       };
     }
 
@@ -126,7 +147,7 @@ export function useSlashSuggestions(inputValue: string, skillManifests?: SkillMa
         args: c.args,
       })),
     };
-  }, [inputValue, skillManifests]);
+  }, [inputValue, skillManifests, activeSelections]);
 
   // Reset selection when results change
   const active = result !== null && result.items.length > 0;

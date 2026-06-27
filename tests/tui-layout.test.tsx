@@ -417,11 +417,11 @@ describe('ModelSelector', () => {
     expect(frame).toContain('deepseek-v4-flash');
   });
 
-  test('marks current model', () => {
+  test('marks current model with ●', () => {
     const { lastFrame } = render(
       <ModelSelector currentModel="deepseek-v4-flash" onSelect={noop} onClose={noop} />,
     );
-    expect(lastFrame()).toContain('(current)');
+    expect(lastFrame()).toContain('●');
   });
 
   test('shows navigation hints', () => {

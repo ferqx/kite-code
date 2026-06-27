@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import { useRef, useState } from 'react';
+import { ACTIVE_DOT, INACTIVE_DOT } from '@/app/tui/constants';
 import { useTheme } from '@/app/tui/theme';
 import { type AvailableModel, listAvailableModels } from '@/core/config';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
@@ -90,15 +91,18 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
       </Text>
       <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
-          {models.map((model, i) => (
-            <Box key={model.id}>
-              <Text color={i === selected ? t.primary : t.muted}>
-                {i === selected ? '❯' : ' '} {model.name}
-                {model.id === currentModel ? ' (current)' : ''}
-              </Text>
-              {model.description ? <Text color={t.dim}> — {model.description}</Text> : null}
-            </Box>
-          ))}
+          {models.map((model, i) => {
+            const activeDot = model.id === currentModel ? ACTIVE_DOT : INACTIVE_DOT;
+            return (
+              <Box key={model.id}>
+                <Text color={i === selected ? t.primary : t.muted}>
+                  {i === selected ? '❯' : ' '} {activeDot}
+                  {model.name}
+                </Text>
+                {model.description ? <Text color={t.dim}> — {model.description}</Text> : null}
+              </Box>
+            );
+          })}
         </ScrollList>
       </Box>
       <Box height={1} />

@@ -2,6 +2,7 @@ import { Box, Text, useInput, useStdout } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import React, { useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
+import { ACTIVE_DOT, INACTIVE_DOT } from '@/app/tui/constants';
 import { useTheme } from '@/app/tui/theme';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useSessionList } from '../hooks/useSessionList.js';
@@ -219,7 +220,7 @@ export default function SessionSelector({
             const isLoading = loadingSessionId === session.threadId;
             const isActive = activeSessionId === session.threadId;
             const cursor = isLoading ? '⏳' : i === selected ? '>' : ' ';
-            const marker = isActive ? '● ' : '';
+            const activeDot = isActive ? ACTIVE_DOT : INACTIVE_DOT;
             const timestamp = session.updatedAt;
             // 右列固定宽度：2 空格间隙 + 19 字符时间戳 "YYYY-MM-DD HH:mm:ss"
             const rightCol = isLoading ? '  Loading...        ' : `  ${timestamp}`;
@@ -227,7 +228,7 @@ export default function SessionSelector({
             // 预留：border(2) + paddingX(2) = 4，Safe margin = 2
             const cols = stdout?.columns ?? 80;
             const maxWidth = cols - 6;
-            const prefix = `${cursor} ${marker}`;
+            const prefix = `${cursor} ${activeDot}`;
             const rawName = session.name.replace(/\n/g, ' ');
             const prefixWidth = stringWidth(prefix);
             const nameMaxCols = Math.max(4, maxWidth - prefixWidth - rightColWidth);
