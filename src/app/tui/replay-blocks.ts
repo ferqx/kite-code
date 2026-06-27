@@ -6,7 +6,7 @@
  * 未来 CLI/Web 等前端可以有自己的转换函数。
  */
 
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+// (message type checks use field-based helpers — no LangChain imports needed)
 import type { SessionData } from '../../core/persistence/sessions.js';
 import { extractText } from '../../core/persistence/sessions.js';
 import type { SubAgentRole } from '../../protocol/events.js';
@@ -63,6 +63,33 @@ export function sessionDataToUI(data: SessionData): {
   return { blocks, interrupt };
 }
 
+/** 判断是否为 AIMessage（兼容 checkpoint 反序列化的 plain object）
+ *  Check if message is AIMessage-like (handles deserialized plain objects) */
+function isAiMessageLike(msg: Record<string, unknown>): boolean {
+  try {
+    if (typeof msg._getType === 'function') {
+      return (msg._getType as () => string).call(msg) === 'ai';
+    }
+  } catch {
+    /* ignore */
+  }
+  // Field-based: deserialized plain objects from checkpoint
+  return msg.type === 'ai' || Array.isArray(msg.tool_calls);
+}
+
+/** 判断是否为 HumanMessage（兼容 checkpoint 反序列化的 plain object） */
+function isHumanMessageLike(msg: Record<string, unknown>): boolean {
+  try {
+    if (typeof msg._getType === 'function') {
+      return (msg._getType as () => string).call(msg) === 'human';
+    }
+  } catch {
+    /* ignore */
+  }
+  // Field-based: deserialized plain objects from checkpoint
+  return msg.type === 'human';
+}
+
 /** 将 LangChain 消息数组映射为 OutputBlock 数组 / Map LangChain messages to OutputBlock array */
 function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
   const blocks: OutputBlock[] = [];
@@ -72,10 +99,11 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
 
   for (const msg of messages) {
     if (!msg || typeof msg !== 'object') continue;
+    const rawMsg = msg as Record<string, unknown>;
 
     // HumanMessage → user block
-    if (HumanMessage.isInstance(msg)) {
-      let content = extractText(msg.content as unknown);
+    if (isHumanMessageLike(rawMsg)) {
+      let content = extractText(rawMsg.content as unknown);
       // Strip "User: " prefix added by runTask for conversation history
       content = content.replace(/^User:\s*/, '');
       if (content.length > 0) {
@@ -85,8 +113,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
     }
 
     // AIMessage
-    if (AIMessage.isInstance(msg)) {
-      const rawMsg = msg as unknown as Record<string, unknown>;
+    if (isAiMessageLike(rawMsg)) {
       const additionalKwargs =
         (rawMsg.additional_kwargs as Record<string, unknown> | undefined) ?? {};
 
@@ -104,7 +131,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
       }
 
       // tool_calls → tool_card blocks (result summary added later from ToolMessage if present)
-      const toolCalls = msg.tool_calls;
+      const toolCalls = rawMsg.tool_calls;
       if (Array.isArray(toolCalls) && toolCalls.length > 0) {
         for (const tc of toolCalls) {
           if (tc && typeof tc === 'object') {
@@ -148,7 +175,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
       }
 
       // text content → text block
-      const content = extractText(msg.content as unknown);
+      const content = extractText(rawMsg.content as unknown);
       if (content.length > 0) {
         blocks.push({ id: nextId++, kind: 'text', content });
       }
@@ -156,17 +183,16 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
     }
 
     // ToolMessage → update matching AIMessage tool_card with result, or create standalone
-    const tm = msg as Record<string, unknown>;
-    if (isToolMessageLike(tm)) {
-      const callId = (tm.tool_call_id as string) ?? '';
-      const tmName = (tm.name as string) ?? '';
+    if (isToolMessageLike(rawMsg)) {
+      const callId = (rawMsg.tool_call_id as string) ?? '';
+      const tmName = (rawMsg.name as string) ?? '';
 
       // task tool result → build subagent block from pending task call + result
       if (tmName === 'task') {
         const pending = pendingTasks.get(callId) ?? { subagentType: 'explore' as const, task: '' };
         const subId = callId || `sa-${nextId}`;
         const { ok, summary, toolCallCount, durationMs, error, steps } = parseTaskResult(
-          typeof tm.content === 'string' ? tm.content : JSON.stringify(tm.content),
+          typeof rawMsg.content === 'string' ? rawMsg.content : JSON.stringify(rawMsg.content),
         );
         const cancelled = !ok && summary === 'Cancelled';
         blocks.push({
@@ -189,7 +215,8 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
       // update_plan result → treat as normal tool_card (plan content shown via tool output)
       // (previously created a plan_review block; now standard tool_card flow handles it)
 
-      const content = typeof tm.content === 'string' ? tm.content : JSON.stringify(tm.content);
+      const content =
+        typeof rawMsg.content === 'string' ? rawMsg.content : JSON.stringify(rawMsg.content);
       let ok = true;
       const summaryMaxLen = tmName === 'edit_file' || tmName === 'write_file' ? 2000 : 200;
       let summary = content.slice(0, summaryMaxLen);
@@ -265,7 +292,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
         }
       } else {
         // Standalone ToolMessage (no preceding AIMessage tool_calls)
-        const name = (tm.name as string) ?? '';
+        const name = (rawMsg.name as string) ?? '';
         blocks.push({
           id: nextId++,
           kind: 'tool_card',
