@@ -177,6 +177,20 @@ function toolRequestFromCall(
   call: { id?: string; name: string; args: Record<string, unknown> },
   _workspace: string,
 ): PendingToolRequest | null {
+  // 合成调用：invokeModel 在 parseToolCall 失败后注入 _raw_invalid_args 标记。
+  // 跳过工具特定的 args 规范化，保留标记字段直通 runApprovedTool 生成错误反馈。
+  // Synthetic call: injected by invokeModel after parseToolCall failure.
+  // Skip per-tool args normalization, preserve markers for runApprovedTool.
+  if (typeof call.args._raw_invalid_args === 'string') {
+    return {
+      id: call.id,
+      name: call.name,
+      args: call.args,
+      reason: `Model requested ${call.name} (synthetic — parse failure)`,
+      protectedCommand: call.name,
+    } as PendingToolRequest;
+  }
+
   if (call.name === 'read_file') {
     const args = call.args as { path?: string; offset?: number; limit?: number };
     return {

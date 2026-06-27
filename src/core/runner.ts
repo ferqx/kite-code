@@ -747,17 +747,24 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
             summary);
         summary = reason;
       }
-      // ask_user: extract human-readable answer from ToolMessage JSON
-      // instead of showing raw JSON
+      // ask_user: 提取人类可读的答案或错误详情
+      // ask_user: extract human-readable answer or error detail
       if ((msg.name as string) === 'ask_user') {
-        const answer = p.answer as string | undefined;
-        const answers = p.answers as Record<string, string> | undefined;
-        if (answers && Object.keys(answers).length > 0) {
-          summary = Object.entries(answers)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join('\n');
-        } else if (typeof answer === 'string') {
-          summary = answer || '(no answer)';
+        // 工具参数解析失败 → 显示错误详情（而非裸 JSON）
+        // Parse failure → show error detail instead of raw JSON
+        if (ok === false) {
+          summary =
+            (p.detail as string) || (p.stderr as string) || 'ask_user failed: invalid arguments';
+        } else {
+          const answer = p.answer as string | undefined;
+          const answers = p.answers as Record<string, string> | undefined;
+          if (answers && Object.keys(answers).length > 0) {
+            summary = Object.entries(answers)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join('\n');
+          } else if (typeof answer === 'string') {
+            summary = answer || '(no answer)';
+          }
         }
       }
     }

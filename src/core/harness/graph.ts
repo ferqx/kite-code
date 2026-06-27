@@ -1,4 +1,4 @@
-import { type AIMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { interrupt, START, StateGraph } from '@langchain/langgraph';
 import { ChatOllama } from '@langchain/ollama';
 import type { AgentConfig } from '@/core/config/index';
@@ -680,6 +680,60 @@ export async function invokeModel({
   const response = (await bindAgentTools(model, tools).invoke(prepared.messages, {
     signal,
   })) as AIMessage;
+
+  // 处理 invalid_tool_calls：LLM 偶尔生成不合法的 JSON arguments，
+  // parseToolCall 失败后这些调用被放入 invalid_tool_calls 而非 tool_calls。
+  // 若不加处理：(1) graph 看不到 tool_calls → 不执行 → 无 ToolMessage，
+  // (2) additional_kwargs.tool_calls 残留 → 下轮 fallback 到 API → 400 错误。
+  //
+  // 处理 invalid_tool_calls：为每个解析失败的调用创建合成 tool_calls 条目，
+  // 携带原始参数标记 _raw_invalid_args。不在此处创建 ToolMessage——
+  // 让合成条目保持"未解决"状态，graph 会路由到 tools 节点，
+  // runApprovedTool 检测到标记后生成工具特定的错误反馈。
+  // tools 节点结束后自动路由回 agent，模型立刻看到错误并重试。
+  //
+  // Handle invalid_tool_calls: create synthetic tool_calls entries with
+  // _raw_invalid_args marker. No ToolMessage here — keep them unresolved
+  // so the graph routes to tools → runApprovedTool detects the marker
+  // and creates error feedback → routes back to agent → model retries.
+  const invalidCalls = response.invalid_tool_calls;
+  if (Array.isArray(invalidCalls) && invalidCalls.length > 0) {
+    const syntheticToolCalls = invalidCalls.map((tc) => ({
+      id: (tc.id as string) ?? `invalid-${crypto.randomUUID()}`,
+      name: (tc.name as string) ?? 'unknown',
+      args: {
+        _raw_invalid_args: tc.args,
+        _parse_error: tc.error,
+      },
+      type: 'tool_call' as const,
+    }));
+
+    // 清理 additional_kwargs.tool_calls 防止 LangChain converter
+    // fallback 发送残留原始数据到 API（触发 400）。
+    const cleanAkw = { ...((response.additional_kwargs ?? {}) as Record<string, unknown>) };
+    delete cleanAkw.tool_calls;
+
+    return {
+      state: {
+        workspaceAccess: state.workspaceAccess,
+        phase: state.phase,
+        approvedToolRequest: state.approvedToolRequest,
+        approvedToolGrant: state.approvedToolGrant,
+        authorization: state.authorization,
+        messages: [
+          new AIMessage({
+            id: response.id,
+            content: response.content,
+            tool_calls: [...(response.tool_calls ?? []), ...syntheticToolCalls],
+            invalid_tool_calls: [],
+            additional_kwargs: cleanAkw,
+            response_metadata: response.response_metadata,
+            usage_metadata: response.usage_metadata,
+          }),
+        ],
+      },
+    };
+  }
 
   const request = toolRequestFromMessage(response, state.workspace);
   if (request) {

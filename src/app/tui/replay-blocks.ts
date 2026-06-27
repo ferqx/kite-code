@@ -212,14 +212,21 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
           }
           // ask_user: extract human-readable answer instead of raw JSON
           if (tmName === 'ask_user') {
-            const answer = p.answer as string | undefined;
-            const answers = p.answers as Record<string, string> | undefined;
-            if (answers && Object.keys(answers).length > 0) {
-              summary = Object.entries(answers)
-                .map(([k, v]) => `${k}: ${v}`)
-                .join('\n');
-            } else if (typeof answer === 'string') {
-              summary = answer || '(no answer)';
+            // 工具参数解析失败 → 显示错误详情 / Parse failure → show error detail
+            if (ok === false) {
+              const detail = p.detail as string | undefined;
+              const stderr = p.stderr as string | undefined;
+              summary = detail || stderr || 'ask_user failed: invalid arguments';
+            } else {
+              const answer = p.answer as string | undefined;
+              const answers = p.answers as Record<string, string> | undefined;
+              if (answers && Object.keys(answers).length > 0) {
+                summary = Object.entries(answers)
+                  .map(([k, v]) => `${k}: ${v}`)
+                  .join('\n');
+              } else if (typeof answer === 'string') {
+                summary = answer || '(no answer)';
+              }
             }
           }
         }
@@ -333,14 +340,20 @@ function parseTaskResult(content: string): {
   };
 }
 
-/** 判断是否为 ToolMessage 类消息 / Check if message is ToolMessage-like */
+/** 判断是否为 ToolMessage 类消息（兼容 checkpoint 反序列化的 plain object）
+ *  Check if message is ToolMessage-like (handles deserialized plain objects from checkpoint) */
 function isToolMessageLike(msg: Record<string, unknown>): boolean {
+  // 实例方法：新创建的消息 / Instance method: freshly constructed messages
   try {
     if (typeof msg._getType === 'function') {
       return (msg._getType as () => string).call(msg) === 'tool';
     }
   } catch {
     /* ignore */
+  }
+  // 字段检测：checkpoint 反序列化后的 plain object / Field-based: deserialized plain objects
+  if (typeof msg.tool_call_id === 'string' && msg.tool_call_id.length > 0) {
+    return true;
   }
   return false;
 }
