@@ -277,7 +277,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
             blocks.splice(existingIdx + 1, 0, {
               id: nextId++,
               kind: 'text',
-              content: '  ── Plan declined ──',
+              content: '── Plan declined ──',
             });
           } else {
             const finalSummary = summary || existing.summary;

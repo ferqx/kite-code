@@ -37,6 +37,8 @@ function formatLines(added?: number, removed?: number): string {
 }
 
 const BLOCK_GAP = 1;
+/** Agent text 内容的左缩进量，与工具卡片 `● 工具名` 中工具名起始列对齐 */
+const TEXT_INDENT = 2;
 
 /** 每个 block 自己负责与上一个 block 的间距（marginTop），而非依赖前一个 block 的 marginBottom。
  *  这样避免了 Static/Dynamic 边界和 block 状态转换时 marginBottom 在 Ink Yoga 布局中被丢失的问题。
@@ -108,11 +110,12 @@ const BlockRenderer = React.memo(function BlockRenderer({
       const hasVisible = /\S/u.test(block.content);
       if (!hasVisible) return null;
       return (
-        <Box marginTop={gapFrom(prevBlock).marginTop} marginBottom={0}>
+        <Box paddingLeft={TEXT_INDENT} marginTop={gapFrom(prevBlock).marginTop} marginBottom={0}>
           <MarkdownBlock
             content={block.content}
             streaming={block.streaming}
             color={block.isError ? dt.error : undefined}
+            maxWidth={columns - TEXT_INDENT}
           />
         </Box>
       );

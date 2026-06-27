@@ -86,7 +86,7 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
       const block: OutputBlock = {
         id: next.nextBlockId,
         kind: 'text',
-        content: '  ── Plan declined ──',
+        content: '── Plan declined ──',
       };
       return {
         ...appendBlock(next, block),
@@ -310,7 +310,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
           const block: OutputBlock = {
             id: next.nextBlockId,
             kind: 'text',
-            content: '  ── Plan declined ──',
+            content: '── Plan declined ──',
           };
           return { ...appendBlock(next, block), interrupt: null };
         }
