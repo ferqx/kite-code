@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-06-27（OSC 4 高亮槽修复 + shell 实时输出）
+最后更新：2026-06-29（Thought 预整合设计 + 上下文压缩方案）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -18,6 +18,7 @@
 
 | 记录 | 状态 | 范围 | 读取时机 |
 | --- | --- | --- | --- |
+| `execution/active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
 | `execution/active/plan-state-reminder.md` | active | 模型上下文构建、计划投影、缓存敏感 prompt 布局 | 修改 `src/model/context.ts`、`src/model/runtime-context.ts`，或修改计划/上下文投影相关测试。 |
 | `execution/active/model-provider-boundary.md` | active | 模型 provider 配置、适配器、provider 专有行为、真实配置模型测试 | 修改 `src/config`、`src/model`、provider 文档或真实模型套件。 |
 | `execution/active/tool-gated-autonomy.md` | active | 图路由、审批边界、工具 gating、最终答案自主性 | 修改 `src/harness/graph.ts`、`src/harness/routes.ts`、`src/harness/tool-policy.ts`、`src/harness/tool-runner.ts`，或修改审批/最终路由相关测试。 |
@@ -63,6 +64,7 @@
 | `understanding/2026-06-09-prompt-cache-optimization.md` | understanding | Prompt Cache 优化：合并 SystemMessage、清理死参数、修复 reasoning_content 注入 key 碰撞、TUI 缓存日志、子 agent 缓存震荡根因、对标 Claude Code/Codex/OpenCode 子 agent 结果回传机制。 |
 | `understanding/2026-06-09-token-stats-persistence-design.md` | understanding | Token 统计持久化系统：手动统计（不依赖 provider）、SQLite 持久化跨重启保留、useEffect 自动保存消除 stateRef 滞后、getSnapshot 内存缓存消除回车卡顿。 |
 | `understanding/2026-06-10-shell-concurrent-execution-design.md` | understanding | Shell 工具并发执行 + 批量审批流程 |
+| `understanding/2026-06-28-thought-pre-consolidation-design.md` | understanding | Thought 预整合设计 — 探索工具合并为 tool_summary、ToolSummaryBlock 三态渲染、explorationSummaryIds 映射、与 SubAgentBlock 对齐。 |
 | `understanding/2026-06-27-osc4-bold-bright-slot.md` | understanding | OSC 4 高亮调色槽发现：终端 bold 文本使用 slot 8-15，OSC 4 需同时重编程基础槽和高亮槽才能让 bold+color 文本跟随主题 |
 
 ## Backlog（工作待办）
@@ -93,6 +95,7 @@
 | `plans/2026-06-18-opentelemetry-observability.md` | draft | Agent OpenTelemetry 可观测性 — Trace/Span 建模 + OTLP/HTTP 导出，工具失败分类驱动提示词优化闭环。 |
 | `plans/2026-06-18-session-logger.md` | draft | 会话日志本地记录 — AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断。 |
 | `plans/2026-06-19-event-mechanism-refactor.md` | draft | 事件机制重构 — turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一。 |
+| `plans/2026-06-28-context-compaction.md` | active | 上下文压缩方案 — M0 TUI 预整合 + M1 Core 工具折叠 + M2 对话摘要（延后）。 |
 
 ## 完成执行记录
 
