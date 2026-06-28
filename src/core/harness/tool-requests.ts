@@ -11,6 +11,26 @@ import type {
 /** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
 export type PendingToolRequest =
   | {
+      /** 工具调用 ID / Tool call ID */
+      id?: string;
+      name: 'search_content';
+      args: { pattern: string; path?: string; glob?: string };
+      /** 调用原因 / Call reason */
+      reason: string;
+      /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
+    }
+  | {
+      /** 工具调用 ID / Tool call ID */
+      id?: string;
+      name: 'search_files';
+      args: { pattern: string; path?: string };
+      /** 调用原因 / Call reason */
+      reason: string;
+      /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
+    }
+  | {
       id?: string;
       name: 'read_file';
       args: { path: string; offset?: number; limit?: number };
@@ -275,6 +295,28 @@ function toolRequestFromCall(
       args: { server: args.server || '', uri: args.uri || '' },
       reason: 'Model requested MCP resource read',
       protectedCommand: `read_mcp_resource ${args.server || ''}`,
+    };
+  }
+
+  if (call.name === 'search_content') {
+    const args = call.args as { pattern?: string; path?: string; glob?: string };
+    return {
+      id: call.id,
+      name: 'search_content',
+      args: { pattern: args.pattern || '', path: args.path, glob: args.glob },
+      reason: 'Model requested content search',
+      protectedCommand: `search_content ${args.pattern || ''}`,
+    };
+  }
+
+  if (call.name === 'search_files') {
+    const args = call.args as { pattern?: string; path?: string };
+    return {
+      id: call.id,
+      name: 'search_files',
+      args: { pattern: args.pattern || '', path: args.path },
+      reason: 'Model requested file search',
+      protectedCommand: `search_files ${args.pattern || ''}`,
     };
   }
 

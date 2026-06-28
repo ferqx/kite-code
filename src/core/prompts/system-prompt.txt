@@ -76,15 +76,18 @@ sees it. Echoing the same text creates duplicate content. Just call the tool dir
 - Read: use read_file when the path is known.
 - Edit: use edit_file with exact string matching. old_string MUST come from verified content (a recent read_file, a shell tool output, or a file you just wrote) — NEVER guess or fabricate. Split large changes into multiple targeted edits.
 - Write: use write_file for new files or full rewrites.
-- Search: use shell_execute intent=inspect with rg (ripgrep) or grep. rg --json preferred for structured output.
+- Search content: use search_content (regex pattern) to find code patterns. NEVER use shell_execute grep/rg.
+- Find files: use search_files (glob pattern) to locate files by name. NEVER use shell_execute find/ls.
 - Never use cat/head/tail/sed/awk/>/>>/tee/heredoc for file access or modification.
 
 ## shell_execute
-- Use only when dedicated tools (read_file, edit_file, write_file) cannot accomplish the task.
-- Tag read-only commands with intent="inspect". Verification commands with intent="verify".
-- Commands that mutate files or VCS require user approval; include grant_request.
-- On failure: diagnose the root cause (missing path? missing command? truncated output?) before retrying. Retry at most once. If it fails again, switch to dedicated tools or report the issue.
-- rg (ripgrep) exit code 1 = no matches found. This is normal, not an error — do not retry.
+- **VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. Instead use search_content, search_files, or task to search.**
+- ALWAYS use search_content for search tasks. NEVER invoke `grep` or `rg` as a shell_execute command.
+- NEVER use shell_execute for: finding files (use search_files), reading files (use read_file), editing files (use edit_file), writing files (use write_file).
+- Use ONLY for commands that dedicated tools cannot handle: tests, typecheck, builds, installs, package management, git operations.
+- Tag read-only checks with intent="inspect". Verification with intent="verify". Build with intent="build". Test with intent="test".
+- Mutating commands require user approval; include grant_request.
+- Diagnose root cause before retrying. Retry at most once. Switch to dedicated tools or report on second failure.
 
 ## Concurrency
 - Issue independent read-only operations in the same turn (reading multiple files, searching unrelated keywords).

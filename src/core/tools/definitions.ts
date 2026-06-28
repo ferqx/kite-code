@@ -11,6 +11,8 @@ import {
   EDIT_FILE_CONTRACT,
   READ_FILE_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
+  SEARCH_CONTENT_CONTRACT,
+  SEARCH_FILES_CONTRACT,
   SHELL_EXECUTE_CONTRACT,
   UPDATE_PLAN_CONTRACT,
   WRITE_FILE_CONTRACT,
@@ -192,6 +194,60 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     },
   );
 
+  // ── search_content: dedicated code search (replaces shell_execute grep/rg) ──
+  const searchContent = tool(
+    async ({ pattern, path, glob }) => {
+      // Build rg command; fall back to grep if rg not available
+      const args = ['--line-number', '--color', 'never'];
+      if (glob) args.push('-g', glob);
+      args.push(pattern);
+      if (path) args.push(path);
+      const cmd = `rg ${args.map((a) => `"${a}"`).join(' ')} 2>/dev/null || grep -rn "${pattern}" ${path ?? '.'} ${glob ? `--include="${glob}"` : ''}`;
+      return JSON.stringify(
+        await (input.shellExecutor ?? shellTool)({
+          workspace: input.workspace,
+          command: cmd,
+          signal: input.signal,
+        }),
+      );
+    },
+    {
+      name: 'search_content',
+      description: SEARCH_CONTENT_CONTRACT.description,
+      schema: z.object({
+        pattern: z.string().describe('Regex pattern to search for (e.g. "function\\s+\\w+")'),
+        path: z
+          .string()
+          .optional()
+          .describe('Directory or file path to search in (default: workspace root)'),
+        glob: z.string().optional().describe('File glob filter (e.g. "*.ts", "*.{ts,tsx}")'),
+      }),
+    },
+  );
+
+  // ── search_files: dedicated file discovery (replaces shell_execute find/ls) ──
+  const searchFiles = tool(
+    async ({ pattern, path }) => {
+      const searchPath = path ?? '.';
+      const cmd = `find "${searchPath}" -type f -path "*${pattern}*" 2>/dev/null | head -50`;
+      return JSON.stringify(
+        await (input.shellExecutor ?? shellTool)({
+          workspace: input.workspace,
+          command: cmd,
+          signal: input.signal,
+        }),
+      );
+    },
+    {
+      name: 'search_files',
+      description: SEARCH_FILES_CONTRACT.description,
+      schema: z.object({
+        pattern: z.string().describe('File name pattern (e.g. "*.test.ts", "config.*")'),
+        path: z.string().optional().describe('Directory to search in (default: workspace root)'),
+      }),
+    },
+  );
+
   let skillTool: ReturnType<typeof createSkillTool> | null = null;
   if (input.skills && input.skills.length > 0 && input.skillOptions) {
     skillTool = createSkillTool(input.skills, input.skillOptions);
@@ -218,6 +274,8 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     editFileTool,
     writeFileTool,
     shellExecute,
+    searchContent,
+    searchFiles,
     readMcpResource,
     ...(skillTool ? [skillTool] : []),
     ...(taskTool ? [taskTool] : []),

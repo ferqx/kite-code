@@ -222,6 +222,35 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     });
   }
 
+  if (request.name === 'search_content') {
+    const result = await shellTool({
+      workspace,
+      command: `rg --line-number --color never "${request.args.pattern ?? ''}" ${request.args.path ?? '.'} ${request.args.glob ? `-g "${request.args.glob}"` : ''}`,
+      signal,
+    });
+    return withFailureGuidance(request, {
+      ...result,
+      stdout: truncateToolOutput(result.stdout),
+      stderr: truncateToolOutput(result.stderr),
+      command: `search_content ${request.args.pattern ?? ''}`,
+    });
+  }
+
+  if (request.name === 'search_files') {
+    const searchPath = request.args.path ?? '.';
+    const result = await shellTool({
+      workspace,
+      command: `find "${searchPath}" -type f -path "*${request.args.pattern ?? ''}*" 2>/dev/null | head -50`,
+      signal,
+    });
+    return withFailureGuidance(request, {
+      ...result,
+      stdout: truncateToolOutput(result.stdout),
+      stderr: truncateToolOutput(result.stderr),
+      command: `search_files ${request.args.pattern ?? ''}`,
+    });
+  }
+
   if (request.name === 'read_mcp_resource') {
     if (!mcpManager) {
       return withFailureGuidance(request, {

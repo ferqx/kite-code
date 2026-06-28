@@ -156,15 +156,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         modelName: input.config.modelName,
         thinkingLevel: input.thinkingLevel ?? null,
       };
+      const baseReturn = {
+        ...result,
+        ...modelConfigState,
+        authorization: syncedAuth,
+      };
       if (retryEvents.length > 0) {
-        return {
-          ...result,
-          ...modelConfigState,
-          authorization: syncedAuth,
-          modelRetries: retryEvents,
-        };
+        return { ...baseReturn, modelRetries: retryEvents };
       }
-      return { ...result, ...modelConfigState, authorization: syncedAuth };
+      return baseReturn;
     } finally {
       if (hasRetryListener(model)) model.setRetryListener(null);
     }

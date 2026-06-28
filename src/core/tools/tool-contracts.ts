@@ -107,19 +107,74 @@ export const WRITE_FILE_CONTRACT: ToolContract = {
 };
 WRITE_FILE_CONTRACT.description = buildDescription(WRITE_FILE_CONTRACT.sections);
 
+export const SEARCH_CONTENT_CONTRACT: ToolContract = {
+  name: 'search_content',
+  sections: {
+    whenToUse:
+      'Search file contents by regex pattern using ripgrep (rg). ' +
+      'Use this to find references, patterns, or specific code in the workspace. ' +
+      'Use `path` to scope the search to a directory or file. ' +
+      'Use `glob` to filter by file extension (e.g. "*.ts", "*.{ts,tsx}"). ' +
+      'NEVER use shell_execute with grep/rg/ag — use search_content instead. ' +
+      'NEVER use shell_execute with find/ls — use search_files instead.',
+    commonMistakes:
+      'Using shell_execute(grep/rg) instead of search_content. ' +
+      'Using shell_execute(find/ls) instead of search_files. ' +
+      'Searching too broadly without a glob filter — wastes context. ' +
+      'Not reading the matched files after finding them — search is discovery, not understanding.',
+    outputFormat:
+      'JSON: ok (boolean), command (executed), stdout (matching lines with file:line:content), stderr. ' +
+      'rg exit code 1 means NO matches — this is normal, not an error.',
+    failureHandling:
+      'rg exit code 1: no matches found. Narrow path or adjust pattern. ' +
+      'rg not installed: falls back to grep. ' +
+      'Empty output: try broader pattern or wider path scope.',
+  },
+  description: '',
+};
+SEARCH_CONTENT_CONTRACT.description = buildDescription(SEARCH_CONTENT_CONTRACT.sections);
+
+export const SEARCH_FILES_CONTRACT: ToolContract = {
+  name: 'search_files',
+  sections: {
+    whenToUse:
+      'Find files by name pattern in the workspace. ' +
+      'Use this to locate specific files by glob pattern (e.g. "*.test.ts", "**/config.*"). ' +
+      'Pattern MUST include a file extension or name fragment — do NOT use bare "*" to dump the entire file tree. ' +
+      'Use `path` to scope the search to a directory. ' +
+      'NEVER use shell_execute with find/ls for file discovery — use search_files instead. ' +
+      'NEVER use shell_execute with grep/rg for content search — use search_content instead.',
+    commonMistakes:
+      'Using bare "*" pattern — too broad, returns every file. Use "*.ts" or "*.test.*" instead. ' +
+      'Using shell_execute(find/ls) instead of search_files. ' +
+      'Using search_files to read file contents — use read_file for that. ' +
+      'Pattern without wildcards — search_files is for discovery, use read_file for known paths.',
+    outputFormat:
+      'JSON: ok (boolean), command (executed), stdout (file paths, one per line), stderr.',
+    failureHandling:
+      'No files found: try broader pattern or different directory. ' +
+      'Too many results: narrow pattern or scope to a subdirectory.',
+  },
+  description: '',
+};
+SEARCH_FILES_CONTRACT.description = buildDescription(SEARCH_FILES_CONTRACT.sections);
+
 export const SHELL_EXECUTE_CONTRACT: ToolContract = {
   name: 'shell_execute',
   sections: {
     whenToUse:
       'Execute a shell command in the workspace. ' +
-      'On Windows the shell is bash (Git Bash / MSYS2), NOT PowerShell or cmd.exe — always use Unix/shell syntax (ls, cat, grep, find, etc.), never PowerShell cmdlets (Get-ChildItem, Get-Content, Select-String, etc.). ' +
+      'On Windows the shell is bash (Git Bash / MSYS2), NOT PowerShell or cmd.exe — always use Unix/shell syntax, never PowerShell cmdlets. ' +
       'Use forward-slashed POSIX paths (e.g. /d/app/src, not D:\\app\\src) — backslashes are bash escape characters and will break paths. ' +
-      'Prefer read_file/edit_file/write_file for file operations; use shell_execute for tests, typecheck, ' +
-      'installs, git operations, and other terminal-only tasks. ' +
-      'Set intent=inspect for read-only exploration (listing files, searching, git status/diff/log) — these bypass approval. ' +
+      '**VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. Instead use search_content, search_files, or task to search.** ' +
+      '**ALWAYS use search_content for search tasks. NEVER invoke `grep` or `rg` as a shell_execute command.** ' +
+      'Do NOT use shell_execute for: searching file contents (use search_content), finding files (use search_files), reading files (use read_file), editing files (use edit_file), writing files (use write_file). ' +
+      'Use shell_execute ONLY for: tests, typecheck, builds, installs, git operations, and other terminal-only tasks. ' +
+      'Set intent=inspect for read-only checks, intent=verify for tests/typecheck/lint, intent=test for test runs, intent=build for compilation, intent=git for git operations. ' +
       'Write a short human-readable description so the user understands what the command does. ' +
       'For commands needing approval, include grant_request (approve_once | same_command | full_access).',
     commonMistakes:
+      'Using shell_execute with grep/rg/find — use search_content/search_files instead. ' +
       'Missing description field — always provide a short human-readable summary. ' +
       'Using intent=inspect for mutating commands — the harness will reject these. ' +
       'Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R) — denied by default.',
@@ -298,6 +353,8 @@ export const KNOWN_TOOL_NAMES = [
   'edit_file',
   'write_file',
   'shell_execute',
+  'search_content',
+  'search_files',
   'read_mcp_resource',
   'update_plan',
   'ask_user',
@@ -314,6 +371,8 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ['edit_file', EDIT_FILE_CONTRACT],
   ['write_file', WRITE_FILE_CONTRACT],
   ['shell_execute', SHELL_EXECUTE_CONTRACT],
+  ['search_content', SEARCH_CONTENT_CONTRACT],
+  ['search_files', SEARCH_FILES_CONTRACT],
   ['read_mcp_resource', READ_MCP_RESOURCE_CONTRACT],
   ['update_plan', UPDATE_PLAN_CONTRACT],
   ['ask_user', ASK_USER_CONTRACT],

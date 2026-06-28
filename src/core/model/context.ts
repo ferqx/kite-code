@@ -1,7 +1,9 @@
 import { AIMessage, type BaseMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import systemPrompt from '@/core/prompts/system-prompt.txt';
 import type { SkillManifest } from '@/core/skills/types';
+import type { ContextBudget } from '@/core/types';
 import type { AgentPlan } from '@/protocol/events';
+import { foldToolOutputs, microCompactToolOutputs } from './compaction';
 import { buildCacheableRuntimeContext, formatPlanStateReminder } from './runtime-context';
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = 'agent';
@@ -20,6 +22,8 @@ export interface ModelContextState {
   plan?: AgentPlan | null;
   /** 激活的 Skill 关键指令 / Active skill critical instructions */
   activeSkillInstructions?: string;
+  /** 上下文预算配置 / Context budget configuration (controls window size for M1 folding, triggers M2 at hard threshold) */
+  contextBudget?: ContextBudget;
 }
 
 /** 准备好的模型上下文 / Prepared model context */
@@ -248,32 +252,33 @@ export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage
   return ordered;
 }
 
-/** 准备模型上下文（组装系统提示词 + 对话消息） / Prepare model context (assemble, clear old tool results when near threshold) */
+/** 准备模型上下文（组装系统提示词 + 对话消息，含压缩流水线） / Prepare model context (assemble with compaction pipeline) */
 export function prepareModelContext(
   role: AgentRole,
   state: ModelContextState,
   skills?: SkillManifest[],
 ): PreparedModelContext {
-  const msgs =
+  let msgs =
     state.messages.length > 0
       ? reorderInterleavedMessages(sanitizeToolCallPairs(state.messages))
       : [new HumanMessage('')];
 
-  // 合并静态系统提示词与可缓存运行时上下文为单个 SystemMessage，
-  // 避免依赖 LangChain 内部的连续 SystemMessage 合并行为。
-  // Merge static system prompt and cacheable runtime context into one SystemMessage
-  // to avoid relying on LangChain's internal consecutive SystemMessage merging.
+  // ── M1a: 连续重复工具折叠 / Micro-compaction (≥3 consecutive same-tool) ──
+  msgs = microCompactToolOutputs(msgs);
+
+  // ── M1b: 只读工具结果折叠 / Read-only tool output folding (每轮默认) ──
+  msgs = foldToolOutputs(msgs, state.contextBudget);
+
+  // 构建 SystemMessage（缓存稳定前缀 + 运行时上下文）
   const systemPrompt =
     buildStaticSystemPrompt(role, skills) +
     '\n\n' +
     buildCacheableRuntimeContext({ workspace: state.workspace });
 
+  const planReminder = state.plan ? [new HumanMessage(formatPlanStateReminder(state.plan))] : [];
+
   return {
-    messages: [
-      new SystemMessage(systemPrompt),
-      ...msgs,
-      ...(state.plan ? [new HumanMessage(formatPlanStateReminder(state.plan))] : []),
-    ],
+    messages: [new SystemMessage(systemPrompt), ...msgs, ...planReminder],
   };
 }
 
