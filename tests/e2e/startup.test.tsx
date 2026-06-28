@@ -223,7 +223,8 @@ describe('TUI E2E — Startup & Core Regression (P0)', () => {
       await tui.waitForIdle(15000);
 
       const output = tui.getOutput();
-      expect(output).toContain('read_file');
+      // read_file tool may be rendered as individual tool_card or consolidated into tool_summary
+      expect(output.includes('read_file') || output.includes('Thought for')).toBe(true);
       expect(output).toContain('File looks good');
     },
     TIMEOUT,

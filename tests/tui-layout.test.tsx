@@ -474,7 +474,7 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('● shell_execute');
+    expect(frame).toContain('● Bash');
     expect(frame).toContain('rm -rf /tmp/test');
   });
 
@@ -814,7 +814,7 @@ describe('BlockRenderer', () => {
     const { lastFrame } = render(
       <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
-    expect(lastFrame()).toContain('read_file');
+    expect(lastFrame()).toContain('Read');
   });
 
   test('renders file_change block', () => {
@@ -917,7 +917,7 @@ describe('Block spacing', () => {
         args: {},
         status: 'done',
         summary: 'done',
-        _marker: 'read_file',
+        _marker: 'Read',
       } as any,
       1,
     );
@@ -959,7 +959,7 @@ describe('Block spacing', () => {
         args: {},
         status: 'done',
         summary: 'result',
-        _marker: 'shell_execute',
+        _marker: 'Bash',
       } as any,
       { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
       1,
@@ -1192,7 +1192,7 @@ describe('OutputArea', () => {
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('shell_execute');
+    expect(frame).toContain('Bash');
     expect(frame).toContain('npm test');
   });
 
@@ -1383,6 +1383,7 @@ describe('App', () => {
       exitRequested: false,
       sessionError: false,
       loadingSessionId: null,
+      explorationSummaryIds: {},
       ...overrides,
     };
   }
@@ -1431,7 +1432,7 @@ describe('App', () => {
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    expect(lastFrame()).toContain('● shell_execute');
+    expect(lastFrame()).toContain('● Bash');
   });
 
   test('shows InputBlock when interrupt is question', () => {

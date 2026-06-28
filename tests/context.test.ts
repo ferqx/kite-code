@@ -734,3 +734,534 @@ describe('reorderInterleavedMessages', () => {
     expect(result[2]).toBe(msgs[2]);
   });
 });
+
+// ============================================================================
+// Compaction — 上下文压缩
+// ============================================================================
+import {
+  estimateTokens,
+  foldOneToolResult,
+  foldToolOutputs,
+  microCompactToolOutputs,
+  shouldCompact,
+} from '../src/core/model/compaction';
+import type { ContextBudget } from '../src/core/types';
+
+describe('shouldCompact', () => {
+  const budget128k: ContextBudget = { maxTokens: 128_000 };
+
+  test('returns none when budget is undefined', () => {
+    expect(shouldCompact(100_000, undefined)).toEqual({ needed: false, reason: 'none' });
+  });
+
+  test('returns none when maxTokens is 0', () => {
+    expect(shouldCompact(100_000, { maxTokens: 0 })).toEqual({ needed: false, reason: 'none' });
+  });
+
+  test('returns none when tokens are well below threshold', () => {
+    expect(shouldCompact(50_000, budget128k)).toEqual({ needed: false, reason: 'none' });
+  });
+
+  test('returns soft when tokens exceed 75% threshold (default)', () => {
+    expect(shouldCompact(100_000, budget128k)).toEqual({ needed: true, reason: 'soft' });
+  });
+
+  test('returns hard when tokens approach window limit', () => {
+    expect(shouldCompact(122_000, budget128k)).toEqual({ needed: true, reason: 'hard' });
+  });
+
+  test('returns hard at appropriate threshold for 256K window', () => {
+    const budget: ContextBudget = { maxTokens: 256_000 };
+    expect(shouldCompact(245_000, budget)).toEqual({ needed: true, reason: 'hard' });
+  });
+
+  test('supports 1M context window', () => {
+    const budget: ContextBudget = { maxTokens: 1_000_000 };
+    expect(shouldCompact(990_000, budget)).toEqual({ needed: true, reason: 'hard' });
+    expect(shouldCompact(500_000, budget)).toEqual({ needed: false, reason: 'none' });
+  });
+
+  test('respects custom compactionThreshold', () => {
+    const budget: ContextBudget = { maxTokens: 128_000, compactionThreshold: 0.5 };
+    expect(shouldCompact(70_000, budget)).toEqual({ needed: true, reason: 'soft' });
+    expect(shouldCompact(60_000, budget)).toEqual({ needed: false, reason: 'none' });
+  });
+});
+
+describe('estimateTokens', () => {
+  test('returns 0 for empty array', () => {
+    expect(estimateTokens([])).toBe(0);
+  });
+
+  test('counts simple text messages', () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage('Hello world'),
+      new AIMessage({ content: 'Hi there!' }),
+    ];
+    const tokens = estimateTokens(msgs);
+    expect(tokens).toBeGreaterThan(0);
+    expect(tokens).toBeLessThan(30);
+  });
+
+  test('accounts for tool_calls overhead', () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: '',
+        tool_calls: [
+          { id: 'c1', name: 'shell_execute', args: { command: 'ls -la' } },
+          { id: 'c2', name: 'read_file', args: { path: 'test.txt' } },
+        ],
+      }),
+    ];
+    const tokens = estimateTokens(msgs);
+    expect(tokens).toBeGreaterThan(30);
+  });
+
+  test('consistently grows with increasing message count', () => {
+    const small = estimateTokens([new HumanMessage('a')]);
+    const medium = estimateTokens([
+      new HumanMessage('a'),
+      new AIMessage({ content: 'b' }),
+      new HumanMessage('c'),
+    ]);
+    expect(medium).toBeGreaterThan(small);
+  });
+});
+
+describe('foldOneToolResult', () => {
+  test('folds read_file into "Read <path> (<N> lines)"', () => {
+    const msg = new ToolMessage({
+      content: JSON.stringify({
+        ok: true,
+        command: 'read_file src/App.tsx',
+        path: 'src/App.tsx',
+        stdout: 'import React from "react";\nconst App = () => {...};\n',
+        totalLines: 343,
+      }),
+      tool_call_id: 'c1',
+      name: 'read_file',
+      status: 'success',
+    });
+    const folded = foldOneToolResult(msg);
+    expect(folded).not.toBeNull();
+    const data = JSON.parse(folded!.content as string);
+    expect(data._folded).toBe(true);
+    expect(data.note).toBe('Read src/App.tsx (343 lines)');
+    expect(data.path).toBe('src/App.tsx');
+  });
+
+  test('folds read_file without line count when totalLines missing', () => {
+    const msg = new ToolMessage({
+      content: JSON.stringify({ ok: true, path: 'README.md' }),
+      tool_call_id: 'c2',
+      name: 'read_file',
+      status: 'success',
+    });
+    const folded = foldOneToolResult(msg);
+    const data = JSON.parse(folded!.content as string);
+    expect(data.note).toBe('Read README.md');
+  });
+
+  test('folds shell_execute with rg command into "Searched: <cmd>"', () => {
+    const msg = new ToolMessage({
+      content: JSON.stringify({
+        ok: true,
+        command: 'rg "pattern" src/',
+        exitCode: 0,
+        stdout: 'src/a.ts:42: pattern found\nsrc/b.ts:7: pattern found',
+        action: { intent: 'inspect' },
+      }),
+      tool_call_id: 'c3',
+      name: 'shell_execute',
+      status: 'success',
+    });
+    const folded = foldOneToolResult(msg);
+    expect(folded).not.toBeNull();
+    const data = JSON.parse(folded!.content as string);
+    expect(data.note).toContain('Searched:');
+    expect(data.note).toContain('rg "pattern" src/');
+  });
+
+  test('does not fold shell_execute with non-search command even if intent=inspect', () => {
+    const msg = new ToolMessage({
+      content: JSON.stringify({
+        ok: true,
+        command: 'ls -la',
+        exitCode: 0,
+        stdout: 'total 42',
+        action: { intent: 'inspect' },
+      }),
+      tool_call_id: 'c5',
+      name: 'shell_execute',
+      status: 'success',
+    });
+    expect(foldOneToolResult(msg)).toBeNull();
+  });
+
+  test('does not fold shell_execute without search intent', () => {
+    const msg = new ToolMessage({
+      content: JSON.stringify({
+        ok: true,
+        command: 'npm run build',
+        exitCode: 0,
+        stdout: 'Build successful',
+        action: { intent: 'build' },
+      }),
+      tool_call_id: 'c4',
+      name: 'shell_execute',
+      status: 'success',
+    });
+    expect(foldOneToolResult(msg)).toBeNull();
+  });
+
+  test('folds read_mcp_resource into "Read MCP <path>"', () => {
+    const msg = new ToolMessage({
+      content: JSON.stringify({ ok: true, path: 'github/repo/docs' }),
+      tool_call_id: 'c5',
+      name: 'read_mcp_resource',
+      status: 'success',
+    });
+    const folded = foldOneToolResult(msg);
+    const data = JSON.parse(folded!.content as string);
+    expect(data.note).toBe('Read MCP github/repo/docs');
+  });
+
+  test('preserves tool_call_id, name, and status in folded message', () => {
+    const msg = new ToolMessage({
+      content: JSON.stringify({ ok: true, path: 'test.txt' }),
+      tool_call_id: 'original-id-123',
+      name: 'read_file',
+      status: 'success',
+    });
+    const folded = foldOneToolResult(msg);
+    expect(folded!.tool_call_id).toBe('original-id-123');
+    expect((folded as unknown as Record<string, unknown>).name).toBe('read_file');
+    expect((folded as unknown as Record<string, unknown>).status).toBe('success');
+  });
+
+  test('returns null for non-foldable tools', () => {
+    for (const name of ['edit_file', 'write_file', 'ask_user', 'update_plan', 'Skill', 'task']) {
+      const msg = new ToolMessage({
+        content: JSON.stringify({ ok: true }),
+        tool_call_id: 'cx',
+        name,
+        status: 'success',
+      });
+      expect(foldOneToolResult(msg)).toBeNull();
+    }
+  });
+});
+
+describe('foldToolOutputs', () => {
+  test('preserves recent messages unfoled', () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage('read file'),
+      new AIMessage({
+        content: '',
+        tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ ok: true, path: 'a.txt', totalLines: 10, stdout: 'AAA' }),
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
+      }),
+    ];
+    // Only 3 messages, recentWindowSize=6 → all within recent window, no folding
+    const result = foldToolOutputs(msgs);
+    const tm = result.find((m) => ToolMessage.isInstance(m)) as ToolMessage;
+    const data = JSON.parse(tm.content as string);
+    expect(data._folded).toBeUndefined();
+  });
+
+  test('folds old read_file messages beyond recent window', () => {
+    const msgs: BaseMessage[] = [];
+    // Create 3 files, each read 4 times (24 messages total)
+    // First read of each file = preserved, subsequent reads of same file = folded
+    for (let i = 0; i < 4; i++) {
+      for (const f of ['a.txt', 'b.txt', 'c.txt']) {
+        msgs.push(
+          new AIMessage({
+            content: '',
+            tool_calls: [{ id: `c_${f}_${i}`, name: 'read_file', args: { path: f } }],
+          }),
+        );
+        msgs.push(
+          new ToolMessage({
+            content: JSON.stringify({
+              ok: true,
+              path: f,
+              totalLines: 10,
+              stdout: `Content of ${f} read ${i}`,
+            }),
+            tool_call_id: `c_${f}_${i}`,
+            name: 'read_file',
+            status: 'success',
+          }),
+        );
+      }
+    }
+
+    // recentWindowSize=2 → last 2 messages protected
+    // First occurrence of each file → preserved (3 messages kept)
+    // Remaining (24 - 2 - 3 = 19) messages → folded
+    const result = foldToolOutputs(msgs, { recentWindowSize: 2 });
+
+    // First ToolMessage (a.txt, first read) → preserved (first path)
+    const firstTM = result[1] as ToolMessage;
+    const firstData = JSON.parse(firstTM.content as string);
+    expect(firstData._folded).toBeUndefined();
+
+    // Second occurrence of a.txt (at index ~7) → folded
+    const secondA = result.find((m, _i) => {
+      if (!ToolMessage.isInstance(m)) return false;
+      try {
+        const d = JSON.parse(m.content as string);
+        return d.path === 'a.txt' && d._folded === true;
+      } catch {
+        return false;
+      }
+    });
+    expect(secondA).toBeDefined();
+
+    // Last 2 messages are within recent window → not folded
+    const lastTM = result[result.length - 1] as ToolMessage;
+    const lastData = JSON.parse(lastTM.content as string);
+    expect(lastData._folded).toBeUndefined();
+  });
+
+  test('preserves first occurrence of each file path', () => {
+    const msgs: BaseMessage[] = [];
+    // Same file read 6 times (12 messages), recentWindowSize=2
+    // Last 2 messages protected, first occurrence preserved, 3 middle ones folded
+    for (let i = 0; i < 6; i++) {
+      msgs.push(
+        new AIMessage({
+          content: '',
+          tool_calls: [{ id: `c${i}`, name: 'read_file', args: { path: 'config.json' } }],
+        }),
+      );
+      msgs.push(
+        new ToolMessage({
+          content: JSON.stringify({
+            ok: true,
+            path: 'config.json',
+            totalLines: 20,
+            stdout: `v${i}`,
+          }),
+          tool_call_id: `c${i}`,
+          name: 'read_file',
+          status: 'success',
+        }),
+      );
+    }
+
+    // recentWindowSize=2 → last 2 of 12 messages protected
+    // First occurrence preserved
+    const result = foldToolOutputs(msgs, { recentWindowSize: 2 });
+
+    // First occurrence preserved (unfolded)
+    const firstTM = result[1] as ToolMessage;
+    const firstData = JSON.parse(firstTM.content as string);
+    expect(firstData._folded).toBeUndefined();
+
+    // Second occurrence should be folded (old + not first path)
+    const secondTM = result[3] as ToolMessage;
+    const secondData = JSON.parse(secondTM.content as string);
+    expect(secondData._folded).toBe(true);
+  });
+
+  test('folds shell_execute with rg search command', () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: '',
+        tool_calls: [
+          { id: 'c1', name: 'shell_execute', args: { command: 'rg pattern', intent: 'inspect' } },
+        ],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({
+          ok: true,
+          command: 'rg pattern',
+          exitCode: 0,
+          stdout: 'Found 5 matches',
+          action: { intent: 'inspect' },
+        }),
+        tool_call_id: 'c1',
+        name: 'shell_execute',
+        status: 'success',
+      }),
+    ];
+
+    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
+    const tm = result[1] as ToolMessage;
+    const data = JSON.parse(tm.content as string);
+    expect(data._folded).toBe(true);
+    expect(data.note).toContain('Searched:');
+    expect(data.note).toContain('rg pattern');
+  });
+
+  test('does not fold non-foldable tools like edit_file', () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: '',
+        tool_calls: [
+          { id: 'c1', name: 'edit_file', args: { path: 'x.ts', old_string: 'a', new_string: 'b' } },
+        ],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ ok: true, command: 'edit_file x.ts' }),
+        tool_call_id: 'c1',
+        name: 'edit_file',
+        status: 'success',
+      }),
+    ];
+
+    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
+    const data = JSON.parse((result[1] as ToolMessage).content as string);
+    expect(data._folded).toBeUndefined();
+  });
+
+  test('does not double-fold micro-compacted messages into "Read unknown"', () => {
+    // Simulate a message that was already compacted by microCompactToolOutputs
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: '',
+        tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({
+          _compacted: true,
+          note: '[repeated read_file output collapsed]',
+        }),
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
+      }),
+    ];
+
+    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
+    const tm = result[1] as ToolMessage;
+    const data = JSON.parse(tm.content as string);
+    // Should pass through unchanged, NOT become "Read unknown"
+    expect(data._compacted).toBe(true);
+    expect(data._folded).toBeUndefined();
+    expect(data.note).toContain('repeated read_file');
+  });
+
+  test('does not double-fold messages already folded by foldOneToolResult', () => {
+    // Simulate a message already folded during a prior turn
+    const foldedContent = JSON.stringify({
+      _folded: true,
+      ok: true,
+      note: 'Read a.txt (10 lines)',
+      path: 'a.txt',
+      totalLines: 10,
+    });
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: '',
+        tool_calls: [{ id: 'c2', name: 'read_file', args: { path: 'a.txt' } }],
+      }),
+      new ToolMessage({
+        content: foldedContent,
+        tool_call_id: 'c2',
+        name: 'read_file',
+        status: 'success',
+      }),
+    ];
+
+    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
+    const tm = result[1] as ToolMessage;
+    expect(tm.content).toBe(foldedContent); // identical, not re-folded
+  });
+
+  test('passes through non-ToolMessages unchanged', () => {
+    const msgs: BaseMessage[] = [new HumanMessage('hello'), new AIMessage({ content: 'hi' })];
+    const result = foldToolOutputs(msgs);
+    expect(result).toEqual(msgs);
+  });
+});
+
+describe('microCompactToolOutputs', () => {
+  test('passes through non-consecutive ToolMessages unchanged', () => {
+    const msgs: BaseMessage[] = [
+      new HumanMessage('go'),
+      new AIMessage({ content: '', tool_calls: [{ id: 'c1', name: 'read_file', args: {} }] }),
+      new ToolMessage({ content: 'file A', tool_call_id: 'c1', name: 'read_file' }),
+      new AIMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
+      new ToolMessage({ content: 'ls output', tool_call_id: 'c2', name: 'shell_execute' }),
+    ];
+    const result = microCompactToolOutputs(msgs);
+    expect(result).toHaveLength(5);
+  });
+
+  test('collapses 3+ consecutive same-tool outputs', () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({ content: '', tool_calls: [{ id: 'c1', name: 'shell_execute', args: {} }] }),
+      new ToolMessage({ content: 'output1', tool_call_id: 'c1', name: 'shell_execute' }),
+      new AIMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
+      new ToolMessage({ content: 'output2', tool_call_id: 'c2', name: 'shell_execute' }),
+      new AIMessage({ content: '', tool_calls: [{ id: 'c3', name: 'shell_execute', args: {} }] }),
+      new ToolMessage({ content: 'output3', tool_call_id: 'c3', name: 'shell_execute' }),
+    ];
+    const result = microCompactToolOutputs(msgs);
+    const contents = result
+      .filter((m) => ToolMessage.isInstance(m))
+      .map((m) => {
+        try {
+          return JSON.parse(m.content as string);
+        } catch {
+          return {};
+        }
+      });
+    const collapsed = contents.find((c) => c._compacted === true);
+    expect(collapsed).toBeDefined();
+    expect(collapsed.note).toContain('shell_execute');
+  });
+
+  test('does not collapse fewer than 3 consecutive calls', () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({ content: '', tool_calls: [{ id: 'c1', name: 'shell_execute', args: {} }] }),
+      new ToolMessage({ content: 'output1', tool_call_id: 'c1', name: 'shell_execute' }),
+      new AIMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
+      new ToolMessage({ content: 'output2', tool_call_id: 'c2', name: 'shell_execute' }),
+    ];
+    const result = microCompactToolOutputs(msgs);
+    expect(result).toHaveLength(4);
+    const contents = result
+      .filter((m) => ToolMessage.isInstance(m))
+      .map((m) => {
+        try {
+          return JSON.parse(m.content as string);
+        } catch {
+          return {};
+        }
+      });
+    expect(contents.some((c) => c._compacted === true)).toBe(false);
+  });
+
+  test('resets consecutive counter when tool name changes', () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({ content: '', tool_calls: [{ id: 'c1', name: 'read_file', args: {} }] }),
+      new ToolMessage({ content: 'f1', tool_call_id: 'c1', name: 'read_file' }),
+      new AIMessage({ content: '', tool_calls: [{ id: 'c2', name: 'read_file', args: {} }] }),
+      new ToolMessage({ content: 'f2', tool_call_id: 'c2', name: 'read_file' }),
+      new AIMessage({ content: '', tool_calls: [{ id: 'c3', name: 'shell_execute', args: {} }] }),
+      new ToolMessage({ content: 'out', tool_call_id: 'c3', name: 'shell_execute' }),
+      new AIMessage({ content: '', tool_calls: [{ id: 'c4', name: 'read_file', args: {} }] }),
+      new ToolMessage({ content: 'f3', tool_call_id: 'c4', name: 'read_file' }),
+    ];
+    const result = microCompactToolOutputs(msgs);
+    const contents = result
+      .filter((m) => ToolMessage.isInstance(m))
+      .map((m) => {
+        try {
+          return JSON.parse(m.content as string);
+        } catch {
+          return {};
+        }
+      });
+    expect(contents.some((c) => c._compacted === true)).toBe(false);
+  });
+});

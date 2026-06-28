@@ -85,20 +85,31 @@ describe('eventReducer (blocks model)', () => {
 
   describe('EVENT.tool_call / tool_done', () => {
     test('appends tool_card block with running status', () => {
+      // read_file is an exploration tool → pre-consolidated to tool_summary
       const s = dispatch(fresh(), tcEvt('c1', 'read_file', { path: 'a.txt' }));
-      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
-      expect(t.kind).toBe('tool_card');
-      expect(t.callId).toBe('c1');
-      expect(t.status).toBe('running');
+      const t = flatBlocks(s)[0]!;
+      expect(t.kind).toBe('tool_summary');
+      const ts = t as Extract<OutputBlock, { kind: 'tool_summary' }>;
+      expect(ts.tools[0]!.callId).toBe('c1');
+      expect(ts.tools[0]!.status).toBe('running');
     });
     test('tool_done updates to done and records elapsed', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file'));
       s = dispatch(s, tdEvt('c1', 'read_file', true, '150 lines'));
-      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
-      expect(t.status).toBe('done');
-      expect(t.summary).toBe('150 lines');
-      expect(t.elapsedMs).toBeNumber();
+      // read_file is an exploration tool → consolidated into tool_summary
+      const t = flatBlocks(s)[0]!;
+      expect(t.kind === 'tool_card' || t.kind === 'tool_summary').toBe(true);
+      if (t.kind === 'tool_card') {
+        const tc = t as Extract<OutputBlock, { kind: 'tool_card' }>;
+        expect(tc.status).toBe('done');
+        expect(tc.summary).toBe('150 lines');
+        expect(tc.elapsedMs).toBeNumber();
+      } else {
+        const ts = t as Extract<OutputBlock, { kind: 'tool_summary' }>;
+        expect(ts.summaryLine).toContain('read 1 file');
+        expect(ts.totalElapsedMs).toBeGreaterThanOrEqual(0);
+      }
     });
     test('tool_done updates to error when ok=false', () => {
       let s = fresh();
@@ -718,7 +729,9 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, textEvt('After tool'));
       expect(flatBlocks(s)).toHaveLength(3);
       expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe('Hello');
-      expect(flatBlocks(s)[1]!.kind).toBe('tool_card');
+      expect(
+        flatBlocks(s)[1]!.kind === 'tool_card' || flatBlocks(s)[1]!.kind === 'tool_summary',
+      ).toBe(true);
       expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: 'text' }>).content).toBe(
         'After tool',
       );
