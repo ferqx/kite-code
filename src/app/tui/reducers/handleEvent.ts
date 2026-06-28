@@ -3,7 +3,13 @@
 import type { AgentEvent } from '@/protocol/events';
 import { getToolDetail, getToolPreview } from '../components/render-utils';
 import { MAX_TOOL_LINES } from '../components/ToolCardBlock';
-import type { FileChangeRecord, OutputBlock, TuiState } from '../types';
+import type { ConsolidatedToolEntry, FileChangeRecord, OutputBlock, TuiState } from '../types';
+import {
+  buildToolSummaryLine,
+  isExplorationToolByName,
+  isExplorationToolEvent,
+  maybeConsolidateLastTurnBlocks,
+} from './consolidateTools';
 import {
   appendBlock,
   finalizeLastTurnStreaming,
@@ -158,16 +164,75 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case 'tool_call': {
       // task tool has its own subagent block
       if (event.data.name === 'task') return state;
-      // 已审批方案后的 update_plan 调用是进度追踪，不在消息列表中展示 / Subsequent update_plan calls after approval are progress tracking, hidden from message list
+      // 已审批方案后的 update_plan 调用是进度追踪，不在消息列表中展示
       if (event.data.name === 'update_plan' && state.status.plan !== null) return state;
-      // Dedup: skip if a tool_card with this callId already exists
+      // Dedup: skip if this callId already exists in any block
       if (hasBlock(state, (b) => b.kind === 'tool_card' && b.callId === event.data.call_id))
         return state;
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
+      const now = Date.now();
+      const times = { ...finalized.toolStartTimes, [event.data.call_id]: now };
+
+      // ── Pre-consolidation: exploration tools go directly to tool_summary, never as tool_card ──
+      if (isExplorationToolEvent(event.data)) {
+        const entry: ConsolidatedToolEntry = {
+          callId: event.data.call_id,
+          name: event.data.name,
+          args: event.data.args,
+          ok: false,
+          summary: '',
+          status: 'running',
+          totalLines:
+            typeof event.data.args?.totalLines === 'number'
+              ? event.data.args.totalLines
+              : undefined,
+        };
+        const turn = lastTurn(finalized);
+        const lastBlock = turn?.blocks.at(-1);
+
+        if (lastBlock?.kind === 'tool_summary') {
+          // 已有 tool_summary 且还在运行中 → 追加 / 已完成 → 创建新块
+          const allSettled = lastBlock.tools.every((t) => t.status !== 'running');
+          if (!allSettled) {
+            const tools = [...lastBlock.tools, entry];
+            const updated: OutputBlock = {
+              ...lastBlock,
+              tools,
+              summaryLine: buildToolSummaryLine(tools),
+            };
+            return {
+              ...updateLastBlock(finalized, updated),
+              toolStartTimes: times,
+              explorationSummaryIds: {
+                ...finalized.explorationSummaryIds,
+                [event.data.call_id]: lastBlock.id,
+              },
+            };
+          }
+          // All settled → create a new tool_summary for this new batch
+        }
+
+        // 创建新 tool_summary
+        const id = finalized.nextBlockId;
+        const block: OutputBlock = {
+          id,
+          kind: 'tool_summary',
+          tools: [entry],
+          totalElapsedMs: 0,
+          createdAt: now,
+          summaryLine: buildToolSummaryLine([entry]),
+        };
+        return {
+          ...appendBlock(finalized, block),
+          toolStartTimes: times,
+          explorationSummaryIds: { ...finalized.explorationSummaryIds, [event.data.call_id]: id },
+        };
+      }
+
+      // Non-exploration tool → standard tool_card
       const preview = getToolPreview(event.data.name, event.data.args);
       const id = finalized.nextBlockId;
-      const now = Date.now();
       const block: OutputBlock = {
         id,
         kind: 'tool_card',
@@ -179,7 +244,6 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         preview,
         startedAt: now,
       };
-      const times = { ...finalized.toolStartTimes, [event.data.call_id]: now };
       return { ...appendBlock(finalized, block), toolStartTimes: times };
     }
     case 'tool_done': {
@@ -187,41 +251,91 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const startedAt = state.toolStartTimes?.[event.data.call_id];
       const elapsedMs = startedAt ? Date.now() - startedAt : undefined;
       const { [event.data.call_id]: _, ...nextTimes } = state.toolStartTimes ?? {};
+
+      // ── Exploration tool: update entry in tool_summary (only if it was pre-consolidated) ──
+      // shell_execute without intent=inspect creates tool_card → won't be found here → falls through
+      if (isExplorationToolByName(event.data.name)) {
+        const blockId = state.explorationSummaryIds[event.data.call_id];
+        if (blockId != null) {
+          const turn = lastTurn(state);
+          const summaryIdx = turn?.blocks.findIndex((b) => b.id === blockId);
+          if (summaryIdx != null && summaryIdx >= 0) {
+            const summary = turn!.blocks[summaryIdx]! as Extract<
+              OutputBlock,
+              { kind: 'tool_summary' }
+            >;
+            const tools = summary.tools.map((t) =>
+              t.callId === event.data.call_id
+                ? {
+                    ...t,
+                    ok: event.data.ok,
+                    summary: event.data.summary,
+                    elapsedMs,
+                    totalLines: event.data.totalLines ?? t.totalLines,
+                    status: event.data.ok ? ('done' as const) : ('error' as const),
+                  }
+                : t,
+            );
+            const totalElapsedMs = Date.now() - summary.createdAt;
+            const updatedSummary: OutputBlock = {
+              ...summary,
+              tools,
+              totalElapsedMs,
+              summaryLine: buildToolSummaryLine(tools),
+            };
+            const turnsCopy = state.turns.map((t, ti) => {
+              if (ti !== state.turns.length - 1) return t;
+              return { blocks: t.blocks.map((b, bi) => (bi === summaryIdx ? updatedSummary : b)) };
+            });
+            let next = { ...state, turns: turnsCopy, toolStartTimes: nextTimes };
+            if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {
+              next = {
+                ...next,
+                status: {
+                  ...state.status,
+                  totalTokens: state.status.totalTokens + event.data.toolTokenCount,
+                },
+              };
+            }
+            return next;
+          }
+        }
+        // Not found via map or in blocks — fall through to standard tool_card update
+      }
+
+      // ── Standard tool_card update (non-exploration tools + exploration tools not pre-consolidated) ──
       const matched = findBlock(
         state,
         (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
       );
       if (matched?.kind !== 'tool_card') return { ...state, toolStartTimes: nextTimes };
-      // update_plan 被拒绝（ESC 取消 / reject）：标记为 Plan declined，替代 ignore 以保证 checkpoint 重放可见
-      // update_plan declined (ESC cancel / reject): mark as error, keep original plan content
+
+      // update_plan declined
       if (matched.name === 'update_plan' && !event.data.ok) {
-        const declined: OutputBlock = {
-          ...matched,
-          status: 'done' as const,
-          expanded: true,
-        };
+        const declined: OutputBlock = { ...matched, status: 'done' as const, expanded: true };
         return { ...replaceBlockById(state, matched.id, declined), toolStartTimes: nextTimes };
       }
-      // ask_user: 防御性提取人类可读的答案，避免裸 JSON 渲染 / ask_user: defensively extract human-readable answer
-      let summary = event.data.summary;
+
+      // ask_user summary extraction
+      let summaryText = event.data.summary;
       if (matched.name === 'ask_user') {
         try {
-          const p = JSON.parse(summary);
+          const p = JSON.parse(summaryText);
           if (p && typeof p === 'object') {
-            // 工具参数解析失败 → 显示错误详情而非裸 JSON / Parse failure → show error detail
             if (p.ok === false) {
-              const detail = p.detail as string | undefined;
-              const stderr = p.stderr as string | undefined;
-              summary = detail || stderr || 'ask_user failed: invalid arguments';
+              summaryText =
+                (p.detail as string) ||
+                (p.stderr as string) ||
+                'ask_user failed: invalid arguments';
             } else {
               const answer = p.answer as string | undefined;
               const answers = p.answers as Record<string, string> | undefined;
               if (answers && Object.keys(answers).length > 0) {
-                summary = Object.entries(answers)
+                summaryText = Object.entries(answers)
                   .map(([k, v]) => `${k}: ${v}`)
                   .join('\n');
               } else if (typeof answer === 'string') {
-                summary = answer || '(no answer)';
+                summaryText = answer || '(no answer)';
               }
             }
           }
@@ -229,7 +343,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           /* not JSON, use raw summary */
         }
       }
-      const cancelled = !event.data.ok && summary === 'Cancelled';
+
+      const cancelled = !event.data.ok && summaryText === 'Cancelled';
       const next: OutputBlock = {
         ...matched,
         status: event.data.ok
@@ -237,7 +352,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           : cancelled
             ? ('cancelled' as const)
             : ('error' as const),
-        summary,
+        summary: summaryText,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
         expanded:
@@ -248,18 +363,30 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           matched.name === 'update_plan' ||
           matched.name === 'ask_user',
       };
-      // 工具输出的 token 计入累计统计 / Tool output tokens counted in cumulative total
+
+      const updated = replaceBlockById(state, matched.id, next);
+      let result: TuiState = { ...updated, toolStartTimes: nextTimes };
       if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {
-        return {
-          ...replaceBlockById(state, matched.id, next),
-          toolStartTimes: nextTimes,
+        result = {
+          ...result,
           status: {
             ...state.status,
             totalTokens: state.status.totalTokens + event.data.toolTokenCount,
           },
         };
       }
-      return { ...replaceBlockById(state, matched.id, next), toolStartTimes: nextTimes };
+
+      // ── Flush pending tool_summary: when non-exploration tool completes, ensure preceding
+      //     exploration tools get flushed (they may be trapped behind a non-exploration tool_card) ──
+      const turn2 = lastTurn(result);
+      if (turn2) {
+        const consolidated = maybeConsolidateLastTurnBlocks(turn2.blocks, result.nextBlockId);
+        const tCopy = result.turns.slice();
+        tCopy[tCopy.length - 1] = { blocks: consolidated.blocks };
+        result = { ...result, turns: tCopy, nextBlockId: consolidated.nextBlockId };
+      }
+
+      return result;
     }
     case 'state_change': {
       const d = event.data;

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { ShellApprovalGrant, ToolApprovalPayload } from '@/protocol/events';
+import { ACTION_NAMES } from './render-utils';
 
 interface Option {
   key: string;
@@ -82,7 +83,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
       <Text bold color={riskColor}>
-        ● {approval.tool}
+        ● {ACTION_NAMES[approval.tool] ?? approval.tool}
       </Text>
       <Text color={t.primary}>{cmd}</Text>
       <Text color={t.dim}>

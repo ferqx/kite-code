@@ -378,7 +378,7 @@ export default function ToolCardBlock({
       <Box flexDirection="column">
         <Box>
           <Text color={isWaiting ? dt.muted : dt.warning}>{spinner} </Text>
-          <Text color={dt.primary}>{block.name}</Text>
+          <Text color={dt.primary}>{ACTION_NAMES[block.name] ?? block.name}</Text>
           {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
           {awaitingApproval ? (
             <Text color={dt.dim}> (awaiting approval)</Text>

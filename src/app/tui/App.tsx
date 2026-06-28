@@ -71,6 +71,7 @@ const initialState: TuiState = {
   exitRequested: false,
   sessionError: false,
   loadingSessionId: null,
+  explorationSummaryIds: {},
   pendingSkills: [],
   skillManifests: [],
 };

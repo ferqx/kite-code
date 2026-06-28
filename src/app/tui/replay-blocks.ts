@@ -11,6 +11,7 @@ import type { SessionData } from '../../core/persistence/sessions.js';
 import { extractText } from '../../core/persistence/sessions.js';
 import type { SubAgentRole } from '../../protocol/events.js';
 import { getToolDetail, getToolPreview } from './components/render-utils.js';
+import { consolidateAllRuns } from './reducers/consolidateTools.js';
 import type { InterruptState, OutputBlock, SubAgentStepRecord } from './types.js';
 
 const AUTO_EXPAND_TOOLS = new Set([
@@ -33,7 +34,8 @@ export function sessionDataToUI(data: SessionData): {
   blocks: OutputBlock[];
   interrupt: InterruptState | null;
 } {
-  const blocks = buildOutputBlocks(data.messages);
+  const rawBlocks = buildOutputBlocks(data.messages);
+  const blocks = consolidateAllRuns(rawBlocks);
 
   // Build callId → blockId index for interrupt mapping
   const callIdIndex: Record<string, number> = {};

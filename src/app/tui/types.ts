@@ -8,6 +8,19 @@ import type {
   WorkspaceAccess,
 } from '@/protocol/events';
 
+/** 合并工具摘要中的单条工具记录 / Single tool entry in a consolidated summary */
+export interface ConsolidatedToolEntry {
+  callId: string;
+  name: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  summary: string;
+  elapsedMs?: number;
+  status: 'running' | 'done' | 'error' | 'cancelled';
+  /** 读取文件时的文件总行数 / Total lines for read_file tool */
+  totalLines?: number;
+}
+
 export interface SubAgentStepRecord {
   toolName: string;
   toolArgs: Record<string, unknown>;
@@ -38,6 +51,14 @@ export type OutputBlock =
       liveOutput?: string;
       /** liveOutput 被截断前的总行数，用于展示截断计数 */
       liveTotalLines?: number;
+    }
+  | {
+      id: number;
+      kind: 'tool_summary';
+      tools: ConsolidatedToolEntry[];
+      totalElapsedMs: number;
+      createdAt: number;
+      summaryLine: string;
     }
   | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
   | {
@@ -115,6 +136,8 @@ export interface TuiState {
   sessionError: boolean;
   /** 正在从 DB 加载的会话 ID，null 表示未在加载 / ID of the session being loaded from DB, null when not loading */
   loadingSessionId: string | null;
+  /** 探索工具 callId → tool_summary block ID 映射，用于 tool_done 精确定位 */
+  explorationSummaryIds: Record<string, number>;
 }
 
 export type InterruptState =

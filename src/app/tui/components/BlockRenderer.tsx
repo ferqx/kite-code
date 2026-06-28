@@ -6,6 +6,7 @@ import MarkdownBlock from './MarkdownBlock';
 import SubAgentBlock from './SubAgentBlock';
 import { wrapDisplayLines } from './soft-wrap';
 import ToolCardBlock from './ToolCardBlock';
+import ToolSummaryBlock from './ToolSummaryBlock';
 
 export function changePrefix(
   kind: string,
@@ -130,6 +131,15 @@ const BlockRenderer = React.memo(function BlockRenderer({
           <ToolCardBlock block={block} awaitingApproval={awaitingApproval} columns={columns} />
         </Box>
       );
+
+    case 'tool_summary': {
+      const rc = block.tools.filter((t) => t.status === 'running').length;
+      return (
+        <Box key={`ts-${block.id}-${rc}-${block.totalElapsedMs}`} {...gapFrom(prevBlock)}>
+          <ToolSummaryBlock block={block} columns={columns} />
+        </Box>
+      );
+    }
 
     case 'file_change':
       return (

@@ -50,6 +50,10 @@ function isSettled(block: OutputBlock): boolean {
       return true; // content is final once emitted
     case 'tool_card':
       return block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
+    case 'tool_summary':
+      return block.tools.every(
+        (t) => t.status === 'done' || t.status === 'error' || t.status === 'cancelled',
+      );
     case 'subagent':
       return block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
     case 'approval':
@@ -81,6 +85,10 @@ export function blockFingerprint(b: OutputBlock): string {
         (b.liveOutput
           ? `:lo${b.liveOutput.length}:${b.liveOutput.slice(0, 8)}:${b.liveOutput.slice(-8)}:t${b.liveTotalLines ?? 0}`
           : '');
+      break;
+    case 'tool_summary':
+      // Every tool status change must trigger a split recomputation
+      extra = `:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}`;
       break;
     case 'subagent':
       extra = `:${b.status}:${b.steps.length}`;

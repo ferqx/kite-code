@@ -2,6 +2,7 @@
 
 import type { OutputBlock, TuiState } from '../types';
 import type { Action } from './actions';
+import { buildToolSummaryLine } from './consolidateTools';
 import {
   appendBlock,
   finalizeLastTurnStreaming,
@@ -12,10 +13,10 @@ import {
   replaceBlockById,
 } from './helpers';
 
-/** 将最后 turn 中所有 running 状态的 subagent/tool_card 标记为 cancelled。
+/** 将最后 turn 中所有 running 状态的 subagent/tool_card/tool_summary 标记为 cancelled。
  *  Esc 取消后 running→false，所有 block 移入 Static 冻结。必须在 render
  *  之前同步收尾，否则 spinner 状态被写入 scrollback 后永远不可恢复。
- *  Mark all running subagent/tool_card blocks in the last turn as cancelled
+ *  Mark all running subagent/tool_card/tool_summary blocks in the last turn as cancelled
  *  before running flips to false, so they don't get frozen into Static. */
 function cancelRunningBlocks(s: TuiState): TuiState {
   const last = lastTurn(s);
@@ -38,6 +39,19 @@ function cancelRunningBlocks(s: TuiState): TuiState {
     if (b.kind === 'tool_card' && b.status === 'running') {
       changed = true;
       return { ...b, status: 'cancelled' as const, summary: 'Cancelled' };
+    }
+    if (b.kind === 'tool_summary') {
+      const tools = b.tools.map((t) =>
+        t.status === 'running' ? { ...t, status: 'cancelled' as const, summary: 'Cancelled' } : t,
+      );
+      if (tools.some((t, i) => t.status !== b.tools[i]!.status)) {
+        changed = true;
+        return {
+          ...b,
+          tools,
+          summaryLine: buildToolSummaryLine(tools),
+        };
+      }
     }
     return b;
   });
