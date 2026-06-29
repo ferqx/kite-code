@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SkillManifest } from '../src/core/skills/types';
 import { createAgentTools, isReadOnlyShellCommand } from '../src/core/tools/definitions';
 import { TOOL_CONTRACTS } from '../src/core/tools/tool-contracts';
@@ -223,6 +226,31 @@ describe('code agent tool definitions', () => {
   });
 
   // 验证 shell_execute schema 收敛验证语义和授权建议字段 / shell_execute schema carries action envelope metadata and grant hints
+  test('search tools execute without shell access', async () => {
+    const workspace = join(tmpdir(), 'kite-code-agent-tools-native-search');
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(join(workspace, 'src'), { recursive: true });
+    writeFileSync(join(workspace, 'package.json'), '{}\n');
+    writeFileSync(join(workspace, 'src', 'alpha.ts'), 'const marker = "needle";\n');
+
+    const tools = createAgentTools({
+      workspace,
+      shellExecutor: async () => {
+        throw new Error('search tools must not invoke shell');
+      },
+    });
+    const searchFiles = tools.find((item) => item.name === 'search_files')!;
+    const searchContent = tools.find((item) => item.name === 'search_content')!;
+
+    const filesResult = JSON.parse(await searchFiles.invoke({ pattern: 'package.json' }));
+    const contentResult = JSON.parse(await searchContent.invoke({ pattern: 'needle' }));
+
+    expect(filesResult.ok).toBe(true);
+    expect(filesResult.stdout).toContain('package.json');
+    expect(contentResult.ok).toBe(true);
+    expect(contentResult.stdout).toContain('src/alpha.ts:1:const marker = "needle";');
+  });
+
   test('shell_execute schema accepts action envelope fields', () => {
     const tools = createAgentTools({
       workspace: 'D:\\workspace',

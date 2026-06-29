@@ -4,6 +4,10 @@ import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '@/core/tools/file';
+import {
+  searchContent as searchContentNative,
+  searchFiles as searchFilesNative,
+} from '@/core/tools/search';
 import { type ShellExecutor, shellTool } from '@/core/tools/shell';
 import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type { AuthorizationOverride, ShellResult, ThreadAuthorizationState } from '@/core/types';
@@ -223,10 +227,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'search_content') {
-    const result = await shellTool({
+    const result = searchContentNative({
       workspace,
-      command: `rg --line-number --color never "${request.args.pattern ?? ''}" ${request.args.path ?? '.'} ${request.args.glob ? `-g "${request.args.glob}"` : ''}`,
-      signal,
+      pattern: request.args.pattern,
+      path: request.args.path,
+      glob: request.args.glob,
     });
     return withFailureGuidance(request, {
       ...result,
@@ -237,17 +242,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'search_files') {
-    const searchPath = request.args.path ?? '.';
-    const result = await (shellExecutor ?? shellTool)({
+    const result = searchFilesNative({
       workspace,
-      command: buildSearchFilesCommand(request.args.pattern ?? '', searchPath),
-      signal,
+      pattern: request.args.pattern,
+      path: request.args.path,
     });
-    const normalized = normalizeSearchFilesResult(result);
     return withFailureGuidance(request, {
-      ...normalized,
-      stdout: truncateToolOutput(normalized.stdout),
-      stderr: truncateToolOutput(normalized.stderr),
+      ...result,
+      stdout: truncateToolOutput(result.stdout),
+      stderr: truncateToolOutput(result.stderr),
       command: `search_files ${request.args.pattern ?? ''}`,
     });
   }
@@ -424,26 +427,6 @@ export function truncateToolOutput(output: string, maxLen = 4000): string {
   const tail = output.slice(-keep);
   const omittedLines = output.slice(keep, -keep).split('\n').filter(Boolean).length;
   return `${head}\n... [${omittedLines} lines omitted, ${output.length - 2 * keep} total chars truncated]\n${tail}`;
-}
-
-function shellQuote(value: unknown): string {
-  return `"${String(value).replace(/(["\\$`])/g, '\\$1')}"`;
-}
-
-function buildSearchFilesCommand(pattern: unknown, path: unknown): string {
-  const rawPattern = String(pattern || '*');
-  const searchPath = String(path || '.');
-  const hasPathSeparator = rawPattern.includes('/') || rawPattern.includes('\\');
-  const globs = hasPathSeparator ? [rawPattern] : [rawPattern, `**/${rawPattern}`];
-  const globArgs = globs.map((glob) => `-g ${shellQuote(glob)}`).join(' ');
-  return `rg --files ${shellQuote(searchPath)} ${globArgs}`;
-}
-
-function normalizeSearchFilesResult(result: ShellResult): ShellResult {
-  if (result.exitCode === 1 && result.stdout.length === 0 && result.stderr.length === 0) {
-    return { ...result, ok: true, exitCode: 0 };
-  }
-  return result;
 }
 
 async function runShellForTool(

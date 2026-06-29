@@ -5,6 +5,7 @@ import type { SupportedChatModel } from '@/core/model/factory';
 import { createSkillTool } from '@/core/skills/skill-tool';
 import { createTaskTool } from '@/core/subagent/task-tool';
 import { editFile, readFile, writeFile } from './file';
+import { searchContent as searchContentNative, searchFiles as searchFilesNative } from './search';
 import { type ShellExecutor, shellTool } from './shell';
 import {
   ASK_USER_CONTRACT,
@@ -44,19 +45,6 @@ export interface CreateAgentToolsInput {
   maxDepth?: number;
   /** 线程 ID，用于多 session 缓存隔离 / Thread ID for multi-session cache isolation */
   threadId?: string;
-}
-
-function shellQuote(value: unknown): string {
-  return `"${String(value).replace(/(["\\$`])/g, '\\$1')}"`;
-}
-
-function buildSearchFilesCommand(pattern: unknown, path: unknown): string {
-  const rawPattern = String(pattern || '*');
-  const searchPath = String(path || '.');
-  const hasPathSeparator = rawPattern.includes('/') || rawPattern.includes('\\');
-  const globs = hasPathSeparator ? [rawPattern] : [rawPattern, `**/${rawPattern}`];
-  const globArgs = globs.map((glob) => `-g ${shellQuote(glob)}`).join(' ');
-  return `rg --files ${shellQuote(searchPath)} ${globArgs}`;
 }
 
 /** 模块级工具缓存：按 cacheKey 隔离，防止多 session 并发时竞态覆盖 / Module-level tool cache isolated by cacheKey to prevent race conditions with concurrent sessions */
@@ -211,18 +199,8 @@ export function createAgentTools(input: CreateAgentToolsInput) {
   // ── search_content: dedicated code search (replaces shell_execute grep/rg) ──
   const searchContent = tool(
     async ({ pattern, path, glob }) => {
-      // Build rg command; fall back to grep if rg not available
-      const args = ['--line-number', '--color', 'never'];
-      if (glob) args.push('-g', glob);
-      args.push(pattern);
-      if (path) args.push(path);
-      const cmd = `rg ${args.map((a) => `"${a}"`).join(' ')} 2>/dev/null || grep -rn "${pattern}" ${path ?? '.'} ${glob ? `--include="${glob}"` : ''}`;
       return JSON.stringify(
-        await (input.shellExecutor ?? shellTool)({
-          workspace: input.workspace,
-          command: cmd,
-          signal: input.signal,
-        }),
+        searchContentNative({ workspace: input.workspace, pattern, path, glob }),
       );
     },
     {
@@ -242,18 +220,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
   // ── search_files: dedicated file discovery (replaces shell_execute find/ls) ──
   const searchFiles = tool(
     async ({ pattern, path }) => {
-      const searchPath = path ?? '.';
-      const cmd = buildSearchFilesCommand(pattern, searchPath);
-      const result = await (input.shellExecutor ?? shellTool)({
-        workspace: input.workspace,
-        command: cmd,
-        signal: input.signal,
-      });
-      const normalized =
-        result.exitCode === 1 && result.stdout.length === 0 && result.stderr.length === 0
-          ? { ...result, ok: true, exitCode: 0 }
-          : result;
-      return JSON.stringify(normalized);
+      return JSON.stringify(searchFilesNative({ workspace: input.workspace, pattern, path }));
     },
     {
       name: 'search_files',

@@ -2,6 +2,9 @@
  * tool-runner 单元测试 — 覆盖 runApprovedTool 各工具分发分支
  */
 import { describe, expect, it } from 'bun:test';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { PendingToolRequest } from '../src/core/harness/tool-requests';
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpManager } from '../src/core/mcp';
@@ -28,6 +31,16 @@ function makeSearchFilesRequest(pattern: string): PendingToolRequest {
     args: { pattern },
     reason: 'Test file search',
     protectedCommand: `search_files ${pattern}`,
+  } as PendingToolRequest;
+}
+
+function makeSearchContentRequest(pattern: string): PendingToolRequest {
+  return {
+    id: 'call-search-content',
+    name: 'search_content',
+    args: { pattern },
+    reason: 'Test content search',
+    protectedCommand: `search_content ${pattern}`,
   } as PendingToolRequest;
 }
 
@@ -103,46 +116,63 @@ describe('runApprovedTool — read_mcp_resource', () => {
 });
 
 describe('runApprovedTool — search_files', () => {
-  it('uses rg --files with glob filters instead of platform-specific find', async () => {
-    let command = '';
+  it('finds files without invoking shell', async () => {
+    const workspace = join(tmpdir(), 'kite-code-search-files-native');
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(join(workspace, 'src'), { recursive: true });
+    writeFileSync(join(workspace, 'package.json'), '{}\n');
+    writeFileSync(join(workspace, 'src', 'package.json'), '{}\n');
+
     const result = await runApprovedTool({
-      workspace: '/ws',
+      workspace,
       request: makeSearchFilesRequest('package.json'),
-      shellExecutor: async (input) => {
-        command = input.command;
-        return {
-          ok: true,
-          command: input.command,
-          exitCode: 0,
-          stdout: 'package.json\n',
-          stderr: '',
-        };
+      shellExecutor: async () => {
+        throw new Error('search_files must not invoke shell');
       },
     });
 
     expect(result.ok).toBe(true);
-    expect(command).toContain('rg --files');
-    expect(command).toContain('-g "package.json"');
-    expect(command).toContain('-g "**/package.json"');
-    expect(command).not.toContain('find ');
+    expect(result.stdout).toContain('package.json');
+    expect(result.stdout).toContain('src/package.json');
+    expect(result.command).toBe('search_files package.json');
   });
 
-  it('treats empty rg --files matches as a successful empty search', async () => {
+  it('returns success with empty stdout when no files match', async () => {
+    const workspace = join(tmpdir(), 'kite-code-search-files-empty-native');
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+
     const result = await runApprovedTool({
-      workspace: '/ws',
+      workspace,
       request: makeSearchFilesRequest('missing.file'),
-      shellExecutor: async (input) => ({
-        ok: false,
-        command: input.command,
-        exitCode: 1,
-        stdout: '',
-        stderr: '',
-      }),
     });
 
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
+  });
+});
+
+describe('runApprovedTool 鈥?search_content', () => {
+  it('searches file contents without invoking shell', async () => {
+    const workspace = join(tmpdir(), 'kite-code-search-content-native');
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(join(workspace, 'src'), { recursive: true });
+    writeFileSync(join(workspace, 'src', 'alpha.ts'), 'export const marker = "needle";\n');
+    writeFileSync(join(workspace, 'src', 'beta.ts'), 'export const other = true;\n');
+
+    const result = await runApprovedTool({
+      workspace,
+      request: makeSearchContentRequest('needle'),
+      shellExecutor: async () => {
+        throw new Error('search_content must not invoke shell');
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.stdout).toContain('src/alpha.ts:1:export const marker = "needle";');
+    expect(result.stdout).not.toContain('beta.ts');
+    expect(result.command).toBe('search_content needle');
   });
 });
