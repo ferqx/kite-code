@@ -172,28 +172,30 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
             <Text color={dt.dim}>├─ ... 以上 {skipped} 步已折叠</Text>
           </Box>
         )}
-        {visibleSteps.map((step) => (
-          <Box key={step.callId} paddingLeft={3}>
-            <Text color={dt.dim}>├─ {actionName(step.name)}</Text>
-            {(() => {
-              const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
-              if (!rawLabel) return null;
-              const stepPreW = stringWidth(`├─ ${actionName(step.name)}`);
-              const errSummary = failureSummary(step, 32);
-              const stepSufW = step.status !== 'running' ? 2 + stringWidth(errSummary) + 1 : 0;
-              const fitLabel = truncateToFit(
-                rawLabel,
-                Math.max(0, col - 3 - stepPreW - stepSufW - 2),
-              );
-              return fitLabel ? <Text color={dt.muted}> {fitLabel}</Text> : null;
-            })()}
-            {step.status === 'done' && <Text color={dt.success}> ✓</Text>}
-            {step.status === 'error' && <Text color={dt.error}> ✗</Text>}
-            {step.status === 'error' && failureSummary(step, 32) && (
-              <Text color={dt.muted}> {failureSummary(step, 32)}</Text>
-            )}
-          </Box>
-        ))}
+        {visibleSteps.map((step) => {
+          const isError = step.status === 'error';
+          const lineColor = isError ? dt.error : dt.dim;
+          return (
+            <Box key={step.callId} paddingLeft={3}>
+              <Text color={lineColor}>├─ {actionName(step.name)}</Text>
+              {(() => {
+                const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
+                if (!rawLabel) return null;
+                const stepPreW = stringWidth(`├─ ${actionName(step.name)}`);
+                const errSummary = failureSummary(step, 32);
+                const stepSufW = isError ? stringWidth(errSummary) + 1 : 0;
+                const fitLabel = truncateToFit(
+                  rawLabel,
+                  Math.max(0, col - 3 - stepPreW - stepSufW - 2),
+                );
+                return fitLabel ? <Text color={lineColor}> {fitLabel}</Text> : null;
+              })()}
+              {isError && failureSummary(step, 32) && (
+                <Text color={dt.error}> {failureSummary(step, 32)}</Text>
+              )}
+            </Box>
+          );
+        })}
         <Box paddingLeft={3}>
           <Text color={dt.dim}>└─ 运行中 ({elapsedStr})</Text>
         </Box>
@@ -216,9 +218,11 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
       </Box>
       {visibleSteps.map((step, i) => {
         const isLast = i === visibleSteps.length - 1;
+        const isError = step.status === 'error';
+        const lineColor = isError ? dt.error : dt.dim;
         return (
           <Box key={step.callId} paddingLeft={3}>
-            <Text color={dt.dim}>
+            <Text color={lineColor}>
               {isLast ? '└─' : '├─'} {actionName(step.name)}
             </Text>
             {(() => {
@@ -226,18 +230,16 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
               if (!rawLabel) return null;
               const stepPreW = stringWidth(`${isLast ? '└─' : '├─'} ${actionName(step.name)}`);
               const errSummary = failureSummary(step, 32);
-              const stepSufW = step.ok !== undefined ? 2 + stringWidth(errSummary) + 1 : 0;
+              const stepSufW = isError ? stringWidth(errSummary) + 1 : 0;
               const fitLabel = truncateToFit(
                 rawLabel,
                 Math.max(0, col - 3 - stepPreW - stepSufW - 2),
               );
-              return fitLabel ? <Text color={dt.muted}> {fitLabel}</Text> : null;
+              return fitLabel ? <Text color={lineColor}> {fitLabel}</Text> : null;
             })()}
-            {step.status === 'done' && <Text color={dt.success}> ✓</Text>}
-            {step.status === 'error' && <Text color={dt.error}> ✗</Text>}
             {step.status === 'running' && <Text color={dt.warning}> …</Text>}
-            {step.status === 'error' && failureSummary(step, 32) && (
-              <Text color={dt.muted}> {failureSummary(step, 32)}</Text>
+            {isError && failureSummary(step, 32) && (
+              <Text color={dt.error}> {failureSummary(step, 32)}</Text>
             )}
           </Box>
         );

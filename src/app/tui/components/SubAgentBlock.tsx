@@ -4,7 +4,7 @@ import stringWidth from 'string-width';
 import type { SubAgentRole } from '@/protocol/events';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
-import { formatReadFileRange, SPINNER, toolColor } from './render-utils';
+import { actionName, formatReadFileRange, SPINNER, toolColor } from './render-utils';
 
 function roleLabel(role: SubAgentRole): string {
   switch (role) {
@@ -196,27 +196,24 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
             <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
           </Box>
         )}
-        {visibleSteps.map((step, i) => (
-          <Box key={i} paddingLeft={3}>
-            <Text color={dt.dim}>├─ {step.toolName}</Text>
-            {step.toolArgs &&
-              Object.keys(step.toolArgs).length > 0 &&
-              (() => {
-                const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
-                if (!rawLabel) return null;
-                const stepPreW = stringWidth(`├─ ${step.toolName}`);
-                const stepSufW = step.ok !== undefined ? 2 : 0; // " ✓" or " ✗"
-                const fitLabel = truncateToFit(
-                  rawLabel,
-                  Math.max(0, col - 3 - stepPreW - stepSufW - 2),
-                );
-                return fitLabel ? <Text color={dt.muted}> {fitLabel}</Text> : null;
-              })()}
-            {step.ok !== undefined && (
-              <Text color={step.ok ? dt.success : dt.error}> {step.ok ? '✓' : '✗'}</Text>
-            )}
-          </Box>
-        ))}
+        {visibleSteps.map((step, i) => {
+          const isError = step.ok === false;
+          const lineColor = isError ? dt.error : dt.dim;
+          return (
+            <Box key={i} paddingLeft={3}>
+              <Text color={lineColor}>├─ {actionName(step.toolName)}</Text>
+              {step.toolArgs &&
+                Object.keys(step.toolArgs).length > 0 &&
+                (() => {
+                  const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
+                  if (!rawLabel) return null;
+                  const stepPreW = stringWidth(`├─ ${actionName(step.toolName)}`);
+                  const fitLabel = truncateToFit(rawLabel, Math.max(0, col - 3 - stepPreW - 2));
+                  return fitLabel ? <Text color={lineColor}> {fitLabel}</Text> : null;
+                })()}
+            </Box>
+          );
+        })}
         <Box paddingLeft={3}>
           <Text color={dt.dim}>└─ 进行中 ({runDur})</Text>
         </Box>
@@ -250,27 +247,24 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
             <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
           </Box>
         )}
-        {visibleSteps.map((step, i) => (
-          <Box key={i} paddingLeft={3}>
-            <Text color={dt.dim}>├─ {step.toolName}</Text>
-            {step.toolArgs &&
-              Object.keys(step.toolArgs).length > 0 &&
-              (() => {
-                const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
-                if (!rawLabel) return null;
-                const stepPreW = stringWidth(`├─ ${step.toolName}`);
-                const stepSufW = step.ok !== undefined ? 2 : 0; // " ✓" or " ✗"
-                const fitLabel = truncateToFit(
-                  rawLabel,
-                  Math.max(0, col - 3 - stepPreW - stepSufW - 2),
-                );
-                return fitLabel ? <Text color={dt.muted}> {fitLabel}</Text> : null;
-              })()}
-            {step.ok !== undefined && (
-              <Text color={step.ok ? dt.success : dt.error}> {step.ok ? '✓' : '✗'}</Text>
-            )}
-          </Box>
-        ))}
+        {visibleSteps.map((step, i) => {
+          const isError = step.ok === false;
+          const lineColor = isError ? dt.error : dt.dim;
+          return (
+            <Box key={i} paddingLeft={3}>
+              <Text color={lineColor}>├─ {actionName(step.toolName)}</Text>
+              {step.toolArgs &&
+                Object.keys(step.toolArgs).length > 0 &&
+                (() => {
+                  const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
+                  if (!rawLabel) return null;
+                  const stepPreW = stringWidth(`├─ ${actionName(step.toolName)}`);
+                  const fitLabel = truncateToFit(rawLabel, Math.max(0, col - 3 - stepPreW - 2));
+                  return fitLabel ? <Text color={lineColor}> {fitLabel}</Text> : null;
+                })()}
+            </Box>
+          );
+        })}
         {(() => {
           if (isCancelled) {
             const cancelText = block.error || block.summary || 'Cancelled';

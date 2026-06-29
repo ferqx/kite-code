@@ -11,6 +11,7 @@ import MarkdownBlock from '../src/app/tui/components/MarkdownBlock';
 import ModelSelector from '../src/app/tui/components/ModelSelector';
 import PlanReviewBlock from '../src/app/tui/components/PlanReviewBlock';
 import StartupScreen from '../src/app/tui/components/StartupScreen';
+import SubAgentBlock from '../src/app/tui/components/SubAgentBlock';
 import TaskProgressBlock from '../src/app/tui/components/TaskProgressBlock';
 import DiffPreview from '../src/app/tui/DiffPreview';
 import Footer from '../src/app/tui/Footer';
@@ -995,7 +996,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('├─ Read CLAUDE.md [lines 1-126 / 126] ✓');
+    expect(frame).toContain('├─ Read CLAUDE.md [lines 1-126 / 126]');
     expect(frame).toContain('└─ 运行中');
     expect(frame).not.toContain('\n   Read CLAUDE.md');
   });
@@ -1812,7 +1813,6 @@ describe('App', () => {
 });
 
 // ── SubAgent block rendering ──
-import SubAgentBlock from '../src/app/tui/components/SubAgentBlock';
 
 describe('SubAgentBlock rendering', () => {
   test('renders running subagent block with steps', () => {
@@ -1835,9 +1835,9 @@ describe('SubAgentBlock rendering', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Code');
     expect(frame).toContain('fix auth bug');
-    expect(frame).toContain('read_file');
-    expect(frame).toContain('edit_file');
-    expect(frame).toContain('✓'); // ok: true on first step
+    expect(frame).toContain('Read');
+    expect(frame).toContain('Update');
+    expect(frame).not.toContain('✓');
   });
 
   test('renders done subagent block', () => {
