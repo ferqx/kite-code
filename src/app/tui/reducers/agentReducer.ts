@@ -44,12 +44,15 @@ function cancelRunningBlocks(s: TuiState): TuiState {
       const tools = b.tools.map((t) =>
         t.status === 'running' ? { ...t, status: 'cancelled' as const, summary: 'Cancelled' } : t,
       );
-      if (tools.some((t, i) => t.status !== b.tools[i]!.status)) {
+      if (tools.some((t, i) => t.status !== b.tools[i]!.status) || b.active) {
         changed = true;
         return {
           ...b,
           tools,
           summaryLine: buildToolSummaryLine(tools),
+          active: false,
+          latestActivity: undefined,
+          totalElapsedMs: now - b.createdAt,
         };
       }
     }
@@ -58,7 +61,29 @@ function cancelRunningBlocks(s: TuiState): TuiState {
   if (!changed) return s;
   const turns = s.turns.slice();
   turns[turns.length - 1] = { blocks };
-  return { ...s, turns };
+  return { ...s, turns, currentThoughtSummaryId: undefined };
+}
+
+function settleActiveThought(s: TuiState): TuiState {
+  if (s.currentThoughtSummaryId == null) return s;
+  const now = Date.now();
+  let changed = false;
+  const turns = s.turns.map((turn) => ({
+    blocks: turn.blocks.flatMap((block) => {
+      if (block.kind !== 'tool_summary' || block.id !== s.currentThoughtSummaryId) return [block];
+      changed = true;
+      if (block.tools.length === 0) return [];
+      return [
+        {
+          ...block,
+          active: false,
+          latestActivity: undefined,
+          totalElapsedMs: now - block.createdAt,
+        },
+      ];
+    }),
+  }));
+  return changed ? { ...s, turns, currentThoughtSummaryId: undefined } : s;
 }
 
 /** 取消 ask_user 问题块时同步更新关联的 tool_card 为 Cancelled
@@ -103,7 +128,7 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
         content: '── Plan declined ──',
       };
       return {
-        ...appendBlock(next, block),
+        ...appendBlock(settleActiveThought(next), block),
         running: false,
         ctrlCPressed: setCtrlCPressed,
         interrupt: null,
@@ -120,7 +145,12 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
       }
     }
   }
-  return { ...next, running: false, ctrlCPressed: setCtrlCPressed, interrupt: null };
+  return {
+    ...settleActiveThought(next),
+    running: false,
+    ctrlCPressed: setCtrlCPressed,
+    interrupt: null,
+  };
 }
 
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
@@ -135,13 +165,14 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         runCount: state.runCount + 1,
         runStartTime: Date.now(),
         currentRunReasonId: undefined,
+        currentThoughtSummaryId: undefined,
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
         status: { ...state.status, currentNode: null, plan: null, retryState: null },
       };
     case 'SET_IDLE': {
-      const s = cancelRunningBlocks(state);
+      const s = settleActiveThought(cancelRunningBlocks(state));
       return {
         ...finalizeLastTurnStreaming(s),
         running: false,
@@ -153,7 +184,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       };
     }
     case 'SET_EXITED': {
-      const s = finalizeLastTurnStreaming(state);
+      const s = finalizeLastTurnStreaming(settleActiveThought(state));
       const merged = mergeConsecutiveTextBlocksInLastTurn(s);
       const elapsedSec = merged.runStartTime
         ? Math.round((Date.now() - merged.runStartTime) / 1000)

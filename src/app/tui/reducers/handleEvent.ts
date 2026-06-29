@@ -77,6 +77,80 @@ function findToolSummaryLocation(
   return null;
 }
 
+function updateToolSummaryById(
+  state: TuiState,
+  blockId: number,
+  update: (
+    block: Extract<OutputBlock, { kind: 'tool_summary' }>,
+  ) => Extract<OutputBlock, { kind: 'tool_summary' }> | null,
+): TuiState {
+  let changed = false;
+  const turns = state.turns.map((turn) => ({
+    blocks: turn.blocks.flatMap((block) => {
+      if (block.kind !== 'tool_summary' || block.id !== blockId) return [block];
+      const next = update(block);
+      changed = true;
+      return next ? [next] : [];
+    }),
+  }));
+  return changed ? { ...state, turns } : state;
+}
+
+function findThoughtSummary(
+  state: TuiState,
+  blockId: number | undefined,
+): Extract<OutputBlock, { kind: 'tool_summary' }> | null {
+  if (blockId == null) return null;
+  const block = findBlockById(state, blockId);
+  return block?.kind === 'tool_summary' ? block : null;
+}
+
+function closeCurrentThought(state: TuiState): TuiState {
+  const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
+  if (!summary) return { ...state, currentThoughtSummaryId: undefined };
+
+  const next = updateToolSummaryById(state, summary.id, (block) => {
+    if (block.tools.length === 0) return null;
+    return {
+      ...block,
+      active: false,
+      latestActivity: undefined,
+      totalElapsedMs: Date.now() - block.createdAt,
+    };
+  });
+  return { ...next, currentThoughtSummaryId: undefined };
+}
+
+function updateCurrentThoughtActivity(
+  state: TuiState,
+  latestActivity: Extract<OutputBlock, { kind: 'tool_summary' }>['latestActivity'],
+): TuiState {
+  const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
+  if (summary?.active) {
+    return updateToolSummaryById(state, summary.id, (block) => ({
+      ...block,
+      active: true,
+      latestActivity,
+    }));
+  }
+
+  const id = state.nextBlockId;
+  const block: OutputBlock = {
+    id,
+    kind: 'tool_summary',
+    tools: [],
+    totalElapsedMs: 0,
+    createdAt: Date.now(),
+    summaryLine: 'thinking',
+    active: true,
+    latestActivity,
+  };
+  return {
+    ...appendBlock(state, block),
+    currentThoughtSummaryId: id,
+  };
+}
+
 export function handleEventAction(state: TuiState, event: AgentEvent): TuiState {
   // Guard: malformed events from corrupted checkpoints must not crash the TUI
   if (!event.data) return state;
@@ -95,6 +169,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
 
   switch (event.type) {
     case 'text': {
+      if (!/\S/u.test(event.data.text)) return state;
+      state = closeCurrentThought(state);
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
 
@@ -173,7 +249,6 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // 但 block 本身会通过 gapFrom 的 marginTop 产生多余空白行。
       // Blank/whitespace-only text (incl. Unicode whitespace) creates no
       // visual output but its marginTop adds unwanted blank lines.
-      if (!/\S/u.test(event.data.text)) return state;
       const id = state.nextBlockId;
       const block: OutputBlock = {
         id,
@@ -185,24 +260,29 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case 'reason': {
       if (state.currentRunReasonId != null) {
-        const last = lastTurn(state);
-        const lastBlock = last?.blocks.at(-1);
-        if (lastBlock?.kind === 'reason' && lastBlock.id === state.currentRunReasonId) {
+        const reasonBlock = findBlockById(state, state.currentRunReasonId);
+        if (reasonBlock?.kind === 'reason') {
           const next: OutputBlock = {
-            ...lastBlock,
-            content: `${lastBlock.content}\n\n${event.data.text}`,
+            ...reasonBlock,
+            content: `${reasonBlock.content}\n\n${event.data.text}`,
           };
-          return updateLastBlock(state, next);
+          return updateCurrentThoughtActivity(replaceBlockById(state, reasonBlock.id, next), {
+            kind: 'thinking',
+            text: event.data.text,
+          });
         }
       }
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
       const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: 'reason', content: event.data.text, folded: true };
-      return { ...appendBlock(finalized, block), currentRunReasonId: id };
+      const withReason = { ...appendBlock(finalized, block), currentRunReasonId: id };
+      return updateCurrentThoughtActivity(withReason, { kind: 'thinking', text: event.data.text });
     }
     case 'tool_call': {
+      const isExploration = isExplorationToolEvent(event.data);
       // task tool has its own subagent block
+      if (!isExploration) state = closeCurrentThought(state);
       if (event.data.name === 'task') return state;
       // 已审批方案后的 update_plan 调用是进度追踪，不在消息列表中展示
       if (event.data.name === 'update_plan' && state.status.plan !== null) return state;
@@ -215,7 +295,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const times = { ...finalized.toolStartTimes, [event.data.call_id]: now };
 
       // ── Pre-consolidation: exploration tools go directly to tool_summary, never as tool_card ──
-      if (isExplorationToolEvent(event.data)) {
+      if (isExploration) {
         const entry: ConsolidatedToolEntry = {
           callId: event.data.call_id,
           name: event.data.name,
@@ -228,29 +308,30 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
               ? event.data.args.totalLines
               : undefined,
         };
-        const turn = lastTurn(finalized);
-        const lastBlock = turn?.blocks.at(-1);
+        const currentThought = findThoughtSummary(finalized, finalized.currentThoughtSummaryId);
 
-        if (lastBlock?.kind === 'tool_summary') {
-          // 已有 tool_summary 且还在运行中 → 追加 / 已完成 → 创建新块
-          const allSettled = lastBlock.tools.every((t) => t.status !== 'running');
-          if (!allSettled) {
-            const tools = [...lastBlock.tools, entry];
-            const updated: OutputBlock = {
-              ...lastBlock,
-              tools,
-              summaryLine: buildToolSummaryLine(tools),
-            };
-            return {
-              ...updateLastBlock(finalized, updated),
-              toolStartTimes: times,
-              explorationSummaryIds: {
-                ...finalized.explorationSummaryIds,
-                [event.data.call_id]: lastBlock.id,
-              },
-            };
-          }
-          // All settled → create a new tool_summary for this new batch
+        if (currentThought?.active) {
+          const tools = [...currentThought.tools, entry];
+          const latestActivity =
+            currentThought.latestActivity?.kind === 'thinking'
+              ? currentThought.latestActivity
+              : ({ kind: 'tool', callId: event.data.call_id } as const);
+          const updated: Extract<OutputBlock, { kind: 'tool_summary' }> = {
+            ...currentThought,
+            tools,
+            summaryLine: buildToolSummaryLine(tools),
+            active: true,
+            latestActivity,
+          };
+          return {
+            ...replaceBlockById(finalized, currentThought.id, updated),
+            toolStartTimes: times,
+            explorationSummaryIds: {
+              ...finalized.explorationSummaryIds,
+              [event.data.call_id]: currentThought.id,
+            },
+            currentThoughtSummaryId: currentThought.id,
+          };
         }
 
         // 创建新 tool_summary
@@ -262,11 +343,14 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           totalElapsedMs: 0,
           createdAt: now,
           summaryLine: buildToolSummaryLine([entry]),
+          active: true,
+          latestActivity: { kind: 'tool', callId: event.data.call_id },
         };
         return {
           ...appendBlock(finalized, block),
           toolStartTimes: times,
           explorationSummaryIds: { ...finalized.explorationSummaryIds, [event.data.call_id]: id },
+          currentThoughtSummaryId: id,
         };
       }
 
@@ -506,7 +590,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case 'final': {
       if (event.data.length === 0) return state;
-      const finalized = finalizeLastTurnStreaming(state);
+      if (!/\S/u.test(event.data)) return state;
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
       const last = lastTurn(finalized);
       // Reconstruct full text from all per-line text blocks in this turn,
       // since with line-by-line output each block holds only one line.
@@ -530,7 +615,6 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       }
       // 无前置 text block（纯 tool 调用等）→ 创建全文 block
       if (fullText.length === 0) {
-        if (!/\S/u.test(event.data)) return finalized;
         const id = finalized.nextBlockId;
         const block: OutputBlock = { id, kind: 'text', content: event.data };
         return appendBlock(finalized, block);
@@ -539,7 +623,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return finalized;
     }
     case 'need_approval': {
-      const finalized = finalizeLastTurnStreaming(state);
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
       const block: OutputBlock = {
         id: finalized.nextBlockId,
         kind: 'approval',
@@ -551,7 +635,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       };
     }
     case 'need_input': {
-      const finalized = finalizeLastTurnStreaming(state);
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
       const block: OutputBlock = {
         id: finalized.nextBlockId,
         kind: 'question',
@@ -573,7 +657,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const planSummary = plan.description
         ? `${plan.description}\n\nSteps:\n${stepsText}`
         : `Steps:\n${stepsText}`;
-      let next = state;
+      let next = closeCurrentThought(state);
       if (planCard?.kind === 'tool_card') {
         next = replaceBlockById(next, planCard.id, {
           ...planCard,

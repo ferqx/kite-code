@@ -21,6 +21,8 @@ export interface ConsolidatedToolEntry {
   totalLines?: number;
 }
 
+export type ThoughtActivity = { kind: 'thinking'; text: string } | { kind: 'tool'; callId: string };
+
 export interface SubAgentStepRecord {
   toolName: string;
   toolArgs: Record<string, unknown>;
@@ -59,6 +61,8 @@ export type OutputBlock =
       totalElapsedMs: number;
       createdAt: number;
       summaryLine: string;
+      active: boolean;
+      latestActivity?: ThoughtActivity;
     }
   | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
   | {
@@ -138,6 +142,8 @@ export interface TuiState {
   loadingSessionId: string | null;
   /** 探索工具 callId → tool_summary block ID 映射，用于 tool_done 精确定位 */
   explorationSummaryIds: Record<string, number>;
+  /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
+  currentThoughtSummaryId?: number;
 }
 
 export type InterruptState =

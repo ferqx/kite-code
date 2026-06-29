@@ -51,8 +51,11 @@ function isSettled(block: OutputBlock): boolean {
     case 'tool_card':
       return block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
     case 'tool_summary':
-      return block.tools.every(
-        (t) => t.status === 'done' || t.status === 'error' || t.status === 'cancelled',
+      return (
+        !block.active &&
+        block.tools.every(
+          (t) => t.status === 'done' || t.status === 'error' || t.status === 'cancelled',
+        )
       );
     case 'subagent':
       return block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
@@ -88,7 +91,13 @@ export function blockFingerprint(b: OutputBlock): string {
       break;
     case 'tool_summary':
       // Every tool status change must trigger a split recomputation
-      extra = `:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}`;
+      extra =
+        `:${b.active ? 'a' : 's'}:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}` +
+        (b.latestActivity
+          ? b.latestActivity.kind === 'thinking'
+            ? `:th:${b.latestActivity.text.length}:${b.latestActivity.text.slice(-16)}`
+            : `:tc:${b.latestActivity.callId}`
+          : '');
       break;
     case 'subagent':
       extra = `:${b.status}:${b.steps.length}`;

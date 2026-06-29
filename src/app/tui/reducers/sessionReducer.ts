@@ -63,6 +63,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         showMcp: false,
         rewindCounter: 0,
         currentRunReasonId: undefined,
+        currentThoughtSummaryId: undefined,
         sessionKey: state.sessionKey + 1,
         status: {
           ...state.status,
@@ -126,6 +127,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         exited: false,
         running: false,
         currentRunReasonId: undefined,
+        currentThoughtSummaryId: undefined,
         loadingSessionId: null,
         sessionKey: state.sessionKey + 1,
         sessionError: false,
@@ -173,6 +175,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         exited: false,
         running: target?.running ?? false,
         currentRunReasonId: undefined,
+        currentThoughtSummaryId: undefined,
         sessionKey: state.sessionKey + 1,
         ctrlCPressed: false,
         exitRequested: false,

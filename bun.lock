@@ -219,7 +219,7 @@
 
     "ink-text-input": ["ink-text-input@6.0.0", "https://registry.npmmirror.com/ink-text-input/-/ink-text-input-6.0.0.tgz", { "dependencies": { "chalk": "^5.3.0", "type-fest": "^4.18.2" }, "peerDependencies": { "ink": ">=5", "react": ">=18" } }, "sha512-Fw64n7Yha5deb1rHY137zHTAbSTNelUKuB5Kkk2HACXEtwIHBCf9OH2tP/LQ9fRYTl1F0dZgbW0zPnZk6FA9Lw=="],
 
-    "ink-virtual-list": ["ink-virtual-list@0.2.3", "", { "peerDependencies": { "ink": "^6.6.0", "react": "^19.2.3" } }, "sha512-LXqaOGuSCJLFL/uRDfBEQV4pNreeAljEaUanrImBuIxXfyZoh8N5P0lF408cz/rHZP65T494HHASzfnlB0jCNg=="],
+    "ink-virtual-list": ["ink-virtual-list@0.2.3", "https://registry.npmmirror.com/ink-virtual-list/-/ink-virtual-list-0.2.3.tgz", { "peerDependencies": { "ink": "^6.6.0", "react": "^19.2.3" } }, "sha512-LXqaOGuSCJLFL/uRDfBEQV4pNreeAljEaUanrImBuIxXfyZoh8N5P0lF408cz/rHZP65T494HHASzfnlB0jCNg=="],
 
     "ip-address": ["ip-address@10.2.0", "https://registry.npmmirror.com/ip-address/-/ip-address-10.2.0.tgz", {}, "sha512-/+S6j4E9AHvW9SWMSEY9Xfy66O5PWvVEJ08O0y5JGyEKQpojb0K0GKpz/v5HJ/G0vi3D2sjGK78119oXZeE0qA=="],
 

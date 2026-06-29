@@ -26,6 +26,31 @@ interface OutputAreaProps {
   columns: number;
 }
 
+function visibleDynamicBlocksForApproval(
+  blocks: OutputBlock[],
+  awaitingApproval?: boolean,
+): OutputBlock[] {
+  if (!awaitingApproval) return blocks;
+
+  const pendingApprovalIndex = blocks.findIndex(
+    (block) => block.kind === 'approval' && block.resolved === undefined,
+  );
+  if (pendingApprovalIndex >= 0) {
+    for (let i = pendingApprovalIndex - 1; i >= 0; i--) {
+      const block = blocks[i]!;
+      if (block.kind === 'tool_card' && block.status === 'running') {
+        return blocks.slice(0, i + 1);
+      }
+    }
+    return blocks.slice(0, pendingApprovalIndex);
+  }
+
+  const approvalToolIndex = blocks.findIndex(
+    (block) => block.kind === 'tool_card' && block.status === 'running',
+  );
+  return approvalToolIndex >= 0 ? blocks.slice(0, approvalToolIndex + 1) : blocks;
+}
+
 /**
  * OutputArea renders <Static> (immutable settled blocks + header) inline,
  * and all mutable blocks in the dynamic tree. Blocks only enter <Static>
@@ -50,8 +75,12 @@ export default function OutputArea({
   onToggleToolRef.current = onToggleToolExpand;
   const onToggleSubagentRef = useRef(onToggleSubagentExpand);
   onToggleSubagentRef.current = onToggleSubagentExpand;
-  const dynamicBlocksRef = useRef(activeDynamicBlocks);
-  dynamicBlocksRef.current = activeDynamicBlocks;
+  const visibleDynamicBlocks = visibleDynamicBlocksForApproval(
+    activeDynamicBlocks,
+    awaitingApproval,
+  );
+  const dynamicBlocksRef = useRef(visibleDynamicBlocks);
+  dynamicBlocksRef.current = visibleDynamicBlocks;
 
   // Arrow key Enter-to-toggle on the last dynamic block
   useInput(
@@ -76,7 +105,7 @@ export default function OutputArea({
   // 确保 body 区与 Footer 交互区的文本起始列一致。
   // Match text start column with Footer interaction blocks' inner paddingX={1}.
   const innerColumns = Math.max(20, columns);
-  const hasMessages = mergedStaticBlocks.length + activeDynamicBlocks.length > 0;
+  const hasMessages = mergedStaticBlocks.length + visibleDynamicBlocks.length > 0;
 
   return (
     <Box flexDirection="column" marginBottom={hasMessages ? 1 : 0}>
@@ -111,8 +140,8 @@ export default function OutputArea({
         )}
       </Box>
       <Box flexDirection="column">
-        {activeDynamicBlocks.map((block, i) => {
-          const prevBlock = i > 0 ? activeDynamicBlocks[i - 1] : mergedStaticBlocks.at(-1);
+        {visibleDynamicBlocks.map((block, i) => {
+          const prevBlock = i > 0 ? visibleDynamicBlocks[i - 1] : mergedStaticBlocks.at(-1);
           return (
             <BlockRenderer
               key={block.id}

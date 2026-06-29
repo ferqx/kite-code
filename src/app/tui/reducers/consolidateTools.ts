@@ -20,41 +20,20 @@ export function isExplorationToolEvent(data: {
   name: string;
   args: Record<string, unknown>;
 }): boolean {
-  if (EXPLORATION_TOOLS.has(data.name)) return true;
-  // shell_execute with intent=inspect + search commands (rg/grep/ag/find) — fallback
-  // when the model uses shell_execute directly for search (should be rare with dedicated tools)
-  if (data.name === 'shell_execute') {
-    const intent = data.args?.intent as string | undefined;
-    if (intent !== 'inspect') return false;
-    const cmd = (data.args?.command as string) ?? '';
-    const searchPrefixes = ['rg ', 'grep ', 'ag ', 'ack ', 'git grep ', 'find .', 'find /'];
-    return searchPrefixes.some((prefix) => cmd.startsWith(prefix));
-  }
-  return false;
+  return EXPLORATION_TOOLS.has(data.name);
 }
 
 /** 从工具名判断是否为探索工具（用于 tool_done 事件） */
 export function isExplorationToolByName(name: string): boolean {
-  if (EXPLORATION_TOOLS.has(name)) return true;
-  return name === 'shell_execute'; // intent already checked at tool_call time, match by name
+  return EXPLORATION_TOOLS.has(name);
 }
 
 /**
  * 判断一个 tool_card 是否为可合并的探索工具。
- * shell_execute 仅当 intent=inspect 时视为探索工具。
  */
 export function isExplorationTool(block: OutputBlock): boolean {
   if (block.kind !== 'tool_card') return false;
-  if (EXPLORATION_TOOLS.has(block.name)) return true;
-  // Fallback: shell_execute with inspect intent + search commands
-  if (block.name === 'shell_execute') {
-    const intent = block.args?.intent as string | undefined;
-    if (intent !== 'inspect') return false;
-    const cmd = (block.args?.command as string) ?? '';
-    const searchPrefixes = ['rg ', 'grep ', 'ag ', 'ack ', 'git grep ', 'find .', 'find /'];
-    return searchPrefixes.some((prefix) => cmd.startsWith(prefix));
-  }
-  return false;
+  return EXPLORATION_TOOLS.has(block.name);
 }
 
 /**
@@ -70,7 +49,7 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
 
   for (const t of tools) {
     if (t.name === 'read_file') readFiles++;
-    else if (t.name === 'search_content' || t.name === 'shell_execute') searched++;
+    else if (t.name === 'search_content') searched++;
     else if (t.name === 'search_files') filePatterns++;
     else if (t.name === 'read_mcp_resource') readMcp++;
     else if (EXPLORATION_TOOLS.has(t.name)) readFiles++; // fallback
@@ -169,6 +148,7 @@ export function maybeConsolidateLastTurnBlocks(
     totalElapsedMs,
     createdAt,
     summaryLine,
+    active: false,
   };
 
   // 替换：前缀 + summary + 后缀（非探索 tools / 其他 blocks 在探索块之后的部分）
@@ -218,6 +198,7 @@ export function consolidateAllRuns(blocks: OutputBlock[]): OutputBlock[] {
       totalElapsedMs,
       createdAt,
       summaryLine,
+      active: false,
     });
 
     pending = [];
@@ -226,6 +207,8 @@ export function consolidateAllRuns(blocks: OutputBlock[]): OutputBlock[] {
   for (const block of blocks) {
     if (block.kind === 'tool_card' && isExplorationTool(block)) {
       pending.push(block);
+    } else if (block.kind === 'reason') {
+      result.push(block);
     } else {
       flushPending();
       result.push(block);

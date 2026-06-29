@@ -79,6 +79,22 @@ function failureSummary(step: { status: string; summary: string }, maxWidth: num
   return truncateToFit(step.summary.replace(/\s+/g, ' ').trim(), maxWidth);
 }
 
+function latestActivityLabel(
+  block: Extract<OutputBlock, { kind: 'tool_summary' }>,
+  maxWidth: number,
+): string {
+  const activity = block.latestActivity;
+  if (!activity) return '';
+  if (activity.kind === 'thinking') {
+    return truncateToFit(`Thinking ${activity.text.replace(/\s+/g, ' ').trim()}`, maxWidth);
+  }
+  const step = block.tools.find((t) => t.callId === activity.callId);
+  if (!step) return '';
+  const args = toolArgsLabel(step.name, step.args, step.totalLines);
+  const label = args ? `${actionName(step.name)} ${args}` : actionName(step.name);
+  return truncateToFit(label, maxWidth);
+}
+
 interface ToolSummaryBlockProps {
   block: Extract<OutputBlock, { kind: 'tool_summary' }>;
   columns: number;
@@ -88,7 +104,8 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
   const dt = useTheme();
   const col = columns > 0 ? columns : (process.stdout.columns ?? 80);
 
-  const isRunning = block.tools.some((t) => t.status === 'running');
+  const hasPendingTools = block.tools.some((t) => t.status === 'running');
+  const isRunning = block.active;
   const hasError = block.tools.some((t) => t.status === 'error');
 
   // ── 计时器 / Live timer ──
@@ -112,18 +129,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
     };
   }, [isRunning]);
 
-  // Running: live counter; Settled: snapshot at transition moment
-  const [finalElapsed, setFinalElapsed] = useState(0);
-  useEffect(() => {
-    if (!isRunning && block.createdAt) {
-      setFinalElapsed(Date.now() - block.createdAt);
-    }
-  }, [isRunning, block.createdAt]);
-  const elapsedMs = isRunning
-    ? liveElapsed
-    : finalElapsed > 0
-      ? finalElapsed
-      : block.totalElapsedMs;
+  const elapsedMs = isRunning ? liveElapsed : block.totalElapsedMs;
   const elapsedStr = formatDuration(elapsedMs);
   const summaryLine = block.summaryLine;
 
@@ -139,6 +145,13 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
     const spinner = SPINNER[spinnerIdx]!;
     const dot = spinner;
     const dotColor = dt.warning;
+    const visibleCallIds = new Set(visibleSteps.map((step) => step.callId));
+    const shouldShowActivity =
+      block.latestActivity?.kind === 'thinking' ||
+      (block.latestActivity?.kind === 'tool' && !visibleCallIds.has(block.latestActivity.callId));
+    const activityLabel = shouldShowActivity
+      ? latestActivityLabel(block, Math.max(0, col - 9))
+      : '';
 
     return (
       <Box flexDirection="column">
@@ -148,22 +161,24 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
             Thought for {elapsedStr}, {summaryLine}
           </Text>
         </Box>
-        {skipped > 0 && (
+        {activityLabel && (
           <Box paddingLeft={3}>
-            <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
+            <Text color={dt.dim}>├─ </Text>
+            <Text color={dt.muted}>{activityLabel}</Text>
           </Box>
         )}
-        {visibleSteps.map((step, i) => (
+        {skipped > 0 && (
+          <Box paddingLeft={3}>
+            <Text color={dt.dim}>├─ ... 以上 {skipped} 步已折叠</Text>
+          </Box>
+        )}
+        {visibleSteps.map((step) => (
           <Box key={step.callId} paddingLeft={3}>
-            <Text color={dt.dim}>
-              {i === visibleSteps.length - 1 && skipped === 0 ? '└─' : '├─'} {actionName(step.name)}
-            </Text>
+            <Text color={dt.dim}>├─ {actionName(step.name)}</Text>
             {(() => {
-              const rawLabel = toolArgsLabel(step.name, step.args);
+              const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
               if (!rawLabel) return null;
-              const stepPreW = stringWidth(
-                `${i === visibleSteps.length - 1 && skipped === 0 ? '└─' : '├─'} ${actionName(step.name)}`,
-              );
+              const stepPreW = stringWidth(`├─ ${actionName(step.name)}`);
               const errSummary = failureSummary(step, 32);
               const stepSufW = step.status !== 'running' ? 2 + stringWidth(errSummary) + 1 : 0;
               const fitLabel = truncateToFit(
@@ -186,9 +201,10 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
     );
   }
 
-  // ── Settled state (done / error / cancelled) ──
-  const settledStatus = hasError ? 'error' : 'done';
+  // ── Settled state (done / error / waiting for late tool results) ──
+  const settledStatus = hasError ? 'error' : hasPendingTools ? 'cancelled' : 'done';
   const doneColor = toolColor(settledStatus, dt);
+  const footerText = hasError ? '部分失败' : hasPendingTools ? '等待工具结果' : '完成';
 
   return (
     <Box flexDirection="column">
@@ -206,9 +222,9 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
               {isLast ? '└─' : '├─'} {actionName(step.name)}
             </Text>
             {(() => {
-              const rawLabel = toolArgsLabel(step.name, step.args);
+              const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
               if (!rawLabel) return null;
-              const stepPreW = stringWidth(`${isLast ? '└─' : '├─'} ${step.name}`);
+              const stepPreW = stringWidth(`${isLast ? '└─' : '├─'} ${actionName(step.name)}`);
               const errSummary = failureSummary(step, 32);
               const stepSufW = step.ok !== undefined ? 2 + stringWidth(errSummary) + 1 : 0;
               const fitLabel = truncateToFit(
@@ -219,6 +235,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
             })()}
             {step.status === 'done' && <Text color={dt.success}> ✓</Text>}
             {step.status === 'error' && <Text color={dt.error}> ✗</Text>}
+            {step.status === 'running' && <Text color={dt.warning}> …</Text>}
             {step.status === 'error' && failureSummary(step, 32) && (
               <Text color={dt.muted}> {failureSummary(step, 32)}</Text>
             )}
@@ -226,7 +243,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
         );
       })}
       <Box paddingLeft={3}>
-        <Text color={dt.dim}>└─ {hasError ? '部分失败' : '完成'}</Text>
+        <Text color={dt.dim}>└─ {footerText}</Text>
       </Box>
     </Box>
   );

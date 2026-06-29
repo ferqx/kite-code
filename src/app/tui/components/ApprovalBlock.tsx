@@ -3,7 +3,6 @@ import { useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { ShellApprovalGrant, ToolApprovalPayload } from '@/protocol/events';
-import { ACTION_NAMES } from './render-utils';
 
 interface Option {
   key: string;
@@ -19,7 +18,6 @@ interface ApprovalBlockProps {
 
 export default function ApprovalBlock({ approval, provider, onResolved }: ApprovalBlockProps) {
   const t = useTheme();
-  const riskColor = t.risk[approval.risk] ?? t.risk.unknown;
 
   const options: Option[] = [];
   for (const g of approval.grantOptions) {
@@ -77,34 +75,20 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     },
   );
 
-  const cmd =
-    approval.command.length > 100 ? `${approval.command.slice(0, 97)}...` : approval.command;
-
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
-      <Text bold color={riskColor}>
-        ● {ACTION_NAMES[approval.tool] ?? approval.tool}
-      </Text>
-      <Text color={t.primary}>{cmd}</Text>
-      <Text color={t.dim}>
-        {approval.summary}
-        {approval.risk ? ` · ${approval.risk}` : ''}
-      </Text>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text color={t.dim}>{'─'.repeat(40)}</Text>
-        {options.map((o, i) => {
-          const isSelected = i === selectedIndex;
-          const isDeny = o.grant === null;
-          return (
-            <Text key={o.key} color={isSelected ? t.primary : isDeny ? t.error : t.muted}>
-              {isSelected ? '▶' : ' '} {i + 1}. {o.label}
-            </Text>
-          );
-        })}
-        <Text color={t.dim}>{'─'.repeat(40)}</Text>
-        <Text color={t.dim}>↑↓ select Enter confirm Esc cancel</Text>
-      </Box>
+    <Box flexDirection="column">
+      <Text color={t.dim}>{'─'.repeat(40)}</Text>
+      <Text color={t.primary}>Approve this tool call?</Text>
+      {options.map((o, i) => {
+        const isSelected = i === selectedIndex;
+        const isDeny = o.grant === null;
+        return (
+          <Text key={o.key} color={isSelected ? t.primary : isDeny ? t.error : t.muted}>
+            {isSelected ? '▶' : ' '} {i + 1}. {o.label}
+          </Text>
+        );
+      })}
+      <Text color={t.dim}>↑↓ select Enter confirm Esc cancel</Text>
     </Box>
   );
 }
