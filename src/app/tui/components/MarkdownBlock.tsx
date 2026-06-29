@@ -16,6 +16,7 @@ export interface InlineSegment {
   bold?: boolean;
   italic?: boolean;
   code?: boolean;
+  strikethrough?: boolean;
   link?: string;
 }
 
@@ -23,12 +24,12 @@ export interface InlineSegment {
 
 export function parseInline(text: string): InlineSegment[] {
   const allPatterns =
-    /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|\[([^\]]+)\]\(([^)]+)\))/g;
+    /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|~~(.+?)~~|\[([^\]]+)\]\(([^)]+)\))/g;
   const segments: InlineSegment[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
+  let match = allPatterns.exec(text);
 
-  while ((match = allPatterns.exec(text)) !== null) {
+  while (match !== null) {
     if (match.index > lastIndex) {
       segments.push({ text: text.slice(lastIndex, match.index) });
     }
@@ -40,10 +41,13 @@ export function parseInline(text: string): InlineSegment[] {
       segments.push({ text: match[4], italic: true });
     } else if (match[5] !== undefined) {
       segments.push({ text: match[5], code: true });
-    } else if (match[6] !== undefined && match[7] !== undefined) {
-      segments.push({ text: match[6], bold: true, link: match[7] });
+    } else if (match[6] !== undefined) {
+      segments.push({ text: match[6], strikethrough: true });
+    } else if (match[7] !== undefined && match[8] !== undefined) {
+      segments.push({ text: match[7], bold: true, link: match[8] });
     }
     lastIndex = match.index + match[1]!.length;
+    match = allPatterns.exec(text);
   }
 
   if (lastIndex < text.length) {
@@ -328,9 +332,9 @@ function isTableRow(line: string): boolean {
   // Markdown: | col1 | col2 | or │ col1 │ col2 │
   // Also support: col1 | col2 | col3 (no leading pipe)
   if (/^[|│]/.test(trimmed) && /[|│]$/.test(trimmed)) return true;
-  // Row has at least two pipe separators → likely a table row
+  // Row has at least one pipe separator → likely a table row
   const pipes = trimmed.match(/[|│]/g);
-  return (pipes?.length ?? 0) >= 2;
+  return (pipes?.length ?? 0) >= 1;
 }
 
 function isTableSeparator(line: string): boolean {
@@ -557,7 +561,7 @@ function isHorizontalRule(line: string): boolean {
 }
 
 const HEADING_RE = /^#{1,6}\s/;
-const UNORDERED_LIST_RE = /^(\s*)[-*]\s+(.*)$/;
+const UNORDERED_LIST_RE = /^(\s*)[-*+]\s+(.*)$/;
 const ORDERED_LIST_RE = /^(\s*)(\d+)[.)]\s+(.*)$/;
 
 function isBlankGroup(g: LineGroup | undefined): boolean {
@@ -672,6 +676,27 @@ export default React.memo(function MarkdownBlock({ content, color, maxWidth }: M
 
     const line = group.line;
 
+    if (line.startsWith('###### ')) {
+      return (
+        <Text bold color={t.dim}>
+          <MarkdownLine content={line.slice(7)} color={t.dim} />
+        </Text>
+      );
+    }
+    if (line.startsWith('##### ')) {
+      return (
+        <Text bold color={t.muted}>
+          <MarkdownLine content={line.slice(6)} color={t.muted} />
+        </Text>
+      );
+    }
+    if (line.startsWith('#### ')) {
+      return (
+        <Text bold color={t.muted}>
+          <MarkdownLine content={line.slice(5)} color={t.muted} />
+        </Text>
+      );
+    }
     if (line.startsWith('### ')) {
       return (
         <Text bold color={t.primary}>
@@ -764,7 +789,13 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
   const t = useTheme();
   const segments = parseInline(content);
 
-  if (segments.length === 1 && !segments[0]!.bold && !segments[0]!.italic && !segments[0]!.code) {
+  if (
+    segments.length === 1 &&
+    !segments[0]!.bold &&
+    !segments[0]!.italic &&
+    !segments[0]!.code &&
+    !segments[0]!.strikethrough
+  ) {
     return <Text color={color}>{content}</Text>;
   }
 
@@ -786,6 +817,7 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
             key={j}
             bold={seg.bold}
             italic={seg.italic}
+            strikethrough={seg.strikethrough}
             color={seg.code ? t.primary : (color ?? undefined)}
           >
             {seg.text}
