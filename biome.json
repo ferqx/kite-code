@@ -26,6 +26,9 @@
       },
       "suspicious": {
         "noArrayIndexKey": "off"
+      },
+      "nursery": {
+        "useImportsFirst": "error"
       }
     }
   },

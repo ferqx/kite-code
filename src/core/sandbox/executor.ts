@@ -13,6 +13,11 @@ import {
 } from './shell-wrapper';
 import type { SandboxOptions } from './types';
 
+/** 获取当前系统 shell 路径 / Get current system shell path */
+function getSystemShell(): string {
+  return process.env.SHELL || '/bin/sh';
+}
+
 /** 创建沙箱化的 ShellExecutor / Create a sandboxed ShellExecutor */
 export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
   const { enabled } = options;
@@ -40,7 +45,7 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   const profile = generateSandboxProfile(workspace);
 
   return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => ({
-    cmd: ['/usr/bin/sandbox-exec', '-p', profile, '/bin/sh', '-c', wrappedCommand],
+    cmd: ['/usr/bin/sandbox-exec', '-p', profile, getSystemShell(), '-c', wrappedCommand],
   }));
 }
 
@@ -52,9 +57,10 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const seccompPath = resolveSeccompPath(findApplySeccomp(), workspace);
 
   return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => {
+    const shell = getSystemShell();
     const innerCmd = seccompPath
-      ? [seccompPath, '/bin/sh', '-c', wrappedCommand]
-      : ['/bin/sh', '-c', wrappedCommand];
+      ? [seccompPath, shell, '-c', wrappedCommand]
+      : [shell, '-c', wrappedCommand];
     return { cmd: [bwrapPath, ...bwrapArgs, ...innerCmd] };
   });
 }

@@ -15,5 +15,6 @@
   },
   "[jsonc]": {
     "editor.defaultFormatter": "biomejs.biome"
-  }
+  },
+  "cSpell.words": ["bwrap", "bubblewrap", "Seatbelt", "seccomp"]
 }
