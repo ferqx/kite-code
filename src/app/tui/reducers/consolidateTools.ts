@@ -65,13 +65,13 @@ export function isExplorationTool(block: OutputBlock): boolean {
 export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
   let readFiles = 0;
   let searched = 0;
-  let foundFiles = 0;
+  let filePatterns = 0;
   let readMcp = 0;
 
   for (const t of tools) {
     if (t.name === 'read_file') readFiles++;
     else if (t.name === 'search_content' || t.name === 'shell_execute') searched++;
-    else if (t.name === 'search_files') foundFiles++;
+    else if (t.name === 'search_files') filePatterns++;
     else if (t.name === 'read_mcp_resource') readMcp++;
     else if (EXPLORATION_TOOLS.has(t.name)) readFiles++; // fallback
   }
@@ -79,7 +79,8 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
   const parts: string[] = [];
   if (readFiles > 0) parts.push(`read ${readFiles} file${readFiles > 1 ? 's' : ''}`);
   if (searched > 0) parts.push(`searched for ${searched} pattern${searched > 1 ? 's' : ''}`);
-  if (foundFiles > 0) parts.push(`found ${foundFiles} pattern${foundFiles > 1 ? 's' : ''}`);
+  if (filePatterns > 0)
+    parts.push(`searched ${filePatterns} file pattern${filePatterns > 1 ? 's' : ''}`);
   if (readMcp > 0) parts.push(`read ${readMcp} MCP resource${readMcp > 1 ? 's' : ''}`);
 
   if (parts.length === 0) {

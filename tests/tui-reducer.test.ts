@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Action } from '../src/app/tui/App';
 import { createInitialState, eventReducer } from '../src/app/tui/App';
+import { buildToolSummaryLine } from '../src/app/tui/reducers/consolidateTools';
 import type { InterruptState, OutputBlock, SessionSnapshot, TuiState } from '../src/app/tui/types';
 import type { CheckpointEntry } from '../src/core/persistence/checkpoint';
 import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
@@ -55,6 +56,31 @@ function question(data: Partial<UserInputPayload> = {}): UserInputPayload {
 }
 
 describe('eventReducer (blocks model)', () => {
+  describe('tool summary text', () => {
+    test('describes search_files as file pattern searches, not found results', () => {
+      const line = buildToolSummaryLine([
+        {
+          callId: 'c1',
+          name: 'search_files',
+          args: { pattern: 'package.json' },
+          ok: false,
+          summary: 'no matches',
+          status: 'error',
+        },
+        {
+          callId: 'c2',
+          name: 'search_files',
+          args: { pattern: '*.md' },
+          ok: false,
+          summary: 'no matches',
+          status: 'error',
+        },
+      ]);
+
+      expect(line).toBe('searched 2 file patterns');
+    });
+  });
+
   describe('EVENT.text', () => {
     test('appends text block', () => {
       const s = dispatch(fresh(), textEvt('hello'));
@@ -110,6 +136,18 @@ describe('eventReducer (blocks model)', () => {
         expect(ts.summaryLine).toContain('read 1 file');
         expect(ts.totalElapsedMs).toBeGreaterThanOrEqual(0);
       }
+    });
+    test('tool_done updates pre-consolidated summary even when the lookup map is stale', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = { ...s, explorationSummaryIds: {} };
+
+      s = dispatch(s, tdEvt('c1', 'read_file', true, '150 lines'));
+
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_summary' }>;
+      expect(t.kind).toBe('tool_summary');
+      expect(t.tools[0]!.status).toBe('done');
+      expect(t.tools[0]!.summary).toBe('150 lines');
     });
     test('tool_done updates to error when ok=false', () => {
       let s = fresh();

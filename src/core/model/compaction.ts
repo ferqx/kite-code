@@ -25,13 +25,29 @@ interface ToolBlock {
   aiMsg: BaseMessage;
   toolMsgs: ToolMessage[];
   tool: string | null;
+  key: string | null;
 }
 
-/** 从 AIMessage 提取主工具名 / Extract primary tool name from an AIMessage */
-function primaryToolOfAI(msg: BaseMessage): string | null {
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'undefined';
+}
+
+/** 从 AIMessage 提取主工具信息 / Extract primary tool metadata from an AIMessage */
+function primaryToolOfAI(msg: BaseMessage): { name: string; key: string } | null {
   const m = msg as unknown as Record<string, unknown>;
   if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-    return ((m.tool_calls[0] as Record<string, unknown>)?.name as string) ?? null;
+    const call = m.tool_calls[0] as Record<string, unknown>;
+    const name = call?.name as string | undefined;
+    if (!name) return null;
+    return { name, key: `${name}:${stableStringify(call.args ?? {})}` };
   }
   return null;
 }
@@ -53,7 +69,7 @@ function partitionIntoToolBlocks(messages: BaseMessage[]): Array<BaseMessage | T
     const tool = primaryToolOfAI(msg);
     if (tool) {
       flush();
-      pending = { aiMsg: msg, toolMsgs: [], tool };
+      pending = { aiMsg: msg, toolMsgs: [], tool: tool.name, key: tool.key };
     } else if (pending && ToolMessage.isInstance(msg)) {
       pending.toolMsgs.push(msg);
     } else {
@@ -97,7 +113,7 @@ export function microCompactToolOutputs(messages: BaseMessage[]): BaseMessage[] 
     const prevBlock = parts[prev] as ToolBlock;
     const currBlock = curr >= 0 ? (parts[curr] as ToolBlock) : null;
 
-    if (currBlock && currBlock.tool === prevBlock.tool && prevBlock.tool !== null) {
+    if (currBlock && currBlock.key === prevBlock.key && prevBlock.key !== null) {
       continue;
     }
     if (i - runStart >= 3) {
@@ -216,6 +232,8 @@ const FOLDABLE_TOOLS = new Set([
   'search_files',
   'read_mcp_resource',
 ]);
+
+const FILE_MUTATION_TOOLS = new Set(['edit_file', 'write_file', 'apply_patch']);
 
 /** 搜索类命令前缀：这些 shell 命令用于代码搜索，可折叠 */
 const SEARCH_COMMAND_PREFIXES = ['rg ', 'grep ', 'ag ', 'ack ', 'git grep ', 'find .', 'find /'];
@@ -424,6 +442,12 @@ export function foldToolOutputs(messages: BaseMessage[], budget?: ContextBudget)
     }
 
     const toolName = (msg as unknown as Record<string, unknown>).name as string;
+    if (FILE_MUTATION_TOOLS.has(toolName)) {
+      const path = extractPath(msg);
+      if (path) seenPaths.delete(path);
+      result.push(msg);
+      continue;
+    }
 
     // 不在可折叠工具列表中 → 直接通过
     if (!FOLDABLE_TOOLS.has(toolName) && !(toolName === 'shell_execute' && isShellSearch(msg))) {

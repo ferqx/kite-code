@@ -37,6 +37,46 @@ function formatFilePreview(raw: string | undefined): string | undefined {
   return raw;
 }
 
+function findToolSummaryLocation(
+  state: TuiState,
+  callId: string,
+  preferredBlockId?: number,
+): {
+  turnIndex: number;
+  blockIndex: number;
+  block: Extract<OutputBlock, { kind: 'tool_summary' }>;
+} | null {
+  if (preferredBlockId != null) {
+    for (let turnIndex = 0; turnIndex < state.turns.length; turnIndex++) {
+      const blockIndex = state.turns[turnIndex]!.blocks.findIndex(
+        (b) => b.kind === 'tool_summary' && b.id === preferredBlockId,
+      );
+      if (blockIndex >= 0) {
+        return {
+          turnIndex,
+          blockIndex,
+          block: state.turns[turnIndex]!.blocks[blockIndex]! as Extract<
+            OutputBlock,
+            { kind: 'tool_summary' }
+          >,
+        };
+      }
+    }
+  }
+
+  for (let turnIndex = state.turns.length - 1; turnIndex >= 0; turnIndex--) {
+    const blocks = state.turns[turnIndex]!.blocks;
+    for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex--) {
+      const block = blocks[blockIndex]!;
+      if (block.kind === 'tool_summary' && block.tools.some((t) => t.callId === callId)) {
+        return { turnIndex, blockIndex, block };
+      }
+    }
+  }
+
+  return null;
+}
+
 export function handleEventAction(state: TuiState, event: AgentEvent): TuiState {
   // Guard: malformed events from corrupted checkpoints must not crash the TUI
   if (!event.data) return state;
@@ -256,49 +296,43 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // shell_execute without intent=inspect creates tool_card → won't be found here → falls through
       if (isExplorationToolByName(event.data.name)) {
         const blockId = state.explorationSummaryIds[event.data.call_id];
-        if (blockId != null) {
-          const turn = lastTurn(state);
-          const summaryIdx = turn?.blocks.findIndex((b) => b.id === blockId);
-          if (summaryIdx != null && summaryIdx >= 0) {
-            const summary = turn!.blocks[summaryIdx]! as Extract<
-              OutputBlock,
-              { kind: 'tool_summary' }
-            >;
-            const tools = summary.tools.map((t) =>
-              t.callId === event.data.call_id
-                ? {
-                    ...t,
-                    ok: event.data.ok,
-                    summary: event.data.summary,
-                    elapsedMs,
-                    totalLines: event.data.totalLines ?? t.totalLines,
-                    status: event.data.ok ? ('done' as const) : ('error' as const),
-                  }
-                : t,
-            );
-            const totalElapsedMs = Date.now() - summary.createdAt;
-            const updatedSummary: OutputBlock = {
-              ...summary,
-              tools,
-              totalElapsedMs,
-              summaryLine: buildToolSummaryLine(tools),
+        const location = findToolSummaryLocation(state, event.data.call_id, blockId);
+        if (location) {
+          const { turnIndex, blockIndex, block: summary } = location;
+          const tools = summary.tools.map((t) =>
+            t.callId === event.data.call_id
+              ? {
+                  ...t,
+                  ok: event.data.ok,
+                  summary: event.data.summary,
+                  elapsedMs,
+                  totalLines: event.data.totalLines ?? t.totalLines,
+                  status: event.data.ok ? ('done' as const) : ('error' as const),
+                }
+              : t,
+          );
+          const totalElapsedMs = Date.now() - summary.createdAt;
+          const updatedSummary: OutputBlock = {
+            ...summary,
+            tools,
+            totalElapsedMs,
+            summaryLine: buildToolSummaryLine(tools),
+          };
+          const turnsCopy = state.turns.map((t, ti) => {
+            if (ti !== turnIndex) return t;
+            return { blocks: t.blocks.map((b, bi) => (bi === blockIndex ? updatedSummary : b)) };
+          });
+          let next = { ...state, turns: turnsCopy, toolStartTimes: nextTimes };
+          if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {
+            next = {
+              ...next,
+              status: {
+                ...state.status,
+                totalTokens: state.status.totalTokens + event.data.toolTokenCount,
+              },
             };
-            const turnsCopy = state.turns.map((t, ti) => {
-              if (ti !== state.turns.length - 1) return t;
-              return { blocks: t.blocks.map((b, bi) => (bi === summaryIdx ? updatedSummary : b)) };
-            });
-            let next = { ...state, turns: turnsCopy, toolStartTimes: nextTimes };
-            if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {
-              next = {
-                ...next,
-                status: {
-                  ...state.status,
-                  totalTokens: state.status.totalTokens + event.data.toolTokenCount,
-                },
-              };
-            }
-            return next;
           }
+          return next;
         }
         // Not found via map or in blocks — fall through to standard tool_card update
       }

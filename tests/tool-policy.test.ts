@@ -24,21 +24,41 @@ const shellExecuteRequest: PendingToolRequest = {
 describe('tool policy', () => {
   // 验证只读工具由统一策略放行且无需审批 / Read tools are allowed without approval by the unified policy
   test('allows read tools without approval', () => {
-    const decision = evaluateToolPolicy({
-      request: {
+    const requests: PendingToolRequest[] = [
+      {
         id: 'call-read',
         name: 'read_file',
         args: { path: 'package.json' },
         reason: 'Model requested read_file',
         protectedCommand: 'read_file package.json',
       },
-      workspaceAccess: 'write',
-      phase: 'planning',
-    });
+      {
+        id: 'call-search-content',
+        name: 'search_content',
+        args: { pattern: 'describe(' },
+        reason: 'Model requested search_content',
+        protectedCommand: 'search_content describe(',
+      },
+      {
+        id: 'call-search-files',
+        name: 'search_files',
+        args: { pattern: '*.md' },
+        reason: 'Model requested search_files',
+        protectedCommand: 'search_files *.md',
+      },
+    ];
 
-    expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(false);
-    expect(decision.risk).toBe('read');
+    for (const request of requests) {
+      const decision = evaluateToolPolicy({
+        request,
+        workspaceAccess: 'write',
+        phase: 'planning',
+      });
+
+      expect(decision.allowed).toBe(true);
+      expect(decision.requiresApproval).toBe(false);
+      expect(decision.risk).toBe('read');
+    }
   });
 
   // 验证普通 shell_execute 执行项目代码时需要审批 / shell_execute commands that run project code require approval

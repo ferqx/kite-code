@@ -21,6 +21,16 @@ function makeReadMcpResourceRequest(
   } as PendingToolRequest;
 }
 
+function makeSearchFilesRequest(pattern: string): PendingToolRequest {
+  return {
+    id: 'call-search-files',
+    name: 'search_files',
+    args: { pattern },
+    reason: 'Test file search',
+    protectedCommand: `search_files ${pattern}`,
+  } as PendingToolRequest;
+}
+
 function mockMcpManager(
   readResourceImpl: (server: string, uri: string) => Promise<string>,
 ): McpManager {
@@ -89,5 +99,50 @@ describe('runApprovedTool — read_mcp_resource', () => {
 
     expect(result.ok).toBe(false);
     expect(result.stderr).toContain('Connection refused');
+  });
+});
+
+describe('runApprovedTool — search_files', () => {
+  it('uses rg --files with glob filters instead of platform-specific find', async () => {
+    let command = '';
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: makeSearchFilesRequest('package.json'),
+      shellExecutor: async (input) => {
+        command = input.command;
+        return {
+          ok: true,
+          command: input.command,
+          exitCode: 0,
+          stdout: 'package.json\n',
+          stderr: '',
+        };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(command).toContain('rg --files');
+    expect(command).toContain('-g "package.json"');
+    expect(command).toContain('-g "**/package.json"');
+    expect(command).not.toContain('find ');
+  });
+
+  it('treats empty rg --files matches as a successful empty search', async () => {
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: makeSearchFilesRequest('missing.file'),
+      shellExecutor: async (input) => ({
+        ok: false,
+        command: input.command,
+        exitCode: 1,
+        stdout: '',
+        stderr: '',
+      }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
   });
 });

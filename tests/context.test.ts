@@ -1071,6 +1071,63 @@ describe('foldToolOutputs', () => {
     expect(secondData._folded).toBe(true);
   });
 
+  test('preserves the first read after a file mutation', () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: '',
+        tool_calls: [{ id: 'read-1', name: 'read_file', args: { path: 'config.json' } }],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({
+          ok: true,
+          path: 'config.json',
+          totalLines: 20,
+          stdout: 'before edit',
+        }),
+        tool_call_id: 'read-1',
+        name: 'read_file',
+        status: 'success',
+      }),
+      new AIMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'edit-1',
+            name: 'edit_file',
+            args: { path: 'config.json', old_string: 'before', new_string: 'after' },
+          },
+        ],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({ ok: true, path: 'config.json' }),
+        tool_call_id: 'edit-1',
+        name: 'edit_file',
+        status: 'success',
+      }),
+      new AIMessage({
+        content: '',
+        tool_calls: [{ id: 'read-2', name: 'read_file', args: { path: 'config.json' } }],
+      }),
+      new ToolMessage({
+        content: JSON.stringify({
+          ok: true,
+          path: 'config.json',
+          totalLines: 20,
+          stdout: 'after edit',
+        }),
+        tool_call_id: 'read-2',
+        name: 'read_file',
+        status: 'success',
+      }),
+    ];
+
+    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
+    const secondRead = result[5] as ToolMessage;
+    const secondData = JSON.parse(secondRead.content as string);
+    expect(secondData._folded).toBeUndefined();
+    expect(secondData.stdout).toBe('after edit');
+  });
+
   test('folds shell_execute with rg search command', () => {
     const msgs: BaseMessage[] = [
       new AIMessage({
@@ -1229,6 +1286,38 @@ describe('microCompactToolOutputs', () => {
     ];
     const result = microCompactToolOutputs(msgs);
     expect(result).toHaveLength(4);
+    const contents = result
+      .filter((m) => ToolMessage.isInstance(m))
+      .map((m) => {
+        try {
+          return JSON.parse(m.content as string);
+        } catch {
+          return {};
+        }
+      });
+    expect(contents.some((c) => c._compacted === true)).toBe(false);
+  });
+
+  test('does not collapse consecutive calls with different arguments', () => {
+    const msgs: BaseMessage[] = [
+      new AIMessage({
+        content: '',
+        tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
+      }),
+      new ToolMessage({ content: 'file A', tool_call_id: 'c1', name: 'read_file' }),
+      new AIMessage({
+        content: '',
+        tool_calls: [{ id: 'c2', name: 'read_file', args: { path: 'b.txt' } }],
+      }),
+      new ToolMessage({ content: 'file B', tool_call_id: 'c2', name: 'read_file' }),
+      new AIMessage({
+        content: '',
+        tool_calls: [{ id: 'c3', name: 'read_file', args: { path: 'c.txt' } }],
+      }),
+      new ToolMessage({ content: 'file C', tool_call_id: 'c3', name: 'read_file' }),
+    ];
+
+    const result = microCompactToolOutputs(msgs);
     const contents = result
       .filter((m) => ToolMessage.isInstance(m))
       .map((m) => {

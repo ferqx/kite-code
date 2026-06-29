@@ -45,6 +45,20 @@ export interface CreateAgentToolsInput {
   /** 线程 ID，用于多 session 缓存隔离 / Thread ID for multi-session cache isolation */
   threadId?: string;
 }
+
+function shellQuote(value: unknown): string {
+  return `"${String(value).replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
+function buildSearchFilesCommand(pattern: unknown, path: unknown): string {
+  const rawPattern = String(pattern || '*');
+  const searchPath = String(path || '.');
+  const hasPathSeparator = rawPattern.includes('/') || rawPattern.includes('\\');
+  const globs = hasPathSeparator ? [rawPattern] : [rawPattern, `**/${rawPattern}`];
+  const globArgs = globs.map((glob) => `-g ${shellQuote(glob)}`).join(' ');
+  return `rg --files ${shellQuote(searchPath)} ${globArgs}`;
+}
+
 /** 模块级工具缓存：按 cacheKey 隔离，防止多 session 并发时竞态覆盖 / Module-level tool cache isolated by cacheKey to prevent race conditions with concurrent sessions */
 const _toolCache = new Map<string, any[]>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- internal cache, breaks circular ReturnType<> reference
 
@@ -229,14 +243,17 @@ export function createAgentTools(input: CreateAgentToolsInput) {
   const searchFiles = tool(
     async ({ pattern, path }) => {
       const searchPath = path ?? '.';
-      const cmd = `find "${searchPath}" -type f -path "*${pattern}*" 2>/dev/null | head -50`;
-      return JSON.stringify(
-        await (input.shellExecutor ?? shellTool)({
-          workspace: input.workspace,
-          command: cmd,
-          signal: input.signal,
-        }),
-      );
+      const cmd = buildSearchFilesCommand(pattern, searchPath);
+      const result = await (input.shellExecutor ?? shellTool)({
+        workspace: input.workspace,
+        command: cmd,
+        signal: input.signal,
+      });
+      const normalized =
+        result.exitCode === 1 && result.stdout.length === 0 && result.stderr.length === 0
+          ? { ...result, ok: true, exitCode: 0 }
+          : result;
+      return JSON.stringify(normalized);
     },
     {
       name: 'search_files',

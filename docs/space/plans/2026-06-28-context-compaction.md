@@ -1,4 +1,147 @@
-# 上下文压缩方案 — M0/M1/M2 三层策略
+# 上下文整理与压缩方案 — UI 线 / 模型输入线
+
+创建日期：2026-06-28
+重写日期：2026-06-29
+状态：active
+优先级：P0
+
+## 结论
+
+原方案把 TUI 展示整理、工具输出折叠、对话摘要压缩都放进 M0/M1/M2 三层压缩模型，容易误导优先级。新的方案拆成两条线：
+
+1. **UI 整理线**：只负责用户看到的 TUI 块如何聚合，不承诺减少模型上下文 token。
+2. **模型输入线**：只负责进入 LLM 的消息如何安全缩减，最终目标是长对话不因 context window 耗尽而中断。
+
+这两条线可以共享“探索工具”的概念，但不能共享实现状态判断。UI 聚合成功不代表模型上下文已经压缩。
+
+## 线 A：UI 整理线（Thought 预整合）
+
+### 目标
+
+将同一轮 agent 中连续出现的只读探索工具聚合成 `tool_summary`，匹配类似 “Thought for 5s, read 2 files, searched for 1 pattern” 的体验。
+
+### 作用边界
+
+- 发生位置：TUI reducer/render 层。
+- 影响对象：`OutputBlock` 渲染形态。
+- 不影响对象：LangGraph checkpoint、`BaseMessage[]`、模型输入 token。
+
+### 探索工具
+
+| 工具 | 归类条件 |
+| --- | --- |
+| `read_file` | 始终 |
+| `search_content` | 始终 |
+| `search_files` | 始终 |
+| `read_mcp_resource` | 始终 |
+| `shell_execute` | `intent=inspect` 且命令为搜索/查找类前缀 |
+
+### 已落地修复
+
+1. `tool_call` 仍建立 `explorationSummaryIds[callId] = blockId` 作为快速索引。
+2. `tool_done` 不再只信该 map；若 map 缺失或 stale，会从所有 turns 反向扫描包含该 `callId` 的 `tool_summary`。
+3. 更新 `tool_summary` 时按 turn/block 创建新引用链，保证 React/Ink 能看到状态变化。
+
+### 后续约束
+
+- `explorationSummaryIds` 是加速索引，不是唯一事实来源。
+- 回放或 session restore 场景必须能只靠 block 内的 `callId` 完成状态恢复。
+- `tool_summary` 进入 Static 的条件仍是所有工具状态均非 `running`。
+
+## 线 B：模型输入线（安全压缩）
+
+### 目标
+
+在 `prepareModelContext()` 构建模型输入时减少 token，同时不丢失会影响后续代码判断的事实。
+
+### B1：工具输出折叠（当前主力）
+
+发生位置：`src/core/model/compaction.ts`，由 `src/core/model/context.ts` 调用。
+
+折叠对象：
+
+| 工具 | 折叠策略 |
+| --- | --- |
+| `read_file` | 旧的重复读取可折叠为一行，但每个路径的关键完整读取必须保留 |
+| `search_content` | 可折叠为搜索摘要 |
+| `search_files` | 可折叠为文件发现摘要 |
+| `read_mcp_resource` | 可折叠为 MCP 资源读取摘要 |
+| `shell_execute` | 仅 inspect 搜索类命令可折叠 |
+
+安全规则：
+
+1. 最近 `recentWindowSize` 条消息不折叠。
+2. 每个文件路径的首次完整读取保留。
+3. 文件发生 `edit_file`、`write_file`、`apply_patch` 后，该路径的下一次 `read_file` 必须重新保留完整内容。
+4. 已标记 `_compacted` 或 `_folded` 的消息不二次折叠。
+5. `microCompactToolOutputs()` 只折叠工具名和关键参数都相同的连续调用；不同 path/pattern/command 不能因为工具名相同而折叠。
+
+### B2：压缩触发（当前未接入生产路径）
+
+已有函数：
+
+- `estimateTokens(messages)`
+- `shouldCompact(estimatedTokens, budget?)`
+
+当前问题：
+
+- `contextBudget` 默认是 `undefined`。
+- `ContextBudget.maxTokens` 是可选字段。
+- `shouldCompact()` 没有在模型调用前接入生产路径。
+
+因此，文档不能再声称“默认 256K 会触发压缩”。默认预算需要在 provider/model 配置层落地后才成立。
+
+### B3：对话摘要压缩（待实现）
+
+最小可用方案：
+
+1. 在模型调用前估算 token。
+2. 若超过软阈值，先执行 B1 工具折叠，再估算。
+3. 若仍超过硬阈值，将早期 settled 消息摘要成结构化状态。
+4. 保留最近窗口、未完成 tool pair、当前 plan、最近文件变更和用户最新请求。
+5. 摘要作为非缓存动态消息注入，避免破坏 cacheable system prompt 前缀。
+
+摘要必须包含：
+
+- 用户目标和已确认约束。
+- 已修改文件和关键决策。
+- 最近有效的文件观察。
+- 未解决问题和下一步。
+- 不可省略的错误/失败结论。
+
+## 当前优先级
+
+1. **已完成**：修复 UI 线 `tool_summary` 的 stale map/running 风险。
+2. **已完成**：修复模型输入线中 M1 折叠的两个信息正确性风险：
+   - 不同参数的连续同名工具不再被 micro compact。
+   - 文件修改后的首次读取不再被折叠。
+3. **下一步**：为 provider/model 建立默认 `ContextBudget`，并在 `invokeModel()` 前接入 `estimateTokens()`/`shouldCompact()`。
+4. **之后**：实现最小 B3 摘要压缩，而不是一次性引入复杂摘要生命周期。
+
+## 文件清单
+
+| 文件 | 角色 | 线 |
+| --- | --- | --- |
+| `src/app/tui/reducers/consolidateTools.ts` | 探索工具判断与 UI 聚合 | UI |
+| `src/app/tui/reducers/handleEvent.ts` | `tool_call`/`tool_done` 更新 `tool_summary` | UI |
+| `src/app/tui/components/ToolSummaryBlock.tsx` | Thought 块渲染 | UI |
+| `src/app/tui/render/useStaticContent.tsx` | Static/Dynamic 分界 | UI |
+| `src/app/tui/types.ts` | `ConsolidatedToolEntry` / `tool_summary` 类型 | UI |
+| `src/core/model/compaction.ts` | 工具输出折叠、token 估算、压缩触发判断 | 模型输入 |
+| `src/core/model/context.ts` | 构建模型输入并调用折叠流水线 | 模型输入 |
+| `src/core/types.ts` | `ContextBudget` 类型 | 模型输入 |
+| `tests/tui-reducer.test.ts` | UI 聚合回归测试 | UI |
+| `tests/context.test.ts` | 模型输入折叠回归测试 | 模型输入 |
+
+## 验证命令
+
+```bash
+bun test tests\tui-reducer.test.ts tests\context.test.ts --timeout 120000
+```
+
+---
+
+## Legacy：旧三层方案原文（已废弃，仅保留历史）
 
 创建日期：2026-06-28
 状态：active（M0 + M1 已实现，M2 延后）

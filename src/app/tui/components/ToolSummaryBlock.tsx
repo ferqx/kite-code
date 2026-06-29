@@ -74,6 +74,11 @@ function truncateToFit(text: string, maxWidth: number): string {
   return `${result}…`;
 }
 
+function failureSummary(step: { status: string; summary: string }, maxWidth: number): string {
+  if (step.status !== 'error' || !step.summary.trim()) return '';
+  return truncateToFit(step.summary.replace(/\s+/g, ' ').trim(), maxWidth);
+}
+
 interface ToolSummaryBlockProps {
   block: Extract<OutputBlock, { kind: 'tool_summary' }>;
   columns: number;
@@ -159,7 +164,8 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
               const stepPreW = stringWidth(
                 `${i === visibleSteps.length - 1 && skipped === 0 ? '└─' : '├─'} ${actionName(step.name)}`,
               );
-              const stepSufW = step.status !== 'running' ? 2 : 0;
+              const errSummary = failureSummary(step, 32);
+              const stepSufW = step.status !== 'running' ? 2 + stringWidth(errSummary) + 1 : 0;
               const fitLabel = truncateToFit(
                 rawLabel,
                 Math.max(0, col - 3 - stepPreW - stepSufW - 2),
@@ -168,6 +174,9 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
             })()}
             {step.status === 'done' && <Text color={dt.success}> ✓</Text>}
             {step.status === 'error' && <Text color={dt.error}> ✗</Text>}
+            {step.status === 'error' && failureSummary(step, 32) && (
+              <Text color={dt.muted}> {failureSummary(step, 32)}</Text>
+            )}
           </Box>
         ))}
         <Box paddingLeft={3}>
@@ -200,7 +209,8 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
               const rawLabel = toolArgsLabel(step.name, step.args);
               if (!rawLabel) return null;
               const stepPreW = stringWidth(`${isLast ? '└─' : '├─'} ${step.name}`);
-              const stepSufW = step.ok !== undefined ? 2 : 0;
+              const errSummary = failureSummary(step, 32);
+              const stepSufW = step.ok !== undefined ? 2 + stringWidth(errSummary) + 1 : 0;
               const fitLabel = truncateToFit(
                 rawLabel,
                 Math.max(0, col - 3 - stepPreW - stepSufW - 2),
@@ -209,6 +219,9 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
             })()}
             {step.status === 'done' && <Text color={dt.success}> ✓</Text>}
             {step.status === 'error' && <Text color={dt.error}> ✗</Text>}
+            {step.status === 'error' && failureSummary(step, 32) && (
+              <Text color={dt.muted}> {failureSummary(step, 32)}</Text>
+            )}
           </Box>
         );
       })}

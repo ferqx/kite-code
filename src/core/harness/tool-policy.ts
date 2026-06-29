@@ -199,7 +199,11 @@ export function evaluateToolPolicy(input: {
     });
   }
 
-  if (request.name === 'read_file') {
+  if (
+    request.name === 'read_file' ||
+    request.name === 'search_content' ||
+    request.name === 'search_files'
+  ) {
     return allow({
       risk: 'read',
       reason: 'Read-only workspace inspection.',

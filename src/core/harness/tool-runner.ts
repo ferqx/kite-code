@@ -238,15 +238,16 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   if (request.name === 'search_files') {
     const searchPath = request.args.path ?? '.';
-    const result = await shellTool({
+    const result = await (shellExecutor ?? shellTool)({
       workspace,
-      command: `find "${searchPath}" -type f -path "*${request.args.pattern ?? ''}*" 2>/dev/null | head -50`,
+      command: buildSearchFilesCommand(request.args.pattern ?? '', searchPath),
       signal,
     });
+    const normalized = normalizeSearchFilesResult(result);
     return withFailureGuidance(request, {
-      ...result,
-      stdout: truncateToolOutput(result.stdout),
-      stderr: truncateToolOutput(result.stderr),
+      ...normalized,
+      stdout: truncateToolOutput(normalized.stdout),
+      stderr: truncateToolOutput(normalized.stderr),
       command: `search_files ${request.args.pattern ?? ''}`,
     });
   }
@@ -424,6 +425,27 @@ export function truncateToolOutput(output: string, maxLen = 4000): string {
   const omittedLines = output.slice(keep, -keep).split('\n').filter(Boolean).length;
   return `${head}\n... [${omittedLines} lines omitted, ${output.length - 2 * keep} total chars truncated]\n${tail}`;
 }
+
+function shellQuote(value: unknown): string {
+  return `"${String(value).replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
+function buildSearchFilesCommand(pattern: unknown, path: unknown): string {
+  const rawPattern = String(pattern || '*');
+  const searchPath = String(path || '.');
+  const hasPathSeparator = rawPattern.includes('/') || rawPattern.includes('\\');
+  const globs = hasPathSeparator ? [rawPattern] : [rawPattern, `**/${rawPattern}`];
+  const globArgs = globs.map((glob) => `-g ${shellQuote(glob)}`).join(' ');
+  return `rg --files ${shellQuote(searchPath)} ${globArgs}`;
+}
+
+function normalizeSearchFilesResult(result: ShellResult): ShellResult {
+  if (result.exitCode === 1 && result.stdout.length === 0 && result.stderr.length === 0) {
+    return { ...result, ok: true, exitCode: 0 };
+  }
+  return result;
+}
+
 async function runShellForTool(
   workspace: string,
   command: string,

@@ -860,6 +860,32 @@ describe('BlockRenderer', () => {
     );
     expect(lastFrame()).toContain('find files');
   });
+
+  test('renders tool_summary error details', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_summary',
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'searched 1 file pattern',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'search_files',
+          args: { pattern: 'package.json' },
+          ok: false,
+          summary: 'search command failed',
+          status: 'error',
+        },
+      ],
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    expect(lastFrame()).toContain('Find package.json');
+    expect(lastFrame()).toContain('search command failed');
+  });
 });
 
 describe('Block spacing', () => {
