@@ -468,14 +468,21 @@ describe('StartupScreen', () => {
 // ── ApprovalBlock ──
 
 describe('ApprovalBlock', () => {
-  test('renders tool name and command', () => {
-    const approval = fakeApproval({ command: 'rm -rf /tmp/test' });
+  test('renders compact approval prompt without repeating tool command', () => {
+    const approval = fakeApproval({
+      command: 'rm -rf /tmp/test',
+      summary: 'Delete temp files',
+      risk: 'destructive',
+    });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('● Bash');
-    expect(frame).toContain('rm -rf /tmp/test');
+    expect(frame).toContain('Approve this tool call?');
+    expect(frame).not.toContain('● Bash');
+    expect(frame).not.toContain('rm -rf /tmp/test');
+    expect(frame).not.toContain('Delete temp files');
+    expect(frame).not.toContain('destructive');
   });
 
   test('shows all grant options with labels', () => {
@@ -490,17 +497,16 @@ describe('ApprovalBlock', () => {
     expect(frame).toContain('Deny');
   });
 
-  test('shows summary and risk text', () => {
-    const approval = fakeApproval({
-      summary: 'Delete temp files',
-      risk: 'destructive',
-    });
+  test('uses a simple top divider instead of a rounded border', () => {
+    const approval = fakeApproval();
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Delete temp files');
-    expect(frame).toContain('destructive');
+    expect(frame).toContain('────────────────────────────────────────');
+    expect(frame).not.toContain('╭');
+    expect(frame).not.toContain('╰');
+    expect(frame).not.toContain('│');
   });
 
   test('non‑shell tools only show approve and deny', () => {
@@ -746,10 +752,12 @@ function OutputAreaTestWrap({
   running,
   turns,
   onToggleReason,
+  awaitingApproval = false,
 }: {
   running: boolean;
   turns: { blocks: OutputBlock[] }[];
   onToggleReason: () => void;
+  awaitingApproval?: boolean;
 }) {
   const {
     staticItems,
@@ -771,6 +779,7 @@ function OutputAreaTestWrap({
       activeDynamicBlocks={activeDynamicBlocks}
       mergedStaticBlocks={mergedStaticBlocks}
       onToggleReason={onToggleReason}
+      awaitingApproval={awaitingApproval}
       columns={80}
     />
   );
@@ -868,6 +877,7 @@ describe('BlockRenderer', () => {
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'searched 1 file pattern',
+      active: false,
       tools: [
         {
           callId: 'c1',
@@ -885,6 +895,199 @@ describe('BlockRenderer', () => {
 
     expect(lastFrame()).toContain('Find package.json');
     expect(lastFrame()).toContain('search command failed');
+  });
+
+  test('renders running tool_summary thinking preview', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: { kind: 'thinking', text: 'checking current Thought boundaries' },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'read 1 file',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    expect(lastFrame()).toContain('Thinking checking current Thought boundaries');
+  });
+
+  test('keeps running tool_summary thinking preview when latest visible activity is a tool', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: { kind: 'thinking', text: 'reviewing the project conventions' },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'read 3 files',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'package.json' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+        {
+          callId: 'c2',
+          name: 'read_file',
+          args: { path: 'CLAUDE.md' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+        {
+          callId: 'c3',
+          name: 'read_file',
+          args: { path: 'README.md' },
+          ok: false,
+          summary: '',
+          status: 'running',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Thinking reviewing the project conventions');
+    expect(frame).toContain('Read README.md');
+  });
+
+  test('renders running tool_summary tree without duplicating latest tool preview', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: { kind: 'tool', callId: 'c1' },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'read 1 file',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'CLAUDE.md', start: 1, end: 126, totalLines: 126 },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+          totalLines: 126,
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('├─ Read CLAUDE.md [lines 1-126 / 126] ✓');
+    expect(frame).toContain('└─ 运行中');
+    expect(frame).not.toContain('\n   Read CLAUDE.md');
+  });
+
+  test('truncates long running tool_summary thinking preview', () => {
+    const longThought =
+      'this is a very long thinking preview that should not spill across the entire terminal width';
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: { kind: 'thinking', text: longThought },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'read 1 file',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={50} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Thinking');
+    expect(frame).toContain('…');
+    expect(frame).not.toContain(longThought);
+  });
+
+  test('omits thinking preview after tool_summary settles', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: false,
+      latestActivity: { kind: 'thinking', text: 'hidden after settle' },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'read 1 file',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    expect(lastFrame()).not.toContain('hidden after settle');
+  });
+
+  test('stops showing running Thought state after a boundary even if a tool is still pending', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: false,
+      latestActivity: { kind: 'tool', callId: 'c1' },
+      createdAt: Date.now() - 10_000,
+      totalElapsedMs: 1200,
+      summaryLine: 'read 1 file',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          ok: false,
+          summary: '',
+          status: 'running',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Thought for 1s, read 1 file');
+    expect(frame).toContain('等待工具结果');
+    expect(frame).not.toContain('运行中');
+    expect(frame).not.toContain('10s');
   });
 });
 
@@ -1317,6 +1520,102 @@ describe('OutputArea', () => {
     expect(lastFrame()).not.toContain('npm publish');
   });
 
+  test('hides dynamic blocks after the approval tool while awaiting approval', () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1,
+        kind: 'tool_card',
+        callId: 'shell-1',
+        name: 'shell_execute',
+        args: { command: 'find src -type f | sort' },
+        status: 'running',
+        summary: '',
+        preview: 'find src -type f | sort',
+      },
+      {
+        id: 2,
+        kind: 'tool_summary',
+        active: false,
+        createdAt: Date.now() - 1000,
+        totalElapsedMs: 1000,
+        summaryLine: 'read 2 files',
+        tools: [
+          {
+            callId: 'read-1',
+            name: 'read_file',
+            args: { path: 'index.ts' },
+            ok: false,
+            summary: '',
+            status: 'running',
+          },
+          {
+            callId: 'read-2',
+            name: 'read_file',
+            args: { path: 'CLAUDE.md', start: 1, end: 60 },
+            ok: false,
+            summary: '',
+            status: 'running',
+          },
+        ],
+      },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running awaitingApproval turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Bash');
+    expect(frame).toContain('find src -type f | sort');
+    expect(frame).toContain('awaiting approval');
+    expect(frame).not.toContain('Thought');
+    expect(frame).not.toContain('index.ts');
+    expect(frame).not.toContain('CLAUDE.md');
+    expect(frame).not.toContain('等待工具结果');
+  });
+
+  test('shows dynamic blocks after the approval tool once approval wait is over', () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1,
+        kind: 'tool_card',
+        callId: 'shell-1',
+        name: 'shell_execute',
+        args: { command: 'find src -type f | sort' },
+        status: 'running',
+        summary: '',
+        preview: 'find src -type f | sort',
+      },
+      {
+        id: 2,
+        kind: 'tool_summary',
+        active: false,
+        createdAt: Date.now() - 1000,
+        totalElapsedMs: 1000,
+        summaryLine: 'read 1 file',
+        tools: [
+          {
+            callId: 'read-1',
+            name: 'read_file',
+            args: { path: 'index.ts' },
+            ok: false,
+            summary: '',
+            status: 'running',
+          },
+        ],
+      },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Bash');
+    expect(frame).toContain('Thought');
+    expect(frame).toContain('index.ts');
+  });
+
   test('resolved approval block shows confirmation for scrollback', () => {
     const blocks: OutputBlock[] = [
       {
@@ -1458,7 +1757,8 @@ describe('App', () => {
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    expect(lastFrame()).toContain('● Bash');
+    expect(lastFrame()).toContain('Approve this tool call?');
+    expect(lastFrame()).toContain('Approve once');
   });
 
   test('shows InputBlock when interrupt is question', () => {

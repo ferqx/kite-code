@@ -107,6 +107,40 @@ describe('eventReducer (blocks model)', () => {
       const r = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>;
       expect(r.folded).toBe(true);
     });
+
+    test('updates the active Thought preview without ending the current exploration summary', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('first thought'));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'a'));
+      s = dispatch(s, reasonEvt('second thought'));
+      s = dispatch(s, tcEvt('c2', 'search_files', { pattern: '*.ts' }));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
+      expect(summaries[0]!.active).toBe(true);
+      expect(summaries[0]!.latestActivity).toEqual({
+        kind: 'thinking',
+        text: 'second thought',
+      });
+    });
+
+    test('creates a running Thought preview for thinking before any tool call', () => {
+      const s = dispatch(fresh(), reasonEvt('checking the repo shape'));
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.active).toBe(true);
+      expect(summary!.latestActivity).toEqual({
+        kind: 'thinking',
+        text: 'checking the repo shape',
+      });
+    });
   });
 
   describe('EVENT.tool_call / tool_done', () => {
@@ -165,6 +199,66 @@ describe('eventReducer (blocks model)', () => {
       const t2 = flatBlocks(s)[1] as Extract<OutputBlock, { kind: 'tool_card' }>;
       expect(t1.status).toBe('done');
       expect(t2.status).toBe('running');
+    });
+
+    test('visible assistant text closes the current Thought before the next exploration tool', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'a'));
+      s = dispatch(s, textEvt('I checked that file.'));
+      s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.txt' }));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summaries[0]!.active).toBe(false);
+      expect(summaries[0]!.latestActivity).toBeUndefined();
+      expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c2']);
+      expect(summaries[1]!.active).toBe(true);
+    });
+
+    test('non-exploration tool call closes the current Thought before later exploration tools', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'a'));
+      s = dispatch(s, tcEvt('c2', 'shell_execute', { command: 'npm test' }));
+      s = dispatch(s, tcEvt('c3', 'read_file', { path: 'b.txt' }));
+
+      const blocks = flatBlocks(s);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summaries[0]!.active).toBe(false);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+      expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c3']);
+      expect(s.currentThoughtSummaryId).toBe(summaries[1]!.id);
+    });
+
+    test('inspect shell search is a barrier tool_card, not part of Thought', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
+      s = dispatch(
+        s,
+        tcEvt('c2', 'shell_execute', {
+          intent: 'inspect',
+          command: 'find /Users/chenchao/Code/ai/openpx-new/src -type f | sort',
+        }),
+      );
+
+      const blocks = flatBlocks(s);
+      const summary = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+
+      expect(summary).toBeDefined();
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summary!.active).toBe(false);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
     });
   });
 
@@ -379,6 +473,82 @@ describe('eventReducer (blocks model)', () => {
       const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'question' }>;
       expect(b.resolved).toBe('my answer');
       expect(s.interrupt).toBeNull();
+    });
+    test('need_approval closes active Thought so its timer stops while waiting for the user', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('checking before approval'));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'a'));
+
+      s = dispatch(s, { type: 'EVENT', event: { type: 'need_approval', data: approval() } });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.active).toBe(false);
+      expect(summary!.latestActivity).toBeUndefined();
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+      expect(s.interrupt?.kind).toBe('approval');
+    });
+    test('bash approval closes Thought even when an exploration tool is still pending', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('checking before shell'));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tcEvt('c2', 'shell_execute', { command: 'npm test' }));
+
+      s = dispatch(s, { type: 'EVENT', event: { type: 'need_approval', data: approval() } });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.active).toBe(false);
+      expect(summary!.latestActivity).toBeUndefined();
+      expect(summary!.tools[0]!.status).toBe('running');
+      expect(flatBlocks(s).some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+      expect(s.interrupt?.kind).toBe('approval');
+    });
+    test('need_input closes active Thought so its timer stops while waiting for the user', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('asking after inspection'));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'a'));
+
+      s = dispatch(s, { type: 'EVENT', event: { type: 'need_input', data: question() } });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.active).toBe(false);
+      expect(summary!.latestActivity).toBeUndefined();
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+      expect(s.interrupt?.kind).toBe('input');
+    });
+    test('need_plan_review closes active Thought so its timer stops while waiting for review', () => {
+      let s = fresh();
+      const plan = {
+        name: 'Review plan',
+        description: 'Check behavior',
+        status: 'pending' as const,
+        steps: [{ step: 'Review', status: 'pending' as const }],
+      };
+      s = dispatch(s, reasonEvt('preparing a plan review'));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'a'));
+
+      s = dispatch(s, { type: 'EVENT', event: { type: 'need_plan_review', data: { plan } } });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.active).toBe(false);
+      expect(summary!.latestActivity).toBeUndefined();
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+      expect(s.interrupt?.kind).toBe('plan_review');
     });
   });
 
