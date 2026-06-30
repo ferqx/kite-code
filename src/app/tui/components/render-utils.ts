@@ -1,4 +1,5 @@
 export const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+export const SPINNER_INTERVAL_MS = 80;
 
 /** 工具名 → 用户界面友好名称映射 / Tool name → user-friendly display name mapping */
 export const ACTION_NAMES: Record<string, string> = {

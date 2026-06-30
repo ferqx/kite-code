@@ -530,11 +530,9 @@ export default function InputLine({
         </Box>
       )}
       {/* Main input line with ghost text */}
-      {!planMode && <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
+      {!planMode && <Text>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
       <Box>
-        <Text color={t.primary} bold={slashMatched}>
-          {promptChar}
-        </Text>
+        <Text bold={slashMatched}>{promptChar}</Text>
         <CtrlSafeTextInput
           key={textKeyRef.current}
           value={value}
@@ -550,7 +548,7 @@ export default function InputLine({
           maxWidth={inputMaxWidth}
         />
       </Box>
-      {!planMode && <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
+      {!planMode && <Text>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
       {/* Plan mode bottom bar */}
       {planMode && <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
 

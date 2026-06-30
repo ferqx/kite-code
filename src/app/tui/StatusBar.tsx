@@ -1,11 +1,6 @@
 import { Box, Text, useStdout } from 'ink';
 import { useEffect, useRef, useState } from 'react';
-import {
-  formatRunStatusLine,
-  type RunStatusSnapshot,
-  type RunStatusTone,
-  WORKING_GRADIENT,
-} from './run-status';
+import { formatRunStatusLine, type RunStatusSnapshot, type RunStatusTone } from './run-status';
 import { type Theme, useTheme } from './theme';
 import type { StatusState } from './types';
 
@@ -28,57 +23,26 @@ export function runStatusColor(theme: Theme, tone: RunStatusTone): string {
 
 // ── spinner ──
 
-/**
- * Rotating arc spinner — 4-frame clockwise sweep @ 100 ms/frame.
- * Distinct from the Braille spinner used by shells and subagents.
- * Inspired by macOS / cli-spinners "arc" variant.
- */
-const ARC = ['◜', '◝', '◞', '◟'];
+/** Flowing dot — 6-frame ping-pong @ 200 ms/frame (1200 ms round trip). */
+const SPINNER = ['●···', '·●··', '··●·', '···●', '··●·', '·●··'];
 
-// ── color gradient animation ──
-
-/** Linear interpolation between two hex colors */
-function interpolateHex(a: string, c2: string, t: number): string {
-  const ar = parseInt(a.slice(1, 3), 16);
-  const ag = parseInt(a.slice(3, 5), 16);
-  const ab = parseInt(a.slice(5, 7), 16);
-  const br = parseInt(c2.slice(1, 3), 16);
-  const bg = parseInt(c2.slice(3, 5), 16);
-  const bb = parseInt(c2.slice(5, 7), 16);
-  const r = Math.round(ar + (br - ar) * t);
-  const g = Math.round(ag + (bg - ag) * t);
-  const blue = Math.round(ab + (bb - ab) * t);
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${blue.toString(16).padStart(2, '0')}`;
-}
-
-/** Current color on the working gradient at a given progress position */
-function gradientColor(progress: number): string {
-  const len = WORKING_GRADIENT.length;
-  const idx = Math.floor(progress) % len;
-  const frac = progress - Math.floor(progress);
-  const a = WORKING_GRADIENT[idx]!;
-  const b = WORKING_GRADIENT[(idx + 1) % len]!;
-  return interpolateHex(a, b, frac);
-}
-
-export default function StatusBar({ status, runStatus, running }: StatusBarProps) {
+export default function StatusBar({ status, runStatus, running, timerKey }: StatusBarProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsedMs, setLiveElapsedMs] = useState(runStatus?.elapsedMs ?? 0);
-  const [colorProgress, setColorProgress] = useState(0);
 
   // Refs for timer-stable values — updated without restarting timers
   const startedAtRef = useRef(Date.now());
   const tickRef = useRef(0);
 
-  // Sync elapsed baseline from prop → ref only (no re-render triggered)
-  // This fires on every App render, but only writes to a ref — cheap.
+  // Sync elapsed baseline from prop -> ref only when the parent-provided
+  // elapsed value changes. Internal timer renders must not reset the baseline.
   useEffect(() => {
     if (running && runStatus?.elapsedMs != null) {
       startedAtRef.current = Date.now() - runStatus.elapsedMs;
     }
-  });
+  }, [running, runStatus?.elapsedMs]);
 
   // Reset spinner on mount
   useEffect(() => {
@@ -92,7 +56,6 @@ export default function StatusBar({ status, runStatus, running }: StatusBarProps
   useEffect(() => {
     if (!running) {
       setSpinnerIdx(0);
-      setColorProgress(0);
       setLiveElapsedMs(0);
       tickRef.current = 0;
       return;
@@ -103,18 +66,17 @@ export default function StatusBar({ status, runStatus, running }: StatusBarProps
     setLiveElapsedMs(initialElapsed);
     tickRef.current = 0;
 
-    // Single 100 ms tick drives all animations.
-    // React 18 batches the 3 state updates into 1 render.
+    // Single 200 ms tick drives all animations.
+    // React 18 batches the 2 state updates into 1 render.
     const timer = setInterval(() => {
       tickRef.current++;
       setLiveElapsedMs(Date.now() - startedAtRef.current);
-      // Spinner: advance every tick → 400 ms full rotation
-      setSpinnerIdx((prev) => (prev + 1) % ARC.length);
-      setColorProgress((prev) => (prev + 0.08) % (WORKING_GRADIENT.length - 1));
-    }, 100);
+      // Spinner: advance every tick → 1200 ms full ping-pong
+      setSpinnerIdx((prev) => (prev + 1) % SPINNER.length);
+    }, 200);
 
     return () => clearInterval(timer);
-  }, [running]);
+  }, [running, timerKey]);
 
   if (!running && status.phase !== 'planning') return null;
 
@@ -123,18 +85,13 @@ export default function StatusBar({ status, runStatus, running }: StatusBarProps
   const liveRunStatus = runStatus ? { ...runStatus, elapsedMs: liveElapsedMs } : undefined;
   const statusLine = liveRunStatus ? formatRunStatusLine(liveRunStatus, cols) : '';
 
-  // Color: animated gradient during working phase, static tones otherwise
-  const isWorking = liveRunStatus?.phase === 'working' && running;
-  const statusColor = isWorking
-    ? gradientColor(colorProgress)
-    : liveRunStatus
-      ? runStatusColor(t, liveRunStatus.tone)
-      : t.primary;
+  // Color: use theme tone color consistently across all phases
+  const statusColor = liveRunStatus ? runStatusColor(t, liveRunStatus.tone) : t.primary;
 
   return (
     <Box>
       {running ? (
-        <Text color={statusColor}>{ARC[spinnerIdx]} </Text>
+        <Text color={statusColor}>{SPINNER[spinnerIdx]} </Text>
       ) : (
         <Text color={t.warning}>* </Text>
       )}

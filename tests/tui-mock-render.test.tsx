@@ -70,8 +70,8 @@ describe('StatusBar', () => {
     );
     const output = lastFrame();
     expect(output).toContain('Running');
-    // arc spinner character appears when running
-    expect(output).toMatch(/[◜◝◞◟]/);
+    // Flowing dot spinner appears when running
+    expect(output).toMatch(/[●·]{4}/);
   });
 
   test('shows run delta but not cumulative metrics', () => {
@@ -88,6 +88,21 @@ describe('StatusBar', () => {
     // Metrics are in StatsLine, not StatusBar
     expect(output).not.toContain('42%');
     expect(output).not.toContain('123,456');
+  });
+
+  test('advances elapsed time from its own timer between parent updates', async () => {
+    const { lastFrame } = render(
+      React.createElement(StatusBar, {
+        status: fakeStatus(),
+        runStatus: fakeRunStatus({ elapsedMs: 0, runTokenDelta: 0 }),
+        timerKey: 0,
+        running: true,
+      }),
+    );
+
+    await Bun.sleep(1_250);
+
+    expect(lastFrame()).toContain('(1s)');
   });
 
   test('working phase shows Working prefix in status line', () => {

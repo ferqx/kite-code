@@ -3,7 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
-import { actionName, formatReadFileRange, SPINNER, toolColor } from './render-utils';
+import {
+  actionName,
+  formatReadFileRange,
+  SPINNER,
+  SPINNER_INTERVAL_MS,
+  toolColor,
+} from './render-utils';
 
 const MAX_RUNNING_STEPS = 5;
 
@@ -108,7 +114,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
   const isRunning = block.active;
   const hasError = block.tools.some((t) => t.status === 'error');
 
-  // ── 计时器 / Live timer ──
+  // ── 计时器：ref 驱动，基于绝对时间，免疫重复渲染 ──
   const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsed, setLiveElapsed] = useState(() =>
     isRunning && block.createdAt ? Date.now() - block.createdAt : block.totalElapsedMs,
@@ -116,18 +122,32 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
   const createdAtRef = useRef(block.createdAt);
   createdAtRef.current = block.createdAt;
 
+  const spinnerStartRef = useRef(Date.now());
+  const spinnerRunningRef = useRef(false);
+
   useEffect(() => {
-    if (!isRunning) return;
+    spinnerRunningRef.current = isRunning;
+    if (isRunning) spinnerStartRef.current = Date.now();
+    else setSpinnerIdx(0);
+  }, [isRunning]);
+
+  // Single persistent timer — reads running state from ref, never restarts.
+  useEffect(() => {
+    const tick = () => {
+      if (!spinnerRunningRef.current) return;
+      const idx = Math.floor((Date.now() - spinnerStartRef.current) / 80) % SPINNER.length;
+      setSpinnerIdx(idx);
+    };
+    const spinnerTimer = setInterval(tick, SPINNER_INTERVAL_MS);
     const elapsedTimer = setInterval(() => {
       const at = createdAtRef.current;
       if (at) setLiveElapsed(Date.now() - at);
     }, 200);
-    const spinnerTimer = setInterval(() => setSpinnerIdx((i) => (i + 1) % SPINNER.length), 80);
     return () => {
-      clearInterval(elapsedTimer);
       clearInterval(spinnerTimer);
+      clearInterval(elapsedTimer);
     };
-  }, [isRunning]);
+  }, []);
 
   const elapsedMs = isRunning ? liveElapsed : block.totalElapsedMs;
   const elapsedStr = formatDuration(elapsedMs);
@@ -143,8 +163,6 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
   // ── Running state ──
   if (isRunning) {
     const spinner = SPINNER[spinnerIdx]!;
-    const dot = spinner;
-    const dotColor = dt.warning;
     const visibleCallIds = new Set(visibleSteps.map((step) => step.callId));
     const shouldShowActivity =
       block.latestActivity?.kind === 'thinking' ||
@@ -156,7 +174,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={dotColor}>{dot} </Text>
+          <Text>{spinner} </Text>
           <Text color={dt.dim}>
             Thought for {elapsedStr}, {summaryLine}
           </Text>

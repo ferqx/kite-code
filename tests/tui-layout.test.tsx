@@ -851,6 +851,26 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('Read');
   });
 
+  test('running tool_card spinner advances within 120ms', async () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'sleep 1' },
+      status: 'running',
+      summary: '',
+      startedAt: Date.now(),
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    expect(lastFrame()).toContain('⠋');
+    await Bun.sleep(120);
+    expect(lastFrame()).not.toContain('⠋');
+  });
+
   test('renders file_change block', () => {
     const block: OutputBlock = {
       id: 1,
@@ -1881,6 +1901,27 @@ describe('SubAgentBlock rendering', () => {
     expect(frame).toContain('Read');
     expect(frame).toContain('Update');
     expect(frame).not.toContain('✓');
+  });
+
+  test('running subagent spinner advances within 120ms', async () => {
+    const block = {
+      id: 1,
+      kind: 'subagent' as const,
+      subagentId: 'sub-1',
+      role: 'code' as const,
+      task: 'fix auth bug',
+      status: 'running' as const,
+      summary: '',
+      toolCallCount: 0,
+      durationMs: 0,
+      steps: [],
+      startedAt: Date.now(),
+    };
+    const { lastFrame } = render(<SubAgentBlock block={block} />);
+
+    expect(lastFrame()).toContain('⠋');
+    await Bun.sleep(120);
+    expect(lastFrame()).not.toContain('⠋');
   });
 
   test('renders done subagent block', () => {

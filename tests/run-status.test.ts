@@ -221,6 +221,36 @@ describe('token delta', () => {
 // ── formatting ──
 
 describe('formatRunStatusLine', () => {
+  test('advances elapsed seconds only after a full second has passed', () => {
+    const lineBeforeOneSecond = formatRunStatusLine(
+      {
+        phase: 'working',
+        verb: 'Running',
+        tone: 'success',
+        elapsedMs: 999,
+        runTokenDelta: 0,
+        retry: null,
+        waiting: null,
+      },
+      120,
+    );
+    const lineAtOneSecond = formatRunStatusLine(
+      {
+        phase: 'working',
+        verb: 'Running',
+        tone: 'success',
+        elapsedMs: 1_000,
+        runTokenDelta: 0,
+        retry: null,
+        waiting: null,
+      },
+      120,
+    );
+
+    expect(lineBeforeOneSecond).toBe('Working · Running… (0s)');
+    expect(lineAtOneSecond).toBe('Working · Running… (1s)');
+  });
+
   test('working phase prefixes verb with Working ·', () => {
     const line = formatRunStatusLine(
       {

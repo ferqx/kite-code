@@ -5,7 +5,13 @@ import type { Theme } from '../theme';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
 import MarkdownBlock from './MarkdownBlock';
-import { ACTION_NAMES, formatElapsed, SPINNER, toolColor } from './render-utils';
+import {
+  ACTION_NAMES,
+  formatElapsed,
+  SPINNER,
+  SPINNER_INTERVAL_MS,
+  toolColor,
+} from './render-utils';
 
 export const MAX_TOOL_LINES = 5;
 const SHELL_PREFIX = '⎿   ';
@@ -332,10 +338,7 @@ export default function ToolCardBlock({
   const dt = useTheme();
   const showElapsed = block.name === 'shell_execute';
 
-  // ── 计时器：useState + setInterval 由 React 批量合并，不产生重复渲染 ──
-  // startedAt 存在 block 上，重挂载时 lazy init 自动恢复正确的已流逝时间。
-  // Timer: useState + setInterval, batched by React — no duplicate renders.
-  // startedAt lives on the block; lazy init restores correct elapsed on remount.
+  // ── 计时器：ref 驱动，基于绝对时间，免疫重复渲染 ──
   const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsed, setLiveElapsed] = useState(() =>
     block.status === 'running' && block.startedAt ? Date.now() - block.startedAt : 0,
@@ -343,15 +346,25 @@ export default function ToolCardBlock({
   const startedAtRef = useRef(block.startedAt);
   startedAtRef.current = block.startedAt;
 
+  // Spinner timing via ref — immune to effect re-runs from parent re-renders
+  const spinnerStartRef = useRef(Date.now());
+  const spinnerRunningRef = useRef(false);
+
   useEffect(() => {
-    if (block.status !== 'running') return;
-    // No spinner animation for tools waiting for user input or approval —
-    // the 80ms setInterval triggers React re-renders that cause Ink's
-    // log-update to briefly move the terminal cursor, which can force
-    // the viewport to scroll-jitter to the bottom, making text selection
-    // and scrollbar interaction impossible.
-    if (awaitingApproval || block.name === 'ask_user') return;
-    const spinnerTimer = setInterval(() => setSpinnerIdx((i) => (i + 1) % SPINNER.length), 80);
+    const shouldRun = block.status === 'running' && !awaitingApproval && block.name !== 'ask_user';
+    spinnerRunningRef.current = shouldRun;
+    if (shouldRun) spinnerStartRef.current = Date.now();
+    else setSpinnerIdx(0);
+  }, [block.status, awaitingApproval, block.name]);
+
+  // Single persistent timer — never restarts. Reads running state from ref.
+  useEffect(() => {
+    const tick = () => {
+      if (!spinnerRunningRef.current) return;
+      const idx = Math.floor((Date.now() - spinnerStartRef.current) / 80) % SPINNER.length;
+      setSpinnerIdx(idx);
+    };
+    const spinnerTimer = setInterval(tick, SPINNER_INTERVAL_MS);
     if (showElapsed) {
       const elapsedTimer = setInterval(() => {
         const at = startedAtRef.current;
@@ -362,10 +375,8 @@ export default function ToolCardBlock({
         clearInterval(elapsedTimer);
       };
     }
-    return () => {
-      clearInterval(spinnerTimer);
-    };
-  }, [block.status, showElapsed, awaitingApproval, block.name]);
+    return () => clearInterval(spinnerTimer);
+  }, [showElapsed]);
 
   const isShell = block.name === 'shell_execute';
 
@@ -377,7 +388,7 @@ export default function ToolCardBlock({
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={isWaiting ? dt.muted : dt.warning}>{spinner} </Text>
+          <Text>{spinner} </Text>
           <Text color={dt.primary}>{ACTION_NAMES[block.name] ?? block.name}</Text>
           {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
           {awaitingApproval ? (

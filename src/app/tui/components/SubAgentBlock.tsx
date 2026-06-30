@@ -4,7 +4,13 @@ import stringWidth from 'string-width';
 import type { SubAgentRole } from '@/protocol/events';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
-import { actionName, formatReadFileRange, SPINNER, toolColor } from './render-utils';
+import {
+  actionName,
+  formatReadFileRange,
+  SPINNER,
+  SPINNER_INTERVAL_MS,
+  toolColor,
+} from './render-utils';
 
 function roleLabel(role: SubAgentRole): string {
   switch (role) {
@@ -149,10 +155,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const taskSummary = taskLabel(block.task);
   const col = process.stdout.columns ?? 80;
 
-  // ── 计时器：useState + setInterval 由 React 批量合并，不产生重复渲染 ──
-  // startedAt 存在 block 上，重挂载时 lazy init 自动恢复正确的已流逝时间。
-  // Timer: useState + setInterval, batched by React — no duplicate renders.
-  // startedAt lives on the block; lazy init restores correct elapsed on remount.
+  // ── 计时器：ref 驱动，基于绝对时间，免疫重复渲染 ──
   const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsed, setLiveElapsed] = useState(() =>
     block.status === 'running' && block.startedAt ? Date.now() - block.startedAt : 0,
@@ -160,18 +163,33 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const startedAtRef = useRef(block.startedAt);
   startedAtRef.current = block.startedAt;
 
+  const spinnerStartRef = useRef(Date.now());
+  const spinnerRunningRef = useRef(false);
+
   useEffect(() => {
-    if (block.status !== 'running') return;
+    const shouldRun = block.status === 'running';
+    spinnerRunningRef.current = shouldRun;
+    if (shouldRun) spinnerStartRef.current = Date.now();
+    else setSpinnerIdx(0);
+  }, [block.status]);
+
+  // Single persistent timer — never restarts. Reads running state from ref.
+  useEffect(() => {
+    const tick = () => {
+      if (!spinnerRunningRef.current) return;
+      const idx = Math.floor((Date.now() - spinnerStartRef.current) / 80) % SPINNER.length;
+      setSpinnerIdx(idx);
+    };
+    const spinnerTimer = setInterval(tick, SPINNER_INTERVAL_MS);
     const elapsedTimer = setInterval(() => {
       const at = startedAtRef.current;
       if (at != null) setLiveElapsed(Date.now() - at);
     }, 200);
-    const spinnerTimer = setInterval(() => setSpinnerIdx((i) => (i + 1) % SPINNER.length), 80);
     return () => {
-      clearInterval(elapsedTimer);
       clearInterval(spinnerTimer);
+      clearInterval(elapsedTimer);
     };
-  }, [block.status]);
+  }, []);
 
   if (block.status === 'running') {
     const spinner = SPINNER[spinnerIdx];
@@ -187,7 +205,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={dt.warning}>{spinner} </Text>
+          <Text>{spinner} </Text>
           <Text color={dt.primary}>{label}</Text>
           <Text color={dt.muted}> · {fitRunTask}</Text>
         </Box>
