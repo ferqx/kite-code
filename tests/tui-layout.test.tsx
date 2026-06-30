@@ -201,7 +201,7 @@ describe('StatusBar', () => {
     expect(frame).not.toContain('Building');
   });
 
-  test('shows elapsed time and run token delta without raw tool detail', () => {
+  test('shows elapsed time without raw tool detail', () => {
     const { lastFrame } = render(
       <StatusBar
         status={fakeStatus()}
@@ -218,7 +218,6 @@ describe('StatusBar', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Locating');
     expect(frame).toContain('28s');
-    expect(frame).toContain('+189 tokens');
     // Tool detail lives in blocks, not in the status line
     expect(frame).not.toContain('StatusBar');
   });
@@ -869,6 +868,27 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('⠋');
     await Bun.sleep(120);
     expect(lastFrame()).not.toContain('⠋');
+  });
+
+  test('running shell tool_card renders liveOutput', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'echo hello' },
+      status: 'running',
+      summary: '',
+      startedAt: Date.now(),
+      liveOutput: 'hello world',
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame();
+    expect(frame).toContain('Bash');
+    expect(frame).toContain('⎿   hello world');
   });
 
   test('renders file_change block', () => {

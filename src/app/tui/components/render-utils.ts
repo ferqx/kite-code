@@ -71,7 +71,8 @@ export function getToolPreview(name: string, args: Record<string, unknown>): str
     case 'shell_execute': {
       const cmd = String(args.command ?? '');
       if (!cmd) return undefined;
-      return cmd.length > 60 ? `${cmd.slice(0, 57)}...` : cmd;
+      const flat = cmd.replace(/\s+/g, ' ').trim();
+      return flat.length > 60 ? `${flat.slice(0, 57)}...` : flat;
     }
     case 'update_plan':
       return String(args.name ?? '') || undefined;

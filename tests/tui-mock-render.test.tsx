@@ -74,7 +74,7 @@ describe('StatusBar', () => {
     expect(output).toMatch(/[●·]{4}/);
   });
 
-  test('shows run delta but not cumulative metrics', () => {
+  test('does not show cumulative metrics in StatusBar', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
         status: fakeStatus(),
@@ -84,7 +84,6 @@ describe('StatusBar', () => {
       }),
     );
     const output = lastFrame();
-    expect(output).toContain('+189 tokens');
     // Metrics are in StatsLine, not StatusBar
     expect(output).not.toContain('42%');
     expect(output).not.toContain('123,456');

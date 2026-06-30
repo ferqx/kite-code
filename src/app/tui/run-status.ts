@@ -49,10 +49,6 @@ function findBlock(
   return undefined;
 }
 
-function firstLine(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
 // ── tool verb mapping ──
 
 const TOOL_VERBS: Record<string, { verb: string; tone: RunStatusTone }> = {
@@ -134,11 +130,6 @@ function currentVerb(
   state: TuiState,
   phase: RunPhase,
 ): { verb: string; tone: RunStatusTone; note?: string } {
-  const thinkingNote = (): string | undefined => {
-    const mode = firstLine(state.status.thinkingMode || '');
-    return mode ? `thinking with ${mode} effort` : 'thinking';
-  };
-
   switch (phase) {
     case 'thinking': {
       const planActive =
@@ -148,7 +139,6 @@ function currentVerb(
       return {
         verb: planActive ? 'Planning' : 'Thinking',
         tone: 'primary',
-        note: thinkingNote(),
       };
     }
 
@@ -220,14 +210,8 @@ function formatDuration(ms: number): string {
   return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
 }
 
-function formatTokenDelta(tokens: number): string {
-  if (tokens >= 10_000) return `+${(tokens / 1000).toFixed(1)}k tokens`;
-  return `+${tokens.toLocaleString()} tokens`;
-}
-
 export function formatRunStatusLine(snapshot: RunStatusSnapshot, columns: number): string {
   const elapsed = formatDuration(snapshot.elapsedMs);
-  const tokens = snapshot.runTokenDelta > 0 ? ` · ${formatTokenDelta(snapshot.runTokenDelta)}` : '';
   const note = snapshot.note ? ` · ${snapshot.note}` : '';
 
   // Prefix: explicit "Working · " for working-phase sub-verbs
@@ -236,18 +220,12 @@ export function formatRunStatusLine(snapshot: RunStatusSnapshot, columns: number
       ? `Working · ${snapshot.verb}…`
       : `${snapshot.verb}…`;
 
-  const wide = `${prefix} (${elapsed}${tokens}${note})`;
+  const wide = `${prefix} (${elapsed}${note})`;
   if (wide.length <= columns) return wide;
 
   // Compact: drop note
-  const medium = `${prefix} (${elapsed}${tokens})`;
+  const medium = `${prefix} (${elapsed})`;
   if (medium.length <= columns) return medium;
-
-  // Narrow: shorten token format
-  const narrowTokens =
-    snapshot.runTokenDelta > 0 ? ` · +${snapshot.runTokenDelta.toLocaleString()}` : '';
-  const narrow = `${prefix} (${elapsed}${narrowTokens})`;
-  if (narrow.length <= columns) return narrow;
 
   // Minimal
   return `${prefix} ${elapsed}`;

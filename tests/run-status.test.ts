@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { AgentEvent } from '@/protocol/events';
 import type { Action } from '../src/app/tui/App';
 import { createInitialState, eventReducer } from '../src/app/tui/App';
 import type { RunStatusTone } from '../src/app/tui/run-status';
@@ -8,7 +9,7 @@ import {
   phaseBaseTone,
   WORKING_GRADIENT,
 } from '../src/app/tui/run-status';
-import type { TuiState } from '../src/app/tui/types';
+import type { OutputBlock, TuiState } from '../src/app/tui/types';
 
 function dispatch(s: TuiState, a: Action): TuiState {
   return eventReducer(s, a);
@@ -264,7 +265,7 @@ describe('formatRunStatusLine', () => {
       },
       120,
     );
-    expect(line).toBe('Working · Running… (12s · +500 tokens)');
+    expect(line).toBe('Working · Running… (12s)');
   });
 
   test('working phase without sub-verb omits prefix', () => {
@@ -280,7 +281,7 @@ describe('formatRunStatusLine', () => {
       },
       120,
     );
-    expect(line).toBe('Working… (18s · +800 tokens)');
+    expect(line).toBe('Working… (18s)');
   });
 
   test('thinking phase includes note', () => {
@@ -313,7 +314,7 @@ describe('formatRunStatusLine', () => {
       },
       120,
     );
-    expect(line).toBe('Finishing… (30s · +1,200 tokens)');
+    expect(line).toBe('Finishing… (30s)');
   });
 
   test('compacts to minimal form for very narrow terminals', () => {
@@ -333,24 +334,25 @@ describe('formatRunStatusLine', () => {
     expect(line).toBe('Working · Running… 1m 2s');
   });
 
-  test('uses compact token format at moderate width', () => {
-    // At 38 columns wide form (43 chars) doesn't fit, falls back to narrow (no "tokens" suffix)
+  test('drops note at moderate width when line overflows', () => {
+    // At 38 columns wide form (43 chars) doesn't fit, falls back to medium (drop note)
     const line = formatRunStatusLine(
       {
         phase: 'working',
         verb: 'Running',
         tone: 'success',
+        note: 'extra details',
         elapsedMs: 62_000,
-        runTokenDelta: 1_530,
+        runTokenDelta: 0,
         retry: null,
         waiting: null,
       },
       38,
     );
-    expect(line).toBe('Working · Running… (1m 2s · +1,530)');
+    expect(line).toBe('Working · Running… (1m 2s)');
   });
 
-  test('formats token delta over 10k with k suffix', () => {
+  test('does not show token delta in status line', () => {
     const line = formatRunStatusLine(
       {
         phase: 'working',
@@ -363,7 +365,7 @@ describe('formatRunStatusLine', () => {
       },
       120,
     );
-    expect(line).toContain('+19.2k tokens');
+    expect(line).toBe('Working · Running… (2m)');
   });
 
   test('omits token part when delta is zero', () => {
@@ -414,5 +416,41 @@ describe('WORKING_GRADIENT', () => {
     for (const color of WORKING_GRADIENT) {
       expect(color).toMatch(/^#[0-9a-fA-F]{6}$/);
     }
+  });
+});
+
+// ── reducer integration: tool_progress → liveOutput ──
+
+describe('tool_progress liveOutput', () => {
+  test('sets liveOutput on running tool_card via EVENT dispatch', () => {
+    const initial = createInitialState();
+    const runStart = { type: 'RUN_START', agentId: 'a1', name: '' };
+    let state = eventReducer(initial, runStart as unknown as Action);
+
+    const callId = 'call-123';
+    state = eventReducer(state, {
+      type: 'EVENT',
+      event: {
+        type: 'tool_call',
+        data: { call_id: callId, name: 'shell_execute', args: { command: 'echo hello' } },
+      } satisfies AgentEvent,
+    });
+
+    const last = state.turns.at(-1)?.blocks.at(-1);
+    expect(last?.kind).toBe('tool_card');
+    expect((last as Extract<OutputBlock, { kind: 'tool_card' }>).status).toBe('running');
+    expect((last as Extract<OutputBlock, { kind: 'tool_card' }>).liveOutput).toBeUndefined();
+
+    state = eventReducer(state, {
+      type: 'EVENT',
+      event: {
+        type: 'tool_progress',
+        data: { call_id: callId, name: 'shell_execute', chunk: 'hello', stream: 'stdout' },
+      } satisfies AgentEvent,
+    });
+
+    const updated = state.turns.at(-1)?.blocks.at(-1);
+    expect(updated?.kind).toBe('tool_card');
+    expect((updated as Extract<OutputBlock, { kind: 'tool_card' }>).liveOutput).toBe('hello');
   });
 });

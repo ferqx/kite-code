@@ -195,7 +195,8 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
           const lineColor = isError ? dt.error : dt.dim;
           return (
             <Box key={step.callId} paddingLeft={3}>
-              <Text color={lineColor}>├─ {actionName(step.name)}</Text>
+              <Text color={lineColor}>├─ </Text>
+              <Text>{actionName(step.name)}</Text>
               {(() => {
                 const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
                 if (!rawLabel) return null;
@@ -240,9 +241,8 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
         const lineColor = isError ? dt.error : dt.dim;
         return (
           <Box key={step.callId} paddingLeft={3}>
-            <Text color={lineColor}>
-              {isLast ? '└─' : '├─'} {actionName(step.name)}
-            </Text>
+            <Text color={lineColor}>{isLast ? '└─' : '├─'} </Text>
+            <Text>{actionName(step.name)}</Text>
             {(() => {
               const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
               if (!rawLabel) return null;

@@ -389,7 +389,7 @@ export default function ToolCardBlock({
       <Box flexDirection="column">
         <Box>
           <Text>{spinner} </Text>
-          <Text color={dt.primary}>{ACTION_NAMES[block.name] ?? block.name}</Text>
+          <Text>{ACTION_NAMES[block.name] ?? block.name}</Text>
           {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
           {awaitingApproval ? (
             <Text color={dt.dim}> (awaiting approval)</Text>
@@ -419,7 +419,7 @@ export default function ToolCardBlock({
     <Box flexDirection="column">
       <Box>
         <Text color={toolColor(block.status, dt)}>● </Text>
-        <Text color={dt.primary}>{displayName}</Text>
+        <Text>{displayName}</Text>
         {block.detail ? <Text color={dt.dim}> {block.detail}</Text> : null}
         {showElapsed && block.elapsedMs != null ? (
           <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
