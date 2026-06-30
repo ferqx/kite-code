@@ -2,6 +2,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { basename, relative, resolve } from 'node:path';
 import type { ShellResult } from '@/core/types';
 import { readTextContent } from './file';
+import { msys2ToWindowsPath } from './path-utils';
 
 interface SearchFilesInput {
   workspace: string;
@@ -21,7 +22,8 @@ const SKIP_DIRS = new Set(['.git']);
 export function searchFiles(input: SearchFilesInput): ShellResult {
   try {
     const pattern = String(input.pattern || '*');
-    const root = resolve(input.workspace, String(input.path || '.'));
+    const rawPath = msys2ToWindowsPath(String(input.path || '.'));
+    const root = resolve(input.workspace, rawPath);
     const matches: string[] = [];
 
     for (const file of walkFiles(input.workspace, root)) {
@@ -47,7 +49,8 @@ export function searchFiles(input: SearchFilesInput): ShellResult {
 export function searchContent(input: SearchContentInput): ShellResult {
   const pattern = String(input.pattern || '');
   try {
-    const root = resolve(input.workspace, String(input.path || '.'));
+    const rawPath = msys2ToWindowsPath(String(input.path || '.'));
+    const root = resolve(input.workspace, rawPath);
     const regex = new RegExp(pattern);
     const glob = input.glob === undefined ? null : String(input.glob);
     const lines: string[] = [];

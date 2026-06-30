@@ -152,6 +152,40 @@ describe('runApprovedTool — search_files', () => {
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
   });
+
+  // Windows MSYS2 路径转换：/d/foo/bar → D:\foo\bar，防止 resolve 误判为工作区越界
+  // MSYS2 path normalization: /d/foo/bar → D:\foo\bar to avoid false workspace-boundary rejection
+  it('normalizes MSYS2 path in search_files to avoid workspace-boundary rejection', async () => {
+    const workspace = join(tmpdir(), 'kite-code-msys2-search-native');
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(join(workspace, 'lib'), { recursive: true });
+    writeFileSync(join(workspace, 'lib', 'utils.ts'), 'export const x = 1;\n');
+
+    if (process.platform === 'win32') {
+      // Simulate Git Bash style path: /d/.../lib
+      const msys2Style = workspace.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1');
+      const result = await runApprovedTool({
+        workspace,
+        request: {
+          id: 'call-msys2',
+          name: 'search_files',
+          args: { pattern: '*.ts', path: msys2Style },
+          reason: 'Test MSYS2 path',
+          protectedCommand: `search_files *.ts`,
+        } as PendingToolRequest,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('utils.ts');
+    } else {
+      // Non-Windows: just verify normal search still works
+      const result = await runApprovedTool({
+        workspace,
+        request: makeSearchFilesRequest('*.ts'),
+      });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('utils.ts');
+    }
+  });
 });
 
 describe('runApprovedTool 鈥?search_content', () => {

@@ -82,5 +82,13 @@ export function classifyToolFailure(toolName: string, summary: string): ToolFail
     return ToolFailureReason.SUBAGENT_FAILED;
   }
 
+  if (toolName === 'search_content' || toolName === 'search_files') {
+    if (/refusing search outside workspace/i.test(s)) return ToolFailureReason.READ_FILE_NOT_FOUND;
+    if (/invalid regular expression|bad regex/i.test(s)) return ToolFailureReason.UNKNOWN;
+    if (/file not found|ENOENT/i.test(s)) return ToolFailureReason.READ_FILE_NOT_FOUND;
+    if (/permission denied/i.test(s)) return ToolFailureReason.READ_PERMISSION_DENIED;
+    return ToolFailureReason.UNKNOWN;
+  }
+
   return ToolFailureReason.UNKNOWN;
 }

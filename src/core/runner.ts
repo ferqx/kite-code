@@ -16,16 +16,10 @@ import type {
 } from '@/protocol/events';
 import type { UserInputProvider } from '@/protocol/provider';
 import { createPromptCacheStandardTracker, extractPromptCacheMetrics } from './cache-metrics';
-import { genSpanId } from './id-utils';
-
-/** 统一事件管道：所有 AgentEvent 通过此接口发送到 TUI + 日志等消费者 */
-interface EventSink {
-  emit(event: AgentEvent): void;
-}
-
 import type { AgentConfig } from './config/index';
 import { buildCodeAgentGraph } from './harness/graph';
 import { defaultAuthorizationState } from './harness/tool-policy';
+import { genSpanId } from './id-utils';
 import type { SupportedChatModel } from './model/factory';
 import type { BunSqliteSaver } from './persistence/checkpoint';
 import { SessionLogCollector } from './session-logger';
@@ -38,6 +32,11 @@ import type {
   ModelRetryEvent,
   ThreadAuthorizationState,
 } from './types';
+
+/** 统一事件管道：所有 AgentEvent 通过此接口发送到 TUI + 日志等消费者 */
+interface EventSink {
+  emit(event: AgentEvent): void;
+}
 
 export interface RunAgentInput {
   task: string;
@@ -542,7 +541,11 @@ async function processStream(
     }
     // Generate file_change events when a write/edit tool completes
     for (const e of events) {
-      if (e.type === 'tool_done' && e.data.ok && e.data.name === 'write_file') {
+      if (
+        e.type === 'tool_done' &&
+        e.data.ok &&
+        (e.data.name === 'write_file' || e.data.name === 'edit_file')
+      ) {
         const call = pendingToolCalls.get(e.data.call_id);
         if (call) {
           const path = call.args.path;
