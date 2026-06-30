@@ -124,6 +124,7 @@ export interface TuiState {
   running: boolean;
   runCount: number;
   runStartTime?: number;
+  runTokenBaseline?: number;
   currentRunReasonId?: number;
   showHelp: boolean;
   showModelSelector: boolean;

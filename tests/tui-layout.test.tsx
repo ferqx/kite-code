@@ -18,6 +18,7 @@ import Footer from '../src/app/tui/Footer';
 import Header from '../src/app/tui/Header';
 import OutputArea, { useStaticContent } from '../src/app/tui/OutputArea';
 import { TuiUserInputProvider } from '../src/app/tui/provider';
+import type { RunStatusSnapshot } from '../src/app/tui/run-status';
 import StatsLine from '../src/app/tui/StatsLine';
 import StatusBar from '../src/app/tui/StatusBar';
 import type {
@@ -47,6 +48,19 @@ function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
     modelName: 'claude-opus',
     thinkingMode: 'detailed',
     retryState: null,
+    ...overrides,
+  };
+}
+
+function fakeRunStatus(overrides: Partial<RunStatusSnapshot> = {}): RunStatusSnapshot {
+  return {
+    phase: 'working',
+    verb: 'Running',
+    tone: 'success',
+    elapsedMs: 28_000,
+    runTokenDelta: 189,
+    retry: null,
+    waiting: null,
     ...overrides,
   };
 }
@@ -173,50 +187,60 @@ describe('Header', () => {
 // ── StatusBar ──
 
 describe('StatusBar', () => {
-  test('shows Planning phase with ○ icon', () => {
+  test('shows the derived run verb with working phase prefix', () => {
+    const { lastFrame } = render(
+      <StatusBar
+        status={fakeStatus({ phase: 'building' })}
+        runStatus={fakeRunStatus({ phase: 'working', verb: 'Running' })}
+        timerKey={0}
+        running
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Running');
+    expect(frame).not.toContain('Building');
+  });
+
+  test('shows elapsed time and run token delta without raw tool detail', () => {
+    const { lastFrame } = render(
+      <StatusBar
+        status={fakeStatus()}
+        runStatus={fakeRunStatus({
+          phase: 'working',
+          verb: 'Locating',
+          elapsedMs: 28_000,
+          runTokenDelta: 189,
+        })}
+        timerKey={0}
+        running
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Locating');
+    expect(frame).toContain('28s');
+    expect(frame).toContain('+189 tokens');
+    // Tool detail lives in blocks, not in the status line
+    expect(frame).not.toContain('StatusBar');
+  });
+
+  test('keeps idle planning mode hint', () => {
     const status = fakeStatus({ phase: 'planning' });
-    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
-    expect(lastFrame()).toContain('Planning');
-  });
-
-  test('shows Building phase with ● icon', () => {
-    const status = fakeStatus({ phase: 'building' });
-    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
-    expect(lastFrame()).toContain('Building');
-  });
-
-  test('shows plan progress when plan is active', () => {
-    const status = fakeStatus({
-      plan: {
-        name: 'Test',
-        description: '',
-        status: 'in_progress',
-        steps: [
-          { step: 'Init', status: 'completed' },
-          { step: 'Build', status: 'in_progress' },
-        ],
-      },
-      currentNode: null,
-    });
-    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
-    expect(lastFrame()).toContain('Step 2/2: Build');
-  });
-
-  test('falls back to currentNode when no plan', () => {
-    const status = fakeStatus({ plan: null, currentNode: 'tools' });
-    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
-    expect(lastFrame()).toContain('tools');
-  });
-
-  test('shows empty when no plan and no currentNode', () => {
-    const status = fakeStatus({ plan: null, currentNode: null });
-    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
-    expect(lastFrame()).not.toContain('—');
+    const { lastFrame } = render(
+      <StatusBar
+        status={status}
+        runStatus={fakeRunStatus({ phase: 'thinking', verb: 'Planning' })}
+        timerKey={0}
+        running={false}
+      />,
+    );
+    expect(lastFrame()).toContain('Shift+Tab to exit');
   });
 
   test('status bar is single row', () => {
     const status = fakeStatus();
-    const { lastFrame } = render(<StatusBar status={status} timerKey={0} running />);
+    const { lastFrame } = render(
+      <StatusBar status={status} runStatus={fakeRunStatus()} timerKey={0} running />,
+    );
     const lines = lastFrame()?.split('\n').filter(Boolean);
     expect(lines?.length).toBe(1);
   });
@@ -1752,14 +1776,33 @@ describe('App', () => {
   test('shows ApprovalBlock when interrupt is approval', () => {
     const approval = fakeApproval();
     const state = fakeState({
+      running: true,
+      runStartTime: Date.now() - 28_000,
       turns: [{ blocks: [{ id: 1, kind: 'approval', approval }] }],
       interrupt: { kind: 'approval', blockId: 1 },
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    expect(lastFrame()).toContain('Approve this tool call?');
-    expect(lastFrame()).toContain('Approve once');
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Approve this tool call?');
+    expect(frame).toContain('Approve once');
+    expect(frame).not.toContain('Waiting...');
+  });
+
+  test('hides run status once final assistant text is visible', () => {
+    const state = fakeState({
+      running: true,
+      runStartTime: Date.now() - 2_000,
+      turns: [{ blocks: [{ id: 1, kind: 'text', content: 'Done. Here is the result.' }] }],
+    });
+    const { lastFrame } = render(
+      <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Done. Here is the result.');
+    expect(frame).not.toContain('Thinking...');
+    expect(frame).not.toContain('Running...');
   });
 
   test('shows InputBlock when interrupt is question', () => {

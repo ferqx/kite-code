@@ -23,15 +23,15 @@ import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
 import { useOverlayHeight } from './hooks/useOverlayHeight';
 import OutputArea, { useStaticContent } from './OutputArea';
-import { useTheme } from './theme';
-import type { TuiState } from './types';
-
-const MemoHeader = React.memo(Header);
-
 import { type Action, eventReducer } from './reducers';
+import { deriveRunStatusSnapshot } from './run-status';
+import { useTheme } from './theme';
+import type { OutputBlock, TuiState } from './types';
 
 export type { Action } from './reducers';
 export { eventReducer };
+
+const MemoHeader = React.memo(Header);
 
 const initialState: TuiState = {
   sessions: [],
@@ -79,6 +79,27 @@ const initialState: TuiState = {
 
 export function createInitialState(): TuiState {
   return { ...initialState, turns: [], interrupt: null };
+}
+
+function latestVisibleBlock(state: TuiState): OutputBlock | undefined {
+  for (let turnIndex = state.turns.length - 1; turnIndex >= 0; turnIndex--) {
+    const blocks = state.turns[turnIndex]!.blocks;
+    for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex--) {
+      const block = blocks[blockIndex]!;
+      if (block.kind !== 'reason') return block;
+    }
+  }
+  return undefined;
+}
+
+function shouldShowRunStatus(state: TuiState): boolean {
+  if (!state.running || state.interrupt) return false;
+  if (state.status.retryState) return true;
+
+  const latest = latestVisibleBlock(state);
+  if (latest?.kind === 'text' && !latest.isError) return false;
+
+  return true;
 }
 
 export interface AppProps {
@@ -255,6 +276,8 @@ export default function App({
     state.showSessions ||
     state.showMcp ||
     state.showRewind;
+  const showRunStatus = shouldShowRunStatus(state);
+  const runStatus = showRunStatus ? deriveRunStatusSnapshot(state) : undefined;
 
   return (
     <Box flexDirection="column">
@@ -276,7 +299,8 @@ export default function App({
       {/* ── Footer: 3-row interaction zone ── */}
       <Footer
         status={state.status}
-        running={state.running && !state.interrupt}
+        runStatus={runStatus}
+        running={showRunStatus}
         timerKey={state.runCount}
       >
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}

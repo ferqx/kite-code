@@ -164,6 +164,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         toolStartTimes: undefined,
         runCount: state.runCount + 1,
         runStartTime: Date.now(),
+        runTokenBaseline: state.status.totalTokens,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
         ctrlCPressed: false,
