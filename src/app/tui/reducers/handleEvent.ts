@@ -21,6 +21,129 @@ import {
   updateLastBlock,
 } from './helpers';
 
+// ── Structural text block helpers ──
+// During streaming, text events are split into per-line blocks for progressive
+// rendering. But structural markdown elements (tables, code blocks) need
+// multi-line context — MarkdownBlock.groupLines() requires seeing header+sep,
+// or opening+closing fences, within a single block. These helpers detect
+// structural elements and merge their per-line blocks back together.
+
+// ── Table detection ──
+
+const TABLE_PIPE = /[|│]/;
+
+function isTableSepLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (!TABLE_PIPE.test(trimmed)) return false;
+  return /^[\s\-:|─━┼╿]+$/.test(trimmed);
+}
+
+function isTableRowLike(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (!TABLE_PIPE.test(trimmed)) return false;
+  return /^[|│]/.test(trimmed) || /[|│]$/.test(trimmed) || isTableSepLine(trimmed);
+}
+
+// ── Code block detection ──
+
+/** True when the first line of content is a code fence (```). */
+function isCodeFenceStart(content: string): boolean {
+  return content.trimStart().startsWith('```');
+}
+
+/** True when content has an odd number of ``` lines → we're inside an
+ *  open code block waiting for a closing fence. */
+function isInsideOpenCodeBlock(content: string): boolean {
+  let fenceCount = 0;
+  const lines = content.split('\n');
+  for (const line of lines) {
+    if (line.trimStart().startsWith('```')) fenceCount++;
+  }
+  return fenceCount % 2 === 1;
+}
+
+/** True when the streaming block is a structural element that needs
+ *  multi-line context for MarkdownBlock — table row, code fence, or
+ *  content inside an open code block. */
+function needsStructuralContext(content: string): boolean {
+  return isTableRowLike(content) || isCodeFenceStart(content) || isInsideOpenCodeBlock(content);
+}
+
+// ── Structural merge ──
+
+type TextBlock = OutputBlock & { kind: 'text' };
+
+/** Merge consecutive text blocks that form structural markdown elements
+ *  (tables, code blocks) so that MarkdownBlock.groupLines() receives
+ *  the multi-line context it needs to render them correctly. */
+function mergeStructuralTextBlocks(state: TuiState): TuiState {
+  const last = state.turns.at(-1);
+  if (!last) return state;
+
+  const merged: OutputBlock[] = [];
+  let buffer: TextBlock[] = [];
+  let changed = false;
+
+  const flushBuffer = () => {
+    if (buffer.length <= 1) {
+      for (const b of buffer) merged.push(b);
+      buffer = [];
+      return;
+    }
+    const first = buffer[0]!;
+    const lastBuf = buffer[buffer.length - 1]!;
+    const content = buffer.map((b) => b.content).join('\n');
+    merged.push({
+      id: first.id,
+      kind: 'text' as const,
+      content,
+      streaming: lastBuf.streaming,
+      isError: buffer.some((b) => b.isError === true) || undefined,
+    });
+    changed = true;
+    buffer = [];
+  };
+
+  let inCode = false;
+
+  for (const block of last.blocks) {
+    if (block.kind !== 'text') {
+      flushBuffer();
+      inCode = false;
+      merged.push(block);
+      continue;
+    }
+
+    if (isCodeFenceStart(block.content)) {
+      if (!inCode) {
+        // Opening fence: start code-block buffer (flush any prior table buffer)
+        flushBuffer();
+        buffer.push(block);
+        inCode = true;
+      } else {
+        // Closing fence: complete the code block
+        buffer.push(block);
+        flushBuffer();
+        inCode = false;
+      }
+    } else if (inCode || isTableRowLike(block.content)) {
+      // Inside code block body, or table row outside code block
+      buffer.push(block);
+    } else {
+      flushBuffer();
+      merged.push(block);
+    }
+  }
+  flushBuffer();
+
+  if (!changed) return state;
+  const turns = state.turns.slice();
+  turns[turns.length - 1] = { blocks: merged };
+  return { ...state, turns };
+}
+
 /** 格式化 file_change 事件的原始预览内容，截断到最多 6 行 / Format raw file_change preview, truncating to max 6 lines */
 const MAX_PREVIEW_LINES = 6;
 
@@ -175,9 +298,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const lastBlock = last?.blocks.at(-1);
 
       if (state.running && event.data.text.includes('\n')) {
-        // Multi-line during streaming → always split into per-line blocks.
-        // Handles both the first text event (no prior streaming block) and
-        // subsequent updates (replacing an existing streaming block).
+        // Multi-line during streaming → split into per-line blocks for progressive
+        // rendering. Structural elements (tables, code blocks) are an exception:
+        // consecutive structural lines are kept together so MarkdownBlock.groupLines()
+        // can detect the multi-line patterns it needs to render them correctly.
 
         // Count already-finalized per-line text blocks (0 for first event or old model).
         let numFinalized = 0;
@@ -197,6 +321,29 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           } else prevFullText += `\n${b.content}`;
         }
         if (prevFullText === event.data.text) return state;
+
+        // ── Structural-element extension: when the current streaming block
+        //     contains a table row, code fence, or code body, and the new
+        //     text is an extension, update in place. This preserves the
+        //     multi-line structure MarkdownBlock needs for table/code-block
+        //     detection and avoids unnecessary block ID churn.
+        if (
+          lastBlock?.kind === 'text' &&
+          lastBlock.streaming &&
+          needsStructuralContext(lastBlock.content) &&
+          event.data.text.startsWith(lastBlock.content) &&
+          event.data.text.length > lastBlock.content.length
+        ) {
+          // Strip trailing newline so block content doesn't end with \n
+          const cleanText = event.data.text.endsWith('\n')
+            ? event.data.text.slice(0, -1)
+            : event.data.text;
+          if (cleanText !== lastBlock.content) {
+            const updated = updateLastBlock(state, { ...lastBlock, content: cleanText });
+            return mergeStructuralTextBlocks(updated);
+          }
+          // cleanText === lastBlock.content: nothing changed after stripping, fall through
+        }
 
         const newLines = event.data.text.split('\n');
         // Drop trailing empty from split (trailing \n artifact).
@@ -226,13 +373,15 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         blocks.push({ id: nextId++, kind: 'text', content: lastLine, streaming: true });
 
         turns[turns.length - 1] = { blocks };
-        return { ...state, turns, nextBlockId: nextId };
+        const splitResult = { ...state, turns, nextBlockId: nextId };
+        return mergeStructuralTextBlocks(splitResult);
       }
 
       // Single-line update: keep existing block ID, just replace content.
       if (state.running && lastBlock?.kind === 'text' && lastBlock.streaming) {
         if (lastBlock.content === event.data.text) return state;
-        return updateLastBlock(state, { ...lastBlock, content: event.data.text });
+        const updated = updateLastBlock(state, { ...lastBlock, content: event.data.text });
+        return mergeStructuralTextBlocks(updated);
       }
 
       // Dedup: check all text blocks in the last turn
@@ -256,7 +405,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         content: event.data.text,
         streaming: state.running,
       };
-      return appendBlock(state, block);
+      const appended = appendBlock(state, block);
+      return mergeStructuralTextBlocks(appended);
     }
     case 'reason': {
       if (state.currentRunReasonId != null) {
@@ -611,13 +761,15 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         if (delta.length === 0 || !/\S/u.test(delta)) return finalized;
         const id = finalized.nextBlockId;
         const block: OutputBlock = { id, kind: 'text', content: delta };
-        return appendBlock(finalized, block);
+        const appended = appendBlock(finalized, block);
+        return mergeStructuralTextBlocks(appended);
       }
       // 无前置 text block（纯 tool 调用等）→ 创建全文 block
       if (fullText.length === 0) {
         const id = finalized.nextBlockId;
         const block: OutputBlock = { id, kind: 'text', content: event.data };
-        return appendBlock(finalized, block);
+        const appended = appendBlock(finalized, block);
+        return mergeStructuralTextBlocks(appended);
       }
       // final 内容与已渲染文本不一致 → 保留已有 block，不创建重复
       return finalized;
