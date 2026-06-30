@@ -14,8 +14,9 @@
 
 Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批后再执行。整个功能涉及三层架构的全面改造。
 
-## 最近更新（2026-06-25）
+## 最近更新（2026-06-30）
 
+- **批量 tool call 路由修复**：`resolveToolRoute` 扫描全部 pending tool calls 而非仅第一个，按优先级决策（`ask_user` > 结构性 `update_plan` > `approval` > `tools`），防止 read_file 在前导致 write_file 绕过审批 / update_plan 绕过 plan_review
 - **ask_user 紧凑渲染**：tool_card 改为 `⎿` 前缀单行布局，仿 shell_execute 样式。单问题 `⎿   User: answer`，多步骤 `⎿  Step1 sub_q User: answer`
 - **方案内容去重**：OutputArea 以 Markdown tool_card 渲染方案，Footer PlanReviewBlock 仅显示确认操作条（不再内联方案内容）
 - **ESC plan_review 停止会话**：ESC 等同 Ctrl+C，设置 `running: false` + 停止 agent，不再仅消除中断
@@ -42,7 +43,7 @@ Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批
 ### 核心层 (core)
 
 - **graph.ts**: 新增 `planReview` 节点，首次 `update_plan` 调用 → interrupt 等用户审批。审批通过 → 设置 `state.plan` + `authorization.mode`（auto → full_access，manual → default）
-- **routes.ts**: `update_plan` 首次调用路由到 `plan_review`，后续调用路由到 `tools`
+- **routes.ts**: `update_plan` 结构性变更（首次提交或名称/描述/步骤文本改变）路由到 `plan_review`，纯进度更新（仅 status 变化）路由到 `tools`。批量 tool call 场景按优先级扫描全部 pending：ask_user > 结构性 update_plan > 需审批 > tools。
 - **runner.ts**: 事件提取、中断映射、resume value 转换
 - **user-input.ts**: `normalizeUserInputResume` 支持 `answers` map（多问题）
 - **sessions.ts**: `ReplayInterrupt` 扩展 `plan_review` 类型，从 checkpoint `channel_values.plan` 提取已批准方案
@@ -139,16 +140,24 @@ Footer 仅渲染确认操作条（无内联方案内容）：
 - `cancelRunningBlocks()` + `finalizeLastTurnStreaming()` + `running: false` + `interrupt: null`
 - 等同 Ctrl+C，停止整个会话
 
-## 计划路由：isPlanProgressOnlyUpdate
+## 计划路由：isPlanProgressOnlyUpdate + 批量扫描
 
-`routes.ts` — `resolveToolRoute()`：
+`routes.ts` — `resolveToolRoute()` 扫描全部待处理 tool calls，按优先级决策：
+
 ```typescript
-if (request.name === 'update_plan' && !isPlanProgressOnlyUpdate(state.plan, request.args)) {
-  return 'plan_review';
+for (const request of allRequests) {
+  if (request.name === 'ask_user') return 'user_input';  // Priority 1
+  if (request.name === 'update_plan' && !isPlanProgressOnlyUpdate(state.plan, request.args)) {
+    return 'plan_review';  // Priority 2
+  }
+  // ... policy evaluation → hasApprovalRequired (Priority 3)
 }
+return 'tools';  // Priority 4
 ```
 
 `isPlanProgressOnlyUpdate` 仅在 name/description/steps（文本 + 数量）完全不变时返回 true。纯状态更新（`in_progress` → `completed`）直通执行。
+
+批量场景：若 AIMessage 含 `[read_file, update_plan(structural)]`，优先级 2 触发 → `plan_review`，`update_plan` 不在第一位也能被正确拦截。
 
 ## 相关文档
 

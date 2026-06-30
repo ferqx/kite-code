@@ -1,8 +1,8 @@
 # 当前规则：工具边界自治
 
 状态：active
-最后更新：2026-05-24
-最后验证：2026-05-24
+最后更新：2026-06-30
+最后验证：2026-06-30
 范围：
 
 - `src/core/harness/graph.ts`
@@ -55,6 +55,8 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 人工确认只保留给受保护工具执行：
 
 - 工具安全策略必须集中在 `src/harness/tool-policy.ts`。`routes.ts` 只根据策略决定进入 `tools` 还是 `approval`；`tool-runner.ts` 在执行前必须再次调用同一策略做兜底。
+- **批量工具调用路由**：模型可在单条 AIMessage 中返回多个 tool_calls。`resolveToolRoute` 必须扫描**全部**待处理工具请求，按优先级决定目标节点——`ask_user` → `user_input`、结构性 `update_plan` → `plan_review`、任一需审批 → `approval`、其余 → `tools`。不得只看第一个 tool call 而让后续工具绕过审批或中断节点。
+- `tool-runner.ts` 执行前必须做防御性检查：若 `policy.requiresApproval && approvedGrant === 'none'`，应拒绝执行并返回错误。确保需要审批的工具不可能绕过审批节点直达执行。
 - `write` 访问下的写入、删除、执行类工具请求必须经过 approval。
 - `read-only` 访问只允许执行只读工具和 `update_plan`；为保持缓存稳定，模型可见工具 schema 与 `write` 访问一致，但写入或执行尝试必须由 tools 层拒绝。
 - `graph.state.phase` 是独立执行边界。`planning` 阶段只能执行只读检查、`update_plan` 和 `ask_user`，不得执行写入或代码执行类工具。
