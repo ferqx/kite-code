@@ -532,10 +532,18 @@ describe('graph integration', () => {
             messages: [new HumanMessage('创建计划')],
             workspaceAccess: 'write',
             phase: 'building',
-            // 设置已有 plan 使 update_plan 走 tools 直通路径（状态更新），
-            // 避免触发新的 plan_review 中断 / existing plan routes update_plan
-            // to tools (status update), avoiding the new plan_review interrupt
-            plan: { name: 'existing', description: '', status: 'in_progress', steps: [] },
+            // 设置已有 plan 使 update_plan 走 tools 直通路径（纯进度更新），
+            // 名称/描述/步骤文本完全一致，仅 status 变化 → 不触发 plan_review
+            // existing plan matches model output → progress-only → tools, no plan_review interrupt
+            plan: {
+              name: '我的计划',
+              description: '测试 update_plan',
+              status: 'pending',
+              steps: [
+                { step: '检查代码', status: 'pending' },
+                { step: '修改代码', status: 'pending' },
+              ],
+            },
             userId: 'test',
             threadId: 't7',
             workspace,
@@ -1081,10 +1089,17 @@ describe('checkpoint recovery', () => {
           messages: [new HumanMessage('执行多步任务')],
           workspaceAccess: 'write',
           phase: 'building',
-          // 设置已有 plan 使 update_plan 走 tools 直通路径，
-          // 避免触发新的 plan_review 中断 / existing plan routes update_plan
-          // to tools, avoiding the new plan_review interrupt
-          plan: { name: 'existing', description: '', status: 'in_progress', steps: [] },
+          // 设置已有 plan 使 update_plan 走 tools 直通路径（纯进度更新），
+          // 名称/描述/步骤文本完全一致 → 不触发 plan_review 中断
+          plan: {
+            name: '多步任务',
+            description: '创建计划后执行写入',
+            status: 'pending',
+            steps: [
+              { step: '创建计划', status: 'pending' },
+              { step: '写入文件', status: 'pending' },
+            ],
+          },
           userId: 'test',
           threadId: 'ck3',
           workspace,

@@ -73,8 +73,9 @@ describe('graph local tool routing', () => {
     ).toBe('plan_review');
   });
 
-  // 验证 update_plan 在已有 plan 时路由到 tools（状态更新） / update_plan after approval routes to tools for status update
-  test('routes update_plan to tools when state.plan already exists (status update)', () => {
+  // 验证 update_plan 在已有 plan 时路由到 tools（纯进度更新） / update_plan progress-only routes to tools
+  // 仅 status 变化，名称/描述/步骤文本完全不变
+  test('routes update_plan to tools when only status changes (progress-only update)', () => {
     expect(
       routeAfterAgent({
         workspaceAccess: 'write',
@@ -90,8 +91,8 @@ describe('graph local tool routing', () => {
                 args: {
                   name: activePlan.name,
                   description: activePlan.description,
-                  status: 'in_progress',
-                  steps: [{ step: 'Do something', status: 'in_progress' }],
+                  status: 'completed',
+                  steps: [{ step: activePlan.steps[0]!.step, status: 'completed' }],
                 },
               },
             ],
@@ -99,6 +100,34 @@ describe('graph local tool routing', () => {
         ],
       } as unknown as CodeAgentState),
     ).toBe('tools');
+  });
+
+  // 验证 update_plan 步骤文本变化时路由到 plan_review / step text change routes to plan_review
+  test('routes update_plan to plan_review when step text changes', () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        plan: activePlan,
+        messages: [
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-3',
+                name: 'update_plan',
+                args: {
+                  name: activePlan.name,
+                  description: activePlan.description,
+                  status: 'in_progress',
+                  steps: [{ step: 'Do something different', status: 'in_progress' }],
+                },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('plan_review');
   });
 
   // 验证 shell_execute 中的只读命令按统一策略直接进入 tools / shell_execute read-only commands route directly to tools by policy
@@ -385,6 +414,153 @@ describe('graph local tool routing', () => {
     ).toBe('approval');
   });
 
+  // ── 多 tool call 批量路由 / Multi-tool batch routing ──
+  // 验证路由扫描全部 pending tool calls 而非只看第一个，按优先级决策
+
+  // 验证批次中 read_file 在前、write_file 在后 → 仍需进入审批 / read-only leading write → still routes to approval
+  test('routes to approval when batch mixes read_file first and write_file second', () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        messages: [
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-read',
+                name: 'read_file',
+                args: { path: 'config.ts' },
+              },
+              {
+                id: 'call-write',
+                name: 'write_file',
+                args: { path: 'out.txt', content: 'generated' },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('approval');
+  });
+
+  // 验证批次中 read_file 在前、update_plan（结构性）在后 → 进入 plan_review
+  test('routes to plan_review when batch has read_file and structural update_plan', () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        plan: activePlan,
+        messages: [
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-read',
+                name: 'read_file',
+                args: { path: 'src/main.ts' },
+              },
+              {
+                id: 'call-update',
+                name: 'update_plan',
+                args: {
+                  name: activePlan.name,
+                  description: 'Changed description', // 描述变化 → 结构性
+                  status: 'in_progress',
+                  steps: [{ step: activePlan.steps[0]!.step, status: 'in_progress' }],
+                },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('plan_review');
+  });
+
+  // 验证批次中 write_file 在前、ask_user 在后 → ask_user 优先级最高，进入 user_input
+  test('routes to user_input when batch has write_file and ask_user', () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        messages: [
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-write',
+                name: 'write_file',
+                args: { path: 'out.txt', content: 'result' },
+              },
+              {
+                id: 'call-ask',
+                name: 'ask_user',
+                args: { question: 'Which directory?', options: [{ id: 'a', label: '/tmp' }] },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('user_input');
+  });
+
+  // 验证批次中全部为只读工具 → 直通 tools
+  test('routes directly to tools when all tools are read-only', () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        messages: [
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-read-1',
+                name: 'read_file',
+                args: { path: 'a.ts' },
+              },
+              {
+                id: 'call-search',
+                name: 'search_content',
+                args: { pattern: 'TODO' },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('tools');
+  });
+
+  // 验证批次中 read-only shell 在前、write_file 在后 → 仍需审批
+  test('routes to approval when batch mixes read-only shell and write_file', () => {
+    expect(
+      routeAfterAgent({
+        workspaceAccess: 'write',
+        phase: 'building',
+        workspace: '/tmp/workspace',
+        messages: [
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-ls',
+                name: 'shell_execute',
+                args: { intent: 'inspect', command: 'ls' },
+              },
+              {
+                id: 'call-write',
+                name: 'write_file',
+                args: { path: 'log.txt', content: 'done' },
+              },
+            ],
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('approval');
+  });
+
+  // ── 单工具调用解析 / Single tool call parsing ──
+
   // 验证 ask_user 工具调用会解析为结构化用户输入请求 / ask_user tool call parses into a structured user input request
   test('parses ask_user tool calls', () => {
     const request = toolRequestFromMessage(
@@ -532,8 +708,8 @@ describe('graph local tool routing', () => {
     expect((result as ShellResult).stderr).toContain('planning');
   });
 
-  // 验证 building 阶段下 write_file 正常执行 / Write tools execute normally during building phase
-  test('allows write tools during building phase', async () => {
+  // 验证 building 阶段下 write_file 通过审批后正常执行 / Write tools execute normally during building phase after approval
+  test('allows write tools during building phase after approval', async () => {
     const result = await runApprovedTool({
       workspace: '/tmp/workspace',
       request: {
@@ -544,6 +720,7 @@ describe('graph local tool routing', () => {
         protectedCommand: 'write_file hello.txt',
       },
       workspaceAccess: 'write',
+      approvedGrant: 'approve_once',
     });
 
     expect(result.ok).toBe(true);

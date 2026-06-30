@@ -98,6 +98,18 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     });
   }
 
+  // 防御性检查：需要审批的工具必须经过审批节点，不能以 approvedGrant='none' 直达
+  // Defense-in-depth: tools requiring approval MUST pass through the approval node
+  if (policy.requiresApproval && approvedGrant === 'none') {
+    return withFailureGuidance(request, {
+      ok: false,
+      command: request.protectedCommand,
+      exitCode: -1,
+      stdout: '',
+      stderr: `Rejected by tool policy: ${request.name} requires approval but was not approved.`,
+    });
+  }
+
   if (request.name === 'update_plan') {
     return withFailureGuidance(request, {
       ok: true,

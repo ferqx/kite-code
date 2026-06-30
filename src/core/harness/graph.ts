@@ -37,7 +37,7 @@ import {
 } from './tool-policy';
 import {
   getAllPendingToolRequests,
-  getPendingToolRequest,
+  type getPendingToolRequest,
   messageText,
   toolRequestFromMessage,
 } from './tool-requests';
@@ -324,11 +324,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     };
   };
 
-  /** 用户输入节点：中断等待用户选择或自由文本 / User input node */
+  /** 用户输入节点：中断等待用户选择或自由文本 / User input node
+   *  从全部待处理工具中查找 ask_user——batch 中 ask_user 未必排在第一位 */
   const userInput = async (state: CodeAgentState) => {
-    const request = getPendingToolRequest(state.messages, state.workspace);
+    const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
+    const request = allRequests.find((r) => r.name === 'ask_user');
 
-    if (request?.name !== 'ask_user') {
+    if (!request || request.name !== 'ask_user') {
       return {};
     }
 
@@ -342,10 +344,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     };
   };
 
-  /** plan review 节点：中断等待用户审查计划，支持反馈 / Plan review node: interrupt for user plan review with optional feedback */
+  /** plan review 节点：中断等待用户审查计划，支持反馈 / Plan review node: interrupt for user plan review with optional feedback
+   *  从全部待处理工具中查找 update_plan——batch 中 update_plan 未必排在第一位 */
   const planReview = async (state: CodeAgentState) => {
-    const request = getPendingToolRequest(state.messages, state.workspace);
-    if (request?.name !== 'update_plan') return {};
+    const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
+    const request = allRequests.find((r) => r.name === 'update_plan');
+    if (!request) return {};
 
     const planArgs = request.args as {
       name: string;
