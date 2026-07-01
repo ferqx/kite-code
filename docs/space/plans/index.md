@@ -39,6 +39,7 @@
 | [`2026-06-28-context-compaction.md`](2026-06-28-context-compaction.md) | active | P0 | — | — | M0 TUI 预整合 ✅ + M1 Core 工具折叠 ✅ + M2 对话摘要（延后） |
 | [`2026-06-27-plan-subagent-role-design.md`](2026-06-27-plan-subagent-role-design.md) | draft | P1 | — | — | Plan 子 Agent 角色：只读架构设计专家，多视角并行设计方案，主 agent 合并后调 `update_plan` |
 | [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | draft | P0 | — | — | 审批层、执行层与沙箱渐进式开发：5 阶段增量演进，基于现有 `runApprovedTool` + `tool-policy` + `sandbox/` 扩展 |
+| [`2026-07-01-web-search-tool.md`](2026-07-01-web-search-tool.md) | draft | P0 | — | — | Web 网络工具：Phase 1 `web_fetch`（fetch → SSRF → readability → turndown 正文提取），Phase 2 `web_search`（搜索发现 URL） |
 
 ## 计划文件命名规范
 
