@@ -341,9 +341,11 @@ export const TASK_CONTRACT: ToolContract = {
       'Expecting the sub-agent to know about decisions made earlier in the conversation.',
     outputFormat:
       "JSON: ok (boolean), summary (string — the sub-agent's final output), toolCallCount (number), durationMs (number). " +
-      'On error: ok: false with error field containing the error message.',
+      'On error: ok: false with error field containing the error message. ' +
+      'If blocked.reasonCode is SUBAGENT_TOOL_REQUIRES_APPROVAL, the harness will route approval and resume the same sub-agent context.',
     failureHandling:
       'If the sub-agent times out (30 min): the task returns an error. Retry with a more focused task description. ' +
+      'If the sub-agent returns blocked.reasonCode=SUBAGENT_TOOL_REQUIRES_APPROVAL: do not retry task and do not run the blocked tool yourself; wait for the harness to resume it. ' +
       'If max concurrent sub-agents (10) are running: wait for running sub-agents to complete. ' +
       'If the sub-agent returns unclear results: rephrase the task with more precise instructions and retry.',
   },

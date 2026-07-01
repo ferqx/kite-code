@@ -2,10 +2,17 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import type { ExecutionJournalEntry } from '@/core/execution/journal';
 import type { PermitBatch } from '@/core/execution/permit';
+import type { SubAgentContinuation } from '@/core/subagent/types';
 import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, AgentPlan, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 import { defaultAuthorizationState } from './tool-policy';
 import type { PendingToolRequest } from './tool-requests';
+
+export interface PendingSubAgentApproval {
+  taskCallId: string;
+  request: PendingToolRequest;
+  continuation: SubAgentContinuation;
+}
 
 export const AgentState = Annotation.Root({
   /** 用户 ID / User ID */
@@ -57,6 +64,10 @@ export const AgentState = Annotation.Root({
   exhaustedFingerprints: Annotation<Record<string, true>>({
     reducer: (_left, right) => right,
     default: () => ({}),
+  }),
+  pendingSubagentApproval: Annotation<PendingSubAgentApproval | null>({
+    reducer: (_left, right) => right,
+    default: () => null,
   }),
   /** 当前 thread 的 shell 授权状态 / Shell authorization state scoped to the current thread */
   authorization: Annotation<ThreadAuthorizationState>({

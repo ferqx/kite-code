@@ -19,6 +19,12 @@ function resolveToolRoute(
   override?: AuthorizationOverride,
   mcpRiskOverride?: Record<string, 'read'>,
 ): 'approval' | 'tools' | 'user_input' | 'plan_review' | null {
+  if (state.pendingSubagentApproval) {
+    const batch = migratePermitBatch(state.approvedBatch);
+    const id = state.pendingSubagentApproval.request.id;
+    return id && batch[id] ? 'tools' : 'approval';
+  }
+
   const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
   if (allRequests.length === 0) return null;
 
@@ -85,6 +91,11 @@ export function routeAfterAgent(
  *  若同一批次还有工具未审批 → 循环回 approval；全部审批完 → tools */
 export function routeAfterApproval(state: CodeAgentState): 'approval' | 'tools' | 'agent' {
   const batch = migratePermitBatch(state.approvedBatch);
+  if (state.pendingSubagentApproval) {
+    const id = state.pendingSubagentApproval.request.id;
+    return id && batch[id] ? 'tools' : 'approval';
+  }
+
   const hasFullAccess = Object.values(batch).some((p) => !p.consumed && p.grant === 'full_access');
 
   // full_access → 不再需要审批，直接执行
@@ -110,8 +121,8 @@ export function routeAfterApproval(state: CodeAgentState): 'approval' | 'tools' 
 }
 
 /** tools 节点后的路由逻辑 / Routing after tools node */
-export function routeAfterTools(_state: CodeAgentState): 'agent' {
-  return 'agent';
+export function routeAfterTools(state: CodeAgentState): 'approval' | 'agent' {
+  return state.pendingSubagentApproval ? 'approval' : 'agent';
 }
 
 /** user_input 节点后的路由逻辑 / Routing after user_input node */

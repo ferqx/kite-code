@@ -84,6 +84,7 @@ const CODE_SYSTEM_PROMPT = [
   '- Use only when dedicated tools (read_file, edit_file, write_file) cannot accomplish the task.',
   '- Tag read-only commands with intent="inspect". Verification commands with intent="verify".',
   '- Commands that mutate files or VCS need approval.',
+  '- If a command is blocked because it requires approval, stop and report that approval is required. Do not retry the same command.',
   '- rg exit code 1 = no matches (normal, do not retry).',
   '- On failure: diagnose root cause before retrying. Retry at most once.',
   '',

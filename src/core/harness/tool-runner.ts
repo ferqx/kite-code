@@ -5,7 +5,7 @@ import { parseMcpToolName } from '@/core/mcp/tool-adapter';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
-import { createTaskTool } from '@/core/subagent/task-tool';
+import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '@/core/tools/file';
@@ -48,15 +48,6 @@ export interface RunApprovedToolInput {
   subagentEventSink?: SubAgentEventSink;
   /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
-  /**
-   * 执行上下文：main 表示主 agent graph 中执行，subagent 表示子 agent 中执行。
-   * 子 agent 无审批节点可走，其安全由角色配置 (allowedTools + wrapReadOnlyShell) 负责，
-   * 不应再经过 defense-in-depth 审批检查。
-   * Execution context: 'main' for graph execution, 'subagent' for sub-agent execution.
-   * Sub-agents cannot route through approval nodes — their safety is enforced by
-   * role configuration (allowedTools + wrapReadOnlyShell). Defaults to 'main'.
-   */
-  executionContext?: 'main' | 'subagent';
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -81,7 +72,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     taskConfig,
     taskModel,
     subagentEventSink,
-    executionContext = 'main',
   } = input;
   // 合成调用：parseToolCall 失败后由 invokeModel 注入 _raw_invalid_args 标记。
   // 跳过正常执行，直接生成工具特定的错误反馈让模型重试。
@@ -124,13 +114,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     });
   }
 
-  // 防御性检查：需要审批的工具在子 agent 上下文中跳过——子 agent 的安全
-  // 由角色配置负责（allowedTools 过滤 + wrapReadOnlyShell 拦截 shell 命令）。
-  // 在主 agent 上下文中必须经过审批节点，不能以 approvedGrant='none' 直达。
-  // Defense-in-depth: skip for subagent contexts — sub-agent safety is enforced by
-  // role configuration (allowedTools filtering + wrapReadOnlyShell for shell commands).
-  // In main context, tools requiring approval MUST pass through the approval node.
-  if (executionContext !== 'subagent' && policy.requiresApproval && approvedGrant === 'none') {
+  // 防御性检查：需要审批的工具必须经过审批节点，不能以 approvedGrant='none' 直达。
+  // 子 agent 也必须继承相同 Gateway 规则；它没有内部审批节点时，应把 blocked 结果返回主 agent。
+  // Defense-in-depth: tools requiring approval MUST pass through the approval node.
+  // Sub-agents inherit the same Gateway rules and return a blocked result to the main agent.
+  if (policy.requiresApproval && approvedGrant === 'none') {
     return withFailureGuidance(request, {
       ok: false,
       command: request.protectedCommand,
@@ -183,29 +171,30 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       });
     }
     try {
-      const taskTool = createTaskTool({
-        config: taskConfig,
-        workspace,
-        shellExecutor,
-        mcpManager,
-        skills: skillManifests,
-        skillOptions,
-        authorization: normalizeAuthorizationState(authorization),
-        workspaceAccess,
-        phase,
-        threadId,
-        eventSink: subagentEventSink,
-        signal,
-        model: taskModel,
-      });
-      const output = await taskTool.invoke(request.args);
-      let ok = true;
-      try {
-        const parsed = JSON.parse(output);
-        ok = parsed.ok !== false;
-      } catch {
-        /* plain-text task result */
-      }
+      const taskArgs = request.args as {
+        subagent_type: 'explore' | 'plan' | 'code' | 'review';
+        task: string;
+      };
+      const result = await runTaskSubAgent(
+        {
+          config: taskConfig,
+          workspace,
+          shellExecutor,
+          mcpManager,
+          skills: skillManifests,
+          skillOptions,
+          authorization: normalizeAuthorizationState(authorization),
+          workspaceAccess,
+          phase,
+          threadId,
+          eventSink: subagentEventSink,
+          signal,
+          model: taskModel,
+        },
+        taskArgs,
+      );
+      const output = JSON.stringify(result);
+      const ok = result.ok !== false;
       return withFailureGuidance(request, {
         ok,
         command: 'task',
@@ -213,6 +202,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stdout: output,
         stderr: ok ? '' : output,
         status: ok ? 'success' : 'error',
+        subagentResult: result,
       });
     } catch (error) {
       return withFailureGuidance(request, {

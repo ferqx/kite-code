@@ -395,6 +395,35 @@ describe('graph local tool routing', () => {
   });
 
   // 验证 write 访问下写入工具调用路由到审批 / Write tools under write access route to approval
+  test('routes pending sub-agent approval from tools to approval', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        pendingSubagentApproval: {
+          taskCallId: 'task-1',
+          request: {
+            id: 'sub-tool-1',
+            name: 'shell_execute',
+            args: { command: 'bun test', intent: 'test' },
+            reason: 'sub-agent requested shell',
+            protectedCommand: 'bun test',
+          },
+          continuation: {
+            id: 'sub-1',
+            role: { role: 'code', systemPrompt: 'code' },
+            task: 'verify',
+            messages: [],
+            toolCallCount: 1,
+            steps: [],
+          },
+        },
+      } as unknown as CodeAgentState),
+    ).toBe('approval');
+  });
+
   test('routes write tool calls to approval under write access', () => {
     expect(
       routeAfterAgent({
@@ -938,6 +967,7 @@ describe('routeEntry — start-of-graph routing', () => {
     interactionMode: 'interactive' as const,
     executionJournal: [],
     exhaustedFingerprints: {},
+    pendingSubagentApproval: null,
     contextBudget: undefined,
     plan: null,
     planReviewed: false,

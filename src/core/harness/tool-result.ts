@@ -1,3 +1,4 @@
+import type { SubAgentResult } from '@/core/subagent/types';
 import type { ShellIntent, ShellResult, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPlan, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 
@@ -48,4 +49,5 @@ export type ToolExecutionResult = ShellResult & {
   activeSkillInstructions?: string;
   /** read_file 返回的文件总行数，用于 TUI 展示行号范围 / Total lines in file returned by read_file for TUI line range display */
   totalLines?: number;
+  subagentResult?: SubAgentResult;
 };

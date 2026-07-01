@@ -10,6 +10,8 @@ import { prepareModelContext } from '@/core/model/context';
 import type { ModelRetryListener, RetryListenerHost } from '@/core/model/deepseek';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { BunSqliteSaver } from '@/core/persistence/checkpoint';
+import { resumeSubAgent } from '@/core/subagent/runner';
+import type { SubAgentResult } from '@/core/subagent/types';
 import { createAgentTools } from '@/core/tools/definitions';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type {
@@ -41,6 +43,7 @@ import {
   getAllPendingToolRequests,
   type getPendingToolRequest,
   messageText,
+  toolRequestFromCall,
   toolRequestFromMessage,
 } from './tool-requests';
 import { runApprovedTool } from './tool-runner';
@@ -179,12 +182,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   /** 审批节点：中断等待人工批准，支持批量积累 / Approval node with batch accumulation */
   const approval = async (state: CodeAgentState) => {
     const batch = migratePermitBatch(state.approvedBatch);
+    const pendingSubagent = state.pendingSubagentApproval;
     const hasFullAccess = Object.values(batch).some(
       (p) => !p.consumed && p.grant === 'full_access',
     );
 
     // 查找第一个尚未审批的待处理工具（跳过已在 batch 中的）
-    const allPending = getAllPendingToolRequests(state.messages, state.workspace);
+    const allPending = pendingSubagent
+      ? [pendingSubagent.request]
+      : getAllPendingToolRequests(state.messages, state.workspace);
     let request: ReturnType<typeof getPendingToolRequest> = null;
     for (const r of allPending) {
       if (r.id && !batch[r.id]) {
@@ -316,15 +322,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         approved !== null &&
         approved.approvalHash !== undefined &&
         !validateApprovalHash(approved, approvalPayload.approvalHash);
+      const reason = hashMismatch
+        ? 'approved request does not match current tool request'
+        : typeof approved === 'object' && approved !== null
+          ? (approved.reason ?? 'not approved')
+          : 'not approved';
       return {
-        ...rejectedToolMessage(
-          request,
-          hashMismatch
-            ? 'approved request does not match current tool request'
-            : typeof approved === 'object' && approved !== null
-              ? (approved.reason ?? 'not approved')
-              : 'not approved',
-        ),
+        ...(pendingSubagent
+          ? rejectedSubagentTaskMessage(pendingSubagent, reason)
+          : rejectedToolMessage(request, reason)),
         approvedBatch: batch,
       };
     }
@@ -334,8 +340,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       try {
         approvedRequest = replaceApprovalCommand(request, approved.replacementCommand);
       } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
         return {
-          ...rejectedToolMessage(request, error instanceof Error ? error.message : String(error)),
+          ...(pendingSubagent
+            ? rejectedSubagentTaskMessage(pendingSubagent, reason)
+            : rejectedToolMessage(request, reason)),
           approvedBatch: batch,
         };
       }
@@ -359,11 +368,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       override,
     });
     if (!approvedPolicy.allowed) {
+      const reason = `approved command rejected by tool policy: ${approvedPolicy.reason}`;
       return {
-        ...rejectedToolMessage(
-          request,
-          `approved command rejected by tool policy: ${approvedPolicy.reason}`,
-        ),
+        ...(pendingSubagent
+          ? rejectedSubagentTaskMessage(pendingSubagent, reason)
+          : rejectedToolMessage(request, reason)),
         approvedBatch: batch,
       };
     }
@@ -381,7 +390,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     // full_access → auto-approve all remaining in batch
     if (grant === 'full_access') {
-      const allPending = getAllPendingToolRequests(state.messages, state.workspace);
+      const allPending = pendingSubagent
+        ? [pendingSubagent.request]
+        : getAllPendingToolRequests(state.messages, state.workspace);
       for (const r of allPending) {
         if (r.id && !batch[r.id]) {
           Object.assign(
@@ -496,11 +507,32 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   };
 
   /** 执行单个工具调用并返回 ToolMessage / Execute a single tool call and return ToolMessage */
+  function pendingSubagentApprovalFromBlocked(
+    taskCallId: string,
+    blocked: NonNullable<SubAgentResult['blocked']>,
+    workspace: string,
+  ): CodeAgentState['pendingSubagentApproval'] {
+    const request = toolRequestFromCall(
+      {
+        id: blocked.toolCallId,
+        name: blocked.toolName,
+        args: blocked.args,
+      },
+      workspace,
+    );
+    if (!request) return null;
+    return {
+      taskCallId,
+      request,
+      continuation: blocked.continuation,
+    };
+  }
+
   async function executeOneTool(
     request: import('./tool-requests').PendingToolRequest,
     state: CodeAgentState,
     grantUsed: string,
-  ): Promise<{ toolMessage: ToolMessage; extra: Record<string, unknown> }> {
+  ): Promise<{ toolMessage: ToolMessage | null; extra: Record<string, unknown> }> {
     // 构造 shell 实时输出回调（仅对 shell_execute 生效）
     const onShellProgress = input.toolProgressSink
       ? (chunk: string, stream: 'stdout' | 'stderr') => {
@@ -530,6 +562,20 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       taskModel: input.model,
       subagentEventSink: input.subagentEventSink,
     });
+
+    if (request.name === 'task' && result.subagentResult?.blocked) {
+      const pending = pendingSubagentApprovalFromBlocked(
+        request.id ?? 'missing-tool-call-id',
+        result.subagentResult.blocked,
+        state.workspace,
+      );
+      if (pending) {
+        return {
+          toolMessage: null,
+          extra: { pendingSubagentApproval: pending },
+        };
+      }
+    }
 
     // Flush React re-renders before dispatching tool_done, so intermediate
     // tool_progress updates (liveOutput) are rendered before status → done.
@@ -632,6 +678,137 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
     const batch = migratePermitBatch(state.approvedBatch);
 
+    if (state.pendingSubagentApproval) {
+      const pending = state.pendingSubagentApproval;
+      const request = pending.request;
+      const grantUsed = request.id && batch[request.id] ? batch[request.id]!.grant : 'none';
+      const onShellProgress = input.toolProgressSink
+        ? (chunk: string, stream: 'stdout' | 'stderr') => {
+            input.toolProgressSink!(request.id ?? '', request.name, chunk, stream);
+          }
+        : undefined;
+
+      const result = await runApprovedTool({
+        workspace: state.workspace,
+        request,
+        shellExecutor: input.shellExecutor,
+        workspaceAccess: state.workspaceAccess,
+        phase: state.phase,
+        authorization: state.authorization,
+        approvedGrant: grantUsed as import('@/protocol/events').ShellGrantUsed,
+        threadId: state.threadId,
+        override,
+        mcpManager: input.mcpManager,
+        mcpRiskOverride,
+        skillManifests: input.skills,
+        skillOptions: input.skillOptions,
+        signal: input.subagentSignal,
+        onShellProgress,
+        permitBatch: batch,
+        interactionMode: state.interactionMode,
+        taskConfig: input.config,
+        taskModel: input.model,
+        subagentEventSink: input.subagentEventSink,
+      });
+
+      if (onShellProgress) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const summary =
+        request.name === 'shell_execute' && result.exitCode === 124 && result.stdout
+          ? result.stdout
+          : (result.stdout || result.stderr || '').slice(0, 200);
+      input.toolResultSink?.(
+        request.id ?? '',
+        request.name,
+        result.ok !== false,
+        summary,
+        result.totalLines,
+        undefined,
+        result.exitCode,
+      );
+
+      const journalState = recordExecutionResult(
+        {
+          executionJournal: state.executionJournal ?? [],
+          exhaustedFingerprints: state.exhaustedFingerprints ?? {},
+        },
+        {
+          toolCallId: request.id ?? '',
+          toolName: request.name,
+          ok: result.ok !== false,
+          stderr: result.stderr,
+          exitCode: result.exitCode,
+          path: result.path,
+        },
+      );
+
+      const resumed = await resumeSubAgent(
+        {
+          config: input.config,
+          workspace: state.workspace,
+          role: pending.continuation.role,
+          task: pending.continuation.task,
+          shellExecutor: input.shellExecutor,
+          mcpManager: input.mcpManager,
+          skills: input.skills,
+          skillOptions: input.skillOptions,
+          authorization: state.authorization,
+          workspaceAccess: state.workspaceAccess,
+          phase: state.phase,
+          threadId: state.threadId,
+          timeoutMs: 30 * 60 * 1000,
+          signal: input.subagentSignal ?? new AbortController().signal,
+          eventSink:
+            input.subagentEventSink ??
+            (((_event: unknown) => {}) as import('@/core/subagent/types').SubAgentEventSink),
+          model: input.model,
+          depth: 1,
+          maxDepth: 0,
+        },
+        pending.continuation,
+        {
+          toolCallId: request.id ?? '',
+          toolName: request.name,
+          result,
+        },
+      );
+
+      if (resumed.blocked) {
+        const nextPending = pendingSubagentApprovalFromBlocked(
+          pending.taskCallId,
+          resumed.blocked,
+          state.workspace,
+        );
+        if (nextPending) {
+          return {
+            approvedBatch: {},
+            approvedToolRequest: null,
+            approvedToolGrant: null,
+            pendingSubagentApproval: nextPending,
+            ...journalState,
+          };
+        }
+      }
+
+      const taskMessage = new ToolMessage({
+        content: JSON.stringify(resumed),
+        tool_call_id: pending.taskCallId,
+        name: 'task',
+        status: resumed.ok === false ? 'error' : 'success',
+      });
+
+      return {
+        approvedBatch: {},
+        approvedToolRequest: null,
+        approvedToolGrant: null,
+        pendingSubagentApproval: null,
+        ...journalState,
+        messages: [taskMessage],
+      };
+    }
+
     if (allRequests.length === 0) {
       return { approvedBatch: {} };
     }
@@ -645,7 +822,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }),
     );
 
-    const messages: ToolMessage[] = results.map((r) => r.toolMessage);
+    const messages: ToolMessage[] = results.flatMap((r) => (r.toolMessage ? [r.toolMessage] : []));
     const mergedExtra: Record<string, unknown> = {};
     for (const r of results) {
       Object.assign(mergedExtra, r.extra);
@@ -655,6 +832,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       exhaustedFingerprints: state.exhaustedFingerprints ?? {},
     };
     for (const r of results) {
+      if (!r.toolMessage) continue;
       try {
         const parsed = JSON.parse(String(r.toolMessage.content)) as {
           ok?: boolean;
@@ -887,5 +1065,32 @@ function rejectedToolMessage(
         status: 'error',
       }),
     ],
+  };
+}
+
+function rejectedSubagentTaskMessage(
+  pending: NonNullable<CodeAgentState['pendingSubagentApproval']>,
+  reason: string,
+) {
+  return {
+    messages: [
+      new ToolMessage({
+        content: JSON.stringify({
+          ok: false,
+          rejected: true,
+          reason,
+          blocked: {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: pending.request.id,
+            toolName: pending.request.name,
+            args: pending.request.args,
+          },
+        }),
+        tool_call_id: pending.taskCallId,
+        name: 'task',
+        status: 'error',
+      }),
+    ],
+    pendingSubagentApproval: null,
   };
 }

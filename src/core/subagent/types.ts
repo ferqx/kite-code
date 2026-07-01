@@ -1,4 +1,5 @@
 // src/core/subagent/types.ts
+import type { BaseMessage } from '@langchain/core/messages';
 import type {
   SubAgentDonePayload,
   SubAgentErrorPayload,
@@ -47,6 +48,15 @@ export interface SubAgentRunnerInput {
   maxDepth?: number;
 }
 
+export interface SubAgentContinuation {
+  id: string;
+  role: SubAgentRoleConfig;
+  task: string;
+  messages: BaseMessage[];
+  toolCallCount: number;
+  steps: SubAgentStepSnapshot[];
+}
+
 /** 子 agent 步骤记录（用于持久化到 checkpoint） */
 export interface SubAgentStepSnapshot {
   toolName: string;
@@ -62,6 +72,15 @@ export interface SubAgentResult {
   toolCallCount: number;
   durationMs: number;
   error?: string;
+  blocked?: {
+    reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL';
+    toolCallId: string;
+    toolName: string;
+    command: string;
+    args: Record<string, unknown>;
+    message: string;
+    continuation: SubAgentContinuation;
+  };
   /** 步骤快照：用于会话重放时恢复步骤树 / Step snapshots for session replay */
   steps?: SubAgentStepSnapshot[];
 }
