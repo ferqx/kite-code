@@ -26,6 +26,12 @@ export type ThoughtActivity = { kind: 'thinking'; text: string } | { kind: 'tool
 export interface SubAgentStepRecord {
   toolName: string;
   toolArgs: Record<string, unknown>;
+  /** 步生命周期状态，渲染层只读此字段决定颜色，不依赖任何布尔组合推断
+   *  Step lifecycle status — the single source of truth for color decisions.
+   *  pending → awaiting_approval → success | rejected | error */
+  status: 'pending' | 'awaiting_approval' | 'success' | 'rejected' | 'error';
+  /** 工具执行结果（仅 success / error 时有意义），保留用于日志和调试
+   *  Tool execution outcome (meaningful only for success / error status), kept for logging */
   ok?: boolean;
   /** 读取文件时的文件总行数，用于 TUI 行号范围展示 / Total lines in file for read_file, used for TUI line range display */
   totalLines?: number;
@@ -65,6 +71,8 @@ export type OutputBlock =
       summaryLine: string;
       active: boolean;
       latestActivity?: ThoughtActivity;
+      /** 整体结果状态（仅 active=false 时有意义），替代从子 tool 状态推断 / Overall outcome (meaningful when active=false), replaces boolean inference */
+      result?: 'done' | 'error' | 'cancelled';
     }
   | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
   | {
@@ -98,6 +106,8 @@ export type OutputBlock =
       cacheMissTokens?: number;
       /** 子 agent 正在等待工具审批 / Sub-agent is awaiting tool approval */
       awaitingApproval?: boolean;
+      /** 正在等待审批的步骤索引，用于 tool_result 回来后标记 rejected / Step index being approved, used to mark as rejected on tool_result */
+      approvingStepIndex?: number;
     };
 
 /** 一次完整的「用户提问 → Agent 回复」往返 */

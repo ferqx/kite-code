@@ -1935,8 +1935,13 @@ describe('SubAgentBlock rendering', () => {
       toolCallCount: 0,
       durationMs: 0,
       steps: [
-        { toolName: 'read_file', toolArgs: { path: 'auth.ts' }, ok: true },
-        { toolName: 'edit_file', toolArgs: { path: 'auth.ts' } },
+        {
+          toolName: 'read_file',
+          toolArgs: { path: 'auth.ts' },
+          status: 'success' as const,
+          ok: true,
+        },
+        { toolName: 'edit_file', toolArgs: { path: 'auth.ts' }, status: 'success' as const },
       ],
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
@@ -2067,7 +2072,7 @@ describe('SubAgentBlock rendering', () => {
       summary: longSummary,
       toolCallCount: 3,
       durationMs: 1200,
-      steps: [{ toolName: 'read_file', toolArgs: {} }],
+      steps: [{ toolName: 'read_file', toolArgs: {}, status: 'success' as const }],
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
     const frame = lastFrame() ?? '';
@@ -2080,6 +2085,7 @@ describe('SubAgentBlock rendering', () => {
 
   test('running block limits visible steps', () => {
     const steps = Array.from({ length: 15 }, (_, i) => ({
+      status: 'pending' as const,
       toolName: `step_${String(i + 1).padStart(2, '0')}`,
       toolArgs: {},
     }));

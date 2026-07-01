@@ -222,10 +222,16 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
     );
   }
 
-  // ── Settled state (done / error / waiting for late tool results) ──
-  const settledStatus = hasError ? 'error' : hasPendingTools ? 'cancelled' : 'done';
+  // ── Settled state: use explicit result when available, fall back to inference ──
+  const settledStatus =
+    block.result ?? (hasError ? 'error' : hasPendingTools ? 'cancelled' : 'done');
   const doneColor = toolColor(settledStatus, dt);
-  const footerText = hasError ? '部分失败' : hasPendingTools ? '等待工具结果' : '完成';
+  const footerText =
+    settledStatus === 'error'
+      ? '部分失败'
+      : settledStatus === 'cancelled'
+        ? '等待工具结果'
+        : '完成';
 
   return (
     <Box flexDirection="column">

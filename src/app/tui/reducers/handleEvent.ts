@@ -240,11 +240,20 @@ function closeCurrentThought(state: TuiState): TuiState {
 
   const next = updateToolSummaryById(state, summary.id, (block) => {
     if (block.tools.length === 0) return null;
+    const hasError = block.tools.some((t) => t.status === 'error' || t.status === 'timeout');
+    const anyCancelled = block.tools.some((t) => t.status === 'cancelled');
+    const hasPending = block.tools.some((t) => t.status === 'running');
+    const result = hasError
+      ? ('error' as const)
+      : anyCancelled || hasPending
+        ? ('cancelled' as const)
+        : ('done' as const);
     return {
       ...block,
       active: false,
       latestActivity: undefined,
       totalElapsedMs: Date.now() - block.createdAt,
+      result,
     };
   });
   return { ...next, currentThoughtSummaryId: undefined };
@@ -821,7 +830,16 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
                 blk.status === 'running'
               ) {
                 changed = true;
-                return { ...blk, awaitingApproval: true };
+                const stepIndex = blk.steps.length - 1;
+                const steps = blk.steps.map((s, i) =>
+                  i === stepIndex ? { ...s, status: 'awaiting_approval' as const } : s,
+                );
+                return {
+                  ...blk,
+                  awaitingApproval: true,
+                  approvingStepIndex: stepIndex,
+                  steps,
+                };
               }
               return blk;
             });
@@ -928,7 +946,14 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (matched?.kind !== 'subagent') return state;
       const next: OutputBlock = {
         ...matched,
-        steps: [...matched.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }],
+        steps: [
+          ...matched.steps,
+          {
+            toolName: event.data.toolName,
+            toolArgs: event.data.toolArgs,
+            status: 'pending' as const,
+          },
+        ],
         awaitingApproval: false, // 新步骤到来时清除等待状态
       };
       return replaceBlockById(state, matched.id, next);
@@ -939,21 +964,32 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         (b) => b.kind === 'subagent' && b.subagentId === event.data.id,
       );
       if (matched?.kind !== 'subagent') return state;
-      // Reverse-scan to find the last UNRESOLVED step with matching toolName.
-      // Prefer unresolved steps to handle out-of-order results correctly:
-      // e.g., two read_file steps — first result resolves the last unresolved one,
-      // second result resolves the remaining one.
+      // Reverse-scan unresolved steps by status (not ok boolean).
+      // pending / awaiting_approval → unresolved; success / rejected / error → resolved.
       let lastMatchIdx = -1;
       for (let i = matched.steps.length - 1; i >= 0; i--) {
         if (
           matched.steps[i]!.toolName === event.data.toolName &&
-          matched.steps[i]!.ok === undefined
+          (matched.steps[i]!.status === 'pending' ||
+            matched.steps[i]!.status === 'awaiting_approval')
         ) {
           lastMatchIdx = i;
           break;
         }
       }
-      // Fallback: if all matching steps already have ok, re-resolve the last one
+      // Fallback: old data without status field → match by ok===undefined (unresolved)
+      if (lastMatchIdx === -1) {
+        for (let i = matched.steps.length - 1; i >= 0; i--) {
+          if (
+            matched.steps[i]!.toolName === event.data.toolName &&
+            matched.steps[i]!.ok === undefined
+          ) {
+            lastMatchIdx = i;
+            break;
+          }
+        }
+      }
+      // Absolute fallback: all steps have ok set already, re-resolve the last one
       if (lastMatchIdx === -1) {
         for (let i = matched.steps.length - 1; i >= 0; i--) {
           if (matched.steps[i]!.toolName === event.data.toolName) {
@@ -963,11 +999,26 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         }
       }
       if (lastMatchIdx === -1) return state;
-      const steps = matched.steps.map((s, i) =>
-        i === lastMatchIdx ? { ...s, ok: event.data.ok, totalLines: event.data.totalLines } : s,
-      );
+      // Compute step status from result + approval context.
+      // A rejected approval produces status:'rejected', not status:'error'.
+      const isApprovalRejected =
+        matched.approvingStepIndex === lastMatchIdx && event.data.ok === false;
+      const stepStatus: 'rejected' | 'success' | 'error' = isApprovalRejected
+        ? 'rejected'
+        : event.data.ok
+          ? 'success'
+          : 'error';
+      const steps = matched.steps.map((s, i) => {
+        if (i !== lastMatchIdx) return s;
+        return { ...s, status: stepStatus, ok: event.data.ok, totalLines: event.data.totalLines };
+      });
       if (steps.every((s, i) => s === matched.steps[i]!)) return state;
-      const next: OutputBlock = { ...matched, steps };
+      const next: OutputBlock = {
+        ...matched,
+        steps,
+        awaitingApproval: false,
+        approvingStepIndex: undefined,
+      };
       return replaceBlockById(state, matched.id, next);
     }
     case 'subagent_done': {

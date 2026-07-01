@@ -145,6 +145,19 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
       }
     }
   }
+  // 清除子 agent 的 awaitingApproval / Clear sub-agent awaiting state on cancel
+  const clearedTurns = next.turns.map((turn) => {
+    let changed = false;
+    const blocks = turn.blocks.map((blk) => {
+      if (blk.kind === 'subagent' && blk.status === 'running') {
+        changed = true;
+        return { ...blk, awaitingApproval: false };
+      }
+      return blk;
+    });
+    return changed ? { blocks } : turn;
+  });
+  next = { ...next, turns: clearedTurns };
   return {
     ...settleActiveThought(next),
     running: false,
@@ -368,10 +381,23 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         const b = findBlockById(state, state.interrupt.blockId);
         if (b) {
           if (b.kind === 'approval') {
-            return {
-              ...replaceBlockById(state, b.id, { ...b, resolved: { action: 'cancelled' } }),
-              interrupt: null,
-            };
+            const withResolved = replaceBlockById(state, b.id, {
+              ...b,
+              resolved: { action: 'cancelled' },
+            });
+            // 清除子 agent 的 waiting 状态 / Clear sub-agent awaiting state on Escape
+            const updatedTurns = withResolved.turns.map((turn) => {
+              let changed = false;
+              const blocks = turn.blocks.map((blk) => {
+                if (blk.kind === 'subagent' && blk.status === 'running') {
+                  changed = true;
+                  return { ...blk, awaitingApproval: false };
+                }
+                return blk;
+              });
+              return changed ? { blocks } : turn;
+            });
+            return { ...withResolved, turns: updatedTurns, interrupt: null };
           } else if (b.kind === 'question') {
             return { ...cancelAskUserToolCard(state, b.id), interrupt: null };
           }

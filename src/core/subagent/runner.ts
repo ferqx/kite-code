@@ -173,12 +173,13 @@ export async function resumeSubAgent(
 ): Promise<SubAgentResult> {
   const normalizedInput = { ...input, role: normalizeRoleConfig(input.role) };
   const toolOutput = JSON.stringify(toolResult.result);
+  const actualOk = toolResult.result.ok !== false;
   normalizedInput.eventSink({
     type: 'tool_result',
     data: {
       id: continuation.id,
       toolName: toolResult.toolName,
-      ok: toolResult.result.ok !== false,
+      ok: actualOk,
       summary: toolOutput.slice(0, 200),
       durationMs: 0,
       ...(typeof toolResult.result.totalLines === 'number'
@@ -190,6 +191,20 @@ export async function resumeSubAgent(
         : {}),
     },
   });
+
+  // Sync step snapshot with actual result — the blocked case didn't set ok,
+  // so the last step in the continuation still has ok: undefined.
+  // resumeSubAgent is the authority on the actual tool outcome (approved → ok,
+  // rejected → !ok), so update the snapshot here before the loop continues.
+  const lastStep = continuation.steps[continuation.steps.length - 1];
+  if (lastStep && lastStep.toolName === toolResult.toolName) {
+    lastStep.ok = actualOk;
+    lastStep.status = actualOk
+      ? 'success'
+      : toolResult.result.status === 'rejected'
+        ? 'rejected'
+        : 'error';
+  }
 
   return runSubAgentLoop(normalizedInput, {
     id: continuation.id,
@@ -278,19 +293,22 @@ async function runSubAgentLoop(
         messages.push(response);
         const summary = extractText(response.content);
         const durationMs = Date.now() - startTime;
-        // 如果有步骤被拒绝（ok === false），子 agent 不应标记为 done
+        // 有步骤被拒绝 → 工具级失败，但子 agent 已正常完成运行，仍发 done
         const rejectedSteps = steps.filter((s) => s.ok === false);
         if (rejectedSteps.length > 0) {
           const toolNames = [...new Set(rejectedSteps.map((s) => s.toolName))].join(', ');
-          const rejectionSummary =
-            summary || `Task stopped: ${toolNames} was rejected by approval.`;
           input.eventSink({
             type: 'done',
-            data: { id, summary: rejectionSummary, toolCallCount, durationMs },
+            data: {
+              id,
+              summary: summary || `Tool calls rejected: ${toolNames}`,
+              toolCallCount,
+              durationMs,
+            },
           });
           return {
             ok: false,
-            summary: rejectionSummary,
+            summary: summary || `Tool calls rejected: ${toolNames}`,
             toolCallCount,
             durationMs,
             steps,
@@ -333,6 +351,7 @@ async function runSubAgentLoop(
           steps.push({
             toolName: tc.name,
             toolArgs: (tc.args as Record<string, unknown>) ?? {},
+            status: 'error' as const,
             ok: false,
           });
           continue;
@@ -346,6 +365,7 @@ async function runSubAgentLoop(
         const stepSnapshot: SubAgentStepSnapshot = {
           toolName: tc.name,
           toolArgs,
+          status: 'pending',
         };
         steps.push(stepSnapshot);
         input.eventSink({
@@ -406,26 +426,11 @@ async function runSubAgentLoop(
             continuation,
           );
           if (blocked) {
-            const durationMs = Date.now() - toolStart;
-            const summary = JSON.stringify({ ok: false, blocked });
-            stepSnapshot.ok = false;
-            input.eventSink({
-              type: 'tool_result',
-              data: {
-                id,
-                toolName: tc.name,
-                ok: false,
-                summary: summary.slice(0, 200),
-                durationMs,
-                toolTokenCount: countTokens(summary),
-                failureReason: 'subagent_tool_requires_approval',
-              },
-            });
             clearTimeout(timeoutId);
             const totalDurationMs = Date.now() - startTime;
             return {
               ok: false,
-              summary,
+              summary: JSON.stringify({ ok: false, blocked }),
               toolCallCount,
               durationMs: totalDurationMs,
               error: blocked.message,
@@ -446,6 +451,7 @@ async function runSubAgentLoop(
 
         const durationMs = Date.now() - toolStart;
         stepSnapshot.ok = ok;
+        stepSnapshot.status = ok ? 'success' : 'error';
         if (totalLines != null) stepSnapshot.totalLines = totalLines;
 
         const toolTokenCount = countTokens(toolOutput);

@@ -71,7 +71,9 @@ function toolArgsLabel(name: string, args: Record<string, unknown>, totalLines?:
     case 'shell_execute':
     case 'bash': {
       const c = args.command;
-      return typeof c === 'string' ? c.slice(0, 80) : '';
+      if (typeof c !== 'string') return '';
+      const firstLine = c.split('\n')[0]!;
+      return firstLine.slice(0, 80);
     }
     case 'grep': {
       const q = args.pattern ?? args.query;
@@ -191,135 +193,71 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
     };
   }, []);
 
-  if (block.status === 'running') {
-    const isWaiting = block.awaitingApproval;
-    const spinner = isWaiting ? '○' : SPINNER[spinnerIdx];
-    const stepCount = block.steps.length;
-    const visibleSteps =
-      stepCount > MAX_RUNNING_STEPS ? block.steps.slice(-MAX_RUNNING_STEPS) : block.steps;
-    const skipped = stepCount - MAX_RUNNING_STEPS;
+  // ── Status flags ──
+  const isRunning = block.status === 'running';
+  const isError = block.status === 'error';
+  const isCancelled = block.status === 'cancelled';
+  const isSettled = isError || isCancelled || block.status === 'done';
+  const isWaiting = isRunning && block.awaitingApproval;
 
-    const runDur = formatDuration(liveElapsed);
-    const headRunBefore = stringWidth(`${spinner} ${label} · `);
-    const fitRunTask = truncateToFit(taskSummary, Math.max(0, col - headRunBefore - 2));
+  if (!isRunning && !isSettled) return null;
 
-    return (
-      <Box flexDirection="column">
-        <Box>
-          <Text>{spinner} </Text>
-          <Text color={dt.primary}>{label}</Text>
-          <Text color={dt.muted}> · {fitRunTask}</Text>
-        </Box>
-        {skipped > 0 && (
-          <Box paddingLeft={3}>
-            <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
-          </Box>
-        )}
-        {visibleSteps.map((step, i) => {
-          // 等待审批时 step.ok === false 是因为工具被策略拦截，不是真正的错误
-          const isError = !isWaiting && step.ok === false;
-          const lineColor = isError ? dt.error : dt.dim;
-          return (
-            <Box key={i} paddingLeft={3}>
-              <Text color={lineColor}>├─ {actionName(step.toolName)}</Text>
-              {step.toolArgs &&
-                Object.keys(step.toolArgs).length > 0 &&
-                (() => {
-                  const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
-                  if (!rawLabel) return null;
-                  const stepPreW = stringWidth(`├─ ${actionName(step.toolName)}`);
-                  const fitLabel = truncateToFit(rawLabel, Math.max(0, col - 3 - stepPreW - 2));
-                  return fitLabel ? <Text color={lineColor}> {fitLabel}</Text> : null;
-                })()}
-            </Box>
-          );
-        })}
+  // ── Common: steps ──
+  const stepCount = block.steps.length;
+  const visibleSteps =
+    stepCount > MAX_RUNNING_STEPS ? block.steps.slice(-MAX_RUNNING_STEPS) : block.steps;
+  const skipped = stepCount - MAX_RUNNING_STEPS;
+
+  // ── Header ──
+  const icon = isRunning ? (isWaiting ? '○' : SPINNER[spinnerIdx]) : '●';
+  const headBefore = stringWidth(`${isRunning ? SPINNER[0]! : '●'} ${label} · `);
+  const fitTask = truncateToFit(taskSummary, Math.max(0, col - headBefore - 2));
+
+  // ── Footer ──
+  const foot = isRunning
+    ? isWaiting
+      ? { text: '等待审批中', color: dt.dim }
+      : { text: `进行中 (${formatDuration(liveElapsed)})`, color: dt.dim }
+    : isCancelled
+      ? { text: 'Cancelled', color: dt.warning }
+      : isError
+        ? { text: block.error || 'Error', color: dt.error }
+        : { text: `done! (${formatDuration(block.durationMs)})`, color: dt.dim };
+
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Text color={toolColor(block.status, dt)}>{icon} </Text>
+        <Text color={dt.primary}>{label}</Text>
+        <Text color={dt.muted}> · {fitTask}</Text>
+      </Box>
+      {skipped > 0 && (
         <Box paddingLeft={3}>
-          {isWaiting ? (
-            <Text color={dt.dim}>└─ 等待审批中</Text>
-          ) : (
-            <Text color={dt.dim}>└─ 进行中 ({runDur})</Text>
-          )}
+          <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
         </Box>
-      </Box>
-    );
-  }
-
-  // ── Settled (done, error, or cancelled): same layout as running, with final summary ──
-  const settled =
-    block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
-  if (settled) {
-    const stepCount = block.steps.length;
-    const visibleSteps =
-      stepCount > MAX_RUNNING_STEPS ? block.steps.slice(-MAX_RUNNING_STEPS) : block.steps;
-    const skipped = stepCount - MAX_RUNNING_STEPS;
-    const isError = block.status === 'error';
-    const isCancelled = block.status === 'cancelled';
-    const doneDur = formatDuration(block.durationMs);
-    const headDoneBefore = stringWidth(`● ${label} · `);
-    const fitDoneTask = truncateToFit(taskSummary, Math.max(0, col - headDoneBefore - 2));
-
-    return (
-      <Box flexDirection="column">
-        <Box>
-          <Text color={toolColor(block.status, dt)}>● </Text>
-          <Text color={dt.primary}>{label}</Text>
-          <Text color={dt.muted}> · {fitDoneTask}</Text>
-        </Box>
-        {skipped > 0 && (
-          <Box paddingLeft={3}>
-            <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
+      )}
+      {visibleSteps.map((step, i) => {
+        // 颜色由 step.status 唯一决定，不依赖布尔值排列组合推断
+        const lineColor =
+          step.status === 'error' ? dt.error : step.status === 'rejected' ? dt.warning : dt.dim;
+        return (
+          <Box key={i} paddingLeft={3}>
+            <Text color={lineColor}>├─ {actionName(step.toolName)}</Text>
+            {step.toolArgs &&
+              Object.keys(step.toolArgs).length > 0 &&
+              (() => {
+                const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
+                if (!rawLabel) return null;
+                const stepPreW = stringWidth(`├─ ${actionName(step.toolName)}`);
+                const fitLabel = truncateToFit(rawLabel, Math.max(0, col - 3 - stepPreW - 2));
+                return fitLabel ? <Text color={lineColor}> {fitLabel}</Text> : null;
+              })()}
           </Box>
-        )}
-        {visibleSteps.map((step, i) => {
-          const isError = step.ok === false;
-          const lineColor = isError ? dt.error : dt.dim;
-          return (
-            <Box key={i} paddingLeft={3}>
-              <Text color={lineColor}>├─ {actionName(step.toolName)}</Text>
-              {step.toolArgs &&
-                Object.keys(step.toolArgs).length > 0 &&
-                (() => {
-                  const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
-                  if (!rawLabel) return null;
-                  const stepPreW = stringWidth(`├─ ${actionName(step.toolName)}`);
-                  const fitLabel = truncateToFit(rawLabel, Math.max(0, col - 3 - stepPreW - 2));
-                  return fitLabel ? <Text color={lineColor}> {fitLabel}</Text> : null;
-                })()}
-            </Box>
-          );
-        })}
-        {(() => {
-          if (isCancelled) {
-            const cancelText = block.error || block.summary || 'Cancelled';
-            const fitCancel = truncateToFit(cancelText, Math.max(0, col - 3 - 3 - 2));
-            return (
-              <Box paddingLeft={3}>
-                <Text color={dt.dim}>└─ {fitCancel}</Text>
-              </Box>
-            );
-          }
-          if (isError) {
-            const errText = block.error || 'Error';
-            const fitErr = truncateToFit(errText, Math.max(0, col - 3 - 3 - 2));
-            return (
-              <Box paddingLeft={3}>
-                <Text color={dt.error}>└─ {fitErr}</Text>
-              </Box>
-            );
-          }
-          // done — show with duration
-          const doneLine = `done! (${doneDur})`;
-          const fitDone = truncateToFit(doneLine, Math.max(0, col - 3 - 3 - 2));
-          return (
-            <Box paddingLeft={3}>
-              <Text color={dt.dim}>└─ {fitDone}</Text>
-            </Box>
-          );
-        })()}
+        );
+      })}
+      <Box paddingLeft={3}>
+        <Text color={foot.color}>└─ {truncateToFit(foot.text, Math.max(0, col - 3 - 3 - 2))}</Text>
       </Box>
-    );
-  }
-
-  return null;
+    </Box>
+  );
 }

@@ -203,13 +203,22 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
           typeof rawMsg.content === 'string' ? rawMsg.content : JSON.stringify(rawMsg.content),
         );
         const cancelled = !ok && summary === 'Cancelled';
+        // 子 agent 有步骤 → 正常跑完（即使工具有失败/被拒），非 cancelled 即为 done
+        // 无步骤 + !ok → 启动即失败（真正的 error）
+        const resolvedStatus: 'done' | 'error' | 'cancelled' = ok
+          ? 'done'
+          : cancelled
+            ? 'cancelled'
+            : steps.length > 0
+              ? 'done'
+              : 'error';
         blocks.push({
           id: nextId++,
           kind: 'subagent',
           subagentId: subId,
           role: pending.subagentType,
           task: pending.task,
-          status: ok ? 'done' : cancelled ? 'cancelled' : 'error',
+          status: resolvedStatus,
           summary,
           toolCallCount,
           durationMs,
@@ -361,7 +370,20 @@ function parseTaskResult(content: string): {
   try {
     const p = JSON.parse(content);
     if (p && typeof p === 'object') {
-      const steps = Array.isArray(p.steps) ? (p.steps as SubAgentStepRecord[]) : [];
+      // 迁移旧数据（无 status 字段）：根据 ok 值推断状态
+      // Migrate legacy snapshots that lack a status field
+      const rawSteps = Array.isArray(p.steps) ? (p.steps as Array<Record<string, unknown>>) : [];
+      const steps = rawSteps.map((s) => ({
+        ...s,
+        status:
+          (s.status as SubAgentStepRecord['status']) ??
+          (s.ok === false
+            ? ('error' as const)
+            : s.ok === true
+              ? ('success' as const)
+              : ('pending' as const)),
+        toolArgs: (s.toolArgs ?? {}) as Record<string, unknown>,
+      })) as SubAgentStepRecord[];
       return {
         ok: p.ok !== false,
         summary: (p.summary as string) ?? (p.error as string) ?? '',

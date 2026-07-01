@@ -57,10 +57,13 @@ export interface SubAgentContinuation {
   steps: SubAgentStepSnapshot[];
 }
 
-/** 子 agent 步骤记录（用于持久化到 checkpoint） */
+/** 子 agent 步骤记录（用于持久化到 checkpoint）
+ *  status 与 TUI 的 SubAgentStepRecord.status 保持一致 */
 export interface SubAgentStepSnapshot {
   toolName: string;
   toolArgs: Record<string, unknown>;
+  /** 步生命周期状态（与 TUI SubAgentStepRecord.status 同步） */
+  status: 'pending' | 'awaiting_approval' | 'success' | 'rejected' | 'error';
   ok?: boolean;
   totalLines?: number;
 }
