@@ -199,6 +199,56 @@ export function evaluateToolPolicy(input: {
     });
   }
 
+  if (request.name === 'web_fetch') {
+    const rawUrl = (request.args.url ?? '').trim();
+
+    // URL 隐私扫描：拒绝包含凭证的 URL
+    let urlObj: URL | null = null;
+    try {
+      urlObj = new URL(rawUrl);
+    } catch {
+      /* invalid URL — let extractor.ts report the error */
+    }
+    if (!urlObj) {
+      return deny({
+        risk: 'network',
+        reason: 'Invalid URL format.',
+        userVisibleSummary: 'Blocked a web fetch with an invalid URL.',
+        expectedEffects: ['No request will be sent'],
+      });
+    }
+    // 拒绝 https://user:pass@host
+    if (urlObj.username || urlObj.password) {
+      return deny({
+        risk: 'network',
+        reason: 'URL must not contain embedded credentials (userinfo).',
+        userVisibleSummary: 'Blocked a web fetch to a URL with embedded credentials.',
+        expectedEffects: ['No request will be sent'],
+      });
+    }
+    // 拒绝 query string 中包含疑似 token/key 的长值
+    if (/[?&](?:token|key|secret|password|auth|api_key)=[^&]{20,}/i.test(rawUrl)) {
+      return deny({
+        risk: 'network',
+        reason: 'URL query parameters appear to contain credentials.',
+        userVisibleSummary: 'Blocked a web fetch to a URL containing credentials in query.',
+        expectedEffects: ['No request will be sent'],
+      });
+    }
+
+    // 只读网络工具 — SSRF + 隐私扫描已挡掉危险 URL，直接放行
+    // Read-only network tool — SSRF + privacy scan already block dangerous URLs
+    return allow({
+      risk: 'network',
+      reason: 'Read-only web fetch with SSRF and privacy protection.',
+      userVisibleSummary: `Fetch: ${rawUrl.slice(0, 60)}`,
+      expectedEffects: [
+        'Fetches a public web page',
+        'Extracts and returns clean Markdown or raw text content',
+      ],
+    });
+  }
+
   if (
     request.name === 'read_file' ||
     request.name === 'search_content' ||

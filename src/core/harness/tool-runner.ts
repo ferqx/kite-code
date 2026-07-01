@@ -11,6 +11,7 @@ import {
 import { type ShellExecutor, shellTool } from '@/core/tools/shell';
 import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type { AuthorizationOverride, ShellResult, ThreadAuthorizationState } from '@/core/types';
+import { fetchAndExtract } from '@/core/web/extractor';
 import type { AgentPhase, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 import {
   defaultPhaseForWorkspaceAccess,
@@ -394,6 +395,54 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
   }
 
+  if (request.name === 'web_fetch') {
+    try {
+      const result = await fetchAndExtract(request.args.url ?? '', {
+        signal,
+        maxChars: request.args.max_chars,
+        timeoutMs: request.args.timeout_ms,
+      });
+      const stdout = result.ok
+        ? [
+            `Fetched: ${result.title ?? result.finalUrl ?? request.args.url}`,
+            result.contentType ? `Type: ${result.contentType}` : '',
+            result.truncated ? '(content truncated)' : '',
+            '',
+            result.content ?? '',
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : `Failed to fetch ${request.args.url}: ${result.error ?? 'unknown error'}`;
+
+      // 截断上限对齐 max_chars（含标题/元数据行的开销，+500 余量）
+      // truncation limit matches max_chars (with ~500 char overhead for metadata lines)
+      const contentLimit = Math.max(8000, (request.args.max_chars ?? 8000) + 500);
+      return withFailureGuidance(request, {
+        ok: result.ok,
+        command: `web_fetch ${request.args.url ?? ''}`,
+        exitCode: result.ok ? 0 : -1,
+        stdout: truncateToolOutput(stdout, contentLimit),
+        stderr: result.error ?? '',
+      });
+    } catch (error) {
+      const isAbort = error instanceof Error && error.name === 'AbortError';
+      const isTimeout = isAbort && error.message === 'Fetch timeout';
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `web_fetch ${request.args.url ?? ''}`,
+        exitCode: isTimeout ? 124 : isAbort ? 130 : -1,
+        stdout: '',
+        stderr: isTimeout
+          ? 'Fetch timed out.'
+          : isAbort
+            ? 'Web fetch cancelled by user.'
+            : error instanceof Error
+              ? error.message
+              : String(error),
+      });
+    }
+  }
+
   if (request.name === 'shell_execute') {
     const raw = await runShellForTool(
       workspace,
@@ -519,6 +568,8 @@ function toolUsageGuidance(request: PendingToolRequest): string {
       return 'Use update_plan with a complete plan object: name, description, status, and ordered steps with statuses. It must only update planning state and must not mutate the workspace.';
     case 'ask_user':
       return 'Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.';
+    case 'web_fetch':
+      return 'Use web_fetch with a complete http/https URL. Verify the URL is public and accessible before calling. If fetch fails with HTTP error, the page may not exist or may be behind authentication. If readability fails, the page may not be a text article — try a different source.';
     case 'Skill':
       return 'Use Skill with the name of a skill from the Available Skills list. The skill name must exactly match. Only use skills listed in the system prompt under Available Skills.';
     default:

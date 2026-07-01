@@ -117,6 +117,13 @@ export type PendingToolRequest =
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
       protectedCommand: string;
+    }
+  | {
+      id?: string;
+      name: 'web_fetch';
+      args: { url: string; max_chars?: number; timeout_ms?: number };
+      reason: string;
+      protectedCommand: string;
     };
 
 /** 从消息列表中获取待处理的工具请求 / Get pending tool request from message list
@@ -345,6 +352,17 @@ function toolRequestFromCall(
     };
   }
 
+  if (call.name === 'web_fetch') {
+    const args = call.args as { url?: string; max_chars?: number; timeout_ms?: number };
+    return {
+      id: call.id,
+      name: 'web_fetch',
+      args: { url: args.url || '', max_chars: args.max_chars, timeout_ms: args.timeout_ms },
+      reason: 'Model requested web page fetch',
+      protectedCommand: `web_fetch ${args.url || ''}`,
+    };
+  }
+
   return null;
 }
 
@@ -501,6 +519,17 @@ export function toolRequestFromMessage(
       },
       reason: 'Model requested sub-agent dispatch',
       protectedCommand: 'task',
+    };
+  }
+
+  if (call.name === 'web_fetch') {
+    const args = call.args as { url?: string; max_chars?: number; timeout_ms?: number };
+    return {
+      id: call.id,
+      name: 'web_fetch',
+      args: { url: args.url || '', max_chars: args.max_chars, timeout_ms: args.timeout_ms },
+      reason: 'Model requested web page fetch',
+      protectedCommand: `web_fetch ${args.url || ''}`,
     };
   }
 
