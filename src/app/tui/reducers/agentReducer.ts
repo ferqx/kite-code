@@ -251,9 +251,13 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       const updatedTurns = withResolved.turns.map((turn) => {
         let changed = false;
         const blocks = turn.blocks.map((blk) => {
-          if ((blk.kind === 'tool_card' || blk.kind === 'subagent') && blk.status === 'running') {
+          if (blk.kind === 'tool_card' && blk.status === 'running') {
             changed = true;
             return { ...blk, startedAt: now };
+          }
+          if (blk.kind === 'subagent' && blk.status === 'running') {
+            changed = true;
+            return { ...blk, startedAt: now, awaitingApproval: false };
           }
           return blk;
         });

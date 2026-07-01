@@ -96,6 +96,8 @@ export type OutputBlock =
       expanded?: boolean;
       cacheHitTokens?: number;
       cacheMissTokens?: number;
+      /** 子 agent 正在等待工具审批 / Sub-agent is awaiting tool approval */
+      awaitingApproval?: boolean;
     };
 
 /** 一次完整的「用户提问 → Agent 回复」往返 */

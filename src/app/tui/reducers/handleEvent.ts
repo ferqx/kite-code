@@ -804,10 +804,32 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         kind: 'approval',
         approval: event.data,
       };
-      return {
+      let next = {
         ...appendBlock(finalized, block),
-        interrupt: { kind: 'approval', blockId: block.id },
+        interrupt: { kind: 'approval' as const, blockId: block.id },
       };
+      // 如果是子 agent 的工具需要审批，标记该子 agent 为等待审批状态
+      if (event.data.subagentId) {
+        next = {
+          ...next,
+          turns: next.turns.map((turn) => {
+            let changed = false;
+            const blocks = turn.blocks.map((blk) => {
+              if (
+                blk.kind === 'subagent' &&
+                blk.subagentId === event.data.subagentId &&
+                blk.status === 'running'
+              ) {
+                changed = true;
+                return { ...blk, awaitingApproval: true };
+              }
+              return blk;
+            });
+            return changed ? { ...turn, blocks } : turn;
+          }),
+        };
+      }
+      return next;
     }
     case 'need_input': {
       const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
@@ -907,6 +929,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       const next: OutputBlock = {
         ...matched,
         steps: [...matched.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }],
+        awaitingApproval: false, // 新步骤到来时清除等待状态
       };
       return replaceBlockById(state, matched.id, next);
     }

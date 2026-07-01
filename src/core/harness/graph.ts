@@ -254,6 +254,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       request,
       decision: policy,
     });
+    // 标记子 agent 审批来源，TUI 据此暂停该子 agent 的加载动画
+    if (pendingSubagent) {
+      approvalPayload.subagentId = pendingSubagent.continuation.id;
+    }
 
     let approved:
       | boolean
@@ -327,10 +331,23 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         : typeof approved === 'object' && approved !== null
           ? (approved.reason ?? 'not approved')
           : 'not approved';
+      // 子 agent 审批被拒 → 注入拒绝结果并恢复子 agent，让它尝试其他方法
+      // Sub-agent approval rejected → inject rejection result so it can try alternatives
+      if (pendingSubagent) {
+        Object.assign(
+          batch,
+          issuePermit({
+            batch,
+            workspace: state.workspace,
+            threadId: state.threadId,
+            request: pendingSubagent.request,
+            grant: 'none',
+          }),
+        );
+        return { approvedBatch: batch };
+      }
       return {
-        ...(pendingSubagent
-          ? rejectedSubagentTaskMessage(pendingSubagent, reason)
-          : rejectedToolMessage(request, reason)),
+        ...rejectedToolMessage(request, reason),
         approvedBatch: batch,
       };
     }
@@ -341,10 +358,21 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         approvedRequest = replaceApprovalCommand(request, approved.replacementCommand);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
+        if (pendingSubagent) {
+          Object.assign(
+            batch,
+            issuePermit({
+              batch,
+              workspace: state.workspace,
+              threadId: state.threadId,
+              request: pendingSubagent.request,
+              grant: 'none',
+            }),
+          );
+          return { approvedBatch: batch };
+        }
         return {
-          ...(pendingSubagent
-            ? rejectedSubagentTaskMessage(pendingSubagent, reason)
-            : rejectedToolMessage(request, reason)),
+          ...rejectedToolMessage(request, reason),
           approvedBatch: batch,
         };
       }
@@ -369,10 +397,21 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     });
     if (!approvedPolicy.allowed) {
       const reason = `approved command rejected by tool policy: ${approvedPolicy.reason}`;
+      if (pendingSubagent) {
+        Object.assign(
+          batch,
+          issuePermit({
+            batch,
+            workspace: state.workspace,
+            threadId: state.threadId,
+            request: pendingSubagent.request,
+            grant: 'none',
+          }),
+        );
+        return { approvedBatch: batch };
+      }
       return {
-        ...(pendingSubagent
-          ? rejectedSubagentTaskMessage(pendingSubagent, reason)
-          : rejectedToolMessage(request, reason)),
+        ...rejectedToolMessage(request, reason),
         approvedBatch: batch,
       };
     }
@@ -744,6 +783,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         },
       );
 
+      // 审批被拒时，修改 stderr 告诉子 agent 不要重试同一工具
+      // When approval was rejected, rewrite stderr so the sub-agent knows to try alternatives
+      const resumeResult =
+        grantUsed === 'none' && result.status === 'rejected'
+          ? {
+              ...result,
+              stderr: `The user rejected this ${request.name} call. Try a completely different approach — use alternative tools, different arguments, or explain why the task cannot be completed.`,
+            }
+          : result;
+
       const resumed = await resumeSubAgent(
         {
           config: input.config,
@@ -771,7 +820,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         {
           toolCallId: request.id ?? '',
           toolName: request.name,
-          result,
+          result: resumeResult,
         },
       );
 
@@ -1065,32 +1114,5 @@ function rejectedToolMessage(
         status: 'error',
       }),
     ],
-  };
-}
-
-function rejectedSubagentTaskMessage(
-  pending: NonNullable<CodeAgentState['pendingSubagentApproval']>,
-  reason: string,
-) {
-  return {
-    messages: [
-      new ToolMessage({
-        content: JSON.stringify({
-          ok: false,
-          rejected: true,
-          reason,
-          blocked: {
-            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-            toolCallId: pending.request.id,
-            toolName: pending.request.name,
-            args: pending.request.args,
-          },
-        }),
-        tool_call_id: pending.taskCallId,
-        name: 'task',
-        status: 'error',
-      }),
-    ],
-    pendingSubagentApproval: null,
   };
 }

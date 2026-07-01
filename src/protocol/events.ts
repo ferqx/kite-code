@@ -239,6 +239,8 @@ export interface ToolApprovalPayload {
   suggestedPrefixRule?: string[];
   /** update_plan 的方案数据（审批时嵌入） */
   plan?: AgentPlan;
+  /** 子 agent ID，当审批来自子 agent 的工具调用时填充 / Sub-agent ID when approval originates from a sub-agent's tool call */
+  subagentId?: string;
 }
 
 // ── 子 Agent 事件 / Sub-agent events ──

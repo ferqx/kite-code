@@ -278,6 +278,25 @@ async function runSubAgentLoop(
         messages.push(response);
         const summary = extractText(response.content);
         const durationMs = Date.now() - startTime;
+        // 如果有步骤被拒绝（ok === false），子 agent 不应标记为 done
+        const rejectedSteps = steps.filter((s) => s.ok === false);
+        if (rejectedSteps.length > 0) {
+          const toolNames = [...new Set(rejectedSteps.map((s) => s.toolName))].join(', ');
+          const rejectionSummary =
+            summary || `Task stopped: ${toolNames} was rejected by approval.`;
+          input.eventSink({
+            type: 'done',
+            data: { id, summary: rejectionSummary, toolCallCount, durationMs },
+          });
+          return {
+            ok: false,
+            summary: rejectionSummary,
+            toolCallCount,
+            durationMs,
+            steps,
+            error: `Tool calls rejected: ${toolNames}`,
+          };
+        }
         input.eventSink({
           type: 'done',
           data: { id, summary, toolCallCount, durationMs },

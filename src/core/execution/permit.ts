@@ -1,9 +1,9 @@
 import { hashToolApprovalRequest } from '@/core/harness/tool-policy';
 import type { PendingToolRequest } from '@/core/harness/tool-requests';
-import type { ShellApprovalGrant } from '@/protocol/events';
+import type { ShellGrantUsed } from '@/protocol/events';
 
 export interface PermitEntry {
-  grant: ShellApprovalGrant;
+  grant: ShellGrantUsed;
   argsHash: string;
   consumed: boolean;
 }
@@ -34,7 +34,7 @@ export function issuePermit(input: {
   workspace: string;
   threadId: string;
   request: PendingToolRequest;
-  grant: ShellApprovalGrant;
+  grant: ShellGrantUsed;
 }): PermitBatch {
   if (!input.request.id) return input.batch;
   return {
@@ -56,7 +56,7 @@ export function claimPermit(input: {
   workspace: string;
   threadId: string;
   request: PendingToolRequest;
-}): { ok: true; grant: ShellApprovalGrant } | { ok: false; reason: string } {
+}): { ok: true; grant: ShellGrantUsed } | { ok: false; reason: string } {
   const id = input.request.id;
   if (!id) return { ok: false, reason: 'No valid permit for this tool call.' };
   const permit = input.batch[id];

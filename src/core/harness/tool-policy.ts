@@ -46,6 +46,7 @@ export interface ToolApprovalPayload {
   suggestedPrefixRule?: string[];
   grantOptions: ShellApprovalGrant[];
   recommendedGrant: ShellApprovalGrant;
+  subagentId?: string;
 }
 
 /** 创建默认 thread 授权状态 / Create default thread authorization state */

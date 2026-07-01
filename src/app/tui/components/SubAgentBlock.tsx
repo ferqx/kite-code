@@ -167,11 +167,11 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const spinnerRunningRef = useRef(false);
 
   useEffect(() => {
-    const shouldRun = block.status === 'running';
+    const shouldRun = block.status === 'running' && !block.awaitingApproval;
     spinnerRunningRef.current = shouldRun;
     if (shouldRun) spinnerStartRef.current = Date.now();
     else setSpinnerIdx(0);
-  }, [block.status]);
+  }, [block.status, block.awaitingApproval]);
 
   // Single persistent timer — never restarts. Reads running state from ref.
   useEffect(() => {
@@ -192,7 +192,8 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   }, []);
 
   if (block.status === 'running') {
-    const spinner = SPINNER[spinnerIdx];
+    const isWaiting = block.awaitingApproval;
+    const spinner = isWaiting ? '○' : SPINNER[spinnerIdx];
     const stepCount = block.steps.length;
     const visibleSteps =
       stepCount > MAX_RUNNING_STEPS ? block.steps.slice(-MAX_RUNNING_STEPS) : block.steps;
@@ -215,7 +216,8 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           </Box>
         )}
         {visibleSteps.map((step, i) => {
-          const isError = step.ok === false;
+          // 等待审批时 step.ok === false 是因为工具被策略拦截，不是真正的错误
+          const isError = !isWaiting && step.ok === false;
           const lineColor = isError ? dt.error : dt.dim;
           return (
             <Box key={i} paddingLeft={3}>
@@ -233,7 +235,11 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
           );
         })}
         <Box paddingLeft={3}>
-          <Text color={dt.dim}>└─ 进行中 ({runDur})</Text>
+          {isWaiting ? (
+            <Text color={dt.dim}>└─ 等待审批中</Text>
+          ) : (
+            <Text color={dt.dim}>└─ 进行中 ({runDur})</Text>
+          )}
         </Box>
       </Box>
     );
