@@ -1,7 +1,12 @@
+import type { AgentConfig } from '@/core/config/index';
+import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpManager } from '@/core/mcp';
 import { parseMcpToolName } from '@/core/mcp/tool-adapter';
+import type { SupportedChatModel } from '@/core/model/factory';
 import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import { createTaskTool } from '@/core/subagent/task-tool';
+import type { SubAgentEventSink } from '@/core/subagent/types';
 import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '@/core/tools/file';
 import {
@@ -36,8 +41,22 @@ export interface RunApprovedToolInput {
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   signal?: AbortSignal;
+  permitBatch?: PermitBatch;
+  interactionMode?: 'interactive' | 'auto_review' | 'unattended';
+  taskConfig?: AgentConfig;
+  taskModel?: SupportedChatModel;
+  subagentEventSink?: SubAgentEventSink;
   /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+  /**
+   * 执行上下文：main 表示主 agent graph 中执行，subagent 表示子 agent 中执行。
+   * 子 agent 无审批节点可走，其安全由角色配置 (allowedTools + wrapReadOnlyShell) 负责，
+   * 不应再经过 defense-in-depth 审批检查。
+   * Execution context: 'main' for graph execution, 'subagent' for sub-agent execution.
+   * Sub-agents cannot route through approval nodes — their safety is enforced by
+   * role configuration (allowedTools + wrapReadOnlyShell). Defaults to 'main'.
+   */
+  executionContext?: 'main' | 'subagent';
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -57,6 +76,12 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     skillManifests,
     skillOptions,
     signal,
+    permitBatch,
+    interactionMode = 'interactive',
+    taskConfig,
+    taskModel,
+    subagentEventSink,
+    executionContext = 'main',
   } = input;
   // 合成调用：parseToolCall 失败后由 invokeModel 注入 _raw_invalid_args 标记。
   // 跳过正常执行，直接生成工具特定的错误反馈让模型重试。
@@ -95,19 +120,44 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       exitCode: -1,
       stdout: '',
       stderr: `Rejected by tool policy: ${policy.reason}`,
+      status: 'rejected',
     });
   }
 
-  // 防御性检查：需要审批的工具必须经过审批节点，不能以 approvedGrant='none' 直达
-  // Defense-in-depth: tools requiring approval MUST pass through the approval node
-  if (policy.requiresApproval && approvedGrant === 'none') {
+  // 防御性检查：需要审批的工具在子 agent 上下文中跳过——子 agent 的安全
+  // 由角色配置负责（allowedTools 过滤 + wrapReadOnlyShell 拦截 shell 命令）。
+  // 在主 agent 上下文中必须经过审批节点，不能以 approvedGrant='none' 直达。
+  // Defense-in-depth: skip for subagent contexts — sub-agent safety is enforced by
+  // role configuration (allowedTools filtering + wrapReadOnlyShell for shell commands).
+  // In main context, tools requiring approval MUST pass through the approval node.
+  if (executionContext !== 'subagent' && policy.requiresApproval && approvedGrant === 'none') {
     return withFailureGuidance(request, {
       ok: false,
       command: request.protectedCommand,
       exitCode: -1,
       stdout: '',
       stderr: `Rejected by tool policy: ${request.name} requires approval but was not approved.`,
+      status: 'rejected',
     });
+  }
+
+  if (permitBatch && request.id && (policy.requiresApproval || permitBatch[request.id])) {
+    const claimed = claimPermit({
+      batch: permitBatch,
+      workspace,
+      threadId,
+      request,
+    });
+    if (!claimed.ok) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr: claimed.reason,
+        status: 'rejected',
+      });
+    }
   }
 
   if (request.name === 'update_plan') {
@@ -119,6 +169,61 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stderr: '',
       plan: request.args,
     });
+  }
+
+  if (request.name === 'task') {
+    if (!taskConfig || !subagentEventSink) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: 'task',
+        exitCode: -1,
+        stdout: '',
+        stderr: 'task tool is unavailable in this execution context.',
+        status: 'error',
+      });
+    }
+    try {
+      const taskTool = createTaskTool({
+        config: taskConfig,
+        workspace,
+        shellExecutor,
+        mcpManager,
+        skills: skillManifests,
+        skillOptions,
+        authorization: normalizeAuthorizationState(authorization),
+        workspaceAccess,
+        phase,
+        threadId,
+        eventSink: subagentEventSink,
+        signal,
+        model: taskModel,
+      });
+      const output = await taskTool.invoke(request.args);
+      let ok = true;
+      try {
+        const parsed = JSON.parse(output);
+        ok = parsed.ok !== false;
+      } catch {
+        /* plain-text task result */
+      }
+      return withFailureGuidance(request, {
+        ok,
+        command: 'task',
+        exitCode: ok ? 0 : -1,
+        stdout: output,
+        stderr: ok ? '' : output,
+        status: ok ? 'success' : 'error',
+      });
+    } catch (error) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: 'task',
+        exitCode: -1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+        status: 'error',
+      });
+    }
   }
 
   if (request.name === 'read_file') {
@@ -229,6 +334,25 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'ask_user') {
+    if (interactionMode === 'unattended') {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: 'ask_user',
+        exitCode: -1,
+        stdout: '',
+        stderr: JSON.stringify({
+          ok: false,
+          rejected: true,
+          replan: {
+            reasonCode: 'UNATTENDED_NO_USER_INTERACTION',
+            reason:
+              'Unattended mode cannot ask the user. Make the best safe assumption and continue.',
+            blockedCapability: 'ask_user',
+          },
+        }),
+        status: 'rejected',
+      });
+    }
     return withFailureGuidance(request, {
       ok: false,
       command: 'ask_user',

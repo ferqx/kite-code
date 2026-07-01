@@ -45,6 +45,9 @@ export interface CreateAgentToolsInput {
   maxDepth?: number;
   /** 线程 ID，用于多 session 缓存隔离 / Thread ID for multi-session cache isolation */
   threadId?: string;
+  authorization?: import('@/core/types').ThreadAuthorizationState;
+  workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
+  phase?: import('@/protocol/events').AgentPhase;
 }
 
 /** 模块级工具缓存：按 cacheKey 隔离，防止多 session 并发时竞态覆盖 / Module-level tool cache isolated by cacheKey to prevent race conditions with concurrent sessions */
@@ -70,7 +73,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       name: 'read_file',
       description: READ_FILE_CONTRACT.description,
       schema: z.object({
-        path: z.string().describe('Path to the file (relative to workspace, or absolute)'),
+        path: z.string().describe('Path to the file, relative to workspace'),
         offset: z.number().optional().describe('Starting line number (1-indexed, default 1)'),
         limit: z.number().optional().describe('Maximum number of lines to read'),
       }),
@@ -92,7 +95,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       name: 'edit_file',
       description: EDIT_FILE_CONTRACT.description,
       schema: z.object({
-        path: z.string().describe('Path to the file to edit (relative to workspace, or absolute)'),
+        path: z.string().describe('Path to the file to edit, relative to workspace'),
         old_string: z
           .string()
           .describe(
@@ -120,7 +123,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
       name: 'write_file',
       description: WRITE_FILE_CONTRACT.description,
       schema: z.object({
-        path: z.string().describe('Path to the file (relative to workspace, or absolute)'),
+        path: z.string().describe('Path to the file, relative to workspace'),
         content: z.string().describe('Complete file content to write'),
         mode: z
           .enum(['overwrite', 'append'])
@@ -256,6 +259,10 @@ export function createAgentTools(input: CreateAgentToolsInput) {
           mcpManager: input.mcpManager,
           skills: input.skills,
           skillOptions: input.skillOptions,
+          authorization: input.authorization,
+          workspaceAccess: input.workspaceAccess,
+          phase: input.phase,
+          threadId: input.threadId,
           eventSink: input.subagentEventSink,
           signal: input.subagentSignal,
           maxDepth: input.maxDepth,
@@ -436,6 +443,7 @@ function createAskUserTool() {
 const PLAN_READ_ONLY_COMMANDS = new Set([
   'awk',
   'cat',
+  'cut',
   'du',
   'echo',
   'file',
@@ -447,9 +455,12 @@ const PLAN_READ_ONLY_COMMANDS = new Set([
   'pwd',
   'rg',
   'sed',
+  'sort',
   'stat',
   'tail',
   'test',
+  'tr',
+  'uniq',
   'wc',
 ]);
 

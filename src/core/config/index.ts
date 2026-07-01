@@ -41,12 +41,22 @@ const mcpServerSchema = z.object({
   timeout: z.number().optional(),
 });
 
+const interactionModeSchema = z.enum(['interactive', 'auto_review', 'unattended']);
+
 export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
   /** @deprecated Use provider[name].models instead */
   models: z.array(legacyModelEntrySchema).optional(),
   theme: z.enum(['dark', 'light']).optional(),
   colorPreset: z.string().optional(),
+  interactionMode: interactionModeSchema.optional(),
+  autoReview: z
+    .object({
+      provider: z.string().optional(),
+      model: z.string().optional(),
+      timeoutMs: z.number().int().positive().optional(),
+    })
+    .optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });
 
@@ -74,6 +84,12 @@ export interface AgentConfig {
   reasoning?: boolean;
   /** 透传给 LangChain 模型构造器的额外参数 */
   modelKwargs?: Record<string, unknown>;
+  interactionMode?: z.infer<typeof interactionModeSchema>;
+  autoReview?: {
+    provider?: string;
+    model?: string;
+    timeoutMs?: number;
+  };
 }
 
 /** 加载配置选项 / Configuration loading options */
@@ -117,6 +133,8 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     models: project.models ?? user.models,
     theme: project.theme ?? user.theme,
     colorPreset: project.colorPreset ?? user.colorPreset,
+    interactionMode: project.interactionMode ?? user.interactionMode,
+    autoReview: project.autoReview ?? user.autoReview,
     mcpServers: { ...user.mcpServers, ...project.mcpServers },
   };
 }
@@ -154,6 +172,7 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
       },
     },
     theme: 'dark',
+    interactionMode: 'interactive',
     mcpServers: {},
   };
 }
@@ -188,6 +207,8 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     reasoningEffort,
     reasoning,
     modelKwargs: provider.modelKwargs as Record<string, unknown> | undefined,
+    interactionMode: cfg.interactionMode,
+    autoReview: cfg.autoReview,
   };
 }
 

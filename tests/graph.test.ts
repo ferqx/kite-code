@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AIMessage, type BaseMessage, ToolMessage } from '@langchain/core/messages';
 import {
   routeAfterAgent,
@@ -710,21 +713,26 @@ describe('graph local tool routing', () => {
 
   // 验证 building 阶段下 write_file 通过审批后正常执行 / Write tools execute normally during building phase after approval
   test('allows write tools during building phase after approval', async () => {
-    const result = await runApprovedTool({
-      workspace: '/tmp/workspace',
-      request: {
-        id: 'call-1',
-        name: 'write_file',
-        args: { path: 'hello.txt', content: 'hi' },
-        reason: 'Write file',
-        protectedCommand: 'write_file hello.txt',
-      },
-      workspaceAccess: 'write',
-      approvedGrant: 'approve_once',
-    });
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-graph-write-'));
+    try {
+      const result = await runApprovedTool({
+        workspace,
+        request: {
+          id: 'call-1',
+          name: 'write_file',
+          args: { path: 'hello.txt', content: 'hi' },
+          reason: 'Write file',
+          protectedCommand: 'write_file hello.txt',
+        },
+        workspaceAccess: 'write',
+        approvedGrant: 'approve_once',
+      });
 
-    expect(result.ok).toBe(true);
-    expect(result.tool).toBe('write_file');
+      expect(result.ok).toBe(true);
+      expect(result.tool).toBe('write_file');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   // 验证 planning phase 是独立的执行边界，执行类工具会在 runner 兜底拒绝 / Planning phase is an execution boundary enforced by the runner
@@ -925,7 +933,11 @@ describe('routeEntry — start-of-graph routing', () => {
     authorization: defaultAuthorizationState(),
     approvedToolRequest: null,
     approvedToolGrant: null,
-    approvedBatch: {} as Record<string, 'approve_once' | 'same_command' | 'full_access'>,
+    approvedBatch: {},
+    executionEnvironment: 'local_unsafe' as const,
+    interactionMode: 'interactive' as const,
+    executionJournal: [],
+    exhaustedFingerprints: {},
     contextBudget: undefined,
     plan: null,
     planReviewed: false,

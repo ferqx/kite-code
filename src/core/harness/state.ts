@@ -1,5 +1,7 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
+import type { ExecutionJournalEntry } from '@/core/execution/journal';
+import type { PermitBatch } from '@/core/execution/permit';
 import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, AgentPlan, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 import { defaultAuthorizationState } from './tool-policy';
@@ -35,8 +37,24 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => null,
   }),
-  /** 当前批次中已审批工具的授权映射 (call_id → grant)，tools 节点消费后清空 */
-  approvedBatch: Annotation<Record<string, 'approve_once' | 'same_command' | 'full_access'>>({
+  /** 当前批次中已审批工具的 Permit 映射 (call_id → permit)，tools 节点消费后清空 */
+  approvedBatch: Annotation<PermitBatch>({
+    reducer: (_left, right) => right,
+    default: () => ({}),
+  }),
+  executionEnvironment: Annotation<'local_unsafe' | 'workspace_sandbox'>({
+    reducer: (_left, right) => right,
+    default: () => 'local_unsafe',
+  }),
+  interactionMode: Annotation<'interactive' | 'auto_review' | 'unattended'>({
+    reducer: (_left, right) => right,
+    default: () => 'interactive',
+  }),
+  executionJournal: Annotation<ExecutionJournalEntry[]>({
+    reducer: (_left, right) => right,
+    default: () => [],
+  }),
+  exhaustedFingerprints: Annotation<Record<string, true>>({
     reducer: (_left, right) => right,
     default: () => ({}),
   }),

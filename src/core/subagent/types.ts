@@ -33,6 +33,10 @@ export interface SubAgentRunnerInput {
   mcpManager?: import('@/core/mcp').McpManager;
   skills?: import('@/core/skills/types').SkillManifest[];
   skillOptions?: import('@/core/skills/types').SkillScanOptions;
+  authorization?: import('@/core/types').ThreadAuthorizationState;
+  workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
+  phase?: import('@/protocol/events').AgentPhase;
+  threadId?: string;
   model?: import('@/core/model/factory').SupportedChatModel;
   timeoutMs: number;
   signal: AbortSignal;

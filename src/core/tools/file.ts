@@ -1,6 +1,12 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, resolve, sep } from 'node:path';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { msys2ToWindowsPath } from './path-utils';
 
 // ============================================================================
@@ -16,17 +22,55 @@ function normalizeEOL(content: string): string {
 // 路径解析 / Path resolution
 // ============================================================================
 
-function resolvePath(workspace: string, filePath: string): string {
+export function resolvePath(workspace: string, filePath: string): string {
   // MSYS2 路径先于 normalize 处理：/d/foo → D:\foo
   const asWindows = msys2ToWindowsPath(filePath);
   const normalized = asWindows.replace(/[\\/]+/g, sep);
-  const expanded =
-    normalized === '~'
-      ? homedir()
-      : normalized.startsWith(`~${sep}`)
-        ? homedir() + normalized.slice(1)
-        : normalized;
-  return resolve(workspace, expanded);
+  if (!normalized || normalized === '~' || normalized.startsWith(`~${sep}`)) {
+    throw new Error(`Path is outside workspace: ${filePath}`);
+  }
+  if (isAbsolute(normalized)) {
+    throw new Error(`Absolute paths are not allowed for file tools: ${filePath}`);
+  }
+  const target = resolve(workspace, normalized);
+  assertInsideWorkspace(workspace, target, filePath);
+  return target;
+}
+
+function assertInsideWorkspace(workspace: string, target: string, originalPath: string): void {
+  const workspaceReal = realpathSync(workspace);
+  const nearest = nearestExistingPath(target);
+  const nearestReal = realpathSync(nearest);
+  if (!isPathInside(workspaceReal, nearestReal)) {
+    throw new Error(`Path is outside workspace: ${originalPath}`);
+  }
+  if (existsSync(target)) {
+    const targetReal = realpathSync(target);
+    if (!isPathInside(workspaceReal, targetReal)) {
+      throw new Error(`Path is outside workspace: ${originalPath}`);
+    }
+  }
+}
+
+function nearestExistingPath(path: string): string {
+  let current = path;
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) return parent;
+    current = parent;
+  }
+  return current;
+}
+
+function isPathInside(parent: string, child: string): boolean {
+  const parentNorm = normalizeForCompare(parent);
+  const childNorm = normalizeForCompare(child);
+  const rel = relative(parentNorm, childNorm);
+  return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel));
+}
+
+function normalizeForCompare(path: string): string {
+  return process.platform === 'win32' ? path.toLowerCase() : path;
 }
 
 // ============================================================================
@@ -663,6 +707,7 @@ export interface WriteFileResult {
 
 export function writeFile(input: WriteFileInput): WriteFileResult {
   try {
+    mkdirSync(input.workspace, { recursive: true });
     const target = resolvePath(input.workspace, input.path);
     mkdirSync(dirname(target), { recursive: true });
 

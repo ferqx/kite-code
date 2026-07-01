@@ -16,6 +16,10 @@ export interface TaskToolDeps {
   mcpManager?: McpManager;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
+  authorization?: import('@/core/types').ThreadAuthorizationState;
+  workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
+  phase?: import('@/protocol/events').AgentPhase;
+  threadId?: string;
   eventSink: SubAgentEventSink;
   signal?: AbortSignal;
   /** 可选自定义模型实例（用于 E2E mock）/ Optional custom model instance (for E2E mock) */
@@ -55,6 +59,10 @@ export function createTaskTool(deps: TaskToolDeps) {
           mcpManager: deps.mcpManager,
           skills: deps.skills,
           skillOptions: deps.skillOptions,
+          authorization: deps.authorization,
+          workspaceAccess: deps.workspaceAccess,
+          phase: deps.phase,
+          threadId: deps.threadId,
           timeoutMs: 30 * 60 * 1000, // 30 分钟
           signal,
           eventSink: deps.eventSink,

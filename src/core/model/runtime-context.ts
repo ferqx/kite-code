@@ -114,7 +114,7 @@ export function buildCacheableRuntimeContext(input: CacheableRuntimeContextInput
   // Only add POSIX path hint on Windows+bash, so the model doesn't use MSYS2 paths for file tools
   if (osPlatform === 'win32') {
     lines.push(
-      `Note: for shell_execute commands, convert Windows paths to POSIX: replace backslashes with /, and change D:\\ to /d/. Example: ${workspace} → ${posixWorkspace}. File tools (read_file, edit_file, write_file) accept Windows paths directly.`,
+      `Note: for shell_execute commands, convert Windows paths to POSIX: replace backslashes with /, and change D:\\ to /d/. Example: ${workspace} → ${posixWorkspace}. File tools (read_file, edit_file, write_file) require paths relative to the workspace.`,
     );
   }
   return lines.join('\n');

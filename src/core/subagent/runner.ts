@@ -1,14 +1,18 @@
 // src/core/subagent/runner.ts
 
+import { isAbsolute, relative, resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
 import { type AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import { ChatOllama } from '@langchain/ollama';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
+import { toolRequestFromCall } from '@/core/harness/tool-requests';
+import { runApprovedTool } from '@/core/harness/tool-runner';
 import { createChatModel } from '@/core/model/factory';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
 import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
+import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { SubAgentResult, SubAgentRunnerInput, SubAgentStepSnapshot } from './types';
 
@@ -58,6 +62,29 @@ function bindTools(
 let _subAgentCounter = 0;
 function nextSubAgentId(): string {
   return `sub-${Date.now().toString(36)}-${_subAgentCounter++}`;
+}
+
+function normalizeSubAgentToolArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+  workspace: string,
+): Record<string, unknown> {
+  if (
+    (toolName !== 'read_file' && toolName !== 'edit_file' && toolName !== 'write_file') ||
+    typeof args.path !== 'string'
+  ) {
+    return args;
+  }
+
+  const rawPath = msys2ToWindowsPath(args.path);
+  if (!isAbsolute(rawPath)) return args;
+
+  const workspaceRoot = resolve(workspace);
+  const rel = relative(workspaceRoot, rawPath);
+  if (rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel))) {
+    return { ...args, path: rel || '.' };
+  }
+  return args;
 }
 
 /** 运行子 Agent：独立上下文窗口 + 受限工具集 + 循环执行至完成 */
@@ -173,12 +200,50 @@ ${input.task}`;
           // 每个工具调用前检查中止信号 / Check abort signal before each tool invocation
           if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
           const tool = tools.find((t) => t.name === tc.name);
-          if (!tool) continue;
+          if (!tool) {
+            // 子 agent LLM 调用了不在允许集合中的工具 → 注入错误 ToolMessage，
+            // 避免对话历史中出现未应答的 tool_call（会导致 LLM 困惑/反复重试）。
+            // Sub-agent LLM called a tool outside the allowed set → inject error
+            // ToolMessage so the conversation history stays consistent.
+            const available = [...new Set(tools.map((t) => t.name))].sort().join(', ');
+            const errMsg = `Tool "${tc.name}" is not available to this sub-agent. Available tools: ${available}. Use one of the available tools instead.`;
+            messages.push(
+              new ToolMessage({
+                content: JSON.stringify({ ok: false, error: errMsg }),
+                tool_call_id: tc.id ?? '',
+                name: tc.name,
+                status: 'error',
+              }),
+            );
+            input.eventSink({
+              type: 'tool_result',
+              data: {
+                id,
+                toolName: tc.name,
+                ok: false,
+                summary: errMsg.slice(0, 200),
+                durationMs: 0,
+                failureReason: 'tool_not_available',
+              },
+            });
+            const stepSnapshot: SubAgentStepSnapshot = {
+              toolName: tc.name,
+              toolArgs: (tc.args as Record<string, unknown>) ?? {},
+              ok: false,
+            };
+            steps.push(stepSnapshot);
+            continue;
+          }
+          const toolArgs = normalizeSubAgentToolArgs(
+            tc.name,
+            (tc.args as Record<string, unknown>) ?? {},
+            input.workspace,
+          );
 
           // 发出 step 事件
           const stepSnapshot: SubAgentStepSnapshot = {
             toolName: tc.name,
-            toolArgs: (tc.args as Record<string, unknown>) ?? {},
+            toolArgs,
           };
           steps.push(stepSnapshot);
           input.eventSink({
@@ -186,7 +251,7 @@ ${input.task}`;
             data: {
               id,
               toolName: tc.name,
-              toolArgs: (tc.args as Record<string, unknown>) ?? {},
+              toolArgs,
             },
           });
 
@@ -197,15 +262,37 @@ ${input.task}`;
           let ok = true;
           let totalLines: number | undefined;
           try {
-            toolOutput = await tool.invoke(tc.args ?? {});
-            // 尝试解析 JSON 判断 ok，并提取 totalLines（用于 TUI 行号展示）
-            try {
-              const parsed = JSON.parse(toolOutput);
-              ok = parsed.ok !== false;
-              if (typeof parsed.totalLines === 'number') totalLines = parsed.totalLines;
-            } catch {
-              /* not JSON */
+            const pendingRequest = toolRequestFromCall(
+              {
+                id: tc.id ?? `subagent-${toolCallCount}`,
+                name: tc.name,
+                args: toolArgs,
+              },
+              input.workspace,
+            );
+            if (!pendingRequest) {
+              throw new Error(`Unknown tool requested by sub-agent: ${tc.name}`);
             }
+            const result = await runApprovedTool({
+              workspace: input.workspace,
+              request: pendingRequest,
+              shellExecutor: effectiveShellExecutor,
+              workspaceAccess: input.workspaceAccess ?? 'write',
+              phase: input.phase ?? 'building',
+              authorization: input.authorization,
+              threadId: input.threadId ?? '',
+              mcpManager: input.mcpManager,
+              skillManifests: input.skills,
+              skillOptions: input.skillOptions,
+              signal: combinedSignal,
+              taskConfig: input.config,
+              taskModel: model,
+              subagentEventSink: input.eventSink,
+              executionContext: 'subagent',
+            });
+            toolOutput = JSON.stringify(result);
+            ok = result.ok !== false;
+            if (typeof result.totalLines === 'number') totalLines = result.totalLines;
           } catch (e) {
             toolOutput = JSON.stringify({
               ok: false,

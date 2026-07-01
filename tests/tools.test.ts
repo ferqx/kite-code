@@ -2,12 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { computeLineDiff, formatDiffOutput } from '../src/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '../src/core/tools/file';
 import { msys2ToWindowsPath, normalizeMsys2PathsInText } from '../src/core/tools/path-utils';
 import { assertInsideWorkspace, shellTool } from '../src/core/tools/shell';
 
 /** Convert MSYS2 Unix-style path to Windows-style path via cygpath (legacy test helper) */
 function msys2Win(p: string): string {
+  if (process.platform === 'win32' && (p === '/tmp' || p.startsWith('/tmp/'))) {
+    return join(tmpdir(), p.slice('/tmp/'.length));
+  }
   try {
     const { spawnSync } = require('node:child_process');
     const r = spawnSync('cygpath', ['-w', p], { encoding: 'utf8', timeout: 3000 });
@@ -57,7 +61,7 @@ describe('tool safety', () => {
     expect(readFileSync(join(workspace, 'hello.txt'), 'utf8')).toBe('hello from write_file\n');
   });
 
-  test('write_file accepts absolute paths inside the workspace', () => {
+  test('write_file rejects absolute paths even inside the workspace', () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write-absolute');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
@@ -69,10 +73,9 @@ describe('tool safety', () => {
       content: 'hello from absolute path\n',
     });
 
-    expect(result.ok).toBe(true);
-    expect(existsSync(absolutePath)).toBe(true);
-    // Verify the absolute path was not misinterpreted as relative and double-nested
-    expect(existsSync(join(workspace, workspace.slice(1), 'nested', 'hello.txt'))).toBe(false);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Absolute paths are not allowed');
+    expect(existsSync(absolutePath)).toBe(false);
   });
 
   test('edit_file finds and replaces text', () => {
@@ -416,8 +419,6 @@ describe('read_file — regression', () => {
 // ============================================================================
 // computeLineDiff tests
 // ============================================================================
-
-import { computeLineDiff, formatDiffOutput } from '../src/core/tools/diff';
 
 describe('computeLineDiff', () => {
   test('single-line change with context', () => {

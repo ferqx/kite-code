@@ -284,6 +284,12 @@ describe('code agent tool definitions', () => {
     // /dev/null 重定向用于抑制输出，应视为只读安全 / /dev/null redirects for output suppression are read-only safe
     expect(isReadOnlyShellCommand('ls -la src tests 2>/dev/null')).toBe(true);
     expect(isReadOnlyShellCommand("find . -name '*.ts' >/dev/null 2>&1")).toBe(true);
+    // 管道中的只读命令 / Read-only commands in pipelines
+    expect(
+      isReadOnlyShellCommand("find src -type f | sed 's/.*\\.//' | sort | uniq -c | sort -rn"),
+    ).toBe(true);
+    expect(isReadOnlyShellCommand('cut -d: -f1 /etc/passwd')).toBe(true);
+    expect(isReadOnlyShellCommand("tr 'a-z' 'A-Z' < input.txt")).toBe(true);
   });
 
   // 验证可能写入、删除或执行项目代码的 shell 命令不会被分类为只读（sed -i, rm -rf, git add, mkdir 等） / Shell commands that can write, delete, or execute project code (sed -i, rm -rf, git add, mkdir, etc.) are not classified as read-only

@@ -47,7 +47,7 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
 /** macOS Seatbelt executor（参照 Codex create_seatbelt_command_args 使用 -p 传 profile）*/
 function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
-  const profile = generateSandboxProfile(workspace);
+  const profile = generateSandboxProfile(workspace, { network: options.network?.mode });
 
   return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => ({
     cmd: ['/usr/bin/sandbox-exec', '-p', profile, getSystemShell(), '-c', wrappedCommand],
@@ -57,7 +57,7 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
 /** Linux Bubblewrap executor */
 function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
-  const bwrapArgs = generateBwrapArgs(workspace);
+  const bwrapArgs = generateBwrapArgs(workspace, { network: options.network?.mode });
   const bwrapPath = Bun.which('bwrap')!;
   const seccompPath = resolveSeccompPath(findApplySeccomp(), workspace);
 

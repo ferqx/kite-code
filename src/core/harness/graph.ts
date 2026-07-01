@@ -2,12 +2,14 @@ import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { interrupt, START, StateGraph } from '@langchain/langgraph';
 import { ChatOllama } from '@langchain/ollama';
 import type { AgentConfig } from '@/core/config/index';
+import { recordExecutionResult } from '@/core/execution/journal';
+import { issuePermit, migratePermitBatch } from '@/core/execution/permit';
+import { createAutoReviewModel, reviewToolApproval } from '@/core/execution/reviewer';
 import type { McpManager } from '@/core/mcp';
 import { prepareModelContext } from '@/core/model/context';
 import type { ModelRetryListener, RetryListenerHost } from '@/core/model/deepseek';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { BunSqliteSaver } from '@/core/persistence/checkpoint';
-import { createTaskTool } from '@/core/subagent/task-tool';
 import { createAgentTools } from '@/core/tools/definitions';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type {
@@ -131,6 +133,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       signal: input.subagentSignal,
       model: input.model,
       threadId: state.threadId,
+      authorization: state.authorization,
+      workspaceAccess: state.workspaceAccess,
+      phase: state.phase,
     });
     const retryEvents: ModelRetryEvent[] = [];
     const listener: ModelRetryListener = (attempt, maxAttempts, error, delayMs) => {
@@ -173,8 +178,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
   /** 审批节点：中断等待人工批准，支持批量积累 / Approval node with batch accumulation */
   const approval = async (state: CodeAgentState) => {
-    const batch = { ...state.approvedBatch };
-    const hasFullAccess = Object.values(batch).some((g) => g === 'full_access');
+    const batch = migratePermitBatch(state.approvedBatch);
+    const hasFullAccess = Object.values(batch).some(
+      (p) => !p.consumed && p.grant === 'full_access',
+    );
 
     // 查找第一个尚未审批的待处理工具（跳过已在 batch 中的）
     const allPending = getAllPendingToolRequests(state.messages, state.workspace);
@@ -193,7 +200,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     // full_access 已授权 → 自动批准剩余所有工具 / full_access already granted → auto-approve all remaining
     if (hasFullAccess) {
       for (const r of allPending) {
-        if (r.id) batch[r.id] = 'full_access';
+        Object.assign(
+          batch,
+          issuePermit({
+            batch,
+            workspace: state.workspace,
+            threadId: state.threadId,
+            request: r,
+            grant: 'full_access',
+          }),
+        );
       }
       return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
     }
@@ -213,7 +229,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     // 不需要审批的工具（如 read_file）→ 标记为 auto-pass 并直接返回
     // Non-approval tools (e.g. read_file) → mark as auto-pass and return
     if (!policy.requiresApproval) {
-      if (request.id) batch[request.id] = 'approve_once';
+      Object.assign(
+        batch,
+        issuePermit({
+          batch,
+          workspace: state.workspace,
+          threadId: state.threadId,
+          request,
+          grant: 'approve_once',
+        }),
+      );
       return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
     }
 
@@ -224,12 +249,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       decision: policy,
     });
 
-    const approved = interrupt({
-      kind: 'tool_approval',
-      request,
-      policy,
-      approval: approvalPayload,
-    }) as
+    let approved:
       | boolean
       | {
           approved?: boolean;
@@ -238,6 +258,48 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           replacementCommand?: string;
           reason?: string;
         };
+    if (state.interactionMode === 'auto_review') {
+      const reviewModel =
+        input.config.autoReview?.provider || input.config.autoReview?.model
+          ? createAutoReviewModel(input.config)
+          : model;
+      const review = await reviewToolApproval({
+        model: reviewModel,
+        payload: approvalPayload,
+        request,
+        timeoutMs: input.config.autoReview?.timeoutMs,
+      });
+      if (!review.ok || !review.suggestion?.approved) {
+        return {
+          ...rejectedToolMessage(
+            request,
+            `auto review rejected: ${review.suggestion?.reason ?? review.reason ?? 'not approved'}`,
+          ),
+          approvedBatch: batch,
+        };
+      }
+      approved = {
+        approved: true,
+        grant: review.suggestion.grant,
+        approvalHash: approvalPayload.approvalHash,
+        reason: review.suggestion.reason,
+      };
+    } else {
+      approved = interrupt({
+        kind: 'tool_approval',
+        request,
+        policy,
+        approval: approvalPayload,
+      }) as
+        | boolean
+        | {
+            approved?: boolean;
+            grant?: ShellApprovalGrant;
+            approvalHash?: string;
+            replacementCommand?: string;
+            reason?: string;
+          };
+    }
     const approvalGrant = approvalGrantFromResume(approved);
     const allowed =
       approved === true ||
@@ -306,14 +368,33 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       };
     }
 
-    if (approvedRequest.id)
-      batch[approvedRequest.id] = grant as 'approve_once' | 'same_command' | 'full_access';
+    Object.assign(
+      batch,
+      issuePermit({
+        batch,
+        workspace: state.workspace,
+        threadId: state.threadId,
+        request: approvedRequest,
+        grant,
+      }),
+    );
 
     // full_access → auto-approve all remaining in batch
     if (grant === 'full_access') {
       const allPending = getAllPendingToolRequests(state.messages, state.workspace);
       for (const r of allPending) {
-        if (r.id && !batch[r.id]) batch[r.id] = 'full_access';
+        if (r.id && !batch[r.id]) {
+          Object.assign(
+            batch,
+            issuePermit({
+              batch,
+              workspace: state.workspace,
+              threadId: state.threadId,
+              request: r,
+              grant: 'full_access',
+            }),
+          );
+        }
       }
     }
 
@@ -420,49 +501,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     state: CodeAgentState,
     grantUsed: string,
   ): Promise<{ toolMessage: ToolMessage; extra: Record<string, unknown> }> {
-    // Handle task tool (sub-agent dispatch)
-    if (request.name === 'task' && input.subagentEventSink) {
-      try {
-        const taskTool = createTaskTool({
-          config: input.config,
-          workspace: state.workspace,
-          shellExecutor: input.shellExecutor,
-          mcpManager: input.mcpManager,
-          skills: input.skills,
-          skillOptions: input.skillOptions,
-          eventSink: input.subagentEventSink,
-          signal: input.subagentSignal,
-          model: input.model,
-        });
-        const toolOutput = await taskTool.invoke(request.args);
-        let taskOk = true;
-        try {
-          const p = JSON.parse(toolOutput);
-          taskOk = p.ok !== false;
-        } catch {}
-        return {
-          toolMessage: new ToolMessage({
-            content: toolOutput,
-            tool_call_id: request.id ?? 'missing-tool-call-id',
-            name: request.name,
-            status: taskOk ? 'success' : 'error',
-          }),
-          extra: {},
-        };
-      } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        return {
-          toolMessage: new ToolMessage({
-            content: JSON.stringify({ ok: false, error: errorMsg }),
-            tool_call_id: request.id ?? 'missing-tool-call-id',
-            name: request.name,
-            status: 'error',
-          }),
-          extra: {},
-        };
-      }
-    }
-
     // 构造 shell 实时输出回调（仅对 shell_execute 生效）
     const onShellProgress = input.toolProgressSink
       ? (chunk: string, stream: 'stdout' | 'stderr') => {
@@ -486,6 +524,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       skillOptions: input.skillOptions,
       signal: input.subagentSignal,
       onShellProgress,
+      permitBatch: migratePermitBatch(state.approvedBatch),
+      interactionMode: state.interactionMode,
+      taskConfig: input.config,
+      taskModel: input.model,
+      subagentEventSink: input.subagentEventSink,
     });
 
     // Flush React re-renders before dispatching tool_done, so intermediate
@@ -587,7 +630,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
    *  shows progressive completion without waiting for the full batch. */
   const tools = async (state: CodeAgentState) => {
     const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
-    const batch = state.approvedBatch ?? {};
+    const batch = migratePermitBatch(state.approvedBatch);
 
     if (allRequests.length === 0) {
       return { approvedBatch: {} };
@@ -597,7 +640,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     // All tools (including task sub-agents) in a single Promise.all.
     const results = await Promise.all(
       allRequests.map((req) => {
-        const reqGrant = req.id && batch[req.id] ? batch[req.id]! : 'none';
+        const reqGrant = req.id && batch[req.id] ? batch[req.id]!.grant : 'none';
         return executeOneTool(req, state, reqGrant);
       }),
     );
@@ -607,12 +650,38 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     for (const r of results) {
       Object.assign(mergedExtra, r.extra);
     }
+    let journalState = {
+      executionJournal: state.executionJournal ?? [],
+      exhaustedFingerprints: state.exhaustedFingerprints ?? {},
+    };
+    for (const r of results) {
+      try {
+        const parsed = JSON.parse(String(r.toolMessage.content)) as {
+          ok?: boolean;
+          stderr?: string;
+          exitCode?: number;
+          path?: string;
+        };
+        journalState = recordExecutionResult(journalState, {
+          toolCallId:
+            (r.toolMessage as unknown as Record<string, unknown>).tool_call_id?.toString() ?? '',
+          toolName: r.toolMessage.name ?? 'unknown',
+          ok: parsed.ok !== false,
+          stderr: parsed.stderr,
+          exitCode: parsed.exitCode,
+          path: parsed.path,
+        });
+      } catch {
+        /* ToolMessage content is expected to be JSON, but do not break graph routing if not. */
+      }
+    }
 
     return {
       approvedBatch: {},
       approvedToolRequest: null,
       approvedToolGrant: null,
       ...mergedExtra,
+      ...journalState,
       messages,
     };
   };

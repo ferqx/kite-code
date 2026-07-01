@@ -1,4 +1,5 @@
 import { END } from '@langchain/langgraph';
+import { migratePermitBatch } from '@/core/execution/permit';
 import type { AuthorizationOverride } from '@/core/types';
 import type { AgentPlan } from '@/protocol/events';
 import type { CodeAgentState } from './state';
@@ -27,8 +28,11 @@ function resolveToolRoute(
   let hasApprovalRequired = false;
 
   for (const request of allRequests) {
-    // Priority 1: ask_user 必须由 user_input 中断节点处理，不能被 tools 节点执行
-    if (request.name === 'ask_user') return 'user_input';
+    // Priority 1: ask_user 必须由 user_input 中断节点处理；unattended 下不能挂起
+    if (request.name === 'ask_user') {
+      if (state.interactionMode === 'unattended') continue;
+      return 'user_input';
+    }
 
     // Priority 2: 结构性 update_plan（名称/描述/步骤文本变化）必须经过 plan_review
     // 纯进度更新（仅 status 变化）可直通 tools
@@ -80,8 +84,8 @@ export function routeAfterAgent(
 /** approval 节点后的路由逻辑 / Routing after approval node
  *  若同一批次还有工具未审批 → 循环回 approval；全部审批完 → tools */
 export function routeAfterApproval(state: CodeAgentState): 'approval' | 'tools' | 'agent' {
-  const batch = state.approvedBatch ?? {};
-  const hasFullAccess = Object.values(batch).some((g) => g === 'full_access');
+  const batch = migratePermitBatch(state.approvedBatch);
+  const hasFullAccess = Object.values(batch).some((p) => !p.consumed && p.grant === 'full_access');
 
   // full_access → 不再需要审批，直接执行
   // 必须扫描全部 pending tools，不能只看第一个：批次中可能混合了不同工具类型

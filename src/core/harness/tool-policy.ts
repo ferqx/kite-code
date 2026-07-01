@@ -622,7 +622,7 @@ function approvalCommand(request: PendingToolRequest): string {
   return request.protectedCommand;
 }
 
-function stableStringify(value: unknown): string {
+export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableStringify).join(',')}]`;
   }

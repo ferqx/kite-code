@@ -317,18 +317,18 @@ describe('loadSession', () => {
     const result = await loadSession(dbPath, 'thread-tc');
     expect(result).not.toBeNull();
     const { blocks } = sessionDataToUI(result!);
-    // user → tool_card (from AIMessage tool_calls, flushed at end) → text
+    // user → tool_summary (from AIMessage tool_calls, flushed at end) → text
     expect(blocks.length).toBe(3);
     expect(blocks[0]!.kind).toBe('user');
     const tcBlock = blocks[1]!;
-    expect(tcBlock.kind).toBe('tool_card');
+    expect(tcBlock.kind).toBe('tool_summary');
     expect(blocks[2]!.kind).toBe('text');
-    if (tcBlock.kind === 'tool_card') {
-      const tc = tcBlock as Extract<OutputBlock, { kind: 'tool_card' }>;
-      expect(tc.callId).toBe('call-1');
-      expect(tc.name).toBe('read_file');
-      expect(tc.args).toEqual({ path: '/tmp/test.txt' });
-      expect(tc.status).toBe('done');
+    if (tcBlock.kind === 'tool_summary') {
+      const summary = tcBlock as Extract<OutputBlock, { kind: 'tool_summary' }>;
+      expect(summary.tools[0]?.callId).toBe('call-1');
+      expect(summary.tools[0]?.name).toBe('read_file');
+      expect(summary.tools[0]?.args).toEqual({ path: '/tmp/test.txt' });
+      expect(summary.tools[0]?.status).toBe('done');
     }
   });
 
