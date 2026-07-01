@@ -133,12 +133,13 @@ export function createAgentTools(input: CreateAgentToolsInput) {
   );
 
   const shellExecute = tool(
-    async ({ command }) =>
+    async ({ command, timeout_ms }) =>
       JSON.stringify(
         await (input.shellExecutor ?? shellTool)({
           workspace: input.workspace,
           command,
           signal: input.signal,
+          timeoutMs: timeout_ms,
         }),
       ),
     {
@@ -156,6 +157,14 @@ export function createAgentTools(input: CreateAgentToolsInput) {
           .enum(['inspect', 'verify', 'build', 'test', 'git', 'other'])
           .optional()
           .describe('Command intent'),
+        timeout_ms: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            'Maximum runtime in milliseconds. Use this for commands that start a TUI, dev server, watcher, or other long-running process.',
+          ),
         prefix_rule: z
           .array(z.string())
           .optional()

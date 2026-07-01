@@ -212,25 +212,49 @@ const SHELL_PREFIX_W = stringWidth(SHELL_PREFIX);
 /** 统一的 shell 输出渲染：SHELL_PREFIX + 终端宽度截断 + 5 行窗口 + 尾行展示最新 N 行。
  *  始终 fragment + map 渲染（消除单/多行分支切换导致的 reconciliation 问题）。
  *  Unified shell output renderer: shears common logic from renderShellSummary + renderLiveShellOutput. */
-function renderShellLines(text: string, color: string, maxLine: number, totalLines?: number) {
+function renderShellLines(
+  text: string,
+  color: string,
+  maxLine: number,
+  totalLines?: number,
+  mode: 'tail' | 'head-tail' = 'tail',
+) {
   const lines = text.trimEnd().split('\n');
   const contentWidth = Math.max(10, maxLine - SHELL_PREFIX_W);
-  const displayLines = lines.slice(-MAX_TOOL_LINES);
-  const skipped = (totalLines ?? lines.length) - MAX_TOOL_LINES;
+  const displayLines =
+    mode === 'head-tail' && lines.length > MAX_TOOL_LINES * 2
+      ? [...lines.slice(0, MAX_TOOL_LINES), ...lines.slice(-MAX_TOOL_LINES)]
+      : mode === 'head-tail'
+        ? lines
+        : lines.slice(-MAX_TOOL_LINES);
+  const skipped =
+    mode === 'head-tail'
+      ? (totalLines ?? lines.length) - displayLines.length
+      : (totalLines ?? lines.length) - MAX_TOOL_LINES;
 
   return (
     <>
-      {skipped > 0 && (
+      {mode === 'tail' && skipped > 0 && (
         <Text color={color}>
           {SHELL_ALIGN}… +{skipped} lines
         </Text>
       )}
-      {displayLines.map((line, i) => (
-        <Text key={i} color={color}>
-          {SHELL_PREFIX}
-          {clip(line, contentWidth)}
-        </Text>
-      ))}
+      {displayLines.map((line, i) => {
+        const insertOmission = mode === 'head-tail' && skipped > 0 && i === MAX_TOOL_LINES;
+        return (
+          <React.Fragment key={i}>
+            {insertOmission && (
+              <Text color={color}>
+                {SHELL_ALIGN}… +{skipped} lines
+              </Text>
+            )}
+            <Text color={color}>
+              {SHELL_PREFIX}
+              {clip(line, contentWidth)}
+            </Text>
+          </React.Fragment>
+        );
+      })}
     </>
   );
 }
@@ -412,7 +436,9 @@ export default function ToolCardBlock({
   const isFileTool = block.name === 'edit_file' || block.name === 'write_file';
   const isPlan = block.name === 'update_plan';
   const isAskUser = block.name === 'ask_user';
-  const isExpanded = block.expanded ?? (block.status === 'error' || block.status === 'cancelled');
+  const isExpanded =
+    block.expanded ??
+    (block.status === 'error' || block.status === 'cancelled' || block.status === 'timeout');
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
   const displayName = ACTION_NAMES[block.name] ?? block.name;
   return (
@@ -448,6 +474,8 @@ export default function ToolCardBlock({
               block.summary!,
               block.status === 'error' ? dt.error : dt.dim,
               columns - 2,
+              undefined,
+              block.status === 'timeout' ? 'head-tail' : 'tail',
             )
           ) : (
             <Text color={dt.dim}>{SHELL_PREFIX}(No output)</Text>
@@ -458,7 +486,11 @@ export default function ToolCardBlock({
             {block.summary?.startsWith('Command cancelled') ||
             block.summary?.includes('"cancelled":true')
               ? 'cancelled'
-              : `exit: ${block.status === 'error' ? 'error' : '0'}`}
+              : block.status === 'timeout'
+                ? block.timeoutMs != null
+                  ? `timed out after ${block.timeoutMs}ms`
+                  : 'timed out'
+                : `exit: ${block.status === 'error' ? 'error' : '0'}`}
           </Text>
           {block.status === 'error' && block.summary?.split('\n').length > 3 && (
             <Text color={dt.dim}>Enter 折叠</Text>

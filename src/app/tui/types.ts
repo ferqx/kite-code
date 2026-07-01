@@ -16,7 +16,7 @@ export interface ConsolidatedToolEntry {
   ok: boolean;
   summary: string;
   elapsedMs?: number;
-  status: 'running' | 'done' | 'error' | 'cancelled';
+  status: 'running' | 'done' | 'error' | 'cancelled' | 'timeout';
   /** 读取文件时的文件总行数 / Total lines for read_file tool */
   totalLines?: number;
 }
@@ -41,7 +41,7 @@ export type OutputBlock =
       callId: string;
       name: string;
       args: Record<string, unknown>;
-      status: 'running' | 'done' | 'error' | 'cancelled';
+      status: 'running' | 'done' | 'error' | 'cancelled' | 'timeout';
       summary: string;
       preview?: string;
       /** 工具实际开始执行的时间戳（用于 live 计时器），排除审批等待后会被重置 / Wall-clock timestamp when tool actually began executing (for live timer), reset after approval to exclude wait time */
@@ -53,6 +53,8 @@ export type OutputBlock =
       liveOutput?: string;
       /** liveOutput 被截断前的总行数，用于展示截断计数 */
       liveTotalLines?: number;
+      /** Shell timeout duration parsed from timeout summary / shell 超时时长 */
+      timeoutMs?: number;
     }
   | {
       id: number;

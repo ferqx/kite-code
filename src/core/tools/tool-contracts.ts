@@ -171,12 +171,15 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       'Do NOT use shell_execute for: searching file contents (use search_content), finding files (use search_files), reading files (use read_file), editing files (use edit_file), writing files (use write_file). ' +
       'Use shell_execute ONLY for: tests, typecheck, builds, installs, git operations, and other terminal-only tasks. ' +
       'Set intent=inspect for read-only checks, intent=verify for tests/typecheck/lint, intent=test for test runs, intent=build for compilation, intent=git for git operations. ' +
+      'For commands that start a TUI, dev server, watcher, or other long-running process, set timeout_ms (for example 10000) so the command returns after collecting startup output. ' +
+      'Do not set timeout_ms for finite commands such as builds, installs, or test suites unless the user explicitly asks for a bounded smoke check. ' +
       'Write a short human-readable description so the user understands what the command does. ' +
       'For commands needing approval, include grant_request (approve_once | same_command | full_access).',
     commonMistakes:
       'Using shell_execute with grep/rg/find — use search_content/search_files instead. ' +
       'Missing description field — always provide a short human-readable summary. ' +
       'Using intent=inspect for mutating commands — the harness will reject these. ' +
+      'Running interactive or long-running commands like `npm run tui`, `bun run dev`, or watch mode without timeout_ms — the tool will keep running until the process exits. ' +
       'Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R) — denied by default.',
     outputFormat:
       'JSON with fields: ok (boolean), command (executed command), exitCode (0=success), stdout, stderr. ' +

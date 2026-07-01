@@ -79,6 +79,7 @@ export interface BuildCodeAgentGraphInput {
     summary: string,
     totalLines?: number,
     toolTokenCount?: number,
+    exitCode?: number,
   ) => void;
   /** 工具进度回调 — shell 进程产生输出时逐行调用，使 TUI 实时展示。
    *  Per-line progress callback — called for each stdout/stderr line during
@@ -496,13 +497,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     // 逐个推送完成事件，TUI 在并行执行期间逐项刷新 / Push completion
     // event per-tool so TUI refreshes progressively during parallel execution.
+    const summary =
+      request.name === 'shell_execute' && result.exitCode === 124 && result.stdout
+        ? result.stdout
+        : (result.stdout || result.stderr || '').slice(0, 200);
     input.toolResultSink?.(
       request.id ?? '',
       request.name,
       result.ok !== false,
-      (result.stdout || result.stderr || '').slice(0, 200),
+      summary,
       result.totalLines,
       undefined, // toolTokenCount computed in runner's parseToolResultEvents
+      result.exitCode,
     );
 
     const toolMessage = new ToolMessage({

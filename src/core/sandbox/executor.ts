@@ -1,5 +1,10 @@
 import type { ShellExecutor } from '@/core/tools/shell';
-import { shellTool } from '@/core/tools/shell';
+import {
+  appendTimeoutMessage,
+  readWithProgress,
+  shellTool,
+  timeoutMessage,
+} from '@/core/tools/shell';
 import { generateBwrapArgs } from './bwrap';
 import { detectSandboxBackend } from './platform';
 import { generateSandboxProfile } from './profile';
@@ -75,6 +80,8 @@ function createWrappedExecutor(
   buildSpawn: (wrappedCommand: string) => { cmd: string[]; stdin?: string },
 ): ShellExecutor {
   return async (input) => {
+    let timedOut = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       // 执行前检查命令是否引用危险文件路径 / Pre-execution dangerous path check
       const dangerous = checkDangerousPaths(input.command);
@@ -107,34 +114,53 @@ function createWrappedExecutor(
         signal: input.signal,
       });
 
+      if (input.timeoutMs && input.timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          try {
+            proc.kill();
+          } catch {
+            /* process may have exited already */
+          }
+        }, input.timeoutMs);
+      }
+
       if (stdin !== undefined && proc.stdin) {
         proc.stdin.write(stdin);
         proc.stdin.end();
       }
 
-      const stdout = await new Response(proc.stdout).text();
-      const stderr = await new Response(proc.stderr).text();
+      const [stdout, stderr] = input.onProgress
+        ? await Promise.all([
+            readWithProgress(proc.stdout, (line) => input.onProgress!(line, 'stdout')),
+            readWithProgress(proc.stderr, (line) => input.onProgress!(line, 'stderr')),
+          ])
+        : await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
       const exitCode = await proc.exited;
+      if (timeoutId) clearTimeout(timeoutId);
 
       return {
-        ok: exitCode === 0,
+        ok: !timedOut && exitCode === 0,
         command: input.command,
-        exitCode,
+        exitCode: timedOut ? 124 : exitCode,
         stdout,
-        stderr,
+        stderr: timedOut ? appendTimeoutMessage(stderr, input.timeoutMs!) : stderr,
       };
     } catch (error) {
+      if (timeoutId) clearTimeout(timeoutId);
       const isAbort = error instanceof Error && error.name === 'AbortError';
       return {
         ok: false,
         command: input.command,
-        exitCode: isAbort ? 130 : -1,
+        exitCode: timedOut ? 124 : isAbort ? 130 : -1,
         stdout: '',
-        stderr: isAbort
-          ? 'Command cancelled by user.'
-          : error instanceof Error
-            ? error.message
-            : String(error),
+        stderr: timedOut
+          ? timeoutMessage(input.timeoutMs ?? 0)
+          : isAbort
+            ? 'Command cancelled by user.'
+            : error instanceof Error
+              ? error.message
+              : String(error),
       };
     }
   };

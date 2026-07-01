@@ -5,6 +5,8 @@ export interface ShellInput {
   command: string;
   /** 中止信号，取消时 kill 子进程 / Abort signal to kill child process on cancellation */
   signal?: AbortSignal;
+  /** 最大运行时间（毫秒）；超时后终止子进程 / Max runtime in milliseconds; kills child on timeout */
+  timeoutMs?: number;
   /** 实时输出回调 — shell 进程每产生一行文本时调用 / Called per output line while shell process is running */
   onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
 }
@@ -27,6 +29,7 @@ export interface ShellActionEnvelope {
   justification?: string;
   expected_observation?: string;
   failure_strategy?: string;
+  timeout_ms?: number;
   prefix_rule?: string[];
   grant_request?: ShellApprovalGrant;
 }

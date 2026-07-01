@@ -21,6 +21,12 @@ const AUTO_EXPAND_TOOLS = new Set([
   'update_plan',
   'ask_user',
 ]);
+const TIMEOUT_RE = /^Command timed out after (\d+)ms\./;
+
+function parseTimeoutMs(summary: string): number | undefined {
+  const match = summary.match(TIMEOUT_RE);
+  return match ? Number(match[1]) : undefined;
+}
 
 /** Pending task tool call info collected from AIMessage tool_calls */
 interface PendingTaskCall {
@@ -223,6 +229,7 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
       const summaryMaxLen = tmName === 'edit_file' || tmName === 'write_file' ? 2000 : 200;
       let summary = content.slice(0, summaryMaxLen);
       let totalLines: number | undefined;
+      let timeoutMs: number | undefined;
       try {
         const p = JSON.parse(content);
         if (p && typeof p === 'object') {
@@ -232,12 +239,18 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
             summary =
               (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
           } else {
-            summary =
-              (p.reason as string) ??
-              (p.stderr as string) ??
-              (p.message as string) ??
-              (p.summary as string) ??
-              summary;
+            const stderr = (p.stderr as string) ?? '';
+            timeoutMs = parseTimeoutMs(stderr);
+            if (tmName === 'shell_execute' && timeoutMs != null) {
+              summary = (p.stdout as string) || '';
+            } else {
+              summary =
+                (p.reason as string) ??
+                stderr ??
+                (p.message as string) ??
+                (p.summary as string) ??
+                summary;
+            }
           }
           // ask_user: extract human-readable answer instead of raw JSON
           if (tmName === 'ask_user') {
@@ -283,11 +296,13 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
             });
           } else {
             const finalSummary = summary || existing.summary;
+            const timedOut = !ok && existing.name === 'shell_execute' && timeoutMs != null;
             blocks[existingIdx] = {
               ...existing,
-              status: ok ? 'done' : 'error',
+              status: ok ? 'done' : timedOut ? 'timeout' : 'error',
               summary: finalSummary,
               detail: getToolDetail(existing.name, existing.args, totalLines),
+              ...(timeoutMs != null ? { timeoutMs } : {}),
               expanded: AUTO_EXPAND_TOOLS.has(existing.name),
             } as (typeof blocks)[number];
           }
@@ -295,14 +310,16 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
       } else {
         // Standalone ToolMessage (no preceding AIMessage tool_calls)
         const name = (rawMsg.name as string) ?? '';
+        const timedOut = !ok && name === 'shell_execute' && timeoutMs != null;
         blocks.push({
           id: nextId++,
           kind: 'tool_card',
           callId,
           name,
           args: {},
-          status: ok ? 'done' : 'error',
+          status: ok ? 'done' : timedOut ? 'timeout' : 'error',
           summary,
+          ...(timeoutMs != null ? { timeoutMs } : {}),
           expanded: !ok || AUTO_EXPAND_TOOLS.has(name),
         });
       }

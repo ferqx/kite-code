@@ -8,6 +8,7 @@ import {
   gatherSystemBashCandidates,
   isWslStubPath,
 } from '../src/core/tools/bash-path';
+import { shellTool } from '../src/core/tools/shell';
 
 describe('shell execute integration', () => {
   const workspace = join(tmpdir(), 'kite-code-e2e-shell');
@@ -46,6 +47,42 @@ describe('shell execute integration', () => {
     const r = await shell({ workspace, command: 'ls /nonexistent_path_xyz 2>&1' });
     expect(r.ok).toBe(false);
     expect(r.stderr.length + r.stdout.length).toBeGreaterThan(0);
+  });
+});
+
+describe('shell live output', () => {
+  const workspace = join(tmpdir(), 'kite-code-e2e-shell-live');
+  mkdirSync(workspace, { recursive: true });
+
+  test('emits stderr progress before later stdout', async () => {
+    const events: Array<{ chunk: string; stream: 'stdout' | 'stderr' }> = [];
+
+    const result = await shellTool({
+      workspace,
+      command: "printf 'err-first\\n' >&2; sleep 0.2; printf 'out-late\\n'",
+      onProgress: (chunk, stream) => {
+        events.push({ chunk, stream });
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(events[0]).toEqual({ chunk: 'err-first', stream: 'stderr' });
+    expect(events.map((e) => e.chunk)).toEqual(['err-first', 'out-late']);
+  });
+
+  test('stops long-running commands after timeoutMs', async () => {
+    const startedAt = Date.now();
+
+    const result = await shellTool({
+      workspace,
+      command: 'sleep 5',
+      timeoutMs: 100,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+    expect(result.ok).toBe(false);
+    expect(result.exitCode).toBe(124);
+    expect(result.stderr).toContain('timed out');
   });
 });
 

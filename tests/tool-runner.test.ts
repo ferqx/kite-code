@@ -188,6 +188,54 @@ describe('runApprovedTool — search_files', () => {
   });
 });
 
+describe('runApprovedTool — shell_execute timeout', () => {
+  it('does not set a timeout unless the model requested timeout_ms', async () => {
+    let capturedTimeout: number | undefined;
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-shell-no-timeout',
+        name: 'shell_execute',
+        args: { command: 'npm run build' },
+        reason: 'Test shell default timeout',
+        protectedCommand: 'npm run build',
+      } as PendingToolRequest,
+      approvedGrant: 'approve_once',
+      shellExecutor: async (input) => {
+        capturedTimeout = input.timeoutMs;
+        return { ok: true, command: input.command, exitCode: 0, stdout: 'built', stderr: '' };
+      },
+    });
+
+    expect(capturedTimeout).toBeUndefined();
+    expect(result.ok).toBe(true);
+  });
+
+  it('passes timeout_ms to the shell executor', async () => {
+    let capturedTimeout: number | undefined;
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-shell-timeout',
+        name: 'shell_execute',
+        args: { command: 'sleep 5', timeout_ms: 250 },
+        reason: 'Test shell timeout',
+        protectedCommand: 'sleep 5',
+      } as PendingToolRequest,
+      approvedGrant: 'approve_once',
+      shellExecutor: async (input) => {
+        capturedTimeout = input.timeoutMs;
+        return { ok: false, command: input.command, exitCode: 124, stdout: '', stderr: 'timeout' };
+      },
+    });
+
+    expect(capturedTimeout).toBe(250);
+    expect(result.exitCode).toBe(124);
+  });
+});
+
 describe('runApprovedTool 鈥?search_content', () => {
   it('searches file contents without invoking shell', async () => {
     const workspace = join(tmpdir(), 'kite-code-search-content-native');

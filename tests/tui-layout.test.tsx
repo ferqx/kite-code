@@ -891,6 +891,31 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('⎿   hello world');
   });
 
+  test('timed out shell tool_card does not render as exit error', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'npm run tui' },
+      status: 'timeout',
+      summary: Array.from({ length: 12 }, (_, i) => `startup line ${i + 1}`).join('\n'),
+      elapsedMs: 10_000,
+      timeoutMs: 5000,
+      expanded: true,
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame();
+    expect(frame).toContain('startup line 1');
+    expect(frame).toContain('startup line 12');
+    expect(frame).toContain('… +2 lines');
+    expect(frame).toContain('timed out after 5000ms');
+    expect(frame).not.toContain('exit: error');
+  });
+
   test('renders file_change block', () => {
     const block: OutputBlock = {
       id: 1,

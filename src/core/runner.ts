@@ -69,6 +69,7 @@ export interface RunAgentInput {
     summary: string,
     totalLines?: number,
     toolTokenCount?: number,
+    exitCode?: number,
   ) => void;
   /** 调用端标识 / Frontend identity */
   frontend?: string;
@@ -207,7 +208,7 @@ export async function* runAgent(
 
   const toolResultSink =
     input.toolResultSink ??
-    ((callId, toolName, ok, summary, totalLines) => {
+    ((callId, toolName, ok, summary, totalLines, _toolTokenCount, exitCode) => {
       // 仅推 TUI（processStream 会从 chunk 生成更完整的 tool_done 并写入日志）
       try {
         provider.onEvent({
@@ -217,6 +218,7 @@ export async function* runAgent(
             name: toolName,
             ok,
             summary,
+            ...(exitCode != null ? { exitCode } : {}),
             ...(totalLines != null ? { totalLines } : {}),
           },
         });
@@ -733,11 +735,13 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
   const summaryMaxLen = (msg.name as string) === 'edit_file' ? 2000 : 200;
   let summary = content.slice(0, summaryMaxLen);
   let totalLines: number | undefined;
+  let exitCode: number | undefined;
   try {
     const p = JSON.parse(content);
     if (p && typeof p === 'object') {
       ok = p.ok !== false;
       if (typeof p.totalLines === 'number') totalLines = p.totalLines;
+      if (typeof p.exitCode === 'number') exitCode = p.exitCode;
       if (p.ok !== false) {
         summary = (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
       } else {
@@ -781,6 +785,7 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
       name: (msg.name as string) ?? '',
       ok,
       summary,
+      ...(exitCode != null ? { exitCode } : {}),
       ...(totalLines != null ? { totalLines } : {}),
       ...(toolTokenCount > 0 ? { toolTokenCount } : {}),
     },

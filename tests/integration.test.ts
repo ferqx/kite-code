@@ -782,6 +782,69 @@ describe('sandbox executor in agent graph', () => {
       tearDown();
     }
   });
+
+  test('toolResultSink preserves full timeout stdout for bounded long-running commands', async () => {
+    setUp();
+    try {
+      const stdout = Array.from({ length: 30 }, (_, i) => `startup line ${i + 1}`).join('\n');
+      const summaries: string[] = [];
+      const shell = async (input: { command: string; workspace: string }) => ({
+        ok: false as const,
+        command: input.command,
+        exitCode: 124,
+        stdout,
+        stderr: 'Command timed out after 5000ms.',
+      });
+
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        shellExecutor: shell,
+        toolResultSink: (_callId, _toolName, _ok, summary) => {
+          summaries.push(summary);
+        },
+        model: new FakeChatModel([
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-timeout',
+                name: 'shell_execute',
+                args: { intent: 'verify', command: 'npm run tui', timeout_ms: 5000 },
+              },
+            ],
+          }),
+          new AIMessage({ content: 'tui checked' }),
+        ]) as any,
+      });
+
+      await collectChunks(
+        await graph.stream(
+          {
+            messages: [new HumanMessage('check tui')],
+            workspaceAccess: 'write',
+            phase: 'building',
+            plan: null,
+            userId: 'test',
+            threadId: 'sbox-timeout',
+            workspace,
+            authorization: { mode: 'full_access', commandGrants: {} },
+          },
+          {
+            configurable: { thread_id: 'sbox-timeout' },
+            streamMode: 'updates',
+            recursionLimit: 60,
+          },
+        ),
+      );
+
+      checkpointer.close();
+
+      expect(summaries[0]).toBe(stdout);
+    } finally {
+      tearDown();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

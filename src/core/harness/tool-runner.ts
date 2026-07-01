@@ -401,6 +401,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       shellExecutor,
       signal,
       input.onShellProgress,
+      request.args.timeout_ms,
     );
     const result: ShellResult = {
       ...raw,
@@ -447,9 +448,16 @@ async function runShellForTool(
   shellExecutor?: ShellExecutor,
   signal?: AbortSignal,
   onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void,
+  timeoutMs?: number,
 ): Promise<ShellResult> {
   try {
-    return await (shellExecutor ?? shellTool)({ workspace, command, signal, onProgress });
+    return await (shellExecutor ?? shellTool)({
+      workspace,
+      command,
+      signal,
+      onProgress,
+      timeoutMs,
+    });
   } catch (error) {
     const isAbort = error instanceof Error && error.name === 'AbortError';
     return {

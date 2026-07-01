@@ -190,6 +190,58 @@ describe('eventReducer (blocks model)', () => {
       const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
       expect(t.status).toBe('error');
     });
+    test('tool_done marks intentional shell timeout separately from errors', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute'));
+      s = dispatch(s, tdEvt('c1', 'shell_execute', false, 'Command timed out after 10000ms.'));
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('timeout');
+    });
+    test('tool_done preserves live shell output when command times out', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute', { command: 'npm run tui', timeout_ms: 5000 }));
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: {
+          type: 'tool_progress',
+          data: {
+            call_id: 'c1',
+            name: 'shell_execute',
+            chunk: 'Kite Code ready',
+            stream: 'stdout',
+          },
+        },
+      });
+      s = dispatch(s, tdEvt('c1', 'shell_execute', false, 'Command timed out after 5000ms.'));
+
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('timeout');
+      expect(t.summary).toBe('Kite Code ready');
+      expect(t.timeoutMs).toBe(5000);
+    });
+    test('tool_done preserves full timeout stdout summary when exitCode is available', () => {
+      let s = fresh();
+      const output = Array.from({ length: 8 }, (_, i) => `startup line ${i + 1}`).join('\n');
+      s = dispatch(s, tcEvt('c1', 'shell_execute', { command: 'npm run tui', timeout_ms: 5000 }));
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: {
+          type: 'tool_done',
+          data: {
+            call_id: 'c1',
+            name: 'shell_execute',
+            ok: false,
+            summary: output,
+            exitCode: 124,
+          },
+        },
+      });
+
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('timeout');
+      expect(t.summary).toBe(output);
+      expect(t.timeoutMs).toBe(5000);
+    });
     test('tool_done only updates matching callId', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'a'));

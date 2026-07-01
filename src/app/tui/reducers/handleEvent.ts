@@ -31,6 +31,12 @@ import {
 // ── Table detection ──
 
 const TABLE_PIPE = /[|│]/;
+const TIMEOUT_RE = /^Command timed out after (\d+)ms\./;
+
+function parseTimeoutMs(summary: string): number | undefined {
+  const match = summary.match(TIMEOUT_RE);
+  return match ? Number(match[1]) : undefined;
+}
 
 function isTableSepLine(line: string): boolean {
   const trimmed = line.trim();
@@ -613,16 +619,33 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       }
 
       const cancelled = !event.data.ok && summaryText === 'Cancelled';
+      const timedOut =
+        !event.data.ok &&
+        matched.name === 'shell_execute' &&
+        (event.data.exitCode === 124 || TIMEOUT_RE.test(summaryText));
+      const timeoutMs =
+        timedOut && typeof matched.args.timeout_ms === 'number'
+          ? matched.args.timeout_ms
+          : timedOut
+            ? parseTimeoutMs(summaryText)
+            : undefined;
+      const displaySummary =
+        timedOut && TIMEOUT_RE.test(summaryText) && matched.liveOutput
+          ? matched.liveOutput
+          : summaryText;
       const next: OutputBlock = {
         ...matched,
         status: event.data.ok
           ? ('done' as const)
           : cancelled
             ? ('cancelled' as const)
-            : ('error' as const),
-        summary: summaryText,
+            : timedOut
+              ? ('timeout' as const)
+              : ('error' as const),
+        summary: displaySummary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
+        ...(timeoutMs != null ? { timeoutMs } : {}),
         expanded:
           !event.data.ok ||
           matched.name === 'shell_execute' ||

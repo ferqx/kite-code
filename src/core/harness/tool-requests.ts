@@ -634,6 +634,9 @@ function normalizeShellActionEnvelope(value: unknown): ShellActionEnvelope {
     ...(typeof record.failure_strategy === 'string'
       ? { failure_strategy: record.failure_strategy }
       : {}),
+    ...(typeof record.timeout_ms === 'number' && Number.isFinite(record.timeout_ms)
+      ? { timeout_ms: Math.max(1, Math.floor(record.timeout_ms)) }
+      : {}),
     ...(Array.isArray(record.prefix_rule)
       ? {
           prefix_rule: record.prefix_rule.filter(

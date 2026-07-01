@@ -66,6 +66,49 @@ describe('sandbox executor integration', () => {
     }
   });
 
+  test('emits live stderr progress before later stdout', async () => {
+    const ws = setupWorkspace();
+    try {
+      const events: Array<{ chunk: string; stream: 'stdout' | 'stderr' }> = [];
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+
+      const result = await executor({
+        workspace: ws,
+        command: "printf 'err-first\\n' >&2; sleep 0.2; printf 'out-late\\n'",
+        onProgress: (chunk, stream) => {
+          events.push({ chunk, stream });
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(events[0]).toEqual({ chunk: 'err-first', stream: 'stderr' });
+      expect(events.map((e) => e.chunk)).toEqual(['err-first', 'out-late']);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('stops long-running commands after timeoutMs', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const startedAt = Date.now();
+
+      const result = await executor({
+        workspace: ws,
+        command: 'sleep 5',
+        timeoutMs: 100,
+      });
+
+      expect(Date.now() - startedAt).toBeLessThan(2000);
+      expect(result.ok).toBe(false);
+      expect(result.exitCode).toBe(124);
+      expect(result.stderr).toContain('timed out');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
   test('allows file read outside workspace (dev tools need system paths)', async () => {
     const ws = setupWorkspace();
     // 文件读取不再被沙箱阻止，以满足 git、xcrun 等开发工具的需求

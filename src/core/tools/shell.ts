@@ -25,7 +25,7 @@ export function assertInsideWorkspace(workspace: string, targetPath: string): st
 /** 逐行读取 ReadableStream，每行触发 onLine，返回完整文本。
  *  Line-by-line stream reader — emits per-line callbacks as data arrives,
  *  returns accumulated full text when stream closes. */
-async function readWithProgress(
+export async function readWithProgress(
   stream: ReadableStream<Uint8Array>,
   onLine: (line: string) => void,
 ): Promise<string> {
@@ -47,7 +47,10 @@ async function readWithProgress(
     // Flush partial multi-byte sequences from TextDecoder internal buffer
     if (buffer.length > 0) {
       const flushed = decoder.decode();
-      if (flushed) { buffer += flushed; result += flushed; }
+      if (flushed) {
+        buffer += flushed;
+        result += flushed;
+      }
       onLine(buffer);
     }
   } catch {
@@ -57,13 +60,19 @@ async function readWithProgress(
     }
   } finally {
     // Release reader lock to avoid leaks
-    try { reader.releaseLock(); } catch { /* already released */ }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* already released */
+    }
   }
   return result;
 }
 
 /** 通过 Bun.spawn 执行 Shell 命令，返回结构化结果 / Execute shell command via Bun.spawn, return structured result */
 export async function shellTool(input: ShellInput): Promise<ShellResult> {
+  let timedOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const proc = Bun.spawn(buildShellInvocation(input.command), {
       cwd: input.workspace,
@@ -72,21 +81,39 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
       signal: input.signal,
     });
 
+    if (input.timeoutMs && input.timeoutMs > 0) {
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        try {
+          proc.kill();
+        } catch {
+          /* process may have exited already */
+        }
+      }, input.timeoutMs);
+    }
+
     if (input.onProgress) {
-      // 顺序流式读取：stdout → stderr，逐行触发 onProgress。
-      // 顺序读避免 Bun reader.read() 在并发模式下的挂起问题。
-      // Sequential streaming: stdout → stderr with per-line progress.
-      // Sequential reads avoid Bun reader.read() hangs in concurrent mode.
-      const stdout = await readWithProgress(proc.stdout, (line) => input.onProgress!(line, 'stdout'));
-      const rawStderr = await readWithProgress(proc.stderr, (line) => input.onProgress!(line, 'stderr'));
+      // 同时消费 stdout/stderr，避免进度输出写入 stderr 时被 stdout 读取阻塞。
+      // Consume both streams concurrently so stderr progress is not blocked
+      // while stdout is quiet.
+      const [stdout, rawStderr] = await Promise.all([
+        readWithProgress(proc.stdout, (line) => input.onProgress!(line, 'stdout')),
+        readWithProgress(proc.stderr, (line) => input.onProgress!(line, 'stderr')),
+      ]);
       const exitCode = await proc.exited;
+      if (timeoutId) clearTimeout(timeoutId);
 
       return {
-        ok: exitCode === 0,
+        ok: !timedOut && exitCode === 0,
         command: input.command,
-        exitCode,
+        exitCode: timedOut ? 124 : exitCode,
         stdout: normalizeMsys2PathsInText(stdout),
-        stderr: cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+        stderr: timedOut
+          ? appendTimeoutMessage(
+              cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+              input.timeoutMs!,
+            )
+          : cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
       };
     }
 
@@ -94,27 +121,36 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
     const stdout = await new Response(proc.stdout).text();
     const rawStderr = await new Response(proc.stderr).text();
     const exitCode = await proc.exited;
+    if (timeoutId) clearTimeout(timeoutId);
 
     return {
-      ok: exitCode === 0,
+      ok: !timedOut && exitCode === 0,
       command: input.command,
-      exitCode,
+      exitCode: timedOut ? 124 : exitCode,
       stdout: normalizeMsys2PathsInText(stdout),
-      stderr: cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+      stderr: timedOut
+        ? appendTimeoutMessage(
+            cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+            input.timeoutMs!,
+          )
+        : cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
     };
   } catch (error) {
+    if (timeoutId) clearTimeout(timeoutId);
     // AbortError 表示用户主动取消，标记为非失败 / AbortError means user cancellation, mark as non-failure
     const isAbort = error instanceof Error && error.name === 'AbortError';
     return {
       ok: false,
       command: input.command,
-      exitCode: isAbort ? 130 : -1,
+      exitCode: timedOut ? 124 : isAbort ? 130 : -1,
       stdout: '',
-      stderr: isAbort
-        ? 'Command cancelled by user.'
-        : error instanceof Error
-          ? error.message
-          : String(error),
+      stderr: timedOut
+        ? timeoutMessage(input.timeoutMs ?? 0)
+        : isAbort
+          ? 'Command cancelled by user.'
+          : error instanceof Error
+            ? error.message
+            : String(error),
     };
   }
 }
@@ -147,4 +183,13 @@ function buildShellInvocation(command: string): string[] {
 /** 过滤 MSYS2 启动时的无害噪音（/tmp 警告等） */
 function cleanMsys2Noise(stderr: string): string {
   return stderr.replace(/^bash\.exe: warning: could not find \/tmp, please create!\r?\n/gm, '');
+}
+
+export function timeoutMessage(timeoutMs: number): string {
+  return `Command timed out after ${timeoutMs}ms.`;
+}
+
+export function appendTimeoutMessage(stderr: string, timeoutMs: number): string {
+  const message = timeoutMessage(timeoutMs);
+  return stderr.trimEnd() ? `${stderr.trimEnd()}\n${message}` : message;
 }
