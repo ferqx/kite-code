@@ -101,6 +101,37 @@ git merge -X theirs origin/<branch> --no-edit
 - 详细的分层边界强制规则见 `layer-boundary-enforcement.md`。
 - 同层模块之间的类型引用用正常 `import`，不用内联 `import()`（除接口字段定义中的紧凑写法外）。
 
+### 模式枚举常量
+
+有限枚举值的业务模式（如 `InteractionMode`、`AuthorizationMode`），禁止在代码中使用裸字符串常量进行判断或赋值。必须通过常量对象引用：
+
+```typescript
+// ✅ 正确：使用常量对象
+if (state.interactionMode === InteractionMode.Auto) { ... }
+dispatch({ type: 'SET_INTERACTION_MODE', mode: InteractionMode.Full });
+
+// ❌ 错误：裸字符串
+if (state.interactionMode === 'auto') { ... }
+dispatch({ type: 'SET_INTERACTION_MODE', mode: 'full' });
+```
+
+模式常量定义在 `src/protocol/events.ts`，使用 `as const` 对象同时提供运行时常量和 TypeScript 类型。如需封装判断逻辑（如"是否为全自动模式"），提炼为函数，例如 `isFullAccessMode()`，不得在各处重复字符串比较。
+
+```typescript
+export const InteractionMode = {
+  Ask: 'ask',
+  Auto: 'auto',
+  Full: 'full',
+} as const;
+export type InteractionMode = (typeof InteractionMode)[keyof typeof InteractionMode];
+
+export function isFullAccessMode(mode: InteractionMode): boolean {
+  return mode === InteractionMode.Full;
+}
+```
+
+> 规则动机：模式名一旦需要改名，只需改常量对象的值，所有引用自动跟随。裸字符串散落在各处会导致改名遗漏和类型不一致。
+
 ### 联合类型访问规则
 
 `OutputBlock` 等判别联合类型必须通过 `kind` 收窄后访问特有字段：

@@ -30,13 +30,6 @@ export function changePrefix(
   }
 }
 
-function formatLines(added?: number, removed?: number): string {
-  const parts: string[] = [];
-  if (added != null) parts.push(`+${added}`);
-  if (removed != null) parts.push(`-${removed}`);
-  return parts.length > 0 ? ` (${parts.join(' ')})` : '';
-}
-
 const BLOCK_GAP = 1;
 /** Agent text 内容的左缩进量，与工具卡片 `● 工具名` 中工具名起始列对齐 */
 const TEXT_INDENT = 2;
@@ -142,34 +135,8 @@ const BlockRenderer = React.memo(function BlockRenderer({
     }
 
     case 'file_change':
-      return (
-        <Box flexDirection="column" {...gapFrom(prevBlock)}>
-          <Text color={dt.muted}>── File Changes ──</Text>
-          {block.changes.map((change, ci) => {
-            const { prefix, color } = changePrefix(change.kind, dt);
-            const lineInfo = formatLines(change.linesAdded, change.linesRemoved);
-            return (
-              <Box key={`${block.id}-${ci}`} flexDirection="column">
-                <Box>
-                  <Text color={color}>
-                    {prefix} {change.path}
-                  </Text>
-                  {lineInfo ? <Text color={dt.dim}>{lineInfo}</Text> : null}
-                </Box>
-                {change.preview && (
-                  <Box paddingLeft={3} flexDirection="column">
-                    {change.preview.split('\n').map((pl, pli) => (
-                      <Text key={pli} color={dt.dim}>
-                        │ {pl}
-                      </Text>
-                    ))}
-                  </Box>
-                )}
-              </Box>
-            );
-          })}
-        </Box>
-      );
+      // 文件变更已由 tool_card 展示，此处不重复
+      return null;
 
     case 'approval': {
       // 审批中/已审批均由 tool_card 和 Footer 完整渲染，此处不重复

@@ -25,7 +25,7 @@ interface PasteState {
 }
 
 export interface SlashSuggestionData {
-  kind: 'command' | 'model' | 'effort' | 'theme';
+  kind: 'command' | 'model' | 'effort' | 'theme' | 'mode';
   partial: string;
   items: Array<{
     command: string;
@@ -403,7 +403,9 @@ export default function InputLine({
                   ? `/effort ${prefix}`
                   : ss.result.kind === 'theme'
                     ? `/theme ${prefix}`
-                    : `/${prefix}`,
+                    : ss.result.kind === 'mode'
+                      ? `/mode ${prefix}`
+                      : `/${prefix}`,
             );
           } else {
             // No common prefix extension — commit the selected item directly

@@ -159,6 +159,8 @@ export interface TuiState {
   explorationSummaryIds: Record<string, number>;
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
   currentThoughtSummaryId?: number;
+  /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
+  interactionMode: 'ask' | 'auto' | 'full';
 }
 
 export type InterruptState =

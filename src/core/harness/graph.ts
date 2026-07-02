@@ -20,7 +20,13 @@ import type {
   ModelRetryEvent,
   ThreadAuthorizationState,
 } from '@/core/types';
-import type { AgentPlan, PlanStatus, ShellApprovalGrant } from '@/protocol/events';
+import {
+  type AgentPlan,
+  InteractionMode,
+  isFullAccessMode,
+  type PlanStatus,
+  type ShellApprovalGrant,
+} from '@/protocol/events';
 import {
   routeAfterAgent,
   routeAfterApproval,
@@ -183,9 +189,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   const approval = async (state: CodeAgentState) => {
     const batch = migratePermitBatch(state.approvedBatch);
     const pendingSubagent = state.pendingSubagentApproval;
-    const hasFullAccess = Object.values(batch).some(
-      (p) => !p.consumed && p.grant === 'full_access',
-    );
+    const hasFullAccess =
+      isFullAccessMode(state.interactionMode) ||
+      Object.values(batch).some((p) => !p.consumed && p.grant === 'full_access');
 
     // 查找第一个尚未审批的待处理工具（跳过已在 batch 中的）
     const allPending = pendingSubagent
@@ -268,7 +274,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           replacementCommand?: string;
           reason?: string;
         };
-    if (state.interactionMode === 'auto_review') {
+    if (state.interactionMode === InteractionMode.Auto) {
       const reviewModel =
         input.config.autoReview?.provider || input.config.autoReview?.model
           ? createAutoReviewModel(input.config)
@@ -280,6 +286,19 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         timeoutMs: input.config.autoReview?.timeoutMs,
       });
       if (!review.ok || !review.suggestion?.approved) {
+        if (pendingSubagent) {
+          Object.assign(
+            batch,
+            issuePermit({
+              batch,
+              workspace: state.workspace,
+              threadId: state.threadId,
+              request: pendingSubagent.request,
+              grant: 'none',
+            }),
+          );
+          return { approvedBatch: batch };
+        }
         return {
           ...rejectedToolMessage(
             request,

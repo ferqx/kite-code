@@ -24,7 +24,7 @@ export interface ParsedArgs {
   replacementCommand?: string;
   answer?: string;
   sandbox: boolean;
-  interactionMode?: 'interactive' | 'auto_review' | 'unattended';
+  interactionMode?: import('@/protocol/events').InteractionMode;
   skills: string[];
 }
 
@@ -36,9 +36,9 @@ export async function main(): Promise<void> {
   }
 
   const config = loadAgentConfig();
-  const interactionMode = args.interactionMode ?? config.interactionMode ?? 'interactive';
-  if (interactionMode === 'unattended' && (!args.sandbox || detectSandboxBackend() === 'none')) {
-    throw new Error('unattended mode requires an available workspace sandbox.');
+  const interactionMode = args.interactionMode ?? config.interactionMode ?? 'ask';
+  if (interactionMode === 'full' && (!args.sandbox || detectSandboxBackend() === 'none')) {
+    throw new Error('full mode requires an available workspace sandbox.');
   }
   const shellExecutor = createSandboxExecutor({
     enabled: args.sandbox,
@@ -185,12 +185,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return index >= 0 ? (argv[index + 1] ?? '') : undefined;
   };
   const noSandbox = argv.includes('--no-sandbox');
-  const interactionMode = argv.includes('--unattended')
-    ? 'unattended'
-    : argv.includes('--auto-review')
-      ? 'auto_review'
-      : argv.includes('--interactive')
-        ? 'interactive'
+  const interactionMode = argv.includes('--full')
+    ? 'full'
+    : argv.includes('--auto')
+      ? 'auto'
+      : argv.includes('--ask')
+        ? 'ask'
         : undefined;
   const explicitThread = value('--thread', '');
   const mode = parseMode(value('--mode', 'auto'));
@@ -302,6 +302,9 @@ Options:
   --replace-command <cmd> Replace pending command
   --answer <text>        Answer user input interrupt
   --authorization-mode <mode>  default or full-access
+  --ask                  Ask before every tool (default)
+  --auto                 Auto-review tools, ask when uncertain
+  --full           Run with full permissions, never ask
   --no-sandbox           Disable sandbox`);
 }
 

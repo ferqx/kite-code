@@ -42,6 +42,7 @@ export class SessionRuntime {
   conversationHistory: string[] = [];
   pendingSkills: string[] = [];
   thinkingLevel: string | null = null;
+  interactionMode: 'ask' | 'auto' | 'full';
   name: string;
 
   skillManifests: SkillManifest[];
@@ -67,6 +68,7 @@ export class SessionRuntime {
     this.skillManifests = deps.skillManifests;
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
+    this.interactionMode = deps.config.interactionMode ?? 'ask';
 
     this._proxyProvider = this._createProxyProvider(deps.provider);
   }
@@ -142,6 +144,7 @@ export class SessionRuntime {
       mcpManager: this.mcpManager,
       pendingSkillsContent,
       shellContext,
+      interactionMode: this.interactionMode,
       model: deps.model,
       // 后台会话注入 full_access，避免中断阻塞 generator
       authorizationOverride: this._foreground ? undefined : { current: 'full_access' as const },

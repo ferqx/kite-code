@@ -1,94 +1,105 @@
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import { useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
-import type { ShellApprovalGrant, ToolApprovalPayload } from '@/protocol/events';
 
 interface Option {
   key: string;
   label: string;
-  grant: ShellApprovalGrant | null;
+  subtext?: string;
+  action: 'approve' | 'auto' | 'full' | 'deny';
 }
 
 interface ApprovalBlockProps {
-  approval: ToolApprovalPayload;
+  approval?: unknown;
   provider: TuiUserInputProvider;
-  onResolved: (action: string, grant?: string, pattern?: string) => void;
+  onResolved: (action: string, grant?: string) => void;
 }
 
-export default function ApprovalBlock({ approval, provider, onResolved }: ApprovalBlockProps) {
+const OPTIONS: Option[] = [
+  { key: 'y', label: 'Yes · 仅本次', action: 'approve' },
+  {
+    key: 'a',
+    label: 'Auto · 自动审批',
+    subtext: '模型自动判断，不确定时再次询问',
+    action: 'auto',
+  },
+  {
+    key: 'f',
+    label: 'Full · 完全权限',
+    subtext: '不再询问，全部工具直接放行',
+    action: 'full',
+  },
+  { key: 'd', label: 'Deny · 拒绝', action: 'deny' },
+];
+
+export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockProps) {
   const t = useTheme();
-
-  const options: Option[] = [];
-  for (const g of approval.grantOptions) {
-    switch (g) {
-      case 'approve_once':
-        options.push({ key: 'a', label: 'Approve once', grant: 'approve_once' });
-        break;
-      case 'same_command':
-        options.push({ key: 's', label: 'Approve same command', grant: 'same_command' });
-        break;
-      case 'full_access':
-        options.push({ key: 'f', label: 'Approve all · full access', grant: 'full_access' });
-        break;
-    }
-  }
-  options.push({ key: 'd', label: 'Deny', grant: null });
-
+  const { stdout } = useStdout();
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const cols = stdout?.columns ?? 80;
 
-  const prefix = approval.suggestedPrefixRule?.[0] ?? approval.command.split(/[;&|]/)[0]?.trim();
-
-  function resolve(grant: ShellApprovalGrant | null) {
-    if (grant) {
-      const pat = grant === 'same_command' && prefix ? prefix : undefined;
-      provider.submitAction({ type: 'approve', grant });
-      onResolved(grant, grant, pat);
+  function resolve(opt: Option) {
+    if (opt.action === 'approve') {
+      provider.submitAction({ type: 'approve', grant: 'approve_once' });
+      onResolved('approve', 'approve_once');
+    } else if (opt.action === 'auto') {
+      provider.submitAction({ type: 'approve', grant: 'approve_once' });
+      onResolved('auto', 'approve_once');
+    } else if (opt.action === 'full') {
+      provider.submitAction({ type: 'approve', grant: 'full_access' });
+      onResolved('full', 'full_access');
     } else {
       provider.submitAction({ type: 'reject' });
       onResolved('denied');
     }
   }
 
-  useInput(
-    (
-      input: string,
-      key: { escape?: boolean; upArrow?: boolean; downArrow?: boolean; return?: boolean },
-    ) => {
-      // Esc 由全局 handler 处理 / Esc is handled by global handler
-      if (key.upArrow) {
-        setSelectedIndex((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setSelectedIndex((i) => Math.min(options.length - 1, i + 1));
-        return;
-      }
-      if (key.return) {
-        const opt = options[selectedIndex];
-        if (opt) resolve(opt.grant);
-        return;
-      }
-      // 字母快捷键保留 / Letter shortcuts kept as quick access
-      const match = options.find((o) => o.key === input.toLowerCase());
-      if (match) resolve(match.grant);
-    },
-  );
+  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+    if (key.upArrow) {
+      setSelectedIndex((i) => Math.max(0, i - 1));
+      return;
+    }
+    if (key.downArrow) {
+      setSelectedIndex((i) => Math.min(OPTIONS.length - 1, i + 1));
+      return;
+    }
+    if (key.return) {
+      const opt = OPTIONS[selectedIndex];
+      if (opt) resolve(opt);
+    }
+  });
 
   return (
     <Box flexDirection="column">
-      <Text color={t.dim}>{'─'.repeat(40)}</Text>
-      <Text color={t.primary}>Approve this tool call?</Text>
-      {options.map((o, i) => {
-        const isSelected = i === selectedIndex;
-        const isDeny = o.grant === null;
-        return (
-          <Text key={o.key} color={isSelected ? t.primary : isDeny ? t.error : t.muted}>
-            {isSelected ? '▶' : ' '} {i + 1}. {o.label}
-          </Text>
-        );
-      })}
-      <Text color={t.dim}>↑↓ select Enter confirm Esc cancel</Text>
+      {/* top border */}
+      <Text color={t.dim}>{'─'.repeat(cols)}</Text>
+
+      {/* title */}
+      <Box marginTop={1}>
+        <Text>Approve this tool call?</Text>
+      </Box>
+
+      {/* options */}
+      <Box flexDirection="column" marginTop={1}>
+        {OPTIONS.map((o, i) => {
+          const isSelected = i === selectedIndex;
+          const color = isSelected ? t.primary : o.action === 'deny' ? t.dim : t.muted;
+          return (
+            <Box key={o.key} marginTop={i > 0 ? 1 : 0}>
+              <Text color={color}>
+                {isSelected ? '>' : ' '} {o.label}
+              </Text>
+              {o.subtext && <Text color={t.dim}> — {o.subtext}</Text>}
+            </Box>
+          );
+        })}
+      </Box>
+
+      {/* footer */}
+      <Box marginTop={1} marginBottom={1}>
+        <Text color={t.dim}>↑↓ select Enter confirm Esc cancel</Text>
+      </Box>
     </Box>
   );
 }

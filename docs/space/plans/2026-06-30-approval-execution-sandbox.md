@@ -1,8 +1,13 @@
 # 审批层、执行层与沙箱渐进式开发方案
 
-状态：draft
+状态：partially-implemented（阶段四交互模式已实现，阶段一~三、五待实现）
 创建：2026-06-30
 优先级：P0
+实施记录：`docs/space/execution/completed/2026-07-02-interaction-mode-slash-command.md`
+
+> 阶段四（无人值守自动审核）的交互模式切换已于 2026-07-02 完成。
+> 命名从 `interactive / auto_review / unattended` 改为 `ask / auto / full`。
+> 其余阶段待实施。
 依赖：无
 
 ## 目标

@@ -73,6 +73,7 @@ const initialState: TuiState = {
   loadingSessionId: null,
   explorationSummaryIds: {},
   currentThoughtSummaryId: undefined,
+  interactionMode: 'ask',
   pendingSkills: [],
   skillManifests: [],
 };
@@ -118,15 +119,19 @@ export function useTuiState(
   initialModelName?: string,
   initialProviderName?: string,
   initialThinkingMode?: string | null,
+  initialInteractionMode?: 'ask' | 'auto' | 'full',
 ): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
   const statusOverrides: Partial<TuiState['status']> = {};
   if (initialModelName) statusOverrides.modelName = initialModelName;
   if (initialProviderName) statusOverrides.modelProvider = initialProviderName;
   if (initialThinkingMode) statusOverrides.thinkingMode = initialThinkingMode;
-  const hasOverrides = Object.keys(statusOverrides).length > 0;
-  const initState = hasOverrides
-    ? { ...initialState, status: { ...initialState.status, ...statusOverrides } }
-    : initialState;
+  const initState = { ...initialState };
+  if (Object.keys(statusOverrides).length > 0) {
+    initState.status = { ...initialState.status, ...statusOverrides };
+  }
+  if (initialInteractionMode) {
+    initState.interactionMode = initialInteractionMode;
+  }
   const [state, dispatch] = useReducer(eventReducer, initState);
   const onToggleReason = useCallback((id: number) => dispatch({ type: 'TOGGLE_REASON', id }), []);
   return { state, dispatch, onToggleReason };
@@ -215,12 +220,17 @@ export default function App({
   const awaitingApproval = state.interrupt?.kind === 'approval';
 
   const resolveApproval = useCallback(
-    (action: string, grant?: string, pattern?: string) => {
+    (action: string, grant?: string) => {
       if (!interruptBlock) return;
+      if (action === 'auto') {
+        dispatch({ type: 'SET_INTERACTION_MODE', mode: 'auto' });
+      } else if (action === 'full') {
+        dispatch({ type: 'SET_INTERACTION_MODE', mode: 'full' });
+      }
       dispatch({
         type: 'RESOLVE_INTERRUPT',
         blockId: interruptBlock.id,
-        resolution: { action, grant, pattern },
+        resolution: { action, grant },
       });
     },
     [dispatch, interruptBlock],
@@ -302,6 +312,7 @@ export default function App({
         runStatus={runStatus}
         running={showRunStatus}
         timerKey={state.runCount}
+        interactionMode={state.interactionMode}
       >
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}
         {!state.interrupt && children}
@@ -375,7 +386,9 @@ export default function App({
                     ? `推理深度匹配 "${slashSuggestion.partial}"`
                     : slashSuggestion.kind === 'theme'
                       ? `主题匹配 "${slashSuggestion.partial}"`
-                      : `命令匹配 /${slashSuggestion.partial}`}
+                      : slashSuggestion.kind === 'mode'
+                        ? `审核模式匹配 "${slashSuggestion.partial}"`
+                        : `命令匹配 /${slashSuggestion.partial}`}
               </Text>
               <Box height={Math.min(slashSuggestion.items.length, listHeight)}>
                 <ScrollList selectedIndex={slashSuggestion.selectedIndex} scrollAlignment="auto">
@@ -387,10 +400,13 @@ export default function App({
                         : '';
                     const argsStr = item.args ? ` ${item.args}` : '';
                     const activeDot = item.isActive ? ACTIVE_DOT : INACTIVE_DOT;
+                    const displayName =
+                      slashSuggestion.kind === 'mode' ? item.command : `/${item.command}`;
                     return (
                       <Box key={item.command}>
                         <Text color={isSelected ? theme.primary : theme.muted}>
-                          {isSelected ? '❯' : ' '} {activeDot}/{item.command}
+                          {isSelected ? '❯' : ' '} {activeDot}
+                          {displayName}
                           {argsStr}
                         </Text>
                         <Text color={theme.dim}>{aliasStr}</Text>

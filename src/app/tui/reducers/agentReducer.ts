@@ -1,5 +1,6 @@
 // ── Agent 生命周期（运行/空闲/退出）、中断、授权、Ctrl+C/Esc ──
 
+import { InteractionMode } from '@/protocol/events';
 import type { OutputBlock, TuiState } from '../types';
 import type { Action } from './actions';
 import { buildToolSummaryLine } from './consolidateTools';
@@ -328,6 +329,22 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
     case 'SET_PHASE':
       return { ...state, status: { ...state.status, phase: action.phase } };
+    case 'SET_INTERACTION_MODE': {
+      const next =
+        action.mode === 'toggle'
+          ? state.interactionMode === InteractionMode.Ask
+            ? InteractionMode.Auto
+            : state.interactionMode === InteractionMode.Auto
+              ? InteractionMode.Full
+              : InteractionMode.Ask
+          : action.mode;
+      const auth = next === InteractionMode.Full ? 'full_access' : 'default';
+      return {
+        ...state,
+        interactionMode: next,
+        status: { ...state.status, authorization: auth as 'default' | 'full_access' },
+      };
+    }
     case 'TOGGLE_PLAN_MODE': {
       const nextPhase = state.status.phase === 'planning' ? 'building' : 'planning';
       const nextAuth = nextPhase === 'planning' ? 'default' : state.status.authorization;

@@ -75,7 +75,7 @@ export interface RunAgentInput {
   frontend?: string;
   /** 初始执行阶段；TUI plan mode 会传入 planning / Initial execution phase */
   initialPhase?: AgentPhase;
-  interactionMode?: 'interactive' | 'auto_review' | 'unattended';
+  interactionMode?: import('@/protocol/events').InteractionMode;
 }
 
 export interface StreamCodeAgentInput {
@@ -280,7 +280,7 @@ export async function* runAgent(
       modelProvider: input.config.providerName,
       modelName: input.config.modelName,
       thinkingLevel: input.thinkingLevel ?? null,
-      interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'interactive',
+      interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
     };
 
     let resumeValue: AgentResumeValue | null = input.resume ?? null;
@@ -457,6 +457,7 @@ export async function* forkFromCheckpoint(
       plan: oldState.plan,
       messages: oldState.messages ?? [],
       authorization: oldState.authorization ?? defaultAuthorizationState(),
+      interactionMode: oldState.interactionMode ?? 'ask',
       contextBudget: undefined,
       modelProvider: input.config.providerName,
       modelName: input.config.modelName,

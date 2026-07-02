@@ -1,7 +1,7 @@
 import { END } from '@langchain/langgraph';
 import { migratePermitBatch } from '@/core/execution/permit';
 import type { AuthorizationOverride } from '@/core/types';
-import type { AgentPlan } from '@/protocol/events';
+import { type AgentPlan, isFullAccessMode } from '@/protocol/events';
 import type { CodeAgentState } from './state';
 import { defaultPhaseForWorkspaceAccess, evaluateToolPolicy } from './tool-policy';
 import { getAllPendingToolRequests } from './tool-requests';
@@ -34,9 +34,9 @@ function resolveToolRoute(
   let hasApprovalRequired = false;
 
   for (const request of allRequests) {
-    // Priority 1: ask_user 必须由 user_input 中断节点处理；unattended 下不能挂起
+    // Priority 1: ask_user 必须由 user_input 中断节点处理；full 下不能挂起
     if (request.name === 'ask_user') {
-      if (state.interactionMode === 'unattended') continue;
+      if (isFullAccessMode(state.interactionMode)) continue;
       return 'user_input';
     }
 

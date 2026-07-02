@@ -16,7 +16,12 @@ import {
 import { type ShellExecutor, shellTool } from '@/core/tools/shell';
 import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type { AuthorizationOverride, ShellResult, ThreadAuthorizationState } from '@/core/types';
-import type { AgentPhase, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
+import {
+  type AgentPhase,
+  isFullAccessMode,
+  type ShellGrantUsed,
+  type WorkspaceAccess,
+} from '@/protocol/events';
 import {
   defaultPhaseForWorkspaceAccess,
   evaluateToolPolicy,
@@ -42,7 +47,7 @@ export interface RunApprovedToolInput {
   skillOptions?: SkillScanOptions;
   signal?: AbortSignal;
   permitBatch?: PermitBatch;
-  interactionMode?: 'interactive' | 'auto_review' | 'unattended';
+  interactionMode?: import('@/protocol/events').InteractionMode;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
   subagentEventSink?: SubAgentEventSink;
@@ -68,7 +73,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     skillOptions,
     signal,
     permitBatch,
-    interactionMode = 'interactive',
+    interactionMode = 'ask',
     taskConfig,
     taskModel,
     subagentEventSink,
@@ -324,7 +329,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'ask_user') {
-    if (interactionMode === 'unattended') {
+    if (isFullAccessMode(interactionMode)) {
       return withFailureGuidance(request, {
         ok: false,
         command: 'ask_user',
@@ -334,9 +339,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
           ok: false,
           rejected: true,
           replan: {
-            reasonCode: 'UNATTENDED_NO_USER_INTERACTION',
-            reason:
-              'Unattended mode cannot ask the user. Make the best safe assumption and continue.',
+            reasonCode: 'FULL_NO_USER_INTERACTION',
+            reason: 'Full mode cannot ask the user. Make the best safe assumption and continue.',
             blockedCapability: 'ask_user',
           },
         }),

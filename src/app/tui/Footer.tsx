@@ -10,10 +10,18 @@ interface FooterProps {
   runStatus?: RunStatusSnapshot;
   running: boolean;
   timerKey: number;
+  interactionMode?: 'ask' | 'auto' | 'full';
   children?: ReactNode;
 }
 
-export default function Footer({ status, runStatus, running, timerKey, children }: FooterProps) {
+export default function Footer({
+  status,
+  runStatus,
+  running,
+  timerKey,
+  interactionMode,
+  children,
+}: FooterProps) {
   return (
     <Box flexDirection="column">
       <StatusBar status={status} runStatus={runStatus} running={running} timerKey={timerKey} />
@@ -23,6 +31,7 @@ export default function Footer({ status, runStatus, running, timerKey, children 
         running={running}
         modelProvider={status.modelProvider}
         modelName={status.modelName}
+        interactionMode={interactionMode}
       />
     </Box>
   );
