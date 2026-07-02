@@ -41,7 +41,7 @@ const mcpServerSchema = z.object({
   timeout: z.number().optional(),
 });
 
-const interactionModeSchema = z.enum(['interactive', 'auto_review', 'unattended']);
+const interactionModeSchema = z.enum(['ask', 'auto', 'full']);
 
 export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
@@ -172,7 +172,7 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
       },
     },
     theme: 'dark',
-    interactionMode: 'interactive',
+    interactionMode: 'ask',
     mcpServers: {},
   };
 }

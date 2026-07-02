@@ -4,7 +4,13 @@ import type { ExecutionJournalEntry } from '@/core/execution/journal';
 import type { PermitBatch } from '@/core/execution/permit';
 import type { SubAgentContinuation } from '@/core/subagent/types';
 import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
-import type { AgentPhase, AgentPlan, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
+import type {
+  AgentPhase,
+  AgentPlan,
+  InteractionMode,
+  ShellGrantUsed,
+  WorkspaceAccess,
+} from '@/protocol/events';
 import { defaultAuthorizationState } from './tool-policy';
 import type { PendingToolRequest } from './tool-requests';
 
@@ -53,9 +59,9 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => 'local_unsafe',
   }),
-  interactionMode: Annotation<'interactive' | 'auto_review' | 'unattended'>({
+  interactionMode: Annotation<InteractionMode>({
     reducer: (_left, right) => right,
-    default: () => 'interactive',
+    default: () => 'ask',
   }),
   executionJournal: Annotation<ExecutionJournalEntry[]>({
     reducer: (_left, right) => right,

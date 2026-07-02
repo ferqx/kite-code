@@ -50,8 +50,20 @@ export type AgentPhase = 'planning' | 'building';
 /** 工作区访问请求模式（CLI --mode 参数），已废弃 read-only/plan / Workspace access request mode (CLI --mode), read-only/plan deprecated */
 export type WorkspaceAccessRequest = 'auto' | WorkspaceAccess | 'builder';
 export type AuthorizationMode = 'default' | 'full_access';
+export const InteractionMode = {
+  Ask: 'ask',
+  Auto: 'auto',
+  Full: 'full',
+} as const;
+export type InteractionMode = (typeof InteractionMode)[keyof typeof InteractionMode];
+
 export type ShellApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
 export type ShellGrantUsed = 'none' | ShellApprovalGrant;
+
+/** 判断是否为全自动放行模式（目前只有 full） */
+export function isFullAccessMode(mode: InteractionMode): boolean {
+  return mode === InteractionMode.Full;
+}
 export type PlanStatus = 'pending' | 'in_progress' | 'completed';
 
 export interface AgentPlanStep {
