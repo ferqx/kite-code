@@ -422,9 +422,9 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
 
       getAuthMode() {
         const out = getOutput();
-        if (out.includes('[完全]')) return 'full_access';
-        if (out.includes('[安全]')) return 'default';
-        return null;
+        if (out.includes('[完全权限]')) return 'full_access';
+        // No label = ask mode (default)
+        return 'default';
       },
 
       async waitForRunningGone(timeout = stepTimeout) {

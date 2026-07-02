@@ -258,19 +258,17 @@ describe('TUI E2E — P2+P3 Advanced Interactions', () => {
 
   describe('Global Shortcuts', () => {
     test(
-      '/auth toggles authorization (replaces removed Ctrl+R)',
+      '/mode toggles interaction mode label (replaces removed Ctrl+R /auth)',
       async () => {
-        const initialAuth = tui.getAuthMode();
-        expect(initialAuth).toBeDefined();
+        // Default: ask mode, no label
+        expect(tui.getOutput()).not.toContain('[自动审批]');
 
-        await runSlashCommand(tui, '/auth', 500);
-        const toggledAuth = tui.getAuthMode();
-        expect(toggledAuth).toBeDefined();
-        expect(toggledAuth).not.toBe(initialAuth);
+        await runSlashCommand(tui, '/mode auto', 500);
+        expect(tui.getOutput()).toContain('[自动审批]');
 
-        // Toggle back
-        await runSlashCommand(tui, '/auth', 500);
-        expect(tui.getAuthMode()).toBe(initialAuth);
+        // Switch back
+        await runSlashCommand(tui, '/mode ask', 500);
+        expect(tui.getOutput()).not.toContain('[自动审批]');
       },
       TIMEOUT,
     );

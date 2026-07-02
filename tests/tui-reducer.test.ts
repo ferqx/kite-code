@@ -2127,4 +2127,66 @@ describe('eventReducer (blocks model)', () => {
       expect(flatBlocks(s)[0]!.id).toBeLessThan(flatBlocks(s)[1]!.id);
     });
   });
+
+  // ── Interaction Mode ──
+
+  describe('SET_INTERACTION_MODE', () => {
+    test('default interactionMode is ask, authorization is default', () => {
+      const s = fresh();
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
+    });
+
+    test('sets interactionMode to auto, authorization stays default', () => {
+      const s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'auto' });
+      expect(s.interactionMode).toBe('auto');
+      expect(s.status.authorization).toBe('default');
+    });
+
+    test('sets interactionMode to full, authorization becomes full_access', () => {
+      const s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
+      expect(s.interactionMode).toBe('full');
+      expect(s.status.authorization).toBe('full_access');
+    });
+
+    test('switching from full to ask resets authorization to default', () => {
+      let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
+      expect(s.status.authorization).toBe('full_access');
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'ask' });
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
+    });
+
+    test('toggle cycles ask → auto → full → ask with correct auth', () => {
+      let s = fresh();
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
+
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('auto');
+      expect(s.status.authorization).toBe('default');
+
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('full');
+      expect(s.status.authorization).toBe('full_access');
+
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
+    });
+
+    test('toggle from auto goes to full with full_access', () => {
+      let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'auto' });
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('full');
+      expect(s.status.authorization).toBe('full_access');
+    });
+
+    test('toggle from full goes to ask with default auth', () => {
+      let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
+    });
+  });
 });

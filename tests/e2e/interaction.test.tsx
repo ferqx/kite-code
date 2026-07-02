@@ -170,23 +170,24 @@ describe('TUI E2E — P1 Key User Workflows', () => {
     );
 
     test(
-      '/auth toggles authorization mode (replaces removed Ctrl+R shortcut)',
+      '/mode toggles interaction mode label',
       async () => {
-        expect(tui.getAuthMode()).toBe('default');
+        // ask is default — no label
+        expect(tui.getOutput()).not.toContain('[自动审批]');
 
-        tui.stdin.write('/auth');
+        tui.stdin.write('/mode auto');
         await new Promise((r) => setTimeout(r, 200));
         tui.stdin.write('\r');
         await new Promise((r) => setTimeout(r, 500));
 
-        expect(tui.getAuthMode()).toBe('full_access');
+        expect(tui.getOutput()).toContain('[自动审批]');
 
-        tui.stdin.write('/auth');
+        tui.stdin.write('/mode ask');
         await new Promise((r) => setTimeout(r, 200));
         tui.stdin.write('\r');
         await new Promise((r) => setTimeout(r, 500));
 
-        expect(tui.getAuthMode()).toBe('default');
+        expect(tui.getOutput()).not.toContain('[自动审批]');
       },
       TIMEOUT,
     );
@@ -358,19 +359,13 @@ describe('TUI E2E — P1 Key User Workflows', () => {
     );
 
     test(
-      '/auth → toggles authorization mode',
+      '/mode auto → shows [自动审批], /mode ask → hides it',
       async () => {
-        const initialAuth = tui.getAuthMode();
-        expect(initialAuth).toBeDefined();
+        await runSlashCommand(tui, '/mode auto', 500);
+        expect(tui.getOutput()).toContain('[自动审批]');
 
-        await runSlashCommand(tui, '/auth', 500);
-
-        const toggledAuth = tui.getAuthMode();
-        expect(toggledAuth).toBeDefined();
-        expect(toggledAuth).not.toBe(initialAuth);
-
-        await runSlashCommand(tui, '/auth', 500);
-        expect(tui.getAuthMode()).toBe(initialAuth);
+        await runSlashCommand(tui, '/mode ask', 500);
+        expect(tui.getOutput()).not.toContain('[自动审批]');
       },
       TIMEOUT,
     );

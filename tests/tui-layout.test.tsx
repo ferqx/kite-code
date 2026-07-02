@@ -275,16 +275,25 @@ describe('StatsLine', () => {
     expect(lastFrame()).toContain('10.0k');
   });
 
-  test('shows [完全] for full_access auth', () => {
-    const status = fakeStatus({ authorization: 'full_access' });
-    const { lastFrame } = render(<StatsLine status={status} running />);
-    expect(lastFrame()).toContain('[完全]');
+  test('shows [自动审批] for auto mode', () => {
+    const status = fakeStatus({ authorization: 'default' });
+    const { lastFrame } = render(<StatsLine status={status} running interactionMode="auto" />);
+    expect(lastFrame()).toContain('[自动审批]');
   });
 
-  test('shows [安全] for default auth', () => {
+  test('shows [完全权限] for full mode', () => {
+    const status = fakeStatus({ authorization: 'full_access' });
+    const { lastFrame } = render(<StatsLine status={status} running interactionMode="full" />);
+    expect(lastFrame()).toContain('[完全权限]');
+  });
+
+  test('shows no label for ask mode (default)', () => {
     const status = fakeStatus({ authorization: 'default' });
-    const { lastFrame } = render(<StatsLine status={status} running />);
-    expect(lastFrame()).toContain('[安全]');
+    const { lastFrame } = render(<StatsLine status={status} running interactionMode="ask" />);
+    expect(lastFrame()).not.toContain('[安全]');
+    expect(lastFrame()).not.toContain('[完全]');
+    expect(lastFrame()).not.toContain('[自动审批]');
+    expect(lastFrame()).not.toContain('[完全权限]');
   });
 
   test('does not show ro/rw indicator (workspace access always write)', () => {
@@ -1799,6 +1808,7 @@ describe('App', () => {
       sessionError: false,
       loadingSessionId: null,
       explorationSummaryIds: {},
+      interactionMode: 'ask',
       ...overrides,
     };
   }
