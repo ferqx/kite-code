@@ -65,6 +65,10 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/k
 - 先看 `git status` + `git diff` + `git log --oneline -5` 确认范围和风格
 - 按变更文件粒度 `git add <file...>`，不 `git add -A`
 - 描述聚焦「改了什么、为什么改」，不列举文件清单
+- **禁止**将 `git commit` 输出管道到 `head`/`tail` 截断——必须看到完整输出以确认提交成功
+- 每次 `git commit` 后**必须**验证 `git status` 工作区干净、`git log --oneline -3` 确认提交入库
+- 多步分批提交时，每批完成后验证 `git status`，确认上一批已提交成功再 `git add` 下一批
+- lefthook pre-commit 会运行 format + typecheck，若 typecheck 失败则 commit 被拒绝——需先修好再重试
 - 提交前运行 `bun run typecheck` 确保零错误；生产代码（`src/`）中不允许新增 `as any` 或 `: any`（外部 API 约束除外，需注释说明）。详见 `docs/space/execution/active/project-conventions.md` 的「TypeScript 类型安全」章节
 
 ## 测试对应关系
