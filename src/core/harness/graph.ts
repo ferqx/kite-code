@@ -2,7 +2,7 @@ import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { interrupt, START, StateGraph } from '@langchain/langgraph';
 import { ChatOllama } from '@langchain/ollama';
 import type { AgentConfig } from '@/core/config/index';
-import { recordExecutionResult } from '@/core/execution/journal';
+import { isFingerprintExhausted, recordExecutionResult } from '@/core/execution/journal';
 import { issuePermit, migratePermitBatch } from '@/core/execution/permit';
 import { createAutoReviewModel, reviewToolApproval } from '@/core/execution/reviewer';
 import type { McpManager } from '@/core/mcp';
@@ -39,6 +39,7 @@ import { AgentState, type CodeAgentState } from './state';
 import {
   applyApprovalGrant,
   buildToolApproval,
+  classifyShellRisk,
   defaultPhaseForWorkspaceAccess,
   evaluateToolPolicy,
   normalizeAuthorizationState,
@@ -728,6 +729,120 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     return {};
   };
 
+  /**
+   * Phase 5: 判断工具请求是否为写操作（mutation）。
+   * Mutations 需串行化以保证 journal 状态正确流动；
+   * Reads 可安全并行。Determine whether a tool request is a mutation. */
+  function isMutationRequest(request: import('./tool-requests').PendingToolRequest): boolean {
+    switch (request.name) {
+      case 'write_file':
+      case 'edit_file':
+      case 'task':
+        return true;
+      case 'shell_execute': {
+        const risk = classifyShellRisk((request.args as unknown as { command: string }).command);
+        // 只读命令（如 grep、cat、ls）归类为 read，可并行
+        // 写类命令（如 npm install、git commit）归类为 mutation
+        return risk !== 'execute_code';
+      }
+      default:
+        return false; // read_file, search_*, read_mcp_resource, Skill, update_plan, ask_user
+    }
+  }
+
+  /** Parse a ToolMessage's JSON content and update journalState via callback.
+   *  For task (subagent) results, also merges the subagent's journal entries
+   *  and exhausted fingerprints into the main journal. */
+  function recordJournalForMessage(
+    msg: ToolMessage | null,
+    journalState: {
+      executionJournal: import('@/core/execution/journal').ExecutionJournalEntry[];
+      exhaustedFingerprints: Record<string, true>;
+    },
+    setJournal: (next: typeof journalState) => void,
+  ): void {
+    if (!msg) return;
+    try {
+      const parsed = JSON.parse(String(msg.content)) as {
+        ok?: boolean;
+        stderr?: string;
+        exitCode?: number;
+        path?: string;
+        subagentResult?: {
+          executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
+          exhaustedFingerprints?: Record<string, true>;
+        };
+      };
+      let next = recordExecutionResult(journalState, {
+        toolCallId: (msg as unknown as Record<string, unknown>).tool_call_id?.toString() ?? '',
+        toolName: msg.name ?? 'unknown',
+        ok: parsed.ok !== false,
+        stderr: parsed.stderr,
+        exitCode: parsed.exitCode,
+        path: parsed.path,
+      });
+      // Phase 5: Merge subagent journal entries and exhausted fingerprints.
+      if (parsed.subagentResult?.executionJournal?.length) {
+        next = {
+          ...next,
+          executionJournal: [
+            ...next.executionJournal,
+            ...parsed.subagentResult.executionJournal,
+          ].slice(-50),
+        };
+      }
+      if (parsed.subagentResult?.exhaustedFingerprints) {
+        next = {
+          ...next,
+          exhaustedFingerprints: {
+            ...next.exhaustedFingerprints,
+            ...parsed.subagentResult.exhaustedFingerprints,
+          },
+        };
+      }
+      setJournal(next);
+    } catch {
+      /* ToolMessage content is expected to be JSON. */
+    }
+  }
+
+  /** When a tool execution just exhausted a fingerprint, rebuild the ToolMessage
+   *  to carry status:'exhausted' and failure.exhausted so the model sees it.
+   *  The exhaustion signal is constructed explicitly from the fingerprint rather
+   *  than parsed from the message content (which never contains it). */
+  function injectExhaustionSignal(msg: ToolMessage, toolName: string, fp: string): ToolMessage {
+    try {
+      const parsed = JSON.parse(String(msg.content));
+      const exhausted: import('@/core/execution/journal').ExhaustionSignal = {
+        fingerprint: fp,
+        consecutiveFailures: 0, // actual count unavailable; model trusts the status
+        maxFailures: 0,
+        suggestion: toolName === 'shell_execute' ? ('skip_step' as const) : ('replan' as const),
+        reason: `Repeated failures exhausted retry limit for ${toolName}.`,
+        suggestedAlternatives: ['Continue another independent step', 'Safely finalize if blocked'],
+      };
+      return new ToolMessage({
+        content: JSON.stringify({
+          ...parsed,
+          status: 'exhausted',
+          failure: {
+            ...(parsed.failure ?? {}),
+            exhausted,
+            guidance:
+              toolName === 'shell_execute'
+                ? `Stop retrying this operation (${toolName}). Skip this step and continue other independent work.`
+                : `Stop retrying this operation (${toolName}). Replan or safely finalize.`,
+          },
+        }),
+        tool_call_id: msg.tool_call_id,
+        name: msg.name,
+        status: 'exhausted' as unknown as ToolMessage['status'],
+      });
+    } catch {
+      return msg;
+    }
+  }
+
   /** 工具节点：并行执行所有待处理的工具调用。
    *  Tools node — execute all pending tool calls in parallel.
    *  Each tool completion fires toolResultSink immediately so the TUI
@@ -787,7 +902,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         result.exitCode,
       );
 
-      const journalState = recordExecutionResult(
+      const baseJournal = recordExecutionResult(
         {
           executionJournal: state.executionJournal ?? [],
           exhaustedFingerprints: state.exhaustedFingerprints ?? {},
@@ -843,6 +958,27 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         },
       );
 
+      let journalState = baseJournal;
+
+      // Phase 5: Merge subagent journal into main journal state.
+      if (resumed.executionJournal?.length) {
+        journalState = {
+          ...journalState,
+          executionJournal: [...journalState.executionJournal, ...resumed.executionJournal].slice(
+            -50,
+          ),
+        };
+      }
+      if (resumed.exhaustedFingerprints) {
+        journalState = {
+          ...journalState,
+          exhaustedFingerprints: {
+            ...journalState.exhaustedFingerprints,
+            ...resumed.exhaustedFingerprints,
+          },
+        };
+      }
+
       if (resumed.blocked) {
         const nextPending = pendingSubagentApprovalFromBlocked(
           pending.taskCallId,
@@ -881,45 +1017,89 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       return { approvedBatch: {} };
     }
 
-    // 所有工具（含 task/子 agent）放入同一个 Promise.all，真正并行执行。
-    // All tools (including task sub-agents) in a single Promise.all.
-    const results = await Promise.all(
-      allRequests.map((req) => {
-        const reqGrant = req.id && batch[req.id] ? batch[req.id]!.grant : 'none';
-        return executeOneTool(req, state, reqGrant);
-      }),
-    );
+    // Phase 5: 写操作串行化 — 同批次 reads 并行，mutations 逐个执行。
+    // Reads execute in parallel; mutations execute sequentially so journal state
+    // (exhaustedFingerprints) flows between steps and prevents stale preflight checks.
+    // Mutation serialization — reads parallel, mutations one at a time.
+    const reads = allRequests.filter((req) => !isMutationRequest(req));
+    const mutations = allRequests.filter((req) => isMutationRequest(req));
 
-    const messages: ToolMessage[] = results.flatMap((r) => (r.toolMessage ? [r.toolMessage] : []));
+    const messages: ToolMessage[] = [];
     const mergedExtra: Record<string, unknown> = {};
-    for (const r of results) {
-      Object.assign(mergedExtra, r.extra);
-    }
     let journalState = {
       executionJournal: state.executionJournal ?? [],
-      exhaustedFingerprints: state.exhaustedFingerprints ?? {},
+      exhaustedFingerprints: { ...(state.exhaustedFingerprints ?? {}) },
     };
-    for (const r of results) {
-      if (!r.toolMessage) continue;
-      try {
-        const parsed = JSON.parse(String(r.toolMessage.content)) as {
-          ok?: boolean;
-          stderr?: string;
-          exitCode?: number;
-          path?: string;
-        };
-        journalState = recordExecutionResult(journalState, {
-          toolCallId:
-            (r.toolMessage as unknown as Record<string, unknown>).tool_call_id?.toString() ?? '',
-          toolName: r.toolMessage.name ?? 'unknown',
-          ok: parsed.ok !== false,
-          stderr: parsed.stderr,
-          exitCode: parsed.exitCode,
-          path: parsed.path,
+
+    // Phase 1: Execute all read tools in parallel.
+    if (reads.length > 0) {
+      const readResults = await Promise.all(
+        reads.map((req) => {
+          const reqGrant = req.id && batch[req.id] ? batch[req.id]!.grant : 'none';
+          return executeOneTool(req, state, reqGrant);
+        }),
+      );
+      for (const r of readResults) {
+        if (r.toolMessage) messages.push(r.toolMessage);
+        Object.assign(mergedExtra, r.extra);
+        recordJournalForMessage(r.toolMessage, journalState, (next) => {
+          journalState = next;
         });
-      } catch {
-        /* ToolMessage content is expected to be JSON, but do not break graph routing if not. */
       }
+    }
+
+    // Phase 2: Execute mutations sequentially — journal state flows between steps.
+    // This ensures an exhaustion triggered by mutation N blocks mutation N+1's preflight.
+    const sequentialState = { ...state, ...journalState };
+    for (const req of mutations) {
+      // Preflight: check if this tool+path fingerprint is already exhausted.
+      const preflightPath = (req.args as Record<string, unknown>).path as string | undefined;
+      if (isFingerprintExhausted(journalState.exhaustedFingerprints, req.name, preflightPath)) {
+        const blockedMsg = new ToolMessage({
+          content: JSON.stringify({
+            ok: false,
+            command: req.protectedCommand,
+            exitCode: -1,
+            stdout: '',
+            stderr: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+            status: 'exhausted' as const,
+            failure: {
+              message: 'Tool execution failed.' as const,
+              tool: req.name,
+              reason: `Execution blocked by exhaustion guard for ${req.name}.`,
+              guidance: 'Stop retrying this operation. Skip this step, replan, or safely finalize.',
+            },
+          }),
+          tool_call_id: req.id ?? 'missing-tool-call-id',
+          name: req.name,
+          status: 'exhausted' as unknown as ToolMessage['status'],
+        });
+        messages.push(blockedMsg);
+        continue;
+      }
+
+      const reqGrant = req.id && batch[req.id] ? batch[req.id]!.grant : 'none';
+      const r = await executeOneTool(req, sequentialState, reqGrant);
+
+      if (r.toolMessage) {
+        // Update journal — if a new fingerprint was just exhausted, inject the signal.
+        const journalBefore = { ...journalState.exhaustedFingerprints };
+        recordJournalForMessage(r.toolMessage, journalState, (next) => {
+          journalState = next;
+        });
+        // Check whether this execution just exhausted a NEW fingerprint.
+        const newExhaustedFp = Object.keys(journalState.exhaustedFingerprints).find(
+          (fp) => !journalBefore[fp],
+        );
+        if (newExhaustedFp) {
+          // Rebuild ToolMessage with exhaustion signal so the model sees it immediately.
+          r.toolMessage = injectExhaustionSignal(r.toolMessage, req.name, newExhaustedFp);
+        }
+        messages.push(r.toolMessage);
+      }
+      Object.assign(mergedExtra, r.extra);
+      // Flow updated journal into state for the next mutation iteration.
+      Object.assign(sequentialState, journalState);
     }
 
     return {

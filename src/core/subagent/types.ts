@@ -55,6 +55,9 @@ export interface SubAgentContinuation {
   messages: BaseMessage[];
   toolCallCount: number;
   steps: SubAgentStepSnapshot[];
+  /** Phase 5: journal state preserved across approval round-trips */
+  executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
+  exhaustedFingerprints?: Record<string, true>;
 }
 
 /** 子 agent 步骤记录（用于持久化到 checkpoint）
@@ -86,6 +89,10 @@ export interface SubAgentResult {
   };
   /** 步骤快照：用于会话重放时恢复步骤树 / Step snapshots for session replay */
   steps?: SubAgentStepSnapshot[];
+  /** Phase 5: 子 Agent 工具执行的 journal 条目 / Journal entries from subagent tool executions */
+  executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
+  /** Phase 5: 子 Agent 中已耗尽的操作指纹 / Exhausted fingerprints detected in subagent */
+  exhaustedFingerprints?: Record<string, true>;
 }
 
 /** 子 agent 缓存指标 / Sub-agent cache metrics */

@@ -1,3 +1,4 @@
+import type { ExhaustionSignal } from '@/core/execution/journal';
 import type { SubAgentResult } from '@/core/subagent/types';
 import type { ShellIntent, ShellResult, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPlan, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
@@ -12,6 +13,8 @@ export interface ToolFailure {
   reason: string;
   /** 正确使用该工具的提示 / Guidance for using the tool correctly */
   guidance: string;
+  /** 同指纹连续失败达上限时的耗尽信号 / Set when repeated same(error,tool,path) failures exhaust the retry limit */
+  exhausted?: ExhaustionSignal;
 }
 
 /** 工具执行结果类型 / Tool execution result type */

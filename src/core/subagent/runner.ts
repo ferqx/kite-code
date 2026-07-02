@@ -3,6 +3,11 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { type AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import { ChatOllama } from '@langchain/ollama';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
+import {
+  type ExecutionJournalEntry,
+  isFingerprintExhausted,
+  recordExecutionResult,
+} from '@/core/execution/journal';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
@@ -159,6 +164,8 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     messages: initialMessages(normalizedInput),
     toolCallCount: 0,
     steps: [],
+    executionJournal: [],
+    exhaustedFingerprints: {},
   });
 }
 
@@ -219,6 +226,8 @@ export async function resumeSubAgent(
     ],
     toolCallCount: continuation.toolCallCount,
     steps: continuation.steps,
+    executionJournal: continuation.executionJournal ?? [],
+    exhaustedFingerprints: continuation.exhaustedFingerprints ?? {},
   });
 }
 
@@ -229,6 +238,9 @@ async function runSubAgentLoop(
     messages: BaseMessage[];
     toolCallCount: number;
     steps: SubAgentStepSnapshot[];
+    // Phase 5: journal tracking for subagent tool executions
+    executionJournal: ExecutionJournalEntry[];
+    exhaustedFingerprints: Record<string, true>;
   },
 ): Promise<SubAgentResult> {
   const id = state.id;
@@ -238,6 +250,8 @@ async function runSubAgentLoop(
   let toolCallCount = state.toolCallCount;
   const steps = state.steps;
   const messages = [...state.messages];
+  let executionJournal = state.executionJournal ?? [];
+  const exhaustedFingerprints: Record<string, true> = { ...(state.exhaustedFingerprints ?? {}) };
 
   const effectiveShellExecutor =
     input.role.allowedTools && input.shellExecutor
@@ -313,13 +327,25 @@ async function runSubAgentLoop(
             durationMs,
             steps,
             error: `Tool calls rejected: ${toolNames}`,
+            executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
+            exhaustedFingerprints:
+              Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
           };
         }
         input.eventSink({
           type: 'done',
           data: { id, summary, toolCallCount, durationMs },
         });
-        return { ok: true, summary, toolCallCount, durationMs, steps };
+        return {
+          ok: true,
+          summary,
+          toolCallCount,
+          durationMs,
+          steps,
+          executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
+          exhaustedFingerprints:
+            Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+        };
       }
 
       messages.push(response);
@@ -378,6 +404,49 @@ async function runSubAgentLoop(
         });
 
         toolCallCount++;
+
+        // Phase 5: 预检 — 如果 tool+path 已耗尽，跳过执行
+        // Preflight: skip execution if this tool+path is already exhausted.
+        const preflightPath = (toolArgs as Record<string, unknown>).path as string | undefined;
+        if (isFingerprintExhausted(exhaustedFingerprints, tc.name, preflightPath)) {
+          const blockedOutput = JSON.stringify({
+            ok: false,
+            command: tc.name,
+            exitCode: -1,
+            stdout: '',
+            stderr: `Execution blocked: too many repeated failures for ${tc.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+            status: 'exhausted' as const,
+            failure: {
+              message: 'Tool execution failed.' as const,
+              tool: tc.name,
+              reason: `Execution blocked by exhaustion guard for ${tc.name}.`,
+              guidance: 'Stop retrying this operation. Skip this step, replan, or safely finalize.',
+            },
+          });
+          messages.push(
+            new ToolMessage({
+              content: blockedOutput,
+              tool_call_id: tc.id ?? '',
+              name: tc.name,
+              status: 'exhausted' as unknown as ToolMessage['status'],
+            }),
+          );
+          stepSnapshot.ok = false;
+          stepSnapshot.status = 'error';
+          input.eventSink({
+            type: 'tool_result',
+            data: {
+              id,
+              toolName: tc.name,
+              ok: false,
+              summary: blockedOutput.slice(0, 200),
+              durationMs: 0,
+              failureReason: 'exhausted',
+            },
+          });
+          continue;
+        }
+
         const toolStart = Date.now();
         let toolOutput: string;
         let ok = true;
@@ -417,6 +486,11 @@ async function runSubAgentLoop(
             messages: [...messages],
             toolCallCount,
             steps,
+            executionJournal: executionJournal.length > 0 ? [...executionJournal] : undefined,
+            exhaustedFingerprints:
+              Object.keys(exhaustedFingerprints).length > 0
+                ? { ...exhaustedFingerprints }
+                : undefined,
           };
           const blocked = approvalRequiredBlock(
             result,
@@ -436,6 +510,9 @@ async function runSubAgentLoop(
               error: blocked.message,
               blocked,
               steps,
+              executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
+              exhaustedFingerprints:
+                Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
             };
           }
           toolOutput = JSON.stringify(result);
@@ -448,6 +525,21 @@ async function runSubAgentLoop(
           });
           ok = false;
         }
+
+        // Phase 5: Record subagent tool execution in journal.
+        const journalResult = recordExecutionResult(
+          { executionJournal, exhaustedFingerprints },
+          {
+            toolCallId: tc.id ?? `subagent-${toolCallCount}`,
+            toolName: tc.name,
+            ok,
+            stderr: ok ? undefined : (JSON.parse(toolOutput).stderr as string | undefined),
+            exitCode: ok ? undefined : (JSON.parse(toolOutput).exitCode as number | undefined),
+            path: (toolArgs as Record<string, unknown>).path as string | undefined,
+          },
+        );
+        executionJournal = journalResult.executionJournal;
+        Object.assign(exhaustedFingerprints, journalResult.exhaustedFingerprints);
 
         const durationMs = Date.now() - toolStart;
         stepSnapshot.ok = ok;
@@ -491,6 +583,16 @@ async function runSubAgentLoop(
       type: 'error',
       data: { id, error: summary, summary, toolCallCount, durationMs },
     });
-    return { ok: false, summary, toolCallCount, durationMs, error: summary, steps };
+    return {
+      ok: false,
+      summary,
+      toolCallCount,
+      durationMs,
+      error: summary,
+      steps,
+      executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
+      exhaustedFingerprints:
+        Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+    };
   }
 }

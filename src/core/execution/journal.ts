@@ -90,14 +90,14 @@ export function classifyExecutionFailure(
     affectedPath: result.path,
   });
   if (result.ok) return { fingerprint };
-  const matching = state.executionJournal.filter((entry) => entry.fingerprint === fingerprint);
+  const consecutive = countConsecutiveFailures(state.executionJournal, fingerprint);
   const maxFailures = maxFailuresFor(errorCode);
-  if (matching.length >= maxFailures) {
+  if (consecutive >= maxFailures) {
     return {
       fingerprint,
       exhausted: {
         fingerprint,
-        consecutiveFailures: matching.length,
+        consecutiveFailures: consecutive,
         maxFailures,
         suggestion: result.toolName === 'shell_execute' ? 'skip_step' : 'replan',
         reason: `Repeated ${errorCode} failure reached limit ${maxFailures}.`,
@@ -108,7 +108,32 @@ export function classifyExecutionFailure(
   return { fingerprint };
 }
 
-function failureFingerprint(input: {
+/** Count only consecutive failures with the same fingerprint from the tail of the journal.
+ *  Stops at: success entry (no fingerprint), different fingerprint, or significant stderr change
+ *  (indicating actual progress was made). */
+function countConsecutiveFailures(journal: ExecutionJournalEntry[], fingerprint: string): number {
+  let count = 0;
+  let lastDigest: string | undefined;
+  for (let i = journal.length - 1; i >= 0; i--) {
+    const entry = journal[i]!;
+    // Success or different error → chain broken
+    if (entry.fingerprint !== fingerprint) break;
+    // Same fingerprint but stderr changed significantly → progress was made, reset from here
+    if (
+      count > 0 &&
+      lastDigest &&
+      entry.stderrDigest &&
+      entry.stderrDigest.slice(0, 100) !== lastDigest.slice(0, 100)
+    ) {
+      break;
+    }
+    lastDigest = entry.stderrDigest;
+    count++;
+  }
+  return count;
+}
+
+export function failureFingerprint(input: {
   toolName: string;
   errorCode: string;
   affectedPath?: string;
@@ -116,7 +141,24 @@ function failureFingerprint(input: {
   return [input.toolName, input.errorCode, input.affectedPath ?? ''].join(':');
 }
 
-function errorCodeFor(result: { stderr?: string; exitCode?: number }): string {
+/** Check if any exhausted fingerprint matches this tool+path combination.
+ *  Uses prefix+suffix matching because the stored fingerprint includes the original errorCode,
+ *  while the preflight check runs before execution (errorCode unknown). */
+export function isFingerprintExhausted(
+  exhausted: Record<string, true>,
+  toolName: string,
+  affectedPath?: string,
+): boolean {
+  if (!affectedPath) {
+    const prefix = `${toolName}:`;
+    return Object.keys(exhausted).some((fp) => fp.startsWith(prefix));
+  }
+  const prefix = `${toolName}:`;
+  const suffix = `:${affectedPath}`;
+  return Object.keys(exhausted).some((fp) => fp.startsWith(prefix) && fp.endsWith(suffix));
+}
+
+export function errorCodeFor(result: { stderr?: string; exitCode?: number }): string {
   if (result.stderr?.includes('ENOENT') || result.stderr?.toLowerCase().includes('not found')) {
     return 'ENOENT';
   }
@@ -127,7 +169,7 @@ function errorCodeFor(result: { stderr?: string; exitCode?: number }): string {
   return 'ERROR';
 }
 
-function maxFailuresFor(errorCode: string): number {
+export function maxFailuresFor(errorCode: string): number {
   if (errorCode === 'ENOENT') return 3;
   if (errorCode === 'EXIT_NONZERO') return 5;
   if (errorCode === 'TIMEOUT') return 10;
