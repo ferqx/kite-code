@@ -29,6 +29,7 @@ describe('code agent tool definitions', () => {
       'search_content',
       'search_files',
       'read_mcp_resource',
+      'web_fetch',
       'update_plan',
       'ask_user',
     ]);
@@ -214,6 +215,7 @@ describe('code agent tool definitions', () => {
       'search_content',
       'search_files',
       'read_mcp_resource',
+      'web_fetch',
       'update_plan',
       'ask_user',
     ]);
@@ -470,9 +472,12 @@ describe('tool contracts (ACI)', () => {
     'edit_file',
     'write_file',
     'shell_execute',
+    'search_content',
+    'search_files',
     'update_plan',
     'read_mcp_resource',
     'ask_user',
+    'web_fetch',
   ];
 
   // 每个注册工具的契约必须存在 / Every registered tool must have a contract

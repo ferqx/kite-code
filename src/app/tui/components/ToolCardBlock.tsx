@@ -360,7 +360,8 @@ export default function ToolCardBlock({
   columns = 80,
 }: ToolCardBlockProps) {
   const dt = useTheme();
-  const showElapsed = block.name === 'shell_execute';
+  const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
+  const isWebFetch = block.name === 'web_fetch';
 
   // ── 计时器：ref 驱动，基于绝对时间，免疫重复渲染 ──
   const [spinnerIdx, setSpinnerIdx] = useState(0);
@@ -466,35 +467,41 @@ export default function ToolCardBlock({
           {renderAskUserSummary(block.args, block.summary ?? '', dt, columns - 2)}
         </Box>
       )}
-      {/* Shell 工具 / Shell */}
-      {isExpanded && isShell && (
+      {/* Shell + Web Fetch 工具：统一渲染 / Shell + Web Fetch: unified rendering */}
+      {isExpanded && (isShell || isWebFetch) && (
         <Box paddingLeft={2} flexDirection="column">
           {hasSummary ? (
             renderShellLines(
               block.summary!,
-              block.status === 'error' ? dt.error : dt.dim,
+              dt.dim,
               columns - 2,
               undefined,
-              block.status === 'timeout' ? 'head-tail' : 'tail',
+              isWebFetch || block.status === 'timeout' ? 'head-tail' : 'tail',
             )
           ) : (
-            <Text color={dt.dim}>{SHELL_PREFIX}(No output)</Text>
+            <Text color={dt.dim}>⎿ (No output)</Text>
           )}
-          {/* 状态尾行：exit code / cancelled / Status footer */}
+          {/* 状态尾行 / Status footer */}
           <Text color={dt.dim}>
-            {SHELL_PREFIX}
-            {block.summary?.startsWith('Command cancelled') ||
-            block.summary?.includes('"cancelled":true')
-              ? 'cancelled'
-              : block.status === 'timeout'
-                ? block.timeoutMs != null
-                  ? `timed out after ${block.timeoutMs}ms`
-                  : 'timed out'
-                : `exit: ${block.status === 'error' ? 'error' : '0'}`}
+            ⎿{' '}
+            {isWebFetch
+              ? block.status === 'error'
+                ? 'fetch failed'
+                : block.status === 'timeout'
+                  ? `timed out after ${block.timeoutMs ?? 15000}ms`
+                  : 'fetched'
+              : block.summary?.startsWith('Command cancelled') ||
+                  block.summary?.includes('"cancelled":true')
+                ? 'cancelled'
+                : block.status === 'timeout'
+                  ? block.timeoutMs != null
+                    ? `timed out after ${block.timeoutMs}ms`
+                    : 'timed out'
+                  : `exit: ${block.status === 'error' ? 'error' : '0'}`}
           </Text>
-          {block.status === 'error' && block.summary?.split('\n').length > 3 && (
-            <Text color={dt.dim}>Enter 折叠</Text>
-          )}
+          {(block.status === 'error' || isWebFetch) &&
+            block.summary &&
+            block.summary.split('\n').length > 3 && <Text color={dt.dim}>Enter 折叠</Text>}
         </Box>
       )}
       {/* 文件工具 / File tools — 无 summary 时展示文件路径（如工具被取消无 ToolMessage） */}
@@ -508,14 +515,20 @@ export default function ToolCardBlock({
         </Box>
       )}
       {/* 其他工具 / Other tools */}
-      {isExpanded && !isPlan && !isAskUser && !isShell && !isFileTool && hasSummary && (
-        <Box paddingLeft={3} flexDirection="column">
-          {renderToolSummary(block.summary!, block.status === 'error', dt)}
-          {block.status === 'error' && block.summary?.split('\n').length > 3 && (
-            <Text color={dt.dim}>Enter 折叠</Text>
-          )}
-        </Box>
-      )}
+      {isExpanded &&
+        !isPlan &&
+        !isAskUser &&
+        !isShell &&
+        !isWebFetch &&
+        !isFileTool &&
+        hasSummary && (
+          <Box paddingLeft={3} flexDirection="column">
+            {renderToolSummary(block.summary!, block.status === 'error', dt)}
+            {block.status === 'error' && block.summary?.split('\n').length > 3 && (
+              <Text color={dt.dim}>Enter 折叠</Text>
+            )}
+          </Box>
+        )}
     </Box>
   );
 }

@@ -14,6 +14,7 @@ export const ACTION_NAMES: Record<string, string> = {
   ask_user: 'Ask',
   task: 'Task',
   Skill: 'Skill',
+  web_fetch: 'Web Fetch',
 };
 
 /** 取工具显示名，无映射则返回原名 / Get display name, fallback to original */
@@ -89,6 +90,15 @@ export function getToolPreview(name: string, args: Record<string, unknown>): str
       const label = server ? `${server}:${uri}` : uri;
       return label.length > 60 ? `${label.slice(0, 57)}...` : label;
     }
+    case 'web_fetch': {
+      const u = typeof args.url === 'string' ? args.url : '';
+      if (!u) return undefined;
+      try {
+        return new URL(u).hostname;
+      } catch {
+        return u.slice(0, 40);
+      }
+    }
     default:
       return undefined;
   }
@@ -139,6 +149,15 @@ export function getToolDetail(
       const uri = typeof args.uri === 'string' ? args.uri : '';
       const server = typeof args.server === 'string' ? args.server : '';
       return server ? `Read ${server}:${uri}` : `Read ${uri}`;
+    }
+    case 'web_fetch': {
+      const u = typeof args.url === 'string' ? args.url : '';
+      if (!u) return undefined;
+      try {
+        return new URL(u).hostname;
+      } catch {
+        return u.slice(0, 60);
+      }
     }
     default:
       return undefined;

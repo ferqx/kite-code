@@ -152,7 +152,7 @@ export const SEARCH_FILES_CONTRACT: ToolContract = {
     outputFormat:
       'JSON: ok (boolean), command (executed), stdout (file paths, one per line), stderr.',
     failureHandling:
-      'No files found: try broader pattern or different directory. ' +
+      'No files found: retry with broader pattern or different directory. ' +
       'Too many results: narrow pattern or scope to a subdirectory.',
   },
   description: '',
@@ -351,6 +351,46 @@ export const TASK_CONTRACT: ToolContract = {
 };
 TASK_CONTRACT.description = buildDescription(TASK_CONTRACT.sections);
 
+export const WEB_FETCH_CONTRACT: ToolContract = {
+  name: 'web_fetch',
+  sections: {
+    whenToUse:
+      'Fetch and extract the main content from a public web page using Mozilla Readability (Firefox Reader Mode). ' +
+      'Best for text-heavy HTML pages: documentation, API references, blog posts, news articles, Wikipedia. ' +
+      'Also works for GitHub issue/PR pages, technical forums, Q&A sites like StackOverflow. ' +
+      'Supports non-HTML formats too: plain text (.txt/.md/.log), JSON API responses, XML/RSS feeds, CSV files — ' +
+      'these are returned as raw content without extraction. ' +
+      'Use this when the user provides a URL or when a URL appears from read_file or search_content results. ' +
+      'Do NOT use for: search result pages, login/auth pages, file download links, ' +
+      'interactive web apps (SPAs), or pages that require authentication. ' +
+      'Do NOT use for internal/localhost URLs — these are blocked by SSRF protection.',
+    commonMistakes:
+      'Fetching search engine result pages or login portals — readability cannot extract meaningful content from forms and result listings. ' +
+      'Fetching URLs that require login, session cookies, or authentication — the tool has no credentials. ' +
+      'Fetching pages that are mostly JavaScript-rendered (SPAs) — readability needs server-rendered HTML. ' +
+      'Fetching without verifying the URL points to an article/document page, not a search form or login portal. ' +
+      'Fetching from sites that may be unreachable in certain network environments (e.g., foreign sites behind a firewall) — ' +
+      'if the user is in mainland China, prefer domestic sites (Baidu, Zhihu, CSDN) when equivalent content exists. ' +
+      'For very large pages like Wikipedia or detailed docs, set timeout_ms higher (e.g. 20000).',
+    outputFormat:
+      'JSON: ok (boolean), url (requested URL), final_url (after redirects), ' +
+      'title (extracted page title, HTML only), content (Markdown for HTML, raw text for JSON/XML/CSV/plain), ' +
+      'content_type (MIME type), truncated (boolean). ' +
+      'On error: ok: false with error field explaining why.',
+    failureHandling:
+      'If HTTP 403 (Forbidden): the site likely has anti-bot protection (e.g., Zhihu articles) — do NOT retry the same URL, find the same information from a different source. ' +
+      'If HTTP 429 (Rate Limited): the site is throttling requests — wait a few seconds or switch to a different domain. ' +
+      'If HTTP 404: the page does not exist — verify the URL is correct. ' +
+      'If blocked by robots.txt: the site disallows crawling — respect this, do NOT attempt to bypass. ' +
+      'If content not extractable: the page is likely not an article (search results, login form, SPA) — this is expected, do NOT retry the same URL, switch to a different source. ' +
+      'If timeout: increase timeout_ms (up to 30000) for large pages like Wikipedia, or try a mirror/alternative domain. ' +
+      'If connection refused or DNS error: the site may be blocked in the current network environment — suggest the user check their proxy or try a domestic alternative. ' +
+      'If blocked by SSRF: the URL is internal/private — do not attempt to access it.',
+  },
+  description: '',
+};
+WEB_FETCH_CONTRACT.description = buildDescription(WEB_FETCH_CONTRACT.sections);
+
 export const KNOWN_TOOL_NAMES = [
   'read_file',
   'edit_file',
@@ -362,6 +402,7 @@ export const KNOWN_TOOL_NAMES = [
   'update_plan',
   'ask_user',
   'task',
+  'web_fetch',
 ] as const;
 
 /** 按名称查找工具契约 / Look up a tool contract by name */
@@ -380,4 +421,5 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ['update_plan', UPDATE_PLAN_CONTRACT],
   ['ask_user', ASK_USER_CONTRACT],
   ['task', TASK_CONTRACT],
+  ['web_fetch', WEB_FETCH_CONTRACT],
 ]);

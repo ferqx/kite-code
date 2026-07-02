@@ -4,6 +4,7 @@ import { adaptMcpTool } from '@/core/mcp/tool-adapter';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { createSkillTool } from '@/core/skills/skill-tool';
 import { createTaskTool } from '@/core/subagent/task-tool';
+import { fetchAndExtract } from '@/core/web/extractor';
 import { editFile, readFile, writeFile } from './file';
 import { searchContent as searchContentNative, searchFiles as searchFilesNative } from './search';
 import { type ShellExecutor, shellTool } from './shell';
@@ -16,6 +17,7 @@ import {
   SEARCH_FILES_CONTRACT,
   SHELL_EXECUTE_CONTRACT,
   UPDATE_PLAN_CONTRACT,
+  WEB_FETCH_CONTRACT,
   WRITE_FILE_CONTRACT,
 } from './tool-contracts';
 
@@ -262,6 +264,55 @@ export function createAgentTools(input: CreateAgentToolsInput) {
         })
       : null;
 
+  const webFetchTool = tool(
+    async ({ url, max_chars, timeout_ms }) => {
+      const result = await fetchAndExtract(url, {
+        signal: input.signal,
+        maxChars: max_chars,
+        timeoutMs: timeout_ms,
+      });
+      const stdout = result.ok
+        ? [
+            `Fetched: ${result.title ?? result.finalUrl ?? url}`,
+            result.contentType ? `Type: ${result.contentType}` : '',
+            result.truncated ? '(content truncated)' : '',
+            '',
+            result.content ?? '',
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : `Failed to fetch ${url}: ${result.error ?? 'unknown error'}`;
+      return JSON.stringify({ ...result, stdout });
+    },
+    {
+      name: 'web_fetch',
+      description: WEB_FETCH_CONTRACT.description,
+      schema: z.object({
+        url: z
+          .string()
+          .min(1)
+          .max(8192)
+          .describe('Public http/https URL to fetch (max 8192 chars)'),
+        max_chars: z
+          .number()
+          .int()
+          .min(1000)
+          .max(16000)
+          .optional()
+          .describe('Max characters of extracted content (default 8000)'),
+        timeout_ms: z
+          .number()
+          .int()
+          .min(3000)
+          .max(30000)
+          .optional()
+          .describe(
+            'Timeout in milliseconds (default 15000). Increase for large pages like Wikipedia or GitHub.',
+          ),
+      }),
+    },
+  );
+
   const builtinTools = [
     readFileTool,
     editFileTool,
@@ -270,6 +321,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     searchContent,
     searchFiles,
     readMcpResource,
+    webFetchTool,
     ...(skillTool ? [skillTool] : []),
     ...(taskTool ? [taskTool] : []),
     createUpdatePlanTool(),
