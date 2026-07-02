@@ -266,23 +266,40 @@ export function createAgentTools(input: CreateAgentToolsInput) {
 
   const webFetchTool = tool(
     async ({ url, max_chars, timeout_ms }) => {
-      const result = await fetchAndExtract(url, {
-        signal: input.signal,
-        maxChars: max_chars,
-        timeoutMs: timeout_ms,
-      });
-      const stdout = result.ok
-        ? [
-            `Fetched: ${result.title ?? result.finalUrl ?? url}`,
-            result.contentType ? `Type: ${result.contentType}` : '',
-            result.truncated ? '(content truncated)' : '',
-            '',
-            result.content ?? '',
-          ]
-            .filter(Boolean)
-            .join('\n')
-        : `Failed to fetch ${url}: ${result.error ?? 'unknown error'}`;
-      return JSON.stringify({ ...result, stdout });
+      try {
+        const result = await fetchAndExtract(url, {
+          signal: input.signal,
+          maxChars: max_chars,
+          timeoutMs: timeout_ms,
+        });
+        const stdout = result.ok
+          ? [
+              `Fetched: ${result.title ?? result.finalUrl ?? url}`,
+              result.contentType ? `Type: ${result.contentType}` : '',
+              result.truncated ? '(content truncated)' : '',
+              '',
+              result.content ?? '',
+            ]
+              .filter(Boolean)
+              .join('\n')
+          : `Failed to fetch ${url}: ${result.error ?? 'unknown error'}`;
+        return JSON.stringify({ ...result, stdout });
+      } catch (err) {
+        const isAbort = err instanceof DOMException && err.name === 'AbortError';
+        const message = isAbort
+          ? err.message === 'Fetch timeout'
+            ? 'Fetch timed out.'
+            : 'Web fetch cancelled by user.'
+          : err instanceof Error
+            ? err.message
+            : String(err);
+        return JSON.stringify({
+          ok: false,
+          url,
+          stderr: message,
+          error: message,
+        });
+      }
     },
     {
       name: 'web_fetch',

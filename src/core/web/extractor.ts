@@ -1,4 +1,5 @@
 import { checkUrl } from './ssrf';
+import type { WebFetchResult } from './types';
 
 // ── robots.txt 缓存：按域名缓存 Disallow 规则，含并发去重 ──
 const robotsCache = new Map<string, { disallowed: Set<string>; fetchedAt: number }>();
@@ -41,9 +42,10 @@ async function checkRobotsTxt(parsed: URL): Promise<{ allowed: boolean }> {
     }),
   );
 
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
+    timeout = setTimeout(() => controller.abort(), 3000);
     // robots.txt fetch 用 manual redirect + SSRF 检查
     let robotsUrl = `https://${domain}/robots.txt`;
     let httpFallback = false;
@@ -77,7 +79,6 @@ async function checkRobotsTxt(parsed: URL): Promise<{ allowed: boolean }> {
       resp = r;
       break;
     }
-    clearTimeout(timeout);
 
     if (!resp?.ok) {
       robotsCache.set(domain, { disallowed: new Set(), fetchedAt: Date.now() });
@@ -124,6 +125,7 @@ async function checkRobotsTxt(parsed: URL): Promise<{ allowed: boolean }> {
   } catch {
     return { allowed: true };
   } finally {
+    clearTimeout(timeout);
     robotsPending.delete(domain);
     resolvePending!();
   }
@@ -299,17 +301,11 @@ async function parseInline(html: string, url: string, maxChars: number): Promise
 export async function fetchAndExtract(
   url: string,
   options?: ExtractOptions,
-): Promise<{
-  ok: boolean;
-  url: string;
-  finalUrl?: string;
-  title?: string;
-  content?: string;
-  contentType?: string;
-  truncated: boolean;
-  error?: string;
-}> {
-  // ── 1. SSRF 检查（初始 URL）──
+): Promise<WebFetchResult> {
+  // ── 1. SSRF 检查 ──
+  if (options?.signal?.aborted) {
+    return { ok: false, url, truncated: false, error: 'Cancelled.' };
+  }
   const initialCheck = checkUrl(url);
   if (!initialCheck.allowed) {
     return { ok: false, url, truncated: false, error: initialCheck.reason };
@@ -490,53 +486,70 @@ export async function fetchAndExtract(
     };
   } finally {
     clearTimeout(timeout);
-    if (options?.signal) {
-      options.signal.removeEventListener('abort', onExternalAbort);
-    }
+    // 不移除 abort listener — parseInWorker 还需要它
   }
 
   // ── 3. 解析（HTML → readability，纯文本 → 直接返回）──
   const maxChars = options?.maxChars ?? 8000;
 
-  if (!isHtml) {
-    // 纯文本 / JSON / XML / CSV — 返回原始内容，不做提取
-    let content = html;
-    let truncated = false;
-    if (content.length > maxChars) {
-      content = `${content.slice(0, maxChars)}\n\n... (content truncated)`;
-      truncated = true;
+  try {
+    if (!isHtml) {
+      // 纯文本 / JSON / XML / CSV — 返回原始内容，不做提取
+      let content = html;
+      let truncated = false;
+      if (content.length > maxChars) {
+        content = `${content.slice(0, maxChars)}\n\n... (content truncated)`;
+        truncated = true;
+      }
+      return {
+        ok: true,
+        url,
+        finalUrl,
+        content,
+        contentType,
+        truncated,
+      };
     }
+
+    // HTML — Worker 线程 readability + turndown
+    const parsed = await parseInWorker(html, finalUrl, maxChars, controller.signal);
+
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        url,
+        finalUrl,
+        contentType,
+        truncated: false,
+        error: parsed.error ?? 'Readability could not extract content from this page.',
+      };
+    }
+
     return {
       ok: true,
       url,
       finalUrl,
-      content,
+      title: parsed.title,
+      content: parsed.content,
       contentType,
-      truncated,
+      truncated: parsed.truncated,
     };
-  }
-
-  // HTML — Worker 线程 readability + turndown
-  const parsed = await parseInWorker(html, finalUrl, maxChars, controller.signal);
-
-  if (!parsed.ok) {
+  } catch (err) {
+    // parseInWorker 抛出的 AbortError — 传递原始消息以便上层区分超时 vs 取消
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw err;
+    }
     return {
       ok: false,
       url,
       finalUrl,
       contentType,
       truncated: false,
-      error: parsed.error ?? 'Readability could not extract content from this page.',
+      error: err instanceof Error ? err.message : String(err),
     };
+  } finally {
+    if (options?.signal) {
+      options.signal.removeEventListener('abort', onExternalAbort);
+    }
   }
-
-  return {
-    ok: true,
-    url,
-    finalUrl,
-    title: parsed.title,
-    content: parsed.content,
-    contentType,
-    truncated: parsed.truncated,
-  };
 }

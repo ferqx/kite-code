@@ -373,9 +373,9 @@ export const WEB_FETCH_CONTRACT: ToolContract = {
       'if the user is in mainland China, prefer domestic sites (Baidu, Zhihu, CSDN) when equivalent content exists. ' +
       'For very large pages like Wikipedia or detailed docs, set timeout_ms higher (e.g. 20000).',
     outputFormat:
-      'JSON: ok (boolean), url (requested URL), final_url (after redirects), ' +
+      'JSON: ok (boolean), url (requested URL), finalUrl (after redirects), ' +
       'title (extracted page title, HTML only), content (Markdown for HTML, raw text for JSON/XML/CSV/plain), ' +
-      'content_type (MIME type), truncated (boolean). ' +
+      'contentType (MIME type), truncated (boolean). ' +
       'On error: ok: false with error field explaining why.',
     failureHandling:
       'If HTTP 403 (Forbidden): the site likely has anti-bot protection (e.g., Zhihu articles) — do NOT retry the same URL, find the same information from a different source. ' +
