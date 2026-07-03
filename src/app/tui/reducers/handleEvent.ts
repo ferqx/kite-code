@@ -240,7 +240,9 @@ function closeCurrentThought(state: TuiState): TuiState {
 
   const next = updateToolSummaryById(state, summary.id, (block) => {
     if (block.tools.length === 0) return null;
-    const hasError = block.tools.some((t) => t.status === 'error' || t.status === 'timeout');
+    const hasError = block.tools.some(
+      (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
+    );
     const anyCancelled = block.tools.some((t) => t.status === 'cancelled');
     const hasPending = block.tools.some((t) => t.status === 'running');
     const result = hasError
@@ -269,6 +271,9 @@ function updateCurrentThoughtActivity(
       ...block,
       active: true,
       latestActivity,
+      // 每次 reason / tool_call 事件更新耗时，消除对前端 setInterval 定时器的依赖
+      // Update elapsed on each reason / tool_call event so the UI doesn't need a live timer
+      totalElapsedMs: Date.now() - block.createdAt,
     }));
   }
 
@@ -556,7 +561,12 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
                   summary: event.data.summary,
                   elapsedMs,
                   totalLines: event.data.totalLines ?? t.totalLines,
-                  status: event.data.ok ? ('done' as const) : ('error' as const),
+                  status:
+                    event.data.status === 'exhausted'
+                      ? ('exhausted' as const)
+                      : event.data.ok
+                        ? ('done' as const)
+                        : ('error' as const),
                 }
               : t,
           );
@@ -591,7 +601,30 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         state,
         (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
       );
-      if (matched?.kind !== 'tool_card') return { ...state, toolStartTimes: nextTimes };
+      if (matched?.kind !== 'tool_card') {
+        // Preflight block: tool was stopped before execution (fingerprint already exhausted).
+        // No tool_card was created by a prior tool_call event — create one now so the
+        // user sees the system intervention.  The status footer ("blocked") is sufficient;
+        // no separate notification text block needed.
+        if (event.data.status === 'exhausted') {
+          const id = state.nextBlockId;
+          const card: OutputBlock = {
+            id,
+            kind: 'tool_card',
+            callId: event.data.call_id,
+            name: event.data.name,
+            args: {},
+            status: 'exhausted' as const,
+            summary: event.data.summary,
+            expanded: true,
+          };
+          return {
+            ...appendBlock(state, card),
+            toolStartTimes: nextTimes,
+          };
+        }
+        return { ...state, toolStartTimes: nextTimes };
+      }
 
       // update_plan declined
       if (matched.name === 'update_plan' && !event.data.ok) {
@@ -628,6 +661,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       }
 
       const cancelled = !event.data.ok && summaryText === 'Cancelled';
+      const exhaustedStatus = event.data.status === 'exhausted';
       const timedOut =
         !event.data.ok &&
         matched.name === 'shell_execute' &&
@@ -644,18 +678,21 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           : summaryText;
       const next: OutputBlock = {
         ...matched,
-        status: event.data.ok
-          ? ('done' as const)
-          : cancelled
-            ? ('cancelled' as const)
-            : timedOut
-              ? ('timeout' as const)
-              : ('error' as const),
+        status: exhaustedStatus
+          ? ('exhausted' as const)
+          : event.data.ok
+            ? ('done' as const)
+            : cancelled
+              ? ('cancelled' as const)
+              : timedOut
+                ? ('timeout' as const)
+                : ('error' as const),
         summary: displaySummary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
         ...(timeoutMs != null ? { timeoutMs } : {}),
         expanded:
+          exhaustedStatus ||
           !event.data.ok ||
           matched.name === 'shell_execute' ||
           matched.name === 'edit_file' ||
@@ -686,6 +723,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         result = { ...result, turns: tCopy, nextBlockId: consolidated.nextBlockId };
       }
 
+      // Exhaustion is rendered by the tool_card itself (amber dot + status footer
+      // "blocked (too many repeated failures)"), no separate notification needed.
       return result;
     }
     case 'state_change': {

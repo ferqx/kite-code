@@ -92,9 +92,10 @@ isExplorationToolByName(data.name)?
 
 | 状态 | 触发条件 | dot | 计时器 | 工具状态 |
 |------|---------|-----|--------|---------|
-| 运行中 | `tools.some(t.status === 'running')` | spinner `○` | 每 200ms 更新 | `├─`/`└─` |
-| 完成 | 所有工具 done | `●` green | 快照冻结 | `✓` |
-| 部分失败 | 有 error | `●` red | 快照冻结 | `✗` |
+| 运行中 | `active=true` + pending 工具 | spinner `○` | 事件驱动（见下） | `├─`/`└─` |
+| 工具完成（仍 active） | `active=true` + 所有工具 done | `●` green | 冻结在最后事件时间 | `├─`/`└─` |
+| 已关闭（settled） | `active=false` | `●` green/red | 冻结 | `├─`/`└─` |
+| 部分失败 | 有 error/exhausted/timeout | `●` red/amber | 冻结 | `✗` |
 
 ### 工具列表渲染
 
@@ -122,8 +123,12 @@ isExplorationToolByName(data.name)?
 
 - 最小显示 1s（`Math.max(1, sec)`）
 - 格式：`Xs` / `Xm Ys`
-- Running 时 `setInterval` 每 200ms 更新
-- Spinner `setInterval` 每 80ms 轮换 `SPINNER` 数组
+- **事件驱动**：不再使用前端 `setInterval`。`totalElapsedMs = Date.now() - createdAt` 在以下 reducer 路径中更新：
+  - `tool_done` 探索工具完成 → `updateToolSummaryById` 中计算
+  - `updateCurrentThoughtActivity`（reason / tool_call 事件）→ `Date.now() - block.createdAt`
+  - `closeCurrentThought` → `Date.now() - block.createdAt`
+- `ToolSummaryBlock` 直接读取 `block.totalElapsedMs`，无 live timer
+- Spinner `setInterval` 每 80ms 轮换 `SPINNER` 数组（仅 pending 工具时激活）
 
 ## Static/Dynamic 边界
 
@@ -131,12 +136,17 @@ isExplorationToolByName(data.name)?
 
 ```typescript
 case 'tool_summary':
-  return block.tools.every(
-    t => t.status === 'done' || t.status === 'error' || t.status === 'cancelled'
+  return (
+    !block.active &&
+    block.tools.every(
+      t => t.status === 'done' || t.status === 'error' ||
+           t.status === 'cancelled' || t.status === 'timeout' ||
+           t.status === 'exhausted'
+    )
   );
 ```
 
-所有工具状态都不是 `running` 时才进入 Static。
+`active=false` 且所有工具状态都不是 `running` 时才进入 Static。
 
 ### blockFingerprint
 

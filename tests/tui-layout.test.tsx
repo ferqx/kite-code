@@ -1095,7 +1095,9 @@ describe('BlockRenderer', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('├─ Read CLAUDE.md [lines 1-126 / 126]');
-    expect(frame).toContain('└─ 运行中');
+    // 所有工具已完成 + 没有 active thinking → footer 变为「完成」
+    // All tools done + no active thinking → footer becomes "完成"
+    expect(frame).toContain('└─ 完成');
     expect(frame).not.toContain('\n   Read CLAUDE.md');
   });
 
