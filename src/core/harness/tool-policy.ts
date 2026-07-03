@@ -77,7 +77,7 @@ export function commandGrantKey(input: {
       `same_command:${stableStringify({
         workspace: input.workspace,
         threadId: input.threadId,
-        command: input.command.trim(),
+        command: (input.command ?? '').trim(),
       })}`,
     )
     .digest('hex');
@@ -89,7 +89,7 @@ export function grantSameCommand(
   input: { workspace: string; threadId: string; command: string },
 ): ThreadAuthorizationState {
   const state = normalizeAuthorizationState(authorization);
-  const command = input.command.trim();
+  const command = (input.command ?? '').trim();
   if (!command) {
     return state;
   }
@@ -119,7 +119,7 @@ export function hasSameCommandGrant(
     !!grant &&
     grant.workspace === input.workspace &&
     grant.threadId === input.threadId &&
-    grant.command === input.command.trim()
+    grant.command === (input.command ?? '').trim()
   );
 }
 
@@ -472,7 +472,7 @@ export function replaceApprovalCommand(
 }
 
 function classifyShellExecute(command: string): ToolPolicyDecision {
-  const trimmed = command.trim();
+  const trimmed = (command ?? '').trim();
   if (!trimmed) {
     return deny({
       risk: 'unknown',
@@ -548,7 +548,7 @@ function authorizedShellDecision(input: {
   command: string;
   effectiveMode: AuthorizationMode;
 }): ToolPolicyDecision | null {
-  const trimmed = input.command.trim();
+  const trimmed = (input.command ?? '').trim();
   if (!trimmed) {
     return null;
   }
@@ -662,7 +662,7 @@ function isNetworkCommand(command: string): boolean {
 }
 
 function normalizeShell(command: string): string {
-  return command.trim().toLowerCase().replace(/\s+/g, ' ');
+  return (command ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function approvalCommand(request: PendingToolRequest): string {

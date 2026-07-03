@@ -167,6 +167,20 @@ export class SessionRuntime {
         deps.dispatch({ type: 'SET_EXITED' });
       }
     } catch (e: any) {
+      // Emit any accumulated retry events before the fatal error
+      if (Array.isArray(e.modelRetries)) {
+        for (const retry of e.modelRetries) {
+          const retryEvent: AgentEvent = {
+            type: 'model_retry',
+            data: retry,
+          };
+          if (this._foreground) {
+            deps.provider.onEvent(retryEvent);
+          } else {
+            this._pushToBuffer(retryEvent);
+          }
+        }
+      }
       const errorEvent: AgentEvent = {
         type: 'error',
         data: { message: e?.message ?? String(e), recoverable: isRecoverableError(e) },

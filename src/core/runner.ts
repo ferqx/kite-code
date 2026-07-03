@@ -127,7 +127,8 @@ export function isRecoverableError(error: unknown): boolean {
     if (msg.includes('etimedout')) return true; // TCP 超时
     if (msg.includes('econnreset')) return true; // 连接重置
     if (msg.includes('429')) return true; // 速率限制
-    if (msg.includes('503') || msg.includes('502')) return true; // 服务不可用
+    if (msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('504'))
+      return true; // 5xx 服务器错误
     if (msg.includes('overloaded')) return true; // 模型过载
     if (msg.includes('timeout')) return true; // 通用超时
     if (msg.includes('rate limit')) return true; // 速率限制文字
@@ -283,25 +284,48 @@ export async function* runAgent(
 
     let resumeValue: AgentResumeValue | null = input.resume ?? null;
     let turnIndex = 0;
+    let streamConfig = graphConfig(input.threadId);
+    let startState: typeof initialState | null = initialState;
+
+    if (!resumeValue) {
+      const existing = await checkpointer.getTuple(streamConfig);
+      if (existing) {
+        const updatedConfig = await graph.updateState(
+          existing.config,
+          {
+            ...initialState,
+            messages: [new HumanMessage(input.task)],
+          },
+          'cleanup',
+        );
+        streamConfig = {
+          ...updatedConfig,
+          configurable: {
+            ...(updatedConfig.configurable ?? {}),
+            thread_id: input.threadId,
+          },
+          streamMode: 'updates' as const,
+          recursionLimit: 9999999,
+        };
+        startState = null;
+      }
+    }
 
     while (true) {
       // 若 resumeValue 待处理（plan 拒绝等），先让 graph 落盘再响应 abort
       // If resumeValue is pending (e.g. plan rejection), let graph persist state before abort
       if (signal?.aborted && !resumeValue) break;
 
-      const streamConfig = {
-        configurable: { thread_id: input.threadId },
-        streamMode: 'updates' as const,
-        recursionLimit: 9999999,
-      };
-
       let stream: AsyncIterable<unknown>;
       if (resumeValue) {
         const cmd: Record<string, unknown> = { resume: resumeValue };
         stream = await graph.stream(new Command(cmd), streamConfig);
+      } else if (startState) {
+        stream = await graph.stream(startState, streamConfig);
       } else {
-        stream = await graph.stream(initialState, streamConfig);
+        stream = await graph.stream(null, streamConfig);
       }
+      startState = null;
 
       resumeValue = null;
       turnIndex++;

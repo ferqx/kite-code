@@ -188,7 +188,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       const s = finalizeLastTurnStreaming(settleActiveThought(state));
       const merged = mergeConsecutiveTextBlocksInLastTurn(s);
       const elapsedSec = merged.runStartTime
-        ? Math.round((Date.now() - merged.runStartTime) / 1000)
+        ? Math.ceil((Date.now() - merged.runStartTime) / 1000)
         : 0;
       const elapsedStr =
         elapsedSec >= 60 ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s` : `${elapsedSec}s`;
@@ -369,7 +369,8 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
               interrupt: null,
             };
           } else if (b.kind === 'question') {
-            return { ...cancelAskUserToolCard(state, b.id), interrupt: null };
+            const finalized = finalizeLastTurnStreaming(state);
+            return { ...cancelAskUserToolCard(finalized, b.id), interrupt: null };
           }
         }
         return { ...state, interrupt: null };

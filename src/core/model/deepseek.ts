@@ -25,6 +25,8 @@ export interface TransientModelRetryOptions {
   maxDelayMs?: number;
   /** 随机抖动上限 / Maximum random jitter */
   jitterMs?: number;
+  /** 重试总时间上限 / Maximum total retry duration across all attempts */
+  maxTotalRetryMs?: number;
   /** 可注入 sleep，便于测试 / Injectable sleep for tests */
   sleep?: (delayMs: number) => Promise<void>;
   /** 重试时调用的回调 / Callback invoked on each retry */
@@ -36,6 +38,7 @@ const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<Omit<TransientModelRetryOptions,
   initialDelayMs: 500,
   maxDelayMs: 4_000,
   jitterMs: 250,
+  maxTotalRetryMs: 30_000,
   sleep: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
 };
 
@@ -186,13 +189,19 @@ export async function withTransientModelRetry<T>(
 ): Promise<T> {
   const retryOptions = { ...DEFAULT_TRANSIENT_RETRY_OPTIONS, ...options };
   let lastError: unknown;
+  const retryStartedAt = Date.now();
 
   for (let attempt = 1; attempt <= retryOptions.maxAttempts; attempt++) {
     try {
       return await operation();
     } catch (error) {
       lastError = error;
-      if (attempt >= retryOptions.maxAttempts || !isTransientModelConnectionError(error)) {
+      const elapsedRetryMs = Date.now() - retryStartedAt;
+      if (
+        attempt >= retryOptions.maxAttempts ||
+        !isTransientModelConnectionError(error) ||
+        elapsedRetryMs >= retryOptions.maxTotalRetryMs
+      ) {
         throw error;
       }
 
@@ -202,7 +211,7 @@ export async function withTransientModelRetry<T>(
       );
       const jitter =
         retryOptions.jitterMs > 0 ? Math.floor(Math.random() * retryOptions.jitterMs) : 0;
-      const delayMs = baseDelay + jitter;
+      const delayMs = Math.min(baseDelay + jitter, retryOptions.maxTotalRetryMs - elapsedRetryMs);
       // attempt 即重试次数（1-indexed）：attempt=1 表示第 1 次重试 / attempt is the retry number (1-indexed): attempt=1 means first retry
       retryOptions.onRetry?.(attempt, retryOptions.maxAttempts, error, delayMs);
       await retryOptions.sleep(delayMs);

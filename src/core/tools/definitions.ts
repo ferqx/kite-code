@@ -535,7 +535,7 @@ const PLAN_READ_ONLY_GIT_SUBCOMMANDS = new Set([
 
 /** 检查命令是否可作为 shell_execute inspect 直通 / Check if command can bypass approval as shell_execute inspect */
 export function isReadOnlyShellCommand(command: string): boolean {
-  const trimmed = command.trim();
+  const trimmed = (command ?? '').trim();
   // 拒绝对空命令和包含文件输出重定向的命令（允许 >&N stderr 重定向到 fd 和 /dev/null 抑制输出）
   // Reject empty commands and file output redirection; allow >&N stderr-to-fd and /dev/null sink
   if (!trimmed || /(^|[^>])>{1,2}(?!&[12]|\s*\/dev\/null)(?:$|[^>])/.test(trimmed)) {

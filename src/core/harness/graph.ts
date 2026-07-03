@@ -166,6 +166,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         return { ...baseReturn, modelRetries: retryEvents };
       }
       return baseReturn;
+    } catch (e) {
+      // Return retry events even on failure — user should see retry context in error display
+      if (retryEvents.length > 0) {
+        throw Object.assign(e instanceof Error ? e : new Error(String(e)), {
+          modelRetries: retryEvents,
+        });
+      }
+      throw e;
     } finally {
       if (hasRetryListener(model)) model.setRetryListener(null);
     }
