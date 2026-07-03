@@ -1,10 +1,15 @@
 # TUI E2E 测试方案与限制
 
 状态：active
-范围：`tests/tui-integration/`、`tests/tui-*.test.tsx`、`tests/mock-model.ts`
+范围：`tests/tui-system/`、`tests/tui-*.test.tsx`、`tests/mock-model.ts`
 读取时机：编写 TUI E2E 测试、调试 TextInput/键盘交互测试、考虑新的终端测试方案时必读。
 
-## 当前方案：ink-testing-library + StreamingMockModel
+## 当前方案
+
+1. `tests/tui-system/` — Bun PTY + mock OpenAI-compatible server，真实终端 E2E/PTTY 系统测试。
+2. `tests/tui-*.test.tsx` — ink-testing-library 组件级单测，覆盖局部布局和输入组件行为，不作为 E2E gate。
+
+## 已退役：旧 `tests/tui-integration/` e2e harness
 
 ```
 render-tui.tsx                ← 创建 TuiBootstrap + FakeChatModel
@@ -13,16 +18,19 @@ render-tui.tsx                ← 创建 TuiBootstrap + FakeChatModel
   → 断言文本是否出现/消失
 ```
 
-**适用场景**：
+该层已于 2026-07-03 退役，原因是它仍运行在虚拟 stdin/lastFrame 环境中，无法覆盖真实 PTY、raw mode、Ctrl+C、resize survival 和 scrollback 语义。仍有价值的局部 Ink 测试保留在 `tests/tui-*.test.tsx`。
+
+**曾适用场景**：
 - 单 session 内的消息发送/回复验证 ✅
 - 审批/提问流程 ✅
 - Slash 命令面板 ✅
 - /new 后旧内容消失（reducer 状态隔离）✅
 
-**不适用场景**：
+**退役原因**：
 - 多 session 连续切换后发送消息（Ink remount 导致 TextInput 焦点丢失）
 - 涉及终端 resize 的测试
 - Scrollback（<Static>）内容捕获
+- 和真实终端 raw mode 时序不同，容易形成 false positive / false negative
 
 ## 已尝试的替代方案
 
@@ -69,23 +77,23 @@ Bun 1.1.0 起支持 `Bun.spawn({ pty: true })`，但子进程 `process.stdin.isT
 
 之前测试的是 `Bun.spawn({ pty: true })`（旧 API），子进程 `isTTY` 返回 false。新的 `Bun.spawn({ terminal })` API 可用。
 
-在 Bun-only 技术栈下，`ink-testing-library` 是组件级集成测试的最佳选择，其已知限制通过以下方式回避：
-- 多 session 消息发送：在 reducer 层测试（`tui-reducer.test.ts`，覆盖 SESSION_ACTIONS 状态转换）
-- 手动验证：`bun run tui`
-
-PTY 系统测试作为补充层级，覆盖 Ink 无法测试的场景（resize、Kitty 协议、scrollback、Ctrl+C 信号等）。
+在 Bun-only 技术栈下，`ink-testing-library` 仍适合作为组件级单测工具；TUI E2E gate 改为 PTY 系统测试。当前 PTY 层已覆盖 resize survival、真实输入、Ctrl+C 信号、审批、ask_user、多轮消息；Kitty 协议、scrollback 和真实 SIGWINCH 尺寸传播仍待补。
 
 ### 2026-07-03 更新：PTY 测试落地 + 遗留问题
 
-**PTY 测试架构**：`tests/tui-system/`，harness + 6 个场景测试，19 tests 全部通过。
+**PTY 测试架构**：`tests/tui-system/`，harness + 7 个场景测试，22 tests 全部通过。
 
 **3-Test Warmup 模式（关键发现）**：每个需要模型调用的 PTY 测试必须遵循 `typing → empty Enter → real message` 三阶段。原因是 Ink 的 `useFocus` hook 在首次渲染时的 `setRawMode` 初始化 + CtrlSafeTextInput remount（`textKeyRef` 变更）需要 2 次 form submission 才能稳定 raw mode 管道。不经 warmup 的模型调用被静默跳过。
 
-**多消息同 session 失败（已知阻塞）**：
-- 现象：第一条消息正常，第二条消息后 mock server `callCount` 不增加
-- 根因：LangGraph 1.4.7 在已完成 thread 上再次 `graph.stream()` 短路返回空流
-- 尝试修复：`Command({ update })`、`updateState` + `stream(null)` 均失败
-- Workaround：每个需要模型调用的测试使用独立 describe block + 全新 TUI 实例
-- 影响：Session 切换、连续多轮对话测试无法进行
+**多消息同 session 阻塞已修复**：
+- `runAgent()` 对同一 `threadId` 的后续非 resume 运行会读取已有 checkpoint，通过 `graph.updateState(...)` 追加新 `HumanMessage`，再从更新后的 config 继续 stream
+- PTY harness 需要模拟真实输入：逐字发送文本，再单独发送 Enter；不要把 `"message\r"` 一次性写入
+- Warmup typing 后必须清空输入，否则后续 Enter 会提交 warmup 文本并消费 mock 响应
+- 回归测试：`tests/runner.test.ts` 的 multi-turn checkpoint continuation，以及 `tests/tui-system/scenarios/multi-turn.test.ts`
+
+**验证边界**：
+- `bun run test:tui:system`：PTY 层全量验证，当前 22 tests，逐文件串行运行以避免 mock server 并发启动。
+- `bun run test:e2e`：默认 E2E 入口，等价于 `bun run test:tui:system`。
+- `bun run test:tui:integration`：兼容旧脚本名，当前也指向 PTY system gate。
 
 **详细方案文档**：`docs/space/plans/2026-07-03-tui-pty-e2e-reform.md`

@@ -27,7 +27,7 @@
 - `src/tools/`：模型工具定义，以及文件、shell、patch 工具实现。
 - `src/persistence/`：Bun SQLite LangGraph checkpointer。
 - `src/config/`：本地 `~/.kite-code/kite-code.jsonc` 配置加载器。
-- `tests/tui-integration/`：TUI 集成测试套件（mock agent，覆盖斜杠命令、键盘快捷键、设置/会话、真实 agent 对话、视口回归）。
+- `tests/tui-system/`：TUI E2E/PTTY 系统测试套件（真实 PTY + mock model server，覆盖终端启动、输入、Ctrl+C、审批、ask_user、多轮消息）。
 - `src/shared/`：共享类型和 prompt cache 指标。
 
 ## 安装
@@ -194,13 +194,17 @@ bun run agent resume --thread demo --user local --answer "使用最小实现，�
 bun test
 ```
 
-TUI 端到端测试（mock agent，无需 API 密钥）：
+TUI E2E/PTTY 系统测试（真实终端 + mock server，无需 API 密钥）：
 
 ```bash
-bun test tests/tui-integration/
+bun run test:e2e
 ```
 
-覆盖 88 个场景：斜杠命令、键盘快捷键、设置/会话管理、真实 agent 对话（StreamingMockModel + 完整 TUI 渲染）和视口回归测试。
+```bash
+bun run test:tui:system
+```
+
+PTY 层覆盖真实终端启动、输入链路、Ctrl+C、审批、ask_user 和同 session 多轮消息。旧 `tests/tui-integration/` e2e harness 已退役；组件级 Ink 单测仍保留在 `tests/tui-*.test.tsx`。
 
 真实配置模型端到端测试：
 

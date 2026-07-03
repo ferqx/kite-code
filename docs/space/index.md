@@ -27,8 +27,8 @@
 | `execution/active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |
 | `execution/active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
 | `execution/active/project-conventions.md` | active | 文档语言、注释规范、测试纪律、CLI 行为、提交粒度、仓库卫生、TypeScript 类型安全 | 修改 Markdown 文档、测试、CLI、提交规范、仓库布局约束或 TypeScript 类型声明时。 |
-| `execution/active/tui-e2e-standards.md` | active | TUI E2E 测试标准、响应分配器、Harness 增强、P0-P3 覆盖分层 | 编写或修改 TUI E2E 测试、调整 mock agent 行为、新增 E2E 场景。 |
-| `execution/active/e2e-test-restructure.md` | active | E2E 测试用例体系重构方案 — 3 文件 60 测试覆盖 P0-P3 | E2E 测试重构、新增测试层级、调整测试文件组织。 |
+| `execution/active/tui-e2e-standards.md` | active | TUI E2E/PTTY 测试标准、PTY harness、mock model server、真实终端覆盖边界 | 编写或修改 TUI E2E/PTTY 测试、调整 mock server 行为、新增真实终端场景。 |
+| `execution/active/e2e-test-restructure.md` | active | 旧 ink-testing-library e2e 重构方案的退役指针 | 遇到旧 `tests/tui-integration/` 引用时查看迁移去向。 |
 | `execution/active/tui-textinput-wrapping-spec.md` | active | `CtrlSafeTextInput` 软换行、光标边界、IME 空格清理、CJK/ASCII 混合输入行为 | 修改 `CtrlSafeTextInput` 软换行、光标移动、IME 处理或 `maxWidth` 传播逻辑时。 |
 | `execution/active/tui-run-status-bar.md` | active | Run Status Bar 3 阶段单向状态行 — Thinking → Working → Finishing 只进不退 + 渐变动画 + arc spinner + timer 性能架构 | 修改 `StatusBar.tsx`、`run-status.ts`、`App.tsx`（shouldShowRunStatus）、Footer.tsx 或相关测试时必读。 |
 | `execution/active/tui-footer-resize-stability.md` | active | TUI 终端缩放刷新方案 — resize 事件驱动 + key remount + 输入保留 + DEC 同步输出缓冲 | 修改 TUI resize 逻辑、缩放行为异常时必读。 |
@@ -36,7 +36,7 @@
 | `execution/active/cancel-resume-cleanup.md` | active | Cancel-Resume 三层清理架构 — graph cleanup 节点 + sanitize + reorder，防止孤儿工具重新执行和 API 400 错误 | 修改 cancel/abort/resume 逻辑、检查点恢复、消息清理时必读。 |
 | `execution/active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
 | `execution/active/tui-reference-stability.md` | active | TUI useStaticContent 引用稳定性 — ref+fingerprint 替代 useMemo 的缓存层，消除 timer/spinner 引发的引用级联和重复渲染 | 修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。 |
-| `execution/active/tui-e2e-testing-limits.md` | active | TUI E2E 测试方案与限制 — ink-testing-library 适用场景、PTY 方案探索结论（Bun PTY / node-pty 均不可用） | 编写 TUI E2E 测试、考虑替代终端测试方案时必读，避免重复踩坑。 |
+| `execution/active/tui-e2e-testing-limits.md` | active | TUI E2E 测试方案与限制 — 旧 ink-testing-library e2e harness 退役原因、Bun PTY 方案和平台边界 | 编写 TUI E2E/PTTY 测试、考虑替代终端测试方案时必读，避免重复踩坑。 |
 | `execution/active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
 | `execution/active/plan-mode-implementation.md` | active | Plan Mode 全栈实现：plan_review 中断、PlanReviewBlock/InputBlock/TaskProgressBlock 渲染、多问题 ask_user、紧凑 tool_card 布局、计划路由优化、持久化恢复 | 修改 plan 流程、plan_review 中断、ask_user 渲染、PlanReviewBlock、InputBlock 多问题向导时必读。 |
 | `execution/active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |

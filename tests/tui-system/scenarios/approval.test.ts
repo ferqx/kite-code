@@ -14,6 +14,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
+import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -67,12 +68,9 @@ describe('TUI PTY System — Tool Approval', () => {
       // In raw mode, individual bytes go directly to child stdin.
       // Send chars one at a time with delays matching human typing speed.
       const text = 'hello';
-      for (const ch of text) {
-        tui.write(ch);
-        await new Promise((r) => setTimeout(r, 80));
-      }
+      await typeText(tui, text, 80);
       // Allow Ink to re-render the input state
-      await new Promise((r) => setTimeout(r, 400));
+      await sleep(400);
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -80,6 +78,8 @@ describe('TUI PTY System — Tool Approval', () => {
       // The typed text should appear in the input area
       // (CtrlSafeTextInput renders the current value near the prompt)
       expect(clean).toContain(text);
+
+      await clearInput(tui, text.length);
     },
     TIMEOUT,
   );
@@ -89,13 +89,15 @@ describe('TUI PTY System — Tool Approval', () => {
   test(
     'empty Enter (no text) does not submit a message',
     async () => {
+      const before = server.getRequestCount();
       // Send Enter with empty input
       tui.write('\r');
-      await new Promise((r) => setTimeout(r, 500));
+      await sleep(500);
 
       const output = tui.output();
       // TUI should still be alive with prompt
       expect(screenContains(output, '❯')).toBe(true);
+      expect(server.getRequestCount()).toBe(before);
     },
     TIMEOUT,
   );
@@ -105,9 +107,9 @@ describe('TUI PTY System — Tool Approval', () => {
   test(
     'tool call triggers approval block, deny (d) recovers TUI',
     async () => {
-      // Write the full message + Enter in a single write call.
-      tui.write('Create a directory\r');
-      await new Promise((r) => setTimeout(r, 300));
+      await typeText(tui, 'Create a directory');
+      tui.write('\r');
+      await waitForRequestMessage(server, 'Create a directory', 15000);
 
       // Wait for approval block to render
       await waitForText(() => tui.output(), 'Approve this tool call?', 15000);
@@ -119,7 +121,7 @@ describe('TUI PTY System — Tool Approval', () => {
 
       // Deny the tool
       tui.write('d');
-      await new Promise((r) => setTimeout(r, 2000));
+      await sleep(2000);
 
       // TUI should recover — prompt visible
       const afterOutput = tui.output();

@@ -1,16 +1,75 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AIMessage } from '@langchain/core/messages';
 import { createPromptCacheStandardTracker } from '../src/core/cache-metrics';
+import type { AgentConfig } from '../src/core/config/index';
+import type { SupportedChatModel } from '../src/core/model/factory';
+import { BunSqliteSaver } from '../src/core/persistence/checkpoint';
 import {
   chunkToEvents,
   initialAgentPhaseForAccess,
   initialWorkspaceAccessForTask,
   isRecoverableError,
   normalizeGraphStream,
+  runAgent,
   taskMessageForInitialAccess,
 } from '../src/core/runner';
 import type { ModelRetryEvent } from '../src/core/types';
 import type { AgentEvent } from '../src/protocol/index';
+import { StreamingMockModel } from './mock-model';
+
+const fakeConfig: AgentConfig = {
+  providerName: 'fake',
+  providerType: 'openai-compatible',
+  apiKey: 'noop',
+  baseURL: 'http://localhost:9999',
+  modelName: 'fake',
+};
+
+function tempWorkspace(prefix: string): string {
+  const root = join(
+    tmpdir(),
+    `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+  );
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(root, { recursive: true });
+  return root;
+}
+
+async function collectRunAgentEvents(input: {
+  task: string;
+  threadId: string;
+  workspace: string;
+  checkpointPath: string;
+  model: StreamingMockModel;
+}): Promise<AgentEvent[]> {
+  const events: AgentEvent[] = [];
+  const provider = {
+    onEvent(event: AgentEvent): void {
+      events.push(event);
+    },
+    async requestAction() {
+      return { type: 'cancel' as const };
+    },
+    submitAction() {},
+    reset() {},
+  };
+
+  const generator = runAgent(provider, {
+    task: input.task,
+    userId: 'test-user',
+    threadId: input.threadId,
+    workspace: input.workspace,
+    checkpointPath: input.checkpointPath,
+    config: fakeConfig,
+    model: input.model as unknown as SupportedChatModel,
+  });
+  for await (const _ of generator) {
+  }
+  return events;
+}
 
 // 测试 runner 的初始工作区访问权限选择逻辑 / Test runner initial workspace access selection logic
 describe('runner initial workspace access selection', () => {
@@ -123,6 +182,73 @@ describe('normalizeGraphStream model retry events', () => {
     expect(events.map((e) => e.type)).toEqual(['update', 'model_retry']);
   });
 });
+
+describe('runAgent multi-turn checkpoint continuation', () => {
+  test('runs a second user task on the same completed thread', async () => {
+    const workspace = tempWorkspace('kite-code-runner-multiturn');
+    try {
+      const checkpointPath = join(workspace, 'checkpoint.db');
+      const threadId = 'same-thread';
+      const model = new StreamingMockModel({
+        responses: [
+          { message: new AIMessage({ content: 'first response', id: 'm1' }) },
+          { message: new AIMessage({ content: 'second response', id: 'm2' }) },
+        ],
+      });
+
+      const firstEvents = await collectRunAgentEvents({
+        task: 'first user task',
+        threadId,
+        workspace,
+        checkpointPath,
+        model,
+      });
+      const secondEvents = await collectRunAgentEvents({
+        task: 'second user task',
+        threadId,
+        workspace,
+        checkpointPath,
+        model,
+      });
+
+      expect(model.callCount).toBe(2);
+      expect(
+        firstEvents.some((e) => e.type === 'text' && e.data.text.includes('first response')),
+      ).toBe(true);
+      expect(
+        secondEvents.some((e) => e.type === 'text' && e.data.text.includes('second response')),
+      ).toBe(true);
+
+      const saver = new BunSqliteSaver(checkpointPath);
+      try {
+        const tuple = await saver.getTuple({ configurable: { thread_id: threadId } });
+        const rawMessages = tuple?.checkpoint.channel_values?.messages;
+        const messages = Array.isArray(rawMessages) ? (rawMessages as unknown[]) : [];
+        expect(messages.map((m) => messageType(m))).toEqual(['human', 'ai', 'human', 'ai']);
+        expect(messages.map((m) => messageContent(m))).toEqual([
+          'first user task',
+          'first response',
+          'second user task',
+          'second response',
+        ]);
+      } finally {
+        saver.close();
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
+function messageType(message: unknown): string {
+  const maybe = message as { _getType?: () => string; getType?: () => string };
+  return maybe._getType?.() ?? maybe.getType?.() ?? '';
+}
+
+function messageContent(message: unknown): string {
+  const maybe = message as { content?: unknown };
+  return typeof maybe.content === 'string' ? maybe.content : '';
+}
 
 describe('chunkToEvents final dedup', () => {
   const cacheStandard = createPromptCacheStandardTracker();

@@ -7,6 +7,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
+import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -50,12 +51,9 @@ describe('TUI PTY System — Input & Message', () => {
       // In raw mode, individual bytes go directly to child stdin.
       // Send chars one at a time with delays matching human typing speed.
       const text = 'hello';
-      for (const ch of text) {
-        tui.write(ch);
-        await new Promise((r) => setTimeout(r, 80));
-      }
+      await typeText(tui, text, 80);
       // Allow Ink to re-render the input state
-      await new Promise((r) => setTimeout(r, 400));
+      await sleep(400);
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -63,6 +61,8 @@ describe('TUI PTY System — Input & Message', () => {
       // The typed text should appear in the input area
       // (CtrlSafeTextInput renders the current value near the prompt)
       expect(clean).toContain(text);
+
+      await clearInput(tui, text.length);
     },
     TIMEOUT,
   );
@@ -72,13 +72,15 @@ describe('TUI PTY System — Input & Message', () => {
   test(
     'empty Enter (no text) does not submit a message',
     async () => {
+      const before = server.getRequestCount();
       // Send Enter with empty input
       tui.write('\r');
-      await new Promise((r) => setTimeout(r, 500));
+      await sleep(500);
 
       const output = tui.output();
       // TUI should still be alive with prompt
       expect(screenContains(output, '❯')).toBe(true);
+      expect(server.getRequestCount()).toBe(before);
     },
     TIMEOUT,
   );
@@ -88,10 +90,9 @@ describe('TUI PTY System — Input & Message', () => {
   test(
     'send message → agent responds with mock text',
     async () => {
-      // Write the full message + Enter in a single write call.
-      // PTY raw mode ensures all bytes reach the child immediately.
-      tui.write('Test message from PTY\r');
-      await new Promise((r) => setTimeout(r, 300));
+      await typeText(tui, 'Test message from PTY');
+      tui.write('\r');
+      await waitForRequestMessage(server, 'Test message from PTY', 15000);
 
       // Wait for the mock model response
       await waitForText(() => tui.output(), 'I received your message!', 15000);

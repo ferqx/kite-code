@@ -6,7 +6,7 @@
  * - Temp workspace directory (for file operations)
  * - Temp checkpoint database path (isolated SQLite)
  *
- * Reuses patterns from tests/tui-integration/render-tui.tsx.
+ * Reuses the temp-home isolation pattern previously used by the old TUI harness.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
