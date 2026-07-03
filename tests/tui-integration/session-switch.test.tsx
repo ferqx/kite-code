@@ -32,10 +32,10 @@ describe('TUI E2E — Session Switching (Group 1: content isolation)', () => {
   });
 
   afterAll(() => {
+    // plan.verify() throws on mismatch — error propagates to fail the test.
+    // Using try/finally (without catch) ensures cleanup always runs.
     try {
       plan.verify(tui.getCallCount());
-    } catch (e) {
-      console.warn('[session G1] plan:', (e as Error).message);
     } finally {
       tui?.unmount();
     }
@@ -77,10 +77,10 @@ describe('TUI E2E — Session Switching (Group 2: switch state)', () => {
   });
 
   afterAll(() => {
+    // plan.verify() throws on mismatch — error propagates to fail the test.
+    // Using try/finally (without catch) ensures cleanup always runs.
     try {
       plan.verify(tui.getCallCount());
-    } catch (e) {
-      console.warn('[session G2] plan:', (e as Error).message);
     } finally {
       tui?.unmount();
     }

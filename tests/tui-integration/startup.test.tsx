@@ -123,18 +123,19 @@ describe('TUI E2E — Startup & Core Regression (P0)', () => {
   // 1. Startup & Render
   // ══════════════════════════════════════════════════════════
 
-  test('renders without crash (output > 10 chars)', () => {
+  test('renders without crash — header and prompt visible', () => {
     const output = tui.getOutput();
-    expect(output.length).toBeGreaterThan(10);
+    expect(output).toContain('❯');
     const lower = output.toLowerCase();
     expect(
       lower.includes('kite code') || lower.includes('( = = )') || lower.includes('( ^ ^ )'),
     ).toBe(true);
   });
 
-  test('auto-creates session — TUI renders normally (no crash)', () => {
+  test('auto-creates session — TUI renders with prompt and footer', () => {
     const output = tui.getOutput();
-    expect(output.length).toBeGreaterThan(10);
+    expect(output).toContain('❯');
+    expect(output).toContain('shortcuts');
     expect(output.includes('( = = )') || output.includes('( ^ ^ )') || output.includes('❯')).toBe(
       true,
     );
@@ -280,9 +281,10 @@ describe('TUI E2E — Startup & Core Regression (P0)', () => {
       tui.stdin.write('n');
       await new Promise((r) => setTimeout(r, 1500));
 
-      // Session count should have increased (just check output is non-empty)
+      // Session count should have increased — verify prompt and active session indicator visible
       const out = tui.getOutput();
-      expect(out.length).toBeGreaterThan(100);
+      expect(out).toContain('❯');
+      expect(out).toContain('shortcuts');
 
       // Send message in session 2
       await tui.sendMessage('SessionBMsg');

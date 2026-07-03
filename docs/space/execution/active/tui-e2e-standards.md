@@ -5,12 +5,12 @@
 
 范围：
 
-- `tests/e2e/` — 所有 TUI e2e 测试（3 文件，22 tests）
-- `tests/e2e/render-tui.tsx` — TuiHarness（含审批流、浮层检测、状态查询方法）
-- `tests/e2e/response-plan.ts` — ResponsePlan 响应分配器
-- `tests/e2e/startup.test.tsx` — P0 核心回归防护（18 tests）
-- `tests/e2e/interaction.test.tsx` — P1 关键用户工作流（~24 tests）
-- `tests/e2e/advanced.test.tsx` — P2+P3 高级交互 + 集成场景（18 tests）
+- `tests/tui-integration/` — 所有 TUI e2e 测试（3 文件，22 tests）
+- `tests/tui-integration/render-tui.tsx` — TuiHarness（含审批流、浮层检测、状态查询方法）
+- `tests/tui-integration/response-plan.ts` — ResponsePlan 响应分配器
+- `tests/tui-integration/startup.test.tsx` — P0 核心回归防护（18 tests）
+- `tests/tui-integration/interaction.test.tsx` — P1 关键用户工作流（~24 tests）
+- `tests/tui-integration/advanced.test.tsx` — P2+P3 高级交互 + 集成场景（18 tests）
 - `tests/tui-reducer.test.ts` — reducer 单元测试（100 tests）
 - `src/app/tui/reducers/` — 6 子 reducer（handleEvent / ui / session / checkpoint / skill / agent）
 - `src/app/tui/hooks/useMcpConnection.ts` — MCP 连接管理 hook
@@ -33,18 +33,18 @@
 
 验证：
 
-- `bun test tests/e2e/startup.test.tsx` — P0 核心回归（18 tests）
-- `bun test tests/e2e/interaction.test.tsx` — P1 交互工作流（24 tests）
-- `bun test tests/e2e/advanced.test.tsx` — P2+P3 高级场景（18 tests）
+- `bun test tests/tui-integration/startup.test.tsx` — P0 核心回归（18 tests）
+- `bun test tests/tui-integration/interaction.test.tsx` — P1 交互工作流（24 tests）
+- `bun test tests/tui-integration/advanced.test.tsx` — P2+P3 高级场景（18 tests）
 - `bun test tests/tui-reducer.test.ts` — Reducer 单元测试（108 tests）
 - **⚠️ e2e 测试文件必须逐个运行**（Bun worker 线程间 render lock 不同步，并行会导致 Ink 冲突）
-- **全量快速验证**：`bun test tests/e2e/startup.test.tsx && bun test tests/e2e/interaction.test.tsx && bun test tests/e2e/advanced.test.tsx`
+- **全量快速验证**：`bun test tests/tui-integration/startup.test.tsx && bun test tests/tui-integration/interaction.test.tsx && bun test tests/tui-integration/advanced.test.tsx`
 
 ## 规则
 
 ### 1. TUI e2e 测试必须覆盖真实的 TuiBootstrap 渲染路径
 
-所有 e2e 测试使用 `createTui()` helper（`tests/e2e/render-tui.tsx`）渲染真实 `TuiBootstrap` 组件。
+所有 e2e 测试使用 `createTui()` helper（`tests/tui-integration/render-tui.tsx`）渲染真实 `TuiBootstrap` 组件。
 
 - **仅 Mock LLM**：只注入 `StreamingMockModel` 替代真实 LLM 调用。其他所有层（handleInput → runTask → SessionManager → SessionRuntime → runAgent → reducer → renderer）均为真实生产路径，绝不允许 mock。
 - 不再使用任何简化根组件（`TuiMockRoot` / `TuiRealAgentRoot` 已删除）
@@ -140,11 +140,11 @@ Ink 的键盘事件解析依赖终端协议配置。任何涉及特殊按键（�
 
 | 文件 | 范围 |
 |------|------|
-| `tests/e2e/render-tui.tsx` | createTui helper，渲染真实 TuiBootstrap + StreamingMockModel，含审批流/浮层/状态检测方法（spinner 检测） |
-| `tests/e2e/response-plan.ts` | ResponsePlan 响应分配器 + text/modelError/toolCall 快捷辅助 |
-| `tests/e2e/startup.test.tsx` | P0 核心回归防护（18 tests）— 启动/消息/多轮/工具/错误/会话切换/中断恢复 |
-| `tests/e2e/interaction.test.tsx` | P1 关键用户工作流（~24 tests）— 审批流/提问/Slash 命令/建议下拉/文件搜索 |
-| `tests/e2e/advanced.test.tsx` | P2+P3 高级交互与集成（18 tests）— 输入历史/快捷键/集成场景 |
+| `tests/tui-integration/render-tui.tsx` | createTui helper，渲染真实 TuiBootstrap + StreamingMockModel，含审批流/浮层/状态检测方法（spinner 检测） |
+| `tests/tui-integration/response-plan.ts` | ResponsePlan 响应分配器 + text/modelError/toolCall 快捷辅助 |
+| `tests/tui-integration/startup.test.tsx` | P0 核心回归防护（18 tests）— 启动/消息/多轮/工具/错误/会话切换/中断恢复 |
+| `tests/tui-integration/interaction.test.tsx` | P1 关键用户工作流（~24 tests）— 审批流/提问/Slash 命令/建议下拉/文件搜索 |
+| `tests/tui-integration/advanced.test.tsx` | P2+P3 高级交互与集成（18 tests）— 输入历史/快捷键/集成场景 |
 | `tests/mock-model.ts` | StreamingMockModel（响应共享计数器 + public callCount getter + 可配置 delay） |
 | `tests/tui-reducer.test.ts` | Reducer 单元测试（100 tests）— 覆盖 42 种 Action |
 | `src/app/tui/reducers/` | 6 子 reducer：handleEvent（19 种事件）/ ui（面板显隐）/ session（会话管理）/ checkpoint（revert/fork）/ skill / agent |
@@ -191,7 +191,7 @@ TUI 手动调用 `enableKittyKeyboardProtocol()` 发送 `\x1b[>1u` 到终端启�
 2. 在 `render()` 调用中传递 `kittyKeyboard: { mode: 'enabled' }`，由 Ink 统一管理协议生命周期
 3. 删除 `process.on('SIGINT/SIGTERM/exit', disableKittyKeyboardProtocol)` — Ink 自动处理
 
-**教训**：终端键盘协议的启用和解析必须由同一个组件（Ink）统一管理。外部手动发送协议命令会导致 parser 状态不一致。任何涉及键盘协议变更都必须通过探针测试（`tests/e2e/kitty-probe.test.tsx` 模式）验证关键按键的解析结果。
+**教训**：终端键盘协议的启用和解析必须由同一个组件（Ink）统一管理。外部手动发送协议命令会导致 parser 状态不一致。任何涉及键盘协议变更都必须通过探针测试（`tests/tui-integration/kitty-probe.test.tsx` 模式）验证关键按键的解析结果。
 
 ### Sidebar 名称换行问题（2026-05-25）
 Sidebar 会话名超过可用宽度时，Ink 默认 `wrap="wrap"` 导致换行。修复：对所有 Sidebar 文本元素设置 `wrap="truncate"`，由 Ink 在 Box 边界处截断。`maxNameLen` 字符截断不足以处理 CJK 字符（2 列宽）和 emoji（变宽），必须依赖渲染层的截断。

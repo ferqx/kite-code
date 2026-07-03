@@ -127,7 +127,7 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - `update_plan` 通过真实模型主动更新计划状态覆盖。
 - `ask_user` 通过用户输入 interrupt 和恢复后的 tool message 覆盖。
 
-`tests/e2e/tui-e2e-all.test.ts` 应覆盖：
+`tests/tui-integration/tui-e2e-all.test.ts` 应覆盖：
 
 - Skills slash 命令（`/skills` 显示列表、`ACTIVATE_SKILL`/`DEACTIVATE_SKILL` 状态切换、`SET_SKILL_MANIFESTS` action）
 - Skills real-agent 场景（模型调用 `Skill` 工具获取内容、调用未知 skill 返回错误、多轮对话使用 skill）

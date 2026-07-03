@@ -5,7 +5,7 @@
 最后验证：2026-05-25
 范围：
 
-- `tests/e2e/`（E2E 测试文件组织、分层、harness 增强）
+- `tests/tui-integration/`（E2E 测试文件组织、分层、harness 增强）
 - `tests/tui-reducer.test.ts`（配套 reducer 单元测试）
 
 读取时机：
@@ -20,13 +20,13 @@
 
 验证：
 
-- `bun test tests/e2e/`
+- `bun test tests/tui-integration/`
 - `bun test tests/tui-reducer.test.ts`
 - `bun test`
 
 ## 背景
 
-当前 `tests/e2e/startup.test.tsx` 有 13 个测试，覆盖基础启动、消息发送/响应、多轮对话、会话切换等 happy path，但在实际体验中仍发现大量问题（如 P0: agentLoopActive 时序、SET_SESSIONS 覆盖 blocks、Kitty 键盘协议方向键解析错误）。
+当前 `tests/tui-integration/startup.test.tsx` 有 13 个测试，覆盖基础启动、消息发送/响应、多轮对话、会话切换等 happy path，但在实际体验中仍发现大量问题（如 P0: agentLoopActive 时序、SET_SESSIONS 覆盖 blocks、Kitty 键盘协议方向键解析错误）。
 
 根据 `docs/space/execution/active/tui-e2e-standards.md` 规范中的 Bug 修复必须通过 e2e 快照验证原则，需要将 e2e 测试从"基础链路验证"升级为"全面交互场景覆盖"。
 
@@ -41,7 +41,7 @@
 ## 文件结构
 
 ```
-tests/e2e/
+tests/tui-integration/
 ├── render-tui.tsx              # 增强：新增审批/浮层/状态检测辅助方法
 ├── response-plan.ts            # 新增：响应分配器
 ├── startup.test.tsx            # 重构：P0 核心回归防护（~18 tests）
@@ -179,10 +179,10 @@ class ResponseAllocator {
 ## 验证
 
 ```bash
-bun test tests/e2e/            # 全部 e2e
-bun test tests/e2e/startup.test.tsx   # 仅 P0
-bun test tests/e2e/interaction.test.tsx  # 仅 P1
-bun test tests/e2e/advanced.test.tsx    # 仅 P2+P3
+bun test tests/tui-integration/            # 全部 e2e
+bun test tests/tui-integration/startup.test.tsx   # 仅 P0
+bun test tests/tui-integration/interaction.test.tsx  # 仅 P1
+bun test tests/tui-integration/advanced.test.tsx    # 仅 P2+P3
 bun test tests/tui-reducer.test.ts      # reducer unit
 bun test                           # 全量回归
 ```

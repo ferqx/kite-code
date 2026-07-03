@@ -100,6 +100,8 @@ describe('TUI E2E — P2+P3 Advanced Interactions', () => {
   });
 
   afterAll(() => {
+    // plan.verify() throws on mismatch — error propagates to fail the test.
+    // Using try/finally (without catch) ensures cleanup always runs.
     try {
       plan.verify(tui.getCallCount());
     } finally {
@@ -126,9 +128,9 @@ describe('TUI E2E — P2+P3 Advanced Interactions', () => {
 
         const outputAfter = tui.getOutput();
         // Output should be essentially unchanged (no new user message block)
-        // Just verify no crash occurred and TUI is still responsive
-        expect(outputAfter.length).toBeGreaterThan(0);
-        expect(tui.isIdle() || tui.isRunning()).toBe(true);
+        // Verify prompt is still visible and TUI is idle (no agent running on empty input)
+        expect(outputAfter).toContain('❯');
+        expect(tui.isRunning()).toBe(false);
       },
       TIMEOUT,
     );
@@ -200,8 +202,9 @@ describe('TUI E2E — P2+P3 Advanced Interactions', () => {
         tui.stdin.write('z'); // Invalid leader key
         await sleep(300);
 
-        // TUI should still be functional
-        expect(tui.isIdle() || tui.isRunning()).toBe(true);
+        // TUI should still be functional — prompt visible, no crash
+        expect(tui.getOutput()).toContain('❯');
+        expect(tui.isIdle()).toBe(true);
 
         // Clean up any stray "z"
         clearInputBuffer(tui);
@@ -221,8 +224,9 @@ describe('TUI E2E — P2+P3 Advanced Interactions', () => {
         tui.stdin.write('\x1b'); // Escape
         await sleep(300);
 
-        // TUI should still be functional
-        expect(tui.isIdle() || tui.isRunning()).toBe(true);
+        // TUI should still be functional — prompt visible, no crash
+        expect(tui.getOutput()).toContain('❯');
+        expect(tui.isIdle()).toBe(true);
       },
       TIMEOUT,
     );
@@ -281,8 +285,9 @@ describe('TUI E2E — P2+P3 Advanced Interactions', () => {
         tui.stdin.write('\x14'); // Ctrl+T
         await sleep(400);
 
-        // TUI should still be functional
-        expect(tui.isIdle() || tui.isRunning()).toBe(true);
+        // TUI should still be functional — prompt visible, not hung
+        expect(tui.getOutput()).toContain('❯');
+        expect(tui.isIdle()).toBe(true);
 
         // Toggle back
         tui.stdin.write('\x14'); // Ctrl+T
@@ -297,7 +302,7 @@ describe('TUI E2E — P2+P3 Advanced Interactions', () => {
         // /clear dispatches CLEAR_OUTPUT which resets turns array.
         // Static content persists in lastFrame(), so verify TUI stays functional.
         await runSlashCommand(tui, '/clear', 500);
-        expect(tui.isIdle() || tui.isRunning()).toBe(true);
+        expect(tui.isIdle()).toBe(true);
         // Prompt should still be visible after clear
         expect(tui.getOutput()).toContain('❯');
       },
@@ -307,17 +312,18 @@ describe('TUI E2E — P2+P3 Advanced Interactions', () => {
     test(
       'Ctrl+N → creates new session, TUI remains responsive',
       async () => {
+        // Ctrl+N creates a new session — verify the session selector appears
+        // and the TUI remains responsive with the prompt visible.
         const outputBefore = tui.getOutput();
-        expect(outputBefore.length).toBeGreaterThan(0);
+        expect(outputBefore).toContain('❯');
 
         tui.stdin.write('\x0e'); // Ctrl+N
         await sleep(1500);
 
-        // After creating a new session, the TUI should still be responsive
-        // and the output area should be cleared (NEW_SESSION clears blocks)
+        // After creating a new session, prompt should still be visible
         const outputAfter = tui.getOutput();
-        expect(outputAfter.length).toBeGreaterThan(0);
-        expect(tui.isIdle() || tui.isRunning()).toBe(true);
+        expect(outputAfter).toContain('❯');
+        expect(tui.isIdle()).toBe(true);
       },
       TIMEOUT,
     );
@@ -400,13 +406,13 @@ describe('TUI E2E — P2+P3 Advanced Interactions', () => {
 
   describe('Long Output', () => {
     test(
-      'output length > 100 chars after many operations',
+      'output still functional after many operations — prompt and footer visible',
       async () => {
-        // After all previous tests, the output should have substantial content
+        // After all previous tests, the TUI should still be fully rendered
+        // with prompt visible and footer (shortcuts) intact.
         const output = tui.getOutput();
-        // The TUI rendered output should be non-trivial after many operations
-        // (even if some tests cleared or changed session, header + output = non-trivial)
-        expect(output.length).toBeGreaterThan(100);
+        expect(output).toContain('❯');
+        expect(output).toContain('shortcuts');
       },
       TIMEOUT,
     );

@@ -126,10 +126,10 @@ describe('TUI E2E — P1 Key User Workflows', () => {
   });
 
   afterAll(() => {
+    // plan.verify() throws on mismatch — error propagates to fail the test.
+    // Using try/finally (without catch) ensures cleanup always runs.
     try {
       plan.verify(tui.getCallCount());
-    } catch (e) {
-      console.warn('[interaction] response plan:', (e as Error).message);
     } finally {
       tui?.unmount();
     }
@@ -300,15 +300,20 @@ describe('TUI E2E — P1 Key User Workflows', () => {
 
   describe('Slash Commands', () => {
     // After agent interaction flows (approval/question), the first TextInput
-    // submission may not reliably reach handleInput. Use the first test as a
-    // warmup that settles TextInput state; real overlay assertions follow.
+    // submission after overlay-heavy tests may not reliably reach handleInput
+    // (known ink-testing-library limitation with CtrlSafeTextInput).
+    // Use the first test to settle TextInput state — verify TUI remains
+    // responsive but don't assert overlay content on the warmup.
 
     test(
-      '/model → model selector appears → Esc closes',
+      '/model → settle TextInput after agent flows (warmup)',
       async () => {
         await runSlashCommand(tui, '/model', 800);
-        // First overlay after agent flow may or may not render; check TUI health
-        expect(tui.getOutput()).toContain('Kite Code');
+        // TextInput may not have captured the full slash command after
+        // agent interactions. Verify the TUI is still alive and the prompt
+        // is visible — do NOT assert overlay content here.
+        expect(tui.getOutput()).toContain('❯');
+        expect(tui.isIdle() || tui.isRunning()).toBe(true);
         tui.stdin.write('\x1b');
         await new Promise((r) => setTimeout(r, 300));
       },

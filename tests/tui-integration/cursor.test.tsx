@@ -30,6 +30,7 @@ function sleep(ms: number): Promise<void> {
 
 /** Strip ANSI escape sequences for clean text matching. */
 function stripAnsi(s: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI CSI sequence stripping
   return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 }
 

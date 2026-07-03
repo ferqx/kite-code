@@ -1,5 +1,5 @@
 /**
- * Real TUI e2e test harness — renders the actual TuiBootstrap component.
+ * Real TUI integration test harness — renders the actual TuiBootstrap component.
  *
  * Unlike the old mock-agent/real-agent helpers which bypass TuiBootstrap,
  * this renders the REAL component with only the LLM replaced by a
@@ -112,7 +112,7 @@ function hasRunningSpinner(output: string): boolean {
 // ── Temp directory helpers ──
 
 function setupTempHome() {
-  const tempHome = mkdtempSync(join(tmpdir(), 'kite-code-e2e-'));
+  const tempHome = mkdtempSync(join(tmpdir(), 'kite-code-tui-int-'));
   const kiteCodeDir = join(tempHome, '.kite-code');
   mkdirSync(kiteCodeDir, { recursive: true });
   writeFileSync(
@@ -281,6 +281,12 @@ export async function createTui(opts: CreateTuiOptions): Promise<TuiHarness> {
   // Import ErrorBoundary for crash detection in tests
   const { default: ErrorBoundary } = await import('../../src/app/tui/components/ErrorBoundary');
 
+  // NOTE: ink-testing-library's render() only accepts 1 argument (tree), so
+  // we cannot pass Ink render options (maxFps, exitOnCtrlC, kittyKeyboard,
+  // incrementalRendering) like the production render() does in index.tsx.
+  // The test render uses ink-testing-library defaults. This is a known
+  // limitation — behavioral differences between test and production Ink
+  // configs cannot be fully eliminated with this library.
   const {
     stdin,
     lastFrame,

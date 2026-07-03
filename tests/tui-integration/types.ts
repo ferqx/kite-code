@@ -104,7 +104,7 @@ export interface SnapshotExpectation {
   state?: StateAssertion[];
 }
 
-// ── Real agent e2e scenario ──
+// ── Real agent integration scenario ──
 
 export interface RealAgentScenario {
   terminalWidth?: number;

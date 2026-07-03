@@ -28,7 +28,7 @@
 
 验证：
 
-- `bun test tests/e2e/scenarios/viewport-culling.ts` — 验证所有 block 始终可见
+- `bun test tests/tui-integration/scenarios/viewport-culling.ts` — 验证所有 block 始终可见
 - `bun test tests/tui-layout.test.tsx` — 验证 OutputArea 渲染完整性
 - `bun test tests/tui-reducer.test.ts` — 验证 reducer 引用稳定性
 - `bun run tui` — 手动验证输入无卡顿、无空白区域

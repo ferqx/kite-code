@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { freezeAnsi, freezeState } from './e2e/freeze';
+import { freezeAnsi, freezeState } from './tui-integration/freeze';
 
 describe('freezeAnsi', () => {
   test('replaces timer pattern', () => {
