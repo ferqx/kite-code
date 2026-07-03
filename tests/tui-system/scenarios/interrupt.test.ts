@@ -81,6 +81,9 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
       // TUI should still be alive — prompt must be visible.
       expect(screenContains(output, '❯')).toBe(true);
 
+      // The delayed response should NOT have arrived (5s delay, checked at ~1.5s)
+      expect(screenContains(output, 'This response will be interrupted')).toBe(false);
+
       // Reset ctrlCPressed by sending a harmless key.  After cancelInterrupt
       // the flag is true, and if it leaks into test 2 the next Ctrl+C would
       // be interpreted as a double-press (exitRequested) instead of an idle

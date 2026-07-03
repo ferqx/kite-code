@@ -13,7 +13,8 @@
 bun install          # 安装依赖
 bun test             # 运行默认测试（不含真实模型/网络端到端测试）
 bun test tests/graph.test.ts  # 运行单个测试文件
-bun test tests/tui-integration/  # 运行 TUI 集成测试套件（mock agent，无需真实模型）
+bun run test:e2e    # 运行 TUI E2E/PTTY 系统测试（mock server，无需真实模型）
+bun run test:tui:system  # 运行真实 PTY TUI 系统测试（mock server，无需真实模型）
 bun run typecheck    # 类型检查
 bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/kite-code.jsonc）
 ```
@@ -85,9 +86,12 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/k
 | checkpoint 持久化 | `bun test tests/checkpoint.test.ts tests/integration.test.ts` |
 | TUI reducer 逻辑 | `bun test tests/tui-reducer.test.ts` |
 | TUI 布局/渲染 | `bun test tests/tui-layout.test.tsx` |
-| TUI 集成测试（mock agent） | `bun test tests/tui-integration/` |
-| TUI 启动与输入链路（TuiBootstrap） | `bun test tests/tui-integration/startup.test.tsx` |
-| TUI 会话切换完整链路 | `bun test tests/tui-session-switch.test.tsx` |
+| TUI E2E/PTTY 系统测试（真实终端） | `bun run test:e2e` 或 `bun run test:tui:system` |
+| TUI 启动与基础交互（真实 PTY） | `bun test tests/tui-system/scenarios/startup.test.ts tests/tui-system/scenarios/input.test.ts` |
+| TUI 会话切换完整链路 | `bun test tests/tui-session-switch.test.tsx`（组件级）或 `tests/tui-system/scenarios/session-lifecycle.test.ts`（PTY） |
+| TUI 工具审批与错误恢复 | `bun test tests/tui-system/scenarios/approval.test.ts tests/tui-system/scenarios/tool-approve.test.ts tests/tui-system/scenarios/ask-user.test.ts tests/tui-system/scenarios/ask-user-esc.test.ts tests/tui-system/scenarios/error-recovery.test.ts` |
+| TUI 斜杠命令 | `bun test tests/tui-system/scenarios/slash-commands.test.ts` |
+| TUI 长消息 / resize / Ctrl+C / 多轮 | `bun test tests/tui-system/scenarios/long-message.test.ts tests/tui-system/scenarios/resize.test.ts tests/tui-system/scenarios/interrupt.test.ts tests/tui-system/scenarios/multi-turn.test.ts tests/tui-system/scenarios/idle-summary.test.ts` |
 | 跨模块/不确定 | `bun test` + `bun run typecheck` |
 | 真实模型链路 | `bun run test:real` |
 

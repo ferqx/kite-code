@@ -1,17 +1,17 @@
 # TUI E2E 测试体系改造：PTY 终端系统测试
 
-> 状态：active（Phase 0-4 完成，Phase 5 待推进）
+> 状态：active（Phase 0-4 完成；Phase 3.5 全覆盖扩展完成；Phase 5 待推进）
 
 > 关联计划：[2026-05-25-e2e-restructure.md](2026-05-25-e2e-restructure.md)（archived — 原 ink-testing-library 方案，本计划新增 PTY 测试层）
 
 ## 目标
 
-将 TUI E2E 测试从单一的 `ink-testing-library` 层拆分为两层：
+将 TUI E2E 测试从旧 `ink-testing-library` harness 迁移到真实 PTY 系统测试：
 
-1. **`tests/tui-integration/`** — Ink 组件集成测试（ink-testing-library，虚拟 stdin）
-2. **`tests/tui-system/`** — PTY 终端系统测试（`Bun.spawn({ terminal })`，真实 PTY + mock model server）
+1. **`tests/tui-system/`** — PTY 终端系统测试（`Bun.spawn({ terminal })`，真实 PTY + mock model server）
+2. **`tests/tui-*.test.tsx`** — Ink 组件级单测，保留局部布局/输入覆盖，但不作为 E2E gate
 
-PTY 层验证真实终端行为：`isTTY`、`SIGWINCH`、Kitty 键盘协议、原始模式输入、Ctrl+C 信号。
+PTY 层验证真实终端行为：`isTTY`、PTY 输入链路、原始模式输入、Ctrl+C 信号，以及 resize 调用后的存活性。Kitty 键盘协议、scrollback、真实 `SIGWINCH` 尺寸传播仍是待覆盖项。
 
 ## 实施阶段
 
@@ -52,7 +52,7 @@ PTY 层验证真实终端行为：`isTTY`、`SIGWINCH`、Kitty 键盘协议、�
 
 ### Phase 3：PTY 场景迁移 ✅（核心完成）
 
-**产出**：19 tests / 6 files（含 Phase 2 的 startup + input）
+**产出**：22 tests / 7 files（含 Phase 2 的 startup + input）
 
 | 文件 | 测试数 | 覆盖场景 |
 |------|--------|---------|
@@ -62,31 +62,55 @@ PTY 层验证真实终端行为：`isTTY`、`SIGWINCH`、Kitty 键盘协议、�
 | `scenarios/interrupt.test.ts` | 3 | 单次 Ctrl+C 取消、空闲 Ctrl+C、双 Ctrl+C 退出 |
 | `scenarios/approval.test.ts` | 3 | Warmup、空 Enter、工具审批块→deny→恢复 |
 | `scenarios/ask-user.test.ts` | 3 | Warmup、空 Enter、ask_user 问题→Enter 确认→恢复 |
+| `scenarios/multi-turn.test.ts` | 3 | Warmup、同一 PTY session 连续两条用户消息→两次模型响应 |
 
-### Phase 4：旧测试清理与分层 ✅
+### Phase 3.5：全覆盖扩展 ✅（2026-07-03）
 
-**改动**：`tests/e2e/` → `tests/tui-integration/`（目录重命名 + 全部引用更新）
+**产出**：34 new tests / 7 new files（累计 56 tests / 14 files）
+
+| 文件 | 测试数 | 覆盖场景 |
+|------|--------|---------|
+| `scenarios/slash-commands.test.ts` | 13 | /help 打开/关闭、/clear 清屏、/theme 切换+去重、/plan 规划模式、Shift+Tab 退出规划、/effort 推理深度、/sessions 打开/关闭、/exit 退出 |
+| `scenarios/session-lifecycle.test.ts` | 5 | 会话内发消息、/new 创建新会话（含重热链）、新会话内发消息→响应 |
+| `scenarios/error-recovery.test.ts` | 4 | 模型 HTTP 500 错误→TUI 存活→提示符可见、错误后可继续发送新消息 |
+| `scenarios/tool-approve.test.ts` | 3 | 工具审批 approve（a）→工具执行→agent 继续→第二次模型调用 |
+| `scenarios/ask-user-esc.test.ts` | 3 | ask_user 问题→Esc 取消→TUI 恢复 idle |
+| `scenarios/idle-summary.test.ts` | 3 | Agent 完成任务→返回 idle→提示符可见 |
+| `scenarios/long-message.test.ts` | 3 | 146 字符长消息输入→TUI 不崩溃→提示符可见 |
+
+**关键发现**：
+- `waitForTextGone` 在累计 PTY 输出缓冲区中不可靠——一旦文本写入终端输出，便永久存在于缓冲区中
+- `<Static>` 内容跨会话切换时保留在终端 scrollback 中——无法清除
+- `generateSessionName` 会消耗 mock 响应队列中的额外槽位
+- `ls` 被正确分类为只读命令（不触发审批）
+- TUI 在 HTTP 500 模型错误后会自动重试
+
+### Phase 4：旧测试清理与 PTY gate 切换 ✅
+
+**改动**：旧 `tests/tui-integration/` e2e harness 退役，`test:e2e` 和 `test:tui:integration` 均指向新的 PTY system gate。
 
 **文件变更**：
-- `tests/e2e/` → `tests/tui-integration/`（目录重命名）
-- `package.json` — 保留 `test:e2e` 别名，新增 `test:tui:integration`
+- 删除 `tests/tui-integration/` 旧 e2e harness 和用例
+- 删除根部旧 `tests/tui-integration.test.ts` 可选真实模型集成测试
+- `tests/helpers/freeze.ts` — 迁移旧 harness 中仍有价值的 freeze helper，供 `tests/freeze.test.ts` 使用
+- `package.json` — `test:e2e`、`test:tui:integration`、`test:tui:system` 统一到 PTY system gate
 - `CLAUDE.md` — 更新测试对应关系表
 - `README.md` — 更新测试运行命令
-- `docs/space/execution/active/tui-e2e-standards.md` — 更新 17 处路径引用
-- `docs/space/execution/active/e2e-test-restructure.md` — 更新 8 处路径引用
-- 其他 4 个文档引用更新
+- `docs/space/execution/active/tui-e2e-standards.md` — 改写为 PTY E2E 标准
+- `docs/space/execution/active/tui-e2e-testing-limits.md` — 标记旧 harness 已退役
 
 ### Phase 5：跨平台 CI 集成 ⬜（待推进）
 
 - 在 Linux 上验证 PTY 测试
 - Windows ConPTY 适配
 - CI matrix 构建
+- 将 14 个文件整合到单文件 glob pattern（`bun test tests/tui-system/scenarios/*.test.ts`），不再逐文件列举
 
 ## 关键技术决策
 
 ### Mock Model Server
 
-零依赖 OpenAI-compatible HTTP server（`Bun.serve` + random port）。TUI 子进程通过 `$KITE_CODE_HOME/.kite-code/kite-code.jsonc` 配置连接到 mock server。响应顺序消费，支持 `% length` wrap-around。
+零依赖 OpenAI-compatible HTTP server（`Bun.serve` + random port）。TUI 子进程通过 `$KITE_CODE_HOME/.kite-code/kite-code.jsonc` 配置连接到 mock server。响应顺序消费，并记录 `/chat/completions` 请求体，供 PTY 测试断言真实用户消息进入模型请求。
 
 **MockResponse 格式**：
 ```typescript
@@ -119,27 +143,21 @@ interface MockResponse {
 
 ## 遗留问题
 
-### 1. 多消息同 session 失败（阻塞）
+### 1. 多消息同 session 失败（已澄清）
 
-**现象**：同一 PTY TUI session 中，第一条消息正常触发模型调用，第二条消息后模型调用次数不增加（mock server `callCount` 不变）。
+**原现象**：同一 PTY TUI session 中，第一条消息正常触发模型调用，第二条消息后模型调用次数不增加（mock server `callCount` 不变）。
 
-**根因定位**：LangGraph 1.4.7 在已完成 thread（checkpoint 有 END 标记）上再次调用 `graph.stream(initialState, config)` 时短路返回空流。`for await (const _ of generator)` 迭代 0 次，`SET_EXITED` 立即派发，模型从未被调用。
+**2026-07-03 复核结论**：`runAgent()` 已改为显式处理已完成 checkpoint 的新用户输入。同一 `threadId` 的非 resume 后续运行会先读取最新 checkpoint，再通过 `graph.updateState(...)` 追加新的 `HumanMessage`，并从更新后的 config 继续 stream。由于当前图的入口路由是 `START → cleanup → agent`，注入节点使用 `cleanup`；使用 `agent` 会让后续路由直接走 `agent → END`，无法再次调用模型。
 
-**尝试过的修复**（全部失败）：
-1. `Command({ update: initialState })` — graph.stream 返回 0 chunks
-2. `Command({ update: { messages } })` — 同上
-3. `graph.updateState(config, values)` + `graph.stream(null, config)` — 不触发执行
-4. `graph.updateState(config, values)` + `graph.stream(null, updatedConfig)` — 不触发执行
+新增 core 回归测试证明同一 `threadId` 连续两次 `runAgent()` 会触发两次模型调用，并且 checkpoint 保留完整消息历史：`Human(first) → AI(first) → Human(second) → AI(second)`。
 
-**当前 workaround**：每个需要模型调用的测试使用独立 describe block + 全新 TUI 实例，避免在同一 session 中发送第二条消息。
+**真实测试问题**：PTY harness 若把 `"message\r"` 一次性写入，Ink 可能把 `\r` 当作输入内容的一部分或与 stale value 时序交错；早期 warmup 还会把 `hello` 留在输入框中，使下一次 Enter 消费第一条 mock 响应。真实用户路径应逐字输入，然后单独发送 Enter，并在 warmup typing 后清空输入。
 
-**待尝试方向**：
-- 每次 `runTask` 使用新 `thread_id`（需在 session-manager 层面管理 thread_id 继承）
-- 升级 LangGraph 版本（检查是否有相关修复）
-- 使用 `graph.invoke()` 替代 `graph.stream()` 处理已完成 thread
-- 在 checkpointer 层面清理 END 标记
+**落地回归**：
+- `tests/runner.test.ts` — `runAgent multi-turn checkpoint continuation`，断言同一 checkpoint 保留 `Human → AI → Human → AI` 消息链
+- `tests/tui-system/scenarios/multi-turn.test.ts` — 同一 PTY session 两条真实逐字输入消息均进入 mock server 请求体并触发模型响应
 
-**影响范围**：Session 切换测试、连续多轮对话测试。
+**影响范围**：连续多轮对话 PTY 测试已解锁；Session 切换测试仍需单独实现真实按键路径。
 
 ### 2. Kitty 键盘协议测试（待实现）
 
@@ -157,19 +175,11 @@ interface MockResponse {
 
 ```
 tests/
-├── tui-integration/        # Ink 组件集成测试 (ink-testing-library)
-│   ├── render-tui.tsx      # Harness
-│   ├── startup.test.tsx    # P0 启动
-│   ├── interaction.test.tsx # P1 交互
-│   ├── advanced.test.tsx   # P2+P3 高级
-│   ├── cursor.test.tsx     # 光标
-│   ├── session-switch.test.tsx # 会话切换
-│   └── tool-parse-error.test.tsx # 工具解析错误
-│
 ├── tui-system/             # PTY 终端系统测试 (真实终端)
 │   ├── harness/
 │   │   ├── pty-process.ts       # PTY 子进程管理
 │   │   ├── fixtures.ts          # Mock model HTTP server
+│   │   ├── input-helpers.ts     # 逐字输入 + 请求体等待
 │   │   ├── terminal-screen.ts   # ANSI 剥离 + 文本断言
 │   │   └── test-workspace.ts    # 临时隔离环境
 │   └── scenarios/
@@ -177,30 +187,50 @@ tests/
 │       ├── input.test.ts        # 输入+消息 (3)
 │       ├── resize.test.ts       # 终端 resize (3)
 │       ├── interrupt.test.ts    # Ctrl+C 中断 (3)
-│       ├── approval.test.ts     # 工具审批 (3)
-│       └── ask-user.test.ts     # ask_user 提问 (3)
+│       ├── approval.test.ts     # 工具审批 deny (3)
+│       ├── ask-user.test.ts     # ask_user Enter (3)
+│       ├── multi-turn.test.ts   # 同 session 多轮消息 (3)
+│       ├── slash-commands.test.ts   # 斜杠命令 13 项 (13)
+│       ├── session-lifecycle.test.ts # 会话生命周期 /new (5)
+│       ├── error-recovery.test.ts    # 模型错误恢复 (4)
+│       ├── tool-approve.test.ts      # 审批通过 (A) 流程 (3)
+│       ├── ask-user-esc.test.ts      # ask_user Esc 取消 (3)
+│       ├── idle-summary.test.ts      # idle 恢复验证 (3)
+│       └── long-message.test.ts      # 长消息输入 (3)
+│
+├── helpers/
+│   └── freeze.ts               # ANSI/state freeze helper
 │
 └── pty-spike/
     └── pty-verify.test.ts      # Phase 0 PTY 能力验证 (4)
 ```
 
-## 待实现场景（Phase 3 遗留）
+## 待实现场景
 
 | 场景 | 优先级 | 阻塞因素 |
 |------|--------|---------|
-| Session 切换 | P1 | 多消息同 session 失败 |
-| 连续多轮对话 | P1 | 同上 |
-| Kitty 协议方向键 | P2 | PTY 中 Kitty 编码研究 |
-| 审批通过 (A 键) + 工具执行 + agent 继续 | P2 | 同上（agent 继续需第二次模型调用） |
+| **Session 切换（跨会话选择器）** | P1 | 需要 SessionSelector 键盘导航（真实按键路径），当前 `/new` 已覆盖 |
+| Kitty 协议方向键 | P2 | PTY 中 Kitty 编码研究，传统 CSI 箭头键可能与 Kitty 模式不兼容 |
+| 审批通过 + 工具执行结果渲染（shell output 显示） | P2 | 工具执行后的详细输出验证（当前仅验证 agent 继续 + 第二次模型调用） |
 | Session 命名 | P3 | 需要 mock 处理，优先级低 |
-| Error recovery | P3 | 需要 mock error 注入 |
+| Slash 建议下拉框 / @ 文件搜索 | P3 | PTY 中 Ink overlay 渲染在终端输出中不易区分 |
+| 光标导航 / 历史导航（Up/Down 箭头） | P3 | Kitty 协议兼容性问题；`CtrlSafeTextInput` remount 后 raw mode 时序 |
+| Leader 键（Ctrl+X 序列） | P3 | 需要特定 leader key 绑定验证 |
+| Tool parse error（malformed tool calls） | P3 | Mock server 不直接支持 `invalid_tool_calls`，需单元测试层覆盖 |
 
 ## 下一步
 
-1. **修复多消息阻塞**（最高优先级）— 需要 LangGraph 层面的改动或 thread_id 管理改造
-2. **Phase 5：跨平台 CI** — Linux/macOS 验证 + CI matrix
-3. **Kitty 协议调研** — 确定 PTY 中按键编码方式
-4. **Session 切换 + 多轮对话测试** — 依赖 #1 修复
+1. **Phase 5：跨平台 CI** — Linux/macOS 验证 + CI matrix
+2. **Kitty 协议调研** — 确定 PTY 中按键编码方式
+3. **Session 切换测试** — 基于真实逐字输入 + 单独 Enter 的 PTY helper 实现
+4. **审批通过 + 工具执行 + agent 继续** — 在 PTY 层覆盖第二次模型调用链路
+
+## 当前验证边界
+
+- `bun run test:e2e`：PTY scenarios 全量 gate（当前 56 tests / 14 files，逐文件串行运行，避免多个 mock server 并发启动）。
+- `bun run test:tui:system`：等价于 `bun run test:e2e`。
+- `bun run test:tui:integration`：兼容旧脚本名，当前也指向 PTY system gate。
+- `bun run test:tui:system:core`：Windows/ConPTY 默认 gate（不含 resize 场景）；resize 场景保留 survival 断言，不声明真实 SIGWINCH 覆盖。
 
 ## 参考文档
 
