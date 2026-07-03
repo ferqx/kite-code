@@ -123,6 +123,10 @@ export interface ToolResultPayload {
   totalLines?: number;
   /** 工具输出的 token 数，用于独立于 provider 的累计统计 / Token count of the tool output for provider-agnostic cumulative tracking */
   toolTokenCount?: number;
+  /** 执行层工具状态。'exhausted' 表示连续失败达上限，系统已阻断该路径。
+   *  / Execution-layer tool status. 'exhausted' means consecutive failures hit the cap
+   *  and the system has blocked this path. */
+  status?: 'success' | 'error' | 'exhausted';
 }
 
 export interface UserInputQuestion {

@@ -70,6 +70,7 @@ export interface RunAgentInput {
     totalLines?: number,
     toolTokenCount?: number,
     exitCode?: number,
+    status?: 'success' | 'error' | 'exhausted',
   ) => void;
   /** 调用端标识 / Frontend identity */
   frontend?: string;
@@ -209,7 +210,7 @@ export async function* runAgent(
 
   const toolResultSink =
     input.toolResultSink ??
-    ((callId, toolName, ok, summary, totalLines, _toolTokenCount, exitCode) => {
+    ((callId, toolName, ok, summary, totalLines, _toolTokenCount, exitCode, status) => {
       // 仅推 TUI（processStream 会从 chunk 生成更完整的 tool_done 并写入日志）
       try {
         provider.onEvent({
@@ -221,6 +222,7 @@ export async function* runAgent(
             summary,
             ...(exitCode != null ? { exitCode } : {}),
             ...(totalLines != null ? { totalLines } : {}),
+            ...(status ? { status } : {}),
           },
         });
       } catch {
@@ -699,7 +701,7 @@ function mapActionToResumeValue(action: UserAction): AgentResumeValue {
 /** Parse AIMessage → text, reason, tool_call events.
  *  LLM 响应中 text 始终先于 tool_calls，事件顺序必须与此一致。
  *  Text always precedes tool_calls in the LLM response; events must match. */
-function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
+export function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
   const events: AgentEvent[] = [];
   // DeepSeek puts reasoning_content in additional_kwargs or as a top-level field
   const rc =
@@ -729,8 +731,9 @@ function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
 }
 
 /** Parse ToolMessage → tool_done event */
-function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null {
-  const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+export function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null {
+  const content =
+    typeof msg.content === 'string' ? msg.content : (JSON.stringify(msg.content) ?? '');
   // 手动统计工具输出的 token 数，不依赖 provider 的 cache_metrics 字段
   // Count tool output tokens manually, independent of provider cache_metrics fields
   const toolTokenCount = countTokens(content);
@@ -739,12 +742,18 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
   let summary = content.slice(0, summaryMaxLen);
   let totalLines: number | undefined;
   let exitCode: number | undefined;
+  let toolStatus: 'success' | 'error' | 'exhausted' | undefined; // from execution layer
   try {
     const p = JSON.parse(content);
     if (p && typeof p === 'object') {
       ok = p.ok !== false;
       if (typeof p.totalLines === 'number') totalLines = p.totalLines;
       if (typeof p.exitCode === 'number') exitCode = p.exitCode;
+      // Extract execution-layer status (e.g. 'exhausted') if present
+      if (typeof p.status === 'string') {
+        const s = p.status;
+        if (s === 'success' || s === 'error' || s === 'exhausted') toolStatus = s;
+      }
       if (p.ok !== false) {
         summary = (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
       } else {
@@ -791,6 +800,7 @@ function parseToolResultEvents(msg: Record<string, unknown>): AgentEvent | null 
       ...(exitCode != null ? { exitCode } : {}),
       ...(totalLines != null ? { totalLines } : {}),
       ...(toolTokenCount > 0 ? { toolTokenCount } : {}),
+      ...(toolStatus ? { status: toolStatus } : {}),
     },
   };
 }

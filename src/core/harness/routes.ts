@@ -120,9 +120,26 @@ export function routeAfterApproval(state: CodeAgentState): 'approval' | 'tools' 
   return 'agent';
 }
 
-/** tools 节点后的路由逻辑 / Routing after tools node */
-export function routeAfterTools(state: CodeAgentState): 'approval' | 'agent' {
-  return state.pendingSubagentApproval ? 'approval' : 'agent';
+/** tools 节点后的路由逻辑 / Routing after tools node
+ *
+ *  耗尽处理策略 / Exhaustion routing strategy:
+ *  - full / auto 模式：无人在回路中 → 直接 END，防止模型绕过耗尽守卫。
+ *    full/auto modes: no human in the loop → END, prevent model workarounds.
+ *  - ask 模式：用户在回路中，可自行判断是否继续 → 路由到 agent 让模型响应。
+ *    ask mode: human in the loop can decide → route to agent for model response.
+ *
+ *  设计理由：见 docs/space/plans/2026-06-30-approval-execution-sandbox.md「跨轮重置」——
+ *  系统不应替用户做"这个操作不该重试"的判断，但在无人值守模式下必须自行终止。 */
+export function routeAfterTools(state: CodeAgentState): 'approval' | 'agent' | typeof END {
+  if (state.pendingSubagentApproval) return 'approval';
+  const exhausted = state.exhaustedFingerprints ?? {};
+  if (Object.keys(exhausted).length > 0) {
+    // full/auto: terminate to prevent the model from trying workarounds
+    if (state.interactionMode === 'full' || state.interactionMode === 'auto') return END;
+    // ask: human is watching — let them see the exhaustion and decide
+    return 'agent';
+  }
+  return 'agent';
 }
 
 /** user_input 节点后的路由逻辑 / Routing after user_input node */

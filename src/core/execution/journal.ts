@@ -143,19 +143,27 @@ export function failureFingerprint(input: {
 
 /** Check if any exhausted fingerprint matches this tool+path combination.
  *  Uses prefix+suffix matching because the stored fingerprint includes the original errorCode,
- *  while the preflight check runs before execution (errorCode unknown). */
+ *  while the preflight check runs before execution (errorCode unknown).
+ *  Falls back to pathless prefix matching when the specific path doesn't match —
+ *  some tool results don't include a path field, producing pathless fingerprints
+ *  (e.g., `search_content:ERROR:`) that would be bypassed by path-specific preflight. */
 export function isFingerprintExhausted(
   exhausted: Record<string, true>,
   toolName: string,
   affectedPath?: string,
 ): boolean {
+  if (Object.keys(exhausted).length === 0) return false;
+  const prefix = `${toolName}:`;
   if (!affectedPath) {
-    const prefix = `${toolName}:`;
     return Object.keys(exhausted).some((fp) => fp.startsWith(prefix));
   }
-  const prefix = `${toolName}:`;
   const suffix = `:${affectedPath}`;
-  return Object.keys(exhausted).some((fp) => fp.startsWith(prefix) && fp.endsWith(suffix));
+  // Exact path match first, then fall back to pathless (prefix-only) match
+  // to catch fingerprints where the stored path is empty (execution result
+  // didn't include a path field).
+  return Object.keys(exhausted).some(
+    (fp) => fp.startsWith(prefix) && (fp.endsWith(suffix) || fp.endsWith(':')),
+  );
 }
 
 export function errorCodeFor(result: { stderr?: string; exitCode?: number }): string {

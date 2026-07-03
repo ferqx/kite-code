@@ -12,7 +12,7 @@ import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { BunSqliteSaver } from '@/core/persistence/checkpoint';
 import { resumeSubAgent } from '@/core/subagent/runner';
 import type { SubAgentResult } from '@/core/subagent/types';
-import { createAgentTools } from '@/core/tools/definitions';
+import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type {
   AgentResumeValue,
@@ -92,6 +92,7 @@ export interface BuildCodeAgentGraphInput {
     totalLines?: number,
     toolTokenCount?: number,
     exitCode?: number,
+    status?: 'success' | 'error' | 'exhausted',
   ) => void;
   /** 工具进度回调 — shell 进程产生输出时逐行调用，使 TUI 实时展示。
    *  Per-line progress callback — called for each stdout/stderr line during
@@ -176,6 +177,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         ...result,
         ...modelConfigState,
         authorization: syncedAuth,
+        // Preserve execution journal state across agent→tools cycles.
+        // Without these, LangGraph may reset channels with default reducer
+        // to their defaults between node invocations.
+        executionJournal: state.executionJournal,
+        exhaustedFingerprints: state.exhaustedFingerprints,
       };
       if (retryEvents.length > 0) {
         return { ...baseReturn, modelRetries: retryEvents };
@@ -724,9 +730,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
 
     if (cancelledToolMessages.length > 0) {
-      return { messages: cancelledToolMessages };
+      return { messages: cancelledToolMessages, executionJournal: [], exhaustedFingerprints: {} };
     }
-    return {};
+    return { executionJournal: [], exhaustedFingerprints: {} };
   };
 
   /**
@@ -740,10 +746,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       case 'task':
         return true;
       case 'shell_execute': {
-        const risk = classifyShellRisk((request.args as unknown as { command: string }).command);
-        // 只读命令（如 grep、cat、ls）归类为 read，可并行
-        // 写类命令（如 npm install、git commit）归类为 mutation
-        return risk !== 'execute_code';
+        const cmd = (request.args as unknown as { command: string }).command;
+        const risk = classifyShellRisk(cmd);
+        if (risk !== 'execute_code') return true; // known mutation pattern
+        // Fallback: if classifyShellRisk didn't recognize the command, check against the
+        // read-only whitelist. Commands NOT on the whitelist (e.g. sed -i, bare redirects)
+        // are treated as mutations for safety — they won't slip into the reads path.
+        if (!isReadOnlyShellCommand(cmd)) return true;
+        return false;
       }
       default:
         return false; // read_file, search_*, read_mcp_resource, Skill, update_plan, ask_user
@@ -801,8 +811,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         };
       }
       setJournal(next);
-    } catch {
-      /* ToolMessage content is expected to be JSON. */
+    } catch (e) {
+      // ToolMessage content is expected to be JSON. Non-JSON content indicates
+      // a tool implementation bug — warn so it's discoverable rather than silently
+      // dropping the journal entry (which would let the tool retry indefinitely).
+      console.warn(
+        `recordJournalForMessage: failed to parse ToolMessage content for ${msg.name ?? 'unknown'}:`,
+        (e as Error)?.message ?? e,
+      );
     }
   }
 
@@ -1031,21 +1047,85 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       exhaustedFingerprints: { ...(state.exhaustedFingerprints ?? {}) },
     };
 
-    // Phase 1: Execute all read tools in parallel.
-    if (reads.length > 0) {
-      const readResults = await Promise.all(
-        reads.map((req) => {
-          const reqGrant = req.id && batch[req.id] ? batch[req.id]!.grant : 'none';
-          return executeOneTool(req, state, reqGrant);
-        }),
-      );
-      for (const r of readResults) {
-        if (r.toolMessage) messages.push(r.toolMessage);
-        Object.assign(mergedExtra, r.extra);
+    // Phase 1: Execute read tools sequentially with per-iteration preflight.
+    // Each read's journal update flows into the next iteration's preflight check,
+    // so exhaustion triggered mid-batch blocks subsequent reads BEFORE they execute.
+    // (Previously reads executed in parallel via Promise.all, which meant all N
+    // reads ran before the journal was updated — exhaustion at position 5+N
+    // couldn't block reads 6..N that had already started.)
+    for (const req of reads) {
+      const preflightPath = (req.args as Record<string, unknown>).path as string | undefined;
+      if (isFingerprintExhausted(journalState.exhaustedFingerprints, req.name, preflightPath)) {
+        const blockedMsg = new ToolMessage({
+          content: JSON.stringify({
+            ok: false,
+            command: req.protectedCommand,
+            exitCode: -1,
+            stdout: '',
+            stderr: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+            status: 'exhausted' as const,
+            failure: {
+              message: 'Tool execution failed.' as const,
+              tool: req.name,
+              reason: `Execution blocked by exhaustion guard for ${req.name}.`,
+              guidance: 'Stop retrying this operation. Skip this step, replan, or safely finalize.',
+            },
+          }),
+          tool_call_id: req.id ?? 'missing-tool-call-id',
+          name: req.name,
+          status: 'exhausted' as unknown as ToolMessage['status'],
+        });
+        messages.push(blockedMsg);
+        input.toolResultSink?.(
+          req.id ?? '',
+          req.name,
+          false,
+          `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+          undefined,
+          undefined,
+          -1,
+          'exhausted',
+        );
+        continue;
+      }
+
+      const reqGrant = req.id && batch[req.id] ? batch[req.id]!.grant : 'none';
+      const r = await executeOneTool(req, state, reqGrant);
+
+      if (r.toolMessage) {
+        const journalBefore = { ...journalState.exhaustedFingerprints };
         recordJournalForMessage(r.toolMessage, journalState, (next) => {
           journalState = next;
         });
+        // Check whether this execution just exhausted a NEW fingerprint.
+        const newExhaustedFp = Object.keys(journalState.exhaustedFingerprints).find(
+          (fp) => !journalBefore[fp],
+        );
+        if (newExhaustedFp) {
+          r.toolMessage = injectExhaustionSignal(
+            r.toolMessage,
+            (r.toolMessage as ToolMessage).name ?? 'unknown',
+            newExhaustedFp,
+          );
+          // Override the earlier toolResultSink (from executeOneTool, Path A)
+          // which reported plain ok=false. The TUI needs status:'exhausted'
+          // to render the amber dot and notification text block.
+          const toolName = (r.toolMessage as ToolMessage).name ?? 'unknown';
+          const callId = ((r.toolMessage as ToolMessage).tool_call_id as string) || '';
+          input.toolResultSink?.(
+            callId,
+            toolName,
+            false,
+            `Execution blocked: too many repeated failures for ${toolName}.`,
+            undefined,
+            undefined,
+            -1,
+            'exhausted',
+          );
+        }
+        messages.push(r.toolMessage);
       }
+      Object.assign(mergedExtra, r.extra);
     }
 
     // Phase 2: Execute mutations sequentially — journal state flows between steps.
@@ -1075,6 +1155,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           status: 'exhausted' as unknown as ToolMessage['status'],
         });
         messages.push(blockedMsg);
+        input.toolResultSink?.(
+          req.id ?? '',
+          req.name,
+          false,
+          `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+          undefined,
+          undefined,
+          -1,
+          'exhausted',
+        );
         continue;
       }
 
@@ -1094,6 +1184,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         if (newExhaustedFp) {
           // Rebuild ToolMessage with exhaustion signal so the model sees it immediately.
           r.toolMessage = injectExhaustionSignal(r.toolMessage, req.name, newExhaustedFp);
+          // Override the earlier toolResultSink (from executeOneTool, Path A)
+          // which reported plain ok=false. The TUI needs status:'exhausted'.
+          input.toolResultSink?.(
+            req.id ?? '',
+            req.name,
+            false,
+            `Execution blocked: too many repeated failures for ${req.name}.`,
+            undefined,
+            undefined,
+            -1,
+            'exhausted',
+          );
         }
         messages.push(r.toolMessage);
       }
