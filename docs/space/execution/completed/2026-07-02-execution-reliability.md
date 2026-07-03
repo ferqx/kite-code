@@ -91,7 +91,14 @@
 
 ## 遗留项
 
-- **耗尽通知用户不可见**：当工具指纹被耗尽时，系统向模型发送了 `status:'exhausted'` 的 ToolMessage，但 TUI 消息列表中没有对应的用户可见记录。类比 `/theme` 指令执行后消息列表中有一条 "主题切换为 xxx" 的系统消息——耗尽事件同样应该在消息列表中有留存，让用户感知到"Agent 在此处被系统拦截，换了一条路"。需要在 TUI 的 block 渲染系统中新增类似 `NotificationBlock` 或扩展现有 `tool_card` 来渲染耗尽通知。
+- ~~**耗尽通知用户不可见**~~ ✅ 已修复（2026-07-02）：
+  - 协议层 `ToolResultPayload` 增加 `status` 字段，`parseToolResultEvents` 提取并传递到 TUI
+  - TUI `tool_card` 新增 `'exhausted'` 状态（琥珀色圆点，区别于红色 error）
+  - 耗尽时注入通知文本块 `"  ⎿  Execution blocked: too many repeated failures for ..."`
+  - 预检阻断（无 tool_card 时）创建 tool_card + 通知块兜底
+  - `replay-blocks.ts` 重放时识别 `isExhausted`
+  - `useStaticContent` 的 `isSettled` 将 `'exhausted'` 视为已定居状态
+  - **设计决策 — 跨轮重置**：连续失败计数仅在一轮对话内有效。`cleanup` 节点每轮重置 `executionJournal` 和 `exhaustedFingerprints` 为空。用户显式重试不被上一轮阻断。
 
 ## 测试覆盖
 

@@ -53,7 +53,8 @@ function isSettled(block: OutputBlock): boolean {
         block.status === 'done' ||
         block.status === 'error' ||
         block.status === 'cancelled' ||
-        block.status === 'timeout'
+        block.status === 'timeout' ||
+        block.status === 'exhausted'
       );
     case 'tool_summary':
       return (
@@ -63,7 +64,8 @@ function isSettled(block: OutputBlock): boolean {
             t.status === 'done' ||
             t.status === 'error' ||
             t.status === 'cancelled' ||
-            t.status === 'timeout',
+            t.status === 'timeout' ||
+            t.status === 'exhausted',
         )
       );
     case 'subagent':

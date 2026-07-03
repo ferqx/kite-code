@@ -34,6 +34,15 @@ function tdEvt(callId: string, name: string, ok: boolean, summary: string): Acti
     event: { type: 'tool_done', data: { call_id: callId, name, ok, summary } },
   };
 }
+function tdExhausted(callId: string, name: string, summary: string): Action {
+  return {
+    type: 'EVENT',
+    event: {
+      type: 'tool_done',
+      data: { call_id: callId, name, ok: false, summary, status: 'exhausted' as const },
+    },
+  };
+}
 function approval(data: Partial<ToolApprovalPayload> = {}): ToolApprovalPayload {
   return {
     scope: 'once',
@@ -241,6 +250,52 @@ describe('eventReducer (blocks model)', () => {
       expect(t.status).toBe('timeout');
       expect(t.summary).toBe(output);
       expect(t.timeoutMs).toBe(5000);
+    });
+    test('tool_done with status: exhausted updates tool_card to exhausted state', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute'));
+      s = dispatch(s, tdExhausted('c1', 'shell_execute', 'repeated failure'));
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('exhausted');
+    });
+    test('tool_done exhausted does NOT inject extra notification text block (rendered by tool_card footer)', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute', { command: 'npm test' }));
+      s = dispatch(s, tdExhausted('c1', 'shell_execute', 'repeated failure'));
+      const blocks = flatBlocks(s);
+      // Only the tool_card — no separate notification text block
+      expect(blocks.length).toBe(1);
+      expect(blocks[0]!.kind).toBe('tool_card');
+    });
+    test('tool_done exhausted with no prior tool_card creates just the card (no notification)', () => {
+      let s = fresh();
+      s = dispatch(
+        s,
+        tdExhausted('c1', 'shell_execute', 'Execution blocked: too many repeated failures'),
+      );
+      const blocks = flatBlocks(s);
+      expect(blocks.length).toBe(1);
+      expect(blocks[0]!.kind).toBe('tool_card');
+      expect((blocks[0] as Extract<OutputBlock, { kind: 'tool_card' }>).status).toBe('exhausted');
+    });
+    test('tool_done exhausted overrides earlier error tool_done for same callId', () => {
+      // Real flow: Path A (executeOneTool) sends ok=false first, then
+      // the for-loop sends status:'exhausted' as an override. Both events
+      // arrive for the same callId before Path B (processStream/chunkToEvents).
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute', { command: 'cat /x' }));
+      s = dispatch(s, tdEvt('c1', 'shell_execute', false, 'cat: /x: No such file or directory'));
+      // Verify it's error before the override
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>).status).toBe(
+        'error',
+      );
+      // Now the override
+      s = dispatch(
+        s,
+        tdExhausted('c1', 'shell_execute', 'Execution blocked: too many repeated failures'),
+      );
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('exhausted');
     });
     test('tool_done only updates matching callId', () => {
       let s = fresh();

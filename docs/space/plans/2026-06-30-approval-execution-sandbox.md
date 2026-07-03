@@ -1133,6 +1133,17 @@ ToolMessage 内容示例（第 5 次失败，status=`'exhausted'`）：
 
 > **为什么不做全量文件变更追踪**：方案明确不做"完整 Git 快照和回滚系统"。轻量的受影响路径 hash 快照足以判断"文件是否被修改"，不需要整个 workspace 的 diff。
 
+### 跨轮重置（Per-Turn Reset）
+
+连续失败计数**仅在一轮对话内有效**。用户每发送一条新消息 → `cleanup` 节点执行 → `executionJournal` 和 `exhaustedFingerprints` 重置为空。用户显式要求重试的操作不会被上一轮的失败计数阻断。
+
+```typescript
+// cleanup 节点返回空 journal，每轮对话重新开始
+return { executionJournal: [], exhaustedFingerprints: {} };
+```
+
+> **设计理由**：如果用户看到 Agent 因连续失败被阻断后，仍然输入相同指令，不应由系统替用户做"这个操作不该重试"的判断。跨轮重置确保每轮对话是独立的决策空间。
+
 ### 执行调度
 
 ```typescript

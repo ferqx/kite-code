@@ -22,6 +22,7 @@ import Footer from './Footer';
 import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
 import { useOverlayHeight } from './hooks/useOverlayHeight';
+import { createInitialState, initialState } from './initialState';
 import OutputArea, { useStaticContent } from './OutputArea';
 import { type Action, eventReducer } from './reducers';
 import { deriveRunStatusSnapshot } from './run-status';
@@ -29,58 +30,9 @@ import { useTheme } from './theme';
 import type { OutputBlock, TuiState } from './types';
 
 export type { Action } from './reducers';
-export { eventReducer };
+export { createInitialState, eventReducer };
 
 const MemoHeader = React.memo(Header);
-
-const initialState: TuiState = {
-  sessions: [],
-  activeSessionId: null,
-  turns: [],
-  nextBlockId: 1,
-  interrupt: null,
-  status: {
-    phase: 'building',
-    plan: null,
-    pendingPlan: null,
-    authorization: 'default',
-    workspaceAccess: 'write',
-    cacheHitTokens: 0,
-    cacheMissTokens: 0,
-    cacheHitRate: 0,
-    totalTokens: 0,
-    currentNode: null,
-    modelProvider: '',
-    modelName: 'deepseek-v4',
-    thinkingMode: 'max',
-    retryState: null,
-  },
-  exited: false,
-  running: false,
-  runCount: 0,
-  currentRunReasonId: undefined,
-  showHelp: false,
-  showModelSelector: false,
-  showSessions: false,
-  showMcp: false,
-  showRewind: false,
-  checkpoints: [],
-  rewindCounter: 0,
-  ctrlCPressed: false,
-  sessionKey: 0,
-  exitRequested: false,
-  sessionError: false,
-  loadingSessionId: null,
-  explorationSummaryIds: {},
-  currentThoughtSummaryId: undefined,
-  interactionMode: 'ask',
-  pendingSkills: [],
-  skillManifests: [],
-};
-
-export function createInitialState(): TuiState {
-  return { ...initialState, turns: [], interrupt: null };
-}
 
 function latestVisibleBlock(state: TuiState): OutputBlock | undefined {
   for (let turnIndex = state.turns.length - 1; turnIndex >= 0; turnIndex--) {

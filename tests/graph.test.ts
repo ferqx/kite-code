@@ -424,6 +424,87 @@ describe('graph local tool routing', () => {
     ).toBe('approval');
   });
 
+  test('exhausted + full mode → END', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        interactionMode: 'full',
+        exhaustedFingerprints: { 'shell_execute::EXIT_NONZERO::': true },
+      } as unknown as CodeAgentState),
+    ).toBe('__end__');
+  });
+
+  test('exhausted + auto mode → END', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        interactionMode: 'auto',
+        exhaustedFingerprints: { 'shell_execute::EXIT_NONZERO::': true },
+      } as unknown as CodeAgentState),
+    ).toBe('__end__');
+  });
+
+  test('exhausted + ask mode → agent (human decides)', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        interactionMode: 'ask',
+        exhaustedFingerprints: { 'shell_execute::EXIT_NONZERO::': true },
+      } as unknown as CodeAgentState),
+    ).toBe('agent');
+  });
+
+  test('exhausted fingerprints + pending subagent → approval (subagent takes priority)', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        exhaustedFingerprints: { 'shell_execute::EXIT_NONZERO::': true },
+        pendingSubagentApproval: {
+          taskCallId: 'task-1',
+          request: {
+            id: 'sub-tool-1',
+            name: 'shell_execute',
+            args: { command: 'bun test', intent: 'test' },
+            reason: 'sub-agent requested shell',
+            protectedCommand: 'bun test',
+          },
+          continuation: {
+            id: 'sub-1',
+            role: { role: 'code', systemPrompt: 'code' },
+            task: 'verify',
+            messages: [],
+            toolCallCount: 1,
+            steps: [],
+          },
+        },
+      } as unknown as CodeAgentState),
+    ).toBe('approval');
+  });
+
+  test('empty exhausted fingerprints → agent (unchanged behavior)', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        exhaustedFingerprints: {},
+      } as unknown as CodeAgentState),
+    ).toBe('agent');
+  });
+
   test('routes write tool calls to approval under write access', () => {
     expect(
       routeAfterAgent({

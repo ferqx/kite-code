@@ -438,7 +438,10 @@ export default function ToolCardBlock({
   const isAskUser = block.name === 'ask_user';
   const isExpanded =
     block.expanded ??
-    (block.status === 'error' || block.status === 'cancelled' || block.status === 'timeout');
+    (block.status === 'error' ||
+      block.status === 'cancelled' ||
+      block.status === 'timeout' ||
+      block.status === 'exhausted');
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
   const displayName = ACTION_NAMES[block.name] ?? block.name;
   return (
@@ -455,6 +458,9 @@ export default function ToolCardBlock({
       {isExpanded && isPlan && hasSummary && (
         <Box paddingLeft={2} marginTop={1} flexDirection="column">
           <MarkdownBlock content={block.summary!} maxWidth={columns - 2} />
+          {block.status === 'exhausted' && (
+            <Text color={dt.warning}>⎿ blocked (too many repeated failures)</Text>
+          )}
         </Box>
       )}
       {/* ask_user 工具：紧凑渲染答案，每行 ⎿ 前缀，仿 shell_execute 布局
@@ -463,7 +469,11 @@ export default function ToolCardBlock({
           自适应截断：maxLine = 终端列宽 − paddingLeft */}
       {isExpanded && isAskUser && (
         <Box paddingLeft={2} flexDirection="column">
-          {renderAskUserSummary(block.args, block.summary ?? '', dt, columns - 2)}
+          {block.status === 'exhausted' ? (
+            <Text color={dt.warning}>⎿ blocked (too many repeated failures)</Text>
+          ) : (
+            renderAskUserSummary(block.args, block.summary ?? '', dt, columns - 2)
+          )}
         </Box>
       )}
       {/* Shell 工具 / Shell */}
@@ -483,14 +493,16 @@ export default function ToolCardBlock({
           {/* 状态尾行：exit code / cancelled / Status footer */}
           <Text color={dt.dim}>
             {SHELL_PREFIX}
-            {block.summary?.startsWith('Command cancelled') ||
-            block.summary?.includes('"cancelled":true')
-              ? 'cancelled'
-              : block.status === 'timeout'
-                ? block.timeoutMs != null
-                  ? `timed out after ${block.timeoutMs}ms`
-                  : 'timed out'
-                : `exit: ${block.status === 'error' ? 'error' : '0'}`}
+            {block.status === 'exhausted'
+              ? 'blocked (too many repeated failures)'
+              : block.summary?.startsWith('Command cancelled') ||
+                  block.summary?.includes('"cancelled":true')
+                ? 'cancelled'
+                : block.status === 'timeout'
+                  ? block.timeoutMs != null
+                    ? `timed out after ${block.timeoutMs}ms`
+                    : 'timed out'
+                  : `exit: ${block.status === 'error' ? 'error' : '0'}`}
           </Text>
           {block.status === 'error' && block.summary?.split('\n').length > 3 && (
             <Text color={dt.dim}>Enter 折叠</Text>
@@ -500,7 +512,9 @@ export default function ToolCardBlock({
       {/* 文件工具 / File tools — 无 summary 时展示文件路径（如工具被取消无 ToolMessage） */}
       {isExpanded && isFileTool && (
         <Box paddingLeft={3} flexDirection="column">
-          {hasSummary ? (
+          {block.status === 'exhausted' ? (
+            <Text color={dt.warning}>⎿ blocked (too many repeated failures)</Text>
+          ) : hasSummary ? (
             renderFileSummary(block.summary!, dt)
           ) : (
             <Text color={dt.dim}>⎿ {pathLabel(block.args)} (no result)</Text>
@@ -510,10 +524,13 @@ export default function ToolCardBlock({
       {/* 其他工具 / Other tools */}
       {isExpanded && !isPlan && !isAskUser && !isShell && !isFileTool && hasSummary && (
         <Box paddingLeft={3} flexDirection="column">
-          {renderToolSummary(block.summary!, block.status === 'error', dt)}
-          {block.status === 'error' && block.summary?.split('\n').length > 3 && (
-            <Text color={dt.dim}>Enter 折叠</Text>
+          {renderToolSummary(
+            block.summary!,
+            block.status === 'error' || block.status === 'exhausted',
+            dt,
           )}
+          {(block.status === 'error' || block.status === 'exhausted') &&
+            block.summary?.split('\n').length > 3 && <Text color={dt.dim}>Enter 折叠</Text>}
         </Box>
       )}
     </Box>
