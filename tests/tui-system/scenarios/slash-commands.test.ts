@@ -6,7 +6,7 @@
  * are handled entirely on the client side).
  *
  * Command list: /help, /clear, /theme, /plan, /effort, /sessions,
- * /auth, /model, /export, /rewind, /mcp, /exit
+ * /mode, /model, /export, /rewind, /mcp, /exit
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -308,22 +308,23 @@ describe('TUI PTY System — Slash Commands', () => {
     TIMEOUT,
   );
 
-  // ── /auth toggles authorization mode ───────────────────────
+  // ── /mode toggles interaction mode ───────────────────────
 
   test(
-    '/auth toggles authorization mode',
+    '/mode toggles interaction mode',
     async () => {
-      await typeText(tui, '/auth');
+      // /mode without argument toggles between ask ↔ full
+      await typeText(tui, '/mode full');
       tui.write('\r');
       await sleep(500);
 
       const output = tui.output();
-      // Authorization toggles between [安全] and [完全] in the stats line
-      const hasAuthDisplay = screenContains(output, '[安全]') || screenContains(output, '[完全]');
-      expect(hasAuthDisplay).toBe(true);
+      // full mode shows [完全权限] in the stats line
+      const hasFull = screenContains(output, '完全权限');
+      expect(hasFull).toBe(true);
 
-      // Toggle back
-      await typeText(tui, '/auth');
+      // Toggle back to ask (default)
+      await typeText(tui, '/mode ask');
       tui.write('\r');
       await sleep(300);
     },

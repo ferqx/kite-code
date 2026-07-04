@@ -116,11 +116,17 @@ describe('TUI PTY System — Tool Approval', () => {
 
       const output = tui.output();
       expect(screenContains(output, 'Approve this tool call?')).toBe(true);
-      expect(screenContains(output, 'Approve once')).toBe(true);
-      expect(screenContains(output, 'Deny')).toBe(true);
+      expect(screenContains(output, 'Yes · 仅本次')).toBe(true);
+      expect(screenContains(output, 'Deny · 拒绝')).toBe(true);
 
-      // Deny the tool
-      tui.write('d');
+      // Navigate to "Deny · 拒绝" (index 3) and press Enter
+      tui.write('\x1b[B');
+      await sleep(100);
+      tui.write('\x1b[B');
+      await sleep(100);
+      tui.write('\x1b[B');
+      await sleep(100);
+      tui.write('\r');
       await sleep(2000);
 
       // TUI should recover — prompt visible

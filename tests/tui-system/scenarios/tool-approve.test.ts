@@ -111,10 +111,10 @@ describe('TUI PTY System — Tool Approve', () => {
     TIMEOUT,
   );
 
-  // ── Approve (a) → Tool Executes → Agent Continues ─────────
+  // ── Approve (Enter) → Tool Executes → Agent Continues ─────────
 
   test(
-    'approve (a) triggers tool execution and agent continues',
+    'approve (Enter, default "Yes") triggers tool execution and agent continues',
     async () => {
       await typeText(tui, 'Create a file for me');
       tui.write('\r');
@@ -125,11 +125,11 @@ describe('TUI PTY System — Tool Approve', () => {
 
       const beforeOutput = tui.output();
       expect(screenContains(beforeOutput, 'Approve this tool call?')).toBe(true);
-      expect(screenContains(beforeOutput, 'Approve once')).toBe(true);
-      expect(screenContains(beforeOutput, 'Deny')).toBe(true);
+      expect(screenContains(beforeOutput, 'Yes · 仅本次')).toBe(true);
+      expect(screenContains(beforeOutput, 'Deny · 拒绝')).toBe(true);
 
-      // Approve the tool (press 'a' for "Approve once")
-      tui.write('a');
+      // Approve the tool ("Yes · 仅本次" is default selected at index 0, press Enter)
+      tui.write('\r');
       // Wait for tool execution (write_file creates hello.txt) + second model response
       await sleep(3000);
 
@@ -156,10 +156,10 @@ describe('TUI PTY System — Tool Approve', () => {
     TIMEOUT,
   );
 
-  // ── same_command grant scope ─────────────────────────
+  // ── full_access grant ─────────────────────────────────────
 
   test(
-    'same_command grant auto-approves matching command, different command re-triggers approval',
+    'full_access grant auto-approves all subsequent tool calls',
     async () => {
       // Wait for pending fire-and-forget calls from previous test to complete
       await sleep(3000);
@@ -170,83 +170,58 @@ describe('TUI PTY System — Tool Approve', () => {
             content: 'I will echo a marker.',
             tool_calls: [
               {
-                id: 'call_sc1',
+                id: 'call_fa1',
                 name: 'shell_execute',
-                args: { command: "echo 'sc_marker'" },
+                args: { command: "echo 'fa_marker'" },
               },
             ],
           },
         },
         {
           message: {
-            content: 'Same command again.',
+            content: 'FA_DONE: all tools passed.',
             tool_calls: [
               {
-                id: 'call_sc2',
-                name: 'shell_execute',
-                args: { command: "echo 'sc_marker'" },
-              },
-            ],
-          },
-        },
-        {
-          message: {
-            content: 'SC_DIFF: listing /tmp.',
-            tool_calls: [
-              {
-                id: 'call_sc3',
+                id: 'call_fa2',
                 name: 'shell_execute',
                 args: { command: 'ls /tmp' },
               },
             ],
           },
         },
-        { message: { content: 'OK, done.' } },
-        { message: { content: 'spare' }, delay: 10 },
-        { message: { content: 'spare' }, delay: 10 },
+        { message: { content: 'OK, full_access confirmed.' } },
+        { message: { content: 'spare 1' }, delay: 10 },
+        { message: { content: 'spare 2' }, delay: 10 },
       ]);
 
-      await typeText(tui, 'Echo a test marker');
+      await typeText(tui, 'Full access test');
       tui.write('\r');
-      await waitForRequestMessage(server, 'Echo a test marker', 15000);
+      await waitForRequestMessage(server, 'Full access test', 15000);
 
-      // Wait for unique command text (avoids stale scrollback match)
-      await waitForText(() => tui.output(), 'sc_marker', 15000);
+      // Wait for first approval block
+      await waitForText(() => tui.output(), 'Approve this tool call?', 15000);
       await sleep(500);
 
-      // First approval block should be visible
       expect(screenContains(tui.output(), 'Approve this tool call?')).toBe(true);
 
-      // Grant same_command
-      tui.write('s');
-
-      // If same_command works, the second echo is auto-approved and the
-      // model reaches the third response (SC_DIFF). If not, test times out.
-      await waitForText(() => tui.output(), 'SC_DIFF', 20000);
-      await sleep(1500);
-
-      // The different command should trigger a NEW approval block
-      const output2 = tui.output();
-      expect(screenContains(output2, 'Approve this tool call?')).toBe(true);
-      expect(screenContains(output2, 'ls /tmp')).toBe(true);
-
-      // Deny to clean up
-      tui.write('d');
+      // Navigate to "Full · 完全权限" (index 2): down arrow twice, then Enter
+      tui.write('\x1b[B');
+      await sleep(150);
+      tui.write('\x1b[B');
+      await sleep(150);
+      tui.write('\r');
       await sleep(2000);
 
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      // All subsequent tool calls should execute without approval
+      // Wait for the final model response
+      await waitForText(() => tui.output(), 'OK, full_access confirmed.', 20000);
+      await sleep(500);
+
+      const finalOutput = tui.output();
+      expect(screenContains(finalOutput, 'OK, full_access confirmed.')).toBe(true);
+      // TUI should recover — prompt visible
+      expect(screenContains(finalOutput, '❯')).toBe(true);
     },
     TIMEOUT,
   );
-
-  // ── full_access grant scope ──────────────────────────
-  //
-  // NOTE: full_access ('f' key) E2E coverage is deferred. Two issues:
-  // 1. <Static> scrollback persistence — "Approve this tool call?" text
-  //    from previous tests pollutes waitForText matching.
-  // 2. Ink 7 useInput routing — after accumulated test state, the
-  //    ApprovalBlock's keyboard handler may not receive the 'f' key in
-  //    raw PTY mode before the InputLine.
-  // Manual verification: `bun run tui` → trigger shell_execute approval →
-  // press 'f' → verify [完全] in StatsLine.
 });

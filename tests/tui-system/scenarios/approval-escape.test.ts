@@ -131,8 +131,8 @@ describe('TUI PTY System — Approval Escape', () => {
 
       const beforeOutput = tui.output();
       expect(screenContains(beforeOutput, 'Approve this tool call?')).toBe(true);
-      expect(screenContains(beforeOutput, 'Approve once')).toBe(true);
-      expect(screenContains(beforeOutput, 'Deny')).toBe(true);
+      expect(screenContains(beforeOutput, 'Yes · 仅本次')).toBe(true);
+      expect(screenContains(beforeOutput, 'Deny · 拒绝')).toBe(true);
 
       // Press Escape to cancel the approval
       tui.write('\x1b');
