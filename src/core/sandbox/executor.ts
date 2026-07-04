@@ -15,6 +15,7 @@ import {
   buildHardenedEnv,
   buildUlimitPreamble,
   checkDangerousPaths,
+  getSandboxRuntimeDir,
 } from './shell-wrapper';
 import type { SandboxOptions } from './types';
 
@@ -57,7 +58,10 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
 /** Linux Bubblewrap executor */
 function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
-  const bwrapArgs = generateBwrapArgs(workspace, { network: options.network?.mode });
+  const bwrapArgs = generateBwrapArgs(workspace, {
+    network: options.network?.mode,
+    sandboxRuntimeDir: getSandboxRuntimeDir(),
+  });
   const bwrapPath = Bun.which('bwrap')!;
   const seccompPath = resolveSeccompPath(findApplySeccomp(), workspace);
 

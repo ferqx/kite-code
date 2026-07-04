@@ -11,7 +11,7 @@ import { existsSync } from 'node:fs';
  */
 export function generateBwrapArgs(
   workspace: string,
-  options?: { network?: 'disabled' | 'allow_all' },
+  options?: { network?: 'disabled' | 'allow_all'; sandboxRuntimeDir?: string },
 ): string[] {
   const args: string[] = [];
 
@@ -24,6 +24,12 @@ export function generateBwrapArgs(
 
   // 工作区：读写绑定
   args.push('--bind', workspace, workspace);
+
+  // 沙箱运行时目录：读写绑定（存放 TMPDIR、bun cache 等）
+  const runtimeDir = options?.sandboxRuntimeDir;
+  if (runtimeDir && dirExists(runtimeDir)) {
+    args.push('--bind', runtimeDir, runtimeDir);
+  }
 
   // 临时目录：tmpfs
   args.push('--tmpfs', '/tmp');

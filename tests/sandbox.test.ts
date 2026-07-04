@@ -14,6 +14,7 @@ import {
   buildHardenedEnv,
   buildUlimitPreamble,
   checkDangerousPaths,
+  getSandboxRuntimeDir,
 } from '../src/core/sandbox/shell-wrapper';
 import { DEFAULT_RESOURCE_LIMITS } from '../src/core/sandbox/types';
 import { shellTool } from '../src/core/tools/shell';
@@ -105,7 +106,7 @@ describe('shell wrapper utilities', () => {
     }
   });
 
-  test('hardened env redirects temp and cache paths to workspace', () => {
+  test('hardened env redirects temp and cache paths to sandbox runtime dir', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-test-'));
     try {
       const env = buildHardenedEnv(ws);
@@ -113,10 +114,11 @@ describe('shell wrapper utilities', () => {
       if (process.env.HOME !== undefined) {
         expect(env.HOME).toBe(process.env.HOME);
       }
-      // Temp and cache paths are still sandboxed
-      expect(env.TMPDIR).toBe(join(ws, '.sandbox-tmp'));
-      expect(env.TMP).toBe(join(ws, '.sandbox-tmp'));
-      expect(env.TEMP).toBe(join(ws, '.sandbox-tmp'));
+      // Temp and cache paths are redirected to sandbox runtime dir in system temp
+      const runtimeDir = getSandboxRuntimeDir();
+      expect(env.TMPDIR).toBe(join(runtimeDir, 'tmp'));
+      expect(env.TMP).toBe(join(runtimeDir, 'tmp'));
+      expect(env.TEMP).toBe(join(runtimeDir, 'tmp'));
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
@@ -369,7 +371,7 @@ describe('seccomp resolution', () => {
       chmodSync(srcBinary, 0o755);
 
       const resolved = resolveSeccompPath(srcBinary, ws);
-      expect(resolved).toBe(join(ws, '.sandbox-tmp', 'apply-seccomp'));
+      expect(resolved).toBe(join(getSandboxRuntimeDir(), 'apply-seccomp'));
       expect(existsSync(resolved!)).toBe(true);
     } finally {
       rmSync(ws, { recursive: true, force: true });

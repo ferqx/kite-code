@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ResourceLimits } from './types';
 import { DEFAULT_RESOURCE_LIMITS } from './types';
@@ -16,10 +17,21 @@ export function buildUlimitPreamble(limits: Partial<ResourceLimits> = {}): strin
   return `${parts.join(' ; ')} ; `;
 }
 
+/** 沙箱运行时目录（系统临时目录下，不污染工作区）/ Sandbox runtime dir in system temp, never in workspace */
+let _runtimeDir: string | null = null;
+
+export function getSandboxRuntimeDir(): string {
+  if (!_runtimeDir) {
+    _runtimeDir = join(tmpdir(), 'openpx-sandbox-runtime');
+    mkdirSync(_runtimeDir, { recursive: true });
+  }
+  return _runtimeDir;
+}
+
 /** 构建硬化后的环境变量 / Build hardened environment variables */
-export function buildHardenedEnv(workspace: string): Record<string, string> {
-  const sandboxTmp = join(workspace, '.sandbox-tmp');
-  const sandboxBunCache = join(workspace, '.sandbox-bun-cache');
+export function buildHardenedEnv(_workspace: string): Record<string, string> {
+  const sandboxTmp = join(getSandboxRuntimeDir(), 'tmp');
+  const sandboxBunCache = join(getSandboxRuntimeDir(), 'bun-cache');
 
   // 确保沙箱目录存在 / Ensure sandbox directories exist
   mkdirSync(sandboxTmp, { recursive: true });

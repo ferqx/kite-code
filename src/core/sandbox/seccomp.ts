@@ -1,5 +1,6 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { getSandboxRuntimeDir } from './shell-wrapper';
 
 /**
  * 定位 vendored apply-seccomp 二进制
@@ -31,11 +32,11 @@ export function findApplySeccomp(): string | null {
 /**
  * 确保 apply-seccomp 二进制在 bwrap 挂载命名空间内可见。
  * bwrap 只 bind-mount 了系统路径和工作区，其他路径不可见。
- * 如果二进制不在工作区内，复制到 .sandbox-tmp/ 子目录。
+ * 如果二进制不在工作区内，复制到沙箱运行时目录。
  *
  * Ensure the apply-seccomp binary is visible within bwrap's mount namespace.
  * bwrap only bind-mounts system paths and the workspace — everything else is invisible.
- * If the binary is outside the workspace, copy it into .sandbox-tmp/.
+ * If the binary is outside the workspace, copy it into the sandbox runtime dir.
  */
 export function resolveSeccompPath(binary: string | null, workspace: string): string | null {
   if (!binary) return null;
@@ -44,10 +45,11 @@ export function resolveSeccompPath(binary: string | null, workspace: string): st
   // 在工作区内（不含 ../ 逃逸）= 直接可见 / Within workspace, directly visible
   if (!rel.startsWith('..') && !rel.startsWith(sep)) return binary;
 
-  // 二进制在工作区外，复制到工作区内的 sandbox-tmp
-  const dest = join(workspace, '.sandbox-tmp', 'apply-seccomp');
+  // 二进制在工作区外，复制到沙箱运行时目录
+  const runtimeDir = getSandboxRuntimeDir();
+  const dest = join(runtimeDir, 'apply-seccomp');
   if (!existsSync(dest)) {
-    mkdirSync(join(workspace, '.sandbox-tmp'), { recursive: true });
+    mkdirSync(runtimeDir, { recursive: true });
     copyFileSync(binary, dest);
     chmodSync(dest, 0o755);
   }
