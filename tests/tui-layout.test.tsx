@@ -524,10 +524,10 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Approve once');
-    expect(frame).toContain('Approve same command');
-    expect(frame).toContain('Approve all');
-    expect(frame).toContain('Deny');
+    expect(frame).toContain('Yes · 仅本次');
+    expect(frame).toContain('Auto · 自动审批');
+    expect(frame).toContain('Full · 完全权限');
+    expect(frame).toContain('Deny · 拒绝');
   });
 
   test('uses a simple top divider instead of a rounded border', () => {
@@ -542,16 +542,17 @@ describe('ApprovalBlock', () => {
     expect(frame).not.toContain('│');
   });
 
-  test('non‑shell tools only show approve and deny', () => {
+  test('non‑shell tools also show all grant options', () => {
+    // sandbox 合并后，ApprovalBlock 不再区分 shell/non‑shell 工具类型，始终展示全部 4 个选项
     const approval = fakeApproval({ tool: 'write_file', grantOptions: ['approve_once'] });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Approve once');
-    expect(frame).toContain('Deny');
-    expect(frame).not.toContain('Approve same command');
-    expect(frame).not.toContain('Approve all');
+    expect(frame).toContain('Yes · 仅本次');
+    expect(frame).toContain('Auto · 自动审批');
+    expect(frame).toContain('Full · 完全权限');
+    expect(frame).toContain('Deny · 拒绝');
   });
 });
 
@@ -629,7 +630,7 @@ describe('TaskProgressBlock', () => {
     // 组件应返回 null — 输出中不存在任何步骤图标或步骤名称
     expect(frame).not.toContain('Step one');
     expect(frame).not.toContain('✓');
-    expect(frame).not.toContain('▶');
+    expect(frame).not.toContain('●');
     expect(frame).not.toContain('○');
   });
 
@@ -644,7 +645,7 @@ describe('TaskProgressBlock', () => {
     const { lastFrame } = render(<TaskProgressBlock plan={plan} />);
     const frame = lastFrame();
     expect(frame).toContain('✓');
-    expect(frame).toContain('▶');
+    expect(frame).toContain('●');
     expect(frame).toContain('○');
   });
 
@@ -925,7 +926,8 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('exit: error');
   });
 
-  test('renders file_change block', () => {
+  test('file_change block is rendered by tool_card, not BlockRenderer', () => {
+    // sandbox 合并后 file_change 由 tool_card 渲染，BlockRenderer 返回 null
     const block: OutputBlock = {
       id: 1,
       kind: 'file_change',
@@ -934,10 +936,12 @@ describe('BlockRenderer', () => {
     const { lastFrame } = render(
       <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
-    expect(lastFrame()).toContain('src/a.ts');
+    // BlockRenderer 返回 null，输出为空
+    expect(lastFrame()).toBe('');
   });
 
-  test('renders resolved question block', () => {
+  test('question block is rendered by tool_card, not BlockRenderer', () => {
+    // sandbox 合并后 question 由 tool_card 渲染，BlockRenderer 返回 null
     const block: OutputBlock = {
       id: 1,
       kind: 'question',
@@ -947,7 +951,8 @@ describe('BlockRenderer', () => {
     const { lastFrame } = render(
       <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
-    expect(lastFrame()).toContain('Answered');
+    // BlockRenderer 返回 null，输出为空
+    expect(lastFrame()).toBe('');
   });
 
   test('renders subagent block', () => {
@@ -1296,26 +1301,38 @@ describe('Block spacing', () => {
     );
   });
 
-  test('text → file_change', () => {
+  // file_change 由 tool_card 渲染，BlockRenderer 返回 null，间距测试已不适用。
+  // file_change is rendered by tool_card, BlockRenderer returns null — spacing is covered by tool_card tests.
+  test('text → file_change is no‑op (file_change rendered by tool_card)', () => {
+    // file_change 不再通过 BlockRenderer 渲染，应在 tool_card 之间验证间距
     assertGap(
       { id: 1, kind: 'text', content: '__BLOCK_0__', _marker: '__BLOCK_0__' } as any,
       {
         id: 2,
-        kind: 'file_change',
-        changes: [{ path: 'f.ts', kind: 'add' }],
-        _marker: 'File Changes',
+        kind: 'tool_card',
+        callId: 'c-fc',
+        name: 'read_file',
+        args: {},
+        status: 'done',
+        summary: 'done',
+        _marker: 'Read',
       } as any,
       1,
     );
   });
 
-  test('file_change → text', () => {
+  // file_change 由 tool_card 渲染，BlockRenderer 返回 null，间距测试已不适用。
+  test('tool_card (as file_change) → text', () => {
     assertGap(
       {
         id: 1,
-        kind: 'file_change',
-        changes: [{ path: 'f.ts', kind: 'add' }],
-        _marker: 'f.ts',
+        kind: 'tool_card',
+        callId: 'c-fc2',
+        name: 'read_file',
+        args: {},
+        status: 'done',
+        summary: 'done',
+        _marker: 'Read',
       } as any,
       { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
       1,
@@ -1592,7 +1609,8 @@ describe('OutputArea', () => {
     expect(frame).toContain('+3 -2');
   });
 
-  test('renders file_change block', () => {
+  test('file_change block is rendered by tool_card, not OutputArea directly', () => {
+    // sandbox 合并后 file_change 由 tool_card 渲染，BlockRenderer 返回 null
     const blocks: OutputBlock[] = [
       {
         id: 1,
@@ -1603,10 +1621,8 @@ describe('OutputArea', () => {
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    const frame = lastFrame();
-    expect(frame).toContain('File Changes');
-    expect(frame).toContain('+ src/a.ts');
-    expect(frame).toContain('+10');
+    // BlockRenderer 返回 null，OutputArea 输出为空
+    expect(lastFrame()).toBe('');
   });
 
   test('approval block renders nothing (UI in Footer)', () => {
@@ -1717,7 +1733,8 @@ describe('OutputArea', () => {
     expect(frame).toContain('index.ts');
   });
 
-  test('resolved approval block shows confirmation for scrollback', () => {
+  test('resolved approval block is rendered by tool_card, not OutputArea', () => {
+    // sandbox 合并后 approval 由 tool_card + Footer 渲染，BlockRenderer 返回 null
     const blocks: OutputBlock[] = [
       {
         id: 1,
@@ -1729,10 +1746,12 @@ describe('OutputArea', () => {
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).toContain('Approved');
+    // BlockRenderer 返回 null，OutputArea 输出为空
+    expect(lastFrame()).toBe('');
   });
 
-  test('denied approval block shows rejection for scrollback', () => {
+  test('denied approval block is rendered by tool_card, not OutputArea', () => {
+    // sandbox 合并后 approval 由 tool_card + Footer 渲染，BlockRenderer 返回 null
     const blocks: OutputBlock[] = [
       {
         id: 1,
@@ -1744,21 +1763,24 @@ describe('OutputArea', () => {
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).toContain('Rejected');
+    // BlockRenderer 返回 null，OutputArea 输出为空
+    expect(lastFrame()).toBe('');
   });
 
-  test('renders question text for unresolved question (scrollback marker)', () => {
+  test('question block is rendered by tool_card, not OutputArea (unresolved)', () => {
+    // sandbox 合并后 question 由 tool_card 渲染，BlockRenderer 返回 null
     const blocks: OutputBlock[] = [
       { id: 1, kind: 'question', question: fakeQuestion({ question: 'Continue?' }) },
     ];
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    // 显示实际问题文本作为 scrollback 标记 / Shows actual question text as scrollback marker
-    expect(lastFrame()).toContain('Continue?');
+    // BlockRenderer 返回 null，OutputArea 输出为空
+    expect(lastFrame()).toBe('');
   });
 
-  test('renders resolved question block', () => {
+  test('question block is rendered by tool_card, not OutputArea (resolved)', () => {
+    // sandbox 合并后 question 由 tool_card 渲染，BlockRenderer 返回 null
     const blocks: OutputBlock[] = [
       {
         id: 1,
@@ -1770,7 +1792,8 @@ describe('OutputArea', () => {
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
     );
-    expect(lastFrame()).toContain('Yes please');
+    // BlockRenderer 返回 null，OutputArea 输出为空
+    expect(lastFrame()).toBe('');
   });
 
   test('renders empty when no blocks', () => {
@@ -1863,7 +1886,7 @@ describe('App', () => {
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Approve this tool call?');
-    expect(frame).toContain('Approve once');
+    expect(frame).toContain('Yes · 仅本次');
     expect(frame).not.toContain('Waiting...');
   });
 

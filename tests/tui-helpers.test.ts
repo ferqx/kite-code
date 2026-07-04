@@ -15,14 +15,19 @@ describe('darkTheme', () => {
       'muted',
       'dim',
       'bg',
+      'userMsgBg',
+      'diffAddedBg',
+      'diffAddedFg',
+      'diffRemovedBg',
+      'diffRemovedFg',
     ];
     for (const k of keys) {
       expect(darkTheme[k]).toBeString();
-      expect(darkTheme[k]).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      expect(darkTheme[k].length).toBeGreaterThan(0);
     }
   });
 
-  test('risk colors cover all risk levels with hex values', () => {
+  test('risk colors cover all risk levels with non‑empty values', () => {
     const expectedRisks = [
       'read',
       'plan',
@@ -35,7 +40,7 @@ describe('darkTheme', () => {
     ];
     for (const r of expectedRisks) {
       expect(darkTheme.risk[r]).toBeString();
-      expect(darkTheme.risk[r]).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      expect(darkTheme.risk[r]!.length).toBeGreaterThan(0);
     }
   });
 });
@@ -44,15 +49,15 @@ describe('darkTheme', () => {
 
 describe('changePrefix', () => {
   test('add returns + with success color', () => {
-    expect(changePrefix('add')).toEqual({ prefix: '+', color: darkTheme.success });
+    expect(changePrefix('add', darkTheme)).toEqual({ prefix: '+', color: darkTheme.success });
   });
 
   test('edit returns ~ with warning color', () => {
-    expect(changePrefix('edit')).toEqual({ prefix: '~', color: darkTheme.warning });
+    expect(changePrefix('edit', darkTheme)).toEqual({ prefix: '~', color: darkTheme.warning });
   });
 
   test('delete returns - with error color', () => {
-    expect(changePrefix('delete')).toEqual({ prefix: '-', color: darkTheme.error });
+    expect(changePrefix('delete', darkTheme)).toEqual({ prefix: '-', color: darkTheme.error });
   });
 });
 

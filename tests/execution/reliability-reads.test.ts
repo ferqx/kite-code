@@ -132,9 +132,12 @@ describe('read-path exhaustion detection (10 concurrent reads)', () => {
       const exhaustedCalls = toolResultSinkCalls.filter((c) => c.status === 'exhausted');
       expect(exhaustedCalls.length).toBeGreaterThanOrEqual(1);
 
-      // All 10 tools fire error via Path A (ok=false, no status)
+      // Reads are now sequential and exhaustion blocks mid-batch.
+      // With EXIT_NONZERO error code, maxFailures=5: the first 5 tools execute and
+      // fail (Path A: ok=false, no status), then the 6th triggers exhaustion via
+      // recordJournalForMessage, and reads 6-10 are blocked with status:'exhausted'.
       const pathACalls = toolResultSinkCalls.filter((c) => !c.ok && c.status === undefined);
-      expect(pathACalls.length).toBe(10);
+      expect(pathACalls.length).toBe(5);
     } finally {
       try {
         rmSync(workspace, { recursive: true, force: true });
@@ -214,11 +217,12 @@ describe('read-path exhaustion detection (10 concurrent reads)', () => {
 
       checkpointer.close();
 
-      // Each of the first 10 calls (Path A from executeOneTool) is ok=false, no status
+      // Reads are sequential now; exhaustion blocks mid-batch after maxFailures (5 for EXIT_NONZERO).
+      // First 5 tools execute and fail (Path A: ok=false, no status), then reads 6-10 are blocked.
       const pathACalls = toolResultSinkCalls.filter(
         (c) => c.status === undefined && c.ok === false,
       );
-      expect(pathACalls.length).toBe(10);
+      expect(pathACalls.length).toBe(5);
 
       // The override calls have status: 'exhausted'
       const exhaustedCalls = toolResultSinkCalls.filter((c) => c.status === 'exhausted');

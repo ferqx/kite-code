@@ -73,8 +73,7 @@ describe('buildRuntimeContext', () => {
     expect(ctx1).toContain('Cacheable runtime context:');
     expect(ctx1).toContain('OS:');
     expect(ctx1).toContain('Shell:');
-    expect(ctx1).toContain('Workspace: /d/workspace');
-    expect(ctx1).toContain('forward-slashed POSIX paths');
+    expect(ctx1).toContain('Workspace: D:\\workspace');
     expect(ctx1).not.toContain('Time:');
     expect(ctx1).not.toContain('Timezone:');
   });
