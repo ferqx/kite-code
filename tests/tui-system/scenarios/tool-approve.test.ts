@@ -155,4 +155,98 @@ describe('TUI PTY System — Tool Approve', () => {
     },
     TIMEOUT,
   );
+
+  // ── same_command grant scope ─────────────────────────
+
+  test(
+    'same_command grant auto-approves matching command, different command re-triggers approval',
+    async () => {
+      // Wait for pending fire-and-forget calls from previous test to complete
+      await sleep(3000);
+
+      server.setResponses([
+        {
+          message: {
+            content: 'I will echo a marker.',
+            tool_calls: [
+              {
+                id: 'call_sc1',
+                name: 'shell_execute',
+                args: { command: "echo 'sc_marker'" },
+              },
+            ],
+          },
+        },
+        {
+          message: {
+            content: 'Same command again.',
+            tool_calls: [
+              {
+                id: 'call_sc2',
+                name: 'shell_execute',
+                args: { command: "echo 'sc_marker'" },
+              },
+            ],
+          },
+        },
+        {
+          message: {
+            content: 'SC_DIFF: listing /tmp.',
+            tool_calls: [
+              {
+                id: 'call_sc3',
+                name: 'shell_execute',
+                args: { command: 'ls /tmp' },
+              },
+            ],
+          },
+        },
+        { message: { content: 'OK, done.' } },
+        { message: { content: 'spare' }, delay: 10 },
+        { message: { content: 'spare' }, delay: 10 },
+      ]);
+
+      await typeText(tui, 'Echo a test marker');
+      tui.write('\r');
+      await waitForRequestMessage(server, 'Echo a test marker', 15000);
+
+      // Wait for unique command text (avoids stale scrollback match)
+      await waitForText(() => tui.output(), 'sc_marker', 15000);
+      await sleep(500);
+
+      // First approval block should be visible
+      expect(screenContains(tui.output(), 'Approve this tool call?')).toBe(true);
+
+      // Grant same_command
+      tui.write('s');
+
+      // If same_command works, the second echo is auto-approved and the
+      // model reaches the third response (SC_DIFF). If not, test times out.
+      await waitForText(() => tui.output(), 'SC_DIFF', 20000);
+      await sleep(1500);
+
+      // The different command should trigger a NEW approval block
+      const output2 = tui.output();
+      expect(screenContains(output2, 'Approve this tool call?')).toBe(true);
+      expect(screenContains(output2, 'ls /tmp')).toBe(true);
+
+      // Deny to clean up
+      tui.write('d');
+      await sleep(2000);
+
+      expect(screenContains(tui.output(), '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  // ── full_access grant scope ──────────────────────────
+  //
+  // NOTE: full_access ('f' key) E2E coverage is deferred. Two issues:
+  // 1. <Static> scrollback persistence — "Approve this tool call?" text
+  //    from previous tests pollutes waitForText matching.
+  // 2. Ink 7 useInput routing — after accumulated test state, the
+  //    ApprovalBlock's keyboard handler may not receive the 'f' key in
+  //    raw PTY mode before the InputLine.
+  // Manual verification: `bun run tui` → trigger shell_execute approval →
+  // press 'f' → verify [完全] in StatsLine.
 });

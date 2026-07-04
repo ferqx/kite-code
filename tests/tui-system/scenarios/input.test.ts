@@ -23,7 +23,12 @@ describe('TUI PTY System — Input & Message', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    server.setResponses([{ message: { content: 'I received your message!' }, delay: 50 }]);
+    server.setResponses([
+      { message: { content: 'I received your message!' }, delay: 50 },
+      { message: { content: 'spare 1' }, delay: 10 },
+      { message: { content: 'spare 2' }, delay: 10 },
+      { message: { content: 'spare 3' }, delay: 10 },
+    ]);
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
@@ -100,6 +105,93 @@ describe('TUI PTY System — Input & Message', () => {
       const output = tui.output();
       expect(screenContains(output, 'Test message from PTY')).toBe(true);
       expect(screenContains(output, 'I received your message!')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  // ── Shift+Enter Soft Newline ─────────────────────────────
+
+  test(
+    'Shift+Enter inserts a newline in the input',
+    async () => {
+      await typeText(tui, 'Line1');
+      // Kitty keyboard protocol: Shift+Enter
+      tui.write('\x1b[13;2u');
+      await sleep(200);
+      await typeText(tui, 'Line2');
+      await sleep(400);
+
+      tui.write('\r');
+      await waitForRequestMessage(server, 'Line1\nLine2', 15000);
+
+      // Verify the model received multi-line input and responded
+      await waitForText(() => tui.output(), 'I received your message!', 15000);
+
+      const output = tui.output();
+      expect(screenContains(output, 'Line1')).toBe(true);
+      expect(screenContains(output, 'Line2')).toBe(true);
+      expect(screenContains(output, '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  // ── History Navigation ──────────────────────────────────
+
+  test(
+    'Up arrow recalls last message from history',
+    async () => {
+      // Send first message
+      await typeText(tui, 'History message A');
+      tui.write('\r');
+      await waitForText(() => tui.output(), 'I received your message!', 15000);
+
+      // Send second message
+      await typeText(tui, 'History message B');
+      tui.write('\r');
+      await waitForText(() => tui.output(), 'I received your message!', 15000);
+
+      // Press Up to recall the last message
+      tui.write('\x1b[A');
+      await sleep(500);
+
+      const output = tui.output();
+      // The recalled text should appear in the input area
+      expect(screenContains(output, 'History message B')).toBe(true);
+
+      // Press Down to clear (navigate forward past the newest entry)
+      tui.write('\x1b[B');
+      await sleep(300);
+
+      // Type something to verify input still works
+      await typeText(tui, 'After history');
+      await sleep(200);
+      expect(screenContains(tui.output(), 'After history')).toBe(true);
+      await clearInput(tui, 'After history'.length);
+    },
+    TIMEOUT,
+  );
+
+  // ── @ File Search ───────────────────────────────────────
+
+  test(
+    '@ triggers file search with matching results',
+    async () => {
+      await typeText(tui, '@pack');
+      await sleep(800);
+
+      const output = tui.output();
+      const clean = stripAnsi(output);
+      console.log('  output after @pack:', clean.slice(-500));
+
+      // File search panel title should appear
+      expect(screenContains(output, '文件匹配')).toBe(true);
+      // package.json should be in the results
+      expect(screenContains(output, 'package.json')).toBe(true);
+
+      // Escape to dismiss the file search dropdown
+      tui.write('\x1b');
+      await sleep(300);
+      await clearInput(tui, '@pack'.length);
     },
     TIMEOUT,
   );
