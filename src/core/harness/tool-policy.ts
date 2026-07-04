@@ -46,6 +46,7 @@ export interface ToolApprovalPayload {
   suggestedPrefixRule?: string[];
   grantOptions: ShellApprovalGrant[];
   recommendedGrant: ShellApprovalGrant;
+  subagentId?: string;
 }
 
 /** 创建默认 thread 授权状态 / Create default thread authorization state */
@@ -612,7 +613,7 @@ function requestRisk(request: PendingToolRequest): ToolRisk {
   return 'unknown';
 }
 
-function classifyShellRisk(command: string): ToolRisk {
+export function classifyShellRisk(command: string): ToolRisk {
   if (isDestructiveShellCommand(command)) return 'destructive';
   if (isVcsMutationCommand(command)) return 'vcs_mutation';
   if (isWriteLikeShellCommand(command)) return 'write_file';
@@ -643,7 +644,7 @@ function isDestructiveShellCommand(command: string): boolean {
 }
 
 function isVcsMutationCommand(command: string): boolean {
-  return /\bgit\s+(?:add|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch)\b/.test(
+  return /\bgit\s+(?:add|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
     normalizeShell(command),
   );
 }
@@ -653,7 +654,8 @@ function isWriteLikeShellCommand(command: string): boolean {
   return (
     /(^|[^>])>{1,2}(?!&[12])(?:$|[^>])/.test(normalized) ||
     /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee|rm|unlink)\b/.test(normalized) ||
-    /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update)\b/.test(normalized)
+    /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update)\b/.test(normalized) ||
+    /\b(?:pip|pip3|cargo|gem|go|brew|apt|apt-get|choco)\s+install\b/.test(normalized)
   );
 }
 
@@ -672,7 +674,7 @@ function approvalCommand(request: PendingToolRequest): string {
   return request.protectedCommand;
 }
 
-function stableStringify(value: unknown): string {
+export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableStringify).join(',')}]`;
   }

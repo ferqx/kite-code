@@ -50,7 +50,7 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
         ['/clear', '清空输出'],
         ['/effort', '设置推理深度（low/medium/high/max）'],
         ['/theme', '切换色彩主题（teal/blue/purple/cyan/mono）'],
-        ['/auth', '切换授权模式'],
+        ['/mode', '设置审核模式（ask/auto/full）'],
         ['/plan', '切换规划模式'],
         ['/mcp', 'MCP 面板'],
         ['/rewind', '回退检查点'],

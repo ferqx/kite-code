@@ -1,20 +1,34 @@
-// src/core/subagent/runner.ts
-
+import { isAbsolute, relative, resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
 import { type AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import { ChatOllama } from '@langchain/ollama';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
+import {
+  type ExecutionJournalEntry,
+  isFingerprintExhausted,
+  recordExecutionResult,
+} from '@/core/execution/journal';
+import { toolRequestFromCall } from '@/core/harness/tool-requests';
+import type { ToolExecutionResult } from '@/core/harness/tool-result';
+import { runApprovedTool } from '@/core/harness/tool-runner';
 import { createChatModel } from '@/core/model/factory';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
 import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
+import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import type { ShellExecutor } from '@/core/tools/shell';
-import type { SubAgentResult, SubAgentRunnerInput, SubAgentStepSnapshot } from './types';
+import { getRoleConfig } from './roles';
+import type {
+  SubAgentContinuation,
+  SubAgentResult,
+  SubAgentRoleConfig,
+  SubAgentRunnerInput,
+  SubAgentStepSnapshot,
+} from './types';
 
 export type { SubAgentRunnerInput } from './types';
 
-/** 提取 AIMessage.content 中的纯文本 / Extract plain text from AIMessage.content */
 function extractText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -29,7 +43,6 @@ function extractText(content: unknown): string {
   return String(content ?? '');
 }
 
-/** 包装 shell executor：只允许只读命令 / Wrap shell executor to allow only read-only commands */
 function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
   return async (shellInput) => {
     if (!isReadOnlyShellCommand(shellInput.command)) {
@@ -45,7 +58,6 @@ function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
   };
 }
 
-/** 绑定模型工具（区分 Ollama）/ Bind tools to model (handle Ollama separately) */
 function bindTools(
   model: ReturnType<typeof createChatModel>,
   tools: ReturnType<typeof createAgentTools>,
@@ -54,77 +66,68 @@ function bindTools(
   return model.bindTools(tools, { tool_choice: 'auto' });
 }
 
-/** 子 agent ID 生成器 */
 let _subAgentCounter = 0;
 function nextSubAgentId(): string {
   return `sub-${Date.now().toString(36)}-${_subAgentCounter++}`;
 }
 
-/** 运行子 Agent：独立上下文窗口 + 受限工具集 + 循环执行至完成 */
-export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
-  const id = nextSubAgentId();
-  const model = input.role.model ?? input.model ?? createChatModel(input.config);
-  const effectiveTimeoutMs = input.role.timeoutMs ?? input.timeoutMs;
-  const startTime = Date.now();
-  let toolCallCount = 0;
-  const steps: SubAgentStepSnapshot[] = [];
+function normalizeSubAgentToolArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+  workspace: string,
+): Record<string, unknown> {
+  if (
+    (toolName !== 'read_file' && toolName !== 'edit_file' && toolName !== 'write_file') ||
+    typeof args.path !== 'string'
+  ) {
+    return args;
+  }
 
-  // 发出 start 事件
-  input.eventSink({
-    type: 'start',
-    data: { id, role: input.role.role, task: input.task },
-  });
+  const rawPath = msys2ToWindowsPath(args.path);
+  if (!isAbsolute(rawPath)) return args;
 
-  // 只读角色：包装 shell executor 限制为只读命令，防止绕过审批
-  // Read-only roles: wrap shell executor to restrict to read-only commands
-  const effectiveShellExecutor =
-    input.role.allowedTools && input.shellExecutor
-      ? wrapReadOnlyShell(input.shellExecutor)
-      : input.shellExecutor;
+  const workspaceRoot = resolve(workspace);
+  const rel = relative(workspaceRoot, rawPath);
+  if (rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel))) {
+    return { ...args, path: rel || '.' };
+  }
+  return args;
+}
 
-  // 组合超时信号 + 外部 abort 信号，传播到模型调用和工具执行
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
-  const combinedSignal = AbortSignal.any([input.signal, timeoutController.signal]);
+function approvalRequiredBlock(
+  result: { command?: string; status?: string; stderr?: string },
+  toolCallId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  continuation: SubAgentContinuation,
+) {
+  if (
+    result.status !== 'rejected' ||
+    !result.stderr?.includes('requires approval but was not approved')
+  ) {
+    return null;
+  }
+  const command = result.command ?? toolName;
+  return {
+    reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' as const,
+    toolCallId,
+    toolName,
+    command,
+    args,
+    message: `Sub-agent blocked: ${toolName} requires main-agent approval before execution.`,
+    continuation,
+  };
+}
 
-  // 构建工具集：受限角色只提供允许的工具
-  const allTools = createAgentTools({
-    workspace: input.workspace,
-    shellExecutor: effectiveShellExecutor,
-    mcpManager: input.mcpManager,
-    skills: input.skills,
-    skillOptions: input.skillOptions,
-    signal: combinedSignal,
-  });
-  // Filter: apply role restrictions, then exclude "task" when depth limit reached
-  const depth = input.depth ?? 0;
-  const maxDepth = input.maxDepth ?? 0;
-  const canSpawnSubAgents = depth < maxDepth;
-  const tools = input.role.allowedTools
-    ? allTools.filter(
-        (t) => input.role.allowedTools?.has(t.name) && (canSpawnSubAgents || t.name !== 'task'),
-      )
-    : allTools.filter((t) => canSpawnSubAgents || t.name !== 'task');
-
-  // 构造缓存安全的运行时上下文（对齐主 agent 的布局，不含时间戳/CWD）
-  // Build cache-safe runtime context (same layout as main agent, no timestamps/CWD)
+function initialMessages(input: SubAgentRunnerInput): BaseMessage[] {
   const cacheableRuntimeCtx = buildCacheableRuntimeContext({ workspace: input.workspace });
-
-  // CWD 嵌入 task HumanMessage：task 每次调用都不同，嵌入 CWD 不增加缓存 miss
-  // Embed CWD in task HumanMessage: task is unique per call, doesn't affect prefix cache
   const taskWithCwd = `<runtime-state source="harness.subagent">
 CWD: ${process.cwd()}
 </runtime-state>
 
 ${input.task}`;
 
-  // System prompt layout (single merged message for cache stability):
-  //   Role-specific self-contained prompt (no shared prefix contamination).
-  //   Code role appends skills if present; all roles append cacheableRuntimeCtx at end.
-  //   Position 0: SystemMessage(merged)  — cache-stable prefix (role prompt is deterministic per role)
-  //   Position 1: HumanMessage(taskWithCwd) — unique per call
   let systemPrompt = input.role.systemPrompt;
-  // Code sub-agent: append available skills (it has Skill tool access)
   if (input.role.role === 'code' && input.skills && input.skills.length > 0) {
     const skillLines = input.skills.map((s) => `- ${s.name}: ${s.description}`);
     systemPrompt += [
@@ -135,22 +138,157 @@ ${input.task}`;
     ].join('\n');
   }
   systemPrompt += `\n\n${cacheableRuntimeCtx}`;
-  const messages: BaseMessage[] = [new SystemMessage(systemPrompt), new HumanMessage(taskWithCwd)];
+  return [new SystemMessage(systemPrompt), new HumanMessage(taskWithCwd)];
+}
+
+function normalizeRoleConfig(role: SubAgentRoleConfig): SubAgentRoleConfig {
+  if (!role.allowedTools || role.allowedTools instanceof Set) return role;
+  const fallback = getRoleConfig(role.role);
+  return {
+    ...fallback,
+    systemPrompt: role.systemPrompt || fallback.systemPrompt,
+    model: role.model,
+    timeoutMs: role.timeoutMs,
+  };
+}
+
+export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
+  const id = nextSubAgentId();
+  const normalizedInput = { ...input, role: normalizeRoleConfig(input.role) };
+  input.eventSink({
+    type: 'start',
+    data: { id, role: normalizedInput.role.role, task: normalizedInput.task },
+  });
+  return runSubAgentLoop(normalizedInput, {
+    id,
+    messages: initialMessages(normalizedInput),
+    toolCallCount: 0,
+    steps: [],
+    executionJournal: [],
+    exhaustedFingerprints: {},
+  });
+}
+
+export async function resumeSubAgent(
+  input: SubAgentRunnerInput,
+  continuation: SubAgentContinuation,
+  toolResult: {
+    toolCallId: string;
+    toolName: string;
+    result: ToolExecutionResult;
+  },
+): Promise<SubAgentResult> {
+  const normalizedInput = { ...input, role: normalizeRoleConfig(input.role) };
+  const toolOutput = JSON.stringify(toolResult.result);
+  const actualOk = toolResult.result.ok !== false;
+  normalizedInput.eventSink({
+    type: 'tool_result',
+    data: {
+      id: continuation.id,
+      toolName: toolResult.toolName,
+      ok: actualOk,
+      summary: toolOutput.slice(0, 200),
+      durationMs: 0,
+      ...(typeof toolResult.result.totalLines === 'number'
+        ? { totalLines: toolResult.result.totalLines }
+        : {}),
+      toolTokenCount: countTokens(toolOutput),
+      ...(toolResult.result.ok === false
+        ? { failureReason: classifyToolFailure(toolResult.toolName, toolOutput.slice(0, 200)) }
+        : {}),
+    },
+  });
+
+  // Sync step snapshot with actual result — the blocked case didn't set ok,
+  // so the last step in the continuation still has ok: undefined.
+  // resumeSubAgent is the authority on the actual tool outcome (approved → ok,
+  // rejected → !ok), so update the snapshot here before the loop continues.
+  const lastStep = continuation.steps[continuation.steps.length - 1];
+  if (lastStep && lastStep.toolName === toolResult.toolName) {
+    lastStep.ok = actualOk;
+    lastStep.status = actualOk
+      ? 'success'
+      : toolResult.result.status === 'rejected'
+        ? 'rejected'
+        : 'error';
+  }
+
+  return runSubAgentLoop(normalizedInput, {
+    id: continuation.id,
+    messages: [
+      ...continuation.messages,
+      new ToolMessage({
+        content: toolOutput,
+        tool_call_id: toolResult.toolCallId,
+        name: toolResult.toolName,
+        status: toolResult.result.ok === false ? 'error' : 'success',
+      }),
+    ],
+    toolCallCount: continuation.toolCallCount,
+    steps: continuation.steps,
+    executionJournal: continuation.executionJournal ?? [],
+    exhaustedFingerprints: continuation.exhaustedFingerprints ?? {},
+  });
+}
+
+async function runSubAgentLoop(
+  input: SubAgentRunnerInput,
+  state: {
+    id: string;
+    messages: BaseMessage[];
+    toolCallCount: number;
+    steps: SubAgentStepSnapshot[];
+    // Phase 5: journal tracking for subagent tool executions
+    executionJournal: ExecutionJournalEntry[];
+    exhaustedFingerprints: Record<string, true>;
+  },
+): Promise<SubAgentResult> {
+  const id = state.id;
+  const model = input.role.model ?? input.model ?? createChatModel(input.config);
+  const effectiveTimeoutMs = input.role.timeoutMs ?? input.timeoutMs;
+  const startTime = Date.now();
+  let toolCallCount = state.toolCallCount;
+  const steps = state.steps;
+  const messages = [...state.messages];
+  let executionJournal = state.executionJournal ?? [];
+  const exhaustedFingerprints: Record<string, true> = { ...(state.exhaustedFingerprints ?? {}) };
+
+  const effectiveShellExecutor =
+    input.role.allowedTools && input.shellExecutor
+      ? wrapReadOnlyShell(input.shellExecutor)
+      : input.shellExecutor;
+
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
+  const combinedSignal = AbortSignal.any([input.signal, timeoutController.signal]);
+
+  const allTools = createAgentTools({
+    workspace: input.workspace,
+    shellExecutor: effectiveShellExecutor,
+    mcpManager: input.mcpManager,
+    skills: input.skills,
+    skillOptions: input.skillOptions,
+    signal: combinedSignal,
+  });
+  const depth = input.depth ?? 0;
+  const maxDepth = input.maxDepth ?? 0;
+  const canSpawnSubAgents = depth < maxDepth;
+  const tools = input.role.allowedTools
+    ? allTools.filter(
+        (t) => input.role.allowedTools?.has(t.name) && (canSpawnSubAgents || t.name !== 'task'),
+      )
+    : allTools.filter((t) => canSpawnSubAgents || t.name !== 'task');
 
   try {
-    // Yield control so Ink/React can render the subagent_start block before we block on model calls
     await new Promise((r) => setTimeout(r, 0));
 
     while (true) {
-      // Check abort before blocking on model invoke
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
       const response = (await bindTools(model, tools).invoke(messages, {
         signal: combinedSignal,
       })) as AIMessage;
-      // Check abort after model invoke returns (signal may have fired during the call)
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
 
-      // 提取子 agent 缓存指标并上报 / Extract sub-agent cache metrics and report
       const cacheMetrics = extractPromptCacheMetrics(response);
       if (cacheMetrics && (cacheMetrics.cacheHitTokens > 0 || cacheMetrics.cacheMissTokens > 0)) {
         input.eventSink({
@@ -164,106 +302,276 @@ ${input.task}`;
         });
       }
 
-      if (response.tool_calls && response.tool_calls.length > 0) {
-        // 将 AI 消息推入一次（在循环外），避免重复
+      if (!response.tool_calls || response.tool_calls.length === 0) {
+        clearTimeout(timeoutId);
         messages.push(response);
-
-        // 处理工具调用
-        for (const tc of response.tool_calls) {
-          // 每个工具调用前检查中止信号 / Check abort signal before each tool invocation
-          if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
-          const tool = tools.find((t) => t.name === tc.name);
-          if (!tool) continue;
-
-          // 发出 step 事件
-          const stepSnapshot: SubAgentStepSnapshot = {
-            toolName: tc.name,
-            toolArgs: (tc.args as Record<string, unknown>) ?? {},
-          };
-          steps.push(stepSnapshot);
+        const summary = extractText(response.content);
+        const durationMs = Date.now() - startTime;
+        // 有步骤被拒绝 → 工具级失败，但子 agent 已正常完成运行，仍发 done
+        const rejectedSteps = steps.filter((s) => s.ok === false);
+        if (rejectedSteps.length > 0) {
+          const toolNames = [...new Set(rejectedSteps.map((s) => s.toolName))].join(', ');
           input.eventSink({
-            type: 'step',
+            type: 'done',
             data: {
               id,
-              toolName: tc.name,
-              toolArgs: (tc.args as Record<string, unknown>) ?? {},
+              summary: summary || `Tool calls rejected: ${toolNames}`,
+              toolCallCount,
+              durationMs,
             },
           });
+          return {
+            ok: false,
+            summary: summary || `Tool calls rejected: ${toolNames}`,
+            toolCallCount,
+            durationMs,
+            steps,
+            error: `Tool calls rejected: ${toolNames}`,
+            executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
+            exhaustedFingerprints:
+              Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+          };
+        }
+        input.eventSink({
+          type: 'done',
+          data: { id, summary, toolCallCount, durationMs },
+        });
+        return {
+          ok: true,
+          summary,
+          toolCallCount,
+          durationMs,
+          steps,
+          executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
+          exhaustedFingerprints:
+            Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+        };
+      }
 
-          toolCallCount++;
-
-          const toolStart = Date.now();
-          let toolOutput: string;
-          let ok = true;
-          let totalLines: number | undefined;
-          try {
-            toolOutput = await tool.invoke(tc.args ?? {});
-            // 尝试解析 JSON 判断 ok，并提取 totalLines（用于 TUI 行号展示）
-            try {
-              const parsed = JSON.parse(toolOutput);
-              ok = parsed.ok !== false;
-              if (typeof parsed.totalLines === 'number') totalLines = parsed.totalLines;
-            } catch {
-              /* not JSON */
-            }
-          } catch (e) {
-            toolOutput = JSON.stringify({
-              ok: false,
-              error: e instanceof Error ? e.message : String(e),
-            });
-            ok = false;
-          }
-
-          const durationMs = Date.now() - toolStart;
-
-          // 回填步骤快照的结果 / Backfill step snapshot with result
-          stepSnapshot.ok = ok;
-          if (totalLines != null) stepSnapshot.totalLines = totalLines;
-
-          // 发出 tool_result 事件（含手动 token 统计 + failure_reason + summary）
-          const toolTokenCount = countTokens(toolOutput);
+      messages.push(response);
+      for (const tc of response.tool_calls) {
+        if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
+        const tool = tools.find((t) => t.name === tc.name);
+        if (!tool) {
+          const available = [...new Set(tools.map((t) => t.name))].sort().join(', ');
+          const errMsg = `Tool "${tc.name}" is not available to this sub-agent. Available tools: ${available}. Use one of the available tools instead.`;
+          messages.push(
+            new ToolMessage({
+              content: JSON.stringify({ ok: false, error: errMsg }),
+              tool_call_id: tc.id ?? '',
+              name: tc.name,
+              status: 'error',
+            }),
+          );
           input.eventSink({
             type: 'tool_result',
             data: {
               id,
               toolName: tc.name,
-              ok,
-              summary: typeof toolOutput === 'string' ? toolOutput.slice(0, 200) : '',
-              durationMs,
-              ...(totalLines != null ? { totalLines } : {}),
-              ...(toolTokenCount > 0 ? { toolTokenCount } : {}),
-              ...(!ok
-                ? {
-                    failureReason: classifyToolFailure(
-                      tc.name,
-                      typeof toolOutput === 'string' ? toolOutput.slice(0, 200) : '',
-                    ),
-                  }
-                : {}),
+              ok: false,
+              summary: errMsg.slice(0, 200),
+              durationMs: 0,
+              failureReason: 'tool_not_available',
             },
           });
-
-          messages.push(
-            new ToolMessage({
-              content: toolOutput,
-              tool_call_id: tc.id ?? '',
-              name: tc.name,
-            }),
-          );
+          steps.push({
+            toolName: tc.name,
+            toolArgs: (tc.args as Record<string, unknown>) ?? {},
+            status: 'error' as const,
+            ok: false,
+          });
+          continue;
         }
-      } else {
-        // 无工具调用 → 最终文本 = 摘要
-        clearTimeout(timeoutId);
-        messages.push(response);
-        const summary = extractText(response.content);
-        const durationMs = Date.now() - startTime;
 
+        const toolArgs = normalizeSubAgentToolArgs(
+          tc.name,
+          (tc.args as Record<string, unknown>) ?? {},
+          input.workspace,
+        );
+        const stepSnapshot: SubAgentStepSnapshot = {
+          toolName: tc.name,
+          toolArgs,
+          status: 'pending',
+        };
+        steps.push(stepSnapshot);
         input.eventSink({
-          type: 'done',
-          data: { id, summary, toolCallCount, durationMs },
+          type: 'step',
+          data: {
+            id,
+            toolName: tc.name,
+            toolArgs,
+          },
         });
 
-        return { ok: true, summary, toolCallCount, durationMs, steps };
+        toolCallCount++;
+
+        // Phase 5: 预检 — 如果 tool+path 已耗尽，跳过执行
+        // Preflight: skip execution if this tool+path is already exhausted.
+        const preflightPath = (toolArgs as Record<string, unknown>).path as string | undefined;
+        if (isFingerprintExhausted(exhaustedFingerprints, tc.name, preflightPath)) {
+          const blockedOutput = JSON.stringify({
+            ok: false,
+            command: tc.name,
+            exitCode: -1,
+            stdout: '',
+            stderr: `Execution blocked: too many repeated failures for ${tc.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+            status: 'exhausted' as const,
+            failure: {
+              message: 'Tool execution failed.' as const,
+              tool: tc.name,
+              reason: `Execution blocked by exhaustion guard for ${tc.name}.`,
+              guidance: 'Stop retrying this operation. Skip this step, replan, or safely finalize.',
+            },
+          });
+          messages.push(
+            new ToolMessage({
+              content: blockedOutput,
+              tool_call_id: tc.id ?? '',
+              name: tc.name,
+              status: 'exhausted' as unknown as ToolMessage['status'],
+            }),
+          );
+          stepSnapshot.ok = false;
+          stepSnapshot.status = 'error';
+          input.eventSink({
+            type: 'tool_result',
+            data: {
+              id,
+              toolName: tc.name,
+              ok: false,
+              summary: blockedOutput.slice(0, 200),
+              durationMs: 0,
+              failureReason: 'exhausted',
+            },
+          });
+          continue;
+        }
+
+        const toolStart = Date.now();
+        let toolOutput: string;
+        let ok = true;
+        let totalLines: number | undefined;
+        try {
+          const pendingRequest = toolRequestFromCall(
+            {
+              id: tc.id ?? `subagent-${toolCallCount}`,
+              name: tc.name,
+              args: toolArgs,
+            },
+            input.workspace,
+          );
+          if (!pendingRequest) {
+            throw new Error(`Unknown tool requested by sub-agent: ${tc.name}`);
+          }
+          const result = await runApprovedTool({
+            workspace: input.workspace,
+            request: pendingRequest,
+            shellExecutor: effectiveShellExecutor,
+            workspaceAccess: input.workspaceAccess ?? 'write',
+            phase: input.phase ?? 'building',
+            authorization: input.authorization,
+            threadId: input.threadId ?? '',
+            mcpManager: input.mcpManager,
+            skillManifests: input.skills,
+            skillOptions: input.skillOptions,
+            signal: combinedSignal,
+            taskConfig: input.config,
+            taskModel: model,
+            subagentEventSink: input.eventSink,
+          });
+          const continuation: SubAgentContinuation = {
+            id,
+            role: input.role,
+            task: input.task,
+            messages: [...messages],
+            toolCallCount,
+            steps,
+            executionJournal: executionJournal.length > 0 ? [...executionJournal] : undefined,
+            exhaustedFingerprints:
+              Object.keys(exhaustedFingerprints).length > 0
+                ? { ...exhaustedFingerprints }
+                : undefined,
+          };
+          const blocked = approvalRequiredBlock(
+            result,
+            pendingRequest.id ?? tc.id ?? `subagent-${toolCallCount}`,
+            pendingRequest.name,
+            toolArgs,
+            continuation,
+          );
+          if (blocked) {
+            clearTimeout(timeoutId);
+            const totalDurationMs = Date.now() - startTime;
+            return {
+              ok: false,
+              summary: JSON.stringify({ ok: false, blocked }),
+              toolCallCount,
+              durationMs: totalDurationMs,
+              error: blocked.message,
+              blocked,
+              steps,
+              executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
+              exhaustedFingerprints:
+                Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+            };
+          }
+          toolOutput = JSON.stringify(result);
+          ok = result.ok !== false;
+          if (typeof result.totalLines === 'number') totalLines = result.totalLines;
+        } catch (e) {
+          toolOutput = JSON.stringify({
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+          ok = false;
+        }
+
+        // Phase 5: Record subagent tool execution in journal.
+        const journalResult = recordExecutionResult(
+          { executionJournal, exhaustedFingerprints },
+          {
+            toolCallId: tc.id ?? `subagent-${toolCallCount}`,
+            toolName: tc.name,
+            ok,
+            stderr: ok ? undefined : (JSON.parse(toolOutput).stderr as string | undefined),
+            exitCode: ok ? undefined : (JSON.parse(toolOutput).exitCode as number | undefined),
+            path: (toolArgs as Record<string, unknown>).path as string | undefined,
+          },
+        );
+        executionJournal = journalResult.executionJournal;
+        Object.assign(exhaustedFingerprints, journalResult.exhaustedFingerprints);
+
+        const durationMs = Date.now() - toolStart;
+        stepSnapshot.ok = ok;
+        stepSnapshot.status = ok ? 'success' : 'error';
+        if (totalLines != null) stepSnapshot.totalLines = totalLines;
+
+        const toolTokenCount = countTokens(toolOutput);
+        input.eventSink({
+          type: 'tool_result',
+          data: {
+            id,
+            toolName: tc.name,
+            ok,
+            summary: toolOutput.slice(0, 200),
+            durationMs,
+            ...(totalLines != null ? { totalLines } : {}),
+            ...(toolTokenCount > 0 ? { toolTokenCount } : {}),
+            ...(!ok
+              ? {
+                  failureReason: classifyToolFailure(tc.name, toolOutput.slice(0, 200)),
+                }
+              : {}),
+          },
+        });
+
+        messages.push(
+          new ToolMessage({
+            content: toolOutput,
+            tool_call_id: tc.id ?? '',
+            name: tc.name,
+          }),
+        );
       }
     }
   } catch (e) {
@@ -275,6 +583,16 @@ ${input.task}`;
       type: 'error',
       data: { id, error: summary, summary, toolCallCount, durationMs },
     });
-    return { ok: false, summary, toolCallCount, durationMs, error: summary, steps };
+    return {
+      ok: false,
+      summary,
+      toolCallCount,
+      durationMs,
+      error: summary,
+      steps,
+      executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
+      exhaustedFingerprints:
+        Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+    };
   }
 }

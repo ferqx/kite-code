@@ -9,7 +9,10 @@ import { existsSync } from 'node:fs';
  * - tmpfs /tmp 临时目录
  * - --unshare-pid 进程隔离
  */
-export function generateBwrapArgs(workspace: string): string[] {
+export function generateBwrapArgs(
+  workspace: string,
+  options?: { network?: 'disabled' | 'allow_all' },
+): string[] {
   const args: string[] = [];
 
   // 系统路径：只读绑定 / System paths: read-only bind
@@ -31,6 +34,9 @@ export function generateBwrapArgs(workspace: string): string[] {
 
   // 进程隔离
   args.push('--unshare-pid');
+  if (options?.network === 'disabled') {
+    args.push('--unshare-net');
+  }
 
   // 父进程退出时清理
   args.push('--die-with-parent');

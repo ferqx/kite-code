@@ -283,8 +283,7 @@ interface ConsolidatedToolEntry {
 
 ### 计时器逻辑
 
-- **Running**：`setInterval` 每 200ms 更新 `Date.now() - createdAt`
-- **Settled**：`useEffect` 在 `isRunning` 转换时快照 `Date.now() - createdAt`
+- **事件驱动**：不再使用前端 `setInterval`。`totalElapsedMs` 由 reducer 在每次事件中更新（`tool_done` / `updateCurrentThoughtActivity` / `closeCurrentThought`），计算方式均为 `Date.now() - createdAt`
 - **显示**：`formatDuration(ms)`，最小显示 1s
 - **totalElapsedMs**：wall-clock 时间（`Date.now() - createdAt`），非 max(elapsedMs)
 

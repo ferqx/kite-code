@@ -2,31 +2,26 @@
  * 回放 Block 构建 — 将 SessionData（中立数据）转为 TUI OutputBlock 数组
  * Replay block builder — converts SessionData (neutral) to TUI OutputBlock array
  *
- * 这是从 core/persistence/sessions.ts 抽出的 UI 层代码。
- * 未来 CLI/Web 等前端可以有自己的转换函数。
+ * 核心原则：重放与实时渲染使用同一条事件→reducer 管道。
+ * AIMessage → parseAIMessageEvents → handleEventAction
+ * ToolMessage → parseToolResultEvents → handleEventAction
+ * HumanMessage → appendBlock (等价于 USER_MESSAGE action)
+ * task 工具 → 独立 subagent block（reducer 跳过 task，此处自行处理）
+ *
+ * 这样对 reducer 的任何修改（如新增 exhausted 状态、调整 tool_card 布局）
+ * 会自动反映到重放，无需维护两套独立的 block 构建逻辑。
  */
 
-// (message type checks use field-based helpers — no LangChain imports needed)
+import type { AIMessage } from '@langchain/core/messages';
 import type { SessionData } from '../../core/persistence/sessions.js';
 import { extractText } from '../../core/persistence/sessions.js';
+import { parseAIMessageEvents, parseToolResultEvents } from '../../core/runner.js';
 import type { SubAgentRole } from '../../protocol/events.js';
-import { getToolDetail, getToolPreview } from './components/render-utils.js';
+import { createInitialState } from './initialState.js';
 import { consolidateAllRuns } from './reducers/consolidateTools.js';
+import { handleEventAction } from './reducers/handleEvent.js';
+import { appendBlock } from './reducers/helpers.js';
 import type { InterruptState, OutputBlock, SubAgentStepRecord } from './types.js';
-
-const AUTO_EXPAND_TOOLS = new Set([
-  'shell_execute',
-  'edit_file',
-  'write_file',
-  'update_plan',
-  'ask_user',
-]);
-const TIMEOUT_RE = /^Command timed out after (\d+)ms\./;
-
-function parseTimeoutMs(summary: string): number | undefined {
-  const match = summary.match(TIMEOUT_RE);
-  return match ? Number(match[1]) : undefined;
-}
 
 /** Pending task tool call info collected from AIMessage tool_calls */
 interface PendingTaskCall {
@@ -40,7 +35,7 @@ export function sessionDataToUI(data: SessionData): {
   blocks: OutputBlock[];
   interrupt: InterruptState | null;
 } {
-  const rawBlocks = buildOutputBlocks(data.messages);
+  const rawBlocks = replayMessagesToBlocks(data.messages);
   const blocks = consolidateAllRuns(rawBlocks);
 
   // Build callId → blockId index for interrupt mapping
@@ -54,7 +49,6 @@ export function sessionDataToUI(data: SessionData): {
   let interrupt: InterruptState | null = null;
   if (data.interrupt) {
     if (data.interrupt.kind === 'plan_review') {
-      // 方案审批中断不创建 block，直接携带 plan 数据 / Plan review interrupt carries plan data directly, no block
       interrupt = { kind: 'plan_review', plan: data.interrupt.plan };
     } else {
       let blockId = 0;
@@ -65,43 +59,14 @@ export function sessionDataToUI(data: SessionData): {
     }
   }
 
-  // 已批准的方案信息通过 status 传递，不创建 plan_review block / Approved plan info flows through status, no plan_review block
-  // (handled by the checkpoint loader in runner.ts)
-
   return { blocks, interrupt };
 }
 
-/** 判断是否为 AIMessage（兼容 checkpoint 反序列化的 plain object）
- *  Check if message is AIMessage-like (handles deserialized plain objects) */
-function isAiMessageLike(msg: Record<string, unknown>): boolean {
-  try {
-    if (typeof msg._getType === 'function') {
-      return (msg._getType as () => string).call(msg) === 'ai';
-    }
-  } catch {
-    /* ignore */
-  }
-  // Field-based: deserialized plain objects from checkpoint
-  return msg.type === 'ai' || Array.isArray(msg.tool_calls);
-}
-
-/** 判断是否为 HumanMessage（兼容 checkpoint 反序列化的 plain object） */
-function isHumanMessageLike(msg: Record<string, unknown>): boolean {
-  try {
-    if (typeof msg._getType === 'function') {
-      return (msg._getType as () => string).call(msg) === 'human';
-    }
-  } catch {
-    /* ignore */
-  }
-  // Field-based: deserialized plain objects from checkpoint
-  return msg.type === 'human';
-}
-
-/** 将 LangChain 消息数组映射为 OutputBlock 数组 / Map LangChain messages to OutputBlock array */
-function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
-  const blocks: OutputBlock[] = [];
-  let nextId = 1;
+/** Convert checkpoint messages → OutputBlock[] using the SAME event→reducer pipeline
+ *  that real-time rendering uses.  Only task/subagent blocks are handled separately
+ *  (the reducer skips task tool events). */
+function replayMessagesToBlocks(messages: unknown[]): OutputBlock[] {
+  let state = createInitialState();
   // Track pending task tool calls: callId → { subagent_type, task }
   const pendingTasks = new Map<string, PendingTaskCall>();
 
@@ -109,107 +74,72 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
     if (!msg || typeof msg !== 'object') continue;
     const rawMsg = msg as Record<string, unknown>;
 
-    // HumanMessage → user block
+    // ── HumanMessage → user block ──
     if (isHumanMessageLike(rawMsg)) {
       let content = extractText(rawMsg.content as unknown);
-      // Strip "User: " prefix added by runTask for conversation history
       content = content.replace(/^User:\s*/, '');
       if (content.length > 0) {
-        blocks.push({ id: nextId++, kind: 'user', content });
+        state = appendBlock(state, { id: state.nextBlockId, kind: 'user', content });
       }
       continue;
     }
 
-    // AIMessage
+    // ── AIMessage → text + tool_call events (same parser as real-time) ──
     if (isAiMessageLike(rawMsg)) {
-      const additionalKwargs =
-        (rawMsg.additional_kwargs as Record<string, unknown> | undefined) ?? {};
-
-      // reasoning_content → reason block
-      const reasoningContent =
-        (rawMsg.reasoning_content as string | undefined) ??
-        (additionalKwargs.reasoning_content as string | undefined);
-      if (typeof reasoningContent === 'string' && reasoningContent.length > 0) {
-        blocks.push({
-          id: nextId++,
-          kind: 'reason',
-          content: reasoningContent,
-          folded: false,
-        });
-      }
-
-      // tool_calls → tool_card blocks (result summary added later from ToolMessage if present)
+      // Collect task tool_call IDs so we can defer their blocks to ToolMessage
       const toolCalls = rawMsg.tool_calls;
-      if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+      if (Array.isArray(toolCalls)) {
         for (const tc of toolCalls) {
           if (tc && typeof tc === 'object') {
             const call = tc as Record<string, unknown>;
-            const callId = typeof call.id === 'string' ? call.id : '';
-            const name = typeof call.name === 'string' ? call.name : '';
-            const args = (call.args as Record<string, unknown>) ?? {};
-
-            // task tool → defer to build subagent block from ToolMessage result
-            if (name === 'task') {
-              const subagentType = (args.subagent_type as SubAgentRole) || 'explore';
-              const task = typeof args.task === 'string' ? args.task : '';
-              pendingTasks.set(callId, { subagentType, task });
-              continue;
+            if (call.name === 'task') {
+              const callId = typeof call.id === 'string' ? call.id : '';
+              const args = (call.args as Record<string, unknown>) ?? {};
+              pendingTasks.set(callId, {
+                subagentType: (args.subagent_type as SubAgentRole) || 'explore',
+                task: typeof args.task === 'string' ? args.task : '',
+              });
             }
-            // update_plan → 预填 summary（从 args 中提取方案内容），ToolMessage 结果会在下方合并覆盖
-            // Pre-fill summary from plan args; ToolMessage result merges/overrides below
-            let planSummary = '';
-            if (name === 'update_plan') {
-              const desc = (args.description as string) ?? '';
-              const steps = args.steps as Array<{ step: string }> | undefined;
-              if (desc || (steps && steps.length > 0)) {
-                const stepsText = (steps ?? []).map((s, i) => `${i + 1}. ${s.step}`).join('\n');
-                planSummary = desc ? `${desc}\n\nSteps:\n${stepsText}` : `Steps:\n${stepsText}`;
-              }
-            }
-            blocks.push({
-              id: nextId++,
-              kind: 'tool_card',
-              callId,
-              name,
-              args,
-              status: 'done',
-              summary: planSummary,
-              preview: getToolPreview(name, args),
-              detail: getToolDetail(name, args),
-              expanded: AUTO_EXPAND_TOOLS.has(name),
-            });
           }
         }
       }
 
-      // text content → text block
-      const content = extractText(rawMsg.content as unknown);
-      if (content.length > 0) {
-        blocks.push({ id: nextId++, kind: 'text', content });
+      // Pipe through the same parseAIMessageEvents that real-time streaming uses.
+      // Cast: checkpoint plain objects have the same shape as AIMessage instances.
+      const events = parseAIMessageEvents(rawMsg as unknown as AIMessage);
+      for (const event of events) {
+        state = handleEventAction(state, event);
       }
       continue;
     }
 
-    // ToolMessage → update matching AIMessage tool_card with result, or create standalone
+    // ── ToolMessage → tool_done (or subagent for task) ──
     if (isToolMessageLike(rawMsg)) {
       const callId = (rawMsg.tool_call_id as string) ?? '';
       const tmName = (rawMsg.name as string) ?? '';
 
-      // task tool result → build subagent block from pending task call + result
+      // task tool result → subagent block (reducer skips task events)
       if (tmName === 'task') {
         const pending = pendingTasks.get(callId) ?? { subagentType: 'explore' as const, task: '' };
-        const subId = callId || `sa-${nextId}`;
+        const subId = callId || `sa-${state.nextBlockId}`;
         const { ok, summary, toolCallCount, durationMs, error, steps } = parseTaskResult(
           typeof rawMsg.content === 'string' ? rawMsg.content : JSON.stringify(rawMsg.content),
         );
         const cancelled = !ok && summary === 'Cancelled';
-        blocks.push({
-          id: nextId++,
+        const resolvedStatus: 'done' | 'error' | 'cancelled' = ok
+          ? 'done'
+          : cancelled
+            ? 'cancelled'
+            : steps.length > 0
+              ? 'done'
+              : 'error';
+        state = appendBlock(state, {
+          id: state.nextBlockId,
           kind: 'subagent',
           subagentId: subId,
           role: pending.subagentType,
           task: pending.task,
-          status: ok ? 'done' : cancelled ? 'cancelled' : 'error',
+          status: resolvedStatus,
           summary,
           toolCallCount,
           durationMs,
@@ -220,118 +150,20 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
         continue;
       }
 
-      // update_plan result → treat as normal tool_card (plan content shown via tool output)
-      // (previously created a plan_review block; now standard tool_card flow handles it)
-
-      const content =
-        typeof rawMsg.content === 'string' ? rawMsg.content : JSON.stringify(rawMsg.content);
-      let ok = true;
-      const summaryMaxLen = tmName === 'edit_file' || tmName === 'write_file' ? 2000 : 200;
-      let summary = content.slice(0, summaryMaxLen);
-      let totalLines: number | undefined;
-      let timeoutMs: number | undefined;
-      try {
-        const p = JSON.parse(content);
-        if (p && typeof p === 'object') {
-          ok = p.ok !== false;
-          if (typeof p.totalLines === 'number') totalLines = p.totalLines;
-          if (p.ok !== false) {
-            summary =
-              (p.stdout as string) ?? (p.message as string) ?? (p.summary as string) ?? summary;
-          } else {
-            const stderr = (p.stderr as string) ?? '';
-            timeoutMs = parseTimeoutMs(stderr);
-            if (tmName === 'shell_execute' && timeoutMs != null) {
-              summary = (p.stdout as string) || '';
-            } else {
-              summary =
-                (p.reason as string) ??
-                stderr ??
-                (p.message as string) ??
-                (p.summary as string) ??
-                summary;
-            }
-          }
-          // ask_user: extract human-readable answer instead of raw JSON
-          if (tmName === 'ask_user') {
-            // 工具参数解析失败 → 显示错误详情 / Parse failure → show error detail
-            if (ok === false) {
-              const detail = p.detail as string | undefined;
-              const stderr = p.stderr as string | undefined;
-              summary = detail || stderr || 'ask_user failed: invalid arguments';
-            } else {
-              const answer = p.answer as string | undefined;
-              const answers = p.answers as Record<string, string> | undefined;
-              if (answers && Object.keys(answers).length > 0) {
-                summary = Object.entries(answers)
-                  .map(([k, v]) => `${k}: ${v}`)
-                  .join('\n');
-              } else if (typeof answer === 'string') {
-                summary = answer || '(no answer)';
-              }
-            }
-          }
-        }
-      } catch {
-        /* use raw content */
-      }
-
-      // Find existing tool_card from AIMessage tool_calls and enrich with result
-      const existingIdx = blocks.findIndex((b) => b.kind === 'tool_card' && b.callId === callId);
-      if (existingIdx >= 0) {
-        const existing = blocks[existingIdx]!;
-        if (existing.kind === 'tool_card') {
-          // update_plan 拒绝时：标记 error 保留原方案内容，插入分隔线
-          // update_plan on rejection: mark error, keep original plan content, insert separator
-          if (existing.name === 'update_plan' && !ok) {
-            blocks[existingIdx] = {
-              ...existing,
-              status: 'done' as const,
-              expanded: true,
-            } as (typeof blocks)[number];
-            blocks.splice(existingIdx + 1, 0, {
-              id: nextId++,
-              kind: 'text',
-              content: '── Plan declined ──',
-            });
-          } else {
-            const finalSummary = summary || existing.summary;
-            const timedOut = !ok && existing.name === 'shell_execute' && timeoutMs != null;
-            blocks[existingIdx] = {
-              ...existing,
-              status: ok ? 'done' : timedOut ? 'timeout' : 'error',
-              summary: finalSummary,
-              detail: getToolDetail(existing.name, existing.args, totalLines),
-              ...(timeoutMs != null ? { timeoutMs } : {}),
-              expanded: AUTO_EXPAND_TOOLS.has(existing.name),
-            } as (typeof blocks)[number];
-          }
-        }
-      } else {
-        // Standalone ToolMessage (no preceding AIMessage tool_calls)
-        const name = (rawMsg.name as string) ?? '';
-        const timedOut = !ok && name === 'shell_execute' && timeoutMs != null;
-        blocks.push({
-          id: nextId++,
-          kind: 'tool_card',
-          callId,
-          name,
-          args: {},
-          status: ok ? 'done' : timedOut ? 'timeout' : 'error',
-          summary,
-          ...(timeoutMs != null ? { timeoutMs } : {}),
-          expanded: !ok || AUTO_EXPAND_TOOLS.has(name),
-        });
+      // Non-task ToolMessage → feed through same parser + reducer as real-time
+      const event = parseToolResultEvents(rawMsg);
+      if (event) {
+        state = handleEventAction(state, event);
       }
     }
   }
 
-  // Any pending task calls without ToolMessage result → create error subagent blocks
+  // Any pending task calls without ToolMessage result → error subagent blocks
   for (const [callId, pending] of pendingTasks) {
-    blocks.push({
-      id: nextId++,
+    state = appendBlock(state, {
+      id: state.nextBlockId,
       kind: 'subagent',
-      subagentId: callId || `sa-${nextId}`,
+      subagentId: callId || `sa-${state.nextBlockId}`,
       role: pending.subagentType,
       task: pending.task,
       status: 'error',
@@ -343,10 +175,8 @@ function buildOutputBlocks(messages: unknown[]): OutputBlock[] {
     });
   }
 
-  // update_plan tool calls without ToolMessage results are handled by the standard
-  // tool_card pipeline — orphaned calls remain as 'done' tool_cards.
-
-  return blocks;
+  // Flatten turns → flat block array
+  return state.turns.flatMap((t) => t.blocks);
 }
 
 /** Parse task tool ToolMessage content into subagent block fields */
@@ -361,7 +191,18 @@ function parseTaskResult(content: string): {
   try {
     const p = JSON.parse(content);
     if (p && typeof p === 'object') {
-      const steps = Array.isArray(p.steps) ? (p.steps as SubAgentStepRecord[]) : [];
+      const rawSteps = Array.isArray(p.steps) ? (p.steps as Array<Record<string, unknown>>) : [];
+      const steps = rawSteps.map((s) => ({
+        ...s,
+        status:
+          (s.status as SubAgentStepRecord['status']) ??
+          (s.ok === false
+            ? ('error' as const)
+            : s.ok === true
+              ? ('success' as const)
+              : ('pending' as const)),
+        toolArgs: (s.toolArgs ?? {}) as Record<string, unknown>,
+      })) as SubAgentStepRecord[];
       return {
         ok: p.ok !== false,
         summary: (p.summary as string) ?? (p.error as string) ?? '',
@@ -386,10 +227,32 @@ function parseTaskResult(content: string): {
   };
 }
 
-/** 判断是否为 ToolMessage 类消息（兼容 checkpoint 反序列化的 plain object）
- *  Check if message is ToolMessage-like (handles deserialized plain objects from checkpoint) */
+/** 判断是否为 AIMessage（兼容 checkpoint 反序列化的 plain object） */
+function isAiMessageLike(msg: Record<string, unknown>): boolean {
+  try {
+    if (typeof msg._getType === 'function') {
+      return (msg._getType as () => string).call(msg) === 'ai';
+    }
+  } catch {
+    /* ignore */
+  }
+  return msg.type === 'ai' || Array.isArray(msg.tool_calls);
+}
+
+/** 判断是否为 HumanMessage（兼容 checkpoint 反序列化的 plain object） */
+function isHumanMessageLike(msg: Record<string, unknown>): boolean {
+  try {
+    if (typeof msg._getType === 'function') {
+      return (msg._getType as () => string).call(msg) === 'human';
+    }
+  } catch {
+    /* ignore */
+  }
+  return msg.type === 'human';
+}
+
+/** 判断是否为 ToolMessage 类消息（兼容 checkpoint 反序列化的 plain object） */
 function isToolMessageLike(msg: Record<string, unknown>): boolean {
-  // 实例方法：新创建的消息 / Instance method: freshly constructed messages
   try {
     if (typeof msg._getType === 'function') {
       return (msg._getType as () => string).call(msg) === 'tool';
@@ -397,7 +260,6 @@ function isToolMessageLike(msg: Record<string, unknown>): boolean {
   } catch {
     /* ignore */
   }
-  // 字段检测：checkpoint 反序列化后的 plain object / Field-based: deserialized plain objects
   if (typeof msg.tool_call_id === 'string' && msg.tool_call_id.length > 0) {
     return true;
   }

@@ -2,13 +2,17 @@ import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { interrupt, START, StateGraph } from '@langchain/langgraph';
 import { ChatOllama } from '@langchain/ollama';
 import type { AgentConfig } from '@/core/config/index';
+import { isFingerprintExhausted, recordExecutionResult } from '@/core/execution/journal';
+import { issuePermit, migratePermitBatch } from '@/core/execution/permit';
+import { createAutoReviewModel, reviewToolApproval } from '@/core/execution/reviewer';
 import type { McpManager } from '@/core/mcp';
 import { prepareModelContext } from '@/core/model/context';
 import type { ModelRetryListener, RetryListenerHost } from '@/core/model/deepseek';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { BunSqliteSaver } from '@/core/persistence/checkpoint';
-import { createTaskTool } from '@/core/subagent/task-tool';
-import { createAgentTools } from '@/core/tools/definitions';
+import { resumeSubAgent } from '@/core/subagent/runner';
+import type { SubAgentResult } from '@/core/subagent/types';
+import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type {
   AgentResumeValue,
@@ -16,7 +20,13 @@ import type {
   ModelRetryEvent,
   ThreadAuthorizationState,
 } from '@/core/types';
-import type { AgentPlan, PlanStatus, ShellApprovalGrant } from '@/protocol/events';
+import {
+  type AgentPlan,
+  InteractionMode,
+  isFullAccessMode,
+  type PlanStatus,
+  type ShellApprovalGrant,
+} from '@/protocol/events';
 import {
   routeAfterAgent,
   routeAfterApproval,
@@ -29,6 +39,7 @@ import { AgentState, type CodeAgentState } from './state';
 import {
   applyApprovalGrant,
   buildToolApproval,
+  classifyShellRisk,
   defaultPhaseForWorkspaceAccess,
   evaluateToolPolicy,
   normalizeAuthorizationState,
@@ -39,6 +50,7 @@ import {
   getAllPendingToolRequests,
   type getPendingToolRequest,
   messageText,
+  toolRequestFromCall,
   toolRequestFromMessage,
 } from './tool-requests';
 import { runApprovedTool } from './tool-runner';
@@ -80,6 +92,7 @@ export interface BuildCodeAgentGraphInput {
     totalLines?: number,
     toolTokenCount?: number,
     exitCode?: number,
+    status?: 'success' | 'error' | 'exhausted',
   ) => void;
   /** 工具进度回调 — shell 进程产生输出时逐行调用，使 TUI 实时展示。
    *  Per-line progress callback — called for each stdout/stderr line during
@@ -131,6 +144,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       signal: input.subagentSignal,
       model: input.model,
       threadId: state.threadId,
+      authorization: state.authorization,
+      workspaceAccess: state.workspaceAccess,
+      phase: state.phase,
     });
     const retryEvents: ModelRetryEvent[] = [];
     const listener: ModelRetryListener = (attempt, maxAttempts, error, delayMs) => {
@@ -161,6 +177,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         ...result,
         ...modelConfigState,
         authorization: syncedAuth,
+        // Preserve execution journal state across agent→tools cycles.
+        // Without these, LangGraph may reset channels with default reducer
+        // to their defaults between node invocations.
+        executionJournal: state.executionJournal,
+        exhaustedFingerprints: state.exhaustedFingerprints,
       };
       if (retryEvents.length > 0) {
         return { ...baseReturn, modelRetries: retryEvents };
@@ -181,11 +202,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
   /** 审批节点：中断等待人工批准，支持批量积累 / Approval node with batch accumulation */
   const approval = async (state: CodeAgentState) => {
-    const batch = { ...state.approvedBatch };
-    const hasFullAccess = Object.values(batch).some((g) => g === 'full_access');
+    const batch = migratePermitBatch(state.approvedBatch);
+    const pendingSubagent = state.pendingSubagentApproval;
+    const hasFullAccess =
+      isFullAccessMode(state.interactionMode) ||
+      Object.values(batch).some((p) => !p.consumed && p.grant === 'full_access');
 
     // 查找第一个尚未审批的待处理工具（跳过已在 batch 中的）
-    const allPending = getAllPendingToolRequests(state.messages, state.workspace);
+    const allPending = pendingSubagent
+      ? [pendingSubagent.request]
+      : getAllPendingToolRequests(state.messages, state.workspace);
     let request: ReturnType<typeof getPendingToolRequest> = null;
     for (const r of allPending) {
       if (r.id && !batch[r.id]) {
@@ -201,7 +227,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     // full_access 已授权 → 自动批准剩余所有工具 / full_access already granted → auto-approve all remaining
     if (hasFullAccess) {
       for (const r of allPending) {
-        if (r.id) batch[r.id] = 'full_access';
+        Object.assign(
+          batch,
+          issuePermit({
+            batch,
+            workspace: state.workspace,
+            threadId: state.threadId,
+            request: r,
+            grant: 'full_access',
+          }),
+        );
       }
       return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
     }
@@ -221,7 +256,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     // 不需要审批的工具（如 read_file）→ 标记为 auto-pass 并直接返回
     // Non-approval tools (e.g. read_file) → mark as auto-pass and return
     if (!policy.requiresApproval) {
-      if (request.id) batch[request.id] = 'approve_once';
+      Object.assign(
+        batch,
+        issuePermit({
+          batch,
+          workspace: state.workspace,
+          threadId: state.threadId,
+          request,
+          grant: 'approve_once',
+        }),
+      );
       return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
     }
 
@@ -231,13 +275,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       request,
       decision: policy,
     });
+    // 标记子 agent 审批来源，TUI 据此暂停该子 agent 的加载动画
+    if (pendingSubagent) {
+      approvalPayload.subagentId = pendingSubagent.continuation.id;
+    }
 
-    const approved = interrupt({
-      kind: 'tool_approval',
-      request,
-      policy,
-      approval: approvalPayload,
-    }) as
+    let approved:
       | boolean
       | {
           approved?: boolean;
@@ -246,6 +289,61 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           replacementCommand?: string;
           reason?: string;
         };
+    if (state.interactionMode === InteractionMode.Auto) {
+      const reviewModel =
+        input.config.autoReview?.provider || input.config.autoReview?.model
+          ? createAutoReviewModel(input.config)
+          : model;
+      const review = await reviewToolApproval({
+        model: reviewModel,
+        payload: approvalPayload,
+        request,
+        timeoutMs: input.config.autoReview?.timeoutMs,
+      });
+      if (!review.ok || !review.suggestion?.approved) {
+        if (pendingSubagent) {
+          Object.assign(
+            batch,
+            issuePermit({
+              batch,
+              workspace: state.workspace,
+              threadId: state.threadId,
+              request: pendingSubagent.request,
+              grant: 'none',
+            }),
+          );
+          return { approvedBatch: batch };
+        }
+        return {
+          ...rejectedToolMessage(
+            request,
+            `auto review rejected: ${review.suggestion?.reason ?? review.reason ?? 'not approved'}`,
+          ),
+          approvedBatch: batch,
+        };
+      }
+      approved = {
+        approved: true,
+        grant: review.suggestion.grant,
+        approvalHash: approvalPayload.approvalHash,
+        reason: review.suggestion.reason,
+      };
+    } else {
+      approved = interrupt({
+        kind: 'tool_approval',
+        request,
+        policy,
+        approval: approvalPayload,
+      }) as
+        | boolean
+        | {
+            approved?: boolean;
+            grant?: ShellApprovalGrant;
+            approvalHash?: string;
+            replacementCommand?: string;
+            reason?: string;
+          };
+    }
     const approvalGrant = approvalGrantFromResume(approved);
     const allowed =
       approved === true ||
@@ -262,15 +360,28 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         approved !== null &&
         approved.approvalHash !== undefined &&
         !validateApprovalHash(approved, approvalPayload.approvalHash);
+      const reason = hashMismatch
+        ? 'approved request does not match current tool request'
+        : typeof approved === 'object' && approved !== null
+          ? (approved.reason ?? 'not approved')
+          : 'not approved';
+      // 子 agent 审批被拒 → 注入拒绝结果并恢复子 agent，让它尝试其他方法
+      // Sub-agent approval rejected → inject rejection result so it can try alternatives
+      if (pendingSubagent) {
+        Object.assign(
+          batch,
+          issuePermit({
+            batch,
+            workspace: state.workspace,
+            threadId: state.threadId,
+            request: pendingSubagent.request,
+            grant: 'none',
+          }),
+        );
+        return { approvedBatch: batch };
+      }
       return {
-        ...rejectedToolMessage(
-          request,
-          hashMismatch
-            ? 'approved request does not match current tool request'
-            : typeof approved === 'object' && approved !== null
-              ? (approved.reason ?? 'not approved')
-              : 'not approved',
-        ),
+        ...rejectedToolMessage(request, reason),
         approvedBatch: batch,
       };
     }
@@ -280,8 +391,22 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       try {
         approvedRequest = replaceApprovalCommand(request, approved.replacementCommand);
       } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        if (pendingSubagent) {
+          Object.assign(
+            batch,
+            issuePermit({
+              batch,
+              workspace: state.workspace,
+              threadId: state.threadId,
+              request: pendingSubagent.request,
+              grant: 'none',
+            }),
+          );
+          return { approvedBatch: batch };
+        }
         return {
-          ...rejectedToolMessage(request, error instanceof Error ? error.message : String(error)),
+          ...rejectedToolMessage(request, reason),
           approvedBatch: batch,
         };
       }
@@ -305,23 +430,55 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       override,
     });
     if (!approvedPolicy.allowed) {
+      const reason = `approved command rejected by tool policy: ${approvedPolicy.reason}`;
+      if (pendingSubagent) {
+        Object.assign(
+          batch,
+          issuePermit({
+            batch,
+            workspace: state.workspace,
+            threadId: state.threadId,
+            request: pendingSubagent.request,
+            grant: 'none',
+          }),
+        );
+        return { approvedBatch: batch };
+      }
       return {
-        ...rejectedToolMessage(
-          request,
-          `approved command rejected by tool policy: ${approvedPolicy.reason}`,
-        ),
+        ...rejectedToolMessage(request, reason),
         approvedBatch: batch,
       };
     }
 
-    if (approvedRequest.id)
-      batch[approvedRequest.id] = grant as 'approve_once' | 'same_command' | 'full_access';
+    Object.assign(
+      batch,
+      issuePermit({
+        batch,
+        workspace: state.workspace,
+        threadId: state.threadId,
+        request: approvedRequest,
+        grant,
+      }),
+    );
 
     // full_access → auto-approve all remaining in batch
     if (grant === 'full_access') {
-      const allPending = getAllPendingToolRequests(state.messages, state.workspace);
+      const allPending = pendingSubagent
+        ? [pendingSubagent.request]
+        : getAllPendingToolRequests(state.messages, state.workspace);
       for (const r of allPending) {
-        if (r.id && !batch[r.id]) batch[r.id] = 'full_access';
+        if (r.id && !batch[r.id]) {
+          Object.assign(
+            batch,
+            issuePermit({
+              batch,
+              workspace: state.workspace,
+              threadId: state.threadId,
+              request: r,
+              grant: 'full_access',
+            }),
+          );
+        }
       }
     }
 
@@ -423,54 +580,32 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   };
 
   /** 执行单个工具调用并返回 ToolMessage / Execute a single tool call and return ToolMessage */
+  function pendingSubagentApprovalFromBlocked(
+    taskCallId: string,
+    blocked: NonNullable<SubAgentResult['blocked']>,
+    workspace: string,
+  ): CodeAgentState['pendingSubagentApproval'] {
+    const request = toolRequestFromCall(
+      {
+        id: blocked.toolCallId,
+        name: blocked.toolName,
+        args: blocked.args,
+      },
+      workspace,
+    );
+    if (!request) return null;
+    return {
+      taskCallId,
+      request,
+      continuation: blocked.continuation,
+    };
+  }
+
   async function executeOneTool(
     request: import('./tool-requests').PendingToolRequest,
     state: CodeAgentState,
     grantUsed: string,
-  ): Promise<{ toolMessage: ToolMessage; extra: Record<string, unknown> }> {
-    // Handle task tool (sub-agent dispatch)
-    if (request.name === 'task' && input.subagentEventSink) {
-      try {
-        const taskTool = createTaskTool({
-          config: input.config,
-          workspace: state.workspace,
-          shellExecutor: input.shellExecutor,
-          mcpManager: input.mcpManager,
-          skills: input.skills,
-          skillOptions: input.skillOptions,
-          eventSink: input.subagentEventSink,
-          signal: input.subagentSignal,
-          model: input.model,
-        });
-        const toolOutput = await taskTool.invoke(request.args);
-        let taskOk = true;
-        try {
-          const p = JSON.parse(toolOutput);
-          taskOk = p.ok !== false;
-        } catch {}
-        return {
-          toolMessage: new ToolMessage({
-            content: toolOutput,
-            tool_call_id: request.id ?? 'missing-tool-call-id',
-            name: request.name,
-            status: taskOk ? 'success' : 'error',
-          }),
-          extra: {},
-        };
-      } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        return {
-          toolMessage: new ToolMessage({
-            content: JSON.stringify({ ok: false, error: errorMsg }),
-            tool_call_id: request.id ?? 'missing-tool-call-id',
-            name: request.name,
-            status: 'error',
-          }),
-          extra: {},
-        };
-      }
-    }
-
+  ): Promise<{ toolMessage: ToolMessage | null; extra: Record<string, unknown> }> {
     // 构造 shell 实时输出回调（仅对 shell_execute 生效）
     const onShellProgress = input.toolProgressSink
       ? (chunk: string, stream: 'stdout' | 'stderr') => {
@@ -494,7 +629,26 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       skillOptions: input.skillOptions,
       signal: input.subagentSignal,
       onShellProgress,
+      permitBatch: migratePermitBatch(state.approvedBatch),
+      interactionMode: state.interactionMode,
+      taskConfig: input.config,
+      taskModel: input.model,
+      subagentEventSink: input.subagentEventSink,
     });
+
+    if (request.name === 'task' && result.subagentResult?.blocked) {
+      const pending = pendingSubagentApprovalFromBlocked(
+        request.id ?? 'missing-tool-call-id',
+        result.subagentResult.blocked,
+        state.workspace,
+      );
+      if (pending) {
+        return {
+          toolMessage: null,
+          extra: { pendingSubagentApproval: pending },
+        };
+      }
+    }
 
     // Flush React re-renders before dispatching tool_done, so intermediate
     // tool_progress updates (liveOutput) are rendered before status → done.
@@ -584,10 +738,134 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
 
     if (cancelledToolMessages.length > 0) {
-      return { messages: cancelledToolMessages };
+      return { messages: cancelledToolMessages, executionJournal: [], exhaustedFingerprints: {} };
     }
-    return {};
+    return { executionJournal: [], exhaustedFingerprints: {} };
   };
+
+  /**
+   * Phase 5: 判断工具请求是否为写操作（mutation）。
+   * Mutations 需串行化以保证 journal 状态正确流动；
+   * Reads 可安全并行。Determine whether a tool request is a mutation. */
+  function isMutationRequest(request: import('./tool-requests').PendingToolRequest): boolean {
+    switch (request.name) {
+      case 'write_file':
+      case 'edit_file':
+      case 'task':
+        return true;
+      case 'shell_execute': {
+        const cmd = (request.args as unknown as { command: string }).command;
+        const risk = classifyShellRisk(cmd);
+        if (risk !== 'execute_code') return true; // known mutation pattern
+        // Fallback: if classifyShellRisk didn't recognize the command, check against the
+        // read-only whitelist. Commands NOT on the whitelist (e.g. sed -i, bare redirects)
+        // are treated as mutations for safety — they won't slip into the reads path.
+        if (!isReadOnlyShellCommand(cmd)) return true;
+        return false;
+      }
+      default:
+        return false; // read_file, search_*, read_mcp_resource, Skill, update_plan, ask_user
+    }
+  }
+
+  /** Parse a ToolMessage's JSON content and update journalState via callback.
+   *  For task (subagent) results, also merges the subagent's journal entries
+   *  and exhausted fingerprints into the main journal. */
+  function recordJournalForMessage(
+    msg: ToolMessage | null,
+    journalState: {
+      executionJournal: import('@/core/execution/journal').ExecutionJournalEntry[];
+      exhaustedFingerprints: Record<string, true>;
+    },
+    setJournal: (next: typeof journalState) => void,
+  ): void {
+    if (!msg) return;
+    try {
+      const parsed = JSON.parse(String(msg.content)) as {
+        ok?: boolean;
+        stderr?: string;
+        exitCode?: number;
+        path?: string;
+        subagentResult?: {
+          executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
+          exhaustedFingerprints?: Record<string, true>;
+        };
+      };
+      let next = recordExecutionResult(journalState, {
+        toolCallId: (msg as unknown as Record<string, unknown>).tool_call_id?.toString() ?? '',
+        toolName: msg.name ?? 'unknown',
+        ok: parsed.ok !== false,
+        stderr: parsed.stderr,
+        exitCode: parsed.exitCode,
+        path: parsed.path,
+      });
+      // Phase 5: Merge subagent journal entries and exhausted fingerprints.
+      if (parsed.subagentResult?.executionJournal?.length) {
+        next = {
+          ...next,
+          executionJournal: [
+            ...next.executionJournal,
+            ...parsed.subagentResult.executionJournal,
+          ].slice(-50),
+        };
+      }
+      if (parsed.subagentResult?.exhaustedFingerprints) {
+        next = {
+          ...next,
+          exhaustedFingerprints: {
+            ...next.exhaustedFingerprints,
+            ...parsed.subagentResult.exhaustedFingerprints,
+          },
+        };
+      }
+      setJournal(next);
+    } catch (e) {
+      // ToolMessage content is expected to be JSON. Non-JSON content indicates
+      // a tool implementation bug — warn so it's discoverable rather than silently
+      // dropping the journal entry (which would let the tool retry indefinitely).
+      console.warn(
+        `recordJournalForMessage: failed to parse ToolMessage content for ${msg.name ?? 'unknown'}:`,
+        (e as Error)?.message ?? e,
+      );
+    }
+  }
+
+  /** When a tool execution just exhausted a fingerprint, rebuild the ToolMessage
+   *  to carry status:'exhausted' and failure.exhausted so the model sees it.
+   *  The exhaustion signal is constructed explicitly from the fingerprint rather
+   *  than parsed from the message content (which never contains it). */
+  function injectExhaustionSignal(msg: ToolMessage, toolName: string, fp: string): ToolMessage {
+    try {
+      const parsed = JSON.parse(String(msg.content));
+      const exhausted: import('@/core/execution/journal').ExhaustionSignal = {
+        fingerprint: fp,
+        consecutiveFailures: 0, // actual count unavailable; model trusts the status
+        maxFailures: 0,
+        suggestion: toolName === 'shell_execute' ? ('skip_step' as const) : ('replan' as const),
+        reason: `Repeated failures exhausted retry limit for ${toolName}.`,
+        suggestedAlternatives: ['Continue another independent step', 'Safely finalize if blocked'],
+      };
+      return new ToolMessage({
+        content: JSON.stringify({
+          ...parsed,
+          status: 'exhausted',
+          failure: {
+            ...(parsed.failure ?? {}),
+            exhausted,
+            guidance:
+              toolName === 'shell_execute'
+                ? `Stop retrying this operation (${toolName}). Skip this step and continue other independent work.`
+                : `Stop retrying this operation (${toolName}). Replan or safely finalize.`,
+          },
+        }),
+        tool_call_id: msg.tool_call_id,
+        name: msg.name,
+        status: 'exhausted' as unknown as ToolMessage['status'],
+      });
+    } catch {
+      return msg;
+    }
+  }
 
   /** 工具节点：并行执行所有待处理的工具调用。
    *  Tools node — execute all pending tool calls in parallel.
@@ -595,25 +873,343 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
    *  shows progressive completion without waiting for the full batch. */
   const tools = async (state: CodeAgentState) => {
     const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
-    const batch = state.approvedBatch ?? {};
+    const batch = migratePermitBatch(state.approvedBatch);
+
+    if (state.pendingSubagentApproval) {
+      const pending = state.pendingSubagentApproval;
+      const request = pending.request;
+      const grantUsed = request.id && batch[request.id] ? batch[request.id]!.grant : 'none';
+      const onShellProgress = input.toolProgressSink
+        ? (chunk: string, stream: 'stdout' | 'stderr') => {
+            input.toolProgressSink!(request.id ?? '', request.name, chunk, stream);
+          }
+        : undefined;
+
+      const result = await runApprovedTool({
+        workspace: state.workspace,
+        request,
+        shellExecutor: input.shellExecutor,
+        workspaceAccess: state.workspaceAccess,
+        phase: state.phase,
+        authorization: state.authorization,
+        approvedGrant: grantUsed as import('@/protocol/events').ShellGrantUsed,
+        threadId: state.threadId,
+        override,
+        mcpManager: input.mcpManager,
+        mcpRiskOverride,
+        skillManifests: input.skills,
+        skillOptions: input.skillOptions,
+        signal: input.subagentSignal,
+        onShellProgress,
+        permitBatch: batch,
+        interactionMode: state.interactionMode,
+        taskConfig: input.config,
+        taskModel: input.model,
+        subagentEventSink: input.subagentEventSink,
+      });
+
+      if (onShellProgress) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const summary =
+        request.name === 'shell_execute' && result.exitCode === 124 && result.stdout
+          ? result.stdout
+          : (result.stdout || result.stderr || '').slice(0, 200);
+      input.toolResultSink?.(
+        request.id ?? '',
+        request.name,
+        result.ok !== false,
+        summary,
+        result.totalLines,
+        undefined,
+        result.exitCode,
+      );
+
+      const baseJournal = recordExecutionResult(
+        {
+          executionJournal: state.executionJournal ?? [],
+          exhaustedFingerprints: state.exhaustedFingerprints ?? {},
+        },
+        {
+          toolCallId: request.id ?? '',
+          toolName: request.name,
+          ok: result.ok !== false,
+          stderr: result.stderr,
+          exitCode: result.exitCode,
+          path: result.path,
+        },
+      );
+
+      // 审批被拒时，修改 stderr 告诉子 agent 不要重试同一工具
+      // When approval was rejected, rewrite stderr so the sub-agent knows to try alternatives
+      const resumeResult =
+        grantUsed === 'none' && result.status === 'rejected'
+          ? {
+              ...result,
+              stderr: `The user rejected this ${request.name} call. Try a completely different approach — use alternative tools, different arguments, or explain why the task cannot be completed.`,
+            }
+          : result;
+
+      const resumed = await resumeSubAgent(
+        {
+          config: input.config,
+          workspace: state.workspace,
+          role: pending.continuation.role,
+          task: pending.continuation.task,
+          shellExecutor: input.shellExecutor,
+          mcpManager: input.mcpManager,
+          skills: input.skills,
+          skillOptions: input.skillOptions,
+          authorization: state.authorization,
+          workspaceAccess: state.workspaceAccess,
+          phase: state.phase,
+          threadId: state.threadId,
+          timeoutMs: 30 * 60 * 1000,
+          signal: input.subagentSignal ?? new AbortController().signal,
+          eventSink:
+            input.subagentEventSink ??
+            (((_event: unknown) => {}) as import('@/core/subagent/types').SubAgentEventSink),
+          model: input.model,
+          depth: 1,
+          maxDepth: 0,
+        },
+        pending.continuation,
+        {
+          toolCallId: request.id ?? '',
+          toolName: request.name,
+          result: resumeResult,
+        },
+      );
+
+      let journalState = baseJournal;
+
+      // Phase 5: Merge subagent journal into main journal state.
+      if (resumed.executionJournal?.length) {
+        journalState = {
+          ...journalState,
+          executionJournal: [...journalState.executionJournal, ...resumed.executionJournal].slice(
+            -50,
+          ),
+        };
+      }
+      if (resumed.exhaustedFingerprints) {
+        journalState = {
+          ...journalState,
+          exhaustedFingerprints: {
+            ...journalState.exhaustedFingerprints,
+            ...resumed.exhaustedFingerprints,
+          },
+        };
+      }
+
+      if (resumed.blocked) {
+        const nextPending = pendingSubagentApprovalFromBlocked(
+          pending.taskCallId,
+          resumed.blocked,
+          state.workspace,
+        );
+        if (nextPending) {
+          return {
+            approvedBatch: {},
+            approvedToolRequest: null,
+            approvedToolGrant: null,
+            pendingSubagentApproval: nextPending,
+            ...journalState,
+          };
+        }
+      }
+
+      const taskMessage = new ToolMessage({
+        content: JSON.stringify(resumed),
+        tool_call_id: pending.taskCallId,
+        name: 'task',
+        status: resumed.ok === false ? 'error' : 'success',
+      });
+
+      return {
+        approvedBatch: {},
+        approvedToolRequest: null,
+        approvedToolGrant: null,
+        pendingSubagentApproval: null,
+        ...journalState,
+        messages: [taskMessage],
+      };
+    }
 
     if (allRequests.length === 0) {
       return { approvedBatch: {} };
     }
 
-    // 所有工具（含 task/子 agent）放入同一个 Promise.all，真正并行执行。
-    // All tools (including task sub-agents) in a single Promise.all.
-    const results = await Promise.all(
-      allRequests.map((req) => {
-        const reqGrant = req.id && batch[req.id] ? batch[req.id]! : 'none';
-        return executeOneTool(req, state, reqGrant);
-      }),
-    );
+    // Phase 5: 写操作串行化 — 同批次 reads 并行，mutations 逐个执行。
+    // Reads execute in parallel; mutations execute sequentially so journal state
+    // (exhaustedFingerprints) flows between steps and prevents stale preflight checks.
+    // Mutation serialization — reads parallel, mutations one at a time.
+    const reads = allRequests.filter((req) => !isMutationRequest(req));
+    const mutations = allRequests.filter((req) => isMutationRequest(req));
 
-    const messages: ToolMessage[] = results.map((r) => r.toolMessage);
+    const messages: ToolMessage[] = [];
     const mergedExtra: Record<string, unknown> = {};
-    for (const r of results) {
+    let journalState = {
+      executionJournal: state.executionJournal ?? [],
+      exhaustedFingerprints: { ...(state.exhaustedFingerprints ?? {}) },
+    };
+
+    // Phase 1: Execute read tools sequentially with per-iteration preflight.
+    // Each read's journal update flows into the next iteration's preflight check,
+    // so exhaustion triggered mid-batch blocks subsequent reads BEFORE they execute.
+    // (Previously reads executed in parallel via Promise.all, which meant all N
+    // reads ran before the journal was updated — exhaustion at position 5+N
+    // couldn't block reads 6..N that had already started.)
+    for (const req of reads) {
+      const preflightPath = (req.args as Record<string, unknown>).path as string | undefined;
+      if (isFingerprintExhausted(journalState.exhaustedFingerprints, req.name, preflightPath)) {
+        const blockedMsg = new ToolMessage({
+          content: JSON.stringify({
+            ok: false,
+            command: req.protectedCommand,
+            exitCode: -1,
+            stdout: '',
+            stderr: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+            status: 'exhausted' as const,
+            failure: {
+              message: 'Tool execution failed.' as const,
+              tool: req.name,
+              reason: `Execution blocked by exhaustion guard for ${req.name}.`,
+              guidance: 'Stop retrying this operation. Skip this step, replan, or safely finalize.',
+            },
+          }),
+          tool_call_id: req.id ?? 'missing-tool-call-id',
+          name: req.name,
+          status: 'exhausted' as unknown as ToolMessage['status'],
+        });
+        messages.push(blockedMsg);
+        input.toolResultSink?.(
+          req.id ?? '',
+          req.name,
+          false,
+          `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+          undefined,
+          undefined,
+          -1,
+          'exhausted',
+        );
+        continue;
+      }
+
+      const reqGrant = req.id && batch[req.id] ? batch[req.id]!.grant : 'none';
+      const r = await executeOneTool(req, state, reqGrant);
+
+      if (r.toolMessage) {
+        const journalBefore = { ...journalState.exhaustedFingerprints };
+        recordJournalForMessage(r.toolMessage, journalState, (next) => {
+          journalState = next;
+        });
+        // Check whether this execution just exhausted a NEW fingerprint.
+        const newExhaustedFp = Object.keys(journalState.exhaustedFingerprints).find(
+          (fp) => !journalBefore[fp],
+        );
+        if (newExhaustedFp) {
+          r.toolMessage = injectExhaustionSignal(
+            r.toolMessage,
+            (r.toolMessage as ToolMessage).name ?? 'unknown',
+            newExhaustedFp,
+          );
+          // Override the earlier toolResultSink (from executeOneTool, Path A)
+          // which reported plain ok=false. The TUI needs status:'exhausted'
+          // to render the amber dot and notification text block.
+          const toolName = (r.toolMessage as ToolMessage).name ?? 'unknown';
+          const callId = ((r.toolMessage as ToolMessage).tool_call_id as string) || '';
+          input.toolResultSink?.(
+            callId,
+            toolName,
+            false,
+            `Execution blocked: too many repeated failures for ${toolName}.`,
+            undefined,
+            undefined,
+            -1,
+            'exhausted',
+          );
+        }
+        messages.push(r.toolMessage);
+      }
       Object.assign(mergedExtra, r.extra);
+    }
+
+    // Phase 2: Execute mutations sequentially — journal state flows between steps.
+    // This ensures an exhaustion triggered by mutation N blocks mutation N+1's preflight.
+    const sequentialState = { ...state, ...journalState };
+    for (const req of mutations) {
+      // Preflight: check if this tool+path fingerprint is already exhausted.
+      const preflightPath = (req.args as Record<string, unknown>).path as string | undefined;
+      if (isFingerprintExhausted(journalState.exhaustedFingerprints, req.name, preflightPath)) {
+        const blockedMsg = new ToolMessage({
+          content: JSON.stringify({
+            ok: false,
+            command: req.protectedCommand,
+            exitCode: -1,
+            stdout: '',
+            stderr: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+            status: 'exhausted' as const,
+            failure: {
+              message: 'Tool execution failed.' as const,
+              tool: req.name,
+              reason: `Execution blocked by exhaustion guard for ${req.name}.`,
+              guidance: 'Stop retrying this operation. Skip this step, replan, or safely finalize.',
+            },
+          }),
+          tool_call_id: req.id ?? 'missing-tool-call-id',
+          name: req.name,
+          status: 'exhausted' as unknown as ToolMessage['status'],
+        });
+        messages.push(blockedMsg);
+        input.toolResultSink?.(
+          req.id ?? '',
+          req.name,
+          false,
+          `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+          undefined,
+          undefined,
+          -1,
+          'exhausted',
+        );
+        continue;
+      }
+
+      const reqGrant = req.id && batch[req.id] ? batch[req.id]!.grant : 'none';
+      const r = await executeOneTool(req, sequentialState, reqGrant);
+
+      if (r.toolMessage) {
+        // Update journal — if a new fingerprint was just exhausted, inject the signal.
+        const journalBefore = { ...journalState.exhaustedFingerprints };
+        recordJournalForMessage(r.toolMessage, journalState, (next) => {
+          journalState = next;
+        });
+        // Check whether this execution just exhausted a NEW fingerprint.
+        const newExhaustedFp = Object.keys(journalState.exhaustedFingerprints).find(
+          (fp) => !journalBefore[fp],
+        );
+        if (newExhaustedFp) {
+          // Rebuild ToolMessage with exhaustion signal so the model sees it immediately.
+          r.toolMessage = injectExhaustionSignal(r.toolMessage, req.name, newExhaustedFp);
+          // Override the earlier toolResultSink (from executeOneTool, Path A)
+          // which reported plain ok=false. The TUI needs status:'exhausted'.
+          input.toolResultSink?.(
+            req.id ?? '',
+            req.name,
+            false,
+            `Execution blocked: too many repeated failures for ${req.name}.`,
+            undefined,
+            undefined,
+            -1,
+            'exhausted',
+          );
+        }
+        messages.push(r.toolMessage);
+      }
+      Object.assign(mergedExtra, r.extra);
+      // Flow updated journal into state for the next mutation iteration.
+      Object.assign(sequentialState, journalState);
     }
 
     return {
@@ -621,6 +1217,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       approvedToolRequest: null,
       approvedToolGrant: null,
       ...mergedExtra,
+      ...journalState,
       messages,
     };
   };

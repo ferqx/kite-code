@@ -240,11 +240,22 @@ function closeCurrentThought(state: TuiState): TuiState {
 
   const next = updateToolSummaryById(state, summary.id, (block) => {
     if (block.tools.length === 0) return null;
+    const hasError = block.tools.some(
+      (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
+    );
+    const anyCancelled = block.tools.some((t) => t.status === 'cancelled');
+    const hasPending = block.tools.some((t) => t.status === 'running');
+    const result = hasError
+      ? ('error' as const)
+      : anyCancelled || hasPending
+        ? ('cancelled' as const)
+        : ('done' as const);
     return {
       ...block,
       active: false,
       latestActivity: undefined,
       totalElapsedMs: Date.now() - block.createdAt,
+      result,
     };
   });
   return { ...next, currentThoughtSummaryId: undefined };
@@ -260,6 +271,9 @@ function updateCurrentThoughtActivity(
       ...block,
       active: true,
       latestActivity,
+      // 每次 reason / tool_call 事件更新耗时，消除对前端 setInterval 定时器的依赖
+      // Update elapsed on each reason / tool_call event so the UI doesn't need a live timer
+      totalElapsedMs: Date.now() - block.createdAt,
     }));
   }
 
@@ -547,7 +561,12 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
                   summary: event.data.summary,
                   elapsedMs,
                   totalLines: event.data.totalLines ?? t.totalLines,
-                  status: event.data.ok ? ('done' as const) : ('error' as const),
+                  status:
+                    event.data.status === 'exhausted'
+                      ? ('exhausted' as const)
+                      : event.data.ok
+                        ? ('done' as const)
+                        : ('error' as const),
                 }
               : t,
           );
@@ -582,7 +601,30 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         state,
         (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
       );
-      if (matched?.kind !== 'tool_card') return { ...state, toolStartTimes: nextTimes };
+      if (matched?.kind !== 'tool_card') {
+        // Preflight block: tool was stopped before execution (fingerprint already exhausted).
+        // No tool_card was created by a prior tool_call event — create one now so the
+        // user sees the system intervention.  The status footer ("blocked") is sufficient;
+        // no separate notification text block needed.
+        if (event.data.status === 'exhausted') {
+          const id = state.nextBlockId;
+          const card: OutputBlock = {
+            id,
+            kind: 'tool_card',
+            callId: event.data.call_id,
+            name: event.data.name,
+            args: {},
+            status: 'exhausted' as const,
+            summary: event.data.summary,
+            expanded: true,
+          };
+          return {
+            ...appendBlock(state, card),
+            toolStartTimes: nextTimes,
+          };
+        }
+        return { ...state, toolStartTimes: nextTimes };
+      }
 
       // update_plan declined
       if (matched.name === 'update_plan' && !event.data.ok) {
@@ -619,6 +661,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       }
 
       const cancelled = !event.data.ok && summaryText === 'Cancelled';
+      const exhaustedStatus = event.data.status === 'exhausted';
       const timedOut =
         !event.data.ok &&
         matched.name === 'shell_execute' &&
@@ -635,18 +678,21 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           : summaryText;
       const next: OutputBlock = {
         ...matched,
-        status: event.data.ok
-          ? ('done' as const)
-          : cancelled
-            ? ('cancelled' as const)
-            : timedOut
-              ? ('timeout' as const)
-              : ('error' as const),
+        status: exhaustedStatus
+          ? ('exhausted' as const)
+          : event.data.ok
+            ? ('done' as const)
+            : cancelled
+              ? ('cancelled' as const)
+              : timedOut
+                ? ('timeout' as const)
+                : ('error' as const),
         summary: displaySummary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
         ...(timeoutMs != null ? { timeoutMs } : {}),
         expanded:
+          exhaustedStatus ||
           !event.data.ok ||
           matched.name === 'shell_execute' ||
           matched.name === 'edit_file' ||
@@ -677,6 +723,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         result = { ...result, turns: tCopy, nextBlockId: consolidated.nextBlockId };
       }
 
+      // Exhaustion is rendered by the tool_card itself (amber dot + status footer
+      // "blocked (too many repeated failures)"), no separate notification needed.
       return result;
     }
     case 'state_change': {
@@ -804,10 +852,41 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         kind: 'approval',
         approval: event.data,
       };
-      return {
+      let next = {
         ...appendBlock(finalized, block),
-        interrupt: { kind: 'approval', blockId: block.id },
+        interrupt: { kind: 'approval' as const, blockId: block.id },
       };
+      // 如果是子 agent 的工具需要审批，标记该子 agent 为等待审批状态
+      if (event.data.subagentId) {
+        next = {
+          ...next,
+          turns: next.turns.map((turn) => {
+            let changed = false;
+            const blocks = turn.blocks.map((blk) => {
+              if (
+                blk.kind === 'subagent' &&
+                blk.subagentId === event.data.subagentId &&
+                blk.status === 'running'
+              ) {
+                changed = true;
+                const stepIndex = blk.steps.length - 1;
+                const steps = blk.steps.map((s, i) =>
+                  i === stepIndex ? { ...s, status: 'awaiting_approval' as const } : s,
+                );
+                return {
+                  ...blk,
+                  awaitingApproval: true,
+                  approvingStepIndex: stepIndex,
+                  steps,
+                };
+              }
+              return blk;
+            });
+            return changed ? { ...turn, blocks } : turn;
+          }),
+        };
+      }
+      return next;
     }
     case 'need_input': {
       const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
@@ -906,7 +985,15 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       if (matched?.kind !== 'subagent') return state;
       const next: OutputBlock = {
         ...matched,
-        steps: [...matched.steps, { toolName: event.data.toolName, toolArgs: event.data.toolArgs }],
+        steps: [
+          ...matched.steps,
+          {
+            toolName: event.data.toolName,
+            toolArgs: event.data.toolArgs,
+            status: 'pending' as const,
+          },
+        ],
+        awaitingApproval: false, // 新步骤到来时清除等待状态
       };
       return replaceBlockById(state, matched.id, next);
     }
@@ -916,21 +1003,32 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         (b) => b.kind === 'subagent' && b.subagentId === event.data.id,
       );
       if (matched?.kind !== 'subagent') return state;
-      // Reverse-scan to find the last UNRESOLVED step with matching toolName.
-      // Prefer unresolved steps to handle out-of-order results correctly:
-      // e.g., two read_file steps — first result resolves the last unresolved one,
-      // second result resolves the remaining one.
+      // Reverse-scan unresolved steps by status (not ok boolean).
+      // pending / awaiting_approval → unresolved; success / rejected / error → resolved.
       let lastMatchIdx = -1;
       for (let i = matched.steps.length - 1; i >= 0; i--) {
         if (
           matched.steps[i]!.toolName === event.data.toolName &&
-          matched.steps[i]!.ok === undefined
+          (matched.steps[i]!.status === 'pending' ||
+            matched.steps[i]!.status === 'awaiting_approval')
         ) {
           lastMatchIdx = i;
           break;
         }
       }
-      // Fallback: if all matching steps already have ok, re-resolve the last one
+      // Fallback: old data without status field → match by ok===undefined (unresolved)
+      if (lastMatchIdx === -1) {
+        for (let i = matched.steps.length - 1; i >= 0; i--) {
+          if (
+            matched.steps[i]!.toolName === event.data.toolName &&
+            matched.steps[i]!.ok === undefined
+          ) {
+            lastMatchIdx = i;
+            break;
+          }
+        }
+      }
+      // Absolute fallback: all steps have ok set already, re-resolve the last one
       if (lastMatchIdx === -1) {
         for (let i = matched.steps.length - 1; i >= 0; i--) {
           if (matched.steps[i]!.toolName === event.data.toolName) {
@@ -940,11 +1038,26 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         }
       }
       if (lastMatchIdx === -1) return state;
-      const steps = matched.steps.map((s, i) =>
-        i === lastMatchIdx ? { ...s, ok: event.data.ok, totalLines: event.data.totalLines } : s,
-      );
+      // Compute step status from result + approval context.
+      // A rejected approval produces status:'rejected', not status:'error'.
+      const isApprovalRejected =
+        matched.approvingStepIndex === lastMatchIdx && event.data.ok === false;
+      const stepStatus: 'rejected' | 'success' | 'error' = isApprovalRejected
+        ? 'rejected'
+        : event.data.ok
+          ? 'success'
+          : 'error';
+      const steps = matched.steps.map((s, i) => {
+        if (i !== lastMatchIdx) return s;
+        return { ...s, status: stepStatus, ok: event.data.ok, totalLines: event.data.totalLines };
+      });
       if (steps.every((s, i) => s === matched.steps[i]!)) return state;
-      const next: OutputBlock = { ...matched, steps };
+      const next: OutputBlock = {
+        ...matched,
+        steps,
+        awaitingApproval: false,
+        approvingStepIndex: undefined,
+      };
       return replaceBlockById(state, matched.id, next);
     }
     case 'subagent_done': {

@@ -1,3 +1,5 @@
+import type { ExhaustionSignal } from '@/core/execution/journal';
+import type { SubAgentResult } from '@/core/subagent/types';
 import type { ShellIntent, ShellResult, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPlan, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 
@@ -11,10 +13,14 @@ export interface ToolFailure {
   reason: string;
   /** 正确使用该工具的提示 / Guidance for using the tool correctly */
   guidance: string;
+  /** 同指纹连续失败达上限时的耗尽信号 / Set when repeated same(error,tool,path) failures exhaust the retry limit */
+  exhausted?: ExhaustionSignal;
 }
 
 /** 工具执行结果类型 / Tool execution result type */
 export type ToolExecutionResult = ShellResult & {
+  /** Project-level execution status. LangChain ToolMessage still maps this to success/error only. */
+  status?: 'success' | 'error' | 'rejected' | 'exhausted';
   /** 执行该结果对应的工具名称 / Tool name that produced this result */
   tool?: string;
   /** 失败时交给模型的结构化指导 / Structured guidance returned on failure */
@@ -46,4 +52,5 @@ export type ToolExecutionResult = ShellResult & {
   activeSkillInstructions?: string;
   /** read_file 返回的文件总行数，用于 TUI 展示行号范围 / Total lines in file returned by read_file for TUI line range display */
   totalLines?: number;
+  subagentResult?: SubAgentResult;
 };

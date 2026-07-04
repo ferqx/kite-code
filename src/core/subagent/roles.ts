@@ -4,8 +4,10 @@ import type { SubAgentRole, SubAgentRoleConfig } from './types';
 // ── 只读角色的共用工具说明（explore / plan / review 共享这段，避免重复） ──
 const READ_ONLY_TOOL_GUIDE = [
   '## Tool usage',
-  '- read_file: Preferred for reading known paths.',
-  '- shell_execute: For grep/rg searches. Always use intent="inspect". rg exit code 1 = no matches (normal, do not retry). Never use cat/head/tail/sed/awk — use read_file instead.',
+  '- read_file: Preferred for reading known paths. Use paths relative to the workspace, never absolute paths.',
+  '- search_content: Preferred for code search (grep/rg). Returns structured results with file:line references.',
+  '- search_files: Preferred for file discovery (find/ls). Use glob patterns to filter by extension or name.',
+  '- shell_execute: Fallback for commands not covered by the dedicated tools above. Always use intent="inspect". rg exit code 1 = no matches (normal, do not retry). Never use cat/head/tail/sed/awk — use read_file instead.',
   '- read_mcp_resource: For reading MCP-served resources.',
   '- Issue independent reads in parallel.',
   '- These are your ONLY tools. Do not attempt to edit, write, execute mutations, or interact with users.',
@@ -73,15 +75,16 @@ const CODE_SYSTEM_PROMPT = [
   '## Tool usage',
   '',
   '### File operations',
-  '- read_file: Use when the path is known.',
-  '- edit_file: Use for targeted changes. old_string MUST come from verified content — never guess. Split large changes into multiple edits.',
-  '- write_file: Use for new files or full rewrites only.',
+  '- read_file: Use when the path is known. Use paths relative to the workspace, never absolute paths.',
+  '- edit_file: Use for targeted changes. old_string MUST come from verified content — never guess. Split large changes into multiple edits. Use paths relative to the workspace, never absolute paths.',
+  '- write_file: Use for new files or full rewrites only. Use paths relative to the workspace, never absolute paths.',
   '- Never use cat/head/tail/sed/awk for file access — use read_file instead.',
   '',
   '### Shell',
   '- Use only when dedicated tools (read_file, edit_file, write_file) cannot accomplish the task.',
   '- Tag read-only commands with intent="inspect". Verification commands with intent="verify".',
   '- Commands that mutate files or VCS need approval.',
+  '- If a command is blocked because it requires approval, try a different approach: use read-only alternatives first (rg, ls, git status with intent="inspect"), then try a different tool or different arguments. Do not retry the exact same command.',
   '- rg exit code 1 = no matches (normal, do not retry).',
   '- On failure: diagnose root cause before retrying. Retry at most once.',
   '',
@@ -101,6 +104,7 @@ const CODE_SYSTEM_PROMPT = [
   '- If verification cannot run, report why and state the impact.',
   '',
   '## Failure recovery',
+  '- When a tool is rejected by approval: try a completely different approach. Use shell_execute as a fallback, or use read-only tools to gather more context before attempting writes again.',
   '- When a tool fails: verify the path exists and the command is available before retrying.',
   '- After a read failure, narrow scope and re-read before making changes.',
   '- Never make modifications from memory after a failed read.',
@@ -131,7 +135,13 @@ const REVIEW_SYSTEM_PROMPT = [
 ].join('\n');
 
 // ── 角色配置 ──
-const READ_ONLY_TOOLS = new Set(['read_file', 'shell_execute', 'read_mcp_resource']);
+const READ_ONLY_TOOLS = new Set([
+  'read_file',
+  'search_content',
+  'search_files',
+  'shell_execute',
+  'read_mcp_resource',
+]);
 const FULL_TOOLS: Set<string> | undefined = undefined; // undefined = all tools available
 
 const ROLE_CONFIGS: Record<SubAgentRole, SubAgentRoleConfig> = {

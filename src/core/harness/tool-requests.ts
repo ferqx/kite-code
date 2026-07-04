@@ -200,7 +200,7 @@ export function getAllPendingToolRequests(
 }
 
 /** 从单个 tool_call 解析工具请求 / Parse tool request from a single tool_call */
-function toolRequestFromCall(
+export function toolRequestFromCall(
   call: { id?: string; name: string; args: Record<string, unknown> },
   _workspace: string,
 ): PendingToolRequest | null {

@@ -63,15 +63,6 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('/plan')).toEqual({ type: 'plan' });
   });
 
-  // ── /auth ──
-  test('parses /auth without mode', () => {
-    expect(parseSlashCommand('/auth')).toEqual({ type: 'auth', mode: undefined });
-  });
-
-  test('parses /auth with mode', () => {
-    expect(parseSlashCommand('/auth full_access')).toEqual({ type: 'auth', mode: 'full_access' });
-  });
-
   // ── /clear ──
   test('parses /clear', () => {
     expect(parseSlashCommand('/clear')).toEqual({ type: 'clear' });
@@ -131,5 +122,35 @@ describe('parseSlashCommand', () => {
 
   test('handles empty string', () => {
     expect(parseSlashCommand('')).toBeNull();
+  });
+
+  // ── /mode ──
+
+  test('parses /mode auto', () => {
+    expect(parseSlashCommand('/mode auto')).toEqual({ type: 'mode', mode: 'auto' });
+  });
+
+  test('parses /mode full', () => {
+    expect(parseSlashCommand('/mode full')).toEqual({ type: 'mode', mode: 'full' });
+  });
+
+  test('parses /mode ask', () => {
+    expect(parseSlashCommand('/mode ask')).toEqual({ type: 'mode', mode: 'ask' });
+  });
+
+  test('parses /mode with no arg', () => {
+    expect(parseSlashCommand('/mode')).toEqual({ type: 'mode', mode: undefined });
+  });
+
+  test('parses /mode with short form a', () => {
+    expect(parseSlashCommand('/mode a')).toEqual({ type: 'mode', mode: 'a' });
+  });
+
+  test('parses /mode with short form f', () => {
+    expect(parseSlashCommand('/mode f')).toEqual({ type: 'mode', mode: 'f' });
+  });
+
+  test('parses /mode with short form au', () => {
+    expect(parseSlashCommand('/mode au')).toEqual({ type: 'mode', mode: 'au' });
   });
 });

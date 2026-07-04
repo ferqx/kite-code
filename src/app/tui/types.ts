@@ -16,7 +16,7 @@ export interface ConsolidatedToolEntry {
   ok: boolean;
   summary: string;
   elapsedMs?: number;
-  status: 'running' | 'done' | 'error' | 'cancelled' | 'timeout';
+  status: 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
   /** 读取文件时的文件总行数 / Total lines for read_file tool */
   totalLines?: number;
 }
@@ -26,6 +26,12 @@ export type ThoughtActivity = { kind: 'thinking'; text: string } | { kind: 'tool
 export interface SubAgentStepRecord {
   toolName: string;
   toolArgs: Record<string, unknown>;
+  /** 步生命周期状态，渲染层只读此字段决定颜色，不依赖任何布尔组合推断
+   *  Step lifecycle status — the single source of truth for color decisions.
+   *  pending → awaiting_approval → success | rejected | error */
+  status: 'pending' | 'awaiting_approval' | 'success' | 'rejected' | 'error';
+  /** 工具执行结果（仅 success / error 时有意义），保留用于日志和调试
+   *  Tool execution outcome (meaningful only for success / error status), kept for logging */
   ok?: boolean;
   /** 读取文件时的文件总行数，用于 TUI 行号范围展示 / Total lines in file for read_file, used for TUI line range display */
   totalLines?: number;
@@ -41,7 +47,7 @@ export type OutputBlock =
       callId: string;
       name: string;
       args: Record<string, unknown>;
-      status: 'running' | 'done' | 'error' | 'cancelled' | 'timeout';
+      status: 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
       summary: string;
       preview?: string;
       /** 工具实际开始执行的时间戳（用于 live 计时器），排除审批等待后会被重置 / Wall-clock timestamp when tool actually began executing (for live timer), reset after approval to exclude wait time */
@@ -65,6 +71,8 @@ export type OutputBlock =
       summaryLine: string;
       active: boolean;
       latestActivity?: ThoughtActivity;
+      /** 整体结果状态（仅 active=false 时有意义），替代从子 tool 状态推断 / Overall outcome (meaningful when active=false), replaces boolean inference */
+      result?: 'done' | 'error' | 'cancelled';
     }
   | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
   | {
@@ -96,6 +104,10 @@ export type OutputBlock =
       expanded?: boolean;
       cacheHitTokens?: number;
       cacheMissTokens?: number;
+      /** 子 agent 正在等待工具审批 / Sub-agent is awaiting tool approval */
+      awaitingApproval?: boolean;
+      /** 正在等待审批的步骤索引，用于 tool_result 回来后标记 rejected / Step index being approved, used to mark as rejected on tool_result */
+      approvingStepIndex?: number;
     };
 
 /** 一次完整的「用户提问 → Agent 回复」往返 */
@@ -147,6 +159,8 @@ export interface TuiState {
   explorationSummaryIds: Record<string, number>;
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
   currentThoughtSummaryId?: number;
+  /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
+  interactionMode: 'ask' | 'auto' | 'full';
 }
 
 export type InterruptState =

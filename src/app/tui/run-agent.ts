@@ -30,6 +30,7 @@ export interface BuildRunTaskParams extends BaseTuiParams {
   task: string;
   pendingSkillsContent: string;
   shellContext: string;
+  interactionMode?: 'ask' | 'auto' | 'full';
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   model?: SupportedChatModel;
 }
@@ -67,6 +68,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): RunAgentInput {
     skills: p.skills,
     skillOptions: p.skillOptions ?? undefined,
     model: p.model,
+    interactionMode: p.interactionMode,
     frontend: 'tui',
   };
 }

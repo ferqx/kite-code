@@ -275,16 +275,25 @@ describe('StatsLine', () => {
     expect(lastFrame()).toContain('10.0k');
   });
 
-  test('shows [完全] for full_access auth', () => {
-    const status = fakeStatus({ authorization: 'full_access' });
-    const { lastFrame } = render(<StatsLine status={status} running />);
-    expect(lastFrame()).toContain('[完全]');
+  test('shows [自动审批] for auto mode', () => {
+    const status = fakeStatus({ authorization: 'default' });
+    const { lastFrame } = render(<StatsLine status={status} running interactionMode="auto" />);
+    expect(lastFrame()).toContain('[自动审批]');
   });
 
-  test('shows [安全] for default auth', () => {
+  test('shows [完全权限] for full mode', () => {
+    const status = fakeStatus({ authorization: 'full_access' });
+    const { lastFrame } = render(<StatsLine status={status} running interactionMode="full" />);
+    expect(lastFrame()).toContain('[完全权限]');
+  });
+
+  test('shows no label for ask mode (default)', () => {
     const status = fakeStatus({ authorization: 'default' });
-    const { lastFrame } = render(<StatsLine status={status} running />);
-    expect(lastFrame()).toContain('[安全]');
+    const { lastFrame } = render(<StatsLine status={status} running interactionMode="ask" />);
+    expect(lastFrame()).not.toContain('[安全]');
+    expect(lastFrame()).not.toContain('[完全]');
+    expect(lastFrame()).not.toContain('[自动审批]');
+    expect(lastFrame()).not.toContain('[完全权限]');
   });
 
   test('does not show ro/rw indicator (workspace access always write)', () => {
@@ -1086,7 +1095,9 @@ describe('BlockRenderer', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('├─ Read CLAUDE.md [lines 1-126 / 126]');
-    expect(frame).toContain('└─ 运行中');
+    // 所有工具已完成 + 没有 active thinking → footer 变为「完成」
+    // All tools done + no active thinking → footer becomes "完成"
+    expect(frame).toContain('└─ 完成');
     expect(frame).not.toContain('\n   Read CLAUDE.md');
   });
 
@@ -1799,6 +1810,7 @@ describe('App', () => {
       sessionError: false,
       loadingSessionId: null,
       explorationSummaryIds: {},
+      interactionMode: 'ask',
       ...overrides,
     };
   }
@@ -1935,8 +1947,13 @@ describe('SubAgentBlock rendering', () => {
       toolCallCount: 0,
       durationMs: 0,
       steps: [
-        { toolName: 'read_file', toolArgs: { path: 'auth.ts' }, ok: true },
-        { toolName: 'edit_file', toolArgs: { path: 'auth.ts' } },
+        {
+          toolName: 'read_file',
+          toolArgs: { path: 'auth.ts' },
+          status: 'success' as const,
+          ok: true,
+        },
+        { toolName: 'edit_file', toolArgs: { path: 'auth.ts' }, status: 'success' as const },
       ],
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
@@ -2067,7 +2084,7 @@ describe('SubAgentBlock rendering', () => {
       summary: longSummary,
       toolCallCount: 3,
       durationMs: 1200,
-      steps: [{ toolName: 'read_file', toolArgs: {} }],
+      steps: [{ toolName: 'read_file', toolArgs: {}, status: 'success' as const }],
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
     const frame = lastFrame() ?? '';
@@ -2080,6 +2097,7 @@ describe('SubAgentBlock rendering', () => {
 
   test('running block limits visible steps', () => {
     const steps = Array.from({ length: 15 }, (_, i) => ({
+      status: 'pending' as const,
       toolName: `step_${String(i + 1).padStart(2, '0')}`,
       toolArgs: {},
     }));

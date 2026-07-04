@@ -1,5 +1,6 @@
 // ── Agent 生命周期（运行/空闲/退出）、中断、授权、Ctrl+C/Esc ──
 
+import { InteractionMode } from '@/protocol/events';
 import type { OutputBlock, TuiState } from '../types';
 import type { Action } from './actions';
 import { buildToolSummaryLine } from './consolidateTools';
@@ -145,6 +146,19 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
       }
     }
   }
+  // 清除子 agent 的 awaitingApproval / Clear sub-agent awaiting state on cancel
+  const clearedTurns = next.turns.map((turn) => {
+    let changed = false;
+    const blocks = turn.blocks.map((blk) => {
+      if (blk.kind === 'subagent' && blk.status === 'running') {
+        changed = true;
+        return { ...blk, awaitingApproval: false };
+      }
+      return blk;
+    });
+    return changed ? { blocks } : turn;
+  });
+  next = { ...next, turns: clearedTurns };
   return {
     ...settleActiveThought(next),
     running: false,
@@ -251,9 +265,13 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       const updatedTurns = withResolved.turns.map((turn) => {
         let changed = false;
         const blocks = turn.blocks.map((blk) => {
-          if ((blk.kind === 'tool_card' || blk.kind === 'subagent') && blk.status === 'running') {
+          if (blk.kind === 'tool_card' && blk.status === 'running') {
             changed = true;
             return { ...blk, startedAt: now };
+          }
+          if (blk.kind === 'subagent' && blk.status === 'running') {
+            changed = true;
+            return { ...blk, startedAt: now, awaitingApproval: false };
           }
           return blk;
         });
@@ -311,6 +329,22 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
     case 'SET_PHASE':
       return { ...state, status: { ...state.status, phase: action.phase } };
+    case 'SET_INTERACTION_MODE': {
+      const next =
+        action.mode === 'toggle'
+          ? state.interactionMode === InteractionMode.Ask
+            ? InteractionMode.Auto
+            : state.interactionMode === InteractionMode.Auto
+              ? InteractionMode.Full
+              : InteractionMode.Ask
+          : action.mode;
+      const auth = next === InteractionMode.Full ? 'full_access' : 'default';
+      return {
+        ...state,
+        interactionMode: next,
+        status: { ...state.status, authorization: auth as 'default' | 'full_access' },
+      };
+    }
     case 'TOGGLE_PLAN_MODE': {
       const nextPhase = state.status.phase === 'planning' ? 'building' : 'planning';
       const nextAuth = nextPhase === 'planning' ? 'default' : state.status.authorization;
@@ -364,10 +398,23 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         const b = findBlockById(state, state.interrupt.blockId);
         if (b) {
           if (b.kind === 'approval') {
-            return {
-              ...replaceBlockById(state, b.id, { ...b, resolved: { action: 'cancelled' } }),
-              interrupt: null,
-            };
+            const withResolved = replaceBlockById(state, b.id, {
+              ...b,
+              resolved: { action: 'cancelled' },
+            });
+            // 清除子 agent 的 waiting 状态 / Clear sub-agent awaiting state on Escape
+            const updatedTurns = withResolved.turns.map((turn) => {
+              let changed = false;
+              const blocks = turn.blocks.map((blk) => {
+                if (blk.kind === 'subagent' && blk.status === 'running') {
+                  changed = true;
+                  return { ...blk, awaitingApproval: false };
+                }
+                return blk;
+              });
+              return changed ? { blocks } : turn;
+            });
+            return { ...withResolved, turns: updatedTurns, interrupt: null };
           } else if (b.kind === 'question') {
             const finalized = finalizeLastTurnStreaming(state);
             return { ...cancelAskUserToolCard(finalized, b.id), interrupt: null };

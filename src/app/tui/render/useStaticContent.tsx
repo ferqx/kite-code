@@ -53,7 +53,8 @@ function isSettled(block: OutputBlock): boolean {
         block.status === 'done' ||
         block.status === 'error' ||
         block.status === 'cancelled' ||
-        block.status === 'timeout'
+        block.status === 'timeout' ||
+        block.status === 'exhausted'
       );
     case 'tool_summary':
       return (
@@ -63,7 +64,8 @@ function isSettled(block: OutputBlock): boolean {
             t.status === 'done' ||
             t.status === 'error' ||
             t.status === 'cancelled' ||
-            t.status === 'timeout',
+            t.status === 'timeout' ||
+            t.status === 'exhausted',
         )
       );
     case 'subagent':
@@ -101,7 +103,7 @@ export function blockFingerprint(b: OutputBlock): string {
     case 'tool_summary':
       // Every tool status change must trigger a split recomputation
       extra =
-        `:${b.active ? 'a' : 's'}:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}` +
+        `:${b.active ? 'a' : 's'}:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}:${b.result ?? '_'}` +
         (b.latestActivity
           ? b.latestActivity.kind === 'thinking'
             ? `:th:${b.latestActivity.text.length}:${b.latestActivity.text.slice(-16)}`
@@ -109,7 +111,9 @@ export function blockFingerprint(b: OutputBlock): string {
           : '');
       break;
     case 'subagent':
-      extra = `:${b.status}:${b.steps.length}`;
+      extra =
+        `:${b.status}:${b.steps.length}:${b.steps.map((s) => s.status?.[0] ?? '_').join('')}` +
+        (b.awaitingApproval ? ':wait' : '');
       break;
     case 'approval':
     case 'question':

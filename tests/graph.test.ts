@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AIMessage, type BaseMessage, ToolMessage } from '@langchain/core/messages';
 import {
   routeAfterAgent,
@@ -392,6 +395,116 @@ describe('graph local tool routing', () => {
   });
 
   // 验证 write 访问下写入工具调用路由到审批 / Write tools under write access route to approval
+  test('routes pending sub-agent approval from tools to approval', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        pendingSubagentApproval: {
+          taskCallId: 'task-1',
+          request: {
+            id: 'sub-tool-1',
+            name: 'shell_execute',
+            args: { command: 'bun test', intent: 'test' },
+            reason: 'sub-agent requested shell',
+            protectedCommand: 'bun test',
+          },
+          continuation: {
+            id: 'sub-1',
+            role: { role: 'code', systemPrompt: 'code' },
+            task: 'verify',
+            messages: [],
+            toolCallCount: 1,
+            steps: [],
+          },
+        },
+      } as unknown as CodeAgentState),
+    ).toBe('approval');
+  });
+
+  test('exhausted + full mode → END', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        interactionMode: 'full',
+        exhaustedFingerprints: { 'shell_execute::EXIT_NONZERO::': true },
+      } as unknown as CodeAgentState),
+    ).toBe('__end__');
+  });
+
+  test('exhausted + auto mode → END', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        interactionMode: 'auto',
+        exhaustedFingerprints: { 'shell_execute::EXIT_NONZERO::': true },
+      } as unknown as CodeAgentState),
+    ).toBe('__end__');
+  });
+
+  test('exhausted + ask mode → agent (human decides)', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        interactionMode: 'ask',
+        exhaustedFingerprints: { 'shell_execute::EXIT_NONZERO::': true },
+      } as unknown as CodeAgentState),
+    ).toBe('agent');
+  });
+
+  test('exhausted fingerprints + pending subagent → approval (subagent takes priority)', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        exhaustedFingerprints: { 'shell_execute::EXIT_NONZERO::': true },
+        pendingSubagentApproval: {
+          taskCallId: 'task-1',
+          request: {
+            id: 'sub-tool-1',
+            name: 'shell_execute',
+            args: { command: 'bun test', intent: 'test' },
+            reason: 'sub-agent requested shell',
+            protectedCommand: 'bun test',
+          },
+          continuation: {
+            id: 'sub-1',
+            role: { role: 'code', systemPrompt: 'code' },
+            task: 'verify',
+            messages: [],
+            toolCallCount: 1,
+            steps: [],
+          },
+        },
+      } as unknown as CodeAgentState),
+    ).toBe('approval');
+  });
+
+  test('empty exhausted fingerprints → agent (unchanged behavior)', () => {
+    expect(
+      routeAfterTools({
+        workspaceAccess: 'write',
+        plan: activePlan,
+        workspace: '/tmp/workspace',
+        messages: [],
+        exhaustedFingerprints: {},
+      } as unknown as CodeAgentState),
+    ).toBe('agent');
+  });
+
   test('routes write tool calls to approval under write access', () => {
     expect(
       routeAfterAgent({
@@ -710,21 +823,26 @@ describe('graph local tool routing', () => {
 
   // 验证 building 阶段下 write_file 通过审批后正常执行 / Write tools execute normally during building phase after approval
   test('allows write tools during building phase after approval', async () => {
-    const result = await runApprovedTool({
-      workspace: '/tmp/workspace',
-      request: {
-        id: 'call-1',
-        name: 'write_file',
-        args: { path: 'hello.txt', content: 'hi' },
-        reason: 'Write file',
-        protectedCommand: 'write_file hello.txt',
-      },
-      workspaceAccess: 'write',
-      approvedGrant: 'approve_once',
-    });
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-graph-write-'));
+    try {
+      const result = await runApprovedTool({
+        workspace,
+        request: {
+          id: 'call-1',
+          name: 'write_file',
+          args: { path: 'hello.txt', content: 'hi' },
+          reason: 'Write file',
+          protectedCommand: 'write_file hello.txt',
+        },
+        workspaceAccess: 'write',
+        approvedGrant: 'approve_once',
+      });
 
-    expect(result.ok).toBe(true);
-    expect(result.tool).toBe('write_file');
+      expect(result.ok).toBe(true);
+      expect(result.tool).toBe('write_file');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   // 验证 planning phase 是独立的执行边界，执行类工具会在 runner 兜底拒绝 / Planning phase is an execution boundary enforced by the runner
@@ -925,7 +1043,12 @@ describe('routeEntry — start-of-graph routing', () => {
     authorization: defaultAuthorizationState(),
     approvedToolRequest: null,
     approvedToolGrant: null,
-    approvedBatch: {} as Record<string, 'approve_once' | 'same_command' | 'full_access'>,
+    approvedBatch: {},
+    executionEnvironment: 'local_unsafe' as const,
+    interactionMode: 'ask' as const,
+    executionJournal: [],
+    exhaustedFingerprints: {},
+    pendingSubagentApproval: null,
     contextBudget: undefined,
     plan: null,
     planReviewed: false,

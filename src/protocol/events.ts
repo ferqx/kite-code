@@ -50,8 +50,20 @@ export type AgentPhase = 'planning' | 'building';
 /** 工作区访问请求模式（CLI --mode 参数），已废弃 read-only/plan / Workspace access request mode (CLI --mode), read-only/plan deprecated */
 export type WorkspaceAccessRequest = 'auto' | WorkspaceAccess | 'builder';
 export type AuthorizationMode = 'default' | 'full_access';
+export const InteractionMode = {
+  Ask: 'ask',
+  Auto: 'auto',
+  Full: 'full',
+} as const;
+export type InteractionMode = (typeof InteractionMode)[keyof typeof InteractionMode];
+
 export type ShellApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
 export type ShellGrantUsed = 'none' | ShellApprovalGrant;
+
+/** 判断是否为全自动放行模式（目前只有 full） */
+export function isFullAccessMode(mode: InteractionMode): boolean {
+  return mode === InteractionMode.Full;
+}
 export type PlanStatus = 'pending' | 'in_progress' | 'completed';
 
 export interface AgentPlanStep {
@@ -111,6 +123,10 @@ export interface ToolResultPayload {
   totalLines?: number;
   /** 工具输出的 token 数，用于独立于 provider 的累计统计 / Token count of the tool output for provider-agnostic cumulative tracking */
   toolTokenCount?: number;
+  /** 执行层工具状态。'exhausted' 表示连续失败达上限，系统已阻断该路径。
+   *  / Execution-layer tool status. 'exhausted' means consecutive failures hit the cap
+   *  and the system has blocked this path. */
+  status?: 'success' | 'error' | 'exhausted';
 }
 
 export interface UserInputQuestion {
@@ -239,6 +255,8 @@ export interface ToolApprovalPayload {
   suggestedPrefixRule?: string[];
   /** update_plan 的方案数据（审批时嵌入） */
   plan?: AgentPlan;
+  /** 子 agent ID，当审批来自子 agent 的工具调用时填充 / Sub-agent ID when approval originates from a sub-agent's tool call */
+  subagentId?: string;
 }
 
 // ── 子 Agent 事件 / Sub-agent events ──

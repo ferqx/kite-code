@@ -36,14 +36,21 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('(allow process-fork)');
   });
 
-  test('profile allows global file write (authorization by tool-policy, not sandbox)', () => {
+  test('profile restricts file write to workspace and temp directories', () => {
     const profile = generateSandboxProfile('/tmp/test-workspace');
-    expect(profile).toContain('(allow file-write* file-ioctl (subpath "/"))');
+    expect(profile).toContain('(allow file-write* file-ioctl (subpath "/tmp/test-workspace"))');
+    expect(profile).toContain('(allow file-write* file-ioctl (subpath "/tmp"))');
+    expect(profile).not.toContain('(allow file-write* file-ioctl (subpath "/"))');
   });
 
   test('profile does not deny network (controlled by tool-policy approval)', () => {
     const profile = generateSandboxProfile('/tmp/test-workspace');
     expect(profile).not.toContain('(deny network*)');
+  });
+
+  test('profile can deny network explicitly', () => {
+    const profile = generateSandboxProfile('/tmp/test-workspace', { network: 'disabled' });
+    expect(profile).toContain('(deny network*)');
   });
 
   test('profile imports system.sb as base', () => {
@@ -56,9 +63,12 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('(allow file-read* (subpath "/"))');
   });
 
-  test('profile allows global file create/unlink (dangerous paths blocked by checkDangerousPaths)', () => {
+  test('profile restricts file create/unlink to workspace and temp directories', () => {
     const profile = generateSandboxProfile('/tmp/test-workspace');
-    expect(profile).toContain('(allow file-write-unlink file-write-create (subpath "/"))');
+    expect(profile).toContain(
+      '(allow file-write-unlink file-write-create (subpath "/tmp/test-workspace"))',
+    );
+    expect(profile).not.toContain('(allow file-write-unlink file-write-create (subpath "/"))');
   });
 });
 
@@ -100,7 +110,9 @@ describe('shell wrapper utilities', () => {
     try {
       const env = buildHardenedEnv(ws);
       // HOME is inherited from parent (real user home), not redirected
-      expect(env.HOME).toBeDefined();
+      if (process.env.HOME !== undefined) {
+        expect(env.HOME).toBe(process.env.HOME);
+      }
       // Temp and cache paths are still sandboxed
       expect(env.TMPDIR).toBe(join(ws, '.sandbox-tmp'));
       expect(env.TMP).toBe(join(ws, '.sandbox-tmp'));
@@ -276,10 +288,17 @@ describe('bwrap argument generation', () => {
 
   test('includes system paths as read-only', () => {
     const args = generateBwrapArgs('/tmp/test-ws');
-    expect(args).toContain('--ro-bind');
-    // 至少包含 /usr 或 /bin（取决于系统）
-    const hasSystemPath = args.includes('/usr') || args.includes('/bin');
-    expect(hasSystemPath).toBe(true);
+    if (process.platform === 'linux') {
+      expect(args).toContain('--ro-bind');
+      // 至少包含 /usr 或 /bin（取决于系统）
+      const hasSystemPath = args.includes('/usr') || args.includes('/bin');
+      expect(hasSystemPath).toBe(true);
+    }
+  });
+
+  test('can disable network namespace', () => {
+    const args = generateBwrapArgs('/tmp/test-ws', { network: 'disabled' });
+    expect(args).toContain('--unshare-net');
   });
 });
 
@@ -325,7 +344,7 @@ describe('seccomp resolution', () => {
     // x64 / arm64 至少一个存在 / at least one is present
     if (process.arch === 'x64' || process.arch === 'arm64') {
       expect(path).toBeString();
-      expect(path).toContain('vendor/seccomp');
+      expect(path?.replace(/\\/g, '/')).toContain('vendor/seccomp');
     } else {
       expect(path).toBeNull();
     }
@@ -341,12 +360,12 @@ describe('seccomp resolution', () => {
     expect(resolveSeccompPath(binary, ws)).toBe(binary);
   });
 
-  test('resolveSeccompPath copies binary when outside workspace', () => {
+  test('resolveSeccompPath copies binary when outside workspace', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'seccomp-test-'));
     const srcDir = mkdtempSync(join(tmpdir(), 'seccomp-src-'));
     try {
       const srcBinary = join(srcDir, 'apply-seccomp');
-      Bun.write(srcBinary, '#!/bin/sh\necho fake');
+      await Bun.write(srcBinary, '#!/bin/sh\necho fake');
       chmodSync(srcBinary, 0o755);
 
       const resolved = resolveSeccompPath(srcBinary, ws);

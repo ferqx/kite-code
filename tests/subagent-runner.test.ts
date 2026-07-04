@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { AIMessage } from '@langchain/core/messages';
+import { defaultAuthorizationState } from '@/core/harness/tool-policy';
 import { getRoleConfig } from '@/core/subagent/roles';
-import { runSubAgent } from '@/core/subagent/runner';
+import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
 import { StreamingMockModel } from './mock-model';
 
 function mockEventSink() {
@@ -85,6 +87,243 @@ describe('SubAgentRunner integration', () => {
       const stepEvents = events.filter((e) => e.type === 'step');
       expect(stepEvents.length).toBeGreaterThanOrEqual(1);
       expect(stepEvents[0]!.data.toolName).toBe('read_file');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('normalizes workspace absolute file paths before executing read_file', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-abs-path-'));
+    writeFileSync(join(ws, 'package.json'), '{"name":"fixture"}\n', 'utf-8');
+
+    try {
+      const { events, sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: new AIMessage({
+              content: 'read package',
+              tool_calls: [
+                { id: 'tc-abs', name: 'read_file', args: { path: join(ws, 'package.json') } },
+              ],
+            }),
+          },
+          { message: new AIMessage({ content: 'done' }) },
+        ],
+      }) as any;
+
+      const result = await runSubAgent({
+        config: { providerName: 'deepseek', modelName: 'test' } as any,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'read package.json',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model: model as any,
+      });
+
+      expect(result.ok).toBe(true);
+      const step = events.find((e) => e.type === 'step' && e.data.toolName === 'read_file');
+      expect((step?.data.toolArgs as { path?: string } | undefined)?.path).toBe('package.json');
+      const readResult = events.find(
+        (e) => e.type === 'tool_result' && e.data.toolName === 'read_file',
+      );
+      expect(readResult?.data.ok).toBe(true);
+      expect(String(readResult?.data.summary)).toContain('read_file package.json');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('inherits full access authorization for sub-agent verification commands', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-verify-'));
+    try {
+      const { events, sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: new AIMessage({
+              content: 'verify',
+              tool_calls: [
+                {
+                  id: 'tc-verify',
+                  name: 'shell_execute',
+                  args: {
+                    command: 'bun run typecheck',
+                    description: 'Run typecheck',
+                    intent: 'verify',
+                  },
+                },
+              ],
+            }),
+          },
+          { message: new AIMessage({ content: 'done' }) },
+        ],
+      }) as any;
+
+      const result = await runSubAgent({
+        config: { providerName: 'deepseek', modelName: 'test' } as any,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'run verification',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model: model as any,
+        authorization: { ...defaultAuthorizationState(), mode: 'full_access' },
+        shellExecutor: async (input) => ({
+          ok: true,
+          command: input.command,
+          exitCode: 0,
+          stdout: 'typecheck ok',
+          stderr: '',
+        }),
+      });
+
+      expect(result.ok).toBe(true);
+      const shellResult = events.find(
+        (e) => e.type === 'tool_result' && e.data.toolName === 'shell_execute',
+      );
+      expect(shellResult?.data.ok).toBe(true);
+      expect(String(shellResult?.data.summary)).toContain('typecheck ok');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('returns approval-required instead of executing protected commands without authorization', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-needs-approval-'));
+    try {
+      const { events, sink } = mockEventSink();
+      let shellExecutions = 0;
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: new AIMessage({
+              content: 'verify',
+              tool_calls: [
+                {
+                  id: 'tc-verify-needs-approval',
+                  name: 'shell_execute',
+                  args: {
+                    command: 'bun run typecheck',
+                    description: 'Run typecheck',
+                    intent: 'verify',
+                  },
+                },
+              ],
+            }),
+          },
+          { message: new AIMessage({ content: 'done' }) },
+        ],
+      }) as any;
+
+      const result = await runSubAgent({
+        config: { providerName: 'deepseek', modelName: 'test' } as any,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'run verification',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model: model as any,
+        shellExecutor: async (input) => {
+          shellExecutions++;
+          return {
+            ok: true,
+            command: input.command,
+            exitCode: 0,
+            stdout: 'should not run',
+            stderr: '',
+          };
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.blocked?.reasonCode).toBe('SUBAGENT_TOOL_REQUIRES_APPROVAL');
+      expect(result.blocked?.toolName).toBe('shell_execute');
+      expect(result.blocked?.toolCallId).toBe('tc-verify-needs-approval');
+      expect(result.blocked?.command).toBe('bun run typecheck');
+      expect(result.blocked?.continuation.messages.length).toBeGreaterThan(0);
+      expect(shellExecutions).toBe(0);
+      expect(events.some((e) => e.type === 'error')).toBe(false);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('resumes original sub-agent after approved tool result', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-resume-'));
+    try {
+      const { events, sink } = mockEventSink();
+      let shellExecutions = 0;
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: new AIMessage({
+              content: 'verify',
+              tool_calls: [
+                {
+                  id: 'tc-resume-verify',
+                  name: 'shell_execute',
+                  args: {
+                    command: 'bun run typecheck',
+                    description: 'Run typecheck',
+                    intent: 'verify',
+                  },
+                },
+              ],
+            }),
+          },
+          { message: new AIMessage({ content: 'saw typecheck ok' }) },
+        ],
+      }) as any;
+
+      const input = {
+        config: { providerName: 'deepseek', modelName: 'test' } as any,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'run verification',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model: model as any,
+        shellExecutor: async (toolInput: { command: string }) => {
+          shellExecutions++;
+          return {
+            ok: true,
+            command: toolInput.command,
+            exitCode: 0,
+            stdout: 'should not run before approval',
+            stderr: '',
+          };
+        },
+      };
+
+      const blocked = await runSubAgent(input);
+      expect(blocked.ok).toBe(false);
+      expect(blocked.blocked?.reasonCode).toBe('SUBAGENT_TOOL_REQUIRES_APPROVAL');
+      expect(shellExecutions).toBe(0);
+
+      const resumed = await resumeSubAgent(input, blocked.blocked!.continuation, {
+        toolCallId: 'tc-resume-verify',
+        toolName: 'shell_execute',
+        result: {
+          ok: true,
+          command: 'bun run typecheck',
+          exitCode: 0,
+          stdout: 'typecheck ok',
+          stderr: '',
+          status: 'success',
+        },
+      });
+
+      expect(resumed.ok).toBe(true);
+      expect(resumed.summary).toContain('saw typecheck ok');
+      expect(shellExecutions).toBe(0);
+      const doneEvent = events.find((e) => e.type === 'done');
+      expect(String(doneEvent?.data.summary)).toContain('saw typecheck ok');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-03（TUI E2E PTY 双层架构改造方案）
+最后更新：2026-07-04（TUI E2E PTY 双层架构改造 + 执行可靠性与连续失败处理）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -38,7 +38,7 @@
 | [`2026-06-26-shell-live-output.md`](2026-06-26-shell-live-output.md) | completed | P0 | — | — | Shell 工具实时输出展示：`tool_progress` 事件 + 流式 stdout/stderr 读取 + TUI tail-follow 渲染 |
 | [`2026-06-28-context-compaction.md`](2026-06-28-context-compaction.md) | active | P0 | — | — | M0 TUI 预整合 ✅ + M1 Core 工具折叠 ✅ + M2 对话摘要（延后） |
 | [`2026-06-27-plan-subagent-role-design.md`](2026-06-27-plan-subagent-role-design.md) | draft | P1 | — | — | Plan 子 Agent 角色：只读架构设计专家，多视角并行设计方案，主 agent 合并后调 `update_plan` |
-| [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | draft | P0 | — | — | 审批层、执行层与沙箱渐进式开发：5 阶段增量演进，基于现有 `runApprovedTool` + `tool-policy` + `sandbox/` 扩展 |
+| [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | active | P0 | — | — | 审批层、执行层与沙箱 5 阶段：阶段四 `/mode` 交互模式 ✅、阶段五 执行可靠性 ✅，阶段一~三待实施 |
 | [`2026-07-01-web-search-tool.md`](2026-07-01-web-search-tool.md) | draft | P0 | — | — | Web 网络工具：Phase 1 `web_fetch`（fetch → SSRF → readability → turndown 正文提取），Phase 2 `web_search`（搜索发现 URL） |
 | [`2026-07-03-tui-pty-e2e-reform.md`](2026-07-03-tui-pty-e2e-reform.md) | active | P1 | — | 扩展 2026-05-25-e2e-restructure | TUI E2E 双层架构：PTY 终端系统测试 + Ink 组件集成测试。Phase 0-4 完成（19 tests / 6 files），多消息阻塞调查中 |
 

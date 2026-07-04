@@ -11,7 +11,7 @@ export type SlashAction =
   | { type: 'theme'; preset?: string }
   | { type: 'sessions'; id?: string }
   | { type: 'plan'; task?: string }
-  | { type: 'auth'; mode?: string }
+  | { type: 'mode'; mode?: string }
   | { type: 'clear' }
   | { type: 'help' }
   | { type: 'new' }
@@ -38,8 +38,8 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'sessions' };
     case 'plan':
       return { type: 'plan', task: arg || undefined };
-    case 'auth':
-      return { type: 'auth', mode: arg || undefined };
+    case 'mode':
+      return { type: 'mode', mode: arg || undefined };
     case 'clear':
     case 'c':
       return { type: 'clear' };
@@ -118,9 +118,23 @@ export function useSlashCommand(
             onRunTask(action.task);
           }
           break;
-        case 'auth':
-          dispatch({ type: 'SWITCH_AUTH', mode: action.mode ?? 'toggle' });
+        case 'mode': {
+          const normalized = (action.mode ?? '').toLowerCase();
+          let target: 'ask' | 'auto' | 'full' | 'toggle' | null = null;
+          if (!normalized) {
+            target = 'toggle';
+          } else if (normalized === 'a' || normalized.startsWith('as')) {
+            target = 'ask';
+          } else if (normalized === 'au' || normalized === 'auto') {
+            target = 'auto';
+          } else if (normalized === 'f' || normalized === 'full') {
+            target = 'full';
+          } else if (['ask', 'auto', 'full'].includes(normalized)) {
+            target = normalized as 'ask' | 'auto' | 'full';
+          }
+          if (target) dispatch({ type: 'SET_INTERACTION_MODE', mode: target });
           break;
+        }
         case 'clear':
           dispatch({ type: 'CLEAR_OUTPUT' });
           break;

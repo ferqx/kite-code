@@ -2,7 +2,7 @@
 
 状态：active
 范围：TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界
-最后更新：2026-06-29
+最后更新：2026-07-03
 
 ## 约束
 
@@ -26,17 +26,21 @@
 
 10. **tool_done 状态更新必须使用 `.map()` 创建全新引用**：直接修改 `turns` 数组和 `blocks` 数组的引用链，确保 reducer 返回全新 state，React 能检测到变化。
 
-11. **计时器对齐**：`totalElapsedMs = Date.now() - createdAt`（wall-clock），非 `Math.max(elapsedMs)`。
+11. **事件驱动计时**：`totalElapsedMs` 由 reducer 在每次相关事件中更新（`Date.now() - createdAt`），不再依赖前端 `setInterval` 主动轮询。更新点：(a) `tool_done` 探索工具完成时；(b) `closeCurrentThought` 关闭 Thought 时；(c) `updateCurrentThoughtActivity` 收到 reason / tool_call 时。`ToolSummaryBlock` 直接读取 `block.totalElapsedMs`，无 live timer。
 
 12. **最小显示 1s**：`formatDuration` 和 `buildToolSummaryLine` 中的耗时格式化，秒数最小为 1。
 
-13. **Static 边界**：`tool_summary` 仅在 `active=false` 且 `tools.every(t => t.status !== 'running')` 时进入 Static。
+13. **工具完成即 ●**：`ToolSummaryBlock` 在 running 状态下，若 `tools.length > 0 && tools.every(t => t.status !== 'running')`，将 spinner 替换为 ●（绿色），footer 从「运行中 (Xs)」切换为「完成」。此判断仅取决于工具状态，不与 `latestActivity.kind` 耦合 —— 后续 reason 事件到来时 ● 不回退为 spinner，避免「完成→运行中→完成」的视觉抖动。thinking 预览与 ● 解耦，可独立展示。
 
-14. **层边界**：`consolidateTools.ts` 中的合并逻辑属于 app 层，不允许导入 core 层模块。
+14. **Static 边界**：`tool_summary` 仅在 `active=false` 且 `tools.every(t => t.status !== 'running')` 时进入 Static。
 
-15. **工具名映射**：所有 TUI 展示使用 `ACTION_NAMES` 映射的友好名称，不允许硬编码英文工具名。
+15. **settledStatus 从实际状态推导**：settled 状态下 `ToolSummaryBlock` 的结算状态直接从工具状态推导（`hasError ? 'error' : hasPendingTools ? 'cancelled' : 'done'`），不使用 `block.result`。`block.result` 由 `closeCurrentThought` 在工具仍 running 时设为 `'cancelled'`，之后 `tool_done` 到达时只更新单条工具状态而不重新计算 `result`，因此可能过时。
 
-16. **审批无关**：探索工具永远不需要审批，`ToolSummaryBlock` 不接受 `awaitingApproval` prop。
+16. **层边界**：`consolidateTools.ts` 中的合并逻辑属于 app 层，不允许导入 core 层模块。
+
+17. **工具名映射**：所有 TUI 展示使用 `ACTION_NAMES` 映射的友好名称，不允许硬编码英文工具名。
+
+18. **审批无关**：探索工具永远不需要审批，`ToolSummaryBlock` 不接受 `awaitingApproval` prop。
 
 ## 设计文档
 

@@ -1,4 +1,5 @@
 // src/core/subagent/types.ts
+import type { BaseMessage } from '@langchain/core/messages';
 import type {
   SubAgentDonePayload,
   SubAgentErrorPayload,
@@ -33,6 +34,10 @@ export interface SubAgentRunnerInput {
   mcpManager?: import('@/core/mcp').McpManager;
   skills?: import('@/core/skills/types').SkillManifest[];
   skillOptions?: import('@/core/skills/types').SkillScanOptions;
+  authorization?: import('@/core/types').ThreadAuthorizationState;
+  workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
+  phase?: import('@/protocol/events').AgentPhase;
+  threadId?: string;
   model?: import('@/core/model/factory').SupportedChatModel;
   timeoutMs: number;
   signal: AbortSignal;
@@ -43,10 +48,25 @@ export interface SubAgentRunnerInput {
   maxDepth?: number;
 }
 
-/** 子 agent 步骤记录（用于持久化到 checkpoint） */
+export interface SubAgentContinuation {
+  id: string;
+  role: SubAgentRoleConfig;
+  task: string;
+  messages: BaseMessage[];
+  toolCallCount: number;
+  steps: SubAgentStepSnapshot[];
+  /** Phase 5: journal state preserved across approval round-trips */
+  executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
+  exhaustedFingerprints?: Record<string, true>;
+}
+
+/** 子 agent 步骤记录（用于持久化到 checkpoint）
+ *  status 与 TUI 的 SubAgentStepRecord.status 保持一致 */
 export interface SubAgentStepSnapshot {
   toolName: string;
   toolArgs: Record<string, unknown>;
+  /** 步生命周期状态（与 TUI SubAgentStepRecord.status 同步） */
+  status: 'pending' | 'awaiting_approval' | 'success' | 'rejected' | 'error';
   ok?: boolean;
   totalLines?: number;
 }
@@ -58,8 +78,21 @@ export interface SubAgentResult {
   toolCallCount: number;
   durationMs: number;
   error?: string;
+  blocked?: {
+    reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL';
+    toolCallId: string;
+    toolName: string;
+    command: string;
+    args: Record<string, unknown>;
+    message: string;
+    continuation: SubAgentContinuation;
+  };
   /** 步骤快照：用于会话重放时恢复步骤树 / Step snapshots for session replay */
   steps?: SubAgentStepSnapshot[];
+  /** Phase 5: 子 Agent 工具执行的 journal 条目 / Journal entries from subagent tool executions */
+  executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
+  /** Phase 5: 子 Agent 中已耗尽的操作指纹 / Exhausted fingerprints detected in subagent */
+  exhaustedFingerprints?: Record<string, true>;
 }
 
 /** 子 agent 缓存指标 / Sub-agent cache metrics */

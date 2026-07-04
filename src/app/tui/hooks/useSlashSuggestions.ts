@@ -21,7 +21,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'sessions', aliases: [], description: 'Show sessions' },
   { name: 'new', aliases: [], description: 'Start a new session' },
   { name: 'plan', aliases: [], description: 'Enter planning mode' },
-  { name: 'auth', aliases: [], description: 'Toggle authorization mode', args: '[mode]' },
+  { name: 'mode', aliases: [], description: 'Set interaction mode', args: 'ask|auto|full' },
   { name: 'clear', aliases: ['c'], description: 'Clear output' },
   { name: 'help', aliases: ['h'], description: 'Show help' },
   { name: 'exit', aliases: ['quit', 'q'], description: 'Exit Kite Code' },
@@ -39,7 +39,7 @@ export interface SuggestionItem {
 }
 
 export interface SlashSuggestionsResult {
-  kind: 'command' | 'model' | 'effort' | 'theme';
+  kind: 'command' | 'model' | 'effort' | 'theme' | 'mode';
   partial: string;
   items: SuggestionItem[];
 }
@@ -47,6 +47,7 @@ export interface SlashSuggestionsResult {
 export interface ActiveSelections {
   theme?: string;
   model?: string;
+  interactionMode?: string;
 }
 
 export function useSlashSuggestions(
@@ -111,6 +112,29 @@ export function useSlashSuggestions(
       };
     }
 
+    // /mode <partial-mode>
+    const modeMatch = inputValue.match(/^\/mode\s+(\S*)$/i);
+    if (modeMatch) {
+      const partial = modeMatch[1]!.toLowerCase();
+      const modes = [
+        { command: 'ask', description: '每次工具调用都需要用户审批' },
+        { command: 'auto', description: '模型自动审核，不确定时询问' },
+        { command: 'full', description: '完全自主，全部放行，不询问用户' },
+      ];
+      const matched = modes.filter((m) => m.command.startsWith(partial));
+      if (matched.length === 0) return null;
+      return {
+        kind: 'mode',
+        partial,
+        items: matched.map((m) => ({
+          command: m.command,
+          aliases: [],
+          description: m.description,
+          isActive: m.command === activeSelections?.interactionMode,
+        })),
+      };
+    }
+
     // /<partial-command>
     const cmdMatch = inputValue.match(/^\/(\S*)$/);
     if (!cmdMatch) return null;
@@ -157,13 +181,16 @@ export function useSlashSuggestions(
 
   const replaceCommand = (
     item: SuggestionItem,
-    kind: 'command' | 'model' | 'effort' | 'theme',
+    kind: 'command' | 'model' | 'effort' | 'theme' | 'mode',
   ): string => {
     if (kind === 'model') {
       return inputValue.replace(/\/model\s+\S*$/, `/model ${item.command}`);
     }
     if (kind === 'effort') {
       return inputValue.replace(/\/effort\s+\S*$/, `/effort ${item.command}`);
+    }
+    if (kind === 'mode') {
+      return inputValue.replace(/\/mode\s+\S*$/, `/mode ${item.command}`);
     }
     if (kind === 'theme') {
       return inputValue.replace(/\/theme\s+\S*$/, `/theme ${item.command}`);

@@ -34,6 +34,15 @@ function tdEvt(callId: string, name: string, ok: boolean, summary: string): Acti
     event: { type: 'tool_done', data: { call_id: callId, name, ok, summary } },
   };
 }
+function tdExhausted(callId: string, name: string, summary: string): Action {
+  return {
+    type: 'EVENT',
+    event: {
+      type: 'tool_done',
+      data: { call_id: callId, name, ok: false, summary, status: 'exhausted' as const },
+    },
+  };
+}
 function approval(data: Partial<ToolApprovalPayload> = {}): ToolApprovalPayload {
   return {
     scope: 'once',
@@ -241,6 +250,52 @@ describe('eventReducer (blocks model)', () => {
       expect(t.status).toBe('timeout');
       expect(t.summary).toBe(output);
       expect(t.timeoutMs).toBe(5000);
+    });
+    test('tool_done with status: exhausted updates tool_card to exhausted state', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute'));
+      s = dispatch(s, tdExhausted('c1', 'shell_execute', 'repeated failure'));
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('exhausted');
+    });
+    test('tool_done exhausted does NOT inject extra notification text block (rendered by tool_card footer)', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute', { command: 'npm test' }));
+      s = dispatch(s, tdExhausted('c1', 'shell_execute', 'repeated failure'));
+      const blocks = flatBlocks(s);
+      // Only the tool_card — no separate notification text block
+      expect(blocks.length).toBe(1);
+      expect(blocks[0]!.kind).toBe('tool_card');
+    });
+    test('tool_done exhausted with no prior tool_card creates just the card (no notification)', () => {
+      let s = fresh();
+      s = dispatch(
+        s,
+        tdExhausted('c1', 'shell_execute', 'Execution blocked: too many repeated failures'),
+      );
+      const blocks = flatBlocks(s);
+      expect(blocks.length).toBe(1);
+      expect(blocks[0]!.kind).toBe('tool_card');
+      expect((blocks[0] as Extract<OutputBlock, { kind: 'tool_card' }>).status).toBe('exhausted');
+    });
+    test('tool_done exhausted overrides earlier error tool_done for same callId', () => {
+      // Real flow: Path A (executeOneTool) sends ok=false first, then
+      // the for-loop sends status:'exhausted' as an override. Both events
+      // arrive for the same callId before Path B (processStream/chunkToEvents).
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute', { command: 'cat /x' }));
+      s = dispatch(s, tdEvt('c1', 'shell_execute', false, 'cat: /x: No such file or directory'));
+      // Verify it's error before the override
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>).status).toBe(
+        'error',
+      );
+      // Now the override
+      s = dispatch(
+        s,
+        tdExhausted('c1', 'shell_execute', 'Execution blocked: too many repeated failures'),
+      );
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('exhausted');
     });
     test('tool_done only updates matching callId', () => {
       let s = fresh();
@@ -2125,6 +2180,68 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, saStart('sub-1', 'explore', 'task1'));
       s = dispatch(s, saStart('sub-2', 'code', 'task2'));
       expect(flatBlocks(s)[0]!.id).toBeLessThan(flatBlocks(s)[1]!.id);
+    });
+  });
+
+  // ── Interaction Mode ──
+
+  describe('SET_INTERACTION_MODE', () => {
+    test('default interactionMode is ask, authorization is default', () => {
+      const s = fresh();
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
+    });
+
+    test('sets interactionMode to auto, authorization stays default', () => {
+      const s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'auto' });
+      expect(s.interactionMode).toBe('auto');
+      expect(s.status.authorization).toBe('default');
+    });
+
+    test('sets interactionMode to full, authorization becomes full_access', () => {
+      const s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
+      expect(s.interactionMode).toBe('full');
+      expect(s.status.authorization).toBe('full_access');
+    });
+
+    test('switching from full to ask resets authorization to default', () => {
+      let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
+      expect(s.status.authorization).toBe('full_access');
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'ask' });
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
+    });
+
+    test('toggle cycles ask → auto → full → ask with correct auth', () => {
+      let s = fresh();
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
+
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('auto');
+      expect(s.status.authorization).toBe('default');
+
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('full');
+      expect(s.status.authorization).toBe('full_access');
+
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
+    });
+
+    test('toggle from auto goes to full with full_access', () => {
+      let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'auto' });
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('full');
+      expect(s.status.authorization).toBe('full_access');
+    });
+
+    test('toggle from full goes to ask with default auth', () => {
+      let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('ask');
+      expect(s.status.authorization).toBe('default');
     });
   });
 });

@@ -81,7 +81,7 @@ function truncateToFit(text: string, maxWidth: number): string {
 }
 
 function failureSummary(step: { status: string; summary: string }, maxWidth: number): string {
-  if (step.status !== 'error' || !step.summary.trim()) return '';
+  if ((step.status !== 'error' && step.status !== 'exhausted') || !step.summary.trim()) return '';
   return truncateToFit(step.summary.replace(/\s+/g, ' ').trim(), maxWidth);
 }
 
@@ -112,15 +112,12 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
 
   const hasPendingTools = block.tools.some((t) => t.status === 'running');
   const isRunning = block.active;
-  const hasError = block.tools.some((t) => t.status === 'error');
-
-  // ── 计时器：ref 驱动，基于绝对时间，免疫重复渲染 ──
-  const [spinnerIdx, setSpinnerIdx] = useState(0);
-  const [liveElapsed, setLiveElapsed] = useState(() =>
-    isRunning && block.createdAt ? Date.now() - block.createdAt : block.totalElapsedMs,
+  const hasError = block.tools.some(
+    (t) => t.status === 'error' || t.status === 'exhausted' || t.status === 'timeout',
   );
-  const createdAtRef = useRef(block.createdAt);
-  createdAtRef.current = block.createdAt;
+
+  // ── Spinner：ref 驱动，基于绝对时间，免疫重复渲染 ──
+  const [spinnerIdx, setSpinnerIdx] = useState(0);
 
   const spinnerStartRef = useRef(Date.now());
   const spinnerRunningRef = useRef(false);
@@ -131,25 +128,22 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
     else setSpinnerIdx(0);
   }, [isRunning]);
 
-  // Single persistent timer — reads running state from ref, never restarts.
+  // Single persistent spinner timer — reads running state from ref, never restarts.
   useEffect(() => {
     const tick = () => {
       if (!spinnerRunningRef.current) return;
       const idx = Math.floor((Date.now() - spinnerStartRef.current) / 80) % SPINNER.length;
       setSpinnerIdx(idx);
     };
-    const spinnerTimer = setInterval(tick, SPINNER_INTERVAL_MS);
-    const elapsedTimer = setInterval(() => {
-      const at = createdAtRef.current;
-      if (at) setLiveElapsed(Date.now() - at);
-    }, 200);
-    return () => {
-      clearInterval(spinnerTimer);
-      clearInterval(elapsedTimer);
-    };
+    const timer = setInterval(tick, SPINNER_INTERVAL_MS);
+    return () => clearInterval(timer);
   }, []);
 
-  const elapsedMs = isRunning ? liveElapsed : block.totalElapsedMs;
+  // 耗时由 reducer 在每次事件（tool_done / reason / closeCurrentThought）中更新，
+  // 不再依赖前端 setInterval 主动计时。
+  // Elapsed is updated by the reducer on each event (tool_done / reason / closeCurrentThought),
+  // removing the need for a live setInterval-based timer.
+  const elapsedMs = block.totalElapsedMs;
   const elapsedStr = formatDuration(elapsedMs);
   const summaryLine = block.summaryLine;
 
@@ -162,8 +156,19 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
 
   // ── Running state ──
   if (isRunning) {
-    const spinner = SPINNER[spinnerIdx]!;
+    // 工具全部完成 → ●；有 pending → spinner。只取决于工具状态，
+    // 不与 latestActivity 绑定——后续思考到来时 ● 不回退为 spinner，
+    // 避免「完成 → 运行中 → 完成」的视觉抖动。
+    // ● when all tools done, spinner when any pending. Keyed only on tool
+    // status, not latestActivity — prevents the jarring ●→spinner→● flicker
+    // when a new reason arrives after tools complete.
+    const allToolsDone = block.tools.length > 0 && !hasPendingTools;
+    const spinner = allToolsDone ? '●' : SPINNER[spinnerIdx]!;
+    const spinnerColor = allToolsDone ? toolColor('done', dt) : undefined;
     const visibleCallIds = new Set(visibleSteps.map((step) => step.callId));
+    // 思考/工具预览与 ● 状态解耦：即使 ● 已显示，仍可展示后续思考内容
+    // Activity preview decoupled from ● state: can show thinking text
+    // even after the dot has replaced the spinner.
     const shouldShowActivity =
       block.latestActivity?.kind === 'thinking' ||
       (block.latestActivity?.kind === 'tool' && !visibleCallIds.has(block.latestActivity.callId));
@@ -174,7 +179,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
     return (
       <Box flexDirection="column">
         <Box>
-          <Text>{spinner} </Text>
+          <Text color={spinnerColor}>{spinner} </Text>
           <Text color={dt.dim}>
             Thought for {elapsedStr}, {summaryLine}
           </Text>
@@ -191,7 +196,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
           </Box>
         )}
         {visibleSteps.map((step) => {
-          const isError = step.status === 'error';
+          const isError = step.status === 'error' || step.status === 'exhausted';
           const lineColor = isError ? dt.error : dt.dim;
           return (
             <Box key={step.callId} paddingLeft={3}>
@@ -216,16 +221,24 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
           );
         })}
         <Box paddingLeft={3}>
-          <Text color={dt.dim}>└─ 运行中 ({elapsedStr})</Text>
+          <Text color={dt.dim}>└─ {allToolsDone ? '完成' : `运行中 (${elapsedStr})`}</Text>
         </Box>
       </Box>
     );
   }
 
-  // ── Settled state (done / error / waiting for late tool results) ──
+  // ── Settled state: derive from actual tool states, not cached block.result.
+  //     block.result can be stale — closeCurrentThought sets it to 'cancelled'
+  //     when exploration tools are still running, but tool_done events that
+  //     arrive after the thought is closed never recompute it. ──
   const settledStatus = hasError ? 'error' : hasPendingTools ? 'cancelled' : 'done';
   const doneColor = toolColor(settledStatus, dt);
-  const footerText = hasError ? '部分失败' : hasPendingTools ? '等待工具结果' : '完成';
+  const footerText =
+    settledStatus === 'error'
+      ? '部分失败'
+      : settledStatus === 'cancelled'
+        ? '等待工具结果'
+        : '完成';
 
   return (
     <Box flexDirection="column">
@@ -237,7 +250,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
       </Box>
       {visibleSteps.map((step, i) => {
         const isLast = i === visibleSteps.length - 1;
-        const isError = step.status === 'error';
+        const isError = step.status === 'error' || step.status === 'exhausted';
         const lineColor = isError ? dt.error : dt.dim;
         return (
           <Box key={step.callId} paddingLeft={3}>

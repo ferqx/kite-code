@@ -1,6 +1,7 @@
 import { END } from '@langchain/langgraph';
+import { migratePermitBatch } from '@/core/execution/permit';
 import type { AuthorizationOverride } from '@/core/types';
-import type { AgentPlan } from '@/protocol/events';
+import { type AgentPlan, isFullAccessMode } from '@/protocol/events';
 import type { CodeAgentState } from './state';
 import { defaultPhaseForWorkspaceAccess, evaluateToolPolicy } from './tool-policy';
 import { getAllPendingToolRequests } from './tool-requests';
@@ -18,6 +19,12 @@ function resolveToolRoute(
   override?: AuthorizationOverride,
   mcpRiskOverride?: Record<string, 'read'>,
 ): 'approval' | 'tools' | 'user_input' | 'plan_review' | null {
+  if (state.pendingSubagentApproval) {
+    const batch = migratePermitBatch(state.approvedBatch);
+    const id = state.pendingSubagentApproval.request.id;
+    return id && batch[id] ? 'tools' : 'approval';
+  }
+
   const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
   if (allRequests.length === 0) return null;
 
@@ -27,8 +34,11 @@ function resolveToolRoute(
   let hasApprovalRequired = false;
 
   for (const request of allRequests) {
-    // Priority 1: ask_user 必须由 user_input 中断节点处理，不能被 tools 节点执行
-    if (request.name === 'ask_user') return 'user_input';
+    // Priority 1: ask_user 必须由 user_input 中断节点处理；full 下不能挂起
+    if (request.name === 'ask_user') {
+      if (isFullAccessMode(state.interactionMode)) continue;
+      return 'user_input';
+    }
 
     // Priority 2: 结构性 update_plan（名称/描述/步骤文本变化）必须经过 plan_review
     // 纯进度更新（仅 status 变化）可直通 tools
@@ -80,8 +90,13 @@ export function routeAfterAgent(
 /** approval 节点后的路由逻辑 / Routing after approval node
  *  若同一批次还有工具未审批 → 循环回 approval；全部审批完 → tools */
 export function routeAfterApproval(state: CodeAgentState): 'approval' | 'tools' | 'agent' {
-  const batch = state.approvedBatch ?? {};
-  const hasFullAccess = Object.values(batch).some((g) => g === 'full_access');
+  const batch = migratePermitBatch(state.approvedBatch);
+  if (state.pendingSubagentApproval) {
+    const id = state.pendingSubagentApproval.request.id;
+    return id && batch[id] ? 'tools' : 'approval';
+  }
+
+  const hasFullAccess = Object.values(batch).some((p) => !p.consumed && p.grant === 'full_access');
 
   // full_access → 不再需要审批，直接执行
   // 必须扫描全部 pending tools，不能只看第一个：批次中可能混合了不同工具类型
@@ -105,8 +120,25 @@ export function routeAfterApproval(state: CodeAgentState): 'approval' | 'tools' 
   return 'agent';
 }
 
-/** tools 节点后的路由逻辑 / Routing after tools node */
-export function routeAfterTools(_state: CodeAgentState): 'agent' {
+/** tools 节点后的路由逻辑 / Routing after tools node
+ *
+ *  耗尽处理策略 / Exhaustion routing strategy:
+ *  - full / auto 模式：无人在回路中 → 直接 END，防止模型绕过耗尽守卫。
+ *    full/auto modes: no human in the loop → END, prevent model workarounds.
+ *  - ask 模式：用户在回路中，可自行判断是否继续 → 路由到 agent 让模型响应。
+ *    ask mode: human in the loop can decide → route to agent for model response.
+ *
+ *  设计理由：见 docs/space/plans/2026-06-30-approval-execution-sandbox.md「跨轮重置」——
+ *  系统不应替用户做"这个操作不该重试"的判断，但在无人值守模式下必须自行终止。 */
+export function routeAfterTools(state: CodeAgentState): 'approval' | 'agent' | typeof END {
+  if (state.pendingSubagentApproval) return 'approval';
+  const exhausted = state.exhaustedFingerprints ?? {};
+  if (Object.keys(exhausted).length > 0) {
+    // full/auto: terminate to prevent the model from trying workarounds
+    if (state.interactionMode === 'full' || state.interactionMode === 'auto') return END;
+    // ask: human is watching — let them see the exhaustion and decide
+    return 'agent';
+  }
   return 'agent';
 }
 

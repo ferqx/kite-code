@@ -22,6 +22,7 @@ export const ToolFailureReason = {
   SUBAGENT_FAILED: 'subagent_failed',
   SUBAGENT_TIMEOUT: 'subagent_timeout',
   SUBAGENT_ABORTED: 'subagent_aborted',
+  TOOL_NOT_AVAILABLE: 'tool_not_available',
   UNKNOWN: 'unknown',
 } as const;
 
@@ -30,6 +31,9 @@ export type ToolFailureReason = (typeof ToolFailureReason)[keyof typeof ToolFail
 /** 从 tool_done 事件 summary 分类 failure_reason */
 export function classifyToolFailure(toolName: string, summary: string): ToolFailureReason {
   const s = summary.toLowerCase();
+
+  // 通用检测：工具不在子 agent 允许集合中 / Generic: tool not available in sub-agent
+  if (/not available to this sub-agent/i.test(s)) return ToolFailureReason.TOOL_NOT_AVAILABLE;
 
   if (toolName === 'shell_execute') {
     if (/command not found/i.test(s)) return ToolFailureReason.SHELL_COMMAND_NOT_FOUND;

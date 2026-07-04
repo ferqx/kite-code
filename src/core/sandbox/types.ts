@@ -6,6 +6,10 @@ export interface SandboxOptions {
   workspace: string;
   /** 自定义资源限制（覆盖默认值）/ Custom resource limits (overrides defaults) */
   resourceLimits?: Partial<ResourceLimits>;
+  /** Network access policy inside the sandbox. Defaults to allow_all for compatibility. */
+  network?: {
+    mode: 'disabled' | 'allow_all';
+  };
 }
 
 /** shell 执行资源限制 / Shell execution resource limits */

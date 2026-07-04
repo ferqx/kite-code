@@ -38,6 +38,7 @@ export function toolColor(status: string, t: ThemeColors): string {
       return t.error;
     case 'cancelled':
     case 'timeout':
+    case 'exhausted':
       return t.warning;
     case 'running':
       return t.primary;

@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { defaultCheckpointPath, loadAgentConfig } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
 import { runAgent } from '@/core/runner';
-import { createSandboxExecutor } from '@/core/sandbox/index';
+import { createSandboxExecutor, detectSandboxBackend } from '@/core/sandbox/index';
 import { getSkillContent, scanSkills } from '@/core/skills/loader';
 import type { AuthorizationOverride } from '@/core/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
@@ -24,6 +24,7 @@ export interface ParsedArgs {
   replacementCommand?: string;
   answer?: string;
   sandbox: boolean;
+  interactionMode?: import('@/protocol/events').InteractionMode;
   skills: string[];
 }
 
@@ -35,6 +36,10 @@ export async function main(): Promise<void> {
   }
 
   const config = loadAgentConfig();
+  const interactionMode = args.interactionMode ?? config.interactionMode ?? 'ask';
+  if (interactionMode === 'full' && (!args.sandbox || detectSandboxBackend() === 'none')) {
+    throw new Error('full mode requires an available workspace sandbox.');
+  }
   const shellExecutor = createSandboxExecutor({
     enabled: args.sandbox,
     workspace: args.workspace,
@@ -72,6 +77,7 @@ export async function main(): Promise<void> {
     mode: args.mode,
     shellExecutor,
     authorizationOverride,
+    interactionMode,
     skills: manifests,
     skillOptions,
     frontend: 'cli',
@@ -179,6 +185,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return index >= 0 ? (argv[index + 1] ?? '') : undefined;
   };
   const noSandbox = argv.includes('--no-sandbox');
+  const interactionMode = argv.includes('--full')
+    ? 'full'
+    : argv.includes('--auto')
+      ? 'auto'
+      : argv.includes('--ask')
+        ? 'ask'
+        : undefined;
   const explicitThread = value('--thread', '');
   const mode = parseMode(value('--mode', 'auto'));
   const authorizationMode = parseAuthorizationMode(optionalValue('--authorization-mode') ?? '');
@@ -214,6 +227,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     replacementCommand,
     answer,
     sandbox: !noSandbox,
+    interactionMode,
     skills: multi('--skill'),
   };
 }
@@ -288,6 +302,9 @@ Options:
   --replace-command <cmd> Replace pending command
   --answer <text>        Answer user input interrupt
   --authorization-mode <mode>  default or full-access
+  --ask                  Ask before every tool (default)
+  --auto                 Auto-review tools, ask when uncertain
+  --full           Run with full permissions, never ask
   --no-sandbox           Disable sandbox`);
 }
 

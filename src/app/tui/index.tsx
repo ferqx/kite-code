@@ -74,6 +74,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     config.modelName,
     config.providerName,
     config.reasoningEffort,
+    config.interactionMode,
   );
   const stateRef = React.useRef(state);
   stateRef.current = state;
@@ -150,6 +151,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     };
   }, []);
   const thinkingLevelRef = React.useRef<string | null>(config.reasoningEffort ?? null);
+  const interactionModeRef = React.useRef<'ask' | 'auto' | 'full'>(config.interactionMode ?? 'ask');
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
@@ -256,6 +258,11 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   React.useEffect(() => {
     thinkingLevelRef.current = state.status.thinkingMode || null;
   }, [state.status.thinkingMode]);
+
+  // 将 interactionMode ref 与 state.interactionMode 同步
+  React.useEffect(() => {
+    interactionModeRef.current = state.interactionMode;
+  }, [state.interactionMode]);
 
   // 每当 token 统计变化时持久化到 DB，确保最新值始终写入
   // Persist token stats to DB on every change, guaranteeing latest values
@@ -590,8 +597,12 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   // Stable reference — avoids re-creating the object on every render and causing
   // an infinite re-render loop through useSlashSuggestions → setSlashSuggestion.
   const activeSelections = React.useMemo(
-    () => ({ theme: themePreset, model: state.status.modelName }),
-    [themePreset, state.status.modelName],
+    () => ({
+      theme: themePreset,
+      model: state.status.modelName,
+      interactionMode: state.interactionMode,
+    }),
+    [themePreset, state.status.modelName, state.interactionMode],
   );
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
@@ -633,6 +644,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       // 将 React 层 per-session 状态同步到 Runtime / Sync React-layer per-session state to runtime
       rt.pendingSkills = [...pendingSkillsRef.current];
       rt.thinkingLevel = thinkingLevelRef.current;
+      rt.interactionMode = interactionModeRef.current;
       rt.conversationHistory = [...conversationHistoryRef.current];
 
       dispatch({ type: 'USER_MESSAGE', text: task });

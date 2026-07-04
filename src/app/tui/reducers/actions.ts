@@ -70,6 +70,7 @@ export type Action =
   | { type: 'SET_SESSIONS'; sessions: TuiState['sessions'] }
   | { type: 'SESSION_INTERRUPT_PENDING'; threadId: string }
   | { type: 'DELETE_SESSION'; threadId: string }
+  | { type: 'SET_INTERACTION_MODE'; mode: 'ask' | 'auto' | 'full' | 'toggle' }
   | { type: 'TOGGLE_PLAN_MODE' }
   | { type: 'TOGGLE_TOOL_EXPAND'; id: number }
   | { type: 'TOGGLE_SUBAGENT_EXPAND'; id: number }

@@ -1,8 +1,14 @@
 # 审批层、执行层与沙箱渐进式开发方案
 
-状态：draft
+状态：partially-implemented（阶段四、五已实现，阶段一~三待实现）
 创建：2026-06-30
 优先级：P0
+实施记录：
+  - `docs/space/execution/completed/2026-07-02-interaction-mode-slash-command.md`（阶段四）
+  - `docs/space/execution/completed/2026-07-02-execution-reliability.md`（阶段五）
+
+> 阶段四（交互模式切换）和阶段五（执行可靠性）已于 2026-07-02 完成。
+> 阶段一~三待实施。
 依赖：无
 
 ## 目标
@@ -1126,6 +1132,17 @@ ToolMessage 内容示例（第 5 次失败，status=`'exhausted'`）：
 **实现方式**：在 Execution Journal 中追加 `affectedPathHash?: string` 和 `stderrDigest?: string` 字段。Gateway 在执行前后做快照，Phase 5 的连续失败检测器比对相邻两次 journal 条目，判定进展。
 
 > **为什么不做全量文件变更追踪**：方案明确不做"完整 Git 快照和回滚系统"。轻量的受影响路径 hash 快照足以判断"文件是否被修改"，不需要整个 workspace 的 diff。
+
+### 跨轮重置（Per-Turn Reset）
+
+连续失败计数**仅在一轮对话内有效**。用户每发送一条新消息 → `cleanup` 节点执行 → `executionJournal` 和 `exhaustedFingerprints` 重置为空。用户显式要求重试的操作不会被上一轮的失败计数阻断。
+
+```typescript
+// cleanup 节点返回空 journal，每轮对话重新开始
+return { executionJournal: [], exhaustedFingerprints: {} };
+```
+
+> **设计理由**：如果用户看到 Agent 因连续失败被阻断后，仍然输入相同指令，不应由系统替用户做"这个操作不该重试"的判断。跨轮重置确保每轮对话是独立的决策空间。
 
 ### 执行调度
 
