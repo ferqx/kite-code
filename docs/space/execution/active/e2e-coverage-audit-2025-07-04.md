@@ -3,6 +3,7 @@
 状态：active
 范围：TUI E2E/PTTY 系统测试覆盖率、测试方法论、已知限制
 读取时机：规划新一轮 E2E 测试覆盖、评估 PTY 测试体系成熟度、设计 mock server 响应队列
+验证：`bun run test:e2e` 和 `bun run test:tui:system` 应全部通过，覆盖本审计中标记的场景。
 
 ---
 

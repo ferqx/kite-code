@@ -2,6 +2,8 @@
 
 状态：active
 范围：TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界
+读取时机：修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。
+验证：`bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/integration.test.ts`
 最后更新：2026-07-03
 
 ## 约束

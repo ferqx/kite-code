@@ -3,6 +3,7 @@
 状态：active
 范围：`tests/tui-system/`、`tests/tui-*.test.tsx`、`tests/mock-model.ts`
 读取时机：编写 TUI E2E 测试、调试 TextInput/键盘交互测试、考虑新的终端测试方案时必读。
+验证：`bun run test:e2e`（了解 PTY 测试限制和替代方案）
 
 ## 当前方案
 

@@ -3,6 +3,7 @@
 状态：active
 范围：`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/App.tsx`、`src/app/tui/OutputArea.tsx`、`src/app/tui/components/BlockRenderer.tsx`
 读取时机：修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。
+验证：`bun test tests/tui-layout.test.tsx`（验证 Static/Dynamic 分界和重复渲染防重）
 
 ## 问题
 

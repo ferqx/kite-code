@@ -1,6 +1,8 @@
 # 当前规则：TUI E2E/PTTY 测试标准
 
 状态：active
+读取时机：编写或修改 TUI E2E/PTTY 测试、调整 mock server 行为、新增真实终端场景。
+验证：`bun run test:e2e`
 最后更新：2026-07-03（旧 `tests/tui-integration/` e2e harness 已退役，PTY system 为默认 gate）
 
 ## 范围

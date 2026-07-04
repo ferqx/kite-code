@@ -3,6 +3,7 @@
 状态：active
 范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/model/runtime-context.ts`、`src/core/subagent/runner.ts`、`src/core/harness/graph.ts`、`src/core/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/app/tui/components/SubAgentBlock.tsx`、`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/types.ts`、`src/app/tui/reducers/helpers.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
 读取时机：修改 `readFile`/`editFile`/`writeFile`、二进制检测、编码处理、换行正规化、MSYS2 路径转换、runtime context 路径格式时必读。
+验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/graph.test.ts tests/integration.test.ts tests/context.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx`
 
 ## 设计目标
 

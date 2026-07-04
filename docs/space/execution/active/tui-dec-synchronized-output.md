@@ -3,6 +3,7 @@
 状态：active
 范围：`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/App.tsx`、`src/app/tui/index.tsx`
 读取时机：修改 `useStaticContent` 渲染逻辑、TUI 屏切换（resize/会话切换）行为异常时必读。
+验证：`bun run test:e2e`（验证 resize/debounce/缓冲行为）
 
 ## 原理
 

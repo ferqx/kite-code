@@ -28,6 +28,7 @@
 | `execution/active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
 | `execution/active/project-conventions.md` | active | 文档语言、注释规范、测试纪律、CLI 行为、提交粒度、仓库卫生、TypeScript 类型安全 | 修改 Markdown 文档、测试、CLI、提交规范、仓库布局约束或 TypeScript 类型声明时。 |
 | `execution/active/tui-e2e-standards.md` | active | TUI E2E/PTTY 测试标准、PTY harness、mock model server、真实终端覆盖边界 | 编写或修改 TUI E2E/PTTY 测试、调整 mock server 行为、新增真实终端场景。 |
+| `execution/active/e2e-coverage-audit-2025-07-04.md` | active | TUI E2E/PTTY 系统测试覆盖率审计、测试方法论、已知限制 | 规划新一轮 E2E 测试覆盖、评估 PTY 测试体系成熟度、设计 mock server 响应队列 |
 | `execution/active/e2e-test-restructure.md` | active | 旧 ink-testing-library e2e 重构方案的退役指针 | 遇到旧 `tests/tui-integration/` 引用时查看迁移去向。 |
 | `execution/active/tui-textinput-wrapping-spec.md` | active | `CtrlSafeTextInput` 软换行、光标边界、IME 空格清理、CJK/ASCII 混合输入行为 | 修改 `CtrlSafeTextInput` 软换行、光标移动、IME 处理或 `maxWidth` 传播逻辑时。 |
 | `execution/active/tui-run-status-bar.md` | active | Run Status Bar 3 阶段单向状态行 — Thinking → Working → Finishing 只进不退 + 渐变动画 + arc spinner + timer 性能架构 | 修改 `StatusBar.tsx`、`run-status.ts`、`App.tsx`（shouldShowRunStatus）、Footer.tsx 或相关测试时必读。 |

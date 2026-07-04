@@ -3,6 +3,7 @@
 状态：active
 范围：`src/app/tui/run-status.ts`、`src/app/tui/StatusBar.tsx`、`src/app/tui/App.tsx`、`src/app/tui/Footer.tsx`、`tests/run-status.test.ts`、`tests/tui-mock-render.test.tsx`
 读取时机：修改 StatusBar 渲染、run-status 推导逻辑、状态行动画、阶段切换规则时必读。
+验证：`bun test tests/run-status.test.ts tests/tui-mock-render.test.tsx`
 
 ## 设计原则
 

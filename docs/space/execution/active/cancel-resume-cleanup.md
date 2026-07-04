@@ -3,6 +3,7 @@
 状态：active
 范围：`src/core/harness/graph.ts`（cleanup、invokeModel）、`src/core/harness/tool-runner.ts`（runApprovedTool）、`src/core/harness/tool-requests.ts`（toolRequestFromCall）、`src/core/model/context.ts`（sanitizeToolCallPairs、reorderInterleavedMessages）、`src/core/tools/tool-parse-error.ts`（formatToolParseError）、`src/app/tui/`（handleEvent、replay-blocks）
 读取时机：修改 cancel/abort/resume 逻辑、检查点恢复、消息清理、工具参数异常处理、ask_user 错误展示时必读。
+验证：`bun test tests/tool-parse-error.test.ts tests/context.test.ts tests/graph.test.ts tests/runner.test.ts tests/tui-reducer.test.ts`
 最后更新：2026-06-27（三层清理架构 + 工具参数异常自主处理）
 
 ## 架构总览
