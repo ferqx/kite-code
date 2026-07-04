@@ -42,6 +42,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # sandbox runtime dirs (legacy — now created in system temp, but gitignore as safety net)
 .sandbox-tmp/
 .sandbox-bun-cache/
+.tmp-config/
 
 # e2e test fixtures (generated, not archived)
 tests/e2e/fixtures/
