@@ -14,6 +14,7 @@ import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/i
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
+import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -67,41 +68,12 @@ describe('TUI PTY System — Session Switching', () => {
     workspace?.cleanup();
   });
 
-  // ── Warmup: type and clear ──
+  // ── Warmup ───────────────────────────────────────────────
 
   test(
-    'warmup: individual keystrokes reach TUI input line',
+    'warmup: input pipeline initialized',
     async () => {
-      const text = 'x';
-      await typeText(tui, text, 80);
-      await sleep(400);
-
-      const output = tui.output();
-      const clean = stripAnsi(output);
-      console.log('  output after typing:', clean.slice(-300));
-      expect(clean).toContain(text);
-
-      await clearInput(tui, text.length);
-      await sleep(300);
-
-      const afterClear = stripAnsi(tui.output());
-      expect(screenContains(afterClear, '❯')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  // ── Empty Enter ──
-
-  test(
-    'empty Enter (no text) does not submit a message',
-    async () => {
-      const before = server.getRequestCount();
-      tui.write('\r');
-      await sleep(500);
-
-      const output = tui.output();
-      expect(screenContains(output, '❯')).toBe(true);
-      expect(server.getRequestCount()).toBe(before);
+      await warmupInputPipeline(tui, server);
     },
     TIMEOUT,
   );

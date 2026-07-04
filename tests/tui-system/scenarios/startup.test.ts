@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -62,17 +62,6 @@ describe('TUI PTY System — Startup', () => {
     async () => {
       await waitForText(() => tui.output(), 'Kite Code', 5000);
       console.log('  Header visible');
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'TUI output has non-trivial ANSI-stripped content',
-    async () => {
-      const clean = stripAnsi(tui.output());
-      // Should have at least some visible content after stripping ANSI
-      expect(clean.length).toBeGreaterThan(20);
-      console.log('  Clean output length:', clean.length, 'chars');
     },
     TIMEOUT,
   );

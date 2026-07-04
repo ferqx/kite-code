@@ -15,10 +15,11 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
+import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -66,37 +67,12 @@ describe('TUI PTY System — Tool Parse Error', () => {
     workspace?.cleanup();
   });
 
-  // ── Text Input ────────────────────────────────────────────
+  // ── Warmup ───────────────────────────────────────────────
 
   test(
-    'individual keystrokes reach TUI input line',
+    'warmup: input pipeline initialized',
     async () => {
-      const text = 'hello';
-      await typeText(tui, text, 80);
-      await sleep(400);
-
-      const output = tui.output();
-      const clean = stripAnsi(output);
-      console.log('  output after typing:', clean.slice(-300));
-      expect(clean).toContain(text);
-
-      await clearInput(tui, text.length);
-    },
-    TIMEOUT,
-  );
-
-  // ── Empty Enter ───────────────────────────────────────────
-
-  test(
-    'empty Enter (no text) does not submit a message',
-    async () => {
-      const before = server.getRequestCount();
-      tui.write('\r');
-      await sleep(500);
-
-      const output = tui.output();
-      expect(screenContains(output, '❯')).toBe(true);
-      expect(server.getRequestCount()).toBe(before);
+      await warmupInputPipeline(tui, server);
     },
     TIMEOUT,
   );

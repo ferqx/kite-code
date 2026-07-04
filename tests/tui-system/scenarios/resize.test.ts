@@ -18,6 +18,7 @@ import { createMockModelServer } from '../harness/fixtures';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
+import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -38,7 +39,10 @@ describe('TUI PTY System — Terminal Resize', () => {
 
     // Wait for TUI fully rendered before running any test
     await waitForText(() => tui.output(), '❯', 15000);
-    // Allow Ink render to settle
+
+    // Enable raw mode so individual characters reach the child immediately
+    tui.setRawMode(true);
+    // Allow raw mode and Ink render to settle
     await new Promise((r) => setTimeout(r, 500));
   });
 
@@ -47,6 +51,16 @@ describe('TUI PTY System — Terminal Resize', () => {
     server?.stop();
     workspace?.cleanup();
   });
+
+  // ── Warmup ───────────────────────────────────────────────
+
+  test(
+    'warmup: input pipeline initialized',
+    async () => {
+      await warmupInputPipeline(tui, server);
+    },
+    TIMEOUT,
+  );
 
   // ── Test 1: Initial Render at Configured Dimensions ──────────
 

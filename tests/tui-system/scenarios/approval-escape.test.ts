@@ -16,10 +16,11 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
+import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -73,45 +74,12 @@ describe('TUI PTY System — Approval Escape', () => {
     workspace?.cleanup();
   });
 
-  // ── Text Input ────────────────────────────────────────────
+  // ── Warmup ───────────────────────────────────────────────
 
   test(
-    'individual keystrokes reach TUI input line',
+    'warmup: input pipeline initialized',
     async () => {
-      // In raw mode, individual bytes go directly to child stdin.
-      // Send chars one at a time with delays matching human typing speed.
-      const text = 'hello';
-      await typeText(tui, text, 80);
-      // Allow Ink to re-render the input state
-      await sleep(400);
-
-      const output = tui.output();
-      const clean = stripAnsi(output);
-      console.log('  output after typing:', clean.slice(-300));
-      // The typed text should appear in the input area
-      // (CtrlSafeTextInput renders the current value near the prompt)
-      expect(clean).toContain(text);
-
-      await clearInput(tui, text.length);
-    },
-    TIMEOUT,
-  );
-
-  // ── Empty Enter ───────────────────────────────────────────
-
-  test(
-    'empty Enter (no text) does not submit a message',
-    async () => {
-      const before = server.getRequestCount();
-      // Send Enter with empty input
-      tui.write('\r');
-      await sleep(500);
-
-      const output = tui.output();
-      // TUI should still be alive with prompt
-      expect(screenContains(output, '❯')).toBe(true);
-      // No model call should have been made
-      expect(server.getRequestCount()).toBe(before);
+      await warmupInputPipeline(tui, server);
     },
     TIMEOUT,
   );
