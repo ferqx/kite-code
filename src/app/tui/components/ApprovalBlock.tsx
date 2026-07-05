@@ -6,8 +6,7 @@ import { useTheme } from '@/app/tui/theme';
 interface Option {
   key: string;
   label: string;
-  subtext?: string;
-  action: 'approve' | 'auto' | 'full' | 'deny';
+  action: 'approve' | 'deny';
 }
 
 interface ApprovalBlockProps {
@@ -18,18 +17,6 @@ interface ApprovalBlockProps {
 
 const OPTIONS: Option[] = [
   { key: 'y', label: 'Yes · 仅本次', action: 'approve' },
-  {
-    key: 'a',
-    label: 'Auto · 自动审批',
-    subtext: '模型自动判断，不确定时再次询问',
-    action: 'auto',
-  },
-  {
-    key: 'f',
-    label: 'Full · 完全权限',
-    subtext: '不再询问，全部工具直接放行',
-    action: 'full',
-  },
   { key: 'd', label: 'Deny · 拒绝', action: 'deny' },
 ];
 
@@ -43,12 +30,6 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
     if (opt.action === 'approve') {
       provider.submitAction({ type: 'approve', grant: 'approve_once' });
       onResolved('approve', 'approve_once');
-    } else if (opt.action === 'auto') {
-      provider.submitAction({ type: 'approve', grant: 'approve_once' });
-      onResolved('auto', 'approve_once');
-    } else if (opt.action === 'full') {
-      provider.submitAction({ type: 'approve', grant: 'full_access' });
-      onResolved('full', 'full_access');
     } else {
       provider.submitAction({ type: 'reject' });
       onResolved('denied');
@@ -90,7 +71,6 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
               <Text color={color}>
                 {isSelected ? '>' : ' '} {o.label}
               </Text>
-              {o.subtext && <Text color={t.dim}> — {o.subtext}</Text>}
             </Box>
           );
         })}

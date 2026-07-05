@@ -26,7 +26,7 @@ export function runStatusColor(theme: Theme, tone: RunStatusTone): string {
 /** Flowing dot — 6-frame ping-pong @ 200 ms/frame (1200 ms round trip). */
 const SPINNER = ['●···', '·●··', '··●·', '···●', '··●·', '·●··'];
 
-export default function StatusBar({ status, runStatus, running, timerKey }: StatusBarProps) {
+export default function StatusBar({ runStatus, running, timerKey }: StatusBarProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const [spinnerIdx, setSpinnerIdx] = useState(0);
@@ -78,9 +78,8 @@ export default function StatusBar({ status, runStatus, running, timerKey }: Stat
     return () => clearInterval(timer);
   }, [running, timerKey]);
 
-  if (!running && status.phase !== 'planning') return null;
+  if (!running) return null;
 
-  const idlePlanMode = !running && status.phase === 'planning';
   const cols = stdout?.columns ?? 80;
   const liveRunStatus = runStatus ? { ...runStatus, elapsedMs: liveElapsedMs } : undefined;
   const statusLine = liveRunStatus ? formatRunStatusLine(liveRunStatus, cols) : '';
@@ -90,14 +89,8 @@ export default function StatusBar({ status, runStatus, running, timerKey }: Stat
 
   return (
     <Box>
-      {running ? (
-        <Text color={statusColor}>{SPINNER[spinnerIdx]} </Text>
-      ) : (
-        <Text color={t.warning}>* </Text>
-      )}
-      <Text color={idlePlanMode ? t.muted : statusColor}>
-        {idlePlanMode ? 'Shift+Tab to exit - describe your task' : statusLine}
-      </Text>
+      <Text color={statusColor}>{SPINNER[spinnerIdx]} </Text>
+      <Text color={statusColor}>{statusLine}</Text>
     </Box>
   );
 }

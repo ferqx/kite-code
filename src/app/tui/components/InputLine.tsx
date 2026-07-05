@@ -49,8 +49,10 @@ interface InputLineProps {
   initialValue?: string;
   /** Called when the input value changes (for external state sync). */
   onValueChange?: (value: string) => void;
-  /** Plan mode — 方案模式下显示专用 prompt 和 indicator bar */
+  /** Plan mode — 方案模式下显示专用 indicator bar */
   planMode?: boolean;
+  /** Plan name — 方案名称，显示在顶部边框中 */
+  planName?: string;
   /** Active selections for slash suggestion kind → value mapping (theme preset, model name, etc.) */
   activeSelections?: import('../hooks/useSlashSuggestions').ActiveSelections;
 }
@@ -111,6 +113,7 @@ export default function InputLine({
   initialValue = '',
   onValueChange,
   planMode = false,
+  planName,
   activeSelections,
 }: InputLineProps) {
   const t = useTheme();
@@ -507,32 +510,26 @@ export default function InputLine({
   }
 
   const promptChar =
-    mode === 'approval'
-      ? '↑↓ select · Enter confirm  '
-      : mode === 'question'
-        ? '? '
-        : planMode
-          ? '≻◷  '
-          : '❯ ';
+    mode === 'approval' ? '↑↓ select · Enter confirm  ' : mode === 'question' ? '? ' : '❯ ';
   const promptWidth = stringWidth(promptChar);
   const inputMaxWidth = Math.max(1, columns - promptWidth);
 
   // Slash suggestions are rendered in App.tsx Overlay area
 
+  const sepWidth = inputMaxWidth + promptWidth;
+
   return (
     <Box flexDirection="column">
-      {/* Plan mode indicator bar */}
-      {planMode && (
-        <Box flexDirection="column">
-          <Box>
-            <Text color={t.primary}>┌ Plan mode</Text>
-            <Text color={t.dim}> Shift+Tab to exit</Text>
-          </Box>
-          <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>
-        </Box>
-      )}
+      {/* Top separator — plan mode 时右侧嵌入 plan 名称 */}
+      <Text color={planMode ? t.primary : undefined}>
+        {planMode
+          ? (() => {
+              const label = ` ${(planName || 'plan').toLowerCase()} ────`;
+              return '─'.repeat(Math.max(0, sepWidth - stringWidth(label))) + label;
+            })()
+          : '─'.repeat(sepWidth)}
+      </Text>
       {/* Main input line with ghost text */}
-      {!planMode && <Text>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
       <Box>
         <Text bold={slashMatched}>{promptChar}</Text>
         <CtrlSafeTextInput
@@ -550,9 +547,8 @@ export default function InputLine({
           maxWidth={inputMaxWidth}
         />
       </Box>
-      {!planMode && <Text>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
-      {/* Plan mode bottom bar */}
-      {planMode && <Text color={t.primary}>{'─'.repeat(inputMaxWidth + promptWidth)}</Text>}
+      {/* Bottom separator — plan mode 时与顶边同色高亮 */}
+      <Text color={planMode ? t.primary : undefined}>{'─'.repeat(sepWidth)}</Text>
 
       {inputWarning && (
         <Box marginTop={1}>

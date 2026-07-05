@@ -1,4 +1,5 @@
 import { Box, Text, useStdout } from 'ink';
+import { listAvailableModels } from '@/core/config';
 import { InteractionMode } from '@/protocol/events';
 import { useTheme } from './theme';
 import type { StatusState } from './types';
@@ -9,6 +10,7 @@ interface StatsLineProps {
   modelProvider?: string;
   modelName?: string;
   interactionMode?: 'ask' | 'auto' | 'full';
+  planMode?: boolean;
 }
 
 function formatTokens(n: number): string {
@@ -17,25 +19,32 @@ function formatTokens(n: number): string {
 }
 
 /** Estimate the visible width of the full stats line. */
-function fullWidth(status: StatusState, interactionMode?: string): number {
+function fullWidth(
+  status: StatusState,
+  interactionMode?: string,
+  planMode?: boolean,
+  contextPct?: string,
+): number {
   let w = status.modelName.length;
   const isDS = status.modelProvider === 'deepseek';
-  if (isDS && status.thinkingMode) w += 3 + 7 + String(status.thinkingMode).length; // " · effort: max"
+  if (isDS && status.thinkingMode) w += 3 + String(status.thinkingMode).length; // " · medium"
   if (isDS && status.totalTokens > 0) w += 3 + 7 + 3; // " · cache: 0%"
-  if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " · tokens: 78.4k"
-  // Non-default mode: label like " · [自动审批]" (~8 chars)
+  if (contextPct)
+    w += 3 + contextPct.length + 8; // " · 30% context"
+  else if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " · tokens: 78.4k"
   if (interactionMode && interactionMode !== 'ask') w += 3 + 6;
+  // plan mode adds: "  Shift+Tab to exit" ≈ 19 chars
+  if (planMode) w += 19;
   return w;
 }
 
-export default function StatsLine({ status, interactionMode }: StatsLineProps) {
+export default function StatsLine({ status, interactionMode, planMode }: StatsLineProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const cacheTotal = status.cacheHitTokens + status.cacheMissTokens;
   const cachePct = cacheTotal > 0 ? (status.cacheHitTokens / cacheTotal) * 100 : 0;
   const cacheColor = cachePct > 50 ? t.success : cachePct > 20 ? t.warning : t.muted;
 
-  // Mode label: ask=默认不显示，auto=自动审批，full=完全权限
   const isDefault = !interactionMode || interactionMode === InteractionMode.Ask;
   const label = isDefault
     ? null
@@ -47,39 +56,47 @@ export default function StatsLine({ status, interactionMode }: StatsLineProps) {
   const isDeepSeek = status.modelProvider === 'deepseek';
   const showThink = isDeepSeek && !!status.thinkingMode;
   const showCache = isDeepSeek && status.totalTokens > 0;
-  const showTokens = status.totalTokens > 0;
 
-  // When the full line would exceed the terminal width, render a shorter
-  // version to prevent wrapping — wrapping causes Footer height to jump,
-  // which triggers input box duplication during resize.
+  // Look up context window from model config; compute percentage if available
+  const models = listAvailableModels();
+  const currentModel = models.find(
+    (m) => m.provider === (status.modelProvider || 'deepseek') && m.name === status.modelName,
+  );
+  const cw = currentModel?.contextWindow;
+  const contextPct =
+    cw && cw > 0 ? `${Math.round((status.totalTokens / cw) * 100)}% context` : null;
+  const showTokens = !contextPct && status.totalTokens > 0;
+
   const cols = stdout?.columns ?? 80;
-  const compact = fullWidth(status, interactionMode) > cols;
+  const compact = fullWidth(status, interactionMode, planMode, contextPct ?? undefined) > cols;
 
   return (
     <Box>
+      {/* Left side: model + config chips */}
       <Text color={t.muted}>{status.modelName}</Text>
       {!compact && showThink && (
         <>
           <Text color={t.dim}> · </Text>
-          <Text color={t.success}>effort: {status.thinkingMode}</Text>
+          <Text color={t.success}>{status.thinkingMode}</Text>
         </>
       )}
       {!compact && showCache && (
         <>
           <Text color={t.dim}> · </Text>
-          <Text>
-            <Text color={t.muted}>cache: </Text>
-            <Text color={cacheColor}>{cachePct.toFixed(0)}%</Text>
-          </Text>
+          <Text color={cacheColor}>{cachePct.toFixed(0)}%</Text>
+          <Text color={t.muted}> cache</Text>
+        </>
+      )}
+      {!compact && contextPct && (
+        <>
+          <Text color={t.dim}> · </Text>
+          <Text color={t.muted}>{contextPct}</Text>
         </>
       )}
       {!compact && showTokens && (
         <>
           <Text color={t.dim}> · </Text>
-          <Text>
-            <Text color={t.muted}>tokens: </Text>
-            <Text>{formatTokens(status.totalTokens)}</Text>
-          </Text>
+          <Text>{formatTokens(status.totalTokens)}</Text>
         </>
       )}
       {label && (
@@ -88,6 +105,10 @@ export default function StatsLine({ status, interactionMode }: StatsLineProps) {
           <Text color={labelColor}>[{label}]</Text>
         </>
       )}
+      {/* Spacer — push hint to the right */}
+      {!compact && planMode && <Box flexGrow={1} />}
+      {/* Right side: Shift+Tab to exit hint */}
+      {!compact && planMode && <Text color={t.dim}>Shift+Tab to exit</Text>}
     </Box>
   );
 }

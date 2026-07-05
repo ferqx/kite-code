@@ -32,6 +32,7 @@ export default function Footer({
         modelProvider={status.modelProvider}
         modelName={status.modelName}
         interactionMode={interactionMode}
+        planMode={status.phase === 'planning'}
       />
     </Box>
   );

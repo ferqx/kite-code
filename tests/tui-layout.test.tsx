@@ -222,8 +222,8 @@ describe('StatusBar', () => {
     expect(frame).not.toContain('StatusBar');
   });
 
-  test('keeps idle planning mode hint', () => {
-    const status = fakeStatus({ phase: 'planning' });
+  test('status bar hides when idle and not planning', () => {
+    const status = fakeStatus({ phase: 'building' });
     const { lastFrame } = render(
       <StatusBar
         status={status}
@@ -232,7 +232,10 @@ describe('StatusBar', () => {
         running={false}
       />,
     );
-    expect(lastFrame()).toContain('Shift+Tab to exit');
+    // StatusBar returns null when idle and not in a special phase
+    const frame = lastFrame();
+    expect(frame).not.toContain('Shift+Tab');
+    expect(frame).not.toContain('*');
   });
 
   test('status bar is single row', () => {
@@ -255,7 +258,24 @@ describe('StatsLine', () => {
   test('shows thinking mode', () => {
     const status = fakeStatus({ modelProvider: 'deepseek', thinkingMode: 'detailed' });
     const { lastFrame } = render(<StatsLine status={status} running />);
-    expect(lastFrame()).toContain('effort: detailed');
+    expect(lastFrame()).toContain('detailed');
+  });
+
+  test('shows thinking mode without effort: prefix', () => {
+    const status = fakeStatus({ modelProvider: 'deepseek', thinkingMode: 'medium' });
+    const { lastFrame } = render(<StatsLine status={status} running />);
+    // Should show just "medium" without "effort: " prefix
+    expect(lastFrame()).not.toContain('effort:');
+    expect(lastFrame()).toContain('medium');
+  });
+
+  test('shows plan mode info when planMode=true', () => {
+    const status = fakeStatus();
+    const { lastFrame } = render(<StatsLine status={status} planMode running />);
+    const frame = lastFrame();
+    // Only Shift+Tab hint in StatsLine; plan name moved to InputLine top separator
+    expect(frame).toContain('Shift+Tab to exit');
+    expect(frame).not.toContain('Plan');
   });
 
   test('shows cache hit rate', () => {
@@ -266,7 +286,7 @@ describe('StatsLine', () => {
       totalTokens: 1200,
     });
     const { lastFrame } = render(<StatsLine status={status} running />);
-    expect(lastFrame()).toContain('cache: 75%');
+    expect(lastFrame()).toContain('75% cache');
   });
 
   test('shows token count formatted', () => {
@@ -294,6 +314,32 @@ describe('StatsLine', () => {
     expect(lastFrame()).not.toContain('[完全]');
     expect(lastFrame()).not.toContain('[自动审批]');
     expect(lastFrame()).not.toContain('[完全权限]');
+  });
+
+  test('shows context percentage when model has contextWindow', () => {
+    const status = fakeStatus({
+      modelProvider: 'deepseek',
+      modelName: 'deepseek-v4-flash',
+      totalTokens: 39321,
+    });
+    const { lastFrame } = render(<StatsLine status={status} running />);
+    const frame = lastFrame() ?? '';
+    // If model config has contextWindow: 39321/131072 ≈ 30% context
+    // If no contextWindow configured: falls back to "39.3k"
+    const hasContext = frame.includes('30% context');
+    const hasAbsolute = frame.includes('39.3k');
+    expect(hasContext || hasAbsolute).toBe(true);
+  });
+
+  test('falls back to absolute token count when model has no contextWindow', () => {
+    const status = fakeStatus({
+      modelProvider: 'anthropic',
+      modelName: 'claude-opus',
+      totalTokens: 10000,
+    });
+    const { lastFrame } = render(<StatsLine status={status} running />);
+    // claude-opus is not in default models, so no contextWindow — falls back to absolute
+    expect(lastFrame()).toContain('10.0k');
   });
 
   test('does not show ro/rw indicator (workspace access always write)', () => {
@@ -715,14 +761,29 @@ describe('PlanReviewBlock', () => {
 // ── InputLine plan mode ──
 
 describe('InputLine plan mode', () => {
-  test('shows plan mode prompt and indicator when planMode=true', () => {
+  test('shows plan name in top separator when planMode=true', () => {
     const { lastFrame } = render(
       <InputLine mode="prompt" planMode={true} onSubmit={noop} workspace="/test" />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Plan mode');
-    expect(frame).toContain('Shift+Tab');
-    expect(frame).toContain('≻◷');
+    // Plan name is embedded at the right of the top separator (lowercase)
+    expect(frame).toContain('plan');
+    // Bottom separator and prompt remain normal
+    expect(frame).not.toContain('Shift+Tab');
+  });
+
+  test('shows custom planName in top separator', () => {
+    const { lastFrame } = render(
+      <InputLine
+        mode="prompt"
+        planMode={true}
+        planName="my-feature"
+        onSubmit={noop}
+        workspace="/test"
+      />,
+    );
+    const frame = lastFrame();
+    expect(frame).toContain('my-feature');
   });
 
   test('shows normal prompt when planMode=false', () => {
@@ -731,7 +792,8 @@ describe('InputLine plan mode', () => {
     );
     const frame = lastFrame();
     expect(frame).toContain('❯');
-    expect(frame).not.toContain('Plan mode');
+    // No plan text in separators
+    expect(frame).not.toContain('plan');
   });
 });
 

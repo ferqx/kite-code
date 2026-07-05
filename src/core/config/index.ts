@@ -113,8 +113,8 @@ export {
 // ── Defaults (DeepSeek) ──
 
 const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
-  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
-  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false },
+  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true, contextWindow: 1048576 },
+  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false, contextWindow: 1048576 },
 ];
 
 // ── Config file loading ──
@@ -397,6 +397,8 @@ export interface AvailableModel {
   provider: string;
   name: string;
   isDefault: boolean;
+  /** 上下文窗口大小（token 数）/ Context window size in tokens */
+  contextWindow?: number;
 }
 
 let _cachedModels: AvailableModel[] | null = null;
@@ -433,7 +435,9 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
         if (!name) continue;
         const isDefault =
           name === defaultName || (m && typeof m === 'object' && !!(m as any).default);
-        models.push({ provider: provName, name, isDefault });
+        const contextWindow =
+          m && typeof m === 'object' ? ((m as any).contextWindow ?? (m as any).tokens) : undefined;
+        models.push({ provider: provName, name, isDefault, contextWindow });
       }
     }
   }
@@ -505,20 +509,22 @@ export interface SaveProviderInput {
  * Preserves existing config sections (other providers, theme, mcpServers, etc.).
  */
 /** Sensible default models per provider type (used when no models are provided). */
-function defaultModelsForProvider(type: ModelProviderType): { name: string; default: boolean }[] {
+function defaultModelsForProvider(
+  type: ModelProviderType,
+): { name: string; default: boolean; contextWindow?: number }[] {
   switch (type) {
     case 'deepseek':
       return [
-        { name: 'deepseek-v4-flash', default: true },
-        { name: 'deepseek-v4-pro', default: false },
+        { name: 'deepseek-v4-flash', default: true, contextWindow: 1048576 },
+        { name: 'deepseek-v4-pro', default: false, contextWindow: 1048576 },
       ];
     case 'openai':
       return [
-        { name: 'gpt-4o', default: true },
-        { name: 'gpt-4.1', default: false },
+        { name: 'gpt-4o', default: true, contextWindow: 128000 },
+        { name: 'gpt-4.1', default: false, contextWindow: 1000000 },
       ];
     case 'ollama':
-      return [{ name: 'llama3.2', default: true }];
+      return [{ name: 'llama3.2', default: true, contextWindow: 131072 }];
     default:
       // openai-compatible — no well-known defaults, let user type their own
       return [];

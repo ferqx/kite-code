@@ -763,6 +763,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
           initialValue={inputValueRef.current}
           onValueChange={handleInputValueChange}
           planMode={state.status.phase === 'planning'}
+          planName={state.status.plan?.name}
           activeSelections={activeSelections}
         />
       </App>

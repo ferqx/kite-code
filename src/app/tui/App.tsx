@@ -174,11 +174,6 @@ export default function App({
   const resolveApproval = useCallback(
     (action: string, grant?: string) => {
       if (!interruptBlock) return;
-      if (action === 'auto') {
-        dispatch({ type: 'SET_INTERACTION_MODE', mode: 'auto' });
-      } else if (action === 'full') {
-        dispatch({ type: 'SET_INTERACTION_MODE', mode: 'full' });
-      }
       dispatch({
         type: 'RESOLVE_INTERRUPT',
         blockId: interruptBlock.id,
