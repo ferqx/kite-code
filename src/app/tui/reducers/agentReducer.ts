@@ -201,33 +201,12 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case 'SET_EXITED': {
       const s = finalizeLastTurnStreaming(settleActiveThought(state));
       const merged = mergeConsecutiveTextBlocksInLastTurn(s);
-      const elapsedSec = merged.runStartTime
-        ? Math.ceil((Date.now() - merged.runStartTime) / 1000)
-        : 0;
-      const elapsedStr =
-        elapsedSec >= 60 ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s` : `${elapsedSec}s`;
-      let changeCount = 0;
-      for (const turn of merged.turns) {
-        for (const b of turn.blocks) {
-          if (b.kind === 'file_change')
-            changeCount += (b as Extract<OutputBlock, { kind: 'file_change' }>).changes.length;
-        }
-      }
-      const summary = [elapsedStr, changeCount > 0 ? `${changeCount} files` : null]
-        .filter(Boolean)
-        .join(' · ');
-      const block: OutputBlock = {
-        id: merged.nextBlockId,
-        kind: 'text',
-        content: `── ${summary} ──`,
-      };
-      const appended = appendBlock(merged, block);
       return {
-        ...appended,
+        ...merged,
         running: false,
         exited: true,
         interrupt: null,
-        status: { ...appended.status, currentNode: null, plan: null },
+        status: { ...merged.status, currentNode: null, plan: null },
       };
     }
     case 'RESOLVE_INTERRUPT': {

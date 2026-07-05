@@ -980,16 +980,13 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'SET_IDLE' });
       expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).streaming).toBe(false);
     });
-    test('SET_EXITED adds exit summary block and sets exited flag', () => {
+    test('SET_EXITED sets exited flag', () => {
       let s = fresh();
       s = { ...s, running: true, runStartTime: Date.now() - 5000 };
       s = dispatch(s, { type: 'SET_EXITED' });
       expect(s.exited).toBe(true);
-      const last = flatBlocks(s).at(-1) as Extract<OutputBlock, { kind: 'text' }>;
-      expect(last.kind).toBe('text');
-      expect(last.content).toMatch(/^── \d+s ──$/);
     });
-    test('SET_EXITED summary includes file change count', () => {
+    test('SET_EXITED does not add an exit summary block', () => {
       let s = fresh();
       s = { ...s, running: true };
       // Add a file_change block with 2 changes
@@ -1002,22 +999,22 @@ describe('eventReducer (blocks model)', () => {
         event: { type: 'file_change', data: { path: 'b.ts', kind: 'edit' } },
       });
       s = dispatch(s, { type: 'SET_EXITED' });
-      const last = flatBlocks(s).at(-1) as Extract<OutputBlock, { kind: 'text' }>;
-      expect(last.content).toContain('2 files');
+      // No extra text block appended — only the original file_change blocks remain
+      const last = flatBlocks(s).at(-1);
+      expect(last!.kind).toBe('file_change');
     });
-    test('SET_EXITED + SET_IDLE preserves both the exit summary and content blocks', () => {
+    test('SET_EXITED + SET_IDLE preserves content blocks', () => {
       let s = fresh();
       s = { ...s, running: true };
       s = dispatch(s, textEvt('AI response'));
       s = dispatch(s, { type: 'SET_EXITED' });
       s = dispatch(s, { type: 'SET_IDLE' });
-      // All blocks preserved, exit summary at end
-      expect(flatBlocks(s)).toHaveLength(2);
+      // All content blocks preserved, no exit summary appended
+      expect(flatBlocks(s)).toHaveLength(1);
       expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe(
         'AI response',
       );
       expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).streaming).toBe(false);
-      expect((flatBlocks(s)[1] as Extract<OutputBlock, { kind: 'text' }>).content).toMatch(/^── /);
       expect(s.exited).toBe(false);
       expect(s.running).toBe(false);
     });
