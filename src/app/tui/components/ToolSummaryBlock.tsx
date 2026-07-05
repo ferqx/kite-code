@@ -166,12 +166,15 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
     const spinner = allToolsDone ? '●' : SPINNER[spinnerIdx]!;
     const spinnerColor = allToolsDone ? toolColor('done', dt) : undefined;
     const visibleCallIds = new Set(visibleSteps.map((step) => step.callId));
-    // 思考/工具预览与 ● 状态解耦：即使 ● 已显示，仍可展示后续思考内容
-    // Activity preview decoupled from ● state: can show thinking text
-    // even after the dot has replaced the spinner.
+    // 思考/工具预览仅在工具未全部完成时展示（工具全完成后的思维链
+    // 属于下一轮 thought，不应混入已完成步骤列表）
+    // Activity preview only shown before all tools are done — post-tool
+    // thinking belongs to a new thought cycle, not this step list.
     const shouldShowActivity =
-      block.latestActivity?.kind === 'thinking' ||
-      (block.latestActivity?.kind === 'tool' && !visibleCallIds.has(block.latestActivity.callId));
+      !allToolsDone &&
+      (block.latestActivity?.kind === 'thinking' ||
+        (block.latestActivity?.kind === 'tool' &&
+          !visibleCallIds.has(block.latestActivity.callId)));
     const activityLabel = shouldShowActivity
       ? latestActivityLabel(block, Math.max(0, col - 9))
       : '';
@@ -181,7 +184,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
         <Box>
           <Text color={spinnerColor}>{spinner} </Text>
           <Text color={dt.dim}>
-            Thought for {elapsedStr}, {summaryLine}
+            {block.tools.length === 0 ? `Thought for ${elapsedStr}` : summaryLine}
           </Text>
         </Box>
         {activityLabel && (
@@ -245,7 +248,7 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
       <Box>
         <Text color={doneColor}>● </Text>
         <Text color={dt.dim}>
-          Thought for {elapsedStr}, {summaryLine}
+          {block.tools.length === 0 ? `Thought for ${elapsedStr}` : summaryLine}
         </Text>
       </Box>
       {visibleSteps.map((step, i) => {

@@ -1063,7 +1063,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('search command failed');
   });
 
-  test('renders running tool_summary thinking preview', () => {
+  test('renders running tool_summary thinking preview while tools are still in progress', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1077,9 +1077,9 @@ describe('BlockRenderer', () => {
           callId: 'c1',
           name: 'read_file',
           args: { path: 'src/app/tui/App.tsx' },
-          ok: true,
-          summary: 'ok',
-          status: 'done',
+          ok: false,
+          summary: '',
+          status: 'running',
         },
       ],
     } as Extract<OutputBlock, { kind: 'tool_summary' }>;
@@ -1168,7 +1168,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('\n   Read CLAUDE.md');
   });
 
-  test('truncates long running tool_summary thinking preview', () => {
+  test('shows thinking preview while tools are still pending (truncated)', () => {
     const longThought =
       'this is a very long thinking preview that should not spill across the entire terminal width';
     const block = {
@@ -1184,9 +1184,9 @@ describe('BlockRenderer', () => {
           callId: 'c1',
           name: 'read_file',
           args: { path: 'src/app/tui/App.tsx' },
-          ok: true,
-          summary: 'ok',
-          status: 'done',
+          ok: false,
+          summary: '',
+          status: 'running',
         },
       ],
     } as Extract<OutputBlock, { kind: 'tool_summary' }>;
@@ -1198,6 +1198,35 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('Thinking');
     expect(frame).toContain('…');
     expect(frame).not.toContain(longThought);
+  });
+
+  test('hides thinking preview when all tools are done (post-tool thinking is a new cycle)', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: { kind: 'thinking', text: 'should not show after tools done' },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'read 1 file',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).not.toContain('Thinking');
+    expect(frame).not.toContain('should not show');
   });
 
   test('omits thinking preview after tool_summary settles', () => {
@@ -1252,7 +1281,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('Thought for 1s, read 1 file');
+    expect(frame).toContain('read 1 file');
     expect(frame).toContain('等待工具结果');
     expect(frame).not.toContain('运行中');
     expect(frame).not.toContain('10s');
@@ -1791,7 +1820,6 @@ describe('OutputArea', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('Bash');
-    expect(frame).toContain('Thought');
     expect(frame).toContain('index.ts');
   });
 
