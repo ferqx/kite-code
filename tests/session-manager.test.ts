@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { SessionManager, SessionRuntime } from '../src/app/tui/session-manager';
+import {
+  fullModeUnavailableReason,
+  SessionManager,
+  SessionRuntime,
+} from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
 import type { AgentEvent } from '../src/protocol/events';
 
@@ -45,6 +49,22 @@ function makeStatus(overrides: Partial<StatusState> = {}): StatusState {
 }
 
 // ── SessionManager ──
+
+describe('fullModeUnavailableReason', () => {
+  test('rejects full mode when no sandbox backend is available', () => {
+    expect(fullModeUnavailableReason('full', 'none')).toContain('requires a sandbox');
+  });
+
+  test('allows non-full modes without a sandbox', () => {
+    expect(fullModeUnavailableReason('ask', 'none')).toBeNull();
+    expect(fullModeUnavailableReason('auto', 'none')).toBeNull();
+  });
+
+  test('allows full mode with a sandbox backend', () => {
+    expect(fullModeUnavailableReason('full', 'seatbelt')).toBeNull();
+    expect(fullModeUnavailableReason('full', 'bubblewrap')).toBeNull();
+  });
+});
 
 describe('SessionManager', () => {
   // ── createSession ──

@@ -65,7 +65,7 @@ export function createAgentTools(input: CreateAgentToolsInput) {
   // 缓存：同一个 agent 迭代中参数不变时避免重建全部工具（包括 MCP 适配）
   // Include subagentEventSink presence and MCP tool count to invalidate on tool list changes
   const mcpToolCount = input.mcpManager?.getAllTools().length ?? 0;
-  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpToolCount}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}`;
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpToolCount}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.authorization?.mode ?? ''}|${Object.keys(input.authorization?.commandGrants ?? {}).length}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
   const readFileTool = tool(

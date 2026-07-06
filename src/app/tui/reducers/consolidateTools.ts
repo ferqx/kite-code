@@ -149,6 +149,7 @@ export function maybeConsolidateLastTurnBlocks(
     createdAt,
     summaryLine,
     active: false,
+    hasThought: false,
   };
 
   // 替换：前缀 + summary + 后缀（非探索 tools / 其他 blocks 在探索块之后的部分）
@@ -199,6 +200,7 @@ export function consolidateAllRuns(blocks: OutputBlock[]): OutputBlock[] {
       createdAt,
       summaryLine,
       active: false,
+      hasThought: false,
     });
 
     pending = [];

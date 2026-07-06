@@ -84,6 +84,7 @@ export type PlanReviewResumeValue =
   | {
       planApproved?: boolean;
       planSupplement?: string;
+      /** auto means auto confirmation, not full_access. manual means ask/default confirmation. */
       executionMode?: 'auto' | 'manual';
     };
 

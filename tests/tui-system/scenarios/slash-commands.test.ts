@@ -222,10 +222,9 @@ describe('TUI PTY System — Slash Commands', () => {
       const clean = stripAnsi(output);
       console.log('  output after /plan:', clean.slice(-500));
 
-      // Planning mode indicator: the prompt changes to ≻◷ instead of ❯
-      // When in plan mode, the status area shows the plan prompt character
-      // The exact rendered text depends on the ink render; verify TUI is alive and plan mode is active
-      expect(screenContains(output, '≻◷')).toBe(true);
+      // Planning mode indicator: the prompt area shows a plan separator and exit hint.
+      expect(screenContains(output, 'plan')).toBe(true);
+      expect(screenContains(output, 'Shift+Tab to exit')).toBe(true);
     },
     TIMEOUT,
   );

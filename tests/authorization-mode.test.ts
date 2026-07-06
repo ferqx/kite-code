@@ -63,6 +63,37 @@ describe('authorization mode switch', () => {
     expect(decision.requiresApproval).toBe(false);
   });
 
+  test('planning phase allows read-only subagents and denies code subagents', () => {
+    const exploreDecision = evaluateToolPolicy({
+      request: {
+        id: 'call-explore',
+        name: 'task',
+        args: { subagent_type: 'explore', task: 'trace state handling' },
+        reason: 'research',
+        protectedCommand: 'task explore',
+      },
+      workspaceAccess: 'write',
+      phase: 'planning',
+      authorization: { mode: 'default', commandGrants: {} },
+    });
+    const codeDecision = evaluateToolPolicy({
+      request: {
+        id: 'call-code',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'implement the fix' },
+        reason: 'implementation',
+        protectedCommand: 'task code',
+      },
+      workspaceAccess: 'write',
+      phase: 'planning',
+      authorization: { mode: 'default', commandGrants: {} },
+    });
+
+    expect(exploreDecision.decision).toBe('allow');
+    expect(codeDecision.decision).toBe('deny');
+    expect(codeDecision.phaseConstraint).toBe('planning');
+  });
+
   // ---- routing with override ----
 
   test('routes write_file to approval under default override', () => {

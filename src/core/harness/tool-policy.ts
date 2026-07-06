@@ -23,6 +23,8 @@ export type ToolRisk =
   | 'unknown';
 
 export interface ToolPolicyDecision {
+  /** Canonical policy action. Kept alongside legacy booleans during migration. */
+  decision: 'allow' | 'ask' | 'deny';
   allowed: boolean;
   requiresApproval: boolean;
   risk: ToolRisk;
@@ -30,6 +32,8 @@ export interface ToolPolicyDecision {
   userVisibleSummary: string;
   expectedEffects: string[];
   grantUsed: ShellGrantUsed;
+  requiresSandbox?: boolean;
+  phaseConstraint?: AgentPhase;
 }
 
 export interface ToolApprovalPayload {
@@ -188,6 +192,21 @@ export function evaluateToolPolicy(input: {
   }
 
   if (request.name === 'task') {
+    const subagentType = request.args.subagent_type;
+    if (
+      phase === 'planning' &&
+      subagentType !== 'explore' &&
+      subagentType !== 'plan' &&
+      subagentType !== 'review'
+    ) {
+      return deny({
+        risk: 'execute_code',
+        reason: 'planning phase allows read-only sub-agents only.',
+        userVisibleSummary: `Rejected ${String(subagentType ?? 'unknown')} sub-agent during planning phase.`,
+        expectedEffects: ['No implementation sub-agent will run during planning'],
+        phaseConstraint: 'planning',
+      });
+    }
     return allow({
       risk: 'plan',
       reason:
@@ -598,6 +617,7 @@ function denyForPlanningPhase(input: {
       reason: 'planning phase allows read-only inspection and plan updates only.',
       userVisibleSummary: `Rejected ${input.request.name} during planning phase.`,
       expectedEffects: ['No workspace mutation or code execution will run'],
+      phaseConstraint: 'planning',
     });
   }
   return null;
@@ -688,11 +708,12 @@ export function stableStringify(value: unknown): string {
 }
 
 function allow(
-  input: Omit<ToolPolicyDecision, 'allowed' | 'requiresApproval' | 'grantUsed'> & {
+  input: Omit<ToolPolicyDecision, 'decision' | 'allowed' | 'requiresApproval' | 'grantUsed'> & {
     grantUsed?: ShellGrantUsed;
   },
 ): ToolPolicyDecision {
   return {
+    decision: 'allow',
     allowed: true,
     requiresApproval: false,
     grantUsed: input.grantUsed ?? 'none',
@@ -701,11 +722,12 @@ function allow(
 }
 
 function requireApproval(
-  input: Omit<ToolPolicyDecision, 'allowed' | 'requiresApproval' | 'grantUsed'> & {
+  input: Omit<ToolPolicyDecision, 'decision' | 'allowed' | 'requiresApproval' | 'grantUsed'> & {
     grantUsed?: ShellGrantUsed;
   },
 ): ToolPolicyDecision {
   return {
+    decision: 'ask',
     allowed: true,
     requiresApproval: true,
     grantUsed: input.grantUsed ?? 'none',
@@ -714,11 +736,12 @@ function requireApproval(
 }
 
 function deny(
-  input: Omit<ToolPolicyDecision, 'allowed' | 'requiresApproval' | 'grantUsed'> & {
+  input: Omit<ToolPolicyDecision, 'decision' | 'allowed' | 'requiresApproval' | 'grantUsed'> & {
     grantUsed?: ShellGrantUsed;
   },
 ): ToolPolicyDecision {
   return {
+    decision: 'deny',
     allowed: false,
     requiresApproval: false,
     grantUsed: input.grantUsed ?? 'none',

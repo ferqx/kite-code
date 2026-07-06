@@ -1,10 +1,14 @@
 import { AIMessage, type BaseMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import systemPrompt from '@/core/prompts/system-prompt.txt';
 import type { SkillManifest } from '@/core/skills/types';
-import type { ContextBudget } from '@/core/types';
-import type { AgentPlan } from '@/protocol/events';
+import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
+import type { AgentPhase, AgentPlan, InteractionMode } from '@/protocol/events';
 import { foldToolOutputs, microCompactToolOutputs } from './compaction';
-import { buildCacheableRuntimeContext, formatPlanStateReminder } from './runtime-context';
+import {
+  buildCacheableRuntimeContext,
+  buildRuntimeModeSnapshot,
+  formatPlanStateReminder,
+} from './runtime-context';
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = 'agent';
 
@@ -18,6 +22,11 @@ export interface ModelContextState {
   final: string;
   /** 工作区访问权限 / Workspace access level (always "write") */
   workspaceAccess?: 'write';
+  phase?: AgentPhase;
+  interactionMode?: InteractionMode;
+  authorization?: ThreadAuthorizationState;
+  executionEnvironment?: 'local_unsafe' | 'workspace_sandbox';
+  planReviewed?: boolean;
   /** 执行计划 / Execution plan */
   plan?: AgentPlan | null;
   /** 激活的 Skill 关键指令 / Active skill critical instructions */
@@ -275,10 +284,24 @@ export function prepareModelContext(
     '\n\n' +
     buildCacheableRuntimeContext({ workspace: state.workspace });
 
+  const modeSnapshot = new HumanMessage(
+    buildRuntimeModeSnapshot({
+      phase: state.phase ?? 'building',
+      interactionMode: state.interactionMode ?? 'ask',
+      authorizationMode: state.authorization?.mode ?? 'default',
+      sandboxBackend: state.executionEnvironment === 'workspace_sandbox' ? 'unknown' : 'none',
+      planReviewed: state.planReviewed ?? false,
+      approvedPlanSummary:
+        state.plan && state.planReviewed
+          ? `${state.plan.name}: ${state.plan.description}`.slice(0, 300)
+          : null,
+    }),
+  );
+
   const planReminder = state.plan ? [new HumanMessage(formatPlanStateReminder(state.plan))] : [];
 
   return {
-    messages: [new SystemMessage(systemPrompt), ...msgs, ...planReminder],
+    messages: [new SystemMessage(systemPrompt), ...msgs, modeSnapshot, ...planReminder],
   };
 }
 

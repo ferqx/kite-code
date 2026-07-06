@@ -3,7 +3,7 @@
  *
  * Verifies that when the agent calls update_plan (structural, non-progress-only),
  * the TUI renders PlanReviewBlock in the footer and handles all three options:
- * a (auto approve), m (manual approve), t (tell agent / supplement feedback).
+ * a (approve and continue), m (approve with confirmations), t (tell agent / supplement feedback).
  * Also verifies Escape to return from supplement mode back to options mode.
  *
  * HOW IT WORKS:
@@ -117,7 +117,7 @@ describe('TUI PTY System — Plan Review', () => {
   // ── Plan Review: Auto Approve (a key) ─────────────────────
 
   test(
-    'plan review renders with options, auto approve (a) triggers agent continuation',
+    'plan review renders with options, approve and continue (a) triggers agent continuation',
     async () => {
       // Submit a user message to trigger the model call
       await typeText(tui, 'Create a plan for testing');
@@ -134,8 +134,8 @@ describe('TUI PTY System — Plan Review', () => {
 
       // Verify all three options are visible
       expect(screenContains(beforeApprove, 'Review the plan above and choose')).toBe(true);
-      expect(screenContains(beforeApprove, 'Yes, and use auto mode')).toBe(true);
-      expect(screenContains(beforeApprove, 'Yes, manually approve edits')).toBe(true);
+      expect(screenContains(beforeApprove, 'Approve and continue')).toBe(true);
+      expect(screenContains(beforeApprove, 'Approve with confirmations')).toBe(true);
       expect(screenContains(beforeApprove, 'Tell Agent what to change')).toBe(true);
 
       // Verify the plan content is rendered (tool_card expanded with plan summary)
@@ -145,7 +145,7 @@ describe('TUI PTY System — Plan Review', () => {
       // Verify keyboard hints are visible
       expect(screenContains(beforeApprove, 'a/m/t quick key')).toBe(true);
 
-      // Press 'a' for auto approve
+      // Press 'a' to approve and continue
       tui.write('a');
       // Wait for the graph to resume, plan to be approved, and agent to continue
       await sleep(3000);
@@ -155,7 +155,10 @@ describe('TUI PTY System — Plan Review', () => {
 
       const afterApprove = tui.output();
       const afterClean = stripAnsi(afterApprove);
-      console.log('  output after auto approve (last 1500 chars):', afterClean.slice(-1500));
+      console.log(
+        '  output after approve and continue (last 1500 chars):',
+        afterClean.slice(-1500),
+      );
 
       // Agent's response should be visible
       expect(screenContains(afterApprove, 'Plan approved! Let me start working on it.')).toBe(true);
@@ -212,7 +215,7 @@ describe('TUI PTY System — Plan Review', () => {
 
       const beforeManual = tui.output();
       expect(screenContains(beforeManual, 'Manual Test Plan')).toBe(true);
-      expect(screenContains(beforeManual, 'Yes, manually approve edits')).toBe(true);
+      expect(screenContains(beforeManual, 'Approve with confirmations')).toBe(true);
 
       // Press 'm' for manual approve
       tui.write('m');
@@ -312,8 +315,8 @@ describe('TUI PTY System — Plan Review', () => {
       const escClean = stripAnsi(afterEsc);
       console.log('  output after Esc (last 800 chars):', escClean.slice(-800));
 
-      expect(screenContains(afterEsc, 'Yes, and use auto mode')).toBe(true);
-      expect(screenContains(afterEsc, 'Yes, manually approve edits')).toBe(true);
+      expect(screenContains(afterEsc, 'Approve and continue')).toBe(true);
+      expect(screenContains(afterEsc, 'Approve with confirmations')).toBe(true);
       expect(screenContains(afterEsc, 'Tell Agent what to change')).toBe(true);
       expect(screenContains(afterEsc, 'a/m/t quick key')).toBe(true);
     },

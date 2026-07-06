@@ -356,6 +356,24 @@ describe('code agent tool definitions', () => {
     expect(tools1.map((t) => t.name)).toEqual(tools2.map((t) => t.name));
   });
 
+  test('invalidates tool cache when runtime policy state changes', () => {
+    const planningTools = createAgentTools({
+      workspace: '/tmp',
+      phase: 'planning',
+      authorization: { mode: 'default', commandGrants: {} },
+      workspaceAccess: 'write',
+    });
+    const buildingTools = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'full_access', commandGrants: {} },
+      workspaceAccess: 'write',
+    });
+
+    expect(buildingTools).not.toBe(planningTools);
+    expect(buildingTools.map((t) => t.name)).toEqual(planningTools.map((t) => t.name));
+  });
+
   // ── Prompt cache: Skill tool placement / Skill 工具插入不影响其他工具 ──
 
   test('Skill tool inserted before update_plan, not at end', () => {

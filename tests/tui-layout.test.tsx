@@ -718,9 +718,9 @@ describe('PlanReviewBlock', () => {
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Yes, and use auto mode');
+    expect(frame).toContain('Approve and continue');
     expect(frame).toContain('(Recommended)');
-    expect(frame).toContain('Yes, manually approve edits');
+    expect(frame).toContain('Approve with confirmations');
     expect(frame).toContain('Tell Agent what to change');
   });
 
@@ -730,8 +730,8 @@ describe('PlanReviewBlock', () => {
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Plan executes without further approvals');
-    expect(frame).toContain('Each file edit requires confirmation');
+    expect(frame).toContain('Execute with automatic low-risk confirmations');
+    expect(frame).toContain('Ask before edits and risky tools');
     expect(frame).toContain('Provide feedback to revise the plan');
   });
 
@@ -752,8 +752,8 @@ describe('PlanReviewBlock', () => {
     // 方案内容移至 OutputArea tool_card Markdown 渲染，Footer 仅显示确认操作条
     // Plan content moved to OutputArea tool_card Markdown; Footer only shows confirmation bar
     expect(frame).toContain('Review the plan above');
-    expect(frame).toContain('Yes, and use auto mode');
-    expect(frame).toContain('Yes, manually approve edits');
+    expect(frame).toContain('Approve and continue');
+    expect(frame).toContain('Approve with confirmations');
     expect(frame).toContain('Tell Agent what to change');
   });
 });
@@ -1044,6 +1044,7 @@ describe('BlockRenderer', () => {
       totalElapsedMs: 1000,
       summaryLine: 'searched 1 file pattern',
       active: false,
+      hasThought: false,
       tools: [
         {
           callId: 'c1',
@@ -1063,7 +1064,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('search command failed');
   });
 
-  test('renders running tool_summary thinking preview while tools are still in progress', () => {
+  test('Thinking phase: shows thinking preview, no tool steps', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1071,23 +1072,18 @@ describe('BlockRenderer', () => {
       latestActivity: { kind: 'thinking', text: 'checking current Thought boundaries' },
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
-      summaryLine: 'read 1 file',
-      tools: [
-        {
-          callId: 'c1',
-          name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
-          ok: false,
-          summary: '',
-          status: 'running',
-        },
-      ],
+      summaryLine: 'thinking',
+      hasThought: true,
+      tools: [],
     } as Extract<OutputBlock, { kind: 'tool_summary' }>;
     const { lastFrame } = render(
       <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
     );
 
-    expect(lastFrame()).toContain('Thinking checking current Thought boundaries');
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Thought for 1s');
+    expect(frame).toContain('checking current Thought boundaries');
+    expect(frame).not.toContain('├─');
   });
 
   test('keeps running tool_summary thinking preview when latest visible activity is a tool', () => {
@@ -1099,6 +1095,7 @@ describe('BlockRenderer', () => {
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'read 3 files',
+      hasThought: true,
       tools: [
         {
           callId: 'c1',
@@ -1131,7 +1128,8 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('Thinking reviewing the project conventions');
+    // Working phase with pending tools: no thinking preview, only tool steps
+    expect(frame).not.toContain('Thinking');
     expect(frame).toContain('Read README.md');
   });
 
@@ -1144,6 +1142,7 @@ describe('BlockRenderer', () => {
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'read 1 file',
+      hasThought: false,
       tools: [
         {
           callId: 'c1',
@@ -1168,7 +1167,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('\n   Read CLAUDE.md');
   });
 
-  test('shows thinking preview while tools are still pending (truncated)', () => {
+  test('Working phase: hides thinking preview, shows tool steps', () => {
     const longThought =
       'this is a very long thinking preview that should not spill across the entire terminal width';
     const block = {
@@ -1179,6 +1178,7 @@ describe('BlockRenderer', () => {
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'read 1 file',
+      hasThought: true,
       tools: [
         {
           callId: 'c1',
@@ -1195,12 +1195,14 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('Thinking');
-    expect(frame).toContain('…');
+    // Working phase: thinking hidden, tool steps shown
+    expect(frame).not.toContain('Thinking');
     expect(frame).not.toContain(longThought);
+    expect(frame).toContain('运行中');
+    expect(frame).toContain('Read');
   });
 
-  test('hides thinking preview when all tools are done (post-tool thinking is a new cycle)', () => {
+  test('keeps thinking preview when a thought-backed summary has completed tools', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1209,6 +1211,7 @@ describe('BlockRenderer', () => {
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'read 1 file',
+      hasThought: true,
       tools: [
         {
           callId: 'c1',
@@ -1225,8 +1228,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).not.toContain('Thinking');
-    expect(frame).not.toContain('should not show');
+    expect(frame).toContain('should not show');
   });
 
   test('omits thinking preview after tool_summary settles', () => {
@@ -1238,6 +1240,7 @@ describe('BlockRenderer', () => {
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'read 1 file',
+      hasThought: true,
       tools: [
         {
           callId: 'c1',
@@ -1265,6 +1268,7 @@ describe('BlockRenderer', () => {
       createdAt: Date.now() - 10_000,
       totalElapsedMs: 1200,
       summaryLine: 'read 1 file',
+      hasThought: false,
       tools: [
         {
           callId: 'c1',
@@ -1747,6 +1751,7 @@ describe('OutputArea', () => {
         createdAt: Date.now() - 1000,
         totalElapsedMs: 1000,
         summaryLine: 'read 2 files',
+        hasThought: false,
         tools: [
           {
             callId: 'read-1',
@@ -1801,6 +1806,7 @@ describe('OutputArea', () => {
         createdAt: Date.now() - 1000,
         totalElapsedMs: 1000,
         summaryLine: 'read 1 file',
+        hasThought: false,
         tools: [
           {
             callId: 'read-1',

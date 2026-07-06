@@ -270,6 +270,7 @@ function updateCurrentThoughtActivity(
     return updateToolSummaryById(state, summary.id, (block) => ({
       ...block,
       active: true,
+      hasThought: true,
       latestActivity,
       // 每次 reason / tool_call 事件更新耗时，消除对前端 setInterval 定时器的依赖
       // Update elapsed on each reason / tool_call event so the UI doesn't need a live timer
@@ -286,6 +287,7 @@ function updateCurrentThoughtActivity(
     createdAt: Date.now(),
     summaryLine: 'thinking',
     active: true,
+    hasThought: true,
     latestActivity,
   };
   return {
@@ -504,7 +506,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           };
         }
 
-        // 创建新 tool_summary
+        // 创建新 tool_summary（无前置 reason → 无思考）
         const id = finalized.nextBlockId;
         const block: OutputBlock = {
           id,
@@ -514,6 +516,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           createdAt: now,
           summaryLine: buildToolSummaryLine([entry]),
           active: true,
+          hasThought: false,
           latestActivity: { kind: 'tool', callId: event.data.call_id },
         };
         return {

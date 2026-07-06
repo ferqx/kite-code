@@ -70,6 +70,8 @@ export type OutputBlock =
       createdAt: number;
       summaryLine: string;
       active: boolean;
+      /** 是否有过 reason 思考块 — 用于三态顶行：Thought + tools / 仅 Thought / 仅 tools */
+      hasThought: boolean;
       latestActivity?: ThoughtActivity;
       /** 整体结果状态（仅 active=false 时有意义），替代从子 tool 状态推断 / Overall outcome (meaningful when active=false), replaces boolean inference */
       result?: 'done' | 'error' | 'cancelled';

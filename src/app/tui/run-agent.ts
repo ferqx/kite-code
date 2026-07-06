@@ -11,6 +11,7 @@ import type { ForkInput, RevertInput, RunAgentInput } from '@/core/runner';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationOverride } from '@/core/types';
+import type { AgentPhase } from '@/protocol/events';
 
 export interface BaseTuiParams {
   threadId: string;
@@ -30,6 +31,8 @@ export interface BuildRunTaskParams extends BaseTuiParams {
   task: string;
   pendingSkillsContent: string;
   shellContext: string;
+  /** 当前 TUI phase，传入 core 由 tool policy 执行边界 / Current TUI phase enforced by core policy */
+  initialPhase?: AgentPhase;
   interactionMode?: 'ask' | 'auto' | 'full';
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   model?: SupportedChatModel;
@@ -68,6 +71,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): RunAgentInput {
     skills: p.skills,
     skillOptions: p.skillOptions ?? undefined,
     model: p.model,
+    initialPhase: p.initialPhase,
     interactionMode: p.interactionMode,
     frontend: 'tui',
   };

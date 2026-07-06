@@ -30,14 +30,14 @@ export default function PlanReviewBlock({
   const options = [
     {
       key: 'a',
-      label: 'Yes, and use auto mode',
-      desc: 'Plan executes without further approvals',
+      label: 'Approve and continue',
+      desc: 'Execute with automatic low-risk confirmations',
       action: 'approved_auto',
     },
     {
       key: 'm',
-      label: 'Yes, manually approve edits',
-      desc: 'Each file edit requires confirmation',
+      label: 'Approve with confirmations',
+      desc: 'Ask before edits and risky tools',
       action: 'approved_manual',
     },
     {

@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 import { listAvailableModels } from '@/core/config';
 import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import type { AgentPhase } from '@/protocol/events';
 import type { Action } from '../reducers/actions';
 
 export type SlashAction =
@@ -72,7 +73,7 @@ export function useSlashCommand(
   >,
   skillManifests?: SkillManifest[],
   skillOptions?: SkillScanOptions,
-  onRunTask?: (task: string) => void,
+  onRunTask?: (task: string, initialPhase?: AgentPhase) => void,
   onTheme?: (preset: string) => void,
 ) {
   return useCallback(
@@ -115,7 +116,7 @@ export function useSlashCommand(
           dispatch({ type: 'SWITCH_AUTH', mode: 'default' });
           // /plan <task> — 立即提交任务 / submit task immediately
           if (action.task && onRunTask) {
-            onRunTask(action.task);
+            onRunTask(action.task, 'planning');
           }
           break;
         case 'mode': {

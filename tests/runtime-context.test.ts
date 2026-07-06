@@ -3,6 +3,7 @@ import { HumanMessage } from '@langchain/core/messages';
 import {
   buildCacheableRuntimeContext,
   buildRuntimeContext,
+  buildRuntimeModeSnapshot,
 } from '../src/core/model/runtime-context';
 
 // 测试运行时上下文构建函数 / Test runtime context building function
@@ -76,5 +77,28 @@ describe('buildRuntimeContext', () => {
     expect(ctx1).toContain('Workspace: D:\\workspace');
     expect(ctx1).not.toContain('Time:');
     expect(ctx1).not.toContain('Timezone:');
+  });
+
+  test('formats dynamic mode snapshot outside the cacheable context', () => {
+    const snapshot = buildRuntimeModeSnapshot({
+      phase: 'planning',
+      interactionMode: 'auto',
+      authorizationMode: 'default',
+      sandboxBackend: 'seatbelt',
+      planReviewed: false,
+      approvedPlanSummary: null,
+    });
+
+    expect(snapshot).toContain('<runtime-state source="graph.mode">');
+    expect(snapshot).toContain('Phase: planning');
+    expect(snapshot).toContain('Interaction mode: auto');
+    expect(snapshot).toContain('Authorization: default');
+    expect(snapshot).toContain('Sandbox backend: seatbelt');
+    expect(snapshot).toContain('Plan reviewed: false');
+
+    const cacheable = buildCacheableRuntimeContext({ workspace: 'D:\\workspace' });
+    expect(cacheable).not.toContain('Phase:');
+    expect(cacheable).not.toContain('Authorization:');
+    expect(cacheable).not.toContain('Sandbox backend:');
   });
 });

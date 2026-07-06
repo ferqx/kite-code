@@ -85,22 +85,6 @@ function failureSummary(step: { status: string; summary: string }, maxWidth: num
   return truncateToFit(step.summary.replace(/\s+/g, ' ').trim(), maxWidth);
 }
 
-function latestActivityLabel(
-  block: Extract<OutputBlock, { kind: 'tool_summary' }>,
-  maxWidth: number,
-): string {
-  const activity = block.latestActivity;
-  if (!activity) return '';
-  if (activity.kind === 'thinking') {
-    return truncateToFit(`Thinking ${activity.text.replace(/\s+/g, ' ').trim()}`, maxWidth);
-  }
-  const step = block.tools.find((t) => t.callId === activity.callId);
-  if (!step) return '';
-  const args = toolArgsLabel(step.name, step.args, step.totalLines);
-  const label = args ? `${actionName(step.name)} ${args}` : actionName(step.name);
-  return truncateToFit(label, maxWidth);
-}
-
 interface ToolSummaryBlockProps {
   block: Extract<OutputBlock, { kind: 'tool_summary' }>;
   columns: number;
@@ -156,43 +140,60 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
 
   // ── Running state ──
   if (isRunning) {
-    // 工具全部完成 → ●；有 pending → spinner。只取决于工具状态，
-    // 不与 latestActivity 绑定——后续思考到来时 ● 不回退为 spinner，
-    // 避免「完成 → 运行中 → 完成」的视觉抖动。
-    // ● when all tools done, spinner when any pending. Keyed only on tool
-    // status, not latestActivity — prevents the jarring ●→spinner→● flicker
-    // when a new reason arrives after tools complete.
+    // 工具全部完成 → ●；有 pending → spinner。只取决于工具状态。
+    // ● when all tools done, spinner when any pending.
     const allToolsDone = block.tools.length > 0 && !hasPendingTools;
-    const spinner = allToolsDone ? '●' : SPINNER[spinnerIdx]!;
-    const spinnerColor = allToolsDone ? toolColor('done', dt) : undefined;
-    const visibleCallIds = new Set(visibleSteps.map((step) => step.callId));
-    // 思考/工具预览仅在工具未全部完成时展示（工具全完成后的思维链
-    // 属于下一轮 thought，不应混入已完成步骤列表）
-    // Activity preview only shown before all tools are done — post-tool
-    // thinking belongs to a new thought cycle, not this step list.
-    const shouldShowActivity =
-      !allToolsDone &&
-      (block.latestActivity?.kind === 'thinking' ||
-        (block.latestActivity?.kind === 'tool' &&
-          !visibleCallIds.has(block.latestActivity.callId)));
-    const activityLabel = shouldShowActivity
-      ? latestActivityLabel(block, Math.max(0, col - 9))
-      : '';
 
+    // ── 阶段判定：Thinking ↔ Working 交替，阶段内容不混排 ──
+    // Phase: Thinking when no tools or all tools done + new thinking started;
+    // Working when tools are pending / running.
+    const noTools = block.tools.length === 0;
+    const isThinkingPhase = noTools || (allToolsDone && block.latestActivity?.kind === 'thinking');
+
+    // ── Top line ──
+    // Thinking: just "Thought for Xs"; Working: three-state with tool summary
+    const topLine = isThinkingPhase
+      ? `Thought for ${elapsedStr}`
+      : block.hasThought
+        ? `Thought for ${elapsedStr}, ${summaryLine}`
+        : summaryLine;
+
+    // ── Spinner ──
+    // ● when all tools done, or when thinking-only (no tools to spin for)
+    const showDot = allToolsDone || noTools;
+    const spinner = showDot ? '●' : SPINNER[spinnerIdx]!;
+    const spinnerColor = showDot ? toolColor('done', dt) : undefined;
+
+    // ── Thinking phase: top line + single-line thinking preview, no tool steps ──
+    // Single-line display avoids flicker from re-wrapping incremental text.
+    if (isThinkingPhase) {
+      const thinkText =
+        block.latestActivity?.kind === 'thinking'
+          ? truncateToFit(block.latestActivity.text, Math.max(1, col - 3))
+          : '';
+
+      return (
+        <Box flexDirection="column">
+          <Box>
+            <Text color={spinnerColor}>{spinner} </Text>
+            <Text color={dt.dim}>{topLine}</Text>
+          </Box>
+          {thinkText && (
+            <Box paddingLeft={3}>
+              <Text color={dt.muted}>{thinkText}</Text>
+            </Box>
+          )}
+        </Box>
+      );
+    }
+
+    // ── Working phase: top line + tool steps, no thinking preview ──
     return (
       <Box flexDirection="column">
         <Box>
           <Text color={spinnerColor}>{spinner} </Text>
-          <Text color={dt.dim}>
-            {block.tools.length === 0 ? `Thought for ${elapsedStr}` : summaryLine}
-          </Text>
+          <Text color={dt.dim}>{topLine}</Text>
         </Box>
-        {activityLabel && (
-          <Box paddingLeft={3}>
-            <Text color={dt.dim}>├─ </Text>
-            <Text color={dt.muted}>{activityLabel}</Text>
-          </Box>
-        )}
         {skipped > 0 && (
           <Box paddingLeft={3}>
             <Text color={dt.dim}>├─ ... 以上 {skipped} 步已折叠</Text>
@@ -248,7 +249,11 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
       <Box>
         <Text color={doneColor}>● </Text>
         <Text color={dt.dim}>
-          {block.tools.length === 0 ? `Thought for ${elapsedStr}` : summaryLine}
+          {block.tools.length === 0
+            ? `Thought for ${elapsedStr}`
+            : block.hasThought
+              ? `Thought for ${elapsedStr}, ${summaryLine}`
+              : summaryLine}
         </Text>
       </Box>
       {visibleSteps.map((step, i) => {

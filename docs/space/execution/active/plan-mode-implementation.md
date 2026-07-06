@@ -3,7 +3,7 @@
 状态：active
 范围：`src/protocol/`、`src/core/`、`src/app/tui/`、`tests/`
 读取时机：修改 plan 流程、plan_review 中断、ask_user 渲染、session 持久化时必读。
-验证：`bun test tests/graph.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/integration.test.ts`
+验证：`bun test tests/session-manager.test.ts tests/authorization-mode.test.ts tests/tool-definitions.test.ts tests/runtime-context.test.ts tests/context.test.ts tests/tui-run-agent.test.ts tests/graph.test.ts tests/runner.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/slash-commands.test.ts`
 
 > 设计文档：[[plan-mode-design]] — 产品方案与交互设计
 > 原始计划：[[2026-06-16-plan-review-interrupt]] — 已归档，实际实现有偏差
@@ -13,6 +13,16 @@
 ## 概述
 
 Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批后再执行。整个功能涉及三层架构的全面改造。
+
+## 最近更新（2026-07-06）
+
+- **三轴模式语义**：`phase` 负责能力边界，`interactionMode` 负责人机确认体验，`authorization` 负责工具执行授权。三者不能互相隐式替代。
+- **Plan Mode core-first**：`/plan <task>`、Shift+Tab 和 TUI session runtime 会把 `initialPhase=planning` 传入 `runAgent`，core tool policy 以 `graph.state.phase` 执行只读边界。
+- **Plan approval 不再等于 full_access**：批准方案后状态迁移为 `phase=building`，`executionMode=auto` 只切到自动低风险确认，不提升到 `authorization.mode=full_access`。
+- **Planning 阶段 tool policy**：默认允许 read/search/research、`ask_user`、`update_plan` 和只读 subagent；拒绝写文件、非只读 shell、实现型 subagent 和 full access escalation。
+- **Full mode 收紧**：TUI/CLI 进入 full 前需要可用 sandbox backend；后台 session 不再默认注入 `full_access`。
+- **动态 runtime snapshot**：当前 phase、interactionMode、authorization、sandbox、planReviewed 和 approvedPlanSummary 作为非 cacheable runtime reminder 注入模型；静态 system prompt 不再携带这些动态状态。
+- **Tool cache 防旧状态**：`createAgentTools()` 的缓存 key 纳入 phase、authorization、workspaceAccess 等 runtime policy 状态，避免 stateful tools 捕获旧权限。
 
 ## 最近更新（2026-06-30）
 
@@ -42,12 +52,14 @@ Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批
 
 ### 核心层 (core)
 
-- **graph.ts**: 新增 `planReview` 节点，首次 `update_plan` 调用 → interrupt 等用户审批。审批通过 → 设置 `state.plan` + `authorization.mode`（auto → full_access，manual → default）
+- **graph.ts**: 新增 `planReview` 节点，首次 `update_plan` 调用 → interrupt 等用户审批。审批通过 → 设置 `state.plan`、`planReviewed=true`、`phase=building`；`auto` 只映射为 `interactionMode=auto`，不提升 `authorization.mode`
 - **routes.ts**: `update_plan` 结构性变更（首次提交或名称/描述/步骤文本改变）路由到 `plan_review`，纯进度更新（仅 status 变化）路由到 `tools`。批量 tool call 场景按优先级扫描全部 pending：ask_user > 结构性 update_plan > 需审批 > tools。
 - **runner.ts**: 事件提取、中断映射、resume value 转换
 - **user-input.ts**: `normalizeUserInputResume` 支持 `answers` map（多问题）
 - **sessions.ts**: `ReplayInterrupt` 扩展 `plan_review` 类型，从 checkpoint `channel_values.plan` 提取已批准方案
 - **types.ts**: `PlanReviewResumeValue` + `UserInputResumeValue.answers`
+- **tool-policy.ts**: 统一返回 `allow | ask | deny` 决策；planning phase 对写入、非只读 shell、实现型 subagent 做 hard deny
+- **context.ts/runtime-context.ts**: 静态 system prompt 只保留通用协作规则和 cacheable workspace context；动态模式快照追加为合成 `HumanMessage`
 
 ### TUI 层 (app/tui)
 
@@ -74,8 +86,8 @@ Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批
   │
   └─ Agent 调用 update_plan → plan_review 中断
       │
-      ├─ Auto: 审批通过，full_access 执行
-      ├─ Manual: 审批通过，per-edit 审批
+      ├─ Approve and continue: phase=building，自动处理低风险确认，authorization 保持 default
+      ├─ Approve with confirmations: phase=building，逐项确认受保护工具
       ├─ Tell: 补充反馈 → Agent 修订 → 再次 plan_review
       └─ Esc/Ctrl+C: 取消，agent 停止
 ```
@@ -92,6 +104,8 @@ Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批
 | Plan 展示 | 方案内容 OutputArea tool_card Markdown（进 Static） + 确认条 Footer（动态） |
 | 边框样式 | `borderStyle="round"` + `columns` 响应式宽度 |
 | 持久化 | 消息中提取 plan_review 块 + checkpoint state.plan 兜底 |
+| Auto 语义 | 只表示自动确认策略，不表示 full access |
+| Full 语义 | 仅 building phase 下可用，且需要 sandbox backend |
 
 ---
 
@@ -112,10 +126,10 @@ Footer 仅渲染确认操作条（无内联方案内容）：
 ```
 ╭─────────────────────────────────────────────────╮
 │ Review the plan above and choose:               │
-│ ▶ 1. Yes, and use auto mode (Recommended)       │
-│  Plan executes without further approvals        │
-│   2. Yes, manually approve edits                │
-│  Each file edit requires confirmation           │
+│ ▶ 1. Approve and continue (Recommended)         │
+│  Execute with automatic low-risk confirmations  │
+│   2. Approve with confirmations                 │
+│  Ask before edits and risky tools               │
 │   3. Tell Agent what to change                  │
 │  Provide feedback to revise the plan            │
 │ ↑↓ select Enter confirm a/m/t quick key Esc cancel│

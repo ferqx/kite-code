@@ -130,7 +130,7 @@ function createCliProvider(_args: ParsedArgs): UserInputProvider {
           });
         }
         console.error(
-          'Type a/auto for full access, m/manual for per-edit approval, t/tell to give feedback, r/reject to reject:',
+          'Type a/auto to approve and continue with automatic low-risk confirmations, m/manual to approve with confirmations, t/tell to give feedback, r/reject to reject:',
         );
       }
 

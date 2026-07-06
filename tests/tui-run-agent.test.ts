@@ -124,6 +124,18 @@ describe('buildRunAgentParams', () => {
     expect(params.task).toContain('do something\n> ls output here');
   });
 
+  test('passes the current TUI phase into the core runner', () => {
+    const params = buildRunAgentParams({
+      ...baseParams(),
+      task: 'inspect before editing',
+      pendingSkillsContent: '',
+      shellContext: '',
+      initialPhase: 'planning',
+    });
+
+    expect(params.initialPhase).toBe('planning');
+  });
+
   test('skillOptions is undefined when null', () => {
     const params = buildRunAgentParams({
       ...baseParams({ skillOptions: null }),

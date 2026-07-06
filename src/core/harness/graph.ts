@@ -551,7 +551,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       (typeof resume === 'object' && resume !== null && resumeObj?.planApproved === true);
 
     if (approved) {
-      const mode = (resumeObj?.executionMode as string) === 'manual' ? 'default' : 'full_access';
+      const executionMode = resumeObj?.executionMode as string | undefined;
+      const interactionMode = executionMode === 'auto' ? InteractionMode.Auto : InteractionMode.Ask;
       // 方案数据已在 AIMessage.tool_calls.args 中，ToolMessage 只需标记 ok + 简短摘要。
       // 重复放入完整 plan 对象会浪费 token 并降低后续调用前缀缓存命中率。
       // The plan data is already in AIMessage.tool_calls.args; ToolMessage only needs ok + brief summary.
@@ -567,7 +568,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         ],
         plan,
         planReviewed: true,
-        authorization: { ...state.authorization, mode },
+        phase: 'building' as const,
+        interactionMode,
+        authorization: { ...state.authorization, mode: 'default' as const },
       };
     }
 

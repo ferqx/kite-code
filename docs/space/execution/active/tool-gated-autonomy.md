@@ -1,8 +1,8 @@
 # 当前规则：工具边界自治
 
 状态：active
-最后更新：2026-06-30
-最后验证：2026-06-30
+最后更新：2026-07-06
+最后验证：2026-07-06
 范围：
 
 - `src/core/harness/graph.ts`
@@ -59,13 +59,15 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - `tool-runner.ts` 执行前必须做防御性检查：若 `policy.requiresApproval && approvedGrant === 'none'`，应拒绝执行并返回错误。确保需要审批的工具不可能绕过审批节点直达执行。
 - `write` 访问下的写入、删除、执行类工具请求必须经过 approval。
 - `read-only` 访问只允许执行只读工具和 `update_plan`；为保持缓存稳定，模型可见工具 schema 与 `write` 访问一致，但写入或执行尝试必须由 tools 层拒绝。
-- `graph.state.phase` 是独立执行边界。`planning` 阶段只能执行只读检查、`update_plan` 和 `ask_user`，不得执行写入或代码执行类工具。
+- `graph.state.phase` 是独立执行边界。`planning` 阶段只能执行只读检查、`update_plan`、`ask_user` 和只读 subagent，不得执行写入、非只读 shell、实现型 subagent、写型 MCP 或 full access escalation。`building` 阶段再按 `interactionMode + authorization + sandbox` 决定 ask/allow/deny。
+- `interactionMode` 只表示确认体验：`ask` 逐项确认，`auto` 自动处理低风险确认，`full` 表示 full interaction intent。它不应直接等同文件权限；实际执行授权由 `graph.state.authorization` 和 sandbox policy 决定。
+- `authorization` 表示当前 thread 的工具执行授权。默认是 `default`；`full_access` 必须来自显式授权，并且只能在 sandbox backend 可用时进入。后台 session 不得无条件注入 `full_access`。
 - 模型可见工具基集为 `read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan`、`ask_user`、`set_authorization_mode`、`read_mcp_resource`。当运行时存在 MCP 管理器时，额外追加 `mcp__<server>__<tool>` 格式的适配工具；当扫描到 `SKILL.md` 文件时，额外追加 `Skill` 工具。追加工具不影响基集 schema 的顺序和稳定性，保证前缀缓存命中。
 - `shell_execute` 是 command action envelope，不只是命令字符串。模型应提供 `command`，并可提供 `intent`、`objective`、`justification`、`expected_observation`、`failure_strategy`、`prefix_rule` 和 `grant_request`；文件定位、文本检索、目录查看和 git 只读检查使用 `intent: "inspect"`，测试、类型检查、构建、lint 和 smoke 验证使用 `intent: "verify"`。
 - `shell_execute` 应按命令内容分级：只读命令可直通；普通执行、写入、网络和 VCS 变更需要审批；高危破坏性命令默认拒绝，不进入普通审批。
-- `graph.state.authorization` 保存当前 thread 的 shell 授权状态。默认模式只支持本次审批 `approve_once` 和同命令授权 `same_command`；用户通过 resume payload 主动选择 `full_access` 后，当前 thread 内后续所有 `shell_execute`、`write_file`、`edit_file` 和 `mcp__*` 工具直接执行（`shell_execute` 包括原本 destructive 分类的命令，MCP 若未在 config 中显式标记 `risk: "read"` 也需审批）。`Skill`、`read_file`、`read_mcp_resource`、`update_plan`、`ask_user` 始终不需要审批。
+- `graph.state.authorization` 保存当前 thread 的 shell 授权状态。默认模式只支持本次审批 `approve_once` 和同命令授权 `same_command`；用户通过 resume payload 主动选择 `full_access` 后，当前 thread 内后续普通 `shell_execute`、`write_file`、`edit_file` 和 `mcp__*` 工具可直接执行。高危 destructive shell 命令仍由策略默认拒绝，不因 `full_access` 或 `same_command` 放行。`Skill`、`read_file`、`read_mcp_resource`、`update_plan`、`ask_user` 始终不需要审批。
 - `same_command` 的命中规则是同一 workspace/thread 下 `command.trim()` 完全一致，不受 `objective`、`justification` 或 `prefix_rule` 变化影响。它使用独立 command grant key，不能和 `approvalHash` 混用。
-- `full_access` 只保存在当前 thread checkpoint 中，新 thread 不继承。它影响 `shell_execute`、`write_file`、`edit_file` 和 `mcp__*` 的审批与 policy 拒绝；`read_file`、`read_mcp_resource`、`update_plan`、`ask_user`、`Skill` 和 `set_authorization_mode`（切换到 `default`）始终不需要审批。
+- `full_access` 只保存在当前 thread checkpoint 中，新 thread 不继承。它影响 `shell_execute`、`write_file`、`edit_file` 和 `mcp__*` 的审批；但 destructive shell deny 仍优先于 full access。`read_file`、`read_mcp_resource`、`update_plan`、`ask_user`、`Skill` 和 `set_authorization_mode`（切换到 `default`）始终不需要审批。
 - `update_plan` 只更新 `graph.state.plan`，不能隐式切换 `graph.state.workspaceAccess`；是否规划应由模型自主决定，明确只读访问只能来自图状态或用户显式访问请求。
 - `ask_user` 是规划澄清工具，不读写工作区，也不是工具审批；无论 `read-only` 还是 `write` 访问，都应路由到 `user_input` 节点并触发 `kind: "user_input"` interrupt，恢复值作为对应 tool call 的 ToolMessage 交回模型。
 - `tool_approval` interrupt 必须携带 harness 生成的结构化审批信息，包括 `policy`、`approval` 和 `approval.approvalHash`，不能依赖模型自然语言自述风险。shell 审批 payload 还应暴露模型解释字段、建议 prefix rule、可选授权粒度和推荐授权。带 hash 的 resume payload 必须匹配当前请求；用户替换命令时，只能替换当前命令型请求，替换后仍需重新经过策略判定并按替换后的命令建立 grant key。
@@ -92,6 +94,7 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - 没有具体工具边界需求时，不要重新引入 evidence/progress 账本或 watchdog 式进度推断。
 - 不要在 MCP 工具 policy 中跳过 `full_access` 模式检查；MCP 工具应与 `shell_execute`/`write_file`/`edit_file` 行为一致。
 - 不要改变基集工具的顺序，以避免破坏前缀缓存稳定性。
+- 不要把 Plan Mode 只做成 TUI 状态或 prompt 文案；必须把 `phase=planning` 传入 core，由 tool policy 执行只读边界。
 
 ## 测试期望
 
@@ -105,7 +108,8 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - `shell_execute` 的只读命令、高危命令、普通执行命令分别覆盖直通、拒绝、审批三种路径。
 - 工具基集按顺序包含 `read_file`、`edit_file`、`write_file`、`shell_execute`、`read_mcp_resource`、`Skill`（当存在 skills 时）、`update_plan`、`ask_user`、`set_authorization_mode`；MCP 工具附加在末尾。
 - `shell_execute` schema 覆盖 action envelope 字段。
-- `same_command` 授权命中后同命令直接进入 `tools`，不同命令不命中；`full_access` 下普通、写入、VCS 和 destructive shell 命令都允许。
+- `same_command` 授权命中后同命令直接进入 `tools`，不同命令不命中；`full_access` 下普通、写入和 VCS shell 命令允许，高危 destructive shell 命令仍被拒绝。
+- Plan approval 后 `phase` 迁移到 `building`，但 `executionMode=auto` 不会把 `authorization.mode` 提升到 `full_access`。
 - `approve_once` 不写入 command grant；`same_command` 写入当前 thread/workspace/command 的 grant；`full_access` 写入当前 thread 授权模式。
 - `planning` 阶段的执行类工具在执行层被拒绝，且不会调用 shell executor。
 - `shell_execute` 执行结果保留 `intent`、`objective`、`expectedObservation`、`failureStrategy`、`prefixRule` 和 `grantUsed`。

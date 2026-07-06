@@ -13,6 +13,7 @@ import type { McpManager } from '@/core/mcp';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
 import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
+import type { AgentPhase } from '../../protocol/events.js';
 import App, { type Action, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import InputLine, { type SlashSuggestionData } from './components/InputLine';
@@ -152,6 +153,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   }, []);
   const thinkingLevelRef = React.useRef<string | null>(config.reasoningEffort ?? null);
   const interactionModeRef = React.useRef<'ask' | 'auto' | 'full'>(config.interactionMode ?? 'ask');
+  const phaseRef = React.useRef<AgentPhase>('building');
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
@@ -263,6 +265,10 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   React.useEffect(() => {
     interactionModeRef.current = state.interactionMode;
   }, [state.interactionMode]);
+
+  React.useEffect(() => {
+    phaseRef.current = state.status.phase;
+  }, [state.status.phase]);
 
   // 每当 token 统计变化时持久化到 DB，确保最新值始终写入
   // Persist token stats to DB on every change, guaranteeing latest values
@@ -564,7 +570,10 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     ],
   );
 
-  const runTaskBridge = React.useCallback((task: string) => {
+  const runTaskBridge = React.useCallback((task: string, initialPhase?: AgentPhase) => {
+    if (initialPhase) {
+      phaseRef.current = initialPhase;
+    }
     runTaskRef.current?.(task);
   }, []);
 
@@ -645,6 +654,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       rt.pendingSkills = [...pendingSkillsRef.current];
       rt.thinkingLevel = thinkingLevelRef.current;
       rt.interactionMode = interactionModeRef.current;
+      rt.phase = phaseRef.current;
       rt.conversationHistory = [...conversationHistoryRef.current];
 
       dispatch({ type: 'USER_MESSAGE', text: task });
