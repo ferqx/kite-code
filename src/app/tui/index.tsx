@@ -10,7 +10,7 @@ import {
 } from '@/core/config/index';
 import { sessionExportPath } from '@/core/config/paths';
 import type { McpManager } from '@/core/mcp';
-import { detectSandboxBackend } from '@/core/sandbox';
+import { resolveSandboxRuntime } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
 import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
@@ -188,7 +188,11 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     _sessionManagerForExit = mgr;
     return mgr;
   }, [config, provider, dispatch]);
-  const sandboxBackend = React.useMemo(() => detectSandboxBackend(), []);
+  const sandboxRuntime = React.useMemo(
+    () => resolveSandboxRuntime({ enabled: config.sandbox.enabled }),
+    [config.sandbox.enabled],
+  );
+  const sandboxBackend = sandboxRuntime.backend;
 
   // Reset conversation history and thread on new session
   React.useEffect(() => {
@@ -604,6 +608,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       // Invalid preset — silently ignored
     },
     state.interactionMode,
+    sandboxBackend,
   );
 
   // Stable reference — avoids re-creating the object on every render and causing
@@ -751,6 +756,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         provider={provider}
         mcpManager={mcpManager ?? undefined}
         slashSuggestion={slashSuggestion}
+        sandboxBackend={sandboxBackend}
         resizeGeneration={resizeKey}
       >
         <InputLine

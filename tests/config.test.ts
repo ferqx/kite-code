@@ -104,6 +104,34 @@ describe('loadAgentConfig', () => {
     }
   });
 
+  test('loads sandbox enabled flag from JSONC', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'sandbox-disabled.jsonc');
+      writeFileSync(
+        configPath,
+        `{
+        "sandbox": {
+          "enabled": false
+        },
+        "provider": {
+          "ollama": {
+            "models": [
+              { "name": "qwen2.5-coder:7b", "default": true }
+            ]
+          }
+        }
+      }`,
+      );
+
+      const config = loadAgentConfig({ configPath });
+
+      expect(config.sandbox.enabled).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('overrides the configured default provider and model', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
     try {

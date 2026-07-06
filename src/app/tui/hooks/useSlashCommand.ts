@@ -1,7 +1,7 @@
 import type { Dispatch } from 'react';
 import { useCallback } from 'react';
 import { listAvailableModels } from '@/core/config';
-import { detectSandboxBackend } from '@/core/sandbox';
+import type { SandboxBackend } from '@/core/sandbox';
 import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { AgentPhase } from '@/protocol/events';
@@ -78,6 +78,7 @@ export function useSlashCommand(
   onRunTask?: (task: string, initialPhase?: AgentPhase) => void,
   onTheme?: (preset: string) => void,
   currentInteractionMode: 'ask' | 'auto' | 'full' = 'ask',
+  sandboxBackend: SandboxBackend = 'none',
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -123,7 +124,6 @@ export function useSlashCommand(
           }
           break;
         case 'mode': {
-          const sandboxBackend = detectSandboxBackend();
           const target = resolveInteractionModeTarget(
             action.mode,
             currentInteractionMode,
@@ -218,6 +218,7 @@ export function useSlashCommand(
       onRunTask,
       onTheme,
       currentInteractionMode,
+      sandboxBackend,
     ],
   );
 }

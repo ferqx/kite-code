@@ -18,7 +18,7 @@ export function fullModeUnavailableReason(
 ): string | null {
   if (interactionMode !== InteractionMode.Full) return null;
   if (sandboxBackend !== 'none') return null;
-  return 'Full mode requires a sandbox backend, but none is available on this system.';
+  return '未启用沙箱，Full 不可用';
 }
 
 export function resolveInteractionModeTarget(

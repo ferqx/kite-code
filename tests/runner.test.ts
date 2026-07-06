@@ -26,6 +26,7 @@ const fakeConfig: AgentConfig = {
   apiKey: 'noop',
   baseURL: 'http://localhost:9999',
   modelName: 'fake',
+  sandbox: { enabled: true },
 };
 
 function tempWorkspace(prefix: string): string {

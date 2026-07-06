@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
 import { isRecoverableError, runAgent } from '@/core/runner';
-import { createSandboxExecutor, detectSandboxBackend } from '@/core/sandbox/index';
+import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentEvent, AgentPhase } from '@/protocol/events';
@@ -135,8 +135,8 @@ export class SessionRuntime {
 
     const shellContext =
       this.conversationHistory.length > 0 ? `\n${this.conversationHistory.join('\n')}` : '';
-    const sandboxBackend = detectSandboxBackend();
-    const fullModeReason = fullModeUnavailableReason(this.interactionMode, sandboxBackend);
+    const sandboxRuntime = resolveSandboxRuntime({ enabled: deps.config.sandbox.enabled });
+    const fullModeReason = fullModeUnavailableReason(this.interactionMode, sandboxRuntime.backend);
     if (fullModeReason) {
       this.interactionMode = 'ask';
       deps.dispatch({ type: 'SET_INTERACTION_MODE', mode: 'ask' });
@@ -146,7 +146,10 @@ export class SessionRuntime {
       });
       return;
     }
-    const shellExecutor = createSandboxExecutor({ enabled: true, workspace: this.workspace });
+    const shellExecutor = createSandboxExecutor({
+      enabled: sandboxRuntime.enabled,
+      workspace: this.workspace,
+    });
 
     const abortController = new AbortController();
 
@@ -165,7 +168,7 @@ export class SessionRuntime {
       shellContext,
       initialPhase: this.phase,
       interactionMode: this.interactionMode,
-      sandboxBackend,
+      sandboxBackend: sandboxRuntime.backend,
       model: deps.model,
       // 后台会话不再默认注入 full_access；中断会挂起到该会话，等待切回前台处理。
       authorizationOverride: undefined,

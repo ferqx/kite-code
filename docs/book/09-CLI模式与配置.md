@@ -61,6 +61,11 @@ kite-code resume --thread-id run-abc123 --action approve --grant full-access
   // 主题
   "theme": "dark",  // "dark" | "light"
 
+  // 沙箱，默认启用。关闭后 Full 模式不可用。
+  "sandbox": {
+    "enabled": true
+  },
+
   // MCP 服务器
   "mcpServers": {
     "filesystem": {
@@ -97,6 +102,12 @@ loadAgentConfig()
   → Zod schema 校验
   → 返回 AgentConfig
 ```
+
+### 沙箱开关
+
+`sandbox.enabled` 默认是 `true`。设置为 `false` 时，TUI 会在 `/mode` 候选中禁用 `full`，并显示“未启用沙箱，Full 不可用”；CLI/TUI 运行时都会把 sandbox backend 解析为 `none`。
+
+CLI 的 `--no-sandbox` 是单次运行覆盖项，优先级高于配置文件，可用于临时关闭沙箱。
 
 ## 9.3 路径管理
 

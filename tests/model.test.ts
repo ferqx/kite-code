@@ -193,6 +193,7 @@ describe('model transient retry', () => {
       apiKey: 'sk-test',
       baseURL: 'https://api.deepseek.com/v1',
       modelName: 'deepseek-v4-flash',
+      sandbox: { enabled: true },
     }) as any;
     const rawToolCall = {
       id: 'call-empty-reasoning',
@@ -260,6 +261,7 @@ describe('model provider factory', () => {
       apiKey: 'sk-test',
       baseURL: 'https://api.deepseek.com/v1',
       modelName: 'deepseek-chat',
+      sandbox: { enabled: true },
     });
 
     expect(model).toBeInstanceOf(ChatDeepSeek);
@@ -273,6 +275,7 @@ describe('model provider factory', () => {
       apiKey: 'sk-compatible',
       baseURL: 'https://api.siliconflow.cn/v1',
       modelName: 'Qwen/Qwen3-Coder',
+      sandbox: { enabled: true },
     };
 
     const model = createChatModel(config);
@@ -292,6 +295,7 @@ describe('model provider factory', () => {
       apiKey: '',
       baseURL: 'http://localhost:11434',
       modelName: 'qwen2.5-coder:7b',
+      sandbox: { enabled: true },
     };
 
     const model = createChatModel(config);

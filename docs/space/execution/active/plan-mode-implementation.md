@@ -21,12 +21,13 @@ Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批
 - **Plan approval 不再等于 full_access**：批准方案后状态迁移为 `phase=building`，`executionMode=auto` 只切到自动低风险确认，不提升到 `authorization.mode=full_access`。
 - **Planning 阶段 tool policy**：默认允许 read/search/research、`ask_user`、`update_plan` 和只读 subagent；拒绝写文件、非只读 shell、实现型 subagent 和 full access escalation。
 - **Full mode 收紧**：TUI/CLI 进入 full 前需要可用 sandbox backend；后台 session 不再默认注入 `full_access`。
+- **沙箱配置一等化**：`sandbox.enabled` 进入 `AgentConfig`，默认 `true`。TUI、CLI 和 session runtime 通过 `resolveSandboxRuntime()` 统一解析 `{ enabled, backend, available }`；CLI `--no-sandbox` 是一次性更高优先级关闭开关。
 - **动态 runtime snapshot**：当前 phase、interactionMode、authorization、sandbox、planReviewed 和 approvedPlanSummary 作为非 cacheable runtime reminder 注入模型；静态 system prompt 不再携带这些动态状态。
 - **Tool cache 防旧状态**：`createAgentTools()` 的缓存 key 纳入 phase、authorization、workspaceAccess 等 runtime policy 状态，避免 stateful tools 捕获旧权限。
-- **Full 入场前 guard**：`/mode full` 和无参 `/mode` 从 auto 进入 full 时，TUI 在 reducer dispatch 前通过 `admitInteractionModeTarget()` 检查 sandbox backend；不可用时保持/回退 `ask` 并展示 recoverable error。Session runtime 仍保留同一 guard 作为执行前防线。
+- **Full 入场前 guard**：`/mode full` 和无参 `/mode` 从 auto 进入 full 时，TUI 在 reducer dispatch 前通过 `admitInteractionModeTarget()` 检查 resolved sandbox backend；不可用时保持/回退 `ask` 并展示 recoverable error。Session runtime 仍保留同一 guard 作为执行前防线。
 - **Full 不可用时前置禁用**：当 sandbox backend 为 `none` 时，TUI `/mode` 候选列表仍显示 `full`，但标记为 disabled，并用“未启用沙箱，Full 不可用”作为辅助文案；无参 `/mode` 在 `ask ↔ auto` 间切换，不再让用户先进入 Full 再失败。
 - **授权 cache key 稳定化**：`createAgentTools()` 不再只用 `commandGrants` 数量做缓存判断，而是把 `authorization.mode + commandGrants` 做稳定序列化，并同时纳入 `interactionMode`，避免同数量不同授权复用旧 stateful tool executor。
-- **实际 sandbox 投影**：TUI/CLI 检测到的 `sandboxBackend` 进入 `RunAgentInput` 和 graph state，并作为动态 runtime snapshot 注入模型；cacheable system prompt 不包含该动态字段。
+- **实际 sandbox 投影**：TUI/CLI 解析出的 `sandboxBackend` 进入 `RunAgentInput` 和 graph state，并作为动态 runtime snapshot 注入模型；cacheable system prompt 不包含该动态字段。
 
 ## 最近更新（2026-06-30）
 

@@ -15,6 +15,7 @@ const fakeConfig: AgentConfig = {
   apiKey: 'noop',
   baseURL: 'http://localhost:9999',
   modelName: 'fake',
+  sandbox: { enabled: true },
 };
 
 class NoopChatModel extends ChatOpenAI {

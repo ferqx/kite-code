@@ -73,6 +73,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       model: {
         default: { provider: 'mock' as const, name: 'mock-model' },
       },
+      ...(opts.workspace.configOverrides ?? {}),
     };
     const configStr = JSON.stringify(mockConfig, null, 2);
 

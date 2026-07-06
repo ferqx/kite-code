@@ -60,6 +60,7 @@ const fakeConfig: AgentConfig = {
   apiKey: 'noop',
   baseURL: 'http://localhost:9999',
   modelName: 'fake',
+  sandbox: { enabled: true },
 };
 
 type GraphChunk = Record<string, unknown>;

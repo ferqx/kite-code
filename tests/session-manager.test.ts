@@ -13,7 +13,7 @@ import type { AgentEvent } from '../src/protocol/events';
 
 function makeDeps(): any {
   return {
-    config: {},
+    config: { sandbox: { enabled: true } },
     provider: {},
     skillManifests: [],
     skillOptions: null,
@@ -54,7 +54,7 @@ function makeStatus(overrides: Partial<StatusState> = {}): StatusState {
 
 describe('fullModeUnavailableReason', () => {
   test('rejects full mode when no sandbox backend is available', () => {
-    expect(fullModeUnavailableReason('full', 'none')).toContain('requires a sandbox');
+    expect(fullModeUnavailableReason('full', 'none')).toContain('未启用沙箱');
   });
 
   test('allows non-full modes without a sandbox', () => {
@@ -87,7 +87,7 @@ describe('interaction mode admission', () => {
     const decision = admitInteractionModeTarget('full', 'none');
     expect(decision.allowed).toBe(false);
     expect(decision.mode).toBe('ask');
-    expect(decision.reason).toContain('requires a sandbox');
+    expect(decision.reason).toContain('未启用沙箱');
   });
 
   test('allows full admission with sandbox backend', () => {

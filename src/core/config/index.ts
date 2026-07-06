@@ -42,6 +42,11 @@ const mcpServerSchema = z.object({
 });
 
 const interactionModeSchema = z.enum(['ask', 'auto', 'full']);
+const sandboxSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+  })
+  .optional();
 
 export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
@@ -50,6 +55,7 @@ export const configSchema = z.object({
   theme: z.enum(['dark', 'light']).optional(),
   colorPreset: z.string().optional(),
   interactionMode: interactionModeSchema.optional(),
+  sandbox: sandboxSchema,
   autoReview: z
     .object({
       provider: z.string().optional(),
@@ -85,6 +91,9 @@ export interface AgentConfig {
   /** 透传给 LangChain 模型构造器的额外参数 */
   modelKwargs?: Record<string, unknown>;
   interactionMode?: z.infer<typeof interactionModeSchema>;
+  sandbox: {
+    enabled: boolean;
+  };
   autoReview?: {
     provider?: string;
     model?: string;
@@ -134,6 +143,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     theme: project.theme ?? user.theme,
     colorPreset: project.colorPreset ?? user.colorPreset,
     interactionMode: project.interactionMode ?? user.interactionMode,
+    sandbox: project.sandbox ?? user.sandbox,
     autoReview: project.autoReview ?? user.autoReview,
     mcpServers: { ...user.mcpServers, ...project.mcpServers },
   };
@@ -173,6 +183,7 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
     },
     theme: 'dark',
     interactionMode: 'ask',
+    sandbox: { enabled: true },
     mcpServers: {},
   };
 }
@@ -208,6 +219,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     reasoning,
     modelKwargs: provider.modelKwargs as Record<string, unknown> | undefined,
     interactionMode: cfg.interactionMode,
+    sandbox: { enabled: cfg.sandbox?.enabled ?? true },
     autoReview: cfg.autoReview,
   };
 }

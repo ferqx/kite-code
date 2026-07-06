@@ -24,6 +24,8 @@ export interface TestWorkspace {
   checkpointDir: string;
   /** Environment variables to pass to child process */
   env: Record<string, string>;
+  /** Additional config fields merged into generated test config */
+  configOverrides?: Record<string, unknown>;
   /** Remove all temp directories */
   cleanup(): void;
 }
@@ -40,6 +42,7 @@ export interface TestWorkspace {
 export function createTestWorkspace(opts?: {
   files?: Record<string, string>; // path → content, created in workspace
   workspaceFiles?: Record<string, string>;
+  configOverrides?: Record<string, unknown>;
 }): TestWorkspace {
   const tempHome = mkdtempSync(join(tmpdir(), 'kite-code-e2e-'));
   const kiteCodeDir = join(tempHome, '.kite-code');
@@ -59,6 +62,7 @@ export function createTestWorkspace(opts?: {
     model: {
       default: { provider: 'deepseek' as const, name: 'deepseek-v4-flash' },
     },
+    ...(opts?.configOverrides ?? {}),
   };
   writeFileSync(join(kiteCodeDir, 'kite-code.jsonc'), JSON.stringify(config, null, 2));
 
@@ -98,5 +102,13 @@ export function createTestWorkspace(opts?: {
     }
   };
 
-  return { home: tempHome, workspace: ws, configPath, checkpointDir, env, cleanup };
+  return {
+    home: tempHome,
+    workspace: ws,
+    configPath,
+    checkpointDir,
+    env,
+    configOverrides: opts?.configOverrides,
+    cleanup,
+  };
 }

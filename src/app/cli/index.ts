@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { defaultCheckpointPath, loadAgentConfig } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
 import { runAgent } from '@/core/runner';
-import { createSandboxExecutor, detectSandboxBackend } from '@/core/sandbox/index';
+import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import { getSkillContent, scanSkills } from '@/core/skills/loader';
 import type { AuthorizationOverride } from '@/core/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
@@ -37,12 +37,14 @@ export async function main(): Promise<void> {
 
   const config = loadAgentConfig();
   const interactionMode = args.interactionMode ?? config.interactionMode ?? 'ask';
-  const sandboxBackend = args.sandbox ? detectSandboxBackend() : 'none';
-  if (interactionMode === 'full' && sandboxBackend === 'none') {
+  const sandboxRuntime = resolveSandboxRuntime({
+    enabled: args.sandbox && config.sandbox.enabled,
+  });
+  if (interactionMode === 'full' && !sandboxRuntime.available) {
     throw new Error('full mode requires an available workspace sandbox.');
   }
   const shellExecutor = createSandboxExecutor({
-    enabled: args.sandbox,
+    enabled: sandboxRuntime.enabled,
     workspace: args.workspace,
   });
 
@@ -79,7 +81,7 @@ export async function main(): Promise<void> {
     shellExecutor,
     authorizationOverride,
     interactionMode,
-    sandboxBackend,
+    sandboxBackend: sandboxRuntime.backend,
     skills: manifests,
     skillOptions,
     frontend: 'cli',

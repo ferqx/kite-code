@@ -9,6 +9,7 @@ import React, {
   useRef,
 } from 'react';
 import type { McpManager } from '@/core/mcp';
+import type { SandboxBackend } from '@/core/sandbox';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
 import HelpPanel from './components/HelpPanel';
@@ -63,6 +64,7 @@ export interface AppProps {
   mcpManager?: McpManager;
   availableModels?: import('@/core/config').AvailableModel[];
   slashSuggestion?: import('./components/InputLine').SlashSuggestionData | null;
+  sandboxBackend?: SandboxBackend;
   resizeGeneration?: number;
   children?: ReactNode;
 }
@@ -96,6 +98,7 @@ export default function App({
   provider,
   mcpManager,
   slashSuggestion,
+  sandboxBackend = 'none',
   resizeGeneration,
   children,
 }: AppProps) {
@@ -289,7 +292,7 @@ export default function App({
       </Footer>
 
       {/* ── Overlay: panels below Footer ── */}
-      {state.showHelp && <HelpPanel onClose={hideHelp} />}
+      {state.showHelp && <HelpPanel onClose={hideHelp} sandboxBackend={sandboxBackend} />}
       {state.showSessions && (
         <SessionSelector
           onSelect={selectSession}

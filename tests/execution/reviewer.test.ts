@@ -194,6 +194,7 @@ describe('resolveAutoReviewConfig', () => {
     modelName: 'deepseek-v4-flash',
     providerName: 'deepseek',
     providerType: 'deepseek',
+    sandbox: { enabled: true },
   };
 
   test('falls back to main model provider and name when autoReview has none', () => {
@@ -248,6 +249,7 @@ describe('createAutoReviewModel', () => {
       modelName: 'deepseek-v4-pro',
       providerName: 'deepseek',
       providerType: 'deepseek',
+      sandbox: { enabled: true },
       autoReview: { model: 'deepseek-v4-flash' },
     };
     // createAutoReviewModel returns a SupportedChatModel — just verify it does not throw
