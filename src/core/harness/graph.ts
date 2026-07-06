@@ -147,6 +147,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       authorization: state.authorization,
       workspaceAccess: state.workspaceAccess,
       phase: state.phase,
+      interactionMode: state.interactionMode,
     });
     const retryEvents: ModelRetryEvent[] = [];
     const listener: ModelRetryListener = (attempt, maxAttempts, error, delayMs) => {

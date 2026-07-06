@@ -37,7 +37,8 @@ export async function main(): Promise<void> {
 
   const config = loadAgentConfig();
   const interactionMode = args.interactionMode ?? config.interactionMode ?? 'ask';
-  if (interactionMode === 'full' && (!args.sandbox || detectSandboxBackend() === 'none')) {
+  const sandboxBackend = args.sandbox ? detectSandboxBackend() : 'none';
+  if (interactionMode === 'full' && sandboxBackend === 'none') {
     throw new Error('full mode requires an available workspace sandbox.');
   }
   const shellExecutor = createSandboxExecutor({
@@ -78,6 +79,7 @@ export async function main(): Promise<void> {
     shellExecutor,
     authorizationOverride,
     interactionMode,
+    sandboxBackend,
     skills: manifests,
     skillOptions,
     frontend: 'cli',

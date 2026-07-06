@@ -50,10 +50,21 @@ export interface CreateAgentToolsInput {
   authorization?: import('@/core/types').ThreadAuthorizationState;
   workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
   phase?: import('@/protocol/events').AgentPhase;
+  interactionMode?: import('@/protocol/events').InteractionMode;
 }
 
 /** 模块级工具缓存：按 cacheKey 隔离，防止多 session 并发时竞态覆盖 / Module-level tool cache isolated by cacheKey to prevent race conditions with concurrent sessions */
 const _toolCache = new Map<string, any[]>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- internal cache, breaks circular ReturnType<> reference
+
+function stableCacheStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableCacheStringify).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableCacheStringify(record[key])}`)
+    .join(',')}}`;
+}
 
 /** 清除工具缓存（MCP server 重连或工具列表变化时调用）/ Clear tool cache (call on MCP reconnect or tool list change) */
 export function clearToolCache(): void {
@@ -65,7 +76,13 @@ export function createAgentTools(input: CreateAgentToolsInput) {
   // 缓存：同一个 agent 迭代中参数不变时避免重建全部工具（包括 MCP 适配）
   // Include subagentEventSink presence and MCP tool count to invalidate on tool list changes
   const mcpToolCount = input.mcpManager?.getAllTools().length ?? 0;
-  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpToolCount}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.authorization?.mode ?? ''}|${Object.keys(input.authorization?.commandGrants ?? {}).length}`;
+  const authorizationCacheKey = input.authorization
+    ? stableCacheStringify({
+        mode: input.authorization.mode,
+        commandGrants: input.authorization.commandGrants ?? {},
+      })
+    : '';
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpToolCount}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
   const readFileTool = tool(

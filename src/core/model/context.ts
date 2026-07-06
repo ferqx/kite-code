@@ -1,5 +1,6 @@
 import { AIMessage, type BaseMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import systemPrompt from '@/core/prompts/system-prompt.txt';
+import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
 import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, AgentPlan, InteractionMode } from '@/protocol/events';
@@ -26,6 +27,7 @@ export interface ModelContextState {
   interactionMode?: InteractionMode;
   authorization?: ThreadAuthorizationState;
   executionEnvironment?: 'local_unsafe' | 'workspace_sandbox';
+  sandboxBackend?: SandboxBackend | 'unknown';
   planReviewed?: boolean;
   /** 执行计划 / Execution plan */
   plan?: AgentPlan | null;
@@ -289,7 +291,9 @@ export function prepareModelContext(
       phase: state.phase ?? 'building',
       interactionMode: state.interactionMode ?? 'ask',
       authorizationMode: state.authorization?.mode ?? 'default',
-      sandboxBackend: state.executionEnvironment === 'workspace_sandbox' ? 'unknown' : 'none',
+      sandboxBackend:
+        state.sandboxBackend ??
+        (state.executionEnvironment === 'workspace_sandbox' ? 'unknown' : 'none'),
       planReviewed: state.planReviewed ?? false,
       approvedPlanSummary:
         state.plan && state.planReviewed

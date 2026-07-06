@@ -22,6 +22,7 @@ import { defaultAuthorizationState } from './harness/tool-policy';
 import { genSpanId } from './id-utils';
 import type { SupportedChatModel } from './model/factory';
 import type { BunSqliteSaver } from './persistence/checkpoint';
+import type { SandboxBackend } from './sandbox';
 import { SessionLogCollector } from './session-logger';
 import { countTokens } from './token-counter';
 import type { ShellExecutor } from './tools/shell';
@@ -77,6 +78,7 @@ export interface RunAgentInput {
   /** 初始执行阶段；TUI plan mode 会传入 planning / Initial execution phase */
   initialPhase?: AgentPhase;
   interactionMode?: import('@/protocol/events').InteractionMode;
+  sandboxBackend?: SandboxBackend | 'unknown';
 }
 
 export interface StreamCodeAgentInput {
@@ -96,6 +98,7 @@ export interface StreamCodeAgentInput {
   signal?: AbortSignal;
   /** 可选 MCP 管理器 / Optional MCP manager */
   mcpManager?: import('@/core/mcp').McpManager;
+  sandboxBackend?: SandboxBackend | 'unknown';
 }
 
 export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, 'task'> {
@@ -284,6 +287,7 @@ export async function* runAgent(
       modelName: input.config.modelName,
       thinkingLevel: input.thinkingLevel ?? null,
       interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
+      sandboxBackend: input.sandboxBackend ?? 'unknown',
     };
 
     let resumeValue: AgentResumeValue | null = input.resume ?? null;
@@ -488,6 +492,7 @@ export async function* forkFromCheckpoint(
       modelProvider: input.config.providerName,
       modelName: input.config.modelName,
       thinkingLevel: null as string | null,
+      sandboxBackend: oldState.sandboxBackend ?? 'unknown',
     };
 
     const streamConfig = {
@@ -1119,6 +1124,7 @@ export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenera
         modelProvider: input.config.providerName,
         modelName: input.config.modelName,
         thinkingLevel: input.thinkingLevel ?? null,
+        sandboxBackend: input.sandboxBackend ?? 'unknown',
       },
       graphConfig(input.threadId),
     );

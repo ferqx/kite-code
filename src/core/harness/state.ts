@@ -2,6 +2,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import type { ExecutionJournalEntry } from '@/core/execution/journal';
 import type { PermitBatch } from '@/core/execution/permit';
+import type { SandboxBackend } from '@/core/sandbox/platform';
 import type { SubAgentContinuation } from '@/core/subagent/types';
 import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
 import type {
@@ -58,6 +59,10 @@ export const AgentState = Annotation.Root({
   executionEnvironment: Annotation<'local_unsafe' | 'workspace_sandbox'>({
     reducer: (_left, right) => right,
     default: () => 'local_unsafe',
+  }),
+  sandboxBackend: Annotation<SandboxBackend | 'unknown'>({
+    reducer: (_left, right) => right,
+    default: () => 'unknown',
   }),
   interactionMode: Annotation<InteractionMode>({
     reducer: (_left, right) => right,

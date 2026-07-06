@@ -2,28 +2,25 @@ import { Database } from 'bun:sqlite';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
 import { isRecoverableError, runAgent } from '@/core/runner';
-import type { SandboxBackend } from '@/core/sandbox/index';
 import { createSandboxExecutor, detectSandboxBackend } from '@/core/sandbox/index';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentEvent, AgentPhase } from '@/protocol/events';
 import type { UserInputProvider } from '@/protocol/provider';
 import type { Action } from './App';
+import { fullModeUnavailableReason } from './interaction-mode';
 import type { TuiUserInputProvider } from './provider';
 import { buildRunAgentParams } from './run-agent';
 import type { SessionSnapshot, StatusState } from './types';
 
+export {
+  admitInteractionModeTarget,
+  fullModeUnavailableReason,
+  resolveInteractionModeTarget,
+} from './interaction-mode';
+
 /** 可丢弃的缓冲事件类型（text/reason 为非关键信息，丢弃时不丢失用户可见状态） */
 const DISPOSABLE_EVENT_TYPES = new Set(['text', 'reason']);
-
-export function fullModeUnavailableReason(
-  interactionMode: 'ask' | 'auto' | 'full',
-  sandboxBackend: SandboxBackend,
-): string | null {
-  if (interactionMode !== 'full') return null;
-  if (sandboxBackend !== 'none') return null;
-  return 'Full mode requires a sandbox backend, but none is available on this system.';
-}
 
 /** 工厂依赖：注入到每个 SessionRuntime */
 export interface SessionDeps {
@@ -168,6 +165,7 @@ export class SessionRuntime {
       shellContext,
       initialPhase: this.phase,
       interactionMode: this.interactionMode,
+      sandboxBackend,
       model: deps.model,
       // 后台会话不再默认注入 full_access；中断会挂起到该会话，等待切回前台处理。
       authorizationOverride: undefined,

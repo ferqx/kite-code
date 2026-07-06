@@ -188,6 +188,21 @@ describe('model context protocol', () => {
     expect(String(messages[1]!.content)).toBe('Inspect before editing');
   });
 
+  test('injects the actual sandbox backend into the dynamic mode snapshot', () => {
+    const messages = buildModelMessages('agent', {
+      workspace: 'D:\\workspace',
+      workspaceAccess: 'write',
+      plan: null,
+      messages: [new HumanMessage('Continue safely')],
+      final: '',
+      sandboxBackend: 'seatbelt',
+    });
+
+    expect(messages[2]!).toBeInstanceOf(HumanMessage);
+    expect(String(messages[2]!.content)).toContain('Sandbox backend: seatbelt');
+    expect(String(messages[0]!.content)).not.toContain('Sandbox backend:');
+  });
+
   // 验证 plan 尾部 HumanMessage 仍然注入，但不再有 workspaceAccess 提醒 / Verify plan HumanMessage still injected without workspaceAccess reminder
   test('projects plan HumanMessage without workspaceAccess reminder', () => {
     const plan = {

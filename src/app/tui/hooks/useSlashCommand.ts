@@ -1,9 +1,11 @@
 import type { Dispatch } from 'react';
 import { useCallback } from 'react';
 import { listAvailableModels } from '@/core/config';
+import { detectSandboxBackend } from '@/core/sandbox';
 import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { AgentPhase } from '@/protocol/events';
+import { admitInteractionModeTarget, resolveInteractionModeTarget } from '../interaction-mode';
 import type { Action } from '../reducers/actions';
 
 export type SlashAction =
@@ -75,6 +77,7 @@ export function useSlashCommand(
   skillOptions?: SkillScanOptions,
   onRunTask?: (task: string, initialPhase?: AgentPhase) => void,
   onTheme?: (preset: string) => void,
+  currentInteractionMode: 'ask' | 'auto' | 'full' = 'ask',
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -120,20 +123,24 @@ export function useSlashCommand(
           }
           break;
         case 'mode': {
-          const normalized = (action.mode ?? '').toLowerCase();
-          let target: 'ask' | 'auto' | 'full' | 'toggle' | null = null;
-          if (!normalized) {
-            target = 'toggle';
-          } else if (normalized === 'a' || normalized.startsWith('as')) {
-            target = 'ask';
-          } else if (normalized === 'au' || normalized === 'auto') {
-            target = 'auto';
-          } else if (normalized === 'f' || normalized === 'full') {
-            target = 'full';
-          } else if (['ask', 'auto', 'full'].includes(normalized)) {
-            target = normalized as 'ask' | 'auto' | 'full';
+          const target = resolveInteractionModeTarget(action.mode, currentInteractionMode);
+          if (!target) break;
+          const admission = admitInteractionModeTarget(target, detectSandboxBackend());
+          if (!admission.allowed) {
+            dispatch({ type: 'SET_INTERACTION_MODE', mode: admission.mode });
+            dispatch({
+              type: 'EVENT',
+              event: {
+                type: 'error',
+                data: {
+                  message: admission.reason ?? 'Interaction mode is not available.',
+                  recoverable: true,
+                },
+              },
+            });
+            break;
           }
-          if (target) dispatch({ type: 'SET_INTERACTION_MODE', mode: target });
+          dispatch({ type: 'SET_INTERACTION_MODE', mode: admission.mode });
           break;
         }
         case 'clear':
@@ -197,6 +204,15 @@ export function useSlashCommand(
       }
       return true;
     },
-    [dispatch, onExit, mcpPromptRegistry, skillManifests, skillOptions, onRunTask, onTheme],
+    [
+      dispatch,
+      onExit,
+      mcpPromptRegistry,
+      skillManifests,
+      skillOptions,
+      onRunTask,
+      onTheme,
+      currentInteractionMode,
+    ],
   );
 }

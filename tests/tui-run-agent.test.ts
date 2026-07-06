@@ -136,6 +136,18 @@ describe('buildRunAgentParams', () => {
     expect(params.initialPhase).toBe('planning');
   });
 
+  test('passes sandbox backend into the core runner', () => {
+    const params = buildRunAgentParams({
+      ...baseParams(),
+      task: 'continue safely',
+      pendingSkillsContent: '',
+      shellContext: '',
+      sandboxBackend: 'seatbelt',
+    });
+
+    expect(params.sandboxBackend).toBe('seatbelt');
+  });
+
   test('skillOptions is undefined when null', () => {
     const params = buildRunAgentParams({
       ...baseParams({ skillOptions: null }),

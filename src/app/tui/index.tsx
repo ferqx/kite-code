@@ -601,6 +601,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       }
       // Invalid preset — silently ignored
     },
+    state.interactionMode,
   );
 
   // Stable reference — avoids re-creating the object on every render and causing

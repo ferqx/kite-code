@@ -374,6 +374,41 @@ describe('code agent tool definitions', () => {
     expect(buildingTools.map((t) => t.name)).toEqual(planningTools.map((t) => t.name));
   });
 
+  test('invalidates tool cache when same-sized command grants change', () => {
+    const grantA = {
+      'grant-a': {
+        workspace: '/tmp',
+        threadId: 'thread-1',
+        command: 'bun test a',
+        createdAt: 1,
+      },
+    };
+    const grantB = {
+      'grant-b': {
+        workspace: '/tmp',
+        threadId: 'thread-1',
+        command: 'bun test b',
+        createdAt: 2,
+      },
+    };
+
+    const toolsA = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'default', commandGrants: grantA },
+      workspaceAccess: 'write',
+    });
+    const toolsB = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'default', commandGrants: grantB },
+      workspaceAccess: 'write',
+    });
+
+    expect(toolsB).not.toBe(toolsA);
+    expect(toolsB.map((t) => t.name)).toEqual(toolsA.map((t) => t.name));
+  });
+
   // ── Prompt cache: Skill tool placement / Skill 工具插入不影响其他工具 ──
 
   test('Skill tool inserted before update_plan, not at end', () => {

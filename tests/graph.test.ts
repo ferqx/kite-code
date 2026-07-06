@@ -1045,6 +1045,7 @@ describe('routeEntry — start-of-graph routing', () => {
     approvedToolGrant: null,
     approvedBatch: {},
     executionEnvironment: 'local_unsafe' as const,
+    sandboxBackend: 'unknown' as const,
     interactionMode: 'ask' as const,
     executionJournal: [],
     exhaustedFingerprints: {},

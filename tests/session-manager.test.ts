@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  admitInteractionModeTarget,
   fullModeUnavailableReason,
+  resolveInteractionModeTarget,
   SessionManager,
   SessionRuntime,
 } from '../src/app/tui/session-manager';
@@ -63,6 +65,31 @@ describe('fullModeUnavailableReason', () => {
   test('allows full mode with a sandbox backend', () => {
     expect(fullModeUnavailableReason('full', 'seatbelt')).toBeNull();
     expect(fullModeUnavailableReason('full', 'bubblewrap')).toBeNull();
+  });
+});
+
+describe('interaction mode admission', () => {
+  test('resolves slash mode toggle without delegating full entry to reducer', () => {
+    expect(resolveInteractionModeTarget(undefined, 'ask')).toBe('auto');
+    expect(resolveInteractionModeTarget(undefined, 'auto')).toBe('full');
+    expect(resolveInteractionModeTarget(undefined, 'full')).toBe('ask');
+    expect(resolveInteractionModeTarget('f', 'ask')).toBe('full');
+    expect(resolveInteractionModeTarget('au', 'ask')).toBe('auto');
+  });
+
+  test('rejects full admission before dispatch when sandbox is unavailable', () => {
+    const decision = admitInteractionModeTarget('full', 'none');
+    expect(decision.allowed).toBe(false);
+    expect(decision.mode).toBe('ask');
+    expect(decision.reason).toContain('requires a sandbox');
+  });
+
+  test('allows full admission with sandbox backend', () => {
+    expect(admitInteractionModeTarget('full', 'seatbelt')).toEqual({
+      allowed: true,
+      mode: 'full',
+      reason: null,
+    });
   });
 });
 

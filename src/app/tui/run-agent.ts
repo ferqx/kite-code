@@ -8,6 +8,7 @@ import { defaultCheckpointPath } from '@/core/config/paths';
 import type { McpManager } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { ForkInput, RevertInput, RunAgentInput } from '@/core/runner';
+import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationOverride } from '@/core/types';
@@ -34,6 +35,7 @@ export interface BuildRunTaskParams extends BaseTuiParams {
   /** 当前 TUI phase，传入 core 由 tool policy 执行边界 / Current TUI phase enforced by core policy */
   initialPhase?: AgentPhase;
   interactionMode?: 'ask' | 'auto' | 'full';
+  sandboxBackend?: SandboxBackend | 'unknown';
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   model?: SupportedChatModel;
 }
@@ -73,6 +75,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): RunAgentInput {
     model: p.model,
     initialPhase: p.initialPhase,
     interactionMode: p.interactionMode,
+    sandboxBackend: p.sandboxBackend,
     frontend: 'tui',
   };
 }

@@ -1,0 +1,56 @@
+import type { SandboxBackend } from '@/core/sandbox/index';
+import { InteractionMode } from '@/protocol/events';
+
+export type TuiInteractionMode =
+  | typeof InteractionMode.Ask
+  | typeof InteractionMode.Auto
+  | typeof InteractionMode.Full;
+
+export interface InteractionModeAdmission {
+  allowed: boolean;
+  mode: TuiInteractionMode;
+  reason: string | null;
+}
+
+export function fullModeUnavailableReason(
+  interactionMode: TuiInteractionMode,
+  sandboxBackend: SandboxBackend,
+): string | null {
+  if (interactionMode !== InteractionMode.Full) return null;
+  if (sandboxBackend !== 'none') return null;
+  return 'Full mode requires a sandbox backend, but none is available on this system.';
+}
+
+export function resolveInteractionModeTarget(
+  requested: string | undefined,
+  current: TuiInteractionMode,
+): TuiInteractionMode | null {
+  const normalized = (requested ?? '').toLowerCase();
+  if (!normalized) {
+    if (current === InteractionMode.Ask) return InteractionMode.Auto;
+    if (current === InteractionMode.Auto) return InteractionMode.Full;
+    return InteractionMode.Ask;
+  }
+  if (normalized === 'a' || normalized.startsWith('as')) return InteractionMode.Ask;
+  if (normalized === 'au' || normalized === InteractionMode.Auto) return InteractionMode.Auto;
+  if (normalized === 'f' || normalized === InteractionMode.Full) return InteractionMode.Full;
+  if (
+    normalized === InteractionMode.Ask ||
+    normalized === InteractionMode.Auto ||
+    normalized === InteractionMode.Full
+  ) {
+    return normalized as TuiInteractionMode;
+  }
+  return null;
+}
+
+export function admitInteractionModeTarget(
+  target: TuiInteractionMode,
+  sandboxBackend: SandboxBackend,
+): InteractionModeAdmission {
+  const reason = fullModeUnavailableReason(target, sandboxBackend);
+  if (reason) {
+    return { allowed: false, mode: InteractionMode.Ask, reason };
+  }
+  return { allowed: true, mode: target, reason: null };
+}
