@@ -23,6 +23,14 @@ export interface ConsolidatedToolEntry {
 
 export type ThoughtActivity = { kind: 'thinking'; text: string } | { kind: 'tool'; callId: string };
 
+/** Thought 时间线条目：记录思考/工具事件的先后顺序，渲染时按序交错 */
+export interface ThoughtTimelineEntry {
+  seq: number;
+  kind: 'thinking' | 'tool';
+  text?: string; // thinking 时的 reason 文本
+  callId?: string; // tool 时的 callId
+}
+
 export interface SubAgentStepRecord {
   toolName: string;
   toolArgs: Record<string, unknown>;
@@ -71,6 +79,17 @@ export type OutputBlock =
       summaryLine: string;
       active: boolean;
       latestActivity?: ThoughtActivity;
+      /** 本 Thought 生命周期内是否出现过思考（reason 事件）。
+       *  用于渲染时区分 "Thought for 3s, read 2 files" vs "read 2 files" vs "Thought for 3s"。
+       *  Whether any reasoning (reason events) occurred during this Thought's lifetime.
+       *  Controls the summary label: with thinking → "Thought for Xs, …", without → just tool counts. */
+      hasThinking?: boolean;
+      /** 事件时间线：记录 reason / tool_call 的先后顺序，渲染时按序交错思考行与工具步骤。
+       *  Event timeline: records reason/tool_call ordering so the render layer
+       *  can interleave thinking lines with tool steps chronologically. */
+      timeline?: ThoughtTimelineEntry[];
+      /** 时间线序列号 / Monotonic sequence counter for timeline entries */
+      nextTimelineSeq?: number;
       /** 整体结果状态（仅 active=false 时有意义），替代从子 tool 状态推断 / Overall outcome (meaningful when active=false), replaces boolean inference */
       result?: 'done' | 'error' | 'cancelled';
     }
