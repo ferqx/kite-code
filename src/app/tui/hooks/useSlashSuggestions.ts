@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { type SetStateAction, useMemo, useState } from 'react';
 import { listAvailableModels } from '@/core/config';
+import { detectSandboxBackend, type SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
 
 export interface SlashCommandDef {
@@ -36,6 +37,7 @@ export interface SuggestionItem {
   args?: string;
   /** Whether this item is the currently active selection (e.g. active theme preset) */
   isActive?: boolean;
+  disabled?: boolean;
 }
 
 export interface SlashSuggestionsResult {
@@ -48,6 +50,53 @@ export interface ActiveSelections {
   theme?: string;
   model?: string;
   interactionMode?: string;
+  sandboxBackend?: SandboxBackend;
+}
+
+export function buildModeSuggestionItems(
+  partial: string,
+  activeInteractionMode: string | undefined,
+  sandboxBackend: SandboxBackend,
+): SuggestionItem[] {
+  const fullDisabled = sandboxBackend === 'none';
+  const modes = [
+    { command: 'ask', description: '每次工具调用都需要用户审批', disabled: false },
+    { command: 'auto', description: '模型自动审核，不确定时询问', disabled: false },
+    {
+      command: 'full',
+      description: fullDisabled ? '未启用沙箱，Full 不可用' : '完全自主，全部放行，不询问用户',
+      disabled: fullDisabled,
+    },
+  ];
+
+  return modes
+    .filter((m) => m.command.startsWith(partial))
+    .map((m) => ({
+      command: m.command,
+      aliases: [],
+      description: m.description,
+      isActive: m.command === activeInteractionMode,
+      disabled: m.disabled,
+    }));
+}
+
+function nearestEnabledIndex(
+  items: SuggestionItem[] | undefined,
+  proposed: number,
+  previous: number,
+): number {
+  if (!items || items.length === 0) return 0;
+  const clamped = Math.max(0, Math.min(items.length - 1, proposed));
+  if (!items[clamped]?.disabled) return clamped;
+
+  const direction = clamped >= previous ? 1 : -1;
+  for (let i = clamped + direction; i >= 0 && i < items.length; i += direction) {
+    if (!items[i]?.disabled) return i;
+  }
+  for (let i = clamped - direction; i >= 0 && i < items.length; i -= direction) {
+    if (!items[i]?.disabled) return i;
+  }
+  return clamped;
 }
 
 export function useSlashSuggestions(
@@ -116,22 +165,16 @@ export function useSlashSuggestions(
     const modeMatch = inputValue.match(/^\/mode\s+(\S*)$/i);
     if (modeMatch) {
       const partial = modeMatch[1]!.toLowerCase();
-      const modes = [
-        { command: 'ask', description: '每次工具调用都需要用户审批' },
-        { command: 'auto', description: '模型自动审核，不确定时询问' },
-        { command: 'full', description: '完全自主，全部放行，不询问用户' },
-      ];
-      const matched = modes.filter((m) => m.command.startsWith(partial));
+      const matched = buildModeSuggestionItems(
+        partial,
+        activeSelections?.interactionMode,
+        activeSelections?.sandboxBackend ?? detectSandboxBackend(),
+      );
       if (matched.length === 0) return null;
       return {
         kind: 'mode',
         partial,
-        items: matched.map((m) => ({
-          command: m.command,
-          aliases: [],
-          description: m.description,
-          isActive: m.command === activeSelections?.interactionMode,
-        })),
+        items: matched,
       };
     }
 
@@ -177,7 +220,16 @@ export function useSlashSuggestions(
   const active = result !== null && result.items.length > 0;
 
   // Memo: clamp selectedIndex when results change
-  const safeSelectedIndex = result && selectedIndex >= result.items.length ? 0 : selectedIndex;
+  const safeSelectedIndex = result
+    ? nearestEnabledIndex(result.items, selectedIndex, selectedIndex)
+    : 0;
+
+  const setSelectableIndex = (next: SetStateAction<number>) => {
+    setSelectedIndex((previous) => {
+      const proposed = typeof next === 'function' ? next(previous) : next;
+      return nearestEnabledIndex(result?.items, proposed, previous);
+    });
+  };
 
   const replaceCommand = (
     item: SuggestionItem,
@@ -202,7 +254,7 @@ export function useSlashSuggestions(
     result,
     active,
     selectedIndex: safeSelectedIndex,
-    setSelectedIndex,
+    setSelectedIndex: setSelectableIndex,
     replaceCommand,
   };
 }

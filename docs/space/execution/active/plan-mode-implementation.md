@@ -24,6 +24,7 @@ Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批
 - **动态 runtime snapshot**：当前 phase、interactionMode、authorization、sandbox、planReviewed 和 approvedPlanSummary 作为非 cacheable runtime reminder 注入模型；静态 system prompt 不再携带这些动态状态。
 - **Tool cache 防旧状态**：`createAgentTools()` 的缓存 key 纳入 phase、authorization、workspaceAccess 等 runtime policy 状态，避免 stateful tools 捕获旧权限。
 - **Full 入场前 guard**：`/mode full` 和无参 `/mode` 从 auto 进入 full 时，TUI 在 reducer dispatch 前通过 `admitInteractionModeTarget()` 检查 sandbox backend；不可用时保持/回退 `ask` 并展示 recoverable error。Session runtime 仍保留同一 guard 作为执行前防线。
+- **Full 不可用时前置禁用**：当 sandbox backend 为 `none` 时，TUI `/mode` 候选列表仍显示 `full`，但标记为 disabled，并用“未启用沙箱，Full 不可用”作为辅助文案；无参 `/mode` 在 `ask ↔ auto` 间切换，不再让用户先进入 Full 再失败。
 - **授权 cache key 稳定化**：`createAgentTools()` 不再只用 `commandGrants` 数量做缓存判断，而是把 `authorization.mode + commandGrants` 做稳定序列化，并同时纳入 `interactionMode`，避免同数量不同授权复用旧 stateful tool executor。
 - **实际 sandbox 投影**：TUI/CLI 检测到的 `sandboxBackend` 进入 `RunAgentInput` 和 graph state，并作为动态 runtime snapshot 注入模型；cacheable system prompt 不包含该动态字段。
 

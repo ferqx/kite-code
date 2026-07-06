@@ -349,9 +349,14 @@ export default function App({
                     const activeDot = item.isActive ? ACTIVE_DOT : INACTIVE_DOT;
                     const displayName =
                       slashSuggestion.kind === 'mode' ? item.command : `/${item.command}`;
+                    const itemColor = item.disabled
+                      ? theme.dim
+                      : isSelected
+                        ? theme.primary
+                        : theme.muted;
                     return (
                       <Box key={item.command}>
-                        <Text color={isSelected ? theme.primary : theme.muted}>
+                        <Text color={itemColor}>
                           {isSelected ? '❯' : ' '} {activeDot}
                           {displayName}
                           {argsStr}

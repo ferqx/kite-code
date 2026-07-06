@@ -10,6 +10,7 @@ import {
 } from '@/core/config/index';
 import { sessionExportPath } from '@/core/config/paths';
 import type { McpManager } from '@/core/mcp';
+import { detectSandboxBackend } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
 import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
@@ -187,6 +188,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     _sessionManagerForExit = mgr;
     return mgr;
   }, [config, provider, dispatch]);
+  const sandboxBackend = React.useMemo(() => detectSandboxBackend(), []);
 
   // Reset conversation history and thread on new session
   React.useEffect(() => {
@@ -611,8 +613,9 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       theme: themePreset,
       model: state.status.modelName,
       interactionMode: state.interactionMode,
+      sandboxBackend,
     }),
-    [themePreset, state.status.modelName, state.interactionMode],
+    [themePreset, state.status.modelName, state.interactionMode, sandboxBackend],
   );
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise

@@ -2,6 +2,7 @@ import { Box, Text, useInput } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import { useState } from 'react';
 import { useTheme } from '@/app/tui/theme';
+import { detectSandboxBackend } from '@/core/sandbox';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 
 interface HelpPanelProps {
@@ -17,6 +18,10 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
   const t = useTheme();
   const [scrollOffset, setScrollOffset] = useState(0);
   const maxContentHeight = useOverlayHeight(8);
+  const modeHelp =
+    detectSandboxBackend() === 'none'
+      ? '设置审核模式（ask/auto；Full 未启用沙箱）'
+      : '设置审核模式（ask/auto/full）';
 
   const groups: ShortcutGroup[] = [
     {
@@ -50,7 +55,7 @@ export default function HelpPanel({ onClose }: HelpPanelProps) {
         ['/clear', '清空输出'],
         ['/effort', '设置推理深度（low/medium/high/max）'],
         ['/theme', '切换色彩主题（teal/blue/purple/cyan/mono）'],
-        ['/mode', '设置审核模式（ask/auto/full）'],
+        ['/mode', modeHelp],
         ['/plan', '切换规划模式'],
         ['/mcp', 'MCP 面板'],
         ['/rewind', '回退检查点'],

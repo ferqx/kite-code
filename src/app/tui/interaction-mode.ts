@@ -24,10 +24,12 @@ export function fullModeUnavailableReason(
 export function resolveInteractionModeTarget(
   requested: string | undefined,
   current: TuiInteractionMode,
+  sandboxBackend?: SandboxBackend,
 ): TuiInteractionMode | null {
   const normalized = (requested ?? '').toLowerCase();
   if (!normalized) {
     if (current === InteractionMode.Ask) return InteractionMode.Auto;
+    if (current === InteractionMode.Auto && sandboxBackend === 'none') return InteractionMode.Ask;
     if (current === InteractionMode.Auto) return InteractionMode.Full;
     return InteractionMode.Ask;
   }

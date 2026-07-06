@@ -123,9 +123,14 @@ export function useSlashCommand(
           }
           break;
         case 'mode': {
-          const target = resolveInteractionModeTarget(action.mode, currentInteractionMode);
+          const sandboxBackend = detectSandboxBackend();
+          const target = resolveInteractionModeTarget(
+            action.mode,
+            currentInteractionMode,
+            sandboxBackend,
+          );
           if (!target) break;
-          const admission = admitInteractionModeTarget(target, detectSandboxBackend());
+          const admission = admitInteractionModeTarget(target, sandboxBackend);
           if (!admission.allowed) {
             dispatch({ type: 'SET_INTERACTION_MODE', mode: admission.mode });
             dispatch({

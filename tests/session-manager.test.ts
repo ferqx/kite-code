@@ -77,6 +77,12 @@ describe('interaction mode admission', () => {
     expect(resolveInteractionModeTarget('au', 'ask')).toBe('auto');
   });
 
+  test('skips full when slash mode toggles without sandbox backend', () => {
+    expect(resolveInteractionModeTarget(undefined, 'ask', 'none')).toBe('auto');
+    expect(resolveInteractionModeTarget(undefined, 'auto', 'none')).toBe('ask');
+    expect(resolveInteractionModeTarget(undefined, 'auto', 'seatbelt')).toBe('full');
+  });
+
   test('rejects full admission before dispatch when sandbox is unavailable', () => {
     const decision = admitInteractionModeTarget('full', 'none');
     expect(decision.allowed).toBe(false);

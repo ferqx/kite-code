@@ -33,6 +33,7 @@ export interface SlashSuggestionData {
     description: string;
     args?: string;
     isActive?: boolean;
+    disabled?: boolean;
   }>;
   selectedIndex: number;
 }
@@ -312,7 +313,7 @@ export default function InputLine({
   const slashGhost = useMemo((): string | null => {
     if (!slashSuggestions.active || !slashSuggestions.result) return null;
     const selected = slashSuggestions.result.items[slashSuggestions.selectedIndex];
-    if (!selected) return null;
+    if (!selected || selected.disabled) return null;
     const suffix = selected.command.slice(slashSuggestions.result.partial.length);
     return suffix.length > 0 ? suffix : null;
   }, [slashSuggestions.active, slashSuggestions.result, slashSuggestions.selectedIndex]);
@@ -396,7 +397,9 @@ export default function InputLine({
         }
         if (key.tab || key.rightArrow) {
           // Commit ghost text: shell-style common prefix completion
-          const names = ss.result.items.map((item) => item.command);
+          const enabledItems = ss.result.items.filter((item) => !item.disabled);
+          if (enabledItems.length === 0) return;
+          const names = enabledItems.map((item) => item.command);
           const prefix = commonPrefix(names);
           if (prefix.length > ss.result.partial.length) {
             commitValue(
@@ -413,7 +416,7 @@ export default function InputLine({
           } else {
             // No common prefix extension — commit the selected item directly
             const selected = ss.result.items[ss.selectedIndex];
-            if (selected) {
+            if (selected && !selected.disabled) {
               commitValue(ss.replaceCommand(selected, ss.result.kind));
             }
           }
@@ -424,7 +427,7 @@ export default function InputLine({
           // processed Enter (with the partial text) and was suppressed via
           // slashActiveRef in handleSubmit.
           const selected = ss.result.items[ss.selectedIndex];
-          if (selected) {
+          if (selected && !selected.disabled) {
             const fullCmd = ss.replaceCommand(selected, ss.result.kind);
             onValueChange?.(''); // clear ref BEFORE onSubmit so remount sees empty value
             commitValue(fullCmd);
