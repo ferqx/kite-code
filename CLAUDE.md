@@ -109,6 +109,15 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/k
   可以破坏 Header/Footer 的渲染位置
 - 测试全绿 ≠ 功能正确，TUI 布局类改动必须在提交前 `bun run tui` 手动验证
 
+### E2E PTY 测试验证渲染逻辑
+
+- **TUI 渲染逻辑改动必须通过 E2E 测试的 PTY 输出截图验证**。PTY 测试的
+  `console.log` 会输出 ANSI-stripped 终端内容，这是唯一能看清真实渲染形态的途径：
+  tree 结构、label 文本、connector（├─/└─）、running/settled 态切换、
+  thinking line 位置等
+- 验证流程：跑 `bun run test:e2e` → 看 `console.log` 输出的 clean text →
+  逐行对照预期行为
+
 ## 平台兼容
 
 - 测试用例必须支持 Windows / Unix 双平台
