@@ -1162,9 +1162,11 @@ describe('BlockRenderer', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('├─ Read CLAUDE.md [lines 1-126 / 126]');
-    // 所有工具已完成 + 没有 active thinking → footer 变为「完成」
-    // All tools done + no active thinking → footer becomes "完成"
-    expect(frame).toContain('└─ 完成');
+    // 运行中的 Thought 始终显示「运行中」——即使当前工具已完成，
+    // 下一轮 reason / tool_call 通常紧随其后，显示「完成」会造成视觉抖动。
+    // Running Thought always shows "运行中" — tools completing is transient;
+    // the next reason/tool_call typically follows immediately.
+    expect(frame).toContain('└─ 运行中');
     expect(frame).not.toContain('\n   Read CLAUDE.md');
   });
 
@@ -1200,12 +1202,12 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain(longThought);
   });
 
-  test('hides thinking preview when all tools are done (post-tool thinking is a new cycle)', () => {
+  test('shows thinking preview even when all tools are done (same thought cycle continues)', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
       active: true,
-      latestActivity: { kind: 'thinking', text: 'should not show after tools done' },
+      latestActivity: { kind: 'thinking', text: 'still thinking after tools done' },
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'read 1 file',
@@ -1225,8 +1227,11 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).not.toContain('Thinking');
-    expect(frame).not.toContain('should not show');
+    // 运行中 Thought 的思考预览始终展示——工具完成不代表思考周期终止，
+    // 下一个 tool_call 很可能紧随其后，预览不应被隐藏又重现。
+    // Running Thought always shows thinking preview — completed tools
+    // don't mean the thinking cycle ended; another tool_call often follows.
+    expect(frame).toContain('Thinking still thinking');
   });
 
   test('omits thinking preview after tool_summary settles', () => {

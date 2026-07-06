@@ -345,7 +345,7 @@ describe('eventReducer (blocks model)', () => {
       expect(s.currentThoughtSummaryId).toBe(summaries[1]!.id);
     });
 
-    test('inspect shell search is a barrier tool_card, not part of Thought', () => {
+    test('inspect shell search with search prefix is consolidated into Thought', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
       s = dispatch(
@@ -361,6 +361,31 @@ describe('eventReducer (blocks model)', () => {
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
 
+      // Both c1 and c2 are now exploration tools → consolidated into the same Thought
+      expect(summary).toBeDefined();
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
+      expect(summary!.active).toBe(true);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(false);
+      expect(s.currentThoughtSummaryId).toBe(summary!.id);
+    });
+
+    test('inspect shell search without search prefix is a barrier tool_card', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
+      s = dispatch(
+        s,
+        tcEvt('c2', 'shell_execute', {
+          intent: 'inspect',
+          command: 'npm test', // not a search prefix
+        }),
+      );
+
+      const blocks = flatBlocks(s);
+      const summary = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+
+      // c1 is exploration → tool_summary; c2 is NOT (npm test is not search) → tool_card
       expect(summary).toBeDefined();
       expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
       expect(summary!.active).toBe(false);
