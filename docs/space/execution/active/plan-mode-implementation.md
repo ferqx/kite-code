@@ -3,7 +3,7 @@
 状态：active
 范围：`src/protocol/`、`src/core/`、`src/app/tui/`、`tests/`
 读取时机：修改 plan 流程、plan_review 中断、ask_user 渲染、session 持久化时必读。
-验证：`bun test tests/session-manager.test.ts tests/authorization-mode.test.ts tests/tool-definitions.test.ts tests/runtime-context.test.ts tests/context.test.ts tests/tui-run-agent.test.ts tests/graph.test.ts tests/runner.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/slash-commands.test.ts`
+验证：`bun test tests/session-manager.test.ts tests/authorization-mode.test.ts tests/tool-definitions.test.ts tests/runtime-context.test.ts tests/context.test.ts tests/tui-run-agent.test.ts tests/graph.test.ts tests/runner.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/slash-commands.test.ts`
 
 > 设计文档：[[plan-mode-design]] — 产品方案与交互设计
 > 原始计划：[[2026-06-16-plan-review-interrupt]] — 已归档，实际实现有偏差
