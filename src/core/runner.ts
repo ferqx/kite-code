@@ -982,6 +982,13 @@ export function chunkToEvents(
   return events;
 }
 
+/** 检测消息是否为 ToolMessage 实例。
+ *  优先使用 _getType() 方法（正确构造的实例），fallback 到检查
+ *  tool_call_id 字段（checkpoint 反序列化后的 plain object）。
+ *
+ *  Detect whether a message is a ToolMessage instance.
+ *  Prefer _getType() (correctly constructed instances), fall back to
+ *  checking the tool_call_id field (plain objects after checkpoint deserialization). */
 function isToolMessage(msg: Record<string, unknown>): boolean {
   try {
     if (typeof msg._getType === 'function')
@@ -989,6 +996,14 @@ function isToolMessage(msg: Record<string, unknown>): boolean {
   } catch {
     /* ignore */
   }
+
+  // Fallback: checkpoint-deserialized messages — check for tool_call_id
+  // which is unique to ToolMessage in the LangChain message hierarchy.
+  // AIMessage / HumanMessage / SystemMessage never have tool_call_id.
+  if (typeof msg.tool_call_id === 'string' && msg.tool_call_id.length > 0) {
+    return true;
+  }
+
   return false;
 }
 

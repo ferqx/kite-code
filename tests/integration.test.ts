@@ -102,6 +102,27 @@ function findInterrupt(chunks: GraphChunk[]): Record<string, unknown> | null {
   return null;
 }
 
+/** Find all ToolMessage-like objects in graph chunks. Utility for inspecting tool execution results. */
+function findToolMessages(
+  chunks: GraphChunk[],
+  toolName: string,
+): Array<{ content: unknown; name: string }> {
+  const results: Array<{ content: unknown; name: string }> = [];
+  for (const chunk of chunks) {
+    for (const node of Object.values(chunk)) {
+      const msgs = (node as Record<string, unknown>)?.messages;
+      if (!Array.isArray(msgs)) continue;
+      for (const msg of msgs) {
+        const m = msg as Record<string, unknown>;
+        if ((m.name as string) === toolName && typeof m.tool_call_id === 'string') {
+          results.push({ content: m.content, name: m.name as string });
+        }
+      }
+    }
+  }
+  return results;
+}
+
 // ---------------------------------------------------------------------------
 // Integration tests — full graph loop with mock model
 // ---------------------------------------------------------------------------
@@ -1601,6 +1622,304 @@ describe('checkpoint recovery', () => {
     }
   });
 
+  test('post-approval progress update_plan does not trigger a second plan_review', async () => {
+    setUp();
+    try {
+      const plan = {
+        name: 'Build Plan',
+        description: 'Implement the requested change.',
+        status: 'in_progress' as const,
+        steps: [
+          { step: 'Inspect current behavior', status: 'pending' as const },
+          { step: 'Apply focused fix', status: 'pending' as const },
+        ],
+      };
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-plan-initial',
+                name: 'update_plan',
+                args: plan,
+              },
+            ],
+          }),
+          new AIMessage({
+            content: '计划已批准，开始执行。',
+            tool_calls: [
+              {
+                id: 'call-plan-progress',
+                name: 'update_plan',
+                args: {
+                  ...plan,
+                  steps: [
+                    { step: 'Inspect current behavior', status: 'in_progress' },
+                    { step: 'Apply focused fix', status: 'pending' },
+                  ],
+                },
+              },
+            ],
+          }),
+          new AIMessage({ content: '继续执行中。' }),
+        ]),
+      });
+
+      const stream1 = await graph.stream(
+        {
+          messages: [new HumanMessage('Fix the repeated plan review prompt')],
+          workspaceAccess: 'write',
+          phase: 'planning',
+          plan: null,
+          planReviewed: false,
+          userId: 'test',
+          threadId: 'post-approval-progress',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'post-approval-progress' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks1 = await collectChunks(stream1);
+      const interrupt1 = findInterrupt(chunks1);
+      expect(interrupt1?.kind).toBe('plan_review');
+
+      const stream2 = await graph.stream(
+        new Command({ resume: { planApproved: true, executionMode: 'auto' } }),
+        {
+          configurable: { thread_id: 'post-approval-progress' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks2 = await collectChunks(stream2);
+      checkpointer.close();
+
+      expect(findInterrupt(chunks2)).toBeNull();
+      expect(findFinal(chunks2)).toBe('继续执行中。');
+    } finally {
+      tearDown();
+    }
+  });
+
+  test('post-approval auto-review failure asks for tool approval instead of plan review', async () => {
+    setUp();
+    try {
+      const plan = {
+        name: 'Build Plan',
+        description: 'Implement the requested change.',
+        status: 'in_progress' as const,
+        steps: [{ step: 'Create directory', status: 'pending' as const }],
+      };
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-plan-before-auto-fail',
+                name: 'update_plan',
+                args: plan,
+              },
+            ],
+          }),
+          new AIMessage({
+            content: '计划已批准，开始执行。',
+            tool_calls: [
+              {
+                id: 'call-shell-after-plan',
+                name: 'shell_execute',
+                args: { command: 'mkdir -p /tmp/post-plan-auto-fail' },
+              },
+            ],
+          }),
+          new AIMessage({ content: 'auto reviewer returned prose instead of json' }),
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-plan-after-auto-fail',
+                name: 'update_plan',
+                args: {
+                  name: 'Replanned after auto failure',
+                  description: 'This should not appear before manual tool approval.',
+                  status: 'in_progress',
+                  steps: [{ step: 'Try another way', status: 'pending' }],
+                },
+              },
+            ],
+          }),
+        ]),
+      });
+
+      const stream1 = await graph.stream(
+        {
+          messages: [new HumanMessage('Create a directory after plan approval')],
+          workspaceAccess: 'write',
+          phase: 'planning',
+          plan: null,
+          planReviewed: false,
+          userId: 'test',
+          threadId: 'post-approval-auto-fail',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'post-approval-auto-fail' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks1 = await collectChunks(stream1);
+      expect(findInterrupt(chunks1)?.kind).toBe('plan_review');
+
+      const stream2 = await graph.stream(
+        new Command({ resume: { planApproved: true, executionMode: 'auto' } }),
+        {
+          configurable: { thread_id: 'post-approval-auto-fail' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks2 = await collectChunks(stream2);
+      checkpointer.close();
+
+      const interrupt = findInterrupt(chunks2);
+      expect(interrupt?.kind).toBe('tool_approval');
+      const approval = interrupt?.approval as Record<string, unknown> | undefined;
+      expect(approval?.tool).toBe('shell_execute');
+      expect(findFinal(chunks2)).toBeNull();
+    } finally {
+      tearDown();
+    }
+  });
+
+  test('auto-review is not invoked for ask_user interrupts in auto mode', async () => {
+    setUp();
+    try {
+      const model = new FakeChatModel([
+        new AIMessage({
+          content: '',
+          tool_calls: [
+            {
+              id: 'call-ask-no-review',
+              name: 'ask_user',
+              args: {
+                question: 'Which implementation style?',
+                options: [{ id: 'minimal', label: 'Minimal' }],
+                allow_free_text: false,
+              },
+            },
+          ],
+        }),
+      ]);
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model,
+      });
+
+      const stream = await graph.stream(
+        {
+          messages: [new HumanMessage('Ask before implementing')],
+          workspaceAccess: 'write',
+          phase: 'building',
+          plan: {
+            name: 'Test Plan',
+            description: 'A test plan.',
+            status: 'in_progress',
+            steps: [{ step: 'Ask user', status: 'in_progress' }],
+          },
+          planReviewed: true,
+          interactionMode: 'auto' as const,
+          authorization: { mode: 'default', commandGrants: {} },
+          userId: 'test',
+          threadId: 'ask-user-no-auto-review',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'ask-user-no-auto-review' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks = await collectChunks(stream);
+      checkpointer.close();
+
+      expect(findInterrupt(chunks)?.kind).toBe('user_input');
+      expect(model.callCount).toBe(1);
+    } finally {
+      tearDown();
+    }
+  });
+
+  test('auto-review is not invoked for plan_review interrupts in auto mode', async () => {
+    setUp();
+    try {
+      const model = new FakeChatModel([
+        new AIMessage({
+          content: '',
+          tool_calls: [
+            {
+              id: 'call-plan-no-review',
+              name: 'update_plan',
+              args: {
+                name: 'Implementation Plan',
+                description: 'Plan that requires user review.',
+                status: 'in_progress',
+                steps: [{ step: 'Implement', status: 'pending' }],
+              },
+            },
+          ],
+        }),
+      ]);
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model,
+      });
+
+      const stream = await graph.stream(
+        {
+          messages: [new HumanMessage('Create a plan')],
+          workspaceAccess: 'write',
+          phase: 'planning',
+          plan: null,
+          planReviewed: false,
+          interactionMode: 'auto' as const,
+          authorization: { mode: 'default', commandGrants: {} },
+          userId: 'test',
+          threadId: 'plan-review-no-auto-review',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'plan-review-no-auto-review' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks = await collectChunks(stream);
+      checkpointer.close();
+
+      expect(findInterrupt(chunks)?.kind).toBe('plan_review');
+      expect(model.callCount).toBe(1);
+    } finally {
+      tearDown();
+    }
+  });
+
   // ── Plan revision preserves existing authorization ──
 
   test('plan revision preserves full_access authorization instead of resetting to default', async () => {
@@ -1851,7 +2170,7 @@ describe('checkpoint recovery', () => {
       const chunks = await collectChunks(stream);
       checkpointer.close();
 
-      // Fail-closed: tool denied, circuit breaker tripped
+      // Fail-closed: tool remains pending for manual approval, circuit breaker tripped.
       const approvalChunk = chunks.find(
         (c) => (c as Record<string, unknown>).approval !== undefined,
       );
@@ -1864,6 +2183,93 @@ describe('checkpoint recovery', () => {
         | Record<string, unknown>
         | undefined;
       expect(autoReview?.circuitBreakerTripped).toBe(true);
+      expect(findInterrupt(chunks)?.kind).toBe('tool_approval');
+      const approval = findInterrupt(chunks)?.approval as Record<string, unknown> | undefined;
+      expect(approval?.reviewFailure).toContain('auto review did not return JSON');
+    } finally {
+      tearDown();
+    }
+  });
+
+  test('auto-review failure escalates to manual tool approval before agent can replan', async () => {
+    setUp();
+    try {
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-exec-fail-replan',
+                name: 'shell_execute',
+                args: { command: 'mkdir -p /tmp/test-fail-replan' },
+              },
+            ],
+          }),
+          // Auto-review response is malformed. The agent response below should not be reached before
+          // the original tool gets a manual approval interrupt.
+          new AIMessage({ content: 'not json' }),
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-plan-after-fail',
+                name: 'update_plan',
+                args: {
+                  name: 'Replanned after approval failure',
+                  description: 'This should not be requested before manual tool approval.',
+                  status: 'in_progress',
+                  steps: [{ step: 'Try a different command', status: 'pending' }],
+                },
+              },
+            ],
+          }),
+        ]),
+      });
+
+      const stream = await graph.stream(
+        {
+          messages: [new HumanMessage('Create test directory')],
+          workspaceAccess: 'write',
+          phase: 'building',
+          plan: {
+            name: 'Test Plan',
+            description: 'A test plan.',
+            status: 'in_progress',
+            steps: [{ step: 'Create dir', status: 'in_progress' }],
+          },
+          planReviewed: true,
+          interactionMode: 'auto' as const,
+          authorization: { mode: 'default', commandGrants: {} },
+          userId: 'test',
+          threadId: 'auto-fail-manual-approval',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'auto-fail-manual-approval' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks = await collectChunks(stream);
+      checkpointer.close();
+
+      const interrupt = findInterrupt(chunks);
+      expect(interrupt?.kind).toBe('tool_approval');
+      const approval = interrupt?.approval as Record<string, unknown> | undefined;
+      expect(approval?.tool).toBe('shell_execute');
+      expect(approval?.reviewFailure).toContain('auto review did not return JSON');
+      expect(findFinal(chunks)).toBeNull();
+      const approvalMessages = chunks.flatMap((c) => {
+        const approvalChunk = (c as Record<string, unknown>).approval as
+          | Record<string, unknown>
+          | undefined;
+        return ((approvalChunk?.messages ?? []) as unknown[]) ?? [];
+      });
+      expect(approvalMessages).toHaveLength(0);
     } finally {
       tearDown();
     }
@@ -2056,6 +2462,224 @@ describe('checkpoint recovery', () => {
       // Agent continued and acknowledged the block
       const final = findFinal(chunks);
       expect(final).toContain('blocked');
+    } finally {
+      tearDown();
+    }
+  });
+
+  // ── Step text elaboration skips plan_review when planReviewed=true ──
+  // Model often elaborates step descriptions during execution (e.g.
+  // "安装依赖" → "安装 Web 前端依赖"). isSamePlanTrackingUpdate allows this
+  // when plan name and step count haven't changed.
+
+  test('step text elaboration does not re-trigger plan_review after approval', async () => {
+    setUp();
+    try {
+      const plan = {
+        name: 'Build Plan',
+        description: 'Implement the feature.',
+        status: 'in_progress' as const,
+        steps: [
+          { step: 'Install deps', status: 'pending' as const },
+          { step: 'Build project', status: 'pending' as const },
+        ],
+      };
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: '',
+            tool_calls: [{ id: 'call-structural-1', name: 'update_plan', args: plan }],
+          }),
+          new AIMessage({
+            content: '计划已批准，开始执行。',
+            tool_calls: [
+              {
+                id: 'call-progress-elaborated',
+                name: 'update_plan',
+                args: {
+                  ...plan,
+                  steps: [
+                    { step: 'Install front-end dependencies', status: 'in_progress' },
+                    { step: 'Build the project with webpack', status: 'pending' },
+                  ],
+                },
+              },
+            ],
+          }),
+          new AIMessage({ content: '继续执行中。' }),
+        ]),
+      });
+
+      const stream1 = await graph.stream(
+        {
+          messages: [new HumanMessage('Fix the bug')],
+          workspaceAccess: 'write',
+          phase: 'planning',
+          plan: null,
+          planReviewed: false,
+          userId: 'test',
+          threadId: 'elaborated-steps',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'elaborated-steps' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+      const chunks1 = await collectChunks(stream1);
+      expect(findInterrupt(chunks1)?.kind).toBe('plan_review');
+
+      const stream2 = await graph.stream(new Command({ resume: { planApproved: true } }), {
+        configurable: { thread_id: 'elaborated-steps' },
+        streamMode: 'updates',
+        recursionLimit: 60,
+      });
+      const chunks2 = await collectChunks(stream2);
+      checkpointer.close();
+
+      expect(findInterrupt(chunks2)).toBeNull();
+      expect(findFinal(chunks2)).toBe('继续执行中。');
+    } finally {
+      tearDown();
+    }
+  });
+
+  // ── Multi-cycle plan: completed → new plan triggers plan_review ──
+  // When a plan cycle completes (status='completed'), the next update_plan
+  // must go through plan_review even with same name/step count.
+
+  test('completed plan allows new plan to trigger plan_review', async () => {
+    setUp();
+    try {
+      const newPlan = {
+        name: 'Build Plan',
+        description: 'A new implementation cycle.',
+        status: 'in_progress' as const,
+        steps: [
+          { step: 'Research approach', status: 'pending' as const },
+          { step: 'Implement solution', status: 'pending' as const },
+        ],
+      };
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: '',
+            tool_calls: [{ id: 'call-new-cycle', name: 'update_plan', args: newPlan }],
+          }),
+        ]),
+      });
+
+      const stream = await graph.stream(
+        {
+          messages: [new HumanMessage('Start a new feature')],
+          workspaceAccess: 'write',
+          phase: 'planning',
+          plan: {
+            name: 'Build Plan',
+            description: 'Previous completed plan.',
+            status: 'completed' as const,
+            steps: [
+              { step: 'Research approach', status: 'completed' },
+              { step: 'Implement solution', status: 'completed' },
+            ],
+          },
+          planReviewed: true,
+          userId: 'test',
+          threadId: 'multi-cycle-plan',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'multi-cycle-plan' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks = await collectChunks(stream);
+      checkpointer.close();
+
+      expect(findInterrupt(chunks)?.kind).toBe('plan_review');
+    } finally {
+      tearDown();
+    }
+  });
+
+  // ── Concurrent same-file edits/writes rejected ──
+  // When two edit_file or write_file calls target the same path in one batch,
+  // the second call is rejected with a clear error message.
+
+  test('rejects concurrent edit_file calls targeting the same file', async () => {
+    setUp();
+    try {
+      const targetFile = path.join(workspace, 'target.ts');
+      fs.writeFileSync(targetFile, 'line1\nline2\nline3\n', 'utf-8');
+
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-edit-1',
+                name: 'edit_file',
+                args: { path: 'target.ts', old_string: 'line1\n', new_string: 'LINE1\n' },
+              },
+              {
+                id: 'call-edit-2',
+                name: 'edit_file',
+                args: { path: 'target.ts', old_string: 'line2\n', new_string: 'LINE2\n' },
+              },
+            ],
+          }),
+          new AIMessage({ content: 'Done.' }),
+        ]),
+      });
+
+      const stream = await graph.stream(
+        {
+          messages: [new HumanMessage('Edit target.ts')],
+          workspaceAccess: 'write',
+          phase: 'building',
+          plan: null,
+          planReviewed: false,
+          interactionMode: 'full' as const,
+          authorization: { mode: 'full_access', commandGrants: {} },
+          userId: 'test',
+          threadId: 'concurrent-edit-reject',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'concurrent-edit-reject' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks = await collectChunks(stream);
+      checkpointer.close();
+
+      const toolMessages = findToolMessages(chunks, 'edit_file');
+      const rejected = toolMessages.find((tm) => {
+        try {
+          const p = JSON.parse(tm.content as string);
+          return p.ok === false && (p.rejected === true || /concurrent/i.test(p.reason || ''));
+        } catch {
+          return false;
+        }
+      });
+      expect(rejected).toBeDefined();
+      expect(JSON.parse(rejected!.content as string).rejected).toBe(true);
+
+      // First edit should have succeeded (file contains LINE1 from edit 1)
+      const updated = fs.readFileSync(targetFile, 'utf-8');
+      expect(updated).toContain('LINE1');
     } finally {
       tearDown();
     }

@@ -61,12 +61,19 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
       'old_string MUST come from verified content — a recent read_file, a shell tool output, ' +
       'or a file you just wrote. NEVER fabricate old_string from memory or guesswork. ' +
       'Do NOT use for creating new files — use write_file. ' +
-      'Do NOT use to rewrite the entire file — use write_file.',
+      'Do NOT use to rewrite the entire file — use write_file. ' +
+      'CRITICAL: Do NOT issue multiple edit_file calls targeting the SAME file in a single turn. ' +
+      'Each edit_file modifies the file immediately, invalidating subsequent old_string values ' +
+      'that were based on the pre-edit content. Combine all edits to the same file into ONE ' +
+      'edit_file call with a larger old_string/new_string range, or use write_file to rewrite ' +
+      'the entire file if the changes are extensive.',
     commonMistakes:
       'Fabricating old_string from memory instead of using verified content — the #1 cause of edit failure. ' +
       "old_string doesn't match the file exactly — whitespace, indentation, or blank lines differ. " +
       'Same old_string appears multiple times without replace_all: true — causes duplicate-match error. ' +
-      'Not including enough surrounding context in old_string to make it unique.',
+      'Not including enough surrounding context in old_string to make it unique. ' +
+      'Making multiple edit_file calls to the same file in one turn — each edit changes the file, ' +
+      'causing subsequent old_string values to fail. Combine into one call instead.',
     outputFormat:
       'JSON: ok (boolean), replacements (count), fromLine/toLine (line range), error (empty on success). ' +
       "Success: 'Replaced N occurrence(s) at line L1-L2'.",

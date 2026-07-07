@@ -69,7 +69,7 @@ import {
   toolRequestFromMessage,
 } from './tool-requests';
 import { runApprovedTool } from './tool-runner';
-import { userInputToolMessage } from './user-input';
+import { normalizeUserInputResume, userInputToolMessage } from './user-input';
 
 /** 构建代码 Agent 图的输入 / Build code agent graph input */
 export interface BuildCodeAgentGraphInput {
@@ -369,6 +369,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       };
 
       // Doom-loop 检测
+      // 注意：仅对被拒绝的工具递增计数器。并发批次的工具调用（如多个 edit_file
+      // 同时修改不同位置）不应算作 doom-loop——doom-loop 仅检测跨 turn 的重复失败。
+      // 同批次内通过审批的工具不递增计数，避免误判。
+      // Note: only increment the counter for REJECTED tools. Concurrent batch calls
+      // (e.g. multiple edit_file targeting different positions) are NOT a doom-loop.
+      // Doom-loop detection guards against across-turn repeated failures only.
       const doomThreshold = input.config.autoReview?.doomLoopRepeatThreshold ?? 3;
       const doomCheck = checkDoomLoop(state.doomLoopTracker, request, doomThreshold, 60_000);
       if (doomCheck.blocked) {
@@ -390,7 +396,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           });
         }
       }
-      doomLoopTrackerNext = updateDoomLoopTracker(state.doomLoopTracker, doomCheck.fingerprint!);
+      // 暂不在此处递增——等 auto-review 结果出来后再决定是否计入
+      // Defer increment — only count rejected calls (see auto-review result handling below)
 
       // _safety fast-path routing
       const agentSafety = (request.args as Record<string, unknown>)._safety as
@@ -448,6 +455,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           true,
           overrideEntry,
         );
+        doomLoopTrackerNext = updateDoomLoopTracker(state.doomLoopTracker, doomCheck.fingerprint!);
         autoReviewRejectionRecord = {
           pendingWarnings: {},
           consecutiveRejects: overrideCbResult.newConsecutiveRejects,
@@ -501,11 +509,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         // 断路器已触发 → 跳过 auto-review，直接中断等用户审批
         if (state.autoReviewState.circuitBreakerTripped) {
           console.warn('[auto-review] circuit breaker tripped — skipping auto-review');
+          const reviewFailure = request.id
+            ? state.autoReviewState.pendingWarnings[request.id]
+            : undefined;
           approved = interrupt({
             kind: 'tool_approval',
             request,
             policy,
-            approval: { ...approvalPayload, circuitBreakerTripped: true },
+            approval: { ...approvalPayload, circuitBreakerTripped: true, reviewFailure },
           }) as typeof approved;
         } else {
           // 正常 auto-review 路径
@@ -542,15 +553,23 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
                 reason: `[auto-review failed] ${failureReason}`,
               };
             } else {
+              doomLoopTrackerNext = updateDoomLoopTracker(
+                state.doomLoopTracker,
+                doomCheck.fingerprint!,
+              );
               autoReviewFailureReason = `auto-review (${reviewModelName}): ${failureReason} (fail-closed)`;
               console.warn(
                 `[auto-review] FAILED (fail-closed): ${failureReason} — tool=${request.name}`,
               );
+              const pendingWarnings = {
+                ...state.autoReviewState.pendingWarnings,
+                ...(request.id ? { [request.id]: autoReviewFailureReason } : {}),
+              };
               if (pendingSubagent) {
                 return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
                   doomLoopNext: doomLoopTrackerNext,
                   autoReviewState: {
-                    pendingWarnings: {},
+                    pendingWarnings,
                     consecutiveRejects: 0,
                     rejectionHistory: [],
                     circuitBreakerTripped: true,
@@ -558,14 +577,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
                 });
               }
               return {
-                ...rejectedToolMessage(
-                  request,
-                  `[auto-review unavailable] ${failureReason}. Please try a different approach or wait for manual review.`,
-                ),
                 approvedBatch: batch,
                 doomLoopTracker: doomLoopTrackerNext,
                 autoReviewState: {
-                  pendingWarnings: {},
+                  pendingWarnings,
                   consecutiveRejects: 0,
                   rejectionHistory: [],
                   circuitBreakerTripped: true,
@@ -573,6 +588,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
               };
             }
           } else if (!review.suggestion!.approved) {
+            doomLoopTrackerNext = updateDoomLoopTracker(
+              state.doomLoopTracker,
+              doomCheck.fingerprint!,
+            );
             const rejectionReason = review.suggestion!.reason || 'auto review rejected this action';
             console.warn(`[auto-review] rejected: ${rejectionReason} — tool=${request.name}`);
             const newEntry: RejectionEntry = {
@@ -608,11 +627,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
             };
             if (cbResult.tripped) {
               console.warn(`[auto-review] CIRCUIT BREAKER TRIPPED: ${cbResult.reason}`);
+              const pendingWarnings = {
+                ...state.autoReviewState.pendingWarnings,
+                ...(request.id ? { [request.id]: `auto-review rejected: ${rejectionReason}` } : {}),
+              };
               if (pendingSubagent) {
                 return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
                   doomLoopNext: doomLoopTrackerNext,
                   autoReviewState: {
-                    pendingWarnings: {},
+                    pendingWarnings,
                     consecutiveRejects: cbResult.newConsecutiveRejects,
                     rejectionHistory: cbResult.newRejectionHistory,
                     circuitBreakerTripped: true,
@@ -620,14 +643,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
                 });
               }
               return {
-                ...rejectedToolMessage(
-                  request,
-                  `Auto-review paused: ${cbResult.reason}. Manual approval required before continuing.`,
-                ),
                 approvedBatch: batch,
                 doomLoopTracker: doomLoopTrackerNext,
                 autoReviewState: {
-                  pendingWarnings: {},
+                  pendingWarnings,
                   consecutiveRejects: cbResult.newConsecutiveRejects,
                   rejectionHistory: cbResult.newRejectionHistory,
                   circuitBreakerTripped: true,
@@ -860,6 +879,22 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       request,
     }) as AgentResumeValue;
 
+    // 与 executeOneTool 保持一致的 toolResultSink 路径：ToolMessage 在
+    // checkpoint 反序列化后会丢失 _getType，仅靠 stream → isToolMessage →
+    // parseToolResultEvents 不够可靠。直接发出 tool_done 确保 TUI 及时更新。
+    // Mirror executeOneTool's toolResultSink pattern: ToolMessage loses _getType
+    // after checkpoint deserialization; stream path alone is unreliable. Emit
+    // tool_done directly so the TUI updates without depending on stream parsing.
+    if (input.toolResultSink && request.id) {
+      const normalized = normalizeUserInputResume(resume);
+      const summary = normalized.answers
+        ? Object.entries(normalized.answers)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join('\n')
+        : normalized.answer;
+      input.toolResultSink(request.id, 'ask_user', true, summary);
+    }
+
     return {
       messages: [userInputToolMessage(request, resume)],
     };
@@ -914,6 +949,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       // Including the full plan redundantly wastes tokens and degrades prefix cache hit rates.
       // 首次方案审批重置授权为 default；执行中修订方案保留现有授权（如 full_access）
       // First plan approval resets authorization to default; plan revision preserves existing authorization
+
+      // 与 executeOneTool 一致：直接发出 tool_done，不依赖 stream 解析
+      // Mirror executeOneTool: emit tool_done directly, don't depend on stream parsing
+      if (input.toolResultSink && request.id) {
+        input.toolResultSink(request.id, 'update_plan', true, planSummary.slice(0, 200));
+      }
+
       return {
         messages: [
           new ToolMessage({
@@ -935,9 +977,20 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     const supplement = resumeObj?.planSupplement;
     if (typeof supplement === 'string' && supplement.length > 0) {
+      if (input.toolResultSink && request.id) {
+        input.toolResultSink(
+          request.id,
+          'update_plan',
+          false,
+          `Plan needs revision: ${supplement}`,
+        );
+      }
       return rejectedToolMessage(request, `Plan needs revision. User feedback: ${supplement}`);
     }
 
+    if (input.toolResultSink && request.id) {
+      input.toolResultSink(request.id, 'update_plan', false, 'plan rejected by user');
+    }
     return rejectedToolMessage(request, 'plan rejected by user');
   };
 
@@ -1408,7 +1461,43 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     // Phase 2: Execute mutations sequentially — journal state flows between steps.
     // This ensures an exhaustion triggered by mutation N blocks mutation N+1's preflight.
     const sequentialState = { ...state, ...journalState };
+    const editedPaths = new Set<string>();
     for (const req of mutations) {
+      // Guard: reject concurrent same-file edits/writes. Each mutation modifies
+      // the file immediately, so a second call targeting the same path would
+      // conflict. Force the model to combine operations into one call.
+      if (req.name === 'edit_file' || req.name === 'write_file') {
+        const editPath = (req.args as Record<string, unknown>).path as string | undefined;
+        if (editPath && editedPaths.has(editPath)) {
+          const blockedMsg = new ToolMessage({
+            content: JSON.stringify({
+              ok: false,
+              path: editPath,
+              rejected: true,
+              reason: `Concurrent edit to '${editPath}' blocked. The file was already edited in this batch — subsequent edits would fail because old_string no longer matches. Combine all changes to this file into a single edit_file call with a larger old_string/new_string range, or use write_file to rewrite the entire file.`,
+              failure: {
+                message: 'Tool execution failed.' as const,
+                tool: req.name,
+                reason: `Concurrent same-file ${req.name} blocked for ${editPath}.`,
+                guidance: `Combine all changes to this file into ONE ${req.name} call.`,
+              },
+            }),
+            tool_call_id: req.id ?? 'missing-tool-call-id',
+            name: req.name,
+            status: 'error',
+          });
+          messages.push(blockedMsg);
+          input.toolResultSink?.(
+            req.id ?? '',
+            req.name,
+            false,
+            `Concurrent same-file ${req.name} blocked for '${editPath}'. Combine into one call.`,
+          );
+          continue;
+        }
+        if (editPath) editedPaths.add(editPath);
+      }
+
       // Preflight: check if this tool+path fingerprint is already exhausted.
       const preflightPath = (req.args as Record<string, unknown>).path as string | undefined;
       if (isFingerprintExhausted(journalState.exhaustedFingerprints, req.name, preflightPath)) {
@@ -1487,8 +1576,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       ...journalState,
       messages,
       // Preserve plan mode state across tools→agent cycles.
+      // mergedSideEffects always carries `plan` (from executeOneTool's sideEffects
+      // struct), which is undefined for non-update_plan tools. Without the explicit
+      // fallback below, ...mergedSideEffects would override state.plan with undefined,
+      // causing isSamePlanTrackingUpdate to fail and re-triggering plan_review.
       interactionMode: state.interactionMode,
       planReviewed: state.planReviewed,
+      plan: mergedSideEffects.plan ?? state.plan,
+      authorization: state.authorization,
       // Auto-review warnings have been injected into ToolMessages; clear them.
       // Preserve breaker/doom-loop state across tools→agent cycles.
       autoReviewState: { ...state.autoReviewState, pendingWarnings: {} },

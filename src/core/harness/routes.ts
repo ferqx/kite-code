@@ -40,10 +40,21 @@ function resolveToolRoute(
       return 'user_input';
     }
 
-    // Priority 2: 结构性 update_plan（名称/描述/步骤文本变化）必须经过 plan_review
-    // 纯进度更新（仅 status 变化）可直通 tools
+    // Priority 2: 结构性 update_plan → plan_review
+    // - 纯进度更新（仅 status 变化）→ 直通 tools（isPlanProgressOnlyUpdate）
+    // - 已审批方案的重入追踪（名称和步骤数未变，允许文本微调）→ 直通 tools
+    // - 新增/删除步骤或方案名称变化 → plan_review
+    // Structural update_plan → plan_review
+    // - Progress-only (status change only) → tools directly
+    // - Re-entrant tracking for already-approved plan (same name & step count) → tools
+    // - New/removed steps or renamed plan → plan_review
     if (request.name === 'update_plan' && !isPlanProgressOnlyUpdate(state.plan, request.args)) {
-      return 'plan_review';
+      if (state.planReviewed && isSamePlanTrackingUpdate(state.plan, request.args)) {
+        // 已审批 + 同结构 → 直通 tools，不重复触发 plan_review
+        // Already approved + same structure → tools, skip redundant plan_review
+      } else {
+        return 'plan_review';
+      }
     }
 
     const decision = evaluateToolPolicy({
@@ -184,4 +195,28 @@ function isPlanProgressOnlyUpdate(current: AgentPlan | null | undefined, next: A
   if (current.description !== next.description) return false;
   if (current.steps.length !== next.steps.length) return false;
   return current.steps.every((step, index) => step.step === next.steps[index]?.step);
+}
+
+/** 判断 update_plan 是否为同计划的追踪更新（已审批方案的重入，仅做进度/文本微调）。
+ *  与 isPlanProgressOnlyUpdate 不同：本函数允许步骤文本变化（模型执行时常会扩充描述），
+ *  仅检查计划名称和步骤数量是否一致，确保结构未发生根本变化。
+ *
+ *  多轮 plan 保护：当前计划状态为 completed 时视为该计划周期已结束，后续任何
+ *  update_plan 均视为新计划，必须重新走 plan_review，避免同名称、同步数的新计划被跳过。
+ *
+ *  Checks whether a re-entrant update_plan is a tracking update for an already-approved plan.
+ *  Unlike isPlanProgressOnlyUpdate, this ALLOWS step text changes (model often elaborates
+ *  during execution) and only guards against name changes or step count changes.
+ *
+ *  Multi-cycle guard: when the current plan is completed, treat any subsequent update_plan
+ *  as a NEW plan requiring full review — prevents skipping review for a new plan that
+ *  happens to have the same name and step count as a completed previous plan. */
+function isSamePlanTrackingUpdate(current: AgentPlan | null | undefined, next: AgentPlan): boolean {
+  if (!current) return false;
+  // 上一轮计划已完成 → 视为新计划，必须走 plan_review
+  // Previous plan completed → treat as new plan, must go through plan_review
+  if (current.status === 'completed') return false;
+  if (current.name !== next.name) return false;
+  if (current.steps.length !== next.steps.length) return false;
+  return true;
 }
