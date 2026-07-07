@@ -342,6 +342,7 @@ describe('tool policy', () => {
 
     expect(approval).toEqual({
       scope: 'once',
+      callId: 'call-shell',
       cwd: '/tmp/project',
       threadId: 'thread-a',
       tool: 'shell_execute',

@@ -94,9 +94,9 @@ describe('TUI PTY System — Plan Review', () => {
     await new Promise((r) => setTimeout(r, 300));
   });
 
-  afterAll(() => {
-    tui?.kill();
+  afterAll(async () => {
     server?.stop();
+    await tui?.killAndWait();
     workspace?.cleanup();
   });
 

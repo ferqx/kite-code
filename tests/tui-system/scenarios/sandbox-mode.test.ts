@@ -28,9 +28,9 @@ describe('TUI PTY System — Sandbox Mode', () => {
     await sleep(300);
   });
 
-  afterAll(() => {
-    tui?.kill();
+  afterAll(async () => {
     server?.stop();
+    await tui?.killAndWait();
     workspace?.cleanup();
   });
 

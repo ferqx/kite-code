@@ -55,9 +55,10 @@ describe('TUI PTY System — Interrupt Resume', () => {
     await new Promise((r) => setTimeout(r, 300));
   });
 
-  afterAll(() => {
-    tui2?.kill();
+  afterAll(async () => {
     server?.stop();
+    await tui1?.killAndWait();
+    await tui2?.killAndWait();
     workspace?.cleanup();
   });
 

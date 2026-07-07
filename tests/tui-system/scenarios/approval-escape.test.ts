@@ -68,9 +68,9 @@ describe('TUI PTY System — Approval Escape', () => {
     await new Promise((r) => setTimeout(r, 300));
   });
 
-  afterAll(() => {
-    tui?.kill();
+  afterAll(async () => {
     server?.stop();
+    await tui?.killAndWait();
     workspace?.cleanup();
   });
 

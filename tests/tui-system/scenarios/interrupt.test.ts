@@ -50,10 +50,10 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
     await new Promise((r) => setTimeout(r, 300));
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     // tui.kill() is safe even if the process already exited (test 3).
-    tui?.kill();
     server?.stop();
+    await tui?.killAndWait();
     workspace?.cleanup();
   });
 

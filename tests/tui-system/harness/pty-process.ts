@@ -37,8 +37,12 @@ export interface PtyProcess {
   output(): string;
   /** Wait for the process to exit, returns exit code */
   waitForExit(): Promise<number>;
-  /** Kill the process */
+  /** Kill the process (SIGTERM → wait → SIGKILL fallback) */
   kill(): void;
+  /** Kill the process and wait for it to exit (returns true if killed, false if already exited) */
+  killAndWait(): Promise<boolean>;
+  /** Check if the process has exited */
+  readonly exited: boolean;
 }
 
 /**
@@ -129,7 +133,50 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     exitResolver?.(code);
   });
 
+  /**
+   * Kill the child process with SIGTERM, then SIGKILL if it doesn't exit.
+   *
+   * SIGTERM gives the process a chance to clean up. If the process ignores
+   * SIGTERM (e.g. stuck in an Ink render loop or network retry), SIGKILL
+   * guarantees termination — it cannot be caught, ignored, or blocked.
+   * When the child dies, Bun closes the PTY, causing any grandchild processes
+   * connected to the PTY slave to receive SIGHUP and exit.
+   */
+  const KILL_TIMEOUT_MS = 2000;
+
+  async function killAndWaitImpl(): Promise<boolean> {
+    if (exited) return false;
+
+    // Graceful attempt first
+    proc.kill();
+
+    // Wait for graceful exit
+    const start = Date.now();
+    while (!exited && Date.now() - start < KILL_TIMEOUT_MS) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    if (!exited) {
+      // Force kill — cannot be caught or ignored
+      proc.kill('SIGKILL');
+
+      // Wait for exit confirmation
+      const deadline = Date.now() + 5000;
+      while (!exited && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+
+    return true;
+  }
+
+  let killPromise: Promise<boolean> | null = null;
+
   return {
+    get exited() {
+      return exited;
+    },
+
     write(data: string) {
       if (!exited && proc.terminal) {
         proc.terminal.write(data);
@@ -162,9 +209,20 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     waitForExit: () => exitPromise,
 
     kill() {
-      if (!exited) {
-        proc.kill();
+      // Fire-and-forget: initiate kill without waiting
+      if (!killPromise) {
+        killPromise = killAndWaitImpl();
       }
+      killPromise.catch(() => {
+        /* best effort */
+      });
+    },
+
+    killAndWait: () => {
+      if (!killPromise) {
+        killPromise = killAndWaitImpl();
+      }
+      return killPromise;
     },
   };
 }

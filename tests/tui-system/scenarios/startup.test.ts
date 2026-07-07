@@ -29,9 +29,9 @@ describe('TUI PTY System — Startup', () => {
     await waitForText(() => tui.output(), '❯', 15000);
   });
 
-  afterAll(() => {
-    tui?.kill();
+  afterAll(async () => {
     server?.stop();
+    await tui?.killAndWait();
     workspace?.cleanup();
   });
 

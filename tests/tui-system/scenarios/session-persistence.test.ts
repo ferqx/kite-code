@@ -58,10 +58,12 @@ describe('TUI PTY System — Session Persistence', () => {
     await new Promise((r) => setTimeout(r, 300));
   });
 
-  afterAll(() => {
-    // Kill tui2 if it was spawned (may be undefined if test 4 failed before spawn)
-    tui2?.kill();
+  afterAll(async () => {
     server?.stop();
+    // tui1 may already be dead (exited via /exit in test 4); killAndWait is a no-op in that case
+    await tui1?.killAndWait();
+    // Kill tui2 if it was spawned (may be undefined if test 4 failed before spawn)
+    await tui2?.killAndWait();
     workspace?.cleanup();
   });
 

@@ -66,9 +66,9 @@ describe('TUI PTY System — ask_user', () => {
     await new Promise((r) => setTimeout(r, 300));
   });
 
-  afterAll(() => {
-    tui?.kill();
+  afterAll(async () => {
     server?.stop();
+    await tui?.killAndWait();
     workspace?.cleanup();
   });
 

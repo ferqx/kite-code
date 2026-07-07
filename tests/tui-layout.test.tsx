@@ -1081,9 +1081,11 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
+    // 新的 timeline 渲染：思考内容以 ├─ Thinking 形式展示
     expect(frame).toContain('Thought for 1s');
     expect(frame).toContain('checking current Thought boundaries');
-    expect(frame).not.toContain('├─');
+    expect(frame).toContain('├─ Thinking');
+    expect(frame).not.toContain('├─ Read');
   });
 
   test('keeps running tool_summary thinking preview when latest visible activity is a tool', () => {
@@ -1128,8 +1130,8 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // Working phase with pending tools: no thinking preview, only tool steps
-    expect(frame).not.toContain('Thinking');
+    // 新 timeline 渲染：思考内容在 tool_summary 中作为 ├─ Thinking 展示
+    expect(frame).toContain('├─ Thinking');
     expect(frame).toContain('Read README.md');
   });
 
@@ -1197,8 +1199,8 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // Working phase: thinking hidden, tool steps shown
-    expect(frame).not.toContain('Thinking');
+    // 新 timeline 渲染：思考内容以 ├─ Thinking 展示，但过长文本会被截断
+    expect(frame).toContain('├─ Thinking');
     expect(frame).not.toContain(longThought);
     expect(frame).toContain('运行中');
     expect(frame).toContain('Read');

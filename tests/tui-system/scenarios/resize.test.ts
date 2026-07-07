@@ -46,9 +46,9 @@ describe('TUI PTY System — Terminal Resize', () => {
     await new Promise((r) => setTimeout(r, 500));
   });
 
-  afterAll(() => {
-    tui?.kill();
+  afterAll(async () => {
     server?.stop();
+    await tui?.killAndWait();
     workspace?.cleanup();
   });
 

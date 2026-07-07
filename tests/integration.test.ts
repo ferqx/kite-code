@@ -1622,6 +1622,77 @@ describe('checkpoint recovery', () => {
     }
   });
 
+  test('sequential ask_user calls each reach user_input', async () => {
+    setUp();
+    try {
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: 'q1',
+            tool_calls: [
+              {
+                id: 'c1',
+                name: 'ask_user',
+                args: { question: 'Q1?', options: [{ id: 'a', label: 'A' }], recommended: 'a' },
+              },
+            ],
+          }),
+          new AIMessage({
+            content: 'q2',
+            tool_calls: [
+              {
+                id: 'c2',
+                name: 'ask_user',
+                args: { question: 'Q2?', options: [{ id: 'b', label: 'B' }], recommended: 'b' },
+              },
+            ],
+          }),
+          new AIMessage({ content: 'done.' }),
+        ]),
+      });
+      const s1 = await collectChunks(
+        await graph.stream(
+          {
+            messages: [new HumanMessage('go')],
+            workspaceAccess: 'write',
+            phase: 'planning',
+            plan: null,
+            planReviewed: false,
+            userId: 'test',
+            threadId: 's2',
+            workspace,
+          },
+          { configurable: { thread_id: 's2' }, streamMode: 'updates', recursionLimit: 60 },
+        ),
+      );
+      expect(findInterrupt(s1)!.kind).toBe('user_input');
+
+      const s2 = await collectChunks(
+        await graph.stream(new Command({ resume: { answer: 'A' } }), {
+          configurable: { thread_id: 's2' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        }),
+      );
+      expect(findInterrupt(s2)!.kind).toBe('user_input');
+
+      const s3 = await collectChunks(
+        await graph.stream(new Command({ resume: { answer: 'B' } }), {
+          configurable: { thread_id: 's2' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        }),
+      );
+      checkpointer.close();
+      expect(findInterrupt(s3)).toBeNull();
+      expect(findFinal(s3)).toBe('done.');
+    } finally {
+      tearDown();
+    }
+  });
+
   test('post-approval progress update_plan does not trigger a second plan_review', async () => {
     setUp();
     try {
@@ -1704,6 +1775,201 @@ describe('checkpoint recovery', () => {
 
       expect(findInterrupt(chunks2)).toBeNull();
       expect(findFinal(chunks2)).toBe('继续执行中。');
+    } finally {
+      tearDown();
+    }
+  });
+
+  // 验证跨 graph 实例（模拟进程重启/重连）时，planReviewed 不被 updateState 覆盖。
+  // runAgent 在已有 checkpoint 的 session 上通过 graph.updateState 注入新消息，
+  // 原先的 initialState 硬编码 plan: null, planReviewed: false 会覆盖已审批的方案，
+  // 导致重连后模型重新生成方案（重复 plan_review）。
+  // Verify that planReviewed survives graph.updateState across graph instances
+  // (simulating process restart/reconnect). The old initialState with hardcoded
+  // plan: null / planReviewed: false would overwrite an approved plan, causing
+  // the model to regenerate and re-trigger plan_review after reconnect.
+  test('planReviewed survives updateState across graph instances (reconnect scenario)', async () => {
+    setUp();
+    const threadId = 'reconnect-plan-persist';
+    try {
+      const plan = {
+        name: 'Reconnect Plan',
+        description: 'A plan that should survive reconnect.',
+        status: 'in_progress' as const,
+        steps: [
+          { step: 'Step one', status: 'pending' as const },
+          { step: 'Step two', status: 'pending' as const },
+        ],
+      };
+
+      // ── Session 1: create and approve a plan ──
+      const { graph: graph1, checkpointer: cp1 } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-plan-reconnect',
+                name: 'update_plan',
+                args: plan,
+              },
+            ],
+          }),
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-progress-reconnect',
+                name: 'update_plan',
+                args: {
+                  ...plan,
+                  steps: [
+                    { step: 'Step one', status: 'in_progress' },
+                    { step: 'Step two', status: 'pending' },
+                  ],
+                },
+              },
+            ],
+          }),
+          new AIMessage({ content: 'Step one done.' }),
+        ]),
+      });
+
+      const stream1 = await graph1.stream(
+        {
+          messages: [new HumanMessage('Do the reconnect plan task.')],
+          workspaceAccess: 'write',
+          phase: 'planning',
+          plan: null,
+          planReviewed: false,
+          userId: 'test',
+          threadId,
+          workspace,
+        },
+        {
+          configurable: { thread_id: threadId },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks1 = await collectChunks(stream1);
+      const interrupt1 = findInterrupt(chunks1);
+      expect(interrupt1?.kind).toBe('plan_review');
+
+      // Resume: approve the plan
+      const stream1b = await graph1.stream(
+        new Command({ resume: { planApproved: true, executionMode: 'auto' } }),
+        {
+          configurable: { thread_id: threadId },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks1b = await collectChunks(stream1b);
+      // Second update_plan is same structure (progress-only) → no second plan_review
+      expect(findInterrupt(chunks1b)).toBeNull();
+      expect(findFinal(chunks1b)).toBe('Step one done.');
+      cp1.close();
+
+      // ── Verify checkpoint has planReviewed: true ──
+      const { checkpointer: cpVerify } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([]),
+      });
+      const verifyTuple = await cpVerify.getTuple({
+        configurable: { thread_id: threadId },
+      });
+      const cv = (verifyTuple?.checkpoint?.channel_values ?? {}) as Record<string, unknown>;
+      expect(cv.planReviewed).toBe(true);
+      expect(cv.plan).not.toBeNull();
+      expect((cv.plan as Record<string, unknown>)?.name).toBe('Reconnect Plan');
+      cpVerify.close();
+
+      // ── Session 2: simulate process restart → runAgent calls updateState ──
+      // The fix strips plan/planReviewed from the updateState payload so
+      // the checkpoint's approved plan is preserved.
+      const { graph: graph2, checkpointer: cp2 } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([
+          // Model sees planReviewed=true → may call progress update_plan
+          // (same structure → routes to tools, not plan_review)
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-progress-post-reconnect',
+                name: 'update_plan',
+                args: {
+                  ...plan,
+                  steps: [
+                    { step: 'Step one', status: 'completed' },
+                    { step: 'Step two', status: 'in_progress' },
+                  ],
+                },
+              },
+            ],
+          }),
+          new AIMessage({ content: 'Still working after reconnect.' }),
+        ]),
+      });
+
+      // Simulate what the fixed runAgent does: updateState WITHOUT plan/planReviewed
+      const existing = await cp2.getTuple({
+        configurable: { thread_id: threadId },
+      });
+      expect(existing).not.toBeNull();
+
+      // Build the update payload the same way the fixed runAgent does:
+      // strip plan/planReviewed so they keep checkpoint values
+      const updatePayload = {
+        messages: [new HumanMessage('Continue after reconnect.')],
+        workspaceAccess: 'write' as const,
+        phase: 'building' as const,
+        userId: 'test',
+        threadId,
+        workspace,
+        authorization: { mode: 'default' as const },
+        modelProvider: 'openai',
+        modelName: 'fake',
+        thinkingLevel: null as string | null,
+        interactionMode: 'auto' as const,
+        sandboxBackend: 'unknown' as const,
+      };
+
+      const updatedConfig = await graph2.updateState(existing!.config, updatePayload, 'cleanup');
+
+      // Start from the updated checkpoint
+      const stream2 = await graph2.stream(null, {
+        ...updatedConfig,
+        configurable: {
+          ...(updatedConfig.configurable ?? {}),
+          thread_id: threadId,
+        },
+        streamMode: 'updates' as const,
+        recursionLimit: 60,
+      });
+
+      const chunks2 = await collectChunks(stream2);
+
+      // CRITICAL: no plan_review interrupt — planReviewed survived the updateState
+      expect(findInterrupt(chunks2)).toBeNull();
+      expect(findFinal(chunks2)).toBe('Still working after reconnect.');
+
+      // Double-check: state after reconnect should still have the plan
+      const afterTuple = await cp2.getTuple({
+        configurable: { thread_id: threadId },
+      });
+      const afterCv = (afterTuple?.checkpoint?.channel_values ?? {}) as Record<string, unknown>;
+      expect(afterCv.planReviewed).toBe(true);
+      expect(afterCv.plan).not.toBeNull();
+
+      cp2.close();
     } finally {
       tearDown();
     }
