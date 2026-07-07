@@ -172,6 +172,12 @@ export function routeAfterPlanReview(state: CodeAgentState): 'agent' | typeof EN
   return 'agent';
 }
 
+/** 判断 update_plan 是否为纯进度更新。
+ *  比较 name、description、步骤数量和每条步骤文本是否完全一致。
+ *  若结构（文本）未变，则只可能是 status 字段变化 → 纯进度更新，无需触发 plan_review。
+ *  Checks whether an update_plan call is a progress-only update (only status fields changed).
+ *  If name, description, step count, and every step's text are identical to the current plan,
+ *  the only possible change is step status — no plan_review needed. */
 function isPlanProgressOnlyUpdate(current: AgentPlan | null | undefined, next: AgentPlan): boolean {
   if (!current) return false;
   if (current.name !== next.name) return false;

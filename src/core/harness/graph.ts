@@ -93,6 +93,7 @@ export interface BuildCodeAgentGraphInput {
     toolTokenCount?: number,
     exitCode?: number,
     status?: 'success' | 'error' | 'exhausted',
+    reviewFailure?: string,
   ) => void;
   /** 工具进度回调 — shell 进程产生输出时逐行调用，使 TUI 实时展示。
    *  Per-line progress callback — called for each stdout/stderr line during
@@ -183,6 +184,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         // to their defaults between node invocations.
         executionJournal: state.executionJournal,
         exhaustedFingerprints: state.exhaustedFingerprints,
+        // Preserve plan mode state — planReview node sets these once; they must
+        // survive agent→tools→agent cycles without resetting to defaults.
+        interactionMode: state.interactionMode,
+        planReviewed: state.planReviewed,
+        autoReviewWarnings: state.autoReviewWarnings,
       };
       if (retryEvents.length > 0) {
         return { ...baseReturn, modelRetries: retryEvents };
@@ -290,6 +296,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           replacementCommand?: string;
           reason?: string;
         };
+    let autoReviewFailureReason: string | null = null;
     if (state.interactionMode === InteractionMode.Auto) {
       const reviewModel =
         input.config.autoReview?.provider || input.config.autoReview?.model
@@ -301,7 +308,44 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         request,
         timeoutMs: input.config.autoReview?.timeoutMs,
       });
-      if (!review.ok || !review.suggestion?.approved) {
+      const reviewModelName =
+        (input.config.autoReview?.model as string) ?? input.config.modelName ?? 'unknown';
+      if (!review.ok) {
+        // ── Cases 1-2: technical failure (API error, timeout, non-JSON) ──
+        // Auto-approve — the user chose "auto". Failure is visible in TUI only,
+        // never sent to the conversation model.
+        const failureReason = review.reason ?? 'auto review technical failure';
+        autoReviewFailureReason = `auto-review (${reviewModelName}): ${failureReason}`;
+        console.warn(
+          `[auto-review] failed: ${failureReason} — tool=${request.name} model=${reviewModelName}`,
+        );
+        if (pendingSubagent) {
+          Object.assign(
+            batch,
+            issuePermit({
+              batch,
+              workspace: state.workspace,
+              threadId: state.threadId,
+              request: pendingSubagent.request,
+              grant: 'none',
+            }),
+          );
+          return { approvedBatch: batch };
+        }
+        approved = {
+          approved: true,
+          grant: 'approve_once' as ShellApprovalGrant,
+          approvalHash: approvalPayload.approvalHash,
+          reason: `[auto-review failed] ${failureReason}`,
+        };
+      } else if (!review.suggestion!.approved) {
+        // ── Case 4: model explicitly rejected ──
+        // Don't execute the tool. Return the rejection reason as a failed
+        // ToolMessage so the conversation model can see and adapt.
+        const rejectionReason = review.suggestion!.reason || 'auto review rejected this action';
+        console.warn(
+          `[auto-review] rejected: ${rejectionReason} — tool=${request.name} model=${reviewModelName}`,
+        );
         if (pendingSubagent) {
           Object.assign(
             batch,
@@ -316,19 +360,19 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           return { approvedBatch: batch };
         }
         return {
-          ...rejectedToolMessage(
-            request,
-            `auto review rejected: ${review.suggestion?.reason ?? review.reason ?? 'not approved'}`,
-          ),
+          ...rejectedToolMessage(request, rejectionReason),
           approvedBatch: batch,
         };
+      } else {
+        // ── Case 3: auto-review approved ──
+        const suggestion = review.suggestion!;
+        approved = {
+          approved: true,
+          grant: suggestion.grant,
+          approvalHash: approvalPayload.approvalHash,
+          reason: suggestion.reason,
+        };
       }
-      approved = {
-        approved: true,
-        grant: review.suggestion.grant,
-        approvalHash: approvalPayload.approvalHash,
-        reason: review.suggestion.reason,
-      };
     } else {
       approved = interrupt({
         kind: 'tool_approval',
@@ -483,11 +527,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
     }
 
+    const autoReviewWarnings: Record<string, string> = { ...state.autoReviewWarnings };
+    if (autoReviewFailureReason && request.id) {
+      autoReviewWarnings[request.id] = autoReviewFailureReason;
+    }
     return {
       approvedBatch: batch,
       approvedToolRequest: approvedRequest,
       approvedToolGrant: grant,
       authorization: nextAuthorization,
+      autoReviewWarnings,
     };
   };
 
@@ -558,6 +607,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       // 重复放入完整 plan 对象会浪费 token 并降低后续调用前缀缓存命中率。
       // The plan data is already in AIMessage.tool_calls.args; ToolMessage only needs ok + brief summary.
       // Including the full plan redundantly wastes tokens and degrades prefix cache hit rates.
+      // 首次方案审批重置授权为 default；执行中修订方案保留现有授权（如 full_access）
+      // First plan approval resets authorization to default; plan revision preserves existing authorization
       return {
         messages: [
           new ToolMessage({
@@ -571,7 +622,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         planReviewed: true,
         phase: 'building' as const,
         interactionMode,
-        authorization: { ...state.authorization, mode: 'default' as const },
+        authorization: state.planReviewed
+          ? state.authorization
+          : { ...state.authorization, mode: 'default' as const },
       };
     }
 
@@ -667,6 +720,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       request.name === 'shell_execute' && result.exitCode === 124 && result.stdout
         ? result.stdout
         : (result.stdout || result.stderr || '').slice(0, 200);
+    const reviewFailure = request.id ? state.autoReviewWarnings[request.id] : undefined;
     input.toolResultSink?.(
       request.id ?? '',
       request.name,
@@ -675,6 +729,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       result.totalLines,
       undefined, // toolTokenCount computed in runner's parseToolResultEvents
       result.exitCode,
+      undefined, // status — determined by runner
+      reviewFailure,
     );
 
     const toolMessage = new ToolMessage({
@@ -1223,6 +1279,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       ...mergedExtra,
       ...journalState,
       messages,
+      // Preserve plan mode state across tools→agent cycles.
+      interactionMode: state.interactionMode,
+      planReviewed: state.planReviewed,
+      // Auto-review warnings have been injected into ToolMessages; clear them.
+      autoReviewWarnings: {},
     };
   };
 

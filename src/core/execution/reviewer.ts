@@ -39,7 +39,11 @@ export async function reviewToolApproval(input: {
   const timeoutMs = input.timeoutMs ?? 15_000;
   try {
     const response = await withTimeout(
-      input.model.invoke(reviewMessages(input.payload, input.request)),
+      input.model.invoke(reviewMessages(input.payload, input.request), {
+        // Force JSON output so the model reliably returns parseable approval decisions
+        // instead of free-text that extractJsonObject cannot handle.
+        response_format: { type: 'json_object' },
+      }),
       timeoutMs,
     );
     return parseAutoReviewSuggestion(messageContent(response), input.payload.grantOptions);

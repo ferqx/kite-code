@@ -72,6 +72,7 @@ export interface RunAgentInput {
     toolTokenCount?: number,
     exitCode?: number,
     status?: 'success' | 'error' | 'exhausted',
+    reviewFailure?: string,
   ) => void;
   /** 调用端标识 / Frontend identity */
   frontend?: string;
@@ -214,7 +215,17 @@ export async function* runAgent(
 
   const toolResultSink =
     input.toolResultSink ??
-    ((callId, toolName, ok, summary, totalLines, _toolTokenCount, exitCode, status) => {
+    ((
+      callId,
+      toolName,
+      ok,
+      summary,
+      totalLines,
+      _toolTokenCount,
+      exitCode,
+      status,
+      reviewFailure,
+    ) => {
       // 仅推 TUI（processStream 会从 chunk 生成更完整的 tool_done 并写入日志）
       try {
         provider.onEvent({
@@ -227,6 +238,7 @@ export async function* runAgent(
             ...(exitCode != null ? { exitCode } : {}),
             ...(totalLines != null ? { totalLines } : {}),
             ...(status ? { status } : {}),
+            ...(reviewFailure ? { reviewFailure } : {}),
           },
         });
       } catch {
@@ -278,6 +290,7 @@ export async function* runAgent(
       workspaceAccess: initialAccess,
       phase: initialPhase,
       plan: null,
+      planReviewed: false,
       userId: input.userId,
       threadId: input.threadId,
       workspace: input.workspace,
@@ -485,6 +498,7 @@ export async function* forkFromCheckpoint(
       workspaceAccess: oldState.workspaceAccess ?? 'write',
       phase: oldState.phase ?? 'building',
       plan: oldState.plan,
+      planReviewed: oldState.planReviewed ?? false,
       messages: oldState.messages ?? [],
       authorization: oldState.authorization ?? defaultAuthorizationState(),
       interactionMode: oldState.interactionMode ?? 'ask',
@@ -841,6 +855,7 @@ function parseStateChangeEvents(node: Record<string, unknown>): AgentEvent | nul
   const phase = node.phase as string | undefined;
   const plan = node.plan ?? (node.metadata as Record<string, unknown> | undefined)?.plan;
   const auth = node.authorization;
+  const im = node.interactionMode as string | undefined;
   const modelProvider = node.modelProvider as string | undefined;
   const modelName = node.modelName as string | undefined;
   if (ws === 'write') sc.workspaceAccess = ws;
@@ -851,6 +866,7 @@ function parseStateChangeEvents(node: Record<string, unknown>): AgentEvent | nul
       mode: (auth as Record<string, unknown>).mode as 'default' | 'full_access',
     };
   }
+  if (im === 'ask' || im === 'auto' || im === 'full') sc.interactionMode = im;
   if (modelProvider) sc.modelProvider = modelProvider;
   if (modelName) sc.modelName = modelName;
   if (Object.keys(sc).length > 0) {

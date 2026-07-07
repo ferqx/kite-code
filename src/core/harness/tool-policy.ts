@@ -315,6 +315,23 @@ export function evaluateToolPolicy(input: {
       });
     }
 
+    // 只读命令在任何 access/phase 下都允许直通
+    // Read-only commands bypass approval regardless of access/phase
+    const shellDecision = classifyShellExecute(request.args.command);
+    if (shellDecision.allowed && !shellDecision.requiresApproval && shellDecision.risk === 'read') {
+      return shellDecision;
+    }
+
+    // planning 阶段拒绝所有非只读 shell，不受 authorization 影响
+    // Full mode / same_command grants are only valid during building phase
+    const phaseDenial = denyForPlanningPhase({
+      request,
+      phase,
+    });
+    if (phaseDenial) {
+      return phaseDenial;
+    }
+
     const authorized = authorizedShellDecision({
       authorization,
       workspace: input.workspace ?? '',
@@ -324,22 +341,6 @@ export function evaluateToolPolicy(input: {
     });
     if (authorized) {
       return authorized;
-    }
-
-    // 只读命令在任何 access/phase 下都允许直通
-    // Read-only commands bypass approval regardless of access/phase
-    const shellDecision = classifyShellExecute(request.args.command);
-    if (shellDecision.allowed && !shellDecision.requiresApproval && shellDecision.risk === 'read') {
-      return shellDecision;
-    }
-
-    // 非只读命令在 planning 阶段仍需审批 / Non-read-only commands still require approval during planning
-    const phaseDenial = denyForPlanningPhase({
-      request,
-      phase,
-    });
-    if (phaseDenial) {
-      return phaseDenial;
     }
 
     return shellDecision;

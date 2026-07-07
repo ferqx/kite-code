@@ -264,6 +264,11 @@ export class BunSqliteSaver extends BaseCheckpointSaver {
         'write',
       phase: (cv.phase as import('@/core/harness/state').CodeAgentState['phase']) ?? 'building',
       plan: (cv.plan as import('@/core/harness/state').CodeAgentState['plan']) ?? null,
+      planReviewed:
+        (cv.planReviewed as import('@/core/harness/state').CodeAgentState['planReviewed']) ?? false,
+      interactionMode:
+        (cv.interactionMode as import('@/core/harness/state').CodeAgentState['interactionMode']) ??
+        'ask',
       authorization:
         cv.authorization as import('@/core/harness/state').CodeAgentState['authorization'],
     };

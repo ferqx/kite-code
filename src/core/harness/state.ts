@@ -90,7 +90,10 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => null,
   }),
-  /** plan 是否已通过用户审批。tools 节点产出新 plan 时设为 false，plan_review 审批通过后设为 true / Whether the plan has been approved by the user. Set to false when tools node produces a new plan, set to true after plan_review approval. */
+  /** 当前 session 中是否已有方案通过用户审批（首个方案审批后设为 true，后续不重置）。
+   *  plan_review 审批通过后设为 true，tools 节点产出 plan（纯进度更新）时保持不变。
+   *  Whether a plan has been approved by the user in this session. Set to true after first plan_review approval; never reset.
+   *  Tools node's progress-only update_plan keeps this flag unchanged. */
   planReviewed: Annotation<boolean>({
     reducer: (_left, right) => right,
     default: () => false,
@@ -129,6 +132,12 @@ export const AgentState = Annotation.Root({
   activeSkillInstructions: Annotation<string>({
     reducer: (_left, right) => right,
     default: () => '',
+  }),
+  /** auto-review 失败时按 tool_call_id 记录警告信息，tools 节点注入到 ToolMessage 中后清除。
+   *  Warnings from failed auto-reviews, keyed by tool_call_id. Injected into ToolMessage by tools node, then cleared. */
+  autoReviewWarnings: Annotation<Record<string, string>>({
+    reducer: (_left, right) => right,
+    default: () => ({}),
   }),
 });
 

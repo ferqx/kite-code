@@ -635,6 +635,15 @@ function isPlanReadOnlySegment(segment: string): boolean {
     return PLAN_READ_ONLY_COMMANDS.has(command) && !/\bsystem\s*\(/.test(segment);
   }
 
+  // xargs 根据其执行的命令判断是否只读 / xargs is read-only only when the command it invokes is read-only
+  if (command === 'xargs') {
+    // tokens[0] is 'xargs'; find the next non-option token (the command xargs runs)
+    const invokedIdx = tokens.findIndex((t, i) => i > 0 && !t.startsWith('-'));
+    const invoked = invokedIdx > 0 ? stripQuotes(tokens[invokedIdx] ?? '').toLowerCase() : '';
+    if (!invoked) return false;
+    return PLAN_READ_ONLY_COMMANDS.has(invoked);
+  }
+
   return PLAN_READ_ONLY_COMMANDS.has(command);
 }
 

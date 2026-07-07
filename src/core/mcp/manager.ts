@@ -8,6 +8,7 @@ import {
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { clearToolCache } from '@/core/tools/definitions';
 import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
 
 const MCP_STARTUP_TIMEOUT = 5000;
@@ -105,6 +106,9 @@ export class McpManager {
           const state = this.servers.get(name);
           if (state) {
             state.tools = result.tools as SdkTool[];
+            // Invalidate the agent tool cache so the next createAgentTools call
+            // picks up the updated MCP tool list.
+            clearToolCache();
           }
         } catch (err) {
           console.error(`[MCP] Failed to refresh tools for ${name}:`, err);
