@@ -265,20 +265,38 @@ function updateCurrentThoughtActivity(
   state: TuiState,
   latestActivity: Extract<OutputBlock, { kind: 'tool_summary' }>['latestActivity'],
 ): TuiState {
+  const isThinking = latestActivity?.kind === 'thinking';
   const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
   if (summary?.active) {
-    return updateToolSummaryById(state, summary.id, (block) => ({
-      ...block,
-      active: true,
-      hasThought: true,
-      latestActivity,
-      // 每次 reason / tool_call 事件更新耗时，消除对前端 setInterval 定时器的依赖
-      // Update elapsed on each reason / tool_call event so the UI doesn't need a live timer
-      totalElapsedMs: Date.now() - block.createdAt,
-    }));
+    return updateToolSummaryById(state, summary.id, (block) => {
+      const seq = (block.nextTimelineSeq ?? block.timeline?.length ?? 0) + 1;
+      const timelineEntry = isThinking
+        ? { seq, kind: 'thinking' as const, text: latestActivity!.text }
+        : { seq, kind: 'tool' as const, callId: latestActivity!.callId };
+      return {
+        ...block,
+        active: true,
+        latestActivity,
+        hasThinking: isThinking ? true : block.hasThinking,
+        totalElapsedMs: Date.now() - block.createdAt,
+        timeline: [...(block.timeline ?? []), timelineEntry],
+        nextTimelineSeq: seq,
+      };
+    });
   }
 
   const id = state.nextBlockId;
+  const initialTimeline = latestActivity
+    ? [
+        {
+          seq: 1,
+          kind: latestActivity.kind as 'thinking' | 'tool',
+          ...(latestActivity.kind === 'thinking'
+            ? { text: latestActivity.text }
+            : { callId: latestActivity.callId }),
+        },
+      ]
+    : [];
   const block: OutputBlock = {
     id,
     kind: 'tool_summary',
@@ -289,6 +307,9 @@ function updateCurrentThoughtActivity(
     active: true,
     hasThought: true,
     latestActivity,
+    hasThinking: isThinking || undefined,
+    timeline: initialTimeline as Extract<OutputBlock, { kind: 'tool_summary' }>['timeline'],
+    nextTimelineSeq: 1,
   };
   return {
     ...appendBlock(state, block),
@@ -302,9 +323,27 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
 
   // 非 reason 事件清除 currentRunReasonId，让下一个 reason 创建新块。
   // 避免中间隔了工具调用后两个 reason 块被合并。
-  // Auto-clear currentRunReasonId on any non-reason event,
+  // 但 cache_metrics / state_change / step_begin / step_end / interrupt / update
+  // 等纯内部事件不应打断 reason 连续性——这些事件不代表模型推理周期中断。
+  // Auto-clear currentRunReasonId on content-bearing events,
   // so the next reason creates a new block instead of appending.
-  if (event.type !== 'reason' && state.currentRunReasonId !== undefined) {
+  // Internal bookkeeping events (cache_metrics, state_change, step_*) must NOT
+  // break reason continuity — they are not part of the model's reasoning cycle.
+  const REASON_CONTINUITY_EVENTS = new Set([
+    'cache_metrics',
+    'state_change',
+    'step_begin',
+    'step_end',
+    'interrupt',
+    'update',
+    'tool_progress',
+    'subagent_cache_metrics',
+  ]);
+  if (
+    event.type !== 'reason' &&
+    state.currentRunReasonId !== undefined &&
+    !REASON_CONTINUITY_EVENTS.has(event.type)
+  ) {
     const reasonBlock = findBlockById(state, state.currentRunReasonId);
     if (reasonBlock?.kind === 'reason' && reasonBlock.folded) {
       state = replaceBlockById(state, state.currentRunReasonId, { ...reasonBlock, folded: false });
@@ -314,8 +353,14 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
 
   switch (event.type) {
     case 'text': {
-      if (!/\S/u.test(event.data.text)) return state;
+      // 先关闭当前 Thought，再判断是否为 whitespace。即使文本自身不渲染（纯空白），
+      // 模型已经开始输出就代表思考周期结束，Thought 必须关闭以防后续工具无限累积。
+      // Close the current Thought BEFORE the whitespace check. Even if the text
+      // itself isn't rendered (all whitespace), the model has begun output —
+      // the thinking cycle is over and the Thought must close to prevent
+      // unbounded tool accumulation in subsequent exploration phases.
       state = closeCurrentThought(state);
+      if (!/\S/u.test(event.data.text)) return state;
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
 
@@ -483,17 +528,25 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         const currentThought = findThoughtSummary(finalized, finalized.currentThoughtSummaryId);
 
         if (currentThought?.active) {
+          const now = Date.now();
           const tools = [...currentThought.tools, entry];
           const latestActivity =
             currentThought.latestActivity?.kind === 'thinking'
               ? currentThought.latestActivity
               : ({ kind: 'tool', callId: event.data.call_id } as const);
+          const seq = (currentThought.nextTimelineSeq ?? currentThought.timeline?.length ?? 0) + 1;
           const updated: Extract<OutputBlock, { kind: 'tool_summary' }> = {
             ...currentThought,
             tools,
+            totalElapsedMs: now - currentThought.createdAt,
             summaryLine: buildToolSummaryLine(tools),
             active: true,
             latestActivity,
+            timeline: [
+              ...(currentThought.timeline ?? []),
+              { seq, kind: 'tool' as const, callId: event.data.call_id },
+            ],
+            nextTimelineSeq: seq,
           };
           return {
             ...replaceBlockById(finalized, currentThought.id, updated),
@@ -518,6 +571,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           active: true,
           hasThought: false,
           latestActivity: { kind: 'tool', callId: event.data.call_id },
+          timeline: [{ seq: 1, kind: 'tool' as const, callId: event.data.call_id }],
+          nextTimelineSeq: 1,
         };
         return {
           ...appendBlock(finalized, block),
@@ -575,11 +630,27 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
               : t,
           );
           const totalElapsedMs = Date.now() - summary.createdAt;
+          // 所有工具均 settled 时重新计算 result，修复 closeCurrentThought 提前
+          // 关闭导致的 result='cancelled' 残留——后续 tool_done 到达后不再卡在 cancelled。
+          // Recompute result when all tools are settled, fixing stale 'cancelled'
+          // left by closeCurrentThought before late-arriving tool_done events.
+          const allSettled = tools.every(
+            (t) =>
+              t.status === 'done' ||
+              t.status === 'error' ||
+              t.status === 'cancelled' ||
+              t.status === 'timeout' ||
+              t.status === 'exhausted',
+          );
+          const hasError = tools.some(
+            (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
+          );
           const updatedSummary: OutputBlock = {
             ...summary,
             tools,
             totalElapsedMs,
             summaryLine: buildToolSummaryLine(tools),
+            ...(allSettled ? { result: hasError ? ('error' as const) : ('done' as const) } : {}),
           };
           const turnsCopy = state.turns.map((t, ti) => {
             if (ti !== turnIndex) return t;
@@ -746,7 +817,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...state, status: next, interactionMode: nextInteractionMode };
     }
     case 'model_retry': {
-      const finalized = finalizeLastTurnStreaming(state);
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
       const id = finalized.nextBlockId;
       const maxAttempts = event.data.maxAttempts;
       const delayLabel =
@@ -935,7 +1006,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       };
     }
     case 'error': {
-      const finalized = finalizeLastTurnStreaming(state);
+      // 错误打断当前思考周期——恢复/重试后模型从头开始推理，不应延续旧 Thought。
+      // An error breaks the current thinking cycle — recovery/retry starts fresh,
+      // so the old Thought must close to avoid incorrect elapsed time accumulation.
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
       const prefix = event.data.recoverable ? '⟳ Recoverable error' : 'Error';
       const id = finalized.nextBlockId;
       const block: OutputBlock = {

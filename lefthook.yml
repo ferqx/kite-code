@@ -1,7 +1,7 @@
 pre-commit:
   commands:
     format:
-      glob: "*.{ts,tsx,json,jsonc,md,yml,yaml}"
+      glob: "*.{ts,tsx,json,jsonc,yml,yaml}"
       run: node node_modules/@biomejs/biome/bin/biome check --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     typecheck:

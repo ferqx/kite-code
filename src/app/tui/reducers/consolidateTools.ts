@@ -13,27 +13,50 @@ const EXPLORATION_TOOLS = new Set([
   'search_content',
   'search_files',
   'read_mcp_resource',
+  'shell_execute', // 条件性纳入：需 intent=inspect + 搜索命令前缀，由 isShellExploreCommand 守卫
 ]);
+
+/** shell_execute 搜索/查找类命令前缀，匹配后纳入 Thought 预整合 */
+const SHELL_SEARCH_PREFIXES = ['rg ', 'grep ', 'ag ', 'ack ', 'git grep ', 'find ./', 'find /'];
+
+/** 判断 shell_execute 是否为搜索/查找类探索命令 */
+function isShellExploreCommand(args: Record<string, unknown>): boolean {
+  const intent = args.intent;
+  if (intent !== 'inspect') return false;
+  const command = args.command;
+  if (typeof command !== 'string') return false;
+  return SHELL_SEARCH_PREFIXES.some((prefix) => command.startsWith(prefix));
+}
 
 /** 从事件数据判断是否为可合并的探索工具（用于 tool_call 事件，此时还没有 block） */
 export function isExplorationToolEvent(data: {
   name: string;
   args: Record<string, unknown>;
 }): boolean {
-  return EXPLORATION_TOOLS.has(data.name);
+  if (EXPLORATION_TOOLS.has(data.name)) {
+    if (data.name === 'shell_execute') return isShellExploreCommand(data.args);
+    return true;
+  }
+  return false;
 }
 
-/** 从工具名判断是否为探索工具（用于 tool_done 事件） */
+/** 从工具名判断是否为探索工具（用于 tool_done 事件）。
+ *  shell_execute 无条件返回 true——若未被预整合（非 inspect 或非搜索命令），
+ *  其 tool_done 在 handleEvent 中会因找不到对应的 tool_summary 而 fall through
+ *  到标准 tool_card 更新路径。 */
 export function isExplorationToolByName(name: string): boolean {
   return EXPLORATION_TOOLS.has(name);
 }
 
 /**
  * 判断一个 tool_card 是否为可合并的探索工具。
+ * shell_execute 需要额外检查 intent + 命令前缀。
  */
 export function isExplorationTool(block: OutputBlock): boolean {
   if (block.kind !== 'tool_card') return false;
-  return EXPLORATION_TOOLS.has(block.name);
+  if (!EXPLORATION_TOOLS.has(block.name)) return false;
+  if (block.name === 'shell_execute') return isShellExploreCommand(block.args);
+  return true;
 }
 
 /**
@@ -46,12 +69,14 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
   let searched = 0;
   let filePatterns = 0;
   let readMcp = 0;
+  let ranCommands = 0;
 
   for (const t of tools) {
     if (t.name === 'read_file') readFiles++;
     else if (t.name === 'search_content') searched++;
     else if (t.name === 'search_files') filePatterns++;
     else if (t.name === 'read_mcp_resource') readMcp++;
+    else if (t.name === 'shell_execute' || t.name === 'bash') ranCommands++;
     else if (EXPLORATION_TOOLS.has(t.name)) readFiles++; // fallback
   }
 
@@ -61,6 +86,7 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
   if (filePatterns > 0)
     parts.push(`searched ${filePatterns} file pattern${filePatterns > 1 ? 's' : ''}`);
   if (readMcp > 0) parts.push(`read ${readMcp} MCP resource${readMcp > 1 ? 's' : ''}`);
+  if (ranCommands > 0) parts.push(`ran ${ranCommands} command${ranCommands > 1 ? 's' : ''}`);
 
   if (parts.length === 0) {
     return `${tools.length} tool call${tools.length > 1 ? 's' : ''}`;

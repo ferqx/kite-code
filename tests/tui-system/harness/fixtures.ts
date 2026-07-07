@@ -11,7 +11,7 @@
 // Reuse the MockResponse shape from the existing mock model
 export interface MockResponse {
   message?: {
-    content: string;
+    content?: string;
     /** 推理/思考内容（DeepSeek reasoning_content），生成 reason block */
     reasoning_content?: string;
     tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }>;
