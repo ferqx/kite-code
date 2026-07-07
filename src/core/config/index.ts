@@ -61,6 +61,10 @@ export const configSchema = z.object({
       provider: z.string().optional(),
       model: z.string().optional(),
       timeoutMs: z.number().int().positive().optional(),
+      failOpen: z.boolean().optional(),
+      doomLoopRepeatThreshold: z.number().int().positive().optional(),
+      circuitBreakerMaxRejections: z.number().int().positive().optional(),
+      circuitBreakerWindowMs: z.number().int().positive().optional(),
     })
     .optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
@@ -98,6 +102,10 @@ export interface AgentConfig {
     provider?: string;
     model?: string;
     timeoutMs?: number;
+    failOpen?: boolean;
+    doomLoopRepeatThreshold?: number;
+    circuitBreakerMaxRejections?: number;
+    circuitBreakerWindowMs?: number;
   };
 }
 

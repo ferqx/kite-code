@@ -54,3 +54,16 @@ export type ToolExecutionResult = ShellResult & {
   totalLines?: number;
   subagentResult?: SubAgentResult;
 };
+
+/** executeOneTool 产出的副作用字段，与 ToolExecutionResult 中的非核心字段对应。
+ *  每个字段对应一个 state channel，tools 节点必须显式传播。
+ *  Side effects extracted from ToolExecutionResult that must flow into graph state.
+ *  Each entry corresponds to a state channel the tools node must propagate explicitly. */
+export interface ToolExecutionSideEffects {
+  plan?: AgentPlan;
+  workspaceAccess?: WorkspaceAccess;
+  authorization?: ThreadAuthorizationState;
+  activeSkillInstructions?: string;
+  /** task 工具子 agent 被阻塞时产生的审批挂起状态 / Pending sub-agent approval when task tool is blocked */
+  pendingSubagentApproval?: import('./state').PendingSubAgentApproval;
+}

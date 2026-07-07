@@ -1129,7 +1129,13 @@ describe('routeEntry — start-of-graph routing', () => {
     modelName: '',
     thinkingLevel: null,
     activeSkillInstructions: '',
-    autoReviewWarnings: {} as Record<string, string>,
+    autoReviewState: {
+      pendingWarnings: {},
+      consecutiveRejects: 0,
+      rejectionHistory: [],
+      circuitBreakerTripped: false,
+    },
+    doomLoopTracker: {} as Record<string, { count: number; lastSeenAt: number }>,
     messages: [],
   };
 

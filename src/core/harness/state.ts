@@ -1,5 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
+import { type AutoReviewState, DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
 import type { ExecutionJournalEntry } from '@/core/execution/journal';
 import type { PermitBatch } from '@/core/execution/permit';
 import type { SandboxBackend } from '@/core/sandbox/platform';
@@ -133,9 +134,14 @@ export const AgentState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => '',
   }),
-  /** auto-review 失败时按 tool_call_id 记录警告信息，tools 节点注入到 ToolMessage 中后清除。
-   *  Warnings from failed auto-reviews, keyed by tool_call_id. Injected into ToolMessage by tools node, then cleared. */
-  autoReviewWarnings: Annotation<Record<string, string>>({
+  /** Auto-review 持久化状态（待注入警告 + 连续拒绝计数 + 拒绝历史 + 断路器状态）/
+   *  Persistent auto-review state (pending warnings + consecutive rejects + rejection history + breaker status) */
+  autoReviewState: Annotation<AutoReviewState>({
+    reducer: (_left, right) => right,
+    default: () => DEFAULT_AUTO_REVIEW_STATE,
+  }),
+  /** doom-loop 重复调用追踪 / Doom-loop repeat call tracker */
+  doomLoopTracker: Annotation<Record<string, { count: number; lastSeenAt: number }>>({
     reducer: (_left, right) => right,
     default: () => ({}),
   }),

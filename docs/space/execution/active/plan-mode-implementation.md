@@ -14,6 +14,14 @@
 
 Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批后再执行。整个功能涉及三层架构的全面改造。
 
+## 最近更新（2026-07-07 重构）
+
+- **Auto-review 状态分组**：原先分散的 4 个 channel（`autoReviewWarnings`、`autoReviewConsecutiveRejects`、`autoReviewRejectionHistory`、`circuitBreakerTripped`）合并为单一 `autoReviewState` channel（类型 `AutoReviewState`，定义于 `circuit-breaker.ts`）。approval 节点所有 return 路径统一使用该 channel，消除字段遗漏导致的 LangGraph 静默重置问题。
+- **类型化副作用**：`executeOneTool` 返回值从 `extra: Record<string, unknown>` 改为 `sideEffects: ToolExecutionSideEffects`（定义于 `tool-result.ts`），编译器可检测字段碰撞。
+- **journal 函数提取**：`recordJournalForMessage` 和 `injectExhaustionSignal` 从 graph.ts 内部闭包提取为 `journal.ts` 导出函数，API 从 callback 改为直接返回 state，可独立单测。
+- **AbortSignal 超时**：`reviewToolApproval` 中 `Promise.race` + `setTimeout` 替换为 `AbortController`，超时时 abort 底层 HTTP 请求，消除连接泄漏。
+- **子 agent 拒绝统一**：approval 节点中 6 处 copy-paste 的子 agent 拒绝路径合并为 `rejectSubagentTool()` 函数。
+
 ## 最近更新（2026-07-07）
 
 - **Auto-review 链路修复**：`interactionMode` 和 `planReviewed` 在 agent/tools 节点 return 中显式保留，防止 LangGraph 对未返回 channel 重置默认值导致 auto-review 静默跳过。
@@ -200,7 +208,7 @@ return 'tools';  // Priority 4
 
 ## 遗留项
 
-- **Auto-review 失败 TUI 组件级测试**：当前仅通过集成测试（mock FakeChatModel）验证 auto-review 4 种场景的数据流，未在 `tui-layout.test.tsx` 中验证 `ToolCardBlock`/`ToolSummaryBlock` 对 `reviewFailure` 字段的渲染。PTY E2E 的 mock server 无法精确控制 auto-review 的独立模型调用（队列式匹配），建议补充组件级测试。
-- **`as any` 消除**：`ToolCardBlock.tsx`、`ToolSummaryBlock.tsx`、`handleEvent.ts` 中使用的 `as any` 访问 `reviewFailure` 字段，原因是 `OutputBlock` 联合类型尚未完全覆盖新字段。应在类型定义稳定后消除。
+- **`as any` 消除**：`ToolCardBlock.tsx`、`ToolSummaryBlock.tsx`、`handleEvent.ts` 中使用的 `as any` 访问 `reviewFailure` 字段，原因是 `OutputBlock` 联合类型尚未完全覆盖新字段。应在类型定义稳定后消除。（core 侧 `ToolExecutionSideEffects` 已类型化，TUI 侧待跟进）
 - **Auto-review 首次调用延迟**：`reviewer.ts` 中 `response_format: json_object` 可能增加首次调用的延迟（provider 需要解析 JSON schema），需观察实际使用中的表现。
 - **工具缓存 key 过度区分**：`definitions.ts` 的 `createAgentTools` 缓存 key 包含 `phase`、`interactionMode`、`commandGrants`，但工具定义本身不依赖这些字段，导致不必要的缓存失效。性能影响微小，但建议后续评估精简。
+- **E2E 覆盖**：`_safety=safe` fast-path 正向路径、auto-review fail-open (`failOpen: true`)、plan review supplement 全链路等场景缺少集成测试。详见审查报告。

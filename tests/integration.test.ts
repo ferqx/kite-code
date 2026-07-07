@@ -699,6 +699,284 @@ describe('graph integration', () => {
       tearDown();
     }
   });
+
+  // -----------------------------------------------------------------------
+  // Sub-agent approval — pendingSubagentApproval in state routes to approval
+  // without running agent node. Verifies interrupt payload carries subagentId
+  // so the TUI can distinguish sub-agent prompts from main-agent prompts.
+  // -----------------------------------------------------------------------
+
+  test('sub-agent tool approval interrupt includes subagentId', async () => {
+    setUp();
+    try {
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: new FakeChatModel([]) as any,
+      });
+
+      const chunks = await collectChunks(
+        await graph.stream(
+          {
+            messages: [new HumanMessage('Sub-agent needs to write output')],
+            workspaceAccess: 'write',
+            phase: 'building',
+            plan: null,
+            userId: 'test',
+            threadId: 'sub-int-1',
+            workspace,
+            interactionMode: 'ask' as const,
+            pendingSubagentApproval: {
+              taskCallId: 'task-call-sub-1',
+              request: {
+                id: 'sub-req-1',
+                name: 'write_file' as const,
+                args: { path: 'sub-output.txt', content: 'sub-agent result' },
+                reason: 'Sub-agent writes result file',
+                protectedCommand: 'write_file sub-output.txt',
+              },
+              continuation: {
+                id: 'sub-agent-int-1',
+                role: {
+                  role: 'code' as const,
+                  systemPrompt: 'You are a code sub-agent.',
+                },
+                task: 'Write a test file',
+                messages: [],
+                toolCallCount: 2,
+                steps: [],
+              },
+            },
+          },
+          {
+            configurable: { thread_id: 'sub-int-1' },
+            streamMode: 'updates',
+            recursionLimit: 60,
+          },
+        ),
+      );
+
+      checkpointer.close();
+
+      const interrupt = findInterrupt(chunks);
+      expect(interrupt).not.toBeNull();
+      expect(interrupt?.kind).toBe('tool_approval');
+
+      // TUI uses subagentId to pause sub-agent loading animation
+      const approval = interrupt?.approval as Record<string, unknown> | undefined;
+      expect(approval?.subagentId).toBe('sub-agent-int-1');
+    } finally {
+      tearDown();
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // Sub-agent auto-review: when pendingSubagentApproval exists and
+  // interactionMode is auto, the reviewer prompt carries subagentId from the
+  // approval payload so the reviewer knows this is a sub-agent tool call.
+  // Also verifies that the approval node returns { approvedBatch, ... }
+  // (not { rejectedToolMessage, ... }) for sub-agent tool approvals.
+  // -----------------------------------------------------------------------
+
+  test('auto-review includes subagentId in reviewer prompt when pending sub-agent exists', async () => {
+    setUp();
+    try {
+      let capturedReviewerMessages: unknown = null;
+      const spyModel = new FakeChatModel([
+        // Reviewer response — only model call since agent node is skipped
+        // when pendingSubagentApproval is in the initial state.
+        new AIMessage({
+          content:
+            '{"approved":true,"grant":"approve_once","reason":"safe workspace write from sub-agent"}',
+        }),
+      ]);
+
+      const originalInvoke = spyModel.invoke.bind(spyModel);
+      spyModel.invoke = async (input: unknown, options?: unknown) => {
+        const result = await originalInvoke(input as any, options as any);
+        // First (and only) invoke is the auto-review call — agent node is
+        // bypassed because routeEntry routes directly to approval when
+        // pendingSubagentApproval is present.
+        if (spyModel.callCount === 1) {
+          capturedReviewerMessages = input;
+        }
+        return result;
+      };
+
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: spyModel,
+      });
+
+      // Tools node will error when it tries to resumeSubAgent with a stub
+      // continuation, but the spy captures the reviewer prompt before that.
+      let chunks: GraphChunk[] = [];
+      try {
+        const stream = await graph.stream(
+          {
+            messages: [new HumanMessage('Run sub-agent to write a file')],
+            workspaceAccess: 'write',
+            phase: 'building',
+            plan: {
+              name: 'Sub-agent Test Plan',
+              description: 'Verify sub-agent auto-review context.',
+              status: 'in_progress',
+              steps: [{ step: 'Sub-agent writes file', status: 'in_progress' }],
+            },
+            planReviewed: true,
+            userId: 'test',
+            threadId: 'sub-review-1',
+            workspace,
+            interactionMode: 'auto' as const,
+            authorization: { mode: 'default', commandGrants: {} },
+            pendingSubagentApproval: {
+              taskCallId: 'task-call-sub-2',
+              request: {
+                id: 'sub-req-2',
+                name: 'write_file' as const,
+                args: { path: 'sub-review-output.txt', content: 'reviewed output' },
+                reason: 'Sub-agent writes reviewed output',
+                protectedCommand: 'write_file sub-review-output.txt',
+              },
+              continuation: {
+                id: 'sub-agent-review-2',
+                role: {
+                  role: 'code' as const,
+                  systemPrompt: 'You are a code sub-agent.',
+                },
+                task: 'Write reviewed output file',
+                messages: [],
+                toolCallCount: 3,
+                steps: [],
+              },
+            },
+          },
+          {
+            configurable: { thread_id: 'sub-review-1' },
+            streamMode: 'updates',
+            recursionLimit: 60,
+          },
+        );
+
+        chunks = await collectChunks(stream);
+      } catch (_e) {
+        // Expected: tools node fails when resumeSubAgent can't connect to model.
+        // The spy captured the reviewer prompt before this error.
+      }
+
+      checkpointer.close();
+
+      // Verify reviewer prompt includes isSubAgent context,
+      // proving the reviewer was invoked in the context of a sub-agent tool call.
+      expect(capturedReviewerMessages).not.toBeNull();
+      const msgs = capturedReviewerMessages as Array<{ content?: unknown }>;
+      const promptText = msgs
+        ?.map((m) => (typeof m.content === 'string' ? m.content : ''))
+        .join('\n');
+      expect(promptText).toContain('isSubAgent');
+      expect(promptText).toContain('true');
+
+      // Verify the approval chunk was emitted before the tools node error.
+      // When pendingSubagent exists, the approval node returns { approvedBatch, ... }
+      // instead of { rejectedToolMessage, ... }.
+      const approvalChunks = chunks.filter((c) => c.approval !== undefined);
+      expect(approvalChunks.length).toBeGreaterThan(0);
+      const approvalState = approvalChunks[0]?.approval as Record<string, unknown> | undefined;
+      // approvedBatch should contain the sub-agent's tool request permit
+      expect(approvalState?.approvedBatch).toBeDefined();
+    } finally {
+      tearDown();
+    }
+  });
+
+  // ── circuit breaker blocks _safety='safe' fast path ──
+
+  test('_safety="safe" fast path is blocked when circuit breaker is already tripped', async () => {
+    setUp();
+    try {
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: {
+          ...fakeConfig,
+          autoReview: { circuitBreakerMaxRejections: 1 },
+        },
+        checkpointPath,
+        model: new FakeChatModel([
+          // Step 1: Agent calls write_file with _safety='caution' on a.ts
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-cb-safe-1',
+                name: 'write_file',
+                args: { path: 'a.ts', content: '// a', _safety: 'caution' },
+              },
+            ],
+          }),
+          // Step 2: Reviewer rejects → breaker trips (maxRejections=1)
+          new AIMessage({
+            content: '{"approved":false,"grant":"approve_once","reason":"rejected"}',
+          }),
+          // Step 3: Agent tries again with _safety='safe' on b.ts
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-cb-safe-2',
+                name: 'write_file',
+                args: { path: 'b.ts', content: '// b', _safety: 'safe' },
+              },
+            ],
+          }),
+          // Step 4-6: Spares (shouldn't be reached — breaker interrupt fires first)
+          new AIMessage({ content: 'spare 1' }),
+          new AIMessage({ content: 'spare 2' }),
+          new AIMessage({ content: 'spare 3' }),
+        ]) as any,
+      });
+
+      const stream = await graph.stream(
+        {
+          messages: [new HumanMessage('Write files')],
+          workspaceAccess: 'write',
+          phase: 'building',
+          interactionMode: 'auto' as const,
+          authorization: { mode: 'default', commandGrants: {} },
+          userId: 'test',
+          threadId: 'breaker-safe-1',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'breaker-safe-1' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks = await collectChunks(stream);
+      checkpointer.close();
+
+      // Assertion 1: An interrupt is found (breaker guard, not fast path)
+      const interruptVal = findInterrupt(chunks);
+      expect(interruptVal).not.toBeNull();
+
+      // Assertion 2: The interrupt approval payload contains circuitBreakerTripped: true
+      const approval =
+        interruptVal?.approval && typeof interruptVal.approval === 'object'
+          ? (interruptVal.approval as Record<string, unknown>)
+          : null;
+      expect(approval?.circuitBreakerTripped).toBe(true);
+
+      // Assertion 3: Fast path was NOT used — b.ts should not exist
+      expect(fs.existsSync(path.join(workspace, 'b.ts'))).toBe(false);
+    } finally {
+      try {
+        tearDown();
+      } catch {
+        // Windows: checkpoint file may still be held after interrupted stream
+      }
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1514,9 +1792,9 @@ describe('checkpoint recovery', () => {
     }
   });
 
-  // ── auto-review failure: model returns non-JSON → auto-approve + warning ──
+  // ── auto-review failure: model returns non-JSON → fail-closed denies tool ──
 
-  test('auto-review failure (non-JSON) auto-approves tool and records warning', async () => {
+  test('auto-review failure (non-JSON) denies tool and trips circuit breaker (fail-closed)', async () => {
     setUp();
     try {
       const { graph, checkpointer } = buildCodeAgentGraph({
@@ -1538,8 +1816,8 @@ describe('checkpoint recovery', () => {
           new AIMessage({
             content: 'I think this command looks fine, go ahead.',
           }),
-          // Step 3: agent final response (tool was auto-approved despite review failure)
-          new AIMessage({ content: 'Directory created with auto-approval.' }),
+          // Step 3: agent sees rejection, adapts
+          new AIMessage({ content: 'Auto-review failed, trying a different approach.' }),
           new AIMessage({ content: 'spare 1' }),
           new AIMessage({ content: 'spare 2' }),
         ]),
@@ -1573,10 +1851,7 @@ describe('checkpoint recovery', () => {
       const chunks = await collectChunks(stream);
       checkpointer.close();
 
-      // No interrupt — tool was auto-approved
-      expect(findInterrupt(chunks)).toBeNull();
-
-      // autoReviewWarnings recorded in approval node's return
+      // Fail-closed: tool denied, circuit breaker tripped
       const approvalChunk = chunks.find(
         (c) => (c as Record<string, unknown>).approval !== undefined,
       );
@@ -1585,12 +1860,10 @@ describe('checkpoint recovery', () => {
         string,
         unknown
       >;
-      const warnings = approvalState.autoReviewWarnings as Record<string, string> | undefined;
-      expect(warnings).toBeDefined();
-      expect(warnings!['call-exec-fail1']).toContain('auto review did not return JSON');
-
-      // Tool executed, agent continued
-      expect(findFinal(chunks)).toBe('Directory created with auto-approval.');
+      const autoReview = (approvalState as Record<string, unknown>).autoReviewState as
+        | Record<string, unknown>
+        | undefined;
+      expect(autoReview?.circuitBreakerTripped).toBe(true);
     } finally {
       tearDown();
     }
@@ -1690,6 +1963,99 @@ describe('checkpoint recovery', () => {
         }
       });
       expect(rejectionMsg).toBeDefined();
+    } finally {
+      tearDown();
+    }
+  });
+
+  // ── _safety="safe" + destructive: belt-and-suspenders force-deny ──
+  // Destructive commands are denied by the tool policy (allowed=false),
+  // so the routing skips approval and goes directly to tools. The tool
+  // is blocked in runApprovedTool with ok=false and status='rejected'.
+
+  test('_safety="safe" with destructive command is force-denied', async () => {
+    setUp();
+    try {
+      const spyModel = new FakeChatModel([
+        // Agent: tool_call with _safety='safe' on a destructive command
+        new AIMessage({
+          content: '',
+          tool_calls: [
+            {
+              id: 'call-bs1',
+              name: 'shell_execute',
+              args: { command: 'rm -rf /tmp/cache', _safety: 'safe' },
+            },
+          ],
+        }),
+        // Agent continuation after receiving the rejection ToolMessage
+        new AIMessage({ content: 'I understand this destructive command was blocked.' }),
+        new AIMessage({ content: 'spare 1' }),
+        new AIMessage({ content: 'spare 2' }),
+      ]);
+
+      const { graph, checkpointer } = buildCodeAgentGraph({
+        config: fakeConfig,
+        checkpointPath,
+        model: spyModel,
+      });
+
+      const stream = await graph.stream(
+        {
+          messages: [new HumanMessage('Clean up temp cache')],
+          workspaceAccess: 'write',
+          phase: 'building',
+          interactionMode: 'auto' as const,
+          authorization: { mode: 'default', commandGrants: {} },
+          userId: 'test',
+          threadId: 'belt-suspenders-1',
+          workspace,
+        },
+        {
+          configurable: { thread_id: 'belt-suspenders-1' },
+          streamMode: 'updates',
+          recursionLimit: 60,
+        },
+      );
+
+      const chunks = await collectChunks(stream);
+      checkpointer.close();
+
+      // Tool was NOT executed — no approval interrupt
+      expect(findInterrupt(chunks)).toBeNull();
+
+      // The tools node produced a rejection ToolMessage with ok=false
+      const toolMsgs = chunks
+        .flatMap((c) => {
+          const toolsChunk = (c as Record<string, unknown>).tools as
+            | Record<string, unknown>
+            | undefined;
+          const approvalChunk = (c as Record<string, unknown>).approval as
+            | Record<string, unknown>
+            | undefined;
+          const msgs = (toolsChunk?.messages ?? approvalChunk?.messages ?? []) as Array<{
+            content: string;
+          }>;
+          return msgs;
+        })
+        .filter(Boolean);
+      const rejectionMsg = toolMsgs.find((m) => {
+        try {
+          const p = JSON.parse(m.content);
+          return (
+            p.ok === false &&
+            typeof p.stderr === 'string' &&
+            p.stderr.includes('Rejected by tool policy')
+          );
+        } catch {
+          return false;
+        }
+      });
+      expect(rejectionMsg).toBeDefined();
+
+      // Agent continued and acknowledged the block
+      const final = findFinal(chunks);
+      expect(final).toContain('blocked');
     } finally {
       tearDown();
     }

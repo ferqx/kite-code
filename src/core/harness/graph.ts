@@ -2,9 +2,24 @@ import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { interrupt, START, StateGraph } from '@langchain/langgraph';
 import { ChatOllama } from '@langchain/ollama';
 import type { AgentConfig } from '@/core/config/index';
-import { isFingerprintExhausted, recordExecutionResult } from '@/core/execution/journal';
+import {
+  DEFAULT_CIRCUIT_BREAKER_CONFIG,
+  evaluateCircuitBreaker,
+  type RejectionEntry,
+} from '@/core/execution/circuit-breaker';
+import { checkDoomLoop, updateDoomLoopTracker } from '@/core/execution/doom-loop';
+import {
+  injectExhaustionSignal,
+  isFingerprintExhausted,
+  recordExecutionResult,
+  recordJournalForMessage,
+} from '@/core/execution/journal';
 import { issuePermit, migratePermitBatch } from '@/core/execution/permit';
-import { createAutoReviewModel, reviewToolApproval } from '@/core/execution/reviewer';
+import {
+  createAutoReviewModel,
+  type ReviewContext,
+  reviewToolApproval,
+} from '@/core/execution/reviewer';
 import type { McpManager } from '@/core/mcp';
 import { prepareModelContext } from '@/core/model/context';
 import type { ModelRetryListener, RetryListenerHost } from '@/core/model/deepseek';
@@ -188,7 +203,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         // survive agent→tools→agent cycles without resetting to defaults.
         interactionMode: state.interactionMode,
         planReviewed: state.planReviewed,
-        autoReviewWarnings: state.autoReviewWarnings,
+        autoReviewState: state.autoReviewState,
+        doomLoopTracker: state.doomLoopTracker,
       };
       if (retryEvents.length > 0) {
         return { ...baseReturn, modelRetries: retryEvents };
@@ -206,6 +222,34 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       if (hasRetryListener(model)) model.setRetryListener(null);
     }
   };
+
+  /** 统一的子 agent 工具拒绝处理 — 合并 approval 节点中 5 处 copy-paste 的拒绝路径。
+   *  Unified sub-agent tool rejection — consolidates 5 copy-pasted rejection paths in the approval node. */
+  function rejectSubagentTool(
+    batch: ReturnType<typeof migratePermitBatch>,
+    pending: NonNullable<CodeAgentState['pendingSubagentApproval']>,
+    workspace: string,
+    threadId: string,
+    opts?: {
+      doomLoopNext?: Record<string, { count: number; lastSeenAt: number }>;
+      autoReviewState?: import('@/core/execution/circuit-breaker').AutoReviewState;
+    },
+  ): Partial<CodeAgentState> {
+    Object.assign(
+      batch,
+      issuePermit({
+        batch,
+        workspace,
+        threadId,
+        request: pending.request,
+        grant: 'none',
+      }),
+    );
+    const result: Partial<CodeAgentState> = { approvedBatch: batch };
+    if (opts?.doomLoopNext) result.doomLoopTracker = opts.doomLoopNext;
+    if (opts?.autoReviewState) result.autoReviewState = opts.autoReviewState;
+    return result;
+  }
 
   /** 审批节点：中断等待人工批准，支持批量积累 / Approval node with batch accumulation */
   const approval = async (state: CodeAgentState) => {
@@ -295,84 +339,341 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           approvalHash?: string;
           replacementCommand?: string;
           reason?: string;
-        };
+        }
+      | undefined;
     let autoReviewFailureReason: string | null = null;
+    let autoReviewRejectionRecord:
+      | import('@/core/execution/circuit-breaker').AutoReviewState
+      | null = null;
+    let doomLoopTrackerNext = state.doomLoopTracker;
     if (state.interactionMode === InteractionMode.Auto) {
       const reviewModel =
         input.config.autoReview?.provider || input.config.autoReview?.model
           ? createAutoReviewModel(input.config)
           : model;
-      const review = await reviewToolApproval({
-        model: reviewModel,
-        payload: approvalPayload,
-        request,
-        timeoutMs: input.config.autoReview?.timeoutMs,
-      });
       const reviewModelName =
         (input.config.autoReview?.model as string) ?? input.config.modelName ?? 'unknown';
-      if (!review.ok) {
-        // ── Cases 1-2: technical failure (API error, timeout, non-JSON) ──
-        // Auto-approve — the user chose "auto". Failure is visible in TUI only,
-        // never sent to the conversation model.
-        const failureReason = review.reason ?? 'auto review technical failure';
-        autoReviewFailureReason = `auto-review (${reviewModelName}): ${failureReason}`;
-        console.warn(
-          `[auto-review] failed: ${failureReason} — tool=${request.name} model=${reviewModelName}`,
-        );
-        if (pendingSubagent) {
-          Object.assign(
-            batch,
-            issuePermit({
-              batch,
-              workspace: state.workspace,
-              threadId: state.threadId,
-              request: pendingSubagent.request,
-              grant: 'none',
-            }),
-          );
-          return { approvedBatch: batch };
+
+      // 构建审查上下文
+      const reviewContext: ReviewContext = {
+        userTask: extractUserTask(state.messages),
+        planSummary: state.plan
+          ? `Plan: ${state.plan.name} — ${state.plan.description}\nSteps: ${state.plan.steps.map((s) => `[${s.status}] ${s.step}`).join('; ')}`
+          : undefined,
+        recentRejections: (state.autoReviewState.rejectionHistory ?? [])
+          .slice(-5)
+          .map((r) => ({ toolName: r.toolName, reason: r.reason, timestamp: r.timestamp })),
+        isSubAgent: !!pendingSubagent,
+        subAgentRole: pendingSubagent?.continuation.role as string | undefined,
+        workspaceRoot: state.workspace,
+      };
+
+      // Doom-loop 检测
+      const doomThreshold = input.config.autoReview?.doomLoopRepeatThreshold ?? 3;
+      const doomCheck = checkDoomLoop(state.doomLoopTracker, request, doomThreshold, 60_000);
+      if (doomCheck.blocked) {
+        console.warn(`[auto-review] doom-loop BLOCKED: ${doomCheck.reason} — tool=${request.name}`);
+        if (!pendingSubagent) {
+          approved = interrupt({
+            kind: 'tool_approval',
+            request,
+            policy,
+            approval: {
+              ...approvalPayload,
+              doomLoopDetected: true,
+              doomLoopReason: doomCheck.reason,
+            },
+          }) as typeof approved;
+        } else {
+          return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
+            doomLoopNext: updateDoomLoopTracker(state.doomLoopTracker, doomCheck.fingerprint!),
+          });
         }
+      }
+      doomLoopTrackerNext = updateDoomLoopTracker(state.doomLoopTracker, doomCheck.fingerprint!);
+
+      // _safety fast-path routing
+      const agentSafety = (request.args as Record<string, unknown>)._safety as
+        | 'safe'
+        | 'caution'
+        | 'dangerous'
+        | undefined;
+      const toolRisk = policy.risk as string;
+
+      // safe + 低风险 → fast path 自动批准（断路器已触发时不允许）
+      if (
+        agentSafety === 'safe' &&
+        !state.autoReviewState.circuitBreakerTripped &&
+        (toolRisk === 'write_file' || toolRisk === 'execute_code' || toolRisk === 'read')
+      ) {
+        console.warn(`[auto-review] FAST PATH: _safety=safe, risk=${toolRisk} — auto-approving`);
         approved = {
           approved: true,
           grant: 'approve_once' as ShellApprovalGrant,
           approvalHash: approvalPayload.approvalHash,
-          reason: `[auto-review failed] ${failureReason}`,
+          reason: '[_safety=safe] auto-approved by agent self-assessment',
         };
-      } else if (!review.suggestion!.approved) {
-        // ── Case 4: model explicitly rejected ──
-        // Don't execute the tool. Return the rejection reason as a failed
-        // ToolMessage so the conversation model can see and adapt.
-        const rejectionReason = review.suggestion!.reason || 'auto review rejected this action';
-        console.warn(
-          `[auto-review] rejected: ${rejectionReason} — tool=${request.name} model=${reviewModelName}`,
-        );
-        if (pendingSubagent) {
-          Object.assign(
-            batch,
-            issuePermit({
-              batch,
-              workspace: state.workspace,
-              threadId: state.threadId,
-              request: pendingSubagent.request,
-              grant: 'none',
-            }),
-          );
-          return { approvedBatch: batch };
-        }
-        return {
-          ...rejectedToolMessage(request, rejectionReason),
-          approvedBatch: batch,
-        };
-      } else {
-        // ── Case 3: auto-review approved ──
-        const suggestion = review.suggestion!;
-        approved = {
-          approved: true,
-          grant: suggestion.grant,
-          approvalHash: approvalPayload.approvalHash,
-          reason: suggestion.reason,
+        autoReviewRejectionRecord = {
+          pendingWarnings: {},
+          consecutiveRejects: 0,
+          rejectionHistory: state.autoReviewState.rejectionHistory,
+          circuitBreakerTripped: false,
         };
       }
+      // safe + destructive → belt-and-suspenders 覆盖，计入断路器
+      else if (agentSafety === 'safe' && toolRisk === 'destructive') {
+        console.warn('[auto-review] OVERRIDE: _safety=safe but risk=destructive — denying');
+        const overrideEntry: RejectionEntry = {
+          timestamp: Date.now(),
+          toolName: request.name,
+          reason: `Agent claimed _safety=safe on destructive command`,
+        };
+        const overrideCbConfig = {
+          ...DEFAULT_CIRCUIT_BREAKER_CONFIG,
+          maxRejections:
+            input.config.autoReview?.circuitBreakerMaxRejections ??
+            DEFAULT_CIRCUIT_BREAKER_CONFIG.maxRejections,
+          windowMs:
+            input.config.autoReview?.circuitBreakerWindowMs ??
+            DEFAULT_CIRCUIT_BREAKER_CONFIG.windowMs,
+        };
+        const overrideCbResult = evaluateCircuitBreaker(
+          state.autoReviewState.consecutiveRejects,
+          state.autoReviewState.rejectionHistory.map((r) => ({
+            timestamp: r.timestamp,
+            toolName: r.toolName,
+            reason: r.reason,
+          })),
+          overrideCbConfig,
+          true,
+          overrideEntry,
+        );
+        autoReviewRejectionRecord = {
+          pendingWarnings: {},
+          consecutiveRejects: overrideCbResult.newConsecutiveRejects,
+          rejectionHistory: overrideCbResult.newRejectionHistory,
+          circuitBreakerTripped: overrideCbResult.tripped,
+        };
+        if (pendingSubagent) {
+          return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
+            doomLoopNext: doomLoopTrackerNext,
+            autoReviewState: {
+              pendingWarnings: {},
+              consecutiveRejects: overrideCbResult.newConsecutiveRejects,
+              rejectionHistory: overrideCbResult.newRejectionHistory,
+              circuitBreakerTripped: overrideCbResult.tripped,
+            },
+          });
+        }
+        return {
+          ...rejectedToolMessage(
+            request,
+            'Destructive commands cannot be auto-approved by agent self-assessment.',
+          ),
+          approvedBatch: batch,
+          doomLoopTracker: doomLoopTrackerNext,
+          autoReviewState: {
+            pendingWarnings: {},
+            consecutiveRejects: overrideCbResult.newConsecutiveRejects,
+            rejectionHistory: overrideCbResult.newRejectionHistory,
+            circuitBreakerTripped: overrideCbResult.tripped,
+          },
+        };
+      }
+      // dangerous → 跳过 reviewer，直接用户审批
+      else if (agentSafety === 'dangerous') {
+        console.warn('[auto-review] DANGEROUS: _safety=dangerous — forcing user interrupt');
+        if (pendingSubagent) {
+          return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
+            doomLoopNext: doomLoopTrackerNext,
+          });
+        }
+        approved = interrupt({
+          kind: 'tool_approval',
+          request,
+          policy,
+          approval: { ...approvalPayload, agentDeclaredDangerous: true },
+        }) as typeof approved;
+      }
+
+      // 断路器 + reviewer：仅当 _safety fast path 未处理时执行
+      if (!approved) {
+        // 断路器已触发 → 跳过 auto-review，直接中断等用户审批
+        if (state.autoReviewState.circuitBreakerTripped) {
+          console.warn('[auto-review] circuit breaker tripped — skipping auto-review');
+          approved = interrupt({
+            kind: 'tool_approval',
+            request,
+            policy,
+            approval: { ...approvalPayload, circuitBreakerTripped: true },
+          }) as typeof approved;
+        } else {
+          // 正常 auto-review 路径
+          const review = await reviewToolApproval({
+            model: reviewModel,
+            payload: approvalPayload,
+            request,
+            context: reviewContext,
+            timeoutMs: input.config.autoReview?.timeoutMs,
+          });
+          if (!review.ok) {
+            const failureReason = review.reason ?? 'auto review technical failure';
+            const failOpen = input.config.autoReview?.failOpen === true;
+            if (failOpen) {
+              autoReviewFailureReason = `auto-review (${reviewModelName}): ${failureReason}`;
+              console.warn(
+                `[auto-review] FAILED (fail-open): ${failureReason} — tool=${request.name}`,
+              );
+              if (pendingSubagent) {
+                return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
+                  doomLoopNext: doomLoopTrackerNext,
+                  autoReviewState: {
+                    pendingWarnings: {},
+                    consecutiveRejects: 0,
+                    rejectionHistory: [],
+                    circuitBreakerTripped: true,
+                  },
+                });
+              }
+              approved = {
+                approved: true,
+                grant: 'approve_once' as ShellApprovalGrant,
+                approvalHash: approvalPayload.approvalHash,
+                reason: `[auto-review failed] ${failureReason}`,
+              };
+            } else {
+              autoReviewFailureReason = `auto-review (${reviewModelName}): ${failureReason} (fail-closed)`;
+              console.warn(
+                `[auto-review] FAILED (fail-closed): ${failureReason} — tool=${request.name}`,
+              );
+              if (pendingSubagent) {
+                return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
+                  doomLoopNext: doomLoopTrackerNext,
+                  autoReviewState: {
+                    pendingWarnings: {},
+                    consecutiveRejects: 0,
+                    rejectionHistory: [],
+                    circuitBreakerTripped: true,
+                  },
+                });
+              }
+              return {
+                ...rejectedToolMessage(
+                  request,
+                  `[auto-review unavailable] ${failureReason}. Please try a different approach or wait for manual review.`,
+                ),
+                approvedBatch: batch,
+                doomLoopTracker: doomLoopTrackerNext,
+                autoReviewState: {
+                  pendingWarnings: {},
+                  consecutiveRejects: 0,
+                  rejectionHistory: [],
+                  circuitBreakerTripped: true,
+                },
+              };
+            }
+          } else if (!review.suggestion!.approved) {
+            const rejectionReason = review.suggestion!.reason || 'auto review rejected this action';
+            console.warn(`[auto-review] rejected: ${rejectionReason} — tool=${request.name}`);
+            const newEntry: RejectionEntry = {
+              timestamp: Date.now(),
+              toolName: request.name,
+              reason: rejectionReason,
+            };
+            const cbConfig = {
+              ...DEFAULT_CIRCUIT_BREAKER_CONFIG,
+              maxRejections:
+                input.config.autoReview?.circuitBreakerMaxRejections ??
+                DEFAULT_CIRCUIT_BREAKER_CONFIG.maxRejections,
+              windowMs:
+                input.config.autoReview?.circuitBreakerWindowMs ??
+                DEFAULT_CIRCUIT_BREAKER_CONFIG.windowMs,
+            };
+            const cbResult = evaluateCircuitBreaker(
+              state.autoReviewState.consecutiveRejects,
+              state.autoReviewState.rejectionHistory.map((r) => ({
+                timestamp: r.timestamp,
+                toolName: r.toolName,
+                reason: r.reason,
+              })),
+              cbConfig,
+              true,
+              newEntry,
+            );
+            autoReviewRejectionRecord = {
+              pendingWarnings: {},
+              consecutiveRejects: cbResult.newConsecutiveRejects,
+              rejectionHistory: cbResult.newRejectionHistory,
+              circuitBreakerTripped: cbResult.tripped,
+            };
+            if (cbResult.tripped) {
+              console.warn(`[auto-review] CIRCUIT BREAKER TRIPPED: ${cbResult.reason}`);
+              if (pendingSubagent) {
+                return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
+                  doomLoopNext: doomLoopTrackerNext,
+                  autoReviewState: {
+                    pendingWarnings: {},
+                    consecutiveRejects: cbResult.newConsecutiveRejects,
+                    rejectionHistory: cbResult.newRejectionHistory,
+                    circuitBreakerTripped: true,
+                  },
+                });
+              }
+              return {
+                ...rejectedToolMessage(
+                  request,
+                  `Auto-review paused: ${cbResult.reason}. Manual approval required before continuing.`,
+                ),
+                approvedBatch: batch,
+                doomLoopTracker: doomLoopTrackerNext,
+                autoReviewState: {
+                  pendingWarnings: {},
+                  consecutiveRejects: cbResult.newConsecutiveRejects,
+                  rejectionHistory: cbResult.newRejectionHistory,
+                  circuitBreakerTripped: true,
+                },
+              };
+            } else {
+              if (pendingSubagent) {
+                return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
+                  doomLoopNext: doomLoopTrackerNext,
+                  autoReviewState: {
+                    pendingWarnings: {},
+                    consecutiveRejects: cbResult.newConsecutiveRejects,
+                    rejectionHistory: cbResult.newRejectionHistory,
+                    circuitBreakerTripped: false,
+                  },
+                });
+              }
+              return {
+                ...rejectedToolMessage(request, rejectionReason),
+                approvedBatch: batch,
+                doomLoopTracker: doomLoopTrackerNext,
+                autoReviewState: {
+                  pendingWarnings: {},
+                  consecutiveRejects: cbResult.newConsecutiveRejects,
+                  rejectionHistory: cbResult.newRejectionHistory,
+                  circuitBreakerTripped: false,
+                },
+              };
+            }
+          } else {
+            const suggestion = review.suggestion!;
+            approved = {
+              approved: true,
+              grant: suggestion.grant,
+              approvalHash: approvalPayload.approvalHash,
+              reason: suggestion.reason,
+            };
+            autoReviewRejectionRecord = {
+              pendingWarnings: {},
+              consecutiveRejects: 0,
+              rejectionHistory: state.autoReviewState.rejectionHistory,
+              circuitBreakerTripped: false,
+            };
+          }
+        }
+      } // closes if (!approved)
     } else {
       approved = interrupt({
         kind: 'tool_approval',
@@ -527,16 +828,20 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
     }
 
-    const autoReviewWarnings: Record<string, string> = { ...state.autoReviewWarnings };
+    const pendingWarnings: Record<string, string> = { ...state.autoReviewState.pendingWarnings };
     if (autoReviewFailureReason && request.id) {
-      autoReviewWarnings[request.id] = autoReviewFailureReason;
+      pendingWarnings[request.id] = autoReviewFailureReason;
     }
+    const nextAutoReviewState = autoReviewRejectionRecord
+      ? { ...autoReviewRejectionRecord, pendingWarnings }
+      : { ...state.autoReviewState, pendingWarnings };
     return {
       approvedBatch: batch,
       approvedToolRequest: approvedRequest,
       approvedToolGrant: grant,
       authorization: nextAuthorization,
-      autoReviewWarnings,
+      autoReviewState: nextAutoReviewState,
+      doomLoopTracker: doomLoopTrackerNext ?? state.doomLoopTracker,
     };
   };
 
@@ -662,7 +967,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     request: import('./tool-requests').PendingToolRequest,
     state: CodeAgentState,
     grantUsed: string,
-  ): Promise<{ toolMessage: ToolMessage | null; extra: Record<string, unknown> }> {
+  ): Promise<{
+    toolMessage: ToolMessage | null;
+    sideEffects: import('./tool-result').ToolExecutionSideEffects;
+  }> {
     // 构造 shell 实时输出回调（仅对 shell_execute 生效）
     const onShellProgress = input.toolProgressSink
       ? (chunk: string, stream: 'stdout' | 'stderr') => {
@@ -702,7 +1010,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       if (pending) {
         return {
           toolMessage: null,
-          extra: { pendingSubagentApproval: pending },
+          sideEffects: { pendingSubagentApproval: pending },
         };
       }
     }
@@ -720,7 +1028,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       request.name === 'shell_execute' && result.exitCode === 124 && result.stdout
         ? result.stdout
         : (result.stdout || result.stderr || '').slice(0, 200);
-    const reviewFailure = request.id ? state.autoReviewWarnings[request.id] : undefined;
+    const reviewFailure = request.id
+      ? state.autoReviewState.pendingWarnings[request.id]
+      : undefined;
     input.toolResultSink?.(
       request.id ?? '',
       request.name,
@@ -740,14 +1050,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       status: result.ok === false ? 'error' : 'success',
     });
 
-    const extra: Record<string, unknown> = {};
-    if ('plan' in result) extra.plan = result.plan;
-    if ('workspaceAccess' in result) extra.workspaceAccess = result.workspaceAccess;
-    if ('authorization' in result) extra.authorization = result.authorization;
-    if ('activeSkillInstructions' in result)
-      extra.activeSkillInstructions = result.activeSkillInstructions;
+    const sideEffects: import('./tool-result').ToolExecutionSideEffects = {
+      plan: result.plan,
+      workspaceAccess: result.workspaceAccess,
+      authorization: result.authorization,
+      activeSkillInstructions: result.activeSkillInstructions,
+    };
 
-    return { toolMessage, extra };
+    return { toolMessage, sideEffects };
   }
 
   /**
@@ -825,105 +1135,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
       default:
         return false; // read_file, search_*, read_mcp_resource, Skill, update_plan, ask_user
-    }
-  }
-
-  /** Parse a ToolMessage's JSON content and update journalState via callback.
-   *  For task (subagent) results, also merges the subagent's journal entries
-   *  and exhausted fingerprints into the main journal. */
-  function recordJournalForMessage(
-    msg: ToolMessage | null,
-    journalState: {
-      executionJournal: import('@/core/execution/journal').ExecutionJournalEntry[];
-      exhaustedFingerprints: Record<string, true>;
-    },
-    setJournal: (next: typeof journalState) => void,
-  ): void {
-    if (!msg) return;
-    try {
-      const parsed = JSON.parse(String(msg.content)) as {
-        ok?: boolean;
-        stderr?: string;
-        exitCode?: number;
-        path?: string;
-        subagentResult?: {
-          executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
-          exhaustedFingerprints?: Record<string, true>;
-        };
-      };
-      let next = recordExecutionResult(journalState, {
-        toolCallId: (msg as unknown as Record<string, unknown>).tool_call_id?.toString() ?? '',
-        toolName: msg.name ?? 'unknown',
-        ok: parsed.ok !== false,
-        stderr: parsed.stderr,
-        exitCode: parsed.exitCode,
-        path: parsed.path,
-      });
-      // Phase 5: Merge subagent journal entries and exhausted fingerprints.
-      if (parsed.subagentResult?.executionJournal?.length) {
-        next = {
-          ...next,
-          executionJournal: [
-            ...next.executionJournal,
-            ...parsed.subagentResult.executionJournal,
-          ].slice(-50),
-        };
-      }
-      if (parsed.subagentResult?.exhaustedFingerprints) {
-        next = {
-          ...next,
-          exhaustedFingerprints: {
-            ...next.exhaustedFingerprints,
-            ...parsed.subagentResult.exhaustedFingerprints,
-          },
-        };
-      }
-      setJournal(next);
-    } catch (e) {
-      // ToolMessage content is expected to be JSON. Non-JSON content indicates
-      // a tool implementation bug — warn so it's discoverable rather than silently
-      // dropping the journal entry (which would let the tool retry indefinitely).
-      console.warn(
-        `recordJournalForMessage: failed to parse ToolMessage content for ${msg.name ?? 'unknown'}:`,
-        (e as Error)?.message ?? e,
-      );
-    }
-  }
-
-  /** When a tool execution just exhausted a fingerprint, rebuild the ToolMessage
-   *  to carry status:'exhausted' and failure.exhausted so the model sees it.
-   *  The exhaustion signal is constructed explicitly from the fingerprint rather
-   *  than parsed from the message content (which never contains it). */
-  function injectExhaustionSignal(msg: ToolMessage, toolName: string, fp: string): ToolMessage {
-    try {
-      const parsed = JSON.parse(String(msg.content));
-      const exhausted: import('@/core/execution/journal').ExhaustionSignal = {
-        fingerprint: fp,
-        consecutiveFailures: 0, // actual count unavailable; model trusts the status
-        maxFailures: 0,
-        suggestion: toolName === 'shell_execute' ? ('skip_step' as const) : ('replan' as const),
-        reason: `Repeated failures exhausted retry limit for ${toolName}.`,
-        suggestedAlternatives: ['Continue another independent step', 'Safely finalize if blocked'],
-      };
-      return new ToolMessage({
-        content: JSON.stringify({
-          ...parsed,
-          status: 'exhausted',
-          failure: {
-            ...(parsed.failure ?? {}),
-            exhausted,
-            guidance:
-              toolName === 'shell_execute'
-                ? `Stop retrying this operation (${toolName}). Skip this step and continue other independent work.`
-                : `Stop retrying this operation (${toolName}). Replan or safely finalize.`,
-          },
-        }),
-        tool_call_id: msg.tool_call_id,
-        name: msg.name,
-        status: 'exhausted' as unknown as ToolMessage['status'],
-      });
-    } catch {
-      return msg;
     }
   }
 
@@ -1109,7 +1320,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     const mutations = allRequests.filter((req) => isMutationRequest(req));
 
     const messages: ToolMessage[] = [];
-    const mergedExtra: Record<string, unknown> = {};
+    const mergedSideEffects: import('./tool-result').ToolExecutionSideEffects = {};
     let journalState = {
       executionJournal: state.executionJournal ?? [],
       exhaustedFingerprints: { ...(state.exhaustedFingerprints ?? {}) },
@@ -1162,9 +1373,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
       if (r.toolMessage) {
         const journalBefore = { ...journalState.exhaustedFingerprints };
-        recordJournalForMessage(r.toolMessage, journalState, (next) => {
-          journalState = next;
-        });
+        journalState = recordJournalForMessage(r.toolMessage, journalState);
         // Check whether this execution just exhausted a NEW fingerprint.
         const newExhaustedFp = Object.keys(journalState.exhaustedFingerprints).find(
           (fp) => !journalBefore[fp],
@@ -1193,7 +1402,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         }
         messages.push(r.toolMessage);
       }
-      Object.assign(mergedExtra, r.extra);
+      Object.assign(mergedSideEffects, r.sideEffects);
     }
 
     // Phase 2: Execute mutations sequentially — journal state flows between steps.
@@ -1242,9 +1451,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       if (r.toolMessage) {
         // Update journal — if a new fingerprint was just exhausted, inject the signal.
         const journalBefore = { ...journalState.exhaustedFingerprints };
-        recordJournalForMessage(r.toolMessage, journalState, (next) => {
-          journalState = next;
-        });
+        journalState = recordJournalForMessage(r.toolMessage, journalState);
         // Check whether this execution just exhausted a NEW fingerprint.
         const newExhaustedFp = Object.keys(journalState.exhaustedFingerprints).find(
           (fp) => !journalBefore[fp],
@@ -1267,7 +1474,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         }
         messages.push(r.toolMessage);
       }
-      Object.assign(mergedExtra, r.extra);
+      Object.assign(mergedSideEffects, r.sideEffects);
       // Flow updated journal into state for the next mutation iteration.
       Object.assign(sequentialState, journalState);
     }
@@ -1276,14 +1483,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       approvedBatch: {},
       approvedToolRequest: null,
       approvedToolGrant: null,
-      ...mergedExtra,
+      ...mergedSideEffects,
       ...journalState,
       messages,
       // Preserve plan mode state across tools→agent cycles.
       interactionMode: state.interactionMode,
       planReviewed: state.planReviewed,
       // Auto-review warnings have been injected into ToolMessages; clear them.
-      autoReviewWarnings: {},
+      // Preserve breaker/doom-loop state across tools→agent cycles.
+      autoReviewState: { ...state.autoReviewState, pendingWarnings: {} },
+      doomLoopTracker: state.doomLoopTracker,
     };
   };
 
@@ -1469,6 +1678,36 @@ function approvalGrantFromResume(
     return resume.grant;
   }
   return null;
+}
+
+/** 从对话历史中提取用户原始任务文本（第一个 HumanMessage 的前 500 字符）。
+ *  Extracts the user's original task from conversation history (first HumanMessage, max 500 chars). */
+function extractUserTask(
+  messages: { getType?: () => string; content?: unknown; type?: string }[],
+): string | undefined {
+  for (const msg of messages) {
+    const msgType =
+      typeof msg.getType === 'function' ? msg.getType() : (msg as Record<string, unknown>).type;
+    if (msgType === 'human' || msgType === 'user') {
+      const content = msg.content;
+      let text = '';
+      if (typeof content === 'string') {
+        text = content;
+      } else if (Array.isArray(content)) {
+        text = content
+          .map((part: unknown) => {
+            if (typeof part === 'string') return part;
+            if (part && typeof part === 'object' && 'text' in part) {
+              return ((part as { text: unknown }).text as string) ?? '';
+            }
+            return '';
+          })
+          .join(' ');
+      }
+      if (text) return text.slice(0, 500);
+    }
+  }
+  return undefined;
 }
 
 function rejectedToolMessage(

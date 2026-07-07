@@ -1,3 +1,5 @@
+import { ToolMessage } from '@langchain/core/messages';
+
 export interface ExecutionJournalEntry {
   toolCallId: string;
   toolName: string;
@@ -182,4 +184,99 @@ export function maxFailuresFor(errorCode: string): number {
   if (errorCode === 'EXIT_NONZERO') return 5;
   if (errorCode === 'TIMEOUT') return 10;
   return 3;
+}
+
+/** Parse a ToolMessage's JSON content and update journal state.
+ *  For task (subagent) results, also merges the subagent's journal entries
+ *  and exhausted fingerprints into the main journal. */
+export function recordJournalForMessage(
+  msg: ToolMessage | null,
+  state: ExecutionJournalState,
+): ExecutionJournalState {
+  if (!msg) return state;
+  try {
+    const parsed = JSON.parse(String(msg.content)) as {
+      ok?: boolean;
+      stderr?: string;
+      exitCode?: number;
+      path?: string;
+      subagentResult?: {
+        executionJournal?: ExecutionJournalEntry[];
+        exhaustedFingerprints?: Record<string, true>;
+      };
+    };
+    let next = recordExecutionResult(state, {
+      toolCallId: (msg as unknown as Record<string, unknown>).tool_call_id?.toString() ?? '',
+      toolName: msg.name ?? 'unknown',
+      ok: parsed.ok !== false,
+      stderr: parsed.stderr,
+      exitCode: parsed.exitCode,
+      path: parsed.path,
+    });
+    // Merge subagent journal entries and exhausted fingerprints.
+    if (parsed.subagentResult?.executionJournal?.length) {
+      next = {
+        ...next,
+        executionJournal: [
+          ...next.executionJournal,
+          ...parsed.subagentResult.executionJournal,
+        ].slice(-50),
+      };
+    }
+    if (parsed.subagentResult?.exhaustedFingerprints) {
+      next = {
+        ...next,
+        exhaustedFingerprints: {
+          ...next.exhaustedFingerprints,
+          ...parsed.subagentResult.exhaustedFingerprints,
+        },
+      };
+    }
+    return next;
+  } catch (e) {
+    console.warn(
+      `recordJournalForMessage: failed to parse ToolMessage content for ${msg.name ?? 'unknown'}:`,
+      (e as Error)?.message ?? e,
+    );
+    return state;
+  }
+}
+
+/** When a tool execution just exhausted a fingerprint, rebuild the ToolMessage
+ *  to carry status:'exhausted' and failure.exhausted so the model sees it. */
+export function injectExhaustionSignal(
+  msg: ToolMessage,
+  toolName: string,
+  fp: string,
+): ToolMessage {
+  try {
+    const parsed = JSON.parse(String(msg.content));
+    const exhausted: ExhaustionSignal = {
+      fingerprint: fp,
+      consecutiveFailures: 0, // actual count unavailable; model trusts the status
+      maxFailures: 0,
+      suggestion: toolName === 'shell_execute' ? ('skip_step' as const) : ('replan' as const),
+      reason: `Repeated failures exhausted retry limit for ${toolName}.`,
+      suggestedAlternatives: ['Continue another independent step', 'Safely finalize if blocked'],
+    };
+    return new ToolMessage({
+      content: JSON.stringify({
+        ...parsed,
+        status: 'exhausted',
+        failure: {
+          ...(parsed.failure ?? {}),
+          exhausted,
+          guidance:
+            toolName === 'shell_execute'
+              ? `Stop retrying this operation (${toolName}). Skip this step and continue other independent work.`
+              : `Stop retrying this operation (${toolName}). Replan or safely finalize.`,
+        },
+      }),
+      tool_call_id: msg.tool_call_id,
+      name: msg.name,
+      status: 'exhausted' as unknown as ToolMessage['status'],
+    });
+  } catch {
+    return msg;
+  }
 }
