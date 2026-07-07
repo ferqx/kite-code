@@ -14,6 +14,20 @@
 
 Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批后再执行。整个功能涉及三层架构的全面改造。
 
+## 最近更新（2026-07-07）
+
+- **Auto-review 链路修复**：`interactionMode` 和 `planReviewed` 在 agent/tools 节点 return 中显式保留，防止 LangGraph 对未返回 channel 重置默认值导致 auto-review 静默跳过。
+- **Auto-review 4 种场景**：技术失败（API 错误/超时/非 JSON）→ auto-approve + TUI 红字警告 + 对话模型不可见；模型主动拒绝 → `rejectedToolMessage` + 对话模型看到拒绝原因；审批通过 → 正常执行。
+- **Auto-review TUI 渲染**：`tool_done` 事件增加 `reviewFailure` 字段，`ToolCardBlock` 和 `ToolSummaryBlock` 在工具执行成功但审批失败时展示 `⚠ auto-review (model): reason` 红色警告，与绿色工具状态独立展示。
+- **Auto-review JSON 强制**：`reviewToolApproval` 模型调用加入 `response_format: json_object`，提高模型返回结构化审批结果的可靠性。
+- **Plan 修订不撤销授权**：planReview 节点用 `state.planReviewed` 区分首次审批（重置 default）和修订（保留现有 authorization），防止 `full_access` 被静默降级。
+- **计划路由注释**：`isPlanProgressOnlyUpdate` 增加 JSDoc 说明比较逻辑——比较 name/desc/步骤文本，结构未变则仅 status 变化。
+- **Planning phase shell_execute**：`denyForPlanningPhase` 检查提前于 `authorizedShellDecision`，防止 `full_access` 绕过 phase 约束。
+- **xargs 只读命令**：`isPlanReadOnlySegment` 增加 `xargs` 特殊处理，检查 `xargs` 执行的子命令是否为只读命令。
+- **MCP 工具缓存清理**：`ToolListChangedNotification` 到达时调用 `clearToolCache()`。
+- **Fork checkpoint 修复**：`getCheckpointState` 返回 `planReviewed` 和 `interactionMode`，`forkFromCheckpoint` 恢复这两个字段。
+- **initialState 一致**：`runAgent` 的 `initialState` 补上 `planReviewed: false`，消除 `plan=null, planReviewed=true` 的不一致状态。
+
 ## 最近更新（2026-07-06）
 
 - **三轴模式语义**：`phase` 负责能力边界，`interactionMode` 负责人机确认体验，`authorization` 负责工具执行授权。三者不能互相隐式替代。
@@ -183,3 +197,10 @@ return 'tools';  // Priority 4
 - [[layer-boundary-enforcement]] — core 层边界约束
 - [[tool-description-contracts]] — 工具 ACI 契约
 - [[tui-reference-stability]] — useStaticContent 与 Static/Dynamic 分离
+
+## 遗留项
+
+- **Auto-review 失败 TUI 组件级测试**：当前仅通过集成测试（mock FakeChatModel）验证 auto-review 4 种场景的数据流，未在 `tui-layout.test.tsx` 中验证 `ToolCardBlock`/`ToolSummaryBlock` 对 `reviewFailure` 字段的渲染。PTY E2E 的 mock server 无法精确控制 auto-review 的独立模型调用（队列式匹配），建议补充组件级测试。
+- **`as any` 消除**：`ToolCardBlock.tsx`、`ToolSummaryBlock.tsx`、`handleEvent.ts` 中使用的 `as any` 访问 `reviewFailure` 字段，原因是 `OutputBlock` 联合类型尚未完全覆盖新字段。应在类型定义稳定后消除。
+- **Auto-review 首次调用延迟**：`reviewer.ts` 中 `response_format: json_object` 可能增加首次调用的延迟（provider 需要解析 JSON schema），需观察实际使用中的表现。
+- **工具缓存 key 过度区分**：`definitions.ts` 的 `createAgentTools` 缓存 key 包含 `phase`、`interactionMode`、`commandGrants`，但工具定义本身不依赖这些字段，导致不必要的缓存失效。性能影响微小，但建议后续评估精简。

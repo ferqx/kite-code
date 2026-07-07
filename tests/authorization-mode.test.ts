@@ -154,4 +154,96 @@ describe('authorization mode switch', () => {
     expect(decision.requiresApproval).toBe(false);
     expect(decision.grantUsed).toBe('full_access');
   });
+
+  // ── Planning phase + full_access cross-verification ──
+
+  test('planning phase denies write_file even with full_access authorization', () => {
+    const decision = evaluateToolPolicy({
+      request: {
+        id: 'call-plan-write',
+        name: 'write_file',
+        args: { path: 'hello.txt', content: 'hi' },
+        reason: 'write during planning',
+        protectedCommand: 'write_file hello.txt',
+      },
+      workspaceAccess: 'write',
+      phase: 'planning',
+      authorization: { mode: 'full_access', commandGrants: {} },
+    });
+    expect(decision.allowed).toBe(false);
+    expect(decision.decision).toBe('deny');
+    expect(decision.phaseConstraint).toBe('planning');
+    expect(decision.reason).toContain('planning phase');
+  });
+
+  test('planning phase denies non-read-only shell_execute even with full_access', () => {
+    const decision = evaluateToolPolicy({
+      request: {
+        id: 'call-plan-shell',
+        name: 'shell_execute',
+        args: { command: 'bun test' },
+        reason: 'test during planning',
+        protectedCommand: 'bun test',
+      },
+      workspaceAccess: 'write',
+      phase: 'planning',
+      authorization: { mode: 'full_access', commandGrants: {} },
+    });
+    // Planning phase must reject execution tools regardless of authorization mode.
+    // Full mode is only valid during building phase.
+    expect(decision.allowed).toBe(false);
+    expect(decision.phaseConstraint).toBe('planning');
+  });
+
+  test('planning phase denies edit_file even with full_access', () => {
+    const decision = evaluateToolPolicy({
+      request: {
+        id: 'call-plan-edit',
+        name: 'edit_file',
+        args: { path: 'src/main.ts', old_string: 'a', new_string: 'b' },
+        reason: 'edit during planning',
+        protectedCommand: 'edit_file src/main.ts',
+      },
+      workspaceAccess: 'write',
+      phase: 'planning',
+      authorization: { mode: 'full_access', commandGrants: {} },
+    });
+    expect(decision.allowed).toBe(false);
+    expect(decision.phaseConstraint).toBe('planning');
+  });
+
+  test('planning phase denies code subagent even with full_access', () => {
+    const decision = evaluateToolPolicy({
+      request: {
+        id: 'call-plan-code',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'implement the fix' },
+        reason: 'implementation',
+        protectedCommand: 'task code',
+      },
+      workspaceAccess: 'write',
+      phase: 'planning',
+      authorization: { mode: 'full_access', commandGrants: {} },
+    });
+    expect(decision.decision).toBe('deny');
+    expect(decision.phaseConstraint).toBe('planning');
+  });
+
+  test('planning phase allows read tools even with full_access (no escalation needed)', () => {
+    const decision = evaluateToolPolicy({
+      request: {
+        id: 'call-plan-read',
+        name: 'read_file',
+        args: { path: 'README.md' },
+        reason: 'read during planning',
+        protectedCommand: 'read_file README.md',
+      },
+      workspaceAccess: 'write',
+      phase: 'planning',
+      authorization: { mode: 'full_access', commandGrants: {} },
+    });
+    expect(decision.allowed).toBe(true);
+    expect(decision.requiresApproval).toBe(false);
+    expect(decision.risk).toBe('read');
+  });
 });

@@ -3,7 +3,11 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SkillManifest } from '../src/core/skills/types';
-import { createAgentTools, isReadOnlyShellCommand } from '../src/core/tools/definitions';
+import {
+  clearToolCache,
+  createAgentTools,
+  isReadOnlyShellCommand,
+} from '../src/core/tools/definitions';
 import { TOOL_CONTRACTS } from '../src/core/tools/tool-contracts';
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
@@ -672,5 +676,111 @@ describe('tool contracts (ACI)', () => {
     expect(contract).toBeUndefined();
     const tools = createAgentTools({ workspace: '/tmp' });
     expect(tools.find((t) => t.name === 'apply_patch')).toBeUndefined();
+  });
+
+  // ── Cache key stabilization ──
+
+  test('returns same tool instances on cache hit (same state)', () => {
+    clearToolCache();
+    const a = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'default', commandGrants: {} },
+      workspaceAccess: 'write',
+      interactionMode: 'auto',
+    });
+    const b = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'default', commandGrants: {} },
+      workspaceAccess: 'write',
+      interactionMode: 'auto',
+    });
+    // Same state → cache hit → same array reference returned
+    expect(a).toBe(b);
+  });
+
+  test('different phase produces different cache key (cache miss)', () => {
+    clearToolCache();
+    const planning = createAgentTools({
+      workspace: '/tmp',
+      phase: 'planning',
+      authorization: { mode: 'default', commandGrants: {} },
+    });
+    const building = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'default', commandGrants: {} },
+    });
+    expect(planning).not.toBe(building);
+  });
+
+  test('different authorization mode produces different cache key (cache miss)', () => {
+    clearToolCache();
+    const defaultAuth = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'default', commandGrants: {} },
+    });
+    const fullAccess = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'full_access', commandGrants: {} },
+    });
+    expect(defaultAuth).not.toBe(fullAccess);
+  });
+
+  test('different commandGrants produces different cache key (cache miss)', () => {
+    clearToolCache();
+    const noGrants = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'default', commandGrants: {} },
+    });
+    const withGrants = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: {
+        mode: 'default',
+        commandGrants: {
+          'thread-x::/tmp::bun test': {
+            workspace: '/tmp',
+            threadId: 'thread-x',
+            command: 'bun test',
+          },
+        },
+      },
+    });
+    expect(noGrants).not.toBe(withGrants);
+  });
+
+  test('different interactionMode produces different cache key (cache miss)', () => {
+    clearToolCache();
+    const auto = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'default', commandGrants: {} },
+      interactionMode: 'auto',
+    });
+    const ask = createAgentTools({
+      workspace: '/tmp',
+      phase: 'building',
+      authorization: { mode: 'default', commandGrants: {} },
+      interactionMode: 'ask',
+    });
+    expect(auto).not.toBe(ask);
+  });
+
+  test('different threadId invalidates cache', () => {
+    clearToolCache();
+    const t1 = createAgentTools({
+      workspace: '/tmp',
+      threadId: 'thread-a',
+    });
+    const t2 = createAgentTools({
+      workspace: '/tmp',
+      threadId: 'thread-b',
+    });
+    expect(t1).not.toBe(t2);
   });
 });

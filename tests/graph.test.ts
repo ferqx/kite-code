@@ -6,6 +6,7 @@ import { AIMessage, type BaseMessage, ToolMessage } from '@langchain/core/messag
 import {
   routeAfterAgent,
   routeAfterApproval,
+  routeAfterPlanReview,
   routeAfterTools,
   routeAfterUserInput,
   routeEntry,
@@ -719,6 +720,76 @@ describe('graph local tool routing', () => {
     ).toBe('agent');
   });
 
+  // ── routeAfterPlanReview ──
+
+  // 验证方案审批通过后路由回 agent / Plan approved → agent
+  test('routes to agent after plan review approval', () => {
+    expect(
+      routeAfterPlanReview({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        messages: [
+          new ToolMessage({
+            content: JSON.stringify({ ok: true, stdout: 'Plan summary' }),
+            tool_call_id: 'call-p1',
+            name: 'update_plan',
+            status: 'success',
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('agent');
+  });
+
+  // 验证补充反馈后路由回 agent（让模型修订方案）/ Supplement feedback → agent (revise and re-call update_plan)
+  test('routes to agent after plan supplement so model can revise', () => {
+    expect(
+      routeAfterPlanReview({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        messages: [
+          new ToolMessage({
+            content: JSON.stringify({
+              ok: false,
+              reason: 'Plan needs revision. User feedback: Add a testing phase.',
+            }),
+            tool_call_id: 'call-p2',
+            name: 'update_plan',
+            status: 'error',
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('agent');
+  });
+
+  // 验证方案被拒绝（非补充）路由到 END / Plan rejected → END
+  test('routes to END after plan is rejected by user', () => {
+    expect(
+      routeAfterPlanReview({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        messages: [
+          new ToolMessage({
+            content: JSON.stringify({ ok: false, reason: 'plan rejected by user' }),
+            tool_call_id: 'call-p3',
+            name: 'update_plan',
+            status: 'error',
+          }),
+        ],
+      } as unknown as CodeAgentState),
+    ).toBe('__end__');
+  });
+
+  // 验证无 update_plan 消息时回退到 agent / No update_plan message → fallback to agent
+  test('routes to agent when no update_plan tool message found', () => {
+    expect(
+      routeAfterPlanReview({
+        workspaceAccess: 'write',
+        workspace: '/tmp/workspace',
+        messages: [],
+      } as unknown as CodeAgentState),
+    ).toBe('agent');
+  });
+
   // 验证用户输入恢复值既支持字符串，也支持结构化 answer/choice / User input resume supports strings and structured answers
   test('normalizes user input resume values', () => {
     expect(normalizeUserInputResume('使用最小实现')).toEqual({
@@ -1058,6 +1129,7 @@ describe('routeEntry — start-of-graph routing', () => {
     modelName: '',
     thinkingLevel: null,
     activeSkillInstructions: '',
+    autoReviewWarnings: {} as Record<string, string>,
     messages: [],
   };
 
