@@ -19,6 +19,8 @@ export interface ConsolidatedToolEntry {
   status: 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
   /** 读取文件时的文件总行数 / Total lines for read_file tool */
   totalLines?: number;
+  /** 自动审批失败原因。工具执行成功但审批失败时展示 / Auto-review failure reason. Shown when tool ok but review failed. */
+  reviewFailure?: string;
 }
 
 export type ThoughtActivity = { kind: 'thinking'; text: string } | { kind: 'tool'; callId: string };
@@ -61,6 +63,8 @@ export type OutputBlock =
       liveTotalLines?: number;
       /** Shell timeout duration parsed from timeout summary / shell 超时时长 */
       timeoutMs?: number;
+      /** 自动审批失败原因。工具卡状态为 done(绿) 时，单独以红色展示此警告 / Auto-review failure reason. Shown in red alongside green done status. */
+      reviewFailure?: string;
     }
   | {
       id: number;

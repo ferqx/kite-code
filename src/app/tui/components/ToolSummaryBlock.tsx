@@ -221,6 +221,9 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
               {isError && failureSummary(step, 32) && (
                 <Text color={dt.error}> {failureSummary(step, 32)}</Text>
               )}
+              {(step as any).reviewFailure && (
+                <Text color={dt.error}> ⚠ {(step as any).reviewFailure}</Text>
+              )}
             </Box>
           );
         })}
@@ -279,6 +282,9 @@ export default function ToolSummaryBlock({ block, columns }: ToolSummaryBlockPro
             {step.status === 'running' && <Text color={dt.warning}> …</Text>}
             {isError && failureSummary(step, 32) && (
               <Text color={dt.error}> {failureSummary(step, 32)}</Text>
+            )}
+            {(step as any).reviewFailure && (
+              <Text color={dt.error}> ⚠ {(step as any).reviewFailure}</Text>
             )}
           </Box>
         );

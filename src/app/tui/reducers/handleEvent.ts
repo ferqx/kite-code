@@ -570,6 +570,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
                       : event.data.ok
                         ? ('done' as const)
                         : ('error' as const),
+                  reviewFailure: event.data.reviewFailure ?? t.reviewFailure,
                 }
               : t,
           );
@@ -690,6 +691,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
               : timedOut
                 ? ('timeout' as const)
                 : ('error' as const),
+        reviewFailure: event.data.reviewFailure ?? (matched as any).reviewFailure,
         summary: displaySummary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
@@ -733,13 +735,15 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case 'state_change': {
       const d = event.data;
       const next = { ...state.status };
+      let nextInteractionMode = state.interactionMode;
       if (d.phase) next.phase = d.phase;
       if (d.plan !== undefined) next.plan = d.plan;
       if (d.authorization) next.authorization = d.authorization.mode;
+      if (d.interactionMode) nextInteractionMode = d.interactionMode;
       if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
       if (d.modelProvider) next.modelProvider = d.modelProvider;
       if (d.modelName) next.modelName = d.modelName;
-      return { ...state, status: next };
+      return { ...state, status: next, interactionMode: nextInteractionMode };
     }
     case 'model_retry': {
       const finalized = finalizeLastTurnStreaming(state);

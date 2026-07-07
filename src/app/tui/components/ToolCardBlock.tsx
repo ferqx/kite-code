@@ -511,6 +511,11 @@ export default function ToolCardBlock({
                       : 'timed out'
                     : `exit: ${block.status === 'error' ? 'error' : '0'}`}
           </Text>
+          {(block as any).reviewFailure ? (
+            <Text color={dt.error}>
+              {SHELL_PREFIX}⚠ auto-review: {(block as any).reviewFailure}
+            </Text>
+          ) : null}
           {(block.status === 'error' || isWebFetch) &&
             block.summary &&
             block.summary.split('\n').length > 3 && <Text color={dt.dim}>Enter 折叠</Text>}
