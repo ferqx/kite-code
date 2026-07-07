@@ -23,6 +23,7 @@ import { useMcpConnection } from './hooks/useMcpConnection';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
 import { useSkillsLoader } from './hooks/useSkillsLoader';
 import { useSlashCommand } from './hooks/useSlashCommand';
+import { shouldCancelClearedInterrupt } from './interrupt-clear';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
 import { SessionManager } from './session-manager';
@@ -164,14 +165,21 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   const pendingSkillsRef = React.useRef<string[]>([]);
   const runTaskRef = React.useRef<(task: string) => Promise<void>>(async () => {});
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
+  const interruptClearedByResolutionRef = React.useRef(false);
 
-  const provider = React.useMemo(
-    () =>
-      new TuiUserInputProvider((event) => {
-        textBatcherRef.current.push(event);
-      }),
-    [],
-  );
+  const provider = React.useMemo(() => {
+    const p = new TuiUserInputProvider((event) => {
+      textBatcherRef.current.push(event);
+    });
+    const submitAction = p.submitAction.bind(p);
+    p.submitAction = (action) => {
+      if (action.type !== 'cancel') {
+        interruptClearedByResolutionRef.current = true;
+      }
+      submitAction(action);
+    };
+    return p;
+  }, []);
 
   const sessionManager = React.useMemo(() => {
     const mgr = new SessionManager({
@@ -627,8 +635,14 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   React.useEffect(() => {
     const prev = prevInterruptRef.current;
     prevInterruptRef.current = state.interrupt;
-    if (prev && !state.interrupt) {
+    const clearedByResolution = interruptClearedByResolutionRef.current;
+    if (shouldCancelClearedInterrupt(prev, state.interrupt, clearedByResolution)) {
       provider.submitAction({ type: 'cancel' });
+    }
+    if (prev && !state.interrupt) {
+      interruptClearedByResolutionRef.current = false;
+    } else if (prev && state.interrupt && prev !== state.interrupt) {
+      interruptClearedByResolutionRef.current = false;
     }
   }, [state.interrupt, provider]);
 

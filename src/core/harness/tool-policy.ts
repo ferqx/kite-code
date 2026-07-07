@@ -38,6 +38,7 @@ export interface ToolPolicyDecision {
 
 export interface ToolApprovalPayload {
   scope: 'once';
+  callId?: string;
   cwd: string;
   threadId: string;
   tool: PendingToolRequest['name'];
@@ -51,6 +52,7 @@ export interface ToolApprovalPayload {
   grantOptions: ShellApprovalGrant[];
   recommendedGrant: ShellApprovalGrant;
   subagentId?: string;
+  reviewFailure?: string;
 }
 
 /** 创建默认 thread 授权状态 / Create default thread authorization state */
@@ -429,6 +431,7 @@ export function buildToolApproval(input: {
   const requestedGrant = shellAction?.grant_request;
   return {
     scope: 'once',
+    ...(input.request.id ? { callId: input.request.id } : {}),
     cwd: input.workspace,
     threadId: input.threadId,
     tool: input.request.name,

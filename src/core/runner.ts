@@ -303,6 +303,60 @@ export async function* runAgent(
       sandboxBackend: input.sandboxBackend ?? 'unknown',
     };
 
+    /**
+     * 向已有 checkpoint 的 session 注入新用户消息。
+     *
+     * 设计决策 — whitelist 而非 blacklist：
+     * - blacklist（spread initialState 再排除 plan/planReviewed）在新增
+     *   execution-state channel 到 initialState 时静默回归
+     * - whitelist 强制显式决策：「这个 channel 是每轮配置，还是累积执行态？」
+     *
+     * 仅更新「每轮配置」类 channel；plan / planReviewed / executionJournal /
+     * autoReviewState 等执行态 channel 从 checkpoint 保留，不被覆盖。
+     *
+     * Inject a new user message into an existing session checkpoint.
+     *
+     * Design — whitelist over blacklist:
+     * - A blacklist (spread initialState, omit plan/planReviewed) silently
+     *   regresses when new execution-state channels are added to initialState.
+     * - A whitelist forces an explicit decision: "is this channel per-turn
+     *   configuration, or accumulated execution state?"
+     *
+     * Only per-turn configuration channels are updated; execution-state
+     * channels (plan, planReviewed, executionJournal, autoReviewState, etc.)
+     * survive from the checkpoint unchanged.
+     */
+    const injectUserMessage = async (
+      existingConfig: import('@langchain/core/runnables').RunnableConfig,
+      auth: import('@/core/types').ThreadAuthorizationState | null,
+    ): Promise<import('@langchain/core/runnables').RunnableConfig> => {
+      return graph.updateState(
+        existingConfig,
+        {
+          // ── Per-turn configuration (safe to update each message) ──
+          messages: [new HumanMessage(input.task)],
+          workspaceAccess: initialAccess,
+          phase: initialPhase,
+          userId: input.userId,
+          threadId: input.threadId,
+          workspace: input.workspace,
+          authorization: auth ?? defaultAuthorizationState(),
+          contextBudget: input.contextBudget,
+          modelProvider: input.config.providerName,
+          modelName: input.config.modelName,
+          thinkingLevel: input.thinkingLevel ?? null,
+          interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
+          sandboxBackend: input.sandboxBackend ?? 'unknown',
+          // ── NOT included (execution state — preserved from checkpoint) ──
+          // plan, planReviewed, executionJournal, exhaustedFingerprints,
+          // autoReviewState, doomLoopTracker, approvedBatch, approvedToolRequest,
+          // approvedToolGrant, pendingSubagentApproval, activeSkillInstructions,
+          // executionEnvironment, final
+        },
+        'cleanup',
+      );
+    };
+
     let resumeValue: AgentResumeValue | null = input.resume ?? null;
     let turnIndex = 0;
     let streamConfig = graphConfig(input.threadId);
@@ -311,14 +365,7 @@ export async function* runAgent(
     if (!resumeValue) {
       const existing = await checkpointer.getTuple(streamConfig);
       if (existing) {
-        const updatedConfig = await graph.updateState(
-          existing.config,
-          {
-            ...initialState,
-            messages: [new HumanMessage(input.task)],
-          },
-          'cleanup',
-        );
+        const updatedConfig = await injectUserMessage(existing.config, prevAuth);
         streamConfig = {
           ...updatedConfig,
           configurable: {

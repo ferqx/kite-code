@@ -23,6 +23,8 @@ interface OutputAreaProps {
   overlayActive?: boolean;
   /** 主 agent 等待审批时隐藏工具计时器 / Hide tool timer when awaiting approval */
   awaitingApproval?: boolean;
+  /** 主 agent 等待 ask_user 输入时标记 ask 工具 / Mark ask_user while waiting for input */
+  awaitingInput?: boolean;
   columns: number;
 }
 
@@ -67,6 +69,7 @@ export default function OutputArea({
   onToggleSubagentExpand,
   overlayActive,
   awaitingApproval,
+  awaitingInput,
   columns,
 }: OutputAreaProps) {
   const onToggleReasonRef = useRef(onToggleReason);
@@ -132,6 +135,7 @@ export default function OutputArea({
                   index={index - 1}
                   prevBlock={prevBlock}
                   awaitingApproval={false}
+                  awaitingInput={false}
                   columns={innerColumns}
                 />
               );
@@ -150,6 +154,7 @@ export default function OutputArea({
               index={i}
               prevBlock={prevBlock}
               awaitingApproval={awaitingApproval}
+              awaitingInput={awaitingInput}
               columns={innerColumns}
             />
           );

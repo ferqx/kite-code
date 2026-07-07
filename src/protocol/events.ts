@@ -233,6 +233,8 @@ export interface CacheMetricsPayload {
 
 export interface ToolApprovalPayload {
   scope: 'once';
+  /** Tool call id this approval belongs to. */
+  callId?: string;
   cwd: string;
   threadId: string;
   tool: string;
@@ -261,6 +263,8 @@ export interface ToolApprovalPayload {
   plan?: AgentPlan;
   /** 子 agent ID，当审批来自子 agent 的工具调用时填充 / Sub-agent ID when approval originates from a sub-agent's tool call */
   subagentId?: string;
+  /** Auto-review failure/rejection reason shown on the pending tool card. */
+  reviewFailure?: string;
 }
 
 // ── 子 Agent 事件 / Sub-agent events ──

@@ -930,10 +930,25 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         kind: 'approval',
         approval: event.data,
       };
-      let next = {
+      let next: TuiState = {
         ...appendBlock(finalized, block),
         interrupt: { kind: 'approval' as const, blockId: block.id },
       };
+      if (event.data.reviewFailure) {
+        const pendingTool = findBlock(
+          next,
+          (b) =>
+            b.kind === 'tool_card' &&
+            b.status === 'running' &&
+            (b.callId === event.data.callId || (!event.data.callId && b.name === event.data.tool)),
+        );
+        if (pendingTool?.kind === 'tool_card') {
+          next = replaceBlockById(next, pendingTool.id, {
+            ...pendingTool,
+            reviewFailure: event.data.reviewFailure,
+          });
+        }
+      }
       // 如果是子 agent 的工具需要审批，标记该子 agent 为等待审批状态
       if (event.data.subagentId) {
         next = {

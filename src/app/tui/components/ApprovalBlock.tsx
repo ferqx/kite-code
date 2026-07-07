@@ -2,11 +2,13 @@ import { Box, Text, useInput, useStdout } from 'ink';
 import { useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
+import type { ShellApprovalGrant } from '@/protocol/events';
 
 interface Option {
   key: string;
   label: string;
   action: 'approve' | 'deny';
+  grant?: ShellApprovalGrant;
 }
 
 interface ApprovalBlockProps {
@@ -16,7 +18,9 @@ interface ApprovalBlockProps {
 }
 
 const OPTIONS: Option[] = [
-  { key: 'y', label: 'Yes · 仅本次', action: 'approve' },
+  { key: 'y', label: 'Yes · 仅本次', action: 'approve', grant: 'approve_once' },
+  { key: 'a', label: 'Auto · 自动审批', action: 'approve', grant: 'same_command' },
+  { key: 'f', label: 'Full · 完全权限', action: 'approve', grant: 'full_access' },
   { key: 'd', label: 'Deny · 拒绝', action: 'deny' },
 ];
 
@@ -28,15 +32,16 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
 
   function resolve(opt: Option) {
     if (opt.action === 'approve') {
-      provider.submitAction({ type: 'approve', grant: 'approve_once' });
-      onResolved('approve', 'approve_once');
+      const grant = opt.grant ?? 'approve_once';
+      provider.submitAction({ type: 'approve', grant });
+      onResolved('approve', grant);
     } else {
       provider.submitAction({ type: 'reject' });
       onResolved('denied');
     }
   }
 
-  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+  useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
     if (key.upArrow) {
       setSelectedIndex((i) => Math.max(0, i - 1));
       return;
@@ -48,6 +53,11 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
     if (key.return) {
       const opt = OPTIONS[selectedIndex];
       if (opt) resolve(opt);
+      return;
+    }
+    const opt = OPTIONS.find((o) => o.key === input.toLowerCase());
+    if (opt) {
+      resolve(opt);
     }
   });
 

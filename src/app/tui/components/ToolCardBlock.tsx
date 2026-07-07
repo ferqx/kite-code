@@ -350,6 +350,8 @@ interface ToolCardBlockProps {
   block: OutputBlock & { kind: 'tool_card' };
   /** 工具等待审批时隐藏计时器 / Hide timer when tool is awaiting approval */
   awaitingApproval?: boolean;
+  /** ask_user 等待用户输入时显示等待状态 / Show waiting label while ask_user awaits input */
+  awaitingInput?: boolean;
   /** 可用列宽（从 BlockRenderer 传入）/ Available terminal columns */
   columns?: number;
 }
@@ -357,6 +359,7 @@ interface ToolCardBlockProps {
 export default function ToolCardBlock({
   block,
   awaitingApproval,
+  awaitingInput,
   columns = 80,
 }: ToolCardBlockProps) {
   const dt = useTheme();
@@ -418,6 +421,8 @@ export default function ToolCardBlock({
           {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
           {awaitingApproval ? (
             <Text color={dt.dim}> (awaiting approval)</Text>
+          ) : awaitingInput && block.name === 'ask_user' ? (
+            <Text color={dt.dim}> (awaiting input)</Text>
           ) : showElapsed ? (
             <Text color={dt.dim}> ({formatElapsed(liveElapsed)})</Text>
           ) : null}
@@ -429,6 +434,13 @@ export default function ToolCardBlock({
             {renderShellLines(block.liveOutput, dt.dim, columns - 2, block.liveTotalLines)}
           </Box>
         )}
+        {block.reviewFailure ? (
+          <Box paddingLeft={2}>
+            <Text color={dt.error}>
+              {SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
+            </Text>
+          </Box>
+        ) : null}
       </Box>
     );
   }
@@ -531,6 +543,11 @@ export default function ToolCardBlock({
           ) : (
             <Text color={dt.dim}>⎿ {pathLabel(block.args)} (no result)</Text>
           )}
+          {block.reviewFailure ? (
+            <Text color={dt.error}>
+              {SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
+            </Text>
+          ) : null}
         </Box>
       )}
       {/* 其他工具 / Other tools */}

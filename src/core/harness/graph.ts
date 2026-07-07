@@ -202,6 +202,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         // Preserve plan mode state — planReview node sets these once; they must
         // survive agent→tools→agent cycles without resetting to defaults.
         interactionMode: state.interactionMode,
+        plan: state.plan,
         planReviewed: state.planReviewed,
         autoReviewState: state.autoReviewState,
         doomLoopTracker: state.doomLoopTracker,
@@ -233,6 +234,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     opts?: {
       doomLoopNext?: Record<string, { count: number; lastSeenAt: number }>;
       autoReviewState?: import('@/core/execution/circuit-breaker').AutoReviewState;
+      planReviewed?: boolean;
     },
   ): Partial<CodeAgentState> {
     Object.assign(
@@ -248,6 +250,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     const result: Partial<CodeAgentState> = { approvedBatch: batch };
     if (opts?.doomLoopNext) result.doomLoopTracker = opts.doomLoopNext;
     if (opts?.autoReviewState) result.autoReviewState = opts.autoReviewState;
+    if (opts?.planReviewed !== undefined) result.planReviewed = opts.planReviewed;
     return result;
   }
 
@@ -272,7 +275,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
 
     if (!request?.id) {
-      return {};
+      return { plan: state.plan, planReviewed: state.planReviewed };
     }
 
     // full_access 已授权 → 自动批准剩余所有工具 / full_access already granted → auto-approve all remaining
@@ -289,7 +292,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           }),
         );
       }
-      return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
+      return {
+        approvedBatch: batch,
+        approvedToolRequest: null,
+        approvedToolGrant: null,
+        plan: state.plan,
+        planReviewed: state.planReviewed,
+      };
     }
 
     const workspaceAccess = state.workspaceAccess ?? 'write';
@@ -317,7 +326,13 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           grant: 'approve_once',
         }),
       );
-      return { approvedBatch: batch, approvedToolRequest: null, approvedToolGrant: null };
+      return {
+        approvedBatch: batch,
+        approvedToolRequest: null,
+        approvedToolGrant: null,
+        plan: state.plan,
+        planReviewed: state.planReviewed,
+      };
     }
 
     const approvalPayload = buildToolApproval({
@@ -393,6 +408,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         } else {
           return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
             doomLoopNext: updateDoomLoopTracker(state.doomLoopTracker, doomCheck.fingerprint!),
+            planReviewed: state.planReviewed,
           });
         }
       }
@@ -465,6 +481,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         if (pendingSubagent) {
           return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
             doomLoopNext: doomLoopTrackerNext,
+            planReviewed: state.planReviewed,
             autoReviewState: {
               pendingWarnings: {},
               consecutiveRejects: overrideCbResult.newConsecutiveRejects,
@@ -494,6 +511,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         if (pendingSubagent) {
           return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
             doomLoopNext: doomLoopTrackerNext,
+            planReviewed: state.planReviewed,
           });
         }
         approved = interrupt({
@@ -538,6 +556,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
               if (pendingSubagent) {
                 return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
                   doomLoopNext: doomLoopTrackerNext,
+                  planReviewed: state.planReviewed,
                   autoReviewState: {
                     pendingWarnings: {},
                     consecutiveRejects: 0,
@@ -568,6 +587,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
               if (pendingSubagent) {
                 return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
                   doomLoopNext: doomLoopTrackerNext,
+                  planReviewed: state.planReviewed,
                   autoReviewState: {
                     pendingWarnings,
                     consecutiveRejects: 0,
@@ -634,6 +654,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
               if (pendingSubagent) {
                 return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
                   doomLoopNext: doomLoopTrackerNext,
+                  planReviewed: state.planReviewed,
                   autoReviewState: {
                     pendingWarnings,
                     consecutiveRejects: cbResult.newConsecutiveRejects,
@@ -656,6 +677,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
               if (pendingSubagent) {
                 return rejectSubagentTool(batch, pendingSubagent, state.workspace, state.threadId, {
                   doomLoopNext: doomLoopTrackerNext,
+                  planReviewed: state.planReviewed,
                   autoReviewState: {
                     pendingWarnings: {},
                     consecutiveRejects: cbResult.newConsecutiveRejects,
@@ -861,6 +883,9 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       authorization: nextAuthorization,
       autoReviewState: nextAutoReviewState,
       doomLoopTracker: doomLoopTrackerNext ?? state.doomLoopTracker,
+      // Preserve plan state — must survive approval→tools→agent cycles
+      plan: state.plan,
+      planReviewed: state.planReviewed,
     };
   };
 
@@ -897,6 +922,8 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     return {
       messages: [userInputToolMessage(request, resume)],
+      plan: state.plan,
+      planReviewed: state.planReviewed,
     };
   };
 
@@ -1161,9 +1188,22 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }
 
     if (cancelledToolMessages.length > 0) {
-      return { messages: cancelledToolMessages, executionJournal: [], exhaustedFingerprints: {} };
+      return {
+        messages: cancelledToolMessages,
+        executionJournal: [],
+        exhaustedFingerprints: {},
+        // Preserve plan state — cleanup runs at graph START; must not
+        // reset planReviewed/plan between turns.
+        planReviewed: state.planReviewed,
+        plan: state.plan,
+      };
     }
-    return { executionJournal: [], exhaustedFingerprints: {} };
+    return {
+      executionJournal: [],
+      exhaustedFingerprints: {},
+      planReviewed: state.planReviewed,
+      plan: state.plan,
+    };
   };
 
   /**
