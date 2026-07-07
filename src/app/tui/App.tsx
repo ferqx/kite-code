@@ -51,7 +51,14 @@ function shouldShowRunStatus(state: TuiState): boolean {
   if (state.status.retryState) return true;
 
   const latest = latestVisibleBlock(state);
-  if (latest?.kind === 'text' && !latest.isError) return false;
+  // 仅当文本仍在流式输出时隐藏状态栏（模型正在输出最终回答）。
+  // 已完成的文本块不隐藏——模型可能正在准备下一批 tool_call，
+  // 过渡文本（如 "── Step 1: ..."）消失会导致进度空白期。
+  // Only hide the status line while text is actively streaming (model is
+  // producing its final answer). Finalized text blocks don't hide it —
+  // the model may be preparing the next batch of tool calls, and hiding
+  // the status during interstitial text creates a blank progress gap.
+  if (latest?.kind === 'text' && latest.streaming && !latest.isError) return false;
 
   return true;
 }
@@ -173,6 +180,7 @@ export default function App({
   }, [state.interrupt, state.turns]);
 
   const awaitingApproval = state.interrupt?.kind === 'approval';
+  const awaitingInput = state.interrupt?.kind === 'input';
 
   const resolveApproval = useCallback(
     (action: string, grant?: string) => {
@@ -253,6 +261,7 @@ export default function App({
         onToggleSubagentExpand={onToggleSubagentExpand}
         overlayActive={overlayActive}
         awaitingApproval={awaitingApproval}
+        awaitingInput={awaitingInput}
         columns={columns}
       />
 
