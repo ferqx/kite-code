@@ -22,6 +22,8 @@ import { defaultAuthorizationState } from './harness/tool-policy';
 import { genSpanId } from './id-utils';
 import type { SupportedChatModel } from './model/factory';
 import type { BunSqliteSaver } from './persistence/checkpoint';
+import type { RuntimeEvent } from './runtime/events';
+import { projectRuntimeEventToAgentEvent } from './runtime/projection';
 import type { SandboxBackend } from './sandbox';
 import { SessionLogCollector } from './session-logger';
 import { countTokens } from './token-counter';
@@ -263,6 +265,15 @@ export async function* runAgent(
     }
   };
 
+  // 运行时事件管道：图节点产出的 RuntimeEvent 经投影函数转换为 AgentEvent 后推入统一 sink
+  // RuntimeEvent pipeline: graph nodes emit RuntimeEvent → projection → AgentEvent → unified sink
+  const runtimeEventSink = (event: RuntimeEvent) => {
+    const agentEvents = projectRuntimeEventToAgentEvent(event);
+    for (const agentEvent of agentEvents) {
+      sink.emit(agentEvent);
+    }
+  };
+
   const { graph, checkpointer } = buildCodeAgentGraph({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -277,6 +288,7 @@ export async function* runAgent(
     subagentSignal: input.signal,
     toolResultSink,
     toolProgressSink,
+    runtimeEventSink,
   });
 
   try {
@@ -595,6 +607,8 @@ async function processStream(
   const cacheStandard = createPromptCacheStandardTracker();
   let currentAccess: WorkspaceAccess = 'write';
   const allEvents: AgentEvent[] = [];
+  // RuntimeEvents 通过 runtimeEventSink 回调（带外通道）流动，不经 graph stream。
+  // 后续 Phase 统一事件管道后，processStream 将同时消费 graph stream 和 RuntimeEvent 流。
   const pendingToolCalls = new Map<string, { name: string; args: Record<string, unknown> }>();
 
   for await (const chunk of stream) {

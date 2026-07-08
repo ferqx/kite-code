@@ -25,6 +25,7 @@ import { prepareModelContext } from '@/core/model/context';
 import type { ModelRetryListener, RetryListenerHost } from '@/core/model/deepseek';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { BunSqliteSaver } from '@/core/persistence/checkpoint';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import { resumeSubAgent } from '@/core/subagent/runner';
 import type { SubAgentResult } from '@/core/subagent/types';
 import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
@@ -119,6 +120,10 @@ export interface BuildCodeAgentGraphInput {
     chunk: string,
     stream: 'stdout' | 'stderr',
   ) => void;
+  /** 运行时事件回调 — 图节点产出的 RuntimeEvent 通过此回调经投影函数
+   *  转换为 AgentEvent 后推入 TUI。Graph nodes emit RuntimeEvent through this
+   *  sink; the projection function converts them to AgentEvent for the TUI. */
+  runtimeEventSink?: (event: import('@/core/runtime/events').RuntimeEvent) => void;
 }
 
 /** 构建 LangGraph 状态图 / Build LangGraph state graph */
@@ -140,6 +145,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         mcpRiskOverride[name] = 'read';
       }
     }
+  }
+
+  /** 发出 RuntimeEvent 的辅助函数 — 封装 runtimeEventSink 调用，调用方可
+   *  在工具完成或交互事件发生时调用。调用前自动检查 runtimeEventSink 是否存在。 */
+  function emitRuntimeEvent(event: RuntimeEvent): void {
+    input.runtimeEventSink?.(event);
   }
 
   /** Agent 节点：使用稳定工具 schema，由执行层强制工作区访问边界 / Agent node */
@@ -920,6 +931,24 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       input.toolResultSink(request.id, 'ask_user', true, summary);
     }
 
+    // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
+    emitRuntimeEvent({
+      type: 'user_input.answered',
+      interactionId: request.id ?? '',
+      answer: typeof resume === 'string' ? resume : JSON.stringify(resume),
+    });
+    emitRuntimeEvent({
+      type: 'tool.finished',
+      toolCallId: request.id ?? '',
+      result: {
+        ok: true,
+        command: request.protectedCommand ?? '',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      },
+    });
+
     return {
       messages: [userInputToolMessage(request, resume)],
       plan: state.plan,
@@ -983,6 +1012,24 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         input.toolResultSink(request.id, 'update_plan', true, planSummary.slice(0, 200));
       }
 
+      // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
+      emitRuntimeEvent({
+        type: 'plan.approved',
+        interactionId: request.id ?? '',
+        executionMode: executionMode === 'auto' ? 'auto' : 'manual',
+      });
+      emitRuntimeEvent({
+        type: 'tool.finished',
+        toolCallId: request.id ?? '',
+        result: {
+          ok: true,
+          command: request.protectedCommand ?? '',
+          exitCode: 0,
+          stdout: planSummary.slice(0, 200),
+          stderr: '',
+        },
+      });
+
       return {
         messages: [
           new ToolMessage({
@@ -1012,12 +1059,24 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           `Plan needs revision: ${supplement}`,
         );
       }
+      // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
+      emitRuntimeEvent({
+        type: 'plan.revision_requested',
+        interactionId: request.id ?? '',
+        feedback: supplement,
+      });
       return rejectedToolMessage(request, `Plan needs revision. User feedback: ${supplement}`);
     }
 
     if (input.toolResultSink && request.id) {
       input.toolResultSink(request.id, 'update_plan', false, 'plan rejected by user');
     }
+    // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
+    emitRuntimeEvent({
+      type: 'plan.rejected',
+      interactionId: request.id ?? '',
+      reason: 'plan rejected by user',
+    });
     return rejectedToolMessage(request, 'plan rejected by user');
   };
 
@@ -1122,6 +1181,19 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       undefined, // status — determined by runner
       reviewFailure,
     );
+
+    // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
+    emitRuntimeEvent({
+      type: 'tool.finished',
+      toolCallId: request.id ?? '',
+      result: {
+        ok: result.ok !== false,
+        command: request.protectedCommand ?? '',
+        exitCode: result.exitCode ?? 0,
+        stdout: result.stdout ?? '',
+        stderr: result.stderr ?? '',
+      },
+    });
 
     const toolMessage = new ToolMessage({
       content: JSON.stringify(result),
@@ -1289,6 +1361,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         undefined,
         result.exitCode,
       );
+      // 与 toolResultSink 并行发出 RuntimeEvent，不替代
+      emitRuntimeEvent({
+        type: 'tool.finished',
+        toolCallId: request.id ?? '',
+        result: {
+          ok: result.ok !== false,
+          command: result.command ?? request.protectedCommand,
+          exitCode: result.exitCode ?? -1,
+          stdout: result.stdout ?? '',
+          stderr: result.stderr ?? '',
+        },
+      });
 
       const baseJournal = recordExecutionResult(
         {
@@ -1458,6 +1542,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           -1,
           'exhausted',
         );
+        // 与 toolResultSink 并行发出 RuntimeEvent（exhaustion）
+        emitRuntimeEvent({
+          type: 'tool.failed',
+          toolCallId: req.id ?? '',
+          error: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+        });
         continue;
       }
 
@@ -1533,6 +1623,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
             false,
             `Concurrent same-file ${req.name} blocked for '${editPath}'. Combine into one call.`,
           );
+          // 与 toolResultSink 并行发出 RuntimeEvent
+          emitRuntimeEvent({
+            type: 'tool.rejected',
+            toolCallId: req.id ?? '',
+            reason: `Concurrent same-file ${req.name} blocked for '${editPath}'. Combine into one call.`,
+          });
           continue;
         }
         if (editPath) editedPaths.add(editPath);
@@ -1571,6 +1667,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           -1,
           'exhausted',
         );
+        // 与 toolResultSink 并行发出 RuntimeEvent（exhaustion）
+        emitRuntimeEvent({
+          type: 'tool.failed',
+          toolCallId: req.id ?? '',
+          error: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+        });
         continue;
       }
 

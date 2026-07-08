@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-04（TUI E2E PTY 双层架构改造 + 执行可靠性与连续失败处理）
+最后更新：2026-07-08（Agent Runtime Kernel 重构方案）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -41,6 +41,7 @@
 | [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | active | P0 | — | — | 审批层、执行层与沙箱 5 阶段：阶段四 `/mode` 交互模式 ✅、阶段五 执行可靠性 ✅，阶段一~三待实施 |
 | [`2026-07-01-web-search-tool.md`](2026-07-01-web-search-tool.md) | draft | P0 | — | — | Web 网络工具：Phase 1 `web_fetch`（fetch → SSRF → readability → turndown 正文提取），Phase 2 `web_search`（搜索发现 URL） |
 | [`2026-07-03-tui-pty-e2e-reform.md`](2026-07-03-tui-pty-e2e-reform.md) | active | P1 | — | 扩展 2026-05-25-e2e-restructure | TUI E2E 双层架构：PTY 终端系统测试 + Ink 组件集成测试。Phase 0-4 完成（19 tests / 6 files），多消息阻塞调查中 |
+| [`2026-07-08-agent-kernel-incremental-evolution.md`](2026-07-08-agent-kernel-incremental-evolution.md) | draft | P0 | — | — | Agent Runtime Kernel 重构：5 阶段建立事件驱动状态机，LangGraph 降级为执行引擎。Phase 1 RuntimeEvent+Projection → Phase 2 Reducer+Store → Phase 3 Controller 抽取 → Phase 4 Policy 策略化 → Phase 5 LangGraph 适配器化 |
 
 ## 计划文件命名规范
 
