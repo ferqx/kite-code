@@ -70,7 +70,7 @@ import {
   toolRequestFromMessage,
 } from './tool-requests';
 import { runApprovedTool } from './tool-runner';
-import { userInputToolMessage } from './user-input';
+import { normalizeUserInputResume, userInputToolMessage } from './user-input';
 
 /** 构建代码 Agent 图的输入 / Build code agent graph input */
 export interface BuildCodeAgentGraphInput {
@@ -901,10 +901,16 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     }) as AgentResumeValue;
 
     // RuntimeEvent 管道发出 tool_done
+    const normalized = normalizeUserInputResume(resume);
+    const answer = normalized.answers
+      ? Object.entries(normalized.answers)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('\n')
+      : normalized.answer;
     emitRuntimeEvent({
       type: 'user_input.answered',
       interactionId: request.id ?? '',
-      answer: typeof resume === 'string' ? resume : JSON.stringify(resume),
+      answer,
     });
     emitRuntimeEvent({
       type: 'tool.finished',
@@ -914,10 +920,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         ok: true,
         command: request.protectedCommand ?? '',
         exitCode: 0,
-        stdout: JSON.stringify({
-          ok: true,
-          answer: typeof resume === 'string' ? resume : JSON.stringify(resume),
-        }),
+        stdout: JSON.stringify({ ok: true, answer }),
         stderr: '',
       },
     });
