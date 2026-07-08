@@ -1,6 +1,7 @@
 import { readFile, stat as statAsync } from 'node:fs/promises';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { Command, INTERRUPT, isInterrupted } from '@langchain/langgraph';
+import { createLangGraphEngine } from '@/core/engines/langgraph-engine';
 import type { UserAction } from '@/protocol/actions';
 import type {
   AgentEvent,
@@ -281,7 +282,7 @@ export async function* runAgent(
     }
   };
 
-  const { graph, checkpointer } = buildCodeAgentGraph({
+  const engine = createLangGraphEngine({
     config: input.config,
     checkpointPath: input.checkpointPath,
     shellExecutor: input.shellExecutor,
@@ -327,7 +328,7 @@ export async function* runAgent(
       });
     }
 
-    const prevAuth = await readLastAuthorization(checkpointer, input.threadId);
+    const prevAuth = await readLastAuthorization(engine.checkpointer, input.threadId);
 
     const initialState = {
       messages: [new HumanMessage(input.task)],
@@ -374,7 +375,7 @@ export async function* runAgent(
       existingConfig: import('@langchain/core/runnables').RunnableConfig,
       auth: import('@/core/types').ThreadAuthorizationState | null,
     ): Promise<import('@langchain/core/runnables').RunnableConfig> => {
-      return graph.updateState(
+      return engine.updateState(
         existingConfig,
         {
           // ── Per-turn configuration (safe to update each message) ──
@@ -407,7 +408,7 @@ export async function* runAgent(
     let startState: typeof initialState | null = initialState;
 
     if (!resumeValue) {
-      const existing = await checkpointer.getTuple(streamConfig);
+      const existing = await engine.checkpointer.getTuple(streamConfig);
       if (existing) {
         const updatedConfig = await injectUserMessage(existing.config, prevAuth);
         streamConfig = {
@@ -430,12 +431,11 @@ export async function* runAgent(
 
       let stream: AsyncIterable<unknown>;
       if (resumeValue) {
-        const cmd: Record<string, unknown> = { resume: resumeValue };
-        stream = await graph.stream(new Command(cmd), streamConfig);
+        stream = await engine.resume({ resume: resumeValue }, streamConfig);
       } else if (startState) {
-        stream = await graph.stream(startState, streamConfig);
+        stream = await engine.run(startState, streamConfig);
       } else {
-        stream = await graph.stream(null, streamConfig);
+        stream = await engine.run(null, streamConfig);
       }
       startState = null;
 
@@ -479,9 +479,9 @@ export async function* runAgent(
     try {
       store.close();
     } catch {
-      /* store 关闭失败不影响 checkpointer 清理 */
+      /* store 关闭失败不影响 engine 清理 */
     }
-    checkpointer.close();
+    engine.close();
   }
 }
 
