@@ -86,18 +86,6 @@ describe('read-path exhaustion detection (10 concurrent reads)', () => {
         config: fakeConfig,
         checkpointPath,
         shellExecutor: shell,
-        toolResultSink: (
-          callId,
-          toolName,
-          ok,
-          _summary,
-          _totalLines,
-          _toolTokenCount,
-          _exitCode,
-          status,
-        ) => {
-          toolResultSinkCalls.push({ callId, toolName, ok, status });
-        },
         model: new FakeChatModel([
           new AIMessage({ content: '', tool_calls: toolCalls }),
           new AIMessage({ content: '任务完成，所有猫检查完毕' }),
@@ -178,18 +166,6 @@ describe('read-path exhaustion detection (10 concurrent reads)', () => {
         config: fakeConfig,
         checkpointPath,
         shellExecutor: shell,
-        toolResultSink: (
-          callId,
-          toolName,
-          ok,
-          _summary,
-          _totalLines,
-          _toolTokenCount,
-          _exitCode,
-          status,
-        ) => {
-          toolResultSinkCalls.push({ callId, toolName, ok, status });
-        },
         model: new FakeChatModel([
           new AIMessage({ content: '', tool_calls: toolCalls }),
           new AIMessage({ content: 'done' }),
@@ -275,19 +251,6 @@ describe('read-path exhaustion detection (10 concurrent reads)', () => {
         config: fakeConfig,
         checkpointPath,
         shellExecutor: shell,
-        toolResultSink: (
-          callId,
-          _toolName,
-          _ok,
-          _summary,
-          _totalLines,
-          _toolTokenCount,
-          _exitCode,
-          status,
-        ) => {
-          const stage = callId.startsWith('b2-') ? 'batch2' : 'batch1';
-          toolResultSinkCalls.push({ callId, status, stage });
-        },
         model: new FakeChatModel([
           // First response: 10 cats
           new AIMessage({ content: '', tool_calls: batch1 }),

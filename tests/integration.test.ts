@@ -1083,7 +1083,7 @@ describe('sandbox executor in agent graph', () => {
     }
   });
 
-  test('toolResultSink preserves full timeout stdout for bounded long-running commands', async () => {
+  test('runtimeEventSink preserves full timeout stdout for bounded long-running commands', async () => {
     setUp();
     try {
       const stdout = Array.from({ length: 30 }, (_, i) => `startup line ${i + 1}`).join('\n');
@@ -1100,8 +1100,10 @@ describe('sandbox executor in agent graph', () => {
         config: fakeConfig,
         checkpointPath,
         shellExecutor: shell,
-        toolResultSink: (_callId, _toolName, _ok, summary) => {
-          summaries.push(summary);
+        runtimeEventSink: (event) => {
+          if (event.type === 'tool.finished' && event.result.exitCode === 124) {
+            summaries.push(event.result.stdout);
+          }
         },
         model: new FakeChatModel([
           new AIMessage({

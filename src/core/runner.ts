@@ -68,18 +68,6 @@ export interface RunAgentInput {
   skillOptions?: import('@/core/skills/types').SkillScanOptions;
   /** 可选 MCP 管理器，提供 MCP 工具和资源 / Optional MCP manager, provides MCP tools and resources */
   mcpManager?: import('@/core/mcp').McpManager;
-  /** 工具完成回调 / Per-tool completion callback for progressive TUI display */
-  toolResultSink?: (
-    callId: string,
-    toolName: string,
-    ok: boolean,
-    summary: string,
-    totalLines?: number,
-    toolTokenCount?: number,
-    exitCode?: number,
-    status?: 'success' | 'error' | 'exhausted',
-    reviewFailure?: string,
-  ) => void;
   /** 调用端标识 / Frontend identity */
   frontend?: string;
   /** 初始执行阶段；TUI plan mode 会传入 planning / Initial execution phase */
@@ -221,39 +209,6 @@ export async function* runAgent(
     }
   };
 
-  const toolResultSink =
-    input.toolResultSink ??
-    ((
-      callId,
-      toolName,
-      ok,
-      summary,
-      totalLines,
-      _toolTokenCount,
-      exitCode,
-      status,
-      reviewFailure,
-    ) => {
-      // 仅推 TUI（processStream 会从 chunk 生成更完整的 tool_done 并写入日志）
-      try {
-        provider.onEvent({
-          type: 'tool_done',
-          data: {
-            call_id: callId,
-            name: toolName,
-            ok,
-            summary,
-            ...(exitCode != null ? { exitCode } : {}),
-            ...(totalLines != null ? { totalLines } : {}),
-            ...(status ? { status } : {}),
-            ...(reviewFailure ? { reviewFailure } : {}),
-          },
-        });
-      } catch {
-        // TUI 异常不影响 Agent
-      }
-    });
-
   // Shell 实时输出 → TUI 事件 / Live shell output → TUI event
   const toolProgressSink = (
     callId: string,
@@ -294,7 +249,6 @@ export async function* runAgent(
     mcpManager: input.mcpManager,
     subagentEventSink,
     subagentSignal: input.signal,
-    toolResultSink,
     toolProgressSink,
     runtimeEventSink,
   });

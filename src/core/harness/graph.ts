@@ -70,7 +70,7 @@ import {
   toolRequestFromMessage,
 } from './tool-requests';
 import { runApprovedTool } from './tool-runner';
-import { normalizeUserInputResume, userInputToolMessage } from './user-input';
+import { userInputToolMessage } from './user-input';
 
 /** 构建代码 Agent 图的输入 / Build code agent graph input */
 export interface BuildCodeAgentGraphInput {
@@ -96,21 +96,6 @@ export interface BuildCodeAgentGraphInput {
   subagentEventSink?: import('@/core/subagent/types').SubAgentEventSink;
   /** 子 agent 中止信号 */
   subagentSignal?: AbortSignal;
-  /** 工具完成回调 — 每个工具执行完立即调用，不等 Promise.all 整体返回。
-   *  使 TUI 能在工具并行执行期间逐项展示完成状态，而非等全部结束后一起刷新。
-   *  Per-tool completion callback — called as each tool finishes during
-   *  Promise.all, so the TUI shows progressive completion. */
-  toolResultSink?: (
-    callId: string,
-    toolName: string,
-    ok: boolean,
-    summary: string,
-    totalLines?: number,
-    toolTokenCount?: number,
-    exitCode?: number,
-    status?: 'success' | 'error' | 'exhausted',
-    reviewFailure?: string,
-  ) => void;
   /** 工具进度回调 — shell 进程产生输出时逐行调用，使 TUI 实时展示。
    *  Per-line progress callback — called for each stdout/stderr line during
    *  shell execution, so the TUI shows live output. */
@@ -915,23 +900,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       request,
     }) as AgentResumeValue;
 
-    // 与 executeOneTool 保持一致的 toolResultSink 路径：ToolMessage 在
-    // checkpoint 反序列化后会丢失 _getType，仅靠 stream → isToolMessage →
-    // parseToolResultEvents 不够可靠。直接发出 tool_done 确保 TUI 及时更新。
-    // Mirror executeOneTool's toolResultSink pattern: ToolMessage loses _getType
-    // after checkpoint deserialization; stream path alone is unreliable. Emit
-    // tool_done directly so the TUI updates without depending on stream parsing.
-    if (input.toolResultSink && request.id) {
-      const normalized = normalizeUserInputResume(resume);
-      const summary = normalized.answers
-        ? Object.entries(normalized.answers)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join('\n')
-        : normalized.answer;
-      input.toolResultSink(request.id, 'ask_user', true, summary);
-    }
-
-    // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
+    // RuntimeEvent 管道发出 tool_done
     emitRuntimeEvent({
       type: 'user_input.answered',
       interactionId: request.id ?? '',
@@ -1010,13 +979,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       // 首次方案审批重置授权为 default；执行中修订方案保留现有授权（如 full_access）
       // First plan approval resets authorization to default; plan revision preserves existing authorization
 
-      // 与 executeOneTool 一致：直接发出 tool_done，不依赖 stream 解析
-      // Mirror executeOneTool: emit tool_done directly, don't depend on stream parsing
-      if (input.toolResultSink && request.id) {
-        input.toolResultSink(request.id, 'update_plan', true, planSummary.slice(0, 200));
-      }
-
-      // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
+      // RuntimeEvent 管道发出 tool_done
       emitRuntimeEvent({
         type: 'plan.approved',
         interactionId: request.id ?? '',
@@ -1056,15 +1019,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     const supplement = resumeObj?.planSupplement;
     if (typeof supplement === 'string' && supplement.length > 0) {
-      if (input.toolResultSink && request.id) {
-        input.toolResultSink(
-          request.id,
-          'update_plan',
-          false,
-          `Plan needs revision: ${supplement}`,
-        );
-      }
-      // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
       emitRuntimeEvent({
         type: 'plan.revision_requested',
         interactionId: request.id ?? '',
@@ -1073,10 +1027,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       return rejectedToolMessage(request, `Plan needs revision. User feedback: ${supplement}`);
     }
 
-    if (input.toolResultSink && request.id) {
-      input.toolResultSink(request.id, 'update_plan', false, 'plan rejected by user');
-    }
-    // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
     emitRuntimeEvent({
       type: 'plan.rejected',
       interactionId: request.id ?? '',
@@ -1166,28 +1116,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    // 逐个推送完成事件，TUI 在并行执行期间逐项刷新 / Push completion
-    // event per-tool so TUI refreshes progressively during parallel execution.
-    const summary =
-      request.name === 'shell_execute' && result.exitCode === 124 && result.stdout
-        ? result.stdout
-        : (result.stdout || result.stderr || '').slice(0, 200);
-    const reviewFailure = request.id
-      ? state.autoReviewState.pendingWarnings[request.id]
-      : undefined;
-    input.toolResultSink?.(
-      request.id ?? '',
-      request.name,
-      result.ok !== false,
-      summary,
-      result.totalLines,
-      undefined, // toolTokenCount computed in runner's parseToolResultEvents
-      result.exitCode,
-      undefined, // status — determined by runner
-      reviewFailure,
-    );
-
-    // Phase 1: 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
+    // RuntimeEvent 管道发出 tool_done
     emitRuntimeEvent({
       type: 'tool.finished',
       toolCallId: request.id ?? '',
@@ -1198,6 +1127,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         exitCode: result.exitCode ?? 0,
         stdout: result.stdout ?? '',
         stderr: result.stderr ?? '',
+        ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
       },
     });
 
@@ -1354,20 +1284,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
-      const summary =
-        request.name === 'shell_execute' && result.exitCode === 124 && result.stdout
-          ? result.stdout
-          : (result.stdout || result.stderr || '').slice(0, 200);
-      input.toolResultSink?.(
-        request.id ?? '',
-        request.name,
-        result.ok !== false,
-        summary,
-        result.totalLines,
-        undefined,
-        result.exitCode,
-      );
-      // 与 toolResultSink 并行发出 RuntimeEvent，不替代
+      // RuntimeEvent 管道发出 tool_done
       emitRuntimeEvent({
         type: 'tool.finished',
         toolCallId: request.id ?? '',
@@ -1539,21 +1456,19 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           status: 'exhausted' as unknown as ToolMessage['status'],
         });
         messages.push(blockedMsg);
-        input.toolResultSink?.(
-          req.id ?? '',
-          req.name,
-          false,
-          `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
-          undefined,
-          undefined,
-          -1,
-          'exhausted',
-        );
-        // 与 toolResultSink 并行发出 RuntimeEvent（exhaustion）
+        // RuntimeEvent 管道：exhaustion preflight
         emitRuntimeEvent({
-          type: 'tool.failed',
+          type: 'tool.finished',
           toolCallId: req.id ?? '',
-          error: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+          name: req.name,
+          result: {
+            ok: false,
+            command: req.protectedCommand ?? '',
+            exitCode: -1,
+            stdout: '',
+            stderr: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+            status: 'exhausted',
+          },
         });
         continue;
       }
@@ -1574,21 +1489,23 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
             (r.toolMessage as ToolMessage).name ?? 'unknown',
             newExhaustedFp,
           );
-          // Override the earlier toolResultSink (from executeOneTool, Path A)
-          // which reported plain ok=false. The TUI needs status:'exhausted'
-          // to render the amber dot and notification text block.
+          // Override the earlier RuntimeEvent (from executeOneTool)
+          // to carry status: 'exhausted' so the TUI renders the amber dot.
           const toolName = (r.toolMessage as ToolMessage).name ?? 'unknown';
           const callId = ((r.toolMessage as ToolMessage).tool_call_id as string) || '';
-          input.toolResultSink?.(
-            callId,
-            toolName,
-            false,
-            `Execution blocked: too many repeated failures for ${toolName}.`,
-            undefined,
-            undefined,
-            -1,
-            'exhausted',
-          );
+          emitRuntimeEvent({
+            type: 'tool.finished',
+            toolCallId: callId,
+            name: toolName,
+            result: {
+              ok: false,
+              command: '',
+              exitCode: -1,
+              stdout: '',
+              stderr: `Execution blocked: too many repeated failures for ${toolName}.`,
+              status: 'exhausted',
+            },
+          });
         }
         messages.push(r.toolMessage);
       }
@@ -1624,13 +1541,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
             status: 'error',
           });
           messages.push(blockedMsg);
-          input.toolResultSink?.(
-            req.id ?? '',
-            req.name,
-            false,
-            `Concurrent same-file ${req.name} blocked for '${editPath}'. Combine into one call.`,
-          );
-          // 与 toolResultSink 并行发出 RuntimeEvent
           emitRuntimeEvent({
             type: 'tool.rejected',
             toolCallId: req.id ?? '',
@@ -1664,21 +1574,19 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           status: 'exhausted' as unknown as ToolMessage['status'],
         });
         messages.push(blockedMsg);
-        input.toolResultSink?.(
-          req.id ?? '',
-          req.name,
-          false,
-          `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
-          undefined,
-          undefined,
-          -1,
-          'exhausted',
-        );
-        // 与 toolResultSink 并行发出 RuntimeEvent（exhaustion）
+        // RuntimeEvent 管道：exhaustion preflight (sequential)
         emitRuntimeEvent({
-          type: 'tool.failed',
+          type: 'tool.finished',
           toolCallId: req.id ?? '',
-          error: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+          name: req.name,
+          result: {
+            ok: false,
+            command: req.protectedCommand ?? '',
+            exitCode: -1,
+            stdout: '',
+            stderr: `Execution blocked: too many repeated failures for ${req.name}${preflightPath ? ` on ${preflightPath}` : ''}.`,
+            status: 'exhausted',
+          },
         });
         continue;
       }
@@ -1697,18 +1605,20 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         if (newExhaustedFp) {
           // Rebuild ToolMessage with exhaustion signal so the model sees it immediately.
           r.toolMessage = injectExhaustionSignal(r.toolMessage, req.name, newExhaustedFp);
-          // Override the earlier toolResultSink (from executeOneTool, Path A)
-          // which reported plain ok=false. The TUI needs status:'exhausted'.
-          input.toolResultSink?.(
-            req.id ?? '',
-            req.name,
-            false,
-            `Execution blocked: too many repeated failures for ${req.name}.`,
-            undefined,
-            undefined,
-            -1,
-            'exhausted',
-          );
+          // Override the earlier RuntimeEvent with status:'exhausted' for TUI
+          emitRuntimeEvent({
+            type: 'tool.finished',
+            toolCallId: req.id ?? '',
+            name: req.name,
+            result: {
+              ok: false,
+              command: '',
+              exitCode: -1,
+              stdout: '',
+              stderr: `Execution blocked: too many repeated failures for ${req.name}.`,
+              status: 'exhausted',
+            },
+          });
         }
         messages.push(r.toolMessage);
       }
