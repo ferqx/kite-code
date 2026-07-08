@@ -38,12 +38,20 @@ export interface ToolProgressEvent {
 export interface ToolFinishedEvent {
   type: 'tool.finished';
   toolCallId: string;
+  /** 工具名称（用于 TUI 渲染 tool_done 时匹配 tool_card） */
+  name: string;
   result: {
     ok: boolean;
     command: string;
     exitCode: number;
     stdout: string;
     stderr: string;
+    /** 执行层状态（success/error/exhausted），映射到 tool_done.status */
+    status?: 'success' | 'error' | 'exhausted';
+    /** 文件读取行数（read_file 工具） */
+    totalLines?: number;
+    /** 工具输出的 token 数 */
+    toolTokenCount?: number;
   };
 }
 

@@ -940,11 +940,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     emitRuntimeEvent({
       type: 'tool.finished',
       toolCallId: request.id ?? '',
+      name: 'ask_user',
       result: {
         ok: true,
         command: request.protectedCommand ?? '',
         exitCode: 0,
-        stdout: '',
+        stdout: JSON.stringify({
+          ok: true,
+          answer: typeof resume === 'string' ? resume : JSON.stringify(resume),
+        }),
         stderr: '',
       },
     });
@@ -1021,6 +1025,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       emitRuntimeEvent({
         type: 'tool.finished',
         toolCallId: request.id ?? '',
+        name: 'update_plan',
         result: {
           ok: true,
           command: request.protectedCommand ?? '',
@@ -1186,6 +1191,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     emitRuntimeEvent({
       type: 'tool.finished',
       toolCallId: request.id ?? '',
+      name: request.name,
       result: {
         ok: result.ok !== false,
         command: request.protectedCommand ?? '',
@@ -1365,6 +1371,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       emitRuntimeEvent({
         type: 'tool.finished',
         toolCallId: request.id ?? '',
+        name: request.name,
         result: {
           ok: result.ok !== false,
           command: result.command ?? request.protectedCommand,

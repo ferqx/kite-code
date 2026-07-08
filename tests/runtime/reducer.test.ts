@@ -341,6 +341,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     const event: RuntimeEvent = {
       type: 'tool.finished',
       toolCallId: 'tool-2',
+      name: 'test-tool',
       result: {
         ok: true,
         command: 'pwd',
@@ -367,6 +368,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     const event: RuntimeEvent = {
       type: 'tool.finished',
       toolCallId: 'nonexistent',
+      name: 'test-tool',
       result: { ok: false, command: 'x', exitCode: 1, stdout: '', stderr: 'err' },
     };
 
@@ -703,6 +705,7 @@ describe('reduceRuntimeState — immutability', () => {
     const finished: RuntimeEvent = {
       type: 'tool.finished',
       toolCallId: 'tool-mut',
+      name: 'test-tool',
       result: { ok: true, command: 'cat test.txt', exitCode: 0, stdout: '', stderr: '' },
     };
     const activeBeforeFinish = s2.tools.active;

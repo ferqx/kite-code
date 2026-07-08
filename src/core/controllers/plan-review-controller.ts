@@ -94,6 +94,7 @@ export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
     emitRuntimeEvent?.({
       type: 'tool.finished',
       toolCallId: request.id ?? '',
+      name: 'update_plan',
       result: {
         ok: true,
         command: '',

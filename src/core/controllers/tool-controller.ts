@@ -113,6 +113,7 @@ export async function executeTool(params: ExecuteToolParams): Promise<{
   params.emitRuntimeEvent?.({
     type: 'tool.finished',
     toolCallId: params.request.id ?? '',
+    name: params.request.name,
     result: {
       ok: result.ok !== false,
       command: params.request.protectedCommand ?? '',

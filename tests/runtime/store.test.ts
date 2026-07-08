@@ -404,6 +404,7 @@ describe('edge cases', () => {
       {
         type: 'tool.finished',
         toolCallId: 'c1',
+        name: 'test-tool',
         result: { ok: true, command: 'ls', exitCode: 0, stdout: '', stderr: '' },
       },
       {
@@ -467,6 +468,7 @@ describe('edge cases', () => {
     const event: RuntimeEvent = {
       type: 'tool.finished',
       toolCallId: 'c-null',
+      name: 'test-tool',
       result: {
         ok: true,
         command: 'test',
