@@ -101,6 +101,13 @@ export function projectRuntimeEventToAgentEvent(event: RuntimeEvent): AgentEvent
     case 'approval.rejected':
       return [];
 
+    // ── 运行时环境事件（仅内核内部消费，不投影为 AgentEvent）──
+    case 'authorization.changed':
+      return [];
+
+    case 'phase.changed':
+      return [];
+
     // ── 默认：未知事件类型 ──
     default:
       return [];

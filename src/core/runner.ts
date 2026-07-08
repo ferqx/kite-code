@@ -24,6 +24,9 @@ import type { SupportedChatModel } from './model/factory';
 import type { BunSqliteSaver } from './persistence/checkpoint';
 import type { RuntimeEvent } from './runtime/events';
 import { projectRuntimeEventToAgentEvent } from './runtime/projection';
+import { reduceRuntimeState } from './runtime/reducer';
+import { createInitialRuntimeState, type RuntimeState } from './runtime/state';
+import { createRuntimeStore, type RuntimeStore } from './runtime/store';
 import type { SandboxBackend } from './sandbox';
 import { SessionLogCollector } from './session-logger';
 import { countTokens } from './token-counter';
@@ -155,6 +158,8 @@ export async function* runAgent(
   // sink 必须先于 collector 定义（闭包捕获），collector 在 sink 之后赋值。
   // subagentEventSink 也使用 sink，因此定义顺序：sink → collector → subagentEventSink → graph。
   let collector: SessionLogCollector;
+  let store!: RuntimeStore;
+  let runtimeState!: RuntimeState;
 
   const sink: EventSink = {
     emit(event: AgentEvent): void {
@@ -268,6 +273,8 @@ export async function* runAgent(
   // 运行时事件管道：图节点产出的 RuntimeEvent 经投影函数转换为 AgentEvent 后推入统一 sink
   // RuntimeEvent pipeline: graph nodes emit RuntimeEvent → projection → AgentEvent → unified sink
   const runtimeEventSink = (event: RuntimeEvent) => {
+    runtimeState = reduceRuntimeState(runtimeState, event);
+    store.appendEvents(input.threadId, [event]);
     const agentEvents = projectRuntimeEventToAgentEvent(event);
     for (const agentEvent of agentEvents) {
       sink.emit(agentEvent);
@@ -294,6 +301,31 @@ export async function* runAgent(
   try {
     const initialAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? 'auto');
     const initialPhase = input.initialPhase ?? workspaceAccessToPhase(initialAccess);
+
+    // ── Runtime 状态与存储初始化 / Runtime state and store initialization ──
+    const runtimeDbPath = input.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
+    store = createRuntimeStore(runtimeDbPath);
+
+    if (input.resume) {
+      const snapshot = store.loadSnapshot<RuntimeState>(input.threadId);
+      runtimeState =
+        snapshot ??
+        createInitialRuntimeState({
+          threadId: input.threadId,
+          userId: input.userId,
+          workspace: input.workspace,
+          interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
+          phase: initialPhase,
+        });
+    } else {
+      runtimeState = createInitialRuntimeState({
+        threadId: input.threadId,
+        userId: input.userId,
+        workspace: input.workspace,
+        interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
+        phase: initialPhase,
+      });
+    }
 
     const prevAuth = await readLastAuthorization(checkpointer, input.threadId);
 
@@ -439,6 +471,16 @@ export async function* runAgent(
     await collector.finalize('fatal');
     throw e;
   } finally {
+    try {
+      store.saveSnapshot(input.threadId, runtimeState);
+    } catch {
+      /* 快照保存失败不影响清理 */
+    }
+    try {
+      store.close();
+    } catch {
+      /* store 关闭失败不影响 checkpointer 清理 */
+    }
     checkpointer.close();
   }
 }

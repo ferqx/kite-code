@@ -3,6 +3,8 @@ import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { type AutoReviewState, DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
 import type { ExecutionJournalEntry } from '@/core/execution/journal';
 import type { PermitBatch } from '@/core/execution/permit';
+import type { PlanLifecycleState, RuntimeState } from '@/core/runtime/state';
+import { computePlanStructuralHash } from '@/core/runtime/state';
 import type { SandboxBackend } from '@/core/sandbox/platform';
 import type { SubAgentContinuation } from '@/core/subagent/types';
 import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
@@ -148,3 +150,154 @@ export const AgentState = Annotation.Root({
 });
 
 export type CodeAgentState = typeof AgentState.State;
+
+// ── Phase 2 bridge functions (temporary) ──
+
+function planLifecycleToChannels(plan: PlanLifecycleState): {
+  plan: AgentPlan | null;
+  planReviewed: boolean;
+} {
+  switch (plan.kind) {
+    case 'none':
+      return { plan: null, planReviewed: false };
+    case 'drafted':
+    case 'awaiting_review':
+      return { plan: plan.draft, planReviewed: false };
+    case 'approved':
+    case 'building':
+    case 'completed':
+      return { plan: plan.plan, planReviewed: true };
+    case 'needs_revision':
+      return { plan: plan.draft, planReviewed: true };
+  }
+}
+
+function channelsToPlanLifecycle(
+  agentPlan: AgentPlan | null,
+  planReviewed: boolean,
+  current: PlanLifecycleState,
+): PlanLifecycleState {
+  if (agentPlan === null) return { kind: 'none' };
+
+  const hash = computePlanStructuralHash(agentPlan);
+  const existingPlanId =
+    current.kind !== 'none' && 'planId' in current ? current.planId : crypto.randomUUID();
+  const nextVersion = current.kind !== 'none' && 'version' in current ? current.version + 1 : 1;
+
+  if (!planReviewed) {
+    if (current.kind === 'awaiting_review') {
+      return {
+        kind: 'awaiting_review',
+        planId: current.planId,
+        version: current.version,
+        draft: agentPlan,
+        structuralHash: hash,
+        interactionId: current.interactionId,
+        toolCallId: current.toolCallId,
+      };
+    }
+    return {
+      kind: 'drafted',
+      planId: existingPlanId,
+      version: nextVersion,
+      draft: agentPlan,
+      structuralHash: hash,
+    };
+  }
+
+  // planReviewed === true
+  switch (current.kind) {
+    case 'approved':
+      return {
+        kind: 'approved',
+        planId: current.planId,
+        version: nextVersion,
+        plan: agentPlan,
+        structuralHash: hash,
+        approvedAtTurnId: current.approvedAtTurnId,
+        executionMode: current.executionMode,
+      };
+    case 'building':
+      return {
+        kind: 'building',
+        planId: current.planId,
+        version: nextVersion,
+        plan: agentPlan,
+        structuralHash: hash,
+      };
+    case 'completed':
+      return {
+        kind: 'building',
+        planId: current.planId,
+        version: nextVersion,
+        plan: agentPlan,
+        structuralHash: hash,
+      };
+    default:
+      // awaiting_review → approved transition, or newly approved plan
+      return {
+        kind: 'approved' as const,
+        planId: existingPlanId,
+        version: nextVersion,
+        plan: agentPlan,
+        structuralHash: hash,
+        approvedAtTurnId: '',
+        executionMode: 'manual' as const,
+      };
+  }
+}
+
+/**
+ * Map the unified {@link RuntimeState} to legacy AgentState channels.
+ * Used so existing graph nodes that read/write `plan` + `planReviewed` can
+ * consume the runtime kernel's plan lifecycle state without refactoring.
+ *
+ * @deprecated Temporary Phase 2 bridge — remove once all graph nodes operate on
+ *             {@link RuntimeState} directly.
+ */
+export function runtimeStateToAgentStateChannels(rs: RuntimeState): Partial<CodeAgentState> {
+  const planChannels = planLifecycleToChannels(rs.plan);
+
+  return {
+    userId: rs.session.userId,
+    threadId: rs.session.threadId,
+    workspace: rs.session.workspace,
+    workspaceAccess: rs.workspaceAccess,
+    phase: rs.phase,
+    interactionMode: rs.mode,
+    plan: planChannels.plan,
+    planReviewed: planChannels.planReviewed,
+    authorization: rs.authorization,
+    autoReviewState: rs.autoReview,
+    doomLoopTracker: rs.doomLoop,
+  };
+}
+
+/**
+ * Reverse bridge: when a graph node modifies legacy AgentState channels
+ * directly, compute the corresponding {@link RuntimeState} update.
+ *
+ * @deprecated Temporary Phase 2 bridge — remove once all graph nodes operate on
+ *             {@link RuntimeState} directly.
+ */
+export function agentStateToRuntimeStateUpdate(
+  agentState: CodeAgentState,
+  current: RuntimeState,
+): Partial<RuntimeState> {
+  const plan = channelsToPlanLifecycle(agentState.plan, agentState.planReviewed, current.plan);
+
+  return {
+    session: {
+      userId: agentState.userId,
+      threadId: agentState.threadId,
+      workspace: agentState.workspace,
+    },
+    workspaceAccess: agentState.workspaceAccess,
+    phase: agentState.phase,
+    mode: agentState.interactionMode,
+    authorization: agentState.authorization,
+    autoReview: agentState.autoReviewState,
+    doomLoop: agentState.doomLoopTracker,
+    plan,
+  };
+}

@@ -4,6 +4,7 @@
 
 import type {
   AgentPlan,
+  AuthorizationMode,
   ShellApprovalGrant,
   ToolApprovalPayload,
   UserInputPayload,
@@ -134,6 +135,20 @@ export interface ApprovalRejectedEvent {
   reason: string;
 }
 
+// ── 运行时环境事件 / Runtime environment events ──
+
+/** 授权模式变更 / Authorization mode changed */
+export interface AuthorizationChangedEvent {
+  type: 'authorization.changed';
+  mode: AuthorizationMode;
+}
+
+/** 执行阶段变更 / Execution phase changed */
+export interface PhaseChangedEvent {
+  type: 'phase.changed';
+  phase: 'planning' | 'building';
+}
+
 // ── 运行时事件联合类型 / Runtime event discriminated union ──
 
 /** 运行时事件 — 所有状态变更的统一类型表示 */
@@ -152,4 +167,6 @@ export type RuntimeEvent =
   | PlanRejectedEvent
   | ApprovalRequestedEvent
   | ApprovalGrantedEvent
-  | ApprovalRejectedEvent;
+  | ApprovalRejectedEvent
+  | AuthorizationChangedEvent
+  | PhaseChangedEvent;
