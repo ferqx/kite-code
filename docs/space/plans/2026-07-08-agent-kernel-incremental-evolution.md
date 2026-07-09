@@ -1,9 +1,10 @@
 # Agent Runtime Kernel 重构方案
 
-状态：draft
+状态：**实施中（~80% 完成）**
 优先级：P0
 依赖：无
 替代：无（全新方案）
+最后更新：2026-07-09
 
 > 原始提案：资深 Agent 架构师提供的完整重构方案，经代码库验证后整理为正式实施计划。
 
@@ -867,3 +868,88 @@ auto-review 只产生 decision。工具能否执行，必须经过 PolicyEngine 
 - [[tool-gated-autonomy]] — 工具 gating 与审批边界（Phase 4 策略化的基础）
 - [[three-layer-architecture-design]] — 三层架构设计（Runtime 层符合 core 层定位）
 - [[2026-06-19-event-mechanism-refactor]] — 事件机制重构（已完成，Phase 1 在此基础上深化）
+
+---
+
+## 10. 实施状态（2026-07-09 审计）
+
+### 10.1 各 Phase 完成度
+
+| Phase | 完成度 | 关键成果 | 主要缺口 |
+|-------|--------|---------|---------|
+| Phase 1 (RuntimeEvent) | **95%** | 17 种事件类型 + projection；全 graph 节点走 RuntimeEvent 管道；toolResultSink 从节点中移除 | turn/model/user/plan 生命周期事件（10 种）未实现 |
+| Phase 2 (State + Reducer) | **85%** | RuntimeState 完整类型 + 14 case reducer + SQLite Store + State Bridge 双向转换 | auto_review 事件在 reducer 中无显式 case（走 default）；transcript/approvals 子状态未独立 |
+| Phase 3 (Controller) | **86%** | 6/7 controller 已创建并全部接入 graph.ts；graph.ts 从 1888 行缩减至 1693 行（-10.3%） | transcript-controller 未创建（model/context.ts 已足够独立，低优先级） |
+| Phase 4 (Policy) | **70%** | RuntimePolicy 接口 + 3 种 mode 实现 + effects/scheduler + composePolicies | Policy 系统未接入 graph.ts（routes.ts 仍直接检查 InteractionMode）；auto-review-policy/loop-policy 缺失 |
+| Phase 5 (Engine) | **95%** | AgentLoopEngine 接口 + LangGraph 适配器；runner.ts 全部 5 个入口使用 engine，0 处直接 buildCodeAgentGraph 调用 | kernel.ts 未实现（AgentKernel 主循环）；checkpoint 未降级为执行缓存 |
+
+### 10.2 目录结构完成度
+
+| 模块 | 计划 | 已创建 | 缺失 |
+|------|------|--------|------|
+| `src/core/runtime/` | 10 文件 | 11 文件 (+bridge) | kernel.ts |
+| `src/core/controllers/` | 7 文件 | 6 文件 | transcript-controller.ts |
+| `src/core/policies/` | 7 文件 | 5 文件 | auto-review-policy.ts, loop-policy.ts |
+| `src/core/engines/` | 2 文件 | 2 文件 | — |
+
+### 10.3 RuntimeEvent 类型覆盖
+
+| 类别 | 计划 | 已实现 | 缺失 |
+|------|------|--------|------|
+| Turn 生命周期 | 3 | 0 | started, completed, aborted |
+| User message | 1 | 0 | message_appended |
+| Model interaction | 2 | 0 | requested, responded |
+| Tool lifecycle | 6 | 6 | — |
+| Plan lifecycle | 7 | 4 | drafted, progress_updated, completed |
+| User input | 2 | 2 | — |
+| Approval | 4 | 3 | command_replaced |
+| Auto-review | 2 | 2 | — |
+| State changes | 2 | 2 | — |
+| **合计** | **29** | **19** | **10** |
+
+### 10.4 Controller 接线状态
+
+| Controller | 已创建 | 已接入 graph.ts | graph 节点 |
+|-----------|--------|----------------|-----------|
+| plan-review-controller | ✅ | ✅ | planReview → handlePlanReview |
+| user-input-controller | ✅ | ✅ | userInput → handleUserInput |
+| model-controller | ✅ | ✅ | agent → invokeAgentModel |
+| tool-controller | ✅ | ✅ | executeOneTool → executeTool |
+| auto-review-controller | ✅ | ✅ | approval → runAutoReview |
+| approval-controller | ✅ | ✅ | approval → handleApprovalResume |
+| transcript-controller | ❌ | — | — |
+
+### 10.5 硬规则合规
+
+| Rule | 状态 | 备注 |
+|------|------|------|
+| 1. graph 节点不直接修 UI | ✅ | toolResultSink 已从 graph 节点中移除 |
+| 2. 不用 boolean 表示生命周期 | ✅ | PlanLifecycleState discriminated union |
+| 3. mode 只影响 policy | ⚠️ | Policy 已实现但未接入；routes.ts 仍直接检查 InteractionMode |
+| 4. auto-review 不直接执行工具 | ✅ | runAutoReview 只返回 decision |
+| 5. 每个 interrupt 有 interactionId | ✅ | 所有 interrupt 值包含 interaction id |
+| 6. 每个 tool status 事件化 | ✅ | tool.finished/rejected/failed 全部 emit |
+| 7. core 不依赖 app | ✅ | 零 app/ import |
+
+### 10.6 测试覆盖
+
+| 测试文件 | 状态 | 测试数 |
+|---------|------|--------|
+| tests/runtime/reducer.test.ts | ✅ | 51 |
+| tests/runtime/store.test.ts | ✅ | 39 |
+| tests/runtime/bridge.test.ts | ✅ | 15 |
+| tests/policies/mode-policy.test.ts | ✅ | 33 |
+| tests/policies/approval-policy.test.ts | ❌ | — |
+| tests/policies/auto-review-policy.test.ts | ❌ | — |
+| tests/execution/reliability-reads.test.ts | ✅ | 3（已适配 runtimeEventSink） |
+| 全量回归（9 文件） | ✅ | 383 pass, 0 fail |
+
+### 10.7 剩余工作（按优先级）
+
+1. **Policy 接入 graph.ts**（Rule 3 修复）— 替换 routes.ts 中直接的 InteractionMode 检查
+2. **kernel.ts 实现**— AgentKernel 主循环，连接 RuntimeState + Scheduler + Controllers + Engine
+3. **Checkpoint 降级**— RuntimeStore 成为唯一状态权威，LangGraph checkpoint 降为执行缓存
+4. **RuntimeEvent 补全**— turn/model/user/plan 生命周期事件
+5. **缺失 policy 实现**— auto-review-policy.ts, loop-policy.ts
+6. **缺失测试**— approval-policy.test.ts, auto-review-policy.test.ts
+7. **transcript-controller**— 低优先级，model/context.ts 已足够独立
