@@ -2,7 +2,6 @@
 // Phase 2: 统一运行时状态 — 替代分散的 AgentState channel，提供类型安全的 discriminated union
 // Phase 2: Unified runtime state — replaces scattered AgentState channels with type-safe discriminated unions
 
-import { createHash } from 'node:crypto';
 import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
 import type {
@@ -327,18 +326,4 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
 
 // ── 工具函数 / Utility functions ──
 
-/**
- * 计算方案的结构化哈希值，用于判断方案内容是否发生了结构性变更。
- * Computes the structural hash of a plan, used to detect structural changes.
- *
- * 哈希计算内容：plan.name + steps.length + 每个 step 的 step 文本。
- * Hash input: plan.name + steps.length + each step's step text.
- *
- * @param plan - 要计算的方案 / The plan to hash
- * @returns SHA256 十六进制哈希字符串 / SHA256 hex digest string
- */
-export function computePlanStructuralHash(plan: AgentPlan): string {
-  const stepsText = plan.steps.map((s) => s.step).join('');
-  const input = plan.name + plan.steps.length + stepsText;
-  return createHash('sha256').update(input).digest('hex');
-}
+export { computePlanStructuralHash } from './hashes';

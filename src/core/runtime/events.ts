@@ -157,6 +157,30 @@ export interface PhaseChangedEvent {
   phase: 'planning' | 'building';
 }
 
+// ── Auto-review 事件 / Auto-review events ──
+
+/** 自动审查请求 / Auto-review requested */
+export interface AutoReviewRequestedEvent {
+  type: 'auto_review.requested';
+  reviewId: string;
+  toolCallId: string;
+}
+
+/** 自动审查完成 / Auto-review completed */
+export interface AutoReviewCompletedEvent {
+  type: 'auto_review.completed';
+  reviewId: string;
+  toolCallId: string;
+  result: {
+    ok: boolean;
+    approved: boolean;
+    grant?: string;
+    reason?: string;
+    reviewerModelName: string;
+    durationMs: number;
+  };
+}
+
 // ── 运行时事件联合类型 / Runtime event discriminated union ──
 
 /** 运行时事件 — 所有状态变更的统一类型表示 */
@@ -177,4 +201,6 @@ export type RuntimeEvent =
   | ApprovalGrantedEvent
   | ApprovalRejectedEvent
   | AuthorizationChangedEvent
-  | PhaseChangedEvent;
+  | PhaseChangedEvent
+  | AutoReviewRequestedEvent
+  | AutoReviewCompletedEvent;

@@ -1,3 +1,9 @@
+// TODO(Phase 4 完成): 替换为 scheduler.ts resolveToolRouteFromState。
+// 迁移步骤 / Migration steps:
+//   1. routeEntry / routeAfterAgent 替换为 resolveToolRouteFromState 调用
+//   2. routeAfterApproval / routeAfterTools 中的 full_access / exhausted 逻辑移入 scheduler
+//   3. 删除本文件，所有路由决策由 decideNextEffect 接管
+
 import { END } from '@langchain/langgraph';
 import { migratePermitBatch } from '@/core/execution/permit';
 import { isPlanProgressOnlyUpdate, isSamePlanTrackingUpdate } from '@/core/policies/plan-policy';
