@@ -2,6 +2,7 @@ import type { ToolMessage } from '@langchain/core/messages';
 import type { PendingToolRequest } from '@/core/harness/tool-requests';
 import { normalizeUserInputResume, userInputToolMessage } from '@/core/harness/user-input';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { genInteractionId } from '@/core/runtime/ids';
 import type { AgentResumeValue } from '@/core/types';
 import type { AgentPlan } from '@/protocol/events';
 
@@ -17,6 +18,8 @@ export interface UserInputParams {
   planReviewed: boolean;
   /** 运行时事件回调 — RuntimeEvent 是唯一 TUI 通知路径 */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
+  /** 交互 ID（由调用方 graph.ts 传入，或自动生成） */
+  interactionId?: string;
 }
 
 /** 用户输入处理结果 / User input handling result */
@@ -40,7 +43,8 @@ export interface UserInputResult {
  * RuntimeEvent is the sole TUI notification path — no more toolResultSink dual-write.
  */
 export function handleUserInput(params: UserInputParams): UserInputResult {
-  const { request, resume, plan, planReviewed, emitRuntimeEvent } = params;
+  const { request, resume, plan, planReviewed, emitRuntimeEvent, interactionId } = params;
+  const iid = interactionId ?? genInteractionId();
 
   // 规范化用户回复 / Normalize user response
   const normalized = normalizeUserInputResume(resume);
@@ -54,7 +58,7 @@ export function handleUserInput(params: UserInputParams): UserInputResult {
   // RuntimeEvent pipeline emits tool_done — sole TUI notification path
   emitRuntimeEvent?.({
     type: 'user_input.answered',
-    interactionId: request.id ?? '',
+    interactionId: iid,
     answer,
   });
   emitRuntimeEvent?.({

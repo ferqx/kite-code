@@ -1,5 +1,6 @@
 import { ToolMessage } from '@langchain/core/messages';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { genInteractionId } from '@/core/runtime/ids';
 import type { ThreadAuthorizationState } from '@/core/types';
 import type { AgentPlan, InteractionMode, PlanStatus } from '@/protocol/events';
 import { InteractionMode as IM } from '@/protocol/events';
@@ -18,6 +19,8 @@ export interface PlanReviewParams {
   };
   /** 运行时事件回调 — RuntimeEvent 是唯一 TUI 通知路径 */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
+  /** 交互 ID（由调用方 graph.ts 传入，或自动生成） */
+  interactionId?: string;
 }
 
 /** 方案审核结果 / Plan review result */
@@ -46,7 +49,8 @@ export interface PlanReviewResult {
  * RuntimeEvent is the sole TUI notification path — no more toolResultSink dual-write.
  */
 export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
-  const { request, resume, state, emitRuntimeEvent } = params;
+  const { request, resume, state, emitRuntimeEvent, interactionId } = params;
+  const iid = interactionId ?? genInteractionId();
 
   // 规范化 resume — graph.ts 的 interrupt() 可能返回 boolean true/false 或对象
   // Normalize resume — graph.ts interrupt() may return boolean true/false or an object
@@ -85,7 +89,7 @@ export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
     // RuntimeEvent 是唯一 TUI 通知路径 / RuntimeEvent is the sole TUI notification path
     emitRuntimeEvent?.({
       type: 'plan.approved',
-      interactionId: request.id ?? '',
+      interactionId: iid,
       executionMode: executionMode === 'auto' ? 'auto' : 'manual',
     });
     emitRuntimeEvent?.({
@@ -127,7 +131,7 @@ export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
   if (typeof supplement === 'string' && supplement.length > 0) {
     emitRuntimeEvent?.({
       type: 'plan.revision_requested',
-      interactionId: request.id ?? '',
+      interactionId: iid,
       feedback: supplement,
     });
 
@@ -144,7 +148,7 @@ export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
   // ── 拒绝分支 / Reject branch ──
   emitRuntimeEvent?.({
     type: 'plan.rejected',
-    interactionId: request.id ?? '',
+    interactionId: iid,
     reason: 'plan rejected by user',
   });
 

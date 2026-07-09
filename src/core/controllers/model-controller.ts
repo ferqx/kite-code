@@ -5,12 +5,15 @@
 // Extracts tool creation + model invocation from the agent node as a standalone function.
 // Wraps createAgentTools + invokeModel + retry listener lifecycle management.
 
+import type { AIMessage } from '@langchain/core/messages';
 import type { AgentConfig } from '@/core/config/index';
 import { invokeModel } from '@/core/harness/graph';
 import type { CodeAgentState } from '@/core/harness/state';
 import type { McpManager } from '@/core/mcp';
 import type { RetryListenerHost } from '@/core/model/deepseek';
 import type { SupportedChatModel } from '@/core/model/factory';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import { genInteractionId } from '@/core/runtime/ids';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { createAgentTools } from '@/core/tools/definitions';
@@ -30,6 +33,8 @@ export interface InvokeAgentModelParams {
   config: AgentConfig;
   subagentEventSink?: SubAgentEventSink;
   subagentSignal?: AbortSignal;
+  /** 运行时事件回调 — 用于发出 model.requested / model.responded */
+  runtimeEventSink?: (event: RuntimeEvent) => void;
 }
 
 /** Model controller 返回结果 / Model controller return result */
@@ -123,12 +128,31 @@ export async function invokeAgentModel(
   if (hasRetryListener(model)) model.setRetryListener(listener);
 
   try {
+    // RuntimeEvent: model.requested — 记录模型请求前事件
+    const requestId = genInteractionId();
+    params.runtimeEventSink?.({ type: 'model.requested', requestId });
+
     const result = await invokeModel({
       model,
       state,
       tools,
       skills,
       signal: subagentSignal,
+    });
+
+    // RuntimeEvent: model.responded — 记录模型响应事件
+    const messages = result.state?.messages as AIMessage[] | undefined;
+    const responseMsg = messages?.[0];
+    params.runtimeEventSink?.({
+      type: 'model.responded',
+      messageId: responseMsg?.id ?? requestId,
+      toolCalls:
+        responseMsg?.tool_calls?.map((tc) => ({
+          id: tc.id ?? '',
+          name: tc.name,
+          args: tc.args,
+        })) ?? [],
+      text: typeof responseMsg?.content === 'string' ? responseMsg.content : undefined,
     });
 
     return {
