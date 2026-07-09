@@ -244,18 +244,23 @@ function closeCurrentThought(state: TuiState): TuiState {
       (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
     );
     const anyCancelled = block.tools.some((t) => t.status === 'cancelled');
-    const hasPending = block.tools.some((t) => t.status === 'running');
-    const result = hasError
-      ? ('error' as const)
-      : anyCancelled || hasPending
-        ? ('cancelled' as const)
-        : ('done' as const);
+    const allSettled = block.tools.every((t) => t.status !== 'running');
+    // Only assign result when all tools have actually settled.
+    // If tools are still running, leave result undefined — later tool_done
+    // events will recalculate it (lines ~633-648).
+    const result = allSettled
+      ? hasError
+        ? ('error' as const)
+        : anyCancelled
+          ? ('cancelled' as const)
+          : ('done' as const)
+      : undefined;
     return {
       ...block,
       active: false,
       latestActivity: undefined,
       totalElapsedMs: Date.now() - block.createdAt,
-      result,
+      ...(result ? { result } : {}),
     };
   });
   return { ...next, currentThoughtSummaryId: undefined };
@@ -528,6 +533,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         const currentThought = findThoughtSummary(finalized, finalized.currentThoughtSummaryId);
 
         if (currentThought?.active) {
+          // Dedup: skip if this callId already exists in tools (dual pipeline: side-channel + stream)
+          if (currentThought.tools.some((t) => t.callId === event.data.call_id)) {
+            return finalized;
+          }
           const now = Date.now();
           const tools = [...currentThought.tools, entry];
           const latestActivity =
@@ -982,6 +991,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return next;
     }
     case 'need_input': {
+      // Dedup: side-channel + stream interrupt can both emit need_input for the same request.
+      // Skip if a question block is already active (interrupt pending).
+      if (state.interrupt?.kind === 'input') return state;
       const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
       const block: OutputBlock = {
         id: finalized.nextBlockId,

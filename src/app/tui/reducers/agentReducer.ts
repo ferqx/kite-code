@@ -242,12 +242,22 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       }
       // 同步更新 block 上的 startedAt，排除审批等待耗时 / Sync startedAt on blocks to exclude approval wait
       const withResolved = replaceBlockById(state, action.blockId, resolved);
+      // ask_user: 从 resolved 提取 answer text 预填充 tool_card summary，
+      // 确保即使 side-channel tool_done 延迟也能立即展示答案
+      const answerText =
+        typeof (resolved as Record<string, unknown>).resolved === 'string'
+          ? ((resolved as Record<string, unknown>).resolved as string)
+          : undefined;
       const updatedTurns = withResolved.turns.map((turn) => {
         let changed = false;
         const blocks = turn.blocks.map((blk) => {
           if (blk.kind === 'tool_card' && blk.status === 'running') {
             changed = true;
-            return { ...blk, startedAt: now };
+            const prefill =
+              blk.name === 'ask_user' && answerText
+                ? { summary: answerText, status: 'done' as const }
+                : {};
+            return { ...blk, startedAt: now, ...prefill };
           }
           if (blk.kind === 'subagent' && blk.status === 'running') {
             changed = true;
