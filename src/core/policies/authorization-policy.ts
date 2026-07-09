@@ -4,17 +4,9 @@ import type { ShellApprovalGrant } from '@/protocol/events';
 
 // ── 本地类型 / Local types ──
 
-/** 工具风险评估等级 / Tool risk assessment tier */
-export type ToolRisk =
-  | 'read'
-  | 'plan'
-  | 'write_file'
-  | 'execute_code'
-  | 'destructive'
-  | 'network'
-  | 'vcs_mutation'
-  | 'mcp'
-  | 'unknown';
+import type { ToolRisk } from './shell-classification';
+
+export type { ToolRisk };
 
 /** 工具请求最小形状，避免依赖 harness 的 PendingToolRequest / Minimal tool request shape, harness-independent */
 interface ToolRequestShape {
@@ -128,14 +120,7 @@ export function applyApprovalGrant(input: {
 
 // ── shell 命令风险分类 / Shell command risk classification ──
 
-/** 根据 shell 命令内容判定工具风险等级 / Classify the tool risk tier for a shell command */
-export function classifyShellRisk(command: string): ToolRisk {
-  if (isDestructiveShellCommand(command)) return 'destructive';
-  if (isVcsMutationCommand(command)) return 'vcs_mutation';
-  if (isWriteLikeShellCommand(command)) return 'write_file';
-  if (isNetworkCommand(command)) return 'network';
-  return 'execute_code';
-}
+export { classifyShellRisk } from './shell-classification';
 
 // ── 审批 hash / Approval hash ──
 
@@ -179,52 +164,4 @@ export function stableStringify(value: unknown): string {
       .join(',')}}`;
   }
   return JSON.stringify(value);
-}
-
-// ── 内部 shell 命令检测辅助 / Internal shell command detection helpers ──
-
-function isDestructiveShellCommand(command: string): boolean {
-  const normalized = normalizeShell(command);
-  return (
-    /(?:(?:^|[;&|]\s*)|\/)sudo\b/.test(normalized) ||
-    /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r|-r\s+-f|-f\s+-r|--recursive.*--force|--force.*--recursive)\b/.test(
-      normalized,
-    ) ||
-    /\brm\s+-[^\s]*f\b/.test(normalized) ||
-    /\bchmod\s+(?:-[^\s]*[rR]|--recursive)\b/.test(normalized) ||
-    /\bchown\s+(?:-[^\s]*[rR]|--recursive)\b/.test(normalized) ||
-    /(?:(?:^|[;&|]\s*)|\/)kill(?:all)?\b/.test(normalized) ||
-    /\bdd\b.*\bof=\/dev\//.test(normalized) ||
-    /\bmkfs\b/.test(normalized) ||
-    /\b(?:shutdown|reboot|halt|poweroff)\b/.test(normalized) ||
-    /\binit\s+[06]\b/.test(normalized) ||
-    /\bfdisk\b/.test(normalized) ||
-    /\bparted\b/.test(normalized) ||
-    /:\(\)\s*\{.*:.*\|.*:.*\}/.test(normalized) ||
-    />\s*\/dev\/sd/.test(normalized)
-  );
-}
-
-function isVcsMutationCommand(command: string): boolean {
-  return /\bgit\s+(?:add|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
-    normalizeShell(command),
-  );
-}
-
-function isWriteLikeShellCommand(command: string): boolean {
-  const normalized = normalizeShell(command);
-  return (
-    /(^|[^>])>{1,2}(?!&[12])(?:$|[^>])/.test(normalized) ||
-    /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee|rm|unlink)\b/.test(normalized) ||
-    /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update)\b/.test(normalized) ||
-    /\b(?:pip|pip3|cargo|gem|go|brew|apt|apt-get|choco)\s+install\b/.test(normalized)
-  );
-}
-
-function isNetworkCommand(command: string): boolean {
-  return /\b(?:curl|wget)\b/.test(normalizeShell(command));
-}
-
-function normalizeShell(command: string): string {
-  return (command ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 }

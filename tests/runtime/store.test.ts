@@ -547,3 +547,198 @@ describe('persistence across close/reopen', () => {
     expect((all[1]!.event as any).toolCallId).toBe('batch2');
   });
 });
+
+// ── 持久化边界情况 / Persistence edge cases ──
+describe('persistence edge cases', () => {
+  let tmpDir: string;
+  let dbPath: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'kite-code-runtime-store-'));
+    dbPath = join(tmpDir, 'runtime.db');
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // 验证快照在 close/reopen 周期后仍然存在 / Verify snapshot survives close/reopen cycle
+  test('snapshot survives close and reopen cycle', () => {
+    const s1 = createRuntimeStore(dbPath);
+    s1.saveSnapshot('thread-snap-cycle', {
+      phase: 'building',
+      counter: 42,
+      nested: { deep: { value: 'persisted' } },
+    });
+    s1.close();
+
+    // Reopen
+    const s2 = createRuntimeStore(dbPath);
+    const loaded = s2.loadSnapshot<{
+      phase: string;
+      counter: number;
+      nested: { deep: { value: string } };
+    }>('thread-snap-cycle');
+    s2.close();
+
+    expect(loaded).not.toBeNull();
+    expect(loaded!.phase).toBe('building');
+    expect(loaded!.counter).toBe(42);
+    expect(loaded!.nested.deep.value).toBe('persisted');
+  });
+
+  // 验证不同线程的事件和快照完全隔离 / Verify events and snapshots are fully isolated across threads
+  test('thread isolation for both events and snapshots', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('thread-iso-a', [makeEvent({ toolCallId: 'a1' })]);
+    store.appendEvents('thread-iso-b', [makeEvent({ toolCallId: 'b1' })]);
+    store.saveSnapshot('thread-iso-a', { version: 1 });
+    store.saveSnapshot('thread-iso-b', { version: 2 });
+
+    // thread-iso-a only sees its own data
+    expect(store.loadEvents('thread-iso-a').length).toBe(1);
+    expect(store.loadEvents('thread-iso-a')[0]!.thread_id).toBe('thread-iso-a');
+    expect(store.loadSnapshot<{ version: number }>('thread-iso-a')!.version).toBe(1);
+
+    // thread-iso-b only sees its own data
+    expect(store.loadEvents('thread-iso-b').length).toBe(1);
+    expect(store.loadEvents('thread-iso-b')[0]!.thread_id).toBe('thread-iso-b');
+    expect(store.loadSnapshot<{ version: number }>('thread-iso-b')!.version).toBe(2);
+
+    store.close();
+  });
+
+  // 验证大批量事件写入和读取 / Verify large batch of events round-trips correctly
+  test('round-trips a large batch of events (120 events)', () => {
+    const store = createRuntimeStore(dbPath);
+    const events: RuntimeEvent[] = [];
+    for (let i = 0; i < 120; i++) {
+      events.push(makeEvent({ type: 'tool.started', toolCallId: `call-${i}` }));
+    }
+    store.appendEvents('thread-large', events);
+
+    const loaded = store.loadEvents('thread-large');
+    expect(loaded.length).toBe(120);
+    expect(loaded[0]!.id).toBeGreaterThan(0);
+    expect(loaded[119]!.id).toBeGreaterThan(loaded[0]!.id);
+    // Auto-increment IDs are strictly increasing
+    for (let i = 1; i < loaded.length; i++) {
+      expect(loaded[i]!.id).toBeGreaterThan(loaded[i - 1]!.id);
+    }
+    store.close();
+  });
+
+  // 验证特殊字符和 Unicode 在事件 payload 中正确保存 / Verify special chars and Unicode survive round-trip
+  test('round-trips events with special characters and Unicode', () => {
+    const store = createRuntimeStore(dbPath);
+    const event: RuntimeEvent = {
+      type: 'tool.finished',
+      toolCallId: 'call-special',
+      name: 'test-tool',
+      result: {
+        ok: true,
+        command: 'echo "hello world"',
+        exitCode: 0,
+        stdout: 'Unicode: hello world',
+        stderr: 'emoji test',
+      },
+    } as RuntimeEvent;
+    store.appendEvents('thread-special', [event]);
+
+    const loaded = store.loadEvents('thread-special');
+    expect(loaded.length).toBe(1);
+    const loadedEvent = loaded[0]!.event as any;
+    expect(loadedEvent.type).toBe('tool.finished');
+    expect(loadedEvent.result.stdout).toBe('Unicode: hello world');
+    expect(loadedEvent.result.stderr).toBe('emoji test');
+    store.close();
+  });
+
+  // 验证复杂嵌套快照对象正确保存 / Verify complex nested snapshots round-trip
+  test('round-trips complex nested snapshot state', () => {
+    const store = createRuntimeStore(dbPath);
+    const complexState = {
+      tools: {
+        calls: {
+          'call-1': {
+            toolCallId: 'call-1',
+            status: 'succeeded',
+            result: { ok: true, summary: 'done', exitCode: 0 },
+          },
+          'call-2': {
+            toolCallId: 'call-2',
+            status: 'failed',
+            error: 'timeout after 30s',
+          },
+        },
+        queue: [],
+        active: [],
+      },
+      plan: {
+        kind: 'approved',
+        planId: 'plan-xyz',
+        version: 2,
+        plan: {
+          name: 'My Plan',
+          description: 'Complex plan',
+          status: 'pending',
+          steps: [
+            { step: 'Step 1', status: 'completed' },
+            { step: 'Step 2', status: 'running' },
+          ],
+        },
+      },
+      turn: { turnId: 'turn-42', turnIndex: 5 },
+    };
+    store.saveSnapshot('thread-complex', complexState);
+
+    const loaded = store.loadSnapshot<typeof complexState>('thread-complex');
+    expect(loaded).not.toBeNull();
+    expect(loaded!.tools.calls['call-1']!.status).toBe('succeeded');
+    expect(loaded!.tools.calls['call-2']!.error).toBe('timeout after 30s');
+    expect(loaded!.plan.planId).toBe('plan-xyz');
+    expect(loaded!.plan.plan.steps[1]!.status).toBe('running');
+    expect(loaded!.turn.turnId).toBe('turn-42');
+    store.close();
+  });
+
+  // 验证不存在线程的快照返回 null / Verify non-existent thread snapshot returns null
+  test('loadSnapshot returns null for completely new thread', () => {
+    const store = createRuntimeStore(dbPath);
+    const result = store.loadSnapshot('completely-new-thread');
+    expect(result).toBeNull();
+    store.close();
+  });
+
+  // 验证自增 ID 在空批次后仍能继续 / Verify auto-increment continues after empty batch
+  test('auto-increment IDs continue after empty batch append', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('thread-seq', [makeEvent({ toolCallId: 'first' })]);
+    const idsAfterFirst = store.loadEvents('thread-seq').map((e) => e.id);
+
+    // Empty batch should not affect auto-increment
+    store.appendEvents('thread-seq', []);
+    store.appendEvents('thread-seq', []);
+
+    store.appendEvents('thread-seq', [makeEvent({ toolCallId: 'second' })]);
+    const all = store.loadEvents('thread-seq');
+    expect(all.length).toBe(2);
+    expect(all[1]!.id).toBeGreaterThan(idsAfterFirst[0]!);
+    store.close();
+  });
+
+  // 验证多线程并发快照覆盖不互相干扰 / Verify snapshot upsert across threads is isolated
+  test('snapshot upsert across threads does not interfere', () => {
+    const store = createRuntimeStore(dbPath);
+    store.saveSnapshot('t1', { version: 1, data: 'first' });
+    store.saveSnapshot('t2', { version: 100, data: 'second' });
+    store.saveSnapshot('t1', { version: 2, data: 'first-updated' });
+
+    expect(store.loadSnapshot<{ version: number; data: string }>('t1')!.version).toBe(2);
+    expect(store.loadSnapshot<{ version: number; data: string }>('t1')!.data).toBe('first-updated');
+    expect(store.loadSnapshot<{ version: number; data: string }>('t2')!.version).toBe(100);
+    expect(store.loadSnapshot<{ version: number; data: string }>('t2')!.data).toBe('second');
+
+    store.close();
+  });
+});

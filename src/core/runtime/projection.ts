@@ -171,7 +171,41 @@ export function projectRuntimeEventToAgentEvent(event: RuntimeEvent): AgentEvent
     case 'phase.changed':
       return [];
 
-    // ── 默认：未知事件类型 ──
+    // ── Turn 生命周期（信息性，暂不投影为 TUI 事件）──
+    case 'turn.started':
+      return [];
+    case 'turn.completed':
+      return [];
+    case 'turn.aborted':
+      return [];
+
+    // ── 用户消息（信息性，暂不投影）──
+    case 'user.message_appended':
+      return [];
+
+    // ── 模型交互（信息性，暂不投影）──
+    case 'model.requested':
+      return [];
+    case 'model.responded':
+      return [];
+
+    // ── Plan 生命周期补充（信息性，由 need_plan_review/tool_done 各自投影）──
+    case 'plan.drafted':
+      return [];
+    case 'plan.progress_updated':
+      return [];
+    case 'plan.completed':
+      return [];
+
+    // ── Approval 补充（信息性，审批结果通过 need_approval/tool_done 各自投影）──
+    case 'approval.command_replaced':
+      return [];
+
+    // ── Auto-review 事件（信息性，审批结果通过 need_approval/tool_done 各自投影）──
+    case 'auto_review.requested':
+      return [];
+    case 'auto_review.completed':
+      return [];
     default:
       return [];
   }

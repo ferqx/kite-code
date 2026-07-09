@@ -3,20 +3,17 @@ import { parseMcpToolName } from '@/core/mcp/tool-adapter';
 import { isReadOnlyShellCommand } from '@/core/tools/definitions';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, ShellGrantUsed } from '@/protocol/events';
+import type { ToolRisk } from './shell-classification';
+import {
+  classifyShellRisk,
+  isDestructiveShellCommand,
+  isNetworkCommand,
+  isVcsMutationCommand,
+  isWriteLikeShellCommand,
+} from './shell-classification';
 
-// ── 公开类型 / Public types ──
-
-/** 工具风险分类 / Tool risk classification */
-export type ToolRisk =
-  | 'read'
-  | 'plan'
-  | 'write_file'
-  | 'execute_code'
-  | 'destructive'
-  | 'network'
-  | 'vcs_mutation'
-  | 'mcp'
-  | 'unknown';
+export type { ToolRisk };
+export { classifyShellRisk, isDestructiveShellCommand };
 
 /** evaluateToolApproval 的输入参数 / Input parameters for evaluateToolApproval */
 export interface EvaluateToolApprovalParams {
@@ -60,80 +57,6 @@ export interface ApprovalDecision {
   requiresSandbox?: boolean;
   /** 导致拒绝的阶段约束（如有）/ Phase constraint that caused denial, if applicable */
   phaseConstraint?: AgentPhase;
-}
-
-// ── Shell 命令分类辅助函数 / Shell command classification helpers ──
-
-/** 规范化 shell 命令为小写、单空白分隔 / Normalize shell command to lowercase with single spaces */
-function normalizeShell(command: string): string {
-  return (command ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-/**
- * 检测 shell 命令是否具有破坏性（不可逆的数据丢失或系统级操作）。
- * 从 tool-policy.ts 复制正则表达式。
- *
- * Check whether a shell command is destructive (irreversible data loss or system-level operations).
- * Regex copied from tool-policy.ts.
- */
-export function isDestructiveShellCommand(command: string): boolean {
-  const normalized = normalizeShell(command);
-  return (
-    /(?:(?:^|[;&|]\s*)|\/)sudo\b/.test(normalized) ||
-    /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r|-r\s+-f|-f\s+-r|--recursive.*--force|--force.*--recursive)\b/.test(
-      normalized,
-    ) ||
-    /\brm\s+-[^\s]*f\b/.test(normalized) ||
-    /\bchmod\s+(?:-[^\s]*[rR]|--recursive)\b/.test(normalized) ||
-    /\bchown\s+(?:-[^\s]*[rR]|--recursive)\b/.test(normalized) ||
-    /(?:(?:^|[;&|]\s*)|\/)kill(?:all)?\b/.test(normalized) ||
-    /\bdd\b.*\bof=\/dev\//.test(normalized) ||
-    /\bmkfs\b/.test(normalized) ||
-    /\b(?:shutdown|reboot|halt|poweroff)\b/.test(normalized) ||
-    /\binit\s+[06]\b/.test(normalized) ||
-    /\bfdisk\b/.test(normalized) ||
-    /\bparted\b/.test(normalized) ||
-    /:\(\)\s*\{.*:.*\|.*:.*\}/.test(normalized) ||
-    />\s*\/dev\/sd/.test(normalized)
-  );
-}
-
-/** 检测命令是否为版本控制变更操作（如 git add/commit/push 等）/ Check if command is a VCS mutation */
-function isVcsMutationCommand(command: string): boolean {
-  return /\bgit\s+(?:add|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
-    normalizeShell(command),
-  );
-}
-
-/** 检测命令是否可能写入文件 / Check if command may write files */
-function isWriteLikeShellCommand(command: string): boolean {
-  const normalized = normalizeShell(command);
-  return (
-    /(^|[^>])>{1,2}(?!&[12])(?:$|[^>])/.test(normalized) ||
-    /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee|rm|unlink)\b/.test(normalized) ||
-    /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update)\b/.test(normalized) ||
-    /\b(?:pip|pip3|cargo|gem|go|brew|apt|apt-get|choco)\s+install\b/.test(normalized)
-  );
-}
-
-/** 检测命令是否访问网络 / Check if command accesses the network */
-function isNetworkCommand(command: string): boolean {
-  return /\b(?:curl|wget)\b/.test(normalizeShell(command));
-}
-
-/**
- * 对 shell 命令进行风险分类。
- * 与 tool-policy.ts 中的 classifyShellRisk 逻辑相同。
- *
- * Classify the risk level of a shell command.
- * Same logic as classifyShellRisk in tool-policy.ts.
- */
-export function classifyShellRisk(command: string): ToolRisk {
-  if (isDestructiveShellCommand(command)) return 'destructive';
-  if (isVcsMutationCommand(command)) return 'vcs_mutation';
-  if (isWriteLikeShellCommand(command)) return 'write_file';
-  if (isNetworkCommand(command)) return 'network';
-  return 'execute_code';
 }
 
 // ── 确定性序列化 / Deterministic serialization ──

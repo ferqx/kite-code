@@ -746,3 +746,426 @@ describe('reduceRuntimeState — immutability', () => {
     expect(s2.interactions).not.toBe(s1.interactions);
   });
 });
+
+// ── 运行时环境 / Runtime environment ──
+
+describe('reduceRuntimeState — runtime environment', () => {
+  // 验证 authorization.changed 更新授权模式
+  test('authorization.changed updates authorization mode', () => {
+    const state = makeInitialState();
+    expect(state.authorization.mode).toBe('default');
+
+    const event: RuntimeEvent = {
+      type: 'authorization.changed',
+      mode: 'full_access',
+    };
+
+    const next = reduceRuntimeState(state, event);
+    expect(next.authorization.mode).toBe('full_access');
+  });
+
+  // 验证 authorization.changed 保留 commandGrants 等字段
+  test('authorization.changed preserves other authorization fields', () => {
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      authorization: {
+        mode: 'default',
+        commandGrants: {
+          key1: { workspace: '/ws', threadId: 't1', command: 'ls' },
+        },
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'authorization.changed',
+      mode: 'full_access',
+    };
+
+    const next = reduceRuntimeState(state, event);
+    expect(next.authorization.mode).toBe('full_access');
+    expect(next.authorization.commandGrants['key1']).toBeDefined();
+    expect(next.authorization.commandGrants['key1']!.command).toBe('ls');
+  });
+
+  // 验证 phase.changed 更新执行阶段
+  test('phase.changed updates execution phase', () => {
+    const state = makeInitialState();
+    expect(state.phase).toBe('planning');
+
+    const next = reduceRuntimeState(state, {
+      type: 'phase.changed',
+      phase: 'building',
+    });
+    expect(next.phase).toBe('building');
+  });
+
+  // 验证 phase.changed 可以在 planning 和 building 之间切换
+  test('phase.changed can switch back to planning', () => {
+    const state: RuntimeState = { ...makeInitialState(), phase: 'building' };
+    const next = reduceRuntimeState(state, {
+      type: 'phase.changed',
+      phase: 'planning',
+    });
+    expect(next.phase).toBe('planning');
+  });
+});
+
+// ── Turn 生命周期 / Turn lifecycle ──
+
+describe('reduceRuntimeState — turn lifecycle', () => {
+  // 验证 turn.started 不修改状态（信息性事件）
+  test('turn.started does not modify state', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'turn.started',
+      turnId: 'turn-new',
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+
+  // 验证 turn.completed 不修改状态（信息性事件）
+  test('turn.completed does not modify state', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'turn.completed',
+      turnId: state.turn.turnId,
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+
+  // 验证 turn.aborted 不修改状态（信息性事件）
+  test('turn.aborted does not modify state', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'turn.aborted',
+      turnId: state.turn.turnId,
+      reason: 'user cancelled',
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+});
+
+// ── 用户消息 / User messages ──
+
+describe('reduceRuntimeState — user messages', () => {
+  // 验证 user.message_appended 不修改状态（信息性事件）
+  test('user.message_appended does not modify state', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'user.message_appended',
+      messageId: 'msg-1',
+      content: 'Hello, can you help?',
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+});
+
+// ── 模型交互 / Model interaction ──
+
+describe('reduceRuntimeState — model interaction', () => {
+  // 验证 model.requested 不修改状态（信息性事件）
+  test('model.requested does not modify state', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'model.requested',
+      requestId: 'req-1',
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+
+  // 验证 model.responded 不修改状态（信息性事件，无工具调用）
+  test('model.responded does not modify state (informational)', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'model.responded',
+      messageId: 'msg-2',
+      text: 'I will help you with that task.',
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+
+  // 验证 model.responded 带 toolCalls 也不修改状态（信息性事件）
+  test('model.responded with toolCalls does not modify state', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'model.responded',
+      messageId: 'msg-3',
+      toolCalls: [
+        { id: 'call-1', name: 'read_file', args: { path: 'test.txt' } },
+        { id: 'call-2', name: 'shell_execute', args: { command: 'ls' } },
+      ],
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+});
+
+// ── Plan 生命周期补充 / Additional plan lifecycle ──
+
+describe('reduceRuntimeState — plan lifecycle supplements', () => {
+  // 验证 plan.drafted 从 none 状态创建 drafted
+  test('plan.drafted transitions from none to drafted', () => {
+    const state = makeInitialState(); // plan.kind === 'none'
+    const plan = makePlan('Draft Plan', ['step a', 'step b']);
+    const structuralHash = computePlanStructuralHash(plan);
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'call-draft-1',
+      plan,
+      structuralHash,
+    };
+
+    const next = reduceRuntimeState(state, event);
+
+    expect(next.plan.kind).toBe('drafted');
+    if (next.plan.kind === 'drafted') {
+      expect(next.plan.planId).toBe(structuralHash.slice(0, 16));
+      expect(next.plan.version).toBe(1);
+      expect(next.plan.draft).toBe(plan);
+      expect(next.plan.structuralHash).toBe(structuralHash);
+    }
+  });
+
+  // 验证 plan.drafted 从 needs_revision 继承 planId 并递增 version
+  test('plan.drafted inherits planId and increments version from needs_revision', () => {
+    const oldPlan = makePlan('Old Draft', ['old step']);
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      plan: {
+        kind: 'needs_revision',
+        planId: 'existing-plan',
+        version: 3,
+        draft: oldPlan,
+        reason: 'too vague',
+      },
+    };
+    const newPlan = makePlan('Revised Draft', ['step x', 'step y', 'step z']);
+    const structuralHash = computePlanStructuralHash(newPlan);
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'call-draft-2',
+      plan: newPlan,
+      structuralHash,
+    };
+
+    const next = reduceRuntimeState(state, event);
+
+    expect(next.plan.kind).toBe('drafted');
+    if (next.plan.kind === 'drafted') {
+      expect(next.plan.planId).toBe('existing-plan');
+      expect(next.plan.version).toBe(4);
+      expect(next.plan.draft).toBe(newPlan);
+      expect(next.plan.structuralHash).toBe(structuralHash);
+    }
+  });
+
+  // 验证 plan.drafted 从 drafted/approved 等非接受状态时不操作
+  test('plan.drafted is no-op when plan is not none or needs_revision', () => {
+    const plan = makePlan('Approved Plan', ['done step']);
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      plan: {
+        kind: 'approved',
+        planId: 'plan-approved',
+        version: 1,
+        plan,
+        structuralHash: computePlanStructuralHash(plan),
+        approvedAtTurnId: 'turn-1',
+        executionMode: 'auto',
+      },
+    };
+    const newPlan = makePlan('Should Not Apply', ['new step']);
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'call-draft-3',
+      plan: newPlan,
+      structuralHash: computePlanStructuralHash(newPlan),
+    };
+
+    const next = reduceRuntimeState(state, event);
+    expect(next.plan.kind).toBe('approved');
+  });
+
+  // 验证 plan.progress_updated 在 building 状态下更新 plan
+  test('plan.progress_updated updates plan when in building state', () => {
+    const oldPlan = makePlan('Building Plan', ['step 1', 'step 2']);
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      plan: {
+        kind: 'building',
+        planId: 'plan-building',
+        version: 2,
+        plan: oldPlan,
+        structuralHash: computePlanStructuralHash(oldPlan),
+      },
+    };
+    const updatedPlan: AgentPlan = {
+      ...oldPlan,
+      steps: [
+        { step: 'step 1', status: 'completed' },
+        { step: 'step 2', status: 'pending' },
+      ],
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.progress_updated',
+      toolCallId: 'call-progress-1',
+      plan: updatedPlan,
+    };
+
+    const next = reduceRuntimeState(state, event);
+
+    expect(next.plan.kind).toBe('building');
+    if (next.plan.kind === 'building') {
+      expect(next.plan.plan).toBe(updatedPlan);
+      expect(next.plan.planId).toBe('plan-building');
+      expect(next.plan.version).toBe(2);
+    }
+  });
+
+  // 验证 plan.progress_updated 在非 building 状态时不操作
+  test('plan.progress_updated is no-op when plan is not building', () => {
+    const state = makeInitialState(); // plan.kind === 'none'
+    const updatedPlan = makePlan('Should Not Apply', ['fake step']);
+    const event: RuntimeEvent = {
+      type: 'plan.progress_updated',
+      toolCallId: 'call-progress-2',
+      plan: updatedPlan,
+    };
+
+    const next = reduceRuntimeState(state, event);
+    expect(next.plan.kind).toBe('none');
+  });
+
+  // 验证 plan.completed 从 building 转为 completed
+  test('plan.completed transitions from building to completed', () => {
+    const plan = makePlan('Build Plan', ['step 1', 'step 2']);
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      plan: {
+        kind: 'building',
+        planId: 'plan-bld',
+        version: 1,
+        plan,
+        structuralHash: computePlanStructuralHash(plan),
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'call-done-1',
+      plan,
+    };
+
+    const next = reduceRuntimeState(state, event);
+
+    expect(next.plan.kind).toBe('completed');
+    if (next.plan.kind === 'completed') {
+      expect(next.plan.planId).toBe('plan-bld');
+      expect(next.plan.version).toBe(1);
+      expect(next.plan.plan.status).toBe('completed');
+      expect(next.plan.completedAtTurnId).toBe(state.turn.turnId);
+    }
+  });
+
+  // 验证 plan.completed 从 approved 转为 completed
+  test('plan.completed transitions from approved to completed', () => {
+    const plan = makePlan('Approved Plan', ['step a']);
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      plan: {
+        kind: 'approved',
+        planId: 'plan-app',
+        version: 2,
+        plan,
+        structuralHash: computePlanStructuralHash(plan),
+        approvedAtTurnId: 'turn-5',
+        executionMode: 'auto',
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'call-done-2',
+      plan,
+    };
+
+    const next = reduceRuntimeState(state, event);
+
+    expect(next.plan.kind).toBe('completed');
+    if (next.plan.kind === 'completed') {
+      expect(next.plan.planId).toBe('plan-app');
+      expect(next.plan.version).toBe(2);
+      expect(next.plan.plan.status).toBe('completed');
+      expect(next.plan.completedAtTurnId).toBe(state.turn.turnId);
+    }
+  });
+
+  // 验证 plan.completed 在 none/drafted/awaiting_review/needs_revision 状态下不操作
+  test('plan.completed is no-op when plan is none', () => {
+    const state = makeInitialState(); // plan.kind === 'none'
+    const plan = makePlan('Cannot Complete', ['step']);
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'call-done-3',
+      plan,
+    };
+
+    const next = reduceRuntimeState(state, event);
+    expect(next.plan.kind).toBe('none');
+  });
+});
+
+// ── Approval 补充 / Additional approval ──
+
+describe('reduceRuntimeState — approval supplements', () => {
+  // 验证 approval.command_replaced 不修改状态（信息性事件）
+  test('approval.command_replaced does not modify state', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'approval.command_replaced',
+      interactionId: 'inter-cmd',
+      command: 'npm test',
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+});
+
+// ── Auto-review 事件 / Auto-review events ──
+
+describe('reduceRuntimeState — auto-review events', () => {
+  // 验证 auto_review.requested 不修改状态（信息性事件）
+  test('auto_review.requested does not modify state', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'auto_review.requested',
+      reviewId: 'rev-1',
+      toolCallId: 'tool-99',
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+
+  // 验证 auto_review.completed 不修改状态（信息性事件）
+  test('auto_review.completed does not modify state', () => {
+    const state = makeInitialState();
+    const event: RuntimeEvent = {
+      type: 'auto_review.completed',
+      reviewId: 'rev-1',
+      toolCallId: 'tool-99',
+      result: {
+        ok: true,
+        approved: true,
+        grant: 'approve_once',
+        reason: 'safe command',
+        reviewerModelName: 'haiku',
+        durationMs: 1500,
+      },
+    };
+    const next = reduceRuntimeState(state, event);
+    expect(next).toEqual(state);
+  });
+});

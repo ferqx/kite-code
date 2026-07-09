@@ -275,6 +275,124 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         phase: event.phase,
       };
 
+    // ── Turn 生命周期 / Turn lifecycle ──
+
+    // turn.started / turn.completed / turn.aborted 为信息性事件，
+    // 当前不修改 RuntimeState（turn 在初始化时已设置）。
+    // Informational events — no state mutation needed (turn is set at init).
+    case 'turn.started':
+    case 'turn.completed':
+    case 'turn.aborted':
+      return state;
+
+    // ── 用户消息 / User message ──
+
+    // user.message_appended 为信息性事件，由 TranscriptState 管理（未来）。
+    // Informational — managed by TranscriptState (future).
+    case 'user.message_appended':
+      return state;
+
+    // ── 模型交互 / Model interaction ──
+
+    // model.requested / model.responded 为信息性事件，由 TranscriptState 管理（未来）。
+    // Informational — managed by TranscriptState (future).
+    case 'model.requested':
+    case 'model.responded':
+      return state;
+
+    // ── Plan 生命周期补充 / Additional plan lifecycle ──
+
+    case 'plan.drafted': {
+      // 仅当 plan 为 none 或 needs_revision 时接受新 draft
+      // Only accept new draft when plan is none or needs_revision
+      if (state.plan.kind === 'none' || state.plan.kind === 'needs_revision') {
+        const hash = computePlanStructuralHash(event.plan) || event.structuralHash;
+        const planId = state.plan.kind === 'needs_revision' ? state.plan.planId : hash.slice(0, 16);
+        const version = state.plan.kind === 'needs_revision' ? state.plan.version + 1 : 1;
+        return {
+          ...state,
+          plan: {
+            kind: 'drafted',
+            planId,
+            version,
+            draft: event.plan,
+            structuralHash: hash,
+          },
+        };
+      }
+      return state;
+    }
+
+    case 'plan.progress_updated': {
+      // 仅当 plan 在 building 状态时更新步骤进度
+      // Only update step progress when plan is in building state
+      if (state.plan.kind === 'building') {
+        return {
+          ...state,
+          plan: {
+            ...state.plan,
+            plan: event.plan,
+          },
+        };
+      }
+      return state;
+    }
+
+    case 'plan.completed': {
+      // 从 building 或 approved 状态转换到 completed
+      // Transition from building or approved to completed
+      if (state.plan.kind === 'building') {
+        return {
+          ...state,
+          plan: {
+            kind: 'completed',
+            planId: state.plan.planId,
+            version: state.plan.version,
+            plan: {
+              ...state.plan.plan,
+              status: 'completed' as import('@/protocol/events').PlanStatus,
+            },
+            completedAtTurnId: state.turn.turnId,
+          },
+        };
+      }
+      if (state.plan.kind === 'approved') {
+        return {
+          ...state,
+          plan: {
+            kind: 'completed',
+            planId: state.plan.planId,
+            version: state.plan.version,
+            plan: {
+              ...state.plan.plan,
+              status: 'completed' as import('@/protocol/events').PlanStatus,
+            },
+            completedAtTurnId: state.turn.turnId,
+          },
+        };
+      }
+      return state;
+    }
+
+    // ── Approval 补充 / Additional approval ──
+
+    // approval.command_replaced 为信息性事件，审批结果通过 approval.granted 体现。
+    // Informational — approval result is reflected via approval.granted.
+    case 'approval.command_replaced':
+      return state;
+
+    // ── Auto-review 事件 / Auto-review events ──
+
+    // auto_review.requested 为信息性事件，auto-review 的触发和结果由
+    // approval-controller 内部处理，不影响 RuntimeState。
+    // Informational — auto-review trigger and result are handled internally
+    // by approval-controller, no RuntimeState mutation needed.
+    case 'auto_review.requested':
+    // auto_review.completed 为信息性事件，审批决策通过 approval.granted/rejected 体现。
+    // Informational — approval decisions are reflected via approval.granted/rejected.
+    case 'auto_review.completed':
+      return state;
+
     default:
       return state;
   }
