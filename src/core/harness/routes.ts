@@ -1,17 +1,41 @@
-// TODO(Phase 4 完成): 替换为 scheduler.ts resolveToolRouteFromState。
-// 迁移步骤 / Migration steps:
-//   1. routeEntry / routeAfterAgent 替换为 resolveToolRouteFromState 调用
+// Route logic for the LangGraph agent graph.
+// Phase 4 部分完成: resolveToolRoute 中的 interactionMode 直接检查已替换为
+// policy 评估（shouldAskUser / shouldContinueLoop）。routeAfterTools 中的
+// 耗尽检查同样通过 policy 判断是否有人值守。
+//
+// Phase 4 partial: direct interactionMode checks in resolveToolRoute replaced
+// with policy evaluation (shouldAskUser / shouldContinueLoop). Exhaustion check
+// in routeAfterTools also uses policy to determine human-in-the-loop presence.
+//
+// 迁移步骤剩余 / Remaining migration steps:
+//   1. ✅ routeEntry / routeAfterAgent 中的 ask_user + 耗尽 policy 评估
 //   2. routeAfterApproval / routeAfterTools 中的 full_access / exhausted 逻辑移入 scheduler
 //   3. 删除本文件，所有路由决策由 decideNextEffect 接管
 
 import { END } from '@langchain/langgraph';
 import { migratePermitBatch } from '@/core/execution/permit';
+import { createModePolicy } from '@/core/policies/mode-policy';
 import { isPlanProgressOnlyUpdate, isSamePlanTrackingUpdate } from '@/core/policies/plan-policy';
 import type { AuthorizationOverride } from '@/core/types';
-import { isFullAccessMode } from '@/protocol/events';
 import type { CodeAgentState } from './state';
 import { defaultPhaseForWorkspaceAccess, evaluateToolPolicy } from './tool-policy';
 import { getAllPendingToolRequests } from './tool-requests';
+
+/** 根据 graph state 构建 PolicyInput 的基础上下文 / Build base PolicyInput context from graph state */
+function buildPolicyContext(state: CodeAgentState) {
+  return {
+    interactionMode: (state.interactionMode ?? 'ask') as 'ask' | 'auto' | 'full',
+    phase: (state.phase ?? 'building') as 'planning' | 'building',
+    planKind: (!state.plan ? 'none' : state.planReviewed ? 'approved' : 'drafted') as
+      | 'none'
+      | 'drafted'
+      | 'awaiting_review'
+      | 'approved'
+      | 'building'
+      | 'needs_revision'
+      | 'completed',
+  };
+}
 
 /** 共享路由逻辑：扫描全部待处理工具请求，按优先级决定目标节点。
  *  Shared routing — scans ALL pending tool requests, picks target by priority.
@@ -41,9 +65,17 @@ function resolveToolRoute(
   let hasApprovalRequired = false;
 
   for (const request of allRequests) {
-    // Priority 1: ask_user 必须由 user_input 中断节点处理；full 下不能挂起
+    // Priority 1: ask_user 必须由 user_input 中断节点处理；通过 policy 判断是否允许挂起
+    // Priority 1: ask_user must be handled by user_input interrupt; policy decides if suspension is allowed
     if (request.name === 'ask_user') {
-      if (isFullAccessMode(state.interactionMode)) continue;
+      const mode = (state.interactionMode ?? 'ask') as 'ask' | 'auto' | 'full';
+      const policy = createModePolicy(mode);
+      const decision = policy.shouldAskUser({
+        ...buildPolicyContext(state),
+        toolName: request.name,
+      });
+      // full mode denies ask_user → skip (don't suspend)
+      if (decision.kind === 'deny') continue;
       return 'user_input';
     }
 
@@ -152,10 +184,22 @@ export function routeAfterTools(state: CodeAgentState): 'approval' | 'agent' | t
   if (state.pendingSubagentApproval) return 'approval';
   const exhausted = state.exhaustedFingerprints ?? {};
   if (Object.keys(exhausted).length > 0) {
-    // full/auto: terminate to prevent the model from trying workarounds
-    if (state.interactionMode === 'full' || state.interactionMode === 'auto') return END;
-    // ask: human is watching — let them see the exhaustion and decide
-    return 'agent';
+    // 通过 policy 判断是否有人值守 / Use policy to determine if human is in the loop
+    // ask mode: shouldApproveTool 对写工具返回 need_tool_approval → 有人值守 → agent
+    // auto mode: shouldApproveTool 返回 need_auto_review → 无人值守 → END
+    // full mode: shouldApproveTool 返回 allow（sandbox 可用）→ 无人值守 → END
+    // 枯竭检查假设 full mode 的 sandbox 可用（sandbox 回退是安全网，不等于有人值守）
+    const mode = (state.interactionMode ?? 'ask') as 'ask' | 'auto' | 'full';
+    const policy = createModePolicy(mode, /* sandboxAvailable */ true);
+    const approvalDecision = policy.shouldApproveTool({
+      ...buildPolicyContext(state),
+      toolName: 'write_file',
+      toolRisk: 'write_file',
+    });
+    // Only ask mode requires human tool approval → human is watching
+    if (approvalDecision.kind === 'need_tool_approval') return 'agent';
+    // Auto/full: unattended → terminate to prevent model workarounds
+    return END;
   }
   return 'agent';
 }

@@ -3,6 +3,7 @@ import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpManager } from '@/core/mcp';
 import { parseMcpToolName } from '@/core/mcp/tool-adapter';
 import type { SupportedChatModel } from '@/core/model/factory';
+import { createModePolicy } from '@/core/policies/mode-policy';
 import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
@@ -17,12 +18,7 @@ import { type ShellExecutor, shellTool } from '@/core/tools/shell';
 import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type { AuthorizationOverride, ShellResult, ThreadAuthorizationState } from '@/core/types';
 import { fetchAndExtract } from '@/core/web/extractor';
-import {
-  type AgentPhase,
-  isFullAccessMode,
-  type ShellGrantUsed,
-  type WorkspaceAccess,
-} from '@/protocol/events';
+import type { AgentPhase, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 import {
   defaultPhaseForWorkspaceAccess,
   evaluateToolPolicy,
@@ -330,7 +326,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'ask_user') {
-    if (isFullAccessMode(interactionMode)) {
+    // 通过 policy 判断 ask_user 是否被当前 mode 禁止（替代 isFullAccessMode 直接检查）
+    // Use policy to determine if ask_user is forbidden by current mode
+    const askPolicy = createModePolicy(interactionMode);
+    if (
+      askPolicy.shouldAskUser({
+        interactionMode,
+        phase: phase as 'planning' | 'building',
+        planKind: 'none',
+        toolName: 'ask_user',
+      }).kind === 'deny'
+    ) {
       return withFailureGuidance(request, {
         ok: false,
         command: 'ask_user',

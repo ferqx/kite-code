@@ -85,6 +85,7 @@ export function buildRevertParams(p: BuildRewindParams): RevertInput {
     ...baseParams(p),
     threadId: p.threadId,
     checkpointId: p.checkpointId,
+    userId: 'tui-user',
   };
 }
 
@@ -94,5 +95,6 @@ export function buildForkParams(p: BuildForkParams): ForkInput {
     oldThreadId: p.oldThreadId,
     checkpointId: p.checkpointId,
     newThreadId: p.newThreadId,
+    userId: 'tui-user',
   };
 }

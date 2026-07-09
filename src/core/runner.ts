@@ -8,6 +8,7 @@ import type {
   AgentPhase,
   AgentPlan,
   CacheMetricsPayload,
+  InteractionMode,
   NeedPlanReviewPayload,
   StateChangePayload,
   ToolApprovalPayload,
@@ -23,10 +24,9 @@ import { genSpanId } from './id-utils';
 import type { SupportedChatModel } from './model/factory';
 import type { BunSqliteSaver } from './persistence/checkpoint';
 import type { RuntimeEvent } from './runtime/events';
-import { projectRuntimeEventToAgentEvent } from './runtime/projection';
-import { reduceRuntimeState } from './runtime/reducer';
+import { AgentKernel, createAgentKernel } from './runtime/kernel';
 import { createInitialRuntimeState, type RuntimeState } from './runtime/state';
-import { createRuntimeStore, type RuntimeStore } from './runtime/store';
+import { createRuntimeStore } from './runtime/store';
 import type { SandboxBackend } from './sandbox';
 import { SessionLogCollector } from './session-logger';
 import { countTokens } from './token-counter';
@@ -99,12 +99,36 @@ export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, 'task'>
   resume: AgentResumeValue;
 }
 
-/** 从上次 checkpoint 读取 thread 授权状态 / Read thread authorization state from last checkpoint */
+/** 从 RuntimeStore 读取 thread 授权状态（替代从 LangGraph checkpoint 读取）。
+ *  Read thread authorization state from RuntimeStore (instead of LangGraph checkpoint).
+ *
+ *  Phase 5 checkpoint 降级：授权状态是业务状态，应从 RuntimeStore 恢复。
+ *  先尝试 RuntimeStore 快照，不存在时回退到 checkpoint（兼容旧会话数据）。
+ *  Phase 5 checkpoint demotion: authorization is business state, restore from RuntimeStore.
+ *  Try RuntimeStore snapshot first; fall back to checkpoint for backward compat. */
 async function readLastAuthorization(
   checkpointer: BunSqliteSaver,
   threadId: string,
 ): Promise<ThreadAuthorizationState | null> {
   try {
+    // Phase 5: 从 RuntimeStore 恢复 / Restore from RuntimeStore
+    const runtimeDbPath = checkpointer.dbPath.replace(/\.sqlite$/, '') + '.runtime.db';
+    try {
+      const store = createRuntimeStore(runtimeDbPath);
+      const snapshot = store.loadSnapshot<RuntimeState>(threadId);
+      store.close();
+      if (snapshot?.authorization?.mode) {
+        return {
+          mode: snapshot.authorization.mode,
+          commandGrants: snapshot.authorization.commandGrants ?? {},
+        };
+      }
+    } catch {
+      /* RuntimeStore not yet populated — fall back to checkpoint */
+    }
+
+    // 回退：从 checkpoint 读取（兼容尚未迁移到 RuntimeStore 的旧会话）
+    // Fallback: read from checkpoint (backward compat for sessions not yet migrated)
     const tuple = await checkpointer.getTuple({
       configurable: { thread_id: threadId },
     });
@@ -146,8 +170,7 @@ export async function* runAgent(
   // sink 必须先于 collector 定义（闭包捕获），collector 在 sink 之后赋值。
   // subagentEventSink 也使用 sink，因此定义顺序：sink → collector → subagentEventSink → graph。
   let collector: SessionLogCollector;
-  let store!: RuntimeStore;
-  let runtimeState!: RuntimeState;
+  let kernel!: AgentKernel;
 
   const sink: EventSink = {
     emit(event: AgentEvent): void {
@@ -225,12 +248,10 @@ export async function* runAgent(
     }
   };
 
-  // 运行时事件管道：图节点产出的 RuntimeEvent 经投影函数转换为 AgentEvent 后推入统一 sink
-  // RuntimeEvent pipeline: graph nodes emit RuntimeEvent → projection → AgentEvent → unified sink
+  // 运行时事件管道：图节点产出的 RuntimeEvent 经 kernel 处理后推入统一 sink
+  // RuntimeEvent pipeline: graph nodes emit RuntimeEvent → kernel.processEvent → AgentEvent → unified sink
   const runtimeEventSink = (event: RuntimeEvent) => {
-    runtimeState = reduceRuntimeState(runtimeState, event);
-    store.appendEvents(input.threadId, [event]);
-    const agentEvents = projectRuntimeEventToAgentEvent(event);
+    const agentEvents = kernel.processEvent(event);
     for (const agentEvent of agentEvents) {
       sink.emit(agentEvent);
     }
@@ -258,26 +279,35 @@ export async function* runAgent(
 
     // ── Runtime 状态与存储初始化 / Runtime state and store initialization ──
     const runtimeDbPath = input.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
-    store = createRuntimeStore(runtimeDbPath);
+    const interactionMode = (input.interactionMode ??
+      input.config.interactionMode ??
+      'ask') as InteractionMode;
 
     if (input.resume) {
+      // 尝试从 store 加载快照恢复 / Try to load snapshot from store for recovery
+      const store = createRuntimeStore(runtimeDbPath);
       const snapshot = store.loadSnapshot<RuntimeState>(input.threadId);
-      runtimeState =
-        snapshot ??
-        createInitialRuntimeState({
-          threadId: input.threadId,
-          userId: input.userId,
-          workspace: input.workspace,
-          interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
-          phase: initialPhase,
-        });
+      // 如果无快照则用默认初始状态 / Fallback to default if no snapshot
+      kernel = new AgentKernel({
+        store,
+        initialState:
+          snapshot ??
+          createInitialRuntimeState({
+            threadId: input.threadId,
+            userId: input.userId,
+            workspace: input.workspace,
+            interactionMode,
+            phase: initialPhase,
+          }),
+        interactionMode,
+      });
     } else {
-      runtimeState = createInitialRuntimeState({
+      kernel = createAgentKernel({
         threadId: input.threadId,
         userId: input.userId,
         workspace: input.workspace,
-        interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
-        phase: initialPhase,
+        storePath: runtimeDbPath,
+        interactionMode,
       });
     }
 
@@ -425,12 +455,12 @@ export async function* runAgent(
     throw e;
   } finally {
     try {
-      store.saveSnapshot(input.threadId, runtimeState);
+      kernel.saveSnapshot();
     } catch {
       /* 快照保存失败不影响清理 */
     }
     try {
-      store.close();
+      kernel.close();
     } catch {
       /* store 关闭失败不影响 engine 清理 */
     }
@@ -444,6 +474,8 @@ export interface RevertInput {
   workspace: string;
   checkpointPath: string;
   config: AgentConfig;
+  /** 用户标识，用于 RuntimeStore 状态初始化 / User id for RuntimeStore state init */
+  userId?: string;
   shellExecutor?: ShellExecutor;
   signal?: AbortSignal;
   model?: SupportedChatModel;
@@ -456,6 +488,36 @@ export async function* revertToCheckpoint(
   provider: UserInputProvider,
   input: RevertInput,
 ): AsyncGenerator<AgentEvent> {
+  const signal = input.signal;
+
+  // ── Runtime 状态与存储初始化 / Runtime state and store initialization ──
+  const runtimeDbPath = input.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
+  const store = createRuntimeStore(runtimeDbPath);
+  const snapshot = store.loadSnapshot<RuntimeState>(input.threadId);
+  const interactionMode = (snapshot?.mode ??
+    input.config.interactionMode ??
+    'ask') as InteractionMode;
+
+  const kernel = new AgentKernel({
+    store,
+    initialState:
+      snapshot ??
+      createInitialRuntimeState({
+        threadId: input.threadId,
+        userId: input.userId ?? 'unknown',
+        workspace: input.workspace,
+        interactionMode,
+      }),
+    interactionMode,
+  });
+
+  const runtimeEventSink = (event: RuntimeEvent) => {
+    const agentEvents = kernel.processEvent(event);
+    for (const agentEvent of agentEvents) {
+      provider.onEvent(agentEvent);
+    }
+  };
+
   const engine = createLangGraphEngine({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -465,9 +527,8 @@ export async function* revertToCheckpoint(
     mcpManager: input.mcpManager,
     subagentEventSink: undefined,
     subagentSignal: input.signal,
+    runtimeEventSink,
   });
-
-  const signal = input.signal;
 
   try {
     // Verify checkpoint exists before attempting revert
@@ -502,6 +563,16 @@ export async function* revertToCheckpoint(
     const result = await processStream(bareSink, provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
+    try {
+      kernel.saveSnapshot();
+    } catch {
+      /* 快照保存失败不影响清理 */
+    }
+    try {
+      kernel.close();
+    } catch {
+      /* store 关闭失败不影响 engine 清理 */
+    }
     engine.close();
   }
 }
@@ -513,6 +584,8 @@ export interface ForkInput {
   workspace: string;
   checkpointPath: string;
   config: AgentConfig;
+  /** 用户标识，用于 RuntimeStore 状态初始化 / User id for RuntimeStore state init */
+  userId?: string;
   shellExecutor?: ShellExecutor;
   signal?: AbortSignal;
   model?: SupportedChatModel;
@@ -525,6 +598,27 @@ export async function* forkFromCheckpoint(
   provider: UserInputProvider,
   input: ForkInput,
 ): AsyncGenerator<AgentEvent> {
+  const signal = input.signal;
+
+  // ── Runtime 状态与存储初始化 / Runtime state and store initialization ──
+  const runtimeDbPath = input.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
+  const interactionMode = (input.config.interactionMode ?? 'ask') as InteractionMode;
+
+  const kernel = createAgentKernel({
+    threadId: input.newThreadId,
+    userId: input.userId ?? 'unknown',
+    workspace: input.workspace,
+    storePath: runtimeDbPath,
+    interactionMode,
+  });
+
+  const runtimeEventSink = (event: RuntimeEvent) => {
+    const agentEvents = kernel.processEvent(event);
+    for (const agentEvent of agentEvents) {
+      provider.onEvent(agentEvent);
+    }
+  };
+
   const engine = createLangGraphEngine({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -534,9 +628,8 @@ export async function* forkFromCheckpoint(
     mcpManager: input.mcpManager,
     subagentEventSink: undefined,
     subagentSignal: input.signal,
+    runtimeEventSink,
   });
-
-  const signal = input.signal;
 
   try {
     const oldState = await engine.checkpointer.getCheckpointState(
@@ -552,7 +645,7 @@ export async function* forkFromCheckpoint(
     }
 
     const initialState = {
-      userId: '',
+      userId: input.userId ?? '',
       threadId: input.newThreadId,
       workspace: input.workspace,
       workspaceAccess: oldState.workspaceAccess ?? 'write',
@@ -584,6 +677,16 @@ export async function* forkFromCheckpoint(
     const result = await processStream(bareSink, provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
+    try {
+      kernel.saveSnapshot();
+    } catch {
+      /* 快照保存失败不影响清理 */
+    }
+    try {
+      kernel.close();
+    } catch {
+      /* store 关闭失败不影响 engine 清理 */
+    }
     engine.close();
   }
 }
@@ -1186,6 +1289,24 @@ export async function* normalizeGraphStream(
 }
 
 export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenerator<AgentEvent> {
+  const signal = input.signal;
+
+  // ── Runtime 状态与存储初始化 / Runtime state and store initialization ──
+  const runtimeDbPath = input.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
+  const interactionMode = (input.config.interactionMode ?? 'ask') as InteractionMode;
+
+  const kernel = createAgentKernel({
+    threadId: input.threadId,
+    userId: input.userId,
+    workspace: input.workspace,
+    storePath: runtimeDbPath,
+    interactionMode,
+  });
+
+  const runtimeEventSink = (event: RuntimeEvent) => {
+    kernel.processEvent(event);
+  };
+
   const engine = createLangGraphEngine({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -1193,9 +1314,8 @@ export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenera
     authorizationOverride: input.authorizationOverride,
     thinkingLevel: input.thinkingLevel,
     mcpManager: input.mcpManager,
+    runtimeEventSink,
   });
-
-  const signal = input.signal;
 
   try {
     const initialWorkspaceAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? 'auto');
@@ -1225,11 +1345,48 @@ export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenera
 
     yield* normalizeGraphStream(stream, signal);
   } finally {
+    try {
+      kernel.saveSnapshot();
+    } catch {
+      /* 快照保存失败不影响清理 */
+    }
+    try {
+      kernel.close();
+    } catch {
+      /* store 关闭失败不影响 engine 清理 */
+    }
     engine.close();
   }
 }
 
 export async function* resumeCodeAgent(input: ResumeCodeAgentInput): AsyncGenerator<AgentEvent> {
+  const signal = input.signal;
+
+  // ── Runtime 状态与存储初始化（resume 时尝试从快照恢复）/ Runtime state init (try snapshot for resume) ──
+  const runtimeDbPath = input.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
+  const store = createRuntimeStore(runtimeDbPath);
+  const snapshot = store.loadSnapshot<RuntimeState>(input.threadId);
+  const interactionMode = (snapshot?.mode ??
+    input.config.interactionMode ??
+    'ask') as InteractionMode;
+
+  const kernel = new AgentKernel({
+    store,
+    initialState:
+      snapshot ??
+      createInitialRuntimeState({
+        threadId: input.threadId,
+        userId: input.userId,
+        workspace: input.workspace,
+        interactionMode,
+      }),
+    interactionMode,
+  });
+
+  const runtimeEventSink = (event: RuntimeEvent) => {
+    kernel.processEvent(event);
+  };
+
   const engine = createLangGraphEngine({
     config: input.config,
     checkpointPath: input.checkpointPath,
@@ -1237,15 +1394,24 @@ export async function* resumeCodeAgent(input: ResumeCodeAgentInput): AsyncGenera
     authorizationOverride: input.authorizationOverride,
     thinkingLevel: input.thinkingLevel,
     mcpManager: input.mcpManager,
+    runtimeEventSink,
   });
-
-  const signal = input.signal;
 
   try {
     const stream = await engine.resume({ resume: input.resume }, graphConfig(input.threadId));
 
     yield* normalizeGraphStream(stream, signal);
   } finally {
+    try {
+      kernel.saveSnapshot();
+    } catch {
+      /* 快照保存失败不影响清理 */
+    }
+    try {
+      kernel.close();
+    } catch {
+      /* store 关闭失败不影响 engine 清理 */
+    }
     engine.close();
   }
 }

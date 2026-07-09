@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
 import { parseMcpToolName } from '@/core/mcp/tool-adapter';
+import type { ToolRisk } from '@/core/policies/shell-classification';
+import {
+  classifyShellRisk,
+  isDestructiveShellCommand,
+  isNetworkCommand,
+  isVcsMutationCommand,
+  isWriteLikeShellCommand,
+} from '@/core/policies/shell-classification';
 import { isReadOnlyShellCommand } from '@/core/tools/definitions';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
 import type {
@@ -11,16 +19,7 @@ import type {
 } from '@/protocol/events';
 import type { PendingToolRequest } from './tool-requests';
 
-export type ToolRisk =
-  | 'read'
-  | 'plan'
-  | 'write_file'
-  | 'execute_code'
-  | 'destructive'
-  | 'network'
-  | 'vcs_mutation'
-  | 'mcp'
-  | 'unknown';
+export type { ToolRisk };
 
 export interface ToolPolicyDecision {
   /** Canonical policy action. Kept alongside legacy booleans during migration. */
@@ -637,59 +636,7 @@ function requestRisk(request: PendingToolRequest): ToolRisk {
   return 'unknown';
 }
 
-export function classifyShellRisk(command: string): ToolRisk {
-  if (isDestructiveShellCommand(command)) return 'destructive';
-  if (isVcsMutationCommand(command)) return 'vcs_mutation';
-  if (isWriteLikeShellCommand(command)) return 'write_file';
-  if (isNetworkCommand(command)) return 'network';
-  return 'execute_code';
-}
-
-function isDestructiveShellCommand(command: string): boolean {
-  const normalized = normalizeShell(command);
-  return (
-    /(?:(?:^|[;&|]\s*)|\/)sudo\b/.test(normalized) ||
-    /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r|-r\s+-f|-f\s+-r|--recursive.*--force|--force.*--recursive)\b/.test(
-      normalized,
-    ) ||
-    /\brm\s+-[^\s]*f\b/.test(normalized) ||
-    /\bchmod\s+(?:-[^\s]*[rR]|--recursive)\b/.test(normalized) ||
-    /\bchown\s+(?:-[^\s]*[rR]|--recursive)\b/.test(normalized) ||
-    /(?:(?:^|[;&|]\s*)|\/)kill(?:all)?\b/.test(normalized) ||
-    /\bdd\b.*\bof=\/dev\//.test(normalized) ||
-    /\bmkfs\b/.test(normalized) ||
-    /\b(?:shutdown|reboot|halt|poweroff)\b/.test(normalized) ||
-    /\binit\s+[06]\b/.test(normalized) ||
-    /\bfdisk\b/.test(normalized) ||
-    /\bparted\b/.test(normalized) ||
-    /:\(\)\s*\{.*:.*\|.*:.*\}/.test(normalized) ||
-    />\s*\/dev\/sd/.test(normalized)
-  );
-}
-
-function isVcsMutationCommand(command: string): boolean {
-  return /\bgit\s+(?:add|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
-    normalizeShell(command),
-  );
-}
-
-function isWriteLikeShellCommand(command: string): boolean {
-  const normalized = normalizeShell(command);
-  return (
-    /(^|[^>])>{1,2}(?!&[12])(?:$|[^>])/.test(normalized) ||
-    /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee|rm|unlink)\b/.test(normalized) ||
-    /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update)\b/.test(normalized) ||
-    /\b(?:pip|pip3|cargo|gem|go|brew|apt|apt-get|choco)\s+install\b/.test(normalized)
-  );
-}
-
-function isNetworkCommand(command: string): boolean {
-  return /\b(?:curl|wget)\b/.test(normalizeShell(command));
-}
-
-function normalizeShell(command: string): string {
-  return (command ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-}
+export { classifyShellRisk } from '@/core/policies/shell-classification';
 
 function approvalCommand(request: PendingToolRequest): string {
   if (request.name === 'shell_execute') {
