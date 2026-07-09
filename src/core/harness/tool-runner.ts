@@ -3,6 +3,7 @@ import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpManager } from '@/core/mcp';
 import { parseMcpToolName } from '@/core/mcp/tool-adapter';
 import type { SupportedChatModel } from '@/core/model/factory';
+import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
@@ -19,11 +20,7 @@ import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type { AuthorizationOverride, ShellResult, ThreadAuthorizationState } from '@/core/types';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { AgentPhase, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
-import {
-  defaultPhaseForWorkspaceAccess,
-  evaluateToolPolicy,
-  normalizeAuthorizationState,
-} from './tool-policy';
+import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
 import type { PendingToolRequest } from './tool-requests';
 import type { ToolExecutionResult } from './tool-result';
 
@@ -95,9 +92,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     };
   }
 
-  const policy = evaluateToolPolicy({
-    request,
-    workspaceAccess,
+  const policy = evaluateToolApproval({
+    toolName: request.name,
+    toolArgs: request.args as Record<string, unknown>,
     phase,
     workspace,
     threadId,

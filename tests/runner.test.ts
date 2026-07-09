@@ -114,6 +114,55 @@ describe('runner initial workspace access selection', () => {
 });
 
 describe('normalizeGraphStream model retry events', () => {
+  test('drains RuntimeEvent projections emitted while graph stream is consumed', async () => {
+    const pendingRuntimeEvents: AgentEvent[] = [];
+    const runtimePump = {
+      drain(): AgentEvent[] {
+        return pendingRuntimeEvents.splice(0);
+      },
+    };
+
+    async function* mockStream() {
+      pendingRuntimeEvents.push({
+        type: 'tool_call',
+        data: {
+          call_id: 'call-queued',
+          name: 'shell_execute',
+          args: { command: 'echo queued' },
+          status: 'queued',
+        },
+      });
+      yield { agent: { messages: [] } };
+
+      pendingRuntimeEvents.push({
+        type: 'tool_started',
+        data: { call_id: 'call-queued' },
+      });
+      yield { tools: { messages: [] } };
+    }
+
+    const events: AgentEvent[] = [];
+    for await (const event of normalizeGraphStream(mockStream(), undefined, runtimePump as any)) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.type)).toEqual([
+      'tool_call',
+      'update',
+      'tool_started',
+      'update',
+    ]);
+    expect(events[0]).toEqual({
+      type: 'tool_call',
+      data: {
+        call_id: 'call-queued',
+        name: 'shell_execute',
+        args: { command: 'echo queued' },
+        status: 'queued',
+      },
+    });
+  });
+
   test('yields model_retry events when agent chunk contains modelRetries', async () => {
     const retries: ModelRetryEvent[] = [
       { attempt: 1, maxAttempts: 5, error: 'ECONNRESET', delayMs: 500 },
@@ -235,6 +284,57 @@ describe('runAgent multi-turn checkpoint continuation', () => {
       } finally {
         saver.close();
       }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('emits assistant text before plan review interrupt for tool-call responses', async () => {
+    const workspace = tempWorkspace('kite-code-runner-plan-order');
+    try {
+      const checkpointPath = join(workspace, 'checkpoint.db');
+      const threadId = 'plan-order-thread';
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: new AIMessage({
+              content: 'I will draft the plan first.',
+              id: 'm1',
+              tool_calls: [
+                {
+                  id: 'plan-call-1',
+                  name: 'update_plan',
+                  args: {
+                    name: 'Plan order',
+                    description: 'Verify TUI event ordering.',
+                    status: 'pending',
+                    steps: [{ step: 'Review event order', status: 'pending' }],
+                  },
+                },
+              ],
+            }),
+          },
+        ],
+      });
+
+      const events = await collectRunAgentEvents({
+        task: 'make a plan',
+        threadId,
+        workspace,
+        checkpointPath,
+        model,
+      });
+
+      const textIndexes = events
+        .map((event, index) =>
+          event.type === 'text' && event.data.text === 'I will draft the plan first.' ? index : -1,
+        )
+        .filter((index) => index >= 0);
+      const planReviewIndex = events.findIndex((event) => event.type === 'need_plan_review');
+
+      expect(textIndexes).toHaveLength(1);
+      expect(planReviewIndex).toBeGreaterThan(-1);
+      expect(textIndexes[0]!).toBeLessThan(planReviewIndex);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

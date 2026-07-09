@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile, stat as statAsync } from 'node:fs/promises';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { INTERRUPT, isInterrupted } from '@langchain/langgraph';
@@ -22,9 +23,9 @@ import type { AgentConfig } from './config/index';
 import { defaultAuthorizationState } from './harness/tool-policy';
 import { genSpanId } from './id-utils';
 import type { SupportedChatModel } from './model/factory';
-import type { BunSqliteSaver } from './persistence/checkpoint';
 import type { RuntimeEvent } from './runtime/events';
 import { AgentKernel, createAgentKernel } from './runtime/kernel';
+import { createRuntimeEventPump, type RuntimeEventPump } from './runtime/pump';
 import { createInitialRuntimeState, type RuntimeState } from './runtime/state';
 import { createRuntimeStore } from './runtime/store';
 import type { SandboxBackend } from './sandbox';
@@ -36,7 +37,6 @@ import type {
   AuthorizationOverride,
   ContextBudget,
   ModelRetryEvent,
-  ThreadAuthorizationState,
 } from './types';
 
 /** 统一事件管道：所有 AgentEvent 通过此接口发送到 TUI + 日志等消费者 */
@@ -101,48 +101,6 @@ export interface ResumeCodeAgentInput extends Omit<StreamCodeAgentInput, 'task'>
 
 /** 从 RuntimeStore 读取 thread 授权状态（替代从 LangGraph checkpoint 读取）。
  *  Read thread authorization state from RuntimeStore (instead of LangGraph checkpoint).
- *
- *  Phase 5 checkpoint 降级：授权状态是业务状态，应从 RuntimeStore 恢复。
- *  先尝试 RuntimeStore 快照，不存在时回退到 checkpoint（兼容旧会话数据）。
- *  Phase 5 checkpoint demotion: authorization is business state, restore from RuntimeStore.
- *  Try RuntimeStore snapshot first; fall back to checkpoint for backward compat. */
-async function readLastAuthorization(
-  checkpointer: BunSqliteSaver,
-  threadId: string,
-): Promise<ThreadAuthorizationState | null> {
-  try {
-    // Phase 5: 从 RuntimeStore 恢复 / Restore from RuntimeStore
-    const runtimeDbPath = checkpointer.dbPath.replace(/\.sqlite$/, '') + '.runtime.db';
-    try {
-      const store = createRuntimeStore(runtimeDbPath);
-      const snapshot = store.loadSnapshot<RuntimeState>(threadId);
-      store.close();
-      if (snapshot?.authorization?.mode) {
-        return {
-          mode: snapshot.authorization.mode,
-          commandGrants: snapshot.authorization.commandGrants ?? {},
-        };
-      }
-    } catch {
-      /* RuntimeStore not yet populated — fall back to checkpoint */
-    }
-
-    // 回退：从 checkpoint 读取（兼容尚未迁移到 RuntimeStore 的旧会话）
-    // Fallback: read from checkpoint (backward compat for sessions not yet migrated)
-    const tuple = await checkpointer.getTuple({
-      configurable: { thread_id: threadId },
-    });
-    if (!tuple) return null;
-    const auth = tuple.checkpoint.channel_values?.authorization as
-      | ThreadAuthorizationState
-      | undefined;
-    if (!auth || typeof auth.mode !== 'string') return null;
-    return auth;
-  } catch {
-    return null;
-  }
-}
-
 /** 按错误类型分类是否为可恢复错误 / Classify whether an error is recoverable */
 export function isRecoverableError(error: unknown): boolean {
   if (error instanceof Error) {
@@ -250,12 +208,11 @@ export async function* runAgent(
 
   // 运行时事件管道：图节点产出的 RuntimeEvent 经 kernel 处理后推入统一 sink
   // RuntimeEvent pipeline: graph nodes emit RuntimeEvent → kernel.processEvent → AgentEvent → unified sink
-  const runtimeEventSink = (event: RuntimeEvent) => {
-    const agentEvents = kernel.processEvent(event);
-    for (const agentEvent of agentEvents) {
-      sink.emit(agentEvent);
-    }
-  };
+  const runtimeEvents = createRuntimeEventPump(
+    (event) => kernel.processEvent(event),
+    (event) => sink.emit(event),
+  );
+  const runtimeEventSink = runtimeEvents.emitRuntimeEvent;
 
   const engine = createLangGraphEngine({
     config: input.config,
@@ -272,6 +229,8 @@ export async function* runAgent(
     toolProgressSink,
     runtimeEventSink,
   });
+
+  let turnSpanId = '';
 
   try {
     const initialAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? 'auto');
@@ -311,14 +270,26 @@ export async function* runAgent(
       });
     }
 
-    const prevAuth = await readLastAuthorization(engine.checkpointer, input.threadId);
+    // Initial user message → RuntimeEvent log (non-resume only)
+    if (!input.resume) {
+      runtimeEventSink({
+        type: 'user.message_appended',
+        messageId: randomUUID(),
+        content: input.task,
+      });
+    }
 
+    const prevAuth = await engine.readLastAuthorization(input.threadId);
+
+    // Per-turn configuration fields used for NEW sessions and for injecting messages
+    // into existing sessions. Must NOT include execution-state fields
+    // (plan, planReviewed, executionJournal, autoReviewState, doomLoopTracker, etc.)
+    // — those fields rely on Annotation.Root defaults for new sessions and are
+    // preserved from the checkpoint on existing sessions.
     const initialState = {
       messages: [new HumanMessage(input.task)],
       workspaceAccess: initialAccess,
       phase: initialPhase,
-      plan: null,
-      planReviewed: false,
       userId: input.userId,
       threadId: input.threadId,
       workspace: input.workspace,
@@ -333,26 +304,10 @@ export async function* runAgent(
 
     /**
      * 向已有 checkpoint 的 session 注入新用户消息。
-     *
-     * 设计决策 — whitelist 而非 blacklist：
-     * - blacklist（spread initialState 再排除 plan/planReviewed）在新增
-     *   execution-state channel 到 initialState 时静默回归
-     * - whitelist 强制显式决策：「这个 channel 是每轮配置，还是累积执行态？」
-     *
-     * 仅更新「每轮配置」类 channel；plan / planReviewed / executionJournal /
-     * autoReviewState 等执行态 channel 从 checkpoint 保留，不被覆盖。
+     * Spreads initialState — safe because execution-state fields (plan, planReviewed, etc.)
+     * are no longer present in initialState and Annotation.Root preserves them from checkpoint.
      *
      * Inject a new user message into an existing session checkpoint.
-     *
-     * Design — whitelist over blacklist:
-     * - A blacklist (spread initialState, omit plan/planReviewed) silently
-     *   regresses when new execution-state channels are added to initialState.
-     * - A whitelist forces an explicit decision: "is this channel per-turn
-     *   configuration, or accumulated execution state?"
-     *
-     * Only per-turn configuration channels are updated; execution-state
-     * channels (plan, planReviewed, executionJournal, autoReviewState, etc.)
-     * survive from the checkpoint unchanged.
      */
     const injectUserMessage = async (
       existingConfig: import('@langchain/core/runnables').RunnableConfig,
@@ -361,25 +316,9 @@ export async function* runAgent(
       return engine.updateState(
         existingConfig,
         {
-          // ── Per-turn configuration (safe to update each message) ──
+          ...initialState,
           messages: [new HumanMessage(input.task)],
-          workspaceAccess: initialAccess,
-          phase: initialPhase,
-          userId: input.userId,
-          threadId: input.threadId,
-          workspace: input.workspace,
           authorization: auth ?? defaultAuthorizationState(),
-          contextBudget: input.contextBudget,
-          modelProvider: input.config.providerName,
-          modelName: input.config.modelName,
-          thinkingLevel: input.thinkingLevel ?? null,
-          interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
-          sandboxBackend: input.sandboxBackend ?? 'unknown',
-          // ── NOT included (execution state — preserved from checkpoint) ──
-          // plan, planReviewed, executionJournal, exhaustedFingerprints,
-          // autoReviewState, doomLoopTracker, approvedBatch, approvedToolRequest,
-          // approvedToolGrant, pendingSubagentApproval, activeSkillInstructions,
-          // executionEnvironment, final
         },
         'cleanup',
       );
@@ -391,9 +330,9 @@ export async function* runAgent(
     let startState: typeof initialState | null = initialState;
 
     if (!resumeValue) {
-      const existing = await engine.checkpointer.getTuple(streamConfig);
-      if (existing) {
-        const updatedConfig = await injectUserMessage(existing.config, prevAuth);
+      const existingConfig = await engine.getExistingSessionConfig(input.threadId);
+      if (existingConfig) {
+        const updatedConfig = await injectUserMessage(existingConfig, prevAuth);
         streamConfig = {
           ...updatedConfig,
           configurable: {
@@ -425,10 +364,19 @@ export async function* runAgent(
       resumeValue = null;
       turnIndex++;
 
-      const turnSpanId = genSpanId();
+      turnSpanId = genSpanId();
       collector.nextTurn(turnSpanId);
       sink.emit({ type: 'turn_begin', data: { index: turnIndex, spanId: turnSpanId } });
-      const result = await processStream(sink, provider, stream, signal, input.workspace);
+      runtimeEventSink({ type: 'turn.started', turnId: turnSpanId });
+      const result = await processStream(
+        sink,
+        provider,
+        stream,
+        signal,
+        input.workspace,
+        runtimeEventSink,
+      );
+      runtimeEventSink({ type: 'turn.completed', turnId: turnSpanId });
       sink.emit({ type: 'turn_end', data: { index: turnIndex } });
 
       yield* result.events;
@@ -451,6 +399,9 @@ export async function* runAgent(
     const exitStatus: 'completed' | 'aborted' | 'fatal' = signal?.aborted ? 'aborted' : 'completed';
     await collector.finalize(exitStatus);
   } catch (e) {
+    if (turnSpanId) {
+      runtimeEventSink({ type: 'turn.aborted', turnId: turnSpanId, reason: String(e) });
+    }
     await collector.finalize('fatal');
     throw e;
   } finally {
@@ -511,12 +462,11 @@ export async function* revertToCheckpoint(
     interactionMode,
   });
 
-  const runtimeEventSink = (event: RuntimeEvent) => {
-    const agentEvents = kernel.processEvent(event);
-    for (const agentEvent of agentEvents) {
-      provider.onEvent(agentEvent);
-    }
-  };
+  const runtimeEvents = createRuntimeEventPump(
+    (event) => kernel.processEvent(event),
+    (event) => provider.onEvent(event),
+  );
+  const runtimeEventSink = runtimeEvents.emitRuntimeEvent;
 
   const engine = createLangGraphEngine({
     config: input.config,
@@ -532,10 +482,7 @@ export async function* revertToCheckpoint(
 
   try {
     // Verify checkpoint exists before attempting revert
-    const cpState = await engine.checkpointer.getCheckpointState(
-      input.threadId,
-      input.checkpointId,
-    );
+    const cpState = await engine.getCheckpointState(input.threadId, input.checkpointId);
     if (!cpState) {
       yield {
         type: 'error' as const,
@@ -560,7 +507,14 @@ export async function* revertToCheckpoint(
         provider.onEvent(e);
       },
     };
-    const result = await processStream(bareSink, provider, stream, signal, input.workspace);
+    const result = await processStream(
+      bareSink,
+      provider,
+      stream,
+      signal,
+      input.workspace,
+      runtimeEventSink,
+    );
     yield* result.events;
   } finally {
     try {
@@ -612,12 +566,11 @@ export async function* forkFromCheckpoint(
     interactionMode,
   });
 
-  const runtimeEventSink = (event: RuntimeEvent) => {
-    const agentEvents = kernel.processEvent(event);
-    for (const agentEvent of agentEvents) {
-      provider.onEvent(agentEvent);
-    }
-  };
+  const runtimeEvents = createRuntimeEventPump(
+    (event) => kernel.processEvent(event),
+    (event) => provider.onEvent(event),
+  );
+  const runtimeEventSink = runtimeEvents.emitRuntimeEvent;
 
   const engine = createLangGraphEngine({
     config: input.config,
@@ -632,10 +585,7 @@ export async function* forkFromCheckpoint(
   });
 
   try {
-    const oldState = await engine.checkpointer.getCheckpointState(
-      input.oldThreadId,
-      input.checkpointId,
-    );
+    const oldState = await engine.getCheckpointState(input.oldThreadId, input.checkpointId);
     if (!oldState) {
       yield {
         type: 'error' as const,
@@ -674,7 +624,14 @@ export async function* forkFromCheckpoint(
         provider.onEvent(e);
       },
     };
-    const result = await processStream(bareSink, provider, stream, signal, input.workspace);
+    const result = await processStream(
+      bareSink,
+      provider,
+      stream,
+      signal,
+      input.workspace,
+      runtimeEventSink,
+    );
     yield* result.events;
   } finally {
     try {
@@ -706,6 +663,7 @@ async function processStream(
   stream: AsyncIterable<unknown>,
   signal?: AbortSignal,
   workspace?: string,
+  runtimeEventSink?: (event: RuntimeEvent) => void,
 ): Promise<StreamResult> {
   const { isInterrupted, INTERRUPT } = await import('@langchain/langgraph');
   const cacheStandard = createPromptCacheStandardTracker();
@@ -720,7 +678,10 @@ async function processStream(
     if (interruptData) {
       const event = interruptToEvent(interruptData);
       if (event) {
-        sink.emit(event);
+        // RuntimeEvent 侧通道已通过 projection 发射对应的 need_* 事件，
+        // 此处仅用于获取 payload 和 typentkKind，不重复发射 need_*。
+        // RuntimeEvent side-channel already emits need_* via projection;
+        // only use stream interrupt for payload and interruptKind.
         allEvents.push(event);
         const payload = eventToInterruptPayload(interruptData, event);
         if (payload) {
@@ -729,6 +690,11 @@ async function processStream(
             sink.emit({
               type: 'user_message',
               data: { text: action.text, kind: 'answer', interruptType: 'input' },
+            });
+            runtimeEventSink?.({
+              type: 'user.message_appended',
+              messageId: randomUUID(),
+              content: action.text,
             });
           }
           const interruptKind =
@@ -746,7 +712,9 @@ async function processStream(
     const acc = findWorkspaceAccess(chunk);
     if (acc) currentAccess = acc;
 
-    const events = chunkToEvents(chunk, currentAccess, cacheStandard);
+    const events = chunkToEvents(chunk, currentAccess, cacheStandard, {
+      parseMessages: runtimeEventSink == null,
+    });
 
     // Record tool calls for cross-chunk file_change matching
     for (const e of events) {
@@ -923,18 +891,6 @@ export function parseAIMessageEvents(msg: AIMessage): AgentEvent[] {
   if (text.length > 0) {
     events.push({ type: 'text', data: { text } });
   }
-  if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-    for (const tc of msg.tool_calls) {
-      events.push({
-        type: 'tool_call',
-        data: {
-          call_id: tc.id ?? '',
-          name: tc.name,
-          args: tc.args as Record<string, unknown>,
-        },
-      });
-    }
-  }
   return events;
 }
 
@@ -1072,10 +1028,12 @@ export function chunkToEvents(
   chunk: unknown,
   workspaceAccess: WorkspaceAccess,
   cacheStandard: ReturnType<typeof createPromptCacheStandardTracker>,
+  options: { parseMessages?: boolean } = {},
 ): AgentEvent[] {
   const events: AgentEvent[] = [];
   if (!chunk || typeof chunk !== 'object') return events;
   const record = chunk as Record<string, unknown>;
+  const parseMessages = options.parseMessages ?? true;
 
   // 预计算：确定此 chunk 中是否有 final 和 cache_metrics
   let final = findFinal(chunk);
@@ -1093,15 +1051,12 @@ export function chunkToEvents(
       data: { node: key, spanId: nodeSpanId, internal: key === 'cleanup' },
     });
 
-    // 消息解析
+    // 消息解析（仅 AIMessage → text/reason；tool_call/tool_done 走 RuntimeEvent 旁路）
     const msgs = node.messages;
-    if (Array.isArray(msgs)) {
+    if (parseMessages && Array.isArray(msgs)) {
       for (const msg of msgs) {
         if (AIMessage.isInstance(msg)) {
           events.push(...parseAIMessageEvents(msg));
-        } else if (isToolMessage(msg as Record<string, unknown>)) {
-          const evt = parseToolResultEvents(msg as Record<string, unknown>);
-          if (evt) events.push(evt);
         }
       }
     }
@@ -1145,31 +1100,6 @@ export function chunkToEvents(
   }
 
   return events;
-}
-
-/** 检测消息是否为 ToolMessage 实例。
- *  优先使用 _getType() 方法（正确构造的实例），fallback 到检查
- *  tool_call_id 字段（checkpoint 反序列化后的 plain object）。
- *
- *  Detect whether a message is a ToolMessage instance.
- *  Prefer _getType() (correctly constructed instances), fall back to
- *  checking the tool_call_id field (plain objects after checkpoint deserialization). */
-function isToolMessage(msg: Record<string, unknown>): boolean {
-  try {
-    if (typeof msg._getType === 'function')
-      return (msg._getType as () => string).call(msg) === 'tool';
-  } catch {
-    /* ignore */
-  }
-
-  // Fallback: checkpoint-deserialized messages — check for tool_call_id
-  // which is unique to ToolMessage in the LangChain message hierarchy.
-  // AIMessage / HumanMessage / SystemMessage never have tool_call_id.
-  if (typeof msg.tool_call_id === 'string' && msg.tool_call_id.length > 0) {
-    return true;
-  }
-
-  return false;
 }
 
 function extractText(content: unknown): string {
@@ -1240,12 +1170,22 @@ export function taskMessageForInitialAccess(
 export async function* normalizeGraphStream(
   stream: AsyncIterable<unknown>,
   signal?: AbortSignal,
+  runtimeEvents?: Pick<RuntimeEventPump, 'drain'>,
 ): AsyncGenerator<AgentEvent> {
   let currentWorkspaceAccess: WorkspaceAccess | null = null;
   const cacheStandard = createPromptCacheStandardTracker();
+  const drainRuntimeEvents = function* (): Generator<AgentEvent> {
+    for (const event of runtimeEvents?.drain() ?? []) {
+      yield event;
+    }
+  };
+
   for await (const chunk of stream) {
+    yield* drainRuntimeEvents();
+
     if (isInterrupted(chunk)) {
       yield { type: 'interrupt', data: (chunk as Record<string | symbol, unknown>)[INTERRUPT] };
+      yield* drainRuntimeEvents();
       // 中断 chunk 同样需要检查 abort，避免消费方已取消仍继续生成事件
       if (signal?.aborted) return;
       continue;
@@ -1254,6 +1194,7 @@ export async function* normalizeGraphStream(
     const chunkRecord = chunk as Record<string, unknown>;
     if (INTERRUPT in chunkRecord) {
       yield { type: 'interrupt', data: chunkRecord[String(INTERRUPT)] };
+      yield* drainRuntimeEvents();
       if (signal?.aborted) return;
       continue;
     }
@@ -1285,7 +1226,10 @@ export async function* normalizeGraphStream(
     if (final) {
       yield { type: 'final', data: final };
     }
+
+    yield* drainRuntimeEvents();
   }
+  yield* drainRuntimeEvents();
 }
 
 export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenerator<AgentEvent> {
@@ -1303,9 +1247,8 @@ export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenera
     interactionMode,
   });
 
-  const runtimeEventSink = (event: RuntimeEvent) => {
-    kernel.processEvent(event);
-  };
+  const runtimeEvents = createRuntimeEventPump((event) => kernel.processEvent(event));
+  const runtimeEventSink = runtimeEvents.emitRuntimeEvent;
 
   const engine = createLangGraphEngine({
     config: input.config,
@@ -1321,7 +1264,13 @@ export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenera
     const initialWorkspaceAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? 'auto');
     const initialPhase = initialAgentPhaseForAccess(initialWorkspaceAccess);
 
-    const prevAuth = await readLastAuthorization(engine.checkpointer, input.threadId);
+    runtimeEventSink({
+      type: 'user.message_appended',
+      messageId: randomUUID(),
+      content: input.task,
+    });
+
+    const prevAuth = await engine.readLastAuthorization(input.threadId);
 
     const stream = await engine.run(
       {
@@ -1343,7 +1292,7 @@ export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenera
       graphConfig(input.threadId),
     );
 
-    yield* normalizeGraphStream(stream, signal);
+    yield* normalizeGraphStream(stream, signal, runtimeEvents);
   } finally {
     try {
       kernel.saveSnapshot();
@@ -1383,9 +1332,8 @@ export async function* resumeCodeAgent(input: ResumeCodeAgentInput): AsyncGenera
     interactionMode,
   });
 
-  const runtimeEventSink = (event: RuntimeEvent) => {
-    kernel.processEvent(event);
-  };
+  const runtimeEvents = createRuntimeEventPump((event) => kernel.processEvent(event));
+  const runtimeEventSink = runtimeEvents.emitRuntimeEvent;
 
   const engine = createLangGraphEngine({
     config: input.config,
@@ -1400,7 +1348,7 @@ export async function* resumeCodeAgent(input: ResumeCodeAgentInput): AsyncGenera
   try {
     const stream = await engine.resume({ resume: input.resume }, graphConfig(input.threadId));
 
-    yield* normalizeGraphStream(stream, signal);
+    yield* normalizeGraphStream(stream, signal, runtimeEvents);
   } finally {
     try {
       kernel.saveSnapshot();

@@ -15,10 +15,22 @@ function dispatch(s: TuiState, a: Action): TuiState {
   return eventReducer(s, a);
 }
 
-function toolCall(callId: string, name: string, args: Record<string, unknown> = {}): Action {
+function toolCall(
+  callId: string,
+  name: string,
+  args: Record<string, unknown> = {},
+  status?: 'queued' | 'running',
+): Action {
   return {
     type: 'EVENT',
-    event: { type: 'tool_call', data: { call_id: callId, name, args } },
+    event: { type: 'tool_call', data: { call_id: callId, name, args, status } },
+  };
+}
+
+function toolStarted(callId: string): Action {
+  return {
+    type: 'EVENT',
+    event: { type: 'tool_started', data: { call_id: callId } },
   };
 }
 
@@ -62,17 +74,30 @@ describe('run phase progression', () => {
     expect(deriveRunStatusSnapshot(state).phase).toBe('working');
   });
 
-  test('transitions to finishing when text starts streaming', () => {
+  test('stays in working while tools node is active before visible tool blocks arrive', () => {
+    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = dispatch(state, {
+      type: 'EVENT',
+      event: { type: 'step_begin', data: { node: 'tools', spanId: 's-tools' } },
+    });
+
+    const snap = deriveRunStatusSnapshot(state);
+    expect(snap.phase).toBe('working');
+    expect(snap.verb).toBe('Working');
+  });
+
+  test('stays working when text streams after tool activity', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, toolCall('c1', 'shell_execute', { command: 'bun test' }));
+    state = dispatch(state, toolDone('c1', 'shell_execute', 'created'));
     state = dispatch(state, {
       type: 'EVENT',
       event: { type: 'text', data: { text: 'All tests passed.' } },
     });
 
     const snap = deriveRunStatusSnapshot(state);
-    expect(snap.phase).toBe('finishing');
-    expect(snap.verb).toBe('Finishing');
+    expect(snap.phase).toBe('working');
+    expect(snap.verb).toBe('Working');
   });
 
   test('skips working phase when run uses no tools', () => {
@@ -91,6 +116,20 @@ describe('run phase progression', () => {
 // ── verb within phases ──
 
 describe('verb within working phase', () => {
+  test('shows queued verb before a queued tool starts running', () => {
+    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = dispatch(state, toolCall('c1', 'shell_execute', { command: 'ls' }, 'queued'));
+
+    let snap = deriveRunStatusSnapshot(state, state.runStartTime! + 2_000);
+    expect(snap.phase).toBe('working');
+    expect(snap.verb).toBe('Queued');
+    expect(snap.tone).toBe('muted');
+
+    state = dispatch(state, toolStarted('c1'));
+    snap = deriveRunStatusSnapshot(state, state.runStartTime! + 3_000);
+    expect(snap.verb).toBe('Running');
+  });
+
   test('shows tool verb when a tool is running', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, toolCall('c1', 'shell_execute', { command: 'ls' }));

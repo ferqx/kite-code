@@ -8,6 +8,7 @@ import { sessionDataToUI } from '../src/app/tui/replay-blocks';
 import type { OutputBlock } from '../src/app/tui/types';
 import { BunSqliteSaver } from '../src/core/persistence/checkpoint';
 import { generateSessionName, listSessions, loadSession } from '../src/core/persistence/sessions';
+import { createRuntimeStore } from '../src/core/runtime/store';
 
 function makeDbPath(label: string): string {
   return join(tmpdir(), `kite-code-sessions-test-${label}.sqlite`);
@@ -334,8 +335,93 @@ describe('loadSession', () => {
       expect(summary.tools[0]?.callId).toBe('call-1');
       expect(summary.tools[0]?.name).toBe('read_file');
       expect(summary.tools[0]?.args).toEqual({ path: '/tmp/test.txt' });
-      expect(summary.tools[0]?.status).toBe('running'); // no ToolMessage → still pending
+      expect(summary.tools[0]?.status).toBe('queued'); // old checkpoint fallback starts as queued
     }
+  });
+
+  test('replays assistant and tool lifecycle from RuntimeEvent store when available', async () => {
+    const dbPath = makeDbPath('runtime-replay');
+    rmSync(dbPath, { force: true });
+    rmSync(dbPath.replace(/\.sqlite$/, '') + '.runtime.db', { force: true });
+
+    const saver = new BunSqliteSaver(dbPath);
+    await saver.put(
+      { configurable: { thread_id: 'thread-runtime' } },
+      makeCheckpoint('cp-runtime', {
+        messages: [
+          new HumanMessage('Checkpoint task'),
+          new AIMessage({
+            content: 'Checkpoint text should not be replayed',
+            tool_calls: [{ id: 'checkpoint-call', name: 'read_file', args: { path: 'old.txt' } }],
+          }),
+        ],
+      }),
+      { source: 'loop', step: 1, parents: {} },
+    );
+    saver.close();
+
+    const runtimeStore = createRuntimeStore(dbPath.replace(/\.sqlite$/, '') + '.runtime.db');
+    runtimeStore.appendEvents('thread-runtime', [
+      {
+        type: 'user.message_appended',
+        messageId: 'user-1',
+        content: 'Runtime task',
+      },
+      {
+        type: 'model.responded',
+        messageId: 'model-1',
+        text: 'Runtime text',
+      },
+      {
+        type: 'tool.queued',
+        toolCallId: 'runtime-call',
+        name: 'shell_execute',
+        args: { command: 'echo runtime' },
+      },
+      {
+        type: 'tool.started',
+        toolCallId: 'runtime-call',
+      },
+      {
+        type: 'tool.finished',
+        toolCallId: 'runtime-call',
+        name: 'shell_execute',
+        result: {
+          ok: true,
+          command: 'echo runtime',
+          exitCode: 0,
+          stdout: 'runtime\n',
+          stderr: '',
+        },
+      },
+    ]);
+    runtimeStore.close();
+
+    const result = await loadSession(dbPath, 'thread-runtime');
+    expect(result).not.toBeNull();
+    expect(result?.runtimeEvents?.map((event) => event.type)).toEqual([
+      'user.message_appended',
+      'model.responded',
+      'tool.queued',
+      'tool.started',
+      'tool.finished',
+    ]);
+
+    const { blocks } = sessionDataToUI(result!);
+    expect(
+      blocks.some((block) => block.kind === 'text' && block.content.includes('Checkpoint')),
+    ).toBe(false);
+    expect(blocks[0]).toMatchObject({ kind: 'user', content: 'Runtime task' });
+    expect(blocks[1]).toMatchObject({ kind: 'text', content: 'Runtime text' });
+
+    const toolCard = blocks.find((block) => block.kind === 'tool_card');
+    expect(toolCard).toMatchObject({
+      kind: 'tool_card',
+      callId: 'runtime-call',
+      name: 'shell_execute',
+      status: 'done',
+      summary: 'runtime\n',
+    });
   });
 
   test('loads session with ToolMessage producing tool_card blocks', async () => {

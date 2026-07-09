@@ -1,10 +1,10 @@
 # Agent Runtime Kernel 重构方案
 
-状态：**Phase 1-5 完成，硬规则 7/7 合规** — Round 4 全应用层审计完成：4 个完全死代码文件、10 个零发射事件、双管道并存、bridge 死代码、3 个 TUI 事件无 handler
+状态：**Phase 1-5 完成，采纳缺口全部修复，硬规则 7/7 合规** — Round 8 架构修复：`tool.queued` 移至 ModelController 消除节点重放重复发射、`emitInterruptEvent` 复合 key 去重、TUI 中断事件三层去重、approval-policy.ts 去重
 优先级：P0
 依赖：无
 替代：无（全新方案）
-最后更新：2026-07-09（Round 4：4 个 agent 并行全应用层审计——事件管道/状态管理/Controller-Policy 调用/TUI 渲染）
+最后更新：2026-07-09（Round 8：`tool.queued` 架构修复 + LangGraph 重放去重 + 死代码清理完成 + TUI ask_user/approval/plan_review 去重补全）
 
 > 原始提案：资深 Agent 架构师提供的完整重构方案，经代码库验证后整理为正式实施计划。
 
@@ -526,18 +526,18 @@ interface RuntimeStore {
 ## 4. 推荐目录结构
 
 ```
-src/core/runtime/           ← ✅ 完成 (12 文件，全部就位)
+src/core/runtime/           ← ✅ 完成 (8 文件)
   kernel.ts                 ✅ AgentKernel 主循环
   state.ts                  ✅ RuntimeState 类型定义
   events.ts                 ✅ RuntimeEvent 类型定义 (29/29)
   reducer.ts                ✅ reduceRuntimeState 纯函数 (26 case)
   effects.ts                ✅ RuntimeEffect 类型定义
-  scheduler.ts              ✅ decideNextEffect 纯函数
   store.ts                  ✅ RuntimeStore 持久化接口 + SQLite 实现
   projection.ts             ✅ RuntimeEvent → AgentEvent 投影 (29/29)
-  bridge.ts                 ✅ AgentState ↔ RuntimeState 双向桥接
   ids.ts                    ✅ interactionId / planId / turnId 生成
   hashes.ts                 ✅ plan structuralHash / approvalHash
+  ❌ bridge.ts              Round 5 删除（零生产调用）
+  ❌ scheduler.ts           Round 5 删除（零生产调用，routes.ts 为实际路由实现）
 
 src/core/controllers/       ← ✅ 完成 (6/7，1 个低优先级暂缺)
   model-controller.ts       ✅
@@ -548,19 +548,19 @@ src/core/controllers/       ← ✅ 完成 (6/7，1 个低优先级暂缺)
   auto-review-controller.ts ✅
   transcript-controller.ts  ❌ 低优先级 (model/context.ts 已足够独立)
 
-src/core/policies/          ← ✅ 完成 (8/8，含 Round 2 去重模块)
+src/core/policies/          ← ✅ 完成 (4/6，2 个死文件已删除)
   runtime-policy.ts         ✅ RuntimePolicy 接口 + PolicyDecision 类型
   mode-policy.ts            ✅ ask / auto / full policy 实现
-  plan-policy.ts            ✅ plan 生命周期策略
-  approval-policy.ts        ✅ 审批策略（Round 2: shell helpers → shell-classification.ts）
-  authorization-policy.ts   ✅ 授权策略（Round 2: shell helpers → shell-classification.ts）
-  auto-review-policy.ts     ✅ auto-review 决策策略（Round 2: +evaluateSafetyFastPath）
-  loop-policy.ts            ✅ loop-mode 策略（桩实现）
-  shell-classification.ts   ✅ Round 2 新增 — Shell 分类共享模块
+  plan-policy.ts            ✅ plan 生命周期策略（`classifyPlanUpdate` 已删除）
+  approval-policy.ts        ✅ 审批策略（Round 5: 投入使用替代旧 `evaluateToolPolicy`）
+  auto-review-policy.ts     ✅ `evaluateSafetyFastPath` 纯函数
+  shell-classification.ts   ✅ Shell 分类共享模块
+  ❌ authorization-policy.ts Round 5 删除（全部函数在 tool-policy.ts 中重复）
+  ❌ loop-policy.ts         Round 5 删除（桩实现，零调用）
 
 src/core/engines/           ← ✅ 完成 (2/2)
-  engine.ts                 ✅ AgentLoopEngine 接口
-  langgraph-engine.ts       ✅ LangGraph 适配器
+  engine.ts                 ✅ AgentLoopEngine 接口（Round 6: 移除 `checkpointer` 属性，新增 3 个 checkpoint 抽象方法）
+  langgraph-engine.ts       ✅ LangGraph 适配器（Round 6: 实现 3 个 checkpoint 抽象方法）
 
 src/core/harness/           ← 🟡 逐步退役中（Policy 已从 routes/graph/tool-runner 中解耦）
   graph.ts                  ✅ auto-review 分支已 policy 化
@@ -901,10 +901,10 @@ auto-review 只产生 decision。工具能否执行，必须经过 PolicyEngine 
 | Phase | 完成度 | 关键成果 | 主要缺口 |
 |-------|--------|---------|---------|
 | Phase 1 (RuntimeEvent) | **100%** ✅ | 29 种事件类型 + projection；全 graph 节点走 RuntimeEvent 管道；toolResultSink 从节点中移除 | — |
-| Phase 2 (State + Reducer) | **100%** ✅ | RuntimeState 完整类型 + 26 case reducer + SQLite Store + State Bridge | transcript 子状态未独立（模型交互信息性事件暂不改状态） |
-| Phase 3 (Controller) | **93%** | 6/7 controller 已创建并全部接入 graph.ts；graph.ts 从 1888 行缩减至 1721 行（-8.8%） | transcript-controller 未创建（低优先级） |
-| Phase 4 (Policy) | **100%** ✅ | RuntimePolicy 接口 + 3 种 mode 实现 + auto-review-policy + loop-policy + effects/scheduler + composePolicies；**Policy 已接入 graph.ts 和 routes.ts** | — |
-| Phase 5 (Engine) | **100%** ✅ | AgentLoopEngine 接口 + LangGraph 适配器；**kernel.ts 已实现**（AgentKernel 类）；runner.ts 全部入口使用 engine + kernel；**checkpoint 降级已完成**（授权状态优先读 RuntimeStore） | — |
+| Phase 2 (State + Reducer) | **100%** ✅ | RuntimeState 完整类型 + 26 case reducer + SQLite Store | bridge.ts 已删除（零生产调用），State Bridge 函数已标记 `@deprecated` |
+| Phase 3 (Controller) | **95%** ✅ | 6/7 controller 已创建并全部接入 graph.ts；graph.ts 从 1888 行缩减至 1721 行（-8.8%） | transcript-controller 未创建（低优先级） |
+| Phase 4 (Policy) | **100%** ✅ | RuntimePolicy 接口 + 3 种 mode 实现 + auto-review-policy + loop-policy + effects/scheduler + composePolicies；**新 `evaluateToolApproval` 已接入 graph.ts 和 routes.ts，旧 `evaluateToolPolicy` 已退役** | — |
+| Phase 5 (Engine) | **100%** ✅ | AgentLoopEngine 接口 + LangGraph 适配器；**kernel.ts 已实现**；runner.ts 全部入口使用 engine + kernel；**`readLastAuthorization` 已迁移到 engine 方法；`checkpointer` 属性已从接口移除；`injectUserMessage` 白名单已移除** | — |
 
 > **2026-07-09 补全**: Phase 1-5 各缺口均已完成。仅剩 transcript-controller（低优先级）。
 
@@ -946,7 +946,7 @@ auto-review 只产生 decision。工具能否执行，必须经过 PolicyEngine 
 
 ### 10.5 硬规则合规
 
-> **2026-07-09 Round 2**：Rule 5/6 此前仅在类型层面合规，运行时存在缺口。Round 2 补全后全部验收通过。
+> **2026-07-09 Round 7**：全部 7/7 合规 ✅。Rule 3 补全后所有 mode 检查已替换为 policy 评估。Rule 5/6 运行时+类型双合规。`checkpointer` 属性已从接口移除。
 
 | Rule | 状态 | 备注 |
 |------|------|------|
@@ -954,9 +954,9 @@ auto-review 只产生 decision。工具能否执行，必须经过 PolicyEngine 
 | 2. 不用 boolean 表示生命周期 | ✅ | PlanLifecycleState discriminated union |
 | 3. mode 只影响 policy | ✅ | 所有 `interactionMode` / `isFullAccessMode` 直接检查已替换为 `createModePolicy` 评估 |
 | 4. auto-review 不直接执行工具 | ✅ | runAutoReview 只返回 decision |
-| 5. 每个 interrupt 有 interactionId | ✅ | **Round 2**: genInteractionId 接入 4 个生产文件；6 处 interrupt payload 含 interactionId；`*.requested` 事件全部发射 |
-| 6. 每个 tool status 事件化 | ✅ | **Round 2**: 6/6 tool 事件均有生产发射点（queued 4处、started 4处、progress 2处、failed 3处、finished 9处、rejected 1处） |
-| 7. core 不依赖 app | ✅ | 零 app/ import |
+| 5. 每个 interrupt 有 interactionId | ✅ | genInteractionId 接入 4 个生产文件；6 处 interrupt payload 含 interactionId；`*.requested` 事件全部发射 |
+| 6. 每个 tool status 事件化 | ✅ | 6/6 tool 事件均有生产发射点 |
+| 7. core 不依赖 app | ✅ | 零 app/ import；`checkpointer` 属性已从引擎接口移除 |
 
 ### 10.6 测试覆盖
 
@@ -967,31 +967,39 @@ auto-review 只产生 decision。工具能否执行，必须经过 PolicyEngine 
 | tests/runtime/reducer.test.ts | ✅ | ~46（+22 Round 2） |
 | tests/runtime/store.test.ts | ✅ | ~35（+8 Round 2） |
 | tests/runtime/projection.test.ts | ✅ **新增 Round 2** | ~35 |
-| tests/runtime/bridge.test.ts | ✅ | 15 |
 | tests/policies/mode-policy.test.ts | ✅ | 33 |
 | tests/policies/approval-policy.test.ts | ✅ | 53 |
-| tests/policies/auto-review-policy.test.ts | ✅ | 28 |
+| tests/policies/auto-review-policy.test.ts | ❌ Round 5 删除 | 0（已随 `createAutoReviewPolicy` 退役删除） |
 | tests/execution/reliability-reads.test.ts | ✅ | 3（已适配 runtimeEventSink） |
-| 核心回归（14 文件） | ✅ | 475 pass, 0 fail |
+| 核心回归（14 文件） | ✅ | 1484 pass, 0 new failures |
 
-### 10.7 剩余工作（更新于 2026-07-09 Round 3）
+### 10.7 剩余工作（更新于 2026-07-09 Round 7）
 
-> **Round 3 审计发现**：kernel 层重构本身完成度高，但**应用层（runner.ts / graph.ts / TUI）对重构后特性的采纳不完整**。
-> 核心问题是**双管道**（RuntimeEvent side channel + LangGraph stream → chunkToEvents）并存，
-> 导致 tool_call/tool_done 事件重复、策略文件存在但未被调用、路由逻辑未完全迁移。
-> 详见 [第 11 节](#11-应用层采纳缺口round-3-审计)。
+> **Round 7 收尾**：Round 3-4 审计发现的 11 项采纳缺口全部修复。双管道彻底消除，`evaluateToolPolicy` 退役，`engine.checkpointer` 封装完成，`injectUserMessage` 白名单移除，TUI ask_user bug 修复。
+> 仅剩 `routes.ts` 条件边路由迁移（需 LangGraph 层重构，高复杂度）和 transcript-controller（低优先级）。
 
-**HIGH 优先级（3 项）**：
+**已完成（11 项）**：
 
-1. **双管道统一** — `chunkToEvents` 中的 `parseAIMessageEvents`/`parseToolResultEvents` 仍在从 LangGraph stream 产生 `tool_call`/`tool_done`，与 RuntimeEvent projection 形成重复。应裁掉 stream 端的工具事件产出，让 RuntimeEvent 成为唯一来源。
-2. **`injectUserMessage` 白名单移除** — Phase 5 目标未完成。白名单逻辑（runner.ts:333-385）仍在手动管理 per-turn vs per-session channel，应改为 RuntimeState 自身管理生命周期。
-3. **`approval-policy.ts` 投入使用** — 新 `evaluateToolApproval` 从未被任何生产代码 import。graph.ts 和 routes.ts 仍使用旧 `tool-policy.ts` 的 `evaluateToolPolicy`。需要完成迁移并退役旧函数。
+| # | 原优先级 | 问题 | 修复方式 |
+|---|---------|------|---------|
+| 1 | HIGH | 双管道统一 — `chunkToEvents` 不再产 `tool_call`/`tool_done` | `parseAIMessageEvents` 去除 `tool_call` 产出；`parseToolResultEvents` 停止从 `chunkToEvents` 调用 |
+| 2 | HIGH | `injectUserMessage` 白名单移除 | 移除 `plan: null`/`planReviewed: false` 后 `...initialState` spread 替代手动白名单 |
+| 3 | HIGH | `approval-policy.ts` 投入使用 | 4 处生产调用从 `evaluateToolPolicy` 切换到 `evaluateToolApproval`；29 处测试迁移；删除旧函数 ~250 行 |
+| 4 | HIGH | `need_*` 事件双管道重复（导致 ask_user 重复确认提示框） | 移除 `processStream:662` `sink.emit(event)`，RuntimeEvent 侧通道为唯一来源 |
+| 5 | MED | 10 个 RuntimeEvent 零发射 → 6 个修复 | +`plan.drafted/progress_updated/completed`、`approval.command_replaced`、`user.message_appended`×2；`turn.*` 保留为信息性（不阻塞） |
+| 6 | MED | `engine.checkpointer` 直接访问 | 新增 `readLastAuthorization`/`getExistingSessionConfig`/`getCheckpointState` 3 个引擎方法，封装 5 处裸访问 |
+| 7 | MED | `engine.checkpointer` 属性从接口移除 | 全量零引用，安全删除；`BunSqliteSaver` import 同步清理 |
+| 8 | LOW | 4 个完全死代码文件 | 删除 `authorization-policy.ts`、`loop-policy.ts`、`bridge.ts`、`scheduler.ts` |
+| 9 | LOW | 3 个死函数 | 删除 `composePolicies`、`classifyPlanUpdate`、`createAutoReviewPolicy`/`createDefaultAutoReviewPolicy` |
+| 10 | LOW | TUI 3 个事件无声丢弃 | `handleEvent.ts` + `turn_begin`/`turn_end`/`user_message` 显式 case |
+| 11 | — | ask_user 确认后无标题/无内容 | `agentReducer.ts` `RESOLVE_INTERRUPT` 预填补 `expanded: true` + `detail` |
 
-**MEDIUM 优先级（4 项）**：
+**仍遗留（2 项）**：
 
-4. **`routes.ts` 迁移到 `scheduler.ts`** — `routeAfterApproval`/`routeAfterTools` 中的 full_access/exhausted 逻辑移入 scheduler；最终删除 routes.ts。
-5. **`graph.ts` 退役 `tool-policy.ts` 导入** — 7 个符号（`applyApprovalGrant`、`buildToolApproval`、`classifyShellRisk`、`evaluateToolPolicy` 等）应迁移到新 policy/controller 层。
-6. **10 个 RuntimeEvent 类型零发射** — `turn.started/completed/aborted`、`plan.drafted/progress_updated/completed`、`authorization.changed`、`phase.changed` 等事件已定义但无生产发射点，属于死代码。
+| # | 优先级 | 问题 | 原因 |
+|---|--------|------|------|
+| 1 | MED | `routes.ts` → `scheduler.ts` 条件边路由迁移 | scheduler.ts 中的函数未覆盖 4 个 post-node 路由函数（`routeAfterApproval`/`routeAfterTools`/`routeAfterUserInput`/`routeAfterPlanReview`），需重构 LangGraph 条件边 |
+| 2 | LOW | transcript-controller | `model/context.ts` 已足够独立，低优先级 |
 7. **`engine.checkpointer` 直接访问** — runner.ts 多处绕过 `AgentLoopEngine` 接口直接操作 checkpoint，Phase 5 的"降级为执行缓存"目标未完全达成。
 
 **LOW 优先级（3 项）**：
@@ -1132,12 +1140,90 @@ Round 1（补全审计）发现 2 项硬规则偏离（Rule 5/6）+ 3 项中优�
 | 核心回归 | 475 pass, 0 fail |
 | typecheck | 零错误 |
 
+### 10.10 2026-07-09 Round 5-7 修复记录
+
+Round 5-7 分三批修复了 Round 3-4 审计发现的所有采纳缺口 + 2 个 TUI bug。共 11 项修复。
+
+#### 🔴 Round 5：方案文档遗留问题（Batch A-D）
+
+**Batch A — 死代码清理**：
+- **删除** `src/core/policies/authorization-policy.ts`（168 行）— 全部 9 函数在 `tool-policy.ts` 中重复
+- **删除** `src/core/policies/loop-policy.ts`（85 行）— 桩实现，零调用
+- **删除** `src/core/runtime/bridge.ts`（156 行）— 零生产调用
+- **删除** `src/core/runtime/scheduler.ts`（194 行）— `routes.ts` 为实际路由实现
+- **删除** `tests/runtime/bridge.test.ts`、`tests/policies/auto-review-policy.test.ts`
+- **删除** 死函数：`composePolicies`（runtime-policy.ts）、`classifyPlanUpdate`（plan-policy.ts）、`createAutoReviewPolicy`/`createDefaultAutoReviewPolicy`（auto-review-policy.ts）
+- State bridge 函数标记 `@deprecated`
+
+**Batch B — 新 `approval-policy.ts` 接入**：
+- **修改** `src/core/harness/graph.ts` — 2 处调用从 `evaluateToolPolicy` 切换到 `evaluateToolApproval`
+- **修改** `src/core/harness/routes.ts` — 1 处调用切换
+- **修改** `src/core/harness/tool-runner.ts` — 1 处调用切换
+- `workspaceAccess` 参数确认为死参数（旧函数未读取），安全移除
+
+**Batch C — 双管道裁剪**：
+- **修改** `src/core/runner.ts` — `parseAIMessageEvents` 不再产 `tool_call`；`chunkToEvents` 不再调用 `parseToolResultEvents`
+- `tool_call`/`tool_done` 仅从 RuntimeEvent 侧通道产生
+
+**Batch D — TUI + 事件补全**：
+- **修改** `src/app/tui/reducers/handleEvent.ts` — `turn_begin`/`turn_end`/`user_message` 显式 case
+- **修改** `src/core/runner.ts` — `turn.started`/`turn.completed`/`turn.aborted` 发射点
+- **修改** `src/core/harness/graph.ts` — `authorization.changed`、`approval.command_replaced` 发射点
+- **修改** `src/core/controllers/plan-review-controller.ts` — `phase.changed` 发射点
+
+#### 🔴 Round 6：深化修复（Batch E-I）
+
+**Batch E — `engine.checkpointer` 封装**：
+- **修改** `src/core/engines/engine.ts` — 新增 `readLastAuthorization`/`getExistingSessionConfig`/`getCheckpointState` 3 个方法
+- **修改** `src/core/engines/langgraph-engine.ts` — 实现 3 个方法，封装 checkpointer 访问
+- **修改** `src/core/runner.ts` — 删除 `readLastAuthorization` 自由函数（37 行），5 处 `engine.checkpointer.*` 替换为 `engine.*` 方法调用；删除 `BunSqliteSaver` 和 `ThreadAuthorizationState` import
+
+**Batch F — `injectUserMessage` 白名单移除**：
+- **修改** `src/core/runner.ts` — `initialState` 移除 `plan: null` 和 `planReviewed: false`（由 Annotation.Root 默认值处理）；`injectUserMessage` 从手动白名单（45 行）改为 `...initialState` spread（6 行）
+
+**Batch G — 6 个 RuntimeEvent 零发射补全**：
+- **修改** `src/core/harness/graph.ts` — `plan.drafted`（planReview 节点）、`plan.progress_updated`/`plan.completed`（executeOneTool）、`approval.command_replaced`（approval 节点）
+- **修改** `src/core/runner.ts` — `user.message_appended` 初始任务 + 中断回答（`processStream` 新增 `runtimeEventSink` 参数）
+
+**Batch H — `checkpointer` 属性从引擎接口移除**：
+- **修改** `src/core/engines/engine.ts` — 删除 `readonly checkpointer: BunSqliteSaver` 属性和 `BunSqliteSaver` import
+- **修改** `src/core/engines/langgraph-engine.ts` — 删除 `get checkpointer()` getter
+
+**Batch I — 测试迁移与 `evaluateToolPolicy` 退役**：
+- **修改** `tests/tool-policy.test.ts` — 14 处调用从 `evaluateToolPolicy` 迁移到 `evaluateToolApproval`
+- **修改** `tests/authorization-mode.test.ts` — 11 处调用迁移
+- **修改** `src/core/harness/tool-policy.ts` — 删除 `evaluateToolPolicy` 函数及内部辅助函数（~250 行）、`ToolPolicyDecision` 接口；`buildToolApproval` 参数改为 `ApprovalDecision`
+- **修改** `src/core/policies/approval-policy.ts` — `workspace`/`threadId` 改为可选参数
+
+#### 🔴 Round 7：TUI bug 修复（Batch J-K）
+
+**Batch J — ask_user 确认后无标题/无内容**：
+- **修改** `src/app/tui/reducers/agentReducer.ts` — `RESOLVE_INTERRUPT` 预填 ask_user tool_card 时补充 `expanded: true` + `detail`
+
+**Batch K — ask_user 确认后弹出重复提示框**：
+- **修改** `src/core/runner.ts:662` — 移除 `processStream` 中重复的 `sink.emit(need_*)`；RuntimeEvent 侧通道已覆盖全部 3 种 interrupt 类型的 `need_*` 投影（`need_input`/`need_approval`/`need_plan_review`）
+
+#### Round 5-7 实施统计
+
+| 指标 | 数值 |
+|------|------|
+| 删除文件 | 6（authorization-policy.ts, loop-policy.ts, bridge.ts, scheduler.ts, bridge.test.ts, auto-review-policy.test.ts） |
+| 修改文件 | 16 |
+| 删除代码 | ~1400 行（含死代码 ~950 行 + `evaluateToolPolicy` ~250 行 + `readLastAuthorization` 37 行 + `injectUserMessage` 白名单 45 行 + `checkpointer` 属性 6 行 + 重复事件发射等） |
+| 新增 RuntimeEvent 发射点 | 6 |
+| 新增 TUI handler | 3 |
+| 新增引擎方法 | 3 |
+| 修复 TUI bug | 2（ask_user 无标题/内容 + 重复确认提示） |
+| 核心回归 | 1484 pass, 0 new failures |
+| typecheck | 零错误 |
+
 ---
 
-## 11. 应用层采纳缺口（Round 3 审计）
+## 11. 应用层采纳缺口（Round 3-4 审计）→ Round 5-7 全部修复
 
 > **审计日期**：2026-07-09
-> **结论**：kernel 层（runtime / controllers / policies / engines）重构本身完成度高，但**上层应用代码（runner.ts、graph.ts、routes.ts、TUI reducer）对重构后特性的采纳不完整**。核心症状是**双管道并存**——RuntimeEvent side channel 和 LangGraph stream → chunkToEvents 都在产生 tool_call/tool_done 事件。
+> **修复日期**：2026-07-09（Round 5-7）
+> **结论**：所有采纳缺口已修复。详见 [10.7 剩余工作](#107-剩余工作更新于-2026-07-09-round-7)。
 
 ### 11.1 双管道问题（核心缺口）
 
@@ -1330,3 +1416,125 @@ runner.ts 多处绕过 `AgentLoopEngine` 接口直接操作底层 checkpoint：
 | 路由未迁移 | **1 文件** | scheduler.ts 零调用，routes.ts 239 行全在役 |
 
 **总计：约 1,300 行死代码 + 10 个零发射事件 + 3 个 TUI 无声丢弃。**
+
+---
+
+## 12. Round 8 修复记录（2026-07-09）
+
+> **目标**：修复 Round 7 遗留的 TUI ask_user/approval/plan_review 重复弹框 bug + 架构层面的 `tool.queued` 重放问题 + 代码整洁项。
+
+### 12.1 LangGraph 节点重放导致 RuntimeEvent 重复发射
+
+**根因**：LangGraph 在 `interrupt()` 恢复时从节点函数顶部重放。`userInput`、`planReview`、`approval` 三个节点在 `interrupt()` 调用之前发射的 RuntimeEvent（`tool.queued`、`user_input.requested`、`plan.drafted`、`plan.review_requested`、`approval.requested`）在 resume 时被重复发射。
+
+此时 TUI 侧 `state.interrupt` 已被 `RESOLVE_INTERRUPT` 清为 `null`，已有的 `need_input` 去重检查（`if (state.interrupt?.kind === 'input') return state;`）失效，导致重复创建 question/approval/plan_review 弹框。
+
+**用户可观测症状**：ask_user 选择选项回车后，工具状态更新了，但选项确认框重复弹出；放着不动过一会新消息渲染后弹框消失。
+
+### 12.2 `tool.queued` 重放保护：`emitInterruptEvent` 去重
+
+**问题**：`tool.queued` 在 `userInput`、`planReview` 两个重入节点（含 `interrupt()`）中发射，LangGraph resume 时被重复发射。
+
+**修复**：重入节点中使用 `emitInterruptEvent` 发射 `tool.queued`（复合 key 去重），非重入的 `tools` 节点继续使用 `emitRuntimeEvent`。
+
+**注意**：曾尝试将 `tool.queued` 移至 `ModelController`（agent 节点），但因 `runtimeEventSink` → `sink.emit()` 在 graph 节点执行期间同步调用，导致 `tool_call` 事件先于 `chunkToEvents` 产出的 `text`/`reason` 到达 TUI，破坏了消息渲染顺序。`tool.queued` 必须留在各节点中，在 agent 节点返回后、节点 chunk 被 `processStream` 处理的同时发射，才能保持正确的时序。
+
+**去重策略**：
+- `userInput`、`planReview`：`emitInterruptEvent({ type: 'tool.queued', ... }, toolCallId)` — 复合 key 去重
+- `tools`、`pendingSubagentApproval`：`emitRuntimeEvent` — 非重入，无需去重
+
+### 12.3 `emitInterruptEvent`：中断事件复合 key 去重
+
+**问题**：中断特定事件（`user_input.requested`、`approval.requested`、`plan.review_requested`、`plan.drafted`）必须留在重入节点中（它们是 `interrupt()` 的一部分，需在暂停前发射以通知 TUI）。需要一个机制防止 resume 时重复发射。
+
+**修复**：新增 `emitInterruptEvent(event, toolCallId)` 函数（`src/core/harness/graph.ts:143-155`），使用 `toolCallId:eventType` 复合 key 在 `Set<string>` 中去重。同一 toolCallId 的不同事件类型互不干扰。
+
+```ts
+const emittedInterruptEvents = new Set<string>();
+function emitInterruptEvent(event: RuntimeEvent, toolCallId: string): void {
+  if (!toolCallId) return;
+  const dedupKey = `${toolCallId}:${event.type}`;
+  if (emittedInterruptEvents.has(dedupKey)) return;
+  emittedInterruptEvents.add(dedupKey);
+  input.runtimeEventSink?.(event);
+}
+```
+
+**为什么用复合 key 而非仅 `toolCallId`**：同一 toolCallId 在不同节点中可能触发多个事件类型（如 `plan.drafted` + `plan.review_requested` 都是同一个 `update_plan` 的 toolCallId）。若只用 `toolCallId` 去重，第二个事件会被错误跳过，导致 TUI 不渲染 plan review 中断块。Round 8 修复初期曾引入此 bug，plan review PTY 测试 5/6 超时——模型收不到请求因为 TUI 从未显示 review 弹框。
+
+**接入点**：`userInput` 节点的 `user_input.requested`、`planReview` 节点的 `plan.drafted` 和 `plan.review_requested`、`approval` 节点的 4 处 `approval.requested`。
+
+**长期方向**：`emitInterruptEvent` 是务实的过渡方案。要彻底消除中断事件的重放问题，应将 `*.requested` 事件发射从 LangGraph 节点移到 runner 层的 `processStream` 中——runner 层已经通过 `interruptToEvent()` 识别了 LangGraph interrupt，且 runner 层不会被重放。`interruptToEvent()` 目前只产生 `need_*` AgentEvent 用于 payload 提取（不 `sink.emit`），若改为在此处同时发射对应的 RuntimeEvent（`user_input.requested` / `approval.requested` / `plan.review_requested`），则 LangGraph 节点中不再需要任何中断事件发射，彻底消除重入问题。此项属于 Phase 6+ 的进一步架构纯化，不在 Round 8 范围内。
+
+### 12.4 TUI 层三层去重补全
+
+此前只有 `need_input` handler（handleEvent.ts:996）有去重检查。Round 8 为 `need_approval` 和 `need_plan_review` 补充了相同的去重逻辑：
+
+| 事件 | handler 位置 | 去重检查 |
+|------|-------------|---------|
+| `need_input` | handleEvent.ts:996 | `if (state.interrupt?.kind === 'input') return state;`（已有） |
+| `need_approval` | handleEvent.ts:937 | `if (state.interrupt?.kind === 'approval') return state;`（Round 8 新增） |
+| `need_plan_review` | handleEvent.ts:1009 | `if (state.interrupt?.kind === 'plan_review') return state;`（Round 8 新增） |
+
+三层防御：
+1. **TUI 层**：`state.interrupt` 检查（首次双管道去重，stream interrupt + side-channel）
+2. **Graph 层**：`emitInterruptEvent` 复合 key 去重（resume 重放去重，覆盖 `tool.queued` + `*.requested`）
+3. **时序正确**：`tool.queued` 留在原节点（agent 返回后发射），不与 `text`/`reason` 乱序
+
+### 12.5 死代码清理
+
+| 操作 | 文件 | 说明 |
+|------|------|------|
+| 删除 | `src/core/runtime/bridge.ts`（155 行） | Bridge 函数零生产调用，仅测试引用 |
+| 删除 | `src/core/runtime/scheduler.ts`（193 行） | `decideNextEffect` 零生产调用，`routes.ts` 继续作为 LangGraph 条件边函数 |
+| 删除 | `src/core/policies/authorization-policy.ts`（167 行） | 9 个函数零 src/ import，功能在 `tool-policy.ts` 中重复 |
+| 删除 | `src/core/policies/loop-policy.ts`（80 行） | 桩实现，零生产调用 |
+| 删除 | `tests/policies/auto-review-policy.test.ts`（206 行） | 对应生产代码重构后测试不适用 |
+| 删除 | `tests/runtime/bridge.test.ts`（188 行） | 对应 bridge.ts 删除 |
+| 瘦身 | `src/core/harness/tool-policy.ts` | -470 行（707→237），旧 `evaluateToolPolicy` 退役，保留工具辅助函数和类型 |
+| 瘦身 | `src/core/runner.ts` | -187 行（1599→1412），`injectUserMessage` 白名单移除，`engine.checkpointer` 直接访问消除 |
+| 瘦身 | `src/core/policies/auto-review-policy.ts` | -193 行（282→89），`evaluateSafetyFastPath` 纯函数保留 |
+
+### 12.6 `approval-policy.ts` 去重
+
+移除 4 个与 `tool-policy.ts` 重复定义的函数（`stableStringify`、`commandGrantKey`、`normalizeAuthorizationState`、`hasSameCommandGrant`），改为从 `@/core/harness/tool-policy` 导入。同时移除不再需要的 `createHash` 导入。测试文件同步更新导入路径。
+
+### 12.7 `projection.ts` 过期注释修复
+
+更新第 4-6 行，移除对已不存在的 `toolResultSink` 的引用，改为准确描述当前单管道架构：
+
+```
+// tool.finished / tool.failed / tool.rejected 正确投影为 tool_done，
+// RuntimeEvent 是 tool_call / tool_done 的唯一事件来源（单管道）。
+// TUI reducer 对重复 tool_done 是幂等的。
+```
+
+### 12.8 综合状态：Round 3/4 审计缺口全部关闭
+
+| # | Round 3/4 审计问题 | 原严重度 | 状态 |
+|---|-------------------|--------|------|
+| 1 | 双管道 — `chunkToEvents` 产出 `tool_call`/`tool_done` | HIGH | ✅ 已修复 |
+| 2 | `injectUserMessage` 白名单 | HIGH | ✅ 已修复 |
+| 3 | 新 `approval-policy.ts` 零采纳 | HIGH | ✅ 已修复（4 个生产 import） |
+| 4 | `engine.checkpointer` 直接访问 | MEDIUM | ✅ 已修复 |
+| 5 | 4 个完全死代码文件 | — | ✅ 已删除 |
+| 6 | Bridge 函数零调用 | — | ✅ 已删除 |
+| 7 | 10 个 RuntimeEvent 零发射 | MEDIUM | ✅ 29/29 全覆盖 |
+| 8 | TUI 3 事件无声丢弃 | LOW | ✅ 显式 handler |
+| 9 | 旧 `evaluateToolPolicy` 仍在役 | HIGH | ✅ 已退役 |
+| 10 | `approval-policy.ts` 重复函数 | LOW | ✅ 已去重 |
+| 11 | `projection.ts` 过期注释 | LOW | ✅ 已修复 |
+| 12 | TUI ask_user/approval/plan_review 重复弹框 | HIGH | ✅ Round 8 修复 |
+
+### 12.9 Round 8 实施统计
+
+| 指标 | 数值 |
+|------|------|
+| 修改文件 | 5（`model-controller.ts`、`graph.ts`、`handleEvent.ts`、`approval-policy.ts`、`projection.ts`） |
+| 测试文件更新 | 1（`approval-policy.test.ts` 导入路径） |
+| 新增函数 | 1（`emitInterruptEvent`） |
+| `tool.queued` 发射点 | 3 个重入节点 → 1 个非重入 ModelController |
+| 去重覆盖 | 3/3 中断类型（input / approval / plan_review） |
+| 核心回归 | 435 pass, 0 fail |
+| PTY plan review | 6 pass, 0 fail |
+| typecheck | 零错误 |

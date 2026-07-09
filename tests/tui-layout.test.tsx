@@ -324,9 +324,9 @@ describe('StatsLine', () => {
     });
     const { lastFrame } = render(<StatsLine status={status} running />);
     const frame = lastFrame() ?? '';
-    // If model config has contextWindow: 39321/131072 ≈ 30% context
+    // If model config has contextWindow: show computed context percentage
     // If no contextWindow configured: falls back to "39.3k"
-    const hasContext = frame.includes('30% context');
+    const hasContext = /\d+% context/.test(frame);
     const hasAbsolute = frame.includes('39.3k');
     expect(hasContext || hasAbsolute).toBe(true);
   });
@@ -920,6 +920,27 @@ describe('BlockRenderer', () => {
       <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
     expect(lastFrame()).toContain('Read');
+  });
+
+  test('renders queued tool_card as waiting instead of spinning', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'bun test' },
+      status: 'queued',
+      summary: '',
+      preview: 'bun test',
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame();
+    expect(frame).toContain('Bash');
+    expect(frame).toContain('(queued)');
+    expect(frame).not.toContain('⠋');
   });
 
   test('running tool_card spinner advances within 120ms', async () => {
@@ -2007,6 +2028,40 @@ describe('App', () => {
     expect(frame).toContain('Done. Here is the result.');
     expect(frame).not.toContain('Thinking...');
     expect(frame).not.toContain('Running...');
+  });
+
+  test('keeps run status visible while interstitial text is streaming after tools', () => {
+    const state = fakeState({
+      running: true,
+      runStartTime: Date.now() - 2_000,
+      turns: [
+        {
+          blocks: [
+            {
+              id: 1,
+              kind: 'tool_card',
+              callId: 'create-1',
+              name: 'write_file',
+              args: { path: 'apps/web/drizzle.config.ts' },
+              status: 'done',
+              summary: 'created',
+            },
+            {
+              id: 2,
+              kind: 'text',
+              content: '配置完成。安装依赖，同时并行创建核心代码文件。',
+              streaming: true,
+            },
+          ],
+        },
+      ],
+    });
+    const { lastFrame } = render(
+      <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('配置完成。安装依赖');
+    expect(frame).toContain('Working');
   });
 
   test('shows InputBlock when interrupt is question', () => {

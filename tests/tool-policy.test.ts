@@ -3,7 +3,6 @@ import {
   applyApprovalGrant,
   buildToolApproval,
   defaultAuthorizationState,
-  evaluateToolPolicy,
   grantSameCommand,
   hashToolApprovalRequest,
   hasSameCommandGrant,
@@ -11,6 +10,7 @@ import {
   validateApprovalHash,
 } from '../src/core/harness/tool-policy';
 import type { PendingToolRequest } from '../src/core/harness/tool-requests';
+import { evaluateToolApproval } from '../src/core/policies/approval-policy';
 
 const shellExecuteRequest: PendingToolRequest = {
   id: 'call-shell',
@@ -49,9 +49,9 @@ describe('tool policy', () => {
     ];
 
     for (const request of requests) {
-      const decision = evaluateToolPolicy({
-        request,
-        workspaceAccess: 'write',
+      const decision = evaluateToolApproval({
+        toolName: request.name,
+        toolArgs: request.args as Record<string, unknown>,
         phase: 'planning',
       });
 
@@ -63,9 +63,9 @@ describe('tool policy', () => {
 
   // 验证普通 shell_execute 执行项目代码时需要审批 / shell_execute commands that run project code require approval
   test('requires approval for normal shell execution under building phase', () => {
-    const decision = evaluateToolPolicy({
-      request: shellExecuteRequest,
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: shellExecuteRequest.name,
+      toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
       phase: 'building',
     });
 
@@ -78,13 +78,9 @@ describe('tool policy', () => {
 
   // 验证只读 shell_execute 命令按命令风险直通，不再只按工具名审批 / Read-only shell_execute commands are classified by command risk
   test('allows read-only shell_execute commands without approval', () => {
-    const decision = evaluateToolPolicy({
-      request: {
-        ...shellExecuteRequest,
-        args: { command: 'git status --short' },
-        protectedCommand: 'git status --short',
-      },
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: 'shell_execute',
+      toolArgs: { command: 'git status --short' },
       phase: 'building',
     });
 
@@ -95,9 +91,9 @@ describe('tool policy', () => {
 
   // 验证规划阶段拒绝执行类工具，即使工作区访问权限错误地为 write / Planning phase rejects execution tools even if workspace access is write
   test('rejects shell execution during planning phase', () => {
-    const decision = evaluateToolPolicy({
-      request: shellExecuteRequest,
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: shellExecuteRequest.name,
+      toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
       phase: 'planning',
     });
 
@@ -109,13 +105,9 @@ describe('tool policy', () => {
 
   // 验证高危命令默认拒绝，不进入普通审批 / High-risk shell commands are denied instead of routed to normal approval
   test('denies destructive shell execution by default', () => {
-    const decision = evaluateToolPolicy({
-      request: {
-        ...shellExecuteRequest,
-        args: { command: 'sudo rm -rf /' },
-        protectedCommand: 'sudo rm -rf /',
-      },
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: 'shell_execute',
+      toolArgs: { command: 'sudo rm -rf /' },
       phase: 'building',
     });
 
@@ -131,9 +123,9 @@ describe('tool policy', () => {
       threadId: 'thread-a',
       command: 'bun test',
     });
-    const decision = evaluateToolPolicy({
-      request: shellExecuteRequest,
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: shellExecuteRequest.name,
+      toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
@@ -152,17 +144,14 @@ describe('tool policy', () => {
       threadId: 'thread-a',
       command: 'bun test',
     });
-    const decision = evaluateToolPolicy({
-      request: {
-        ...shellExecuteRequest,
-        args: {
-          command: '  bun test  ',
-          objective: '重新验证修改后的行为',
-          justification: '同一个命令，但解释文本不同。',
-          prefix_rule: ['bun', 'test'],
-        },
+    const decision = evaluateToolApproval({
+      toolName: 'shell_execute',
+      toolArgs: {
+        command: '  bun test  ',
+        objective: '重新验证修改后的行为',
+        justification: '同一个命令，但解释文本不同。',
+        prefix_rule: ['bun', 'test'],
       },
-      workspaceAccess: 'write',
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
@@ -181,13 +170,9 @@ describe('tool policy', () => {
       threadId: 'thread-a',
       command: 'bun test',
     });
-    const decision = evaluateToolPolicy({
-      request: {
-        ...shellExecuteRequest,
-        args: { command: 'bun run typecheck' },
-        protectedCommand: 'bun run typecheck',
-      },
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: 'shell_execute',
+      toolArgs: { command: 'bun run typecheck' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
@@ -210,13 +195,9 @@ describe('tool policy', () => {
     });
 
     for (const command of ['bun test', 'echo hi > hello.txt', 'git add -A']) {
-      const decision = evaluateToolPolicy({
-        request: {
-          ...shellExecuteRequest,
-          args: { command },
-          protectedCommand: command,
-        },
-        workspaceAccess: 'write',
+      const decision = evaluateToolApproval({
+        toolName: 'shell_execute',
+        toolArgs: { command },
         phase: 'building',
         workspace: '/tmp/project',
         threadId: 'thread-a',
@@ -239,13 +220,9 @@ describe('tool policy', () => {
       request: shellExecuteRequest,
     });
 
-    const decision = evaluateToolPolicy({
-      request: {
-        ...shellExecuteRequest,
-        args: { command: 'sudo rm -rf /' },
-        protectedCommand: 'sudo rm -rf /',
-      },
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: 'shell_execute',
+      toolArgs: { command: 'sudo rm -rf /' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
@@ -265,13 +242,9 @@ describe('tool policy', () => {
       command: 'sudo rm -rf /',
     });
 
-    const decision = evaluateToolPolicy({
-      request: {
-        ...shellExecuteRequest,
-        args: { command: 'sudo rm -rf /' },
-        protectedCommand: 'sudo rm -rf /',
-      },
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: 'shell_execute',
+      toolArgs: { command: 'sudo rm -rf /' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
@@ -327,9 +300,9 @@ describe('tool policy', () => {
 
   // 验证审批 payload 由 runtime 基于工具请求和策略生成 / Approval payload is generated by the runtime from request and policy
   test('builds structured approval payload from policy decision', () => {
-    const decision = evaluateToolPolicy({
-      request: shellExecuteRequest,
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: shellExecuteRequest.name,
+      toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
       phase: 'building',
     });
 
@@ -385,15 +358,9 @@ describe('tool policy', () => {
 
   // read_mcp_resource tool policy tests
   test('allows read_mcp_resource without approval', () => {
-    const decision = evaluateToolPolicy({
-      request: {
-        id: 'call-mcp-resource',
-        name: 'read_mcp_resource',
-        args: { server: 'docs', uri: 'file:///api.md' },
-        reason: 'Model requested MCP resource',
-        protectedCommand: 'read_mcp_resource',
-      },
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: 'read_mcp_resource',
+      toolArgs: { server: 'docs', uri: 'file:///api.md' },
       phase: 'building',
     });
     expect(decision.allowed).toBe(true);
@@ -402,15 +369,9 @@ describe('tool policy', () => {
   });
 
   test('allows read_mcp_resource in read-only workspace', () => {
-    const decision = evaluateToolPolicy({
-      request: {
-        id: 'call-mcp-resource',
-        name: 'read_mcp_resource',
-        args: { server: 'docs', uri: 'file:///api.md' },
-        reason: 'Model requested MCP resource',
-        protectedCommand: 'read_mcp_resource',
-      },
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: 'read_mcp_resource',
+      toolArgs: { server: 'docs', uri: 'file:///api.md' },
       phase: 'planning',
     });
     expect(decision.allowed).toBe(true);
@@ -419,14 +380,9 @@ describe('tool policy', () => {
   });
 
   test('allows Skill without approval', () => {
-    const decision = evaluateToolPolicy({
-      request: {
-        name: 'Skill',
-        args: { skill: 'tdd' },
-        reason: 'Model requested Skill tool',
-        protectedCommand: 'Skill',
-      },
-      workspaceAccess: 'write',
+    const decision = evaluateToolApproval({
+      toolName: 'Skill',
+      toolArgs: { skill: 'tdd' },
       phase: 'building',
     });
     expect(decision.allowed).toBe(true);
@@ -437,14 +393,9 @@ describe('tool policy', () => {
   // MCP 工具策略测试 / MCP tool policy tests
   describe('MCP tools', () => {
     test('requires approval for mcp__* tools by default', () => {
-      const decision = evaluateToolPolicy({
-        request: {
-          name: 'mcp__playwright__navigate',
-          args: { url: 'https://example.com' },
-          reason: 'Model requested MCP tool',
-          protectedCommand: 'mcp__playwright__navigate',
-        } as unknown as PendingToolRequest,
-        workspaceAccess: 'write',
+      const decision = evaluateToolApproval({
+        toolName: 'mcp__playwright__navigate',
+        toolArgs: { url: 'https://example.com' },
         phase: 'building',
       });
       expect(decision.requiresApproval).toBe(true);
@@ -452,14 +403,9 @@ describe('tool policy', () => {
     });
 
     test('allows MCP tool with server-level risk=read override', () => {
-      const decision = evaluateToolPolicy({
-        request: {
-          name: 'mcp__safe_reader__list',
-          args: {},
-          reason: 'Model requested MCP tool',
-          protectedCommand: 'mcp__safe_reader__list',
-        } as unknown as PendingToolRequest,
-        workspaceAccess: 'write',
+      const decision = evaluateToolApproval({
+        toolName: 'mcp__safe_reader__list',
+        toolArgs: {},
         phase: 'building',
         mcpRiskOverride: { safe_reader: 'read' },
       });
@@ -469,14 +415,9 @@ describe('tool policy', () => {
     });
 
     test('denies MCP tools in read-only workspace', () => {
-      const decision = evaluateToolPolicy({
-        request: {
-          name: 'mcp__playwright__navigate',
-          args: {},
-          reason: 'Model requested MCP tool',
-          protectedCommand: 'mcp__playwright__navigate',
-        } as unknown as PendingToolRequest,
-        workspaceAccess: 'write',
+      const decision = evaluateToolApproval({
+        toolName: 'mcp__playwright__navigate',
+        toolArgs: {},
         phase: 'planning',
       });
       expect(decision.allowed).toBe(false);

@@ -181,6 +181,7 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
       <Text color={lineColor}>{connector}</Text>
       <Text>{actionName(step.name)}</Text>
       {fitLabel && <Text color={lineColor}> {fitLabel}</Text>}
+      {step.status === 'queued' && <Text color={dt.muted}> queued</Text>}
       {step.status === 'running' && <Text color={dt.warning}> …</Text>}
       {isError && errSummary && <Text color={dt.error}> {errSummary}</Text>}
     </Box>
@@ -215,7 +216,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
     let pending = false;
     let err = false;
     for (const t of block.tools) {
-      if (t.status === 'running') pending = true;
+      if (t.status === 'queued' || t.status === 'running') pending = true;
       if (t.status === 'error' || t.status === 'exhausted' || t.status === 'timeout') err = true;
       if (pending && err) break;
     }

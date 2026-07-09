@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { hasSameCommandGrant, normalizeAuthorizationState } from '@/core/harness/tool-policy';
 import { parseMcpToolName } from '@/core/mcp/tool-adapter';
 import { isReadOnlyShellCommand } from '@/core/tools/definitions';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
@@ -24,9 +24,9 @@ export interface EvaluateToolApprovalParams {
   /** 当前 agent 阶段: 'planning' 或 'building' / Current agent phase */
   phase: AgentPhase;
   /** 工作区路径（same_command 授权匹配用）/ Workspace path for same_command grant matching */
-  workspace: string;
+  workspace?: string;
   /** 线程 ID（same_command 授权匹配用）/ Thread ID for same_command grant matching */
-  threadId: string;
+  threadId?: string;
   /** 线程授权状态；null/undefined → 默认模式 / Thread authorization state; null/undefined → default */
   authorization?: ThreadAuthorizationState | null;
   /** 运行时授权覆盖（如来自 checkpoint 或父线程）/ Runtime authorization override */
@@ -57,79 +57,6 @@ export interface ApprovalDecision {
   requiresSandbox?: boolean;
   /** 导致拒绝的阶段约束（如有）/ Phase constraint that caused denial, if applicable */
   phaseConstraint?: AgentPhase;
-}
-
-// ── 确定性序列化 / Deterministic serialization ──
-
-/**
- * 对象的确定性 JSON 序列化 — 键按字母序排序，数组保持原序。
- * 用于为 same_command 授权生成稳定的 hash。
- *
- * Deterministic JSON serialization — object keys sorted alphabetically,
- * arrays preserve order. Used for stable same_command grant hashing.
- */
-export function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(',')}]`;
-  }
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
-// ── Same-command 授权工具 / Same-command grant utilities ──
-
-/**
- * 为 same_command 授权生成 key，不复用 approvalHash。
- * 与 tool-policy.ts 中的 commandGrantKey 逻辑相同。
- *
- * Build same_command grant key without reusing approvalHash.
- * Same logic as commandGrantKey in tool-policy.ts.
- */
-export function commandGrantKey(input: {
-  workspace: string;
-  threadId: string;
-  command: string;
-}): string {
-  return createHash('sha256')
-    .update(
-      `same_command:${stableStringify({
-        workspace: input.workspace,
-        threadId: input.threadId,
-        command: (input.command ?? '').trim(),
-      })}`,
-    )
-    .digest('hex');
-}
-
-/** 规范化 checkpoint 中可能缺失的授权状态 / Normalize authorization state from checkpoints */
-export function normalizeAuthorizationState(
-  authorization?: ThreadAuthorizationState | null,
-): ThreadAuthorizationState {
-  return {
-    mode: authorization?.mode === 'full_access' ? 'full_access' : 'default',
-    commandGrants: authorization?.commandGrants ?? {},
-  };
-}
-
-/** 检查 same_command 授权是否命中 / Check whether an exact command grant exists */
-export function hasSameCommandGrant(
-  authorization: ThreadAuthorizationState | null | undefined,
-  input: { workspace: string; threadId: string; command: string },
-): boolean {
-  const state = normalizeAuthorizationState(authorization);
-  const key = commandGrantKey(input);
-  const grant = state.commandGrants[key];
-  return (
-    !!grant &&
-    grant.workspace === input.workspace &&
-    grant.threadId === input.threadId &&
-    grant.command === (input.command ?? '').trim()
-  );
 }
 
 // ── 决策构建器 / Decision builder functions ──
@@ -277,7 +204,7 @@ function denyForPlanningPhase(params: {
  * but accepts explicit parameters, decoupled from LangGraph's PendingToolRequest.
  */
 export function evaluateToolApproval(params: EvaluateToolApprovalParams): ApprovalDecision {
-  const { toolName, toolArgs, phase, workspace, threadId } = params;
+  const { toolName, toolArgs, phase, workspace = '', threadId = '' } = params;
   const authorization = normalizeAuthorizationState(params.authorization);
   const effectiveMode = params.override?.current ?? authorization.mode;
 

@@ -31,9 +31,12 @@ import type { McpManager } from '@/core/mcp';
 import { prepareModelContext } from '@/core/model/context';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { BunSqliteSaver } from '@/core/persistence/checkpoint';
+import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { evaluateSafetyFastPath } from '@/core/policies/auto-review-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
+import { isPlanProgressOnlyUpdate } from '@/core/policies/plan-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { computePlanStructuralHash } from '@/core/runtime/hashes';
 import { genInteractionId } from '@/core/runtime/ids';
 import { resumeSubAgent } from '@/core/subagent/runner';
 import type { SubAgentResult } from '@/core/subagent/types';
@@ -59,7 +62,6 @@ import {
   buildToolApproval,
   classifyShellRisk,
   defaultPhaseForWorkspaceAccess,
-  evaluateToolPolicy,
   normalizeAuthorizationState,
   replaceApprovalCommand,
 } from './tool-policy';
@@ -135,6 +137,24 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   /** 发出 RuntimeEvent 的辅助函数 — 封装 runtimeEventSink 调用，调用方可
    *  在工具完成或交互事件发生时调用。调用前自动检查 runtimeEventSink 是否存在。 */
   function emitRuntimeEvent(event: RuntimeEvent): void {
+    input.runtimeEventSink?.(event);
+  }
+
+  // LangGraph 节点在 interrupt() 恢复时会从顶部重放，导致 interrupt 前
+  // 的 RuntimeEvent（*.requested）被重复发射。用 toolCallId + eventType
+  // 作为复合去重 key 防止 TUI 收到重复的 need_input / need_approval / need_plan_review，
+  // 同时允许同一 toolCallId 的不同事件类型各自发射。
+  //
+  // LangGraph nodes replay from the top on interrupt() resume, causing
+  // RuntimeEvents before interrupt() to be re-emitted. Dedup using
+  // composite key (toolCallId + eventType) to prevent duplicate TUI
+  // interrupt blocks while allowing different event types for the same tool.
+  const emittedInterruptEvents = new Set<string>();
+  function emitInterruptEvent(event: RuntimeEvent, toolCallId: string): void {
+    if (!toolCallId) return;
+    const dedupKey = `${toolCallId}:${event.type}`;
+    if (emittedInterruptEvents.has(dedupKey)) return;
+    emittedInterruptEvents.add(dedupKey);
     input.runtimeEventSink?.(event);
   }
 
@@ -265,13 +285,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       };
     }
 
-    const workspaceAccess = state.workspaceAccess ?? 'write';
-    const policy = evaluateToolPolicy({
-      request,
-      workspaceAccess,
-      phase: state.phase ?? defaultPhaseForWorkspaceAccess(workspaceAccess),
-      workspace: state.workspace,
-      threadId: state.threadId,
+    const policy = evaluateToolApproval({
+      toolName: request.name,
+      toolArgs: request.args as Record<string, unknown>,
+      phase: state.phase ?? defaultPhaseForWorkspaceAccess(state.workspaceAccess ?? 'write'),
+      workspace: state.workspace ?? '',
+      threadId: state.threadId ?? '',
       authorization: state.authorization,
       override,
       mcpRiskOverride,
@@ -366,16 +385,19 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       if (doomCheck.blocked) {
         console.warn(`[auto-review] doom-loop BLOCKED: ${doomCheck.reason} — tool=${request.name}`);
         if (!pendingSubagent) {
-          emitRuntimeEvent({
-            type: 'approval.requested',
-            interactionId,
-            toolCallId: request.id ?? '',
-            approval: {
-              ...approvalPayload,
-              doomLoopDetected: true,
-              doomLoopReason: doomCheck.reason,
-            } as unknown as import('@/protocol/events').ToolApprovalPayload,
-          });
+          emitInterruptEvent(
+            {
+              type: 'approval.requested',
+              interactionId,
+              toolCallId: request.id ?? '',
+              approval: {
+                ...approvalPayload,
+                doomLoopDetected: true,
+                doomLoopReason: doomCheck.reason,
+              } as unknown as import('@/protocol/events').ToolApprovalPayload,
+            },
+            request.id ?? '',
+          );
           approved = interrupt({
             kind: 'tool_approval',
             request,
@@ -491,15 +513,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
             planReviewed: state.planReviewed,
           });
         }
-        emitRuntimeEvent({
-          type: 'approval.requested',
-          interactionId,
-          toolCallId: request.id ?? '',
-          approval: {
-            ...approvalPayload,
-            agentDeclaredDangerous: true,
-          } as unknown as import('@/protocol/events').ToolApprovalPayload,
-        });
+        emitInterruptEvent(
+          {
+            type: 'approval.requested',
+            interactionId,
+            toolCallId: request.id ?? '',
+            approval: {
+              ...approvalPayload,
+              agentDeclaredDangerous: true,
+            } as unknown as import('@/protocol/events').ToolApprovalPayload,
+          },
+          request.id ?? '',
+        );
         approved = interrupt({
           kind: 'tool_approval',
           request,
@@ -517,16 +542,19 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
           const reviewFailure = request.id
             ? state.autoReviewState.pendingWarnings[request.id]
             : undefined;
-          emitRuntimeEvent({
-            type: 'approval.requested',
-            interactionId,
-            toolCallId: request.id ?? '',
-            approval: {
-              ...approvalPayload,
-              circuitBreakerTripped: true,
-              reviewFailure,
-            } as unknown as import('@/protocol/events').ToolApprovalPayload,
-          });
+          emitInterruptEvent(
+            {
+              type: 'approval.requested',
+              interactionId,
+              toolCallId: request.id ?? '',
+              approval: {
+                ...approvalPayload,
+                circuitBreakerTripped: true,
+                reviewFailure,
+              } as unknown as import('@/protocol/events').ToolApprovalPayload,
+            },
+            request.id ?? '',
+          );
           approved = interrupt({
             kind: 'tool_approval',
             request,
@@ -572,12 +600,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         }
       } // closes if (!approved)
     } else {
-      emitRuntimeEvent({
-        type: 'approval.requested',
-        interactionId,
-        toolCallId: request.id ?? '',
-        approval: approvalPayload as unknown as import('@/protocol/events').ToolApprovalPayload,
-      });
+      emitInterruptEvent(
+        {
+          type: 'approval.requested',
+          interactionId,
+          toolCallId: request.id ?? '',
+          approval: approvalPayload as unknown as import('@/protocol/events').ToolApprovalPayload,
+        },
+        request.id ?? '',
+      );
       approved = interrupt({
         kind: 'tool_approval',
         request,
@@ -629,6 +660,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     if (result.replacementCommand) {
       try {
         approvedRequest = replaceApprovalCommand(request, result.replacementCommand);
+        emitRuntimeEvent({
+          type: 'approval.command_replaced',
+          interactionId,
+          command: result.replacementCommand,
+        });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         if (pendingSubagent) {
@@ -659,12 +695,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       threadId: state.threadId,
       request: approvedRequest,
     });
-    const approvedPolicy = evaluateToolPolicy({
-      request: approvedRequest,
-      workspaceAccess,
-      phase: state.phase ?? defaultPhaseForWorkspaceAccess(workspaceAccess),
-      workspace: state.workspace,
-      threadId: state.threadId,
+    if (nextAuthorization.mode !== state.authorization.mode) {
+      emitRuntimeEvent({ type: 'authorization.changed', mode: nextAuthorization.mode });
+    }
+    const approvedPolicy = evaluateToolApproval({
+      toolName: approvedRequest.name,
+      toolArgs: approvedRequest.args as Record<string, unknown>,
+      phase: state.phase ?? defaultPhaseForWorkspaceAccess(state.workspaceAccess ?? 'write'),
+      workspace: state.workspace ?? '',
+      threadId: state.threadId ?? '',
       authorization: nextAuthorization,
       override,
     });
@@ -735,19 +774,25 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
 
     const interactionId = genInteractionId();
 
-    // RuntimeEvent: tool.queued — ask_user 也走统一工具生命周期（Rule 6）
-    emitRuntimeEvent({
-      type: 'tool.queued',
-      toolCallId: request.id ?? '',
-      name: request.name,
-      args: request.args,
-    });
-    emitRuntimeEvent({
-      type: 'user_input.requested',
-      interactionId,
-      toolCallId: request.id ?? '',
-      request: request.args as unknown as import('@/protocol/events').UserInputPayload,
-    });
+    // emitInterruptEvent 防止 LangGraph node 重放时重复发射
+    emitInterruptEvent(
+      {
+        type: 'tool.queued',
+        toolCallId: request.id ?? '',
+        name: request.name,
+        args: request.args,
+      },
+      request.id ?? '',
+    );
+    emitInterruptEvent(
+      {
+        type: 'user_input.requested',
+        interactionId,
+        toolCallId: request.id ?? '',
+        request: request.args as unknown as import('@/protocol/events').UserInputPayload,
+      },
+      request.id ?? '',
+    );
 
     const resume = interrupt({
       kind: 'user_input',
@@ -790,26 +835,43 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       })),
     };
 
+    // emitInterruptEvent 防止 LangGraph node 重放时重复发射
+    emitInterruptEvent(
+      {
+        type: 'plan.drafted',
+        toolCallId: request.id ?? '',
+        plan,
+        structuralHash: computePlanStructuralHash(plan),
+      },
+      request.id ?? '',
+    );
+
     // 将 scheme content 格式化为工具输出，通过 need_plan_review payload 传递给 TUI
     // Format scheme content as tool output, passed to TUI via need_plan_review payload
     const stepsText = plan.steps.map((s, i) => `${i + 1}. ${s.step}`).join('\n');
     const planSummary = `${plan.description}\n\nSteps:\n${stepsText}`;
 
     const interactionId = genInteractionId();
-    // RuntimeEvent: tool.queued — update_plan 也走统一工具生命周期（Rule 6）
-    emitRuntimeEvent({
-      type: 'tool.queued',
-      toolCallId: request.id ?? '',
-      name: request.name,
-      args: request.args as unknown as Record<string, unknown>,
-    });
-    emitRuntimeEvent({
-      type: 'plan.review_requested',
-      interactionId,
-      toolCallId: request.id ?? '',
-      plan,
-      planSummary,
-    });
+    // emitInterruptEvent 防止 LangGraph node 重放时重复发射
+    emitInterruptEvent(
+      {
+        type: 'tool.queued',
+        toolCallId: request.id ?? '',
+        name: request.name,
+        args: request.args as unknown as Record<string, unknown>,
+      },
+      request.id ?? '',
+    );
+    emitInterruptEvent(
+      {
+        type: 'plan.review_requested',
+        interactionId,
+        toolCallId: request.id ?? '',
+        plan,
+        planSummary,
+      },
+      request.id ?? '',
+    );
 
     const resume = interrupt({
       kind: 'plan_review',
@@ -918,6 +980,27 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       });
       toolMsg = r.toolMessage;
       sideEffects = r.sideEffects;
+
+      // Emit plan.progress_updated for status-only update_plan calls
+      if (request.name === 'update_plan' && sideEffects.plan) {
+        if (isPlanProgressOnlyUpdate(state.plan, sideEffects.plan)) {
+          emitRuntimeEvent({
+            type: 'plan.progress_updated',
+            toolCallId: request.id ?? '',
+            plan: sideEffects.plan,
+          });
+        }
+      }
+
+      // Emit plan.completed when update_plan sets status to 'completed'
+      if (request.name === 'update_plan' && sideEffects.plan?.status === 'completed') {
+        emitRuntimeEvent({
+          type: 'plan.completed',
+          toolCallId: request.id ?? '',
+          plan: sideEffects.plan,
+        });
+      }
+
       subagentBlocked = r.subagentBlocked;
     } catch (error) {
       emitRuntimeEvent({

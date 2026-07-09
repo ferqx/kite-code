@@ -244,7 +244,7 @@ function closeCurrentThought(state: TuiState): TuiState {
       (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
     );
     const anyCancelled = block.tools.some((t) => t.status === 'cancelled');
-    const allSettled = block.tools.every((t) => t.status !== 'running');
+    const allSettled = block.tools.every((t) => t.status !== 'queued' && t.status !== 'running');
     // Only assign result when all tools have actually settled.
     // If tools are still running, leave result undefined — later tool_done
     // events will recalculate it (lines ~633-648).
@@ -503,6 +503,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     }
     case 'tool_call': {
       const isExploration = isExplorationToolEvent(event.data);
+      const toolStatus = event.data.status ?? 'running';
       // task tool has its own subagent block
       if (!isExploration) state = closeCurrentThought(state);
       if (event.data.name === 'task') return state;
@@ -514,7 +515,10 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
       const now = Date.now();
-      const times = { ...finalized.toolStartTimes, [event.data.call_id]: now };
+      const times =
+        toolStatus === 'running'
+          ? { ...finalized.toolStartTimes, [event.data.call_id]: now }
+          : finalized.toolStartTimes;
 
       // ── Pre-consolidation: exploration tools go directly to tool_summary, never as tool_card ──
       if (isExploration) {
@@ -524,7 +528,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           args: event.data.args,
           ok: false,
           summary: '',
-          status: 'running',
+          status: toolStatus,
           totalLines:
             typeof event.data.args?.totalLines === 'number'
               ? event.data.args.totalLines
@@ -600,12 +604,58 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         callId: event.data.call_id,
         name: event.data.name,
         args: event.data.args,
-        status: 'running',
+        status: toolStatus,
         summary: '',
         preview,
-        startedAt: now,
+        ...(toolStatus === 'running' ? { startedAt: now } : {}),
       };
       return { ...appendBlock(finalized, block), toolStartTimes: times };
+    }
+    case 'tool_started': {
+      const now = Date.now();
+      const matched = findBlock(
+        state,
+        (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
+      );
+      if (matched?.kind === 'tool_card') {
+        if (matched.status === 'running') return state;
+        if (matched.status !== 'queued') return state;
+        return {
+          ...replaceBlockById(state, matched.id, {
+            ...matched,
+            status: 'running' as const,
+            startedAt: now,
+          }),
+          toolStartTimes: { ...state.toolStartTimes, [event.data.call_id]: now },
+        };
+      }
+
+      const location = findToolSummaryLocation(state, event.data.call_id);
+      if (!location) return state;
+      const { turnIndex, blockIndex, block: summary } = location;
+      let changed = false;
+      const tools = summary.tools.map((t) => {
+        if (t.callId !== event.data.call_id || t.status !== 'queued') return t;
+        changed = true;
+        return { ...t, status: 'running' as const };
+      });
+      if (!changed) return state;
+      const updatedSummary: OutputBlock = {
+        ...summary,
+        tools,
+        active: summary.active,
+        totalElapsedMs: summary.active ? now - summary.createdAt : summary.totalElapsedMs,
+        summaryLine: buildToolSummaryLine(tools),
+      };
+      const turnsCopy = state.turns.map((t, ti) => {
+        if (ti !== turnIndex) return t;
+        return { blocks: t.blocks.map((b, bi) => (bi === blockIndex ? updatedSummary : b)) };
+      });
+      return {
+        ...state,
+        turns: turnsCopy,
+        toolStartTimes: { ...state.toolStartTimes, [event.data.call_id]: now },
+      };
     }
     case 'tool_done': {
       if (event.data.name === 'task') return state;
@@ -645,11 +695,13 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           // left by closeCurrentThought before late-arriving tool_done events.
           const allSettled = tools.every(
             (t) =>
-              t.status === 'done' ||
-              t.status === 'error' ||
-              t.status === 'cancelled' ||
-              t.status === 'timeout' ||
-              t.status === 'exhausted',
+              t.status !== 'queued' &&
+              t.status !== 'running' &&
+              (t.status === 'done' ||
+                t.status === 'error' ||
+                t.status === 'cancelled' ||
+                t.status === 'timeout' ||
+                t.status === 'exhausted'),
           );
           const hasError = tools.some(
             (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
@@ -709,7 +761,6 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
         }
         return { ...state, toolStartTimes: nextTimes };
       }
-
       // update_plan declined
       if (matched.name === 'update_plan' && !event.data.ok) {
         const declined: OutputBlock = { ...matched, status: 'done' as const, expanded: true };
@@ -771,7 +822,9 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
               : timedOut
                 ? ('timeout' as const)
                 : ('error' as const),
-        reviewFailure: event.data.reviewFailure ?? (matched as any).reviewFailure,
+        reviewFailure:
+          event.data.reviewFailure ??
+          ('reviewFailure' in matched ? matched.reviewFailure : undefined),
         summary: displaySummary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
@@ -933,6 +986,8 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return finalized;
     }
     case 'need_approval': {
+      // Dedup: side-channel + stream interrupt can both emit need_approval for the same request.
+      if (state.interrupt?.kind === 'approval') return state;
       const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
       const block: OutputBlock = {
         id: finalized.nextBlockId,
@@ -948,7 +1003,7 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
           next,
           (b) =>
             b.kind === 'tool_card' &&
-            b.status === 'running' &&
+            (b.status === 'queued' || b.status === 'running') &&
             (b.callId === event.data.callId || (!event.data.callId && b.name === event.data.tool)),
         );
         if (pendingTool?.kind === 'tool_card') {
@@ -1003,13 +1058,18 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
       return { ...appendBlock(finalized, block), interrupt: { kind: 'input', blockId: block.id } };
     }
     case 'need_plan_review': {
+      // Dedup: side-channel + stream interrupt can both emit need_plan_review for the same request.
+      if (state.interrupt?.kind === 'plan_review') return state;
       // 方案内容在 OutputArea 以 Markdown tool_card 渲染，同时 Footer PlanReviewBlock
       // 展示确认操作条。填充 summary + expanded 以便 MarkdownBlock 展开渲染。
       // Plan content rendered in OutputArea as Markdown tool_card; Footer PlanReviewBlock
       // shows the confirmation bar. Populate summary + expanded for MarkdownBlock rendering.
       const planCard = findBlock(
         state,
-        (b) => b.kind === 'tool_card' && b.name === 'update_plan' && b.status === 'running',
+        (b) =>
+          b.kind === 'tool_card' &&
+          b.name === 'update_plan' &&
+          (b.status === 'queued' || b.status === 'running'),
       );
       const plan = event.data.plan;
       const stepsText = (plan.steps ?? []).map((s, i) => `${i + 1}. ${s.step}`).join('\n');
@@ -1258,6 +1318,15 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     // Raw passthrough events — intentionally no-op for UI consumers
     case 'interrupt':
     case 'update':
+      return state;
+    case 'turn_begin':
+      // Informational — turn boundary marker, no UI state change needed
+      return state;
+    case 'turn_end':
+      // Informational — turn boundary marker, no UI state change needed
+      return state;
+    case 'user_message':
+      // Informational — user message already rendered via other mechanisms
       return state;
     default:
       return state;

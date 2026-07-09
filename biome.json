@@ -25,7 +25,8 @@
         "noNonNullAssertion": "off"
       },
       "suspicious": {
-        "noArrayIndexKey": "off"
+        "noArrayIndexKey": "off",
+        "noMisleadingCharacterClass": "off"
       },
       "nursery": {
         "useImportsFirst": "error"

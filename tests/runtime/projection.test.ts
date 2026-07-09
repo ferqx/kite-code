@@ -4,12 +4,19 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { projectRuntimeEventToAgentEvent } from '../../src/core/runtime/projection';
+import type {
+  NeedPlanReviewPayload,
+  ToolCallPayload,
+  ToolProgressPayload,
+  ToolResultPayload,
+  ToolStartedPayload,
+} from '../../src/protocol/events';
 
 // ── 工具生命周期投影 / Tool lifecycle projection ──
 
 describe('projectRuntimeEventToAgentEvent — tool lifecycle', () => {
-  // 验证 tool.queued 投影为 tool_call
-  test('tool.queued projects to tool_call', () => {
+  // 验证 tool.queued 投影为 queued tool_call
+  test('tool.queued projects to queued tool_call', () => {
     const event: RuntimeEvent = {
       type: 'tool.queued',
       toolCallId: 'call-1',
@@ -21,20 +28,23 @@ describe('projectRuntimeEventToAgentEvent — tool lifecycle', () => {
 
     expect(result.length).toBe(1);
     expect(result[0]!.type).toBe('tool_call');
-    expect((result[0]!.data as any).call_id).toBe('call-1');
-    expect((result[0]!.data as any).name).toBe('shell_execute');
-    expect((result[0]!.data as any).args).toEqual({ command: 'ls', cwd: '/tmp' });
+    expect((result[0]!.data as ToolCallPayload).call_id).toBe('call-1');
+    expect((result[0]!.data as ToolCallPayload).name).toBe('shell_execute');
+    expect((result[0]!.data as ToolCallPayload).args).toEqual({ command: 'ls', cwd: '/tmp' });
+    expect((result[0]!.data as ToolCallPayload).status).toBe('queued');
   });
 
-  // 验证 tool.started 投影为空数组（信息性事件）
-  test('tool.started projects to []', () => {
+  // 验证 tool.started 投影为 tool_started
+  test('tool.started projects to tool_started', () => {
     const event: RuntimeEvent = {
       type: 'tool.started',
       toolCallId: 'call-1',
     };
 
     const result = projectRuntimeEventToAgentEvent(event);
-    expect(result).toEqual([]);
+    expect(result.length).toBe(1);
+    expect(result[0]!.type).toBe('tool_started');
+    expect((result[0]!.data as ToolStartedPayload).call_id).toBe('call-1');
   });
 
   // 验证 tool.progress 投影为 tool_progress
@@ -50,9 +60,9 @@ describe('projectRuntimeEventToAgentEvent — tool lifecycle', () => {
 
     expect(result.length).toBe(1);
     expect(result[0]!.type).toBe('tool_progress');
-    expect((result[0]!.data as any).call_id).toBe('call-2');
-    expect((result[0]!.data as any).chunk).toBe('line of output\n');
-    expect((result[0]!.data as any).stream).toBe('stdout');
+    expect((result[0]!.data as ToolProgressPayload).call_id).toBe('call-2');
+    expect((result[0]!.data as ToolProgressPayload).chunk).toBe('line of output\n');
+    expect((result[0]!.data as ToolProgressPayload).stream).toBe('stdout');
   });
 
   // 验证 tool.finished 投影为 tool_done (ok: true)
@@ -75,11 +85,11 @@ describe('projectRuntimeEventToAgentEvent — tool lifecycle', () => {
 
     expect(result.length).toBe(1);
     expect(result[0]!.type).toBe('tool_done');
-    expect((result[0]!.data as any).call_id).toBe('call-3');
-    expect((result[0]!.data as any).name).toBe('shell_execute');
-    expect((result[0]!.data as any).ok).toBe(true);
-    expect((result[0]!.data as any).exitCode).toBe(0);
-    expect((result[0]!.data as any).totalLines).toBe(0);
+    expect((result[0]!.data as ToolResultPayload).call_id).toBe('call-3');
+    expect((result[0]!.data as ToolResultPayload).name).toBe('shell_execute');
+    expect((result[0]!.data as ToolResultPayload).ok).toBe(true);
+    expect((result[0]!.data as ToolResultPayload).exitCode).toBe(0);
+    expect((result[0]!.data as ToolResultPayload).totalLines).toBe(0);
   });
 
   // 验证 tool.finished 投影包含 exitCode (非 null)
@@ -102,9 +112,9 @@ describe('projectRuntimeEventToAgentEvent — tool lifecycle', () => {
 
     expect(result.length).toBe(1);
     expect(result[0]!.type).toBe('tool_done');
-    expect((result[0]!.data as any).ok).toBe(false);
-    expect((result[0]!.data as any).exitCode).toBe(1);
-    expect((result[0]!.data as any).status).toBe('error');
+    expect((result[0]!.data as ToolResultPayload).ok).toBe(false);
+    expect((result[0]!.data as ToolResultPayload).exitCode).toBe(1);
+    expect((result[0]!.data as ToolResultPayload).status).toBe('error');
   });
 
   // 验证 tool.failed 投影为 tool_done (ok: false)
@@ -119,9 +129,9 @@ describe('projectRuntimeEventToAgentEvent — tool lifecycle', () => {
 
     expect(result.length).toBe(1);
     expect(result[0]!.type).toBe('tool_done');
-    expect((result[0]!.data as any).call_id).toBe('call-4');
-    expect((result[0]!.data as any).ok).toBe(false);
-    expect((result[0]!.data as any).summary).toBe('command not found: xyz');
+    expect((result[0]!.data as ToolResultPayload).call_id).toBe('call-4');
+    expect((result[0]!.data as ToolResultPayload).ok).toBe(false);
+    expect((result[0]!.data as ToolResultPayload).summary).toBe('command not found: xyz');
   });
 
   // 验证 tool.rejected 投影为 tool_done (ok: false)
@@ -136,9 +146,11 @@ describe('projectRuntimeEventToAgentEvent — tool lifecycle', () => {
 
     expect(result.length).toBe(1);
     expect(result[0]!.type).toBe('tool_done');
-    expect((result[0]!.data as any).call_id).toBe('call-5');
-    expect((result[0]!.data as any).ok).toBe(false);
-    expect((result[0]!.data as any).summary).toBe('destructive operation denied by policy');
+    expect((result[0]!.data as ToolResultPayload).call_id).toBe('call-5');
+    expect((result[0]!.data as ToolResultPayload).ok).toBe(false);
+    expect((result[0]!.data as ToolResultPayload).summary).toBe(
+      'destructive operation denied by policy',
+    );
   });
 });
 
@@ -208,7 +220,7 @@ describe('projectRuntimeEventToAgentEvent — plan review', () => {
 
     expect(result.length).toBe(1);
     expect(result[0]!.type).toBe('need_plan_review');
-    expect((result[0]!.data as any).plan).toBe(plan);
+    expect((result[0]!.data as NeedPlanReviewPayload).plan).toBe(plan);
   });
 
   // 验证 plan.approved 投影为空数组
@@ -375,24 +387,42 @@ describe('projectRuntimeEventToAgentEvent — informational events', () => {
     expect(projectRuntimeEventToAgentEvent(event)).toEqual([]);
   });
 
-  // 验证 model.responded 投影为空数组（无 toolCalls）
-  test('model.responded without toolCalls projects to []', () => {
+  // 验证 model.responded 直接投影 assistant text，避免文本落后于后续工具事件
+  test('model.responded with text projects to text event', () => {
     const event: RuntimeEvent = {
       type: 'model.responded',
       messageId: 'msg-2',
       text: 'Task completed successfully.',
     };
-    expect(projectRuntimeEventToAgentEvent(event)).toEqual([]);
+    expect(projectRuntimeEventToAgentEvent(event)).toEqual([
+      { type: 'text', data: { text: 'Task completed successfully.' } },
+    ]);
   });
 
-  // 验证 model.responded 投影为空数组（有 toolCalls）
-  test('model.responded with toolCalls projects to []', () => {
+  test('model.responded with reasoning and text preserves model output order', () => {
+    const event: RuntimeEvent = {
+      type: 'model.responded',
+      messageId: 'msg-reason',
+      reasoningText: 'Thinking through the next step.',
+      text: 'I will inspect the file.',
+    };
+    expect(projectRuntimeEventToAgentEvent(event)).toEqual([
+      { type: 'reason', data: { text: 'Thinking through the next step.' } },
+      { type: 'text', data: { text: 'I will inspect the file.' } },
+    ]);
+  });
+
+  // 验证 model.responded 仅投影文本；tool_call 仍由 tool.queued 生命周期事件负责
+  test('model.responded with text and toolCalls projects text only', () => {
     const event: RuntimeEvent = {
       type: 'model.responded',
       messageId: 'msg-3',
+      text: 'I will inspect the file.',
       toolCalls: [{ id: 'call-x', name: 'read_file', args: { path: 'test.txt' } }],
     };
-    expect(projectRuntimeEventToAgentEvent(event)).toEqual([]);
+    expect(projectRuntimeEventToAgentEvent(event)).toEqual([
+      { type: 'text', data: { text: 'I will inspect the file.' } },
+    ]);
   });
 
   // 验证 plan.drafted 投影为空数组

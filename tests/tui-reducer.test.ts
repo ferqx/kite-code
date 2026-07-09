@@ -22,10 +22,21 @@ function textEvt(text: string): Action {
 function reasonEvt(text: string): Action {
   return { type: 'EVENT', event: { type: 'reason', data: { text } } };
 }
-function tcEvt(callId: string, name: string, args: Record<string, unknown> = {}): Action {
+function tcEvt(
+  callId: string,
+  name: string,
+  args: Record<string, unknown> = {},
+  status?: 'queued' | 'running',
+): Action {
   return {
     type: 'EVENT',
-    event: { type: 'tool_call', data: { call_id: callId, name: name as any, args } },
+    event: { type: 'tool_call', data: { call_id: callId, name: name as any, args, status } },
+  };
+}
+function tsEvt(callId: string): Action {
+  return {
+    type: 'EVENT',
+    event: { type: 'tool_started', data: { call_id: callId } },
   };
 }
 function tdEvt(callId: string, name: string, ok: boolean, summary: string): Action {
@@ -153,6 +164,47 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('EVENT.tool_call / tool_done', () => {
+    test('queued tool_call creates a queued tool_card then tool_started marks it running', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute', { command: 'bun test' }, 'queued'));
+
+      let t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.kind).toBe('tool_card');
+      expect(t.status).toBe('queued');
+
+      s = dispatch(s, tsEvt('c1'));
+      t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('running');
+      expect(t.startedAt).toBeNumber();
+    });
+
+    test('queued exploration tool_call creates a queued summary entry then tool_started marks it running', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }, 'queued'));
+
+      let summary = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_summary' }>;
+      expect(summary.kind).toBe('tool_summary');
+      expect(summary.tools[0]!.status).toBe('queued');
+
+      s = dispatch(s, tsEvt('c1'));
+      summary = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_summary' }>;
+      expect(summary.tools[0]!.status).toBe('running');
+    });
+
+    test('escape cancels both queued and running tool blocks', () => {
+      let s = dispatch(fresh(), { type: 'SET_RUNNING' });
+      s = dispatch(s, tcEvt('queued-1', 'shell_execute', { command: 'npm i' }, 'queued'));
+      s = dispatch(s, tcEvt('running-1', 'write_file', { path: 'a.txt' }));
+
+      s = dispatch(s, { type: 'ESCAPE' });
+
+      const blocks = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_card' }> => b.kind === 'tool_card',
+      );
+      expect(s.running).toBe(false);
+      expect(blocks.map((b) => b.status)).toEqual(['cancelled', 'cancelled']);
+    });
+
     test('appends tool_card block with running status', () => {
       // read_file is an exploration tool → pre-consolidated to tool_summary
       const s = dispatch(fresh(), tcEvt('c1', 'read_file', { path: 'a.txt' }));
@@ -324,6 +376,25 @@ describe('eventReducer (blocks model)', () => {
       expect(summaries[0]!.latestActivity).toBeUndefined();
       expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c2']);
       expect(summaries[1]!.active).toBe(true);
+    });
+
+    test('late tool_started does not reactivate a Thought closed by assistant text', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('checking files'));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }, 'queued'));
+      s = dispatch(s, textEvt('I checked that file.'));
+      s = dispatch(s, tsEvt('c1'));
+      s = dispatch(s, tcEvt('c2', 'shell_execute', { command: 'npm test' }));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.active).toBe(false);
+      expect(summaries[0]!.latestActivity).toBeUndefined();
+      expect(summaries[0]!.tools[0]!.status).toBe('running');
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+      expect(flatBlocks(s).some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
     });
 
     test('non-exploration tool call closes the current Thought before later exploration tools', () => {

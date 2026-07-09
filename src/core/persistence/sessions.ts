@@ -1,6 +1,10 @@
+import { existsSync } from 'node:fs';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import type { AgentPlan } from '../../protocol/events.js';
 import { type AgentConfig, loadAgentConfig } from '../config/index.js';
 import { createChatModel } from '../model/factory.js';
+import type { RuntimeEvent } from '../runtime/events.js';
+import { createRuntimeStore } from '../runtime/store.js';
 import { BunSqliteSaver } from './checkpoint.js';
 
 // ── Public types ──
@@ -19,6 +23,8 @@ export interface SessionData {
   threadId: string;
   /** 原始 LangGraph 消息数组 / Raw LangGraph message array */
   messages: unknown[];
+  /** RuntimeEvent 日志；新会话 replay 优先使用它重建 UI 生命周期 */
+  runtimeEvents: RuntimeEvent[];
   interrupt: ReplayInterrupt | null;
   modelProvider: string;
   modelName: string;
@@ -28,8 +34,6 @@ export interface SessionData {
   /** 方案审批通过时的授权模式（用于推断 auto/manual）/ Authorization mode at plan approval time */
   planAuthMode: string | null;
 }
-
-import type { AgentPlan } from '../../protocol/events.js';
 
 /** 中立中断信息（无 blockId），TUI 端负责映射到具体 block
  *  Neutral interrupt info (no blockId), TUI layer maps to concrete block */
@@ -190,7 +194,7 @@ export async function loadSession(
 ): Promise<SessionData | null> {
   const saver = new BunSqliteSaver(checkpointPath);
   try {
-    return await loadSessionWithSaver(saver, threadId);
+    return await loadSessionWithSaver(saver, threadId, checkpointPath);
   } finally {
     saver.close();
   }
@@ -200,6 +204,7 @@ export async function loadSession(
 async function loadSessionWithSaver(
   saver: BunSqliteSaver,
   threadId: string,
+  checkpointPath?: string,
 ): Promise<SessionData | null> {
   const tuple = await saver.getTuple({
     configurable: { thread_id: threadId },
@@ -222,6 +227,7 @@ async function loadSessionWithSaver(
   return {
     threadId,
     messages,
+    runtimeEvents: checkpointPath ? loadRuntimeEventsForSession(checkpointPath, threadId) : [],
     interrupt,
     modelProvider: typeof cv.modelProvider === 'string' ? cv.modelProvider : '',
     modelName: typeof cv.modelName === 'string' ? cv.modelName : '',
@@ -232,6 +238,24 @@ async function loadSessionWithSaver(
 }
 
 // ── Helpers ──
+
+function runtimeStorePathForCheckpoint(checkpointPath: string): string {
+  return checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
+}
+
+function loadRuntimeEventsForSession(checkpointPath: string, threadId: string): RuntimeEvent[] {
+  const runtimeStorePath = runtimeStorePathForCheckpoint(checkpointPath);
+  if (!existsSync(runtimeStorePath)) return [];
+
+  const store = createRuntimeStore(runtimeStorePath);
+  try {
+    return store.loadEvents(threadId).map((entry) => entry.event);
+  } catch {
+    return [];
+  } finally {
+    store.close();
+  }
+}
 
 /** 提取消息文本内容 / Extract text content from various content formats */
 export function extractText(content: unknown): string {

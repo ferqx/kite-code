@@ -40,7 +40,7 @@ function visibleDynamicBlocksForApproval(
   if (pendingApprovalIndex >= 0) {
     for (let i = pendingApprovalIndex - 1; i >= 0; i--) {
       const block = blocks[i]!;
-      if (block.kind === 'tool_card' && block.status === 'running') {
+      if (block.kind === 'tool_card' && (block.status === 'queued' || block.status === 'running')) {
         return blocks.slice(0, i + 1);
       }
     }
@@ -48,7 +48,8 @@ function visibleDynamicBlocksForApproval(
   }
 
   const approvalToolIndex = blocks.findIndex(
-    (block) => block.kind === 'tool_card' && block.status === 'running',
+    (block) =>
+      block.kind === 'tool_card' && (block.status === 'queued' || block.status === 'running'),
   );
   return approvalToolIndex >= 0 ? blocks.slice(0, approvalToolIndex + 1) : blocks;
 }

@@ -93,6 +93,10 @@ export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
       executionMode: executionMode === 'auto' ? 'auto' : 'manual',
     });
     emitRuntimeEvent?.({
+      type: 'phase.changed',
+      phase: 'building',
+    });
+    emitRuntimeEvent?.({
       type: 'tool.finished',
       toolCallId: request.id ?? '',
       name: 'update_plan',

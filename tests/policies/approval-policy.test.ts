@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  classifyShellRisk,
   commandGrantKey,
-  type EvaluateToolApprovalParams,
-  evaluateToolApproval,
   hasSameCommandGrant,
-  isDestructiveShellCommand,
   normalizeAuthorizationState,
   stableStringify,
+} from '@/core/harness/tool-policy';
+import {
+  classifyShellRisk,
+  type EvaluateToolApprovalParams,
+  evaluateToolApproval,
+  isDestructiveShellCommand,
 } from '@/core/policies/approval-policy';
 
 // ── Test helpers / 测试辅助 ──

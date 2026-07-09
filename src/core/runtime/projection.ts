@@ -3,7 +3,8 @@
 // 这是 RuntimeEvent 和 AgentEvent 之间的唯一桥梁，确保 TUI 状态来自单一来源。
 //
 // tool.finished / tool.failed / tool.rejected 正确投影为 tool_done，
-// 与 toolResultSink 并行运行。TUI reducer 对重复 tool_done 是幂等的。
+// RuntimeEvent 是 tool_call / tool_done 的唯一事件来源（单管道）。
+// TUI reducer 对重复 tool_done 是幂等的。
 
 import type { AgentEvent } from '@/protocol/events.js';
 import type { RuntimeEvent } from './events.js';
@@ -54,12 +55,20 @@ export function projectRuntimeEventToAgentEvent(event: RuntimeEvent): AgentEvent
             call_id: event.toolCallId,
             name: event.name,
             args: event.args as Record<string, unknown>,
+            status: 'queued' as const,
           },
         },
       ];
 
     case 'tool.started':
-      return [];
+      return [
+        {
+          type: 'tool_started' as const,
+          data: {
+            call_id: event.toolCallId,
+          },
+        },
+      ];
 
     case 'tool.progress':
       return [
@@ -183,11 +192,19 @@ export function projectRuntimeEventToAgentEvent(event: RuntimeEvent): AgentEvent
     case 'user.message_appended':
       return [];
 
-    // ── 模型交互（信息性，暂不投影）──
+    // ── 模型交互 / Model interaction ──
     case 'model.requested':
       return [];
-    case 'model.responded':
-      return [];
+    case 'model.responded': {
+      const events: AgentEvent[] = [];
+      if (event.reasoningText && event.reasoningText.length > 0) {
+        events.push({ type: 'reason' as const, data: { text: event.reasoningText } });
+      }
+      if (event.text && event.text.length > 0) {
+        events.push({ type: 'text' as const, data: { text: event.text } });
+      }
+      return events;
+    }
 
     // ── Plan 生命周期补充（信息性，由 need_plan_review/tool_done 各自投影）──
     case 'plan.drafted':

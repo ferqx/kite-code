@@ -134,7 +134,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
       );
 
     case 'tool_summary': {
-      const rc = block.tools.filter((t) => t.status === 'running').length;
+      const rc = block.tools.filter((t) => t.status === 'queued' || t.status === 'running').length;
       return (
         <Box key={`ts-${block.id}-${rc}-${block.totalElapsedMs}`} {...gapFrom(prevBlock)}>
           <ToolSummaryBlock block={block} columns={columns} />

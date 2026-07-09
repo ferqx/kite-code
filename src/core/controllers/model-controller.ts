@@ -61,6 +61,31 @@ function hasRetryListener(
   );
 }
 
+function extractText(content: unknown): string | undefined {
+  if (typeof content === 'string') return content.length > 0 ? content : undefined;
+  if (Array.isArray(content)) {
+    const text = content
+      .map((block: unknown) => {
+        if (block && typeof block === 'object' && 'text' in (block as Record<string, unknown>)) {
+          return String((block as Record<string, unknown>).text);
+        }
+        return '';
+      })
+      .join('');
+    return text.length > 0 ? text : undefined;
+  }
+  return undefined;
+}
+
+function extractReasoningText(message: AIMessage | undefined): string | undefined {
+  const reasoning =
+    (message?.additional_kwargs?.reasoning_content as string | undefined) ??
+    ((message as unknown as Record<string, unknown> | undefined)?.reasoning_content as
+      | string
+      | undefined);
+  return reasoning && reasoning.length > 0 ? reasoning : undefined;
+}
+
 // ── Controller / 控制器 ──
 
 /**
@@ -152,7 +177,8 @@ export async function invokeAgentModel(
           name: tc.name,
           args: tc.args,
         })) ?? [],
-      text: typeof responseMsg?.content === 'string' ? responseMsg.content : undefined,
+      reasoningText: extractReasoningText(responseMsg),
+      text: extractText(responseMsg?.content),
     });
 
     return {

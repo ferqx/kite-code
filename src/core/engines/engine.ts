@@ -1,5 +1,5 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
-import type { BunSqliteSaver } from '@/core/persistence/checkpoint';
+import type { ThreadAuthorizationState } from '@/core/types';
 
 /** A single chunk from the agent engine stream.
  *  Shape matches LangGraph's updates-mode stream output:
@@ -31,9 +31,22 @@ export interface AgentLoopEngine {
     asNode?: string,
   ): Promise<RunnableConfig>;
 
-  /** The underlying checkpointer. Exposed for callers that need direct access
-   *  (e.g. reading authorization state, revert/fork checkpoint lookups). */
-  readonly checkpointer: BunSqliteSaver;
+  /** Read the last authorization state for a thread.
+   *  Primary source: RuntimeStore snapshot. Fallback: LangGraph checkpoint
+   *  (backward compat for sessions created before the Phase 5 RuntimeStore migration). */
+  readLastAuthorization(threadId: string): Promise<ThreadAuthorizationState | null>;
+
+  /** Check whether a checkpoint session exists for the given thread.
+   *  Returns the stored RunnableConfig if one exists, or null.
+   *  Used to determine whether to continue an existing session or start fresh. */
+  getExistingSessionConfig(threadId: string): Promise<RunnableConfig | null>;
+
+  /** Read a specific checkpoint's state for revert / fork operations.
+   *  Returns null if the checkpoint does not exist. */
+  getCheckpointState(
+    threadId: string,
+    checkpointId: string,
+  ): Promise<Record<string, unknown> | null>;
 
   /** Release resources (checkpointer connection, etc.). */
   close(): void;

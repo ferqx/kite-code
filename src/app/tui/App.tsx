@@ -28,38 +28,16 @@ import OutputArea, { useStaticContent } from './OutputArea';
 import { type Action, eventReducer } from './reducers';
 import { deriveRunStatusSnapshot } from './run-status';
 import { useTheme } from './theme';
-import type { OutputBlock, TuiState } from './types';
+import type { TuiState } from './types';
 
 export type { Action } from './reducers';
 export { createInitialState, eventReducer };
 
 const MemoHeader = React.memo(Header);
 
-function latestVisibleBlock(state: TuiState): OutputBlock | undefined {
-  for (let turnIndex = state.turns.length - 1; turnIndex >= 0; turnIndex--) {
-    const blocks = state.turns[turnIndex]!.blocks;
-    for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex--) {
-      const block = blocks[blockIndex]!;
-      if (block.kind !== 'reason') return block;
-    }
-  }
-  return undefined;
-}
-
 function shouldShowRunStatus(state: TuiState): boolean {
   if (!state.running || state.interrupt) return false;
   if (state.status.retryState) return true;
-
-  const latest = latestVisibleBlock(state);
-  // 仅当文本仍在流式输出时隐藏状态栏（模型正在输出最终回答）。
-  // 已完成的文本块不隐藏——模型可能正在准备下一批 tool_call，
-  // 过渡文本（如 "── Step 1: ..."）消失会导致进度空白期。
-  // Only hide the status line while text is actively streaming (model is
-  // producing its final answer). Finalized text blocks don't hide it —
-  // the model may be preparing the next batch of tool calls, and hiding
-  // the status during interstitial text creates a blank progress gap.
-  if (latest?.kind === 'text' && latest.streaming && !latest.isError) return false;
-
   return true;
 }
 

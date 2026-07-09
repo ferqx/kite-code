@@ -1,24 +1,14 @@
 // Route logic for the LangGraph agent graph.
-// Phase 4 部分完成: resolveToolRoute 中的 interactionMode 直接检查已替换为
-// policy 评估（shouldAskUser / shouldContinueLoop）。routeAfterTools 中的
-// 耗尽检查同样通过 policy 判断是否有人值守。
-//
-// Phase 4 partial: direct interactionMode checks in resolveToolRoute replaced
-// with policy evaluation (shouldAskUser / shouldContinueLoop). Exhaustion check
-// in routeAfterTools also uses policy to determine human-in-the-loop presence.
-//
-// 迁移步骤剩余 / Remaining migration steps:
-//   1. ✅ routeEntry / routeAfterAgent 中的 ask_user + 耗尽 policy 评估
-//   2. routeAfterApproval / routeAfterTools 中的 full_access / exhausted 逻辑移入 scheduler
-//   3. 删除本文件，所有路由决策由 decideNextEffect 接管
+// Phase 4: interactionMode checks migrated to policy evaluation (createModePolicy + evaluateToolApproval).
 
 import { END } from '@langchain/langgraph';
 import { migratePermitBatch } from '@/core/execution/permit';
+import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import { isPlanProgressOnlyUpdate, isSamePlanTrackingUpdate } from '@/core/policies/plan-policy';
 import type { AuthorizationOverride } from '@/core/types';
 import type { CodeAgentState } from './state';
-import { defaultPhaseForWorkspaceAccess, evaluateToolPolicy } from './tool-policy';
+import { defaultPhaseForWorkspaceAccess } from './tool-policy';
 import { getAllPendingToolRequests } from './tool-requests';
 
 /** 根据 graph state 构建 PolicyInput 的基础上下文 / Build base PolicyInput context from graph state */
@@ -59,8 +49,7 @@ function resolveToolRoute(
   const allRequests = getAllPendingToolRequests(state.messages, state.workspace);
   if (allRequests.length === 0) return null;
 
-  const workspaceAccess = state.workspaceAccess ?? 'write';
-  const phase = state.phase ?? defaultPhaseForWorkspaceAccess(workspaceAccess);
+  const phase = state.phase ?? defaultPhaseForWorkspaceAccess(state.workspaceAccess ?? 'write');
 
   let hasApprovalRequired = false;
 
@@ -96,12 +85,12 @@ function resolveToolRoute(
       }
     }
 
-    const decision = evaluateToolPolicy({
-      request,
-      workspaceAccess,
+    const decision = evaluateToolApproval({
+      toolName: request.name,
+      toolArgs: request.args as Record<string, unknown>,
       phase,
-      workspace: state.workspace,
-      threadId: state.threadId,
+      workspace: state.workspace ?? '',
+      threadId: state.threadId ?? '',
       authorization: state.authorization,
       override,
       mcpRiskOverride,

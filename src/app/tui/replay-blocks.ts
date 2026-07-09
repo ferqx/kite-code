@@ -16,6 +16,8 @@ import type { AIMessage } from '@langchain/core/messages';
 import type { SessionData } from '../../core/persistence/sessions.js';
 import { extractText } from '../../core/persistence/sessions.js';
 import { parseAIMessageEvents, parseToolResultEvents } from '../../core/runner.js';
+import type { RuntimeEvent } from '../../core/runtime/events.js';
+import { projectRuntimeEventToAgentEvent } from '../../core/runtime/projection.js';
 import type { SubAgentRole } from '../../protocol/events.js';
 import { createInitialState } from './initialState.js';
 import { consolidateAllRuns } from './reducers/consolidateTools.js';
@@ -35,7 +37,9 @@ export function sessionDataToUI(data: SessionData): {
   blocks: OutputBlock[];
   interrupt: InterruptState | null;
 } {
-  const rawBlocks = replayMessagesToBlocks(data.messages);
+  const rawBlocks = hasReplayableRuntimeEvents(data.runtimeEvents)
+    ? replayRuntimeEventsToBlocks(data.runtimeEvents)
+    : replayMessagesToBlocks(data.messages);
   const blocks = consolidateAllRuns(rawBlocks);
 
   // Build callId → blockId index for interrupt mapping
@@ -62,6 +66,33 @@ export function sessionDataToUI(data: SessionData): {
   return { blocks, interrupt };
 }
 
+function hasReplayableRuntimeEvents(events: RuntimeEvent[]): boolean {
+  return events.some(
+    (event) =>
+      event.type === 'user.message_appended' || projectRuntimeEventToAgentEvent(event).length > 0,
+  );
+}
+
+function replayRuntimeEventsToBlocks(events: RuntimeEvent[]): OutputBlock[] {
+  let state = createInitialState();
+
+  for (const runtimeEvent of events) {
+    if (runtimeEvent.type === 'user.message_appended') {
+      const content = runtimeEvent.content.replace(/^User:\s*/, '');
+      if (content.length > 0) {
+        state = appendBlock(state, { id: state.nextBlockId, kind: 'user', content });
+      }
+      continue;
+    }
+
+    for (const event of projectRuntimeEventToAgentEvent(runtimeEvent)) {
+      state = handleEventAction(state, event);
+    }
+  }
+
+  return state.turns.flatMap((t) => t.blocks);
+}
+
 /** Convert checkpoint messages → OutputBlock[] using the SAME event→reducer pipeline
  *  that real-time rendering uses.  Only task/subagent blocks are handled separately
  *  (the reducer skips task tool events). */
@@ -84,31 +115,44 @@ function replayMessagesToBlocks(messages: unknown[]): OutputBlock[] {
       continue;
     }
 
-    // ── AIMessage → text + tool_call events (same parser as real-time) ──
+    // ── AIMessage → text + reason events (via parseAIMessageEvents, now text/reason only),
+    //     then tool_call events emitted directly from msg.tool_calls (non-task only). ──
     if (isAiMessageLike(rawMsg)) {
-      // Collect task tool_call IDs so we can defer their blocks to ToolMessage
+      // Pipe text/reason through parser (tool_call moved to RuntimeEvent side channel;
+      // replay reconstructs tool_call from checkpoint msg.tool_calls directly below).
+      const events = parseAIMessageEvents(rawMsg as unknown as AIMessage);
+      for (const event of events) {
+        state = handleEventAction(state, event);
+      }
+
+      // Emit tool_call events from checkpoint tool_calls (non-task only)
       const toolCalls = rawMsg.tool_calls;
       if (Array.isArray(toolCalls)) {
         for (const tc of toolCalls) {
           if (tc && typeof tc === 'object') {
             const call = tc as Record<string, unknown>;
             if (call.name === 'task') {
+              // Collect task tool_call IDs so we can defer their blocks to ToolMessage
               const callId = typeof call.id === 'string' ? call.id : '';
               const args = (call.args as Record<string, unknown>) ?? {};
               pendingTasks.set(callId, {
                 subagentType: (args.subagent_type as SubAgentRole) || 'explore',
                 task: typeof args.task === 'string' ? args.task : '',
               });
+            } else {
+              // Non-task tools: emit tool_call event (same shape as RuntimeEvent projection)
+              state = handleEventAction(state, {
+                type: 'tool_call',
+                data: {
+                  call_id: (call.id as string) ?? '',
+                  name: (call.name as string) ?? '',
+                  args: (call.args as Record<string, unknown>) ?? {},
+                  status: 'queued',
+                },
+              });
             }
           }
         }
-      }
-
-      // Pipe through the same parseAIMessageEvents that real-time streaming uses.
-      // Cast: checkpoint plain objects have the same shape as AIMessage instances.
-      const events = parseAIMessageEvents(rawMsg as unknown as AIMessage);
-      for (const event of events) {
-        state = handleEventAction(state, event);
       }
       continue;
     }

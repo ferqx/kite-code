@@ -71,24 +71,32 @@ function toolVerb(name: string): { verb: string; tone: RunStatusTone } {
 // ── phase derivation (monotonic, forward-only) ──
 
 function derivePhase(state: TuiState): RunPhase {
-  // Finishing: streaming text is the last stage of a run
-  if (findBlock(state, (b) => b.kind === 'text' && b.streaming === true)) {
-    return 'finishing';
-  }
-
-  // Working: at least one tool/subagent/file_change has appeared this run.
-  // Once here, never goes back to Thinking.
   const last = state.turns.at(-1);
-  if (last) {
-    const hasActivity = last.blocks.some(
+  const hasActivity =
+    last?.blocks.some(
       (b) =>
         b.kind === 'tool_card' ||
         b.kind === 'tool_summary' ||
         b.kind === 'subagent' ||
         b.kind === 'file_change',
-    );
-    if (hasActivity) return 'working';
+    ) ?? false;
+
+  // Streaming text after tool activity is often interstitial narration before
+  // the next tool batch. Keep the run visibly in Working until the run idles.
+  if (findBlock(state, (b) => b.kind === 'text' && b.streaming === true)) {
+    return hasActivity ? 'working' : 'finishing';
   }
+
+  // The tools node can be active before a visible tool block exists. This
+  // happens for hidden progress-only tools (for example post-approval
+  // update_plan) and in the small window before tool lifecycle events render.
+  if (state.status.currentNode === 'tools') {
+    return 'working';
+  }
+
+  // Working: at least one tool/subagent/file_change has appeared this run.
+  // Once here, never goes back to Thinking.
+  if (hasActivity) return 'working';
 
   return 'thinking';
 }
@@ -107,6 +115,10 @@ function activeBlockVerb(state: TuiState): { verb: string; tone: RunStatusTone }
   if (card?.kind === 'tool_card') {
     return toolVerb(card.name);
   }
+  const queuedCard = findBlock(state, (b) => b.kind === 'tool_card' && b.status === 'queued');
+  if (queuedCard?.kind === 'tool_card') {
+    return { verb: 'Queued', tone: 'muted' };
+  }
 
   // Tool summary active
   const summary = findBlock(state, (b) => b.kind === 'tool_summary' && b.active);
@@ -114,12 +126,15 @@ function activeBlockVerb(state: TuiState): { verb: string; tone: RunStatusTone }
     const act = summary.latestActivity;
     if (act?.kind === 'tool') {
       const tool = summary.tools.find((t) => t.callId === act.callId);
+      if (tool?.status === 'queued') return { verb: 'Queued', tone: 'muted' };
       if (tool) return toolVerb(tool.name);
     }
     // Still active but between tool events — thinking
     if (act?.kind === 'thinking') return null;
     const running = summary.tools.find((t) => t.status === 'running');
     if (running) return toolVerb(running.name);
+    const queued = summary.tools.find((t) => t.status === 'queued');
+    if (queued) return { verb: 'Queued', tone: 'muted' };
     return null;
   }
 

@@ -122,7 +122,12 @@ export function maybeConsolidateLastTurnBlocks(
   let rightmost = -1;
   for (let i = endIdx; i >= 0; i--) {
     const b = blocks[i]!;
-    if (b.kind === 'tool_card' && isExplorationTool(b) && b.status !== 'running') {
+    if (
+      b.kind === 'tool_card' &&
+      isExplorationTool(b) &&
+      b.status !== 'queued' &&
+      b.status !== 'running'
+    ) {
       rightmost = i;
       break;
     }
@@ -136,6 +141,7 @@ export function maybeConsolidateLastTurnBlocks(
     scanIdx >= 0 &&
     blocks[scanIdx]!.kind === 'tool_card' &&
     isExplorationTool(blocks[scanIdx]!) &&
+    (blocks[scanIdx] as Extract<OutputBlock, { kind: 'tool_card' }>).status !== 'queued' &&
     (blocks[scanIdx] as Extract<OutputBlock, { kind: 'tool_card' }>).status !== 'running'
   ) {
     explorationBlocks.unshift(blocks[scanIdx]!);
@@ -233,7 +239,12 @@ export function consolidateAllRuns(blocks: OutputBlock[]): OutputBlock[] {
   }
 
   for (const block of blocks) {
-    if (block.kind === 'tool_card' && isExplorationTool(block)) {
+    if (
+      block.kind === 'tool_card' &&
+      isExplorationTool(block) &&
+      block.status !== 'queued' &&
+      block.status !== 'running'
+    ) {
       pending.push(block);
     } else if (block.kind === 'reason') {
       result.push(block);

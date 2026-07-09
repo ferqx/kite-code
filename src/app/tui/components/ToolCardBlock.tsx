@@ -408,6 +408,17 @@ export default function ToolCardBlock({
 
   const isShell = block.name === 'shell_execute';
 
+  if (block.status === 'queued') {
+    return (
+      <Box>
+        <Text color={dt.muted}>○ </Text>
+        <Text>{ACTION_NAMES[block.name] ?? block.name}</Text>
+        {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
+        <Text color={dt.dim}> (queued)</Text>
+      </Box>
+    );
+  }
+
   if (block.status === 'running') {
     // 等待审批/输入时用静态 ○ 代替轮播 spinner / Static dot for tools awaiting approval or input
     const isWaiting = awaitingApproval || block.name === 'ask_user';
@@ -523,9 +534,9 @@ export default function ToolCardBlock({
                       : 'timed out'
                     : `exit: ${block.status === 'error' ? 'error' : '0'}`}
           </Text>
-          {(block as any).reviewFailure ? (
+          {'reviewFailure' in block && block.reviewFailure ? (
             <Text color={dt.error}>
-              {SHELL_PREFIX}⚠ auto-review: {(block as any).reviewFailure}
+              {SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
             </Text>
           ) : null}
           {(block.status === 'error' || isWebFetch) &&

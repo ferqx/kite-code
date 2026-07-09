@@ -14,10 +14,10 @@ import {
   replaceBlockById,
 } from './helpers';
 
-/** 将最后 turn 中所有 running 状态的 subagent/tool_card/tool_summary 标记为 cancelled。
+/** 将最后 turn 中所有 queued/running 状态的 subagent/tool_card/tool_summary 标记为 cancelled。
  *  Esc 取消后 running→false，所有 block 移入 Static 冻结。必须在 render
  *  之前同步收尾，否则 spinner 状态被写入 scrollback 后永远不可恢复。
- *  Mark all running subagent/tool_card/tool_summary blocks in the last turn as cancelled
+ *  Mark all queued/running subagent/tool_card/tool_summary blocks in the last turn as cancelled
  *  before running flips to false, so they don't get frozen into Static. */
 function cancelRunningBlocks(s: TuiState): TuiState {
   const last = lastTurn(s);
@@ -37,13 +37,15 @@ function cancelRunningBlocks(s: TuiState): TuiState {
         expanded: false,
       };
     }
-    if (b.kind === 'tool_card' && b.status === 'running') {
+    if (b.kind === 'tool_card' && (b.status === 'queued' || b.status === 'running')) {
       changed = true;
       return { ...b, status: 'cancelled' as const, summary: 'Cancelled' };
     }
     if (b.kind === 'tool_summary') {
       const tools = b.tools.map((t) =>
-        t.status === 'running' ? { ...t, status: 'cancelled' as const, summary: 'Cancelled' } : t,
+        t.status === 'queued' || t.status === 'running'
+          ? { ...t, status: 'cancelled' as const, summary: 'Cancelled' }
+          : t,
       );
       if (tools.some((t, i) => t.status !== b.tools[i]!.status) || b.active) {
         changed = true;
@@ -96,7 +98,10 @@ function cancelAskUserToolCard(s: TuiState, questionBlockId: number): TuiState {
   } as OutputBlock);
   const toolCard = findBlock(
     next,
-    (blk) => blk.kind === 'tool_card' && blk.name === 'ask_user' && blk.status === 'running',
+    (blk) =>
+      blk.kind === 'tool_card' &&
+      blk.name === 'ask_user' &&
+      (blk.status === 'queued' || blk.status === 'running'),
   );
   if (toolCard?.kind === 'tool_card') {
     next = replaceBlockById(next, toolCard.id, {
@@ -243,7 +248,8 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       // 同步更新 block 上的 startedAt，排除审批等待耗时 / Sync startedAt on blocks to exclude approval wait
       const withResolved = replaceBlockById(state, action.blockId, resolved);
       // ask_user: 从 resolved 提取 answer text 预填充 tool_card summary，
-      // 确保即使 side-channel tool_done 延迟也能立即展示答案
+      // 确保立即展示标题和答案，不等待 tool_done 事件
+      // Pre-fill tool_card summary/status/detail/expanded so title and answer render immediately
       const answerText =
         typeof (resolved as Record<string, unknown>).resolved === 'string'
           ? ((resolved as Record<string, unknown>).resolved as string)
@@ -253,10 +259,21 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         const blocks = turn.blocks.map((blk) => {
           if (blk.kind === 'tool_card' && blk.status === 'running') {
             changed = true;
-            const prefill =
-              blk.name === 'ask_user' && answerText
-                ? { summary: answerText, status: 'done' as const }
-                : {};
+            let prefill: Record<string, unknown> = {};
+            if (blk.name === 'ask_user' && answerText) {
+              const question = typeof blk.args.question === 'string' ? blk.args.question : '';
+              const detail = question
+                ? question.length > 60
+                  ? `${question.slice(0, 57)}...`
+                  : question
+                : 'Asked';
+              prefill = {
+                summary: answerText,
+                status: 'done' as const,
+                expanded: true,
+                detail,
+              };
+            }
             return { ...blk, startedAt: now, ...prefill };
           }
           if (blk.kind === 'subagent' && blk.status === 'running') {

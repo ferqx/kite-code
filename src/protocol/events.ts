@@ -5,6 +5,7 @@ export type AgentEvent =
   | { type: 'reason'; data: { text: string } }
   | { type: 'text'; data: { text: string } }
   | { type: 'tool_call'; data: ToolCallPayload }
+  | { type: 'tool_started'; data: ToolStartedPayload }
   | { type: 'tool_done'; data: ToolResultPayload }
   | { type: 'need_approval'; data: ToolApprovalPayload }
   | { type: 'need_input'; data: UserInputPayload }
@@ -100,6 +101,12 @@ export interface ToolCallPayload {
   call_id: string;
   name: string;
   args: Record<string, unknown>;
+  /** queued when graph has enqueued the call; omitted means legacy running */
+  status?: 'queued' | 'running';
+}
+
+export interface ToolStartedPayload {
+  call_id: string;
 }
 
 /** Shell 工具实时输出负载 — 进程运行期间逐行推送 / Per-line progress payload emitted during shell execution */

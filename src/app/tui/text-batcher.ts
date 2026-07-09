@@ -13,6 +13,7 @@ export class TextBatcher {
   private pendingText: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private textStreamOpen = false;
 
   private dispatch: (action: Action) => void;
   private interval: number;
@@ -23,11 +24,20 @@ export class TextBatcher {
   }
 
   setRunning(running: boolean) {
+    if (!running && this.running) {
+      this.flush();
+      this.textStreamOpen = false;
+    }
     this.running = running;
   }
 
   push(event: AgentEvent) {
     if (this.running && event.type === 'text') {
+      if (!this.textStreamOpen) {
+        this.textStreamOpen = true;
+        this.dispatch({ type: 'EVENT', event });
+        return;
+      }
       // 覆盖：只保留最新的累积文本
       this.pendingText = event.data.text;
       if (!this.timer) {
@@ -36,6 +46,7 @@ export class TextBatcher {
     } else {
       // 非 text 事件：先 flush 再立即 dispatch
       this.flush();
+      this.textStreamOpen = false;
       this.dispatch({ type: 'EVENT', event });
     }
   }
@@ -61,5 +72,6 @@ export class TextBatcher {
       this.timer = null;
     }
     this.pendingText = null;
+    this.textStreamOpen = false;
   }
 }
