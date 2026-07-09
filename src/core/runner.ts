@@ -1,6 +1,6 @@
 import { readFile, stat as statAsync } from 'node:fs/promises';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
-import { Command, INTERRUPT, isInterrupted } from '@langchain/langgraph';
+import { INTERRUPT, isInterrupted } from '@langchain/langgraph';
 import { createLangGraphEngine } from '@/core/engines/langgraph-engine';
 import type { UserAction } from '@/protocol/actions';
 import type {
@@ -18,7 +18,6 @@ import type {
 import type { UserInputProvider } from '@/protocol/provider';
 import { createPromptCacheStandardTracker, extractPromptCacheMetrics } from './cache-metrics';
 import type { AgentConfig } from './config/index';
-import { buildCodeAgentGraph } from './harness/graph';
 import { defaultAuthorizationState } from './harness/tool-policy';
 import { genSpanId } from './id-utils';
 import type { SupportedChatModel } from './model/factory';
@@ -457,7 +456,7 @@ export async function* revertToCheckpoint(
   provider: UserInputProvider,
   input: RevertInput,
 ): AsyncGenerator<AgentEvent> {
-  const { graph, checkpointer } = buildCodeAgentGraph({
+  const engine = createLangGraphEngine({
     config: input.config,
     checkpointPath: input.checkpointPath,
     shellExecutor: input.shellExecutor,
@@ -472,7 +471,10 @@ export async function* revertToCheckpoint(
 
   try {
     // Verify checkpoint exists before attempting revert
-    const cpState = await checkpointer.getCheckpointState(input.threadId, input.checkpointId);
+    const cpState = await engine.checkpointer.getCheckpointState(
+      input.threadId,
+      input.checkpointId,
+    );
     if (!cpState) {
       yield {
         type: 'error' as const,
@@ -490,7 +492,7 @@ export async function* revertToCheckpoint(
       recursionLimit: 9999999,
     };
 
-    const stream = await graph.stream({ messages: [] }, streamConfig);
+    const stream = await engine.run({ messages: [] }, streamConfig);
 
     const bareSink: EventSink = {
       emit(e) {
@@ -500,7 +502,7 @@ export async function* revertToCheckpoint(
     const result = await processStream(bareSink, provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
-    checkpointer.close();
+    engine.close();
   }
 }
 
@@ -523,7 +525,7 @@ export async function* forkFromCheckpoint(
   provider: UserInputProvider,
   input: ForkInput,
 ): AsyncGenerator<AgentEvent> {
-  const { graph, checkpointer } = buildCodeAgentGraph({
+  const engine = createLangGraphEngine({
     config: input.config,
     checkpointPath: input.checkpointPath,
     shellExecutor: input.shellExecutor,
@@ -537,7 +539,10 @@ export async function* forkFromCheckpoint(
   const signal = input.signal;
 
   try {
-    const oldState = await checkpointer.getCheckpointState(input.oldThreadId, input.checkpointId);
+    const oldState = await engine.checkpointer.getCheckpointState(
+      input.oldThreadId,
+      input.checkpointId,
+    );
     if (!oldState) {
       yield {
         type: 'error' as const,
@@ -570,7 +575,7 @@ export async function* forkFromCheckpoint(
       recursionLimit: 9999999,
     };
 
-    const stream = await graph.stream(initialState, streamConfig);
+    const stream = await engine.run(initialState, streamConfig);
     const bareSink: EventSink = {
       emit(e) {
         provider.onEvent(e);
@@ -579,7 +584,7 @@ export async function* forkFromCheckpoint(
     const result = await processStream(bareSink, provider, stream, signal, input.workspace);
     yield* result.events;
   } finally {
-    checkpointer.close();
+    engine.close();
   }
 }
 
@@ -1181,7 +1186,7 @@ export async function* normalizeGraphStream(
 }
 
 export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenerator<AgentEvent> {
-  const { graph, checkpointer } = buildCodeAgentGraph({
+  const engine = createLangGraphEngine({
     config: input.config,
     checkpointPath: input.checkpointPath,
     shellExecutor: input.shellExecutor,
@@ -1196,9 +1201,9 @@ export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenera
     const initialWorkspaceAccess = initialWorkspaceAccessForTask(input.task, input.mode ?? 'auto');
     const initialPhase = initialAgentPhaseForAccess(initialWorkspaceAccess);
 
-    const prevAuth = await readLastAuthorization(checkpointer, input.threadId);
+    const prevAuth = await readLastAuthorization(engine.checkpointer, input.threadId);
 
-    const stream = await graph.stream(
+    const stream = await engine.run(
       {
         messages: [new HumanMessage(input.task)],
         workspaceAccess: initialWorkspaceAccess,
@@ -1213,18 +1218,19 @@ export async function* streamCodeAgent(input: StreamCodeAgentInput): AsyncGenera
         modelName: input.config.modelName,
         thinkingLevel: input.thinkingLevel ?? null,
         sandboxBackend: input.sandboxBackend ?? 'unknown',
+        interactionMode: input.config.interactionMode ?? 'ask',
       },
       graphConfig(input.threadId),
     );
 
     yield* normalizeGraphStream(stream, signal);
   } finally {
-    checkpointer.close();
+    engine.close();
   }
 }
 
 export async function* resumeCodeAgent(input: ResumeCodeAgentInput): AsyncGenerator<AgentEvent> {
-  const { graph, checkpointer } = buildCodeAgentGraph({
+  const engine = createLangGraphEngine({
     config: input.config,
     checkpointPath: input.checkpointPath,
     shellExecutor: input.shellExecutor,
@@ -1236,14 +1242,11 @@ export async function* resumeCodeAgent(input: ResumeCodeAgentInput): AsyncGenera
   const signal = input.signal;
 
   try {
-    const stream = await graph.stream(
-      new Command({ resume: input.resume }),
-      graphConfig(input.threadId),
-    );
+    const stream = await engine.resume({ resume: input.resume }, graphConfig(input.threadId));
 
     yield* normalizeGraphStream(stream, signal);
   } finally {
-    checkpointer.close();
+    engine.close();
   }
 }
 

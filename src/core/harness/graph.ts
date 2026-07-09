@@ -3,6 +3,15 @@ import { interrupt, START, StateGraph } from '@langchain/langgraph';
 import { ChatOllama } from '@langchain/ollama';
 import type { AgentConfig } from '@/core/config/index';
 import {
+  handleApprovalResume,
+  normalizeApprovalResume,
+} from '@/core/controllers/approval-controller';
+import { runAutoReview } from '@/core/controllers/auto-review-controller';
+import { invokeAgentModel } from '@/core/controllers/model-controller';
+import { handlePlanReview } from '@/core/controllers/plan-review-controller';
+import { executeTool } from '@/core/controllers/tool-controller';
+import { handleUserInput } from '@/core/controllers/user-input-controller';
+import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   evaluateCircuitBreaker,
   type RejectionEntry,
@@ -15,25 +24,19 @@ import {
   recordJournalForMessage,
 } from '@/core/execution/journal';
 import { issuePermit, migratePermitBatch } from '@/core/execution/permit';
-import {
-  createAutoReviewModel,
-  type ReviewContext,
-  reviewToolApproval,
-} from '@/core/execution/reviewer';
+import type { ReviewContext } from '@/core/execution/reviewer';
 import type { McpManager } from '@/core/mcp';
 import { prepareModelContext } from '@/core/model/context';
-import type { ModelRetryListener, RetryListenerHost } from '@/core/model/deepseek';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { BunSqliteSaver } from '@/core/persistence/checkpoint';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { resumeSubAgent } from '@/core/subagent/runner';
 import type { SubAgentResult } from '@/core/subagent/types';
-import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
+import { type createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type {
   AgentResumeValue,
   AuthorizationOverride,
-  ModelRetryEvent,
   ThreadAuthorizationState,
 } from '@/core/types';
 import {
@@ -60,7 +63,6 @@ import {
   evaluateToolPolicy,
   normalizeAuthorizationState,
   replaceApprovalCommand,
-  validateApprovalHash,
 } from './tool-policy';
 import {
   getAllPendingToolRequests,
@@ -70,7 +72,6 @@ import {
   toolRequestFromMessage,
 } from './tool-requests';
 import { runApprovedTool } from './tool-runner';
-import { normalizeUserInputResume, userInputToolMessage } from './user-input';
 
 /** 构建代码 Agent 图的输入 / Build code agent graph input */
 export interface BuildCodeAgentGraphInput {
@@ -138,13 +139,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
     input.runtimeEventSink?.(event);
   }
 
-  /** Agent 节点：使用稳定工具 schema，由执行层强制工作区访问边界 / Agent node */
+  /** Agent 节点：委托 ModelController 处理工具创建 + 模型调用 / Agent node delegates to ModelController */
   const agent = async (state: CodeAgentState) => {
-    // cleanup 节点已在 agent 之前为所有孤儿 tool_calls 注入 cancelled ToolMessage，
-    // 不再需要 sanitizeToolCallPairs 的重复防御。
-    // The cleanup node already injects cancelled ToolMessages for all orphan tool_calls
-    // before agent runs, so the duplicate sanitize pass is unnecessary here.
-    const tools = createAgentTools({
+    const { result, retryEvents } = await invokeAgentModel({
+      model,
+      state,
       workspace: state.workspace,
       shellExecutor: input.shellExecutor,
       mcpManager: input.mcpManager,
@@ -153,71 +152,30 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       config: input.config,
       subagentEventSink: input.subagentEventSink,
       subagentSignal: input.subagentSignal,
-      signal: input.subagentSignal,
-      model: input.model,
-      threadId: state.threadId,
-      authorization: state.authorization,
-      workspaceAccess: state.workspaceAccess,
-      phase: state.phase,
-      interactionMode: state.interactionMode,
     });
-    const retryEvents: ModelRetryEvent[] = [];
-    const listener: ModelRetryListener = (attempt, maxAttempts, error, delayMs) => {
-      retryEvents.push({
-        attempt,
-        maxAttempts,
-        error: typeof error === 'string' ? error : String(error).slice(0, 200),
-        delayMs,
-      });
-    };
-    if (hasRetryListener(model)) model.setRetryListener(listener);
 
-    try {
-      const { state: result } = await invokeModel({
-        model,
-        state,
-        tools,
-        skills: input.skills,
-        signal: input.subagentSignal,
-      });
-      const syncedAuth = authorizationForState(state, override);
-      const modelConfigState = {
-        modelProvider: input.config.providerName,
-        modelName: input.config.modelName,
-        thinkingLevel: input.thinkingLevel ?? null,
-      };
-      const baseReturn = {
-        ...result,
-        ...modelConfigState,
-        authorization: syncedAuth,
-        // Preserve execution journal state across agent→tools cycles.
-        // Without these, LangGraph may reset channels with default reducer
-        // to their defaults between node invocations.
-        executionJournal: state.executionJournal,
-        exhaustedFingerprints: state.exhaustedFingerprints,
-        // Preserve plan mode state — planReview node sets these once; they must
-        // survive agent→tools→agent cycles without resetting to defaults.
-        interactionMode: state.interactionMode,
-        plan: state.plan,
-        planReviewed: state.planReviewed,
-        autoReviewState: state.autoReviewState,
-        doomLoopTracker: state.doomLoopTracker,
-      };
-      if (retryEvents.length > 0) {
-        return { ...baseReturn, modelRetries: retryEvents };
-      }
-      return baseReturn;
-    } catch (e) {
-      // Return retry events even on failure — user should see retry context in error display
-      if (retryEvents.length > 0) {
-        throw Object.assign(e instanceof Error ? e : new Error(String(e)), {
-          modelRetries: retryEvents,
-        });
-      }
-      throw e;
-    } finally {
-      if (hasRetryListener(model)) model.setRetryListener(null);
+    const syncedAuth = authorizationForState(state, override);
+    const modelConfigState = {
+      modelProvider: input.config.providerName,
+      modelName: input.config.modelName,
+      thinkingLevel: input.thinkingLevel ?? null,
+    };
+    const baseReturn = {
+      ...result.state,
+      ...modelConfigState,
+      authorization: syncedAuth,
+      executionJournal: state.executionJournal,
+      exhaustedFingerprints: state.exhaustedFingerprints,
+      interactionMode: state.interactionMode,
+      plan: state.plan,
+      planReviewed: state.planReviewed,
+      autoReviewState: state.autoReviewState,
+      doomLoopTracker: state.doomLoopTracker,
+    };
+    if (retryEvents && retryEvents.length > 0) {
+      return { ...baseReturn, modelRetries: retryEvents };
     }
+    return baseReturn;
   };
 
   /** 统一的子 agent 工具拒绝处理 — 合并 approval 节点中 5 处 copy-paste 的拒绝路径。
@@ -358,14 +316,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       | null = null;
     let doomLoopTrackerNext = state.doomLoopTracker;
     if (state.interactionMode === InteractionMode.Auto) {
-      const reviewModel =
-        input.config.autoReview?.provider || input.config.autoReview?.model
-          ? createAutoReviewModel(input.config)
-          : model;
-      const reviewModelName =
-        (input.config.autoReview?.model as string) ?? input.config.modelName ?? 'unknown';
-
-      // 构建审查上下文
+      // 构建审查上下文 / Build review context
       const reviewContext: ReviewContext = {
         userTask: extractUserTask(state.messages),
         planSummary: state.plan
@@ -533,16 +484,22 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
             approval: { ...approvalPayload, circuitBreakerTripped: true, reviewFailure },
           }) as typeof approved;
         } else {
-          // 正常 auto-review 路径
-          const review = await reviewToolApproval({
-            model: reviewModel,
+          // 正常 auto-review 路径 — 委托 auto-review-controller
+          const autoReviewResult = await runAutoReview({
             payload: approvalPayload,
             request,
             context: reviewContext,
-            timeoutMs: input.config.autoReview?.timeoutMs,
+            config: input.config,
+            reviewId: request.id ?? '',
+            emitRuntimeEvent,
+            // 无专属 auto-review config 时回退到主 agent model / Fall back to main model
+            ...(input.config.autoReview?.provider || input.config.autoReview?.model
+              ? {}
+              : { model }),
           });
-          if (!review.ok) {
-            const failureReason = review.reason ?? 'auto review technical failure';
+          const reviewModelName = autoReviewResult.reviewerModelName;
+          if (!autoReviewResult.ok) {
+            const failureReason = autoReviewResult.reason ?? 'auto review technical failure';
             const failOpen = input.config.autoReview?.failOpen === true;
             if (failOpen) {
               autoReviewFailureReason = `auto-review (${reviewModelName}): ${failureReason}`;
@@ -603,12 +560,12 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
                 },
               };
             }
-          } else if (!review.suggestion!.approved) {
+          } else if (!autoReviewResult.approved) {
             doomLoopTrackerNext = updateDoomLoopTracker(
               state.doomLoopTracker,
               doomCheck.fingerprint!,
             );
-            const rejectionReason = review.suggestion!.reason || 'auto review rejected this action';
+            const rejectionReason = autoReviewResult.reason || 'auto review rejected this action';
             console.warn(`[auto-review] rejected: ${rejectionReason} — tool=${request.name}`);
             const newEntry: RejectionEntry = {
               timestamp: Date.now(),
@@ -695,12 +652,11 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
               };
             }
           } else {
-            const suggestion = review.suggestion!;
             approved = {
               approved: true,
-              grant: suggestion.grant,
+              grant: (autoReviewResult.grant as ShellApprovalGrant) ?? 'approve_once',
               approvalHash: approvalPayload.approvalHash,
-              reason: suggestion.reason,
+              reason: autoReviewResult.reason,
             };
             autoReviewRejectionRecord = {
               pendingWarnings: {},
@@ -727,27 +683,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
             reason?: string;
           };
     }
-    const approvalGrant = approvalGrantFromResume(approved);
-    const allowed =
-      approved === true ||
-      (typeof approved === 'object' &&
-        approved !== null &&
-        (approved.approved === true ||
-          (approved.approved === undefined && approvalGrant !== null)) &&
-        (approved.approvalHash === undefined ||
-          validateApprovalHash(approved, approvalPayload.approvalHash)));
+    const resumeValue = normalizeApprovalResume(approved);
+    const result = handleApprovalResume({
+      toolCallId: request.id ?? '',
+      resumeValue,
+      expectedHash: approvalPayload.approvalHash,
+      emitRuntimeEvent,
+    });
 
-    if (!allowed) {
-      const hashMismatch =
-        typeof approved === 'object' &&
-        approved !== null &&
-        approved.approvalHash !== undefined &&
-        !validateApprovalHash(approved, approvalPayload.approvalHash);
-      const reason = hashMismatch
-        ? 'approved request does not match current tool request'
-        : typeof approved === 'object' && approved !== null
-          ? (approved.reason ?? 'not approved')
-          : 'not approved';
+    if (!result.approved) {
       // 子 agent 审批被拒 → 注入拒绝结果并恢复子 agent，让它尝试其他方法
       // Sub-agent approval rejected → inject rejection result so it can try alternatives
       if (pendingSubagent) {
@@ -764,15 +708,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         return { approvedBatch: batch };
       }
       return {
-        ...rejectedToolMessage(request, reason),
+        ...rejectedToolMessage(request, result.reason ?? 'not approved'),
         approvedBatch: batch,
       };
     }
 
     let approvedRequest = request;
-    if (typeof approved === 'object' && approved !== null && approved.replacementCommand) {
+    if (result.replacementCommand) {
       try {
-        approvedRequest = replaceApprovalCommand(request, approved.replacementCommand);
+        approvedRequest = replaceApprovalCommand(request, result.replacementCommand);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         if (pendingSubagent) {
@@ -795,7 +739,7 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
     }
 
-    const grant = approvalGrant ?? 'approve_once';
+    const grant = result.grant ?? 'approve_once';
     const nextAuthorization = applyApprovalGrant({
       authorization: state.authorization,
       grant,
@@ -900,36 +844,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       request,
     }) as AgentResumeValue;
 
-    // RuntimeEvent 管道发出 tool_done
-    const normalized = normalizeUserInputResume(resume);
-    const answer = normalized.answers
-      ? Object.entries(normalized.answers)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join('\n')
-      : normalized.answer;
-    emitRuntimeEvent({
-      type: 'user_input.answered',
-      interactionId: request.id ?? '',
-      answer,
-    });
-    emitRuntimeEvent({
-      type: 'tool.finished',
-      toolCallId: request.id ?? '',
-      name: 'ask_user',
-      result: {
-        ok: true,
-        command: request.protectedCommand ?? '',
-        exitCode: 0,
-        stdout: JSON.stringify({ ok: true, answer }),
-        stderr: '',
-      },
-    });
-
-    return {
-      messages: [userInputToolMessage(request, resume)],
+    // 委托 Controller 处理 resume → RuntimeEvent + ToolMessage
+    // Delegate to Controller for resume → RuntimeEvent + ToolMessage
+    return handleUserInput({
+      request,
+      resume,
       plan: state.plan,
       planReviewed: state.planReviewed,
-    };
+      emitRuntimeEvent,
+    });
   };
 
   /** plan review 节点：中断等待用户审查计划，支持反馈 / Plan review node: interrupt for user plan review with optional feedback
@@ -967,75 +890,18 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       callId: request.id,
     }) as AgentResumeValue;
 
-    const resumeObj = resume as Record<string, unknown> | null | undefined;
-    const approved =
-      resume === true ||
-      (typeof resume === 'object' && resume !== null && resumeObj?.planApproved === true);
-
-    if (approved) {
-      const executionMode = resumeObj?.executionMode as string | undefined;
-      const interactionMode = executionMode === 'auto' ? InteractionMode.Auto : InteractionMode.Ask;
-      // 方案数据已在 AIMessage.tool_calls.args 中，ToolMessage 只需标记 ok + 简短摘要。
-      // 重复放入完整 plan 对象会浪费 token 并降低后续调用前缀缓存命中率。
-      // The plan data is already in AIMessage.tool_calls.args; ToolMessage only needs ok + brief summary.
-      // Including the full plan redundantly wastes tokens and degrades prefix cache hit rates.
-      // 首次方案审批重置授权为 default；执行中修订方案保留现有授权（如 full_access）
-      // First plan approval resets authorization to default; plan revision preserves existing authorization
-
-      // RuntimeEvent 管道发出 tool_done
-      emitRuntimeEvent({
-        type: 'plan.approved',
-        interactionId: request.id ?? '',
-        executionMode: executionMode === 'auto' ? 'auto' : 'manual',
-      });
-      emitRuntimeEvent({
-        type: 'tool.finished',
-        toolCallId: request.id ?? '',
-        name: 'update_plan',
-        result: {
-          ok: true,
-          command: request.protectedCommand ?? '',
-          exitCode: 0,
-          stdout: planSummary.slice(0, 200),
-          stderr: '',
-        },
-      });
-
-      return {
-        messages: [
-          new ToolMessage({
-            content: JSON.stringify({ ok: true, stdout: planSummary.slice(0, 200) }),
-            tool_call_id: request.id ?? 'missing-tool-call-id',
-            name: 'update_plan',
-            status: 'success',
-          }),
-        ],
-        plan,
-        planReviewed: true,
-        phase: 'building' as const,
-        interactionMode,
-        authorization: state.planReviewed
-          ? state.authorization
-          : { ...state.authorization, mode: 'default' as const },
-      };
-    }
-
-    const supplement = resumeObj?.planSupplement;
-    if (typeof supplement === 'string' && supplement.length > 0) {
-      emitRuntimeEvent({
-        type: 'plan.revision_requested',
-        interactionId: request.id ?? '',
-        feedback: supplement,
-      });
-      return rejectedToolMessage(request, `Plan needs revision. User feedback: ${supplement}`);
-    }
-
-    emitRuntimeEvent({
-      type: 'plan.rejected',
-      interactionId: request.id ?? '',
-      reason: 'plan rejected by user',
+    // 委托 Controller 处理 approve / supplement / reject 三路分支
+    // Delegate to Controller for three-way branching: approve / supplement / reject
+    return handlePlanReview({
+      request: { id: request.id, args: request.args as unknown as Record<string, unknown> },
+      resume: resume as boolean | Record<string, unknown>,
+      state: {
+        plan: state.plan,
+        planReviewed: state.planReviewed,
+        authorization: state.authorization,
+      },
+      emitRuntimeEvent,
     });
-    return rejectedToolMessage(request, 'plan rejected by user');
   };
 
   /** 执行单个工具调用并返回 ToolMessage / Execute a single tool call and return ToolMessage */
@@ -1075,9 +941,15 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
         }
       : undefined;
 
-    const result = await runApprovedTool({
+    // 委托 tool-controller 执行工具 / Delegate to tool-controller
+    const { toolMessage, sideEffects, subagentBlocked } = await executeTool({
       workspace: state.workspace,
-      request,
+      request: request as {
+        id?: string;
+        name: string;
+        args: Record<string, unknown>;
+        protectedCommand: string;
+      },
       shellExecutor: input.shellExecutor,
       workspaceAccess: state.workspaceAccess,
       phase: state.phase,
@@ -1096,12 +968,14 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       taskConfig: input.config,
       taskModel: input.model,
       subagentEventSink: input.subagentEventSink,
+      emitRuntimeEvent,
     });
 
-    if (request.name === 'task' && result.subagentResult?.blocked) {
+    // 子 agent 阻塞 → 创建 pendingSubagentApproval 供 approval 节点处理
+    if (subagentBlocked) {
       const pending = pendingSubagentApprovalFromBlocked(
         request.id ?? 'missing-tool-call-id',
-        result.subagentResult.blocked,
+        subagentBlocked,
         state.workspace,
       );
       if (pending) {
@@ -1112,41 +986,10 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
       }
     }
 
-    // Flush React re-renders before dispatching tool_done, so intermediate
-    // tool_progress updates (liveOutput) are rendered before status → done.
-    // Only needed when this tool emitted progress events; skip otherwise.
+    // Flush React re-renders before dispatching tool_done
     if (onShellProgress) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-
-    // RuntimeEvent 管道发出 tool_done
-    emitRuntimeEvent({
-      type: 'tool.finished',
-      toolCallId: request.id ?? '',
-      name: request.name,
-      result: {
-        ok: result.ok !== false,
-        command: request.protectedCommand ?? '',
-        exitCode: result.exitCode ?? 0,
-        stdout: result.stdout ?? '',
-        stderr: result.stderr ?? '',
-        ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
-      },
-    });
-
-    const toolMessage = new ToolMessage({
-      content: JSON.stringify(result),
-      tool_call_id: request.id ?? 'missing-tool-call-id',
-      name: request.name,
-      status: result.ok === false ? 'error' : 'success',
-    });
-
-    const sideEffects: import('./tool-result').ToolExecutionSideEffects = {
-      plan: result.plan,
-      workspaceAccess: result.workspaceAccess,
-      authorization: result.authorization,
-      activeSkillInstructions: result.activeSkillInstructions,
-    };
 
     return { toolMessage, sideEffects };
   }
@@ -1676,16 +1519,6 @@ export function buildCodeAgentGraph(input: BuildCodeAgentGraphInput) {
   return { graph, checkpointer };
 }
 
-/** 检查模型是否支持 RetryListener / Check if model supports RetryListener */
-function hasRetryListener(
-  model: SupportedChatModel,
-): model is SupportedChatModel & RetryListenerHost {
-  return (
-    'setRetryListener' in model &&
-    typeof (model as { setRetryListener: unknown }).setRetryListener === 'function'
-  );
-}
-
 /** 将 override 同步到 state.authorization / Sync override to state.authorization */
 function authorizationForState(
   state: CodeAgentState,
@@ -1817,24 +1650,6 @@ function bindAgentTools(
     return model.bindTools(tools);
   }
   return model.bindTools(tools, { tool_choice: 'auto' });
-}
-
-function approvalGrantFromResume(
-  resume: boolean | { grant?: ShellApprovalGrant } | null | undefined,
-): ShellApprovalGrant | null {
-  if (resume === true) {
-    return 'approve_once';
-  }
-  if (
-    resume &&
-    typeof resume === 'object' &&
-    (resume.grant === 'approve_once' ||
-      resume.grant === 'same_command' ||
-      resume.grant === 'full_access')
-  ) {
-    return resume.grant;
-  }
-  return null;
 }
 
 /** 从对话历史中提取用户原始任务文本（第一个 HumanMessage 的前 500 字符）。

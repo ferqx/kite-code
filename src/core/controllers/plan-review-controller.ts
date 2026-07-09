@@ -16,9 +16,7 @@ export interface PlanReviewParams {
     planReviewed: boolean;
     authorization: ThreadAuthorizationState;
   };
-  /** 工具结果回调 — 通知 TUI 工具执行完成 / Notify TUI of tool completion */
-  toolResultSink?: (callId: string, toolName: string, ok: boolean, summary: string) => void;
-  /** 运行时事件回调 — 发出 RuntimeEvent 供上层消费 */
+  /** 运行时事件回调 — RuntimeEvent 是唯一 TUI 通知路径 */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
 }
 
@@ -43,9 +41,12 @@ export interface PlanReviewResult {
  * graph.ts planReview node into a pure function with no LangGraph dependency.
  * The caller is responsible for calling interrupt() in the LangGraph node and
  * passing the resume value here.
+ *
+ * RuntimeEvent 是唯一 TUI 通知路径 — 不再使用 toolResultSink 双写。
+ * RuntimeEvent is the sole TUI notification path — no more toolResultSink dual-write.
  */
 export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
-  const { request, resume, state, toolResultSink, emitRuntimeEvent } = params;
+  const { request, resume, state, emitRuntimeEvent } = params;
 
   // 规范化 resume — graph.ts 的 interrupt() 可能返回 boolean true/false 或对象
   // Normalize resume — graph.ts interrupt() may return boolean true/false or an object
@@ -81,11 +82,7 @@ export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
     const executionMode = resumeObj.executionMode as string | undefined;
     const interactionMode = executionMode === 'auto' ? IM.Auto : IM.Ask;
 
-    // 与 executeOneTool 一致：直接发出 tool_done，不依赖 stream 解析
-    // Mirror executeOneTool: emit tool_done directly, don't depend on stream parsing
-    toolResultSink?.(request.id ?? '', 'update_plan', true, planSummary.slice(0, 200));
-
-    // 发出 RuntimeEvent（与 toolResultSink 并行，不替代）
+    // RuntimeEvent 是唯一 TUI 通知路径 / RuntimeEvent is the sole TUI notification path
     emitRuntimeEvent?.({
       type: 'plan.approved',
       interactionId: request.id ?? '',
@@ -128,8 +125,6 @@ export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
   // ── 补充/修订分支 / Supplement branch ──
   const supplement = resumeObj.planSupplement;
   if (typeof supplement === 'string' && supplement.length > 0) {
-    toolResultSink?.(request.id ?? '', 'update_plan', false, `Plan needs revision: ${supplement}`);
-
     emitRuntimeEvent?.({
       type: 'plan.revision_requested',
       interactionId: request.id ?? '',
@@ -147,8 +142,6 @@ export function handlePlanReview(params: PlanReviewParams): PlanReviewResult {
   }
 
   // ── 拒绝分支 / Reject branch ──
-  toolResultSink?.(request.id ?? '', 'update_plan', false, 'plan rejected by user');
-
   emitRuntimeEvent?.({
     type: 'plan.rejected',
     interactionId: request.id ?? '',
