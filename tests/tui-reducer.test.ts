@@ -3,7 +3,6 @@ import type { Action } from '../src/app/tui/App';
 import { createInitialState, eventReducer } from '../src/app/tui/App';
 import { buildToolSummaryLine } from '../src/app/tui/reducers/consolidateTools';
 import type { InterruptState, OutputBlock, SessionSnapshot, TuiState } from '../src/app/tui/types';
-import type { CheckpointEntry } from '../src/core/persistence/checkpoint';
 import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
 
 function fresh(): TuiState {
@@ -1429,11 +1428,10 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('SHOW_REWIND / HIDE_REWIND / SET_CHECKPOINTS + ESCAPE', () => {
-    const ck1: CheckpointEntry = {
-      checkpointId: 'ck1',
-      parentCheckpointId: null,
-      createdAt: '2024-01-01T00:00:00Z',
-      firstUserMessage: 'hello',
+    const ck1 = {
+      snapshotId: 'snapshot-1',
+      eventPosition: 1,
+      createdAt: 1_704_067_200,
     };
 
     test('SHOW_REWIND sets showRewind=true', () => {
@@ -1448,7 +1446,7 @@ describe('eventReducer (blocks model)', () => {
       expect(s.checkpoints).toEqual([]);
     });
     test('SET_CHECKPOINTS stores entries', () => {
-      const entries = [ck1, { ...ck1, checkpointId: 'ck2' }];
+      const entries = [ck1, { ...ck1, snapshotId: 'snapshot-2' }];
       const s = dispatch(fresh(), { type: 'SET_CHECKPOINTS', checkpoints: entries });
       expect(s.checkpoints).toEqual(entries);
     });

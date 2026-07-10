@@ -1,7 +1,12 @@
 import { Database } from 'bun:sqlite';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
-import { isRecoverableError, runAgent } from '@/core/runner';
+import type { RuntimeUserAction } from '@/core/runtime/actions';
+import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
+import type { RuntimeEffect } from '@/core/runtime/effects';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import type { RuntimeActionProvider } from '@/core/runtime/runner';
+import type { RuntimeState } from '@/core/runtime/state';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
@@ -12,6 +17,12 @@ import { fullModeUnavailableReason } from './interaction-mode';
 import type { TuiUserInputProvider } from './provider';
 import { buildRunAgentParams } from './run-agent';
 import type { SessionSnapshot, StatusState } from './types';
+
+function isRecoverableError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return /timeout|timed out|rate limit|overloaded|\b429\b|\b5\d\d\b/.test(message);
+}
 
 export {
   admitInteractionModeTarget,
@@ -41,7 +52,7 @@ export class SessionRuntime {
   abortController: AbortController | null = null;
   agentLoopActive = false;
   pendingInterrupt = false;
-  eventBuffer: AgentEvent[] = [];
+  eventBuffer: Array<AgentEvent | RuntimeEvent> = [];
   /** true if loaded from DB and state not yet hydrated / 从 DB 加载但尚未加载完整状态 */
   dormant = false;
   static readonly MAX_BUFFER = 1000;
@@ -57,7 +68,7 @@ export class SessionRuntime {
   readonly skillOptions: SkillScanOptions | null;
   mcpManager: McpManager | null;
 
-  generator: AsyncGenerator<AgentEvent> | null = null;
+  generator: AsyncGenerator<RuntimeEvent> | null = null;
   /** 当后台会话命中中断时通知 Manager 刷新快照 / Callback to notify Manager on background interrupt */
   notifyInterrupt: (() => void) | null = null;
 
@@ -166,16 +177,35 @@ export class SessionRuntime {
       mcpManager: this.mcpManager,
       pendingSkillsContent,
       shellContext,
-      initialPhase: this.phase,
       interactionMode: this.interactionMode,
       sandboxBackend: sandboxRuntime.backend,
       model: deps.model,
       // 后台会话不再默认注入 full_access；中断会挂起到该会话，等待切回前台处理。
-      authorizationOverride: undefined,
     });
 
     // 始终使用代理提供器 — 事件路由由 _foreground 控制
-    const generator = runAgent(this._proxyProvider, runAgentParams);
+    const runtimeInput: RunRuntimeAgentInput = {
+      task: runAgentParams.task,
+      userId: runAgentParams.userId,
+      threadId: runAgentParams.threadId,
+      workspace: runAgentParams.workspace,
+      runtimeStorePath: runAgentParams.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db',
+      config: runAgentParams.config,
+      model: runAgentParams.model,
+      shellExecutor: runAgentParams.shellExecutor,
+      mcpManager: runAgentParams.mcpManager,
+      skills: runAgentParams.skills,
+      skillOptions: runAgentParams.skillOptions,
+      interactionMode: runAgentParams.interactionMode,
+      thinkingLevel: runAgentParams.thinkingLevel,
+      sandboxBackend: runAgentParams.sandboxBackend,
+      signal: runAgentParams.signal,
+      frontend: 'tui',
+    };
+    const runtimeProvider: RuntimeActionProvider = {
+      requestAction: (effect, state) => this._requestRuntimeAction(effect, state),
+    };
+    const generator = runRuntimeAgent(runtimeInput, runtimeProvider);
 
     // 所有状态变更必须在 try 块内，防止 buildRunAgentParams/runAgent 抛出时
     // agentLoopActive 和 abortController 泄漏导致会话永久冻结
@@ -184,7 +214,8 @@ export class SessionRuntime {
       this.agentLoopActive = true;
       this.abortController = abortController;
       this.generator = generator;
-      for await (const _ of generator) {
+      for await (const event of generator) {
+        this._routeRuntimeEvent(event, deps.dispatch);
         if (abortController.signal.aborted) {
           aborted = true;
           break;
@@ -233,7 +264,7 @@ export class SessionRuntime {
   // ── 私有：代理提供器 & 缓冲 ──
 
   /** 推送事件到缓冲，溢出时优先丢弃非关键事件 */
-  private _pushToBuffer(event: AgentEvent): void {
+  private _pushToBuffer(event: AgentEvent | RuntimeEvent): void {
     if (this.eventBuffer.length >= SessionRuntime.MAX_BUFFER) {
       // 查找第一个可丢弃事件的下标
       const dropIdx = this.eventBuffer.findIndex((e) => DISPOSABLE_EVENT_TYPES.has(e.type));
@@ -245,6 +276,101 @@ export class SessionRuntime {
       }
     }
     this.eventBuffer.push(event);
+  }
+
+  /** Route the public RuntimeEvent stream without passing through AgentEvent projection. */
+  private _routeRuntimeEvent(event: RuntimeEvent, dispatch: (action: Action) => void): void {
+    if (this._foreground) {
+      dispatch({ type: 'RUNTIME_EVENT', event });
+      return;
+    }
+    // Background ask_user is immediately cancelled by the provider below; do not
+    // replay a request the user can no longer answer after switching sessions.
+    if (event.type === 'user_input.requested') return;
+    this._pushToBuffer(event);
+    if (event.type === 'approval.requested' || event.type === 'plan.review_requested') {
+      this.pendingInterrupt = true;
+      this.notifyInterrupt?.();
+    }
+  }
+
+  /** Adapt existing Ink button actions at the UI edge and bind the persisted interaction id. */
+  private async _requestRuntimeAction(
+    effect: Extract<RuntimeEffect, { interactionId: string }>,
+    state: Readonly<RuntimeState>,
+  ): Promise<RuntimeUserAction> {
+    const interaction = state.interactions;
+    let payload: InterruptPayload;
+    if (effect.type === 'request_user_input' && interaction.kind === 'awaiting_user_input') {
+      payload = { kind: 'input', question: interaction.request };
+    } else if (
+      effect.type === 'request_tool_approval' &&
+      interaction.kind === 'awaiting_tool_approval'
+    ) {
+      payload = { kind: 'approval', approval: interaction.approval };
+    } else if (
+      effect.type === 'request_plan_review' &&
+      interaction.kind === 'awaiting_plan_review'
+    ) {
+      payload = { kind: 'plan_review', plan: interaction.plan };
+    } else {
+      return {
+        type: 'cancel',
+        interactionId: effect.interactionId,
+        reason: 'Interaction state changed.',
+      };
+    }
+
+    const action = await this._proxyProvider.requestAction(payload);
+    switch (action.type) {
+      case 'input':
+        return {
+          type: 'input',
+          interactionId: effect.interactionId,
+          text: action.text,
+          answers: action.answers,
+        };
+      case 'approve':
+        return action.grant === 'none'
+          ? {
+              type: 'reject',
+              interactionId: effect.interactionId,
+              reason: 'No approval grant selected.',
+            }
+          : { type: 'approve', interactionId: effect.interactionId, grant: action.grant };
+      case 'reject':
+        return { type: 'reject', interactionId: effect.interactionId };
+      case 'approve_plan_auto':
+        return { type: 'approve_plan', interactionId: effect.interactionId, executionMode: 'auto' };
+      case 'approve_plan_manual':
+        return {
+          type: 'approve_plan',
+          interactionId: effect.interactionId,
+          executionMode: 'manual',
+        };
+      case 'approve_plan':
+        return {
+          type: 'approve_plan',
+          interactionId: effect.interactionId,
+          executionMode: 'manual',
+        };
+      case 'supplement_plan':
+        return {
+          type: 'revise_plan',
+          interactionId: effect.interactionId,
+          feedback: action.feedback,
+        };
+      case 'reject_plan':
+        return { type: 'reject_plan', interactionId: effect.interactionId };
+      case 'cancel':
+        return { type: 'cancel', interactionId: effect.interactionId };
+      default:
+        return {
+          type: 'cancel',
+          interactionId: effect.interactionId,
+          reason: 'Unsupported UI action.',
+        };
+    }
   }
 
   /** 创建代理提供器。interrupt 使用运行时自身状态，永久等待用户处理 */
@@ -362,9 +488,10 @@ export class SessionManager {
   /** 懒加载 stats DB 连接 / Lazy-load the stats DB connection */
   private get statsDb(): Database {
     if (!this._statsDb) {
-      this._statsDb = new Database(this.deps.checkpointPath);
-      // WAL 模式提升并发读写性能，与 BunSqliteSaver 保持一致
-      // Enable WAL mode for consistent concurrent read/write behavior with BunSqliteSaver
+      this._statsDb = new Database(
+        this.deps.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db',
+      );
+      // Keep token-stat writes compatible with concurrent RuntimeStore access.
       this._statsDb.run('pragma journal_mode = wal');
       this._statsDb.run('pragma busy_timeout = 5000');
       this._statsDb.run(`create table if not exists session_stats (

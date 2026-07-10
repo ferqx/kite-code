@@ -1,12 +1,14 @@
 // ── Action 类型定义 ──
 // 从 App.tsx 中抽出，避免 reducers 和 App.tsx 之间的循环依赖
 
-import type { CheckpointEntry } from '@/core/persistence/checkpoint';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import type { RuntimeSnapshotEntry } from '@/core/runtime/store';
 import type { AgentEvent } from '@/protocol/events';
 import type { InterruptState, OutputBlock, TuiState } from '../types';
 
 export type Action =
   | { type: 'EVENT'; event: AgentEvent }
+  | { type: 'RUNTIME_EVENT'; event: RuntimeEvent }
   | { type: 'SET_EXITED' }
   | { type: 'SET_RUNNING' }
   | { type: 'SET_IDLE' }
@@ -61,7 +63,7 @@ export type Action =
   | { type: 'HIDE_REWIND' }
   | { type: 'REVERT_TO_CHECKPOINT'; checkpointId: string }
   | { type: 'FORK_FROM_CHECKPOINT'; checkpointId: string }
-  | { type: 'SET_CHECKPOINTS'; checkpoints: CheckpointEntry[] }
+  | { type: 'SET_CHECKPOINTS'; checkpoints: RuntimeSnapshotEntry[] }
   | { type: 'ACTIVATE_SKILL'; name: string; content: string }
   | { type: 'DEACTIVATE_SKILL' }
   | { type: 'LIST_SKILLS' }

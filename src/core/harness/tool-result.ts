@@ -65,5 +65,5 @@ export interface ToolExecutionSideEffects {
   authorization?: ThreadAuthorizationState;
   activeSkillInstructions?: string;
   /** task 工具子 agent 被阻塞时产生的审批挂起状态 / Pending sub-agent approval when task tool is blocked */
-  pendingSubagentApproval?: import('./state').PendingSubAgentApproval;
+  pendingSubagentApproval?: unknown;
 }

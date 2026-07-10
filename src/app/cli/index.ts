@@ -1,10 +1,11 @@
 import { resolve } from 'node:path';
 import { defaultCheckpointPath, loadAgentConfig } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
-import { runAgent } from '@/core/runner';
+import type { RuntimeUserAction } from '@/core/runtime/actions';
+import { runRuntimeAgent } from '@/core/runtime/agent';
+import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import { getSkillContent, scanSkills } from '@/core/skills/loader';
-import type { AuthorizationOverride } from '@/core/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
 import type { UserInputProvider } from '@/protocol/provider';
@@ -34,6 +35,11 @@ export async function main(): Promise<void> {
     printHelp();
     return;
   }
+  if (args.command === 'resume') {
+    throw new Error(
+      'Legacy checkpoint sessions are not compatible with the Runtime Kernel. Start a new task.',
+    );
+  }
 
   const config = loadAgentConfig();
   const interactionMode = args.interactionMode ?? config.interactionMode ?? 'ask';
@@ -47,9 +53,6 @@ export async function main(): Promise<void> {
     enabled: sandboxRuntime.enabled,
     workspace: args.workspace,
   });
-
-  const authorizationOverride: AuthorizationOverride | undefined =
-    args.authorizationMode !== undefined ? { current: args.authorizationMode } : undefined;
 
   // Load skill contents and prepend to task
   let task = args.task ?? '';
@@ -68,42 +71,86 @@ export async function main(): Promise<void> {
     task = skillContents.join('') + task;
   }
 
-  const provider = createCliProvider(args);
+  const provider = createCliRuntimeProvider();
+  const generator = runRuntimeAgent(
+    {
+      task,
+      userId: args.userId,
+      threadId: args.threadId,
+      workspace: args.workspace,
+      runtimeStorePath: `${args.checkpointPath.replace(/\.sqlite$/, '')}.runtime.db`,
+      config,
+      shellExecutor,
+      interactionMode,
+      sandboxBackend: sandboxRuntime.backend,
+      frontend: 'cli',
+      skills: manifests,
+      skillOptions,
+    },
+    provider,
+  );
 
-  const generator = runAgent(provider, {
-    task,
-    userId: args.userId,
-    threadId: args.threadId,
-    workspace: args.workspace,
-    checkpointPath: args.checkpointPath,
-    config,
-    mode: args.mode,
-    shellExecutor,
-    authorizationOverride,
-    interactionMode,
-    sandboxBackend: sandboxRuntime.backend,
-    skills: manifests,
-    skillOptions,
-    frontend: 'cli',
-    resume:
-      args.command === 'resume'
-        ? args.answer === undefined
-          ? {
-              approved: args.approve,
-              grant: args.approvalGrant,
-              approvalHash: args.approvalHash,
-              replacementCommand: args.replacementCommand,
-            }
-          : { answer: args.answer }
-        : undefined,
-  });
-
-  for await (const _ of generator) {
-    // Events handled by provider.onEvent
+  for await (const event of generator) {
+    console.log(JSON.stringify(event));
   }
 }
 
-function createCliProvider(_args: ParsedArgs): UserInputProvider {
+function createCliRuntimeProvider(): RuntimeActionProvider {
+  return {
+    async requestAction(effect, state): Promise<RuntimeUserAction> {
+      if (state.interactions.kind === 'awaiting_tool_approval') {
+        const approval = state.interactions.approval;
+        console.error(`\n[APPROVAL REQUIRED] ${approval.tool}: ${approval.command}`);
+        console.error(`Risk: ${approval.risk} | ${approval.summary}`);
+        console.error('Type y/yes to approve, n to reject, f/full_access for full access:');
+        const value = (await readStdin()).toLowerCase();
+        if (value === 'f' || value === 'full_access')
+          return { type: 'approve', interactionId: effect.interactionId, grant: 'full_access' };
+        if (value === 'y' || value === 'yes')
+          return { type: 'approve', interactionId: effect.interactionId, grant: 'approve_once' };
+        return { type: 'reject', interactionId: effect.interactionId };
+      }
+      if (state.interactions.kind === 'awaiting_plan_review') {
+        const plan = state.interactions.plan;
+        console.error(`\n[PLAN REVIEW] ${plan.name}\n${plan.description}`);
+        console.error('Type a/auto, m/manual, t/tell, or r/reject:');
+        const value = (await readStdin()).toLowerCase();
+        if (value === 'a' || value === 'auto')
+          return {
+            type: 'approve_plan',
+            interactionId: effect.interactionId,
+            executionMode: 'auto',
+          };
+        if (value === 'm' || value === 'manual')
+          return {
+            type: 'approve_plan',
+            interactionId: effect.interactionId,
+            executionMode: 'manual',
+          };
+        if (value === 't' || value === 'tell') {
+          console.error('Enter your feedback:');
+          return {
+            type: 'revise_plan',
+            interactionId: effect.interactionId,
+            feedback: await readStdin(),
+          };
+        }
+        return { type: 'reject_plan', interactionId: effect.interactionId };
+      }
+      if (state.interactions.kind !== 'awaiting_user_input') {
+        throw new Error('Runtime requested input without an input interaction.');
+      }
+      const request = state.interactions.request;
+      console.error(`\n[QUESTION] ${request.question}`);
+      request.options.forEach((option, index) => {
+        console.error(`  ${index + 1}. ${option.label}`);
+      });
+      return { type: 'input', interactionId: effect.interactionId, text: await readStdin() };
+    },
+  };
+}
+
+export function createCliProvider(_args: ParsedArgs): UserInputProvider {
   return {
     onEvent(event: AgentEvent) {
       console.log(JSON.stringify(event));

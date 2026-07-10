@@ -5,6 +5,7 @@
 // 隐私脱敏由遥测通道的 scrubber 负责，本层不裁剪内容。
 
 import { genSpanId } from '@/core/id-utils';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import type { AgentEvent } from '@/protocol/events';
 import { classifyToolFailure } from './classifier';
 import type { TraceRecord } from './types';
@@ -372,5 +373,71 @@ export function recordEvent(
       break;
   }
 
+  return base;
+}
+
+/** Record a RuntimeEvent directly, without converting it through AgentEvent. */
+export function recordRuntimeEvent(
+  event: RuntimeEvent,
+  traceId: string,
+  parentSpanId: string,
+): TraceRecord {
+  const base: TraceRecord = {
+    traceId,
+    spanId: genSpanId(),
+    parentSpanId,
+    name: `runtime.${event.type}`,
+    kind: 1,
+    timestamp: ts(),
+    attributes: { 'kite_code.runtime_event': event.type },
+    status: { code: 'OK', message: '' },
+  };
+  switch (event.type) {
+    case 'model.responded':
+      base.kind = 3;
+      base.attributes['kite_code.model.message_id'] = event.messageId;
+      if (event.text) base.attributes['kite_code.text.content'] = trunc(event.text, TRUNC_CONTENT);
+      if (event.reasoningText)
+        base.attributes['kite_code.reason.content'] = trunc(event.reasoningText, TRUNC_CONTENT);
+      break;
+    case 'tool.queued':
+      base.name = `tool.${event.name}.call`;
+      base.attributes['kite_code.tool.name'] = event.name;
+      base.attributes['kite_code.tool.call_id'] = event.toolCallId;
+      base.attributes['kite_code.tool.args'] = safeStringify(event.args, TRUNC_ARGS);
+      break;
+    case 'tool.finished':
+      base.name = `tool.${event.name}`;
+      base.attributes['kite_code.tool.name'] = event.name;
+      base.attributes['kite_code.tool.call_id'] = event.toolCallId;
+      base.attributes['kite_code.tool.ok'] = event.result.ok;
+      base.attributes['kite_code.tool.summary'] = trunc(
+        event.result.stdout || event.result.stderr,
+        TRUNC_SUMMARY,
+      );
+      if (!event.result.ok)
+        base.status = { code: 'ERROR', message: event.result.stderr || 'tool failed' };
+      break;
+    case 'tool.failed':
+    case 'tool.rejected':
+      base.status = {
+        code: 'ERROR',
+        message: event.type === 'tool.failed' ? event.error : event.reason,
+      };
+      base.attributes['kite_code.tool.call_id'] = event.toolCallId;
+      break;
+    case 'user_input.requested':
+      base.attributes['kite_code.interaction_id'] = event.interactionId;
+      base.attributes['kite_code.input.question'] = trunc(event.request.question, TRUNC_QUESTION);
+      break;
+    case 'approval.requested':
+      base.attributes['kite_code.interaction_id'] = event.interactionId;
+      base.attributes['kite_code.approval.command'] = trunc(event.approval.command, TRUNC_COMMAND);
+      break;
+    case 'plan.review_requested':
+      base.attributes['kite_code.interaction_id'] = event.interactionId;
+      base.attributes['kite_code.plan'] = safeStringify(event.plan, TRUNC_SUMMARY);
+      break;
+  }
   return base;
 }

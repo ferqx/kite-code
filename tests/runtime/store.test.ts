@@ -95,6 +95,23 @@ describe('createRuntimeStore', () => {
     expect(loaded[0]!.event.type).toBe('tool.queued');
     store.close();
   });
+
+  test('backfills session metadata for stores created before runtime_sessions existed', () => {
+    const db = new Database(dbPath);
+    db.run(
+      'CREATE TABLE runtime_events (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, event_json TEXT NOT NULL, created_at INTEGER)',
+    );
+    db.run(
+      'INSERT INTO runtime_events (thread_id, event_json, created_at) VALUES (\'legacy-runtime\', \'{"type":"user.message_appended","messageId":"m","content":"hello"}\', 100)',
+    );
+    db.close();
+
+    const store = createRuntimeStore(dbPath);
+    expect(store.listSessions()).toEqual([
+      expect.objectContaining({ threadId: 'legacy-runtime', name: 'hello' }),
+    ]);
+    store.close();
+  });
 });
 
 describe('appendEvents + loadEvents round-trip', () => {
@@ -739,6 +756,66 @@ describe('persistence edge cases', () => {
     expect(store.loadSnapshot<{ version: number; data: string }>('t2')!.version).toBe(100);
     expect(store.loadSnapshot<{ version: number; data: string }>('t2')!.data).toBe('second');
 
+    store.close();
+  });
+
+  test('named snapshots retain a recovery point and its event position', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('rewindable', [makeEvent({ toolCallId: 'before-rewind' })]);
+    const position = store.getLastEventPosition('rewindable');
+    store.saveNamedSnapshot('rewindable', 'before-change', { stage: 'before' });
+    store.appendEvents('rewindable', [makeEvent({ toolCallId: 'after-rewind' })]);
+
+    expect(position).toBeGreaterThan(0);
+    expect(store.loadNamedSnapshot<{ stage: string }>('rewindable', 'before-change')).toEqual({
+      stage: 'before',
+    });
+    expect(store.getLastEventPosition('rewindable')).toBeGreaterThan(position);
+    store.close();
+  });
+
+  test('restoreNamedSnapshot truncates later events and restores the saved state', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('rewind', [makeEvent({ toolCallId: 'before' })]);
+    store.saveNamedSnapshot('rewind', 'safe', { version: 1 });
+    store.appendEvents('rewind', [makeEvent({ toolCallId: 'after' })]);
+
+    expect(store.restoreNamedSnapshot('rewind', 'safe')).toBe(true);
+    expect(store.loadSnapshot<{ version: number }>('rewind')).toEqual({ version: 1 });
+    expect(store.loadEvents('rewind')).toHaveLength(1);
+    store.close();
+  });
+
+  test('restoreNamedSnapshot removes recovery points beyond the restored position', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('rewind-prune', [makeEvent({ toolCallId: 'first' })]);
+    store.saveNamedSnapshot('rewind-prune', 'first', { version: 1 });
+    store.appendEvents('rewind-prune', [makeEvent({ toolCallId: 'second' })]);
+    store.saveNamedSnapshot('rewind-prune', 'second', { version: 2 });
+
+    expect(store.restoreNamedSnapshot('rewind-prune', 'first')).toBe(true);
+    expect(store.listNamedSnapshots('rewind-prune').map((entry) => entry.snapshotId)).toEqual([
+      'first',
+    ]);
+    store.close();
+  });
+
+  test('forkSession rebinds the persisted state to the target thread', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('source', [makeEvent({ toolCallId: 'source-call' })]);
+    store.saveNamedSnapshot('source', 'safe', {
+      session: { threadId: 'source', userId: 'u', workspace: '/workspace' },
+      authorization: { mode: 'default', commandGrants: { inherited: { threadId: 'source' } } },
+    });
+
+    expect(store.forkSession('source', 'safe', 'fork')).toBe(true);
+    const fork = store.loadSnapshot<any>('fork');
+    expect(fork.session.threadId).toBe('fork');
+    expect(fork.authorization.commandGrants).toEqual({});
+    expect(store.loadEvents('fork')).toHaveLength(1);
+    expect(store.listNamedSnapshots('fork')[0]!.eventPosition).toBe(
+      store.getLastEventPosition('fork'),
+    );
     store.close();
   });
 });

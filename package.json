@@ -7,7 +7,6 @@
   "scripts": {
     "agent": "bun run src/app/cli/index.ts",
     "test": "bun test",
-    "test:real": "bun run tests/real-test-cli.ts",
     "test:mock": "bun test ./tests/mock-compaction.real.ts",
     "test:e2e": "bun test tests/tui-system/scenarios/",
     "test:tui:integration": "bun test tests/tui-system/scenarios/",
@@ -24,8 +23,6 @@
   "dependencies": {
     "@langchain/core": "^1.2.1",
     "@langchain/deepseek": "^1.1.3",
-    "@langchain/langgraph": "^1.4.7",
-    "@langchain/langgraph-checkpoint": "^1.1.3",
     "@langchain/ollama": "^1.3.0",
     "@langchain/openai": "^1.5.3",
     "@modelcontextprotocol/sdk": "^1.29.0",

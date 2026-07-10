@@ -4,7 +4,7 @@ import type { TuiState } from '../types';
 import type { Action } from './actions';
 import { agentReducer } from './agentReducer';
 import { checkpointReducer } from './checkpointReducer';
-import { handleEventAction } from './handleEvent';
+import { handleEventAction, handleRuntimeEventAction } from './handleEvent';
 import { sessionReducer } from './sessionReducer';
 import { skillReducer } from './skillReducer';
 import { uiReducer } from './uiReducer';
@@ -66,6 +66,9 @@ export function eventReducer(state: TuiState, action: Action): TuiState {
   // EVENT 动作有独立的子类型分发
   if (action.type === 'EVENT') {
     return handleEventAction(state, action.event);
+  }
+  if (action.type === 'RUNTIME_EVENT') {
+    return handleRuntimeEventAction(state, action.event);
   }
 
   // ESCAPE 需要链式分发：uiReducer 关面板 → agentReducer 处理中断

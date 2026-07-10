@@ -19,6 +19,7 @@ describe('test discovery boundaries', () => {
   test('keeps real model suites out of Bun default test discovery', () => {
     const defaultTests = collectFiles(join(repoRoot, 'tests'))
       .map((path) => relative(repoRoot, path))
+      .map((path) => path.replace(/\\/g, '/'))
       .filter(isBunDefaultTestFile)
       .filter((path) => path !== 'tests/test-discovery.test.ts');
     const realDefaultTests = defaultTests.filter((path) => path.includes('real'));
@@ -35,14 +36,13 @@ describe('test discovery boundaries', () => {
     expect(liveModelDefaultTests).toEqual([]);
   });
 
-  test('keeps real model tests behind explicit scripts', () => {
+  test('does not retain a legacy real-agent test script', () => {
     const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
 
     expect(pkg.scripts?.test).toBe('bun test');
-    expect(pkg.scripts?.['test:real']).toBe('bun run tests/real-test-cli.ts');
-    expect(pkg.scripts?.['test:real']).not.toContain('proxy');
+    expect(pkg.scripts?.['test:real']).toBeUndefined();
     expect(pkg.scripts?.['test:real:direct']).toBeUndefined();
   });
 });

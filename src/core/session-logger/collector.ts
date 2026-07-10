@@ -21,8 +21,9 @@ import { writeFileSync } from 'node:fs';
 import { arch, platform, release } from 'node:os';
 import { sessionLogDir } from '@/core/config/paths';
 import { genSpanId, genTraceId } from '@/core/id-utils';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import type { AgentEvent } from '@/protocol/events';
-import { recordEvent } from './recorder';
+import { recordEvent, recordRuntimeEvent } from './recorder';
 import type { RunSummary, TraceRecord } from './types';
 import { SessionLogWriter } from './writer';
 
@@ -158,6 +159,24 @@ export class SessionLogCollector {
       this._updateStats(event);
     } catch {
       // 日志记录失败不影响 Agent
+    }
+  }
+
+  /** Runtime-native log path; no AgentEvent projection is required. */
+  recordRuntime(event: RuntimeEvent): void {
+    try {
+      const rec = recordRuntimeEvent(event, this._traceId, this._currentTurnSpanId);
+      this._recordRaw(rec);
+      if (event.type === 'tool.finished') {
+        this._summary.stats.toolCalls.total++;
+        if (event.result.ok) this._summary.stats.toolCalls.ok++;
+        else this._summary.stats.toolCalls.failed++;
+      } else if (event.type === 'tool.failed' || event.type === 'tool.rejected') {
+        this._summary.stats.toolCalls.total++;
+        this._summary.stats.toolCalls.failed++;
+      }
+    } catch {
+      // Logging cannot interrupt the runtime.
     }
   }
 

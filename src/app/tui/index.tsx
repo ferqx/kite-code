@@ -503,7 +503,14 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         if (incomingRt && incomingRt.eventBuffer.length > 0) {
           dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
           for (const event of incomingRt.eventBuffer) {
-            dispatch({ type: 'EVENT', event });
+            if (event.type.includes('.')) {
+              dispatch({
+                type: 'RUNTIME_EVENT',
+                event: event as import('@/core/runtime/events').RuntimeEvent,
+              });
+            } else {
+              dispatch({ type: 'EVENT', event: event as import('@/protocol/events').AgentEvent });
+            }
           }
           incomingRt.eventBuffer = [];
           incomingRt.pendingInterrupt = false;

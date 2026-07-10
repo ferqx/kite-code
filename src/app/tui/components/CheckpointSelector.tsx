@@ -1,14 +1,14 @@
 import { Box, Text, useInput } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import { useState } from 'react';
-import type { CheckpointEntry } from '@/core/persistence/checkpoint';
+import type { RuntimeSnapshotEntry } from '@/core/runtime/store';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useTheme } from '../theme';
 
-export type { CheckpointEntry };
+export type { RuntimeSnapshotEntry };
 
 interface CheckpointSelectorProps {
-  checkpoints: CheckpointEntry[];
+  checkpoints: RuntimeSnapshotEntry[];
   onRevert: (checkpointId: string) => void;
   onFork: (checkpointId: string) => void;
   onClose: () => void;
@@ -39,18 +39,18 @@ export default function CheckpointSelector({
     }
     if (key.return) {
       const cp = checkpoints[selected];
-      if (cp) onRevert(cp.checkpointId);
+      if (cp) onRevert(cp.snapshotId);
       return;
     }
     const char = _input.toLowerCase();
     if (char === 'r') {
       const cp = checkpoints[selected];
-      if (cp) onRevert(cp.checkpointId);
+      if (cp) onRevert(cp.snapshotId);
       return;
     }
     if (char === 'f') {
       const cp = checkpoints[selected];
-      if (cp) onFork(cp.checkpointId);
+      if (cp) onFork(cp.snapshotId);
       return;
     }
   });
@@ -95,14 +95,12 @@ export default function CheckpointSelector({
             const isSelected = i === selected;
             const prefix = isSelected ? '\u276f' : ' ';
             const color = isSelected ? t.primary : t.muted;
-            const displayId = cp.checkpointId.slice(0, 8);
-            const rawMsg = cp.firstUserMessage || '';
-            const displayMsg =
-              rawMsg.length > 60 ? `${rawMsg.slice(0, 60)}...` : rawMsg || '(no message)';
-            const displayTime = cp.createdAt ? cp.createdAt.slice(0, 19) : '';
+            const displayId = cp.snapshotId.slice(0, 8);
+            const displayMsg = `event #${cp.eventPosition}`;
+            const displayTime = new Date(cp.createdAt * 1000).toLocaleString();
 
             return (
-              <Text key={cp.checkpointId} color={color}>
+              <Text key={cp.snapshotId} color={color}>
                 {prefix} {i + 1}. [{displayId}] {displayMsg}
                 {displayTime ? ` \u2014 ${displayTime}` : ''}
               </Text>

@@ -1538,3 +1538,27 @@ function emitInterruptEvent(event: RuntimeEvent, toolCallId: string): void {
 | 核心回归 | 435 pass, 0 fail |
 | PTY plan review | 6 pass, 0 fail |
 | typecheck | 零错误 |
+
+---
+
+## 13. 后续：LangGraph 物理移除与 Kernel 切换（2026-07-10）
+
+Round 8 之后，LangGraph graph/routes/state/engine/checkpoint 等旧基础设施被物理删除，
+项目完全切换到 Runtime Kernel 原生执行路径。详见切换追踪文档：
+
+→ [[2026-07-10-runtime-kernel-cutover-status]]
+
+**切换要点**：
+
+- 旧 Graph 代码（`graph.ts` 1650 行、`routes.ts` 235 行、`state.ts` 303 行等）
+  和 4 个旧 Controller（approval/auto-review/plan-review/user-input）已物理删除
+- `model-controller.ts` 和 `tool-controller.ts` 保留并重写为 Kernel 原生函数
+  （`invokeRuntimeModel` / `executeRuntimeTools`），输入 `RuntimeState`，输出
+  `RuntimeEvent[]`
+- 旧 Policy 文件中的 `auto-review-policy.ts` 和 `plan-policy.ts` 发现为零引用死代码，
+  已于切换清理中删除
+- `RuntimeEvent` 覆盖率从 29/29 类型定义补全到实际 emit：新增 `turn.*`（3）、
+  `model.retry`、`tool.file_change`、`model.cache_metrics` 共 6 个发射链路
+- 遗留：`auto_review.*` 事件——旧 auto-review-controller 已删除但 Kernel 原生替代
+  未实现，`decideNextEffect` 不返回 `run_auto_review` 效果，auto mode 降级为
+  ask mode 行为。需独立方案修复

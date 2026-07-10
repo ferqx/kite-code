@@ -170,7 +170,7 @@ export interface TuiState {
   showSessions: boolean;
   showMcp: boolean;
   showRewind: boolean;
-  checkpoints: import('@/core/persistence/checkpoint').CheckpointEntry[];
+  checkpoints: import('@/core/runtime/store').RuntimeSnapshotEntry[];
   rewindCounter: number;
   pendingSkills: string[];
   skillManifests: import('@/core/skills/types').SkillManifest[];

@@ -271,6 +271,32 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     expect(call.createdAtTurnId).toBe(state.turn.turnId);
   });
 
+  test('replayed tool.queued is idempotent and preserves a terminal call', () => {
+    let state = reduceRuntimeState(makeInitialState(), {
+      type: 'tool.queued',
+      toolCallId: 'tool-replay',
+      name: 'read_file',
+      args: { path: 'a.ts' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'tool-replay',
+      name: 'read_file',
+      result: { ok: true, command: '', exitCode: 0, stdout: 'ok', stderr: '' },
+    });
+
+    const replayed = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'tool-replay',
+      name: 'read_file',
+      args: { path: 'a.ts' },
+    });
+
+    expect(replayed).toBe(state);
+    expect(replayed.tools.queue).toEqual([]);
+    expect(replayed.tools.calls['tool-replay']!.status).toBe('succeeded');
+  });
+
   // 验证 tool.started 从队列移到活跃列表并设为 running
   test('tool.started moves tool from queue to active with running status', () => {
     const state: RuntimeState = {
@@ -360,6 +386,41 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     expect(call.result!.ok).toBe(true);
     expect(call.result!.exitCode).toBe(0);
     expect(call.result!.summary).toContain('pwd');
+  });
+
+  test('tool.finished removes an unstarted interactive tool from queue', () => {
+    let state = reduceRuntimeState(makeInitialState(), {
+      type: 'tool.queued',
+      toolCallId: 'ask-1',
+      name: 'ask_user',
+      args: {},
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'ask-1',
+      name: 'ask_user',
+      result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
+    });
+
+    expect(state.tools.queue).toEqual([]);
+    expect(state.tools.calls['ask-1']!.status).toBe('succeeded');
+  });
+
+  test('tool.finished with ok:false records failed rather than succeeded', () => {
+    let state = reduceRuntimeState(makeInitialState(), {
+      type: 'tool.queued',
+      toolCallId: 'failed-1',
+      name: 'shell_execute',
+      args: { command: 'false' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'failed-1',
+      name: 'shell_execute',
+      result: { ok: false, command: 'false', exitCode: 1, stdout: '', stderr: 'failed' },
+    });
+
+    expect(state.tools.calls['failed-1']!.status).toBe('failed');
   });
 
   // 验证 tool.finished 对不存在的 toolCallId 静默忽略
@@ -541,6 +602,26 @@ describe('reduceRuntimeState — interaction state', () => {
     const next = reduceRuntimeState(state, event);
 
     expect(next.interactions.kind).toBe('idle');
+  });
+
+  test('a mismatched user_input answer cannot resolve the active interaction', () => {
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      interactions: {
+        kind: 'awaiting_user_input',
+        interactionId: 'ui-original',
+        toolCallId: 'ask-1',
+        request: { question: 'Q?', options: [], allow_free_text: true },
+      },
+    };
+
+    const next = reduceRuntimeState(state, {
+      type: 'user_input.answered',
+      interactionId: 'ui-replayed',
+      answer: 'answer',
+    });
+
+    expect(next).toBe(state);
   });
 
   // 验证 approval.requested 设置 awaiting_tool_approval 交互
@@ -786,6 +867,19 @@ describe('reduceRuntimeState — runtime environment', () => {
     expect(next.authorization.commandGrants['key1']!.command).toBe('ls');
   });
 
+  test('authorization.changed can persist replacement command grants', () => {
+    const state = makeInitialState();
+    const next = reduceRuntimeState(state, {
+      type: 'authorization.changed',
+      mode: 'default',
+      commandGrants: {
+        cmd: { workspace: '/ws', threadId: 'thread-1', command: 'bun test' },
+      },
+    });
+
+    expect(next.authorization.commandGrants.cmd!.command).toBe('bun test');
+  });
+
   // 验证 phase.changed 更新执行阶段
   test('phase.changed updates execution phase', () => {
     const state = makeInitialState();
@@ -850,8 +944,7 @@ describe('reduceRuntimeState — turn lifecycle', () => {
 // ── 用户消息 / User messages ──
 
 describe('reduceRuntimeState — user messages', () => {
-  // 验证 user.message_appended 不修改状态（信息性事件）
-  test('user.message_appended does not modify state', () => {
+  test('user.message_appended persists transcript content', () => {
     const state = makeInitialState();
     const event: RuntimeEvent = {
       type: 'user.message_appended',
@@ -859,7 +952,9 @@ describe('reduceRuntimeState — user messages', () => {
       content: 'Hello, can you help?',
     };
     const next = reduceRuntimeState(state, event);
-    expect(next).toEqual(state);
+    expect(next.transcript.messages).toEqual([
+      { kind: 'user', messageId: 'msg-1', content: 'Hello, can you help?' },
+    ]);
   });
 });
 
@@ -877,8 +972,7 @@ describe('reduceRuntimeState — model interaction', () => {
     expect(next).toEqual(state);
   });
 
-  // 验证 model.responded 不修改状态（信息性事件，无工具调用）
-  test('model.responded does not modify state (informational)', () => {
+  test('model.responded persists assistant content and final text', () => {
     const state = makeInitialState();
     const event: RuntimeEvent = {
       type: 'model.responded',
@@ -886,11 +980,16 @@ describe('reduceRuntimeState — model interaction', () => {
       text: 'I will help you with that task.',
     };
     const next = reduceRuntimeState(state, event);
-    expect(next).toEqual(state);
+    expect(next.transcript.final).toBe('I will help you with that task.');
+    expect(next.transcript.messages[0]).toMatchObject({
+      kind: 'assistant',
+      messageId: 'msg-2',
+      content: 'I will help you with that task.',
+      toolCalls: [],
+    });
   });
 
-  // 验证 model.responded 带 toolCalls 也不修改状态（信息性事件）
-  test('model.responded with toolCalls does not modify state', () => {
+  test('model.responded persists tool calls without final text', () => {
     const state = makeInitialState();
     const event: RuntimeEvent = {
       type: 'model.responded',
@@ -901,7 +1000,12 @@ describe('reduceRuntimeState — model interaction', () => {
       ],
     };
     const next = reduceRuntimeState(state, event);
-    expect(next).toEqual(state);
+    expect(next.transcript.final).toBeUndefined();
+    expect(next.transcript.messages[0]).toMatchObject({
+      kind: 'assistant',
+      messageId: 'msg-3',
+      toolCalls: event.toolCalls,
+    });
   });
 });
 

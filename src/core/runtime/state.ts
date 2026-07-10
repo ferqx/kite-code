@@ -186,6 +186,8 @@ export interface ToolCallRecord {
   createdAtTurnId: string;
   /** 审批哈希（用于缓存审批结果）/ Approval hash for caching approval decisions */
   approvalHash?: string;
+  /** The one-shot or persisted grant selected for this specific execution. */
+  approvalGrant?: import('@/protocol/events').ShellApprovalGrant;
   /** 工具执行结果（成功后填充）/ Tool execution result (populated on success) */
   result?: {
     /** 执行是否成功 / Whether execution was successful */
@@ -212,6 +214,24 @@ export interface ToolRuntimeState {
   queue: string[];
   /** 当前正在执行的工具调用 ID 列表 / Currently active tool call ids */
   active: string[];
+}
+
+/** JSON-safe transcript.  LangChain message instances are rebuilt only at the
+ * model boundary and are never persisted in RuntimeStore. */
+export type TranscriptMessage =
+  | { kind: 'user'; messageId: string; content: string }
+  | {
+      kind: 'assistant';
+      messageId: string;
+      content?: string;
+      reasoningText?: string;
+      toolCalls: Array<{ id: string; name: string; args: unknown }>;
+    }
+  | { kind: 'tool'; toolCallId: string; name: string; content: string; ok: boolean };
+
+export interface TranscriptState {
+  messages: TranscriptMessage[];
+  final?: string;
 }
 
 // ── 运行时状态 / Runtime state ──
@@ -242,6 +262,8 @@ export interface RuntimeState {
     /** Turn 序号（从 0 开始递增）/ Turn index (incrementing from 0) */
     turnIndex: number;
   };
+  /** Persisted, provider-neutral transcript used to rebuild model context. */
+  transcript: TranscriptState;
   /** 方案生命周期状态 / Plan lifecycle state */
   plan: PlanLifecycleState;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
@@ -305,6 +327,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       turnId: crypto.randomUUID(),
       turnIndex: 0,
     },
+    transcript: { messages: [] },
     plan: { kind: 'none' },
     interactions: { kind: 'idle' },
     tools: {

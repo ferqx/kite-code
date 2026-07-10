@@ -18,6 +18,19 @@ export interface StoredEvent {
   created_at: number;
 }
 
+export interface RuntimeSessionInfo {
+  threadId: string;
+  name: string;
+  updatedAt: number;
+  needsSmartName: boolean;
+}
+
+export interface RuntimeSnapshotEntry {
+  snapshotId: string;
+  eventPosition: number;
+  createdAt: number;
+}
+
 /** RuntimeStore 接口 / Runtime store interface */
 export interface RuntimeStore {
   /** 批量追加事件（事务写入）/ Append events in a transaction */
@@ -28,6 +41,18 @@ export interface RuntimeStore {
   saveSnapshot(threadId: string, state: unknown): void;
   /** 加载最新状态快照 / Load the latest state snapshot */
   loadSnapshot<T = unknown>(threadId: string): T | null;
+  /** Persist a named recovery point independently from the rolling snapshot. */
+  saveNamedSnapshot(threadId: string, name: string, state: unknown, eventPosition?: number): void;
+  /** Load a named recovery point, or null when it is absent/corrupt. */
+  loadNamedSnapshot<T = unknown>(threadId: string, name: string): T | null;
+  /** Return the last durable event position for a thread. */
+  getLastEventPosition(threadId: string): number;
+  listSessions(query?: string, limit?: number): RuntimeSessionInfo[];
+  setSessionName(threadId: string, name: string): void;
+  deleteSession(threadId: string): void;
+  listNamedSnapshots(threadId: string): RuntimeSnapshotEntry[];
+  restoreNamedSnapshot(threadId: string, snapshotId: string): boolean;
+  forkSession(sourceThreadId: string, snapshotId: string, targetThreadId: string): boolean;
   /** 关闭数据库连接 / Close the database */
   close(): void;
 }
@@ -77,6 +102,32 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
     )
   `);
   db.run(`
+    CREATE TABLE IF NOT EXISTS runtime_sessions (
+      thread_id  TEXT PRIMARY KEY,
+      name       TEXT NOT NULL DEFAULT '',
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )
+  `);
+  // Upgrade pre-metadata RuntimeStore files without touching legacy Graph
+  // checkpoints.  The first event timestamp is sufficient for a recoverable
+  // list entry; subsequent appends maintain the normal updated_at value.
+  db.run(`
+    INSERT OR IGNORE INTO runtime_sessions (thread_id, name, updated_at)
+    SELECT thread_id, '', MAX(created_at)
+    FROM runtime_events
+    GROUP BY thread_id
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS runtime_named_snapshots (
+      thread_id      TEXT    NOT NULL,
+      name           TEXT    NOT NULL,
+      event_position INTEGER NOT NULL DEFAULT 0,
+      state_json     TEXT    NOT NULL,
+      created_at     INTEGER DEFAULT (unixepoch()),
+      PRIMARY KEY (thread_id, name)
+    )
+  `);
+  db.run(`
     CREATE TABLE IF NOT EXISTS runtime_snapshots (
       thread_id  TEXT    PRIMARY KEY,
       state_json TEXT    NOT NULL,
@@ -101,6 +152,46 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
   const selectSnapshot = db.query<SnapshotRow, [string]>(
     'SELECT thread_id, state_json, created_at FROM runtime_snapshots WHERE thread_id = ? ORDER BY created_at DESC LIMIT 1',
   );
+  const upsertNamedSnapshot = db.query(
+    'INSERT OR REPLACE INTO runtime_named_snapshots (thread_id, name, event_position, state_json, created_at) VALUES (?, ?, ?, ?, unixepoch())',
+  );
+  const selectNamedSnapshot = db.query<{ state_json: string }, [string, string]>(
+    'SELECT state_json FROM runtime_named_snapshots WHERE thread_id = ? AND name = ?',
+  );
+  const selectLastEventPosition = db.query<{ id: number | null }, [string]>(
+    'SELECT MAX(id) AS id FROM runtime_events WHERE thread_id = ?',
+  );
+  const upsertSession = db.query(
+    "INSERT INTO runtime_sessions (thread_id, name, updated_at) VALUES (?, '', unixepoch()) ON CONFLICT(thread_id) DO UPDATE SET updated_at = unixepoch()",
+  );
+  const setSessionName = db.query(
+    'UPDATE runtime_sessions SET name = ?, updated_at = unixepoch() WHERE thread_id = ?',
+  );
+  const listSessions = db.query<
+    { thread_id: string; name: string; updated_at: number; first_message: string | null },
+    [number]
+  >(
+    `SELECT s.thread_id, s.name, s.updated_at,
+      (SELECT json_extract(e.event_json, '$.content') FROM runtime_events e
+       WHERE e.thread_id = s.thread_id AND json_extract(e.event_json, '$.type') = 'user.message_appended'
+       ORDER BY e.id ASC LIMIT 1) AS first_message
+     FROM runtime_sessions s
+     ORDER BY s.updated_at DESC LIMIT ?`,
+  );
+  const deleteEvents = db.query('DELETE FROM runtime_events WHERE thread_id = ?');
+  const deleteEventsAfter = db.query('DELETE FROM runtime_events WHERE thread_id = ? AND id > ?');
+  const deleteSnapshot = db.query('DELETE FROM runtime_snapshots WHERE thread_id = ?');
+  const deleteNamedSnapshots = db.query('DELETE FROM runtime_named_snapshots WHERE thread_id = ?');
+  const deleteNamedSnapshotsAfter = db.query(
+    'DELETE FROM runtime_named_snapshots WHERE thread_id = ? AND event_position > ?',
+  );
+  const deleteSession = db.query('DELETE FROM runtime_sessions WHERE thread_id = ?');
+  const listNamedSnapshots = db.query<
+    { name: string; event_position: number; created_at: number },
+    [string]
+  >(
+    'SELECT name, event_position, created_at FROM runtime_named_snapshots WHERE thread_id = ? ORDER BY created_at DESC, name DESC',
+  );
 
   const store: RuntimeStore = {
     appendEvents(threadId: string, events: RuntimeEvent[]): void {
@@ -109,6 +200,7 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
 
       try {
         db.transaction(() => {
+          upsertSession.run(threadId);
           for (const event of events) {
             insertEvent.run(threadId, JSON.stringify(event));
           }
@@ -164,6 +256,134 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
         // 快照数据损坏时返回 null / Return null on corrupted snapshot data
         return null;
       }
+    },
+
+    saveNamedSnapshot(
+      threadId: string,
+      name: string,
+      state: unknown,
+      eventPosition?: number,
+    ): void {
+      if (isClosed) return;
+      try {
+        const position = eventPosition ?? selectLastEventPosition.get(threadId)?.id ?? 0;
+        upsertNamedSnapshot.run(threadId, name, position, JSON.stringify(state));
+      } catch (e) {
+        throw new Error(
+          `Failed to save named snapshot ${name} for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
+          { cause: e },
+        );
+      }
+    },
+
+    loadNamedSnapshot<T = unknown>(threadId: string, name: string): T | null {
+      if (isClosed) return null;
+      const row = selectNamedSnapshot.get(threadId, name);
+      if (!row) return null;
+      try {
+        return JSON.parse(row.state_json) as T;
+      } catch {
+        return null;
+      }
+    },
+
+    getLastEventPosition(threadId: string): number {
+      if (isClosed) return 0;
+      return selectLastEventPosition.get(threadId)?.id ?? 0;
+    },
+
+    listSessions(query = '', limit = 50): RuntimeSessionInfo[] {
+      if (isClosed) return [];
+      const needle = query.trim().toLowerCase();
+      return listSessions
+        .all(needle ? Math.max(limit, 200) : limit)
+        .filter(
+          (row) =>
+            !needle ||
+            row.name.toLowerCase().includes(needle) ||
+            (row.first_message ?? '').toLowerCase().includes(needle),
+        )
+        .slice(0, limit)
+        .map((row) => ({
+          threadId: row.thread_id,
+          name: row.name || row.first_message || row.thread_id,
+          updatedAt: row.updated_at,
+          needsSmartName: !row.name,
+        }));
+    },
+
+    setSessionName(threadId: string, name: string): void {
+      if (isClosed) return;
+      upsertSession.run(threadId);
+      setSessionName.run(name, threadId);
+    },
+
+    deleteSession(threadId: string): void {
+      if (isClosed) return;
+      db.transaction(() => {
+        deleteEvents.run(threadId);
+        deleteSnapshot.run(threadId);
+        deleteNamedSnapshots.run(threadId);
+        deleteSession.run(threadId);
+      })();
+    },
+
+    listNamedSnapshots(threadId: string): RuntimeSnapshotEntry[] {
+      if (isClosed) return [];
+      return listNamedSnapshots.all(threadId).map((row) => ({
+        snapshotId: row.name,
+        eventPosition: row.event_position,
+        createdAt: row.created_at,
+      }));
+    },
+
+    restoreNamedSnapshot(threadId: string, snapshotId: string): boolean {
+      if (isClosed) return false;
+      const snapshot = store.loadNamedSnapshot(threadId, snapshotId);
+      const entry = listNamedSnapshots.all(threadId).find((item) => item.name === snapshotId);
+      if (!snapshot || !entry) return false;
+      db.transaction(() => {
+        deleteEventsAfter.run(threadId, entry.event_position);
+        deleteNamedSnapshotsAfter.run(threadId, entry.event_position);
+        upsertSnapshot.run(threadId, JSON.stringify(snapshot));
+        upsertSession.run(threadId);
+      })();
+      return true;
+    },
+
+    forkSession(sourceThreadId: string, snapshotId: string, targetThreadId: string): boolean {
+      if (isClosed) return false;
+      const snapshot = store.loadNamedSnapshot<Record<string, unknown>>(sourceThreadId, snapshotId);
+      if (!snapshot) return false;
+      const sourceEvents = store.loadEvents(sourceThreadId);
+      const position =
+        listNamedSnapshots.all(sourceThreadId).find((entry) => entry.name === snapshotId)
+          ?.event_position ?? 0;
+      const events = sourceEvents
+        .filter((entry) => entry.id <= position)
+        .map((entry) => entry.event);
+      const forkState = structuredClone(snapshot);
+      const session = forkState.session as Record<string, unknown> | undefined;
+      if (session) session.threadId = targetThreadId;
+      const authorization = forkState.authorization as Record<string, unknown> | undefined;
+      if (authorization) authorization.commandGrants = {};
+      db.transaction(() => {
+        deleteEvents.run(targetThreadId);
+        deleteSnapshot.run(targetThreadId);
+        deleteNamedSnapshots.run(targetThreadId);
+        deleteSession.run(targetThreadId);
+        upsertSession.run(targetThreadId);
+        for (const event of events) insertEvent.run(targetThreadId, JSON.stringify(event));
+        const targetPosition = selectLastEventPosition.get(targetThreadId)?.id ?? 0;
+        upsertSnapshot.run(targetThreadId, JSON.stringify(forkState));
+        upsertNamedSnapshot.run(
+          targetThreadId,
+          snapshotId,
+          targetPosition,
+          JSON.stringify(forkState),
+        );
+      })();
+      return true;
     },
 
     close(): void {
