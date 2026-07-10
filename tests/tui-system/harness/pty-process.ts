@@ -116,7 +116,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   childEnv['TERM'] = 'xterm-256color';
 
   const proc = Bun.spawn({
-    cmd: ['bun', 'run', 'src/app/tui/index.tsx'],
+    cmd: [process.execPath, 'run', 'src/app/tui/index.tsx'],
     cwd,
     env: childEnv,
     terminal: {

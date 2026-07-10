@@ -93,7 +93,7 @@ async function spawnWithTerminal(
   let proc: any;
   try {
     proc = Bun.spawn({
-      cmd: ['bun', 'run', scriptPath],
+      cmd: [process.execPath, 'run', scriptPath],
       terminal: {
         rows: opts?.rows ?? 24,
         cols: opts?.cols ?? 80,

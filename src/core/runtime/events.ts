@@ -149,6 +149,9 @@ export interface ApprovalRejectedEvent {
 export interface AuthorizationChangedEvent {
   type: 'authorization.changed';
   mode: AuthorizationMode;
+  /** Persisted exact-command grants.  Carry the full set because this event is
+   * the runtime-state handoff for a graph-side authorization decision. */
+  commandGrants?: Record<string, { workspace: string; threadId: string; command: string }>;
 }
 
 /** 执行阶段变更 / Execution phase changed */
@@ -231,6 +234,38 @@ export interface ModelRespondedEvent {
   text?: string;
 }
 
+/** A retry observed while invoking the model. */
+export interface ModelRetryEvent {
+  type: 'model.retry';
+  attempt: number;
+  maxAttempts: number;
+  error: string;
+  delayMs: number;
+}
+
+/** Prompt cache metrics observed after a model call. */
+export interface ModelCacheMetricsEvent {
+  type: 'model.cache_metrics';
+  inputTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  hitRate: number;
+}
+
+/** Durable terminal output.  Consumers do not infer completion from graph state. */
+export interface RunCompletedEvent {
+  type: 'run.completed';
+  turnId: string;
+  output: string;
+}
+
+/** A recoverable or terminal runtime failure exposed on the public protocol. */
+export interface RunErrorEvent {
+  type: 'run.error';
+  message: string;
+  recoverable: boolean;
+}
+
 // ── Plan 生命周期补充事件 / Additional plan lifecycle events ──
 
 /** Plan 草案已生成 / Plan draft has been generated */
@@ -264,6 +299,19 @@ export interface ApprovalCommandReplacedEvent {
   command: string;
 }
 
+// ── 工具副作用事件 / Tool side-effect events ──
+
+/** 工具执行导致文件变更 / Tool execution caused file changes */
+export interface ToolFileChangeEvent {
+  type: 'tool.file_change';
+  toolCallId: string;
+  path: string;
+  kind: 'add' | 'edit' | 'delete';
+  linesAdded?: number;
+  linesRemoved?: number;
+  preview?: string;
+}
+
 // ── 运行时事件联合类型 / Runtime event discriminated union ──
 
 /** 运行时事件 — 所有状态变更的统一类型表示 */
@@ -293,7 +341,12 @@ export type RuntimeEvent =
   | UserMessageAppendedEvent
   | ModelRequestedEvent
   | ModelRespondedEvent
+  | ModelRetryEvent
+  | ModelCacheMetricsEvent
+  | RunCompletedEvent
+  | RunErrorEvent
   | PlanDraftedEvent
   | PlanProgressUpdatedEvent
   | PlanCompletedEvent
-  | ApprovalCommandReplacedEvent;
+  | ApprovalCommandReplacedEvent
+  | ToolFileChangeEvent;

@@ -31,6 +31,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const structuralHash = computePlanStructuralHash(event.plan);
       return {
         ...state,
+        tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_plan_review'),
         plan: {
           kind: 'awaiting_review',
           planId: inherited.planId,
@@ -54,6 +55,13 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       // 仅当方案在 awaiting_review 状态时转换为 approved
       // Only transition to approved when plan is in awaiting_review
       const planData = state.plan.kind === 'awaiting_review' ? state.plan : null;
+      if (
+        state.interactions.kind !== 'idle' &&
+        (state.interactions.kind !== 'awaiting_plan_review' ||
+          state.interactions.interactionId !== event.interactionId)
+      ) {
+        return state;
+      }
       return {
         ...state,
         plan: planData
@@ -80,6 +88,13 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           : state.plan.kind === 'drafted'
             ? state.plan
             : null;
+      if (
+        state.interactions.kind !== 'idle' &&
+        (state.interactions.kind !== 'awaiting_plan_review' ||
+          state.interactions.interactionId !== event.interactionId)
+      ) {
+        return state;
+      }
       return {
         ...state,
         plan: planData
@@ -96,6 +111,13 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'plan.rejected':
+      if (
+        state.interactions.kind !== 'idle' &&
+        (state.interactions.kind !== 'awaiting_plan_review' ||
+          state.interactions.interactionId !== event.interactionId)
+      ) {
+        return state;
+      }
       return {
         ...state,
         plan: { kind: 'none' },
@@ -105,6 +127,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // ── 工具生命周期 / Tool lifecycle ──
 
     case 'tool.queued': {
+      // LangGraph can replay an interrupted node.  A replayed queue event must
+      // not reset a terminal call or append the same id to the queue again.
+      if (state.tools.calls[event.toolCallId]) return state;
       const call = {
         toolCallId: event.toolCallId,
         modelMessageId: '',
@@ -143,6 +168,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.finished': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      const status =
+        event.result.status === 'exhausted'
+          ? ('exhausted' as const)
+          : event.result.ok
+            ? ('succeeded' as const)
+            : ('failed' as const);
       return {
         ...state,
         tools: {
@@ -151,7 +182,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...state.tools.calls,
             [event.toolCallId]: {
               ...existingCall,
-              status: 'succeeded' as const,
+              status,
               result: {
                 ok: event.result.ok,
                 summary: `Command: ${event.result.command}, exit code: ${event.result.exitCode}`,
@@ -159,7 +190,21 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               },
             },
           },
+          queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
+        },
+        transcript: {
+          ...state.transcript,
+          messages: [
+            ...state.transcript.messages,
+            {
+              kind: 'tool',
+              toolCallId: event.toolCallId,
+              name: event.name,
+              content: event.result.stdout || event.result.stderr,
+              ok: event.result.ok,
+            },
+          ],
         },
       };
     }
@@ -179,6 +224,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               error: event.error,
             },
           },
+          queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
         },
       };
@@ -212,6 +258,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     // tool.progress does not modify state — progress data is consumed via event stream
     case 'tool.progress':
+    // tool.file_change is informational — consumed via event stream
+    case 'tool.file_change':
       return state;
 
     // ── 用户输入交互 / User input interaction ──
@@ -219,6 +267,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'user_input.requested':
       return {
         ...state,
+        tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_user_input'),
         interactions: {
           kind: 'awaiting_user_input',
           interactionId: event.interactionId,
@@ -228,6 +277,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
 
     case 'user_input.answered':
+      if (
+        state.interactions.kind !== 'awaiting_user_input' ||
+        state.interactions.interactionId !== event.interactionId
+      ) {
+        return state;
+      }
       return {
         ...state,
         interactions: { kind: 'idle' },
@@ -238,6 +293,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'approval.requested':
       return {
         ...state,
+        tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_approval'),
         interactions: {
           kind: 'awaiting_tool_approval',
           interactionId: event.interactionId,
@@ -247,14 +303,38 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
 
     case 'approval.granted':
+      if (
+        state.interactions.kind !== 'awaiting_tool_approval' ||
+        state.interactions.interactionId !== event.interactionId
+      ) {
+        return state;
+      }
       return {
         ...state,
+        tools: {
+          ...updateToolStatus(state.tools, state.interactions.toolCallId, 'approved'),
+          calls: {
+            ...state.tools.calls,
+            [state.interactions.toolCallId]: {
+              ...state.tools.calls[state.interactions.toolCallId]!,
+              status: 'approved',
+              approvalGrant: event.grant,
+            },
+          },
+        },
         interactions: { kind: 'idle' },
       };
 
     case 'approval.rejected':
+      if (
+        state.interactions.kind !== 'awaiting_tool_approval' ||
+        state.interactions.interactionId !== event.interactionId
+      ) {
+        return state;
+      }
       return {
         ...state,
+        tools: updateToolStatus(state.tools, state.interactions.toolCallId, 'rejected'),
         interactions: { kind: 'idle' },
       };
 
@@ -266,6 +346,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         authorization: {
           ...state.authorization,
           mode: event.mode,
+          ...(event.commandGrants ? { commandGrants: event.commandGrants } : {}),
         },
       };
 
@@ -290,15 +371,49 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // user.message_appended 为信息性事件，由 TranscriptState 管理（未来）。
     // Informational — managed by TranscriptState (future).
     case 'user.message_appended':
-      return state;
+      return {
+        ...state,
+        transcript: {
+          ...state.transcript,
+          final: undefined,
+          messages: [
+            ...state.transcript.messages,
+            { kind: 'user', messageId: event.messageId, content: event.content },
+          ],
+        },
+      };
 
     // ── 模型交互 / Model interaction ──
 
     // model.requested / model.responded 为信息性事件，由 TranscriptState 管理（未来）。
     // Informational — managed by TranscriptState (future).
     case 'model.requested':
-    case 'model.responded':
       return state;
+
+    case 'model.retry':
+    case 'model.cache_metrics':
+    case 'run.completed':
+    case 'run.error':
+      return state;
+
+    case 'model.responded':
+      return {
+        ...state,
+        transcript: {
+          ...state.transcript,
+          final: event.toolCalls?.length ? undefined : (event.text ?? state.transcript.final),
+          messages: [
+            ...state.transcript.messages,
+            {
+              kind: 'assistant',
+              messageId: event.messageId,
+              content: event.text,
+              reasoningText: event.reasoningText,
+              toolCalls: event.toolCalls ?? [],
+            },
+          ],
+        },
+      };
 
     // ── Plan 生命周期补充 / Additional plan lifecycle ──
 
@@ -383,10 +498,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     // ── Auto-review 事件 / Auto-review events ──
 
-    // auto_review.requested 为信息性事件，auto-review 的触发和结果由
-    // approval-controller 内部处理，不影响 RuntimeState。
-    // Informational — auto-review trigger and result are handled internally
-    // by approval-controller, no RuntimeState mutation needed.
+    // Auto-review facts are informational; approval actions carry the state transition.
     case 'auto_review.requested':
     // auto_review.completed 为信息性事件，审批决策通过 approval.granted/rejected 体现。
     // Informational — approval decisions are reflected via approval.granted/rejected.
@@ -396,4 +508,22 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     default:
       return state;
   }
+}
+
+function updateToolStatus(
+  tools: RuntimeState['tools'],
+  toolCallId: string,
+  status:
+    | 'awaiting_user_input'
+    | 'awaiting_plan_review'
+    | 'awaiting_approval'
+    | 'approved'
+    | 'rejected',
+): RuntimeState['tools'] {
+  const call = tools.calls[toolCallId];
+  if (!call) return tools;
+  return {
+    ...tools,
+    calls: { ...tools.calls, [toolCallId]: { ...call, status } },
+  };
 }

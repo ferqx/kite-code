@@ -1,5 +1,6 @@
 // ── EVENT action handler — 19 event sub-types ──
 
+import type { RuntimeEvent } from '@/core/runtime/events';
 import type { AgentEvent } from '@/protocol/events';
 import { getToolDetail, getToolPreview } from '../components/render-utils';
 import { MAX_TOOL_LINES } from '../components/ToolCardBlock';
@@ -1328,6 +1329,133 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
     case 'user_message':
       // Informational — user message already rendered via other mechanisms
       return state;
+    default:
+      return state;
+  }
+}
+
+/** Direct RuntimeEvent rendering path.  It intentionally does not use the
+ * legacy RuntimeEvent→AgentEvent projection so TUI migration can delete it. */
+export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
+  switch (event.type) {
+    case 'user.message_appended':
+      return appendBlock(state, {
+        id: state.nextBlockId,
+        kind: 'user',
+        content: event.content.replace(/^User:\s*/, ''),
+      });
+    case 'model.responded': {
+      let next = state;
+      if (event.reasoningText)
+        next = handleEventAction(next, { type: 'reason', data: { text: event.reasoningText } });
+      if (event.text) next = handleEventAction(next, { type: 'text', data: { text: event.text } });
+      return next;
+    }
+    case 'model.retry':
+      return handleEventAction(state, {
+        type: 'model_retry',
+        data: {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          error: event.error,
+          delayMs: event.delayMs,
+        },
+      });
+    case 'model.cache_metrics':
+      return handleEventAction(state, {
+        type: 'cache_metrics',
+        data: {
+          workspaceAccess: 'write' as const,
+          inputTokens: event.inputTokens,
+          cacheHitTokens: event.cacheHitTokens,
+          cacheMissTokens: event.cacheMissTokens,
+          hitRate: event.hitRate,
+          standard: {
+            callIndex: 1,
+            isWarmup: false,
+            includedInStandard: false,
+            targetHitRate: 0.8,
+            minimumMeasuredInputTokens: 0,
+            summary: {
+              inputTokens: event.inputTokens,
+              cacheHitTokens: event.cacheHitTokens,
+              cacheMissTokens: event.cacheMissTokens,
+              hitRate: event.hitRate,
+              totalCalls: 1,
+              warmupCalls: 0,
+              measuredCalls: 0,
+              targetHitRate: 0.8,
+              minimumMeasuredInputTokens: 0,
+              hasEnoughMeasuredTokens: false,
+              meetsTarget: null,
+            },
+          },
+        },
+      });
+    case 'run.error':
+      return handleEventAction(state, {
+        type: 'error',
+        data: { message: event.message, recoverable: event.recoverable },
+      });
+    case 'tool.queued':
+      return handleEventAction(state, {
+        type: 'tool_call',
+        data: {
+          call_id: event.toolCallId,
+          name: event.name,
+          args: event.args as Record<string, unknown>,
+          status: 'queued',
+        },
+      });
+    case 'tool.started':
+      return handleEventAction(state, {
+        type: 'tool_started',
+        data: { call_id: event.toolCallId },
+      });
+    case 'tool.progress':
+      return handleEventAction(state, {
+        type: 'tool_progress',
+        data: { call_id: event.toolCallId, name: '', chunk: event.chunk, stream: event.stream },
+      });
+    case 'tool.finished':
+      return handleEventAction(state, {
+        type: 'tool_done',
+        data: {
+          call_id: event.toolCallId,
+          name: event.name,
+          ok: event.result.ok,
+          summary: (event.result.stdout || event.result.stderr).slice(0, 200),
+          exitCode: event.result.exitCode,
+          status: event.result.status,
+        },
+      });
+    case 'tool.failed':
+      return handleEventAction(state, {
+        type: 'tool_done',
+        data: { call_id: event.toolCallId, name: '', ok: false, summary: event.error },
+      });
+    case 'tool.rejected':
+      return handleEventAction(state, {
+        type: 'tool_done',
+        data: { call_id: event.toolCallId, name: '', ok: false, summary: event.reason },
+      });
+    case 'tool.file_change':
+      return handleEventAction(state, {
+        type: 'file_change',
+        data: {
+          path: event.path,
+          kind: event.kind,
+          linesAdded: event.linesAdded,
+          linesRemoved: event.linesRemoved,
+          preview: event.preview,
+        },
+      });
+    case 'user_input.requested':
+      return handleEventAction(state, { type: 'need_input', data: event.request });
+    case 'approval.requested':
+      return handleEventAction(state, { type: 'need_approval', data: event.approval });
+    case 'plan.review_requested':
+      return handleEventAction(state, { type: 'need_plan_review', data: { plan: event.plan } });
     default:
       return state;
   }

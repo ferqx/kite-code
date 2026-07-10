@@ -1,24 +1,18 @@
 // ── Agent Runtime Kernel 核心协调器 / Agent Runtime Kernel core coordinator ──
-// Phase 4: AgentKernel 封装 RuntimeState 管理、事件管道和策略决策。
-// 将当前 runner.ts 中分散的 reduceRuntimeState + store.appendEvents + projectRuntimeEventToAgentEvent
-// 调用收敛为统一入口，为 Phase 5 的 checkpoint 降级和主循环重构打基础。
+// AgentKernel 封装 RuntimeState 管理、事件管道和策略决策。
+// RuntimeState、事件持久化和效果执行调度的统一入口。
 //
-// Phase 4: AgentKernel encapsulates RuntimeState management, event pipeline,
-// and policy decisions. Converges the scattered reduceRuntimeState + store.appendEvents +
-// projectRuntimeEventToAgentEvent calls in runner.ts into a single entry point,
-// laying the foundation for Phase 5 checkpoint demotion and main loop refactoring.
-//
-// 注意：kernel.ts 当前是 factoring change（代码重组），不改行为语义。
-// 完整的主循环（while decideNextEffect + controller dispatch）留在 Phase 5 实现。
-// Note: kernel.ts is currently a factoring change (code reorganization), no behavior changes.
-// The full main loop (while decideNextEffect + controller dispatch) is deferred to Phase 5.
+// AgentKernel encapsulates RuntimeState management, event pipeline,
+// and policy decisions.  Single entry point for state, persistence, and effect dispatch.
 
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
-import type { AgentEvent, InteractionMode } from '@/protocol/events';
+import type { InteractionMode } from '@/protocol/events';
+import { eventsForRuntimeAction, type RuntimeUserAction } from './actions';
+import type { RuntimeEffect } from './effects';
 import type { RuntimeEvent } from './events';
-import { projectRuntimeEventToAgentEvent } from './projection';
 import { reduceRuntimeState } from './reducer';
+import { decideNextEffect } from './scheduler';
 import { createInitialRuntimeState, type RuntimeState } from './state';
 import { createRuntimeStore, type RuntimeStore } from './store';
 
@@ -36,6 +30,12 @@ export interface KernelConfig {
   sandboxAvailable?: boolean;
 }
 
+/** Executes an effect and returns facts for the Kernel to reduce/persist. */
+export type RuntimeEffectExecutor = (
+  effect: RuntimeEffect,
+  state: Readonly<RuntimeState>,
+) => Promise<RuntimeEvent[]>;
+
 // ── AgentKernel 实现 / AgentKernel implementation ──
 
 /**
@@ -45,14 +45,13 @@ export interface KernelConfig {
  * 职责 / Responsibilities:
  * - 维护 RuntimeState（通过 reducer 处理事件更新）/ Maintain RuntimeState (update via reducer)
  * - 持久化 RuntimeEvent 到 EventStore / Persist RuntimeEvents to EventStore
- * - 投影 RuntimeEvent 为 AgentEvent（供 TUI 消费）/ Project RuntimeEvents to AgentEvents (for TUI)
  * - 管理 RuntimePolicy（根据 mode 创建策略）/ Manage RuntimePolicy (create policy from mode)
  * - 状态快照保存 / State snapshot persistence
  *
  * 不负责 / Does NOT handle:
  * - 调用模型（由 model-controller 负责）/ Calling the model (model-controller)
  * - 执行工具（由 tool-controller 负责）/ Executing tools (tool-controller)
- * - 主循环控制（Phase 5 将添加）/ Main loop control (coming in Phase 5)
+ * - UI action collection（由 app/provider 负责）/ UI action collection (app/provider)
  */
 export class AgentKernel {
   private store: RuntimeStore;
@@ -70,36 +69,38 @@ export class AgentKernel {
   // ── 事件处理 / Event processing ──
 
   /**
-   * 处理单个 RuntimeEvent：reduce → persist → project。
-   * Process a single RuntimeEvent: reduce → persist → project.
-   *
-   * @param event - 要处理的运行时事件 / Runtime event to process
-   * @returns 投影后的 AgentEvent 数组（供 TUI 消费）/ Projected AgentEvent array (for TUI)
+   * 处理单个 RuntimeEvent：reduce → persist。
+   * Process a single RuntimeEvent: reduce → persist.
    */
-  processEvent(event: RuntimeEvent): AgentEvent[] {
+  processEvent(event: RuntimeEvent): void {
     // 1. 更新状态 / Update state
     this.state = reduceRuntimeState(this.state, event);
 
     // 2. 持久化事件 / Persist event
     this.store.appendEvents(this.state.session.threadId, [event]);
 
-    // 3. 投影为 TUI 事件 / Project to TUI events
-    return projectRuntimeEventToAgentEvent(event);
+    // Keep the snapshot at the same durability boundary as the append-only
+    // event log.  A process crash must not leave a newer event log behind an
+    // old (or absent) snapshot that resume would silently ignore.
+    this.store.saveSnapshot(this.state.session.threadId, this.state);
+
+    if (event.type === 'run.completed') {
+      this.store.saveNamedSnapshot(
+        this.state.session.threadId,
+        `turn-${event.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
+        this.state,
+      );
+    }
   }
 
   /**
    * 批量处理多个 RuntimeEvent。
    * Process multiple RuntimeEvents in batch.
-   *
-   * @param events - 要处理的运行时事件数组 / Array of runtime events
-   * @returns 聚合的 AgentEvent 数组 / Aggregated AgentEvent array
    */
-  processEvents(events: RuntimeEvent[]): AgentEvent[] {
-    const result: AgentEvent[] = [];
+  processEvents(events: RuntimeEvent[]): void {
     for (const event of events) {
-      result.push(...this.processEvent(event));
+      this.processEvent(event);
     }
-    return result;
   }
 
   // ── 状态访问 / State access ──
@@ -126,6 +127,35 @@ export class AgentKernel {
    */
   getMode(): InteractionMode {
     return this.state.mode;
+  }
+
+  /**
+   * Execute deterministic effects until the runtime needs user input or the
+   * supplied executor stops emitting facts.  The executor never receives a
+   * mutable state reference and cannot bypass processEvent().
+   */
+  async run(executor: RuntimeEffectExecutor, maxEffects = 10_000): Promise<RuntimeEffect> {
+    for (let index = 0; index < maxEffects; index++) {
+      const effect = decideNextEffect(this.state);
+      if (
+        effect.type === 'request_user_input' ||
+        effect.type === 'request_plan_review' ||
+        effect.type === 'request_tool_approval' ||
+        effect.type === 'stop' ||
+        effect.type === 'emit_final'
+      ) {
+        return effect;
+      }
+      const events = await executor(effect, this.getState());
+      if (events.length === 0) return { type: 'stop' };
+      this.processEvents(events);
+    }
+    throw new Error(`Runtime effect limit (${maxEffects}) exceeded`);
+  }
+
+  /** Apply a user action only when it matches the currently persisted interaction. */
+  applyAction(action: RuntimeUserAction): void {
+    this.processEvents(eventsForRuntimeAction(this.state, action));
   }
 
   // ── 持久化 / Persistence ──
@@ -159,6 +189,19 @@ export class AgentKernel {
    */
   loadEvents(threadId: string, since?: number) {
     return this.store.loadEvents(threadId, since);
+  }
+
+  /** Save a stable recovery point for rewind/fork without involving Graph checkpoints. */
+  saveNamedSnapshot(name: string): void {
+    this.store.saveNamedSnapshot(this.state.session.threadId, name, this.state);
+  }
+
+  /** Restore a named RuntimeStore recovery point into this Kernel. */
+  restoreNamedSnapshot(name: string): boolean {
+    const snapshot = this.store.loadNamedSnapshot<RuntimeState>(this.state.session.threadId, name);
+    if (!snapshot) return false;
+    this.state = snapshot;
+    return true;
   }
 
   // ── 生命周期 / Lifecycle ──
@@ -195,12 +238,15 @@ export function createAgentKernel(params: {
   sandboxAvailable?: boolean;
 }): AgentKernel {
   const store = createRuntimeStore(params.storePath);
-  const initialState = createInitialRuntimeState({
+  const freshState = createInitialRuntimeState({
     threadId: params.threadId,
     userId: params.userId,
     workspace: params.workspace,
     interactionMode: params.interactionMode ?? 'ask',
   });
+  const restoredState = store.loadSnapshot<RuntimeState>(params.threadId);
+  const initialState =
+    restoredState?.session.threadId === params.threadId ? restoredState : freshState;
 
   return new AgentKernel({
     store,

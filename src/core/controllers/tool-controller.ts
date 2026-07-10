@@ -1,201 +1,163 @@
-import { ToolMessage } from '@langchain/core/messages';
 import type { AgentConfig } from '@/core/config/index';
-import { isFingerprintExhausted } from '@/core/execution/journal';
-import type { PermitBatch } from '@/core/execution/permit';
-import type { ToolExecutionSideEffects } from '@/core/harness/tool-result';
+import { buildToolApproval } from '@/core/harness/tool-policy';
+import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import type { McpManager } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
+import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { genInteractionId } from '@/core/runtime/ids';
+import type { RuntimeState } from '@/core/runtime/state';
+import { computePlanStructuralHash } from '@/core/runtime/state';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
-import type { SubAgentEventSink, SubAgentResult } from '@/core/subagent/types';
+import type { SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
-import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
-import type {
-  AgentPhase,
-  InteractionMode,
-  ShellGrantUsed,
-  WorkspaceAccess,
-} from '@/protocol/events';
-
-/** Preflight guard result / 预检守卫结果 */
-export interface PreflightGuardResult {
-  blocked: boolean;
-  toolMessage?: ToolMessage;
-}
 
 /**
- * Check if a tool call is blocked by the exhaustion preflight guard.
- * If blocked, emits tool.finished RuntimeEvent and returns a blocked ToolMessage.
- *
- * 检查工具调用是否被耗尽预检守卫阻止。
- * 如果被阻止，发出 tool.finished 运行时事件并返回一个被阻止的 ToolMessage。
+ * Kernel-native tool effect.  It derives the execution request from the
+ * persisted call record and returns facts only; it never creates a ToolMessage
+ * or mutates a graph channel.
  */
-export function preflightExhaustionCheck(params: {
-  requestName: string;
-  requestId: string;
-  requestArgs: Record<string, unknown>;
-  protectedCommand: string;
-  exhaustedFingerprints: Record<string, true>;
-  emitRuntimeEvent?: (event: RuntimeEvent) => void;
-}): PreflightGuardResult {
-  const preflightPath = params.requestArgs.path as string | undefined;
-  if (!isFingerprintExhausted(params.exhaustedFingerprints, params.requestName, preflightPath)) {
-    return { blocked: false };
-  }
-
-  const stderr = `Execution blocked: too many repeated failures for ${params.requestName}${preflightPath ? ` on ${preflightPath}` : ''}.`;
-
-  const toolMessage = new ToolMessage({
-    content: JSON.stringify({
-      ok: false,
-      command: params.protectedCommand,
-      exitCode: -1,
-      stdout: '',
-      stderr,
-      status: 'exhausted' as const,
-      failure: {
-        message: 'Tool execution failed.' as const,
-        tool: params.requestName,
-        reason: `Execution blocked by exhaustion guard for ${params.requestName}.`,
-        guidance: 'Stop retrying this operation. Skip this step, replan, or safely finalize.',
-      },
-    }),
-    tool_call_id: params.requestId || 'missing-tool-call-id',
-    name: params.requestName,
-    status: 'exhausted' as unknown as ToolMessage['status'],
-  });
-
-  params.emitRuntimeEvent?.({
-    type: 'tool.finished',
-    toolCallId: params.requestId,
-    name: params.requestName,
-    result: {
-      ok: false,
-      command: params.protectedCommand,
-      exitCode: -1,
-      stdout: '',
-      stderr,
-      status: 'exhausted',
-    },
-  });
-
-  return { blocked: true, toolMessage };
-}
-
-/** executeTool 输入参数 / Input for executeTool */
-export interface ExecuteToolParams {
-  workspace: string;
-  request: { id?: string; name: string; args: Record<string, unknown>; protectedCommand: string };
+export async function executeRuntimeTools(params: {
+  state: RuntimeState;
+  toolCallIds: string[];
   shellExecutor?: ShellExecutor;
-  workspaceAccess: WorkspaceAccess;
-  phase: AgentPhase;
-  authorization: ThreadAuthorizationState | null;
-  approvedGrant: ShellGrantUsed;
-  threadId: string;
-  override?: AuthorizationOverride;
   mcpManager?: McpManager;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   signal?: AbortSignal;
-  permitBatch?: PermitBatch;
-  interactionMode: InteractionMode;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
   subagentEventSink?: SubAgentEventSink;
-  onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
-  /** 运行时事件回调 — RuntimeEvent 是唯一 TUI 通知路径 */
-  emitRuntimeEvent?: (event: RuntimeEvent) => void;
-  pendingWarnings?: Record<string, string>;
-  mcpRiskOverride?: Record<string, 'read'>;
-}
+}): Promise<RuntimeEvent[]> {
+  const events: RuntimeEvent[] = [];
+  for (const toolCallId of params.toolCallIds) {
+    const call = params.state.tools.calls[toolCallId];
+    if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+    const request = toolRequestFromCall(
+      { id: call.toolCallId, name: call.name, args: (call.args ?? {}) as Record<string, unknown> },
+      params.state.session.workspace,
+    );
+    if (!request) {
+      events.push({ type: 'tool.failed', toolCallId, error: `Unsupported tool '${call.name}'.` });
+      continue;
+    }
+    if (request.name === 'ask_user') {
+      events.push({
+        type: 'user_input.requested',
+        interactionId: genInteractionId(),
+        toolCallId,
+        request: request.args,
+      });
+      continue;
+    }
+    if (request.name === 'update_plan') {
+      const plan = request.args;
+      const interactionId = genInteractionId();
+      events.push({
+        type: 'plan.drafted',
+        toolCallId,
+        plan,
+        structuralHash: computePlanStructuralHash(plan),
+      });
+      events.push({
+        type: 'plan.review_requested',
+        interactionId,
+        toolCallId,
+        plan,
+        planSummary: `${plan.description}\n\n${plan.steps.map((step, index) => `${index + 1}. ${step.step}`).join('\n')}`,
+      });
+      continue;
+    }
 
-/**
- * 执行工具调用的薄封装 — 包装 runApprovedTool，在其返回后发出
- * tool.finished RuntimeEvent，并构造 ToolMessage 与副作用。
- *
- * Thin wrapper around runApprovedTool that emits tool.finished RuntimeEvent
- * after execution, then constructs ToolMessage and side effects.
- *
- * RuntimeEvent 是唯一 TUI 通知路径 — 不再使用 toolResultSink 双写。
- * RuntimeEvent is the sole TUI notification path — no more toolResultSink dual-write.
- */
-export async function executeTool(params: ExecuteToolParams): Promise<{
-  toolMessage: ToolMessage | null;
-  sideEffects: ToolExecutionSideEffects;
-  /** 子 agent 工具被阻塞时的信息（仅 'task' 工具）/ Subagent blocking info (only for 'task' tool) */
-  subagentBlocked?: NonNullable<SubAgentResult['blocked']>;
-}> {
-  let result: Awaited<ReturnType<typeof runApprovedTool>>;
-  try {
-    result = await runApprovedTool({
-      workspace: params.workspace,
-      request: params.request as import('@/core/harness/tool-requests').PendingToolRequest,
-      shellExecutor: params.shellExecutor,
-      workspaceAccess: params.workspaceAccess,
-      phase: params.phase,
-      authorization: params.authorization,
-      approvedGrant: params.approvedGrant,
-      threadId: params.threadId,
-      override: params.override,
-      mcpManager: params.mcpManager,
-      mcpRiskOverride: params.mcpRiskOverride,
-      skillManifests: params.skillManifests,
-      skillOptions: params.skillOptions,
-      signal: params.signal,
-      permitBatch: params.permitBatch,
-      interactionMode: params.interactionMode,
-      taskConfig: params.taskConfig,
-      taskModel: params.taskModel,
-      subagentEventSink: params.subagentEventSink,
-      onShellProgress: params.onShellProgress,
+    const decision = evaluateToolApproval({
+      toolName: request.name,
+      toolArgs: request.args as Record<string, unknown>,
+      phase: params.state.phase,
+      workspace: params.state.session.workspace,
+      threadId: params.state.session.threadId,
+      authorization: params.state.authorization,
     });
-  } catch (error) {
-    params.emitRuntimeEvent?.({
-      type: 'tool.failed',
-      toolCallId: params.request.id ?? '',
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
+    if (!decision.allowed) {
+      events.push({ type: 'tool.rejected', toolCallId, reason: decision.userVisibleSummary });
+      continue;
+    }
+    if (decision.requiresApproval) {
+      events.push({
+        type: 'approval.requested',
+        interactionId: genInteractionId(),
+        toolCallId,
+        approval: buildToolApproval({
+          workspace: params.state.session.workspace,
+          threadId: params.state.session.threadId,
+          request,
+          decision,
+        }) as unknown as import('@/protocol/events').ToolApprovalPayload,
+      });
+      continue;
+    }
+
+    events.push({ type: 'tool.started', toolCallId });
+    const progress: RuntimeEvent[] = [];
+    try {
+      const result = await runApprovedTool({
+        workspace: params.state.session.workspace,
+        request,
+        shellExecutor: params.shellExecutor,
+        workspaceAccess: params.state.workspaceAccess,
+        phase: params.state.phase,
+        authorization: params.state.authorization,
+        approvedGrant: call.approvalGrant ?? 'none',
+        threadId: params.state.session.threadId,
+        mcpManager: params.mcpManager,
+        skillManifests: params.skillManifests,
+        skillOptions: params.skillOptions,
+        signal: params.signal,
+        interactionMode: params.state.mode,
+        taskConfig: params.taskConfig,
+        taskModel: params.taskModel,
+        subagentEventSink: params.subagentEventSink,
+        onShellProgress: (chunk, stream) =>
+          progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
+      });
+      events.push(...progress);
+
+      // 文件变更事件 — write_file / edit_file 的结果通知 TUI
+      // File change event — notify TUI of write_file / edit_file results
+      if (result.ok !== false && (request.name === 'write_file' || request.name === 'edit_file')) {
+        const filePath = String((request.args as Record<string, unknown>).path ?? '');
+        if (filePath) {
+          events.push({
+            type: 'tool.file_change',
+            toolCallId,
+            path: filePath,
+            kind: request.name === 'edit_file' ? 'edit' : 'add',
+            preview: (result.stdout ?? result.stderr ?? '').slice(0, 500) || undefined,
+          });
+        }
+      }
+
+      events.push({
+        type: 'tool.finished',
+        toolCallId,
+        name: request.name,
+        result: {
+          ok: result.ok !== false,
+          command: result.command ?? request.protectedCommand,
+          exitCode: result.exitCode ?? 0,
+          stdout: result.stdout ?? '',
+          stderr: result.stderr ?? '',
+          status:
+            result.status === 'exhausted' ? 'exhausted' : result.ok === false ? 'error' : 'success',
+        },
+      });
+    } catch (error) {
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
-
-  // 子 agent 阻塞 — 不发出 tool.finished，返回阻塞信息供调用方处理
-  // Subagent blocked — don't emit tool.finished, return blocking info for caller
-  if (params.request.name === 'task' && result.subagentResult?.blocked) {
-    return {
-      toolMessage: null,
-      sideEffects: {} as ToolExecutionSideEffects,
-      subagentBlocked: result.subagentResult.blocked,
-    };
-  }
-
-  // 发出 RuntimeEvent — 唯一 TUI 通知路径 / Emit RuntimeEvent — sole TUI notification path
-  params.emitRuntimeEvent?.({
-    type: 'tool.finished',
-    toolCallId: params.request.id ?? '',
-    name: params.request.name,
-    result: {
-      ok: result.ok !== false,
-      command: params.request.protectedCommand ?? '',
-      exitCode: result.exitCode ?? 0,
-      stdout: result.stdout ?? '',
-      stderr: result.stderr ?? '',
-    },
-  });
-
-  const toolMessage = new ToolMessage({
-    content: JSON.stringify(result),
-    tool_call_id: params.request.id ?? 'missing-tool-call-id',
-    name: params.request.name,
-    status: result.ok === false ? 'error' : 'success',
-  });
-
-  const sideEffects: ToolExecutionSideEffects = {
-    plan: result.plan,
-    workspaceAccess: result.workspaceAccess,
-    authorization: result.authorization,
-    activeSkillInstructions: result.activeSkillInstructions,
-  };
-
-  return { toolMessage, sideEffects };
+  return events;
 }
