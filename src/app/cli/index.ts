@@ -111,7 +111,7 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
           return { type: 'approve', interactionId: effect.interactionId, grant: 'approve_once' };
         return { type: 'reject', interactionId: effect.interactionId };
       }
-      if (state.interactions.kind === 'awaiting_plan_review') {
+      if (state.interactions.kind === 'awaiting_review') {
         const plan = state.interactions.plan;
         console.error(`\n[PLAN REVIEW] ${plan.name}\n${plan.description}`);
         console.error('Type a/auto, m/manual, t/tell, or r/reject:');

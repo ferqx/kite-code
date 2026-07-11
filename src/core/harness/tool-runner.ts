@@ -314,10 +314,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   if (request.name === 'ask_user') {
     // 通过 policy 判断 ask_user 是否被当前 mode 禁止（替代 isFullAccessMode 直接检查）
     // Use policy to determine if ask_user is forbidden by current mode
-    const askPolicy = createModePolicy(interactionMode);
+    const askPolicy = createModePolicy(
+      (interactionMode === 'accept_edits' ? 'ask' : interactionMode) as 'ask' | 'auto' | 'full',
+    );
     if (
       askPolicy.shouldAskUser({
-        interactionMode,
+        interactionMode: (interactionMode === 'accept_edits' ? 'ask' : interactionMode) as
+          | 'ask'
+          | 'auto'
+          | 'full',
         phase: phase as 'planning' | 'building',
         planKind: 'none',
         toolName: 'ask_user',

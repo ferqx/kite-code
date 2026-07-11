@@ -2,15 +2,30 @@
 // 方案结构化哈希 + 审批哈希 / Plan structural hash + approval hash
 
 import { createHash } from 'node:crypto';
-import type { AgentPlan } from '@/protocol/events';
+import type { AgentPlan, PlanDocument } from '@/protocol/events';
 
 /**
- * 计算方案的结构化哈希值，用于判断方案内容是否发生了结构性变更。
- * Computes the structural hash of a plan, used to detect structural changes.
+ * 计算 PlanDocument 的结构化摘要，用于判断方案内容是否发生了结构性变更。
+ * Computes the structural digest of a PlanDocument, used to detect structural changes.
  *
- * 哈希计算内容：plan.name + steps.length + 每个 step 的 step 文本。
- * Hash input: plan.name + steps.length + each step's step text.
+ * 摘要计算内容：title + bodyMarkdown + steps.length + 每个 step 的 id + title。
+ * 执行状态（step status）不进入 digest，避免状态更新被误判为结构变化。
+ * Digest input: title + bodyMarkdown + steps.length + each step's id + title.
+ * Execution status is excluded from the digest to prevent false structural-change detection.
  */
+export function computePlanStructuralDigest(
+  doc: Pick<PlanDocument, 'title' | 'bodyMarkdown' | 'steps'>,
+): string {
+  const normalize = (s: string) => s.replace(/\r\n/g, '\n').trim();
+  const input = JSON.stringify({
+    title: normalize(doc.title),
+    bodyMarkdown: normalize(doc.bodyMarkdown),
+    steps: doc.steps.map(({ id, title }) => ({ id, title: normalize(title) })),
+  });
+  return createHash('sha256').update(input).digest('hex');
+}
+
+/** @deprecated Use `computePlanStructuralDigest(PlanDocument)` instead. */
 export function computePlanStructuralHash(plan: AgentPlan): string {
   const stepsText = plan.steps.map((s) => s.step).join('');
   const input = plan.name + plan.steps.length + stepsText;

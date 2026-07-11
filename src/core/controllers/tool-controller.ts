@@ -8,7 +8,7 @@ import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState } from '@/core/runtime/state';
-import { computePlanStructuralHash } from '@/core/runtime/state';
+import { computePlanStructuralDigest, getAgentPhase } from '@/core/runtime/state';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
@@ -82,7 +82,18 @@ export async function executeRuntimeTools(params: {
         type: 'plan.drafted',
         toolCallId,
         plan,
-        structuralHash: computePlanStructuralHash(plan),
+        structuralHash: computePlanStructuralDigest({
+          title: plan.name.slice(0, 120),
+          bodyMarkdown: plan.description,
+          steps: plan.steps.map((s: { step: string; status: string }) => ({
+            id: s.step
+              .toLowerCase()
+              .replace(/[^a-z0-9_-]+/g, '-')
+              .slice(0, 32),
+            title: s.step.slice(0, 160),
+            status: 'pending' as const,
+          })),
+        }),
       });
       events.push({
         type: 'plan.review_requested',
@@ -97,7 +108,7 @@ export async function executeRuntimeTools(params: {
     const decision = evaluateToolApproval({
       toolName: request.name,
       toolArgs: request.args as Record<string, unknown>,
-      phase: params.state.phase,
+      phase: getAgentPhase(params.state.planning),
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
@@ -147,7 +158,7 @@ export async function executeRuntimeTools(params: {
         request,
         shellExecutor: params.shellExecutor,
         workspaceAccess: params.state.workspaceAccess,
-        phase: params.state.phase,
+        phase: getAgentPhase(params.state.planning),
         authorization: params.state.authorization,
         approvedGrant: call.approvalGrant ?? 'none',
         threadId: params.state.session.threadId,

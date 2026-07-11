@@ -15,12 +15,31 @@ import { invokeBoundModel } from '@/core/model/invoke';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState, TranscriptMessage } from '@/core/runtime/state';
+import { getAgentPhase } from '@/core/runtime/state';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { createAgentTools } from '@/core/tools/definitions';
 import type { ShellExecutor } from '@/core/tools/shell';
+import type { AgentPlan } from '@/protocol/events';
 
 // ── 辅助函数 / Helpers ──
+
+/** Convert PlanDocument back to legacy AgentPlan for consumers that still use it. */
+function planDocumentToAgentPlan(doc: {
+  title: string;
+  bodyMarkdown: string;
+  steps: Array<{ title: string; status: string }>;
+}): AgentPlan {
+  return {
+    name: doc.title,
+    description: doc.bodyMarkdown,
+    status: 'in_progress',
+    steps: doc.steps.map((s) => ({
+      step: s.title,
+      status: s.status as 'pending' | 'in_progress' | 'completed',
+    })),
+  };
+}
 
 function extractText(content: unknown): string | undefined {
   if (typeof content === 'string') return content.length > 0 ? content : undefined;
@@ -123,14 +142,10 @@ export async function invokeRuntimeModel(params: {
 
   try {
     const plan =
-      state.plan.kind === 'approved' ||
-      state.plan.kind === 'building' ||
-      state.plan.kind === 'completed'
-        ? state.plan.plan
-        : state.plan.kind === 'drafted' ||
-            state.plan.kind === 'awaiting_review' ||
-            state.plan.kind === 'needs_revision'
-          ? state.plan.draft
+      state.planning.kind === 'executing' || state.planning.kind === 'completed'
+        ? planDocumentToAgentPlan(state.planning.document)
+        : state.planning.kind === 'planning_draft' || state.planning.kind === 'awaiting_review'
+          ? planDocumentToAgentPlan(state.planning.document)
           : null;
     const tools = createAgentTools({
       workspace: state.session.workspace,
@@ -146,9 +161,10 @@ export async function invokeRuntimeModel(params: {
       threadId: state.session.threadId,
       authorization: state.authorization,
       workspaceAccess: state.workspaceAccess,
-      phase: state.phase,
+      phase: getAgentPhase(state.planning),
       interactionMode: state.mode,
     });
+    const phase = getAgentPhase(state.planning);
     const prepared = prepareModelContext(
       'agent',
       {
@@ -156,13 +172,10 @@ export async function invokeRuntimeModel(params: {
         messages: runtimeTranscriptMessages(state.transcript.messages),
         final: state.transcript.final ?? '',
         workspaceAccess: state.workspaceAccess,
-        phase: state.phase,
+        phase,
         interactionMode: state.mode,
         authorization: state.authorization,
-        planReviewed:
-          state.plan.kind === 'approved' ||
-          state.plan.kind === 'building' ||
-          state.plan.kind === 'completed',
+        planReviewed: state.planning.kind === 'executing' || state.planning.kind === 'completed',
         plan,
       },
       params.skills,

@@ -14,6 +14,22 @@ export type RuntimeUserAction =
   | { type: 'approve_plan'; interactionId: string; executionMode: 'manual' | 'auto' }
   | { type: 'revise_plan'; interactionId: string; feedback: string }
   | { type: 'reject_plan'; interactionId: string; reason?: string }
+  // ── Plan Mode v2: unified plan_review_decision ──
+  | {
+      type: 'plan_review_decision';
+      interactionId: string;
+      planId: string;
+      version: number;
+      structuralDigest: string;
+      decision:
+        | {
+            kind: 'approve';
+            nextMode: 'ask' | 'accept_edits' | 'auto';
+            clearPlanningContext: boolean;
+          }
+        | { kind: 'revise'; feedback: string }
+        | { kind: 'cancel'; reason?: string };
+    }
   | { type: 'cancel'; interactionId: string; reason?: string };
 
 /** Convert a validated user action to facts.  An invalid action intentionally has no effects. */
@@ -57,8 +73,6 @@ export function eventsForRuntimeAction(
         threadId: state.session.threadId,
         request: {
           id: interaction.toolCallId,
-          // applyApprovalGrant only persists same-command grants for shell;
-          // other tool grants are represented by the per-call approvalGrant.
           name: 'shell_execute',
           args: { command: interaction.approval.command },
           reason: 'User approved tool execution.',
@@ -86,14 +100,67 @@ export function eventsForRuntimeAction(
     return [];
   }
 
-  if (interaction.kind === 'awaiting_plan_review' && action.type === 'approve_plan') {
+  // ── Plan Mode v2: unified plan_review_decision ──
+  if (interaction.kind === 'awaiting_review' && action.type === 'plan_review_decision') {
+    // Validate planId + version + structuralDigest match
+    if (
+      action.planId !== interaction.planId ||
+      action.version !== interaction.version ||
+      action.structuralDigest !== interaction.structuralDigest
+    ) {
+      return [];
+    }
+    const { decision } = action;
+    if (decision.kind === 'approve') {
+      return [
+        {
+          type: 'plan.approved',
+          interactionId: action.interactionId,
+          executionMode: decision.nextMode as 'manual' | 'auto',
+        },
+        {
+          type: 'tool.finished',
+          toolCallId: interaction.toolCallId,
+          name: 'exit_plan_mode',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: interaction.planSummary,
+            stderr: '',
+          },
+        },
+      ];
+    }
+    if (decision.kind === 'revise') {
+      return [
+        {
+          type: 'plan.revision_requested',
+          interactionId: action.interactionId,
+          feedback: decision.feedback,
+        },
+      ];
+    }
+    if (decision.kind === 'cancel') {
+      return [
+        {
+          type: 'plan.rejected',
+          interactionId: action.interactionId,
+          reason: decision.reason ?? 'Plan cancelled by user.',
+        },
+      ];
+    }
+    return [];
+  }
+
+  // ── Legacy plan actions (backward compatibility) ──
+  if (interaction.kind === 'awaiting_review' && action.type === 'approve_plan') {
     return [
       {
         type: 'plan.approved',
         interactionId: action.interactionId,
         executionMode: action.executionMode,
       },
-      { type: 'phase.changed', phase: 'building' },
       {
         type: 'tool.finished',
         toolCallId: interaction.toolCallId,

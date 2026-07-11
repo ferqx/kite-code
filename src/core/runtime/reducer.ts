@@ -2,9 +2,10 @@
 // Phase 2: 纯函数 reduceRuntimeState — 将 RuntimeEvent 应用到 RuntimeState，返回新的不可变状态
 // Phase 2: Pure function reduceRuntimeState — applies a RuntimeEvent to RuntimeState, returns new immutable state
 
+import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
 import type { RuntimeEvent } from './events';
 import type { RuntimeState } from './state';
-import { computePlanStructuralHash } from './state';
+import { computePlanStructuralDigest } from './state';
 
 /**
  * 纯函数：将运行时事件应用到状态，返回新的不可变状态。
@@ -22,29 +23,36 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // ── 方案生命周期 / Plan lifecycle ──
 
     case 'plan.review_requested': {
-      // 从 drafted/needs_revision 继承 planId 和 version，否则生成新的
-      // Inherit planId and version from drafted/needs_revision, otherwise generate new
+      // 从 planning_draft 继承 planId 和 version
+      // Inherit planId and version from planning_draft
+      const doc = planDocumentFromAgentPlan(event.plan, state.turn.turnId);
       const inherited =
-        state.plan.kind === 'drafted' || state.plan.kind === 'needs_revision'
-          ? { planId: state.plan.planId, version: state.plan.version + 1 }
-          : { planId: crypto.randomUUID(), version: 1 };
-      const structuralHash = computePlanStructuralHash(event.plan);
+        state.planning.kind === 'planning_draft'
+          ? { planId: state.planning.document.planId, version: state.planning.document.version + 1 }
+          : { planId: doc.planId, version: 1 };
+      const structuralDigest = computePlanStructuralDigest(doc);
+      const document: PlanDocument = {
+        ...doc,
+        planId: inherited.planId,
+        version: inherited.version,
+        structuralDigest,
+      };
       return {
         ...state,
-        tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_plan_review'),
-        plan: {
+        tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_review'),
+        planning: {
           kind: 'awaiting_review',
-          planId: inherited.planId,
-          version: inherited.version,
-          draft: event.plan,
-          structuralHash,
+          document,
           interactionId: event.interactionId,
-          toolCallId: event.toolCallId,
+          exitToolCallId: event.toolCallId,
         },
         interactions: {
-          kind: 'awaiting_plan_review',
+          kind: 'awaiting_review',
           interactionId: event.interactionId,
           toolCallId: event.toolCallId,
+          planId: document.planId,
+          version: document.version,
+          structuralDigest: document.structuralDigest,
           plan: event.plan,
           planSummary: event.planSummary,
         },
@@ -52,75 +60,68 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'plan.approved': {
-      // 仅当方案在 awaiting_review 状态时转换为 approved
-      // Only transition to approved when plan is in awaiting_review
-      const planData = state.plan.kind === 'awaiting_review' ? state.plan : null;
+      // 仅当方案在 awaiting_review 状态时转换为 executing
+      // Only transition to executing when plan is in awaiting_review
+      if (state.planning.kind !== 'awaiting_review') return state;
       if (
         state.interactions.kind !== 'idle' &&
-        (state.interactions.kind !== 'awaiting_plan_review' ||
+        (state.interactions.kind !== 'awaiting_review' ||
           state.interactions.interactionId !== event.interactionId)
       ) {
         return state;
       }
       return {
         ...state,
-        plan: planData
-          ? {
-              kind: 'approved',
-              planId: planData.planId,
-              version: planData.version,
-              plan: planData.draft,
-              structuralHash: planData.structuralHash,
-              approvedAtTurnId: state.turn.turnId,
-              executionMode: event.executionMode,
-            }
-          : state.plan,
+        planning: {
+          kind: 'executing',
+          document: state.planning.document,
+          executionMode: event.executionMode as 'manual' | 'accept_edits' | 'auto',
+          approvedAtTurnId: state.turn.turnId,
+        },
         interactions: { kind: 'idle' },
       };
     }
 
     case 'plan.revision_requested': {
-      // 从 awaiting_review 或 drafted 迁出时携带方案数据
-      // Carry plan data when transitioning from awaiting_review or drafted
-      const planData =
-        state.plan.kind === 'awaiting_review'
-          ? state.plan
-          : state.plan.kind === 'drafted'
-            ? state.plan
-            : null;
+      // 从 awaiting_review 迁回 planning_draft，携带修订反馈
+      // Transition from awaiting_review back to planning_draft with revision feedback
+      if (state.planning.kind !== 'awaiting_review') return state;
       if (
         state.interactions.kind !== 'idle' &&
-        (state.interactions.kind !== 'awaiting_plan_review' ||
+        (state.interactions.kind !== 'awaiting_review' ||
           state.interactions.interactionId !== event.interactionId)
       ) {
         return state;
       }
       return {
         ...state,
-        plan: planData
-          ? {
-              kind: 'needs_revision',
-              planId: planData.planId,
-              version: planData.version,
-              draft: planData.draft,
-              reason: event.feedback,
-            }
-          : state.plan,
+        planning: {
+          kind: 'planning_draft',
+          document: state.planning.document,
+          revisionFeedback: event.feedback,
+        },
         interactions: { kind: 'idle' },
       };
     }
 
     case 'plan.rejected':
+      // plan.rejected → plan.cancelled (event naming migration)
+      // plan.rejected → plan.cancelled (event naming migration)
       if (
         state.interactions.kind !== 'idle' &&
-        (state.interactions.kind !== 'awaiting_plan_review' ||
+        (state.interactions.kind !== 'awaiting_review' ||
           state.interactions.interactionId !== event.interactionId)
       ) {
         return state;
       }
       return {
         ...state,
-        plan: { kind: 'none' },
+        planning: {
+          kind: 'cancelled',
+          document: state.planning.kind === 'awaiting_review' ? state.planning.document : undefined,
+          reason: event.reason,
+          cancelledAtTurnId: state.turn.turnId,
+        },
         interactions: { kind: 'idle' },
       };
 
@@ -350,11 +351,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         },
       };
 
+    // phase.changed — deprecated; phase is now derived from planning.kind via getAgentPhase()
+    // phase.changed — deprecated; phase is now derived from planning.kind via getAgentPhase()
     case 'phase.changed':
-      return {
-        ...state,
-        phase: event.phase,
-      };
+      return state;
 
     // ── Turn 生命周期 / Turn lifecycle ──
 
@@ -368,8 +368,6 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     // ── 用户消息 / User message ──
 
-    // user.message_appended 为信息性事件，由 TranscriptState 管理（未来）。
-    // Informational — managed by TranscriptState (future).
     case 'user.message_appended':
       return {
         ...state,
@@ -418,20 +416,26 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // ── Plan 生命周期补充 / Additional plan lifecycle ──
 
     case 'plan.drafted': {
-      // 仅当 plan 为 none 或 needs_revision 时接受新 draft
-      // Only accept new draft when plan is none or needs_revision
-      if (state.plan.kind === 'none' || state.plan.kind === 'needs_revision') {
-        const hash = computePlanStructuralHash(event.plan) || event.structuralHash;
-        const planId = state.plan.kind === 'needs_revision' ? state.plan.planId : hash.slice(0, 16);
-        const version = state.plan.kind === 'needs_revision' ? state.plan.version + 1 : 1;
+      // plan.drafted → plan.draft_saved (event naming migration)
+      // Accept new draft when planning is empty or in planning_draft (revision cycle)
+      if (state.planning.kind === 'planning_empty' || state.planning.kind === 'planning_draft') {
+        const doc = planDocumentFromAgentPlan(event.plan, state.turn.turnId);
+        const digest = computePlanStructuralDigest(doc);
+        const planId =
+          state.planning.kind === 'planning_draft' ? state.planning.document.planId : doc.planId;
+        const version =
+          state.planning.kind === 'planning_draft' ? state.planning.document.version + 1 : 1;
+        const document: PlanDocument = {
+          ...doc,
+          planId,
+          version,
+          structuralDigest: digest,
+        };
         return {
           ...state,
-          plan: {
-            kind: 'drafted',
-            planId,
-            version,
-            draft: event.plan,
-            structuralHash: hash,
+          planning: {
+            kind: 'planning_draft',
+            document,
           },
         };
       }
@@ -439,14 +443,22 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'plan.progress_updated': {
-      // 仅当 plan 在 building 状态时更新步骤进度
-      // Only update step progress when plan is in building state
-      if (state.plan.kind === 'building') {
+      // 仅当 plan 在 executing 状态时更新步骤进度
+      // Only update step progress when plan is in executing state
+      if (state.planning.kind === 'executing') {
+        const updatedSteps = mergeStepUpdates(
+          state.planning.document.steps,
+          agentPlanToSteps(event.plan),
+        );
         return {
           ...state,
-          plan: {
-            ...state.plan,
-            plan: event.plan,
+          planning: {
+            ...state.planning,
+            document: {
+              ...state.planning.document,
+              steps: updatedSteps,
+              updatedAtTurnId: state.turn.turnId,
+            },
           },
         };
       }
@@ -454,34 +466,14 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'plan.completed': {
-      // 从 building 或 approved 状态转换到 completed
-      // Transition from building or approved to completed
-      if (state.plan.kind === 'building') {
+      // 从 executing 状态转换到 completed
+      // Transition from executing to completed
+      if (state.planning.kind === 'executing') {
         return {
           ...state,
-          plan: {
+          planning: {
             kind: 'completed',
-            planId: state.plan.planId,
-            version: state.plan.version,
-            plan: {
-              ...state.plan.plan,
-              status: 'completed' as import('@/protocol/events').PlanStatus,
-            },
-            completedAtTurnId: state.turn.turnId,
-          },
-        };
-      }
-      if (state.plan.kind === 'approved') {
-        return {
-          ...state,
-          plan: {
-            kind: 'completed',
-            planId: state.plan.planId,
-            version: state.plan.version,
-            plan: {
-              ...state.plan.plan,
-              status: 'completed' as import('@/protocol/events').PlanStatus,
-            },
+            document: state.planning.document,
             completedAtTurnId: state.turn.turnId,
           },
         };
@@ -544,7 +536,7 @@ function updateToolStatus(
   toolCallId: string,
   status:
     | 'awaiting_user_input'
-    | 'awaiting_plan_review'
+    | 'awaiting_review'
     | 'awaiting_approval'
     | 'awaiting_auto_review'
     | 'approved'
@@ -556,4 +548,65 @@ function updateToolStatus(
     ...tools,
     calls: { ...tools.calls, [toolCallId]: { ...call, status } },
   };
+}
+
+// ── Helper: convert legacy AgentPlan → PlanDocument ──
+
+function planDocumentFromAgentPlan(
+  plan: AgentPlan,
+  turnId: string,
+): Omit<PlanDocument, 'structuralDigest'> {
+  return {
+    planId: crypto.randomUUID(),
+    version: 1,
+    title: plan.name.slice(0, 120),
+    bodyMarkdown: plan.description,
+    steps: plan.steps.map((s) => ({
+      id: sanitizeStepId(s.step),
+      title: s.step.slice(0, 160),
+      status: mapLegacyStatus(s.status),
+    })),
+    createdAtTurnId: turnId,
+    updatedAtTurnId: turnId,
+  };
+}
+
+function agentPlanToSteps(plan: AgentPlan): PlanStep[] {
+  return plan.steps.map((s) => ({
+    id: sanitizeStepId(s.step),
+    title: s.step.slice(0, 160),
+    status: mapLegacyStatus(s.status),
+  }));
+}
+
+function mapLegacyStatus(status: string): PlanStep['status'] {
+  switch (status) {
+    case 'in_progress':
+      return 'in_progress';
+    case 'completed':
+      return 'completed';
+    default:
+      return 'pending';
+  }
+}
+
+function sanitizeStepId(text: string): string {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32) || 'step'
+  );
+}
+
+function mergeStepUpdates(existing: PlanStep[], updates: PlanStep[]): PlanStep[] {
+  const updateMap = new Map(updates.map((u) => [u.id, u]));
+  return existing.map((step) => {
+    const update = updateMap.get(step.id);
+    if (update && update.status !== 'pending') {
+      return { ...step, status: update.status, note: update.note ?? step.note };
+    }
+    return step;
+  });
 }

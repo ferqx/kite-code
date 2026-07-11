@@ -8,93 +8,15 @@ import type {
   AgentPlan,
   AuthorizationMode,
   InteractionMode,
+  PlanningState,
   ToolApprovalPayload,
   UserInputPayload,
   WorkspaceAccess,
 } from '@/protocol/events.js';
+import { getAgentPhase } from '@/protocol/events.js';
 
-// ── 方案生命周期状态 / Plan lifecycle state ──
-
-/**
- * 方案生命周期状态 — discriminated union 替代原先的 plan: AgentPlan|null + planReviewed: boolean。
- * Plan lifecycle state — discriminated union replacing the former plan + planReviewed channels.
- */
-export type PlanLifecycleState =
-  | { kind: 'none' }
-  | {
-      kind: 'drafted';
-      /** 方案唯一标识 / Unique plan identifier */
-      planId: string;
-      /** 方案版本号，每次修改递增 / Plan version, incremented on each modification */
-      version: number;
-      /** 方案草稿内容 / Draft plan content */
-      draft: AgentPlan;
-      /** 方案结构化哈希，用于判断结构是否变更 / Structural hash for detecting structural changes */
-      structuralHash: string;
-    }
-  | {
-      kind: 'awaiting_review';
-      /** 方案唯一标识 / Unique plan identifier */
-      planId: string;
-      /** 方案版本号 / Plan version */
-      version: number;
-      /** 待审核的方案草稿 / Draft plan awaiting review */
-      draft: AgentPlan;
-      /** 方案结构化哈希 / Structural hash */
-      structuralHash: string;
-      /** 交互标识，关联 plan_review 中断 / Interaction id linking to the plan_review interrupt */
-      interactionId: string;
-      /** 触发该审核的工具调用 ID / Tool call id that triggered this review */
-      toolCallId: string;
-    }
-  | {
-      kind: 'approved';
-      /** 方案唯一标识 / Unique plan identifier */
-      planId: string;
-      /** 方案版本号 / Plan version */
-      version: number;
-      /** 已审批通过的方案 / Approved plan */
-      plan: AgentPlan;
-      /** 方案结构化哈希 / Structural hash */
-      structuralHash: string;
-      /** 方案审批通过的 turn ID / Turn id when plan was approved */
-      approvedAtTurnId: string;
-      /** 执行模式：manual=用户手动确认每一步，auto=自动执行 / Execution mode: manual=confirm each step, auto=run automatically */
-      executionMode: 'manual' | 'auto';
-    }
-  | {
-      kind: 'building';
-      /** 方案唯一标识 / Unique plan identifier */
-      planId: string;
-      /** 方案版本号 / Plan version */
-      version: number;
-      /** 当前正在执行的方案 / Currently executing plan */
-      plan: AgentPlan;
-      /** 方案结构化哈希 / Structural hash */
-      structuralHash: string;
-    }
-  | {
-      kind: 'needs_revision';
-      /** 方案唯一标识 / Unique plan identifier */
-      planId: string;
-      /** 方案版本号 / Plan version */
-      version: number;
-      /** 当前方案草稿 / Current draft plan */
-      draft: AgentPlan;
-      /** 需要修订的原因 / Reason revision is needed */
-      reason: string;
-    }
-  | {
-      kind: 'completed';
-      /** 方案唯一标识 / Unique plan identifier */
-      planId: string;
-      /** 方案版本号 / Plan version */
-      version: number;
-      /** 已完成执行的方案 / Completed plan */
-      plan: AgentPlan;
-      /** 方案完成的 turn ID / Turn id when plan was completed */
-      completedAtTurnId: string;
-    };
+// ── Re-export for convenience ──
+export { getAgentPhase };
 
 // ── 交互状态 / Interaction state ──
 
@@ -114,11 +36,17 @@ export type InteractionState =
       request: UserInputPayload;
     }
   | {
-      kind: 'awaiting_plan_review';
+      kind: 'awaiting_review';
       /** 交互标识，关联 plan_review 中断 / Interaction id linking to the plan_review interrupt */
       interactionId: string;
       /** 触发该审核的工具调用 ID / Tool call id that triggered this review */
       toolCallId: string;
+      /** 方案 ID，用于 action 校验 / Plan ID for action validation */
+      planId: string;
+      /** 方案版本，用于 action 校验 / Plan version for action validation */
+      version: number;
+      /** 方案结构化摘要，用于 action 校验 / Structural digest for action validation */
+      structuralDigest: string;
       /** 待审核的方案 / Plan awaiting review */
       plan: AgentPlan;
       /** 方案摘要（用于用户展示）/ Plan summary for user display */
@@ -155,9 +83,9 @@ export type InteractionState =
  *
  * - 'queued': 已入队，等待执行 / Queued, waiting to execute
  * - 'awaiting_user_input': 执行中需要用户输入 / Executing, needs user input
- * - 'awaiting_plan_review': 执行中触发方案审核 / Executing, triggered plan review
+ * - 'awaiting_review': 执行中触发方案审核 / Executing, triggered plan review
  * - 'awaiting_approval': 等待用户审批 / Waiting for user approval
-- 'awaiting_auto_review': 等待自动审查 / Waiting for auto-review
+ * - 'awaiting_auto_review': 等待自动审查 / Waiting for auto-review
  * - 'approved': 已审批通过，等待执行 / Approved, pending execution
  * - 'running': 正在执行 / Currently running
  * - 'succeeded': 执行成功 / Execution succeeded
@@ -169,7 +97,7 @@ export type InteractionState =
 export type ToolCallStatus =
   | 'queued'
   | 'awaiting_user_input'
-  | 'awaiting_plan_review'
+  | 'awaiting_review'
   | 'awaiting_approval'
   | 'awaiting_auto_review'
   | 'approved'
@@ -251,6 +179,9 @@ export interface TranscriptState {
 
 // ── 运行时状态 / Runtime state ──
 
+/** Runtime state schema version for migration compatibility. */
+export const RUNTIME_STATE_SCHEMA_VERSION = 2;
+
 /**
  * 统一运行时状态 — runtime kernel 的核心状态对象。
  * Unified runtime state — the core state object for the runtime kernel.
@@ -261,6 +192,8 @@ export interface TranscriptState {
  * providing type-safe access via discriminated unions.
  */
 export interface RuntimeState {
+  /** 状态 schema 版本，用于迁移兼容 / Schema version for migration compatibility */
+  schemaVersion: number;
   /** 会话信息 / Session information */
   session: {
     /** LangGraph 线程 ID / LangGraph thread id */
@@ -279,8 +212,8 @@ export interface RuntimeState {
   };
   /** Persisted, provider-neutral transcript used to rebuild model context. */
   transcript: TranscriptState;
-  /** 方案生命周期状态 / Plan lifecycle state */
-  plan: PlanLifecycleState;
+  /** 方案生命周期状态（v2: PlanningState 取代 PlanLifecycleState）/ Plan lifecycle state */
+  planning: PlanningState;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
   interactions: InteractionState;
   /** 工具运行时状态 / Tool runtime state */
@@ -294,8 +227,6 @@ export interface RuntimeState {
   };
   /** 交互模式（ask/auto/full）/ Interaction mode */
   mode: InteractionMode;
-  /** 当前执行阶段 / Current execution phase */
-  phase: 'planning' | 'building';
   /** 工作区访问权限 / Workspace access level */
   workspaceAccess: WorkspaceAccess;
   /** Auto-review 持久化状态 / Auto-review persistent state */
@@ -332,7 +263,11 @@ export interface CreateRuntimeStateInput {
  * @returns 初始运行时状态 / Initial runtime state
  */
 export function createInitialRuntimeState(input: CreateRuntimeStateInput): RuntimeState {
+  const phase = input.phase ?? 'building';
+  const initialPlanning: PlanningState =
+    phase === 'planning' ? { kind: 'planning_empty' } : { kind: 'building_without_plan' };
   return {
+    schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     session: {
       threadId: input.threadId,
       userId: input.userId,
@@ -343,7 +278,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       turnIndex: 0,
     },
     transcript: { messages: [] },
-    plan: { kind: 'none' },
+    planning: initialPlanning,
     interactions: { kind: 'idle' },
     tools: {
       calls: {},
@@ -355,7 +290,6 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       commandGrants: {},
     },
     mode: input.interactionMode ?? ('ask' as InteractionMode),
-    phase: input.phase ?? 'building',
     workspaceAccess: input.workspaceAccess ?? 'write',
     autoReview: { ...DEFAULT_AUTO_REVIEW_STATE },
     doomLoop: {},
@@ -364,4 +298,4 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
 
 // ── 工具函数 / Utility functions ──
 
-export { computePlanStructuralHash } from './hashes';
+export { computePlanStructuralDigest } from './hashes';

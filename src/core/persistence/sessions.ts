@@ -1,4 +1,4 @@
-import type { AgentPlan } from '../../protocol/events.js';
+import type { AgentPlan, PlanDocument } from '../../protocol/events.js';
 import type { RuntimeEvent } from '../runtime/events.js';
 import type { RuntimeState } from '../runtime/state.js';
 import {
@@ -6,6 +6,19 @@ import {
   type RuntimeSessionInfo,
   runtimeStorePathFor,
 } from '../runtime/store.js';
+
+/** Convert PlanDocument back to legacy AgentPlan for consumers that still use it. */
+function planDocumentToAgentPlan(doc: PlanDocument): AgentPlan {
+  return {
+    name: doc.title,
+    description: doc.bodyMarkdown,
+    status: 'in_progress',
+    steps: doc.steps.map((s) => ({
+      step: s.title,
+      status: s.status as 'pending' | 'in_progress' | 'completed',
+    })),
+  };
+}
 
 export interface SessionInfo {
   threadId: string;
@@ -82,15 +95,13 @@ export async function loadSession(
         ? { kind: 'approval', callId: interaction.toolCallId }
         : interaction?.kind === 'awaiting_user_input'
           ? { kind: 'input', callId: interaction.toolCallId }
-          : interaction?.kind === 'awaiting_plan_review'
+          : interaction?.kind === 'awaiting_review'
             ? { kind: 'plan_review', plan: interaction.plan }
             : null;
-    const planState = state?.plan;
+    const planState = state?.planning;
     const plan =
-      planState?.kind === 'approved' ||
-      planState?.kind === 'building' ||
-      planState?.kind === 'completed'
-        ? planState.plan
+      planState?.kind === 'executing' || planState?.kind === 'completed'
+        ? planDocumentToAgentPlan(planState.document)
         : null;
     return {
       threadId,

@@ -53,6 +53,7 @@ export type WorkspaceAccessRequest = 'auto' | WorkspaceAccess | 'builder';
 export type AuthorizationMode = 'default' | 'full_access';
 export const InteractionMode = {
   Ask: 'ask',
+  AcceptEdits: 'accept_edits',
   Auto: 'auto',
   Full: 'full',
 } as const;
@@ -77,6 +78,106 @@ export interface AgentPlan {
   description: string;
   status: PlanStatus;
   steps: AgentPlanStep[];
+}
+
+// ── Plan Mode v2: PlanDocument + PlanningState (replaces AgentPlan) ──
+
+/** 执行步骤 — ID 稳定，title 一行描述 / Execution step with stable ID and one-line title */
+export interface PlanStep {
+  /** 稳定 ID，如 "inspect-runtime" / Stable ID, e.g. "inspect-runtime" */
+  id: string;
+  /** 一行描述，最多 160 字符 / One-line description, max 160 chars */
+  title: string;
+  /** 执行状态 / Execution status */
+  status: 'pending' | 'in_progress' | 'completed' | 'skipped';
+  /** 可选备注 / Optional note */
+  note?: string;
+}
+
+/** 方案文档 — 用户审核的主内容 / Plan document — primary content for user review */
+export interface PlanDocument {
+  /** 方案唯一标识 / Unique plan identifier */
+  planId: string;
+  /** 方案版本号，每次结构修改递增 / Version, incremented on each structural change */
+  version: number;
+  /** 一行标题，最多 120 字符 / One-line title, max 120 chars */
+  title: string;
+  /** 用户审核的主内容 / Main content for user review */
+  bodyMarkdown: string;
+  /** 结构稳定的执行步骤 / Structurally stable execution steps */
+  steps: PlanStep[];
+  /** SHA-256，仅对 title/body/step id+title 计算 / SHA-256 of title, body, step ids+title only */
+  structuralDigest: string;
+  /** 创建该版本的 turn ID / Turn ID when this version was created */
+  createdAtTurnId: string;
+  /** 最后更新该版本的 turn ID / Turn ID when this version was last updated */
+  updatedAtTurnId: string;
+}
+
+/**
+ * 方案生命周期状态 — discriminated union 替代独立的 phase + plan。
+ * Plan lifecycle state — discriminated union replacing independent phase + plan.
+ *
+ * Phase 通过 selector `getAgentPhase()` 推导，不再独立持久化。
+ * Phase is derived via `getAgentPhase()` selector, no longer independently persisted.
+ */
+export type PlanningState =
+  | { kind: 'building_without_plan' }
+  | { kind: 'planning_empty' }
+  | {
+      kind: 'planning_draft';
+      document: PlanDocument;
+      /** 用户修订反馈（仅在 revision_requested 后设置）/ User revision feedback (set after revision_requested) */
+      revisionFeedback?: string;
+    }
+  | {
+      kind: 'awaiting_review';
+      document: PlanDocument;
+      /** 交互标识，关联 plan_review 中断 / Interaction id linking to the plan_review interrupt */
+      interactionId: string;
+      /** 触发该审核的 exit_plan_mode 工具调用 ID / exit_plan_mode tool call id that triggered this review */
+      exitToolCallId: string;
+    }
+  | {
+      kind: 'executing';
+      document: PlanDocument;
+      /** 执行模式：manual=用户手动确认每一步，accept_edits=自动接受工作区编辑，auto=自动执行 / Execution mode */
+      executionMode: 'manual' | 'accept_edits' | 'auto';
+      /** 方案审批通过的 turn ID / Turn id when plan was approved */
+      approvedAtTurnId: string;
+    }
+  | {
+      kind: 'completed';
+      document: PlanDocument;
+      /** 方案完成的 turn ID / Turn id when plan was completed */
+      completedAtTurnId: string;
+    }
+  | {
+      kind: 'cancelled';
+      /** 取消时可能没有方案 / May not have a document when cancelled */
+      document?: PlanDocument;
+      /** 取消原因 / Reason for cancellation */
+      reason: string;
+      /** 取消发生的 turn ID / Turn id when cancelled */
+      cancelledAtTurnId: string;
+    };
+
+/**
+ * 从 PlanningState 推导当前执行阶段。
+ * Derives the current execution phase from PlanningState.
+ *
+ * planning_empty / planning_draft / awaiting_review → 'planning'
+ * 所有其他状态 → 'building'
+ */
+export function getAgentPhase(planning: PlanningState): AgentPhase {
+  switch (planning.kind) {
+    case 'planning_empty':
+    case 'planning_draft':
+    case 'awaiting_review':
+      return 'planning';
+    default:
+      return 'building';
+  }
 }
 
 export interface UserInputOption {

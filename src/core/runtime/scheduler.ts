@@ -14,7 +14,7 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
         interactionId: state.interactions.interactionId,
         toolCallId: state.interactions.toolCallId,
       };
-    case 'awaiting_plan_review':
+    case 'awaiting_review':
       return {
         type: 'request_plan_review',
         interactionId: state.interactions.interactionId,

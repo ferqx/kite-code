@@ -1,6 +1,7 @@
 import type {
   AgentPlan,
   AuthorizationMode,
+  InteractionMode,
   ShellGrantUsed,
   ToolApprovalPayload,
   UserInputPayload,
@@ -12,6 +13,19 @@ export type UserAction =
   | { type: 'input'; text: string; answers?: Record<string, string> }
   | { type: 'cancel' }
   | { type: 'switch_auth'; mode: AuthorizationMode }
+  // ── Plan Mode v2: unified plan_review_decision ──
+  | {
+      type: 'plan_review_decision';
+      interactionId: string;
+      planId: string;
+      version: number;
+      structuralDigest: string;
+      decision:
+        | { kind: 'approve'; nextMode: InteractionMode; clearPlanningContext: boolean }
+        | { kind: 'revise'; feedback: string }
+        | { kind: 'cancel'; reason?: string };
+    }
+  // ── Deprecated: replaced by plan_review_decision, kept for transition ──
   | { type: 'approve_plan' }
   | { type: 'approve_plan_auto' }
   | { type: 'approve_plan_manual' }

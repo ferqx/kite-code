@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import type { RuntimeState } from '../../src/core/runtime/state';
-import { computePlanStructuralHash, createInitialRuntimeState } from '../../src/core/runtime/state';
+import {
+  computePlanStructuralDigest,
+  createInitialRuntimeState,
+} from '../../src/core/runtime/state';
 import type { AgentPlan, AgentPlanStep } from '../../src/protocol/events';
 
 // ── 测试辅助函数 / Test helpers ──
@@ -33,6 +36,61 @@ function makeInitialState(overrides?: Partial<RuntimeState>): RuntimeState {
 function uuidPattern() {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 }
+/** Replicate sanitizeStepId from reducer.ts for digest computation parity. */
+function sanitizeStepId(text: string): string {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32) || 'step'
+  );
+}
+
+/** Convert AgentPlan to the minimal shape needed by computePlanStructuralDigest. */
+function planToDigestInput(plan: AgentPlan) {
+  return {
+    title: plan.name.slice(0, 120),
+    bodyMarkdown: plan.description,
+    steps: plan.steps.map((s) => ({
+      id: sanitizeStepId(s.step),
+      title: s.step.slice(0, 160),
+      status: 'pending' as const,
+    })),
+  };
+}
+
+/** Build a PlanDocument-compatible object from an AgentPlan for test state construction. */
+function makePlanDoc(
+  plan: AgentPlan,
+  overrides?: {
+    planId?: string;
+    version?: number;
+    structuralDigest?: string;
+    createdAtTurnId?: string;
+    updatedAtTurnId?: string;
+  },
+) {
+  return {
+    planId: overrides?.planId ?? 'test-plan-id',
+    version: overrides?.version ?? 1,
+    title: plan.name.slice(0, 120),
+    bodyMarkdown: plan.description,
+    steps: plan.steps.map((s) => ({
+      id: sanitizeStepId(s.step),
+      title: s.step.slice(0, 160),
+      status: (s.status === 'completed'
+        ? 'completed'
+        : s.status === 'in_progress'
+          ? 'in_progress'
+          : 'pending') as 'pending' | 'in_progress' | 'completed' | 'skipped',
+    })),
+    structuralDigest:
+      overrides?.structuralDigest ?? computePlanStructuralDigest(planToDigestInput(plan)),
+    createdAtTurnId: overrides?.createdAtTurnId ?? 'turn-0',
+    updatedAtTurnId: overrides?.updatedAtTurnId ?? 'turn-0',
+  };
+}
 
 // ── 方案生命周期 / Plan lifecycle ──
 
@@ -51,17 +109,21 @@ describe('reduceRuntimeState — plan lifecycle', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('awaiting_review');
-    if (next.plan.kind === 'awaiting_review') {
-      expect(next.plan.planId).toMatch(uuidPattern());
-      expect(next.plan.version).toBe(1);
-      expect(next.plan.draft).toBe(plan);
-      expect(next.plan.structuralHash).toBe(computePlanStructuralHash(plan));
-      expect(next.plan.interactionId).toBe('inter-1');
-      expect(next.plan.toolCallId).toBe('call-1');
+    expect(next.planning.kind).toBe('awaiting_review');
+    if (next.planning.kind === 'awaiting_review') {
+      expect(next.planning.document.planId).toMatch(uuidPattern());
+      expect(next.planning.document.version).toBe(1);
+      expect(next.planning.document.title).toBe(plan.name);
+      expect(next.planning.document.bodyMarkdown).toBe(plan.description);
+      expect(next.planning.document.steps).toHaveLength(plan.steps.length);
+      expect(next.planning.document.structuralDigest).toBe(
+        computePlanStructuralDigest(planToDigestInput(plan)),
+      );
+      expect(next.planning.interactionId).toBe('inter-1');
+      expect(next.planning.exitToolCallId).toBe('call-1');
     }
-    expect(next.interactions.kind).toBe('awaiting_plan_review');
-    if (next.interactions.kind === 'awaiting_plan_review') {
+    expect(next.interactions.kind).toBe('awaiting_review');
+    if (next.interactions.kind === 'awaiting_review') {
       expect(next.interactions.interactionId).toBe('inter-1');
       expect(next.interactions.toolCallId).toBe('call-1');
       expect(next.interactions.plan).toBe(plan);
@@ -74,12 +136,9 @@ describe('reduceRuntimeState — plan lifecycle', () => {
     const draftPlan = makePlan('Draft Plan', ['x', 'y']);
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
-        kind: 'drafted',
-        planId: 'existing-plan-id',
-        version: 3,
-        draft: draftPlan,
-        structuralHash: computePlanStructuralHash(draftPlan),
+      planning: {
+        kind: 'planning_draft',
+        document: makePlanDoc(draftPlan, { planId: 'existing-plan-id', version: 3 }),
       },
     };
     const newPlan = makePlan('Draft Plan V2', ['x', 'y', 'z']);
@@ -93,11 +152,11 @@ describe('reduceRuntimeState — plan lifecycle', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('awaiting_review');
-    if (next.plan.kind === 'awaiting_review') {
-      expect(next.plan.planId).toBe('existing-plan-id');
-      expect(next.plan.version).toBe(4);
-      expect(next.plan.draft).toBe(newPlan);
+    expect(next.planning.kind).toBe('awaiting_review');
+    if (next.planning.kind === 'awaiting_review') {
+      expect(next.planning.document.planId).toBe('existing-plan-id');
+      expect(next.planning.document.version).toBe(4);
+      expect(next.planning.document.title).toBe(newPlan.name);
     }
   });
 
@@ -106,12 +165,10 @@ describe('reduceRuntimeState — plan lifecycle', () => {
     const revPlan = makePlan('Rev Plan', ['a']);
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
-        kind: 'needs_revision',
-        planId: 'rev-plan-id',
-        version: 5,
-        draft: revPlan,
-        reason: 'too vague',
+      planning: {
+        kind: 'planning_draft',
+        document: makePlanDoc(revPlan, { planId: 'rev-plan-id', version: 5 }),
+        revisionFeedback: 'too vague',
       },
     };
     const newPlan = makePlan('Rev Plan V2', ['a', 'b']);
@@ -125,28 +182,25 @@ describe('reduceRuntimeState — plan lifecycle', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('awaiting_review');
-    if (next.plan.kind === 'awaiting_review') {
-      expect(next.plan.planId).toBe('rev-plan-id');
-      expect(next.plan.version).toBe(6);
-      expect(next.plan.draft).toBe(newPlan);
+    expect(next.planning.kind).toBe('awaiting_review');
+    if (next.planning.kind === 'awaiting_review') {
+      expect(next.planning.document.planId).toBe('rev-plan-id');
+      expect(next.planning.document.version).toBe(6);
+      expect(next.planning.document.title).toBe(newPlan.name);
     }
   });
 
   // 验证 plan.approved 将 awaiting_review 转为 approved
   test('plan.approved transitions awaiting_review to approved', () => {
     const plan = makePlan('Approval Plan', ['step 1']);
-    const structuralHash = computePlanStructuralHash(plan);
+    const structuralHash = computePlanStructuralDigest(planToDigestInput(plan));
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
+      planning: {
         kind: 'awaiting_review',
-        planId: 'plan-99',
-        version: 2,
-        draft: plan,
-        structuralHash,
+        document: makePlanDoc(plan, { planId: 'plan-99', version: 2 }),
         interactionId: 'inter-99',
-        toolCallId: 'call-99',
+        exitToolCallId: 'call-99',
       },
     };
     const event: RuntimeEvent = {
@@ -157,21 +211,23 @@ describe('reduceRuntimeState — plan lifecycle', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('approved');
-    if (next.plan.kind === 'approved') {
-      expect(next.plan.planId).toBe('plan-99');
-      expect(next.plan.version).toBe(2);
-      expect(next.plan.plan).toBe(plan);
-      expect(next.plan.structuralHash).toBe(structuralHash);
-      expect(next.plan.approvedAtTurnId).toBe(state.turn.turnId);
-      expect(next.plan.executionMode).toBe('auto');
+    expect(next.planning.kind).toBe('executing');
+    if (next.planning.kind === 'executing') {
+      expect(next.planning.document.planId).toBe('plan-99');
+      expect(next.planning.document.version).toBe(2);
+      expect(next.planning.document.title).toBe(plan.name);
+      expect(next.planning.document.bodyMarkdown).toBe(plan.description);
+      expect(next.planning.document.steps).toHaveLength(plan.steps.length);
+      expect(next.planning.document.structuralDigest).toBe(structuralHash);
+      expect(next.planning.approvedAtTurnId).toBe(state.turn.turnId);
+      expect(next.planning.executionMode).toBe('auto');
     }
     expect(next.interactions.kind).toBe('idle');
   });
 
   // 验证 plan.approved 在非 awaiting_review 状态时为 no-op（保留原有 plan）
   test('plan.approved is no-op when plan is not awaiting_review', () => {
-    const state = makeInitialState(); // plan.kind === 'none'
+    const state = makeInitialState(); // planning.kind === 'building_without_plan'
     const event: RuntimeEvent = {
       type: 'plan.approved',
       interactionId: 'inter-99',
@@ -180,24 +236,20 @@ describe('reduceRuntimeState — plan lifecycle', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('none');
+    expect(next.planning.kind).toBe('building_without_plan');
     expect(next.interactions.kind).toBe('idle');
   });
 
   // 验证 plan.revision_requested 转为 needs_revision
   test('plan.revision_requested transitions to needs_revision', () => {
     const plan = makePlan('Needs Fix', ['bad step']);
-    const structuralHash = computePlanStructuralHash(plan);
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
+      planning: {
         kind: 'awaiting_review',
-        planId: 'plan-fix',
-        version: 1,
-        draft: plan,
-        structuralHash,
+        document: makePlanDoc(plan, { planId: 'plan-fix', version: 1 }),
         interactionId: 'inter-fix',
-        toolCallId: 'call-fix',
+        exitToolCallId: 'call-fix',
       },
     };
     const event: RuntimeEvent = {
@@ -208,12 +260,14 @@ describe('reduceRuntimeState — plan lifecycle', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('needs_revision');
-    if (next.plan.kind === 'needs_revision') {
-      expect(next.plan.planId).toBe('plan-fix');
-      expect(next.plan.version).toBe(1);
-      expect(next.plan.draft).toBe(plan);
-      expect(next.plan.reason).toBe('Please add more detail to step 1');
+    expect(next.planning.kind).toBe('planning_draft');
+    if (next.planning.kind === 'planning_draft') {
+      expect(next.planning.document.planId).toBe('plan-fix');
+      expect(next.planning.document.version).toBe(1);
+      expect(next.planning.document.title).toBe(plan.name);
+      expect(next.planning.document.bodyMarkdown).toBe(plan.description);
+      expect(next.planning.document.steps).toHaveLength(plan.steps.length);
+      expect(next.planning.revisionFeedback).toBe('Please add more detail to step 1');
     }
     expect(next.interactions.kind).toBe('idle');
   });
@@ -223,14 +277,11 @@ describe('reduceRuntimeState — plan lifecycle', () => {
     const plan = makePlan('Rejected Plan', ['doom']);
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
+      planning: {
         kind: 'awaiting_review',
-        planId: 'plan-doom',
-        version: 1,
-        draft: plan,
-        structuralHash: computePlanStructuralHash(plan),
+        document: makePlanDoc(plan, { planId: 'plan-doom', version: 1 }),
         interactionId: 'inter-doom',
-        toolCallId: 'call-doom',
+        exitToolCallId: 'call-doom',
       },
     };
     const event: RuntimeEvent = {
@@ -241,7 +292,11 @@ describe('reduceRuntimeState — plan lifecycle', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('none');
+    expect(next.planning.kind).toBe('cancelled');
+    if (next.planning.kind === 'cancelled') {
+      expect(next.planning.reason).toBe('Not what I want');
+      expect(next.planning.document).toBeDefined();
+    }
     expect(next.interactions.kind).toBe('idle');
   });
 });
@@ -744,12 +799,12 @@ describe('reduceRuntimeState — immutability', () => {
       planSummary: 'Immutable plan summary',
     };
 
-    const originalPlanKind = state.plan.kind;
+    const originalPlanKind = state.planning.kind;
     const originalInteractionKind = state.interactions.kind;
 
     reduceRuntimeState(state, event);
 
-    expect(state.plan.kind).toBe(originalPlanKind);
+    expect(state.planning.kind).toBe(originalPlanKind);
     expect(state.interactions.kind).toBe(originalInteractionKind);
   });
 
@@ -815,7 +870,7 @@ describe('reduceRuntimeState — immutability', () => {
     const s1 = reduceRuntimeState(state, e1);
     expect(s1).not.toBe(state);
     expect(s1.interactions).not.toBe(state.interactions);
-    expect(s1.plan).toBe(state.plan); // plan 未变，结构共享
+    expect(s1.planning).toBe(state.planning); // planning 未变，结构共享
 
     const e2: RuntimeEvent = {
       type: 'user_input.answered',
@@ -880,26 +935,25 @@ describe('reduceRuntimeState — runtime environment', () => {
     expect(next.authorization.commandGrants.cmd!.command).toBe('bun test');
   });
 
-  // 验证 phase.changed 更新执行阶段
-  test('phase.changed updates execution phase', () => {
+  // phase.changed 已废弃 — 仅验证为 no-op 不崩溃
+  test('phase.changed is a no-op and does not crash', () => {
     const state = makeInitialState();
-    expect(state.phase).toBe('building');
+    expect(state.planning.kind).toBe('building_without_plan');
 
     const next = reduceRuntimeState(state, {
       type: 'phase.changed',
       phase: 'building',
     });
-    expect(next.phase).toBe('building');
+    expect(next).toBe(state);
   });
 
-  // 验证 phase.changed 可以在 planning 和 building 之间切换
-  test('phase.changed can switch back to planning', () => {
-    const state: RuntimeState = { ...makeInitialState(), phase: 'building' };
+  test('phase.changed with planning phase is also a no-op', () => {
+    const state: RuntimeState = { ...makeInitialState(), planning: { kind: 'planning_empty' } };
     const next = reduceRuntimeState(state, {
       type: 'phase.changed',
       phase: 'planning',
     });
-    expect(next.phase).toBe('planning');
+    expect(next).toBe(state);
   });
 });
 
@@ -1013,10 +1067,24 @@ describe('reduceRuntimeState — model interaction', () => {
 
 describe('reduceRuntimeState — plan lifecycle supplements', () => {
   // 验证 plan.drafted 从 none 状态创建 drafted
-  test('plan.drafted transitions from none to drafted', () => {
-    const state = makeInitialState(); // plan.kind === 'none'
+  test('plan.drafted is no-op when planning is building_without_plan', () => {
+    const state = makeInitialState();
+    const plan = makePlan('Wont Apply', ['step']);
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'call-draft-0',
+      plan,
+      structuralHash: computePlanStructuralDigest(planToDigestInput(plan)),
+    };
+
+    const next = reduceRuntimeState(state, event);
+    expect(next.planning.kind).toBe('building_without_plan');
+  });
+
+  test('plan.drafted transitions from planning_empty to planning_draft', () => {
+    const state: RuntimeState = { ...makeInitialState(), planning: { kind: 'planning_empty' } };
     const plan = makePlan('Draft Plan', ['step a', 'step b']);
-    const structuralHash = computePlanStructuralHash(plan);
+    const structuralHash = computePlanStructuralDigest(planToDigestInput(plan));
     const event: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-draft-1',
@@ -1026,12 +1094,14 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('drafted');
-    if (next.plan.kind === 'drafted') {
-      expect(next.plan.planId).toBe(structuralHash.slice(0, 16));
-      expect(next.plan.version).toBe(1);
-      expect(next.plan.draft).toBe(plan);
-      expect(next.plan.structuralHash).toBe(structuralHash);
+    expect(next.planning.kind).toBe('planning_draft');
+    if (next.planning.kind === 'planning_draft') {
+      expect(next.planning.document.planId).toMatch(uuidPattern());
+      expect(next.planning.document.version).toBe(1);
+      expect(next.planning.document.title).toBe(plan.name);
+      expect(next.planning.document.bodyMarkdown).toBe(plan.description);
+      expect(next.planning.document.steps).toHaveLength(plan.steps.length);
+      expect(next.planning.document.structuralDigest).toBe(structuralHash);
     }
   });
 
@@ -1040,16 +1110,14 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     const oldPlan = makePlan('Old Draft', ['old step']);
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
-        kind: 'needs_revision',
-        planId: 'existing-plan',
-        version: 3,
-        draft: oldPlan,
-        reason: 'too vague',
+      planning: {
+        kind: 'planning_draft',
+        document: makePlanDoc(oldPlan, { planId: 'existing-plan', version: 3 }),
+        revisionFeedback: 'too vague',
       },
     };
     const newPlan = makePlan('Revised Draft', ['step x', 'step y', 'step z']);
-    const structuralHash = computePlanStructuralHash(newPlan);
+    const structuralHash = computePlanStructuralDigest(planToDigestInput(newPlan));
     const event: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-draft-2',
@@ -1059,28 +1127,25 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('drafted');
-    if (next.plan.kind === 'drafted') {
-      expect(next.plan.planId).toBe('existing-plan');
-      expect(next.plan.version).toBe(4);
-      expect(next.plan.draft).toBe(newPlan);
-      expect(next.plan.structuralHash).toBe(structuralHash);
+    expect(next.planning.kind).toBe('planning_draft');
+    if (next.planning.kind === 'planning_draft') {
+      expect(next.planning.document.planId).toBe('existing-plan');
+      expect(next.planning.document.version).toBe(4);
+      expect(next.planning.document.title).toBe(newPlan.name);
+      expect(next.planning.document.structuralDigest).toBe(structuralHash);
     }
   });
 
   // 验证 plan.drafted 从 drafted/approved 等非接受状态时不操作
-  test('plan.drafted is no-op when plan is not none or needs_revision', () => {
+  test('plan.drafted is no-op when plan is executing', () => {
     const plan = makePlan('Approved Plan', ['done step']);
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
-        kind: 'approved',
-        planId: 'plan-approved',
-        version: 1,
-        plan,
-        structuralHash: computePlanStructuralHash(plan),
-        approvedAtTurnId: 'turn-1',
+      planning: {
+        kind: 'executing',
+        document: makePlanDoc(plan, { planId: 'plan-approved', version: 1 }),
         executionMode: 'auto',
+        approvedAtTurnId: 'turn-1',
       },
     };
     const newPlan = makePlan('Should Not Apply', ['new step']);
@@ -1088,24 +1153,23 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
       type: 'plan.drafted',
       toolCallId: 'call-draft-3',
       plan: newPlan,
-      structuralHash: computePlanStructuralHash(newPlan),
+      structuralHash: computePlanStructuralDigest(planToDigestInput(newPlan)),
     };
 
     const next = reduceRuntimeState(state, event);
-    expect(next.plan.kind).toBe('approved');
+    expect(next.planning.kind).toBe('executing');
   });
 
   // 验证 plan.progress_updated 在 building 状态下更新 plan
-  test('plan.progress_updated updates plan when in building state', () => {
+  test('plan.progress_updated updates steps when in executing state', () => {
     const oldPlan = makePlan('Building Plan', ['step 1', 'step 2']);
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
-        kind: 'building',
-        planId: 'plan-building',
-        version: 2,
-        plan: oldPlan,
-        structuralHash: computePlanStructuralHash(oldPlan),
+      planning: {
+        kind: 'executing',
+        document: makePlanDoc(oldPlan, { planId: 'plan-building', version: 2 }),
+        executionMode: 'manual',
+        approvedAtTurnId: 'turn-0',
       },
     };
     const updatedPlan: AgentPlan = {
@@ -1123,17 +1187,21 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('building');
-    if (next.plan.kind === 'building') {
-      expect(next.plan.plan).toBe(updatedPlan);
-      expect(next.plan.planId).toBe('plan-building');
-      expect(next.plan.version).toBe(2);
+    expect(next.planning.kind).toBe('executing');
+    if (next.planning.kind === 'executing') {
+      const step1 = next.planning.document.steps.find(
+        (s: { id: string }) => s.id === sanitizeStepId('step 1'),
+      );
+      expect(step1).toBeDefined();
+      expect(step1!.status).toBe('completed');
+      expect(next.planning.document.planId).toBe('plan-building');
+      expect(next.planning.document.version).toBe(2);
     }
   });
 
   // 验证 plan.progress_updated 在非 building 状态时不操作
-  test('plan.progress_updated is no-op when plan is not building', () => {
-    const state = makeInitialState(); // plan.kind === 'none'
+  test('plan.progress_updated is no-op when plan is not executing', () => {
+    const state = makeInitialState(); // planning.kind === 'building_without_plan'
     const updatedPlan = makePlan('Should Not Apply', ['fake step']);
     const event: RuntimeEvent = {
       type: 'plan.progress_updated',
@@ -1142,20 +1210,19 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     };
 
     const next = reduceRuntimeState(state, event);
-    expect(next.plan.kind).toBe('none');
+    expect(next.planning.kind).toBe('building_without_plan');
   });
 
   // 验证 plan.completed 从 building 转为 completed
-  test('plan.completed transitions from building to completed', () => {
+  test('plan.completed transitions from executing to completed', () => {
     const plan = makePlan('Build Plan', ['step 1', 'step 2']);
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
-        kind: 'building',
-        planId: 'plan-bld',
-        version: 1,
-        plan,
-        structuralHash: computePlanStructuralHash(plan),
+      planning: {
+        kind: 'executing',
+        document: makePlanDoc(plan, { planId: 'plan-bld', version: 1 }),
+        executionMode: 'manual',
+        approvedAtTurnId: 'turn-0',
       },
     };
     const event: RuntimeEvent = {
@@ -1166,28 +1233,24 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('completed');
-    if (next.plan.kind === 'completed') {
-      expect(next.plan.planId).toBe('plan-bld');
-      expect(next.plan.version).toBe(1);
-      expect(next.plan.plan.status).toBe('completed');
-      expect(next.plan.completedAtTurnId).toBe(state.turn.turnId);
+    expect(next.planning.kind).toBe('completed');
+    if (next.planning.kind === 'completed') {
+      expect(next.planning.document.planId).toBe('plan-bld');
+      expect(next.planning.document.version).toBe(1);
+      expect(next.planning.completedAtTurnId).toBe(state.turn.turnId);
     }
   });
 
   // 验证 plan.completed 从 approved 转为 completed
-  test('plan.completed transitions from approved to completed', () => {
+  test('plan.completed transitions from executing to completed (approved path)', () => {
     const plan = makePlan('Approved Plan', ['step a']);
     const state: RuntimeState = {
       ...makeInitialState(),
-      plan: {
-        kind: 'approved',
-        planId: 'plan-app',
-        version: 2,
-        plan,
-        structuralHash: computePlanStructuralHash(plan),
-        approvedAtTurnId: 'turn-5',
+      planning: {
+        kind: 'executing',
+        document: makePlanDoc(plan, { planId: 'plan-app', version: 2 }),
         executionMode: 'auto',
+        approvedAtTurnId: 'turn-5',
       },
     };
     const event: RuntimeEvent = {
@@ -1198,18 +1261,17 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.plan.kind).toBe('completed');
-    if (next.plan.kind === 'completed') {
-      expect(next.plan.planId).toBe('plan-app');
-      expect(next.plan.version).toBe(2);
-      expect(next.plan.plan.status).toBe('completed');
-      expect(next.plan.completedAtTurnId).toBe(state.turn.turnId);
+    expect(next.planning.kind).toBe('completed');
+    if (next.planning.kind === 'completed') {
+      expect(next.planning.document.planId).toBe('plan-app');
+      expect(next.planning.document.version).toBe(2);
+      expect(next.planning.completedAtTurnId).toBe(state.turn.turnId);
     }
   });
 
   // 验证 plan.completed 在 none/drafted/awaiting_review/needs_revision 状态下不操作
-  test('plan.completed is no-op when plan is none', () => {
-    const state = makeInitialState(); // plan.kind === 'none'
+  test('plan.completed is no-op when planning is building_without_plan', () => {
+    const state = makeInitialState(); // planning.kind === 'building_without_plan'
     const plan = makePlan('Cannot Complete', ['step']);
     const event: RuntimeEvent = {
       type: 'plan.completed',
@@ -1218,7 +1280,7 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     };
 
     const next = reduceRuntimeState(state, event);
-    expect(next.plan.kind).toBe('none');
+    expect(next.planning.kind).toBe('building_without_plan');
   });
 });
 

@@ -63,7 +63,12 @@ export class AgentKernel {
     this.store = config.store;
     this.state = config.initialState;
     this.sandboxAvailable = config.sandboxAvailable ?? false;
-    this.policy = createModePolicy(config.interactionMode, this.sandboxAvailable);
+    // Map accept_edits to ask for policy creation; accept_edits mode policy is handled separately
+    const policyMode: 'ask' | 'auto' | 'full' =
+      config.interactionMode === 'accept_edits'
+        ? 'ask'
+        : (config.interactionMode as 'ask' | 'auto' | 'full');
+    this.policy = createModePolicy(policyMode, this.sandboxAvailable);
   }
 
   // ── 事件处理 / Event processing ──

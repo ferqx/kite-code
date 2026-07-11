@@ -915,7 +915,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       if (d.phase) next.phase = d.phase;
       if (d.plan !== undefined) next.plan = d.plan;
       if (d.authorization) next.authorization = d.authorization.mode;
-      if (d.interactionMode) nextInteractionMode = d.interactionMode;
+      if (d.interactionMode) nextInteractionMode = d.interactionMode as 'ask' | 'auto' | 'full';
       if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
       if (d.modelProvider) next.modelProvider = d.modelProvider;
       if (d.modelName) next.modelName = d.modelName;

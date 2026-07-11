@@ -326,10 +326,7 @@ export class SessionRuntime {
       interaction.kind === 'awaiting_tool_approval'
     ) {
       payload = { kind: 'approval', approval: interaction.approval };
-    } else if (
-      effect.type === 'request_plan_review' &&
-      interaction.kind === 'awaiting_plan_review'
-    ) {
+    } else if (effect.type === 'request_plan_review' && interaction.kind === 'awaiting_review') {
       payload = { kind: 'plan_review', plan: interaction.plan };
     } else {
       return {
