@@ -44,7 +44,7 @@ export function createAskModePolicy(): RuntimePolicy {
     shouldReviewPlan(input: PolicyInput): PolicyDecision {
       // 仅当方案处于 drafted 或 awaiting_review 状态时才需审核
       // Only require review when plan is drafted or awaiting_review
-      if (input.planKind === 'drafted' || input.planKind === 'awaiting_review') {
+      if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
         return { kind: 'need_plan_review' };
       }
       return { kind: 'allow' };
@@ -110,7 +110,7 @@ export function createAutoModePolicy(_config?: AutoModeConfig): RuntimePolicy {
     },
 
     shouldReviewPlan(input: PolicyInput): PolicyDecision {
-      if (input.planKind === 'drafted' || input.planKind === 'awaiting_review') {
+      if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
         return { kind: 'need_plan_review' };
       }
       return { kind: 'allow' };
@@ -191,7 +191,7 @@ export function createFullModePolicy(sandboxAvailable: boolean): RuntimePolicy {
       },
 
       shouldReviewPlan(input: PolicyInput): PolicyDecision {
-        if (input.planKind === 'drafted' || input.planKind === 'awaiting_review') {
+        if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
           return { kind: 'need_plan_review' };
         }
         return { kind: 'allow' };
@@ -229,7 +229,7 @@ export function createFullModePolicy(sandboxAvailable: boolean): RuntimePolicy {
     },
 
     shouldReviewPlan(input: PolicyInput): PolicyDecision {
-      if (input.planKind === 'drafted' || input.planKind === 'awaiting_review') {
+      if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
         return { kind: 'need_plan_review' };
       }
       return { kind: 'allow' };
@@ -274,14 +274,85 @@ export function createFullModePolicy(sandboxAvailable: boolean): RuntimePolicy {
  * @param sandboxAvailable - sandbox 是否可用（仅 full mode 需要）
  * @param autoConfig - auto mode 配置（可选）
  */
+// ── Accept Edits Mode / 接受编辑模式 ──
+
+/**
+ * 创建 Accept Edits Mode 策略 — Plan 审批后的半自动执行。
+ * Create Accept Edits Mode policy — semi-automatic execution after plan approval.
+ *
+ * 行为 / Behavior:
+ * - workspace file edit: allow (auto-approve write_file/edit_file)
+ * - safe fs command: allow (read/search/stat)
+ * - test/build/execute: approval (still requires user check)
+ * - network: approval
+ * - vcs mutation: approval
+ * - destructive: deny
+ */
+export function createAcceptEditsModePolicy(): RuntimePolicy {
+  return {
+    name: 'accept-edits',
+
+    shouldRequirePlan(_input: PolicyInput): PolicyDecision {
+      return { kind: 'allow' };
+    },
+
+    shouldReviewPlan(input: PolicyInput): PolicyDecision {
+      if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
+        return { kind: 'need_plan_review' };
+      }
+      return { kind: 'allow' };
+    },
+
+    shouldAskUser(_input: PolicyInput): PolicyDecision {
+      return { kind: 'allow' };
+    },
+
+    shouldApproveTool(input: PolicyInput): PolicyDecision {
+      if (isDestructive(input.toolRisk)) {
+        return { kind: 'deny', reason: 'destructive operations are not allowed' };
+      }
+      // Auto-approve workspace file edits
+      if (input.toolRisk === 'write_file') {
+        return { kind: 'allow' };
+      }
+      // Read/plan — allow
+      if (input.toolRisk === 'read' || input.toolRisk === 'plan') {
+        return { kind: 'allow' };
+      }
+      // Everything else (test, build, execute, network, vcs) — approval
+      return { kind: 'need_tool_approval' };
+    },
+
+    shouldAutoReview(_input: PolicyInput): PolicyDecision {
+      return { kind: 'allow' };
+    },
+
+    shouldContinueLoop(_input: PolicyInput): PolicyDecision {
+      return { kind: 'stop' };
+    },
+  };
+}
+
+// ── 工厂函数 / Factory ──
+
+/**
+ * 根据 mode 名称创建对应的策略实例。
+ * Create the appropriate policy instance for a given mode name.
+ *
+ * @param mode - 'ask' | 'accept_edits' | 'auto' | 'full'
+ * @param sandboxAvailable - sandbox 是否可用（仅 full mode 需要）
+ * @param autoConfig - auto mode 配置（可选）
+ */
 export function createModePolicy(
-  mode: 'ask' | 'auto' | 'full',
+  mode: 'ask' | 'accept_edits' | 'auto' | 'full',
   sandboxAvailable?: boolean,
   autoConfig?: AutoModeConfig,
 ): RuntimePolicy {
   switch (mode) {
     case 'ask':
       return createAskModePolicy();
+    case 'accept_edits':
+      return createAcceptEditsModePolicy();
     case 'auto':
       return createAutoModePolicy(autoConfig);
     case 'full':

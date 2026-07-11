@@ -35,15 +35,15 @@ export interface PolicyInput {
   interactionMode: 'ask' | 'auto' | 'full';
   /** 当前执行阶段 / Current execution phase */
   phase: 'planning' | 'building';
-  /** 当前方案生命周期状态 / Current plan lifecycle state kind */
+  /** 当前方案生命周期状态 / Current plan lifecycle state kind (v2: PlanningState kinds) */
   planKind:
-    | 'none'
-    | 'drafted'
+    | 'building_without_plan'
+    | 'planning_empty'
+    | 'planning_draft'
     | 'awaiting_review'
-    | 'approved'
-    | 'building'
-    | 'needs_revision'
-    | 'completed';
+    | 'executing'
+    | 'completed'
+    | 'cancelled';
   /** 工具名称（审批决策时使用）/ Tool name (used in approval decisions) */
   toolName?: string;
   /** 工具参数（审批决策时使用）/ Tool arguments (used in approval decisions) */

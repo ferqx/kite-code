@@ -324,7 +324,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
           | 'auto'
           | 'full',
         phase: phase as 'planning' | 'building',
-        planKind: 'none',
+        planKind: 'building_without_plan',
         toolName: 'ask_user',
       }).kind === 'deny'
     ) {

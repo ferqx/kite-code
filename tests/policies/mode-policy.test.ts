@@ -13,7 +13,7 @@ function baseInput(overrides?: Partial<PolicyInput>): PolicyInput {
   return {
     interactionMode: 'ask',
     phase: 'building',
-    planKind: 'none',
+    planKind: 'building_without_plan',
     ...overrides,
   };
 }
@@ -28,12 +28,14 @@ describe('createAskModePolicy', () => {
   });
 
   it('should require plan review when plan is drafted', () => {
-    const result = policy.shouldReviewPlan(baseInput({ planKind: 'drafted' }));
+    const result = policy.shouldReviewPlan(baseInput({ planKind: 'planning_draft' }));
     expect(result.kind).toBe('need_plan_review');
   });
 
   it('should allow when no plan exists', () => {
-    expect(policy.shouldReviewPlan(baseInput({ planKind: 'none' })).kind).toBe('allow');
+    expect(policy.shouldReviewPlan(baseInput({ planKind: 'building_without_plan' })).kind).toBe(
+      'allow',
+    );
   });
 
   it('should allow read tools', () => {

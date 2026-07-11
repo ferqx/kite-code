@@ -133,9 +133,10 @@ export class AgentKernel {
    * v2: policy is no longer created once in constructor; re-evaluated from current state.mode each call.
    */
   getPolicy(): RuntimePolicy {
-    const policyMode: 'ask' | 'auto' | 'full' =
-      this.state.mode === 'accept_edits' ? 'ask' : (this.state.mode as 'ask' | 'auto' | 'full');
-    return createModePolicy(policyMode, this.sandboxAvailable);
+    return createModePolicy(
+      this.state.mode as 'ask' | 'accept_edits' | 'auto' | 'full',
+      this.sandboxAvailable,
+    );
   }
 
   /**
