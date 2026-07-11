@@ -57,18 +57,20 @@ const SKILL_ACTIONS: ReadonlySet<string> = new Set([
   'LIST_SKILLS',
 ]);
 
-// AGENT_ACTIONS：剩余所有非 EVENT action（SET_RUNNING, SET_IDLE, SET_EXITED,
+// AGENT_ACTIONS：剩余所有非 RuntimeEvent action（SET_RUNNING, SET_IDLE, SET_EXITED,
 // RESOLVE_INTERRUPT, SWITCH_AUTH, EXPORT_SESSION,
 // EXPORT_SESSION_DONE, INJECT_MCP_PROMPT,
 // SET_PHASE, CTRL_C, ESCAPE）
 
 export function eventReducer(state: TuiState, action: Action): TuiState {
-  // EVENT 动作有独立的子类型分发
-  if (action.type === 'EVENT') {
-    return handleEventAction(state, action.event);
-  }
   if (action.type === 'RUNTIME_EVENT') {
     return handleRuntimeEventAction(state, action.event);
+  }
+  if (action.type === 'LOCAL_TEXT') {
+    return handleEventAction(state, {
+      type: 'text',
+      data: { text: action.text },
+    });
   }
 
   // ESCAPE 需要链式分发：uiReducer 关面板 → agentReducer 处理中断

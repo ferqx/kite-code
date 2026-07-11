@@ -134,14 +134,9 @@ export function useSlashCommand(
           if (!admission.allowed) {
             dispatch({ type: 'SET_INTERACTION_MODE', mode: admission.mode });
             dispatch({
-              type: 'EVENT',
-              event: {
-                type: 'error',
-                data: {
-                  message: admission.reason ?? 'Interaction mode is not available.',
-                  recoverable: true,
-                },
-              },
+              type: 'LOCAL_TEXT',
+              text: admission.reason ?? 'Interaction mode is not available.',
+              isError: true,
             });
             break;
           }

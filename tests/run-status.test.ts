@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AgentEvent } from '@/protocol/events';
 import type { Action } from '../src/app/tui/App';
 import { createInitialState, eventReducer } from '../src/app/tui/App';
+import { handleEventAction, type RenderEvent } from '../src/app/tui/reducers/handleEvent';
 import type { RunStatusTone } from '../src/app/tui/run-status';
 import {
   deriveRunStatusSnapshot,
@@ -11,7 +12,11 @@ import {
 } from '../src/app/tui/run-status';
 import type { OutputBlock, TuiState } from '../src/app/tui/types';
 
-function dispatch(s: TuiState, a: Action): TuiState {
+type LegacyRenderAction = { type: 'EVENT'; event: RenderEvent };
+type TestAction = Action | LegacyRenderAction;
+
+function dispatch(s: TuiState, a: TestAction): TuiState {
+  if (a.type === 'EVENT') return handleEventAction(s, a.event);
   return eventReducer(s, a);
 }
 
@@ -20,21 +25,21 @@ function toolCall(
   name: string,
   args: Record<string, unknown> = {},
   status?: 'queued' | 'running',
-): Action {
+): LegacyRenderAction {
   return {
     type: 'EVENT',
     event: { type: 'tool_call', data: { call_id: callId, name, args, status } },
   };
 }
 
-function toolStarted(callId: string): Action {
+function toolStarted(callId: string): LegacyRenderAction {
   return {
     type: 'EVENT',
     event: { type: 'tool_started', data: { call_id: callId } },
   };
 }
 
-function toolDone(callId: string, name: string, summary = 'ok'): Action {
+function toolDone(callId: string, name: string, summary = 'ok'): LegacyRenderAction {
   return {
     type: 'EVENT',
     event: { type: 'tool_done', data: { call_id: callId, name, ok: true, summary } },
@@ -467,7 +472,7 @@ describe('tool_progress liveOutput', () => {
     let state = eventReducer(initial, runStart as unknown as Action);
 
     const callId = 'call-123';
-    state = eventReducer(state, {
+    state = dispatch(state, {
       type: 'EVENT',
       event: {
         type: 'tool_call',
@@ -480,7 +485,7 @@ describe('tool_progress liveOutput', () => {
     expect((last as Extract<OutputBlock, { kind: 'tool_card' }>).status).toBe('running');
     expect((last as Extract<OutputBlock, { kind: 'tool_card' }>).liveOutput).toBeUndefined();
 
-    state = eventReducer(state, {
+    state = dispatch(state, {
       type: 'EVENT',
       event: {
         type: 'tool_progress',

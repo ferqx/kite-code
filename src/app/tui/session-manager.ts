@@ -7,11 +7,11 @@ import type { RuntimeEffect } from '@/core/runtime/effects';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import type { RuntimeState } from '@/core/runtime/state';
+import { runtimeStorePathFor } from '@/core/runtime/store';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
-import type { AgentEvent, AgentPhase } from '@/protocol/events';
-import type { UserInputProvider } from '@/protocol/provider';
+import type { AgentPhase } from '@/protocol/events';
 import type { Action } from './App';
 import { fullModeUnavailableReason } from './interaction-mode';
 import type { TuiUserInputProvider } from './provider';
@@ -52,7 +52,7 @@ export class SessionRuntime {
   abortController: AbortController | null = null;
   agentLoopActive = false;
   pendingInterrupt = false;
-  eventBuffer: Array<AgentEvent | RuntimeEvent> = [];
+  eventBuffer: RuntimeEvent[] = [];
   /** true if loaded from DB and state not yet hydrated / 从 DB 加载但尚未加载完整状态 */
   dormant = false;
   static readonly MAX_BUFFER = 1000;
@@ -75,7 +75,7 @@ export class SessionRuntime {
   // ── 双模式代理：生成器始终使用 _proxyProvider，通过 _foreground 切换事件路由 ──
   private _foreground = true;
   private _foregroundWake: (() => void) | null = null;
-  private _proxyProvider: UserInputProvider;
+  private _proxyProvider: Pick<TuiUserInputProvider, 'requestAction'>;
   /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
   private _pendingInterrupt: InterruptPayload | null = null;
   private _pendingResolve: ((action: UserAction) => void) | null = null;
@@ -89,7 +89,7 @@ export class SessionRuntime {
     this.mcpManager = deps.mcpManager;
     this.interactionMode = deps.config.interactionMode ?? 'ask';
 
-    this._proxyProvider = this._createProxyProvider(deps.provider);
+    this._proxyProvider = this._createProxyProvider();
   }
 
   // ── 公开 API ──
@@ -151,9 +151,9 @@ export class SessionRuntime {
     if (fullModeReason) {
       this.interactionMode = 'ask';
       deps.dispatch({ type: 'SET_INTERACTION_MODE', mode: 'ask' });
-      deps.provider.onEvent({
-        type: 'error',
-        data: { message: fullModeReason, recoverable: true },
+      deps.dispatch({
+        type: 'RUNTIME_EVENT',
+        event: { type: 'run.error', message: fullModeReason, recoverable: true },
       });
       return;
     }
@@ -178,6 +178,7 @@ export class SessionRuntime {
       pendingSkillsContent,
       shellContext,
       interactionMode: this.interactionMode,
+      phase: this.phase,
       sandboxBackend: sandboxRuntime.backend,
       model: deps.model,
       // 后台会话不再默认注入 full_access；中断会挂起到该会话，等待切回前台处理。
@@ -189,7 +190,7 @@ export class SessionRuntime {
       userId: runAgentParams.userId,
       threadId: runAgentParams.threadId,
       workspace: runAgentParams.workspace,
-      runtimeStorePath: runAgentParams.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db',
+      runtimeStorePath: runtimeStorePathFor(runAgentParams.checkpointPath),
       config: runAgentParams.config,
       model: runAgentParams.model,
       shellExecutor: runAgentParams.shellExecutor,
@@ -197,6 +198,7 @@ export class SessionRuntime {
       skills: runAgentParams.skills,
       skillOptions: runAgentParams.skillOptions,
       interactionMode: runAgentParams.interactionMode,
+      phase: runAgentParams.phase,
       thinkingLevel: runAgentParams.thinkingLevel,
       sandboxBackend: runAgentParams.sandboxBackend,
       signal: runAgentParams.signal,
@@ -225,26 +227,42 @@ export class SessionRuntime {
         deps.dispatch({ type: 'SET_EXITED' });
       }
     } catch (e: any) {
-      // Emit any accumulated retry events before the fatal error
+      // Emit any accumulated retry events before the fatal error.
+      // In the Kernel architecture, model retries are normally emitted
+      // through the runtime event pipeline.  This catch block handles
+      // retries that were accumulated on the error object before the
+      // pipeline could emit them.
       if (Array.isArray(e.modelRetries)) {
         for (const retry of e.modelRetries) {
-          const retryEvent: AgentEvent = {
-            type: 'model_retry',
-            data: retry,
-          };
           if (this._foreground) {
-            deps.provider.onEvent(retryEvent);
+            deps.dispatch({
+              type: 'RUNTIME_EVENT',
+              event: {
+                type: 'model.retry',
+                attempt: (retry as any).attempt ?? 0,
+                maxAttempts: (retry as any).maxAttempts ?? 0,
+                error: (retry as any).error ?? String(retry),
+                delayMs: (retry as any).delayMs ?? 0,
+              },
+            });
           } else {
-            this._pushToBuffer(retryEvent);
+            this._pushToBuffer({
+              type: 'model.retry',
+              attempt: (retry as any).attempt ?? 0,
+              maxAttempts: (retry as any).maxAttempts ?? 0,
+              error: (retry as any).error ?? String(retry),
+              delayMs: (retry as any).delayMs ?? 0,
+            });
           }
         }
       }
-      const errorEvent: AgentEvent = {
-        type: 'error',
-        data: { message: e?.message ?? String(e), recoverable: isRecoverableError(e) },
+      const errorEvent: RuntimeEvent = {
+        type: 'run.error',
+        message: e?.message ?? String(e),
+        recoverable: isRecoverableError(e),
       };
       if (this._foreground) {
-        deps.provider.onEvent(errorEvent);
+        deps.dispatch({ type: 'RUNTIME_EVENT', event: errorEvent });
       } else {
         this._pushToBuffer(errorEvent);
       }
@@ -264,7 +282,7 @@ export class SessionRuntime {
   // ── 私有：代理提供器 & 缓冲 ──
 
   /** 推送事件到缓冲，溢出时优先丢弃非关键事件 */
-  private _pushToBuffer(event: AgentEvent | RuntimeEvent): void {
+  private _pushToBuffer(event: RuntimeEvent): void {
     if (this.eventBuffer.length >= SessionRuntime.MAX_BUFFER) {
       // 查找第一个可丢弃事件的下标
       const dropIdx = this.eventBuffer.findIndex((e) => DISPOSABLE_EVENT_TYPES.has(e.type));
@@ -278,7 +296,7 @@ export class SessionRuntime {
     this.eventBuffer.push(event);
   }
 
-  /** Route the public RuntimeEvent stream without passing through AgentEvent projection. */
+  /** Route the public RuntimeEvent stream directly to the foreground or buffer. */
   private _routeRuntimeEvent(event: RuntimeEvent, dispatch: (action: Action) => void): void {
     if (this._foreground) {
       dispatch({ type: 'RUNTIME_EVENT', event });
@@ -374,24 +392,9 @@ export class SessionRuntime {
   }
 
   /** 创建代理提供器。interrupt 使用运行时自身状态，永久等待用户处理 */
-  private _createProxyProvider(realProvider: TuiUserInputProvider): TuiUserInputProvider {
+  private _createProxyProvider(): Pick<TuiUserInputProvider, 'requestAction'> {
     const self = this;
     const proxy = {
-      onEvent(event: AgentEvent): void {
-        if (self._foreground) {
-          realProvider.onEvent(event);
-        } else {
-          // need_input is auto-cancelled in background (requestAction returns cancel immediately),
-          // so don't buffer it — replay would create an unanswerable zombie question
-          if (event.type === 'need_input') return;
-          self._pushToBuffer(event);
-          if (event.type === 'need_approval') {
-            self.pendingInterrupt = true;
-            self.notifyInterrupt?.();
-          }
-        }
-      },
-
       async requestAction(payload: InterruptPayload): Promise<UserAction> {
         if (!self._foreground) {
           // user_input in background: auto-cancel (user can't respond)
@@ -435,7 +438,7 @@ export class SessionRuntime {
         return Promise.resolve();
       },
     };
-    return proxy as unknown as TuiUserInputProvider;
+    return proxy;
   }
 
   /** 解析挂起的中断（由 SessionManager 的中央 bridge 调用）/ Resolve pending interrupt (called by SessionManager's central bridge) */
@@ -488,9 +491,7 @@ export class SessionManager {
   /** 懒加载 stats DB 连接 / Lazy-load the stats DB connection */
   private get statsDb(): Database {
     if (!this._statsDb) {
-      this._statsDb = new Database(
-        this.deps.checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db',
-      );
+      this._statsDb = new Database(runtimeStorePathFor(this.deps.checkpointPath));
       // Keep token-stat writes compatible with concurrent RuntimeStore access.
       this._statsDb.run('pragma journal_mode = wal');
       this._statsDb.run('pragma busy_timeout = 5000');

@@ -7,7 +7,6 @@ import {
   SessionRuntime,
 } from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
-import type { AgentEvent } from '../src/protocol/events';
 
 // ── Helpers ──
 
@@ -231,7 +230,7 @@ describe('SessionManager', () => {
     const mgr = makeManager();
     const id = mgr.createSession('/tmp/ws');
     const rt = mgr.getRuntime(id)!;
-    rt.eventBuffer.push({ type: 'text', data: { text: 'hello' } } as AgentEvent);
+    rt.eventBuffer.push({ type: 'model.responded', messageId: 'm1', text: 'hello' });
 
     mgr.removeRuntime(id);
 
@@ -578,7 +577,7 @@ describe('SessionRuntime', () => {
 
   test('clearBuffer empties event buffer, history, skills, and interrupt flag', () => {
     const rt = makeRuntime();
-    rt.eventBuffer.push({ type: 'text', data: { text: 'hello' } } as AgentEvent);
+    rt.eventBuffer.push({ type: 'model.responded', messageId: 'm1', text: 'hello' });
     rt.conversationHistory = ['cmd1', 'cmd2'];
     rt.pendingSkills = ['skill1'];
     rt.pendingInterrupt = true;
@@ -616,7 +615,7 @@ describe('SessionRuntime', () => {
 
   test('pushToBuffer adds event to buffer', () => {
     const rt = makeRuntime();
-    (rt as any)._pushToBuffer({ type: 'text', data: { text: 'hello' } } as AgentEvent);
+    (rt as any)._pushToBuffer({ type: 'model.responded', messageId: 'm1', text: 'hello' });
     expect(rt.eventBuffer.length).toBe(1);
   });
 
@@ -624,10 +623,10 @@ describe('SessionRuntime', () => {
     const rt = makeRuntime();
     // Fill buffer to max
     for (let i = 0; i < (SessionRuntime as any).MAX_BUFFER; i++) {
-      rt.eventBuffer.push({ type: 'text', data: { text: `msg${i}` } } as AgentEvent);
+      rt.eventBuffer.push({ type: 'model.responded', messageId: `m${i}`, text: `msg${i}` });
     }
     // Push one more — should discard a disposable event
-    (rt as any)._pushToBuffer({ type: 'text', data: { text: 'overflow' } } as AgentEvent);
+    (rt as any)._pushToBuffer({ type: 'model.responded', messageId: 'overflow', text: 'overflow' });
     expect(rt.eventBuffer.length).toBeLessThanOrEqual((SessionRuntime as any).MAX_BUFFER);
   });
 
@@ -637,68 +636,23 @@ describe('SessionRuntime', () => {
     // Fill buffer with non-disposable events (tool_call, tool_done are not in DISPOSABLE_EVENT_TYPES)
     for (let i = 0; i < MAX; i++) {
       rt.eventBuffer.push({
-        type: 'tool_done',
-        data: { call_id: `c${i}`, name: 'read_file', ok: true, summary: '' },
-      } as AgentEvent);
+        type: 'tool.finished',
+        toolCallId: `c${i}`,
+        name: 'read_file',
+        result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
+      });
     }
     (rt as any)._pushToBuffer({
-      type: 'tool_done',
-      data: { call_id: 'c_new', name: 'read_file', ok: true, summary: '' },
-    } as AgentEvent);
+      type: 'tool.finished',
+      toolCallId: 'c_new',
+      name: 'read_file',
+      result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
+    });
     // Should have shifted oldest
     expect(rt.eventBuffer.length).toBe(MAX);
   });
 
   // ── _createProxyProvider (via private access) ──
-
-  test('proxy provider routes onEvent to real provider in foreground', () => {
-    const events: AgentEvent[] = [];
-    const deps: any = {
-      config: {},
-      provider: { onEvent: (e: AgentEvent) => events.push(e) },
-      skillManifests: [],
-      skillOptions: null,
-      mcpManager: null,
-      checkpointPath: ':memory:',
-    };
-    const rt = new SessionRuntime('t1', '/tmp/ws', deps);
-    const proxy = (rt as any)._proxyProvider;
-
-    proxy.onEvent({ type: 'text', data: { text: 'hello' } } as AgentEvent);
-    expect(events.length).toBe(1);
-  });
-
-  test('proxy provider buffers onEvent in background', () => {
-    const rt = makeRuntime();
-    const proxy = (rt as any)._proxyProvider;
-    (rt as any)._foreground = false;
-
-    proxy.onEvent({ type: 'text', data: { text: 'bg event' } } as AgentEvent);
-    expect(rt.eventBuffer.length).toBe(1);
-  });
-
-  test('proxy provider drops need_input events in background', () => {
-    const rt = makeRuntime();
-    const proxy = (rt as any)._proxyProvider;
-    (rt as any)._foreground = false;
-
-    proxy.onEvent({ type: 'need_input', data: { prompt: 'ask something' } } as any);
-    expect(rt.eventBuffer.length).toBe(0);
-  });
-
-  test('proxy provider sets pendingInterrupt on need_approval in background', () => {
-    const rt = makeRuntime();
-    let notified = false;
-    rt.notifyInterrupt = () => {
-      notified = true;
-    };
-    const proxy = (rt as any)._proxyProvider;
-    (rt as any)._foreground = false;
-
-    proxy.onEvent({ type: 'need_approval', data: { toolRequests: [], reason: 'test' } } as any);
-    expect(rt.pendingInterrupt).toBe(true);
-    expect(notified).toBe(true);
-  });
 
   test('proxy requestAction auto-cancels input in background', async () => {
     const rt = makeRuntime();

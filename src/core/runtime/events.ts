@@ -6,6 +6,12 @@ import type {
   AgentPlan,
   AuthorizationMode,
   ShellApprovalGrant,
+  SubAgentCacheMetricsPayload,
+  SubAgentDonePayload,
+  SubAgentErrorPayload,
+  SubAgentStartPayload,
+  SubAgentStepPayload,
+  SubAgentToolResultPayload,
   ToolApprovalPayload,
   UserInputPayload,
 } from '@/protocol/events.js';
@@ -167,6 +173,12 @@ export interface AutoReviewRequestedEvent {
   type: 'auto_review.requested';
   reviewId: string;
   toolCallId: string;
+  /** 工具名称 / Tool name */
+  toolName: string;
+  /** auto-review 原因 / Reason for auto-review */
+  reason: string;
+  /** 工具审批负载 / Tool approval payload */
+  approval: import('@/protocol/events').ToolApprovalPayload;
 }
 
 /** 自动审查完成 / Auto-review completed */
@@ -312,6 +324,44 @@ export interface ToolFileChangeEvent {
   preview?: string;
 }
 
+// ── Subagent lifecycle events ──
+
+/** A delegated subagent started work. */
+export interface SubagentStartedEvent {
+  type: 'subagent.started';
+  subagent: SubAgentStartPayload;
+}
+
+/** A delegated subagent started a tool step. */
+export interface SubagentStepEvent {
+  type: 'subagent.step';
+  subagent: SubAgentStepPayload;
+}
+
+/** A delegated subagent finished a tool step. */
+export interface SubagentToolResultEvent {
+  type: 'subagent.tool_result';
+  subagent: SubAgentToolResultPayload;
+}
+
+/** A delegated subagent completed normally. */
+export interface SubagentCompletedEvent {
+  type: 'subagent.completed';
+  subagent: SubAgentDonePayload;
+}
+
+/** A delegated subagent stopped with an error. */
+export interface SubagentFailedEvent {
+  type: 'subagent.failed';
+  subagent: SubAgentErrorPayload;
+}
+
+/** Cache usage reported by a delegated subagent. */
+export interface SubagentCacheMetricsEvent {
+  type: 'subagent.cache_metrics';
+  subagent: SubAgentCacheMetricsPayload;
+}
+
 // ── 运行时事件联合类型 / Runtime event discriminated union ──
 
 /** 运行时事件 — 所有状态变更的统一类型表示 */
@@ -349,4 +399,10 @@ export type RuntimeEvent =
   | PlanProgressUpdatedEvent
   | PlanCompletedEvent
   | ApprovalCommandReplacedEvent
-  | ToolFileChangeEvent;
+  | ToolFileChangeEvent
+  | SubagentStartedEvent
+  | SubagentStepEvent
+  | SubagentToolResultEvent
+  | SubagentCompletedEvent
+  | SubagentFailedEvent
+  | SubagentCacheMetricsEvent;

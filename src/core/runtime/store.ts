@@ -31,6 +31,12 @@ export interface RuntimeSnapshotEntry {
   createdAt: number;
 }
 
+/** Derive the runtime sidecar path without turning SQLite's memory sentinel into a file. */
+export function runtimeStorePathFor(checkpointPath: string): string {
+  if (checkpointPath === ':memory:') return ':memory:';
+  return checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
+}
+
 /** RuntimeStore 接口 / Runtime store interface */
 export interface RuntimeStore {
   /** 批量追加事件（事务写入）/ Append events in a transaction */

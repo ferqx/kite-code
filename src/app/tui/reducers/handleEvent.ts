@@ -1,7 +1,7 @@
-// ── EVENT action handler — 19 event sub-types ──
+// ── TUI render-event handler ──
 
 import type { RuntimeEvent } from '@/core/runtime/events';
-import type { AgentEvent } from '@/protocol/events';
+import type * as Protocol from '@/protocol/events';
 import { getToolDetail, getToolPreview } from '../components/render-utils';
 import { MAX_TOOL_LINES } from '../components/ToolCardBlock';
 import type { ConsolidatedToolEntry, FileChangeRecord, OutputBlock, TuiState } from '../types';
@@ -21,6 +21,48 @@ import {
   replaceBlockById,
   updateLastBlock,
 } from './helpers';
+
+/** Internal rendering vocabulary shared by RuntimeEvent rendering paths.
+ * RuntimeEvent remains the only streamed action accepted by the TUI reducer. */
+export type RenderEvent =
+  | { type: 'step_begin'; data: { node: string; spanId: string; internal?: boolean } }
+  | { type: 'step_end'; data: { node: string; spanId: string } }
+  | { type: 'reason' | 'text'; data: { text: string } }
+  | { type: 'tool_call'; data: Protocol.ToolCallPayload }
+  | { type: 'tool_started'; data: Protocol.ToolStartedPayload }
+  | { type: 'tool_done'; data: Protocol.ToolResultPayload }
+  | { type: 'need_approval'; data: Protocol.ToolApprovalPayload }
+  | { type: 'need_input'; data: Protocol.UserInputPayload }
+  | { type: 'need_plan_review'; data: Protocol.NeedPlanReviewPayload }
+  | { type: 'state_change'; data: Protocol.StateChangePayload }
+  | {
+      type: 'file_change';
+      data: {
+        path: string;
+        kind: 'add' | 'edit' | 'delete';
+        linesAdded?: number;
+        linesRemoved?: number;
+        preview?: string;
+      };
+    }
+  | { type: 'cache_metrics'; data: Protocol.CacheMetricsPayload }
+  | { type: 'error'; data: { message: string; recoverable: boolean } }
+  | { type: 'interrupt' | 'update'; data: unknown }
+  | {
+      type: 'model_retry';
+      data: { attempt: number; maxAttempts: number; error: string; delayMs: number };
+    }
+  | { type: 'final'; data: string }
+  | { type: 'subagent_start'; data: Protocol.SubAgentStartPayload }
+  | { type: 'subagent_step'; data: Protocol.SubAgentStepPayload }
+  | { type: 'subagent_tool_result'; data: Protocol.SubAgentToolResultPayload }
+  | { type: 'subagent_done'; data: Protocol.SubAgentDonePayload }
+  | { type: 'subagent_error'; data: Protocol.SubAgentErrorPayload }
+  | { type: 'subagent_cache_metrics'; data: Protocol.SubAgentCacheMetricsPayload }
+  | { type: 'tool_progress'; data: Protocol.ToolProgressPayload }
+  | { type: 'turn_begin'; data: { index: number; spanId: string } }
+  | { type: 'turn_end'; data: { index: number } }
+  | { type: 'user_message'; data: Protocol.UserMessagePayload };
 
 // ── Structural text block helpers ──
 // During streaming, text events are split into per-line blocks for progressive
@@ -323,7 +365,7 @@ function updateCurrentThoughtActivity(
   };
 }
 
-export function handleEventAction(state: TuiState, event: AgentEvent): TuiState {
+export function handleEventAction(state: TuiState, event: RenderEvent): TuiState {
   // Guard: malformed events from corrupted checkpoints must not crash the TUI
   if (!event.data) return state;
 
@@ -1334,10 +1376,21 @@ export function handleEventAction(state: TuiState, event: AgentEvent): TuiState 
   }
 }
 
-/** Direct RuntimeEvent rendering path.  It intentionally does not use the
- * legacy RuntimeEvent→AgentEvent projection so TUI migration can delete it. */
+/** Direct RuntimeEvent rendering path. */
 export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
   switch (event.type) {
+    case 'subagent.started':
+      return handleEventAction(state, { type: 'subagent_start', data: event.subagent });
+    case 'subagent.step':
+      return handleEventAction(state, { type: 'subagent_step', data: event.subagent });
+    case 'subagent.tool_result':
+      return handleEventAction(state, { type: 'subagent_tool_result', data: event.subagent });
+    case 'subagent.completed':
+      return handleEventAction(state, { type: 'subagent_done', data: event.subagent });
+    case 'subagent.failed':
+      return handleEventAction(state, { type: 'subagent_error', data: event.subagent });
+    case 'subagent.cache_metrics':
+      return handleEventAction(state, { type: 'subagent_cache_metrics', data: event.subagent });
     case 'user.message_appended':
       return appendBlock(state, {
         id: state.nextBlockId,

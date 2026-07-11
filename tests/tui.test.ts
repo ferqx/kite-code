@@ -1,22 +1,25 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { TuiUserInputProvider } from '../src/app/tui/provider';
-import type { AgentEvent } from '../src/protocol/events';
 
 describe('TuiUserInputProvider', () => {
-  test('onEvent dispatches events to the callback', () => {
-    const received: AgentEvent[] = [];
-    const provider = new TuiUserInputProvider((e) => received.push(e));
+  test('TUI reducer exposes RuntimeEvent as its only streamed event action', () => {
+    const root = import.meta.dir.replace(/\/tests$/, '');
+    const actions = readFileSync(join(root, 'src/app/tui/reducers/actions.ts'), 'utf8');
+    const reducer = readFileSync(join(root, 'src/app/tui/reducers/index.ts'), 'utf8');
 
-    provider.onEvent({ type: 'text', data: { text: 'hello' } });
-    provider.onEvent({ type: 'final', data: 'done' });
+    expect(actions).not.toContain("type: 'EVENT'");
+    expect(reducer).not.toContain("action.type === 'EVENT'");
+  });
 
-    expect(received).toHaveLength(2);
-    expect(received[0]!.type).toBe('text');
-    expect(received[1]!.type).toBe('final');
+  test('does not expose the retired AgentEvent forwarding method', () => {
+    const provider = new TuiUserInputProvider();
+    expect('onEvent' in provider).toBe(false);
   });
 
   test('requestAction blocks until submitAction is called', async () => {
-    const provider = new TuiUserInputProvider(() => {});
+    const provider = new TuiUserInputProvider();
 
     const actionPromise = provider.requestAction({
       kind: 'approval',
@@ -49,12 +52,12 @@ describe('TuiUserInputProvider', () => {
   });
 
   test('getPendingInterrupt returns null when no interrupt pending', () => {
-    const provider = new TuiUserInputProvider(() => {});
+    const provider = new TuiUserInputProvider();
     expect(provider.getPendingInterrupt()).toBeNull();
   });
 
   test('getPendingInterrupt returns the payload during an active request', async () => {
-    const provider = new TuiUserInputProvider(() => {});
+    const provider = new TuiUserInputProvider();
     const payload = {
       kind: 'input' as const,
       question: { question: 'What?', options: [], allow_free_text: true },
@@ -69,7 +72,7 @@ describe('TuiUserInputProvider', () => {
   });
 
   test('teardown resolves pending promise with cancel action', async () => {
-    const provider = new TuiUserInputProvider(() => {});
+    const provider = new TuiUserInputProvider();
 
     const promise = provider.requestAction({
       kind: 'approval',
@@ -93,15 +96,5 @@ describe('TuiUserInputProvider', () => {
     const result = await promise;
     expect(result.type).toBe('cancel');
     expect(provider.getPendingInterrupt()).toBeNull();
-  });
-
-  test('file_change event type is correct', () => {
-    const event: AgentEvent = {
-      type: 'file_change',
-      data: { path: '/tmp/test.txt', kind: 'add' },
-    };
-    expect(event.type).toBe('file_change');
-    expect(event.data.path).toBe('/tmp/test.txt');
-    expect(event.data.kind).toBe('add');
   });
 });

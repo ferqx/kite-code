@@ -2,23 +2,28 @@ import { describe, expect, test } from 'bun:test';
 import type { Action } from '../src/app/tui/App';
 import { createInitialState, eventReducer } from '../src/app/tui/App';
 import { buildToolSummaryLine } from '../src/app/tui/reducers/consolidateTools';
+import { handleEventAction, type RenderEvent } from '../src/app/tui/reducers/handleEvent';
 import type { InterruptState, OutputBlock, SessionSnapshot, TuiState } from '../src/app/tui/types';
 import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
 
 function fresh(): TuiState {
   return createInitialState();
 }
-function dispatch(s: TuiState, a: Action): TuiState {
+type LegacyRenderAction = { type: 'EVENT'; event: RenderEvent };
+type TestAction = Action | LegacyRenderAction;
+
+function dispatch(s: TuiState, a: TestAction): TuiState {
+  if (a.type === 'EVENT') return handleEventAction(s, a.event);
   return eventReducer(s, a);
 }
 function flatBlocks(s: TuiState) {
   return s.turns.flatMap((t) => t.blocks);
 }
 
-function textEvt(text: string): Action {
+function textEvt(text: string): LegacyRenderAction {
   return { type: 'EVENT', event: { type: 'text', data: { text } } };
 }
-function reasonEvt(text: string): Action {
+function reasonEvt(text: string): LegacyRenderAction {
   return { type: 'EVENT', event: { type: 'reason', data: { text } } };
 }
 function tcEvt(
@@ -26,25 +31,25 @@ function tcEvt(
   name: string,
   args: Record<string, unknown> = {},
   status?: 'queued' | 'running',
-): Action {
+): LegacyRenderAction {
   return {
     type: 'EVENT',
     event: { type: 'tool_call', data: { call_id: callId, name: name as any, args, status } },
   };
 }
-function tsEvt(callId: string): Action {
+function tsEvt(callId: string): LegacyRenderAction {
   return {
     type: 'EVENT',
     event: { type: 'tool_started', data: { call_id: callId } },
   };
 }
-function tdEvt(callId: string, name: string, ok: boolean, summary: string): Action {
+function tdEvt(callId: string, name: string, ok: boolean, summary: string): LegacyRenderAction {
   return {
     type: 'EVENT',
     event: { type: 'tool_done', data: { call_id: callId, name, ok, summary } },
   };
 }
-function tdExhausted(callId: string, name: string, summary: string): Action {
+function tdExhausted(callId: string, name: string, summary: string): LegacyRenderAction {
   return {
     type: 'EVENT',
     event: {
@@ -101,6 +106,11 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('EVENT.text', () => {
+    test('LOCAL_TEXT appends a local UI notification without an AgentEvent', () => {
+      const s = dispatch(fresh(), { type: 'LOCAL_TEXT', text: 'Theme set to teal' });
+      expect(flatBlocks(s)[0]).toMatchObject({ kind: 'text', content: 'Theme set to teal' });
+    });
+
     test('appends text block', () => {
       const s = dispatch(fresh(), textEvt('hello'));
       expect(flatBlocks(s)).toHaveLength(1);
@@ -932,7 +942,7 @@ describe('eventReducer (blocks model)', () => {
       const eventPayload = {
         plan: { name: 'Test', description: 'Desc', status: 'pending' as const, steps: [] },
       };
-      const event: Action = {
+      const event: LegacyRenderAction = {
         type: 'EVENT',
         event: { type: 'need_plan_review' as any, data: eventPayload },
       };
@@ -2132,13 +2142,17 @@ describe('eventReducer (blocks model)', () => {
       id: string,
       role: 'explore' | 'plan' | 'code' | 'review',
       task: string,
-    ): Action {
+    ): LegacyRenderAction {
       return { type: 'EVENT', event: { type: 'subagent_start', data: { id, role, task } } };
     }
-    function saStep(id: string, toolName: string, toolArgs: Record<string, unknown> = {}): Action {
+    function saStep(
+      id: string,
+      toolName: string,
+      toolArgs: Record<string, unknown> = {},
+    ): LegacyRenderAction {
       return { type: 'EVENT', event: { type: 'subagent_step', data: { id, toolName, toolArgs } } };
     }
-    function saToolResult(id: string, toolName: string, ok: boolean): Action {
+    function saToolResult(id: string, toolName: string, ok: boolean): LegacyRenderAction {
       return { type: 'EVENT', event: { type: 'subagent_tool_result', data: { id, toolName, ok } } };
     }
     function saDone(
@@ -2146,13 +2160,13 @@ describe('eventReducer (blocks model)', () => {
       summary: string,
       toolCallCount: number,
       durationMs: number,
-    ): Action {
+    ): LegacyRenderAction {
       return {
         type: 'EVENT',
         event: { type: 'subagent_done', data: { id, summary, toolCallCount, durationMs } },
       };
     }
-    function saError(id: string, error: string): Action {
+    function saError(id: string, error: string): LegacyRenderAction {
       return { type: 'EVENT', event: { type: 'subagent_error', data: { id, error } } };
     }
 
@@ -2271,6 +2285,122 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, saStart('sub-1', 'explore', 'task1'));
       s = dispatch(s, saStart('sub-2', 'code', 'task2'));
       expect(flatBlocks(s)[0]!.id).toBeLessThan(flatBlocks(s)[1]!.id);
+    });
+  });
+
+  describe('RUNTIME_EVENT.subagent.*', () => {
+    test('renders a RuntimeEvent subagent start without the legacy event path', () => {
+      const state = dispatch(fresh(), {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'subagent.started',
+          subagent: { id: 'runtime-subagent', role: 'explore', task: 'find runtime callers' },
+        },
+      });
+
+      const block = flatBlocks(state)[0];
+      expect(block?.kind).toBe('subagent');
+      if (block?.kind !== 'subagent') throw new Error('expected subagent block');
+      expect(block.subagentId).toBe('runtime-subagent');
+      expect(block.task).toBe('find runtime callers');
+    });
+  });
+
+  describe('RUNTIME_EVENT message-list pipeline', () => {
+    test('renders model text, tool lifecycle, file changes, and terminal errors in event order', () => {
+      let state = fresh();
+      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+        { type: 'user.message_appended', messageId: 'u1', content: 'Inspect the file' },
+        {
+          type: 'model.responded',
+          messageId: 'm1',
+          reasoningText: 'checking',
+          text: 'I will inspect it.',
+        },
+        { type: 'tool.queued', toolCallId: 'read1', name: 'read_file', args: { path: 'a.ts' } },
+        { type: 'tool.started', toolCallId: 'read1' },
+        {
+          type: 'tool.finished',
+          toolCallId: 'read1',
+          name: 'read_file',
+          result: { ok: true, command: '', exitCode: 0, stdout: 'ok', stderr: '' },
+        },
+        { type: 'tool.file_change', toolCallId: 'read1', path: 'a.ts', kind: 'edit' },
+        { type: 'run.error', message: 'network failed', recoverable: true },
+      ];
+      for (const event of events) state = dispatch(state, { type: 'RUNTIME_EVENT', event });
+
+      const blocks = flatBlocks(state);
+      expect(blocks.map((block) => block.kind)).toContain('user');
+      expect(blocks.map((block) => block.kind)).toContain('text');
+      expect(blocks.map((block) => block.kind)).toContain('tool_summary');
+      expect(blocks.map((block) => block.kind)).toContain('file_change');
+      expect(blocks.at(-1)).toMatchObject({
+        kind: 'text',
+        content: '⟳ Recoverable error: network failed',
+      });
+    });
+
+    test('renders approval, user input, and plan review as distinct interaction blocks', () => {
+      const approvalEvent: import('../src/core/runtime/events').RuntimeEvent = {
+        type: 'approval.requested',
+        interactionId: 'approval-1',
+        toolCallId: 'write-1',
+        approval: approval(),
+      };
+      const inputEvent: import('../src/core/runtime/events').RuntimeEvent = {
+        type: 'user_input.requested',
+        interactionId: 'input-1',
+        toolCallId: 'ask-1',
+        request: question(),
+      };
+      const reviewEvent: import('../src/core/runtime/events').RuntimeEvent = {
+        type: 'plan.review_requested',
+        interactionId: 'plan-1',
+        toolCallId: 'plan-call',
+        plan: { name: 'Plan', description: 'Do work', status: 'pending', steps: [] },
+        planSummary: 'Do work',
+      };
+
+      const approvalState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: approvalEvent });
+      expect(flatBlocks(approvalState).at(-1)?.kind).toBe('approval');
+      expect(approvalState.interrupt?.kind).toBe('approval');
+
+      const inputState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: inputEvent });
+      expect(flatBlocks(inputState).at(-1)?.kind).toBe('question');
+      expect(inputState.interrupt?.kind).toBe('input');
+
+      const reviewState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: reviewEvent });
+      expect(reviewState.interrupt?.kind).toBe('plan_review');
+      expect(reviewState.status.pendingPlan?.name).toBe('Plan');
+    });
+
+    test('updates cache statistics and keeps non-visual lifecycle facts out of the message list', () => {
+      let state = fresh();
+      const nonVisual: import('../src/core/runtime/events').RuntimeEvent[] = [
+        { type: 'turn.started', turnId: 'turn-1' },
+        { type: 'model.requested', requestId: 'request-1' },
+        { type: 'authorization.changed', mode: 'default' },
+        { type: 'phase.changed', phase: 'building' },
+        { type: 'turn.completed', turnId: 'turn-1' },
+      ];
+      for (const event of nonVisual) state = dispatch(state, { type: 'RUNTIME_EVENT', event });
+      expect(flatBlocks(state)).toHaveLength(0);
+
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'model.cache_metrics',
+          inputTokens: 100,
+          cacheHitTokens: 80,
+          cacheMissTokens: 20,
+          hitRate: 0.8,
+        },
+      });
+      expect(state.status.cacheHitTokens).toBe(80);
+      expect(state.status.cacheMissTokens).toBe(20);
+      expect(state.status.cacheHitRate).toBe(0.8);
+      expect(flatBlocks(state)).toHaveLength(0);
     });
   });
 

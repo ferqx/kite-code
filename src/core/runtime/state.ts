@@ -132,6 +132,19 @@ export type InteractionState =
       toolCallId: string;
       /** 工具审批负载 / Tool approval payload */
       approval: ToolApprovalPayload;
+    }
+  | {
+      kind: 'awaiting_auto_review';
+      /** 交互标识，关联 auto-review / Interaction id linking to the auto-review */
+      interactionId: string;
+      /** 触发 auto-review 的工具调用 ID / Tool call id that triggered this auto-review */
+      toolCallId: string;
+      /** 工具名称 / Tool name */
+      toolName: string;
+      /** auto-review 原因 / Reason for auto-review */
+      reason: string;
+      /** 工具审批负载 / Tool approval payload */
+      approval: ToolApprovalPayload;
     };
 
 // ── 工具调用状态 / Tool call status ──
@@ -144,6 +157,7 @@ export type InteractionState =
  * - 'awaiting_user_input': 执行中需要用户输入 / Executing, needs user input
  * - 'awaiting_plan_review': 执行中触发方案审核 / Executing, triggered plan review
  * - 'awaiting_approval': 等待用户审批 / Waiting for user approval
+- 'awaiting_auto_review': 等待自动审查 / Waiting for auto-review
  * - 'approved': 已审批通过，等待执行 / Approved, pending execution
  * - 'running': 正在执行 / Currently running
  * - 'succeeded': 执行成功 / Execution succeeded
@@ -157,6 +171,7 @@ export type ToolCallStatus =
   | 'awaiting_user_input'
   | 'awaiting_plan_review'
   | 'awaiting_approval'
+  | 'awaiting_auto_review'
   | 'approved'
   | 'running'
   | 'succeeded'
@@ -305,7 +320,7 @@ export interface CreateRuntimeStateInput {
   authorizationMode?: AuthorizationMode;
   /** 工作区访问权限，默认 'write' / Workspace access, defaults to 'write' */
   workspaceAccess?: WorkspaceAccess;
-  /** 初始执行阶段，默认 'planning' / Initial phase, defaults to 'planning' */
+  /** 初始执行阶段，默认 'building' / Initial phase, defaults to 'building' */
   phase?: 'planning' | 'building';
 }
 
@@ -340,7 +355,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       commandGrants: {},
     },
     mode: input.interactionMode ?? ('ask' as InteractionMode),
-    phase: input.phase ?? 'planning',
+    phase: input.phase ?? 'building',
     workspaceAccess: input.workspaceAccess ?? 'write',
     autoReview: { ...DEFAULT_AUTO_REVIEW_STATE },
     doomLoop: {},

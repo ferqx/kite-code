@@ -1,19 +1,10 @@
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
-import type { AgentEvent } from '@/protocol/events';
-import type { UserInputProvider } from '@/protocol/provider';
 
-export class TuiUserInputProvider implements UserInputProvider {
-  private dispatch: (event: AgentEvent) => void;
+export class TuiUserInputProvider {
   private pendingResolve: ((action: UserAction) => void) | null = null;
   private pendingInterrupt: InterruptPayload | null = null;
 
-  constructor(dispatch: (event: AgentEvent) => void) {
-    this.dispatch = dispatch;
-  }
-
-  onEvent(event: AgentEvent): void {
-    this.dispatch(event);
-  }
+  constructor(_legacyDispatch?: unknown) {}
 
   /** 获取当前待处理的中断负载 / Get current pending interrupt payload */
   getPendingInterrupt(): InterruptPayload | null {

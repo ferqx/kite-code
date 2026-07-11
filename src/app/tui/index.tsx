@@ -27,7 +27,6 @@ import { shouldCancelClearedInterrupt } from './interrupt-clear';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
 import { SessionManager } from './session-manager';
-import { TextBatcher } from './text-batcher';
 import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } from './theme';
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
@@ -82,17 +81,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   const stateRef = React.useRef(state);
   stateRef.current = state;
 
-  // TextBatcher: merge consecutive text events to reduce re-renders during streaming
-  const textBatcher = React.useMemo(
-    () => new TextBatcher((action) => dispatch(action), 16),
-    [dispatch],
-  );
-  const textBatcherRef = React.useRef(textBatcher);
-  textBatcherRef.current = textBatcher;
-
-  React.useEffect(() => {
-    textBatcher.setRunning(state.running);
-  }, [state.running, textBatcher]);
   const [themePreset, setThemePreset] = React.useState<ThemePreset>(() => {
     const saved = loadColorPreset(workspace);
     if (
@@ -168,9 +156,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   const interruptClearedByResolutionRef = React.useRef(false);
 
   const provider = React.useMemo(() => {
-    const p = new TuiUserInputProvider((event) => {
-      textBatcherRef.current.push(event);
-    });
+    const p = new TuiUserInputProvider();
     const submitAction = p.submitAction.bind(p);
     p.submitAction = (action) => {
       if (action.type !== 'cancel') {
@@ -303,7 +289,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   ]);
 
   const handleExit = React.useCallback(() => {
-    dispatch({ type: 'EVENT', event: { type: 'text', data: { text: '👋 Goodbye!' } } });
+    dispatch({ type: 'LOCAL_TEXT', text: '👋 Goodbye!' });
     sessionManager.abortAll();
     sessionManager.dispose();
     setTimeout(() => {
@@ -503,14 +489,10 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         if (incomingRt && incomingRt.eventBuffer.length > 0) {
           dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
           for (const event of incomingRt.eventBuffer) {
-            if (event.type.includes('.')) {
-              dispatch({
-                type: 'RUNTIME_EVENT',
-                event: event as import('@/core/runtime/events').RuntimeEvent,
-              });
-            } else {
-              dispatch({ type: 'EVENT', event: event as import('@/protocol/events').AgentEvent });
-            }
+            dispatch({
+              type: 'RUNTIME_EVENT',
+              event: event as import('@/core/runtime/events').RuntimeEvent,
+            });
           }
           incomingRt.eventBuffer = [];
           incomingRt.pendingInterrupt = false;
@@ -571,11 +553,9 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
           dispatch({ type: 'EXPORT_SESSION_DONE', filename });
         } catch (e: any) {
           dispatch({
-            type: 'EVENT',
-            event: {
-              type: 'error',
-              data: { message: `Export failed: ${e?.message ?? e}`, recoverable: false },
-            },
+            type: 'LOCAL_TEXT',
+            text: `Export failed: ${e?.message ?? e}`,
+            isError: true,
           });
         }
         return;
@@ -615,10 +595,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         process.stdout.write(osc4Apply(p));
         saveColorPreset(p);
         dispatchSessionLoad({ type: 'USER_MESSAGE', text: `/theme ${p}` });
-        dispatchSessionLoad({
-          type: 'EVENT',
-          event: { type: 'text', data: { text: `  ⎿  Theme set to ${p}` } },
-        });
+        dispatchSessionLoad({ type: 'LOCAL_TEXT', text: `  ⎿  Theme set to ${p}` });
       }
       // Invalid preset — silently ignored
     },
@@ -687,7 +664,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       rt.phase = phaseRef.current;
       rt.conversationHistory = [...conversationHistoryRef.current];
 
-      dispatch({ type: 'USER_MESSAGE', text: task });
       dispatch({ type: 'SET_RUNNING' });
       dispatch({ type: 'DEACTIVATE_SKILL' }); // clear after capture into runtime
 
@@ -762,10 +738,9 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
 
   React.useEffect(() => {
     return () => {
-      textBatcher.dispose();
       provider.teardown?.();
     };
-  }, [provider, textBatcher]);
+  }, [provider]);
 
   return (
     <ThemeContext.Provider value={theme}>

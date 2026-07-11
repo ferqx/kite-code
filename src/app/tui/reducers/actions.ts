@@ -3,12 +3,11 @@
 
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeSnapshotEntry } from '@/core/runtime/store';
-import type { AgentEvent } from '@/protocol/events';
 import type { InterruptState, OutputBlock, TuiState } from '../types';
 
 export type Action =
-  | { type: 'EVENT'; event: AgentEvent }
   | { type: 'RUNTIME_EVENT'; event: RuntimeEvent }
+  | { type: 'LOCAL_TEXT'; text: string; isError?: boolean }
   | { type: 'SET_EXITED' }
   | { type: 'SET_RUNNING' }
   | { type: 'SET_IDLE' }

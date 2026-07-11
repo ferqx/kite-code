@@ -16,8 +16,10 @@ import TaskProgressBlock from '../src/app/tui/components/TaskProgressBlock';
 import DiffPreview from '../src/app/tui/DiffPreview';
 import Footer from '../src/app/tui/Footer';
 import Header from '../src/app/tui/Header';
+import { createInitialState } from '../src/app/tui/initialState';
 import OutputArea, { useStaticContent } from '../src/app/tui/OutputArea';
 import { TuiUserInputProvider } from '../src/app/tui/provider';
+import { eventReducer } from '../src/app/tui/reducers';
 import type { RunStatusSnapshot } from '../src/app/tui/run-status';
 import StatsLine from '../src/app/tui/StatsLine';
 import StatusBar from '../src/app/tui/StatusBar';
@@ -28,6 +30,7 @@ import type {
   TuiState,
   Turn,
 } from '../src/app/tui/types';
+import type { RuntimeEvent } from '../src/core/runtime/events';
 import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
 
 // ── Shared helpers ──
@@ -1608,6 +1611,101 @@ describe('Block spacing', () => {
 });
 
 describe('OutputArea', () => {
+  test('renders the message list produced exclusively from RuntimeEvents', () => {
+    const events: RuntimeEvent[] = [
+      { type: 'user.message_appended', messageId: 'u-1', content: 'Inspect the runtime bridge' },
+      {
+        type: 'model.responded',
+        messageId: 'm-1',
+        reasoningText: 'I will inspect the renderer.',
+        text: 'The runtime bridge is connected.',
+      },
+      {
+        type: 'tool.queued',
+        toolCallId: 'tool-1',
+        name: 'shell_execute',
+        args: { command: 'echo runtime-bridge' },
+      },
+      { type: 'tool.started', toolCallId: 'tool-1' },
+      {
+        type: 'tool.finished',
+        toolCallId: 'tool-1',
+        name: 'shell_execute',
+        result: {
+          ok: true,
+          command: 'echo runtime-bridge',
+          exitCode: 0,
+          stdout: 'runtime-bridge',
+          stderr: '',
+        },
+      },
+      { type: 'run.error', message: 'temporary network issue', recoverable: true },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={state.turns} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('❯ Inspect the runtime bridge');
+    expect(frame).toContain('The runtime bridge is connected.');
+    expect(frame).toContain('Bash');
+    expect(frame).toContain('echo runtime-bridge');
+    expect(frame).toContain('⟳ Recoverable error: temporary network issue');
+    expect(frame.indexOf('Inspect the runtime bridge')).toBeLessThan(
+      frame.indexOf('The runtime bridge is connected.'),
+    );
+    expect(frame).not.toContain('I will inspect the renderer.');
+  });
+
+  test('renders a completed subagent card produced from RuntimeEvents', () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'subagent.started',
+        subagent: { id: 'subagent-1', role: 'explore', task: 'Locate runtime event consumers' },
+      },
+      {
+        type: 'subagent.step',
+        subagent: {
+          id: 'subagent-1',
+          toolName: 'read_file',
+          toolArgs: { path: 'src/app/tui/session-manager.ts' },
+        },
+      },
+      {
+        type: 'subagent.tool_result',
+        subagent: { id: 'subagent-1', toolName: 'read_file', ok: true, summary: 'found route' },
+      },
+      {
+        type: 'subagent.completed',
+        subagent: {
+          id: 'subagent-1',
+          summary: 'Found one RuntimeEvent route.',
+          toolCallCount: 1,
+          durationMs: 42,
+        },
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={state.turns} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Explore');
+    expect(frame).toContain('Locate runtime event consumers');
+    expect(frame).toContain('Read session-manager.ts');
+    expect(frame).toContain('done!');
+  });
+
   test('renders user block with chevron prefix', () => {
     const blocks: OutputBlock[] = [{ id: 1, kind: 'user', content: 'Hello agent' }];
     const { lastFrame } = render(
