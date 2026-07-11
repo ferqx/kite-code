@@ -75,33 +75,175 @@ export async function executeRuntimeTools(params: {
       });
       continue;
     }
-    if (request.name === 'update_plan') {
-      const plan = request.args;
-      const interactionId = genInteractionId();
+
+    // ── Plan tools ──
+
+    if (request.name === 'write_plan') {
+      const args = request.args as {
+        title: string;
+        body_markdown: string;
+        steps: Array<{ id: string; title: string }>;
+        expected_version?: number;
+      };
+      const phase = getAgentPhase(params.state.planning);
+      if (phase !== 'planning') {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'write_plan is only available in planning phase.',
+        });
+        continue;
+      }
+      // Version conflict check
+      if (
+        args.expected_version != null &&
+        params.state.planning.kind === 'planning_draft' &&
+        args.expected_version !== params.state.planning.document.version
+      ) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: `Version conflict: expected v${args.expected_version}, current is v${params.state.planning.document.version}.`,
+        });
+        continue;
+      }
+      // Emit plan.drafted — no interrupt
       events.push({
         type: 'plan.drafted',
         toolCallId,
-        plan,
+        plan: {
+          name: args.title,
+          description: args.body_markdown,
+          status: 'pending' as const,
+          steps: args.steps.map((s) => ({ step: s.title, status: 'pending' as const })),
+        },
         structuralHash: computePlanStructuralDigest({
-          title: plan.name.slice(0, 120),
-          bodyMarkdown: plan.description,
-          steps: plan.steps.map((s: { step: string; status: string }) => ({
-            id: s.step
-              .toLowerCase()
-              .replace(/[^a-z0-9_-]+/g, '-')
-              .slice(0, 32),
-            title: s.step.slice(0, 160),
+          title: args.title,
+          bodyMarkdown: args.body_markdown,
+          steps: args.steps.map((s) => ({
+            id: s.id,
+            title: s.title,
             status: 'pending' as const,
           })),
         }),
       });
+      continue;
+    }
+
+    if (request.name === 'exit_plan_mode') {
+      const args = request.args as {
+        plan_id: string;
+        expected_version: number;
+        expected_digest: string;
+      };
+      const phase = getAgentPhase(params.state.planning);
+      if (phase !== 'planning') {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'exit_plan_mode is only available in planning phase.',
+        });
+        continue;
+      }
+      // Must have a draft
+      if (params.state.planning.kind !== 'planning_draft') {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'No plan draft saved. Call write_plan first.',
+        });
+        continue;
+      }
+      const draft = params.state.planning.document;
+      // Validate plan_id, version, digest
+      if (
+        args.plan_id !== draft.planId ||
+        args.expected_version !== draft.version ||
+        args.expected_digest !== draft.structuralDigest
+      ) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: `Plan mismatch: expected plan_id=${args.plan_id} v${args.expected_version}, current is ${draft.planId} v${draft.version}.`,
+        });
+        continue;
+      }
+      const interactionId = genInteractionId();
+      const plan: import('@/protocol/events').AgentPlan = {
+        name: draft.title,
+        description: draft.bodyMarkdown,
+        status: 'pending',
+        steps: draft.steps.map((s) => ({ step: s.title, status: s.status })),
+      };
       events.push({
         type: 'plan.review_requested',
         interactionId,
         toolCallId,
         plan,
-        planSummary: `${plan.description}\n\n${plan.steps.map((step, index) => `${index + 1}. ${step.step}`).join('\n')}`,
+        planSummary: `${draft.title}\n\n${draft.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}`,
       });
+      continue;
+    }
+
+    if (request.name === 'update_plan') {
+      const args = request.args as {
+        plan_id: string;
+        updates: Array<{ step_id: string; status: string; note?: string }>;
+        complete_plan?: boolean;
+      };
+      const phase = getAgentPhase(params.state.planning);
+      if (phase !== 'building') {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'update_plan is only available in building phase after plan approval.',
+        });
+        continue;
+      }
+      if (params.state.planning.kind !== 'executing') {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'No executing plan. Wait for plan approval first.',
+        });
+        continue;
+      }
+      const doc = params.state.planning.document;
+      if (args.plan_id !== doc.planId) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: `Plan ID mismatch: expected ${args.plan_id}, current is ${doc.planId}.`,
+        });
+        continue;
+      }
+      const updatedPlan: import('@/protocol/events').AgentPlan = {
+        name: doc.title,
+        description: doc.bodyMarkdown,
+        status: args.complete_plan ? 'completed' : 'in_progress',
+        steps: doc.steps.map((s) => {
+          const update = args.updates.find((u) => u.step_id === s.id);
+          if (update) {
+            return {
+              step: s.title,
+              status: update.status as 'pending' | 'in_progress' | 'completed',
+            };
+          }
+          return { step: s.title, status: s.status as 'pending' | 'in_progress' | 'completed' };
+        }),
+      };
+      events.push({
+        type: 'plan.progress_updated',
+        toolCallId,
+        plan: updatedPlan,
+      });
+      if (args.complete_plan) {
+        events.push({
+          type: 'plan.completed',
+          toolCallId,
+          plan: updatedPlan,
+        });
+      }
       continue;
     }
 

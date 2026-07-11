@@ -208,40 +208,87 @@ export const UPDATE_PLAN_CONTRACT: ToolContract = {
   name: 'update_plan',
   sections: {
     whenToUse:
-      'FIRST CALL (plan proposal): Call update_plan with a thorough plan outline before any other tools. ' +
-      'The plan is shown to the user for review. The user can: ' +
-      '(a) approve — execution begins immediately; ' +
-      '(b) supplement — provide feedback for you to revise the plan, then call update_plan again with the revised plan; ' +
-      '(c) reject — discard the plan. ' +
-      'If the user supplements, you receive their feedback as a rejection reason — revise the plan accordingly and call update_plan again. ' +
-      'SUBSEQUENT CALLS (progress tracking): After plan approval, call update_plan to mark steps as in_progress/completed as you execute. ' +
-      'Once the plan is approved, execution tools (read_file, edit_file, write_file, shell_execute) become available. ' +
-      'Do NOT call update_plan for trivial single-step tasks.',
+      'After plan approval (executing phase), update step execution status. ' +
+      'Use this to mark steps as in_progress when you begin work, completed when finished, or skipped when unnecessary. ' +
+      'Set complete_plan: true when all steps are done to mark the entire plan as completed. ' +
+      "Do NOT use update_plan to modify plan structure (steps, title, description) — that is write_plan's job. " +
+      'Do NOT call update_plan before plan approval — it will be rejected in planning phase. ' +
+      'update_plan is for progress tracking only, not for structural changes.',
     outputFormat:
-      'JSON: { ok: true, plan: { name, description, status, steps } }.\n' +
-      '- name: short title (one line)\n' +
-      '- description: FULL plan details — architecture, design decisions, file structure, ' +
-      'dependencies, data flow, trade-offs. Put ALL substantive content here. ' +
-      'This is what the user reviews, so make it thorough.\n' +
-      '- status: pending / in_progress / completed\n' +
-      '- steps: SHORT goal markers (3-6 words each) for progress tracking ONLY. ' +
-      'Do NOT put architecture details or file lists in steps.',
+      'JSON: { ok: true, plan_id, updated_steps, plan_completed }.\n' +
+      '- updates: array of { step_id, status (pending|in_progress|completed|skipped), note? }\n' +
+      '- complete_plan: optional boolean, set to true when all work is done',
     commonMistakes:
-      'Writing detailed file-by-file descriptions in steps instead of the description field. ' +
-      'Putting architecture and design in steps — steps are progress markers, not the plan. ' +
-      'Including tool calls (file edits, shell commands, installs) as steps instead of goals. ' +
-      'Overusing update_plan for trivial progress. ' +
-      'Giving up after plan rejection — revise based on feedback and resubmit. ' +
-      'Ignoring user supplement feedback and executing the original plan without revision — ' +
-      'when the user supplements, you MUST revise the plan based on their feedback and call update_plan again.',
+      'Calling update_plan before the plan is approved — works only in executing phase. ' +
+      'Trying to modify step titles or add new steps via update_plan — use write_plan for structural changes. ' +
+      'Not using stable step IDs from the original plan document. ' +
+      'Calling update_plan with a step_id that does not exist in the current plan.',
     failureHandling:
-      'This tool is a no-op; it always succeeds. ' +
-      'To change direction, call again with updated status or steps. ' +
-      'To finish, call with status: completed.',
+      'Rejected in planning phase — wait for plan approval first. ' +
+      'Invalid step_id: verify the step IDs match those in the approved plan. ' +
+      'Structural changes rejected: use write_plan to save a revised draft, then exit_plan_mode for re-approval.',
   },
   description: '',
 };
 UPDATE_PLAN_CONTRACT.description = buildDescription(UPDATE_PLAN_CONTRACT.sections);
+
+export const WRITE_PLAN_CONTRACT: ToolContract = {
+  name: 'write_plan',
+  sections: {
+    whenToUse:
+      'Save or replace the current plan draft. Does NOT trigger user review — call exit_plan_mode for that. ' +
+      'Use this during planning phase to record your research findings and proposed approach. ' +
+      'You can call write_plan multiple times as your plan evolves; each call increments the version. ' +
+      'Include a clear title (one line, max 120 chars), detailed body_markdown (the full plan), and structured steps (3-12 items, each with stable id and one-line title). ' +
+      'Only call this in planning phase — building phase rejects write_plan.',
+    outputFormat:
+      'JSON: { ok: true, plan_id, version, structural_digest, review_required: false }.\n' +
+      '- plan_id: stable identifier across versions\n' +
+      '- version: incremented on each write_plan call\n' +
+      '- structural_digest: SHA-256 of plan structure (title, body, step ids+titles)\n' +
+      '- review_required: always false — write_plan never triggers review',
+    commonMistakes:
+      'Expecting write_plan to trigger user review — it does not. Call exit_plan_mode when ready. ' +
+      'Using unstable step IDs that change across versions — use stable descriptive IDs like "inspect-runtime". ' +
+      'Putting architecture details in step titles instead of body_markdown. ' +
+      'Forgetting to set expected_version to prevent overwriting a newer draft saved by the editor.',
+    failureHandling:
+      'Rejected in building/executing phase — only works in planning phase. ' +
+      'Version conflict: if expected_version does not match current version, the call is rejected — re-read current plan state. ' +
+      'Schema validation: title max 120 chars, body_markdown min 20 chars, steps 1-12 items.',
+  },
+  description: '',
+};
+WRITE_PLAN_CONTRACT.description = buildDescription(WRITE_PLAN_CONTRACT.sections);
+
+export const EXIT_PLAN_MODE_CONTRACT: ToolContract = {
+  name: 'exit_plan_mode',
+  sections: {
+    whenToUse:
+      'Submit the current plan draft for user review. This is the ONLY way to trigger plan review. ' +
+      'Call this ONLY when your plan is complete and ready for the user to evaluate. ' +
+      'You must have previously saved a plan draft with write_plan — exit_plan_mode validates the current draft. ' +
+      'Provide plan_id, expected_version, and expected_digest from your last write_plan result to prevent stale submissions. ' +
+      'Do NOT call exit_plan_mode before calling write_plan — it will fail. ' +
+      'After calling exit_plan_mode, execution pauses until the user approves, requests revisions, or cancels.',
+    outputFormat:
+      'On approval: { decision: "approved", plan_id, version, next_mode, clear_planning_context }\n' +
+      'On revision: { decision: "revise", plan_id, version, feedback } — revise plan and call write_plan again\n' +
+      'On cancel: { decision: "cancelled", plan_id, version, reason }',
+    commonMistakes:
+      'Calling exit_plan_mode without first calling write_plan. ' +
+      'Providing wrong expected_version or expected_digest — version/digest mismatch causes rejection. ' +
+      'Assuming user will always approve — be prepared for revision feedback or cancellation. ' +
+      'Calling exit_plan_mode multiple times without write_plan in between.',
+    failureHandling:
+      'No draft saved: call write_plan first to save a plan draft. ' +
+      'Version/digest mismatch: your plan was modified (e.g. by editor) since your last write_plan — re-read current state. ' +
+      'Rejected in building phase: exit_plan_mode only works in planning phase. ' +
+      'User feedback (revise): read the feedback, update your plan with write_plan, then call exit_plan_mode again.',
+  },
+  description: '',
+};
+EXIT_PLAN_MODE_CONTRACT.description = buildDescription(EXIT_PLAN_MODE_CONTRACT.sections);
 
 export const ASK_USER_CONTRACT: ToolContract = {
   name: 'ask_user',
@@ -408,6 +455,8 @@ export const KNOWN_TOOL_NAMES = [
   'search_content',
   'search_files',
   'read_mcp_resource',
+  'write_plan',
+  'exit_plan_mode',
   'update_plan',
   'ask_user',
   'task',
@@ -427,6 +476,8 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ['search_content', SEARCH_CONTENT_CONTRACT],
   ['search_files', SEARCH_FILES_CONTRACT],
   ['read_mcp_resource', READ_MCP_RESOURCE_CONTRACT],
+  ['write_plan', WRITE_PLAN_CONTRACT],
+  ['exit_plan_mode', EXIT_PLAN_MODE_CONTRACT],
   ['update_plan', UPDATE_PLAN_CONTRACT],
   ['ask_user', ASK_USER_CONTRACT],
   ['task', TASK_CONTRACT],

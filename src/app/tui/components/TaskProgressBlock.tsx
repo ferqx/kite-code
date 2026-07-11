@@ -6,6 +6,7 @@ const STATUS_ICON: Record<PlanStatus, string> = {
   pending: '○',
   in_progress: '●',
   completed: '✓',
+  skipped: '⏭',
 };
 
 function statusColor(status: PlanStatus, t: ReturnType<typeof useTheme>): string {
@@ -15,6 +16,8 @@ function statusColor(status: PlanStatus, t: ReturnType<typeof useTheme>): string
     case 'in_progress':
       return t.primary;
     case 'pending':
+      return t.muted;
+    case 'skipped':
       return t.muted;
   }
 }

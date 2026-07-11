@@ -208,14 +208,36 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
   const authorization = normalizeAuthorizationState(params.authorization);
   const effectiveMode = params.override?.current ?? authorization.mode;
 
-  // update_plan — 不修改工作区，直接放行
-  // update_plan — does not mutate the workspace, allow directly
+  // write_plan — pure control tool, saves draft without triggering user review
+  // write_plan — pure control tool, does not mutate the workspace
+  if (toolName === 'write_plan') {
+    return allow({
+      risk: 'plan',
+      reason: 'Plan draft writes do not mutate the workspace.',
+      userVisibleSummary: 'Save plan draft.',
+      expectedEffects: ['Updates runtime state only'],
+    });
+  }
+
+  // exit_plan_mode — control tool, approval-policy passes through; interaction triggered by tool-controller
+  // exit_plan_mode — passes through approval; plan_review interaction is triggered by tool-controller
+  if (toolName === 'exit_plan_mode') {
+    return allow({
+      risk: 'plan',
+      reason: 'Plan review submission does not mutate the workspace.',
+      userVisibleSummary: 'Submit plan for user review.',
+      expectedEffects: ['Triggers plan_review interrupt'],
+    });
+  }
+
+  // update_plan — progress update only, no workspace mutation
+  // update_plan — progress update only, does not mutate the workspace
   if (toolName === 'update_plan') {
     return allow({
       risk: 'plan',
-      reason: 'Plan updates do not mutate the workspace.',
-      userVisibleSummary: 'Update the agent plan.',
-      expectedEffects: ['Updates graph.state.plan only'],
+      reason: 'Plan progress updates do not mutate the workspace.',
+      userVisibleSummary: 'Update plan step progress.',
+      expectedEffects: ['Updates runtime state only'],
     });
   }
 

@@ -11,6 +11,7 @@ import { type ShellExecutor, shellTool } from './shell';
 import {
   ASK_USER_CONTRACT,
   EDIT_FILE_CONTRACT,
+  EXIT_PLAN_MODE_CONTRACT,
   READ_FILE_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
   SEARCH_CONTENT_CONTRACT,
@@ -19,6 +20,7 @@ import {
   UPDATE_PLAN_CONTRACT,
   WEB_FETCH_CONTRACT,
   WRITE_FILE_CONTRACT,
+  WRITE_PLAN_CONTRACT,
 } from './tool-contracts';
 
 /** 创建 Agent 工具集输入 / Input for creating agent tools */
@@ -365,7 +367,9 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     webFetchTool,
     ...(skillTool ? [skillTool] : []),
     ...(taskTool ? [taskTool] : []),
-    createUpdatePlanTool(),
+    createWritePlanTool(),
+    createExitPlanModeTool(),
+    createProgressUpdatePlanTool(),
     createAskUserTool(),
   ];
 
@@ -394,38 +398,118 @@ export function createPlanAgentTools(input: CreateAgentToolsInput) {
   return createAgentTools(input);
 }
 
-/** 创建 update_plan 工具定义，用于创建或更新执行计划 / Create update_plan tool definition for creating/updating execution plans */
-function createUpdatePlanTool() {
+/** 创建 write_plan 工具定义 — 保存或替换草稿，不触发用户审核。
+ *  Create write_plan tool definition — save or replace draft, does NOT trigger user review. */
+function createWritePlanTool() {
   return tool(
-    async ({ name, description, status, steps }) =>
+    async ({ title, body_markdown, steps, expected_version }) =>
       JSON.stringify({
         ok: true,
-        plan: {
-          name,
-          description,
-          status,
-          steps,
-        },
+        plan_id: '', // filled by tool-controller after structuralDigest computation
+        version: 0, // filled by tool-controller
+        structural_digest: '', // filled by tool-controller
+        review_required: false,
+        _params: { title, body_markdown, steps, expected_version },
+      }),
+    {
+      name: 'write_plan',
+      description: WRITE_PLAN_CONTRACT.description,
+      schema: z.object({
+        title: z.string().trim().min(1).max(120).describe('One-line plan title (max 120 chars)'),
+        body_markdown: z
+          .string()
+          .trim()
+          .min(20)
+          .max(30_000)
+          .describe('Full plan in Markdown — the main content the user reviews'),
+        steps: z
+          .array(
+            z.object({
+              id: z
+                .string()
+                .regex(/^[a-z][a-z0-9_-]{0,31}$/)
+                .describe('Stable step ID (e.g. "inspect-runtime")'),
+              title: z.string().trim().min(1).max(160).describe('One-line step description'),
+            }),
+          )
+          .min(1)
+          .max(12)
+          .describe('Ordered execution steps (1-12 items)'),
+        expected_version: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Expected current version to prevent overwriting a newer draft'),
+      }),
+    },
+  );
+}
+
+/** 创建 exit_plan_mode 工具定义 — 提交草稿，唯一触发 Plan Review。
+ *  Create exit_plan_mode tool definition — submit draft, the ONLY way to trigger Plan Review. */
+function createExitPlanModeTool() {
+  return tool(
+    async ({ plan_id, expected_version, expected_digest }) =>
+      JSON.stringify({
+        ok: false,
+        stderr:
+          'exit_plan_mode is handled by the harness as a plan_review interrupt. Pending user decision...',
+        _params: { plan_id, expected_version, expected_digest },
+      }),
+    {
+      name: 'exit_plan_mode',
+      description: EXIT_PLAN_MODE_CONTRACT.description,
+      schema: z.object({
+        plan_id: z.string().min(1).describe('Plan ID from the last write_plan result'),
+        expected_version: z
+          .number()
+          .int()
+          .positive()
+          .describe('Expected version from the last write_plan result'),
+        expected_digest: z
+          .string()
+          .min(1)
+          .describe('Expected structural_digest from the last write_plan result'),
+      }),
+    },
+  );
+}
+
+/** 创建 update_plan 工具定义 — 批准后更新步骤执行进度。
+ *  Create update_plan tool definition — update step execution progress after approval. */
+function createProgressUpdatePlanTool() {
+  return tool(
+    async ({ plan_id, updates, complete_plan }) =>
+      JSON.stringify({
+        ok: true,
+        plan_id,
+        updated_steps: updates.map((u) => u.step_id),
+        plan_completed: complete_plan ?? false,
+        _params: { plan_id, updates, complete_plan },
       }),
     {
       name: 'update_plan',
       description: UPDATE_PLAN_CONTRACT.description,
       schema: z.object({
-        name: z.string().describe('Short plan name'),
-        description: z.string().describe('Short plan description'),
-        status: z
-          .enum(['pending', 'in_progress', 'completed'])
-          .describe('Current status for the plan'),
-        steps: z
+        plan_id: z.string().min(1).describe('Plan ID from the approved plan'),
+        updates: z
           .array(
             z.object({
-              step: z.string().describe('Plan step'),
+              step_id: z.string().min(1).describe('Stable step ID from the plan'),
               status: z
-                .enum(['pending', 'in_progress', 'completed'])
-                .describe('Current status for this step'),
+                .enum(['pending', 'in_progress', 'completed', 'skipped'])
+                .describe('New status for this step'),
+              note: z.string().trim().max(500).optional().describe('Optional note about this step'),
             }),
           )
-          .describe('Ordered plan steps'),
+          .min(1)
+          .max(12)
+          .describe('Step status updates (1-12 items)'),
+        complete_plan: z
+          .boolean()
+          .optional()
+          .describe('Set to true when all steps are done to mark the plan as completed'),
       }),
     },
   );

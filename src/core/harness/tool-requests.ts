@@ -1,12 +1,6 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { ShellActionEnvelope, ShellIntent } from '@/core/types';
-import type {
-  AgentPlan,
-  PlanStatus,
-  ShellApprovalGrant,
-  UserInputOption,
-  UserInputRequest,
-} from '@/protocol/events';
+import type { ShellApprovalGrant, UserInputOption, UserInputRequest } from '@/protocol/events';
 
 /** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
 export type PendingToolRequest =
@@ -70,8 +64,39 @@ export type PendingToolRequest =
       /** 工具调用 ID / Tool call ID */
       id?: string;
       name: 'update_plan';
-      /** 计划数据 / Plan data */
-      args: AgentPlan;
+      /** 进度更新参数 / Progress update params */
+      args: {
+        plan_id: string;
+        updates: Array<{ step_id: string; status: string; note?: string }>;
+        complete_plan?: boolean;
+      };
+      /** 调用原因 / Call reason */
+      reason: string;
+      /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
+    }
+  | {
+      /** 工具调用 ID / Tool call ID */
+      id?: string;
+      name: 'write_plan';
+      /** write_plan 参数 / write_plan params */
+      args: {
+        title: string;
+        body_markdown: string;
+        steps: Array<{ id: string; title: string }>;
+        expected_version?: number;
+      };
+      /** 调用原因 / Call reason */
+      reason: string;
+      /** 用于审批展示的命令 / Command displayed for approval */
+      protectedCommand: string;
+    }
+  | {
+      /** 工具调用 ID / Tool call ID */
+      id?: string;
+      name: 'exit_plan_mode';
+      /** exit_plan_mode 参数 / exit_plan_mode params */
+      args: { plan_id: string; expected_version: number; expected_digest: string };
       /** 调用原因 / Call reason */
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
@@ -273,13 +298,57 @@ export function toolRequestFromCall(
   }
 
   if (call.name === 'update_plan') {
-    const args = call.args as Partial<AgentPlan>;
+    const args = call.args as Record<string, unknown>;
     return {
       id: call.id,
       name: 'update_plan',
-      args: normalizeAgentPlan(args),
-      reason: 'Model requested plan state update',
+      args: {
+        plan_id: String(args.plan_id ?? ''),
+        updates: (Array.isArray(args.updates) ? args.updates : []).map(
+          (u: Record<string, unknown>) => ({
+            step_id: String(u.step_id ?? ''),
+            status: String(u.status ?? 'pending'),
+            note: u.note != null ? String(u.note) : undefined,
+          }),
+        ),
+        complete_plan: args.complete_plan != null ? Boolean(args.complete_plan) : undefined,
+      },
+      reason: 'Model requested plan progress update',
       protectedCommand: 'update_plan',
+    };
+  }
+
+  if (call.name === 'write_plan') {
+    const args = call.args as Record<string, unknown>;
+    return {
+      id: call.id,
+      name: 'write_plan',
+      args: {
+        title: String(args.title ?? ''),
+        body_markdown: String(args.body_markdown ?? ''),
+        steps: (Array.isArray(args.steps) ? args.steps : []).map((s: Record<string, unknown>) => ({
+          id: String(s.id ?? ''),
+          title: String(s.title ?? ''),
+        })),
+        expected_version: args.expected_version != null ? Number(args.expected_version) : undefined,
+      },
+      reason: 'Model saved plan draft',
+      protectedCommand: 'write_plan',
+    };
+  }
+
+  if (call.name === 'exit_plan_mode') {
+    const args = call.args as Record<string, unknown>;
+    return {
+      id: call.id,
+      name: 'exit_plan_mode',
+      args: {
+        plan_id: String(args.plan_id ?? ''),
+        expected_version: Number(args.expected_version ?? 0),
+        expected_digest: String(args.expected_digest ?? ''),
+      },
+      reason: 'Model requested plan review',
+      protectedCommand: 'exit_plan_mode',
     };
   }
 
@@ -465,13 +534,57 @@ export function toolRequestFromMessage(
   }
 
   if (call.name === 'update_plan') {
-    const args = call.args as Partial<AgentPlan>;
+    const args = call.args as Record<string, unknown>;
     return {
       id: call.id,
       name: 'update_plan',
-      args: normalizeAgentPlan(args),
-      reason: 'Model requested plan state update',
+      args: {
+        plan_id: String(args.plan_id ?? ''),
+        updates: (Array.isArray(args.updates) ? args.updates : []).map(
+          (u: Record<string, unknown>) => ({
+            step_id: String(u.step_id ?? ''),
+            status: String(u.status ?? 'pending'),
+            note: u.note != null ? String(u.note) : undefined,
+          }),
+        ),
+        complete_plan: args.complete_plan != null ? Boolean(args.complete_plan) : undefined,
+      },
+      reason: 'Model requested plan progress update',
       protectedCommand: 'update_plan',
+    };
+  }
+
+  if (call.name === 'write_plan') {
+    const args = call.args as Record<string, unknown>;
+    return {
+      id: call.id,
+      name: 'write_plan',
+      args: {
+        title: String(args.title ?? ''),
+        body_markdown: String(args.body_markdown ?? ''),
+        steps: (Array.isArray(args.steps) ? args.steps : []).map((s: Record<string, unknown>) => ({
+          id: String(s.id ?? ''),
+          title: String(s.title ?? ''),
+        })),
+        expected_version: args.expected_version != null ? Number(args.expected_version) : undefined,
+      },
+      reason: 'Model saved plan draft',
+      protectedCommand: 'write_plan',
+    };
+  }
+
+  if (call.name === 'exit_plan_mode') {
+    const args = call.args as Record<string, unknown>;
+    return {
+      id: call.id,
+      name: 'exit_plan_mode',
+      args: {
+        plan_id: String(args.plan_id ?? ''),
+        expected_version: Number(args.expected_version ?? 0),
+        expected_digest: String(args.expected_digest ?? ''),
+      },
+      reason: 'Model requested plan review',
+      protectedCommand: 'exit_plan_mode',
     };
   }
 
@@ -572,22 +685,6 @@ export function messageText(message: AIMessage): string {
   return typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
 }
 
-/** 规范化 Agent 计划结构，填充默认值 / Normalize Agent plan structure */
-function normalizeAgentPlan(value: Partial<AgentPlan>): AgentPlan {
-  const rawSteps: unknown[] = Array.isArray(value.steps) ? (value.steps as unknown[]) : [];
-  return {
-    name: typeof value.name === 'string' ? value.name : '',
-    description: typeof value.description === 'string' ? value.description : '',
-    status: normalizePlanStatus(value.status),
-    steps: rawSteps
-      .filter((step): step is Record<string, unknown> => !!step && typeof step === 'object')
-      .map((step) => ({
-        step: typeof step.step === 'string' ? step.step : '',
-        status: normalizePlanStatus(step.status),
-      })),
-  };
-}
-
 /** 规范化所有选项（单个问题级别）/ Normalize options for a single question */
 function normalizeOptions(raw: unknown[]): UserInputOption[] {
   return raw
@@ -636,11 +733,6 @@ function normalizeUserInputRequest(value: Partial<UserInputRequest>): UserInputR
       : {}),
     ...(questions ? { questions } : {}),
   };
-}
-
-/** 规范化计划状态值 / Normalize plan status value */
-function normalizePlanStatus(status: unknown): PlanStatus {
-  return status === 'in_progress' || status === 'completed' ? status : 'pending';
 }
 
 /** 规范化 shell_execute action envelope / Normalize shell_execute action envelope */

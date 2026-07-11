@@ -66,7 +66,7 @@ export type ShellGrantUsed = 'none' | ShellApprovalGrant;
 export function isFullAccessMode(mode: InteractionMode): boolean {
   return mode === InteractionMode.Full;
 }
-export type PlanStatus = 'pending' | 'in_progress' | 'completed';
+export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
 
 export interface AgentPlanStep {
   step: string;
