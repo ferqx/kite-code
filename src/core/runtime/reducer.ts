@@ -133,7 +133,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (state.tools.calls[event.toolCallId]) return state;
       const call = {
         toolCallId: event.toolCallId,
-        modelMessageId: '',
+        modelMessageId: event.modelMessageId ?? '',
         name: event.name,
         args: event.args,
         status: 'queued' as const,

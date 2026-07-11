@@ -24,6 +24,10 @@ export interface ToolQueuedEvent {
   toolCallId: string;
   name: string;
   args: unknown;
+  /** 触发该工具调用的模型消息 ID / Model message ID that triggered this tool call */
+  modelMessageId?: string;
+  /** 该工具调用在模型消息中的序号（0-based）/ Ordinal position of this tool call in the model message */
+  ordinal?: number;
 }
 
 /** 工具调用开始执行 */

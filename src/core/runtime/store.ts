@@ -41,6 +41,8 @@ export function runtimeStorePathFor(checkpointPath: string): string {
 export interface RuntimeStore {
   /** 批量追加事件（事务写入）/ Append events in a transaction */
   appendEvents(threadId: string, events: RuntimeEvent[]): void;
+  /** 批量追加事件并同时写入快照（单一事务原子写入）/ Append events and save snapshot in a single atomic transaction */
+  appendEventsAndSnapshot(threadId: string, events: RuntimeEvent[], nextState: unknown): void;
   /** 加载线程事件，可选从某个 ID 之后开始 / Load events, optionally since a given id */
   loadEvents(threadId: string, since?: number): StoredEvent[];
   /** 保存状态快照（INSERT OR REPLACE）/ Save a state snapshot */
@@ -214,6 +216,24 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
       } catch (e) {
         throw new Error(
           `Failed to append events for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
+          { cause: e },
+        );
+      }
+    },
+
+    appendEventsAndSnapshot(threadId: string, events: RuntimeEvent[], nextState: unknown): void {
+      if (isClosed) return;
+      try {
+        db.transaction(() => {
+          upsertSession.run(threadId);
+          for (const event of events) {
+            insertEvent.run(threadId, JSON.stringify(event));
+          }
+          upsertSnapshot.run(threadId, JSON.stringify(nextState));
+        })();
+      } catch (e) {
+        throw new Error(
+          `Failed to appendEventsAndSnapshot for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
           { cause: e },
         );
       }

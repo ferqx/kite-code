@@ -234,8 +234,17 @@ export async function invokeRuntimeModel(params: {
       });
     }
 
+    const messageId = response.id ?? requestId;
+    let ordinal = 0;
     for (const call of [...toolCalls, ...invalidToolCalls]) {
-      events.push({ type: 'tool.queued', toolCallId: call.id, name: call.name, args: call.args });
+      events.push({
+        type: 'tool.queued',
+        toolCallId: call.id,
+        name: call.name,
+        args: call.args,
+        modelMessageId: messageId,
+        ordinal: ordinal++,
+      });
     }
     return events;
   } finally {

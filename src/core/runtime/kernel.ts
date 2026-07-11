@@ -56,19 +56,12 @@ export type RuntimeEffectExecutor = (
 export class AgentKernel {
   private store: RuntimeStore;
   private state: RuntimeState;
-  private policy: RuntimePolicy;
   private sandboxAvailable: boolean;
 
   constructor(config: KernelConfig) {
     this.store = config.store;
     this.state = config.initialState;
     this.sandboxAvailable = config.sandboxAvailable ?? false;
-    // Map accept_edits to ask for policy creation; accept_edits mode policy is handled separately
-    const policyMode: 'ask' | 'auto' | 'full' =
-      config.interactionMode === 'accept_edits'
-        ? 'ask'
-        : (config.interactionMode as 'ask' | 'auto' | 'full');
-    this.policy = createModePolicy(policyMode, this.sandboxAvailable);
   }
 
   // ── 事件处理 / Event processing ──
@@ -99,6 +92,20 @@ export class AgentKernel {
   }
 
   /**
+   * 批量处理 RuntimeEvent：reduce → 原子持久化 (events + snapshot)。
+   * Process a batch of RuntimeEvents atomically: reduce → persist events and snapshot together.
+   *
+   * 用于 Plan 审批等需要事件和快照同时落盘的关键路径。
+   * Used for critical paths like plan approval where events and snapshot must be durably consistent.
+   */
+  processEventBatch(events: RuntimeEvent[]): void {
+    if (events.length === 0) return;
+    const nextState = events.reduce(reduceRuntimeState, this.state);
+    this.store.appendEventsAndSnapshot(this.state.session.threadId, events, nextState);
+    this.state = nextState;
+  }
+
+  /**
    * 批量处理多个 RuntimeEvent。
    * Process multiple RuntimeEvents in batch.
    */
@@ -119,11 +126,16 @@ export class AgentKernel {
   }
 
   /**
-   * 获取当前运行时策略。
-   * Get the current runtime policy.
+   * 获取当前运行时策略（每次基于 state.mode 重新求值）。
+   * Get the current runtime policy (re-evaluated from state.mode each call).
+   *
+   * v2: policy 不再仅在 constructor 创建一次，而是每次基于当前 state.mode 纯函数求值。
+   * v2: policy is no longer created once in constructor; re-evaluated from current state.mode each call.
    */
   getPolicy(): RuntimePolicy {
-    return this.policy;
+    const policyMode: 'ask' | 'auto' | 'full' =
+      this.state.mode === 'accept_edits' ? 'ask' : (this.state.mode as 'ask' | 'auto' | 'full');
+    return createModePolicy(policyMode, this.sandboxAvailable);
   }
 
   /**
