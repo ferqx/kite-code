@@ -988,6 +988,105 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('⎿   hello world');
   });
 
+  test('renders all structured answers for a completed five-question ask_user card', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-1',
+      name: 'ask_user',
+      args: {
+        questions: [
+          { id: 'scope', question: 'Scope?' },
+          { id: 'priority', question: 'Priority?' },
+          { id: 'timeline', question: 'Timeline?' },
+          { id: 'owner', question: 'Owner?' },
+          { id: 'rollout', question: 'Rollout?' },
+        ],
+      },
+      status: 'done',
+      summary: '',
+      expanded: true,
+      userInput: {
+        answer: 'Small scope',
+        answers: {
+          scope: 'Small scope',
+          priority: 'Reliability',
+          timeline: 'This week',
+          owner: 'Platform team',
+          rollout: 'Staged rollout',
+        },
+      },
+    };
+
+    const { lastFrame } = render(
+      <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    for (const label of [
+      'Small scope',
+      'Reliability',
+      'This week',
+      'Platform team',
+      'Staged rollout',
+    ]) {
+      expect(frame).toContain(label);
+    }
+    expect(frame).not.toContain('(no answer)');
+  });
+
+  test('uses question indexes for structured ask_user answers without explicit IDs', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-2',
+      name: 'ask_user',
+      args: {
+        questions: [{ question: 'First?' }, { question: 'Second?' }],
+      },
+      status: 'done',
+      summary: '',
+      expanded: true,
+      userInput: {
+        answer: 'First answer',
+        answers: { '0': 'First answer', '1': 'Second answer' },
+      },
+    };
+
+    const { lastFrame } = render(
+      <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('First answer');
+    expect(frame).toContain('Second answer');
+    expect(frame).not.toContain('(no answer)');
+  });
+
+  test('retains plain-text summary fallback for ask_user answers', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-legacy',
+      name: 'ask_user',
+      args: {
+        questions: [{ id: 'first', question: 'First?' }, { id: 'second', question: 'Second?' }],
+      },
+      status: 'done',
+      summary: 'first: Legacy first\nsecond: Legacy second',
+      expanded: true,
+    };
+
+    const { lastFrame } = render(
+      <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Legacy first');
+    expect(frame).toContain('Legacy second');
+    expect(frame).not.toContain('(no answer)');
+  });
+
   test('timed out shell tool_card does not render as exit error', () => {
     const block: OutputBlock = {
       id: 1,

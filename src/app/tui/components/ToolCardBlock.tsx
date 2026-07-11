@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink';
 import React, { useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
+import type { UserInputResult } from '@/protocol/events';
 import type { Theme } from '../theme';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
@@ -78,12 +79,20 @@ function truncateAnswer(a: string, maxWidth: number): string {
 function parseAskUserAnswers(
   args: Record<string, unknown>,
   summary: string,
+  userInput?: UserInputResult,
 ): {
   answer: string;
   answerMap: Record<string, string> | undefined;
   isCancelled: boolean;
 } {
   const questions = args.questions as AskQuestionItem[] | undefined;
+  if (userInput) {
+    const answerMap =
+      userInput.answers && Object.keys(userInput.answers).length > 0 ? userInput.answers : undefined;
+    const answer = userInput.answer || '(no answer)';
+    return { answer, answerMap, isCancelled: answer === 'Cancelled' };
+  }
+
   let answer: string | undefined;
   let answerMap: Record<string, string> | undefined;
   try {
@@ -124,13 +133,14 @@ function renderAskUserSummary(
   summary: string,
   dt: Theme,
   maxLine: number,
+  userInput?: UserInputResult,
 ): React.ReactNode {
   const questions = args.questions as AskQuestionItem[] | undefined;
-  const { answer, answerMap, isCancelled } = parseAskUserAnswers(args, summary);
+  const { answer, answerMap, isCancelled } = parseAskUserAnswers(args, summary, userInput);
 
-  // 已取消（summary 为空或 "Cancelled"）→ 展示所有问题 + Cancelled 标记
-  // Cancelled (empty summary or "Cancelled") → show all questions with Cancelled label
-  const cancelled = isCancelled || !summary || summary.trim().length === 0;
+  // 已取消（结构化答案为 Cancelled，或无结构化答案且 summary 为空/Cancelled）→ 展示所有问题 + Cancelled 标记
+  // Cancelled (structured answer is Cancelled, or no structured result and summary is empty/Cancelled)
+  const cancelled = isCancelled || (!userInput && (!summary || summary.trim().length === 0));
   if (cancelled) {
     if (questions && questions.length > 0) {
       return (
@@ -496,7 +506,7 @@ export default function ToolCardBlock({
           {block.status === 'exhausted' ? (
             <Text color={dt.warning}>⎿ blocked (too many repeated failures)</Text>
           ) : (
-            renderAskUserSummary(block.args, block.summary ?? '', dt, columns - 2)
+            renderAskUserSummary(block.args, block.summary ?? '', dt, columns - 2, block.userInput)
           )}
         </Box>
       )}
