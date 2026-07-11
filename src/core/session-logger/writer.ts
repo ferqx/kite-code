@@ -8,7 +8,7 @@
 // 一条记录 ~300 bytes，50 条一 batch 约 15KB，异步 appendFile 一次写完，
 // 主流程永不阻塞。
 
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { appendFile } from 'node:fs/promises';
 import { sessionLogDir } from '@/core/config/paths';
 
@@ -41,6 +41,7 @@ export class SessionLogWriter {
       // 使用 queueMicrotask 而非 setImmediate，兼容 Bun / 浏览器 / Node.js
       this._scheduled = true;
       queueMicrotask(() => {
+        if (!this._scheduled) return;
         this._scheduled = false;
         this._flushAsync();
       });
@@ -63,18 +64,14 @@ export class SessionLogWriter {
 
   /** 会话结束时写盘——先等待所有异步写入完成，再同步写剩余缓冲，避免数据交错 */
   async finalize(): Promise<void> {
-    // 等待所有 pending 异步写入完成
+    // 抑制尚未执行的微任务，并将当前缓冲串到已有 flush 后。这样 finalize
+    // 等待的是完整链，而不会在等待期间被微任务追加新的未等待写入。
+    this._scheduled = false;
+    this._flushAsync();
+
     if (this._pendingFlush) {
       await this._pendingFlush;
       this._pendingFlush = null;
-    }
-
-    if (this._buffer.length === 0) return;
-    try {
-      appendFileSync(this._filePath, `${this._buffer.join('\n')}\n`, 'utf-8');
-      this._buffer = [];
-    } catch {
-      // 静默
     }
   }
 }
