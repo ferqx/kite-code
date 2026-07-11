@@ -142,7 +142,9 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     };
   }, []);
   const thinkingLevelRef = React.useRef<string | null>(config.reasoningEffort ?? null);
-  const interactionModeRef = React.useRef<'ask' | 'auto' | 'full'>(config.interactionMode ?? 'ask');
+  const interactionModeRef = React.useRef<'accept_edits' | 'auto' | 'full'>(
+    config.interactionMode ?? 'accept_edits',
+  );
   const phaseRef = React.useRef<AgentPhase>('building');
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);

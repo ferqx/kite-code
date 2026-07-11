@@ -29,25 +29,16 @@ export default function PlanReviewBlock({
 
   const options = [
     {
-      key: 'a',
       label: 'Approve and start in Auto',
       desc: 'Run non-destructive work with automatic review',
       action: 'approved_auto',
     },
     {
-      key: 'e',
       label: 'Approve and accept edits',
       desc: 'Apply workspace file edits without prompting',
       action: 'approved_accept_edits',
     },
     {
-      key: 'm',
-      label: 'Approve and review manually',
-      desc: 'Ask before each protected operation',
-      action: 'approved_manual',
-    },
-    {
-      key: 'f',
       label: 'Keep planning with feedback',
       desc: 'Provide feedback to revise the plan',
       action: 'supplemented',
@@ -69,13 +60,6 @@ export default function PlanReviewBlock({
           decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
         });
         onResolved('approved_accept_edits');
-        break;
-      case 'approved_manual':
-        provider.submitAction({
-          type: 'plan_review_decision',
-          decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
-        });
-        onResolved('approved_manual');
         break;
       case 'supplemented':
         provider.submitAction({
@@ -103,7 +87,7 @@ export default function PlanReviewBlock({
 
   useInput(
     (
-      input: string,
+      _input: string,
       key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean },
     ) => {
       // Esc is handled by global handler
@@ -139,17 +123,6 @@ export default function PlanReviewBlock({
         }
         return;
       }
-      // Letter shortcuts: a → auto, e → accept edits, m → manual, f → feedback
-      const lower = input.toLowerCase();
-      const match = options.find((o) => o.key === lower);
-      if (match) {
-        if (match.action === 'supplemented') {
-          if (supplementEscRef) supplementEscRef.current = true;
-          setMode('supplement');
-        } else {
-          resolve(match.action);
-        }
-      }
     },
   );
 
@@ -164,7 +137,7 @@ export default function PlanReviewBlock({
             const isSelected = i === selectedIndex;
             const isRec = i === 0;
             return (
-              <Box key={o.key} flexDirection="column">
+              <Box key={o.action} flexDirection="column">
                 <Text color={isSelected ? t.primary : t.muted}>
                   {isSelected ? '▶' : ' '} {i + 1}. {o.label}
                   {isRec ? <Text color={t.dim}> (Recommended)</Text> : null}
@@ -173,7 +146,7 @@ export default function PlanReviewBlock({
               </Box>
             );
           })}
-          <Text color={t.dim}>↑↓ select Enter confirm a/e/m/f quick key Esc cancel</Text>
+          <Text color={t.dim}>↑↓ select Enter confirm Esc cancel</Text>
         </>
       ) : (
         <>

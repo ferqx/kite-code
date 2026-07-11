@@ -5,7 +5,6 @@ import { useTheme } from '@/app/tui/theme';
 import type { ShellApprovalGrant } from '@/protocol/events';
 
 interface Option {
-  key: string;
   label: string;
   action: 'approve' | 'deny';
   grant?: ShellApprovalGrant;
@@ -18,10 +17,10 @@ interface ApprovalBlockProps {
 }
 
 const OPTIONS: Option[] = [
-  { key: 'y', label: 'Yes · 仅本次', action: 'approve', grant: 'approve_once' },
-  { key: 'a', label: 'Auto · 自动审批', action: 'approve', grant: 'same_command' },
-  { key: 'f', label: 'Full · 完全权限', action: 'approve', grant: 'full_access' },
-  { key: 'd', label: 'Deny · 拒绝', action: 'deny' },
+  { label: 'Yes · 仅本次', action: 'approve', grant: 'approve_once' },
+  { label: 'Auto · 自动审批', action: 'approve', grant: 'same_command' },
+  { label: 'Full · 完全权限', action: 'approve', grant: 'full_access' },
+  { label: 'Deny · 拒绝', action: 'deny' },
 ];
 
 export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockProps) {
@@ -41,7 +40,7 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
     }
   }
 
-  useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
     if (key.upArrow) {
       setSelectedIndex((i) => Math.max(0, i - 1));
       return;
@@ -54,10 +53,6 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
       const opt = OPTIONS[selectedIndex];
       if (opt) resolve(opt);
       return;
-    }
-    const opt = OPTIONS.find((o) => o.key === input.toLowerCase());
-    if (opt) {
-      resolve(opt);
     }
   });
 
@@ -77,7 +72,7 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
           const isSelected = i === selectedIndex;
           const color = isSelected ? t.primary : o.action === 'deny' ? t.dim : t.muted;
           return (
-            <Box key={o.key} marginTop={i > 0 ? 1 : 0}>
+            <Box key={i} marginTop={i > 0 ? 1 : 0}>
               <Text color={color}>
                 {isSelected ? '>' : ' '} {o.label}
               </Text>

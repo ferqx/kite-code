@@ -9,7 +9,7 @@ interface StatsLineProps {
   running: boolean;
   modelProvider?: string;
   modelName?: string;
-  interactionMode?: 'ask' | 'auto' | 'full';
+  interactionMode?: 'accept_edits' | 'auto' | 'full';
   planMode?: boolean;
 }
 
@@ -32,7 +32,7 @@ function fullWidth(
   if (contextPct)
     w += 3 + contextPct.length + 8; // " · 30% context"
   else if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " · tokens: 78.4k"
-  if (interactionMode && interactionMode !== 'ask') w += 3 + 6;
+  if (interactionMode) w += 3 + 6;
   // plan mode adds: "  Shift+Tab to exit" ≈ 19 chars
   if (planMode) w += 19;
   return w;
@@ -45,13 +45,18 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
   const cachePct = cacheTotal > 0 ? (status.cacheHitTokens / cacheTotal) * 100 : 0;
   const cacheColor = cachePct > 50 ? t.success : cachePct > 20 ? t.warning : t.muted;
 
-  const isDefault = !interactionMode || interactionMode === InteractionMode.Ask;
-  const label = isDefault
-    ? null
-    : interactionMode === InteractionMode.Auto
+  const label =
+    interactionMode === InteractionMode.Auto
       ? '自动审批'
-      : '完全权限';
-  const labelColor = interactionMode === InteractionMode.Auto ? t.success : t.warning;
+      : interactionMode === InteractionMode.Full
+        ? '完全权限'
+        : '接受编辑';
+  const labelColor =
+    interactionMode === InteractionMode.Auto
+      ? t.success
+      : interactionMode === InteractionMode.Full
+        ? t.warning
+        : t.muted;
 
   const isDeepSeek = status.modelProvider === 'deepseek';
   const showThink = isDeepSeek && !!status.thinkingMode;
@@ -99,7 +104,7 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
           <Text>{formatTokens(status.totalTokens)}</Text>
         </>
       )}
-      {label && (
+      {interactionMode && (
         <>
           <Text color={t.dim}> · </Text>
           <Text color={labelColor}>[{label}]</Text>

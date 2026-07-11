@@ -58,7 +58,7 @@ export function useTuiState(
   initialModelName?: string,
   initialProviderName?: string,
   initialThinkingMode?: string | null,
-  initialInteractionMode?: 'ask' | 'auto' | 'full',
+  initialInteractionMode?: 'accept_edits' | 'auto' | 'full',
 ): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
   const statusOverrides: Partial<TuiState['status']> = {};
   if (initialModelName) statusOverrides.modelName = initialModelName;

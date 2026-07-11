@@ -60,7 +60,7 @@ export class SessionRuntime {
   conversationHistory: string[] = [];
   pendingSkills: string[] = [];
   thinkingLevel: string | null = null;
-  interactionMode: 'ask' | 'auto' | 'full';
+  interactionMode: 'accept_edits' | 'auto' | 'full';
   phase: AgentPhase = 'building';
   name: string;
 
@@ -87,7 +87,7 @@ export class SessionRuntime {
     this.skillManifests = deps.skillManifests;
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
-    this.interactionMode = deps.config.interactionMode ?? 'ask';
+    this.interactionMode = deps.config.interactionMode ?? 'accept_edits';
 
     this._proxyProvider = this._createProxyProvider();
   }
@@ -149,8 +149,8 @@ export class SessionRuntime {
     const sandboxRuntime = resolveSandboxRuntime({ enabled: deps.config.sandbox.enabled });
     const fullModeReason = fullModeUnavailableReason(this.interactionMode, sandboxRuntime.backend);
     if (fullModeReason) {
-      this.interactionMode = 'ask';
-      deps.dispatch({ type: 'SET_INTERACTION_MODE', mode: 'ask' });
+      this.interactionMode = 'accept_edits';
+      deps.dispatch({ type: 'SET_INTERACTION_MODE', mode: 'accept_edits' });
       deps.dispatch({
         type: 'RUNTIME_EVENT',
         event: { type: 'run.error', message: fullModeReason, recoverable: true },
@@ -322,7 +322,7 @@ export class SessionRuntime {
       decision:
         | {
             kind: 'approve';
-            nextMode: 'ask' | 'accept_edits' | 'auto';
+            nextMode: 'accept_edits' | 'accept_edits' | 'auto';
             clearPlanningContext: boolean;
           }
         | { kind: 'revise'; feedback: string }

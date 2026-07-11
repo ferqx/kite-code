@@ -4,8 +4,8 @@ import type {
   AuthorizationMode,
   SubAgentRole,
   ToolApprovalPayload,
-  UserInputResult,
   UserInputPayload,
+  UserInputResult,
   WorkspaceAccess,
 } from '@/protocol/events';
 
@@ -190,7 +190,7 @@ export interface TuiState {
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
   currentThoughtSummaryId?: number;
   /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
-  interactionMode: 'ask' | 'auto' | 'full';
+  interactionMode: 'accept_edits' | 'auto' | 'full';
 }
 
 export type InterruptState =

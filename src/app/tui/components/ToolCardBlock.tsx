@@ -88,7 +88,9 @@ function parseAskUserAnswers(
   const questions = args.questions as AskQuestionItem[] | undefined;
   if (userInput) {
     const answerMap =
-      userInput.answers && Object.keys(userInput.answers).length > 0 ? userInput.answers : undefined;
+      userInput.answers && Object.keys(userInput.answers).length > 0
+        ? userInput.answers
+        : undefined;
     const answer = userInput.answer || '(no answer)';
     return { answer, answerMap, isCancelled: answer === 'Cancelled' };
   }
@@ -468,7 +470,7 @@ export default function ToolCardBlock({
 
   // done or error
   const isFileTool = block.name === 'edit_file' || block.name === 'write_file';
-  const isPlan = block.name === 'update_plan';
+  const isPlan = block.name === 'write_plan' || block.name === 'update_plan';
   const isAskUser = block.name === 'ask_user';
   const isExpanded =
     block.expanded ??

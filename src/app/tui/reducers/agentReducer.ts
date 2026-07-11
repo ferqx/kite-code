@@ -120,7 +120,10 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
   if (s.interrupt) {
     // plan_review 没有 blockId，仅清除 interrupt / plan_review has no blockId, just clear interrupt
     if (s.interrupt.kind === 'plan_review') {
-      const planCard = findBlock(next, (b) => b.kind === 'tool_card' && b.name === 'update_plan');
+      const planCard = findBlock(
+        next,
+        (b) => b.kind === 'tool_card' && (b.name === 'write_plan' || b.name === 'update_plan'),
+      );
       if (planCard?.kind === 'tool_card') {
         next = replaceBlockById(next, planCard.id, {
           ...planCard,
@@ -318,10 +321,17 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
     case 'RESOLVE_PLAN_REVIEW': {
       const r = action.resolution;
-      const approved = r.action === 'approved_auto' || r.action === 'approved_manual';
+      const approved = r.action === 'approved_auto' || r.action === 'approved_accept_edits';
+      const nextInteractionMode =
+        r.action === 'approved_auto'
+          ? InteractionMode.Auto
+          : r.action === 'approved_accept_edits'
+            ? InteractionMode.AcceptEdits
+            : state.interactionMode;
       return {
         ...state,
         interrupt: null,
+        interactionMode: nextInteractionMode,
         status: {
           ...state.status,
           plan: approved ? state.status.pendingPlan : state.status.plan,
@@ -364,11 +374,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case 'SET_INTERACTION_MODE': {
       const next =
         action.mode === 'toggle'
-          ? state.interactionMode === InteractionMode.Ask
+          ? state.interactionMode === InteractionMode.AcceptEdits
             ? InteractionMode.Auto
             : state.interactionMode === InteractionMode.Auto
               ? InteractionMode.Full
-              : InteractionMode.Ask
+              : InteractionMode.AcceptEdits
           : action.mode;
       const auth = next === InteractionMode.Full ? 'full_access' : 'default';
       return {
@@ -409,7 +419,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
           // card already set to done by need_plan_review; tool succeeded, user just declined, keep done
           const planCard = findBlock(
             finalized,
-            (b) => b.kind === 'tool_card' && b.name === 'update_plan',
+            (b) => b.kind === 'tool_card' && (b.name === 'write_plan' || b.name === 'update_plan'),
           );
           let next = finalized;
           if (planCard?.kind === 'tool_card') {

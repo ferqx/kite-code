@@ -10,7 +10,7 @@ interface FooterProps {
   runStatus?: RunStatusSnapshot;
   running: boolean;
   timerKey: number;
-  interactionMode?: 'ask' | 'auto' | 'full';
+  interactionMode?: 'accept_edits' | 'auto' | 'full';
   children?: ReactNode;
 }
 

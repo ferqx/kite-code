@@ -2,7 +2,7 @@ import type { SandboxBackend } from '@/core/sandbox/index';
 import { InteractionMode } from '@/protocol/events';
 
 export type TuiInteractionMode =
-  | typeof InteractionMode.Ask
+  | typeof InteractionMode.AcceptEdits
   | typeof InteractionMode.Auto
   | typeof InteractionMode.Full;
 
@@ -28,16 +28,18 @@ export function resolveInteractionModeTarget(
 ): TuiInteractionMode | null {
   const normalized = (requested ?? '').toLowerCase();
   if (!normalized) {
-    if (current === InteractionMode.Ask) return InteractionMode.Auto;
-    if (current === InteractionMode.Auto && sandboxBackend === 'none') return InteractionMode.Ask;
+    if (current === InteractionMode.AcceptEdits) return InteractionMode.Auto;
+    if (current === InteractionMode.Auto && sandboxBackend === 'none')
+      return InteractionMode.AcceptEdits;
     if (current === InteractionMode.Auto) return InteractionMode.Full;
-    return InteractionMode.Ask;
+    return InteractionMode.AcceptEdits;
   }
-  if (normalized === 'a' || normalized.startsWith('as')) return InteractionMode.Ask;
+  if (normalized === 'a' || normalized === InteractionMode.AcceptEdits)
+    return InteractionMode.AcceptEdits;
   if (normalized === 'au' || normalized === InteractionMode.Auto) return InteractionMode.Auto;
   if (normalized === 'f' || normalized === InteractionMode.Full) return InteractionMode.Full;
   if (
-    normalized === InteractionMode.Ask ||
+    normalized === InteractionMode.AcceptEdits ||
     normalized === InteractionMode.Auto ||
     normalized === InteractionMode.Full
   ) {
@@ -52,7 +54,7 @@ export function admitInteractionModeTarget(
 ): InteractionModeAdmission {
   const reason = fullModeUnavailableReason(target, sandboxBackend);
   if (reason) {
-    return { allowed: false, mode: InteractionMode.Ask, reason };
+    return { allowed: false, mode: InteractionMode.AcceptEdits, reason };
   }
   return { allowed: true, mode: target, reason: null };
 }

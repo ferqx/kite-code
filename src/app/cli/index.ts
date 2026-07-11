@@ -43,7 +43,7 @@ export async function main(): Promise<void> {
   }
 
   const config = loadAgentConfig();
-  const interactionMode = args.interactionMode ?? config.interactionMode ?? 'ask';
+  const interactionMode = args.interactionMode ?? config.interactionMode ?? 'accept_edits';
   const sandboxRuntime = resolveSandboxRuntime({
     enabled: args.sandbox && config.sandbox.enabled,
   });
@@ -114,7 +114,7 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
       if (state.interactions.kind === 'awaiting_review') {
         const plan = state.interactions.plan;
         console.error(`\n[PLAN REVIEW] ${plan.name}\n${plan.description}`);
-        console.error('Type a/auto, e/accept-edits, m/manual, f/feedback, or c/cancel:');
+        console.error('Type a/auto, e/accept-edits, f/feedback, or c/cancel:');
         const value = (await readStdin()).toLowerCase();
         const review = {
           type: 'plan_review_decision' as const,
@@ -132,11 +132,6 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
           return {
             ...review,
             decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
-          };
-        if (value === 'm' || value === 'manual')
-          return {
-            ...review,
-            decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
           };
         if (value === 'f' || value === 'feedback') {
           console.error('Enter your feedback:');
@@ -187,7 +182,7 @@ export function createCliProvider(_args: ParsedArgs): UserInputProvider {
             console.error(`  ${i + 1}. ${s.step} [${s.status}]`);
           });
         }
-        console.error('Type a/auto, e/accept-edits, m/manual, f/feedback, or c/cancel:');
+        console.error('Type a/auto, e/accept-edits, f/feedback, or c/cancel:');
       }
 
       const data = await readStdin();
@@ -209,11 +204,6 @@ export function createCliProvider(_args: ParsedArgs): UserInputProvider {
           return {
             type: 'plan_review_decision',
             decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
-          };
-        if (lower === 'm' || lower === 'manual')
-          return {
-            type: 'plan_review_decision',
-            decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
           };
         if (lower === 'f' || lower === 'feedback') {
           console.error('Enter your feedback:');
@@ -259,7 +249,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     : argv.includes('--auto')
       ? 'auto'
       : argv.includes('--ask')
-        ? 'ask'
+        ? 'accept_edits'
         : undefined;
   const explicitThread = value('--thread', '');
   const mode = parseMode(value('--mode', 'auto'));

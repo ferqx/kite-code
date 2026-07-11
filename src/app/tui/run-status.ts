@@ -59,7 +59,8 @@ const TOOL_VERBS: Record<string, { verb: string; tone: RunStatusTone }> = {
   edit_file: { verb: 'Changing', tone: 'warning' },
   write_file: { verb: 'Changing', tone: 'warning' },
   shell_execute: { verb: 'Running', tone: 'success' },
-  update_plan: { verb: 'Planning', tone: 'primary' },
+  write_plan: { verb: 'Planning', tone: 'primary' },
+  update_plan: { verb: 'Updating plan', tone: 'primary' },
   ask_user: { verb: 'Asking', tone: 'warning' },
   task: { verb: 'Delegating', tone: 'success' },
 };

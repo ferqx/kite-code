@@ -77,7 +77,7 @@ export function useSlashCommand(
   skillOptions?: SkillScanOptions,
   onRunTask?: (task: string, initialPhase?: AgentPhase) => void,
   onTheme?: (preset: string) => void,
-  currentInteractionMode: 'ask' | 'auto' | 'full' = 'ask',
+  currentInteractionMode: 'accept_edits' | 'auto' | 'full' = 'accept_edits',
   sandboxBackend: SandboxBackend = 'none',
 ) {
   return useCallback(

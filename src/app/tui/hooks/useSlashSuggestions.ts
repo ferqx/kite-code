@@ -60,7 +60,11 @@ export function buildModeSuggestionItems(
 ): SuggestionItem[] {
   const fullDisabled = sandboxBackend === 'none';
   const modes = [
-    { command: 'ask', description: '每次工具调用都需要用户审批', disabled: false },
+    {
+      command: 'accept_edits',
+      description: '本地工作区操作自动执行；出网、外部写入和未知副作用需确认',
+      disabled: false,
+    },
     { command: 'auto', description: '模型自动审核，不确定时询问', disabled: false },
     {
       command: 'full',

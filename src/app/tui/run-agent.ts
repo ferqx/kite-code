@@ -21,7 +21,7 @@ export interface BuildRunTaskParams {
   mcpManager: McpManager | null;
   pendingSkillsContent: string;
   shellContext: string;
-  interactionMode?: 'ask' | 'auto' | 'full';
+  interactionMode?: 'accept_edits' | 'auto' | 'full';
   phase?: 'planning' | 'building';
   sandboxBackend?: SandboxBackend | 'unknown';
   model?: SupportedChatModel;

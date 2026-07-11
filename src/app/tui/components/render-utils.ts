@@ -10,7 +10,8 @@ export const ACTION_NAMES: Record<string, string> = {
   search_files: 'Find',
   shell_execute: 'Bash',
   read_mcp_resource: 'MCP',
-  update_plan: 'Plan',
+  write_plan: 'Plan',
+  update_plan: 'Progress',
   ask_user: 'Ask',
   task: 'Task',
   Skill: 'Skill',
@@ -77,8 +78,17 @@ export function getToolPreview(name: string, args: Record<string, unknown>): str
       const flat = cmd.replace(/\s+/g, ' ').trim();
       return flat.length > 60 ? `${flat.slice(0, 57)}...` : flat;
     }
-    case 'update_plan':
-      return String(args.name ?? '') || undefined;
+    case 'write_plan':
+    case 'update_plan': {
+      const title = typeof args.title === 'string' ? args.title : '';
+      if (title) return title;
+      // update_plan v2: show step progress summary
+      const updates = args.updates as Array<{ step_id: string; status: string }> | undefined;
+      if (Array.isArray(updates) && updates.length > 0) {
+        return `${updates.length} step(s) updated`;
+      }
+      return undefined;
+    }
     case 'ask_user': {
       const q = typeof args.question === 'string' ? args.question : '';
       if (!q) return undefined;
@@ -138,8 +148,21 @@ export function getToolDetail(
       const cmd = typeof args.command === 'string' ? args.command.slice(0, 60) : '';
       return `Ran: ${cmd}`;
     }
+    case 'write_plan': {
+      const title = typeof args.title === 'string' ? args.title : '';
+      if (title) return title;
+      const steps = args.steps as Array<{ title?: string; id?: string }> | undefined;
+      if (Array.isArray(steps)) return `${steps.length} step(s)`;
+      return undefined;
+    }
     case 'update_plan': {
-      return typeof args.name === 'string' ? args.name : undefined;
+      const title = typeof args.title === 'string' ? args.title : '';
+      if (title) return title;
+      const updates = args.updates as Array<{ step_id: string; status: string }> | undefined;
+      if (Array.isArray(updates)) return `${updates.length} step(s)`;
+      const complete = typeof args.complete_plan === 'boolean' ? args.complete_plan : undefined;
+      if (complete) return 'Plan completed';
+      return undefined;
     }
     case 'ask_user': {
       const q = typeof args.question === 'string' ? args.question : '';

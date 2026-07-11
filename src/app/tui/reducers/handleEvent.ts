@@ -879,6 +879,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           matched.name === 'shell_execute' ||
           matched.name === 'edit_file' ||
           matched.name === 'write_file' ||
+          matched.name === 'write_plan' ||
           matched.name === 'update_plan' ||
           matched.name === 'ask_user',
       };
@@ -916,7 +917,8 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       if (d.phase) next.phase = d.phase;
       if (d.plan !== undefined) next.plan = d.plan;
       if (d.authorization) next.authorization = d.authorization.mode;
-      if (d.interactionMode) nextInteractionMode = d.interactionMode as 'ask' | 'auto' | 'full';
+      if (d.interactionMode)
+        nextInteractionMode = d.interactionMode as 'accept_edits' | 'auto' | 'full';
       if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
       if (d.modelProvider) next.modelProvider = d.modelProvider;
       if (d.modelName) next.modelName = d.modelName;
@@ -1113,7 +1115,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         state,
         (b) =>
           b.kind === 'tool_card' &&
-          (b.name === 'exit_plan_mode' || b.name === 'update_plan') &&
+          (b.name === 'write_plan' || b.name === 'update_plan') &&
           (b.status === 'queued' || b.status === 'running'),
       );
       const plan = event.data.plan;
@@ -1516,6 +1518,25 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       return handleEventAction(state, { type: 'need_approval', data: event.approval });
     case 'plan.review_requested':
       return handleEventAction(state, { type: 'need_plan_review', data: { plan: event.plan } });
+    case 'plan.approved':
+      return {
+        ...state,
+        interactionMode: event.executionMode as 'accept_edits' | 'auto',
+        status: { ...state.status, phase: 'building' },
+      };
+    case 'plan.revision_requested':
+      return {
+        ...state,
+        status: {
+          ...state.status,
+          pendingPlan: state.status.plan, // keep current plan for revision display
+        },
+      };
+    case 'plan.rejected':
+      return {
+        ...state,
+        status: { ...state.status, pendingPlan: null },
+      };
     default:
       return state;
   }
