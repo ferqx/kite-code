@@ -247,7 +247,19 @@ describe('SubAgentRunner integration', () => {
       expect(result.blocked?.command).toBe('bun run typecheck');
       expect(result.blocked?.continuation.messages.length).toBeGreaterThan(0);
       expect(shellExecutions).toBe(0);
-      expect(events.some((e) => e.type === 'error')).toBe(false);
+      // 修复后 blocked 路径暂停子 agent，不发射 error 事件。
+      // 审批通过 Runtime Kernel 管线处理：Kernel 发射 approval.requested，
+      // TUI 展示审批对话框，用户操作后通过 resumeSubAgent 恢复执行。
+      // After fix: blocked path pauses sub-agent without error event.
+      // Approval is routed through Runtime Kernel: Kernel emits approval.requested,
+      // TUI shows approval dialog, execution resumes via resumeSubAgent after user action.
+      const errorEvent = events.find((e) => e.type === 'error');
+      expect(errorEvent).toBeUndefined();
+      // 被阻塞的步骤快照应标记为 awaiting_approval（暂停等待审批，非错误）
+      // The blocked step snapshot should be marked as awaiting_approval (paused for approval, not errored)
+      const blockedStep = result.steps?.find((s) => s.toolName === 'shell_execute');
+      expect(blockedStep).toBeDefined();
+      expect(blockedStep!.status).toBe('awaiting_approval');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

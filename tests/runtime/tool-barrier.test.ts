@@ -1,5 +1,5 @@
 // ── Plan Mode v2 交互屏障测试 / Interaction barrier tests ──
-// 验证 exit_plan_mode / ask_user / approval 作为 barrier 阻止后续 sibling tool calls
+// 验证 write_plan / ask_user / approval 作为 barrier 阻止后续 sibling tool calls
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
@@ -79,6 +79,8 @@ describe('interaction barrier', () => {
       makeEvent({
         type: 'plan.drafted',
         toolCallId: 'call-wp',
+        planId: 'plan-barrier',
+        version: 1,
         plan,
         structuralHash: 'abc',
       }),
@@ -88,7 +90,7 @@ describe('interaction barrier', () => {
     expect(s2.interactions.kind).toBe('idle');
   });
 
-  test('exit_plan_mode is an interaction barrier', () => {
+  test('write_plan is an interaction barrier', () => {
     const state = createInitialRuntimeState({
       threadId: 't1',
       userId: 'u1',
@@ -103,12 +105,14 @@ describe('interaction barrier', () => {
       makeEvent({
         type: 'plan.drafted',
         toolCallId: 'c1',
+        planId: 'plan-barrier2',
+        version: 1,
         plan,
         structuralHash: 'abc',
       }),
     );
 
-    // exit_plan_mode triggers review_requested → interaction = awaiting_review
+    // write_plan triggers review_requested → interaction = awaiting_review
     const s2 = reduceRuntimeState(
       s1,
       makeEvent({
@@ -146,7 +150,7 @@ describe('interaction barrier', () => {
     // Barrier: scheduler returns request_user_input instead of run_tools
   });
 
-  test('model returns [write_plan, exit_plan_mode, write_file]: write_plan succeeds, exit_plan_mode waits, write_file blocked', () => {
+  test('model returns [write_plan, write_plan, write_file]: write_plan succeeds, write_plan waits, write_file blocked', () => {
     const state = createInitialRuntimeState({
       threadId: 't1',
       userId: 'u1',
@@ -162,6 +166,8 @@ describe('interaction barrier', () => {
       makeEvent({
         type: 'plan.drafted',
         toolCallId: 'call-wp',
+        planId: 'plan-barrier3',
+        version: 1,
         plan,
         structuralHash: 'abc',
       }),
@@ -173,7 +179,7 @@ describe('interaction barrier', () => {
       makeEvent({
         type: 'tool.queued',
         toolCallId: 'call-epm',
-        name: 'exit_plan_mode',
+        name: 'write_plan',
         args: {},
       }),
     );
@@ -187,7 +193,7 @@ describe('interaction barrier', () => {
       }),
     );
 
-    // exit_plan_mode creates interaction barrier
+    // write_plan creates interaction barrier
     const s4 = reduceRuntimeState(
       s3,
       makeEvent({

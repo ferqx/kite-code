@@ -8,7 +8,7 @@ describe('runtime user actions', () => {
     state.interactions = {
       kind: 'awaiting_user_input',
       interactionId: 'expected',
-      toolCallId: 'ask',
+      toolCallId: 'accept_edits',
       request: { question: 'q', options: [], allow_free_text: true },
     };
     expect(
@@ -21,7 +21,7 @@ describe('runtime user actions', () => {
     state.interactions = {
       kind: 'awaiting_user_input',
       interactionId: 'expected',
-      toolCallId: 'ask',
+      toolCallId: 'accept_edits',
       request: { question: 'q', options: [], allow_free_text: true },
     };
     expect(
@@ -38,7 +38,7 @@ describe('runtime user actions', () => {
     state.interactions = {
       kind: 'awaiting_user_input',
       interactionId: 'expected',
-      toolCallId: 'ask',
+      toolCallId: 'accept_edits',
       request: {
         question: 'Choose project settings',
         options: [],

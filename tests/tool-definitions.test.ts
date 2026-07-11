@@ -28,7 +28,6 @@ describe('code agent tool definitions', () => {
     const names = tools.map((item) => item.name);
     expect(names).toContain('read_file');
     expect(names).toContain('write_plan');
-    expect(names).toContain('exit_plan_mode');
     expect(names).toContain('update_plan');
     expect(names).toContain('ask_user');
     expect(names.length).toBeGreaterThanOrEqual(10);
@@ -119,31 +118,45 @@ describe('code agent tool definitions', () => {
     expect(String(wp.description)).toContain('Save');
   });
 
-  test('exit_plan_mode requires plan_id, expected_version, expected_digest', () => {
+  test('write_plan accepts action save or submit', () => {
     const tools = createAgentTools({ workspace: '/tmp' });
-    const epm = tools.find((item) => item.name === 'exit_plan_mode')!;
-    expect(epm).toBeDefined();
+    const wp = tools.find((item) => item.name === 'write_plan')!;
+    expect(wp).toBeDefined();
+    // action='save' is valid
     expect(
-      epm.schema.safeParse({
-        plan_id: 'plan-123',
-        expected_version: 1,
-        expected_digest: 'abc123',
+      wp.schema.safeParse({
+        title: 'Test Plan',
+        body_markdown: 'A plan with enough text to test schema validation.',
+        steps: [{ id: 's1', title: 'Step 1' }],
+        action: 'save',
       }).success,
     ).toBe(true);
+    // action='submit' is valid
     expect(
-      epm.schema.safeParse({
-        plan_id: 'plan-123',
-        expected_version: 1,
+      wp.schema.safeParse({
+        title: 'Test Plan',
+        body_markdown: 'A plan with enough text to test schema validation.',
+        steps: [{ id: 's1', title: 'Step 1' }],
+        action: 'submit',
+      }).success,
+    ).toBe(true);
+    // invalid action
+    expect(
+      wp.schema.safeParse({
+        title: 'Test Plan',
+        body_markdown: 'A plan with enough text to test schema validation.',
+        steps: [{ id: 's1', title: 'Step 1' }],
+        action: 'invalid',
       }).success,
     ).toBe(false);
+    // missing action defaults to save (valid)
     expect(
-      epm.schema.safeParse({
-        plan_id: '',
-        expected_version: 0,
-        expected_digest: '',
+      wp.schema.safeParse({
+        title: 'Test Plan',
+        body_markdown: 'A plan with enough text to test schema validation.',
+        steps: [{ id: 's1', title: 'Step 1' }],
       }).success,
-    ).toBe(false);
-    expect(String(epm.description)).toContain('review');
+    ).toBe(true);
   });
 
   test('update_plan requires plan_id and updates array', () => {
@@ -197,9 +210,9 @@ describe('code agent tool definitions', () => {
     });
     const result = JSON.parse(raw);
     expect(result.ok).toBe(true);
-    expect(result.review_required).toBe(false);
     expect(result._params.title).toBe('Refactor');
     expect(result._params.steps).toHaveLength(3);
+    expect(result._params.action).toBe('save');
   });
 
   test('exposes one cache-stable tool schema', () => {
@@ -210,13 +223,9 @@ describe('code agent tool definitions', () => {
     const names = tools.map((item) => item.name);
     expect(names).toContain('read_file');
     expect(names).toContain('write_plan');
-    expect(names).toContain('exit_plan_mode');
     expect(names).toContain('update_plan');
     expect(names).toContain('ask_user');
     expect(String(tools.find((item) => item.name === 'write_plan')?.description)).toContain('Save');
-    expect(String(tools.find((item) => item.name === 'exit_plan_mode')?.description)).toContain(
-      'review',
-    );
     expect(String(tools.find((item) => item.name === 'update_plan')?.description)).toContain(
       'progress',
     );
@@ -533,7 +542,6 @@ describe('tool contracts (ACI)', () => {
     'search_files',
     'update_plan',
     'write_plan',
-    'exit_plan_mode',
     'read_mcp_resource',
     'ask_user',
     'web_fetch',
@@ -762,7 +770,7 @@ describe('tool contracts (ACI)', () => {
       workspace: '/tmp',
       phase: 'building',
       authorization: { mode: 'default', commandGrants: {} },
-      interactionMode: 'ask',
+      interactionMode: 'accept_edits',
     });
     expect(auto).not.toBe(ask);
   });

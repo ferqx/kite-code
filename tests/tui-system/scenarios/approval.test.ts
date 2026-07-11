@@ -36,7 +36,11 @@ describe('TUI PTY System — Tool Approval', () => {
         message: {
           content: 'I will create a directory.',
           tool_calls: [
-            { id: 'call_1', name: 'shell_execute', args: { command: 'mkdir test_approval_dir' } },
+            {
+              id: 'call_1',
+              name: 'shell_execute',
+              args: { command: 'node -e "1+1"', description: 'test command' },
+            },
           ],
         },
       },

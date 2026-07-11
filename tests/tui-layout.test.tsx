@@ -310,9 +310,11 @@ describe('StatsLine', () => {
     expect(lastFrame()).toContain('[完全权限]');
   });
 
-  test('shows no label for ask mode (default)', () => {
+  test('shows no label for accept_edits mode (default)', () => {
     const status = fakeStatus({ authorization: 'default' });
-    const { lastFrame } = render(<StatsLine status={status} running interactionMode="ask" />);
+    const { lastFrame } = render(
+      <StatsLine status={status} running interactionMode="accept_edits" />,
+    );
     expect(lastFrame()).not.toContain('[安全]');
     expect(lastFrame()).not.toContain('[完全]');
     expect(lastFrame()).not.toContain('[自动审批]');
@@ -715,7 +717,7 @@ describe('TaskProgressBlock', () => {
 });
 
 describe('PlanReviewBlock', () => {
-  test('renders four options with recommended tag', () => {
+  test('renders three options with recommended tag', () => {
     const plan = fakePlan();
     const { lastFrame } = render(
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
@@ -724,7 +726,6 @@ describe('PlanReviewBlock', () => {
     expect(frame).toContain('Approve and start in Auto');
     expect(frame).toContain('Approve and accept edits');
     expect(frame).toContain('(Recommended)');
-    expect(frame).toContain('Approve and review manually');
     expect(frame).toContain('Keep planning with feedback');
   });
 
@@ -735,7 +736,6 @@ describe('PlanReviewBlock', () => {
     );
     const frame = lastFrame();
     expect(frame).toContain('Run non-destructive work with automatic review');
-    expect(frame).toContain('Ask before each protected operation');
     expect(frame).toContain('Provide feedback to revise the plan');
   });
 
@@ -744,7 +744,7 @@ describe('PlanReviewBlock', () => {
     const { lastFrame } = render(
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    expect(lastFrame()).toContain('a/e/m/f quick key');
+    expect(lastFrame()).toContain('↑↓ select Enter confirm Esc cancel');
   });
 
   test('renders plan review confirmation bar', () => {
@@ -757,7 +757,7 @@ describe('PlanReviewBlock', () => {
     // Plan content moved to OutputArea tool_card Markdown; Footer only shows confirmation bar
     expect(frame).toContain('Review the plan above');
     expect(frame).toContain('Approve and start in Auto');
-    expect(frame).toContain('Approve and review manually');
+    expect(frame).toContain('Approve and accept edits');
     expect(frame).toContain('Keep planning with feedback');
   });
 });
@@ -1070,7 +1070,10 @@ describe('BlockRenderer', () => {
       callId: 'ask-legacy',
       name: 'ask_user',
       args: {
-        questions: [{ id: 'first', question: 'First?' }, { id: 'second', question: 'Second?' }],
+        questions: [
+          { id: 'first', question: 'First?' },
+          { id: 'second', question: 'Second?' },
+        ],
       },
       status: 'done',
       summary: 'first: Legacy first\nsecond: Legacy second',
@@ -2156,7 +2159,7 @@ describe('App', () => {
       sessionError: false,
       loadingSessionId: null,
       explorationSummaryIds: {},
-      interactionMode: 'ask',
+      interactionMode: 'accept_edits',
       ...overrides,
     };
   }

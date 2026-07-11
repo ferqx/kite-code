@@ -14,7 +14,7 @@ describe('AgentKernel durability', () => {
         userId: 'user',
         workspace: '/workspace',
       }),
-      interactionMode: 'ask',
+      interactionMode: 'accept_edits',
     });
 
     kernel.processEvent({
@@ -36,14 +36,14 @@ test('runRuntimeLoop resumes a matching input action and persists its facts', as
   const kernel = new AgentKernel({
     store,
     initialState: createInitialRuntimeState({ threadId: 'loop', userId: 'u', workspace: '/' }),
-    interactionMode: 'ask',
+    interactionMode: 'accept_edits',
   });
   kernel.processEvents([
-    { type: 'tool.queued', toolCallId: 'ask', name: 'ask_user', args: {} },
+    { type: 'tool.queued', toolCallId: 'accept_edits', name: 'ask_user', args: {} },
     {
       type: 'user_input.requested',
       interactionId: 'input-1',
-      toolCallId: 'ask',
+      toolCallId: 'accept_edits',
       request: { question: 'q', options: [], allow_free_text: true },
     },
   ]);
@@ -62,7 +62,7 @@ test('runRuntimeLoop persists and yields a durable terminal output event', async
   const kernel = new AgentKernel({
     store,
     initialState: createInitialRuntimeState({ threadId: 'final', userId: 'u', workspace: '/' }),
-    interactionMode: 'ask',
+    interactionMode: 'accept_edits',
   });
   const events = [] as string[];
   for await (const event of runRuntimeLoop(

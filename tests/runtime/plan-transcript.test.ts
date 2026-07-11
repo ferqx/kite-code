@@ -50,17 +50,19 @@ describe('transcript integrity', () => {
         messageId: 'msg-1',
         toolCalls: [
           { id: 'tc-1', name: 'write_plan', args: {} },
-          { id: 'tc-2', name: 'exit_plan_mode', args: {} },
+          { id: 'tc-2', name: 'write_plan', args: {} },
         ],
       },
       { type: 'tool.queued', toolCallId: 'tc-1', name: 'write_plan', args: {} },
       {
         type: 'plan.drafted',
         toolCallId: 'tc-1',
+        planId: 'plan-tx',
+        version: 1,
         plan,
         structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
       },
-      { type: 'tool.queued', toolCallId: 'tc-2', name: 'exit_plan_mode', args: {} },
+      { type: 'tool.queued', toolCallId: 'tc-2', name: 'write_plan', args: {} },
       {
         type: 'plan.review_requested',
         interactionId: 'inter-1',
@@ -71,12 +73,12 @@ describe('transcript integrity', () => {
       {
         type: 'plan.approved',
         interactionId: 'inter-1',
-        executionMode: 'manual',
+        executionMode: 'accept_edits',
       },
       {
         type: 'tool.finished',
         toolCallId: 'tc-2',
-        name: 'exit_plan_mode',
+        name: 'write_plan',
         result: { ok: true, command: '', exitCode: 0, stdout: 'approved', stderr: '' },
       },
     ];
@@ -95,7 +97,7 @@ describe('transcript integrity', () => {
   });
 
   test('sanitizeToolCallPairs does not remove plan feedback ToolMessages', () => {
-    // Plan revise feedback comes as a ToolMessage from exit_plan_mode
+    // Plan revise feedback comes as a ToolMessage from write_plan
     // It should NOT be removed by sanitization
     const msgs = [
       new AIMessage({
@@ -103,7 +105,7 @@ describe('transcript integrity', () => {
         tool_calls: [
           {
             id: 'tc-epm',
-            name: 'exit_plan_mode',
+            name: 'write_plan',
             args: { plan_id: 'p1', expected_version: 1, expected_digest: 'abc' },
           },
         ],
@@ -126,7 +128,7 @@ describe('transcript integrity', () => {
   });
 
   test('model can read revise feedback from transcript', () => {
-    // The transcript should contain the exit_plan_mode tool result
+    // The transcript should contain the write_plan tool result
     // with decision: "revise" so the model can read the feedback
     const state = createInitialRuntimeState({
       threadId: 't1',
@@ -140,6 +142,8 @@ describe('transcript integrity', () => {
       {
         type: 'plan.drafted',
         toolCallId: 'tc-wp',
+        planId: 'plan-rev',
+        version: 1,
         plan,
         structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
       },
@@ -187,6 +191,8 @@ describe('transcript integrity', () => {
       {
         type: 'plan.drafted',
         toolCallId: 'c1',
+        planId: 'plan-comp',
+        version: 1,
         plan,
         structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
       },
@@ -200,7 +206,7 @@ describe('transcript integrity', () => {
       {
         type: 'plan.approved',
         interactionId: 'i1',
-        executionMode: 'manual',
+        executionMode: 'accept_edits',
       },
     ];
     let s = events.reduce(reduceRuntimeState, state);

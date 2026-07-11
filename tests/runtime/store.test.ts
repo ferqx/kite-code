@@ -531,7 +531,6 @@ describe('edge cases', () => {
       },
       { type: 'approval.rejected', interactionId: 'i3', reason: 'unsafe' },
       { type: 'authorization.changed', mode: 'full_access' },
-      { type: 'phase.changed', phase: 'building' },
     ];
 
     store.appendEvents('thread-k', events);

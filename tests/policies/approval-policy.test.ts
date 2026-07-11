@@ -245,10 +245,49 @@ describe('evaluateToolApproval', () => {
     });
 
     it('denies destructive shell commands', () => {
-      const result = evaluateToolApproval(baseParams({ toolArgs: { command: 'rm -rf /tmp' } }));
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'rm -rf /etc/nginx' } }),
+      );
       expect(result.allowed).toBe(false);
       expect(result.decision).toBe('deny');
       expect(result.risk).toBe('destructive');
+    });
+
+    it('denies rm -rf . (workspace root)', () => {
+      const result = evaluateToolApproval(baseParams({ toolArgs: { command: 'rm -rf .' } }));
+      expect(result.allowed).toBe(false);
+      expect(result.decision).toBe('deny');
+      expect(result.risk).toBe('destructive');
+    });
+
+    it('downgrades rm -rf on workspace subdirectories to write_file', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'rm -rf node_modules' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.risk).toBe('write_file');
+      expect(result.decision).toBe('ask');
+    });
+
+    it('downgrades rm -rf on temp paths to write_file', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'rm -rf /tmp/build' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.risk).toBe('write_file');
+      expect(result.decision).toBe('ask');
+    });
+
+    it('downgrades rm -rf on other non-critical paths to write_file', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'rm -rf /opt/cache' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.risk).toBe('write_file');
+      expect(result.decision).toBe('ask');
     });
 
     it('denies empty shell commands', () => {
@@ -263,6 +302,50 @@ describe('evaluateToolApproval', () => {
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(true);
       expect(result.risk).toBe('network');
+      expect(result.effects).toEqual({ network: true });
+    });
+
+    it('marks remote git operations as network access', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'git push origin main' } }),
+      );
+      expect(result.risk).toBe('vcs_mutation');
+      expect(result.effects).toEqual({ network: true });
+    });
+
+    it('marks dependency installation as network access', () => {
+      const result = evaluateToolApproval(baseParams({ toolArgs: { command: 'bun install' } }));
+      expect(result.risk).toBe('write_file');
+      expect(result.effects).toEqual({ network: true });
+    });
+
+    it('marks writes outside the workspace for approval', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'touch ../outside.txt' } }),
+      );
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalWrite: true });
+    });
+
+    it('treats Windows-style relative write paths as inside the workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'touch nested\\output.txt' } }),
+      );
+      expect(result.effects).toEqual({});
+    });
+
+    it('marks unprovable scripts as uncertain', () => {
+      const result = evaluateToolApproval(baseParams({ toolArgs: { command: 'node script.js' } }));
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ uncertainEffects: true });
+    });
+
+    it('marks local Git mutations as uncertain because hooks and filters can execute external programs', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'git commit -m update' } }),
+      );
+
+      expect(result.effects).toEqual({ uncertainEffects: true });
     });
   });
 
@@ -296,12 +379,13 @@ describe('evaluateToolApproval', () => {
 
   // ── web_fetch / 网络请求 ──
   describe('web_fetch', () => {
-    it('allows valid web_fetch URLs', () => {
+    it('marks valid web_fetch URLs as network access without imposing a mode decision', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'web_fetch', toolArgs: { url: 'https://example.com' } }),
       );
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(false);
+      expect(result.effects).toEqual({ network: true });
     });
 
     it('denies URLs with embedded credentials', () => {
@@ -456,7 +540,7 @@ describe('evaluateToolApproval', () => {
 
   // ── read_mcp_resource / MCP 资源读取 ──
   describe('read_mcp_resource', () => {
-    it('allows read_mcp_resource directly', () => {
+    it('marks externally managed resource reads without imposing a mode decision', () => {
       const result = evaluateToolApproval(
         baseParams({
           toolName: 'read_mcp_resource',
@@ -466,6 +550,7 @@ describe('evaluateToolApproval', () => {
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(false);
       expect(result.risk).toBe('read');
+      expect(result.effects).toEqual({ uncertainEffects: true });
     });
   });
 

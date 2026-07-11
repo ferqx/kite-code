@@ -42,14 +42,14 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('(allow file-write* file-ioctl (subpath "/"))');
   });
 
-  test('profile does not deny network (controlled by tool-policy approval)', () => {
+  test('profile denies network by default', () => {
     const profile = generateSandboxProfile('/tmp/test-workspace');
-    expect(profile).not.toContain('(deny network*)');
+    expect(profile).toContain('(deny network*)');
   });
 
-  test('profile can deny network explicitly', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace', { network: 'disabled' });
-    expect(profile).toContain('(deny network*)');
+  test('profile explicitly grants network access when allow_all is selected', () => {
+    const profile = generateSandboxProfile('/tmp/test-workspace', { network: 'allow_all' });
+    expect(profile).toContain('(allow network*)');
   });
 
   test('profile imports system.sb as base', () => {
@@ -295,6 +295,11 @@ describe('bwrap argument generation', () => {
 
   test('can disable network namespace', () => {
     const args = generateBwrapArgs('/tmp/test-ws', { network: 'disabled' });
+    expect(args).toContain('--unshare-net');
+  });
+
+  test('disables the network namespace by default', () => {
+    const args = generateBwrapArgs('/tmp/test-ws');
     expect(args).toContain('--unshare-net');
   });
 });

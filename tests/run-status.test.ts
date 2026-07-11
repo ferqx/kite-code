@@ -164,7 +164,13 @@ describe('verb within working phase', () => {
       ['search_content', { pattern: 'TODO' }, 'Locating', 'primary'],
       ['edit_file', { path: 'src/app.ts' }, 'Changing', 'warning'],
       ['shell_execute', { command: 'ls' }, 'Running', 'success'],
-      ['update_plan', { name: 'refactor' }, 'Planning', 'primary'],
+      ['write_plan', { title: 'Refactor' }, 'Planning', 'primary'],
+      [
+        'update_plan',
+        { updates: [{ step_id: 's1', status: 'in_progress' }] },
+        'Updating plan',
+        'primary',
+      ],
       ['ask_user', { question: 'Which?' }, 'Asking', 'warning'],
     ];
 

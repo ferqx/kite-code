@@ -48,6 +48,8 @@ describe('PlanningState lifecycle transitions', () => {
     const event: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-1',
+      planId: 'plan-test',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
@@ -62,12 +64,14 @@ describe('PlanningState lifecycle transitions', () => {
     }
   });
 
-  test('planning_draft → awaiting_review (exit_plan_mode)', () => {
+  test('planning_draft → awaiting_review (write_plan)', () => {
     const state = makeState();
     const plan = makePlan('Review Plan', ['inspect', 'refactor']);
     const e1: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-1',
+      planId: 'plan-test',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
@@ -97,6 +101,8 @@ describe('PlanningState lifecycle transitions', () => {
     const e1: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-1',
+      planId: 'plan-test',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
@@ -133,6 +139,8 @@ describe('PlanningState lifecycle transitions', () => {
     const e1: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-1',
+      planId: 'plan-test',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
@@ -169,6 +177,8 @@ describe('PlanningState lifecycle transitions', () => {
     const e1: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-1',
+      planId: 'plan-test',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
@@ -203,6 +213,8 @@ describe('PlanningState lifecycle transitions', () => {
     const e1: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-1',
+      planId: 'plan-test',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
@@ -218,7 +230,7 @@ describe('PlanningState lifecycle transitions', () => {
     const e3: RuntimeEvent = {
       type: 'plan.approved',
       interactionId: 'inter-5',
-      executionMode: 'manual',
+      executionMode: 'accept_edits',
     };
     const s3 = reduceRuntimeState(s2, e3);
     expect(s3.planning.kind).toBe('executing');
@@ -247,6 +259,8 @@ describe('PlanningState lifecycle transitions', () => {
     const e1: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-1',
+      planId: 'plan-v',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
@@ -259,6 +273,8 @@ describe('PlanningState lifecycle transitions', () => {
     const e2: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-2',
+      planId: 'plan-v',
+      version: 2,
       plan: plan2,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan2)),
     };
@@ -275,6 +291,8 @@ describe('PlanningState lifecycle transitions', () => {
     const e1: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-1',
+      planId: 'plan-sv',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
@@ -296,7 +314,7 @@ describe('PlanningState lifecycle transitions', () => {
     }
   });
 
-  test('plan.drafted from planning_empty creates new planId', () => {
+  test('plan.drafted uses event planId and version from the tool-controller', () => {
     const state = makeState();
     expect(state.planning.kind).toBe('planning_empty');
 
@@ -304,26 +322,30 @@ describe('PlanningState lifecycle transitions', () => {
     const event: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-1',
+      planId: 'plan-from-controller',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
     const next = reduceRuntimeState(state, event);
     expect(next.planning.kind).toBe('planning_draft');
     if (next.planning.kind === 'planning_draft') {
-      expect(next.planning.document.planId).toMatch(/^[0-9a-f]{8}-/);
+      expect(next.planning.document.planId).toBe('plan-from-controller');
       expect(next.planning.document.version).toBe(1);
     }
   });
 
-  test('stale version/digest from exit_plan_mode is rejected (handled by tool-controller)', () => {
+  test('stale version/digest from write_plan is rejected (handled by tool-controller)', () => {
     // The tool-controller checks version/digest before emitting plan.review_requested.
     // This test verifies that if the reducer receives plan.review_requested for a draft
-    // at a specific version, the version is correctly inherited + incremented.
+    // at a specific version, the version is correctly inherited from the event.
     const state = makeState();
     const plan = makePlan('V3', ['a']);
     const e1: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'c1',
+      planId: 'plan-stale',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
     };
@@ -336,11 +358,83 @@ describe('PlanningState lifecycle transitions', () => {
     const e2: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'c2',
+      planId: 'plan-stale',
+      version: 2,
       plan: plan2,
       structuralHash: computePlanStructuralDigest(makeDigestInput(plan2)),
     };
     const s2 = reduceRuntimeState(s1, e2);
     if (s2.planning.kind !== 'planning_draft') throw new Error('expected planning_draft');
     expect(s2.planning.document.version).toBe(correctVersion + 1);
+  });
+});
+
+// ── plan.approved 设置 mode / mode transitions after plan approval ──
+
+describe('plan.approved sets runtime mode', () => {
+  function makeAwaitingReviewState() {
+    const state = createInitialRuntimeState({
+      threadId: 't1',
+      userId: 'u1',
+      workspace: '/tmp',
+      phase: 'planning',
+    });
+    const plan = makePlan('Test', ['step']);
+    const s1 = reduceRuntimeState(state, {
+      type: 'plan.drafted',
+      toolCallId: 'c1',
+      planId: 'plan-mode',
+      version: 1,
+      plan,
+      structuralHash: computePlanStructuralDigest({
+        title: plan.name.slice(0, 120),
+        bodyMarkdown: plan.description,
+        steps: plan.steps.map((s, i) => ({
+          id: `step-${i + 1}`,
+          title: s.step.slice(0, 160),
+          status: 'pending' as const,
+        })),
+      }),
+    });
+    return reduceRuntimeState(s1, {
+      type: 'plan.review_requested',
+      interactionId: 'inter-mode',
+      toolCallId: 'c2',
+      plan,
+      planSummary: 'Review',
+    });
+  }
+
+  test('approve with auto → state.mode = auto', () => {
+    const state = makeAwaitingReviewState();
+    const next = reduceRuntimeState(state, {
+      type: 'plan.approved',
+      interactionId: 'inter-mode',
+      executionMode: 'auto',
+    });
+    expect(next.mode).toBe('auto');
+    expect(next.planning.kind).toBe('executing');
+  });
+
+  test('approve with accept_edits → state.mode = accept_edits', () => {
+    const state = makeAwaitingReviewState();
+    const next = reduceRuntimeState(state, {
+      type: 'plan.approved',
+      interactionId: 'inter-mode',
+      executionMode: 'accept_edits',
+    });
+    expect(next.mode).toBe('accept_edits');
+    expect(next.planning.kind).toBe('executing');
+  });
+
+  test('approve with manual → state.mode = accept_edits', () => {
+    const state = makeAwaitingReviewState();
+    const next = reduceRuntimeState(state, {
+      type: 'plan.approved',
+      interactionId: 'inter-mode',
+      executionMode: 'accept_edits',
+    });
+    expect(next.mode).toBe('accept_edits');
+    expect(next.planning.kind).toBe('executing');
   });
 });

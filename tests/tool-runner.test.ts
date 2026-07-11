@@ -63,6 +63,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
       workspace: '/ws',
       request,
       mcpManager: manager,
+      approvedGrant: 'approve_once',
     });
 
     expect(result.ok).toBe(true);
@@ -76,6 +77,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
     const result = await runApprovedTool({
       workspace: '/ws',
       request,
+      approvedGrant: 'approve_once',
     });
 
     expect(result.ok).toBe(false);
@@ -92,6 +94,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
       workspace: '/ws',
       request,
       mcpManager: manager,
+      approvedGrant: 'approve_once',
     });
 
     expect(result.ok).toBe(false);
@@ -108,10 +111,30 @@ describe('runApprovedTool — read_mcp_resource', () => {
       workspace: '/ws',
       request,
       mcpManager: manager,
+      approvedGrant: 'approve_once',
     });
 
     expect(result.ok).toBe(false);
     expect(result.stderr).toContain('Connection refused');
+  });
+
+  it('rejects an external MCP resource in auto mode without an auto-review grant', async () => {
+    let readCalled = false;
+    const manager = mockMcpManager(async () => {
+      readCalled = true;
+      return 'resource content';
+    });
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: makeReadMcpResourceRequest(),
+      mcpManager: manager,
+      interactionMode: 'auto',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.stderr).toContain('requires approval');
+    expect(readCalled).toBe(false);
   });
 });
 
@@ -189,6 +212,77 @@ describe('runApprovedTool — search_files', () => {
 });
 
 describe('runApprovedTool — shell_execute timeout', () => {
+  it('runs proven-local accept_edits shell commands with networking disabled', async () => {
+    let capturedNetworkMode: string | undefined;
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-shell-local',
+        name: 'shell_execute',
+        args: { command: 'touch local.txt' },
+        reason: 'Write a workspace file',
+        protectedCommand: 'touch local.txt',
+      } as PendingToolRequest,
+      interactionMode: 'accept_edits',
+      shellExecutor: async (input) => {
+        capturedNetworkMode = input.networkMode;
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedNetworkMode).toBe('disabled');
+  });
+
+  it('opens networking only for an approved network shell command', async () => {
+    let capturedNetworkMode: string | undefined;
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-shell-network',
+        name: 'shell_execute',
+        args: { command: 'curl https://example.com' },
+        reason: 'Fetch a URL',
+        protectedCommand: 'curl https://example.com',
+      } as PendingToolRequest,
+      interactionMode: 'accept_edits',
+      approvedGrant: 'approve_once',
+      shellExecutor: async (input) => {
+        capturedNetworkMode = input.networkMode;
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedNetworkMode).toBe('allow_all');
+  });
+
+  it('opens networking for a full-access network shell command', async () => {
+    let capturedNetworkMode: string | undefined;
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-shell-full-network',
+        name: 'shell_execute',
+        args: { command: 'curl https://example.com' },
+        reason: 'Fetch a URL',
+        protectedCommand: 'curl https://example.com',
+      } as PendingToolRequest,
+      interactionMode: 'full',
+      authorization: { mode: 'full_access', commandGrants: {} },
+      shellExecutor: async (input) => {
+        capturedNetworkMode = input.networkMode;
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedNetworkMode).toBe('allow_all');
+  });
+
   it('does not set a timeout unless the model requested timeout_ms', async () => {
     let capturedTimeout: number | undefined;
 

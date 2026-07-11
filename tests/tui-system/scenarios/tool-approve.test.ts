@@ -10,8 +10,6 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { createMockModelServer } from '../harness/fixtures';
 import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
@@ -30,24 +28,24 @@ describe('TUI PTY System — Tool Approve', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    // Response #1: reasoning + write_file tool call (needs approval, produces file_change)
+    // Response #1: shell_execute tool call (needs approval in any mode)
     // Response #2: what the agent says AFTER the tool executes
     // Response #3-5: spare for generateSessionName + potential retries
     server.setResponses([
       {
         message: {
-          reasoning_content: 'The user wants a tool approved. I will write a file.',
-          content: 'I will create a file for you.',
+          reasoning_content: 'The user wants a tool approved. I will run a command.',
+          content: 'I will run a quick command for you.',
           tool_calls: [
             {
               id: 'call_1',
-              name: 'write_file',
-              args: { path: 'hello.txt', content: 'Hello from PTY test!' },
+              name: 'shell_execute',
+              args: { command: 'node -e "console.log(1)"', description: 'test' },
             },
           ],
         },
       },
-      { message: { content: 'File created successfully!' } },
+      { message: { content: 'Command executed successfully!' } },
       { message: { content: 'Approve spare 1' } },
       { message: { content: 'Approve spare 2' } },
       { message: { content: 'Approve spare 3' } },
@@ -69,7 +67,6 @@ describe('TUI PTY System — Tool Approve', () => {
     server?.stop();
     await tui?.killAndWait();
     workspace?.cleanup();
-    expect(existsSync(join(workspace.workspace, 'hello.txt'))).toBe(false);
   });
 
   // ── Warmup ───────────────────────────────────────────────
@@ -87,9 +84,9 @@ describe('TUI PTY System — Tool Approve', () => {
   test(
     'approve (Enter, default "Yes") triggers tool execution and agent continues',
     async () => {
-      await typeText(tui, 'Create a file for me');
+      await typeText(tui, 'Run a command for me');
       tui.write('\r');
-      await waitForRequestMessage(server, 'Create a file for me', 15000);
+      await waitForRequestMessage(server, 'Run a command for me', 15000);
 
       // Wait for approval block to render
       await waitForText(() => tui.output(), 'Approve this tool call?', 15000);
@@ -105,22 +102,14 @@ describe('TUI PTY System — Tool Approve', () => {
       await sleep(3000);
 
       // Wait for the agent's follow-up response after tool execution
-      await waitForText(() => tui.output(), 'File created successfully!', 15000);
+      await waitForText(() => tui.output(), 'Command executed successfully!', 15000);
 
       const afterOutput = tui.output();
       const clean = stripAnsi(afterOutput);
       console.log('  output after approve (last 1500 chars):', clean.slice(-1500));
-      console.log('  searching for hello.txt in output:', screenContains(afterOutput, 'hello.txt'));
 
       // Agent's response should be visible
-      expect(screenContains(afterOutput, 'File created successfully!')).toBe(true);
-
-      // tool_card done state: write_file should show the action name "Create" and file path
-      // The tool_card was already rendered before approval (as awaiting approval),
-      // and after execution it transitions to done state in the scrollback
-      expect(screenContains(afterOutput, 'hello.txt')).toBe(true);
-      expect(screenContains(afterOutput, 'Create')).toBe(true);
-      expect(existsSync(join(workspace.workspace, 'hello.txt'))).toBe(true);
+      expect(screenContains(afterOutput, 'Command executed successfully!')).toBe(true);
 
       // TUI should recover — prompt visible
       expect(screenContains(afterOutput, '❯')).toBe(true);
@@ -144,7 +133,7 @@ describe('TUI PTY System — Tool Approve', () => {
               {
                 id: 'call_fa1',
                 name: 'shell_execute',
-                args: { command: "echo 'fa_marker'" },
+                args: { command: 'node -e "42"', description: 'quick test' },
               },
             ],
           },
@@ -156,7 +145,7 @@ describe('TUI PTY System — Tool Approve', () => {
               {
                 id: 'call_fa2',
                 name: 'shell_execute',
-                args: { command: 'ls /tmp' },
+                args: { command: 'node -e "84"', description: 'another test' },
               },
             ],
           },

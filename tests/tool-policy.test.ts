@@ -357,7 +357,7 @@ describe('tool policy', () => {
   });
 
   // read_mcp_resource tool policy tests
-  test('allows read_mcp_resource without approval', () => {
+  test('marks externally managed MCP resources without a base approval requirement', () => {
     const decision = evaluateToolApproval({
       toolName: 'read_mcp_resource',
       toolArgs: { server: 'docs', uri: 'file:///api.md' },
@@ -366,9 +366,10 @@ describe('tool policy', () => {
     expect(decision.allowed).toBe(true);
     expect(decision.requiresApproval).toBe(false);
     expect(decision.risk).toBe('read');
+    expect(decision.effects).toEqual({ uncertainEffects: true });
   });
 
-  test('allows read_mcp_resource in read-only workspace', () => {
+  test('keeps MCP resource reads available in planning', () => {
     const decision = evaluateToolApproval({
       toolName: 'read_mcp_resource',
       toolArgs: { server: 'docs', uri: 'file:///api.md' },

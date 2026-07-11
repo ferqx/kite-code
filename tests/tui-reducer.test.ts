@@ -1102,6 +1102,24 @@ describe('eventReducer (blocks model)', () => {
       expect(s.status.pendingPlan).toBeNull();
     });
 
+    test('RESOLVE_PLAN_REVIEW with approved_accept_edits clears interrupt and promotes plan', () => {
+      const eventPayload = {
+        plan: { name: 'AcceptEdits', description: 'Desc', status: 'pending' as const, steps: [] },
+      };
+      let s = dispatch(fresh(), {
+        type: 'EVENT',
+        event: { type: 'need_plan_review' as any, data: eventPayload },
+      });
+      expect(s.interrupt?.kind).toBe('plan_review');
+      s = dispatch(s, {
+        type: 'RESOLVE_PLAN_REVIEW',
+        resolution: { action: 'approved_accept_edits' },
+      });
+      expect(s.interrupt).toBeNull();
+      expect(s.status.plan).toEqual(eventPayload.plan);
+      expect(s.status.pendingPlan).toBeNull();
+    });
+
     test('need_plan_review populates tool_card summary and expanded', () => {
       // First create a tool_call for update_plan (simulating the agent calling the tool)
       let s = dispatch(fresh(), {
@@ -2562,7 +2580,6 @@ describe('eventReducer (blocks model)', () => {
         { type: 'turn.started', turnId: 'turn-1' },
         { type: 'model.requested', requestId: 'request-1' },
         { type: 'authorization.changed', mode: 'default' },
-        { type: 'phase.changed', phase: 'building' },
         { type: 'turn.completed', turnId: 'turn-1' },
       ];
       for (const event of nonVisual) state = dispatch(state, { type: 'RUNTIME_EVENT', event });
@@ -2590,7 +2607,7 @@ describe('eventReducer (blocks model)', () => {
   describe('SET_INTERACTION_MODE', () => {
     test('default interactionMode is ask, authorization is default', () => {
       const s = fresh();
-      expect(s.interactionMode).toBe('ask');
+      expect(s.interactionMode).toBe('accept_edits');
       expect(s.status.authorization).toBe('default');
     });
 
@@ -2609,14 +2626,14 @@ describe('eventReducer (blocks model)', () => {
     test('switching from full to ask resets authorization to default', () => {
       let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
       expect(s.status.authorization).toBe('full_access');
-      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'ask' });
-      expect(s.interactionMode).toBe('ask');
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'accept_edits' });
+      expect(s.interactionMode).toBe('accept_edits');
       expect(s.status.authorization).toBe('default');
     });
 
     test('toggle cycles ask → auto → full → ask with correct auth', () => {
       let s = fresh();
-      expect(s.interactionMode).toBe('ask');
+      expect(s.interactionMode).toBe('accept_edits');
       expect(s.status.authorization).toBe('default');
 
       s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
@@ -2628,7 +2645,7 @@ describe('eventReducer (blocks model)', () => {
       expect(s.status.authorization).toBe('full_access');
 
       s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
-      expect(s.interactionMode).toBe('ask');
+      expect(s.interactionMode).toBe('accept_edits');
       expect(s.status.authorization).toBe('default');
     });
 
@@ -2642,7 +2659,7 @@ describe('eventReducer (blocks model)', () => {
     test('toggle from full goes to ask with default auth', () => {
       let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
       s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
-      expect(s.interactionMode).toBe('ask');
+      expect(s.interactionMode).toBe('accept_edits');
       expect(s.status.authorization).toBe('default');
     });
   });

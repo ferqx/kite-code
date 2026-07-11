@@ -134,8 +134,8 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('/mode full')).toEqual({ type: 'mode', mode: 'full' });
   });
 
-  test('parses /mode ask', () => {
-    expect(parseSlashCommand('/mode ask')).toEqual({ type: 'mode', mode: 'ask' });
+  test('parses /mode accept_edits', () => {
+    expect(parseSlashCommand('/mode accept_edits')).toEqual({ type: 'mode', mode: 'accept_edits' });
   });
 
   test('parses /mode with no arg', () => {

@@ -67,6 +67,8 @@ describe('plan persistence', () => {
       {
         type: 'plan.drafted',
         toolCallId: 'c1',
+        planId: 'plan-persist',
+        version: 1,
         plan,
         structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
       },
@@ -112,6 +114,8 @@ describe('plan persistence', () => {
       const e1: RuntimeEvent = {
         type: 'plan.drafted',
         toolCallId: 'c1',
+        planId: 'plan-survive',
+        version: 1,
         plan,
         structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
       };

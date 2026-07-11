@@ -1,5 +1,5 @@
 // ── Plan Mode v2 工具行为测试 / Plan tool behavior tests ──
-// 验证 write_plan/exit_plan_mode/update_plan 的 phase 约束和行为差异
+// 验证 write_plan/write_plan/update_plan 的 phase 约束和行为差异
 import { describe, expect, test } from 'bun:test';
 import { createInitialRuntimeState, getAgentPhase } from '../../src/core/runtime/state';
 import type { PlanningState } from '../../src/protocol/events';
@@ -31,8 +31,8 @@ describe('plan tools — phase constraints', () => {
     expect(getAgentPhase(buildingNoPlan)).toBe('building');
   });
 
-  test('exit_plan_mode is only allowed in planning phase with a draft', () => {
-    // exit_plan_mode requires planning_draft state
+  test('write_plan is only allowed in planning phase with a draft', () => {
+    // write_plan requires planning_draft state
     const draft: PlanningState = {
       kind: 'planning_draft',
       document: {
@@ -67,7 +67,7 @@ describe('plan tools — phase constraints', () => {
         createdAtTurnId: 't0',
         updatedAtTurnId: 't0',
       },
-      executionMode: 'manual',
+      executionMode: 'accept_edits',
       approvedAtTurnId: 't1',
     };
     expect(getAgentPhase(executing)).toBe('building');
@@ -98,8 +98,8 @@ describe('plan tools — phase constraints', () => {
     // After write_plan, state transitions to planning_draft (no interrupt)
   });
 
-  test('exit_plan_mode triggers plan review interrupt', () => {
-    // exit_plan_mode emits plan.review_requested → creates awaiting_review interaction
+  test('write_plan triggers plan review interrupt', () => {
+    // write_plan emits plan.review_requested → creates awaiting_review interaction
     // This is the ONLY tool that triggers plan review
     const draft: PlanningState = {
       kind: 'planning_draft',
@@ -114,7 +114,7 @@ describe('plan tools — phase constraints', () => {
         updatedAtTurnId: 't0',
       },
     };
-    // After exit_plan_mode, state → awaiting_review with interaction
+    // After write_plan, state → awaiting_review with interaction
     expect(draft.kind).toBe('planning_draft');
     // The tool-controller creates interactionId and emits plan.review_requested
     // which reducer handles by transitioning to awaiting_review

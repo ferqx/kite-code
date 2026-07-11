@@ -152,21 +152,30 @@ describe('sandbox executor integration', () => {
     }
   });
 
-  test('allows external network access (controlled by tool-policy, not sandbox)', async () => {
+  test('applies network permission independently to each sandboxed command', async () => {
     const ws = setupWorkspace();
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => new Response('sandbox-network-ok'),
+    });
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
-      const result = await executor({
+      const url = `http://127.0.0.1:${server.port}`;
+      const blocked = await executor({
         workspace: ws,
-        command: 'curl -s --connect-timeout 3 --max-time 5 http://example.com 2>&1 || true',
+        command: `curl -s --connect-timeout 1 ${url}`,
       });
-      // 网络访问由 tool-policy 审批控制，沙箱不再拦截
-      // Network access is controlled by tool-policy approval, not sandbox
-      const output = result.stdout + result.stderr;
-      // curl may fail due to DNS/timeout, but should NOT fail with sandbox denial
-      const sandboxDenied = output.includes('Operation not permitted') || output.includes('deny');
-      expect(sandboxDenied).toBe(false);
+      const allowed = await executor({
+        workspace: ws,
+        command: `curl -s --connect-timeout 1 ${url}`,
+        networkMode: 'allow_all',
+      });
+
+      expect(blocked.ok).toBe(false);
+      expect(allowed.ok).toBe(true);
+      expect(allowed.stdout).toBe('sandbox-network-ok');
     } finally {
+      server.stop(true);
       cleanupWorkspace(ws);
     }
   });

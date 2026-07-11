@@ -14,12 +14,6 @@ describe('buildRuntimeContext', () => {
       workspace: 'D:\\workspace',
       messages: [new HumanMessage('/plan please inspect the repo')],
       workspaceAccess: 'write',
-      plan: {
-        name: 'Repository investigation',
-        description: 'Inspect the current graph implementation before editing.',
-        status: 'in_progress',
-        steps: [{ step: 'Inspect graph state', status: 'in_progress' }],
-      },
       now: new Date('2026-04-23T12:34:56.000Z'),
       timezone: 'Asia/Shanghai',
     });
@@ -29,14 +23,6 @@ describe('buildRuntimeContext', () => {
     expect(context).toContain('OS:');
     expect(context).toContain('Shell:');
     expect(context).toContain('Workspace: D:\\workspace');
-    expect(context).toContain('Workspace: D:\\workspace');
-    expect(context).not.toContain('Tool policy (plan mode):');
-    expect(context).not.toContain('Configured model:');
-    expect(context).not.toContain('User ID:');
-    expect(context).not.toContain('Thread mode:');
-    expect(context).not.toContain('Current workspace access:');
-    expect(context).not.toContain('Plan state:'); // 动态计划状态不注入运行时上下文 / Plan state not injected into runtime context
-    expect(context).not.toContain('Context summary:');
     expect(context.length).toBeLessThan(1200);
   });
 
@@ -46,23 +32,11 @@ describe('buildRuntimeContext', () => {
       workspace: 'D:\\workspace',
       messages: [new HumanMessage('please continue')],
       workspaceAccess: 'write',
-      plan: {
-        name: 'State-first refactor',
-        description: 'Persist access and plan in graph state while executing.',
-        status: 'in_progress',
-        steps: [{ step: 'Update runtime context', status: 'completed' }],
-      },
       now: new Date('2026-04-23T12:34:56.000Z'),
       timezone: 'Asia/Shanghai',
     });
 
     expect(context).toContain('Workspace: D:\\workspace');
-    expect(context).not.toContain('Tool policy (builder mode):');
-    expect(context).not.toContain('User ID:');
-    expect(context).not.toContain('Thread mode:');
-    expect(context).not.toContain('Current workspace access:');
-    expect(context).not.toContain('Plan state:');
-    expect(context).not.toContain('Context summary:');
   });
 
   // 验证可缓存运行时上下文仅接受 workspace 参数，防止注入动态状态破坏 provider 前缀缓存 / Verify cacheable runtime context only accepts workspace, preventing injection of dynamic state
@@ -79,20 +53,35 @@ describe('buildRuntimeContext', () => {
     expect(ctx1).not.toContain('Timezone:');
   });
 
-  test('formats dynamic mode snapshot outside the cacheable context', () => {
+  test('formats dynamic mode snapshot with planningState', () => {
     const snapshot = buildRuntimeModeSnapshot({
       phase: 'planning',
       interactionMode: 'auto',
       authorizationMode: 'default',
       sandboxBackend: 'seatbelt',
-      planReviewed: false,
-      approvedPlanSummary: null,
+      planningState: {
+        kind: 'planning_draft',
+        document: {
+          planId: 'p1',
+          version: 2,
+          title: 'Test Plan',
+          bodyMarkdown: 'A test plan.',
+          steps: [{ id: 's1', title: 'Step 1', status: 'pending' }],
+          structuralDigest: 'abc123def456',
+          createdAtTurnId: 't0',
+          updatedAtTurnId: 't0',
+        },
+      },
     });
 
     expect(snapshot).toContain('<runtime-state source="runtime.kernel">');
     expect(snapshot).toContain('phase: planning');
     expect(snapshot).toContain('interaction_mode: auto');
     expect(snapshot).toContain('authorization_mode: default');
+    expect(snapshot).toContain('plan_id: p1');
+    expect(snapshot).toContain('version: 2');
+    expect(snapshot).toContain('write_plan_allowed: true');
+    expect(snapshot).toContain('write_plan_submit_allowed: true');
 
     const cacheable = buildCacheableRuntimeContext({ workspace: 'D:\\workspace' });
     expect(cacheable).not.toContain('Phase:');

@@ -229,7 +229,7 @@ describe('reduceRuntimeState — plan lifecycle', () => {
     const event: RuntimeEvent = {
       type: 'plan.approved',
       interactionId: 'inter-99',
-      executionMode: 'manual',
+      executionMode: 'accept_edits',
     };
 
     const next = reduceRuntimeState(state, event);
@@ -932,27 +932,6 @@ describe('reduceRuntimeState — runtime environment', () => {
 
     expect(next.authorization.commandGrants.cmd!.command).toBe('bun test');
   });
-
-  // phase.changed 已废弃 — 仅验证为 no-op 不崩溃
-  test('phase.changed is a no-op and does not crash', () => {
-    const state = makeInitialState();
-    expect(state.planning.kind).toBe('building_without_plan');
-
-    const next = reduceRuntimeState(state, {
-      type: 'phase.changed',
-      phase: 'building',
-    });
-    expect(next).toBe(state);
-  });
-
-  test('phase.changed with planning phase is also a no-op', () => {
-    const state: RuntimeState = { ...makeInitialState(), planning: { kind: 'planning_empty' } };
-    const next = reduceRuntimeState(state, {
-      type: 'phase.changed',
-      phase: 'planning',
-    });
-    expect(next).toBe(state);
-  });
 });
 
 // ── Turn 生命周期 / Turn lifecycle ──
@@ -1071,6 +1050,8 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     const event: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-draft-0',
+      planId: 'plan-nop',
+      version: 1,
       plan,
       structuralHash: computePlanStructuralDigest(planToDigestInput(plan)),
     };
@@ -1079,13 +1060,15 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     expect(next.planning.kind).toBe('building_without_plan');
   });
 
-  test('plan.drafted transitions from planning_empty to planning_draft', () => {
+  test('plan.drafted uses event planId and version from tool-controller', () => {
     const state: RuntimeState = { ...makeInitialState(), planning: { kind: 'planning_empty' } };
     const plan = makePlan('Draft Plan', ['step a', 'step b']);
     const structuralHash = computePlanStructuralDigest(planToDigestInput(plan));
     const event: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-draft-1',
+      planId: 'plan-from-tc',
+      version: 1,
       plan,
       structuralHash,
     };
@@ -1094,7 +1077,7 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
 
     expect(next.planning.kind).toBe('planning_draft');
     if (next.planning.kind === 'planning_draft') {
-      expect(next.planning.document.planId).toMatch(uuidPattern());
+      expect(next.planning.document.planId).toBe('plan-from-tc');
       expect(next.planning.document.version).toBe(1);
       expect(next.planning.document.title).toBe(plan.name);
       expect(next.planning.document.bodyMarkdown).toBe(plan.description);
@@ -1103,8 +1086,8 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     }
   });
 
-  // 验证 plan.drafted 从 needs_revision 继承 planId 并递增 version
-  test('plan.drafted inherits planId and increments version from needs_revision', () => {
+  // 验证 plan.drafted 使用事件中的 planId 和 version（由 tool-controller 提供）
+  test('plan.drafted uses event planId and version on revision', () => {
     const oldPlan = makePlan('Old Draft', ['old step']);
     const state: RuntimeState = {
       ...makeInitialState(),
@@ -1119,6 +1102,8 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     const event: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-draft-2',
+      planId: 'existing-plan',
+      version: 4,
       plan: newPlan,
       structuralHash,
     };
@@ -1134,7 +1119,7 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     }
   });
 
-  // 验证 plan.drafted 从 drafted/approved 等非接受状态时不操作
+  // 验证 plan.drafted 在 executing 状态下不操作
   test('plan.drafted is no-op when plan is executing', () => {
     const plan = makePlan('Approved Plan', ['done step']);
     const state: RuntimeState = {
@@ -1150,6 +1135,8 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     const event: RuntimeEvent = {
       type: 'plan.drafted',
       toolCallId: 'call-draft-3',
+      planId: 'should-not-apply',
+      version: 99,
       plan: newPlan,
       structuralHash: computePlanStructuralDigest(planToDigestInput(newPlan)),
     };
@@ -1166,7 +1153,7 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
       planning: {
         kind: 'executing',
         document: makePlanDoc(oldPlan, { planId: 'plan-building', version: 2 }),
-        executionMode: 'manual',
+        executionMode: 'accept_edits',
         approvedAtTurnId: 'turn-0',
       },
     };
@@ -1219,7 +1206,7 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
       planning: {
         kind: 'executing',
         document: makePlanDoc(plan, { planId: 'plan-bld', version: 1 }),
-        executionMode: 'manual',
+        executionMode: 'accept_edits',
         approvedAtTurnId: 'turn-0',
       },
     };
@@ -1379,6 +1366,11 @@ describe('reduceRuntimeState — auto-review events', () => {
     const next = reduceRuntimeState(awaiting, event);
     expect(next.interactions.kind).toBe('idle');
     expect(next.tools.calls['tool-99']!.status).toBe('approved');
+    // Regression: approvalGrant must be set so defense-in-depth doesn't reject
+    expect(next.tools.calls['tool-99']!.approvalGrant).toBe('approve_once');
+    // Circuit breaker should reset on approval
+    expect(next.autoReview.circuitBreakerTripped).toBe(false);
+    expect(next.autoReview.consecutiveRejects).toBe(0);
   });
 
   test('auto_review.completed rejects tool when not approved', () => {
@@ -1421,6 +1413,11 @@ describe('reduceRuntimeState — auto-review events', () => {
     const next = reduceRuntimeState(awaiting, event);
     expect(next.interactions.kind).toBe('idle');
     expect(next.tools.calls['tool-99']!.status).toBe('rejected');
+    // Circuit breaker should increment on rejection
+    expect(next.autoReview.consecutiveRejects).toBe(1);
+    expect(next.autoReview.rejectionHistory).toHaveLength(1);
+    expect(next.autoReview.rejectionHistory[0]!.toolName).toBe('shell_execute');
+    expect(next.autoReview.circuitBreakerTripped).toBe(false); // not tripped yet (threshold=3)
   });
 
   test('auto_review.completed ignores mismatched reviewId', () => {
@@ -1464,5 +1461,54 @@ describe('reduceRuntimeState — auto-review events', () => {
     // Should NOT transition — interactionId mismatch
     expect(next.interactions.kind).toBe('awaiting_auto_review');
     expect(next.tools.calls['tool-99']!.status).toBe('awaiting_auto_review');
+  });
+
+  test('circuit breaker trips after consecutive auto_review rejections', () => {
+    const state = makeInitialState();
+    const approval = {
+      risk: 'execute_code',
+      summary: 'Run cmd',
+      reason: 'testing',
+      command: 'cmd',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+    };
+    // Pre-set consecutive rejects at 2 (one below threshold of 3)
+    let s: any = {
+      ...state,
+      autoReview: { ...state.autoReview, consecutiveRejects: 2, rejectionHistory: [] },
+    };
+    const withTool = reduceRuntimeState(s, {
+      type: 'tool.queued',
+      toolCallId: 'tool-99',
+      name: 'shell_execute',
+      args: { command: 'cmd' },
+    });
+    s = reduceRuntimeState(withTool, {
+      type: 'auto_review.requested',
+      reviewId: 'rev-1',
+      toolCallId: 'tool-99',
+      toolName: 'shell_execute',
+      reason: 'test',
+      approval: approval as any,
+    });
+    // Third consecutive rejection → should trip
+    const event: RuntimeEvent = {
+      type: 'auto_review.completed',
+      reviewId: 'rev-1',
+      toolCallId: 'tool-99',
+      result: {
+        ok: true,
+        approved: false,
+        reason: 'rejected again',
+        reviewerModelName: 'haiku',
+        durationMs: 100,
+      },
+    };
+    const next = reduceRuntimeState(s, event);
+    expect(next.tools.calls['tool-99']!.status).toBe('rejected');
+    expect(next.autoReview.consecutiveRejects).toBe(3);
+    expect(next.autoReview.circuitBreakerTripped).toBe(true);
   });
 });

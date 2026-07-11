@@ -78,7 +78,7 @@ describe('plan_review_decision actions', () => {
     const finished = events.find((e) => e.type === 'tool.finished');
     expect(finished).toBeDefined();
     if (finished && finished.type === 'tool.finished') {
-      expect(finished.name).toBe('exit_plan_mode');
+      expect(finished.name).toBe('write_plan');
       expect(finished.result.ok).toBe(true);
     }
   });
@@ -102,7 +102,7 @@ describe('plan_review_decision actions', () => {
     }
   });
 
-  test('approve manual → mode ask', () => {
+  test('approve manual → mode accept_edits', () => {
     const state = makeAwaitingReviewState();
     const action: RuntimeUserAction = {
       type: 'plan_review_decision',
@@ -110,14 +110,14 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 2,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
     };
 
     const events = eventsForRuntimeAction(state, action);
     const approved = events.find((e) => e.type === 'plan.approved');
     expect(approved).toBeDefined();
     if (approved && approved.type === 'plan.approved') {
-      expect(approved.executionMode).toBe('ask');
+      expect(approved.executionMode).toBe('accept_edits');
     }
   });
 
@@ -190,7 +190,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 2,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -205,7 +205,7 @@ describe('plan_review_decision actions', () => {
       planId: 'wrong-plan',
       version: 2,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -220,7 +220,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 999,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -235,7 +235,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 2,
       structuralDigest: 'wrong-digest',
-      decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -254,7 +254,7 @@ describe('plan_review_decision actions', () => {
       planId: 'any',
       version: 1,
       structuralDigest: 'any',
-      decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
     };
 
     const events = eventsForRuntimeAction(state, action);

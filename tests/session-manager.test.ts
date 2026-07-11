@@ -57,7 +57,7 @@ describe('fullModeUnavailableReason', () => {
   });
 
   test('allows non-full modes without a sandbox', () => {
-    expect(fullModeUnavailableReason('ask', 'none')).toBeNull();
+    expect(fullModeUnavailableReason('accept_edits', 'none')).toBeNull();
     expect(fullModeUnavailableReason('auto', 'none')).toBeNull();
   });
 
@@ -69,23 +69,23 @@ describe('fullModeUnavailableReason', () => {
 
 describe('interaction mode admission', () => {
   test('resolves slash mode toggle without delegating full entry to reducer', () => {
-    expect(resolveInteractionModeTarget(undefined, 'ask')).toBe('auto');
+    expect(resolveInteractionModeTarget(undefined, 'accept_edits')).toBe('auto');
     expect(resolveInteractionModeTarget(undefined, 'auto')).toBe('full');
-    expect(resolveInteractionModeTarget(undefined, 'full')).toBe('ask');
-    expect(resolveInteractionModeTarget('f', 'ask')).toBe('full');
-    expect(resolveInteractionModeTarget('au', 'ask')).toBe('auto');
+    expect(resolveInteractionModeTarget(undefined, 'full')).toBe('accept_edits');
+    expect(resolveInteractionModeTarget('f', 'accept_edits')).toBe('full');
+    expect(resolveInteractionModeTarget('au', 'accept_edits')).toBe('auto');
   });
 
   test('skips full when slash mode toggles without sandbox backend', () => {
-    expect(resolveInteractionModeTarget(undefined, 'ask', 'none')).toBe('auto');
-    expect(resolveInteractionModeTarget(undefined, 'auto', 'none')).toBe('ask');
+    expect(resolveInteractionModeTarget(undefined, 'accept_edits', 'none')).toBe('auto');
+    expect(resolveInteractionModeTarget(undefined, 'auto', 'none')).toBe('accept_edits');
     expect(resolveInteractionModeTarget(undefined, 'auto', 'seatbelt')).toBe('full');
   });
 
   test('rejects full admission before dispatch when sandbox is unavailable', () => {
     const decision = admitInteractionModeTarget('full', 'none');
     expect(decision.allowed).toBe(false);
-    expect(decision.mode).toBe('ask');
+    expect(decision.mode).toBe('accept_edits');
     expect(decision.reason).toContain('未启用沙箱');
   });
 

@@ -44,7 +44,7 @@ describe('TUI PTY System — Approval Escape', () => {
             {
               id: 'call_1',
               name: 'shell_execute',
-              args: { command: 'mkdir test_escape_dir' },
+              args: { command: 'node -e "1+1"', description: 'test escape approval' },
             },
           ],
         },
