@@ -51,6 +51,13 @@ Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批
 - **授权 cache key 稳定化**：`createAgentTools()` 不再只用 `commandGrants` 数量做缓存判断，而是把 `authorization.mode + commandGrants` 做稳定序列化，并同时纳入 `interactionMode`，避免同数量不同授权复用旧 stateful tool executor。
 - **实际 sandbox 投影**：TUI/CLI 解析出的 `sandboxBackend` 进入 `RunAgentInput` 和 graph state，并作为动态 runtime snapshot 注入模型；cacheable system prompt 不包含该动态字段。
 
+## 最近更新（2026-07-11）
+
+- **ask_user 结构化结果**：新增 `UserInputResult` 协议类型（`{ answer: string; answers?: Record<string, string> }`），将 ask_user 回答从截断的 summary 字符串升级为独立的结构化数据。`tool.finished` 事件和 `ToolResultPayload` 均携带 `userInput` 字段。
+- **TUI 状态保留**：`OutputBlock.tool_card` 新增 `userInput?: UserInputResult` 字段。`handleRuntimeEventAction` 和 `handleEventAction`（`tool_done`）透传该字段；`RESOLVE_INTERRUPT` 在回答提交时直接写入对应 ask_user card，不等待 `tool.finished`。
+- **toolCallId 关联**：`need_input` 事件和 `question` block 新增 `toolCallId`。`RESOLVE_INTERRUPT` 通过 `toolCallId` 精确匹配活跃 ask_user card，处理重复 ask_user / 仅 queued（未 started）的卡片。legacy `need_input`（无 toolCallId）仅在唯一活跃 ask_user 时回退匹配。
+- **渲染优先级**：`ToolCardBlock.tsx` 的 `parseAskUserAnswers` 和 `renderAskUserSummary` 优先使用 `block.userInput` 结构化数据，只在无结构化结果时回退到 summary 文本解析。取消状态也通过结构化 `answer === 'Cancelled'` 判断。
+
 ## 最近更新（2026-06-30）
 
 - **批量 tool call 路由修复**：`resolveToolRoute` 扫描全部 pending tool calls 而非仅第一个，按优先级决策（`ask_user` > 结构性 `update_plan` > `approval` > `tools`），防止 read_file 在前导致 write_file 绕过审批 / update_plan 绕过 plan_review
@@ -73,9 +80,9 @@ Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批
 ### 协议层 (protocol)
 
 - **新事件**: `need_plan_review` — `NeedPlanReviewPayload { plan: AgentPlan }`
-- **新类型**: `AgentPlan`、`AgentPlanStep`、`PlanStatus`、`UserInputQuestion`
+- **新类型**: `AgentPlan`、`AgentPlanStep`、`PlanStatus`、`UserInputQuestion`、`UserInputResult`（`{ answer: string; answers?: Record<string, string> }`）
 - **新 UserAction**: `approve_plan_auto`、`approve_plan_manual`、`supplement_plan`、`reject_plan`
-- **扩展**: `UserInputPayload` 新增 `questions?: UserInputQuestion[]`（多问题模式）
+- **扩展**: `UserInputPayload` 新增 `questions?: UserInputQuestion[]`（多问题模式）；`ToolResultPayload` 新增 `userInput?: UserInputResult`（ask_user 结构化答案，独立于截断的 display summary）
 
 ### 核心层 (core)
 
@@ -140,11 +147,28 @@ Plan Mode 允许 Agent 在执行复杂任务前先提出方案，经用户审批
 
 `ToolCardBlock.tsx` — `renderAskUserSummary` 替代 `formatAskUserContent` + `MarkdownBlock`：
 
-- **解析**：`parseAskUserAnswers` 从 summary 提取 answer/answerMap/isCancelled（兼容 JSON 和上游纯文本格式）
+- **结构化优先**：`parseAskUserAnswers` 和 `renderAskUserSummary` 接收 `block.userInput?: UserInputResult`。存在结构化数据时，`answer` 和 `answerMap` 直接从 `userInput.answer` / `userInput.answers` 派生；仅在无结构化数据时回退到 summary 文本解析（兼容旧事件和 replay）
+- **取消判断**：结构化答案 `answer === 'Cancelled'` 时标记为已取消；legacy 路径继续用 summary 为空或 `'Cancelled'` 判断
 - **单问题**：`⎿   User: answer` — 问题文本已在 detail 行，不重复
-- **多步骤**：`⎿  Step1 sub_question User: answer` — 每步一行，sub_question >40 字截断
-- **取消**：`⎿   Cancelled`
-- summary 为空 → 不渲染（上游 `parseToolResultEvents` 保证非空，此 guard 为防御性）
+- **多步骤**：`⎿  Step1 sub_question User: answer` — 每步一行，sub_question >40 字截断。问题 ID 缺失时用数组索引 `String(index)` 作为 key
+- **取消**：`⎿   Cancelled` — 展示所有问题 + Cancelled 标记
+- summary 为空且无 `userInput` → 不渲染（防御性 guard）
+
+### 数据流
+
+```
+Runtime: eventsForRuntimeAction → tool.finished.result.userInput
+         └─ events.ts 导出 UserInputResult
+
+TUI 事件: handleRuntimeEventAction (tool.finished) → block.userInput
+          handleEventAction (tool_done) → 保留已有 userInput
+
+Reducer: RESOLVE_INTERRUPT → 按 toolCallId 匹配活跃 ask_user card
+         → 写入 userInput + summary + status=done（不等 tool.finished）
+
+渲染:   renderAskUserSummary(block.args, block.summary, dt, columns, block.userInput)
+         → 优先结构化 → 回退 summary 解析
+```
 
 ## PlanReviewBlock 布局
 
@@ -208,7 +232,7 @@ return 'tools';  // Priority 4
 
 ## 遗留项
 
-- **`as any` 消除**：`ToolCardBlock.tsx`、`ToolSummaryBlock.tsx`、`handleEvent.ts` 中使用的 `as any` 访问 `reviewFailure` 字段，原因是 `OutputBlock` 联合类型尚未完全覆盖新字段。应在类型定义稳定后消除。（core 侧 `ToolExecutionSideEffects` 已类型化，TUI 侧待跟进）
+- **`as any` 消除**：`ToolCardBlock.tsx`、`handleEvent.ts` 中原有的 `as any` 访问 `userInput` 字段已通过新增 `UserInputResult` 类型和 `OutputBlock` 联合类型补齐而消除。`ToolSummaryBlock.tsx` 中 `reviewFailure` 字段的 `as any` 仍待跟进。（core 侧 `ToolExecutionSideEffects` 已类型化，TUI 侧 `reviewFailure` 待跟进）
 - **Auto-review 首次调用延迟**：`reviewer.ts` 中 `response_format: json_object` 可能增加首次调用的延迟（provider 需要解析 JSON schema），需观察实际使用中的表现。
 - **工具缓存 key 过度区分**：`definitions.ts` 的 `createAgentTools` 缓存 key 包含 `phase`、`interactionMode`、`commandGrants`，但工具定义本身不依赖这些字段，导致不必要的缓存失效。性能影响微小，但建议后续评估精简。
 - **E2E 覆盖**：`_safety=safe` fast-path 正向路径、auto-review fail-open (`failOpen: true`)、plan review supplement 全链路等场景缺少集成测试。详见审查报告。

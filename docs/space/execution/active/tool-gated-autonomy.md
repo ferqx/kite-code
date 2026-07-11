@@ -59,7 +59,7 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - `write` 访问下的写入、删除、执行类工具请求必须经过 approval。
 - `read-only` 访问只允许执行只读工具和 `update_plan`；为保持缓存稳定，模型可见工具 schema 与 `write` 访问一致，但写入或执行尝试必须由 tools 层拒绝。
 - `RuntimeState.phase` 是独立执行边界。`planning` 阶段只能执行只读检查、`update_plan`、`ask_user` 和只读 subagent，不得执行写入、非只读 shell、实现型 subagent、写型 MCP 或 full access escalation。`building` 阶段再按 `interactionMode + authorization + sandbox` 决定 ask/allow/deny。
-- `interactionMode` 只表示确认体验：`ask` 逐项确认，`auto` 自动处理低风险确认，`full` 表示 full interaction intent。它不应直接等同文件权限；实际执行授权由 `RuntimeState.authorization` 和 sandbox policy 决定。
+- `interactionMode` 只表示确认体验：`accept_edits` 自动执行可证明仅影响工作区的本地写入；Git 变更、出网、工作区外写入和未知副作用仍逐项确认。`auto` 继承这些本地直通规则，并将其余原本需人工审批的操作改为自动审查；`full` 在显式完全授权后自动放行非破坏性操作。Shell 沙箱默认断网，只在本次已批准或已授权的网络调用中放开。它不应直接等同文件权限；实际执行授权由 `RuntimeState.authorization` 和 sandbox policy 决定。
 - `authorization` 表示当前 thread 的工具执行授权。默认是 `default`；`full_access` 必须来自显式授权，并且只能在 sandbox backend 可用时进入。后台 session 不得无条件注入 `full_access`。
 - 模型可见工具基集为 `read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan`、`ask_user`、`set_authorization_mode`、`read_mcp_resource`。当运行时存在 MCP 管理器时，额外追加 `mcp__<server>__<tool>` 格式的适配工具；当扫描到 `SKILL.md` 文件时，额外追加 `Skill` 工具。追加工具不影响基集 schema 的顺序和稳定性，保证前缀缓存命中。
 - `shell_execute` 是 command action envelope，不只是命令字符串。模型应提供 `command`，并可提供 `intent`、`objective`、`justification`、`expected_observation`、`failure_strategy`、`prefix_rule` 和 `grant_request`；文件定位、文本检索、目录查看和 git 只读检查使用 `intent: "inspect"`，测试、类型检查、构建、lint 和 smoke 验证使用 `intent: "verify"`。
@@ -79,7 +79,7 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - MCP 工具命名格式为 `mcp__<server>__<tool>`，由 `getAllTools()` 聚合所有已连接 server 的工具并通过 `adaptMcpTool` 转为 LangChain StructuredTool；输出体积超过阈值时自动截断。MCP 资源读取通过 `read_mcp_resource` 工具，调用 `manager.readResource(server, uri)`。
 - MCP 工具默认需要审批（risk: `mcp`）。可通过 server config 中 `risk: "read"` 声明降低风险级别，此时直接放行；`full_access` 模式下 MCP 工具也直接放行。
 - `Skill` 工具仅当运行时扫描到 `SKILL.md` 文件时才注册。它始终不需要审批（risk: `read`），调用 `getSkillContent` 读取磁盘上的技能指令内容返回给模型。
-- `read_mcp_resource` 和 `Skill` 被归类为只读工具，不会触发审批，不受 `read-only` 访问权限阻止。
+- `read_mcp_resource` 的资源位置可能由外部 MCP 服务管理；在默认的 `accept_edits` 模式下它需要审批，其他模式保留各自的确认语义。`Skill` 被归类为只读工具，不会触发审批。二者均不受 `read-only` 访问权限阻止。
 - `Skill` 工具在基集中位于 `read_mcp_resource` 之后、`update_plan` 之前，MCP 工具追加在 `set_authorization_mode` 之后。此顺序保持基集不变，保证前缀缓存稳定。
 
 ## 不要做
@@ -120,7 +120,7 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - `tools` 和 `user_input` 完成后直接回到单一 `agent`。
 - `Skill` 工具路由到 tools 直接执行（不经过 approval），`Skill` 未在 manifests 中找到时返回 `ok: false`；`Skill` 不受 `read-only` 访问权限阻止。
 - `mcp__*` 工具默认路由到 approval 节点，`risk: "read"` 配置的 server 工具直接进入 tools，`full_access` 模式下直接进入 tools。
-- `read_mcp_resource` 始终直接路由到 tools（不经过 approval），MCP manager 不可用时返回错误。
+- `read_mcp_resource` 在 `accept_edits` 下因外部副作用进入 approval；其他模式按各自策略路由到 tools，MCP manager 不可用时返回错误。
 - 前缀缓存：内置工具 schema 不因 MCP 或 Skill 的存在而改变；MCP 工具始终追加在末尾，Skill 工具插入在固定位置（`read_mcp_resource` 之后、`update_plan` 之前）；`buildStaticSystemPrompt` 的 base 始终是 skills 版本的严格前缀。
 
 `tests/` 真实模型套件应显式覆盖当前全部模型可见工具：
