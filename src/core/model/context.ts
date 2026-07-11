@@ -3,7 +3,7 @@ import systemPrompt from '@/core/prompts/system-prompt.txt';
 import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
 import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
-import type { AgentPhase, AgentPlan, InteractionMode } from '@/protocol/events';
+import type { AgentPhase, AgentPlan, InteractionMode, PlanningState } from '@/protocol/events';
 import { foldToolOutputs, microCompactToolOutputs } from './compaction';
 import {
   buildCacheableRuntimeContext,
@@ -35,6 +35,8 @@ export interface ModelContextState {
   activeSkillInstructions?: string;
   /** 上下文预算配置 / Context budget configuration (controls window size for M1 folding, triggers M2 at hard threshold) */
   contextBudget?: ContextBudget;
+  /** v2: PlanningState for dynamic runtime-state block (替代独立的 phase + plan + planReviewed) */
+  planningState?: PlanningState;
 }
 
 /** 准备好的模型上下文 / Prepared model context */
@@ -286,6 +288,17 @@ export function prepareModelContext(
     '\n\n' +
     buildCacheableRuntimeContext({ workspace: state.workspace });
 
+  const planReviewed =
+    state.planningState?.kind === 'executing' || state.planningState?.kind === 'completed';
+  const approvedPlanSummary =
+    planReviewed && state.planningState?.kind === 'executing'
+      ? `${state.planningState.document.title}: ${state.planningState.document.bodyMarkdown}`.slice(
+          0,
+          300,
+        )
+      : state.plan && state.planReviewed
+        ? `${state.plan.name}: ${state.plan.description}`.slice(0, 300)
+        : null;
   const modeSnapshot = new HumanMessage(
     buildRuntimeModeSnapshot({
       phase: state.phase ?? 'building',
@@ -294,15 +307,20 @@ export function prepareModelContext(
       sandboxBackend:
         state.sandboxBackend ??
         (state.executionEnvironment === 'workspace_sandbox' ? 'unknown' : 'none'),
-      planReviewed: state.planReviewed ?? false,
-      approvedPlanSummary:
-        state.plan && state.planReviewed
-          ? `${state.plan.name}: ${state.plan.description}`.slice(0, 300)
-          : null,
+      planReviewed: state.planReviewed ?? planReviewed,
+      approvedPlanSummary,
+      planningState: state.planningState,
     }),
   );
 
-  const planReminder = state.plan ? [new HumanMessage(formatPlanStateReminder(state.plan))] : [];
+  const planReminder =
+    state.planningState &&
+    state.planningState.kind !== 'building_without_plan' &&
+    state.planningState.kind !== 'planning_empty'
+      ? [new HumanMessage(formatPlanStateReminder(state.planningState))]
+      : state.plan
+        ? [new HumanMessage(formatPlanStateReminder(state.plan))]
+        : [];
 
   return {
     messages: [new SystemMessage(systemPrompt), ...msgs, modeSnapshot, ...planReminder],

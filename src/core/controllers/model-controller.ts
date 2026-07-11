@@ -177,6 +177,7 @@ export async function invokeRuntimeModel(params: {
         authorization: state.authorization,
         planReviewed: state.planning.kind === 'executing' || state.planning.kind === 'completed',
         plan,
+        planningState: state.planning,
       },
       params.skills,
     );
