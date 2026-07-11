@@ -1111,7 +1111,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         state,
         (b) =>
           b.kind === 'tool_card' &&
-          b.name === 'update_plan' &&
+          (b.name === 'exit_plan_mode' || b.name === 'update_plan') &&
           (b.status === 'queued' || b.status === 'running'),
       );
       const plan = event.data.plan;
