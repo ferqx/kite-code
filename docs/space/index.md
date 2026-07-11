@@ -21,7 +21,7 @@
 | `execution/active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
 | `execution/active/plan-state-reminder.md` | active | 模型上下文构建、计划投影、缓存敏感 prompt 布局 | 修改 `src/model/context.ts`、`src/model/runtime-context.ts`，或修改计划/上下文投影相关测试。 |
 | `execution/active/model-provider-boundary.md` | active | 模型 provider 配置、适配器、provider 专有行为、真实配置模型测试 | 修改 `src/config`、`src/model`、provider 文档或真实模型套件。 |
-| `execution/active/tool-gated-autonomy.md` | active | 图路由、审批边界、工具 gating、最终答案自主性 | 修改 `src/harness/graph.ts`、`src/harness/routes.ts`、`src/harness/tool-policy.ts`、`src/harness/tool-runner.ts`，或修改审批/最终路由相关测试。 |
+| `execution/active/tool-gated-autonomy.md` | active | 工具审批边界、工具 gating、最终答案自主性 | 修改 `src/core/harness/tool-policy.ts`、`src/core/harness/tool-runner.ts`、`src/core/runtime/scheduler.ts`、`src/core/runtime/tool-controller.ts`，或修改审批/工具执行相关测试。 |
 | `execution/active/real-model-test-boundary.md` | active | 测试发现、真实模型端到端套件、package 脚本 | 修改测试命名、`package.json` 测试脚本或真实模型套件。 |
 | `execution/active/documentation-language.md` | active | 文档语言、Markdown 内容标准、文档测试 | 创建或修改 README、AGENTS、`docs/space` 或其他 Markdown 文档。 |
 | `execution/active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |

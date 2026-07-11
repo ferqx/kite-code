@@ -1,9 +1,9 @@
 # Cancel-Resume 清理架构 & 工具参数异常处理
 
 状态：active
-范围：`src/core/harness/graph.ts`（cleanup、invokeModel）、`src/core/harness/tool-runner.ts`（runApprovedTool）、`src/core/harness/tool-requests.ts`（toolRequestFromCall）、`src/core/model/context.ts`（sanitizeToolCallPairs、reorderInterleavedMessages）、`src/core/tools/tool-parse-error.ts`（formatToolParseError）、`src/app/tui/`（handleEvent、replay-blocks）
+范围：`src/core/runtime/kernel.ts`（AgentKernel.run 循环控制）、`src/core/harness/tool-runner.ts`（runApprovedTool）、`src/core/harness/tool-requests.ts`（toolRequestFromCall）、`src/core/model/context.ts`（sanitizeToolCallPairs、reorderInterleavedMessages）、`src/core/tools/tool-parse-error.ts`（formatToolParseError）、`src/app/tui/`（handleEvent、replay-blocks）
 读取时机：修改 cancel/abort/resume 逻辑、检查点恢复、消息清理、工具参数异常处理、ask_user 错误展示时必读。
-验证：`bun test tests/tool-parse-error.test.ts tests/context.test.ts tests/graph.test.ts tests/runner.test.ts tests/tui-reducer.test.ts`
+验证：`bun test tests/tool-parse-error.test.ts tests/context.test.ts tests/tui-reducer.test.ts`
 最后更新：2026-06-27（三层清理架构 + 工具参数异常自主处理）
 
 ## 架构总览
@@ -21,18 +21,18 @@ START → cleanup → routeEntry → agent/approval/tools/user_input → ...
          模型 API
 ```
 
-## 第 1 层：cleanup 节点（`graph.ts:533-572`）
+## 第 1 层：cleanup（`context.ts` sanitize + `kernel.ts` 循环入口）
 
-图入口第一站。检测孤儿 `tool_calls`（有 tool_calls 无匹配 ToolMessage），插入 cancelled ToolMessage。
+Agent 循环入口第一站。检测孤儿 `tool_calls`（有 tool_calls 无匹配 ToolMessage），插入 cancelled ToolMessage。
 
 - 只检查 `m.tool_calls`（顶层字段），**不检查** `m.additional_kwargs.tool_calls`
 - 使用 field-based 检测，不依赖 instanceof，兼容反序列化消息
 
-## 第 2 层：invalid_tool_calls 处理（`graph.ts:697-751` + `tool-runner.ts:57-75` + `tool-requests.ts:183-191`）
+## 第 2 层：invalid_tool_calls 处理（`model-controller.ts` + `tool-runner.ts` + `tool-requests.ts`）
 
 ### 问题
 
-LLM 偶尔生成不合法的 JSON tool call 参数 → `parseToolCall()` 失败 → 放入 `response.invalid_tool_calls` → `response.tool_calls` 为空 → graph 看不到 → 不执行 → 无 ToolMessage → 模型不知道工具调用失败。
+LLM 偶尔生成不合法的 JSON tool call 参数 → `parseToolCall()` 失败 → 放入 `response.invalid_tool_calls` → 不执行 → 无 ToolMessage → 模型不知道工具调用失败。
 
 ### 修复：合成 tool_calls + runApprovedTool 检测
 
@@ -84,7 +84,7 @@ executeOneTool
 
 | 文件 | 改动 |
 |------|------|
-| `src/core/runner.ts` — `parseToolResultEvents` | `ok === false` 时提取 `stderr` 为 summary |
+| `src/core/runtime/runner.ts` — `parseToolResultEvents` | `ok === false` 时提取 `stderr` 为 summary |
 | `src/app/tui/reducers/handleEvent.ts` | 同上（实时处理） |
 | `src/app/tui/replay-blocks.ts` — ask_user 展示 + `isToolMessageLike` | 同上（回放）+ field-based fallback 兼容 plain object |
 
@@ -101,7 +101,6 @@ executeOneTool
 ```bash
 bun test tests/tool-parse-error.test.ts  # 工具层错误格式化 (8 tests)
 bun test tests/context.test.ts           # sanitize + reorder (32 tests)
-bun test tests/graph.test.ts             # 路由 + cleanup + invokeModel (45 tests)
-bun test tests/runner.test.ts            # runAgent (30 tests)
+bun test tests/runtime/reducer.test.ts   # RuntimeState 状态转换 (53 tests)
 bun test tests/tui-reducer.test.ts       # TUI 展示 (111 tests)
 ```

@@ -1,16 +1,17 @@
-# Bun LangGraph 代码 Agent
+# Bun Runtime Kernel 代码 Agent
 
-这是一个基于 Bun、TypeScript、LangGraph.js 和 LangChain 聊天模型适配器构建的独立代码 agent 参考实现。
+这是一个基于 Bun、TypeScript 和 Runtime Kernel 的独立代码 agent 参考实现。Kernel 以
+`RuntimeEvent` 作为公开执行、重放和持久化协议；模型、工具和用户交互均通过其效果调度器协调。
 
 ## 功能
 
-- 使用 LangGraph `StateGraph` 维护 `agent -> approval/user_input/tools -> agent` 循环。
+- 使用 Runtime Kernel 维护 `model -> approval/user_input/tools -> model` 循环。
 - 支持 `read-only` / `write` 工作区访问权限；只读访问由工具执行层强制，静态系统提示和工具 schema 不随访问权限变化，以提升 provider 前缀缓存命中。
 - 支持上下文预算和历史消息压缩摘要。
 - 当 provider 元数据暴露缓存 token 计数时，从流式模型响应中提取 prompt cache 指标，并在 `cache_metrics` 事件内附带 coding 场景缓存命中标准评估。
-- 使用 Bun 原生 SQLite checkpointer 持久化短期 thread 状态。
+- 使用 Bun 原生 SQLite RuntimeStore 持久化事件、快照与恢复点。
 - 输出标准化的图事件流，包括 interrupt 和 final 事件。
-- 通过 LangGraph `interrupt()` 和 `Command({ resume })` 为受保护工具执行提供人工审批；审批 payload 由 harness 生成，包含风险、预期影响和 `approvalHash`。
+- 通过 RuntimeEvent 交互事实为受保护工具执行提供人工审批；审批 payload 包含风险、预期影响和 `approvalHash`。
 - 提供工作区安全的文件 patch 工具和结构化 shell 工具结果。
 - 模型可见工具表面固定为 `read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan` 和 `ask_user`。
 - `shell_execute` 使用 action envelope 表达命令、意图、目标、预期观察和失败策略；验证命令通过 `intent: "verify"` 表达。
@@ -22,10 +23,10 @@
 
 - `src/app/tui/`：基于 React Ink 的交互式 TUI（OutputArea、App 布局、reducer、键盘快捷键、斜杠命令支持）。
 - `src/app/`：CLI 入口、run/resume 编排和事件流标准化。
-- `src/harness/`：LangGraph 控制循环、状态、路由、审批和工具分发。
-- `src/model/`：模型适配器工厂、OpenAI-compatible provider 适配、Ollama provider 适配、DeepSeek 专用 patch、静态 prompt、运行时上下文和上下文压缩。
+- `src/core/runtime/`：Kernel、状态、reducer、效果调度、执行器和 RuntimeStore。
+- `src/core/model/`：模型适配器工厂、provider 适配、静态 prompt、运行时上下文和上下文压缩。
 - `src/tools/`：模型工具定义，以及文件、shell、patch 工具实现。
-- `src/persistence/`：Bun SQLite LangGraph checkpointer。
+- `src/core/persistence/`：会话元数据与 RuntimeStore 持久化支持。
 - `src/config/`：本地 `~/.kite-code/kite-code.jsonc` 配置加载器。
 - `tests/tui-system/`：TUI E2E/PTTY 系统测试套件（真实 PTY + mock model server，覆盖终端启动、输入、Ctrl+C、审批、ask_user、多轮消息）。
 - `src/shared/`：共享类型和 prompt cache 指标。
@@ -188,7 +189,7 @@ bun run agent resume --thread demo --user local --answer "使用最小实现，�
 
 ## 测试
 
-默认测试，不包含真实模型/网络套件：
+默认测试，不包含真实模型/网络套件和 PTY 系统套件：
 
 ```bash
 bun test

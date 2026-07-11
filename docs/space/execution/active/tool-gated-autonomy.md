@@ -5,17 +5,16 @@
 最后验证：2026-07-06
 范围：
 
-- `src/core/harness/graph.ts`
-- `src/core/harness/routes.ts`
 - `src/core/harness/tool-policy.ts`
 - `src/core/harness/tool-runner.ts`
-- `src/core/harness/state.ts`
 - `src/core/harness/tool-requests.ts`
 - `src/core/tools/definitions.ts`
 - `src/core/mcp/tool-adapter.ts`
 - `src/core/mcp/manager.ts`
 - `src/core/skills/skill-tool.ts`
-- `src/core/runner.ts`
+- `src/core/runtime/scheduler.ts`
+- `src/core/runtime/runner.ts`
+- `src/core/runtime/tool-controller.ts`
 - `src/app/cli/index.ts`
 - `src/app/tui/run-agent.ts`
 - `tests/graph.test.ts`
@@ -54,21 +53,21 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 
 人工确认只保留给受保护工具执行：
 
-- 工具安全策略必须集中在 `src/harness/tool-policy.ts`。`routes.ts` 只根据策略决定进入 `tools` 还是 `approval`；`tool-runner.ts` 在执行前必须再次调用同一策略做兜底。
+- 工具安全策略必须集中在 `src/core/harness/tool-policy.ts`。路由决策（`scheduler.ts` 的 `decideNextEffect`）只根据策略决定进入 `tools` 还是 `approval`；`tool-runner.ts` 在执行前必须再次调用同一策略做兜底。
 - **批量工具调用路由**：模型可在单条 AIMessage 中返回多个 tool_calls。`resolveToolRoute` 必须扫描**全部**待处理工具请求，按优先级决定目标节点——`ask_user` → `user_input`、结构性 `update_plan` → `plan_review`、任一需审批 → `approval`、其余 → `tools`。不得只看第一个 tool call 而让后续工具绕过审批或中断节点。
 - `tool-runner.ts` 执行前必须做防御性检查：若 `policy.requiresApproval && approvedGrant === 'none'`，应拒绝执行并返回错误。确保需要审批的工具不可能绕过审批节点直达执行。
 - `write` 访问下的写入、删除、执行类工具请求必须经过 approval。
 - `read-only` 访问只允许执行只读工具和 `update_plan`；为保持缓存稳定，模型可见工具 schema 与 `write` 访问一致，但写入或执行尝试必须由 tools 层拒绝。
-- `graph.state.phase` 是独立执行边界。`planning` 阶段只能执行只读检查、`update_plan`、`ask_user` 和只读 subagent，不得执行写入、非只读 shell、实现型 subagent、写型 MCP 或 full access escalation。`building` 阶段再按 `interactionMode + authorization + sandbox` 决定 ask/allow/deny。
-- `interactionMode` 只表示确认体验：`ask` 逐项确认，`auto` 自动处理低风险确认，`full` 表示 full interaction intent。它不应直接等同文件权限；实际执行授权由 `graph.state.authorization` 和 sandbox policy 决定。
+- `RuntimeState.phase` 是独立执行边界。`planning` 阶段只能执行只读检查、`update_plan`、`ask_user` 和只读 subagent，不得执行写入、非只读 shell、实现型 subagent、写型 MCP 或 full access escalation。`building` 阶段再按 `interactionMode + authorization + sandbox` 决定 ask/allow/deny。
+- `interactionMode` 只表示确认体验：`ask` 逐项确认，`auto` 自动处理低风险确认，`full` 表示 full interaction intent。它不应直接等同文件权限；实际执行授权由 `RuntimeState.authorization` 和 sandbox policy 决定。
 - `authorization` 表示当前 thread 的工具执行授权。默认是 `default`；`full_access` 必须来自显式授权，并且只能在 sandbox backend 可用时进入。后台 session 不得无条件注入 `full_access`。
 - 模型可见工具基集为 `read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan`、`ask_user`、`set_authorization_mode`、`read_mcp_resource`。当运行时存在 MCP 管理器时，额外追加 `mcp__<server>__<tool>` 格式的适配工具；当扫描到 `SKILL.md` 文件时，额外追加 `Skill` 工具。追加工具不影响基集 schema 的顺序和稳定性，保证前缀缓存命中。
 - `shell_execute` 是 command action envelope，不只是命令字符串。模型应提供 `command`，并可提供 `intent`、`objective`、`justification`、`expected_observation`、`failure_strategy`、`prefix_rule` 和 `grant_request`；文件定位、文本检索、目录查看和 git 只读检查使用 `intent: "inspect"`，测试、类型检查、构建、lint 和 smoke 验证使用 `intent: "verify"`。
 - `shell_execute` 应按命令内容分级：只读命令可直通；普通执行、写入、网络和 VCS 变更需要审批；高危破坏性命令默认拒绝，不进入普通审批。
-- `graph.state.authorization` 保存当前 thread 的 shell 授权状态。默认模式只支持本次审批 `approve_once` 和同命令授权 `same_command`；用户通过 resume payload 主动选择 `full_access` 后，当前 thread 内后续普通 `shell_execute`、`write_file`、`edit_file` 和 `mcp__*` 工具可直接执行。高危 destructive shell 命令仍由策略默认拒绝，不因 `full_access` 或 `same_command` 放行。`Skill`、`read_file`、`read_mcp_resource`、`update_plan`、`ask_user` 始终不需要审批。
+- `RuntimeState.authorization` 保存当前 thread 的 shell 授权状态。默认模式只支持本次审批 `approve_once` 和同命令授权 `same_command`；用户通过 resume payload 主动选择 `full_access` 后，当前 thread 内后续普通 `shell_execute`、`write_file`、`edit_file` 和 `mcp__*` 工具可直接执行。高危 destructive shell 命令仍由策略默认拒绝，不因 `full_access` 或 `same_command` 放行。`Skill`、`read_file`、`read_mcp_resource`、`update_plan`、`ask_user` 始终不需要审批。
 - `same_command` 的命中规则是同一 workspace/thread 下 `command.trim()` 完全一致，不受 `objective`、`justification` 或 `prefix_rule` 变化影响。它使用独立 command grant key，不能和 `approvalHash` 混用。
 - `full_access` 只保存在当前 thread checkpoint 中，新 thread 不继承。它影响 `shell_execute`、`write_file`、`edit_file` 和 `mcp__*` 的审批；但 destructive shell deny 仍优先于 full access。`read_file`、`read_mcp_resource`、`update_plan`、`ask_user`、`Skill` 和 `set_authorization_mode`（切换到 `default`）始终不需要审批。
-- `update_plan` 只更新 `graph.state.plan`，不能隐式切换 `graph.state.workspaceAccess`；是否规划应由模型自主决定，明确只读访问只能来自图状态或用户显式访问请求。
+- `update_plan` 只更新 `RuntimeState.plan`，不能隐式切换 workspace access 配置；是否规划应由模型自主决定，明确只读访问只能来自配置或用户显式访问请求。
 - `ask_user` 是规划澄清工具，不读写工作区，也不是工具审批；无论 `read-only` 还是 `write` 访问，都应路由到 `user_input` 节点并触发 `kind: "user_input"` interrupt，恢复值作为对应 tool call 的 ToolMessage 交回模型。
 - `tool_approval` interrupt 必须携带 harness 生成的结构化审批信息，包括 `policy`、`approval` 和 `approval.approvalHash`，不能依赖模型自然语言自述风险。shell 审批 payload 还应暴露模型解释字段、建议 prefix rule、可选授权粒度和推荐授权。带 hash 的 resume payload 必须匹配当前请求；用户替换命令时，只能替换当前命令型请求，替换后仍需重新经过策略判定并按替换后的命令建立 grant key。
 - 非危险最终答案、计划摘要和访问权限状态不触发 approval interrupt。
@@ -89,7 +88,7 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - 不要为只读访问完成增加非危险 `mode_confirmation` 或 `access_confirmation` interrupt。
 - 不要把 `ask_user` 复用成工具审批、访问权限切换或最终答案确认。
 - 不要把受保护操作的安全检查从 tool gating 移到仅靠 prompt 指令。
-- 不要在 `routes.ts`、`tool-runner.ts` 或工具定义中新增与 `tool-policy.ts` 漂移的独立安全判断；只读 shell 白名单这类底层分类函数可以被策略复用。
+- 不要在 `scheduler.ts`（路由决策）、`tool-runner.ts` 或工具定义中新增与 `tool-policy.ts` 漂移的独立安全判断；只读 shell 白名单这类底层分类函数可以被策略复用。
 - 不要静默削弱 `read-only` 访问的只读约束。
 - 没有具体工具边界需求时，不要重新引入 evidence/progress 账本或 watchdog 式进度推断。
 - 不要在 MCP 工具 policy 中跳过 `full_access` 模式检查；MCP 工具应与 `shell_execute`/`write_file`/`edit_file` 行为一致。
@@ -98,7 +97,7 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 
 ## 测试期望
 
-`tests/graph.test.ts` 应断言：
+`tests/runtime/reducer.test.ts` 和 `tests/runtime/tool-controller.test.ts` 应断言：
 
 - `read-only` 访问下 final 直接路由到 `END`。
 - `write` 访问下 final 直接路由到 `END`。
@@ -124,7 +123,7 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - `read_mcp_resource` 始终直接路由到 tools（不经过 approval），MCP manager 不可用时返回错误。
 - 前缀缓存：内置工具 schema 不因 MCP 或 Skill 的存在而改变；MCP 工具始终追加在末尾，Skill 工具插入在固定位置（`read_mcp_resource` 之后、`update_plan` 之前）；`buildStaticSystemPrompt` 的 base 始终是 skills 版本的严格前缀。
 
-`tests/real-agent.real.ts` 应显式覆盖当前全部模型可见工具：
+`tests/` 真实模型套件应显式覆盖当前全部模型可见工具：
 
 - `read_file`、`write_file` 和 `edit_file` 通过真实模型文件工具链路覆盖，并用工具结果中的 `tool` 元数据确认。
 - `shell_execute` 通过 inspect 失败恢复、verify action envelope、`same_command` 和 `full_access` 场景覆盖。

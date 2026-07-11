@@ -42,6 +42,7 @@
 | [`2026-07-01-web-search-tool.md`](2026-07-01-web-search-tool.md) | draft | P0 | — | — | Web 网络工具：Phase 1 `web_fetch`（fetch → SSRF → readability → turndown 正文提取），Phase 2 `web_search`（搜索发现 URL） |
 | [`2026-07-03-tui-pty-e2e-reform.md`](2026-07-03-tui-pty-e2e-reform.md) | active | P1 | — | 扩展 2026-05-25-e2e-restructure | TUI E2E 双层架构：PTY 终端系统测试 + Ink 组件集成测试。Phase 0-4 完成（19 tests / 6 files），多消息阻塞调查中 |
 | [`2026-07-08-agent-kernel-incremental-evolution.md`](2026-07-08-agent-kernel-incremental-evolution.md) | draft | P0 | — | — | Agent Runtime Kernel 重构：5 阶段建立事件驱动状态机，LangGraph 降级为执行引擎。Phase 1 RuntimeEvent+Projection → Phase 2 Reducer+Store → Phase 3 Controller 抽取 → Phase 4 Policy 策略化 → Phase 5 LangGraph 适配器化 |
+| [`2026-07-10-langchain-to-ai-sdk-migration.md`](2026-07-10-langchain-to-ai-sdk-migration.md) | draft | P0 | `2026-07-10-runtime-kernel-cutover-status` | — | LangChain → AI SDK 依赖迁移：3 provider 包 + `@langchain/core` + MCP SDK → `ai` + `@ai-sdk/openai-compatible` + `@ai-sdk/mcp` |
 
 ## 计划文件命名规范
 

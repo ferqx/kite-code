@@ -36,12 +36,14 @@ describe('test discovery boundaries', () => {
     expect(liveModelDefaultTests).toEqual([]);
   });
 
-  test('does not retain a legacy real-agent test script', () => {
+  test('keeps real-agent and PTY suites out of the default test script', () => {
     const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
 
-    expect(pkg.scripts?.test).toBe('bun test');
+    expect(pkg.scripts?.test).toContain('bun test');
+    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/tui-system/**'");
+    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/pty-spike/**'");
     expect(pkg.scripts?.['test:real']).toBeUndefined();
     expect(pkg.scripts?.['test:real:direct']).toBeUndefined();
   });
