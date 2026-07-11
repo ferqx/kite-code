@@ -131,8 +131,7 @@ describe('reduceRuntimeState — plan lifecycle', () => {
     }
   });
 
-  // 验证 plan.review_requested 从 drafted 继承 planId 并递增 version
-  test('plan.review_requested inherits planId and increments version from drafted', () => {
+  test('plan.review_requested inherits the saved draft version', () => {
     const draftPlan = makePlan('Draft Plan', ['x', 'y']);
     const state: RuntimeState = {
       ...makeInitialState(),
@@ -155,13 +154,12 @@ describe('reduceRuntimeState — plan lifecycle', () => {
     expect(next.planning.kind).toBe('awaiting_review');
     if (next.planning.kind === 'awaiting_review') {
       expect(next.planning.document.planId).toBe('existing-plan-id');
-      expect(next.planning.document.version).toBe(4);
+      expect(next.planning.document.version).toBe(3);
       expect(next.planning.document.title).toBe(newPlan.name);
     }
   });
 
-  // 验证 plan.review_requested 从 needs_revision 继承 planId 并递增 version
-  test('plan.review_requested inherits planId and increments version from needs_revision', () => {
+  test('plan.review_requested preserves the revision draft version', () => {
     const revPlan = makePlan('Rev Plan', ['a']);
     const state: RuntimeState = {
       ...makeInitialState(),
@@ -185,7 +183,7 @@ describe('reduceRuntimeState — plan lifecycle', () => {
     expect(next.planning.kind).toBe('awaiting_review');
     if (next.planning.kind === 'awaiting_review') {
       expect(next.planning.document.planId).toBe('rev-plan-id');
-      expect(next.planning.document.version).toBe(6);
+      expect(next.planning.document.version).toBe(5);
       expect(next.planning.document.title).toBe(newPlan.name);
     }
   });

@@ -23,19 +23,16 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // ── 方案生命周期 / Plan lifecycle ──
 
     case 'plan.review_requested': {
-      // 从 planning_draft 继承 planId 和 version
-      // Inherit planId and version from planning_draft
       const doc = planDocumentFromAgentPlan(event.plan, state.turn.turnId);
       const inherited =
         state.planning.kind === 'planning_draft'
-          ? { planId: state.planning.document.planId, version: state.planning.document.version + 1 }
+          ? { planId: state.planning.document.planId, version: state.planning.document.version }
           : { planId: doc.planId, version: 1 };
-      const structuralDigest = computePlanStructuralDigest(doc);
       const document: PlanDocument = {
         ...doc,
         planId: inherited.planId,
         version: inherited.version,
-        structuralDigest,
+        structuralDigest: computePlanStructuralDigest(doc),
       };
       return {
         ...state,
@@ -78,6 +75,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           executionMode: event.executionMode,
           approvedAtTurnId: state.turn.turnId,
         },
+        mode: event.executionMode === 'manual' ? 'ask' : event.executionMode,
         interactions: { kind: 'idle' },
       };
     }
@@ -105,8 +103,6 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'plan.rejected':
-      // plan.rejected → plan.cancelled (event naming migration)
-      // plan.rejected → plan.cancelled (event naming migration)
       if (
         state.interactions.kind !== 'idle' &&
         (state.interactions.kind !== 'awaiting_review' ||
@@ -134,6 +130,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const call = {
         toolCallId: event.toolCallId,
         modelMessageId: event.modelMessageId ?? '',
+        ordinal: event.ordinal,
         name: event.name,
         args: event.args,
         status: 'queued' as const,
@@ -253,6 +250,36 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...state.tools,
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
+        },
+      };
+    }
+
+    case 'tool.cancelled': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (!existingCall) return state;
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: { ...existingCall, status: 'cancelled' as const },
+          },
+          queue: state.tools.queue.filter((id) => id !== event.toolCallId),
+          active: state.tools.active.filter((id) => id !== event.toolCallId),
+        },
+        transcript: {
+          ...state.transcript,
+          messages: [
+            ...state.transcript.messages,
+            {
+              kind: 'tool',
+              toolCallId: event.toolCallId,
+              name: existingCall.name,
+              content: event.reason,
+              ok: false,
+            },
+          ],
         },
       };
     }
@@ -416,26 +443,21 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // ── Plan 生命周期补充 / Additional plan lifecycle ──
 
     case 'plan.drafted': {
-      // plan.drafted → plan.draft_saved (event naming migration)
-      // Accept new draft when planning is empty or in planning_draft (revision cycle)
       if (state.planning.kind === 'planning_empty' || state.planning.kind === 'planning_draft') {
-        const doc = planDocumentFromAgentPlan(event.plan, state.turn.turnId);
-        const digest = computePlanStructuralDigest(doc);
-        const planId =
-          state.planning.kind === 'planning_draft' ? state.planning.document.planId : doc.planId;
-        const version =
-          state.planning.kind === 'planning_draft' ? state.planning.document.version + 1 : 1;
-        const document: PlanDocument = {
-          ...doc,
-          planId,
-          version,
-          structuralDigest: digest,
-        };
         return {
           ...state,
           planning: {
             kind: 'planning_draft',
-            document,
+            document: {
+              ...planDocumentFromAgentPlan(event.plan, state.turn.turnId),
+              planId:
+                state.planning.kind === 'planning_draft'
+                  ? state.planning.document.planId
+                  : crypto.randomUUID(),
+              version:
+                state.planning.kind === 'planning_draft' ? state.planning.document.version + 1 : 1,
+              structuralDigest: event.structuralHash,
+            },
           },
         };
       }
@@ -550,8 +572,6 @@ function updateToolStatus(
   };
 }
 
-// ── Helper: convert legacy AgentPlan → PlanDocument ──
-
 function planDocumentFromAgentPlan(
   plan: AgentPlan,
   turnId: string,
@@ -561,33 +581,19 @@ function planDocumentFromAgentPlan(
     version: 1,
     title: plan.name.slice(0, 120),
     bodyMarkdown: plan.description,
-    steps: plan.steps.map((s) => ({
-      id: sanitizeStepId(s.step),
-      title: s.step.slice(0, 160),
-      status: mapLegacyStatus(s.status),
-    })),
+    steps: agentPlanToSteps(plan),
     createdAtTurnId: turnId,
     updatedAtTurnId: turnId,
   };
 }
 
 function agentPlanToSteps(plan: AgentPlan): PlanStep[] {
-  return plan.steps.map((s) => ({
-    id: sanitizeStepId(s.step),
-    title: s.step.slice(0, 160),
-    status: mapLegacyStatus(s.status),
+  return plan.steps.map((step) => ({
+    id: step.id ?? sanitizeStepId(step.step),
+    title: step.step.slice(0, 160),
+    status: step.status,
+    note: step.note,
   }));
-}
-
-function mapLegacyStatus(status: string): PlanStep['status'] {
-  switch (status) {
-    case 'in_progress':
-      return 'in_progress';
-    case 'completed':
-      return 'completed';
-    default:
-      return 'pending';
-  }
 }
 
 function sanitizeStepId(text: string): string {
@@ -604,7 +610,7 @@ function mergeStepUpdates(existing: PlanStep[], updates: PlanStep[]): PlanStep[]
   const updateMap = new Map(updates.map((u) => [u.id, u]));
   return existing.map((step) => {
     const update = updateMap.get(step.id);
-    if (update && update.status !== 'pending') {
+    if (update) {
       return { ...step, status: update.status, note: update.note ?? step.note };
     }
     return step;

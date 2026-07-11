@@ -85,7 +85,7 @@ describe('PlanningState lifecycle transitions', () => {
     expect(s2.planning.kind).toBe('awaiting_review');
     expect(s2.interactions.kind).toBe('awaiting_review');
     if (s2.planning.kind === 'awaiting_review') {
-      expect(s2.planning.document.version).toBe(2); // version incremented
+      expect(s2.planning.document.version).toBe(1); // review does not create a content version
       expect(s2.planning.interactionId).toBe('inter-1');
       expect(s2.planning.exitToolCallId).toBe('call-2');
     }
@@ -292,7 +292,7 @@ describe('PlanningState lifecycle transitions', () => {
     const s2 = reduceRuntimeState(s1, e2);
     expect(s2.planning.kind).toBe('awaiting_review');
     if (s2.planning.kind === 'awaiting_review') {
-      expect(s2.planning.document.version).toBe(vBefore + 1); // review_requested increments from planning_draft
+      expect(s2.planning.document.version).toBe(vBefore); // review_requested does not change the draft
     }
   });
 

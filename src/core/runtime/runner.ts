@@ -51,7 +51,7 @@ export async function* runRuntimeLoop(
       const events = eventsForRuntimeAction(kernel.getState(), action);
       if (events.length === 0)
         throw new Error('Runtime action does not match the active interaction.');
-      kernel.processEvents(events);
+      kernel.processEventBatch(events);
       yield* events;
       continue;
     }

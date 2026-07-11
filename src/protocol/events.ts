@@ -71,6 +71,9 @@ export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
 export interface AgentPlanStep {
   step: string;
   status: PlanStatus;
+  /** Stable v2 identity retained while legacy renderers consume `step`. */
+  id?: string;
+  note?: string;
 }
 
 export interface AgentPlan {
@@ -141,8 +144,8 @@ export type PlanningState =
   | {
       kind: 'executing';
       document: PlanDocument;
-      /** 执行模式：manual=用户手动确认每一步，accept_edits=自动接受工作区编辑，auto=自动执行 / Execution mode */
-      executionMode: 'manual' | 'accept_edits' | 'auto';
+      /** 执行模式：ask=每次确认，accept_edits=自动接受工作区编辑，auto=自动执行 / Execution mode */
+      executionMode: 'ask' | 'manual' | 'accept_edits' | 'auto';
       /** 方案审批通过的 turn ID / Turn id when plan was approved */
       approvedAtTurnId: string;
     }

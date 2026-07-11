@@ -318,6 +318,26 @@ export class SessionRuntime {
     state: Readonly<RuntimeState>,
   ): Promise<RuntimeUserAction> {
     const interaction = state.interactions;
+    const planReviewDecision = (
+      decision:
+        | {
+            kind: 'approve';
+            nextMode: 'ask' | 'accept_edits' | 'auto';
+            clearPlanningContext: boolean;
+          }
+        | { kind: 'revise'; feedback: string }
+        | { kind: 'cancel'; reason?: string },
+    ): RuntimeUserAction | null =>
+      interaction.kind === 'awaiting_review'
+        ? {
+            type: 'plan_review_decision',
+            interactionId: effect.interactionId,
+            planId: interaction.planId,
+            version: interaction.version,
+            structuralDigest: interaction.structuralDigest,
+            decision,
+          }
+        : null;
     let payload: InterruptPayload;
     if (effect.type === 'request_user_input' && interaction.kind === 'awaiting_user_input') {
       payload = { kind: 'input', question: interaction.request };
@@ -355,28 +375,8 @@ export class SessionRuntime {
           : { type: 'approve', interactionId: effect.interactionId, grant: action.grant };
       case 'reject':
         return { type: 'reject', interactionId: effect.interactionId };
-      case 'approve_plan_auto':
-        return { type: 'approve_plan', interactionId: effect.interactionId, executionMode: 'auto' };
-      case 'approve_plan_manual':
-        return {
-          type: 'approve_plan',
-          interactionId: effect.interactionId,
-          executionMode: 'manual',
-        };
-      case 'approve_plan':
-        return {
-          type: 'approve_plan',
-          interactionId: effect.interactionId,
-          executionMode: 'manual',
-        };
-      case 'supplement_plan':
-        return {
-          type: 'revise_plan',
-          interactionId: effect.interactionId,
-          feedback: action.feedback,
-        };
-      case 'reject_plan':
-        return { type: 'reject_plan', interactionId: effect.interactionId };
+      case 'plan_review_decision':
+        return planReviewDecision(action.decision)!;
       case 'cancel':
         return { type: 'cancel', interactionId: effect.interactionId };
       default:
