@@ -44,6 +44,12 @@ export interface ToolProgressEvent {
   stream: 'stdout' | 'stderr';
 }
 
+/** Structured answer returned by an ask_user tool call. */
+export interface UserInputResult {
+  answer: string;
+  answers?: Record<string, string>;
+}
+
 /** 工具调用成功完成 */
 export interface ToolFinishedEvent {
   type: 'tool.finished';
@@ -62,6 +68,8 @@ export interface ToolFinishedEvent {
     totalLines?: number;
     /** 工具输出的 token 数 */
     toolTokenCount?: number;
+    /** Structured ask_user result for UI consumers; stdout remains the model transcript. */
+    userInput?: UserInputResult;
   };
 }
 

@@ -32,4 +32,50 @@ describe('runtime user actions', () => {
       }).map((event) => event.type),
     ).toEqual(['user_input.answered', 'tool.finished']);
   });
+
+  test('preserves five-question input answers as structured tool completion data', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.interactions = {
+      kind: 'awaiting_user_input',
+      interactionId: 'expected',
+      toolCallId: 'ask',
+      request: {
+        question: 'Choose project settings',
+        options: [],
+        allow_free_text: true,
+        questions: [
+          { id: 'language', question: 'Language?', options: [] },
+          { id: 'framework', question: 'Framework?', options: [] },
+          { id: 'database', question: 'Database?', options: [] },
+          { id: 'hosting', question: 'Hosting?', options: [] },
+          { id: 'testing', question: 'Testing?', options: [] },
+        ],
+      },
+    };
+    const answer = 'Use the submitted configuration for the new service.';
+    const answers = {
+      language: 'TypeScript with strict compiler settings and no implicit any values.',
+      framework: 'A lightweight HTTP framework with typed routes and middleware.',
+      database: 'PostgreSQL with migrations, indexes, backups, and connection pooling.',
+      hosting: 'A regional container platform with managed secrets and observability.',
+      testing: 'Unit, integration, and end-to-end tests in continuous integration.',
+    };
+
+    const events = eventsForRuntimeAction(state, {
+      type: 'input',
+      interactionId: 'expected',
+      text: answer,
+      answers,
+    });
+    const toolFinished = events[1];
+
+    expect(toolFinished).toMatchObject({
+      type: 'tool.finished',
+      result: {
+        userInput: { answer, answers },
+      },
+    });
+    if (toolFinished?.type !== 'tool.finished') throw new Error('Expected tool.finished event');
+    expect(toolFinished.result.stdout.length).toBeGreaterThan(200);
+  });
 });

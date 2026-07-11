@@ -56,6 +56,7 @@ export function eventsForRuntimeAction(
           exitCode: 0,
           stdout: JSON.stringify({ answer: action.text, answers: action.answers }),
           stderr: '',
+          userInput: { answer: action.text, answers: action.answers },
         },
       },
     ];
