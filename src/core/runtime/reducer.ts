@@ -2,6 +2,10 @@
 // Phase 2: 纯函数 reduceRuntimeState — 将 RuntimeEvent 应用到 RuntimeState，返回新的不可变状态
 // Phase 2: Pure function reduceRuntimeState — applies a RuntimeEvent to RuntimeState, returns new immutable state
 
+import {
+  DEFAULT_CIRCUIT_BREAKER_CONFIG,
+  evaluateCircuitBreaker,
+} from '@/core/execution/circuit-breaker';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
 import type { RuntimeEvent } from './events';
 import type { RuntimeState } from './state';
@@ -75,7 +79,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           executionMode: event.executionMode,
           approvedAtTurnId: state.turn.turnId,
         },
-        mode: event.executionMode === 'manual' ? 'ask' : event.executionMode,
+        mode: event.executionMode,
         interactions: { kind: 'idle' },
       };
     }
@@ -378,16 +382,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         },
       };
 
-    // phase.changed — deprecated; phase is now derived from planning.kind via getAgentPhase()
-    // phase.changed — deprecated; phase is now derived from planning.kind via getAgentPhase()
-    case 'phase.changed':
-      return state;
-
-    // ── Turn 生命周期 / Turn lifecycle ──
-
-    // turn.started / turn.completed / turn.aborted 为信息性事件，
-    // 当前不修改 RuntimeState（turn 在初始化时已设置）。
-    // Informational events — no state mutation needed (turn is set at init).
+    // phase.changed — removed; phase is derived from planning.kind via getAgentPhase()
     case 'turn.started':
     case 'turn.completed':
     case 'turn.aborted':
@@ -450,12 +445,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             kind: 'planning_draft',
             document: {
               ...planDocumentFromAgentPlan(event.plan, state.turn.turnId),
-              planId:
-                state.planning.kind === 'planning_draft'
-                  ? state.planning.document.planId
-                  : crypto.randomUUID(),
-              version:
-                state.planning.kind === 'planning_draft' ? state.planning.document.version + 1 : 1,
+              planId: event.planId,
+              version: event.version,
               structuralDigest: event.structuralHash,
             },
           },
@@ -535,16 +526,63 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       }
       const result = event.result;
       if (result.ok && result.approved) {
+        const call = state.tools.calls[state.interactions.toolCallId];
+        // Reset circuit breaker on successful auto-review
+        const breaker = evaluateCircuitBreaker(
+          state.autoReview.consecutiveRejects,
+          state.autoReview.rejectionHistory,
+          DEFAULT_CIRCUIT_BREAKER_CONFIG,
+          false, // not a rejection — reset
+        );
         return {
           ...state,
-          tools: updateToolStatus(state.tools, state.interactions.toolCallId, 'approved'),
+          tools: {
+            ...state.tools,
+            calls: {
+              ...state.tools.calls,
+              ...(call
+                ? {
+                    [state.interactions.toolCallId]: {
+                      ...call,
+                      status: 'approved' as const,
+                      approvalGrant: (result.grant ??
+                        'approve_once') as import('@/protocol/events').ShellApprovalGrant,
+                    },
+                  }
+                : {}),
+            },
+          },
           interactions: { kind: 'idle' },
+          autoReview: {
+            ...state.autoReview,
+            consecutiveRejects: breaker.newConsecutiveRejects,
+            rejectionHistory: breaker.newRejectionHistory,
+            circuitBreakerTripped: false,
+          },
         };
       }
+      // Auto-review rejected — update circuit breaker
+      const breaker = evaluateCircuitBreaker(
+        state.autoReview.consecutiveRejects,
+        state.autoReview.rejectionHistory,
+        DEFAULT_CIRCUIT_BREAKER_CONFIG,
+        true, // isRejection
+        {
+          timestamp: Date.now(),
+          toolName: state.interactions.toolName,
+          reason: result.reason ?? 'auto-review rejected',
+        },
+      );
       return {
         ...state,
         tools: updateToolStatus(state.tools, state.interactions.toolCallId, 'rejected'),
         interactions: { kind: 'idle' },
+        autoReview: {
+          ...state.autoReview,
+          consecutiveRejects: breaker.newConsecutiveRejects,
+          rejectionHistory: breaker.newRejectionHistory,
+          circuitBreakerTripped: state.autoReview.circuitBreakerTripped || breaker.tripped,
+        },
       };
     }
 

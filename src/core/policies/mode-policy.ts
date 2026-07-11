@@ -15,68 +15,35 @@ function isDestructive(risk: PolicyInput['toolRisk']): boolean {
   return risk === 'destructive';
 }
 
+function hasExternalEffects(effects: PolicyInput['effects']): boolean {
+  return Boolean(effects?.network || effects?.externalWrite || effects?.uncertainEffects);
+}
+
 /** 判断工具是否需要审批（非只读/非计划类）/ Returns true if the tool requires approval */
 function requiresApproval(risk: PolicyInput['toolRisk']): boolean {
   if (!risk) return false;
   return risk !== 'read' && risk !== 'plan';
 }
 
-// ── Ask Mode / 询问模式 ──
-
 /**
- * 创建 Ask Mode 策略 — 最保守的模式，所有变更需用户确认。
- * Create Ask Mode policy — most conservative, all mutations require user confirmation.
- *
- * 行为 / Behavior:
- * - plan: 草稿方案需人工审核 / drafted plans require human review
- * - 工具: 只读直通，变更需审批，破坏性拒绝 / read-only allowed, mutations need approval, destructive denied
- * - ask_user: 正常支持 / fully supported
- * - auto-review: 不启用 / disabled
+ * `accept_edits` is the shared baseline for interactive execution modes.
+ * It permits only proven-local workspace work and sends every other
+ * non-destructive operation to an approval path.
  */
-export function createAskModePolicy(): RuntimePolicy {
-  return {
-    name: 'ask-mode',
-
-    shouldRequirePlan(_input: PolicyInput): PolicyDecision {
-      return { kind: 'allow' };
-    },
-
-    shouldReviewPlan(input: PolicyInput): PolicyDecision {
-      // 仅当方案处于 drafted 或 awaiting_review 状态时才需审核
-      // Only require review when plan is drafted or awaiting_review
-      if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
-        return { kind: 'need_plan_review' };
-      }
-      return { kind: 'allow' };
-    },
-
-    shouldAskUser(_input: PolicyInput): PolicyDecision {
-      // ask mode 下 ask_user 正常支持 / ask_user is supported in ask mode
-      return { kind: 'allow' };
-    },
-
-    shouldApproveTool(input: PolicyInput): PolicyDecision {
-      // 破坏性操作 — 不可绕过 / Destructive operations — never bypass
-      if (isDestructive(input.toolRisk)) {
-        return { kind: 'deny', reason: 'destructive operations are not allowed' };
-      }
-      // 需要审批的工具 — 中断等用户确认 / Tools requiring approval — interrupt for user
-      if (requiresApproval(input.toolRisk)) {
-        return { kind: 'need_tool_approval' };
-      }
-      // 只读/计划类 — 直通 / Read/plan — allow directly
-      return { kind: 'allow' };
-    },
-
-    shouldAutoReview(_input: PolicyInput): PolicyDecision {
-      // ask mode 不使用 auto-review / ask mode does not use auto-review
-      return { kind: 'allow' };
-    },
-
-    shouldContinueLoop(_input: PolicyInput): PolicyDecision {
-      return { kind: 'stop' };
-    },
-  };
+function decideAcceptEditsTool(input: PolicyInput): PolicyDecision {
+  if (isDestructive(input.toolRisk)) {
+    return { kind: 'deny', reason: 'destructive operations are not allowed' };
+  }
+  if (hasExternalEffects(input.effects)) {
+    return { kind: 'need_tool_approval' };
+  }
+  if (input.toolRisk === 'write_file') {
+    return { kind: 'allow' };
+  }
+  if (input.toolRisk === 'read' || input.toolRisk === 'plan') {
+    return { kind: 'allow' };
+  }
+  return { kind: 'need_tool_approval' };
 }
 
 // ── Auto Mode / 自动模式 ──
@@ -97,11 +64,31 @@ export interface AutoModeConfig {
  *
  * 行为 / Behavior:
  * - plan: 可在审批时选择 auto-execution / can choose auto-execution at approval time
- * - 工具: 非破坏性变更走 auto-review，破坏性拒绝 / non-destructive mutations go through auto-review, destructive denied
+ * - 工具: 继承 accept_edits 的本地直通；原本需人工审批的操作走 auto-review，破坏性拒绝 /
+ *   inherits accept_edits local allows; operations otherwise needing manual approval go through auto-review; destructive denied
  * - ask_user: 正常支持 / fully supported
  * - auto-review: 对需审批的工具自动审查 / auto-review for tools that need approval
  */
 export function createAutoModePolicy(_config?: AutoModeConfig): RuntimePolicy {
+  const decideTool = (input: PolicyInput): PolicyDecision => {
+    const acceptEditsDecision = decideAcceptEditsTool(input);
+
+    // Auto is an upgrade of accept_edits: preserve direct allows and denies,
+    // and replace only manual approval with automatic review.
+    if (acceptEditsDecision.kind !== 'need_tool_approval') {
+      return acceptEditsDecision;
+    }
+    if (input.circuitBreakerTripped) {
+      return { kind: 'need_tool_approval' };
+    }
+    return {
+      kind: 'need_auto_review',
+      toolCallId: '',
+      toolName: input.toolName ?? 'unknown',
+      reason: 'auto-review required for an operation accept_edits would require approval for',
+    };
+  };
+
   return {
     name: 'auto-mode',
 
@@ -121,43 +108,12 @@ export function createAutoModePolicy(_config?: AutoModeConfig): RuntimePolicy {
     },
 
     shouldApproveTool(input: PolicyInput): PolicyDecision {
-      // 破坏性 — 不可绕过 / Destructive — never bypass
-      if (isDestructive(input.toolRisk)) {
-        return { kind: 'deny', reason: 'destructive operations are not allowed' };
-      }
-      // 需要审批 — 走 auto-review / Requires approval — go through auto-review
-      if (requiresApproval(input.toolRisk)) {
-        // 已有审批缓存 — 直通 / Already cached approval — allow
-        if (input.approvalCached) {
-          return { kind: 'allow' };
-        }
-        // 断路器已跳闸 — 回退到人工审批 / Circuit breaker tripped — fall back to manual
-        if (input.circuitBreakerTripped) {
-          return { kind: 'need_tool_approval' };
-        }
-        // 正常路径 — auto-review / Normal path — auto-review
-        return {
-          kind: 'need_auto_review',
-          toolCallId: '',
-          toolName: input.toolName ?? 'unknown',
-          reason: 'auto-review required for non-read operation',
-        };
-      }
-      // 只读/计划类 — 直通 / Read/plan — allow directly
-      return { kind: 'allow' };
+      return decideTool(input);
     },
 
     shouldAutoReview(input: PolicyInput): PolicyDecision {
-      // 仅对需审批的非破坏性工具启用 / Only for non-destructive tools that need approval
-      if (requiresApproval(input.toolRisk) && !isDestructive(input.toolRisk)) {
-        return {
-          kind: 'need_auto_review',
-          toolCallId: '',
-          toolName: input.toolName ?? 'unknown',
-          reason: 'auto-review for tool approval',
-        };
-      }
-      return { kind: 'allow' };
+      const decision = decideTool(input);
+      return decision.kind === 'need_auto_review' ? decision : { kind: 'allow' };
     },
 
     shouldContinueLoop(_input: PolicyInput): PolicyDecision {
@@ -281,11 +237,9 @@ export function createFullModePolicy(sandboxAvailable: boolean): RuntimePolicy {
  * Create Accept Edits Mode policy — semi-automatic execution after plan approval.
  *
  * 行为 / Behavior:
- * - workspace file edit: allow (auto-approve write_file/edit_file)
- * - safe fs command: allow (read/search/stat)
- * - test/build/execute: approval (still requires user check)
- * - network: approval
- * - vcs mutation: approval
+ * - proven-local workspace writes and Git mutations: allow
+ * - read/plan: allow
+ * - network, external writes, and unknown side effects: approval
  * - destructive: deny
  */
 export function createAcceptEditsModePolicy(): RuntimePolicy {
@@ -308,19 +262,7 @@ export function createAcceptEditsModePolicy(): RuntimePolicy {
     },
 
     shouldApproveTool(input: PolicyInput): PolicyDecision {
-      if (isDestructive(input.toolRisk)) {
-        return { kind: 'deny', reason: 'destructive operations are not allowed' };
-      }
-      // Auto-approve workspace file edits
-      if (input.toolRisk === 'write_file') {
-        return { kind: 'allow' };
-      }
-      // Read/plan — allow
-      if (input.toolRisk === 'read' || input.toolRisk === 'plan') {
-        return { kind: 'allow' };
-      }
-      // Everything else (test, build, execute, network, vcs) — approval
-      return { kind: 'need_tool_approval' };
+      return decideAcceptEditsTool(input);
     },
 
     shouldAutoReview(_input: PolicyInput): PolicyDecision {
@@ -344,13 +286,11 @@ export function createAcceptEditsModePolicy(): RuntimePolicy {
  * @param autoConfig - auto mode 配置（可选）
  */
 export function createModePolicy(
-  mode: 'ask' | 'accept_edits' | 'auto' | 'full',
+  mode: 'accept_edits' | 'auto' | 'full',
   sandboxAvailable?: boolean,
   autoConfig?: AutoModeConfig,
 ): RuntimePolicy {
   switch (mode) {
-    case 'ask':
-      return createAskModePolicy();
     case 'accept_edits':
       return createAcceptEditsModePolicy();
     case 'auto':

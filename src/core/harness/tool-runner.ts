@@ -17,7 +17,12 @@ import {
 } from '@/core/tools/search';
 import { type ShellExecutor, shellTool } from '@/core/tools/shell';
 import { formatToolParseError } from '@/core/tools/tool-parse-error';
-import type { AuthorizationOverride, ShellResult, ThreadAuthorizationState } from '@/core/types';
+import type {
+  AuthorizationOverride,
+  ShellNetworkMode,
+  ShellResult,
+  ThreadAuthorizationState,
+} from '@/core/types';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { AgentPhase, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
@@ -67,7 +72,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     skillOptions,
     signal,
     permitBatch,
-    interactionMode = 'ask',
+    interactionMode = 'accept_edits',
     taskConfig,
     taskModel,
     subagentEventSink,
@@ -113,11 +118,23 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     });
   }
 
-  // 防御性检查：需要审批的工具必须经过审批节点，不能以 approvedGrant='none' 直达。
-  // 子 agent 也必须继承相同 Gateway 规则；它没有内部审批节点时，应把 blocked 结果返回主 agent。
-  // Defense-in-depth: tools requiring approval MUST pass through the approval node.
-  // Sub-agents inherit the same Gateway rules and return a blocked result to the main agent.
-  if (policy.requiresApproval && approvedGrant === 'none') {
+  // 防御性检查仍复用同一 mode policy，避免控制器与执行器对免审批范围产生漂移。
+  // Defense-in-depth reuses the same mode policy so controller and runner cannot drift.
+  const modeDecision = createModePolicy(interactionMode).shouldApproveTool({
+    interactionMode,
+    phase,
+    planKind: 'building_without_plan',
+    toolName: request.name,
+    toolRisk: policy.risk,
+    effects: policy.effects,
+  });
+  const requiresModeApproval =
+    modeDecision.kind === 'need_tool_approval' || modeDecision.kind === 'need_auto_review';
+  const hasExecutionGrant =
+    approvedGrant !== 'none' ||
+    policy.grantUsed === 'same_command' ||
+    policy.grantUsed === 'full_access';
+  if (!hasExecutionGrant && requiresModeApproval) {
     return withFailureGuidance(request, {
       ok: false,
       command: request.protectedCommand,
@@ -314,15 +331,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   if (request.name === 'ask_user') {
     // 通过 policy 判断 ask_user 是否被当前 mode 禁止（替代 isFullAccessMode 直接检查）
     // Use policy to determine if ask_user is forbidden by current mode
-    const askPolicy = createModePolicy(
-      (interactionMode === 'accept_edits' ? 'ask' : interactionMode) as 'ask' | 'auto' | 'full',
-    );
+    const askPolicy = createModePolicy(interactionMode);
     if (
       askPolicy.shouldAskUser({
-        interactionMode: (interactionMode === 'accept_edits' ? 'ask' : interactionMode) as
-          | 'ask'
-          | 'auto'
-          | 'full',
+        interactionMode: interactionMode as 'accept_edits' | 'auto' | 'accept_edits' | 'full',
         phase: phase as 'planning' | 'building',
         planKind: 'building_without_plan',
         toolName: 'ask_user',
@@ -559,6 +571,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'shell_execute') {
+    const networkMode = resolveShellNetworkMode(policy, approvedGrant);
     const raw = await runShellForTool(
       workspace,
       request.args.command,
@@ -566,6 +579,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       signal,
       input.onShellProgress,
       request.args.timeout_ms,
+      networkMode,
     );
     const result: ShellResult = {
       ...raw,
@@ -613,6 +627,7 @@ async function runShellForTool(
   signal?: AbortSignal,
   onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void,
   timeoutMs?: number,
+  networkMode?: ShellNetworkMode,
 ): Promise<ShellResult> {
   try {
     return await (shellExecutor ?? shellTool)({
@@ -621,6 +636,7 @@ async function runShellForTool(
       signal,
       onProgress,
       timeoutMs,
+      networkMode,
     });
   } catch (error) {
     const isAbort = error instanceof Error && error.name === 'AbortError';
@@ -636,6 +652,18 @@ async function runShellForTool(
           : String(error),
     };
   }
+}
+
+function resolveShellNetworkMode(
+  policy: ReturnType<typeof evaluateToolApproval>,
+  approvedGrant: ShellGrantUsed,
+): ShellNetworkMode {
+  const mayNeedNetwork = policy.effects?.network || policy.effects?.uncertainEffects;
+  const hasNetworkApproval =
+    approvedGrant !== 'none' ||
+    policy.grantUsed === 'same_command' ||
+    policy.grantUsed === 'full_access';
+  return mayNeedNetwork && hasNetworkApproval ? 'allow_all' : 'disabled';
 }
 
 /** 给失败工具结果补充模型可直接使用的原因和正确用法 / Add model-facing failure guidance to failed tool results */

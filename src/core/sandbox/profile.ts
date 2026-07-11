@@ -18,7 +18,7 @@ export function generateSandboxProfile(
     fileReadPolicy(),
     fileWritePolicy(workspace),
     fileWriteUnlinkPolicy(workspace),
-    networkPolicy(options?.network ?? 'allow_all'),
+    networkPolicy(options?.network ?? 'disabled'),
   ]
     .filter(Boolean)
     .join('\n');
@@ -150,5 +150,6 @@ function networkPolicy(mode: 'disabled' | 'allow_all'): string {
     return `;; ── 网络：禁用 ──
 (deny network*)`;
   }
-  return '';
+  return `;; ── 网络：允许 ──
+(allow network*)`;
 }

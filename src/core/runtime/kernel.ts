@@ -138,7 +138,7 @@ export class AgentKernel {
    */
   getPolicy(): RuntimePolicy {
     return createModePolicy(
-      this.state.mode as 'ask' | 'accept_edits' | 'auto' | 'full',
+      this.state.mode as 'accept_edits' | 'accept_edits' | 'auto' | 'full',
       this.sandboxAvailable,
     );
   }
@@ -247,7 +247,7 @@ export class AgentKernel {
  * @param userId - 用户 ID / User id
  * @param workspace - 工作目录 / Workspace path
  * @param storePath - RuntimeStore 数据库路径 / RuntimeStore database path
- * @param interactionMode - 交互模式，默认 'ask' / Interaction mode, defaults to 'ask'
+ * @param interactionMode - 交互模式，默认 'accept_edits' / Interaction mode, defaults to 'accept_edits'
  * @param sandboxAvailable - 沙箱是否可用 / Whether sandbox is available
  * @returns 初始化的 AgentKernel 实例 / Initialized AgentKernel instance
  */
@@ -266,7 +266,7 @@ export function createAgentKernel(params: {
     threadId: params.threadId,
     userId: params.userId,
     workspace: params.workspace,
-    interactionMode: params.interactionMode ?? 'ask',
+    interactionMode: params.interactionMode ?? 'accept_edits',
     phase: params.phase,
   });
   const restoredState = store.loadSnapshot<RuntimeState>(params.threadId);
@@ -279,7 +279,7 @@ export function createAgentKernel(params: {
   return new AgentKernel({
     store,
     initialState,
-    interactionMode: params.interactionMode ?? 'ask',
+    interactionMode: params.interactionMode ?? 'accept_edits',
     sandboxAvailable: params.sandboxAvailable,
   });
 }

@@ -3,7 +3,6 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { SandboxBackend } from '@/core/sandbox/platform';
 import type {
   AgentPhase,
-  AgentPlan,
   AuthorizationMode,
   InteractionMode,
   PlanningState,
@@ -34,37 +33,21 @@ export interface RuntimeSystemInfo {
   workspace: string;
 }
 
-/** 运行时上下文输入参数 / Runtime context input parameters */
+/** 运行时上下文输入参数（内部，轻量使用）/ Runtime context input parameters (internal, lightweight usage) */
 export interface RuntimeContextInput {
-  /** 工作目录 / Workspace path */
   workspace: string;
-  /** 对话消息 / Conversation messages */
   messages: BaseMessage[];
-  /** 工作区访问权限 / Workspace access level */
   workspaceAccess?: 'write';
-  /** 执行计划 / Execution plan */
-  plan?: AgentPlan | null;
-  phase?: AgentPhase;
-  interactionMode?: InteractionMode;
-  authorizationMode?: AuthorizationMode;
-  sandboxBackend?: SandboxBackend | 'unknown';
-  planReviewed?: boolean;
-  approvedPlanSummary?: string | null;
-  /** 可注入的当前时间 / Injectable current time */
   now?: Date;
-  /** 可注入的时区 / Injectable timezone */
   timezone?: string;
 }
 
-/** 动态模式快照输入。该数据随轮次变化，不能进入 cacheable runtime context。
- *  v2: 新增 planningState 字段，替代独立的 phase + planReviewed + approvedPlanSummary。 */
+/** 动态模式快照输入。该数据随轮次变化，不能进入 cacheable runtime context。 */
 export interface RuntimeModeSnapshotInput {
   phase: AgentPhase;
   interactionMode: InteractionMode;
   authorizationMode: AuthorizationMode;
   sandboxBackend: SandboxBackend | 'unknown';
-  planReviewed: boolean;
-  approvedPlanSummary?: string | null;
   /** v2: PlanningState for dynamic runtime-state block */
   planningState?: PlanningState;
 }
@@ -120,7 +103,7 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     `authorization_mode: ${input.authorizationMode}`,
   ];
 
-  // v2: dynamic plan state block from PlanningState
+  // dynamic plan state block from PlanningState
   if (input.planningState) {
     const ps = input.planningState;
     lines.push('');
@@ -150,18 +133,13 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     lines.push(
       `  write_plan_allowed: ${ps.kind === 'planning_empty' || ps.kind === 'planning_draft'}`,
     );
-    lines.push(`  exit_plan_mode_allowed: ${ps.kind === 'planning_draft'}`);
+    lines.push(`  write_plan_submit_allowed: ${ps.kind === 'planning_draft'}`);
     lines.push(`  update_plan_allowed: ${ps.kind === 'executing'}`);
-  } else if (input.planReviewed) {
-    lines.push(`plan_reviewed: true`);
-    if (input.approvedPlanSummary) {
-      lines.push(`approved_plan_summary: ${input.approvedPlanSummary}`);
-    }
   }
 
   if (input.phase === 'planning') {
     lines.push(
-      'Planning phase policy: read/search/research, ask_user, write_plan, and exit_plan_mode are allowed; workspace mutation, code execution, full access escalation, and side-effectful MCP/sub-agent work are not allowed until plan approval moves the phase to building.',
+      'Planning phase policy: read/search/research, ask_user, and write_plan are allowed; workspace mutation, code execution, full access escalation, and side-effectful MCP/sub-agent work are not allowed until plan approval moves the phase to building.',
     );
   } else {
     lines.push(
@@ -208,50 +186,29 @@ export function buildCacheableRuntimeContext(input: CacheableRuntimeContextInput
   return lines.join('\n');
 }
 
-/** 将计划格式化为运行时状态提醒文本。支持 PlanningState (v2) 和 AgentPlan (deprecated)。
- *  Format plan as runtime state reminder text. Supports PlanningState (v2) and AgentPlan (deprecated). */
-export function formatPlanStateReminder(
-  input: NonNullable<RuntimeContextInput['plan']> | PlanningState,
-): string {
-  // v2: PlanningState (detected by 'document' property)
-  if ('document' in input && input.document) {
-    const planning = input as PlanningState;
-    const lines = ['<runtime-state source="runtime.kernel">', `lifecycle: ${planning.kind}`];
-    if (
-      planning.kind === 'planning_draft' ||
-      planning.kind === 'awaiting_review' ||
-      planning.kind === 'executing' ||
-      planning.kind === 'completed'
-    ) {
-      lines.push(`plan_id: ${planning.document.planId}`);
-      lines.push(`version: ${planning.document.version}`);
-      lines.push(`title: ${planning.document.title}`);
-    }
-    if (planning.kind === 'executing') {
-      lines.push('steps:');
-      for (const step of planning.document.steps) {
-        lines.push(`  - ${step.id}: ${step.status}`);
-      }
-    }
-    if (planning.kind === 'planning_draft' && planning.revisionFeedback) {
-      lines.push(`revision_feedback: ${planning.revisionFeedback}`);
-    }
-    lines.push('</runtime-state>');
-    return lines.join('\n');
+/** 将计划格式化为运行时状态提醒文本。使用 PlanningState。
+ *  Format plan as runtime state reminder text. Uses PlanningState. */
+export function formatPlanStateReminder(planning: PlanningState): string {
+  const lines = ['<runtime-state source="runtime.kernel">', `lifecycle: ${planning.kind}`];
+  if (
+    planning.kind === 'planning_draft' ||
+    planning.kind === 'awaiting_review' ||
+    planning.kind === 'executing' ||
+    planning.kind === 'completed'
+  ) {
+    lines.push(`plan_id: ${planning.document.planId}`);
+    lines.push(`version: ${planning.document.version}`);
+    lines.push(`title: ${planning.document.title}`);
   }
-
-  // Legacy AgentPlan
-  const plan = input as NonNullable<RuntimeContextInput['plan']>;
-  const lines = [
-    '<runtime-state source="graph.state.plan">',
-    'This message is generated by the harness, not by the user.',
-    'Use it as the current persisted plan state.',
-    `Name: ${plan.name}`,
-    `Status: ${plan.status}`,
-    `Description: ${plan.description}`,
-    'Steps:',
-    ...plan.steps.map((step) => `- [${step.status}] ${step.step}`),
-    '</runtime-state>',
-  ];
+  if (planning.kind === 'executing') {
+    lines.push('steps:');
+    for (const step of planning.document.steps) {
+      lines.push(`  - ${step.id}: ${step.status}`);
+    }
+  }
+  if (planning.kind === 'planning_draft' && planning.revisionFeedback) {
+    lines.push(`revision_feedback: ${planning.revisionFeedback}`);
+  }
+  lines.push('</runtime-state>');
   return lines.join('\n');
 }

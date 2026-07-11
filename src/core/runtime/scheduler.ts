@@ -7,7 +7,7 @@ import type { RuntimeState } from './state';
  * before asking for the next effect.
  *
  * v2: single-tool scheduling — runs one tool at a time so interaction barriers
- * (exit_plan_mode, ask_user, approval.requested) naturally interrupt the queue
+ * (write_plan with action=submit, ask_user, approval.requested) naturally interrupt the queue
  * before sibling tool calls execute.
  */
 export function decideNextEffect(state: RuntimeState): RuntimeEffect {
@@ -41,7 +41,7 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   }
 
   // Single-tool scheduling: run one tool at a time to support interaction barriers.
-  // When an interaction-creating tool (exit_plan_mode, ask_user, approval) is reached,
+  // When an interaction-creating tool (write_plan action=submit, ask_user, approval) is reached,
   // the scheduler naturally stops before sibling tool calls execute.
   const nextRunnable = state.tools.queue.find((id) => {
     const call = state.tools.calls[id];

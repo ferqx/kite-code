@@ -41,7 +41,7 @@ const mcpServerSchema = z.object({
   timeout: z.number().optional(),
 });
 
-const interactionModeSchema = z.enum(['ask', 'auto', 'full']);
+const interactionModeSchema = z.enum(['accept_edits', 'auto', 'full']);
 const sandboxSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -190,7 +190,7 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
       },
     },
     theme: 'dark',
-    interactionMode: 'ask',
+    interactionMode: 'accept_edits',
     sandbox: { enabled: true },
     mcpServers: {},
   };

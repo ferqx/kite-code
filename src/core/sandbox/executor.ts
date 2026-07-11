@@ -5,6 +5,7 @@ import {
   shellTool,
   timeoutMessage,
 } from '@/core/tools/shell';
+import type { ShellNetworkMode } from '@/core/types';
 import { generateBwrapArgs } from './bwrap';
 import { detectSandboxBackend } from './platform';
 import { generateSandboxProfile } from './profile';
@@ -48,30 +49,42 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
 /** macOS Seatbelt executor（参照 Codex create_seatbelt_command_args 使用 -p 传 profile）*/
 function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
-  const profile = generateSandboxProfile(workspace, { network: options.network?.mode });
 
-  return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => ({
-    cmd: ['/usr/bin/sandbox-exec', '-p', profile, getSystemShell(), '-c', wrappedCommand],
-  }));
+  return createWrappedExecutor(
+    workspace,
+    resourceLimits,
+    (wrappedCommand, networkMode) => {
+      const profile = generateSandboxProfile(workspace, { network: networkMode });
+      return {
+        cmd: ['/usr/bin/sandbox-exec', '-p', profile, getSystemShell(), '-c', wrappedCommand],
+      };
+    },
+    options.network?.mode,
+  );
 }
 
 /** Linux Bubblewrap executor */
 function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
-  const bwrapArgs = generateBwrapArgs(workspace, {
-    network: options.network?.mode,
-    sandboxRuntimeDir: getSandboxRuntimeDir(),
-  });
   const bwrapPath = Bun.which('bwrap')!;
   const seccompPath = resolveSeccompPath(findApplySeccomp(), workspace);
 
-  return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => {
-    const shell = getSystemShell();
-    const innerCmd = seccompPath
-      ? [seccompPath, shell, '-c', wrappedCommand]
-      : [shell, '-c', wrappedCommand];
-    return { cmd: [bwrapPath, ...bwrapArgs, ...innerCmd] };
-  });
+  return createWrappedExecutor(
+    workspace,
+    resourceLimits,
+    (wrappedCommand, networkMode) => {
+      const bwrapArgs = generateBwrapArgs(workspace, {
+        network: networkMode,
+        sandboxRuntimeDir: getSandboxRuntimeDir(),
+      });
+      const shell = getSystemShell();
+      const innerCmd = seccompPath
+        ? [seccompPath, shell, '-c', wrappedCommand]
+        : [shell, '-c', wrappedCommand];
+      return { cmd: [bwrapPath, ...bwrapArgs, ...innerCmd] };
+    },
+    options.network?.mode,
+  );
 }
 
 /**
@@ -81,7 +94,11 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
 function createWrappedExecutor(
   workspace: string,
   resourceLimits: SandboxOptions['resourceLimits'],
-  buildSpawn: (wrappedCommand: string) => { cmd: string[]; stdin?: string },
+  buildSpawn: (
+    wrappedCommand: string,
+    networkMode: ShellNetworkMode,
+  ) => { cmd: string[]; stdin?: string },
+  defaultNetworkMode: ShellNetworkMode = 'disabled',
 ): ShellExecutor {
   return async (input) => {
     let timedOut = false;
@@ -108,7 +125,7 @@ function createWrappedExecutor(
       ].join(' ');
 
       const wrappedCommand = `${preamble} ${input.command}`;
-      const { cmd, stdin } = buildSpawn(wrappedCommand);
+      const { cmd, stdin } = buildSpawn(wrappedCommand, input.networkMode ?? defaultNetworkMode);
 
       const proc = Bun.spawn(cmd, {
         cwd: workspace,

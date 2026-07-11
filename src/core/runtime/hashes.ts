@@ -2,7 +2,7 @@
 // 方案结构化哈希 + 审批哈希 / Plan structural hash + approval hash
 
 import { createHash } from 'node:crypto';
-import type { AgentPlan, PlanDocument } from '@/protocol/events';
+import type { PlanDocument } from '@/protocol/events';
 
 /**
  * 计算 PlanDocument 的结构化摘要，用于判断方案内容是否发生了结构性变更。
@@ -22,13 +22,6 @@ export function computePlanStructuralDigest(
     bodyMarkdown: normalize(doc.bodyMarkdown),
     steps: doc.steps.map(({ id, title }) => ({ id, title: normalize(title) })),
   });
-  return createHash('sha256').update(input).digest('hex');
-}
-
-/** @deprecated Use `computePlanStructuralDigest(PlanDocument)` instead. */
-export function computePlanStructuralHash(plan: AgentPlan): string {
-  const stepsText = plan.steps.map((s) => s.step).join('');
-  const input = plan.name + plan.steps.length + stepsText;
   return createHash('sha256').update(input).digest('hex');
 }
 

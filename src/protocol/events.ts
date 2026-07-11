@@ -52,7 +52,6 @@ export type AgentPhase = 'planning' | 'building';
 export type WorkspaceAccessRequest = 'auto' | WorkspaceAccess | 'builder';
 export type AuthorizationMode = 'default' | 'full_access';
 export const InteractionMode = {
-  Ask: 'ask',
   AcceptEdits: 'accept_edits',
   Auto: 'auto',
   Full: 'full',
@@ -138,14 +137,14 @@ export type PlanningState =
       document: PlanDocument;
       /** 交互标识，关联 plan_review 中断 / Interaction id linking to the plan_review interrupt */
       interactionId: string;
-      /** 触发该审核的 exit_plan_mode 工具调用 ID / exit_plan_mode tool call id that triggered this review */
+      /** 触发该审核的 write_plan 工具调用 ID / write_plan tool call id that triggered this review */
       exitToolCallId: string;
     }
   | {
       kind: 'executing';
       document: PlanDocument;
       /** 执行模式：ask=每次确认，accept_edits=自动接受工作区编辑，auto=自动执行 / Execution mode */
-      executionMode: 'ask' | 'manual' | 'accept_edits' | 'auto';
+      executionMode: 'accept_edits' | 'auto';
       /** 方案审批通过的 turn ID / Turn id when plan was approved */
       approvedAtTurnId: string;
     }

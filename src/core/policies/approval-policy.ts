@@ -3,9 +3,12 @@ import { parseMcpToolName } from '@/core/mcp/tool-adapter';
 import { isReadOnlyShellCommand } from '@/core/tools/definitions';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, ShellGrantUsed } from '@/protocol/events';
-import type { ToolRisk } from './shell-classification';
+import type { ToolEffects, ToolRisk } from './shell-classification';
 import {
+  classifyShellEffects,
   classifyShellRisk,
+  isDestructiveRmOnCriticalPaths,
+  isDestructiveRmOnWorkspace,
   isDestructiveShellCommand,
   isNetworkCommand,
   isVcsMutationCommand,
@@ -45,6 +48,8 @@ export interface ApprovalDecision {
   requiresApproval: boolean;
   /** 风险分类 / Risk classification */
   risk: ToolRisk;
+  /** 可叠加的网络与文件系统副作用 / Additive network and filesystem effects */
+  effects?: ToolEffects;
   /** 决策原因 / Reason for the decision */
   reason: string;
   /** 用户可见的摘要描述 / Human-readable summary for UI display */
@@ -101,7 +106,7 @@ function deny(input: DecisionInput): ApprovalDecision {
 // ── 内部分类器 / Internal classifiers ──
 
 /** 对 shell_execute 命令进行分类（内部使用 classifyShellRisk）/ Classify shell_execute command */
-function classifyShellExecute(command: string): ApprovalDecision {
+function classifyShellExecute(command: string, workspace: string): ApprovalDecision {
   const trimmed = (command ?? '').trim();
   if (!trimmed) {
     return deny({
@@ -121,6 +126,8 @@ function classifyShellExecute(command: string): ApprovalDecision {
     });
   }
 
+  const effects = classifyShellEffects(trimmed, workspace);
+
   if (isReadOnlyShellCommand(trimmed)) {
     return allow({
       risk: 'read',
@@ -136,6 +143,7 @@ function classifyShellExecute(command: string): ApprovalDecision {
   if (isVcsMutationCommand(trimmed)) {
     return requireApproval({
       risk: 'vcs_mutation',
+      effects,
       reason: 'This command mutates version-control state.',
       userVisibleSummary: `Run version-control mutation command: ${trimmed}`,
       expectedEffects: ['Mutates git state', 'May change staged files, commits, or branches'],
@@ -145,6 +153,7 @@ function classifyShellExecute(command: string): ApprovalDecision {
   if (isWriteLikeShellCommand(trimmed)) {
     return requireApproval({
       risk: 'write_file',
+      effects,
       reason: 'This shell command may modify workspace files.',
       userVisibleSummary: `Run workspace-mutating shell command: ${trimmed}`,
       expectedEffects: [
@@ -157,6 +166,7 @@ function classifyShellExecute(command: string): ApprovalDecision {
   if (isNetworkCommand(trimmed)) {
     return requireApproval({
       risk: 'network',
+      effects,
       reason: 'This shell command may access the network.',
       userVisibleSummary: `Run network-capable shell command: ${trimmed}`,
       expectedEffects: ['May access network resources', 'May write downloaded or generated output'],
@@ -165,6 +175,7 @@ function classifyShellExecute(command: string): ApprovalDecision {
 
   return requireApproval({
     risk: 'execute_code',
+    effects,
     reason: 'This shell command executes local project code or an arbitrary program.',
     userVisibleSummary: `Run shell command: ${trimmed}`,
     expectedEffects: ['Executes local project code', 'May create cache or temporary output'],
@@ -216,17 +227,6 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
       reason: 'Plan draft writes do not mutate the workspace.',
       userVisibleSummary: 'Save plan draft.',
       expectedEffects: ['Updates runtime state only'],
-    });
-  }
-
-  // exit_plan_mode — control tool, approval-policy passes through; interaction triggered by tool-controller
-  // exit_plan_mode — passes through approval; plan_review interaction is triggered by tool-controller
-  if (toolName === 'exit_plan_mode') {
-    return allow({
-      risk: 'plan',
-      reason: 'Plan review submission does not mutate the workspace.',
-      userVisibleSummary: 'Submit plan for user review.',
-      expectedEffects: ['Triggers plan_review interrupt'],
     });
   }
 
@@ -324,6 +324,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
 
     return allow({
       risk: 'network',
+      effects: { network: true },
       reason: 'Read-only web fetch with SSRF and privacy protection.',
       userVisibleSummary: `Fetch: ${rawUrl.slice(0, 60)}`,
       expectedEffects: [
@@ -344,12 +345,13 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
-  // read_mcp_resource — 只读 MCP 资源
-  // read_mcp_resource — read MCP resources only
+  // read_mcp_resource — 资源位置可能是外部服务
+  // read_mcp_resource — resource locations may be externally managed
   if (toolName === 'read_mcp_resource') {
     return allow({
       risk: 'read',
-      reason: 'Read MCP resources only inspects remote content exposed by MCP servers.',
+      effects: { uncertainEffects: true },
+      reason: 'MCP resource locations may be remote or externally managed.',
       userVisibleSummary: `Read MCP resource from ${String(toolArgs.server ?? 'MCP server')}: ${String(toolArgs.uri ?? '?')}`,
       expectedEffects: [
         'Reads content from external MCP server',
@@ -376,18 +378,39 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
 
     // 兜底：destructive 命令在任何模式下都拒绝，不受 full_access / same_command 影响
     // Safety net: destructive commands are always denied regardless of authorization mode
+    // rm -rf 例外：只拒绝工作区代码和关键系统路径，其余降级为 write_file 走正常审批
+    // rm -rf exception: only deny workspace code + critical system paths;
+    // everything else downgrades to write_file → normal mode-based approval
     if (isDestructiveShellCommand(command)) {
-      return deny({
-        risk: 'destructive',
-        reason: 'Destructive shell commands are denied by default.',
-        userVisibleSummary: `Rejected destructive shell command: ${command}`,
-        expectedEffects: ['No command will be executed'],
+      if (isDestructiveRmOnWorkspace(command, workspace)) {
+        return deny({
+          risk: 'destructive',
+          reason: 'rm -rf must not delete workspace code.',
+          userVisibleSummary: `Rejected destructive rm targeting workspace: ${command}`,
+          expectedEffects: ['No command will be executed'],
+        });
+      }
+      if (isDestructiveRmOnCriticalPaths(command)) {
+        return deny({
+          risk: 'destructive',
+          reason: 'rm -rf must not delete critical system paths.',
+          userVisibleSummary: `Rejected destructive rm targeting critical system paths: ${command}`,
+          expectedEffects: ['No command will be executed'],
+        });
+      }
+      // Non-critical rm -rf: downgrade to write_file; mode policy handles approval
+      return requireApproval({
+        risk: 'write_file',
+        effects: {},
+        reason: 'rm -rf on non-critical paths; downgraded to write_file risk.',
+        userVisibleSummary: `Remove files: ${command}`,
+        expectedEffects: ['Deletes files and directories outside workspace and system paths'],
       });
     }
 
     // 只读命令在任何 access/phase 下都允许直通
     // Read-only commands bypass approval regardless of access/phase
-    const shellDecision = classifyShellExecute(command);
+    const shellDecision = classifyShellExecute(command, workspace);
     if (shellDecision.allowed && !shellDecision.requiresApproval && shellDecision.risk === 'read') {
       return shellDecision;
     }
@@ -410,6 +433,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
       if (effectiveMode === 'full_access') {
         return allow({
           risk: classifyShellRisk(trimmed),
+          effects: classifyShellEffects(trimmed, workspace),
           reason: 'full_access is enabled for this thread.',
           userVisibleSummary: `Run shell command under full_access: ${trimmed}`,
           expectedEffects: [
@@ -429,6 +453,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
       ) {
         return allow({
           risk: classifyShellRisk(trimmed),
+          effects: classifyShellEffects(trimmed, workspace),
           reason:
             'same_command grant matches this exact command in the current thread and workspace.',
           userVisibleSummary: `Run previously approved shell command: ${trimmed}`,
@@ -494,6 +519,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     if (effectiveMode === 'full_access') {
       return allow({
         risk: 'mcp',
+        effects: { uncertainEffects: true },
         reason: 'full_access is enabled for this thread.',
         userVisibleSummary: `Run MCP tool under full_access: ${toolName}`,
         expectedEffects: ['Calls external MCP server tool', 'May have side effects'],
@@ -503,6 +529,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
 
     return requireApproval({
       risk: 'mcp',
+      effects: { uncertainEffects: true },
       reason: 'MCP tools require user approval by default.',
       userVisibleSummary: `Run MCP tool: ${toolName}`,
       expectedEffects: ['Calls external MCP server tool', 'May have side effects'],

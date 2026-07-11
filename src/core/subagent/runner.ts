@@ -502,6 +502,14 @@ async function runSubAgentLoop(
           if (blocked) {
             clearTimeout(timeoutId);
             const totalDurationMs = Date.now() - startTime;
+            // 子 agent 工具需要审批：标记步骤为 awaiting_approval，暂停子 agent，
+            // 将 blocked 结果返回给调用方（tool-controller）以通过 Runtime Kernel
+            // 的审批管线处理。Kernel 审批通过后通过 resumeSubAgent 恢复执行。
+            // Sub-agent tool needs approval: mark step as awaiting_approval, pause
+            // the sub-agent, and return the blocked result to the caller so the
+            // Runtime Kernel's approval pipeline can handle it. After approval, the
+            // kernel resumes execution via resumeSubAgent.
+            stepSnapshot.status = 'awaiting_approval' as const;
             return {
               ok: false,
               summary: JSON.stringify({ ok: false, blocked }),

@@ -1,3 +1,5 @@
+import type { ShellNetworkMode } from '@/core/types';
+
 /** 沙箱执行器配置 / Sandbox executor configuration */
 export interface SandboxOptions {
   /** 启用沙箱；false 时回退到裸 shellTool / Enable sandbox; fall back to bare shellTool when false */
@@ -6,9 +8,9 @@ export interface SandboxOptions {
   workspace: string;
   /** 自定义资源限制（覆盖默认值）/ Custom resource limits (overrides defaults) */
   resourceLimits?: Partial<ResourceLimits>;
-  /** Network access policy inside the sandbox. Defaults to allow_all for compatibility. */
+  /** Network access policy inside the sandbox. Defaults to disabled. */
   network?: {
-    mode: 'disabled' | 'allow_all';
+    mode: ShellNetworkMode;
   };
 }
 

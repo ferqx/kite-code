@@ -50,7 +50,7 @@ export async function* runRuntimeAgent(
     userId: input.userId,
     workspace: input.workspace,
     storePath: input.runtimeStorePath,
-    interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
+    interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'accept_edits',
     phase: input.phase,
   });
   const collector = new SessionLogCollector(

@@ -22,7 +22,7 @@ export type UserAction =
       decision:
         | {
             kind: 'approve';
-            nextMode: 'ask' | 'accept_edits' | 'auto';
+            nextMode: 'accept_edits' | 'accept_edits' | 'auto';
             clearPlanningContext: boolean;
           }
         | { kind: 'revise'; feedback: string }

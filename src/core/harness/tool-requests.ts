@@ -85,18 +85,8 @@ export type PendingToolRequest =
         body_markdown: string;
         steps: Array<{ id: string; title: string }>;
         expected_version?: number;
+        action: 'save' | 'submit';
       };
-      /** 调用原因 / Call reason */
-      reason: string;
-      /** 用于审批展示的命令 / Command displayed for approval */
-      protectedCommand: string;
-    }
-  | {
-      /** 工具调用 ID / Tool call ID */
-      id?: string;
-      name: 'exit_plan_mode';
-      /** exit_plan_mode 参数 / exit_plan_mode params */
-      args: { plan_id: string; expected_version: number; expected_digest: string };
       /** 调用原因 / Call reason */
       reason: string;
       /** 用于审批展示的命令 / Command displayed for approval */
@@ -320,6 +310,7 @@ export function toolRequestFromCall(
 
   if (call.name === 'write_plan') {
     const args = call.args as Record<string, unknown>;
+    const action = args.action === 'submit' ? 'submit' : 'save';
     return {
       id: call.id,
       name: 'write_plan',
@@ -331,24 +322,10 @@ export function toolRequestFromCall(
           title: String(s.title ?? ''),
         })),
         expected_version: args.expected_version != null ? Number(args.expected_version) : undefined,
+        action,
       },
-      reason: 'Model saved plan draft',
+      reason: action === 'submit' ? 'Model submitted plan for review' : 'Model saved plan draft',
       protectedCommand: 'write_plan',
-    };
-  }
-
-  if (call.name === 'exit_plan_mode') {
-    const args = call.args as Record<string, unknown>;
-    return {
-      id: call.id,
-      name: 'exit_plan_mode',
-      args: {
-        plan_id: String(args.plan_id ?? ''),
-        expected_version: Number(args.expected_version ?? 0),
-        expected_digest: String(args.expected_digest ?? ''),
-      },
-      reason: 'Model requested plan review',
-      protectedCommand: 'exit_plan_mode',
     };
   }
 
@@ -556,6 +533,7 @@ export function toolRequestFromMessage(
 
   if (call.name === 'write_plan') {
     const args = call.args as Record<string, unknown>;
+    const action = args.action === 'submit' ? 'submit' : 'save';
     return {
       id: call.id,
       name: 'write_plan',
@@ -567,24 +545,10 @@ export function toolRequestFromMessage(
           title: String(s.title ?? ''),
         })),
         expected_version: args.expected_version != null ? Number(args.expected_version) : undefined,
+        action,
       },
-      reason: 'Model saved plan draft',
+      reason: action === 'submit' ? 'Model submitted plan for review' : 'Model saved plan draft',
       protectedCommand: 'write_plan',
-    };
-  }
-
-  if (call.name === 'exit_plan_mode') {
-    const args = call.args as Record<string, unknown>;
-    return {
-      id: call.id,
-      name: 'exit_plan_mode',
-      args: {
-        plan_id: String(args.plan_id ?? ''),
-        expected_version: Number(args.expected_version ?? 0),
-        expected_digest: String(args.expected_digest ?? ''),
-      },
-      reason: 'Model requested plan review',
-      protectedCommand: 'exit_plan_mode',
     };
   }
 

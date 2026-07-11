@@ -14,6 +14,7 @@ export function generateBwrapArgs(
   options?: { network?: 'disabled' | 'allow_all'; sandboxRuntimeDir?: string },
 ): string[] {
   const args: string[] = [];
+  const networkMode = options?.network ?? 'disabled';
 
   // 系统路径：只读绑定 / System paths: read-only bind
   for (const path of ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc', '/sys']) {
@@ -40,7 +41,7 @@ export function generateBwrapArgs(
 
   // 进程隔离
   args.push('--unshare-pid');
-  if (options?.network === 'disabled') {
+  if (networkMode === 'disabled') {
     args.push('--unshare-net');
   }
 

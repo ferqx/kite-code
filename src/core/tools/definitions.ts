@@ -11,7 +11,6 @@ import { type ShellExecutor, shellTool } from './shell';
 import {
   ASK_USER_CONTRACT,
   EDIT_FILE_CONTRACT,
-  EXIT_PLAN_MODE_CONTRACT,
   READ_FILE_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
   SEARCH_CONTENT_CONTRACT,
@@ -368,7 +367,6 @@ export function createAgentTools(input: CreateAgentToolsInput) {
     ...(skillTool ? [skillTool] : []),
     ...(taskTool ? [taskTool] : []),
     createWritePlanTool(),
-    createExitPlanModeTool(),
     createProgressUpdatePlanTool(),
     createAskUserTool(),
   ];
@@ -398,19 +396,21 @@ export function createPlanAgentTools(input: CreateAgentToolsInput) {
   return createAgentTools(input);
 }
 
-/** 创建 write_plan 工具定义 — 保存或替换草稿，不触发用户审核。
- *  Create write_plan tool definition — save or replace draft, does NOT trigger user review. */
+/** 创建 write_plan 工具定义 — 保存草稿或提交审核。
+ *  Create write_plan tool definition — save draft or submit for review. */
 function createWritePlanTool() {
   return tool(
-    async ({ title, body_markdown, steps, expected_version }) =>
-      JSON.stringify({
+    async ({ title, body_markdown, steps, expected_version, action }) => {
+      const submit = action === 'submit';
+      return JSON.stringify({
         ok: true,
-        plan_id: '', // filled by tool-controller after structuralDigest computation
+        plan_id: '', // filled by tool-controller
         version: 0, // filled by tool-controller
         structural_digest: '', // filled by tool-controller
-        review_required: false,
-        _params: { title, body_markdown, steps, expected_version },
-      }),
+        review_required: submit,
+        _params: { title, body_markdown, steps, expected_version, action },
+      });
+    },
     {
       name: 'write_plan',
       description: WRITE_PLAN_CONTRACT.description,
@@ -441,36 +441,13 @@ function createWritePlanTool() {
           .positive()
           .optional()
           .describe('Expected current version to prevent overwriting a newer draft'),
-      }),
-    },
-  );
-}
-
-/** 创建 exit_plan_mode 工具定义 — 提交草稿，唯一触发 Plan Review。
- *  Create exit_plan_mode tool definition — submit draft, the ONLY way to trigger Plan Review. */
-function createExitPlanModeTool() {
-  return tool(
-    async ({ plan_id, expected_version, expected_digest }) =>
-      JSON.stringify({
-        ok: false,
-        stderr:
-          'exit_plan_mode is handled by the harness as a plan_review interrupt. Pending user decision...',
-        _params: { plan_id, expected_version, expected_digest },
-      }),
-    {
-      name: 'exit_plan_mode',
-      description: EXIT_PLAN_MODE_CONTRACT.description,
-      schema: z.object({
-        plan_id: z.string().min(1).describe('Plan ID from the last write_plan result'),
-        expected_version: z
-          .number()
-          .int()
-          .positive()
-          .describe('Expected version from the last write_plan result'),
-        expected_digest: z
-          .string()
-          .min(1)
-          .describe('Expected structural_digest from the last write_plan result'),
+        action: z
+          .enum(['save', 'submit'])
+          .optional()
+          .default('save')
+          .describe(
+            'save: store draft and continue planning. submit: save and request user review (pauses execution).',
+          ),
       }),
     },
   );

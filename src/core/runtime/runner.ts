@@ -1,3 +1,4 @@
+import { resolveRejectedSubagentContinuation } from '../controllers/tool-controller';
 import type { RuntimeUserAction } from './actions';
 import { eventsForRuntimeAction } from './actions';
 import type { RuntimeEvent } from './events';
@@ -51,6 +52,16 @@ export async function* runRuntimeLoop(
       const events = eventsForRuntimeAction(kernel.getState(), action);
       if (events.length === 0)
         throw new Error('Runtime action does not match the active interaction.');
+
+      // When a sub-agent tool approval is rejected, emit subagent.failed +
+      // tool.finished to terminate the sub-agent and produce a result for the model.
+      if (action.type === 'reject' && effect.type === 'request_tool_approval') {
+        const subagentEvents = resolveRejectedSubagentContinuation(effect.toolCallId);
+        if (subagentEvents.length > 0) {
+          events.push(...subagentEvents);
+        }
+      }
+
       kernel.processEventBatch(events);
       yield* events;
       continue;

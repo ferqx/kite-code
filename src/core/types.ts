@@ -1,5 +1,8 @@
 import type { AuthorizationMode, ShellApprovalGrant } from '@/protocol/events';
 
+/** 单次 Shell 调用的沙箱网络权限 / Per-invocation sandbox network permission */
+export type ShellNetworkMode = 'disabled' | 'allow_all';
+
 export interface ShellInput {
   workspace: string;
   command: string;
@@ -9,6 +12,8 @@ export interface ShellInput {
   timeoutMs?: number;
   /** 实时输出回调 — shell 进程每产生一行文本时调用 / Called per output line while shell process is running */
   onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+  /** 本次调用的网络权限；未指定时使用执行器默认值 / Network permission for this call */
+  networkMode?: ShellNetworkMode;
 }
 
 export interface ShellResult {
@@ -84,8 +89,8 @@ export type PlanReviewResumeValue =
   | {
       planApproved?: boolean;
       planSupplement?: string;
-      /** auto means auto confirmation, not full_access. manual means ask/default confirmation. */
-      executionMode?: 'auto' | 'manual';
+      /** auto means auto-review, accept_edits means auto file edits + manual shell. */
+      executionMode?: 'auto' | 'accept_edits';
     };
 
 export type AgentResumeValue =

@@ -247,7 +247,7 @@ export interface CreateRuntimeStateInput {
   userId: string;
   /** 工作目录 / Workspace path */
   workspace: string;
-  /** 交互模式，默认 'ask' / Interaction mode, defaults to 'ask' */
+  /** 交互模式，默认 'accept_edits' / Interaction mode, defaults to 'accept_edits' */
   interactionMode?: InteractionMode;
   /** 授权模式，默认 'default' / Authorization mode, defaults to 'default' */
   authorizationMode?: AuthorizationMode;
@@ -291,7 +291,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       mode: input.authorizationMode ?? 'default',
       commandGrants: {},
     },
-    mode: input.interactionMode ?? ('ask' as InteractionMode),
+    mode: input.interactionMode ?? ('accept_edits' as InteractionMode),
     workspaceAccess: input.workspaceAccess ?? 'write',
     autoReview: { ...DEFAULT_AUTO_REVIEW_STATE },
     doomLoop: {},

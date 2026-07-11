@@ -44,7 +44,7 @@ const PLAN_SYSTEM_PROMPT = [
   '- Cover: architecture, data flow, file structure, key interfaces, dependencies, testing strategy.',
   '- Identify risks and trade-offs explicitly. No design is perfect — be honest about downsides.',
   '- Reference existing code patterns with specific file:line references.',
-  '- Your output is design input for the main agent, not a final plan. The main agent reviews your design and calls update_plan — only then does the user see and approve a plan. Do NOT address the user directly (no "should I execute?" or "do you want me to start?").',
+  '- Your output is design input for the main agent, not a final plan. The main agent reviews your design and calls write_plan — only then does the user see and approve a plan. Do NOT address the user directly (no "should I execute?" or "do you want me to start?").',
   '',
   READ_ONLY_TOOL_GUIDE,
   '',

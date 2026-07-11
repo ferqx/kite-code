@@ -3,7 +3,7 @@ import systemPrompt from '@/core/prompts/system-prompt.txt';
 import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
 import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
-import type { AgentPhase, AgentPlan, InteractionMode, PlanningState } from '@/protocol/events';
+import type { AgentPhase, InteractionMode, PlanningState } from '@/protocol/events';
 import { foldToolOutputs, microCompactToolOutputs } from './compaction';
 import {
   buildCacheableRuntimeContext,
@@ -15,27 +15,17 @@ export type AgentRole = 'agent';
 
 /** 模型上下文状态输入 / Model context state input */
 export interface ModelContextState {
-  /** 工作目录 / Workspace path */
   workspace: string;
-  /** 对话消息列表 / Conversation messages */
   messages: BaseMessage[];
-  /** 最终回答文本 / Final answer text */
   final: string;
-  /** 工作区访问权限 / Workspace access level (always "write") */
   workspaceAccess?: 'write';
   phase?: AgentPhase;
   interactionMode?: InteractionMode;
   authorization?: ThreadAuthorizationState;
-  executionEnvironment?: 'local_unsafe' | 'workspace_sandbox';
   sandboxBackend?: SandboxBackend | 'unknown';
-  planReviewed?: boolean;
-  /** 执行计划 / Execution plan */
-  plan?: AgentPlan | null;
-  /** 激活的 Skill 关键指令 / Active skill critical instructions */
   activeSkillInstructions?: string;
-  /** 上下文预算配置 / Context budget configuration (controls window size for M1 folding, triggers M2 at hard threshold) */
   contextBudget?: ContextBudget;
-  /** v2: PlanningState for dynamic runtime-state block (替代独立的 phase + plan + planReviewed) */
+  /** PlanningState for dynamic runtime-state block */
   planningState?: PlanningState;
 }
 
@@ -288,27 +278,12 @@ export function prepareModelContext(
     '\n\n' +
     buildCacheableRuntimeContext({ workspace: state.workspace });
 
-  const planReviewed =
-    state.planningState?.kind === 'executing' || state.planningState?.kind === 'completed';
-  const approvedPlanSummary =
-    planReviewed && state.planningState?.kind === 'executing'
-      ? `${state.planningState.document.title}: ${state.planningState.document.bodyMarkdown}`.slice(
-          0,
-          300,
-        )
-      : state.plan && state.planReviewed
-        ? `${state.plan.name}: ${state.plan.description}`.slice(0, 300)
-        : null;
   const modeSnapshot = new HumanMessage(
     buildRuntimeModeSnapshot({
       phase: state.phase ?? 'building',
-      interactionMode: state.interactionMode ?? 'ask',
+      interactionMode: state.interactionMode ?? 'accept_edits',
       authorizationMode: state.authorization?.mode ?? 'default',
-      sandboxBackend:
-        state.sandboxBackend ??
-        (state.executionEnvironment === 'workspace_sandbox' ? 'unknown' : 'none'),
-      planReviewed: state.planReviewed ?? planReviewed,
-      approvedPlanSummary,
+      sandboxBackend: state.sandboxBackend ?? 'none',
       planningState: state.planningState,
     }),
   );
@@ -318,9 +293,7 @@ export function prepareModelContext(
     state.planningState.kind !== 'building_without_plan' &&
     state.planningState.kind !== 'planning_empty'
       ? [new HumanMessage(formatPlanStateReminder(state.planningState))]
-      : state.plan
-        ? [new HumanMessage(formatPlanStateReminder(state.plan))]
-        : [];
+      : [];
 
   return {
     messages: [new SystemMessage(systemPrompt), ...msgs, modeSnapshot, ...planReminder],

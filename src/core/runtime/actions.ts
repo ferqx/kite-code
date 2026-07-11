@@ -21,7 +21,7 @@ export type RuntimeUserAction =
       decision:
         | {
             kind: 'approve';
-            nextMode: 'ask' | 'accept_edits' | 'auto';
+            nextMode: 'accept_edits' | 'auto';
             clearPlanningContext: boolean;
           }
         | { kind: 'revise'; feedback: string }
@@ -119,7 +119,7 @@ export function eventsForRuntimeAction(
         {
           type: 'tool.finished',
           toolCallId: interaction.toolCallId,
-          name: 'exit_plan_mode',
+          name: 'write_plan',
           result: {
             ok: true,
             command: '',
@@ -140,7 +140,7 @@ export function eventsForRuntimeAction(
         {
           type: 'tool.finished',
           toolCallId: interaction.toolCallId,
-          name: 'exit_plan_mode',
+          name: 'write_plan',
           result: {
             ok: true,
             command: '',

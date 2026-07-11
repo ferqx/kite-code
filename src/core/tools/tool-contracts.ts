@@ -227,7 +227,7 @@ export const UPDATE_PLAN_CONTRACT: ToolContract = {
     failureHandling:
       'Rejected in planning phase — wait for plan approval first. ' +
       'Invalid step_id: verify the step IDs match those in the approved plan. ' +
-      'Structural changes rejected: use write_plan to save a revised draft, then exit_plan_mode for re-approval.',
+      'Structural changes rejected: use write_plan to save a revised draft, then submit for re-approval.',
   },
   description: '',
 };
@@ -237,59 +237,33 @@ export const WRITE_PLAN_CONTRACT: ToolContract = {
   name: 'write_plan',
   sections: {
     whenToUse:
-      'Save or replace the current plan draft. Does NOT trigger user review — call exit_plan_mode for that. ' +
-      'Use this during planning phase to record your research findings and proposed approach. ' +
-      'You can call write_plan multiple times as your plan evolves; each call increments the version. ' +
-      'Include a clear title (one line, max 120 chars), detailed body_markdown (the full plan), and structured steps (3-12 items, each with stable id and one-line title). ' +
+      'Save or submit the current plan. Use action="save" to store a draft and continue planning. ' +
+      'Use action="submit" when the plan is complete and ready for user review — this pauses execution until approval. ' +
+      'You can call write_plan with action="save" multiple times as your plan evolves; each call increments the version. ' +
+      'After approval, switch to update_plan for step-level progress tracking. ' +
+      'Include a clear title (one line, max 120 chars), detailed body_markdown (the full plan), and structured steps (1-12 items, each with stable id and one-line title). ' +
       'Only call this in planning phase — building phase rejects write_plan.',
     outputFormat:
-      'JSON: { ok: true, plan_id, version, structural_digest, review_required: false }.\n' +
+      'action="save": { ok: true, status: "draft_saved", plan_id, version, structural_digest }.\n' +
+      'action="submit" on approval: { ok: true, status: "approved", plan_id, version, execution_mode }.\n' +
+      'action="submit" on revision: { ok: false, status: "revision_requested", feedback, plan_id, version }.\n' +
       '- plan_id: stable identifier across versions\n' +
-      '- version: incremented on each write_plan call\n' +
-      '- structural_digest: SHA-256 of plan structure (title, body, step ids+titles)\n' +
-      '- review_required: always false — write_plan never triggers review',
+      '- version: incremented on each call\n' +
+      '- structural_digest: SHA-256 of plan structure (title, body, step ids+titles)',
     commonMistakes:
-      'Expecting write_plan to trigger user review — it does not. Call exit_plan_mode when ready. ' +
+      'Using action="submit" before the plan is complete — draft iteratively with action="save" first. ' +
       'Using unstable step IDs that change across versions — use stable descriptive IDs like "inspect-runtime". ' +
       'Putting architecture details in step titles instead of body_markdown. ' +
       'Forgetting to set expected_version to prevent overwriting a newer draft saved by the editor.',
     failureHandling:
       'Rejected in building/executing phase — only works in planning phase. ' +
       'Version conflict: if expected_version does not match current version, the call is rejected — re-read current plan state. ' +
-      'Schema validation: title max 120 chars, body_markdown min 20 chars, steps 1-12 items.',
+      'Schema validation: title max 120 chars, body_markdown min 20 chars, steps 1-12 items. ' +
+      'Revision feedback: read the feedback, update your plan with action="save" or action="submit".',
   },
   description: '',
 };
 WRITE_PLAN_CONTRACT.description = buildDescription(WRITE_PLAN_CONTRACT.sections);
-
-export const EXIT_PLAN_MODE_CONTRACT: ToolContract = {
-  name: 'exit_plan_mode',
-  sections: {
-    whenToUse:
-      'Submit the current plan draft for user review. This is the ONLY way to trigger plan review. ' +
-      'Call this ONLY when your plan is complete and ready for the user to evaluate. ' +
-      'You must have previously saved a plan draft with write_plan — exit_plan_mode validates the current draft. ' +
-      'Provide plan_id, expected_version, and expected_digest from your last write_plan result to prevent stale submissions. ' +
-      'Do NOT call exit_plan_mode before calling write_plan — it will fail. ' +
-      'After calling exit_plan_mode, execution pauses until the user approves, requests revisions, or cancels.',
-    outputFormat:
-      'On approval: { ok: true, decision: "approved", plan_id, version, next_mode, clear_planning_context }\n' +
-      'On revision: { ok: true, decision: "revise", plan_id, version, feedback } — revise plan and call write_plan again\n' +
-      'On cancel: { ok: false, decision: "cancelled", plan_id, version, reason }',
-    commonMistakes:
-      'Calling exit_plan_mode without first calling write_plan. ' +
-      'Providing wrong expected_version or expected_digest — version/digest mismatch causes rejection. ' +
-      'Assuming user will always approve — be prepared for revision feedback or cancellation. ' +
-      'Calling exit_plan_mode multiple times without write_plan in between.',
-    failureHandling:
-      'No draft saved: call write_plan first to save a plan draft. ' +
-      'Version/digest mismatch: your plan was modified (e.g. by editor) since your last write_plan — re-read current state. ' +
-      'Rejected in building phase: exit_plan_mode only works in planning phase. ' +
-      'User feedback (revise): read the feedback, update your plan with write_plan, then call exit_plan_mode again.',
-  },
-  description: '',
-};
-EXIT_PLAN_MODE_CONTRACT.description = buildDescription(EXIT_PLAN_MODE_CONTRACT.sections);
 
 export const ASK_USER_CONTRACT: ToolContract = {
   name: 'ask_user',
@@ -299,7 +273,7 @@ export const ASK_USER_CONTRACT: ToolContract = {
       'Use the `questions` array to batch all unknowns into ONE call — ask everything at once rather than ' +
       'spreading clarifications across multiple interruptions. Each question gets its own options (max 3). ' +
       'Only use single-question mode (`question` + `options`) for simple choose-one scenarios. ' +
-      'In plan mode: batch all pre-plan clarifications into one ask_user call before calling update_plan.',
+      'In plan mode: batch all pre-plan clarifications into one ask_user call before calling write_plan.',
     commonMistakes:
       'Making multiple ask_user calls in sequence instead of batching into one `questions` array. ' +
       'Asking vague questions without concrete options — always provide 2-3 options to help non-expert users decide. ' +
@@ -457,7 +431,6 @@ export const KNOWN_TOOL_NAMES = [
   'search_files',
   'read_mcp_resource',
   'write_plan',
-  'exit_plan_mode',
   'update_plan',
   'ask_user',
   'task',
@@ -478,7 +451,6 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ['search_files', SEARCH_FILES_CONTRACT],
   ['read_mcp_resource', READ_MCP_RESOURCE_CONTRACT],
   ['write_plan', WRITE_PLAN_CONTRACT],
-  ['exit_plan_mode', EXIT_PLAN_MODE_CONTRACT],
   ['update_plan', UPDATE_PLAN_CONTRACT],
   ['ask_user', ASK_USER_CONTRACT],
   ['task', TASK_CONTRACT],

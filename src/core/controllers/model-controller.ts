@@ -20,26 +20,8 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { createAgentTools } from '@/core/tools/definitions';
 import type { ShellExecutor } from '@/core/tools/shell';
-import type { AgentPlan } from '@/protocol/events';
 
 // ── 辅助函数 / Helpers ──
-
-/** Convert PlanDocument back to legacy AgentPlan for consumers that still use it. */
-function planDocumentToAgentPlan(doc: {
-  title: string;
-  bodyMarkdown: string;
-  steps: Array<{ title: string; status: string }>;
-}): AgentPlan {
-  return {
-    name: doc.title,
-    description: doc.bodyMarkdown,
-    status: 'in_progress',
-    steps: doc.steps.map((s) => ({
-      step: s.title,
-      status: s.status as 'pending' | 'in_progress' | 'completed',
-    })),
-  };
-}
 
 function extractText(content: unknown): string | undefined {
   if (typeof content === 'string') return content.length > 0 ? content : undefined;
@@ -141,12 +123,6 @@ export async function invokeRuntimeModel(params: {
   }
 
   try {
-    const plan =
-      state.planning.kind === 'executing' || state.planning.kind === 'completed'
-        ? planDocumentToAgentPlan(state.planning.document)
-        : state.planning.kind === 'planning_draft' || state.planning.kind === 'awaiting_review'
-          ? planDocumentToAgentPlan(state.planning.document)
-          : null;
     const tools = createAgentTools({
       workspace: state.session.workspace,
       shellExecutor: params.shellExecutor,
@@ -175,8 +151,6 @@ export async function invokeRuntimeModel(params: {
         phase,
         interactionMode: state.mode,
         authorization: state.authorization,
-        planReviewed: state.planning.kind === 'executing' || state.planning.kind === 'completed',
-        plan,
         planningState: state.planning,
       },
       params.skills,

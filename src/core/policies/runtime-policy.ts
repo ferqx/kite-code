@@ -7,6 +7,7 @@
 // Policy decisions are decoupled from graph node if-else chains.
 
 import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '@/protocol/events';
+import type { ToolEffects } from './shell-classification';
 
 // ── 策略决策 / Policy decision ──
 
@@ -32,7 +33,9 @@ export type PolicyDecision =
 /** 策略评估的输入上下文 / Input context for policy evaluation */
 export interface PolicyInput {
   /** 当前交互模式 / Current interaction mode */
-  interactionMode: 'ask' | 'auto' | 'full';
+  interactionMode: 'auto' | 'accept_edits' | 'full';
+  /** 当前授权模式 / Current authorization mode (default or full_access) */
+  authorizationMode?: 'default' | 'full_access';
   /** 当前执行阶段 / Current execution phase */
   phase: 'planning' | 'building';
   /** 当前方案生命周期状态 / Current plan lifecycle state kind (v2: PlanningState kinds) */
@@ -59,8 +62,8 @@ export interface PolicyInput {
     | 'vcs_mutation'
     | 'mcp'
     | 'unknown';
-  /** 是否已有审批缓存 / Whether approval is already cached */
-  approvalCached?: boolean;
+  /** 工具调用可叠加的副作用 / Additive effects beyond its primary risk */
+  effects?: ToolEffects;
   /** 沙箱是否可用（full mode 前提条件）/ Whether sandbox is available (prerequisite for full mode) */
   sandboxAvailable?: boolean;
   /** doop-loop 计数 / Doom-loop repeat count */
