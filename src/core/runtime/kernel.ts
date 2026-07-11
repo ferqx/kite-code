@@ -13,7 +13,11 @@ import type { RuntimeEffect } from './effects';
 import type { RuntimeEvent } from './events';
 import { reduceRuntimeState } from './reducer';
 import { decideNextEffect } from './scheduler';
-import { createInitialRuntimeState, type RuntimeState } from './state';
+import {
+  createInitialRuntimeState,
+  RUNTIME_STATE_SCHEMA_VERSION,
+  type RuntimeState,
+} from './state';
 import { createRuntimeStore, type RuntimeStore } from './store';
 
 // ── Kernel 配置 / Kernel configuration ──
@@ -173,7 +177,7 @@ export class AgentKernel {
 
   /** Apply a user action only when it matches the currently persisted interaction. */
   applyAction(action: RuntimeUserAction): void {
-    this.processEvents(eventsForRuntimeAction(this.state, action));
+    this.processEventBatch(eventsForRuntimeAction(this.state, action));
   }
 
   // ── 持久化 / Persistence ──
@@ -267,7 +271,10 @@ export function createAgentKernel(params: {
   });
   const restoredState = store.loadSnapshot<RuntimeState>(params.threadId);
   const initialState =
-    restoredState?.session.threadId === params.threadId ? restoredState : freshState;
+    restoredState?.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION &&
+    restoredState.session.threadId === params.threadId
+      ? restoredState
+      : freshState;
 
   return new AgentKernel({
     store,

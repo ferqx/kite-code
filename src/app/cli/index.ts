@@ -114,29 +114,35 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
       if (state.interactions.kind === 'awaiting_review') {
         const plan = state.interactions.plan;
         console.error(`\n[PLAN REVIEW] ${plan.name}\n${plan.description}`);
-        console.error('Type a/auto, m/manual, t/tell, or r/reject:');
+        console.error('Type a/auto, e/accept-edits, m/manual, f/feedback, or c/cancel:');
         const value = (await readStdin()).toLowerCase();
+        const review = {
+          type: 'plan_review_decision' as const,
+          interactionId: effect.interactionId,
+          planId: state.interactions.planId,
+          version: state.interactions.version,
+          structuralDigest: state.interactions.structuralDigest,
+        };
         if (value === 'a' || value === 'auto')
           return {
-            type: 'approve_plan',
-            interactionId: effect.interactionId,
-            executionMode: 'auto',
+            ...review,
+            decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+          };
+        if (value === 'e' || value === 'accept-edits')
+          return {
+            ...review,
+            decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
           };
         if (value === 'm' || value === 'manual')
           return {
-            type: 'approve_plan',
-            interactionId: effect.interactionId,
-            executionMode: 'manual',
+            ...review,
+            decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
           };
-        if (value === 't' || value === 'tell') {
+        if (value === 'f' || value === 'feedback') {
           console.error('Enter your feedback:');
-          return {
-            type: 'revise_plan',
-            interactionId: effect.interactionId,
-            feedback: await readStdin(),
-          };
+          return { ...review, decision: { kind: 'revise', feedback: await readStdin() } };
         }
-        return { type: 'reject_plan', interactionId: effect.interactionId };
+        return { ...review, decision: { kind: 'cancel' } };
       }
       if (state.interactions.kind !== 'awaiting_user_input') {
         throw new Error('Runtime requested input without an input interaction.');
@@ -181,9 +187,7 @@ export function createCliProvider(_args: ParsedArgs): UserInputProvider {
             console.error(`  ${i + 1}. ${s.step} [${s.status}]`);
           });
         }
-        console.error(
-          'Type a/auto to approve and continue with automatic low-risk confirmations, m/manual to approve with confirmations, t/tell to give feedback, r/reject to reject:',
-        );
+        console.error('Type a/auto, e/accept-edits, m/manual, f/feedback, or c/cancel:');
       }
 
       const data = await readStdin();
@@ -196,14 +200,27 @@ export function createCliProvider(_args: ParsedArgs): UserInputProvider {
       }
       if (payload.kind === 'plan_review') {
         const lower = data.toLowerCase();
-        if (lower === 'a' || lower === 'auto') return { type: 'approve_plan_auto' };
-        if (lower === 'm' || lower === 'manual') return { type: 'approve_plan_manual' };
-        if (lower === 't' || lower === 'tell') {
+        if (lower === 'a' || lower === 'auto')
+          return {
+            type: 'plan_review_decision',
+            decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+          };
+        if (lower === 'e' || lower === 'accept-edits')
+          return {
+            type: 'plan_review_decision',
+            decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+          };
+        if (lower === 'm' || lower === 'manual')
+          return {
+            type: 'plan_review_decision',
+            decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
+          };
+        if (lower === 'f' || lower === 'feedback') {
           console.error('Enter your feedback:');
           const feedback = await readStdin();
-          return { type: 'supplement_plan', feedback };
+          return { type: 'plan_review_decision', decision: { kind: 'revise', feedback } };
         }
-        return { type: 'reject_plan' };
+        return { type: 'plan_review_decision', decision: { kind: 'cancel' } };
       }
       return { type: 'input', text: data };
     },

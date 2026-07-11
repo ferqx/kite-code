@@ -51,4 +51,86 @@ describe('executeRuntimeTools', () => {
       },
     ]);
   });
+
+  test('finishes write_plan once and returns the persisted plan identity', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-plan-write',
+      userId: 'user',
+      workspace: process.cwd(),
+      phase: 'planning',
+    });
+    state.tools.calls.write = {
+      toolCallId: 'write',
+      modelMessageId: 'model',
+      name: 'write_plan',
+      args: {
+        title: 'Inspect runtime',
+        body_markdown: 'Inspect the runtime lifecycle and verify every transition.',
+        steps: [{ id: 'inspect-runtime', title: 'Inspect runtime lifecycle' }],
+      },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('write');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['write'] });
+
+    const finished = events.find((event) => event.type === 'tool.finished');
+    expect(finished).toBeDefined();
+    if (finished?.type === 'tool.finished') {
+      expect(finished.name).toBe('write_plan');
+      expect(JSON.parse(finished.result.stdout)).toMatchObject({
+        ok: true,
+        version: 1,
+        review_required: false,
+      });
+    }
+  });
+
+  test('cancels later sibling calls when exit_plan_mode opens review', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-plan-barrier',
+      userId: 'user',
+      workspace: process.cwd(),
+      phase: 'planning',
+    });
+    const document = {
+      planId: 'plan-1',
+      version: 1,
+      title: 'Inspect',
+      bodyMarkdown: 'Inspect runtime state transitions in detail.',
+      steps: [{ id: 'inspect', title: 'Inspect runtime', status: 'pending' as const }],
+      structuralDigest: 'digest',
+      createdAtTurnId: state.turn.turnId,
+      updatedAtTurnId: state.turn.turnId,
+    };
+    state.planning = { kind: 'planning_draft', document };
+    state.tools.calls.exit = {
+      toolCallId: 'exit',
+      modelMessageId: 'message-1',
+      ordinal: 0,
+      name: 'exit_plan_mode',
+      args: { plan_id: 'plan-1', expected_version: 1, expected_digest: 'digest' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.write = {
+      toolCallId: 'write',
+      modelMessageId: 'message-1',
+      ordinal: 1,
+      name: 'write_file',
+      args: { path: 'unsafe.txt', content: 'unsafe' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('exit', 'write');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['exit'] });
+
+    expect(events).toContainEqual({
+      type: 'tool.cancelled',
+      toolCallId: 'write',
+      reason: 'Cancelled because an earlier tool call opened an interaction.',
+    });
+  });
 });

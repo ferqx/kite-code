@@ -79,6 +79,13 @@ export interface ToolRejectedEvent {
   reason: string;
 }
 
+/** Tool call cancelled because an earlier sibling opened a user interaction. */
+export interface ToolCancelledEvent {
+  type: 'tool.cancelled';
+  toolCallId: string;
+  reason: string;
+}
+
 // ── 用户输入交互事件 / User input interaction events ──
 
 /** 系统向用户发起输入请求 */
@@ -377,6 +384,7 @@ export type RuntimeEvent =
   | ToolFinishedEvent
   | ToolFailedEvent
   | ToolRejectedEvent
+  | ToolCancelledEvent
   | UserInputRequestedEvent
   | UserInputAnsweredEvent
   | PlanReviewRequestedEvent

@@ -11,9 +11,6 @@ export type RuntimeUserAction =
       grant: import('@/protocol/events').ShellApprovalGrant;
     }
   | { type: 'reject'; interactionId: string; reason?: string }
-  | { type: 'approve_plan'; interactionId: string; executionMode: 'manual' | 'auto' }
-  | { type: 'revise_plan'; interactionId: string; feedback: string }
-  | { type: 'reject_plan'; interactionId: string; reason?: string }
   // ── Plan Mode v2: unified plan_review_decision ──
   | {
       type: 'plan_review_decision';
@@ -139,6 +136,18 @@ export function eventsForRuntimeAction(
           interactionId: action.interactionId,
           feedback: decision.feedback,
         },
+        {
+          type: 'tool.finished',
+          toolCallId: interaction.toolCallId,
+          name: 'exit_plan_mode',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: JSON.stringify({ decision: 'revise', feedback: decision.feedback }),
+            stderr: '',
+          },
+        },
       ];
     }
     if (decision.kind === 'cancel') {
@@ -153,38 +162,5 @@ export function eventsForRuntimeAction(
     return [];
   }
 
-  // ── Legacy plan actions (backward compatibility) ──
-  if (interaction.kind === 'awaiting_review' && action.type === 'approve_plan') {
-    return [
-      {
-        type: 'plan.approved',
-        interactionId: action.interactionId,
-        executionMode: action.executionMode,
-      },
-      {
-        type: 'tool.finished',
-        toolCallId: interaction.toolCallId,
-        name: 'update_plan',
-        result: { ok: true, command: '', exitCode: 0, stdout: interaction.planSummary, stderr: '' },
-      },
-    ];
-  }
-  if (action.type === 'revise_plan')
-    return [
-      {
-        type: 'plan.revision_requested',
-        interactionId: action.interactionId,
-        feedback: action.feedback,
-      },
-    ];
-  if (action.type === 'reject_plan' || action.type === 'cancel') {
-    return [
-      {
-        type: 'plan.rejected',
-        interactionId: action.interactionId,
-        reason: action.reason ?? 'Plan rejected by user.',
-      },
-    ];
-  }
   return [];
 }

@@ -30,19 +30,25 @@ export default function PlanReviewBlock({
   const options = [
     {
       key: 'a',
-      label: 'Approve and continue',
-      desc: 'Execute with automatic low-risk confirmations',
+      label: 'Approve and start in Auto',
+      desc: 'Run non-destructive work with automatic review',
       action: 'approved_auto',
     },
     {
+      key: 'e',
+      label: 'Approve and accept edits',
+      desc: 'Apply workspace file edits without prompting',
+      action: 'approved_accept_edits',
+    },
+    {
       key: 'm',
-      label: 'Approve with confirmations',
-      desc: 'Ask before edits and risky tools',
+      label: 'Approve and review manually',
+      desc: 'Ask before each protected operation',
       action: 'approved_manual',
     },
     {
-      key: 't',
-      label: 'Tell Agent what to change',
+      key: 'f',
+      label: 'Keep planning with feedback',
       desc: 'Provide feedback to revise the plan',
       action: 'supplemented',
     },
@@ -51,19 +57,35 @@ export default function PlanReviewBlock({
   function resolve(action: string, feedback?: string) {
     switch (action) {
       case 'approved_auto':
-        provider.submitAction({ type: 'approve_plan_auto' });
+        provider.submitAction({
+          type: 'plan_review_decision',
+          decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+        });
         onResolved('approved_auto');
         break;
+      case 'approved_accept_edits':
+        provider.submitAction({
+          type: 'plan_review_decision',
+          decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+        });
+        onResolved('approved_accept_edits');
+        break;
       case 'approved_manual':
-        provider.submitAction({ type: 'approve_plan_manual' });
+        provider.submitAction({
+          type: 'plan_review_decision',
+          decision: { kind: 'approve', nextMode: 'ask', clearPlanningContext: false },
+        });
         onResolved('approved_manual');
         break;
       case 'supplemented':
-        provider.submitAction({ type: 'supplement_plan', feedback: feedback ?? '' });
+        provider.submitAction({
+          type: 'plan_review_decision',
+          decision: { kind: 'revise', feedback: feedback ?? '' },
+        });
         onResolved('supplemented', feedback);
         break;
       case 'rejected':
-        provider.submitAction({ type: 'reject_plan' });
+        provider.submitAction({ type: 'plan_review_decision', decision: { kind: 'cancel' } });
         onResolved('rejected');
         break;
     }
@@ -117,7 +139,7 @@ export default function PlanReviewBlock({
         }
         return;
       }
-      // Letter shortcuts: a → auto, m → manual, t → tell
+      // Letter shortcuts: a → auto, e → accept edits, m → manual, f → feedback
       const lower = input.toLowerCase();
       const match = options.find((o) => o.key === lower);
       if (match) {
@@ -151,7 +173,7 @@ export default function PlanReviewBlock({
               </Box>
             );
           })}
-          <Text color={t.dim}>↑↓ select Enter confirm a/m/t quick key Esc cancel</Text>
+          <Text color={t.dim}>↑↓ select Enter confirm a/e/m/f quick key Esc cancel</Text>
         </>
       ) : (
         <>

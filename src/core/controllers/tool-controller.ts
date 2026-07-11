@@ -107,25 +107,53 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      // Emit plan.drafted — no interrupt
+      const previous =
+        params.state.planning.kind === 'planning_draft'
+          ? params.state.planning.document
+          : undefined;
+      const document = {
+        planId: previous?.planId ?? crypto.randomUUID(),
+        version: (previous?.version ?? 0) + 1,
+        title: args.title,
+        bodyMarkdown: args.body_markdown,
+        steps: args.steps.map(({ id, title }) => ({ id, title, status: 'pending' as const })),
+        structuralDigest: '',
+        createdAtTurnId: previous?.createdAtTurnId ?? params.state.turn.turnId,
+        updatedAtTurnId: params.state.turn.turnId,
+      };
+      document.structuralDigest = computePlanStructuralDigest(document);
       events.push({
         type: 'plan.drafted',
         toolCallId,
         plan: {
-          name: args.title,
-          description: args.body_markdown,
-          status: 'pending' as const,
-          steps: args.steps.map((s) => ({ step: s.title, status: 'pending' as const })),
-        },
-        structuralHash: computePlanStructuralDigest({
-          title: args.title,
-          bodyMarkdown: args.body_markdown,
-          steps: args.steps.map((s) => ({
-            id: s.id,
-            title: s.title,
-            status: 'pending' as const,
+          name: document.title,
+          description: document.bodyMarkdown,
+          status: 'pending',
+          steps: document.steps.map((step) => ({
+            step: step.title,
+            id: step.id,
+            status: step.status,
           })),
-        }),
+        },
+        structuralHash: document.structuralDigest,
+      });
+      events.push({
+        type: 'tool.finished',
+        toolCallId,
+        name: 'write_plan',
+        result: {
+          ok: true,
+          command: '',
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            plan_id: document.planId,
+            version: document.version,
+            structural_digest: document.structuralDigest,
+            review_required: false,
+          }),
+          stderr: '',
+        },
       });
       continue;
     }
@@ -169,19 +197,36 @@ export async function executeRuntimeTools(params: {
         continue;
       }
       const interactionId = genInteractionId();
-      const plan: import('@/protocol/events').AgentPlan = {
-        name: draft.title,
-        description: draft.bodyMarkdown,
-        status: 'pending',
-        steps: draft.steps.map((s) => ({ step: s.title, status: s.status })),
-      };
       events.push({
         type: 'plan.review_requested',
         interactionId,
         toolCallId,
-        plan,
+        plan: {
+          name: draft.title,
+          description: draft.bodyMarkdown,
+          status: 'pending',
+          steps: draft.steps.map((step) => ({
+            step: step.title,
+            id: step.id,
+            status: step.status,
+            note: step.note,
+          })),
+        },
         planSummary: `${draft.title}\n\n${draft.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}`,
       });
+      for (const sibling of Object.values(params.state.tools.calls)) {
+        if (
+          sibling.status === 'queued' &&
+          sibling.modelMessageId === call.modelMessageId &&
+          (sibling.ordinal ?? 0) > (call.ordinal ?? 0)
+        ) {
+          events.push({
+            type: 'tool.cancelled',
+            toolCallId: sibling.toolCallId,
+            reason: 'Cancelled because an earlier tool call opened an interaction.',
+          });
+        }
+      }
       continue;
     }
 
@@ -217,33 +262,64 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      const updatedPlan: import('@/protocol/events').AgentPlan = {
+      const unknownStep = args.updates.find(
+        (update) => !doc.steps.some((step) => step.id === update.step_id),
+      );
+      if (unknownStep) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: `Unknown plan step ID: ${unknownStep.step_id}.`,
+        });
+        continue;
+      }
+      const plan = {
         name: doc.title,
         description: doc.bodyMarkdown,
-        status: args.complete_plan ? 'completed' : 'in_progress',
-        steps: doc.steps.map((s) => {
-          const update = args.updates.find((u) => u.step_id === s.id);
-          if (update) {
-            return {
-              step: s.title,
-              status: update.status as 'pending' | 'in_progress' | 'completed',
-            };
-          }
-          return { step: s.title, status: s.status as 'pending' | 'in_progress' | 'completed' };
+        status: args.complete_plan ? ('completed' as const) : ('in_progress' as const),
+        steps: doc.steps.map((step) => {
+          const update = args.updates.find((candidate) => candidate.step_id === step.id);
+          return {
+            step: step.title,
+            id: step.id,
+            status: (update?.status ?? step.status) as
+              | 'pending'
+              | 'in_progress'
+              | 'completed'
+              | 'skipped',
+            note: update?.note ?? step.note,
+          };
         }),
       };
       events.push({
         type: 'plan.progress_updated',
         toolCallId,
-        plan: updatedPlan,
+        plan,
       });
       if (args.complete_plan) {
         events.push({
           type: 'plan.completed',
           toolCallId,
-          plan: updatedPlan,
+          plan,
         });
       }
+      events.push({
+        type: 'tool.finished',
+        toolCallId,
+        name: 'update_plan',
+        result: {
+          ok: true,
+          command: '',
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            plan_id: doc.planId,
+            updated_steps: args.updates.map((update) => update.step_id),
+            plan_completed: args.complete_plan ?? false,
+          }),
+          stderr: '',
+        },
+      });
       continue;
     }
 
@@ -259,7 +335,10 @@ export async function executeRuntimeTools(params: {
       events.push({ type: 'tool.rejected', toolCallId, reason: decision.userVisibleSummary });
       continue;
     }
-    if (decision.requiresApproval && call.status !== 'approved') {
+    const acceptsWorkspaceEdits =
+      params.state.mode === 'accept_edits' &&
+      (request.name === 'write_file' || request.name === 'edit_file');
+    if (decision.requiresApproval && call.status !== 'approved' && !acceptsWorkspaceEdits) {
       const approval = buildToolApproval({
         workspace: params.state.session.workspace,
         threadId: params.state.session.threadId,

@@ -119,6 +119,8 @@ export interface ToolCallRecord {
   toolCallId: string;
   /** 触发该工具调用的模型消息 ID / Model message id that triggered this tool call */
   modelMessageId: string;
+  /** Position in the originating model message, used to cancel later siblings. */
+  ordinal?: number;
   /** 工具名称 / Tool name */
   name: string;
   /** 工具调用参数 / Tool call arguments */

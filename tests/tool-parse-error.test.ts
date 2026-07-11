@@ -11,8 +11,8 @@ describe('getToolSchemaHint', () => {
 
   test('returns update_plan schema', () => {
     const hint = getToolSchemaHint('update_plan');
-    expect(hint).toContain('name');
-    expect(hint).toContain('description');
+    expect(hint).toContain('plan_id');
+    expect(hint).toContain('step_id');
     expect(hint).toContain('steps');
   });
 

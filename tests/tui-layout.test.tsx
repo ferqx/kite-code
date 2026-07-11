@@ -715,16 +715,17 @@ describe('TaskProgressBlock', () => {
 });
 
 describe('PlanReviewBlock', () => {
-  test('renders three options with recommended tag', () => {
+  test('renders four options with recommended tag', () => {
     const plan = fakePlan();
     const { lastFrame } = render(
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Approve and continue');
+    expect(frame).toContain('Approve and start in Auto');
+    expect(frame).toContain('Approve and accept edits');
     expect(frame).toContain('(Recommended)');
-    expect(frame).toContain('Approve with confirmations');
-    expect(frame).toContain('Tell Agent what to change');
+    expect(frame).toContain('Approve and review manually');
+    expect(frame).toContain('Keep planning with feedback');
   });
 
   test('shows option descriptions', () => {
@@ -733,8 +734,8 @@ describe('PlanReviewBlock', () => {
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Execute with automatic low-risk confirmations');
-    expect(frame).toContain('Ask before edits and risky tools');
+    expect(frame).toContain('Run non-destructive work with automatic review');
+    expect(frame).toContain('Ask before each protected operation');
     expect(frame).toContain('Provide feedback to revise the plan');
   });
 
@@ -743,7 +744,7 @@ describe('PlanReviewBlock', () => {
     const { lastFrame } = render(
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    expect(lastFrame()).toContain('a/m/t quick key');
+    expect(lastFrame()).toContain('a/e/m/f quick key');
   });
 
   test('renders plan review confirmation bar', () => {
@@ -755,9 +756,9 @@ describe('PlanReviewBlock', () => {
     // 方案内容移至 OutputArea tool_card Markdown 渲染，Footer 仅显示确认操作条
     // Plan content moved to OutputArea tool_card Markdown; Footer only shows confirmation bar
     expect(frame).toContain('Review the plan above');
-    expect(frame).toContain('Approve and continue');
-    expect(frame).toContain('Approve with confirmations');
-    expect(frame).toContain('Tell Agent what to change');
+    expect(frame).toContain('Approve and start in Auto');
+    expect(frame).toContain('Approve and review manually');
+    expect(frame).toContain('Keep planning with feedback');
   });
 });
 
