@@ -765,6 +765,66 @@ describe('eventReducer (blocks model)', () => {
       expect(first).toMatchObject({ status: 'done', userInput: { answer: 'auto' } });
       expect(second?.status).toBe('running');
     });
+    test('RESOLVE_INTERRUPT pre-fills a queued ask_user card before tool.started', () => {
+      const request = question({ question: 'Choose a mode' });
+      let s = dispatch(fresh(), {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.queued',
+          toolCallId: 'ask-queued',
+          name: 'ask_user',
+          args: { question: request.question },
+        },
+      });
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user_input.requested',
+          interactionId: 'input-queued',
+          toolCallId: 'ask-queued',
+          request,
+        },
+      });
+      const blockId = (s.interrupt as { blockId: number }).blockId;
+
+      s = dispatch(s, { type: 'RESOLVE_INTERRUPT', blockId, resolution: 'auto' });
+
+      const card = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'ask-queued',
+      );
+      expect(card).toMatchObject({ status: 'done', userInput: { answer: 'auto' } });
+    });
+    test('RESOLVE_INTERRUPT pre-fills the sole active ask_user card for legacy need_input', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('ask-only', 'ask_user', { question: 'Choose a mode' }));
+      s = dispatch(s, { type: 'EVENT', event: { type: 'need_input', data: question() } });
+      const blockId = (s.interrupt as { blockId: number }).blockId;
+
+      s = dispatch(s, { type: 'RESOLVE_INTERRUPT', blockId, resolution: 'auto' });
+
+      const card = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'ask-only',
+      );
+      expect(card).toMatchObject({ status: 'done', userInput: { answer: 'auto' } });
+    });
+    test('RESOLVE_INTERRUPT leaves duplicate legacy ask_user cards active when identity is absent', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('ask-first', 'ask_user', { question: 'Choose a mode' }));
+      s = dispatch(s, tcEvt('ask-second', 'ask_user', { question: 'Choose a mode' }));
+      s = dispatch(s, { type: 'EVENT', event: { type: 'need_input', data: question() } });
+      const blockId = (s.interrupt as { blockId: number }).blockId;
+
+      s = dispatch(s, { type: 'RESOLVE_INTERRUPT', blockId, resolution: 'auto' });
+
+      const cards = flatBlocks(s).filter(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.name === 'ask_user',
+      );
+      expect(cards.map((card) => card.status)).toEqual(['running', 'running']);
+      expect(cards.map((card) => card.userInput)).toEqual([undefined, undefined]);
+    });
     test('need_approval closes active Thought so its timer stops while waiting for the user', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('checking before approval'));

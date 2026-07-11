@@ -13,8 +13,11 @@ import type {
   SubAgentStepPayload,
   SubAgentToolResultPayload,
   ToolApprovalPayload,
+  UserInputResult,
   UserInputPayload,
 } from '@/protocol/events.js';
+
+export type { UserInputResult } from '@/protocol/events.js';
 
 // ── 工具生命周期事件 / Tool lifecycle events ──
 
@@ -42,12 +45,6 @@ export interface ToolProgressEvent {
   toolCallId: string;
   chunk: string;
   stream: 'stdout' | 'stderr';
-}
-
-/** Structured answer returned by an ask_user tool call. */
-export interface UserInputResult {
-  answer: string;
-  answers?: Record<string, string>;
 }
 
 /** 工具调用成功完成 */

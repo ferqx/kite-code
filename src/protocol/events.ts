@@ -1,5 +1,3 @@
-import type { UserInputResult } from '@/core/runtime/events';
-
 // ── 核心事件类型 / Core event types ──
 export type AgentEvent =
   | { type: 'step_begin'; data: { node: string; spanId: string; internal?: boolean } }
@@ -213,6 +211,12 @@ export interface ToolCallPayload {
 
 export interface ToolStartedPayload {
   call_id: string;
+}
+
+/** Structured answer returned by an ask_user tool call. */
+export interface UserInputResult {
+  answer: string;
+  answers?: Record<string, string>;
 }
 
 /** Shell 工具实时输出负载 — 进程运行期间逐行推送 / Per-line progress payload emitted during shell execution */

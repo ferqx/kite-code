@@ -1,10 +1,10 @@
-import type { UserInputResult } from '@/core/runtime/events';
 import type {
   AgentPhase,
   AgentPlan,
   AuthorizationMode,
   SubAgentRole,
   ToolApprovalPayload,
+  UserInputResult,
   UserInputPayload,
   WorkspaceAccess,
 } from '@/protocol/events';

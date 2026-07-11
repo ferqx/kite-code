@@ -256,18 +256,26 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
                 answer: action.resolution.text ?? action.resolution.action ?? '',
                 ...(action.resolution.answers ? { answers: action.resolution.answers } : {}),
               };
-      const activeAskUser =
+      const activeAskUsers =
         b.kind === 'question'
-          ? findBlock(
-              withResolved,
-              (blk) =>
-                blk.kind === 'tool_card' &&
-                blk.name === 'ask_user' &&
-                blk.status === 'running' &&
-                blk.callId === b.toolCallId,
+          ? withResolved.turns.flatMap((turn) =>
+              turn.blocks.filter(
+                (blk): blk is Extract<OutputBlock, { kind: 'tool_card' }> =>
+                  blk.kind === 'tool_card' &&
+                  blk.name === 'ask_user' &&
+                  (blk.status === 'queued' || blk.status === 'running'),
+              ),
             )
-          : undefined;
-      if (activeAskUser?.kind === 'tool_card') nextTimes[activeAskUser.callId] = now;
+          : [];
+      const activeAskUser =
+        b.kind !== 'question'
+          ? undefined
+          : b.toolCallId
+            ? activeAskUsers.find((blk) => blk.callId === b.toolCallId)
+            : activeAskUsers.length === 1
+              ? activeAskUsers[0]
+              : undefined;
+      if (activeAskUser) nextTimes[activeAskUser.callId] = now;
       const updatedTurns = withResolved.turns.map((turn) => {
         let changed = false;
         const blocks = turn.blocks.map((blk) => {
