@@ -174,6 +174,12 @@ export class SessionLogCollector {
       } else if (event.type === 'tool.failed' || event.type === 'tool.rejected') {
         this._summary.stats.toolCalls.total++;
         this._summary.stats.toolCalls.failed++;
+      } else if (event.type === 'subagent.started') {
+        this._summary.stats.subAgents.total++;
+      } else if (event.type === 'subagent.completed') {
+        this._summary.stats.subAgents.ok++;
+      } else if (event.type === 'subagent.failed') {
+        this._summary.stats.subAgents.failed++;
       }
     } catch {
       // Logging cannot interrupt the runtime.

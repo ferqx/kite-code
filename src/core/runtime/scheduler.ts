@@ -26,6 +26,12 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
         interactionId: state.interactions.interactionId,
         toolCallId: state.interactions.toolCallId,
       };
+    case 'awaiting_auto_review':
+      return {
+        type: 'run_auto_review',
+        reviewId: state.interactions.interactionId,
+        toolCallId: state.interactions.toolCallId,
+      };
     case 'idle':
       break;
   }

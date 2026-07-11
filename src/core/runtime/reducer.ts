@@ -498,12 +498,41 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     // ── Auto-review 事件 / Auto-review events ──
 
-    // Auto-review facts are informational; approval actions carry the state transition.
     case 'auto_review.requested':
-    // auto_review.completed 为信息性事件，审批决策通过 approval.granted/rejected 体现。
-    // Informational — approval decisions are reflected via approval.granted/rejected.
-    case 'auto_review.completed':
-      return state;
+      return {
+        ...state,
+        tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_auto_review'),
+        interactions: {
+          kind: 'awaiting_auto_review',
+          interactionId: event.reviewId,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          reason: event.reason,
+          approval: event.approval,
+        },
+      };
+
+    case 'auto_review.completed': {
+      if (
+        state.interactions.kind !== 'awaiting_auto_review' ||
+        state.interactions.interactionId !== event.reviewId
+      ) {
+        return state;
+      }
+      const result = event.result;
+      if (result.ok && result.approved) {
+        return {
+          ...state,
+          tools: updateToolStatus(state.tools, state.interactions.toolCallId, 'approved'),
+          interactions: { kind: 'idle' },
+        };
+      }
+      return {
+        ...state,
+        tools: updateToolStatus(state.tools, state.interactions.toolCallId, 'rejected'),
+        interactions: { kind: 'idle' },
+      };
+    }
 
     default:
       return state;
@@ -517,6 +546,7 @@ function updateToolStatus(
     | 'awaiting_user_input'
     | 'awaiting_plan_review'
     | 'awaiting_approval'
+    | 'awaiting_auto_review'
     | 'approved'
     | 'rejected',
 ): RuntimeState['tools'] {

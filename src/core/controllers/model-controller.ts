@@ -179,13 +179,32 @@ export async function invokeRuntimeModel(params: {
         name: call.name,
         args: call.args,
       })) ?? [];
+    const invalidToolCalls = (
+      (
+        response as unknown as {
+          invalid_tool_calls?: Array<{ id?: string; name?: string; args?: string; error?: string }>;
+        }
+      ).invalid_tool_calls ?? []
+    )
+      .filter(
+        (call): call is { id?: string; name: string; args: string; error?: string } =>
+          typeof call.name === 'string' && typeof call.args === 'string',
+      )
+      .map((call) => ({
+        id: call.id ?? crypto.randomUUID(),
+        name: call.name,
+        args: {
+          _raw_invalid_args: call.args,
+          _parse_error: call.error ?? 'invalid JSON arguments',
+        },
+      }));
     const events: RuntimeEvent[] = [
       ...retryEvents,
       { type: 'model.requested', requestId },
       {
         type: 'model.responded',
         messageId: response.id ?? requestId,
-        toolCalls,
+        toolCalls: [...toolCalls, ...invalidToolCalls],
         reasoningText: extractReasoningText(response),
         text: extractText(response.content),
       },
@@ -202,7 +221,7 @@ export async function invokeRuntimeModel(params: {
       });
     }
 
-    for (const call of toolCalls) {
+    for (const call of [...toolCalls, ...invalidToolCalls]) {
       events.push({ type: 'tool.queued', toolCallId: call.id, name: call.name, args: call.args });
     }
     return events;

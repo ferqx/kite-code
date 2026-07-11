@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
 import type { RuntimeStore } from '../../src/core/runtime/store.js';
-import { createRuntimeStore } from '../../src/core/runtime/store.js';
+import { createRuntimeStore, runtimeStorePathFor } from '../../src/core/runtime/store.js';
 
 // ── helpers ──
 
@@ -114,6 +114,16 @@ describe('createRuntimeStore', () => {
   });
 });
 
+describe('runtimeStorePathFor', () => {
+  test('preserves :memory: instead of creating a sidecar filename', () => {
+    expect(runtimeStorePathFor(':memory:')).toBe(':memory:');
+  });
+
+  test('derives a sidecar database path for persistent checkpoints', () => {
+    expect(runtimeStorePathFor('/tmp/checkpoints.sqlite')).toBe('/tmp/checkpoints.runtime.db');
+  });
+});
+
 describe('appendEvents + loadEvents round-trip', () => {
   let store: RuntimeStore;
   let tmpDir: string;
@@ -158,6 +168,59 @@ describe('appendEvents + loadEvents round-trip', () => {
     // 自增 ID 应为递增 / Auto-increment IDs should be ascending
     expect(loaded[0]!.id).toBeLessThan(loaded[1]!.id);
     expect(loaded[1]!.id).toBeLessThan(loaded[2]!.id);
+  });
+
+  test('round-trips every subagent lifecycle event with its payload and order', () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'subagent.started',
+        subagent: { id: 'sub-1', role: 'explore', task: 'find runtime callers' },
+      },
+      {
+        type: 'subagent.step',
+        subagent: { id: 'sub-1', toolName: 'read_file', toolArgs: { path: 'src/core/runtime' } },
+      },
+      {
+        type: 'subagent.tool_result',
+        subagent: {
+          id: 'sub-1',
+          toolName: 'read_file',
+          ok: true,
+          summary: 'found 4 files',
+          totalLines: 80,
+          toolTokenCount: 12,
+          durationMs: 4,
+        },
+      },
+      {
+        type: 'subagent.completed',
+        subagent: { id: 'sub-1', summary: 'all callers found', toolCallCount: 1, durationMs: 9 },
+      },
+      {
+        type: 'subagent.failed',
+        subagent: {
+          id: 'sub-2',
+          error: 'timeout',
+          summary: 'partial result',
+          toolCallCount: 2,
+          durationMs: 11,
+        },
+      },
+      {
+        type: 'subagent.cache_metrics',
+        subagent: {
+          subagentId: 'sub-1',
+          cacheHitTokens: 100,
+          cacheMissTokens: 20,
+          inputTokens: 120,
+        },
+      },
+    ];
+
+    store.appendEvents('thread-subagent-events', events);
+    const loaded = store.loadEvents('thread-subagent-events').map((entry) => entry.event);
+
+    expect(loaded).toEqual(events);
   });
 
   // 验证不同线程的事件相互隔离 / Verify events are isolated by thread_id

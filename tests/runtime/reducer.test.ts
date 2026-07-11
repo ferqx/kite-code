@@ -883,7 +883,7 @@ describe('reduceRuntimeState — runtime environment', () => {
   // 验证 phase.changed 更新执行阶段
   test('phase.changed updates execution phase', () => {
     const state = makeInitialState();
-    expect(state.phase).toBe('planning');
+    expect(state.phase).toBe('building');
 
     const next = reduceRuntimeState(state, {
       type: 'phase.changed',
@@ -1241,21 +1241,68 @@ describe('reduceRuntimeState — approval supplements', () => {
 // ── Auto-review 事件 / Auto-review events ──
 
 describe('reduceRuntimeState — auto-review events', () => {
-  // 验证 auto_review.requested 不修改状态（信息性事件）
-  test('auto_review.requested does not modify state', () => {
+  test('auto_review.requested sets awaiting_auto_review interaction', () => {
     const state = makeInitialState();
+    // Add a queued tool to the state first
+    const withTool = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'tool-99',
+      name: 'shell_execute',
+      args: { command: 'npm test' },
+    });
+    const approval = {
+      risk: 'execute_code',
+      summary: 'Run npm test',
+      reason: 'testing',
+      command: 'npm test',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+    };
     const event: RuntimeEvent = {
       type: 'auto_review.requested',
       reviewId: 'rev-1',
       toolCallId: 'tool-99',
+      toolName: 'shell_execute',
+      reason: 'auto-review for tool approval',
+      approval: approval as any,
     };
-    const next = reduceRuntimeState(state, event);
-    expect(next).toEqual(state);
+    const next = reduceRuntimeState(withTool, event);
+    expect(next.interactions.kind).toBe('awaiting_auto_review');
+    if (next.interactions.kind === 'awaiting_auto_review') {
+      expect(next.interactions.interactionId).toBe('rev-1');
+      expect(next.interactions.toolCallId).toBe('tool-99');
+      expect(next.interactions.toolName).toBe('shell_execute');
+    }
+    expect(next.tools.calls['tool-99']!.status).toBe('awaiting_auto_review');
   });
 
-  // 验证 auto_review.completed 不修改状态（信息性事件）
-  test('auto_review.completed does not modify state', () => {
+  test('auto_review.completed approves tool when ok and approved', () => {
     const state = makeInitialState();
+    // Set up state as if auto_review.requested was already processed
+    const approval = {
+      risk: 'execute_code',
+      summary: 'Run npm test',
+      reason: 'testing',
+      command: 'npm test',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+    };
+    const withTool = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'tool-99',
+      name: 'shell_execute',
+      args: { command: 'npm test' },
+    });
+    const awaiting = reduceRuntimeState(withTool, {
+      type: 'auto_review.requested',
+      reviewId: 'rev-1',
+      toolCallId: 'tool-99',
+      toolName: 'shell_execute',
+      reason: 'auto-review for tool approval',
+      approval: approval as any,
+    });
     const event: RuntimeEvent = {
       type: 'auto_review.completed',
       reviewId: 'rev-1',
@@ -1269,7 +1316,93 @@ describe('reduceRuntimeState — auto-review events', () => {
         durationMs: 1500,
       },
     };
-    const next = reduceRuntimeState(state, event);
-    expect(next).toEqual(state);
+    const next = reduceRuntimeState(awaiting, event);
+    expect(next.interactions.kind).toBe('idle');
+    expect(next.tools.calls['tool-99']!.status).toBe('approved');
+  });
+
+  test('auto_review.completed rejects tool when not approved', () => {
+    const state = makeInitialState();
+    const approval = {
+      risk: 'execute_code',
+      summary: 'Run npm test',
+      reason: 'testing',
+      command: 'npm test',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+    };
+    const withTool = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'tool-99',
+      name: 'shell_execute',
+      args: { command: 'npm test' },
+    });
+    const awaiting = reduceRuntimeState(withTool, {
+      type: 'auto_review.requested',
+      reviewId: 'rev-1',
+      toolCallId: 'tool-99',
+      toolName: 'shell_execute',
+      reason: 'auto-review for tool approval',
+      approval: approval as any,
+    });
+    const event: RuntimeEvent = {
+      type: 'auto_review.completed',
+      reviewId: 'rev-1',
+      toolCallId: 'tool-99',
+      result: {
+        ok: true,
+        approved: false,
+        reason: 'unsafe command',
+        reviewerModelName: 'haiku',
+        durationMs: 1200,
+      },
+    };
+    const next = reduceRuntimeState(awaiting, event);
+    expect(next.interactions.kind).toBe('idle');
+    expect(next.tools.calls['tool-99']!.status).toBe('rejected');
+  });
+
+  test('auto_review.completed ignores mismatched reviewId', () => {
+    const state = makeInitialState();
+    const approval = {
+      risk: 'execute_code',
+      summary: 'Run npm test',
+      reason: 'testing',
+      command: 'npm test',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+    };
+    const withTool = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'tool-99',
+      name: 'shell_execute',
+      args: { command: 'npm test' },
+    });
+    const awaiting = reduceRuntimeState(withTool, {
+      type: 'auto_review.requested',
+      reviewId: 'rev-1',
+      toolCallId: 'tool-99',
+      toolName: 'shell_execute',
+      reason: 'auto-review for tool approval',
+      approval: approval as any,
+    });
+    const event: RuntimeEvent = {
+      type: 'auto_review.completed',
+      reviewId: 'rev-2', // mismatched
+      toolCallId: 'tool-99',
+      result: {
+        ok: true,
+        approved: true,
+        reason: 'ok',
+        reviewerModelName: 'haiku',
+        durationMs: 100,
+      },
+    };
+    const next = reduceRuntimeState(awaiting, event);
+    // Should NOT transition — interactionId mismatch
+    expect(next.interactions.kind).toBe('awaiting_auto_review');
+    expect(next.tools.calls['tool-99']!.status).toBe('awaiting_auto_review');
   });
 });

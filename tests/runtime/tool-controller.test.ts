@@ -1,8 +1,20 @@
 import { describe, expect, test } from 'bun:test';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
+import { executeRuntimeTools, toRuntimeSubagentEvent } from '@/core/controllers/tool-controller';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 
 describe('executeRuntimeTools', () => {
+  test('converts delegated lifecycle facts to the public RuntimeEvent protocol', () => {
+    expect(
+      toRuntimeSubagentEvent({
+        type: 'start',
+        data: { id: 'sub-1', role: 'explore', task: 'find callers' },
+      }),
+    ).toEqual({
+      type: 'subagent.started',
+      subagent: { id: 'sub-1', role: 'explore', task: 'find callers' },
+    });
+  });
+
   test('emits a rejection without executing a policy-denied tool', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-tool-policy',

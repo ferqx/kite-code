@@ -438,6 +438,38 @@ export function recordRuntimeEvent(
       base.attributes['kite_code.interaction_id'] = event.interactionId;
       base.attributes['kite_code.plan'] = safeStringify(event.plan, TRUNC_SUMMARY);
       break;
+    case 'subagent.started':
+      base.name = 'subagent.start';
+      base.attributes['kite_code.subagent.id'] = event.subagent.id;
+      base.attributes['kite_code.subagent.role'] = event.subagent.role;
+      base.attributes['kite_code.subagent.task'] = trunc(event.subagent.task, TRUNC_SUMMARY);
+      break;
+    case 'subagent.step':
+      base.name = 'subagent.step';
+      base.attributes['kite_code.subagent.id'] = event.subagent.id;
+      base.attributes['kite_code.tool.name'] = event.subagent.toolName;
+      base.attributes['kite_code.tool.args'] = safeStringify(event.subagent.toolArgs, TRUNC_ARGS);
+      break;
+    case 'subagent.tool_result':
+      base.name = 'subagent.tool_result';
+      base.attributes['kite_code.subagent.id'] = event.subagent.id;
+      base.attributes['kite_code.tool.name'] = event.subagent.toolName;
+      base.attributes['kite_code.tool.ok'] = event.subagent.ok;
+      if (!event.subagent.ok)
+        base.status = { code: 'ERROR', message: event.subagent.summary ?? 'tool failed' };
+      break;
+    case 'subagent.completed':
+    case 'subagent.failed':
+      base.name = event.type === 'subagent.completed' ? 'subagent.done' : 'subagent.error';
+      base.attributes['kite_code.subagent.id'] = event.subagent.id;
+      if (event.type === 'subagent.failed')
+        base.status = { code: 'ERROR', message: event.subagent.error };
+      break;
+    case 'subagent.cache_metrics':
+      base.name = 'subagent.cache_metrics';
+      base.attributes['kite_code.subagent.id'] = event.subagent.subagentId;
+      base.attributes['gen_ai.usage.input_tokens'] = event.subagent.inputTokens;
+      break;
   }
   return base;
 }

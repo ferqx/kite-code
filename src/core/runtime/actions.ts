@@ -86,7 +86,7 @@ export function eventsForRuntimeAction(
     return [];
   }
 
-  if (action.type === 'approve_plan') {
+  if (interaction.kind === 'awaiting_plan_review' && action.type === 'approve_plan') {
     return [
       {
         type: 'plan.approved',

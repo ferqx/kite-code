@@ -13,6 +13,26 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 
+type SubagentEvent = Parameters<SubAgentEventSink>[0];
+
+/** Convert the subagent runner's private callback payload into a durable public fact. */
+export function toRuntimeSubagentEvent(event: SubagentEvent): RuntimeEvent {
+  switch (event.type) {
+    case 'start':
+      return { type: 'subagent.started', subagent: event.data };
+    case 'step':
+      return { type: 'subagent.step', subagent: event.data };
+    case 'tool_result':
+      return { type: 'subagent.tool_result', subagent: event.data };
+    case 'done':
+      return { type: 'subagent.completed', subagent: event.data };
+    case 'error':
+      return { type: 'subagent.failed', subagent: event.data };
+    case 'cache_metrics':
+      return { type: 'subagent.cache_metrics', subagent: event.data };
+  }
+}
+
 /**
  * Kernel-native tool effect.  It derives the execution request from the
  * persisted call record and returns facts only; it never creates a ToolMessage
@@ -31,6 +51,10 @@ export async function executeRuntimeTools(params: {
   subagentEventSink?: SubAgentEventSink;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
+  const emitSubagentEvent: SubAgentEventSink = (event) => {
+    events.push(toRuntimeSubagentEvent(event));
+    params.subagentEventSink?.(event);
+  };
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
@@ -82,18 +106,36 @@ export async function executeRuntimeTools(params: {
       events.push({ type: 'tool.rejected', toolCallId, reason: decision.userVisibleSummary });
       continue;
     }
-    if (decision.requiresApproval) {
-      events.push({
-        type: 'approval.requested',
-        interactionId: genInteractionId(),
-        toolCallId,
-        approval: buildToolApproval({
-          workspace: params.state.session.workspace,
-          threadId: params.state.session.threadId,
-          request,
-          decision,
-        }) as unknown as import('@/protocol/events').ToolApprovalPayload,
-      });
+    if (decision.requiresApproval && call.status !== 'approved') {
+      const approval = buildToolApproval({
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+        request,
+        decision,
+      }) as unknown as import('@/protocol/events').ToolApprovalPayload;
+
+      // auto mode: use auto-review for non-destructive tools (unless circuit breaker tripped)
+      if (
+        params.state.mode === 'auto' &&
+        decision.risk !== 'destructive' &&
+        !params.state.autoReview.circuitBreakerTripped
+      ) {
+        events.push({
+          type: 'auto_review.requested',
+          reviewId: genInteractionId(),
+          toolCallId,
+          toolName: request.name,
+          reason: decision.reason,
+          approval,
+        });
+      } else {
+        events.push({
+          type: 'approval.requested',
+          interactionId: genInteractionId(),
+          toolCallId,
+          approval,
+        });
+      }
       continue;
     }
 
@@ -116,7 +158,7 @@ export async function executeRuntimeTools(params: {
         interactionMode: params.state.mode,
         taskConfig: params.taskConfig,
         taskModel: params.taskModel,
-        subagentEventSink: params.subagentEventSink,
+        subagentEventSink: emitSubagentEvent,
         onShellProgress: (chunk, stream) =>
           progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
       });
