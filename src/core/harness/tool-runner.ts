@@ -147,17 +147,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
   }
 
-  if (request.name === 'update_plan') {
-    return withFailureGuidance(request, {
-      ok: true,
-      command: 'update_plan',
-      exitCode: 0,
-      stdout: '',
-      stderr: '',
-      plan: request.args,
-    });
-  }
-
   if (request.name === 'task') {
     if (!taskConfig || !subagentEventSink) {
       return withFailureGuidance(request, {
@@ -685,8 +674,6 @@ function toolUsageGuidance(request: PendingToolRequest): string {
       return 'Use write_file with a relative path and complete file content when creating or fully overwriting a file. For small changes to an existing file, prefer read_file followed by edit_file.';
     case 'shell_execute':
       return 'Use shell_execute with a concrete command and action metadata. Set intent to inspect for read-only checks such as rg, ls, cat, or git status; set intent to verify for tests, typecheck, build, lint, or smoke checks. Provide description to explain what the command does. Include grant_request for commands needing approval.';
-    case 'update_plan':
-      return 'Use update_plan with a complete plan object: name, description, status, and ordered steps with statuses. It must only update planning state and must not mutate the workspace.';
     case 'ask_user':
       return 'Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.';
     case 'web_fetch':

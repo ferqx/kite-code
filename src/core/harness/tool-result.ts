@@ -27,8 +27,6 @@ export type ToolExecutionResult = ShellResult & {
   failure?: ToolFailure;
   /** 文件工具返回的相对路径 / Relative path returned by file tools */
   path?: string;
-  /** update_plan 返回的持久化计划 / Plan state returned by update_plan */
-  plan?: AgentPlan;
   /** shell_execute 返回的 action envelope 元数据 / Action envelope metadata returned by shell_execute */
   action?: {
     /** 模型表达的命令意图 / Model-declared command intent */
