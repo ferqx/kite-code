@@ -26,6 +26,8 @@ export interface RunRuntimeAgentInput {
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   interactionMode?: InteractionMode;
+  /** 初始执行阶段 / Initial execution phase */
+  phase?: 'planning' | 'building';
   thinkingLevel?: string | null;
   sandboxBackend?: SandboxBackend | 'unknown';
   signal?: AbortSignal;
@@ -49,6 +51,7 @@ export async function* runRuntimeAgent(
     workspace: input.workspace,
     storePath: input.runtimeStorePath,
     interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'ask',
+    phase: input.phase,
   });
   const collector = new SessionLogCollector(
     input.threadId,

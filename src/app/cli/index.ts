@@ -4,6 +4,7 @@ import { skillDirs } from '@/core/config/paths';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
 import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
+import { runtimeStorePathFor } from '@/core/runtime/store';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import { getSkillContent, scanSkills } from '@/core/skills/loader';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
@@ -78,7 +79,7 @@ export async function main(): Promise<void> {
       userId: args.userId,
       threadId: args.threadId,
       workspace: args.workspace,
-      runtimeStorePath: `${args.checkpointPath.replace(/\.sqlite$/, '')}.runtime.db`,
+      runtimeStorePath: runtimeStorePathFor(args.checkpointPath),
       config,
       shellExecutor,
       interactionMode,

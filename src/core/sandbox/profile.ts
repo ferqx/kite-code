@@ -4,7 +4,7 @@
  * 分层策略：
  *   1. 静态基础层  — 进程执行、mach-lookup、sysctl、IOKit、IPC、PTY
  *   2. 文件读取层  — 全局读取（dev tools 兼容），由 checkDangerousPaths + 工具策略兜底
- *   3. 文件写入层  — 仅 workspace + /tmp 可写
+ *   3. 文件写入层  — 全局允许，由 tool-policy 授权
  *   4. 网络层      — deny default，需要时追加
  */
 
@@ -133,20 +133,16 @@ function fileReadPolicy(): string {
 (allow file-map-executable (subpath "/"))`;
 }
 
-/** 3. 文件写入层 — 仅 workspace + 临时目录可写 */
-function fileWritePolicy(workspace: string): string {
-  return `;; ── 文件写入：仅 workspace + 临时目录可写 ──
-(allow file-write* file-ioctl (subpath "${escapeSeatbeltPath(workspace)}"))
-(allow file-write* file-ioctl (subpath "/tmp"))
-(allow file-write* file-ioctl (subpath "/private/tmp"))`;
+/** 3. 文件写入层 — 普通路径由 tool-policy 授权 */
+function fileWritePolicy(_workspace: string): string {
+  return `;; ── 文件写入：普通路径由 tool-policy 授权，危险路径由 checkDangerousPaths 拒绝 ──
+(allow file-write* file-ioctl (subpath "/"))`;
 }
 
-/** 4. 文件创建/删除层 — 仅 workspace + 临时目录可写 */
-function fileWriteUnlinkPolicy(workspace: string): string {
-  return `;; ── 文件创建/删除：仅 workspace + 临时目录可写 ──
-(allow file-write-unlink file-write-create (subpath "${escapeSeatbeltPath(workspace)}"))
-(allow file-write-unlink file-write-create (subpath "/tmp"))
-(allow file-write-unlink file-write-create (subpath "/private/tmp"))`;
+/** 4. 文件创建/删除层 — 普通路径由 tool-policy 授权 */
+function fileWriteUnlinkPolicy(_workspace: string): string {
+  return `;; ── 文件创建/删除：普通路径由 tool-policy 授权，危险路径由 checkDangerousPaths 拒绝 ──
+(allow file-write-unlink file-write-create (subpath "/"))`;
 }
 
 function networkPolicy(mode: 'disabled' | 'allow_all'): string {
@@ -155,8 +151,4 @@ function networkPolicy(mode: 'disabled' | 'allow_all'): string {
 (deny network*)`;
   }
   return '';
-}
-
-function escapeSeatbeltPath(path: string): string {
-  return path.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }

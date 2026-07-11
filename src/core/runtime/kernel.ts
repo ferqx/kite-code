@@ -235,6 +235,8 @@ export function createAgentKernel(params: {
   workspace: string;
   storePath: string;
   interactionMode?: InteractionMode;
+  /** 初始执行阶段 / Initial execution phase */
+  phase?: 'planning' | 'building';
   sandboxAvailable?: boolean;
 }): AgentKernel {
   const store = createRuntimeStore(params.storePath);
@@ -243,6 +245,7 @@ export function createAgentKernel(params: {
     userId: params.userId,
     workspace: params.workspace,
     interactionMode: params.interactionMode ?? 'ask',
+    phase: params.phase,
   });
   const restoredState = store.loadSnapshot<RuntimeState>(params.threadId);
   const initialState =

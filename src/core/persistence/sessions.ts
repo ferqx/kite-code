@@ -1,7 +1,11 @@
 import type { AgentPlan } from '../../protocol/events.js';
 import type { RuntimeEvent } from '../runtime/events.js';
 import type { RuntimeState } from '../runtime/state.js';
-import { createRuntimeStore, type RuntimeSessionInfo } from '../runtime/store.js';
+import {
+  createRuntimeStore,
+  type RuntimeSessionInfo,
+  runtimeStorePathFor,
+} from '../runtime/store.js';
 
 export interface SessionInfo {
   threadId: string;
@@ -28,10 +32,6 @@ export interface SessionData {
   planAuthMode: string | null;
 }
 
-function runtimePath(checkpointPath: string): string {
-  return checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
-}
-
 function formatTime(timestamp: number): string {
   const date = new Date(timestamp * 1000);
   return Number.isNaN(date.getTime()) ? '(unknown)' : date.toLocaleString();
@@ -47,7 +47,7 @@ function mapSession(info: RuntimeSessionInfo): SessionInfo {
 }
 
 export async function listSessions(checkpointPath: string): Promise<SessionInfo[]> {
-  const store = createRuntimeStore(runtimePath(checkpointPath));
+  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
   try {
     return store.listSessions().map(mapSession);
   } finally {
@@ -59,7 +59,7 @@ export async function searchSessions(
   checkpointPath: string,
   query: string,
 ): Promise<SessionInfo[]> {
-  const store = createRuntimeStore(runtimePath(checkpointPath));
+  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
   try {
     return store.listSessions(query).map(mapSession);
   } finally {
@@ -71,7 +71,7 @@ export async function loadSession(
   checkpointPath: string,
   threadId: string,
 ): Promise<SessionData | null> {
-  const store = createRuntimeStore(runtimePath(checkpointPath));
+  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
   try {
     const events = store.loadEvents(threadId).map((entry) => entry.event);
     const state = store.loadSnapshot<RuntimeState>(threadId);
@@ -113,7 +113,7 @@ export async function persistSessionName(
   threadId: string,
   name: string,
 ): Promise<void> {
-  const store = createRuntimeStore(runtimePath(checkpointPath));
+  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
   try {
     store.setSessionName(threadId, name);
   } finally {
@@ -122,7 +122,7 @@ export async function persistSessionName(
 }
 
 export async function deleteSession(checkpointPath: string, threadId: string): Promise<void> {
-  const store = createRuntimeStore(runtimePath(checkpointPath));
+  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
   try {
     store.deleteSession(threadId);
   } finally {

@@ -37,11 +37,9 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('(allow process-fork)');
   });
 
-  test('profile restricts file write to workspace and temp directories', () => {
+  test('profile allows ordinary file writes for tool-policy to authorize', () => {
     const profile = generateSandboxProfile('/tmp/test-workspace');
-    expect(profile).toContain('(allow file-write* file-ioctl (subpath "/tmp/test-workspace"))');
-    expect(profile).toContain('(allow file-write* file-ioctl (subpath "/tmp"))');
-    expect(profile).not.toContain('(allow file-write* file-ioctl (subpath "/"))');
+    expect(profile).toContain('(allow file-write* file-ioctl (subpath "/"))');
   });
 
   test('profile does not deny network (controlled by tool-policy approval)', () => {
@@ -64,12 +62,9 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('(allow file-read* (subpath "/"))');
   });
 
-  test('profile restricts file create/unlink to workspace and temp directories', () => {
+  test('profile allows ordinary file create and unlink for tool-policy to authorize', () => {
     const profile = generateSandboxProfile('/tmp/test-workspace');
-    expect(profile).toContain(
-      '(allow file-write-unlink file-write-create (subpath "/tmp/test-workspace"))',
-    );
-    expect(profile).not.toContain('(allow file-write-unlink file-write-create (subpath "/"))');
+    expect(profile).toContain('(allow file-write-unlink file-write-create (subpath "/"))');
   });
 });
 
