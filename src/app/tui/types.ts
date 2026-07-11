@@ -113,6 +113,8 @@ export type OutputBlock =
       id: number;
       kind: 'question';
       question: UserInputPayload;
+      /** Runtime tool identity that opened this input interaction. */
+      toolCallId?: string;
       resolved?: string | { text: string; answers?: Record<string, string> };
     }
   | {

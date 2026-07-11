@@ -264,7 +264,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
                 blk.kind === 'tool_card' &&
                 blk.name === 'ask_user' &&
                 blk.status === 'running' &&
-                blk.args.question === b.question.question,
+                blk.callId === b.toolCallId,
             )
           : undefined;
       if (activeAskUser?.kind === 'tool_card') nextTimes[activeAskUser.callId] = now;

@@ -705,7 +705,15 @@ describe('eventReducer (blocks model)', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('ask-1', 'ask_user', { question: multiQuestion.question }));
       s = dispatch(s, tcEvt('shell-1', 'shell_execute', { command: 'bun test' }));
-      s = dispatch(s, { type: 'EVENT', event: { type: 'need_input', data: multiQuestion } });
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user_input.requested',
+          interactionId: 'input-1',
+          toolCallId: 'ask-1',
+          request: multiQuestion,
+        },
+      });
       const blockId = (s.interrupt as { blockId: number }).blockId;
 
       s = dispatch(s, {
@@ -727,6 +735,35 @@ describe('eventReducer (blocks model)', () => {
         userInput: { answer: 'Configured', answers },
       });
       expect(shellCard?.status).toBe('running');
+    });
+    test('RESOLVE_INTERRUPT uses the input tool identity when ask_user questions are duplicated', () => {
+      const duplicateQuestion = question({ question: 'Choose a mode' });
+      let s = fresh();
+      s = dispatch(s, tcEvt('ask-first', 'ask_user', { question: duplicateQuestion.question }));
+      s = dispatch(s, tcEvt('ask-second', 'ask_user', { question: duplicateQuestion.question }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user_input.requested',
+          interactionId: 'input-first',
+          toolCallId: 'ask-first',
+          request: duplicateQuestion,
+        },
+      });
+      const blockId = (s.interrupt as { blockId: number }).blockId;
+
+      s = dispatch(s, { type: 'RESOLVE_INTERRUPT', blockId, resolution: 'auto' });
+
+      const first = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'ask-first',
+      );
+      const second = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'ask-second',
+      );
+      expect(first).toMatchObject({ status: 'done', userInput: { answer: 'auto' } });
+      expect(second?.status).toBe('running');
     });
     test('need_approval closes active Thought so its timer stops while waiting for the user', () => {
       let s = fresh();

@@ -32,7 +32,7 @@ export type RenderEvent =
   | { type: 'tool_started'; data: Protocol.ToolStartedPayload }
   | { type: 'tool_done'; data: Protocol.ToolResultPayload }
   | { type: 'need_approval'; data: Protocol.ToolApprovalPayload }
-  | { type: 'need_input'; data: Protocol.UserInputPayload }
+  | { type: 'need_input'; data: Protocol.UserInputPayload; toolCallId?: string }
   | { type: 'need_plan_review'; data: Protocol.NeedPlanReviewPayload }
   | { type: 'state_change'; data: Protocol.StateChangePayload }
   | {
@@ -1098,6 +1098,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         id: finalized.nextBlockId,
         kind: 'question',
         question: event.data,
+        toolCallId: event.toolCallId,
       };
       return { ...appendBlock(finalized, block), interrupt: { kind: 'input', blockId: block.id } };
     }
@@ -1506,7 +1507,11 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         },
       });
     case 'user_input.requested':
-      return handleEventAction(state, { type: 'need_input', data: event.request });
+      return handleEventAction(state, {
+        type: 'need_input',
+        data: event.request,
+        toolCallId: event.toolCallId,
+      });
     case 'approval.requested':
       return handleEventAction(state, { type: 'need_approval', data: event.approval });
     case 'plan.review_requested':
