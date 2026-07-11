@@ -1,3 +1,4 @@
+import type { UserInputResult } from '@/core/runtime/events';
 import type {
   AgentPhase,
   AgentPlan,
@@ -73,6 +74,8 @@ export type OutputBlock =
       timeoutMs?: number;
       /** 自动审批失败原因。工具卡状态为 done(绿) 时，单独以红色展示此警告 / Auto-review failure reason. Shown in red alongside green done status. */
       reviewFailure?: string;
+      /** Structured answer returned by ask_user, independent of the truncated summary. */
+      userInput?: UserInputResult;
     }
   | {
       id: number;

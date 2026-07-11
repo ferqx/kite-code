@@ -1,3 +1,5 @@
+import type { UserInputResult } from '@/core/runtime/events';
+
 // ── 核心事件类型 / Core event types ──
 export type AgentEvent =
   | { type: 'step_begin'; data: { node: string; spanId: string; internal?: boolean } }
@@ -241,6 +243,8 @@ export interface ToolResultPayload {
   /** 自动审批失败时 reviewFailure 携带原因。工具执行成功+审批失败=工具绿色✓+审批警告红色⚠。
    *  When auto-review fails, reviewFailure carries the reason. Tool ok + reviewFailure = green ✓ + red ⚠. */
   reviewFailure?: string;
+  /** Structured ask_user result, retained separately from the display summary. */
+  userInput?: UserInputResult;
 }
 
 export interface UserInputQuestion {

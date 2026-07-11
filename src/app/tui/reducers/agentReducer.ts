@@ -241,42 +241,59 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       }
       // 重置工具启动时间戳，排除审批等待耗时 / Reset tool start timestamps to exclude approval wait time
       const now = Date.now();
-      const nextTimes: Record<string, number> = {};
-      if (state.toolStartTimes) {
+      const nextTimes: Record<string, number> = { ...(state.toolStartTimes ?? {}) };
+      if (b.kind === 'approval' && state.toolStartTimes) {
         for (const k of Object.keys(state.toolStartTimes)) nextTimes[k] = now;
       }
       // 同步更新 block 上的 startedAt，排除审批等待耗时 / Sync startedAt on blocks to exclude approval wait
       const withResolved = replaceBlockById(state, action.blockId, resolved);
-      // ask_user: 从 resolved 提取 answer text 预填充 tool_card summary，
-      // 确保立即展示标题和答案，不等待 tool_done 事件
-      // Pre-fill tool_card summary/status/detail/expanded so title and answer render immediately
-      const answerText =
-        typeof (resolved as Record<string, unknown>).resolved === 'string'
-          ? ((resolved as Record<string, unknown>).resolved as string)
+      const userInput =
+        b.kind !== 'question'
+          ? undefined
+          : typeof action.resolution === 'string'
+            ? { answer: action.resolution }
+            : {
+                answer: action.resolution.text ?? action.resolution.action ?? '',
+                ...(action.resolution.answers ? { answers: action.resolution.answers } : {}),
+              };
+      const activeAskUser =
+        b.kind === 'question'
+          ? findBlock(
+              withResolved,
+              (blk) =>
+                blk.kind === 'tool_card' &&
+                blk.name === 'ask_user' &&
+                blk.status === 'running' &&
+                blk.args.question === b.question.question,
+            )
           : undefined;
+      if (activeAskUser?.kind === 'tool_card') nextTimes[activeAskUser.callId] = now;
       const updatedTurns = withResolved.turns.map((turn) => {
         let changed = false;
         const blocks = turn.blocks.map((blk) => {
-          if (blk.kind === 'tool_card' && blk.status === 'running') {
+          if (blk.kind === 'tool_card' && blk.id === activeAskUser?.id) {
             changed = true;
-            let prefill: Record<string, unknown> = {};
-            if (blk.name === 'ask_user' && answerText) {
-              const question = typeof blk.args.question === 'string' ? blk.args.question : '';
-              const detail = question
-                ? question.length > 60
-                  ? `${question.slice(0, 57)}...`
-                  : question
-                : 'Asked';
-              prefill = {
-                summary: answerText,
-                status: 'done' as const,
-                expanded: true,
-                detail,
-              };
-            }
-            return { ...blk, startedAt: now, ...prefill };
+            const question = typeof blk.args.question === 'string' ? blk.args.question : '';
+            const detail = question
+              ? question.length > 60
+                ? `${question.slice(0, 57)}...`
+                : question
+              : 'Asked';
+            return {
+              ...blk,
+              startedAt: now,
+              summary: userInput?.answer ?? '',
+              status: 'done' as const,
+              expanded: true,
+              detail,
+              userInput,
+            };
           }
-          if (blk.kind === 'subagent' && blk.status === 'running') {
+          if (b.kind === 'approval' && blk.kind === 'tool_card' && blk.status === 'running') {
+            changed = true;
+            return { ...blk, startedAt: now };
+          }
+          if (b.kind === 'approval' && blk.kind === 'subagent' && blk.status === 'running') {
             changed = true;
             return { ...blk, startedAt: now, awaitingApproval: false };
           }

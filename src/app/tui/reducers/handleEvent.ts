@@ -868,6 +868,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         reviewFailure:
           event.data.reviewFailure ??
           ('reviewFailure' in matched ? matched.reviewFailure : undefined),
+        userInput: event.data.userInput ?? matched.userInput,
         summary: displaySummary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
@@ -1480,6 +1481,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           summary: (event.result.stdout || event.result.stderr).slice(0, 200),
           exitCode: event.result.exitCode,
           status: event.result.status,
+          userInput: event.result.userInput,
         },
       });
     case 'tool.failed':

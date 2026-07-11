@@ -686,6 +686,48 @@ describe('eventReducer (blocks model)', () => {
       expect(b.resolved).toBe('my answer');
       expect(s.interrupt).toBeNull();
     });
+    test('RESOLVE_INTERRUPT pre-fills only the active ask_user card with multi-question answers', () => {
+      const answers = {
+        intent: 'implement',
+        scope: 'tui',
+        tests: 'focused',
+        review: 'self',
+        commit: 'yes',
+      };
+      const multiQuestion = question({
+        question: 'Configure the work',
+        questions: Object.keys(answers).map((id) => ({
+          id,
+          question: `Choose ${id}`,
+          options: [],
+        })),
+      });
+      let s = fresh();
+      s = dispatch(s, tcEvt('ask-1', 'ask_user', { question: multiQuestion.question }));
+      s = dispatch(s, tcEvt('shell-1', 'shell_execute', { command: 'bun test' }));
+      s = dispatch(s, { type: 'EVENT', event: { type: 'need_input', data: multiQuestion } });
+      const blockId = (s.interrupt as { blockId: number }).blockId;
+
+      s = dispatch(s, {
+        type: 'RESOLVE_INTERRUPT',
+        blockId,
+        resolution: { action: 'answered', text: 'Configured', answers },
+      });
+
+      const askCard = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'ask-1',
+      );
+      const shellCard = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'shell-1',
+      );
+      expect(askCard).toMatchObject({
+        status: 'done',
+        userInput: { answer: 'Configured', answers },
+      });
+      expect(shellCard?.status).toBe('running');
+    });
     test('need_approval closes active Thought so its timer stops while waiting for the user', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('checking before approval'));
@@ -2307,6 +2349,48 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('RUNTIME_EVENT message-list pipeline', () => {
+    test('retains every structured multi-question answer when ask_user finishes with oversized stdout', () => {
+      const answers = {
+        intent: 'implement',
+        scope: 'tui',
+        tests: 'focused',
+        review: 'self',
+        commit: 'yes',
+      };
+      let state = dispatch(fresh(), {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.queued',
+          toolCallId: 'ask-1',
+          name: 'ask_user',
+          args: { question: 'Configure the work' },
+        },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.finished',
+          toolCallId: 'ask-1',
+          name: 'ask_user',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: 'x'.repeat(500),
+            stderr: '',
+            userInput: { answer: 'Configured', answers },
+          },
+        },
+      });
+
+      const card = flatBlocks(state).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'ask-1',
+      );
+      expect(card?.summary).toBe('x'.repeat(200));
+      expect(card?.userInput).toEqual({ answer: 'Configured', answers });
+    });
+
     test('renders model text, tool lifecycle, file changes, and terminal errors in event order', () => {
       let state = fresh();
       const events: import('../src/core/runtime/events').RuntimeEvent[] = [
