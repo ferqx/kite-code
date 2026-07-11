@@ -31,7 +31,13 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      files: {
+        'CLAUDE.md': '# Test workspace\n\nFixture used by Thought Lifecycle read-tool scenarios.\n',
+        'package.json': '{"name":"thought-lifecycle-fixture"}\n',
+        'src/index.ts': 'export const runtime = "langgraph migration fixture";\n',
+      },
+    });
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 

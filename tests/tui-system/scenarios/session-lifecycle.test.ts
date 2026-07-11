@@ -29,8 +29,6 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
     server.setResponses([
       { message: { content: 'First session response!' }, delay: 50 },
-      // Duplicates: generateSessionName or other internal calls may consume extras
-      { message: { content: 'First session response!' }, delay: 50 },
       { message: { content: 'Second session response!' }, delay: 50 },
       { message: { content: 'Second session response!' }, delay: 50 },
       { message: { content: 'Second session response!' }, delay: 50 },

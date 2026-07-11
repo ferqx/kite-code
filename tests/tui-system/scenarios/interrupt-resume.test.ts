@@ -176,9 +176,8 @@ describe('TUI PTY System — Interrupt Resume', () => {
       expect(screenContains(panelOutput, '搜索')).toBe(true);
 
       // The session from tui1 should appear in the list.
-      // Session name comes from smart naming (consumes mock response "Extra 1").
-      // Check for text that appears in the session list entry.
-      expect(screenContains(panelOutput, 'Extra 1')).toBe(true);
+      // Session name is generated from the first user message by smart naming.
+      expect(screenContains(panelOutput, 'Hello from tui1')).toBe(true);
     },
     TIMEOUT,
   );

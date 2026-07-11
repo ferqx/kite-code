@@ -30,9 +30,8 @@ describe('TUI PTY System — Error Recovery', () => {
 
     server.setResponses([
       { error: 'Internal server error', delay: 50 },
-      // Extra spare: TUI may retry once after error before attempting user's second message
-      { message: { content: 'Spare for retry' }, delay: 50 },
       { message: { content: 'Second attempt: hello from model!' }, delay: 50 },
+      { message: { content: 'Spare 1' } },
       { message: { content: 'Spare 2' } },
       { message: { content: 'Spare 3' } },
     ]);

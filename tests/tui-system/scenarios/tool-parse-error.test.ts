@@ -33,9 +33,8 @@ describe('TUI PTY System — Tool Parse Error', () => {
     workspace = createTestWorkspace();
 
     // Response #1: malformed tool call args (missing closing brace) — triggers parse error
-    // Response #2-3: spares for retry after tool parse error (agent → tools → error → agent → model retry)
-    // Response #4: recovery response for follow-up message
-    // Response #5-6: spare for generateSessionName
+    // Response #2: Kernel receives the synthetic tool failure and asks the model to recover.
+    // Response #3: recovery response for the follow-up message.
     server.setResponses([
       {
         message: {
@@ -45,7 +44,6 @@ describe('TUI PTY System — Tool Parse Error', () => {
         delay: 50,
       },
       { message: { content: 'Spare retry 1' }, delay: 50 },
-      { message: { content: 'Spare retry 2' }, delay: 50 },
       { message: { content: 'Recovery message after parse error!' }, delay: 50 },
       { message: { content: 'Spare 4' } },
       { message: { content: 'Spare 5' } },

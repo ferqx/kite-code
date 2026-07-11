@@ -22,7 +22,11 @@ describe('TUI PTY System — Input & Message', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      files: {
+        'package.json': '{"name":"input-search-fixture"}\n',
+      },
+    });
 
     server.setResponses([
       { message: { content: 'I received your message!' }, delay: 50 },

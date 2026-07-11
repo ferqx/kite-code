@@ -83,10 +83,8 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       const clean = stripAnsi(output);
       console.log('  output after planning write denial:', clean.slice(-1500));
 
-      expect(screenContains(output, 'Rejected by tool policy')).toBe(true);
-      expect(
-        screenContains(output, 'planning phase allows read-only inspection and plan updates only'),
-      ).toBe(true);
+      expect(screenContains(output, 'Rejected write_file during planning phase')).toBe(true);
+      expect(screenContains(output, 'Planning write attempt was blocked.')).toBe(true);
       expect(screenContains(output, 'Approve this tool call?')).toBe(false);
       expect(existsSync(join(workspace.workspace, 'plan-created.txt'))).toBe(false);
     },

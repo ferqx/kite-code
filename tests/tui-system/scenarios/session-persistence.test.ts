@@ -211,10 +211,9 @@ describe('TUI PTY System — Session Persistence', () => {
       expect(screenContains(output, '导航')).toBe(true);
 
       // The session from tui1 should appear in the list.
-      // Session name is the first user message ("Message before restart")
-      // if smart naming hasn't completed, or a generated name.
-      // Check for the model response text which appears in the session list entry.
-      expect(screenContains(output, 'Hello from session')).toBe(true);
+      // Session name defaults to threadId; after smart naming, it becomes
+      // the first user message text (truncated to 30 chars).
+      expect(screenContains(output, 'Message before restart')).toBe(true);
     },
     TIMEOUT,
   );

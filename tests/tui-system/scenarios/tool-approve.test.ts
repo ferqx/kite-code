@@ -10,6 +10,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createMockModelServer } from '../harness/fixtures';
 import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
@@ -67,6 +69,7 @@ describe('TUI PTY System — Tool Approve', () => {
     server?.stop();
     await tui?.killAndWait();
     workspace?.cleanup();
+    expect(existsSync(join(workspace.workspace, 'hello.txt'))).toBe(false);
   });
 
   // ── Warmup ───────────────────────────────────────────────
@@ -117,6 +120,7 @@ describe('TUI PTY System — Tool Approve', () => {
       // and after execution it transitions to done state in the scrollback
       expect(screenContains(afterOutput, 'hello.txt')).toBe(true);
       expect(screenContains(afterOutput, 'Create')).toBe(true);
+      expect(existsSync(join(workspace.workspace, 'hello.txt'))).toBe(true);
 
       // TUI should recover — prompt visible
       expect(screenContains(afterOutput, '❯')).toBe(true);

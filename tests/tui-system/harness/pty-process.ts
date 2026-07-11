@@ -45,6 +45,65 @@ export interface PtyProcess {
   readonly exited: boolean;
 }
 
+/** Wait until a PTY child has exited, or fail its cleanup instead of hiding a leak. */
+export async function waitForPtyExit(
+  hasExited: () => boolean,
+  timeoutMs: number,
+  pollIntervalMs = 100,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!hasExited() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  if (!hasExited()) {
+    throw new Error(`PTY child did not exit within ${timeoutMs}ms`);
+  }
+}
+
+/** Wait for an exit code without allowing a failed TUI exit to stall cleanup forever. */
+export async function waitForPtyExitCode(
+  exitPromise: Promise<number>,
+  timeoutMs: number,
+): Promise<number> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      exitPromise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`PTY child did not exit within ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+function forceKillPtyChild(proc: ReturnType<typeof Bun.spawn>): void {
+  if (process.platform === 'win32') {
+    // Bun's signal emulation only targets the direct process on Windows. The
+    // TUI may own descendants, so taskkill is needed to terminate its tree.
+    Bun.spawnSync(['taskkill.exe', '/pid', String(proc.pid), '/t', '/f'], {
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    return;
+  }
+  proc.kill('SIGKILL');
+}
+
+export function resolveTuiLaunchPaths(
+  opts: Pick<PtyProcessOptions, 'cwd' | 'workspace'>,
+  projectRoot = process.cwd(),
+): { cwd: string; entryPath: string } {
+  return {
+    cwd: opts.cwd ?? opts.workspace?.workspace ?? projectRoot,
+    entryPath: join(projectRoot, 'src/app/tui/index.tsx'),
+  };
+}
+
 /**
  * Spawn the TUI subprocess with a real PTY.
  *
@@ -55,9 +114,9 @@ export interface PtyProcess {
 export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   const cols = opts.cols ?? 120;
   const rows = opts.rows ?? 40;
-  // cwd MUST be project root so `bun run src/app/tui/index.tsx` resolves.
-  // Config is found via KITE_CODE_HOME env var → defaultConfigPath().
-  const cwd = process.cwd();
+  // Execute the project entrypoint by absolute path while keeping relative
+  // tool paths inside the isolated test workspace.
+  const { cwd, entryPath } = resolveTuiLaunchPaths(opts);
 
   // If a mock server is provided, write config that points to it.
   // Config is written to BOTH the home-level (~/.kite-code/) AND the
@@ -116,7 +175,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   childEnv['TERM'] = 'xterm-256color';
 
   const proc = Bun.spawn({
-    cmd: [process.execPath, 'run', 'src/app/tui/index.tsx'],
+    cmd: [process.execPath, 'run', entryPath],
     cwd,
     env: childEnv,
     terminal: {
@@ -134,15 +193,16 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   });
 
   /**
-   * Kill the child process with SIGTERM, then SIGKILL if it doesn't exit.
+   * Kill the child process with SIGTERM, then force-kill it if it doesn't exit.
    *
    * SIGTERM gives the process a chance to clean up. If the process ignores
    * SIGTERM (e.g. stuck in an Ink render loop or network retry), SIGKILL
    * guarantees termination — it cannot be caught, ignored, or blocked.
-   * When the child dies, Bun closes the PTY, causing any grandchild processes
-   * connected to the PTY slave to receive SIGHUP and exit.
+   * On Windows, force-kill uses taskkill /T because Bun's signal emulation
+   * cannot guarantee that descendant bun.exe processes are terminated.
    */
   const KILL_TIMEOUT_MS = 2000;
+  const EXIT_TIMEOUT_MS = 15_000;
 
   async function killAndWaitImpl(): Promise<boolean> {
     if (exited) return false;
@@ -150,21 +210,13 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     // Graceful attempt first
     proc.kill();
 
-    // Wait for graceful exit
-    const start = Date.now();
-    while (!exited && Date.now() - start < KILL_TIMEOUT_MS) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-
-    if (!exited) {
-      // Force kill — cannot be caught or ignored
-      proc.kill('SIGKILL');
-
-      // Wait for exit confirmation
-      const deadline = Date.now() + 5000;
-      while (!exited && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 100));
-      }
+    try {
+      await waitForPtyExit(() => exited, KILL_TIMEOUT_MS);
+    } catch {
+      // Force kill — cannot be caught or ignored. On Windows this also kills
+      // the process tree, which prevents orphaned bun.exe descendants.
+      forceKillPtyChild(proc);
+      await waitForPtyExit(() => exited, 5000);
     }
 
     return true;
@@ -206,7 +258,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       return new TextDecoder().decode(merged);
     },
 
-    waitForExit: () => exitPromise,
+    waitForExit: () => waitForPtyExitCode(exitPromise, EXIT_TIMEOUT_MS),
 
     kill() {
       // Fire-and-forget: initiate kill without waiting
