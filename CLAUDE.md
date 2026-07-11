@@ -11,12 +11,12 @@
 
 ```bash
 bun install          # 安装依赖
-bun test             # 运行默认测试（不含真实模型/网络端到端测试）
-bun test tests/graph.test.ts  # 运行单个测试文件
+bun run typecheck    # 类型检查（~2s，日常开发首选）
+bun test tests/xxx.test.ts  # 按改动范围跑对应测试（~3-10s）
+bun run test         # 运行默认测试（排除 PTY，61 文件 ~13s）
 bun run test:e2e    # 运行 TUI E2E/PTTY 系统测试（mock server，无需真实模型）
-bun run test:tui:system  # 运行真实 PTY TUI 系统测试（mock server，无需真实模型）
-bun run typecheck    # 类型检查
 bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/kite-code.jsonc）
+# ⚠️ 禁止裸 bun test（包含 PTY 测试，86 文件 231s）。日常开发只用 typecheck + 目标文件。
 ```
 
 ## 项目架构
@@ -72,27 +72,36 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/k
 - lefthook pre-commit 会运行 format + typecheck，若 typecheck 失败则 commit 被拒绝——需先修好再重试
 - 提交前运行 `bun run typecheck` 确保零错误；生产代码（`src/`）中不允许新增 `as any` 或 `: any`（外部 API 约束除外，需注释说明）。详见 `docs/space/execution/active/project-conventions.md` 的「TypeScript 类型安全」章节
 
+## 测试纪律
+
+**禁止在开发过程中运行全量测试**（`bun run test` 61 文件 ~13s，裸 `bun test` 含 PTY 86 文件 231s）。
+
+- 日常开发验证：`bun run typecheck`（~2s）+ 按下方对照表运行目标测试文件（~3-10s）
+- `bun run test` 仅在 commit 前运行一次，作为最终确认；**禁止裸 `bun test`**（含 PTY，耗时太长）
+- 不得顺手跑全量——大部分文件与当前改动无关
+
 ## 测试对应关系
 
 | 改动范围 | 验证命令 |
 |---------|---------|
-| 图路由、审批流 | `bun test tests/graph.test.ts` |
-| 全图集成（mock 模型） | `bun test tests/integration.test.ts` |
+| Runtime Kernel 状态/事件/reducer | `bun test tests/runtime/reducer.test.ts tests/runtime/actions.test.ts` |
+| Runtime Kernel 调度/工具控制器 | `bun test tests/runtime/scheduler.test.ts tests/runtime/tool-controller.test.ts` |
+| Runtime Kernel 持久化 | `bun test tests/runtime/store.test.ts` |
+| Runtime Kernel 全链路 | `bun test tests/runtime/kernel.test.ts tests/runtime/agent.integration.test.ts` |
 | 工具实现或限制 | `bun test tests/tools.test.ts tests/tool-definitions.test.ts` |
-| 工具安全策略 | `bun test tests/tool-policy.test.ts` |
+| 工具安全/审批策略 | `bun test tests/tool-policy.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts` |
 | CLI | `bun test tests/cli.test.ts` |
-| 上下文整理 | `bun test tests/context.test.ts` |
-| 运行时编排 | `bun test tests/runner.test.ts` |
-| checkpoint 持久化 | `bun test tests/checkpoint.test.ts tests/integration.test.ts` |
+| 模型上下文 | `bun test tests/context.test.ts tests/runtime-context.test.ts` |
 | TUI reducer 逻辑 | `bun test tests/tui-reducer.test.ts` |
 | TUI 布局/渲染 | `bun test tests/tui-layout.test.tsx` |
-| TUI E2E/PTTY 系统测试（真实终端） | `bun run test:e2e` 或 `bun run test:tui:system` |
-| TUI 启动与基础交互（真实 PTY） | `bun test tests/tui-system/scenarios/startup.test.ts tests/tui-system/scenarios/input.test.ts` |
-| TUI 会话切换完整链路 | `bun test tests/tui-session-switch.test.tsx`（组件级）或 `tests/tui-system/scenarios/session-lifecycle.test.ts`（PTY） |
+| TUI E2E/PTTY 系统测试（真实终端） | `bun run test:e2e` |
+| TUI 启动与基础交互 | `bun test tests/tui-system/scenarios/startup.test.ts tests/tui-system/scenarios/input.test.ts` |
+| TUI 会话切换 | `bun test tests/tui-system/scenarios/session-switch.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts` |
 | TUI 工具审批与错误恢复 | `bun test tests/tui-system/scenarios/approval.test.ts tests/tui-system/scenarios/tool-approve.test.ts tests/tui-system/scenarios/ask-user.test.ts tests/tui-system/scenarios/ask-user-esc.test.ts tests/tui-system/scenarios/error-recovery.test.ts` |
 | TUI 斜杠命令 | `bun test tests/tui-system/scenarios/slash-commands.test.ts` |
-| TUI 长消息 / resize / Ctrl+C / 多轮 | `bun test tests/tui-system/scenarios/long-message.test.ts tests/tui-system/scenarios/resize.test.ts tests/tui-system/scenarios/interrupt.test.ts tests/tui-system/scenarios/multi-turn.test.ts tests/tui-system/scenarios/idle-summary.test.ts` |
-| 跨模块/不确定 | `bun test` + `bun run typecheck` |
+| TUI 长消息 / resize / Ctrl+C / 多轮 | `bun test tests/tui-system/scenarios/long-message.test.ts tests/tui-system/scenarios/resize.test.ts tests/tui-system/scenarios/interrupt.test.ts tests/tui-system/scenarios/multi-turn.test.ts` |
+| run status 状态行 | `bun test tests/run-status.test.ts` |
+| 跨模块/不确定 | `bun run test` + `bun run typecheck` |
 | 真实模型链路 | `bun run test:real` |
 
 ## 测试编写原则
