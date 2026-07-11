@@ -219,10 +219,11 @@ export const UPDATE_PLAN_CONTRACT: ToolContract = {
       '- updates: array of { step_id, status (pending|in_progress|completed|skipped), note? }\n' +
       '- complete_plan: optional boolean, set to true when all work is done',
     commonMistakes:
-      'Calling update_plan before the plan is approved — works only in executing phase. ' +
-      'Trying to modify step titles or add new steps via update_plan — use write_plan for structural changes. ' +
-      'Not using stable step IDs from the original plan document. ' +
-      'Calling update_plan with a step_id that does not exist in the current plan.',
+      'Calling update_plan before the plan is approved — rejected in planning phase, wait for approval. ' +
+      'Trying to modify step titles or add new steps via update_plan — use write_plan for structural changes instead. ' +
+      'Not using stable step IDs from the original plan document — wrong IDs cause errors. ' +
+      'Calling update_plan with a step_id that does not exist — the call will fail with a mismatch error. ' +
+      'Forgetting to set complete_plan when all steps are done — the plan stays in_progress.',
     failureHandling:
       'Rejected in planning phase — wait for plan approval first. ' +
       'Invalid step_id: verify the step IDs match those in the approved plan. ' +
@@ -272,9 +273,9 @@ export const EXIT_PLAN_MODE_CONTRACT: ToolContract = {
       'Do NOT call exit_plan_mode before calling write_plan — it will fail. ' +
       'After calling exit_plan_mode, execution pauses until the user approves, requests revisions, or cancels.',
     outputFormat:
-      'On approval: { decision: "approved", plan_id, version, next_mode, clear_planning_context }\n' +
-      'On revision: { decision: "revise", plan_id, version, feedback } — revise plan and call write_plan again\n' +
-      'On cancel: { decision: "cancelled", plan_id, version, reason }',
+      'On approval: { ok: true, decision: "approved", plan_id, version, next_mode, clear_planning_context }\n' +
+      'On revision: { ok: true, decision: "revise", plan_id, version, feedback } — revise plan and call write_plan again\n' +
+      'On cancel: { ok: false, decision: "cancelled", plan_id, version, reason }',
     commonMistakes:
       'Calling exit_plan_mode without first calling write_plan. ' +
       'Providing wrong expected_version or expected_digest — version/digest mismatch causes rejection. ' +

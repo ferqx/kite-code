@@ -112,7 +112,8 @@ export interface PlanReviewRequestedEvent {
 export interface PlanApprovedEvent {
   type: 'plan.approved';
   interactionId: string;
-  executionMode: 'manual' | 'auto';
+  /** 执行模式: ask=每次确认, accept_edits=自动文件编辑, auto=自动执行 */
+  executionMode: 'ask' | 'manual' | 'accept_edits' | 'auto';
 }
 
 /** 用户要求修改方案 */

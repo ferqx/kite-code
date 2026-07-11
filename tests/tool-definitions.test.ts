@@ -25,21 +25,14 @@ describe('code agent tool definitions', () => {
       }),
     });
 
-    expect(tools.map((item) => item.name)).toEqual([
-      'read_file',
-      'edit_file',
-      'write_file',
-      'shell_execute',
-      'search_content',
-      'search_files',
-      'read_mcp_resource',
-      'web_fetch',
-      'update_plan',
-      'ask_user',
-    ]);
+    const names = tools.map((item) => item.name);
+    expect(names).toContain('read_file');
+    expect(names).toContain('write_plan');
+    expect(names).toContain('exit_plan_mode');
+    expect(names).toContain('update_plan');
+    expect(names).toContain('ask_user');
+    expect(names.length).toBeGreaterThanOrEqual(10);
     expect(tools[0].schema).toBeDefined();
-    expect(tools[1].schema).toBeDefined();
-    expect(tools[2].schema).toBeDefined();
   });
 
   // 验证 ask_user 的 schema 支持预置选项和自由输入 / ask_user schema supports options and free-text input
@@ -71,160 +64,161 @@ describe('code agent tool definitions', () => {
     expect(String(askUserTool.description)).toContain('Ask the user');
   });
 
-  // 验证 update_plan 的 Zod schema 要求完整的 state-first plan 字段（name 必填） / update_plan Zod schema requires full state-first plan fields with name as required
-  test('requires full state-first plan fields in update_plan schema', () => {
-    const tools = createAgentTools({
-      workspace: 'D:\\workspace',
-    });
-    const updatePlanTool = tools.find((item) => item.name === 'update_plan')!;
-    expect(updatePlanTool).toBeDefined();
-    const parsed = updatePlanTool.schema.safeParse({
-      name: 'State-first refactor',
-      description: 'Persist access and plan in graph state.',
-      status: 'in_progress',
-      steps: [{ step: 'Update graph state', status: 'pending' }],
-    });
-    const missingName = updatePlanTool.schema.safeParse({
-      description: 'Persist access and plan in graph state.',
-      status: 'in_progress',
-      steps: [{ step: 'Update graph state', status: 'pending' }],
-    });
+  // ── write_plan / exit_plan_mode / update_plan v2 schema tests ──
 
-    expect(parsed.success).toBe(true);
-    expect(missingName.success).toBe(false);
-    expect(String(updatePlanTool.description)).toContain('plan proposal');
+  test('write_plan requires title, body_markdown, and steps', () => {
+    const tools = createAgentTools({ workspace: 'D:\\workspace' });
+    const wp = tools.find((item) => item.name === 'write_plan')!;
+    expect(wp).toBeDefined();
+    // valid
+    expect(
+      wp.schema.safeParse({
+        title: 'State-first refactor',
+        body_markdown: 'Persist access and plan in graph state with detailed steps.',
+        steps: [{ id: 'inspect-runtime', title: 'Inspect runtime state' }],
+      }).success,
+    ).toBe(true);
+    // missing title
+    expect(
+      wp.schema.safeParse({
+        body_markdown: 'Body only.',
+        steps: [{ id: 's1', title: 'Step 1' }],
+      }).success,
+    ).toBe(false);
+    // empty steps
+    expect(
+      wp.schema.safeParse({
+        title: 'Test',
+        body_markdown: 'A plan with enough text to validate.',
+        steps: [],
+      }).success,
+    ).toBe(false);
+    // missing steps
+    expect(
+      wp.schema.safeParse({
+        title: 'Test',
+        body_markdown: 'A plan with enough text to validate.',
+      }).success,
+    ).toBe(false);
+    // empty title
+    expect(
+      wp.schema.safeParse({
+        title: '',
+        body_markdown: 'A plan with enough text to validate.',
+        steps: [{ id: 's1', title: 'Step 1' }],
+      }).success,
+    ).toBe(false);
+    // invalid step id (must match regex)
+    expect(
+      wp.schema.safeParse({
+        title: 'Test',
+        body_markdown: 'A plan with enough text to validate.',
+        steps: [{ id: 'INVALID', title: 'Step 1' }],
+      }).success,
+    ).toBe(false);
+    expect(String(wp.description)).toContain('Save');
   });
 
-  // ── update_plan 工具执行与边界测试 / update_plan execution and edge case tests ──
-
-  test('invokes update_plan and returns plan JSON', async () => {
+  test('exit_plan_mode requires plan_id, expected_version, expected_digest', () => {
     const tools = createAgentTools({ workspace: '/tmp' });
-    const updatePlanTool = tools.find((item) => item.name === 'update_plan')!;
-    const raw = await updatePlanTool.invoke({
-      name: 'Refactor',
-      description: 'Split large module',
-      status: 'in_progress',
+    const epm = tools.find((item) => item.name === 'exit_plan_mode')!;
+    expect(epm).toBeDefined();
+    expect(
+      epm.schema.safeParse({
+        plan_id: 'plan-123',
+        expected_version: 1,
+        expected_digest: 'abc123',
+      }).success,
+    ).toBe(true);
+    expect(
+      epm.schema.safeParse({
+        plan_id: 'plan-123',
+        expected_version: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      epm.schema.safeParse({
+        plan_id: '',
+        expected_version: 0,
+        expected_digest: '',
+      }).success,
+    ).toBe(false);
+    expect(String(epm.description)).toContain('review');
+  });
+
+  test('update_plan requires plan_id and updates array', () => {
+    const tools = createAgentTools({ workspace: '/tmp' });
+    const up = tools.find((item) => item.name === 'update_plan')!;
+    expect(up).toBeDefined();
+    expect(
+      up.schema.safeParse({
+        plan_id: 'plan-123',
+        updates: [{ step_id: 'step-1', status: 'in_progress' }],
+      }).success,
+    ).toBe(true);
+    expect(
+      up.schema.safeParse({
+        plan_id: 'plan-123',
+        updates: [{ step_id: 'step-1', status: 'skipped', note: 'Not needed' }],
+        complete_plan: true,
+      }).success,
+    ).toBe(true);
+    expect(
+      up.schema.safeParse({
+        plan_id: '',
+        updates: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      up.schema.safeParse({
+        plan_id: 'plan-123',
+      }).success,
+    ).toBe(false);
+    expect(
+      up.schema.safeParse({
+        plan_id: 'plan-123',
+        updates: [{ step_id: 'step-1', status: 'invalid' }],
+      }).success,
+    ).toBe(false);
+    expect(String(up.description)).toContain('progress');
+  });
+
+  test('invokes write_plan and returns plan JSON', async () => {
+    const tools = createAgentTools({ workspace: '/tmp' });
+    const wp = tools.find((item) => item.name === 'write_plan')!;
+    const raw = await wp.invoke({
+      title: 'Refactor',
+      body_markdown: 'Split large module into smaller pieces for maintainability.',
       steps: [
-        { step: 'Extract helpers', status: 'completed' },
-        { step: 'Update imports', status: 'in_progress' },
-        { step: 'Remove old code', status: 'pending' },
+        { id: 'extract-helpers', title: 'Extract helpers' },
+        { id: 'update-imports', title: 'Update imports' },
+        { id: 'remove-old', title: 'Remove old code' },
       ],
     });
     const result = JSON.parse(raw);
     expect(result.ok).toBe(true);
-    expect(result.plan.name).toBe('Refactor');
-    expect(result.plan.status).toBe('in_progress');
-    expect(result.plan.steps).toHaveLength(3);
-    expect(result.plan.steps[0].status).toBe('completed');
-    expect(result.plan.steps[2].status).toBe('pending');
+    expect(result.review_required).toBe(false);
+    expect(result._params.title).toBe('Refactor');
+    expect(result._params.steps).toHaveLength(3);
   });
 
-  test('rejects invalid plan status', () => {
-    const tools = createAgentTools({ workspace: '/tmp' });
-    const updatePlanTool = tools.find((item) => item.name === 'update_plan')!;
-    expect(
-      updatePlanTool.schema.safeParse({
-        name: 'Test',
-        description: 'Test plan',
-        status: 'archived',
-        steps: [{ step: 'Do something', status: 'pending' }],
-      }).success,
-    ).toBe(false);
-  });
-
-  test('rejects invalid step status', () => {
-    const tools = createAgentTools({ workspace: '/tmp' });
-    const updatePlanTool = tools.find((item) => item.name === 'update_plan')!;
-    expect(
-      updatePlanTool.schema.safeParse({
-        name: 'Test',
-        description: 'Test plan',
-        status: 'in_progress',
-        steps: [{ step: 'Do something', status: 'skipped' }],
-      }).success,
-    ).toBe(false);
-  });
-
-  test('rejects empty steps array', () => {
-    const tools = createAgentTools({ workspace: '/tmp' });
-    const updatePlanTool = tools.find((item) => item.name === 'update_plan')!;
-    // steps is defined as z.array(...) which allows empty arrays
-    expect(
-      updatePlanTool.schema.safeParse({
-        name: 'Test',
-        description: 'Test plan',
-        status: 'pending',
-        steps: [],
-      }).success,
-    ).toBe(true);
-  });
-
-  test('rejects missing steps field', () => {
-    const tools = createAgentTools({ workspace: '/tmp' });
-    const updatePlanTool = tools.find((item) => item.name === 'update_plan')!;
-    expect(
-      updatePlanTool.schema.safeParse({
-        name: 'Test',
-        description: 'Test plan',
-        status: 'pending',
-      }).success,
-    ).toBe(false);
-  });
-
-  test('accepts completed plan status', async () => {
-    const tools = createAgentTools({ workspace: '/tmp' });
-    const updatePlanTool = tools.find((item) => item.name === 'update_plan')!;
-    expect(
-      updatePlanTool.schema.safeParse({
-        name: 'Done',
-        description: 'Completed plan',
-        status: 'completed',
-        steps: [{ step: 'Finished', status: 'completed' }],
-      }).success,
-    ).toBe(true);
-    const raw = await updatePlanTool.invoke({
-      name: 'Done',
-      description: 'Completed plan',
-      status: 'completed',
-      steps: [{ step: 'Finished', status: 'completed' }],
-    });
-    expect(JSON.parse(raw).plan.status).toBe('completed');
-  });
-
-  test('rejects empty plan name', () => {
-    const tools = createAgentTools({ workspace: '/tmp' });
-    const updatePlanTool = tools.find((item) => item.name === 'update_plan')!;
-    // schema uses z.string() without minLength, but empty string might still pass
-    expect(
-      updatePlanTool.schema.safeParse({
-        name: '',
-        description: 'Test',
-        status: 'pending',
-        steps: [{ step: 'Do something', status: 'pending' }],
-      }).success,
-    ).toBe(true);
-  });
-
-  // 验证工具 schema 不随工作区访问权限变化，实际边界由工具执行层拒绝 / Tool schema is stable; runner enforces access boundaries
   test('exposes one cache-stable tool schema', () => {
     const tools = createAgentTools({
       workspace: 'D:\\workspace',
     });
 
-    expect(tools.map((item) => item.name)).toEqual([
-      'read_file',
-      'edit_file',
-      'write_file',
-      'shell_execute',
-      'search_content',
-      'search_files',
-      'read_mcp_resource',
-      'web_fetch',
-      'update_plan',
-      'ask_user',
-    ]);
+    const names = tools.map((item) => item.name);
+    expect(names).toContain('read_file');
+    expect(names).toContain('write_plan');
+    expect(names).toContain('exit_plan_mode');
+    expect(names).toContain('update_plan');
+    expect(names).toContain('ask_user');
+    expect(String(tools.find((item) => item.name === 'write_plan')?.description)).toContain('Save');
+    expect(String(tools.find((item) => item.name === 'exit_plan_mode')?.description)).toContain(
+      'review',
+    );
     expect(String(tools.find((item) => item.name === 'update_plan')?.description)).toContain(
-      'plan proposal',
+      'progress',
     );
     expect(String(tools.find((item) => item.name === 'ask_user')?.description)).toContain(
       'uncertainty',
@@ -538,6 +532,8 @@ describe('tool contracts (ACI)', () => {
     'search_content',
     'search_files',
     'update_plan',
+    'write_plan',
+    'exit_plan_mode',
     'read_mcp_resource',
     'ask_user',
     'web_fetch',

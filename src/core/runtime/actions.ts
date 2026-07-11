@@ -116,7 +116,7 @@ export function eventsForRuntimeAction(
         {
           type: 'plan.approved',
           interactionId: action.interactionId,
-          executionMode: decision.nextMode as 'manual' | 'auto',
+          executionMode: decision.nextMode,
         },
         {
           type: 'tool.finished',

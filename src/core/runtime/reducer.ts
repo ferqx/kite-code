@@ -75,7 +75,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         planning: {
           kind: 'executing',
           document: state.planning.document,
-          executionMode: event.executionMode as 'manual' | 'accept_edits' | 'auto',
+          executionMode: event.executionMode,
           approvedAtTurnId: state.turn.turnId,
         },
         interactions: { kind: 'idle' },

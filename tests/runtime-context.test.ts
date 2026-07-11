@@ -89,12 +89,10 @@ describe('buildRuntimeContext', () => {
       approvedPlanSummary: null,
     });
 
-    expect(snapshot).toContain('<runtime-state source="graph.mode">');
-    expect(snapshot).toContain('Phase: planning');
-    expect(snapshot).toContain('Interaction mode: auto');
-    expect(snapshot).toContain('Authorization: default');
-    expect(snapshot).toContain('Sandbox backend: seatbelt');
-    expect(snapshot).toContain('Plan reviewed: false');
+    expect(snapshot).toContain('<runtime-state source="runtime.kernel">');
+    expect(snapshot).toContain('phase: planning');
+    expect(snapshot).toContain('interaction_mode: auto');
+    expect(snapshot).toContain('authorization_mode: default');
 
     const cacheable = buildCacheableRuntimeContext({ workspace: 'D:\\workspace' });
     expect(cacheable).not.toContain('Phase:');

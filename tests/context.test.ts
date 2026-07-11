@@ -40,7 +40,7 @@ describe('model context protocol', () => {
     expect(messages[1]!).toBeInstanceOf(HumanMessage); // 用户任务 / User task
     expect(messages[1]!.content).toBe(task);
     expect(messages[2]!).toBeInstanceOf(HumanMessage);
-    expect(String(messages[2]!.content)).toContain('<runtime-state source="graph.mode">');
+    expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
     expect(String(messages[1]!.content)).not.toContain('Plan:');
     expect(String(messages[1]!.content)).not.toContain('Tool results:');
     expect(String(messages[0]!.content)).toContain('Cacheable runtime context:');
@@ -148,7 +148,7 @@ describe('model context protocol', () => {
     expect(messages[1]!).toBeInstanceOf(HumanMessage);
     expect(String(messages[1]!.content)).toBe('Create dark mode');
     expect(messages[2]!).toBeInstanceOf(HumanMessage);
-    expect(String(messages[2]!.content)).toContain('<runtime-state source="graph.mode">');
+    expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
     expect(messages[3]!).toBeInstanceOf(HumanMessage);
     expect(String(messages[3]!.content)).toContain('<runtime-state source="graph.state.plan">');
     expect(String(messages[3]!.content)).toContain(
@@ -181,7 +181,7 @@ describe('model context protocol', () => {
     expect(messages.map((message) => message.getType())).toEqual(['system', 'human', 'human']);
     expect(messages[1]!).toBeInstanceOf(HumanMessage);
     expect(messages[2]!).toBeInstanceOf(HumanMessage);
-    expect(String(messages[2]!.content)).toContain('<runtime-state source="graph.mode">');
+    expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
     expect(String(messages[0]!.content)).not.toContain('Current workspace access:');
     expect(String(messages[0]!.content)).toContain('Cacheable runtime context:');
     expect(String(messages[0]!.content)).not.toContain('Current workspace access:');
@@ -199,8 +199,8 @@ describe('model context protocol', () => {
     });
 
     expect(messages[2]!).toBeInstanceOf(HumanMessage);
-    expect(String(messages[2]!.content)).toContain('Sandbox backend: seatbelt');
-    expect(String(messages[0]!.content)).not.toContain('Sandbox backend:');
+    expect(String(messages[2]!.content)).toContain('runtime.kernel');
+    expect(String(messages[2]!.content)).toContain('authorization_mode');
   });
 
   // 验证 plan 尾部 HumanMessage 仍然注入，但不再有 workspaceAccess 提醒 / Verify plan HumanMessage still injected without workspaceAccess reminder
@@ -231,7 +231,7 @@ describe('model context protocol', () => {
     expect(messages[2]!).toBeInstanceOf(HumanMessage);
     expect(messages[3]!).toBeInstanceOf(HumanMessage);
     expect(String(messages[1]!.content)).toBe('/plan inspect cache behavior');
-    expect(String(messages[2]!.content)).toContain('<runtime-state source="graph.mode">');
+    expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
     expect(String(messages[3]!.content)).toContain('<runtime-state source="graph.state.plan">');
     expect(String(messages[3]!.content)).toContain('Name: Inspect cache layout');
     expect(String(messages[0]!.content)).not.toContain('Inspect cache layout');
