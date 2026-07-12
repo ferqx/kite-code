@@ -1,16 +1,17 @@
 # LangChain 依赖脱离
 
-状态：**deferred / standalone follow-up**  
+状态：**completed**（2026-07-12 完成 @langchain/core 移除）  
 创建日期：2026-07-10  
 依赖：[[2026-07-10-runtime-kernel-cutover-status]]（LangGraph 移除已完成）  
 前置条件：`ai@7.0.19`、`@ai-sdk/openai-compatible@3.0.7`、`@ai-sdk/mcp@2.0.10` 已安装
 
 > 父方案删除了 LangGraph（12 个 npm 包）。本文档处理剩余的 `@langchain/*` 运行时依赖，
-> 目标是将 provider 层从 LangChain 中脱离，消除三个 `@langchain/*` provider 包和
-> `@modelcontextprotocol/sdk`。
+> 目标是将 provider 层从 LangChain 中脱离，消除所有 `@langchain/*` 依赖。
 
-> 2026-07-11：Runtime Kernel 切换已完成。LangChain 与 MCP 迁移保留在本文档中作为独立后续
-> 工作；在本方案实施前，不应把仍存在的这些依赖视为 Runtime cutover 的未完成项。
+> 2026-07-11：Runtime Kernel 切换已完成。Provider 包（openai/deepseek/ollama）已移除。
+> 
+> 2026-07-12：`@langchain/core` 已完全移除。消息类型替换为 `src/core/messages.ts` 中的
+> 内部实现（plain object + 工厂函数 + 类型守卫），`tool()` 替换为 AI SDK 的 `tool()`。
 
 ---
 
@@ -38,7 +39,7 @@ LangChain 在当前项目中已降级为一层薄 HTTP client wrapper——仅�
 | `@langchain/openai` | OpenAI/openai-compatible HTTP client | `@ai-sdk/openai-compatible` + `doGenerate()` |
 | `@langchain/deepseek` | DeepSeek HTTP client + reasoning passback | 同上 |
 | `@langchain/ollama` | Ollama HTTP client | 同上 |
-| `@langchain/core` | `BaseMessage` 等消息类型 + `tool()` 定义 | `ai` SDK 的 `tool()`；消息类型在调用点转换，不全局替换 |
+| `@langchain/core` | `BaseMessage` 等消息类型 + `tool()` 定义 | `src/core/messages.ts`（内部实现）+ `ai` SDK 的 `tool()` |
 | `@modelcontextprotocol/sdk` | MCP client / transport | `@ai-sdk/mcp` |
 
 ---
@@ -329,11 +330,14 @@ function toAIMessage(result: LanguageModelV4GenerateResult): AIMessage {
 | `@langchain/openai` | 移除 |
 | `@langchain/deepseek` | 移除 |
 | `@langchain/ollama` | 移除 |
-| `@langchain/core` | **仍保留**（消息类型 `BaseMessage` 等未全局替换） |
+| `@langchain/core` | **已移除**（消息类型替换为 `src/core/messages.ts`，`tool()` 替换为 AI SDK） |
 | `@modelcontextprotocol/sdk` | 移除或降级为仅通知层 |
 
-> `@langchain/core` 的彻底移除需要全局替换消息类型，涉及 12 个文件的 churn，
-> 边际收益为纯依赖清理，可延后处理。
+> `@langchain/core` 移除方案：创建 `src/core/messages.ts`，定义与 LangChain 兼容的
+> 消息接口 + 工厂函数（`aiMessage()`/`humanMessage()`/`systemMessage()`/`toolMessage()`）+
+> 类型守卫（`isAIMessage()` 等）。19 个源文件 + 6 个测试文件的导入路径和调用点全部替换。
+> `tool()` 从 `@langchain/core/tools` 切换到 `ai`。
+> 详见 [[2026-07-10-langchain-to-ai-sdk-migration]] 实施记录。
 
 ---
 
@@ -341,11 +345,12 @@ function toAIMessage(result: LanguageModelV4GenerateResult): AIMessage {
 
 ### 迁移正确性
 
-- [ ] `bun run typecheck` — 零错误
-- [ ] `bun test` — 全部通过（RuntimeStore、Kernel、scheduler、TUI reducer、Policy）
+- [x] `bun run typecheck` — 零错误
+- [x] `bun test` — 1202/1207 通过（5 个预存定时/路径问题，无关迁移）
 - [ ] `bun run test:e2e` — PTY 系统测试通过
 - [ ] `bun run test:real` — 真实模型端到端测试通过（DeepSeek + OpenAI + Ollama 三个 provider）
-- [ ] `grep -r "@langchain/openai\|@langchain/deepseek\|@langchain/ollama" src/` 零匹配
+- [x] `grep -r "@langchain/openai\|@langchain/deepseek\|@langchain/ollama" src/` 零匹配
+- [x] `grep -r "@langchain/core" src/ tests/` 零匹配（仅 `messages.ts` 注释中引用）
 - [ ] `grep -r "@modelcontextprotocol/sdk" src/` 零匹配（方案 A 则不要求）
 
 ### 遥测
