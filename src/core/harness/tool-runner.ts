@@ -278,6 +278,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         parts.push(`(replaced ${count} time${count > 1 ? 's' : ''})`);
       }
       parts.push(formatDiffOutput(diff));
+      if (request.args.old_string === (request.args.new_string ?? '')) {
+        parts.push('(no effective change)');
+      }
       // 保护 LLM 上下文：diff 超长时截断
       // Cap for LLM context: truncate overlong diff output
       stdout = parts.join('\n');
@@ -317,8 +320,18 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       if (oldExisted && request.args.mode !== 'append') {
         // 覆写已有文件：diff 旧内容 → 新内容
         // Overwrite existing file: diff old → new
-        const diff = computeLineDiff(oldRead.content, request.args.content ?? '', 1);
-        stdout = formatDiffOutput(diff);
+        const newContent = request.args.content ?? '';
+        const diff = computeLineDiff(oldRead.content, newContent, 1);
+        if (diff.addedLines === 0 && diff.removedLines === 0) {
+          // 内容未变更 — 展示实际行数而非无意义的 0 diff
+          // Content unchanged — show actual line count instead of meaningless 0 diff
+          const actualLines = result.lines ?? 0;
+          const linesWord = actualLines === 1 ? 'line' : 'lines';
+          const header = `Wrote ${actualLines} ${linesWord} to ${request.args.path} (content unchanged)`;
+          stdout = formatContentOutput(newContent, header);
+        } else {
+          stdout = formatDiffOutput(diff);
+        }
       } else {
         // 新建文件 / 追加模式：展示带行号的纯文本内容，无需 diff 样式
         // New file or append: show plain content with line numbers, no diff markers
