@@ -49,7 +49,7 @@ export function toolColor(status: string, t: ThemeColors): string {
 }
 
 export function formatElapsed(ms: number): string {
-  const sec = Math.round(ms / 1000);
+  const sec = Math.max(1, Math.round(ms / 1000));
   if (sec < 60) return `${sec}s`;
   const m = Math.floor(sec / 60);
   const s = sec % 60;

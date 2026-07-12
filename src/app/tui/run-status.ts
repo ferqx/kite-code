@@ -219,7 +219,7 @@ export function deriveRunStatusSnapshot(state: TuiState, now = Date.now()): RunS
 // ── formatting ──
 
 function formatDuration(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const seconds = Math.max(1, Math.floor(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;

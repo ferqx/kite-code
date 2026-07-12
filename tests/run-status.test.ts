@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AgentEvent } from '@/protocol/events';
 import type { Action } from '../src/app/tui/App';
 import { createInitialState, eventReducer } from '../src/app/tui/App';
+import { formatElapsed } from '../src/app/tui/components/render-utils';
 import { handleEventAction, type RenderEvent } from '../src/app/tui/reducers/handleEvent';
 import type { RunStatusTone } from '../src/app/tui/run-status';
 import {
@@ -298,7 +299,7 @@ describe('formatRunStatusLine', () => {
       120,
     );
 
-    expect(lineBeforeOneSecond).toBe('Working · Running… (0s)');
+    expect(lineBeforeOneSecond).toBe('Working · Running… (1s)');
     expect(lineAtOneSecond).toBe('Working · Running… (1s)');
   });
 
@@ -502,5 +503,32 @@ describe('tool_progress liveOutput', () => {
     const updated = state.turns.at(-1)?.blocks.at(-1);
     expect(updated?.kind).toBe('tool_card');
     expect((updated as Extract<OutputBlock, { kind: 'tool_card' }>).liveOutput).toBe('hello');
+  });
+});
+
+// ── formatElapsed (from render-utils) ──
+
+describe('formatElapsed', () => {
+  test('clamps to minimum 1s for sub-second durations', () => {
+    expect(formatElapsed(0)).toBe('1s');
+    expect(formatElapsed(100)).toBe('1s');
+    expect(formatElapsed(499)).toBe('1s');
+  });
+
+  test('shows 1s for exactly 1s', () => {
+    expect(formatElapsed(500)).toBe('1s');
+    expect(formatElapsed(1000)).toBe('1s');
+  });
+
+  test('shows seconds for sub-minute durations', () => {
+    expect(formatElapsed(5000)).toBe('5s');
+    expect(formatElapsed(30000)).toBe('30s');
+    expect(formatElapsed(59500)).toBe('1m 0s');
+  });
+
+  test('shows minutes and seconds', () => {
+    expect(formatElapsed(65000)).toBe('1m 5s');
+    expect(formatElapsed(120000)).toBe('2m 0s');
+    expect(formatElapsed(125000)).toBe('2m 5s');
   });
 });

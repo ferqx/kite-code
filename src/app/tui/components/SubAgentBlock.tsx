@@ -6,6 +6,7 @@ import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
 import {
   actionName,
+  formatElapsed,
   formatReadFileRange,
   SPINNER,
   SPINNER_INTERVAL_MS,
@@ -26,15 +27,6 @@ function roleLabel(role: SubAgentRole): string {
       return role;
   }
 }
-
-function formatDuration(ms: number): string {
-  const sec = Math.round(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}m ${s}s`;
-}
-
 /** 将文本截断到指定宽度，超出部分用 "…" 替代。
  *  Truncate text to fit within maxWidth columns, appending "…" if truncated. */
 function truncateToFit(text: string, maxWidth: number): string {
@@ -217,12 +209,12 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const foot = isRunning
     ? isWaiting
       ? { text: '等待审批中', color: dt.dim }
-      : { text: `进行中 (${formatDuration(liveElapsed)})`, color: dt.dim }
+      : { text: `进行中 (${formatElapsed(liveElapsed)})`, color: dt.dim }
     : isCancelled
       ? { text: 'Cancelled', color: dt.warning }
       : isError
         ? { text: block.error || 'Error', color: dt.error }
-        : { text: `done! (${formatDuration(block.durationMs)})`, color: dt.dim };
+        : { text: `done! (${formatElapsed(block.durationMs)})`, color: dt.dim };
 
   return (
     <Box flexDirection="column">

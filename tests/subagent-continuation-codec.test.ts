@@ -270,7 +270,7 @@ describe('sub-agent continuation codec', () => {
       id: 'sub-unsupported',
       role: getRoleConfig('code'),
       task: 'unsupported message',
-      messages: [{ getType: () => 'function' }],
+      messages: [{ type: 'function' as const }],
       toolCallCount: 0,
       steps: [],
     } as unknown as SubAgentContinuation;
@@ -334,7 +334,7 @@ describe('resume-specific safety invariants', () => {
     expect(restored.blockedTool.toolCallId).toBe(originalCallId);
 
     // The AI message must still contain the original tool_call
-    const aiMsg = restored.messages.find((m) => m.getType() === 'ai') as AIMessage;
+    const aiMsg = restored.messages.find((m) => m.type === 'ai') as AIMessage;
     expect(aiMsg).toBeDefined();
     expect(aiMsg.tool_calls).toHaveLength(1);
     expect(aiMsg.tool_calls![0]!.id).toBe(originalCallId);
@@ -374,7 +374,7 @@ describe('resume-specific safety invariants', () => {
 
     const restored = deserializeSubagentContinuation(JSON.parse(JSON.stringify(snapshot)));
 
-    const aiMsg = restored.messages.find((m) => m.getType() === 'ai') as AIMessage;
+    const aiMsg = restored.messages.find((m) => m.type === 'ai') as AIMessage;
     const ids = aiMsg.tool_calls!.map((tc) => tc.id);
 
     // All three original IDs must survive the round-trip
@@ -418,7 +418,7 @@ describe('resume-specific safety invariants', () => {
 
     const restored = deserializeSubagentContinuation(JSON.parse(JSON.stringify(snapshot)));
 
-    const aiMsg = restored.messages.find((m) => m.getType() === 'ai') as AIMessage;
+    const aiMsg = restored.messages.find((m) => m.type === 'ai') as AIMessage;
     const hasMatchingCall = aiMsg.tool_calls?.some(
       (tc) => tc.id === restored.blockedTool.toolCallId,
     );

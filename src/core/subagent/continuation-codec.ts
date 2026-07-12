@@ -2,9 +2,12 @@ import {
   AIMessage,
   type BaseMessage,
   HumanMessage,
+  type MessageStructure,
+  type MessageType,
   SystemMessage,
   ToolMessage,
 } from '@langchain/core/messages';
+import type { BaseMessage as CustomBaseMessage } from '@/core/messages';
 import type {
   JsonObject,
   JsonValue,
@@ -29,7 +32,9 @@ export function serializeSubagentContinuation(
     subagentId: continuation.id,
     role: continuation.role.role,
     task: continuation.task,
-    messages: continuation.messages.map(serializeMessage),
+    messages: continuation.messages.map((m) =>
+      serializeMessage(m as unknown as BaseMessage<MessageStructure, MessageType>),
+    ),
     toolCallCount: continuation.toolCallCount,
     steps: continuation.steps.map(serializeStep),
     ...(continuation.executionJournal
@@ -72,7 +77,9 @@ export function deserializeSubagentContinuation(
   };
 }
 
-function serializeMessage(message: BaseMessage): PersistedSubagentMessage {
+function serializeMessage(
+  message: BaseMessage<MessageStructure, MessageType>,
+): PersistedSubagentMessage {
   const base = {
     ...(message.id === undefined ? {} : { id: message.id }),
     ...(message.name === undefined ? {} : { name: message.name }),
@@ -132,7 +139,13 @@ function serializeMessage(message: BaseMessage): PersistedSubagentMessage {
   }
 }
 
-function deserializeMessage(message: PersistedSubagentMessage): BaseMessage {
+function deserializeMessage(message: PersistedSubagentMessage): CustomBaseMessage {
+  return deserializeMessageImpl(message) as unknown as CustomBaseMessage;
+}
+
+function deserializeMessageImpl(
+  message: PersistedSubagentMessage,
+): BaseMessage<MessageStructure, MessageType> {
   switch (message.type) {
     case 'system':
       return new SystemMessage({

@@ -470,7 +470,7 @@ describe('sub-agent external write approval chain', () => {
     // blockedTool.toolCallId must match the AI message's tool_call.id
     expect(restored.blockedTool.toolCallId).toBe(originalCallId);
 
-    const aiMsg = restored.messages.find((m) => m.getType() === 'ai') as AIMessage;
+    const aiMsg = restored.messages.find((m) => m.type === 'ai') as AIMessage;
     const matchingCall = aiMsg.tool_calls?.find((tc) => tc.id === restored.blockedTool.toolCallId);
     expect(matchingCall).toBeDefined();
     expect(matchingCall!.name).toBe('shell_execute');

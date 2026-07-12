@@ -5,6 +5,7 @@ import { useTheme } from '../theme';
 import type { ConsolidatedToolEntry, OutputBlock } from '../types';
 import {
   actionName,
+  formatElapsed,
   formatReadFileRange,
   SPINNER,
   SPINNER_INTERVAL_MS,
@@ -90,15 +91,6 @@ function toolArgsLabel(name: string, args: Record<string, unknown>, totalLines?:
       return '';
     }
   }
-}
-
-/** 格式化耗时 / Format elapsed time. Minimum 1s. */
-function formatDuration(ms: number): string {
-  const sec = Math.max(1, Math.round(ms / 1000));
-  if (sec < 60) return `${sec}s`;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}m ${s}s`;
 }
 
 /** 截断文本到指定宽度 / Truncate text to fit within maxWidth */
@@ -224,7 +216,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   }, [block.active, block.tools]);
 
   const elapsedMs = block.totalElapsedMs;
-  const elapsedStr = formatDuration(elapsedMs);
+  const elapsedStr = formatElapsed(elapsedMs);
   const summaryLine = block.summaryLine;
 
   // ── 折叠逻辑（running / settled 两态共享）──
