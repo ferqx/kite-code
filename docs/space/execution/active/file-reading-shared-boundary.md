@@ -1,7 +1,7 @@
 # 文件读取共享边界 — readTextContent 单入口设计
 
 状态：active
-范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/model/runtime-context.ts`、`src/core/subagent/runner.ts`、`src/core/harness/graph.ts`、`src/core/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/app/tui/components/SubAgentBlock.tsx`、`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/types.ts`、`src/app/tui/reducers/helpers.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
+范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/tools/search.ts`、`src/core/harness/tool-runner.ts`、`src/core/model/runtime-context.ts`、`src/core/subagent/runner.ts`、`src/core/harness/graph.ts`、`src/core/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/app/tui/components/SubAgentBlock.tsx`、`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/types.ts`、`src/app/tui/reducers/helpers.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
 读取时机：修改 `readFile`/`editFile`/`writeFile`、二进制检测、编码处理、换行正规化、MSYS2 路径转换、runtime context 路径格式时必读。
 验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/graph.test.ts tests/integration.test.ts tests/context.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx`
 
@@ -131,12 +131,40 @@ subagent CWD 使用 `process.cwd()` 原生格式，不再通过 `toPosixPath` �
 | `resolvePath` | 标准 `path.resolve` | 同左 | +MSYS2 转换 |
 | runtime context Workspace | 标准路径 | 同左 | Windows 原生格式 |
 
+### `allowExternal` — 受控外部路径访问（2026-07-12）
+
+`resolvePath` 新增 `allowExternal` 可选参数。当 `true` 时跳过工作区边界检查，允许读写工作区外的路径。
+
+**调用方约束**：`allowExternal` 只能由 `tool-runner.ts` 的 `runApprovedTool` 设置为 `true`，且必须同时满足两个条件：
+
+```
+isExternal = isAbsolute(path) || path.startsWith('~')
+allowExternal = hasExecutionGrant && isExternal
+```
+
+其中 `hasExecutionGrant` 由审批管线统一计算（用户审批通过或 `full_access` 授权）。
+
+**所有路径类工具保持一致** — 5 个工具均在 handler 中计算 `isExternal` / `allowExternal` 并透传至实现层：
+
+| 工具 | 实现层边界检查 | allowExternal 透传 |
+|------|--------------|-------------------|
+| `read_file` | `readTextContent` → `resolvePath` | ✅ |
+| `edit_file` | `readTextContent` → `resolvePath`（读/写各一次） | ✅ |
+| `write_file` | `readTextContent`（旧内容 diff）+ `writeFile` → `resolvePath` | ✅ |
+| `search_content` | `walkFiles`（目录边界）+ `readTextContent`（文件读取） | ✅ |
+| `search_files` | `walkFiles`（目录边界） | ✅ |
+
+**双层防御**：
+1. 策略层（`evaluateToolApproval` + `modePolicy.shouldApproveTool`）：执行前检查 `externalWrite` 效果，无授权则拒绝
+2. 路径层（`resolvePath` / `walkFiles`）：`allowExternal` 为 `false` 时强制边界检查，防御策略层疏漏
+
 ## 验证
 
 ```bash
 bun run typecheck
 bun test tests/tools.test.ts
 bun test tests/tool-definitions.test.ts tests/tool-policy.test.ts tests/graph.test.ts tests/integration.test.ts tests/subagent-runner.test.ts tests/context.test.ts
+bun test tests/subagent-approval.test.ts
 bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-session-switch.test.tsx
 ```
 

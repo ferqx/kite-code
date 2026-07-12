@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-11（Plan Mode 重构：三工具职责分离）
+最后更新：2026-07-12（工具策略一致性：`allowExternal` 统一 + `resolveShellNetworkMode` 去重）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -44,6 +44,8 @@
 | [`2026-07-08-agent-kernel-incremental-evolution.md`](2026-07-08-agent-kernel-incremental-evolution.md) | draft | P0 | — | — | Agent Runtime Kernel 重构：5 阶段建立事件驱动状态机，LangGraph 降级为执行引擎。Phase 1 RuntimeEvent+Projection → Phase 2 Reducer+Store → Phase 3 Controller 抽取 → Phase 4 Policy 策略化 → Phase 5 LangGraph 适配器化 |
 | [`2026-07-10-langchain-to-ai-sdk-migration.md`](2026-07-10-langchain-to-ai-sdk-migration.md) | draft | P0 | `2026-07-10-runtime-kernel-cutover-status` | — | LangChain → AI SDK 依赖迁移：3 provider 包 + `@langchain/core` + MCP SDK → `ai` + `@ai-sdk/openai-compatible` + `@ai-sdk/mcp` |
 | [`2026-07-11-plan-mode-refactor.md`](2026-07-11-plan-mode-refactor.md) | draft | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | 替代 [[plan-mode-design]] 中 `update_plan` 单工具设计 | Plan Mode 重构：`update_plan` → `write_plan` + `exit_plan_mode` + `update_plan`(进度版) 三工具职责分离，7 commits 实施 |
+| [`2026-07-12-subagent-approval-continuation.md`](2026-07-12-subagent-approval-continuation.md) | draft | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | — | 子 agent 审批续跑状态机：持久化 continuation，支持重复审批与会话恢复。 |
+| [`2026-07-12-subagent-approval-continuation-implementation.md`](2026-07-12-subagent-approval-continuation-implementation.md) | draft | P0 | `2026-07-12-subagent-approval-continuation.md` | — | 子 agent 审批续跑状态机的五项 TDD 实施计划。 |
 
 ## 计划文件命名规范
 

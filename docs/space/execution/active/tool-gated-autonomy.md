@@ -1,7 +1,7 @@
 # 当前规则：工具边界自治
 
 状态：active
-最后更新：2026-07-06
+最后更新：2026-07-12
 最后验证：2026-07-06
 范围：
 
@@ -9,6 +9,9 @@
 - `src/core/harness/tool-runner.ts`
 - `src/core/harness/tool-requests.ts`
 - `src/core/tools/definitions.ts`
+- `src/core/tools/file.ts`
+- `src/core/tools/search.ts`
+- `src/core/tools/shell.ts`
 - `src/core/mcp/tool-adapter.ts`
 - `src/core/mcp/manager.ts`
 - `src/core/skills/skill-tool.ts`
@@ -45,6 +48,7 @@
 - `bun test tests/mcp.test.ts`
 - `bun test tests/context.test.ts`
 - `bun test tests/tui-run-agent.test.ts`
+- `bun test tests/subagent-approval.test.ts`
 - `bun run typecheck`
 
 ## 规则
@@ -81,6 +85,29 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 - `Skill` 工具仅当运行时扫描到 `SKILL.md` 文件时才注册。它始终不需要审批（risk: `read`），调用 `getSkillContent` 读取磁盘上的技能指令内容返回给模型。
 - `read_mcp_resource` 的资源位置可能由外部 MCP 服务管理；在默认的 `accept_edits` 模式下它需要审批，其他模式保留各自的确认语义。`Skill` 被归类为只读工具，不会触发审批。二者均不受 `read-only` 访问权限阻止。
 - `Skill` 工具在基集中位于 `read_mcp_resource` 之后、`update_plan` 之前，MCP 工具追加在 `set_authorization_mode` 之后。此顺序保持基集不变，保证前缀缓存稳定。
+
+### `runApprovedTool` 防御纵深：`allowExternal` 模式（2026-07-12）
+
+`runApprovedTool` 在策略检查（第一层防御）通过后，对 5 个路径类工具统一施加第二层防御 — 工作区边界检查：
+
+```typescript
+// 在 runApprovedTool 中（策略检查通过后）
+const hasExecutionGrant =
+    approvedGrant !== 'none' ||
+    policy.grantUsed === 'same_command' ||
+    policy.grantUsed === 'full_access';
+
+// 5 个工具处理器中统一模式
+const isExternal = isAbsolute(path) || path.startsWith('~');
+const allowExternal = hasExecutionGrant && isExternal;
+```
+
+**设计约束**：
+- `allowExternal` 只在 `hasExecutionGrant` 为 `true` 时才能为 `true`——即用户显式批准或具有 `full_access` 授权
+- 无授权时 `allowExternal` 始终为 `false`，`resolvePath` / `walkFiles` 强制执行工作区边界检查
+- `read_file`、`edit_file`、`write_file`、`search_content`、`search_files` 五个工具**必须一致**使用此模式，禁止任一工具跳过 `allowExternal` 计算
+
+**`resolveShellNetworkMode` 复用同一授权判断**：网络模式解析函数接受 `hasExecutionGrant` 参数，不再独立计算（去重）。网络访问授权与文件外部访问授权共享同一逻辑。
 
 ## 不要做
 
