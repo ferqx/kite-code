@@ -1,5 +1,5 @@
 // src/core/messages.ts
-// Internal message types — lightweight plain-object replacements for @langchain/core/messages.
+// Internal message types — lightweight plain-object message interfaces.
 //
 // Design:
 // - Messages are plain objects discriminated by a `type` field ('human' | 'ai' | 'system' | 'tool').
@@ -7,7 +7,7 @@
 // - Type guard functions replace static .isInstance() methods.
 // - After JSON round-trip (checkpoint serialization), the `type` field still discriminates correctly.
 //
-// API mapping from @langchain/core/messages:
+// API mapping:
 //   new AIMessage({...})       → aiMessage({...})
 //   new HumanMessage('text')   → humanMessage('text')
 //   new HumanMessage({c, id})  → humanMessage({content: c, id})
@@ -63,6 +63,7 @@ export interface BaseMessage {
   readonly type: 'human' | 'ai' | 'system' | 'tool';
   content: string | ContentBlock[];
   id?: string;
+  name?: string;
   additional_kwargs: Record<string, unknown>;
   response_metadata: Record<string, unknown>;
 }
@@ -89,32 +90,53 @@ export interface ToolMessage extends BaseMessage {
   name?: string;
   /** 'success' | 'error' | 'exhausted' — typed as string to allow custom states */
   status: string;
+  /** Arbitrary metadata attached to the tool result (LangChain compatibility) */
+  metadata?: Record<string, unknown>;
+  /** Arbitrary artifact attached to the tool result (LangChain compatibility) */
+  artifact?: unknown;
 }
 
 // ── Factory functions ──
 
-/** Create a HumanMessage from a string or {content, id?} object. */
+/** Create a HumanMessage from a string or fields object. */
 export function humanMessage(content: string): HumanMessage;
-export function humanMessage(fields: { content: string; id?: string }): HumanMessage;
-export function humanMessage(input: string | { content: string; id?: string }): HumanMessage {
+export function humanMessage(fields: {
+  content: string;
+  id?: string;
+  name?: string;
+  response_metadata?: Record<string, unknown>;
+}): HumanMessage;
+export function humanMessage(
+  input:
+    | string
+    | { content: string; id?: string; name?: string; response_metadata?: Record<string, unknown> },
+): HumanMessage {
   const content = typeof input === 'string' ? input : input.content;
   const id = typeof input === 'string' ? undefined : input.id;
+  const name = typeof input === 'string' ? undefined : input.name;
+  const responseMetadata = typeof input === 'string' ? undefined : input.response_metadata;
   return {
     type: 'human' as const,
     content,
     ...(id ? { id } : {}),
+    ...(name ? { name } : {}),
     additional_kwargs: {},
-    response_metadata: {},
+    response_metadata: responseMetadata ?? {},
   };
 }
 
 /** Create a SystemMessage. */
-export function systemMessage(content: string): SystemMessage {
+export function systemMessage(
+  content: string,
+  fields?: { id?: string; name?: string; response_metadata?: Record<string, unknown> },
+): SystemMessage {
   return {
     type: 'system' as const,
     content,
+    ...(fields?.id ? { id: fields.id } : {}),
+    ...(fields?.name ? { name: fields.name } : {}),
     additional_kwargs: {},
-    response_metadata: {},
+    response_metadata: fields?.response_metadata ?? {},
   };
 }
 
@@ -122,6 +144,7 @@ export function systemMessage(content: string): SystemMessage {
 export function aiMessage(fields: {
   content?: string | ContentBlock[];
   id?: string;
+  name?: string;
   tool_calls?: ToolCall[];
   invalid_tool_calls?: AIMessage['invalid_tool_calls'];
   additional_kwargs?: Record<string, unknown>;
@@ -132,6 +155,7 @@ export function aiMessage(fields: {
     type: 'ai' as const,
     content: fields.content ?? '',
     ...(fields.id ? { id: fields.id } : {}),
+    ...(fields.name ? { name: fields.name } : {}),
     ...(fields.tool_calls !== undefined ? { tool_calls: fields.tool_calls } : {}),
     ...(fields.invalid_tool_calls !== undefined
       ? { invalid_tool_calls: fields.invalid_tool_calls }
@@ -146,17 +170,24 @@ export function aiMessage(fields: {
 export function toolMessage(fields: {
   content: string;
   tool_call_id: string;
+  id?: string;
   name?: string;
   status?: string;
+  response_metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  artifact?: unknown;
 }): ToolMessage {
   return {
     type: 'tool' as const,
     content: fields.content,
     tool_call_id: fields.tool_call_id,
+    ...(fields.id !== undefined ? { id: fields.id } : {}),
     ...(fields.name !== undefined ? { name: fields.name } : {}),
     status: fields.status ?? 'success',
     additional_kwargs: {},
-    response_metadata: {},
+    response_metadata: fields.response_metadata ?? {},
+    ...(fields.metadata !== undefined ? { metadata: fields.metadata } : {}),
+    ...(fields.artifact !== undefined ? { artifact: fields.artifact } : {}),
   };
 }
 

@@ -1,13 +1,5 @@
-import {
-  AIMessage,
-  type BaseMessage,
-  HumanMessage,
-  type MessageStructure,
-  type MessageType,
-  SystemMessage,
-  ToolMessage,
-} from '@langchain/core/messages';
-import type { BaseMessage as CustomBaseMessage } from '@/core/messages';
+import type { AIMessage, BaseMessage, ToolMessage } from '@/core/messages';
+import { aiMessage, humanMessage, systemMessage, toolMessage } from '@/core/messages';
 import type {
   JsonObject,
   JsonValue,
@@ -32,9 +24,7 @@ export function serializeSubagentContinuation(
     subagentId: continuation.id,
     role: continuation.role.role,
     task: continuation.task,
-    messages: continuation.messages.map((m) =>
-      serializeMessage(m as unknown as BaseMessage<MessageStructure, MessageType>),
-    ),
+    messages: continuation.messages.map(serializeMessage),
     toolCallCount: continuation.toolCallCount,
     steps: continuation.steps.map(serializeStep),
     ...(continuation.executionJournal
@@ -77,20 +67,15 @@ export function deserializeSubagentContinuation(
   };
 }
 
-function serializeMessage(
-  message: BaseMessage<MessageStructure, MessageType>,
-): PersistedSubagentMessage {
+function serializeMessage(message: BaseMessage): PersistedSubagentMessage {
   const base = {
     ...(message.id === undefined ? {} : { id: message.id }),
     ...(message.name === undefined ? {} : { name: message.name }),
-    content: toJsonValue(message.content, `${message.getType()}.content`),
-    responseMetadata: toJsonObject(
-      message.response_metadata,
-      `${message.getType()}.responseMetadata`,
-    ),
+    content: toJsonValue(message.content, `${message.type}.content`),
+    responseMetadata: toJsonObject(message.response_metadata, `${message.type}.responseMetadata`),
   };
 
-  switch (message.getType()) {
+  switch (message.type) {
     case 'system':
       return { type: 'system', ...base };
     case 'human':
@@ -125,7 +110,9 @@ function serializeMessage(
         ...base,
         toolCallId: toolMessage.tool_call_id,
         ...(toolMessage.name === undefined ? {} : { name: toolMessage.name }),
-        ...(toolMessage.status ? { status: toolMessage.status } : {}),
+        ...(toolMessage.status
+          ? { status: toolMessage.status as 'success' | 'error' | 'exhausted' }
+          : {}),
         ...(toolMessage.artifact === undefined
           ? {}
           : { artifact: toJsonValue(toolMessage.artifact, 'tool.artifact') }),
@@ -135,33 +122,44 @@ function serializeMessage(
       };
     }
     default:
-      throw new Error(`Unsupported sub-agent continuation message type: ${message.getType()}`);
+      throw new Error(`Unsupported sub-agent continuation message type: ${message.type}`);
   }
 }
 
-function deserializeMessage(message: PersistedSubagentMessage): CustomBaseMessage {
-  return deserializeMessageImpl(message) as unknown as CustomBaseMessage;
+function deserializeMessage(message: PersistedSubagentMessage): BaseMessage {
+  return deserializeMessageImpl(message);
 }
 
-function deserializeMessageImpl(
-  message: PersistedSubagentMessage,
-): BaseMessage<MessageStructure, MessageType> {
+function deserializeMessageImpl(message: PersistedSubagentMessage): BaseMessage {
+  const id = (message.id !== undefined ? cloneJsonValue(message.id) : undefined) as
+    | string
+    | undefined;
+  const name = (message.name !== undefined ? cloneJsonValue(message.name) : undefined) as
+    | string
+    | undefined;
+  const responseMetadata = cloneJsonObject(message.responseMetadata ?? {});
+
   switch (message.type) {
     case 'system':
-      return new SystemMessage({
-        ...messageIdentity(message),
-        content: cloneJsonValue(message.content) as string,
+      return systemMessage(cloneJsonValue(message.content) as string, {
+        id,
+        name,
+        response_metadata: responseMetadata,
       });
     case 'human':
-      return new HumanMessage({
-        ...messageIdentity(message),
+      return humanMessage({
         content: cloneJsonValue(message.content) as string,
+        id,
+        name,
+        response_metadata: responseMetadata,
       });
     case 'ai':
-      return new AIMessage({
-        ...messageIdentity(message),
+      return aiMessage({
+        id,
+        name,
         content: cloneJsonValue(message.content) as string,
         additional_kwargs: cloneJsonObject(message.additionalKwargs),
+        response_metadata: responseMetadata,
         tool_calls: message.toolCalls.map((toolCall) => ({
           ...(toolCall.id === undefined ? {} : { id: toolCall.id }),
           name: toolCall.name,
@@ -182,14 +180,13 @@ function deserializeMessageImpl(
             }),
       });
     case 'tool':
-      return new ToolMessage({
-        ...messageIdentity(message),
+      return toolMessage({
+        id,
+        name,
         content: cloneJsonValue(message.content) as string,
         tool_call_id: message.toolCallId,
-        ...(message.name === undefined ? {} : { name: message.name }),
-        ...(message.status === undefined
-          ? {}
-          : { status: message.status as unknown as ToolMessage['status'] }),
+        status: (message.status ?? 'success') as 'success' | 'error' | 'exhausted',
+        response_metadata: responseMetadata,
         ...(message.artifact === undefined ? {} : { artifact: cloneJsonValue(message.artifact) }),
         ...(message.metadata === undefined ? {} : { metadata: cloneJsonObject(message.metadata) }),
       });
@@ -198,18 +195,6 @@ function deserializeMessageImpl(
         `Unsupported persisted sub-agent continuation message type: ${String(message)}`,
       );
   }
-}
-
-function messageIdentity(message: { id?: string; name?: string; responseMetadata?: JsonObject }): {
-  id?: string;
-  name?: string;
-  response_metadata: JsonObject;
-} {
-  return {
-    ...(message.id === undefined ? {} : { id: message.id }),
-    ...(message.name === undefined ? {} : { name: message.name }),
-    response_metadata: cloneJsonObject(message.responseMetadata ?? {}),
-  };
 }
 
 function serializeStep(step: SubAgentStepSnapshot): PersistedSubagentStep {

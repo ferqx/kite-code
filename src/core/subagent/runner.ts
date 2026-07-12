@@ -1,5 +1,4 @@
 import { isAbsolute, relative, resolve } from 'node:path';
-import { ToolMessage } from '@langchain/core/messages';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import {
@@ -530,7 +529,7 @@ async function runSubAgentLoop(
             for (let i = currentIndex + 1; i < response.tool_calls.length; i++) {
               const remaining = response.tool_calls[i]!;
               messages.push(
-                new ToolMessage({
+                toolMessage({
                   content: JSON.stringify({
                     ok: false,
                     deferred: true,
@@ -538,7 +537,7 @@ async function runSubAgentLoop(
                   }),
                   tool_call_id: remaining.id ?? `subagent-deferred-${i}`,
                   name: remaining.name,
-                  status: 'error' as ToolMessage['status'],
+                  status: 'error',
                 }),
               );
             }

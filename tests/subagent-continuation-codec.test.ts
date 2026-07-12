@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import type { AIMessage } from '@/core/messages';
+import {
+  aiMessage,
+  humanMessage,
+  isAIMessage,
+  isHumanMessage,
+  isSystemMessage,
+  isToolMessage,
+  systemMessage,
+  toolMessage,
+} from '@/core/messages';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
@@ -14,19 +24,18 @@ describe('sub-agent continuation codec', () => {
       role: getRoleConfig('code'),
       task: 'inspect the repository',
       messages: [
-        new SystemMessage({
+        systemMessage('You are a coding agent.', {
           id: 'system-1',
           name: 'system-instructions',
-          content: 'You are a coding agent.',
           response_metadata: { trace: { source: 'system' } },
         }),
-        new HumanMessage({
+        humanMessage({
+          content: 'Inspect src.',
           id: 'human-1',
           name: 'operator',
-          content: 'Inspect src.',
           response_metadata: { trace: { source: 'human' } },
         }),
-        new AIMessage({
+        aiMessage({
           id: 'ai-1',
           name: 'tool-planner',
           content: 'I will inspect the source.',
@@ -38,7 +47,6 @@ describe('sub-agent continuation codec', () => {
               name: 'read_file',
               args: '{',
               error: 'Unexpected end of JSON input',
-              type: 'invalid_tool_call',
             },
           ],
           usage_metadata: { input_tokens: 3, output_tokens: 5, total_tokens: 8 },
@@ -51,7 +59,7 @@ describe('sub-agent continuation codec', () => {
             },
           ],
         }),
-        new ToolMessage({
+        toolMessage({
           id: 'tool-1',
           content: 'export {}',
           tool_call_id: 'call-1',
@@ -100,9 +108,9 @@ describe('sub-agent continuation codec', () => {
     expect(restored.steps).toEqual(continuation.steps);
     expect(restored.executionJournal).toEqual(continuation.executionJournal);
     expect(restored.exhaustedFingerprints).toEqual(continuation.exhaustedFingerprints);
-    expect(restored.messages[0]).toBeInstanceOf(SystemMessage);
-    expect(restored.messages[1]).toBeInstanceOf(HumanMessage);
-    expect(restored.messages[2]).toBeInstanceOf(AIMessage);
+    expect(isSystemMessage(restored.messages[0])).toBe(true);
+    expect(isHumanMessage(restored.messages[1])).toBe(true);
+    expect(isAIMessage(restored.messages[2])).toBe(true);
     expect((restored.messages[2] as AIMessage).tool_calls).toMatchObject([
       { id: 'call-1', name: 'read_file', args: { path: 'src/index.ts' } },
     ]);
@@ -130,7 +138,7 @@ describe('sub-agent continuation codec', () => {
       ],
       usage_metadata: { input_tokens: 3, output_tokens: 5, total_tokens: 8 },
     });
-    expect(restored.messages[3]).toBeInstanceOf(ToolMessage);
+    expect(isToolMessage(restored.messages[3])).toBe(true);
     expect(restored.messages[3]).toMatchObject({
       tool_call_id: 'call-1',
       name: 'read_file',
@@ -153,7 +161,7 @@ describe('sub-agent continuation codec', () => {
       role: getRoleConfig('code'),
       task: 'keep nested state isolated',
       messages: [
-        new AIMessage({
+        aiMessage({
           content: [{ type: 'text', text: 'original content' }],
           tool_calls: [
             {
@@ -204,11 +212,11 @@ describe('sub-agent continuation codec', () => {
       role: getRoleConfig('code'),
       task: 'preserve exhausted status',
       messages: [
-        new ToolMessage({
+        toolMessage({
           content: 'retry limit reached',
           tool_call_id: 'call-exhausted',
           name: 'shell_execute',
-          status: 'exhausted' as unknown as 'success',
+          status: 'exhausted',
         }),
       ],
       toolCallCount: 1,
@@ -259,9 +267,9 @@ describe('sub-agent continuation codec', () => {
     const restored = deserializeSubagentContinuation(legacySnapshot);
 
     expect(restored.messages).toHaveLength(4);
-    expect(restored.messages[0]).toBeInstanceOf(SystemMessage);
+    expect(isSystemMessage(restored.messages[0])).toBe(true);
     expect(restored.messages[0]?.response_metadata).toEqual({});
-    expect(restored.messages[3]).toBeInstanceOf(ToolMessage);
+    expect(isToolMessage(restored.messages[3])).toBe(true);
     expect(restored.messages[3]?.response_metadata).toEqual({});
   });
 
@@ -297,7 +305,7 @@ describe('resume-specific safety invariants', () => {
       role: getRoleConfig('code'),
       task: 'verify tool_call_id matching',
       messages: [
-        new AIMessage({
+        aiMessage({
           content: 'I will run a shell command.',
           tool_calls: [
             {
@@ -352,7 +360,7 @@ describe('resume-specific safety invariants', () => {
       role: getRoleConfig('code'),
       task: 'multi-tool message',
       messages: [
-        new AIMessage({
+        aiMessage({
           content: 'I will do three things.',
           tool_calls: [
             { id: callA, name: 'search_content', args: { pattern: 'foo' }, type: 'tool_call' },
@@ -396,7 +404,7 @@ describe('resume-specific safety invariants', () => {
       role: getRoleConfig('code'),
       task: 'traceable tool id',
       messages: [
-        new AIMessage({
+        aiMessage({
           content: '',
           tool_calls: [
             { id: realId, name: 'shell_execute', args: { command: 'ls' }, type: 'tool_call' },

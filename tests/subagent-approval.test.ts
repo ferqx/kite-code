@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AIMessage } from '@langchain/core/messages';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import { runApprovedTool } from '@/core/harness/tool-runner';
+import type { AIMessage } from '@/core/messages';
+import { aiMessage } from '@/core/messages';
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import {
@@ -436,7 +437,7 @@ describe('sub-agent external write approval chain', () => {
       role: getRoleConfig('code'),
       task: 'shell test',
       messages: [
-        new AIMessage({
+        aiMessage({
           content: 'I will run a command.',
           tool_calls: [
             {

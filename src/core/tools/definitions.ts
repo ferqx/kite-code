@@ -366,7 +366,7 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
   // MCP tool synthesis — temporarily disabled, will be restored after Step 6 MCP migration
   // TODO(Step 6): Replace adaptMcpTool with direct ToolSet from mcpManager.getToolSet()
   if (input.mcpManager) {
-    // MCP tools still use langchain format; skip for now until Step 6
+    // MCP tools require @ai-sdk/mcp integration; skip for now until Step 6
     // Store only builtin tools; MCP integration will be restored after @ai-sdk/mcp migration
     _toolCache.set(cacheKey, builtinTools);
     return builtinTools;
