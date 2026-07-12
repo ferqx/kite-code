@@ -20,20 +20,18 @@ describe('repository knowledge system', () => {
     const index = readFileSync(indexPath, 'utf8');
     const indexedActiveRecords = Array.from(
       index.matchAll(/\| `(execution\/active\/[^`]+)` \| active \|/g),
-      (match) => match[1],
+      (match) => match[1]!.replace(/^execution\/active\//, ''),
     ).sort();
 
-    const activeRecords = collectFilesIfExists(
-      join(repoRoot, 'docs', 'space', 'execution', 'active'),
-    )
-      .map((path) => relative(join(repoRoot, 'docs', 'space'), path).replace(/\\/g, '/'))
+    const activeRecords = collectFilesIfExists(join(repoRoot, 'docs', 'active'))
+      .map((path) => relative(join(repoRoot, 'docs', 'active'), path).replace(/\\/g, '/'))
       .filter((path) => path.endsWith('.md'))
       .sort();
 
     expect(indexedActiveRecords).toEqual(activeRecords);
 
     for (const record of activeRecords) {
-      const source = readFileSync(join(repoRoot, 'docs', 'space', record), 'utf8');
+      const source = readFileSync(join(repoRoot, 'docs', 'active', record), 'utf8');
       expect(source).toContain('状态：active');
       expect(source).toContain('读取时机：');
       expect(source).toContain('验证：');

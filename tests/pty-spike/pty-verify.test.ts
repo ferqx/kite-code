@@ -4,7 +4,7 @@
  * Tests whether Bun.spawn({ terminal }) in Bun 1.3.14 can create a real PTY
  * subprocess suitable for TUI E2E testing. This is the NEWER API (not the
  * older `pty: true` option which failed in prior investigation — see
- * docs/space/execution/active/tui-e2e-testing-limits.md).
+ * docs/active/tui-e2e-testing-limits.md).
  *
  * Run: bun test tests/pty-spike/pty-verify.test.ts
  */

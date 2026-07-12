@@ -22,8 +22,6 @@
 - `tool-gated-autonomy.md`
 - `project-conventions.md`
 - `file-reading-shared-boundary.md` — MSYS2 路径转换 + readTextContent 边界
-- `../completed/2026-05-26-shell-msys2-dll-fix.md`（本次修复记录）
-- `../completed/2026-05-26-shell-wsl-stub-exclusion.md`（本次修复记录）
 
 验证：
 

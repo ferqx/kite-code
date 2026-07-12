@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-12（工具策略一致性：`allowExternal` 统一 + `resolveShellNetworkMode` 去重）
+最后更新：2026-07-12（Runtime 工程护栏建设方案注册）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -46,6 +46,7 @@
 | [`2026-07-11-plan-mode-refactor.md`](2026-07-11-plan-mode-refactor.md) | draft | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | 替代 [[plan-mode-design]] 中 `update_plan` 单工具设计 | Plan Mode 重构：`update_plan` → `write_plan` + `exit_plan_mode` + `update_plan`(进度版) 三工具职责分离，7 commits 实施 |
 | [`2026-07-12-subagent-approval-continuation.md`](2026-07-12-subagent-approval-continuation.md) | draft | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | — | 子 agent 审批续跑状态机：持久化 continuation，支持重复审批与会话恢复。 |
 | [`2026-07-12-subagent-approval-continuation-implementation.md`](2026-07-12-subagent-approval-continuation-implementation.md) | draft | P0 | `2026-07-12-subagent-approval-continuation.md` | — | 子 agent 审批续跑状态机的五项 TDD 实施计划。 |
+| [`2026-07-12-runtime-engineering-guardrails.md`](2026-07-12-runtime-engineering-guardrails.md) | completed | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | — | Runtime 工程护栏建设：Feature Flags、Golden Tests、FailureKind、授权溯源、Replay、ADR、准入标准、边界检查、文档分层与 Prompt 契约均已实施。 |
 
 ## 计划文件命名规范
 

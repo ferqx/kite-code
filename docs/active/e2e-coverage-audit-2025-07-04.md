@@ -125,8 +125,8 @@
 
 | 记录 | 关系 |
 |------|------|
-| `execution/active/tui-e2e-standards.md` | PTY 测试标准、harness 设计 |
-| `execution/active/tui-e2e-testing-limits.md` | PTY 测试限制（scrollback、Static、渲染差异） |
-| `execution/active/e2e-test-restructure.md` | 旧 e2e harness 退役指针 |
+| `docs/active/tui-e2e-standards.md` | PTY 测试标准、harness 设计 |
+| `docs/active/tui-e2e-testing-limits.md` | PTY 测试限制（scrollback、Static、渲染差异） |
+| `docs/active/e2e-test-restructure.md` | 旧 e2e harness 退役指针 |
 | `plans/2026-05-25-e2e-restructure.md` | 首次 E2E 重构方案（archived） |
 | `backlog/tui-issues.md` | TUI 待修复项（影响测试可行性） |

@@ -19,9 +19,9 @@
 
 相关：
 
-- `../../understanding/2026-04-26-plan-state-context-projection.md`
-- `../completed/2026-04-26-plan-state-reminder.md`
-- `../../references/opencode-codex-plan-handling.md`
+- `docs/space/understanding/2026-04-26-plan-state-context-projection.md`
+- `docs/space/execution/completed/2026-04-26-plan-state-reminder.md`
+- `docs/space/references/opencode-codex-plan-handling.md`
 
 验证：
 

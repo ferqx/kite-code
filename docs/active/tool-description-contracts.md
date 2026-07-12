@@ -21,8 +21,8 @@
 相关：
 
 - `./tool-gated-autonomy.md`
-- `../completed/2026-05-06-tool-description-contracts.md`
-- `../../understanding/space-system-design.md`
+- `docs/space/execution/completed/2026-05-06-tool-description-contracts.md`
+- `docs/space/understanding/space-system-design.md`
 
 验证：
 

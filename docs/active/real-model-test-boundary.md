@@ -17,7 +17,7 @@
 
 相关：
 
-- `../completed/2026-04-26-real-model-test-boundary.md`
+- `docs/space/execution/completed/2026-04-26-real-model-test-boundary.md`
 - `model-provider-boundary.md`
 
 验证：

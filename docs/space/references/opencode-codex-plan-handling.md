@@ -5,7 +5,7 @@
 相关本地记录：
 
 - `../understanding/2026-04-26-plan-state-context-projection.md`
-- `../execution/active/plan-state-reminder.md`
+- `../../active/plan-state-reminder.md`
 
 ## Opencode
 

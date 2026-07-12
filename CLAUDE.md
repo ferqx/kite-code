@@ -30,7 +30,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/k
 
 **`src/core/` — 核心层**：图编排、模型、工具、持久化、配置
 
-> **架构约束**：core 是纯数据逻辑层，**不依赖任何 UI 端**。规则只有一条——`import` 方向：`app → core → protocol`，永不反向。详细边界见 `docs/space/execution/active/layer-boundary-enforcement.md`。
+> **架构约束**：core 是纯数据逻辑层，**不依赖任何 UI 端**。规则只有一条——`import` 方向：`app → core → protocol`，永不反向。详细边界见 `docs/active/layer-boundary-enforcement.md`。
 
 - `harness/graph.ts` — LangGraph 节点组装和主循环拓扑（单 agent 节点）
 - `harness/routes.ts` — agent / approval / tools / user_input 之间的路由
@@ -70,7 +70,7 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/k
 - 每次 `git commit` 后**必须**验证 `git status` 工作区干净、`git log --oneline -3` 确认提交入库
 - 多步分批提交时，每批完成后验证 `git status`，确认上一批已提交成功再 `git add` 下一批
 - lefthook pre-commit 会运行 format + typecheck，若 typecheck 失败则 commit 被拒绝——需先修好再重试
-- 提交前运行 `bun run typecheck` 确保零错误；生产代码（`src/`）中不允许新增 `as any` 或 `: any`（外部 API 约束除外，需注释说明）。详见 `docs/space/execution/active/project-conventions.md` 的「TypeScript 类型安全」章节
+- 提交前运行 `bun run typecheck` 确保零错误；生产代码（`src/`）中不允许新增 `as any` 或 `: any`（外部 API 约束除外，需注释说明）。详见 `docs/active/project-conventions.md` 的「TypeScript 类型安全」章节
 
 ## 测试纪律
 
@@ -149,4 +149,4 @@ bun run test:real    # 运行真实端到端测试（需先配置 ~/.kite-code/k
 - 每次重要决策应先对照 `PRODUCT.md` 判断是否在产品边界内。规划新功能应查看 `ROADMAP.md`。
 - **强制规则**：实现功能前，必须先读取 `docs/space/index.md` 的"读取时机"列，找到对应的设计文档（`plans/` 或 `understanding/`），并严格按照文档中的代码示例和布局规范实现。测试全绿 ≠ 实现正确，必须对照设计文档验证布局、结构、交互是否符合规范。
 
-**写**：每次提交前检查是否有新的设计决策、行为约束或实现细节需要记录在 `docs/space/` 中，尤其是 `execution/active/` 下的规则记录。
+**写**：每次提交前检查是否有新的设计决策、行为约束或实现细节需要记录在 `docs/space/` 中，尤其是 `docs/active/` 下的规则记录。

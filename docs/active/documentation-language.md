@@ -18,9 +18,9 @@
 
 相关：
 
-- `../../understanding/space-system-design.md`
-- `../completed/2026-04-27-harness-engineering-doc-hygiene.md`
-- `../completed/2026-04-27-documentation-language-standard.md`
+- `docs/space/understanding/space-system-design.md`
+- `docs/space/execution/completed/2026-04-27-harness-engineering-doc-hygiene.md`
+- `docs/space/execution/completed/2026-04-27-documentation-language-standard.md`
 
 验证：
 
@@ -46,4 +46,4 @@
 
 ## 测试期望
 
-`tests/docs-space.test.ts` 应检查 active 记录使用中文元数据标签，并继续检查 active 记录被 `docs/space/index.md` 索引。
+`tests/docs-space.test.ts` 应检查 `docs/active/` 记录使用中文元数据标签，并继续检查 active 记录被 `docs/space/index.md` 的兼容索引覆盖。

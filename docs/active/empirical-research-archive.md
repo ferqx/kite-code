@@ -21,10 +21,10 @@
 
 相关：
 
-- `../../understanding/space-system-design.md`
+- `docs/space/understanding/space-system-design.md`
 - `documentation-language.md`
 - `plan-state-reminder.md`
-- `../completed/2026-05-01-prompt-cache-runtime-state-research.md`
+- `docs/space/execution/completed/2026-05-01-prompt-cache-runtime-state-research.md`
 
 验证：
 
@@ -44,7 +44,7 @@
 
 归档位置按用途选择：
 
-- 形成当前约束时，更新或新增 `execution/active/` 记录。
+- 形成当前约束时，更新或新增 `docs/active/` 记录。
 - 记录一次已完成实验、实现和验证时，新增 `execution/completed/` 记录。
 - 只解释背景和思路、不直接约束未来改动时，新增或更新 `understanding/` 记录。
 - 外部资料摘要放入 `references/`，不能直接替代本地实验记录。
@@ -73,6 +73,6 @@
 
 `tests/docs-space.test.ts` 应继续保证：
 
-- 所有 active 记录都出现在 `docs/space/index.md`。
+- 所有 active 记录都由 `docs/space/index.md` 的兼容索引覆盖。
 - active 记录包含中文元数据标签。
 - 仓库内没有 `docs/superpowers/` 生成物。

@@ -36,9 +36,9 @@
 
 相关：
 
-- `../completed/2026-04-26-remove-stop-check.md`
-- `../completed/2026-04-26-remove-internal-ledgers.md`
-- `../../references/opencode-codex-plan-handling.md`
+- `docs/space/execution/completed/2026-04-26-remove-stop-check.md`
+- `docs/space/execution/completed/2026-04-26-remove-internal-ledgers.md`
+- `docs/space/references/opencode-codex-plan-handling.md`
 
 验证：
 

@@ -20,7 +20,7 @@
 
 - `model-provider-boundary.md`
 - `documentation-language.md`
-- `../completed/2026-04-27-harness-engineering-doc-hygiene.md`
+- `docs/space/execution/completed/2026-04-27-harness-engineering-doc-hygiene.md`
 
 验证：
 
@@ -36,7 +36,7 @@
 
 ## 模型与 Provider
 
-- **模型服务不是 DeepSeek-only**：修改 `src/config`、`src/model`、真实模型测试或 provider 文档前，先读 `docs/space/execution/active/model-provider-boundary.md`。
+- **模型服务不是 DeepSeek-only**：修改 `src/config`、`src/model`、真实模型测试或 provider 文档前，先读 `docs/active/model-provider-boundary.md`。
 - 不要把真实模型端到端测试当成默认验证手段；只有改动涉及真实模型链路或用户明确要求时才运行。
 - 真实模型测试文件命名不能是 `*.test.ts` / `*.spec.ts`，避免裸 `bun test` 误触发。
 
@@ -53,7 +53,7 @@
 ## 仓库卫生
 
 - 不要提交本地 checkpoint、临时文件、密钥配置或 `tests/.tmp-*` 下的运行产物。
-- 不要创建 `docs/superpowers/` 或 Superpowers 计划文档；需要持久项目规则时使用 `docs/space/`。
+- 不要创建 `docs/superpowers/` 或 Superpowers 计划文档；需要当前持久规则时使用 `docs/active/`，计划与执行记录使用 `docs/space/`。
 - 不要把 `tests/.tmp-*` 下的文件当成正式源码或稳定夹具。
 
 ## 分支合并策略

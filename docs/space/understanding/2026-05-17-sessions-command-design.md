@@ -4,7 +4,7 @@
 状态：understanding
 相关：
 - `../execution/completed/2026-05-17-sessions-command-implementation.md`
-- `../execution/active/tui-no-viewport-culling.md`
+- `../../active/tui-no-viewport-culling.md`
 
 ## 概述
 

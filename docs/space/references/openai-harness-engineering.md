@@ -28,7 +28,7 @@ OpenAI 的 Codex harness engineering 文章把仓库描述为 agent 工作的主
 
 - `README.md` 作为短入口。
 - `index.md` 作为目录和状态视图。
-- `execution/active/` 保存当前实现约束。
+- `../active/` 保存当前实现约束。
 - `execution/completed/` 保存历史变更记录和验证。
 - `references/` 保存非绑定外部摘要。
 - `generated/` 保存不能自动成为规则的派生材料。

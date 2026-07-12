@@ -18,8 +18,8 @@
 
 当前有效规则：
 
-- `docs/space/execution/active/tui-e2e-standards.md`
-- `docs/space/execution/active/tui-e2e-testing-limits.md`
+- `docs/active/tui-e2e-standards.md`
+- `docs/active/tui-e2e-testing-limits.md`
 - `docs/space/plans/2026-07-03-tui-pty-e2e-reform.md`
 
 历史设计和旧 P0-P3 分层记录见归档方案：
