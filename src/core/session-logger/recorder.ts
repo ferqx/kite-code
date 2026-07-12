@@ -427,9 +427,16 @@ export function recordRuntimeEvent(
     case 'tool.rejected':
       base.status = {
         code: 'ERROR',
-        message: event.type === 'tool.failed' ? event.error : event.reason,
+        message:
+          event.type === 'tool.failed'
+            ? (event.failure?.message ?? event.error ?? 'Tool failed.')
+            : event.reason,
       };
       base.attributes['kite_code.tool.call_id'] = event.toolCallId;
+      if (event.type === 'tool.failed' && event.failure) {
+        base.attributes['kite_code.failure.kind'] = event.failure.kind;
+        base.attributes['kite_code.failure.retryable'] = event.failure.retryable;
+      }
       break;
     case 'user_input.requested':
       base.attributes['kite_code.interaction_id'] = event.interactionId;

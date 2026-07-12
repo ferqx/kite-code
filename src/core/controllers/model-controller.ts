@@ -19,6 +19,7 @@ import { prepareModelContext } from '@/core/model/context';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { classifyFailure } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState, TranscriptMessage } from '@/core/runtime/state';
 import { getAgentPhase } from '@/core/runtime/state';
@@ -52,6 +53,32 @@ function extractReasoningText(message: AIMessage | undefined): string | undefine
       | string
       | undefined);
   return reasoning && reasoning.length > 0 ? reasoning : undefined;
+}
+
+/** Convert invalid provider tool arguments into durable queued-and-failed facts. */
+export function eventsForInvalidModelToolCalls(
+  calls: Array<{ id: string; name: string; args: { _parse_error?: string } }>,
+  messageId: string,
+  ordinalStart: number,
+): RuntimeEvent[] {
+  return calls.flatMap((call, index) => [
+    {
+      type: 'tool.queued' as const,
+      toolCallId: call.id,
+      name: call.name,
+      args: call.args,
+      modelMessageId: messageId,
+      ordinal: ordinalStart + index,
+    },
+    {
+      type: 'tool.failed' as const,
+      toolCallId: call.id,
+      failure: classifyFailure(
+        'model_invalid_tool_args',
+        String(call.args._parse_error ?? 'invalid model tool arguments'),
+      ),
+    },
+  ]);
 }
 
 function runtimeTranscriptMessages(messages: TranscriptMessage[]): BaseMessage[] {
@@ -208,7 +235,7 @@ export async function invokeRuntimeModel(params: {
 
     const messageId = response.id ?? requestId;
     let ordinal = 0;
-    for (const call of [...toolCalls, ...invalidToolCalls]) {
+    for (const call of toolCalls) {
       events.push({
         type: 'tool.queued',
         toolCallId: call.id,
@@ -218,6 +245,7 @@ export async function invokeRuntimeModel(params: {
         ordinal: ordinal++,
       });
     }
+    events.push(...eventsForInvalidModelToolCalls(invalidToolCalls, messageId, ordinal));
     return events;
   } finally {
     params.model.setRetryListener(null);

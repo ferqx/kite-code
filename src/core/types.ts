@@ -39,9 +39,22 @@ export interface ShellActionEnvelope {
   grant_request?: ShellApprovalGrant;
 }
 
+export type AuthorizationSource = 'user' | 'config' | 'test' | 'system';
+
+export interface ToolGrant {
+  workspace: string;
+  threadId: string;
+  command: string;
+  source?: AuthorizationSource;
+  grantedAt?: string;
+  expiresAt?: string;
+}
+
 export interface ThreadAuthorizationState {
   mode: 'default' | 'full_access';
-  commandGrants: Record<string, { workspace: string; threadId: string; command: string }>;
+  modeSource?: AuthorizationSource;
+  modeGrantedAt?: string;
+  commandGrants: Record<string, ToolGrant>;
 }
 
 export interface AuthorizationOverride {

@@ -1,0 +1,15 @@
+{
+  "name": "tool-failure",
+  "description": "Unsupported tool calls become a classified failed record.",
+  "initialEvents": [
+    { "type": "tool.queued", "toolCallId": "call-1", "name": "unknown_tool", "args": {} }
+  ],
+  "effects": [
+    { "events": [{ "type": "tool.failed", "toolCallId": "call-1", "error": "Unsupported tool" }] }
+  ],
+  "expectedEvents": ["tool.queued", "tool.failed"],
+  "expectedFinalState": {
+    "tools.calls.call-1.status": "failed",
+    "tools.calls.call-1.error": "Unsupported tool"
+  }
+}

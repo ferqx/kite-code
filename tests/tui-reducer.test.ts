@@ -825,6 +825,60 @@ describe('eventReducer (blocks model)', () => {
       expect(cards.map((card) => card.status)).toEqual(['running', 'running']);
       expect(cards.map((card) => card.userInput)).toEqual([undefined, undefined]);
     });
+    test('tool_done after RESOLVE_INTERRUPT preserves ask_user answer in userInput', () => {
+      // Verify that when tool.finished arrives AFTER the optimistic RESOLVE_INTERRUPT,
+      // the answer (userInput) is preserved and the tool_card renders correctly.
+      let s = fresh();
+      s = dispatch(s, tcEvt('ask-1', 'ask_user', { question: 'What color?' }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user_input.requested',
+          interactionId: 'input-1',
+          toolCallId: 'ask-1',
+          request: question({ question: 'What color?' }),
+        },
+      });
+      const blockId = (s.interrupt as { blockId: number }).blockId;
+
+      // Simulate user selecting option
+      s = dispatch(s, {
+        type: 'RESOLVE_INTERRUPT',
+        blockId,
+        resolution: 'Blue',
+      });
+
+      // Simulate tool.finished event arriving from kernel
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.finished',
+          toolCallId: 'ask-1',
+          name: 'ask_user',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: JSON.stringify({ answer: 'Blue' }),
+            stderr: '',
+            userInput: { answer: 'Blue' },
+          },
+        },
+      });
+
+      const card = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'ask-1',
+      );
+      expect(card).toMatchObject({
+        status: 'done',
+        userInput: { answer: 'Blue' },
+      });
+      // The summary should contain the parsed answer, not raw JSON
+      expect(card?.summary).toBe('Blue');
+      // expanded must be true for answer rendering
+      expect(card?.expanded).toBe(true);
+    });
     test('need_approval closes active Thought so its timer stops while waiting for the user', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('checking before approval'));

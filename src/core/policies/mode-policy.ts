@@ -6,7 +6,27 @@
 // Decouples mode decisions from graph node if-else chains into independently
 // testable pure functions.
 
+import type { AuthorizationSource } from '@/core/types';
 import type { PolicyDecision, PolicyInput, RuntimePolicy } from './runtime-policy';
+
+/** Enforce authorization invariants at every elevation boundary. */
+export function assertAuthorizationElevation(input: {
+  mode: 'default' | 'full_access';
+  source?: AuthorizationSource;
+  sandboxAvailable: boolean;
+  autoReview?: boolean;
+  loopMode?: boolean;
+}): void {
+  if (input.mode === 'full_access' && !input.sandboxAvailable) {
+    throw new Error('full_access requires an available workspace sandbox.');
+  }
+  if (input.autoReview && input.source === 'system' && input.mode === 'full_access') {
+    throw new Error('auto-review cannot grant full_access.');
+  }
+  if (input.loopMode && input.mode === 'full_access' && input.source === 'system') {
+    throw new Error('loop-mode cannot auto-elevate authorization.');
+  }
+}
 
 // ── 辅助函数 / Helpers ──
 

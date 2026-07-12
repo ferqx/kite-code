@@ -6,7 +6,8 @@ import type { SandboxBackend } from '@/core/sandbox';
 import { SessionLogCollector } from '@/core/session-logger';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
-import type { InteractionMode } from '@/protocol/events';
+import type { AuthorizationSource } from '@/core/types';
+import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
 import type { RuntimeEvent } from './events';
 import { createRuntimeEffectExecutor } from './executor';
 import { createAgentKernel } from './kernel';
@@ -26,6 +27,8 @@ export interface RunRuntimeAgentInput {
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   interactionMode?: InteractionMode;
+  authorizationMode?: AuthorizationMode;
+  authorizationSource?: AuthorizationSource;
   /** 初始执行阶段 / Initial execution phase */
   phase?: 'planning' | 'building';
   thinkingLevel?: string | null;
@@ -51,7 +54,10 @@ export async function* runRuntimeAgent(
     workspace: input.workspace,
     storePath: input.runtimeStorePath,
     interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'accept_edits',
+    authorizationMode: input.authorizationMode,
+    authorizationSource: input.authorizationSource,
     phase: input.phase,
+    sandboxAvailable: input.sandboxBackend === 'seatbelt' || input.sandboxBackend === 'bubblewrap',
   });
   const collector = new SessionLogCollector(
     input.threadId,

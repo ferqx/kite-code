@@ -1,5 +1,7 @@
 import { applyApprovalGrant } from '@/core/harness/tool-policy';
+import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from './events';
+import { classifyFailure } from './failures';
 import type { RuntimeState } from './state';
 
 /** Actions accepted by the Kernel.  They are correlated to exactly one waiting interaction. */
@@ -33,6 +35,7 @@ export type RuntimeUserAction =
 export function eventsForRuntimeAction(
   state: RuntimeState,
   action: RuntimeUserAction,
+  options: { sandboxAvailable?: boolean } = {},
 ): RuntimeEvent[] {
   const interaction = state.interactions;
   if (interaction.kind === 'idle' || interaction.interactionId !== action.interactionId) return [];
@@ -64,6 +67,27 @@ export function eventsForRuntimeAction(
 
   if (interaction.kind === 'awaiting_tool_approval') {
     if (action.type === 'approve') {
+      if (action.grant === 'full_access') {
+        try {
+          assertAuthorizationElevation({
+            mode: 'full_access',
+            source: 'user',
+            sandboxAvailable: options.sandboxAvailable ?? false,
+          });
+        } catch (error) {
+          return [
+            {
+              type: 'approval.rejected',
+              interactionId: action.interactionId,
+              reason: error instanceof Error ? error.message : String(error),
+              failure: classifyFailure(
+                'sandbox_error',
+                error instanceof Error ? error.message : String(error),
+              ),
+            },
+          ];
+        }
+      }
       const nextAuthorization = applyApprovalGrant({
         authorization: state.authorization,
         grant: action.grant,
@@ -83,6 +107,8 @@ export function eventsForRuntimeAction(
           type: 'authorization.changed',
           mode: nextAuthorization.mode,
           commandGrants: nextAuthorization.commandGrants,
+          modeSource: nextAuthorization.modeSource,
+          modeGrantedAt: nextAuthorization.modeGrantedAt,
         },
       ];
     }
@@ -92,6 +118,7 @@ export function eventsForRuntimeAction(
           type: 'approval.rejected',
           interactionId: action.interactionId,
           reason: action.reason ?? 'Rejected by user.',
+          failure: classifyFailure('approval_rejected', action.reason ?? 'Rejected by user.'),
         },
       ];
     }

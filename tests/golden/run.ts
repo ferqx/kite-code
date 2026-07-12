@@ -1,0 +1,109 @@
+import { deepStrictEqual, ok } from 'node:assert';
+import type { RuntimeUserAction } from '@/core/runtime/actions';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import { AgentKernel } from '@/core/runtime/kernel';
+import { runRuntimeLoop } from '@/core/runtime/runner';
+import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
+import { createRuntimeStore } from '@/core/runtime/store';
+
+export interface GoldenFixture {
+  name: string;
+  description: string;
+  initialState?: Partial<RuntimeState>;
+  initialEvents: RuntimeEvent[];
+  effects: Array<{ events: RuntimeEvent[] }>;
+  userActions?: Array<
+    | { type: 'input'; text: string }
+    | { type: 'approve'; grant: 'approve_once' | 'same_command' | 'full_access' }
+    | { type: 'approve_plan'; executionMode: 'accept_edits' | 'auto' }
+  >;
+  expectedEvents: RuntimeEvent['type'][];
+  expectedEffects?: string[];
+  expectedFinalState: Record<string, unknown>;
+}
+
+function getByPath(value: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== 'object') return undefined;
+    return (current as Record<string, unknown>)[segment];
+  }, value);
+}
+
+/**
+ * Deterministically replays durable RuntimeEvents through the production
+ * reducer. Fixtures contain no timers, models, files, or UI state, keeping
+ * their output stable and their failures useful as kernel regressions.
+ */
+export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeState> {
+  const base = createInitialRuntimeState({
+    threadId: `golden-${fixture.name}`,
+    userId: 'golden-user',
+    workspace: '/tmp/golden',
+  });
+  const store = createRuntimeStore(':memory:');
+  const kernel = new AgentKernel({
+    store,
+    initialState: { ...base, ...fixture.initialState },
+    interactionMode: 'accept_edits',
+    sandboxAvailable: true,
+  });
+  const observed = [...fixture.initialEvents];
+  kernel.processEvents(fixture.initialEvents);
+  const effects = [...fixture.effects];
+  const actions = [...(fixture.userActions ?? [])];
+  const observedEffects: string[] = [];
+  try {
+    for await (const event of runRuntimeLoop(
+      kernel,
+      async (effect) => {
+        observedEffects.push(effect.type);
+        return effects.shift()?.events ?? [];
+      },
+      {
+        requestAction: async (effect, state): Promise<RuntimeUserAction> => {
+          observedEffects.push(effect.type);
+          const action = actions.shift();
+          if (!action) throw new Error(`${fixture.name}: missing action for ${effect.type}`);
+          if (action.type === 'input')
+            return { type: 'input', interactionId: effect.interactionId, text: action.text };
+          if (action.type === 'approve')
+            return { type: 'approve', interactionId: effect.interactionId, grant: action.grant };
+          if (state.interactions.kind !== 'awaiting_review') {
+            throw new Error(`${fixture.name}: plan action without a plan review`);
+          }
+          return {
+            type: 'plan_review_decision',
+            interactionId: effect.interactionId,
+            planId: state.interactions.planId,
+            version: state.interactions.version,
+            structuralDigest: state.interactions.structuralDigest,
+            decision: {
+              kind: 'approve',
+              nextMode: action.executionMode,
+              clearPlanningContext: false,
+            },
+          };
+        },
+      },
+    )) {
+      observed.push(event);
+    }
+  } finally {
+    store.close();
+  }
+  const state = kernel.getState() as RuntimeState;
+  const actualTypes = observed.map((event) => event.type);
+  for (const expected of fixture.expectedEvents) {
+    ok(actualTypes.includes(expected), `${fixture.name}: expected event ${expected} not found`);
+  }
+  for (const [path, expected] of Object.entries(fixture.expectedFinalState)) {
+    deepStrictEqual(getByPath(state, path), expected, `${fixture.name}: state mismatch at ${path}`);
+  }
+  for (const expected of fixture.expectedEffects ?? []) {
+    ok(
+      observedEffects.includes(expected),
+      `${fixture.name}: expected effect ${expected} not requested`,
+    );
+  }
+  return state;
+}

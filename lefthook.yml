@@ -7,3 +7,12 @@ pre-commit:
     typecheck:
       glob: "*.{ts,tsx}"
       run: node node_modules/typescript/bin/tsc --noEmit
+    core-boundary:
+      glob: "*.{ts,tsx}"
+      run: bun run check:core-boundary
+    golden:
+      glob: "*.{ts,tsx,json}"
+      run: bun test tests/golden/
+    docs:
+      glob: "*.md"
+      run: bun run check:docs

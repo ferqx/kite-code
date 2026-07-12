@@ -64,7 +64,12 @@ export function commandGrantKey(input: {
 /** 记录同 thread/workspace 下的精确命令授权 / Record an exact command grant for a thread/workspace */
 export function grantSameCommand(
   authorization: ThreadAuthorizationState | null | undefined,
-  input: { workspace: string; threadId: string; command: string },
+  input: {
+    workspace: string;
+    threadId: string;
+    command: string;
+    source?: import('@/core/types').AuthorizationSource;
+  },
 ): ThreadAuthorizationState {
   const state = normalizeAuthorizationState(authorization);
   const command = (input.command ?? '').trim();
@@ -80,6 +85,8 @@ export function grantSameCommand(
         workspace: input.workspace,
         threadId: input.threadId,
         command,
+        source: input.source ?? 'user',
+        grantedAt: new Date().toISOString(),
       },
     },
   };
@@ -108,12 +115,15 @@ export function applyApprovalGrant(input: {
   workspace: string;
   threadId: string;
   request: PendingToolRequest;
+  source?: import('@/core/types').AuthorizationSource;
 }): ThreadAuthorizationState {
   const authorization = normalizeAuthorizationState(input.authorization);
   if (input.grant === 'full_access') {
     return {
       ...authorization,
       mode: 'full_access',
+      modeSource: input.source ?? 'user',
+      modeGrantedAt: new Date().toISOString(),
     };
   }
   if (input.grant === 'same_command' && input.request.name === 'shell_execute') {
@@ -121,6 +131,7 @@ export function applyApprovalGrant(input: {
       workspace: input.workspace,
       threadId: input.threadId,
       command: input.request.args.command,
+      source: input.source,
     });
   }
   return authorization;

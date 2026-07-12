@@ -47,11 +47,12 @@ describe('executeRuntimeTools', () => {
 
     expect(executed).toBe(false);
     expect(events).toEqual([
-      {
+      expect.objectContaining({
         type: 'tool.rejected',
         toolCallId: 'denied',
         reason: 'Rejected shell_execute during planning phase.',
-      },
+        failure: expect.objectContaining({ kind: 'policy_denied' }),
+      }),
     ]);
   });
 

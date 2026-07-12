@@ -1,3 +1,4 @@
+import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { invokeRuntimeModel } from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
@@ -21,6 +22,11 @@ export interface RuntimeExecutorDependencies {
   skillOptions?: SkillScanOptions;
   signal?: AbortSignal;
   subagentEventSink?: SubAgentEventSink;
+}
+
+/** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
+export function resolveAutoReviewTimeout(config: AgentConfig): number {
+  return getFeatureFlags(config).autoReviewV2 ? (config.autoReview?.timeoutMs ?? 15_000) : 15_000;
 }
 
 /** Build the production executor for Kernel effects. */
@@ -141,7 +147,9 @@ async function executeAutoReview(
       payload: state.interactions
         .approval as import('@/core/harness/tool-policy').ToolApprovalPayload,
       request,
-      timeoutMs: 15_000,
+      // V2 makes the configured reviewer timeout part of the rollout surface;
+      // the established path retains the fixed compatibility timeout.
+      timeoutMs: resolveAutoReviewTimeout(dependencies.config),
     });
 
     return [

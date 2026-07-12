@@ -8,6 +8,7 @@ import {
 } from '@/core/execution/circuit-breaker';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
 import type { RuntimeEvent } from './events';
+import { classifyFailure } from './failures';
 import type { RuntimeState } from './state';
 import { computePlanStructuralDigest } from './state';
 
@@ -234,7 +235,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             [event.toolCallId]: {
               ...existingCall,
               status: 'failed' as const,
-              error: event.error,
+              error: event.failure?.message ?? event.error ?? 'Tool failed.',
+              ...(event.failure ? { failure: event.failure } : {}),
             },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
@@ -257,7 +259,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...state.tools,
             calls: {
               ...state.tools.calls,
-              [event.toolCallId]: { ...existingCall, status: 'rejected' as const },
+              [event.toolCallId]: {
+                ...existingCall,
+                status: 'rejected' as const,
+                error: event.reason,
+                ...(event.failure ? { failure: event.failure } : {}),
+              },
             },
             queue: state.tools.queue.filter((id) => id !== event.toolCallId),
             active: state.tools.active.filter((id) => id !== event.toolCallId),
@@ -404,7 +411,18 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       }
       return {
         ...state,
-        tools: updateToolStatus(state.tools, state.interactions.toolCallId, 'rejected'),
+        tools: {
+          ...updateToolStatus(state.tools, state.interactions.toolCallId, 'rejected'),
+          calls: {
+            ...state.tools.calls,
+            [state.interactions.toolCallId]: {
+              ...state.tools.calls[state.interactions.toolCallId]!,
+              status: 'rejected',
+              error: event.reason,
+              failure: event.failure ?? classifyFailure('approval_rejected', event.reason),
+            },
+          },
+        },
         interactions: { kind: 'idle' },
       };
 
@@ -417,6 +435,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...state.authorization,
           mode: event.mode,
           ...(event.commandGrants ? { commandGrants: event.commandGrants } : {}),
+          ...(event.modeSource ? { modeSource: event.modeSource } : {}),
+          ...(event.modeGrantedAt ? { modeGrantedAt: event.modeGrantedAt } : {}),
         },
       };
 
@@ -613,7 +633,21 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       );
       return {
         ...state,
-        tools: updateToolStatus(state.tools, state.interactions.toolCallId, 'rejected'),
+        tools: {
+          ...updateToolStatus(state.tools, state.interactions.toolCallId, 'rejected'),
+          calls: {
+            ...state.tools.calls,
+            [state.interactions.toolCallId]: {
+              ...state.tools.calls[state.interactions.toolCallId]!,
+              status: 'rejected',
+              error: result.reason ?? 'auto-review rejected',
+              failure: classifyFailure(
+                'auto_review_rejected',
+                result.reason ?? 'auto-review rejected',
+              ),
+            },
+          },
+        },
         interactions: { kind: 'idle' },
         autoReview: {
           ...state.autoReview,

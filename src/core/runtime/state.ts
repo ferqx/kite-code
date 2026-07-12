@@ -4,6 +4,7 @@
 
 import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
+import type { AuthorizationSource } from '@/core/types';
 import type {
   AgentPlan,
   AuthorizationMode,
@@ -15,6 +16,7 @@ import type {
 } from '@/protocol/events.js';
 import { getAgentPhase } from '@/protocol/events.js';
 import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
+import type { ClassifiedFailure } from './failures';
 
 // ── Re-export for convenience ──
 export { getAgentPhase };
@@ -145,6 +147,8 @@ export interface ToolCallRecord {
   };
   /** 错误信息（失败时填充）/ Error message (populated on failure) */
   error?: string;
+  /** Structured failure metadata retained for retry policy and replay. */
+  failure?: ClassifiedFailure;
 }
 
 // ── 工具运行时状态 / Tool runtime state ──
@@ -260,6 +264,7 @@ export interface CreateRuntimeStateInput {
   interactionMode?: InteractionMode;
   /** 授权模式，默认 'default' / Authorization mode, defaults to 'default' */
   authorizationMode?: AuthorizationMode;
+  authorizationSource?: AuthorizationSource;
   /** 工作区访问权限，默认 'write' / Workspace access, defaults to 'write' */
   workspaceAccess?: WorkspaceAccess;
   /** 初始执行阶段，默认 'building' / Initial phase, defaults to 'building' */
@@ -299,6 +304,12 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     suspendedSubagents: {},
     authorization: {
       mode: input.authorizationMode ?? 'default',
+      ...(input.authorizationMode === 'full_access'
+        ? {
+            modeSource: input.authorizationSource ?? 'system',
+            modeGrantedAt: new Date().toISOString(),
+          }
+        : {}),
       commandGrants: {},
     },
     mode: input.interactionMode ?? ('accept_edits' as InteractionMode),

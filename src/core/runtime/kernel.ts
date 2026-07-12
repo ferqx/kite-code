@@ -7,7 +7,8 @@
 
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
-import type { InteractionMode } from '@/protocol/events';
+import type { AuthorizationSource } from '@/core/types';
+import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
 import { eventsForRuntimeAction, type RuntimeUserAction } from './actions';
 import type { RuntimeEffect } from './effects';
 import type { RuntimeEvent } from './events';
@@ -151,6 +152,11 @@ export class AgentKernel {
     return this.state.mode;
   }
 
+  /** Whether this runtime may grant authorization that requires a sandbox. */
+  isSandboxAvailable(): boolean {
+    return this.sandboxAvailable;
+  }
+
   /**
    * Execute deterministic effects until the runtime needs user input or the
    * supplied executor stops emitting facts.  The executor never receives a
@@ -183,7 +189,9 @@ export class AgentKernel {
 
   /** Apply a user action only when it matches the currently persisted interaction. */
   applyAction(action: RuntimeUserAction): void {
-    this.processEventBatch(eventsForRuntimeAction(this.state, action));
+    this.processEventBatch(
+      eventsForRuntimeAction(this.state, action, { sandboxAvailable: this.sandboxAvailable }),
+    );
   }
 
   // ── 持久化 / Persistence ──
@@ -263,6 +271,8 @@ export function createAgentKernel(params: {
   workspace: string;
   storePath: string;
   interactionMode?: InteractionMode;
+  authorizationMode?: AuthorizationMode;
+  authorizationSource?: AuthorizationSource;
   /** 初始执行阶段 / Initial execution phase */
   phase?: 'planning' | 'building';
   sandboxAvailable?: boolean;
@@ -273,6 +283,8 @@ export function createAgentKernel(params: {
     userId: params.userId,
     workspace: params.workspace,
     interactionMode: params.interactionMode ?? 'accept_edits',
+    authorizationMode: params.authorizationMode,
+    authorizationSource: params.authorizationSource,
     phase: params.phase,
   });
   const restoredState = store.loadSnapshot<RuntimeState>(params.threadId);

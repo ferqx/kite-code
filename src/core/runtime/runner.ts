@@ -56,7 +56,9 @@ export async function* runRuntimeLoop(
       effect.type === 'request_tool_approval'
     ) {
       const action = await provider.requestAction(effect, kernel.getState());
-      const events = eventsForRuntimeAction(kernel.getState(), action);
+      const events = eventsForRuntimeAction(kernel.getState(), action, {
+        sandboxAvailable: kernel.isSandboxAvailable(),
+      });
       if (events.length === 0)
         throw new Error('Runtime action does not match the active interaction.');
 

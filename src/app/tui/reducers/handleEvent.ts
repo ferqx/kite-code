@@ -1490,7 +1490,12 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
     case 'tool.failed':
       return handleEventAction(state, {
         type: 'tool_done',
-        data: { call_id: event.toolCallId, name: '', ok: false, summary: event.error },
+        data: {
+          call_id: event.toolCallId,
+          name: '',
+          ok: false,
+          summary: event.failure?.message ?? event.error ?? 'Tool failed.',
+        },
       });
     case 'tool.rejected':
       return handleEventAction(state, {

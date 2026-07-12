@@ -1,0 +1,34 @@
+{
+  "name": "plan-approval",
+  "description": "A submitted plan is reviewed and becomes the executing lifecycle state.",
+  "initialState": { "planning": { "kind": "planning_empty" } },
+  "initialEvents": [
+    { "type": "tool.queued", "toolCallId": "call-1", "name": "write_plan", "args": {} }
+  ],
+  "effects": [
+    {
+      "events": [
+        {
+          "type": "plan.review_requested",
+          "interactionId": "review-1",
+          "toolCallId": "call-1",
+          "plan": {
+            "name": "Runtime guardrails",
+            "description": "Build the safety layer",
+            "status": "pending",
+            "steps": [{ "step": "Add tests", "status": "pending" }]
+          },
+          "planSummary": "Build the safety layer"
+        }
+      ]
+    }
+  ],
+  "userActions": [{ "type": "approve_plan", "executionMode": "auto" }],
+  "expectedEffects": ["run_tools", "request_plan_review"],
+  "expectedEvents": ["plan.review_requested", "plan.approved"],
+  "expectedFinalState": {
+    "planning.kind": "executing",
+    "mode": "auto",
+    "interactions.kind": "idle"
+  }
+}

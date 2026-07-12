@@ -8,6 +8,7 @@ import type { SupportedChatModel } from '@/core/model/factory';
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { classifyFailure } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState } from '@/core/runtime/state';
 import { computePlanStructuralDigest, getAgentPhase } from '@/core/runtime/state';
@@ -269,7 +270,11 @@ export async function executeRuntimeTools(params: {
       params.state.session.workspace,
     );
     if (!request) {
-      events.push({ type: 'tool.failed', toolCallId, error: `Unsupported tool '${call.name}'.` });
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure: classifyFailure('tool_not_found', `Unsupported tool '${call.name}'.`),
+      });
       continue;
     }
     if (request.name === 'ask_user') {
@@ -508,7 +513,12 @@ export async function executeRuntimeTools(params: {
       authorization: params.state.authorization,
     });
     if (!decision.allowed) {
-      events.push({ type: 'tool.rejected', toolCallId, reason: decision.userVisibleSummary });
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: decision.userVisibleSummary,
+        failure: classifyFailure('policy_denied', decision.userVisibleSummary),
+      });
       continue;
     }
     const requiresEffectReview =
@@ -536,6 +546,10 @@ export async function executeRuntimeTools(params: {
           type: 'tool.rejected',
           toolCallId,
           reason: modeDecision.reason ?? decision.userVisibleSummary,
+          failure: classifyFailure(
+            'policy_denied',
+            modeDecision.reason ?? decision.userVisibleSummary,
+          ),
         });
         continue;
       }
@@ -560,7 +574,6 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       } else {
-        // need_tool_approval (default)
         const approval = buildToolApproval({
           workspace: params.state.session.workspace,
           threadId: params.state.session.threadId,
@@ -698,7 +711,10 @@ export async function executeRuntimeTools(params: {
         events.push({
           type: 'tool.failed',
           toolCallId,
-          error: error instanceof Error ? error.message : String(error),
+          failure: classifyFailure(
+            'tool_runtime_error',
+            error instanceof Error ? error.message : String(error),
+          ),
         });
       }
       continue;
@@ -762,7 +778,10 @@ export async function executeRuntimeTools(params: {
       events.push({
         type: 'tool.failed',
         toolCallId,
-        error: error instanceof Error ? error.message : String(error),
+        failure: classifyFailure(
+          'tool_runtime_error',
+          error instanceof Error ? error.message : String(error),
+        ),
       });
     }
   }

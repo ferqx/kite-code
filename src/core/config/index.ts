@@ -3,7 +3,15 @@ import { resolve } from 'node:path';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
 import type { McpServerConfig } from '../mcp/types';
+import type { FeatureFlags } from './features';
 import { defaultConfigPath, projectConfigPath } from './paths';
+
+export {
+  DEFAULT_FEATURE_FLAGS,
+  getFeatureFlags,
+  isFeatureFlagName,
+  parseFeatureOverride,
+} from './features';
 
 // ── Zod schemas ──
 
@@ -48,6 +56,18 @@ const sandboxSchema = z
   })
   .optional();
 
+const featuresSchema = z
+  .object({
+    planLifecycleV2: z.boolean().optional(),
+    interactionControllerV2: z.boolean().optional(),
+    autoReviewV2: z.boolean().optional(),
+    runtimeProjectionV2: z.boolean().optional(),
+    nativeLoopEngine: z.boolean().optional(),
+    loopMode: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
+
 export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
   /** @deprecated Use provider[name].models instead */
@@ -55,6 +75,7 @@ export const configSchema = z.object({
   theme: z.enum(['dark', 'light']).optional(),
   colorPreset: z.string().optional(),
   interactionMode: interactionModeSchema.optional(),
+  features: featuresSchema,
   sandbox: sandboxSchema,
   autoReview: z
     .object({
@@ -95,6 +116,7 @@ export interface AgentConfig {
   /** 透传给 LangChain 模型构造器的额外参数 */
   modelKwargs?: Record<string, unknown>;
   interactionMode?: z.infer<typeof interactionModeSchema>;
+  features?: Partial<FeatureFlags>;
   sandbox: {
     enabled: boolean;
   };
@@ -151,6 +173,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     theme: project.theme ?? user.theme,
     colorPreset: project.colorPreset ?? user.colorPreset,
     interactionMode: project.interactionMode ?? user.interactionMode,
+    features: { ...user.features, ...project.features },
     sandbox: project.sandbox ?? user.sandbox,
     autoReview: project.autoReview ?? user.autoReview,
     mcpServers: { ...user.mcpServers, ...project.mcpServers },
@@ -191,6 +214,7 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
     },
     theme: 'dark',
     interactionMode: 'accept_edits',
+    features: {},
     sandbox: { enabled: true },
     mcpServers: {},
   };
@@ -227,6 +251,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     reasoning,
     modelKwargs: provider.modelKwargs as Record<string, unknown> | undefined,
     interactionMode: cfg.interactionMode,
+    features: cfg.features,
     sandbox: { enabled: cfg.sandbox?.enabled ?? true },
     autoReview: cfg.autoReview,
   };

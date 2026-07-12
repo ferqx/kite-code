@@ -1911,7 +1911,7 @@ describe('OutputArea', () => {
     );
     const frame = lastFrame();
     expect(frame).toContain('command not found');
-    expect(frame).toContain('0s');
+    expect(frame).toContain('1s');
   });
 
   test('renders tool_card with detail annotation', () => {

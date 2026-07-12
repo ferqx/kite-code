@@ -2,6 +2,7 @@
 // Phase 1: 工具生命周期 + 交互事件
 // 所有状态变更通过类型化事件表示，供 runtime 内部及各层消费者使用
 
+import type { ToolGrant } from '@/core/types';
 import type {
   AgentPlan,
   AuthorizationMode,
@@ -17,6 +18,7 @@ import type {
   UserInputResult,
 } from '@/protocol/events.js';
 import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
+import type { ClassifiedFailure } from './failures';
 
 export type { UserInputResult } from '@/protocol/events.js';
 
@@ -72,17 +74,21 @@ export interface ToolFinishedEvent {
 }
 
 /** 工具调用执行失败 */
-export interface ToolFailedEvent {
+export type ToolFailedEvent = {
   type: 'tool.failed';
   toolCallId: string;
-  error: string;
-}
+  /** Structured failure for new producers. `error` remains readable for v3 event-log replay. */
+} & (
+  | { failure: ClassifiedFailure; error?: string }
+  | { /** @deprecated retained for historical event replay. */ error: string; failure?: never }
+);
 
 /** 工具调用被安全策略驳回 */
 export interface ToolRejectedEvent {
   type: 'tool.rejected';
   toolCallId: string;
   reason: string;
+  failure?: ClassifiedFailure;
 }
 
 /** Tool call cancelled because an earlier sibling opened a user interaction. */
@@ -165,6 +171,7 @@ export interface ApprovalRejectedEvent {
   type: 'approval.rejected';
   interactionId: string;
   reason: string;
+  failure?: ClassifiedFailure;
 }
 
 // ── 运行时环境事件 / Runtime environment events ──
@@ -175,7 +182,9 @@ export interface AuthorizationChangedEvent {
   mode: AuthorizationMode;
   /** Persisted exact-command grants.  Carry the full set because this event is
    * the runtime-state handoff for a graph-side authorization decision. */
-  commandGrants?: Record<string, { workspace: string; threadId: string; command: string }>;
+  commandGrants?: Record<string, ToolGrant>;
+  modeSource?: import('@/core/types').AuthorizationSource;
+  modeGrantedAt?: string;
 }
 
 // ── Auto-review 事件 / Auto-review events ──

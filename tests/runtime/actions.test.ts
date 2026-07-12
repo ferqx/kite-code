@@ -79,3 +79,38 @@ describe('runtime user actions', () => {
     expect(toolFinished.result.stdout.length).toBeGreaterThan(200);
   });
 });
+
+test('full access approval is rejected when no sandbox is available', () => {
+  const state = createInitialRuntimeState({ threadId: 'auth', userId: 'u', workspace: '/' });
+  state.interactions = {
+    kind: 'awaiting_tool_approval',
+    interactionId: 'approval-1',
+    toolCallId: 'tool-1',
+    approval: {
+      scope: 'once',
+      cwd: '/',
+      threadId: 'auth',
+      tool: 'shell_execute',
+      command: 'pwd',
+      risk: 'execute_code',
+      approvalHash: 'hash',
+      summary: 'Run pwd',
+      reason: 'test',
+      expectedEffects: [],
+      grantOptions: ['full_access'],
+      recommendedGrant: 'full_access',
+    },
+  };
+  expect(
+    eventsForRuntimeAction(
+      state,
+      { type: 'approve', interactionId: 'approval-1', grant: 'full_access' },
+      { sandboxAvailable: false },
+    ),
+  ).toEqual([
+    expect.objectContaining({
+      type: 'approval.rejected',
+      reason: expect.stringContaining('requires'),
+    }),
+  ]);
+});

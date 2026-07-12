@@ -1,0 +1,62 @@
+{
+  "name": "auto-review-rejection",
+  "description": "A rejected auto-review stops the tool and records breaker state.",
+  "initialEvents": [
+    {
+      "type": "tool.queued",
+      "toolCallId": "call-1",
+      "name": "shell_execute",
+      "args": { "command": "curl example.com" }
+    }
+  ],
+  "effects": [
+    {
+      "events": [
+        {
+          "type": "auto_review.requested",
+          "reviewId": "review-1",
+          "toolCallId": "call-1",
+          "toolName": "shell_execute",
+          "reason": "network",
+          "approval": {
+            "scope": "once",
+            "cwd": "/tmp/golden",
+            "threadId": "golden",
+            "tool": "shell_execute",
+            "command": "curl example.com",
+            "risk": "network",
+            "approvalHash": "hash",
+            "summary": "Network",
+            "reason": "network",
+            "expectedEffects": [],
+            "grantOptions": ["approve_once"],
+            "recommendedGrant": "approve_once"
+          }
+        }
+      ]
+    },
+    {
+      "events": [
+        {
+          "type": "auto_review.completed",
+          "reviewId": "review-1",
+          "toolCallId": "call-1",
+          "result": {
+            "ok": true,
+            "approved": false,
+            "reason": "Needs human review",
+            "reviewerModelName": "test",
+            "durationMs": 1
+          }
+        }
+      ]
+    }
+  ],
+  "expectedEffects": ["run_tools", "run_auto_review"],
+  "expectedEvents": ["auto_review.requested", "auto_review.completed"],
+  "expectedFinalState": {
+    "interactions.kind": "idle",
+    "tools.calls.call-1.status": "rejected",
+    "autoReview.consecutiveRejects": 1
+  }
+}

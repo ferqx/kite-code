@@ -1,18 +1,21 @@
 import { resolve } from 'node:path';
-import { defaultCheckpointPath, loadAgentConfig } from '@/core/config/index';
+import type { FeatureFlags } from '@/core/config/features';
+import { defaultCheckpointPath, loadAgentConfig, parseFeatureOverride } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
+import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
 import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { runtimeStorePathFor } from '@/core/runtime/store';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
+import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
 import { getSkillContent, scanSkills } from '@/core/skills/loader';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
 import type { UserInputProvider } from '@/protocol/provider';
 
 export interface ParsedArgs {
-  command: 'run' | 'resume' | 'help';
+  command: 'run' | 'resume' | 'trace' | 'help';
   task?: string;
   threadId: string;
   userId: string;
@@ -28,6 +31,10 @@ export interface ParsedArgs {
   sandbox: boolean;
   interactionMode?: import('@/protocol/events').InteractionMode;
   skills: string[];
+  featureOverrides: Partial<FeatureFlags>;
+  tracePath?: string;
+  traceTurn?: number;
+  traceFormat?: 'text' | 'json';
 }
 
 export async function main(): Promise<void> {
@@ -36,19 +43,46 @@ export async function main(): Promise<void> {
     printHelp();
     return;
   }
+  if (args.command === 'trace') {
+    if (!args.tracePath) throw new Error('trace requires a JSONL path.');
+    const records = parseTraceJsonl(args.tracePath);
+    if (args.traceFormat === 'json') {
+      const turn = args.traceTurn;
+      const selected = filterTraceTurn(records, turn);
+      console.log(JSON.stringify(selected, null, 2));
+    } else {
+      console.log(
+        formatTrace(records, { turn: args.traceTurn, color: Boolean(process.stdout.isTTY) }),
+      );
+    }
+    return;
+  }
   if (args.command === 'resume') {
     throw new Error(
       'Legacy checkpoint sessions are not compatible with the Runtime Kernel. Start a new task.',
     );
   }
 
-  const config = loadAgentConfig();
+  const loadedConfig = loadAgentConfig();
+  const config = {
+    ...loadedConfig,
+    features: { ...loadedConfig.features, ...args.featureOverrides },
+  };
   const interactionMode = args.interactionMode ?? config.interactionMode ?? 'accept_edits';
   const sandboxRuntime = resolveSandboxRuntime({
     enabled: args.sandbox && config.sandbox.enabled,
   });
   if (interactionMode === 'full' && !sandboxRuntime.available) {
     throw new Error('full mode requires an available workspace sandbox.');
+  }
+  const authorizationMode =
+    args.authorizationMode ?? (args.approvalGrant === 'full_access' ? 'full_access' : undefined);
+  if (authorizationMode) {
+    assertAuthorizationElevation({
+      mode: authorizationMode,
+      source: 'config',
+      sandboxAvailable: sandboxRuntime.available,
+    });
   }
   const shellExecutor = createSandboxExecutor({
     enabled: sandboxRuntime.enabled,
@@ -83,6 +117,8 @@ export async function main(): Promise<void> {
       config,
       shellExecutor,
       interactionMode,
+      authorizationMode,
+      authorizationSource: authorizationMode === 'full_access' ? 'config' : undefined,
       sandboxBackend: sandboxRuntime.backend,
       frontend: 'cli',
       skills: manifests,
@@ -232,7 +268,14 @@ function readStdin(): Promise<string> {
 // ── Argument parsing (unchanged from original cli.ts) ──
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const command = argv[0] === 'resume' ? 'resume' : argv[0] === 'run' ? 'run' : 'help';
+  const command =
+    argv[0] === 'resume'
+      ? 'resume'
+      : argv[0] === 'run'
+        ? 'run'
+        : argv[0] === 'trace'
+          ? 'trace'
+          : 'help';
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
     const index = argv.indexOf(name);
@@ -258,6 +301,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const approvalHash = optionalValue('--approval-hash');
   const replacementCommand = optionalValue('--replace-command');
   const approvalGrant = parseApprovalGrant(argv);
+  const traceTurnValue = optionalValue('--turn');
+  const traceTurn = traceTurnValue === undefined ? undefined : Number(traceTurnValue);
+  if (traceTurn !== undefined && (!Number.isSafeInteger(traceTurn) || traceTurn < 1)) {
+    throw new Error('--turn must be a positive integer.');
+  }
 
   const multi = (flag: string): string[] => {
     const values: string[] = [];
@@ -271,6 +319,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return values;
   };
 
+  const featureOverrides: Partial<FeatureFlags> = {};
+  for (const feature of multi('--feature')) {
+    Object.assign(featureOverrides, parseFeatureOverride(feature));
+  }
   return {
     command,
     task: command === 'run' ? value('--task', positionalTask(argv)) : '',
@@ -288,6 +340,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     sandbox: !noSandbox,
     interactionMode,
     skills: multi('--skill'),
+    featureOverrides,
+    tracePath: command === 'trace' ? argv[1] : undefined,
+    traceTurn,
+    traceFormat: optionalValue('--format') === 'json' ? 'json' : 'text',
   };
 }
 
@@ -311,6 +367,7 @@ function positionalTask(argv: string[]): string {
     '--approval-hash',
     '--replace-command',
     '--skill',
+    '--feature',
   ]);
   const parts: string[] = [];
   for (let index = 1; index < argv.length; index++) {
@@ -348,15 +405,19 @@ function printHelp(): void {
 
 Options:
   --task <text>          Task for run
+  trace <events.jsonl>   Replay a runtime trace
   --thread <id>          LangGraph thread id
   --user <id>            User id
   --workspace <path>     Tool workspace
   --checkpoints <path>   SQLite checkpoint path
   --mode <mode>          auto, write, or builder
   --skill <name>         Activate a skill (repeatable)
+  --feature <name[=bool]> Temporarily override a registered feature flag (repeatable)
+  --turn <n>             Limit trace output to a turn
+  --format json          Emit a trace as JSON
   --approve              Approve tool call on resume
   --approve-same-command Approve same future commands
-  --full-access          Allow all future shell_execute
+  --full-access          Start with full authorization (requires sandbox; source=config)
   --approval-hash <hash> Approval hash
   --replace-command <cmd> Replace pending command
   --answer <text>        Answer user input interrupt
