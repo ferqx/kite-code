@@ -90,7 +90,7 @@
 | 包 | 替换目标 | 优先级 |
 |---|---|---|
 | `@langchain/openai` + `@langchain/deepseek` + `@langchain/ollama` | `@ai-sdk/openai-compatible`（统一 provider，middleware 注入 retry + reasoning passback） | P0 |
-| `@langchain/core` | `ai` SDK（`ModelMessage` 类型 + `tool()` + `generateText()`） | P0 |
+| `@langchain/core` | `ai` SDK + `src/core/messages.ts`（`ModelMessage` 类型 + `tool()` + `generateText()` + 内部消息类型） | P0（✅ 2026-07-12 完成） |
 | `@modelcontextprotocol/sdk` | `@ai-sdk/mcp`（统一 MCP client + 工具适配，通知监听需另选方案） | P1 |
 
 涉及文件约 18 个（`src/core/model/`、`controllers/`、`execution/`、`harness/`、`subagent/`、`mcp/`）。

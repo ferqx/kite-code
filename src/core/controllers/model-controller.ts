@@ -5,10 +5,16 @@
 // Kernel-native model invocation: build context from RuntimeState → call model → return RuntimeEvent[].
 // No LangGraph state dependency, no side effects.
 
-import { AIMessage, type BaseMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
+import {
+  type AIMessage,
+  aiMessage,
+  type BaseMessage,
+  humanMessage,
+  toolMessage,
+} from '@/core/messages';
 import { prepareModelContext } from '@/core/model/context';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
@@ -52,9 +58,9 @@ function runtimeTranscriptMessages(messages: TranscriptMessage[]): BaseMessage[]
   return messages.map((message) => {
     switch (message.kind) {
       case 'user':
-        return new HumanMessage({ id: message.messageId, content: message.content });
+        return humanMessage({ id: message.messageId, content: message.content });
       case 'assistant':
-        return new AIMessage({
+        return aiMessage({
           id: message.messageId,
           content: message.content ?? '',
           tool_calls: message.toolCalls.map((call) => ({
@@ -62,16 +68,19 @@ function runtimeTranscriptMessages(messages: TranscriptMessage[]): BaseMessage[]
             args: (call.args ?? {}) as Record<string, unknown>,
             type: 'tool_call' as const,
           })),
+          additional_kwargs: {
+            ...(message.reasoningText ? { reasoning_content: message.reasoningText } : {}),
+          },
         });
       case 'tool':
-        return new ToolMessage({
+        return toolMessage({
           tool_call_id: message.toolCallId,
           name: message.name,
           content: message.content,
           status: message.ok ? 'success' : 'error',
         });
       default:
-        return new HumanMessage({ content: '' });
+        return humanMessage({ content: '' });
     }
   });
 }
@@ -96,31 +105,19 @@ export async function invokeRuntimeModel(params: {
   const requestId = genInteractionId();
   const retryEvents: RuntimeEvent[] = [];
 
-  // 注册 retry listener — 模型内部 _generate 有 withTransientModelRetry 包装，
-  // 但需要通过 listener 回调来收集重试事件为 RuntimeEvent。
-  // Register retry listener — the model's _generate is wrapped with
-  // withTransientModelRetry, but we need the listener callback to collect
-  // retry events as RuntimeEvents.
-  const modelWithRetry = params.model as {
-    setRetryListener?:
-      | ((
-          listener:
-            | ((attempt: number, maxAttempts: number, error: unknown, delayMs: number) => void)
-            | null,
-        ) => void)
-      | null;
-  };
-  if (typeof modelWithRetry.setRetryListener === 'function') {
-    modelWithRetry.setRetryListener((attempt, maxAttempts, error, delayMs) => {
-      retryEvents.push({
-        type: 'model.retry',
-        attempt,
-        maxAttempts,
-        error: typeof error === 'string' ? error : String(error).slice(0, 200),
-        delayMs,
-      });
+  // 注册 retry listener — 模型通过 transientRetryMiddleware 实现重试，
+  // 通过 setRetryListener 回调来收集重试事件为 RuntimeEvent。
+  // Register retry listener — the model retries via transientRetryMiddleware,
+  // we collect retry events as RuntimeEvents through the listener callback.
+  params.model.setRetryListener((attempt, maxAttempts, error, delayMs) => {
+    retryEvents.push({
+      type: 'model.retry',
+      attempt,
+      maxAttempts,
+      error: typeof error === 'string' ? error : String(error).slice(0, 200),
+      delayMs,
     });
-  }
+  });
 
   try {
     const tools = createAgentTools({
@@ -223,8 +220,6 @@ export async function invokeRuntimeModel(params: {
     }
     return events;
   } finally {
-    if (typeof modelWithRetry.setRetryListener === 'function') {
-      modelWithRetry.setRetryListener(null);
-    }
+    params.model.setRetryListener(null);
   }
 }

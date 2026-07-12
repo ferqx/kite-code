@@ -1,7 +1,5 @@
 import { isAbsolute, relative, resolve } from 'node:path';
-import type { BaseMessage } from '@langchain/core/messages';
-import { type AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
-import { ChatOllama } from '@langchain/ollama';
+import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import {
   type ExecutionJournalEntry,
@@ -11,7 +9,10 @@ import {
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
+import type { BaseMessage } from '@/core/messages';
+import { humanMessage, systemMessage, toolMessage } from '@/core/messages';
 import { createChatModel } from '@/core/model/factory';
+import { invokeBoundModel } from '@/core/model/invoke';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
@@ -56,14 +57,6 @@ function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
     }
     return inner(shellInput);
   };
-}
-
-function bindTools(
-  model: ReturnType<typeof createChatModel>,
-  tools: ReturnType<typeof createAgentTools>,
-) {
-  if (model instanceof ChatOllama) return model.bindTools(tools);
-  return model.bindTools(tools, { tool_choice: 'auto' });
 }
 
 let _subAgentCounter = 0;
@@ -138,7 +131,7 @@ ${input.task}`;
     ].join('\n');
   }
   systemPrompt += `\n\n${cacheableRuntimeCtx}`;
-  return [new SystemMessage(systemPrompt), new HumanMessage(taskWithCwd)];
+  return [systemMessage(systemPrompt), humanMessage(taskWithCwd)];
 }
 
 function normalizeRoleConfig(role: SubAgentRoleConfig): SubAgentRoleConfig {
@@ -217,7 +210,7 @@ export async function resumeSubAgent(
     id: continuation.id,
     messages: [
       ...continuation.messages,
-      new ToolMessage({
+      toolMessage({
         content: toolOutput,
         tool_call_id: toolResult.toolCallId,
         name: toolResult.toolName,
@@ -286,20 +279,33 @@ async function runSubAgentLoop(
   const depth = input.depth ?? 0;
   const maxDepth = input.maxDepth ?? 0;
   const canSpawnSubAgents = depth < maxDepth;
-  const tools = input.role.allowedTools
-    ? allTools.filter(
-        (t) => input.role.allowedTools?.has(t.name) && (canSpawnSubAgents || t.name !== 'task'),
-      )
-    : allTools.filter((t) => canSpawnSubAgents || t.name !== 'task');
+  // ToolSet is now Record<string, Tool> — filter by key (tool name)
+  const tools: ToolSet = {};
+  if (input.role.allowedTools) {
+    for (const [name, t] of Object.entries(allTools)) {
+      if (input.role.allowedTools.has(name) && (canSpawnSubAgents || name !== 'task')) {
+        tools[name] = t;
+      }
+    }
+  } else {
+    for (const [name, t] of Object.entries(allTools)) {
+      if (canSpawnSubAgents || name !== 'task') {
+        tools[name] = t;
+      }
+    }
+  }
 
   try {
     await new Promise((r) => setTimeout(r, 0));
 
     while (true) {
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
-      const response = (await bindTools(model, tools).invoke(messages, {
+      const response = await invokeBoundModel({
+        model,
+        tools,
+        messages,
         signal: combinedSignal,
-      })) as AIMessage;
+      });
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
 
       const cacheMetrics = extractPromptCacheMetrics(response);
@@ -364,12 +370,12 @@ async function runSubAgentLoop(
       messages.push(response);
       for (const tc of response.tool_calls) {
         if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
-        const tool = tools.find((t) => t.name === tc.name);
+        const tool = tools[tc.name];
         if (!tool) {
-          const available = [...new Set(tools.map((t) => t.name))].sort().join(', ');
+          const available = Object.keys(tools).sort().join(', ');
           const errMsg = `Tool "${tc.name}" is not available to this sub-agent. Available tools: ${available}. Use one of the available tools instead.`;
           messages.push(
-            new ToolMessage({
+            toolMessage({
               content: JSON.stringify({ ok: false, error: errMsg }),
               tool_call_id: tc.id ?? '',
               name: tc.name,
@@ -437,11 +443,11 @@ async function runSubAgentLoop(
             },
           });
           messages.push(
-            new ToolMessage({
+            toolMessage({
               content: blockedOutput,
               tool_call_id: tc.id ?? '',
               name: tc.name,
-              status: 'exhausted' as unknown as ToolMessage['status'],
+              status: 'exhausted',
             }),
           );
           stepSnapshot.ok = false;
@@ -626,10 +632,11 @@ async function runSubAgentLoop(
         });
 
         messages.push(
-          new ToolMessage({
+          toolMessage({
             content: toolOutput,
             tool_call_id: tc.id ?? '',
             name: tc.name,
+            status: ok ? 'success' : 'error',
           }),
         );
       }

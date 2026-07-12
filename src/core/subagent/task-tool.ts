@@ -1,4 +1,4 @@
-import { tool } from '@langchain/core/tools';
+import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
@@ -70,40 +70,35 @@ export async function runTaskSubAgent(
 }
 
 export function createTaskTool(deps: TaskToolDeps) {
-  return tool(
-    async ({ subagent_type, task }) => {
-      const result = await runTaskSubAgent(deps, { subagent_type, task });
-      return JSON.stringify(result);
-    },
-    {
-      name: 'task',
-      description: [
-        'Dispatch a specialized sub-agent to handle a standalone task in an isolated context window.',
-        'Sub-agents have their own context; they CANNOT see the main conversation history.',
-        'Use this to: run independent work in parallel, delegate well-scoped tasks, or keep the main conversation focused.',
-        '',
-        'When to use (prefer task over direct tool calls):',
-        '- Searching for something across many files: use explore sub-agent instead of multiple greps/reads',
-        '- Implementing a self-contained feature or fix: use code sub-agent with clear, specific instructions',
-        '- Reviewing code for bugs or security issues: use review sub-agent for an impartial audit',
-        '- Any task where the sub-agent can work independently without needing main conversation context',
-        "- The user explicitly asks you to 'dispatch', 'delegate', or 'use a sub-agent'",
-        '',
-        'When NOT to use:',
-        '- Simple single-file reads or single grep: use read_file or shell_execute directly',
-        '- Tasks that depend on understanding the full conversation history',
-        '',
-        'Available types:',
-        '- explore: Read-only search across the codebase. Best for: finding usages, tracing call chains, gathering evidence.',
-        '- plan: Read-only architecture design. Best for: designing implementation approaches, evaluating trade-offs, proposing file structures.',
-        '- code: Full read/write/execute. Best for: implementing features, fixing bugs, running tests.',
-        '- review: Read-only critical review. Best for: security audit, code quality check, regression detection.',
-        '',
-        'If the sub-agent returns blocked.reasonCode=SUBAGENT_TOOL_REQUIRES_APPROVAL, do not retry task. The harness will resume the sub-agent after approval.',
-        '',
-        'Write self-contained instructions in the task field; include file paths, function names, and specific requirements.',
-      ].join('\n'),
-      schema: z.object({
+  return tool({
+    description: [
+      'Dispatch a specialized sub-agent to handle a standalone task in an isolated context window.',
+      'Sub-agents have their own context; they CANNOT see the main conversation history.',
+      'Use this to: run independent work in parallel, delegate well-scoped tasks, or keep the main conversation focused.',
+      '',
+      'When to use (prefer task over direct tool calls):',
+      '- Searching for something across many files: use explore sub-agent instead of multiple greps/reads',
+      '- Implementing a self-contained feature or fix: use code sub-agent with clear, specific instructions',
+      '- Reviewing code for bugs or security issues: use review sub-agent for an impartial audit',
+      '- Any task where the sub-agent can work independently without needing main conversation context',
+      "- The user explicitly asks you to 'dispatch', 'delegate', or 'use a sub-agent'",
+      '',
+      'When NOT to use:',
+      '- Simple single-file reads or single grep: use read_file or shell_execute directly',
+      '- Tasks that depend on understanding the full conversation history',
+      '',
+      'Available types:',
+      '- explore: Read-only search across the codebase. Best for: finding usages, tracing call chains, gathering evidence.',
+      '- plan: Read-only architecture design. Best for: designing implementation approaches, evaluating trade-offs, proposing file structures.',
+      '- code: Full read/write/execute. Best for: implementing features, fixing bugs, running tests.',
+      '- review: Read-only critical review. Best for: security audit, code quality check, regression detection.',
+      '',
+      'If the sub-agent returns blocked.reasonCode=SUBAGENT_TOOL_REQUIRES_APPROVAL, do not retry task. The harness will resume the sub-agent after approval.',
+      '',
+      'Write self-contained instructions in the task field; include file paths, function names, and specific requirements.',
+    ].join('\n'),
+    inputSchema: zodSchema(
+      z.object({
         subagent_type: z
           .enum(['explore', 'plan', 'code', 'review'])
           .describe('Type of sub-agent to invoke'),
@@ -114,6 +109,10 @@ export function createTaskTool(deps: TaskToolDeps) {
             'Self-contained task description with all necessary context. The sub-agent cannot see the main conversation.',
           ),
       }),
+    ),
+    execute: async ({ subagent_type, task }) => {
+      const result = await runTaskSubAgent(deps, { subagent_type, task });
+      return JSON.stringify(result);
     },
-  );
+  });
 }

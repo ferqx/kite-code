@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AIMessage } from '@langchain/core/messages';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
+import { aiMessage } from '../src/core/messages';
 import { StreamingMockModel } from './mock-model';
 
 function mockEventSink() {
@@ -101,14 +101,14 @@ describe('SubAgentRunner integration', () => {
       const model = new StreamingMockModel({
         responses: [
           {
-            message: new AIMessage({
+            message: aiMessage({
               content: 'read package',
               tool_calls: [
                 { id: 'tc-abs', name: 'read_file', args: { path: join(ws, 'package.json') } },
               ],
             }),
           },
-          { message: new AIMessage({ content: 'done' }) },
+          { message: aiMessage({ content: 'done' }) },
         ],
       }) as any;
 
@@ -143,7 +143,7 @@ describe('SubAgentRunner integration', () => {
       const model = new StreamingMockModel({
         responses: [
           {
-            message: new AIMessage({
+            message: aiMessage({
               content: 'verify',
               tool_calls: [
                 {
@@ -158,7 +158,7 @@ describe('SubAgentRunner integration', () => {
               ],
             }),
           },
-          { message: new AIMessage({ content: 'done' }) },
+          { message: aiMessage({ content: 'done' }) },
         ],
       }) as any;
 
@@ -200,7 +200,7 @@ describe('SubAgentRunner integration', () => {
       const model = new StreamingMockModel({
         responses: [
           {
-            message: new AIMessage({
+            message: aiMessage({
               content: 'verify',
               tool_calls: [
                 {
@@ -215,7 +215,7 @@ describe('SubAgentRunner integration', () => {
               ],
             }),
           },
-          { message: new AIMessage({ content: 'done' }) },
+          { message: aiMessage({ content: 'done' }) },
         ],
       }) as any;
 
@@ -273,7 +273,7 @@ describe('SubAgentRunner integration', () => {
       const model = new StreamingMockModel({
         responses: [
           {
-            message: new AIMessage({
+            message: aiMessage({
               content: 'verify',
               tool_calls: [
                 {
@@ -288,7 +288,7 @@ describe('SubAgentRunner integration', () => {
               ],
             }),
           },
-          { message: new AIMessage({ content: 'saw typecheck ok' }) },
+          { message: aiMessage({ content: 'saw typecheck ok' }) },
         ],
       }) as any;
 

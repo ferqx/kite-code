@@ -1,5 +1,6 @@
-import { type BaseMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { generateText, stepCountIs } from 'ai';
 import type { AgentConfig } from '@/core/config/index';
+import { type BaseMessage, humanMessage, isSystemMessage, systemMessage } from '@/core/messages';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import type { ShellApprovalGrant } from '@/protocol/events';
 import type { ToolApprovalPayload } from '../harness/tool-policy';
@@ -43,12 +44,7 @@ export function createAutoReviewModel(config: AgentConfig): SupportedChatModel {
 }
 
 export async function reviewToolApproval(input: {
-  model: {
-    invoke(
-      messages: BaseMessage[],
-      options?: { signal?: AbortSignal; [key: string]: unknown },
-    ): Promise<unknown>;
-  };
+  model: SupportedChatModel;
   payload: ToolApprovalPayload;
   request: PendingToolRequest;
   context?: ReviewContext;
@@ -62,14 +58,34 @@ export async function reviewToolApproval(input: {
     effectiveTimeout,
   );
   try {
-    const response = await input.model.invoke(
-      buildReviewPrompt(input.payload, input.request, input.context),
-      { response_format: { type: 'json_object' }, signal: controller.signal },
-    );
-    const result = parseAutoReviewSuggestion(messageContent(response), input.payload.grantOptions);
+    const messages = buildReviewPrompt(input.payload, input.request, input.context);
+    // Convert LangChain messages to AI SDK format — system messages go via `system` option
+    const systemMsgs: string[] = [];
+    const chatMsgs: Array<{ role: 'user'; content: string }> = [];
+    for (const msg of messages) {
+      if (isSystemMessage(msg)) {
+        systemMsgs.push(msg.content as string);
+      } else {
+        chatMsgs.push({ role: 'user' as const, content: msg.content as string });
+      }
+    }
+    const result = await generateText({
+      model: input.model.model,
+      messages: chatMsgs,
+      system: systemMsgs.join('\n\n') || undefined,
+      stopWhen: stepCountIs(1),
+      temperature: 0,
+      maxRetries: 0,
+      abortSignal: controller.signal,
+    });
+    const reviewResult = parseAutoReviewSuggestion(result.text, input.payload.grantOptions);
 
     // Belt-and-suspenders: destructive commands are never auto-approved
-    if (result.ok && result.suggestion?.approved && input.payload.risk === 'destructive') {
+    if (
+      reviewResult.ok &&
+      reviewResult.suggestion?.approved &&
+      input.payload.risk === 'destructive'
+    ) {
       return {
         ok: true,
         suggestion: {
@@ -81,7 +97,7 @@ export async function reviewToolApproval(input: {
       };
     }
 
-    return result;
+    return reviewResult;
   } catch (error) {
     return {
       ok: false,
@@ -177,10 +193,7 @@ function buildReviewPrompt(
     }
   }
 
-  return [
-    new SystemMessage(REVIEWER_SYSTEM_PROMPT),
-    new HumanMessage(JSON.stringify(reviewData, null, 2)),
-  ];
+  return [systemMessage(REVIEWER_SYSTEM_PROMPT), humanMessage(JSON.stringify(reviewData, null, 2))];
 }
 
 function riskAdjustedTimeout(risk: string, defaultTimeout: number): number {
@@ -268,22 +281,4 @@ function extractJsonObject(content: string): string | null {
 
 function isShellApprovalGrant(value: string): value is ShellApprovalGrant {
   return value === 'approve_once' || value === 'same_command' || value === 'full_access';
-}
-
-function messageContent(message: unknown): string {
-  const content = (message as { content?: unknown })?.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part && typeof part === 'object' && 'text' in part) {
-          const text = (part as { text?: unknown }).text;
-          return typeof text === 'string' ? text : '';
-        }
-        return '';
-      })
-      .join('');
-  }
-  return '';
 }

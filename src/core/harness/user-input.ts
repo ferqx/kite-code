@@ -1,4 +1,4 @@
-import { ToolMessage } from '@langchain/core/messages';
+import { type ToolMessage, toolMessage } from '@/core/messages';
 import type { AgentResumeValue } from '@/core/types';
 import type { PendingToolRequest } from './tool-requests';
 
@@ -53,7 +53,7 @@ export function userInputToolMessage(
   resume: AgentResumeValue,
 ): ToolMessage {
   const normalized = normalizeUserInputResume(resume);
-  return new ToolMessage({
+  return toolMessage({
     content: JSON.stringify({
       ok: true,
       answer: normalized.answer,

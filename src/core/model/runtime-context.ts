@@ -1,5 +1,5 @@
 import { platform as osPlatformFn, type as osTypeFn, release } from 'node:os';
-import type { BaseMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@/core/messages';
 import type { SandboxBackend } from '@/core/sandbox/platform';
 import type {
   AgentPhase,

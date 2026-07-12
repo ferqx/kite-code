@@ -2,7 +2,7 @@
 // 验证每个 tool_call 有且只有一个 tool result，sanitize 不删除 plan 反馈
 
 import { describe, expect, test } from 'bun:test';
-import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { aiMessage, humanMessage, toolMessage } from '../../src/core/messages';
 import { sanitizeToolCallPairs } from '../../src/core/model/context';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
@@ -100,7 +100,7 @@ describe('transcript integrity', () => {
     // Plan revise feedback comes as a ToolMessage from write_plan
     // It should NOT be removed by sanitization
     const msgs = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [
           {
@@ -110,11 +110,11 @@ describe('transcript integrity', () => {
           },
         ],
       }),
-      new ToolMessage({
+      toolMessage({
         content: JSON.stringify({ decision: 'revise', feedback: 'Add error handling' }),
         tool_call_id: 'tc-epm',
       }),
-      new HumanMessage('Revised plan submitted'),
+      humanMessage('Revised plan submitted'),
     ];
 
     const sanitized = sanitizeToolCallPairs(msgs);

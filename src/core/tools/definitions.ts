@@ -1,6 +1,5 @@
-import { tool } from '@langchain/core/tools';
+import { type ToolSet, tool, zodSchema } from 'ai';
 import { z } from 'zod';
-import { adaptMcpTool } from '@/core/mcp/tool-adapter';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { createSkillTool } from '@/core/skills/skill-tool';
 import { createTaskTool } from '@/core/subagent/task-tool';
@@ -55,7 +54,7 @@ export interface CreateAgentToolsInput {
 }
 
 /** 模块级工具缓存：按 cacheKey 隔离，防止多 session 并发时竞态覆盖 / Module-level tool cache isolated by cacheKey to prevent race conditions with concurrent sessions */
-const _toolCache = new Map<string, any[]>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- internal cache, breaks circular ReturnType<> reference
+const _toolCache = new Map<string, ToolSet>();
 
 function stableCacheStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -73,7 +72,7 @@ export function clearToolCache(): void {
 }
 
 /** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
-export function createAgentTools(input: CreateAgentToolsInput) {
+export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
   // 缓存：同一个 agent 迭代中参数不变时避免重建全部工具（包括 MCP 适配）
   // Include subagentEventSink presence and MCP tool count to invalidate on tool list changes
   const mcpToolCount = input.mcpManager?.getAllTools().length ?? 0;
@@ -86,35 +85,23 @@ export function createAgentTools(input: CreateAgentToolsInput) {
   const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpToolCount}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
-  const readFileTool = tool(
-    async ({ path, offset, limit }) =>
-      JSON.stringify(readFile({ workspace: input.workspace, path, offset, limit })),
-    {
-      name: 'read_file',
-      description: READ_FILE_CONTRACT.description,
-      schema: z.object({
+  const readFileTool = tool({
+    description: READ_FILE_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
         path: z.string().describe('Path to the file, relative to workspace'),
         offset: z.number().optional().describe('Starting line number (1-indexed, default 1)'),
         limit: z.number().optional().describe('Maximum number of lines to read'),
       }),
-    },
-  );
+    ),
+    execute: async ({ path, offset, limit }) =>
+      JSON.stringify(readFile({ workspace: input.workspace, path, offset, limit })),
+  });
 
-  const editFileTool = tool(
-    async ({ path, old_string, new_string, replace_all }) =>
-      JSON.stringify(
-        editFile({
-          workspace: input.workspace,
-          path,
-          oldString: old_string,
-          newString: new_string,
-          replaceAll: replace_all,
-        }),
-      ),
-    {
-      name: 'edit_file',
-      description: EDIT_FILE_CONTRACT.description,
-      schema: z.object({
+  const editFileTool = tool({
+    description: EDIT_FILE_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
         path: z.string().describe('Path to the file to edit, relative to workspace'),
         old_string: z
           .string()
@@ -133,16 +120,23 @@ export function createAgentTools(input: CreateAgentToolsInput) {
             'Match mode: exact (default) for verbatim matching, trimmed for per-line whitespace trimming',
           ),
       }),
-    },
-  );
+    ),
+    execute: async ({ path, old_string, new_string, replace_all }) =>
+      JSON.stringify(
+        editFile({
+          workspace: input.workspace,
+          path,
+          oldString: old_string,
+          newString: new_string,
+          replaceAll: replace_all,
+        }),
+      ),
+  });
 
-  const writeFileTool = tool(
-    async ({ path, content, mode }) =>
-      JSON.stringify(writeFile({ workspace: input.workspace, path, content, mode })),
-    {
-      name: 'write_file',
-      description: WRITE_FILE_CONTRACT.description,
-      schema: z.object({
+  const writeFileTool = tool({
+    description: WRITE_FILE_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
         path: z.string().describe('Path to the file, relative to workspace'),
         content: z.string().describe('Complete file content to write'),
         mode: z
@@ -152,23 +146,15 @@ export function createAgentTools(input: CreateAgentToolsInput) {
             'Write mode: overwrite (default) replaces entire file, append adds content at end',
           ),
       }),
-    },
-  );
+    ),
+    execute: async ({ path, content, mode }) =>
+      JSON.stringify(writeFile({ workspace: input.workspace, path, content, mode })),
+  });
 
-  const shellExecute = tool(
-    async ({ command, timeout_ms }) =>
-      JSON.stringify(
-        await (input.shellExecutor ?? shellTool)({
-          workspace: input.workspace,
-          command,
-          signal: input.signal,
-          timeoutMs: timeout_ms,
-        }),
-      ),
-    {
-      name: 'shell_execute',
-      description: SHELL_EXECUTE_CONTRACT.description,
-      schema: z.object({
+  const shellExecute = tool({
+    description: SHELL_EXECUTE_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
         command: z.string().describe('Shell command to execute in the workspace'),
         description: z
           .string()
@@ -197,11 +183,27 @@ export function createAgentTools(input: CreateAgentToolsInput) {
           .optional()
           .describe('Suggested approval grant; the user resume payload decides the actual grant'),
       }),
-    },
-  );
+    ),
+    execute: async ({ command, timeout_ms }) =>
+      JSON.stringify(
+        await (input.shellExecutor ?? shellTool)({
+          workspace: input.workspace,
+          command,
+          signal: input.signal,
+          timeoutMs: timeout_ms,
+        }),
+      ),
+  });
 
-  const readMcpResource = tool(
-    async ({ server, uri }) => {
+  const readMcpResource = tool({
+    description: READ_MCP_RESOURCE_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
+        server: z.string().describe('MCP server name'),
+        uri: z.string().describe('Resource URI to read (e.g. file:///docs/api.md)'),
+      }),
+    ),
+    execute: async ({ server, uri }) => {
       if (!input.mcpManager) {
         return JSON.stringify({
           ok: false,
@@ -218,27 +220,13 @@ export function createAgentTools(input: CreateAgentToolsInput) {
         });
       }
     },
-    {
-      name: 'read_mcp_resource',
-      description: READ_MCP_RESOURCE_CONTRACT.description,
-      schema: z.object({
-        server: z.string().describe('MCP server name'),
-        uri: z.string().describe('Resource URI to read (e.g. file:///docs/api.md)'),
-      }),
-    },
-  );
+  });
 
   // ── search_content: dedicated code search (replaces shell_execute grep/rg) ──
-  const searchContent = tool(
-    async ({ pattern, path, glob }) => {
-      return JSON.stringify(
-        searchContentNative({ workspace: input.workspace, pattern, path, glob }),
-      );
-    },
-    {
-      name: 'search_content',
-      description: SEARCH_CONTENT_CONTRACT.description,
-      schema: z.object({
+  const searchContent = tool({
+    description: SEARCH_CONTENT_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
         pattern: z.string().describe('Regex pattern to search for (e.g. "function\\s+\\w+")'),
         path: z
           .string()
@@ -246,23 +234,27 @@ export function createAgentTools(input: CreateAgentToolsInput) {
           .describe('Directory or file path to search in (default: workspace root)'),
         glob: z.string().optional().describe('File glob filter (e.g. "*.ts", "*.{ts,tsx}")'),
       }),
+    ),
+    execute: async ({ pattern, path, glob }) => {
+      return JSON.stringify(
+        searchContentNative({ workspace: input.workspace, pattern, path, glob }),
+      );
     },
-  );
+  });
 
   // ── search_files: dedicated file discovery (replaces shell_execute find/ls) ──
-  const searchFiles = tool(
-    async ({ pattern, path }) => {
-      return JSON.stringify(searchFilesNative({ workspace: input.workspace, pattern, path }));
-    },
-    {
-      name: 'search_files',
-      description: SEARCH_FILES_CONTRACT.description,
-      schema: z.object({
+  const searchFiles = tool({
+    description: SEARCH_FILES_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
         pattern: z.string().describe('File name pattern (e.g. "*.test.ts", "config.*")'),
         path: z.string().optional().describe('Directory to search in (default: workspace root)'),
       }),
+    ),
+    execute: async ({ pattern, path }) => {
+      return JSON.stringify(searchFilesNative({ workspace: input.workspace, pattern, path }));
     },
-  );
+  });
 
   let skillTool: ReturnType<typeof createSkillTool> | null = null;
   if (input.skills && input.skills.length > 0 && input.skillOptions) {
@@ -289,8 +281,34 @@ export function createAgentTools(input: CreateAgentToolsInput) {
         })
       : null;
 
-  const webFetchTool = tool(
-    async ({ url, max_chars, timeout_ms }) => {
+  const webFetchTool = tool({
+    description: WEB_FETCH_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
+        url: z
+          .string()
+          .min(1)
+          .max(8192)
+          .describe('Public http/https URL to fetch (max 8192 chars)'),
+        max_chars: z
+          .number()
+          .int()
+          .min(1000)
+          .max(16000)
+          .optional()
+          .describe('Max characters of extracted content (default 8000)'),
+        timeout_ms: z
+          .number()
+          .int()
+          .min(3000)
+          .max(30000)
+          .optional()
+          .describe(
+            'Timeout in milliseconds (default 15000). Increase for large pages like Wikipedia or GitHub.',
+          ),
+      }),
+    ),
+    execute: async ({ url, max_chars, timeout_ms }) => {
       try {
         const result = await fetchAndExtract(url, {
           signal: input.signal,
@@ -326,60 +344,32 @@ export function createAgentTools(input: CreateAgentToolsInput) {
         });
       }
     },
-    {
-      name: 'web_fetch',
-      description: WEB_FETCH_CONTRACT.description,
-      schema: z.object({
-        url: z
-          .string()
-          .min(1)
-          .max(8192)
-          .describe('Public http/https URL to fetch (max 8192 chars)'),
-        max_chars: z
-          .number()
-          .int()
-          .min(1000)
-          .max(16000)
-          .optional()
-          .describe('Max characters of extracted content (default 8000)'),
-        timeout_ms: z
-          .number()
-          .int()
-          .min(3000)
-          .max(30000)
-          .optional()
-          .describe(
-            'Timeout in milliseconds (default 15000). Increase for large pages like Wikipedia or GitHub.',
-          ),
-      }),
-    },
-  );
+  });
 
-  const builtinTools = [
-    readFileTool,
-    editFileTool,
-    writeFileTool,
-    shellExecute,
-    searchContent,
-    searchFiles,
-    readMcpResource,
-    webFetchTool,
-    ...(skillTool ? [skillTool] : []),
-    ...(taskTool ? [taskTool] : []),
-    createWritePlanTool(),
-    createProgressUpdatePlanTool(),
-    createAskUserTool(),
-  ];
+  const builtinTools: ToolSet = {
+    read_file: readFileTool,
+    edit_file: editFileTool,
+    write_file: writeFileTool,
+    shell_execute: shellExecute,
+    search_content: searchContent,
+    search_files: searchFiles,
+    read_mcp_resource: readMcpResource,
+    web_fetch: webFetchTool,
+    ...(skillTool ? { Skill: skillTool } : {}),
+    ...(taskTool ? { task: taskTool } : {}),
+    write_plan: createWritePlanTool(),
+    update_plan: createProgressUpdatePlanTool(),
+    ask_user: createAskUserTool(),
+  };
 
-  // MCP 工具合成
+  // MCP 工具合成 — 暂时禁用，待 Step 6 MCP 迁移完成后恢复
+  // MCP tool synthesis — temporarily disabled, will be restored after Step 6 MCP migration
+  // TODO(Step 6): Replace adaptMcpTool with direct ToolSet from mcpManager.getToolSet()
   if (input.mcpManager) {
-    const mcpEntries = input.mcpManager.getAllTools();
-    const mcpTools = mcpEntries.map(({ server, tool }) =>
-      adaptMcpTool(server, tool, input.mcpManager!),
-    );
-    const all = [...builtinTools, ...mcpTools];
-    _toolCache.set(cacheKey, all);
-    return all;
+    // MCP tools still use langchain format; skip for now until Step 6
+    // Store only builtin tools; MCP integration will be restored after @ai-sdk/mcp migration
+    _toolCache.set(cacheKey, builtinTools);
+    return builtinTools;
   }
 
   _toolCache.set(cacheKey, builtinTools);
@@ -399,22 +389,10 @@ export function createPlanAgentTools(input: CreateAgentToolsInput) {
 /** 创建 write_plan 工具定义 — 保存草稿或提交审核。
  *  Create write_plan tool definition — save draft or submit for review. */
 function createWritePlanTool() {
-  return tool(
-    async ({ title, body_markdown, steps, expected_version, action }) => {
-      const submit = action === 'submit';
-      return JSON.stringify({
-        ok: true,
-        plan_id: '', // filled by tool-controller
-        version: 0, // filled by tool-controller
-        structural_digest: '', // filled by tool-controller
-        review_required: submit,
-        _params: { title, body_markdown, steps, expected_version, action },
-      });
-    },
-    {
-      name: 'write_plan',
-      description: WRITE_PLAN_CONTRACT.description,
-      schema: z.object({
+  return tool({
+    description: WRITE_PLAN_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
         title: z.string().trim().min(1).max(120).describe('One-line plan title (max 120 chars)'),
         body_markdown: z
           .string()
@@ -449,26 +427,29 @@ function createWritePlanTool() {
             'save: store draft and continue planning. submit: save and request user review (pauses execution).',
           ),
       }),
+    ),
+    execute: async ({ title, body_markdown, steps, expected_version, action }) => {
+      const effectiveAction = action ?? 'save';
+      const submit = effectiveAction === 'submit';
+      return JSON.stringify({
+        ok: true,
+        plan_id: '', // filled by tool-controller
+        version: 0, // filled by tool-controller
+        structural_digest: '', // filled by tool-controller
+        review_required: submit,
+        _params: { title, body_markdown, steps, expected_version, action: effectiveAction },
+      });
     },
-  );
+  });
 }
 
 /** 创建 update_plan 工具定义 — 批准后更新步骤执行进度。
  *  Create update_plan tool definition — update step execution progress after approval. */
 function createProgressUpdatePlanTool() {
-  return tool(
-    async ({ plan_id, updates, complete_plan }) =>
-      JSON.stringify({
-        ok: true,
-        plan_id,
-        updated_steps: updates.map((u) => u.step_id),
-        plan_completed: complete_plan ?? false,
-        _params: { plan_id, updates, complete_plan },
-      }),
-    {
-      name: 'update_plan',
-      description: UPDATE_PLAN_CONTRACT.description,
-      schema: z.object({
+  return tool({
+    description: UPDATE_PLAN_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
         plan_id: z.string().min(1).describe('Plan ID from the approved plan'),
         updates: z
           .array(
@@ -488,8 +469,16 @@ function createProgressUpdatePlanTool() {
           .optional()
           .describe('Set to true when all steps are done to mark the plan as completed'),
       }),
-    },
-  );
+    ),
+    execute: async ({ plan_id, updates, complete_plan }) =>
+      JSON.stringify({
+        ok: true,
+        plan_id,
+        updated_steps: updates.map((u) => u.step_id),
+        plan_completed: complete_plan ?? false,
+        _params: { plan_id, updates, complete_plan },
+      }),
+  });
 }
 
 /** 创建 ask_user 工具定义，用于规划时向用户澄清关键不确定性。
@@ -536,21 +525,10 @@ function createAskUserTool() {
       .describe('Whether user may type custom answer for this question; default true'),
   });
 
-  return tool(
-    async ({ question, options, allow_free_text, context, questions }) =>
-      JSON.stringify({
-        ok: false,
-        question,
-        options,
-        allow_free_text: allow_free_text ?? true,
-        context,
-        questions,
-        stderr: 'ask_user is handled by the harness as a user_input interrupt.',
-      }),
-    {
-      name: 'ask_user',
-      description: ASK_USER_CONTRACT.description,
-      schema: z.object({
+  return tool({
+    description: ASK_USER_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
         question: z
           .string()
           .min(1)
@@ -582,8 +560,18 @@ function createAskUserTool() {
             'Multiple questions at once — TUI renders as a step wizard. Use this to batch clarifications instead of making multiple ask_user calls.',
           ),
       }),
-    },
-  );
+    ),
+    execute: async ({ question, options, allow_free_text, context, questions }) =>
+      JSON.stringify({
+        ok: false,
+        question,
+        options,
+        allow_free_text: allow_free_text ?? true,
+        context,
+        questions,
+        stderr: 'ask_user is handled by the harness as a user_input interrupt.',
+      }),
+  });
 }
 
 /** shell_execute inspect 允许直通的只读命令白名单 / Read-only command allowlist for shell_execute inspect */

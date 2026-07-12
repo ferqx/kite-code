@@ -1,6 +1,8 @@
-import { AIMessage, type BaseMessage, HumanMessage } from '@langchain/core/messages';
-import { ChatDeepSeek } from '@langchain/deepseek';
-import type { AgentConfig } from '@/core/config/index';
+// src/core/model/deepseek.ts
+// Transient retry + DeepSeek reasoning middleware for AI SDK LanguageModelV4.
+// Keeps retry logic from the old LangChain subclass, now applied via wrapLanguageModel middleware.
+
+import type { LanguageModelMiddleware } from 'ai';
 
 /** 模型重试监听器 / Model retry listener */
 export type ModelRetryListener = (
@@ -41,146 +43,6 @@ const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<Omit<TransientModelRetryOptions,
   maxTotalRetryMs: 30_000,
   sleep: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
 };
-
-const MODEL_REQUEST_TIMEOUT_MS = 30_000;
-
-/**
- * ChatDeepSeek 扩展：在 _generate 中注入 reasoning_content 到 API 请求体。
- * Extended ChatDeepSeek: injects reasoning_content into API request body in _generate.
- *
- * DeepSeek thinking 模型（如 deepseek-v4-flash）要求工具调用轮次的 reasoning_content 回传 API。
- * LangChain 的 convertMessagesToCompletionsMessageParams 不会从 additional_kwargs 复制该字段。
- * 我们 override _generate 来在发送前将 reasoning_content 注入 messagesMapped。
- *
- * DeepSeek thinking models (e.g. deepseek-v4-flash) require reasoning_content passback for
- * tool-call turns. LangChain's converter doesn't copy it from additional_kwargs.
- * We override _generate to inject reasoning_content into messagesMapped before sending.
- */
-class PatchedChatDeepSeek extends ChatDeepSeek {
-  /** @internal 暂存原始消息以便在 completionWithRetry 中回查 / Stash original messages for lookup in completionWithRetry */
-  private _originalMessages: BaseMessage[] | null = null;
-
-  /** 当前调用的重试监听器 / Retry listener for the current invocation */
-  _retryListener: ModelRetryListener | null = null;
-
-  /**
-   * 覆写非流式消息转换，确保 response_metadata.usage 始终包含原始 usage 数据。
-   * 父类仅在 system_fingerprint 存在时才写入 usage，而 DeepSeek 响应可能不带
-   * system_fingerprint，导致 prompt_cache_hit_tokens 等字段丢失。
-   *
-   * Override non-streaming message conversion to ensure response_metadata.usage
-   * always contains the raw usage data. The parent only includes usage when
-   * system_fingerprint is present, but DeepSeek responses may omit it, causing
-   * prompt_cache_hit_tokens etc. to be lost.
-   */
-  override _convertCompletionsMessageToBaseMessage(message: any, rawResponse: any): BaseMessage {
-    const base = super._convertCompletionsMessageToBaseMessage(message, rawResponse);
-    // 如果父类已经写入 usage 且含有缓存字段，直接返回 / If parent already wrote usage with cache fields, return as-is
-    const existing = (base.response_metadata as Record<string, unknown>)?.usage as
-      | Record<string, unknown>
-      | undefined;
-    if (existing?.prompt_cache_hit_tokens != null || existing?.prompt_cache_miss_tokens != null)
-      return base;
-    // 父类未写入 usage 或缺少缓存字段：从 rawResponse 补全 / Parent missed usage or cache fields: patch from rawResponse
-    const rawUsage = rawResponse?.usage as Record<string, unknown> | undefined;
-    if (!rawUsage) return base;
-    base.response_metadata = {
-      ...base.response_metadata,
-      usage: { ...rawUsage },
-    };
-    return base;
-  }
-
-  /** 设置重试监听器 / Set the retry listener */
-  setRetryListener(listener: ModelRetryListener | null): void {
-    this._retryListener = listener;
-  }
-
-  /** @internal */
-  override async _generate(messages: BaseMessage[], options: any, runManager?: any): Promise<any> {
-    this._originalMessages = messages;
-    try {
-      return await super._generate(messages, options, runManager);
-    } finally {
-      this._originalMessages = null;
-    }
-  }
-
-  /** @internal 在发送前注入 reasoning_content / Inject reasoning_content before sending */
-  override async completionWithRetry(request: any, requestOptions?: any): Promise<any> {
-    if (this._originalMessages && request.messages && Array.isArray(request.messages)) {
-      // 按 HumanMessage 边界划分 user turn。根据 DeepSeek 官方文档：
-      // - 有 tool_calls 的 turn 内，所有 assistant 消息的 reasoning_content 必须回传
-      // - 无 tool_calls 的 turn 内，reasoning_content 回传也会被 API 忽略 → 清空以节省 token、提升缓存
-      //
-      // Split by HumanMessage boundaries into user turns. Per DeepSeek docs:
-      // - Tool-call turns: all reasoning_content must be passed back
-      // - No-tool-call turns: reasoning_content is ignored by API → strip to save tokens & improve cache
-      const originals = this._originalMessages;
-      const reasonings: string[] = [];
-      const pending: string[] = [];
-      let turnHasToolCalls = false;
-
-      function flushTurn() {
-        for (const rc of pending) {
-          reasonings.push(turnHasToolCalls ? rc : '');
-        }
-        pending.length = 0;
-        turnHasToolCalls = false;
-      }
-
-      for (const original of originals) {
-        if (HumanMessage.isInstance(original)) {
-          flushTurn();
-          continue;
-        }
-        if (!AIMessage.isInstance(original)) continue;
-
-        const hasToolCalls = Array.isArray(original.tool_calls) && original.tool_calls.length > 0;
-        if (hasToolCalls) turnHasToolCalls = true;
-
-        const reasoning = (original.additional_kwargs as Record<string, unknown>)
-          ?.reasoning_content;
-        pending.push(typeof reasoning === 'string' ? reasoning : '');
-      }
-      flushTurn();
-
-      let assistantIdx = 0;
-      for (const mapped of request.messages) {
-        if (mapped.role !== 'assistant') continue;
-        if (assistantIdx >= reasonings.length) break;
-        if ('reasoning_content' in mapped && mapped.reasoning_content !== undefined) {
-          assistantIdx++;
-          continue;
-        }
-        const reasoning = reasonings[assistantIdx];
-        if (typeof reasoning === 'string') {
-          mapped.reasoning_content = reasoning;
-        }
-        assistantIdx++;
-      }
-
-      // DeepSeek all-or-nothing requirement: if ANY assistant message has reasoning_content,
-      // ALL assistant messages must have it (even empty strings). Otherwise API returns 400.
-      const anyReasoning = request.messages.some(
-        (m: any) => m.role === 'assistant' && 'reasoning_content' in m,
-      );
-      if (anyReasoning) {
-        for (const m of request.messages) {
-          if (
-            m.role === 'assistant' &&
-            (!('reasoning_content' in m) || m.reasoning_content === undefined)
-          ) {
-            m.reasoning_content = '';
-          }
-        }
-      }
-    }
-    return withTransientModelRetry(() => super.completionWithRetry(request, requestOptions), {
-      onRetry: this._retryListener ?? undefined,
-    });
-  }
-}
 
 /** 只对瞬时连接错误重试模型请求 / Retry model requests only for transient connection errors */
 export async function withTransientModelRetry<T>(
@@ -262,22 +124,129 @@ function errorText(error: unknown, depth = 0): string {
   return String(error);
 }
 
-/** 创建 DeepSeek 聊天模型实例 / Create DeepSeek chat model instance */
-export function createDeepSeekModel(config: AgentConfig): ChatDeepSeek {
-  return new PatchedChatDeepSeek({
-    apiKey: config.apiKey,
-    maxRetries: 0,
-    configuration: {
-      baseURL: config.baseURL,
-      maxRetries: 0,
-      timeout: MODEL_REQUEST_TIMEOUT_MS,
+// ── AI SDK Middleware ──
+
+/**
+ * Transient retry middleware — wraps doGenerate with withTransientModelRetry.
+ * Replaces the old RetryingChatOpenAI/RetryingChatOllama/PatchedChatDeepSeek
+ * subclass _generate override pattern.
+ */
+export function transientRetryMiddleware(options: {
+  onRetry?: ModelRetryListener;
+}): LanguageModelMiddleware {
+  return {
+    wrapGenerate: async ({ doGenerate }: { doGenerate: () => Promise<unknown> }) => {
+      return withTransientModelRetry(() => doGenerate(), {
+        onRetry: options.onRetry,
+      });
     },
-    model: config.modelName,
-    temperature: 0,
-    timeout: MODEL_REQUEST_TIMEOUT_MS,
-    ...(config.reasoning !== false && config.reasoningEffort
-      ? { reasoningEffort: config.reasoningEffort }
-      : {}),
-    ...(config.modelKwargs ?? {}),
-  });
+  } as unknown as LanguageModelMiddleware;
+}
+
+/**
+ * DeepSeek reasoning_content passback middleware.
+ *
+ * DeepSeek thinking 模型（如 deepseek-v4-flash）要求工具调用轮次的 reasoning_content 回传 API。
+ * 此 middleware 在 transformParams 阶段遍历 prompt messages，
+ * 按 HumanMessage 边界划分 turn，计算 reasoning_content 并注入。
+ *
+ * DeepSeek thinking models require reasoning_content passback for tool-call turns.
+ * This middleware walks prompt messages in transformParams, splits by user-message
+ * boundaries into turns, computes reasoning_content per turn, and patches messages.
+ */
+export function createDeepSeekMiddleware(): LanguageModelMiddleware {
+  return {
+    transformParams: async ({ params }: { params: Record<string, unknown> }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- params shape is flexible across providers
+      const prompt = (params as any).prompt as Array<Record<string, unknown>> | undefined;
+      if (!prompt || !Array.isArray(prompt)) return params;
+      // Walk messages, partition by user-message boundaries, and collect
+      // reasoning_content per turn. The logic mirrors the old
+      // PatchedChatDeepSeek.completionWithRetry override.
+      const reasonings: string[] = [];
+      const pending: string[] = [];
+      let turnHasToolCalls = false;
+
+      function flushTurn() {
+        for (const rc of pending) {
+          reasonings.push(turnHasToolCalls ? rc : '');
+        }
+        pending.length = 0;
+        turnHasToolCalls = false;
+      }
+
+      for (const msg of prompt) {
+        if (msg.role === 'user') {
+          flushTurn();
+          continue;
+        }
+        if (msg.role !== 'assistant') continue;
+
+        const content = msg.content;
+        if (Array.isArray(content)) {
+          const hasToolCalls = content.some(
+            (part) => (part as { type?: string }).type === 'tool-call',
+          );
+          if (hasToolCalls) turnHasToolCalls = true;
+
+          // Collect reasoning_content from assistant messages
+          const reasoningPart = content.find(
+            (part) => (part as { type?: string }).type === 'reasoning',
+          );
+          const reasoningText =
+            reasoningPart && 'text' in (reasoningPart as Record<string, unknown>)
+              ? String((reasoningPart as Record<string, unknown>).text)
+              : '';
+          pending.push(reasoningText);
+        }
+      }
+      flushTurn();
+
+      // Apply reasoning_content to assistant messages in order
+      let assistantIdx = 0;
+      for (const msg of prompt) {
+        if (msg.role !== 'assistant') continue;
+        if (assistantIdx >= reasonings.length) break;
+
+        if (!Array.isArray(msg.content)) continue;
+
+        // Check if reasoning_content already exists (set by provider)
+        const hasReasoning = msg.content.some(
+          (part) => (part as { type?: string }).type === 'reasoning',
+        );
+        if (hasReasoning) {
+          assistantIdx++;
+          continue;
+        }
+
+        const reasoning = reasonings[assistantIdx];
+        if (reasoning) {
+          msg.content = [...msg.content, { type: 'reasoning' as const, text: reasoning }];
+        }
+        assistantIdx++;
+      }
+
+      // DeepSeek all-or-nothing requirement: if ANY assistant message has reasoning_content,
+      // ALL assistant messages must have it (even empty strings).
+      const anyReasoning = prompt.some(
+        (msg) =>
+          msg.role === 'assistant' &&
+          Array.isArray(msg.content) &&
+          msg.content.some((part) => (part as { type?: string }).type === 'reasoning'),
+      );
+      if (anyReasoning) {
+        for (const msg of prompt) {
+          if (
+            msg.role === 'assistant' &&
+            Array.isArray(msg.content) &&
+            !msg.content.some((part) => (part as { type?: string }).type === 'reasoning')
+          ) {
+            msg.content = [...msg.content, { type: 'reasoning' as const, text: '' }];
+          }
+        }
+      }
+
+      return params;
+    },
+  } as unknown as LanguageModelMiddleware;
 }

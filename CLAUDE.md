@@ -4,8 +4,8 @@
 
 - 运行时：Bun
 - 语言：TypeScript（ESM）
-- 核心依赖：`@langchain/core`、`@langchain/langgraph`、`@langchain/deepseek`、`@langchain/openai`、`@langchain/langgraph-checkpoint-sqlite`
-- 持久化：SQLite checkpoint
+- 核心依赖：`ai`（Vercel AI SDK v7）、`@ai-sdk/openai-compatible`、`@ai-sdk/mcp`
+- 持久化：SQLite checkpoint（Bun SQLite）
 
 ## 常用命令
 
