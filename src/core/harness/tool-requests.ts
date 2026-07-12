@@ -1,4 +1,10 @@
-import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import {
+  type AIMessage,
+  aiMessage,
+  type BaseMessage,
+  isAIMessage,
+  isToolMessage,
+} from '@/core/messages';
 import type { ShellActionEnvelope, ShellIntent } from '@/core/types';
 import type { ShellApprovalGrant, UserInputOption, UserInputRequest } from '@/protocol/events';
 
@@ -160,14 +166,14 @@ export function getPendingToolRequest(
   }
 
   // Search backwards for the last AIMessage with an unresolved tool_call.
-  // Use AIMessage.isInstance() instead of instanceof to handle deserialized
+  // Use isAIMessage() instead of instanceof to handle deserialized
   // messages from checkpoint — isInstance falls back to checking the `type`
   // field when the prototype chain is unavailable (e.g. after JSON round-trip).
   // Iterate ALL tool_calls (not just [0]) to handle multi-tool-call AIMessages
   // where the first call is resolved but later ones are not.
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (!AIMessage.isInstance(msg)) continue;
+    if (!isAIMessage(msg)) continue;
     if (!msg.tool_calls || msg.tool_calls.length === 0) continue;
     for (const call of msg.tool_calls) {
       if (!call.id || resolvedIds.has(call.id)) continue;
@@ -198,7 +204,7 @@ export function getAllPendingToolRequests(
   // Find the last AIMessage with tool_calls
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (!AIMessage.isInstance(msg)) continue;
+    if (!isAIMessage(msg)) continue;
     if (!msg.tool_calls || msg.tool_calls.length === 0) continue;
 
     // Parse all unresolved tool_calls from this AIMessage
@@ -413,37 +419,15 @@ export function toolRequestFromCall(
 }
 
 /**
- * 检测消息是否为 ToolMessage 实例。
- * 优先使用 _getType() 方法（正确构造的实例），fallback 到检查
- * tool_call_id 字段（checkpoint 反序列化后的 plain object）。
+ * 检测消息是否为 ToolMessage。
+ * 通过 type 字段（'tool'）判别，对 checkpoint 反序列化后的 plain object 同样生效。
  *
  * Detect whether a message is a ToolMessage instance.
- * Prefer _getType() (correctly constructed instances), fall back to
- * checking the tool_call_id field (plain objects after checkpoint deserialization).
+ * Uses the `type` field ('tool') — works for both factory-created objects
+ * and checkpoint-deserialized plain objects.
  */
 function isToolMessageInstance(msg: unknown): boolean {
-  const m = msg as Record<string, unknown> | null;
-  if (!m) return false;
-
-  // Primary: use _getType() for correctly constructed instances
-  try {
-    if (typeof m._getType === 'function') {
-      return (m._getType as () => string).call(m) === 'tool';
-    }
-  } catch {
-    /* ignore */
-  }
-
-  // Fallback: checkpoint-deserialized messages — check for tool_call_id
-  // which is unique to ToolMessage in the LangChain message hierarchy
-  if (typeof m.tool_call_id === 'string' && m.tool_call_id.length > 0) {
-    // Guard against false positives: AIMessage never has tool_call_id
-    if (AIMessage.isInstance(msg)) return false;
-    // HumanMessage / SystemMessage never have tool_call_id
-    return true;
-  }
-
-  return false;
+  return isToolMessage(msg);
 }
 
 /** 解析 AIMessage 中的工具调用请求 / Parse tool call request from an AIMessage */
@@ -630,7 +614,7 @@ export function messageWithSingleToolCall(message: AIMessage, toolCallId?: strin
 
   const reasoningContent = message.additional_kwargs.reasoning_content as string | undefined;
 
-  return new AIMessage({
+  return aiMessage({
     id: message.id,
     content: message.content,
     additional_kwargs: {

@@ -1,4 +1,4 @@
-import { AIMessage } from '@langchain/core/messages';
+import { isAIMessage } from '@/core/messages';
 import type {
   PromptCacheMetrics,
   PromptCacheStandardEvaluation,
@@ -90,7 +90,7 @@ export function createPromptCacheStandardTracker(input?: {
   };
 }
 export function extractPromptCacheMetrics(message: unknown): PromptCacheMetrics | null {
-  if (!AIMessage.isInstance(message)) {
+  if (!isAIMessage(message)) {
     return null;
   }
 

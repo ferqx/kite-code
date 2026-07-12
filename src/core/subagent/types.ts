@@ -1,5 +1,5 @@
 // src/core/subagent/types.ts
-import type { BaseMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@/core/messages';
 import type {
   SubAgentDonePayload,
   SubAgentErrorPayload,

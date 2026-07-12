@@ -1,15 +1,18 @@
 // src/core/model/invoke.ts
 // Invoke a model with tools — AI SDK generateText (single-step, no tool execution).
-// Message conversion from LangChain BaseMessage[] to AI SDK ModelMessage[] lives here.
+// Message conversion from internal BaseMessage[] to AI SDK ModelMessage[] lives here.
 
-import {
-  AIMessage,
-  type BaseMessage,
-  HumanMessage,
-  SystemMessage,
-  ToolMessage,
-} from '@langchain/core/messages';
 import { generateText, type ModelMessage, stepCountIs, type ToolSet } from 'ai';
+import {
+  type AIMessage,
+  aiMessage,
+  type BaseMessage,
+  isAIMessage,
+  isHumanMessage,
+  isSystemMessage,
+  isToolMessage,
+  type ToolMessage,
+} from '@/core/messages';
 import type { SupportedChatModel } from './factory';
 
 /**
@@ -47,7 +50,7 @@ export async function invokeBoundModel(params: {
   return toAIMessage(result);
 }
 
-// ── Message conversion: LangChain BaseMessage → AI SDK ModelMessage ──
+// ── Message conversion: internal BaseMessage → AI SDK ModelMessage ──
 
 function contentAsString(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -66,23 +69,23 @@ function contentAsString(content: unknown): string {
 
 function toModelMessages(messages: BaseMessage[]): ModelMessage[] {
   return messages.map((msg) => {
-    if (HumanMessage.isInstance(msg)) {
+    if (isHumanMessage(msg)) {
       const text = contentAsString(msg.content);
       return {
         role: 'user' as const,
         content: text || ' ',
       };
     }
-    if (SystemMessage.isInstance(msg)) {
+    if (isSystemMessage(msg)) {
       return {
         role: 'system' as const,
         content: contentAsString(msg.content),
       };
     }
-    if (AIMessage.isInstance(msg)) {
+    if (isAIMessage(msg)) {
       return toAssistantModelMessage(msg);
     }
-    if (ToolMessage.isInstance(msg)) {
+    if (isToolMessage(msg)) {
       return toToolModelMessage(msg);
     }
     // Fallback: treat as user message
@@ -144,10 +147,10 @@ function toToolModelMessage(msg: ToolMessage): ModelMessage {
   };
 }
 
-// ── Result conversion: generateText result → LangChain AIMessage ──
+// ── Result conversion: generateText result → internal AIMessage ──
 
 function toAIMessage(result: Awaited<ReturnType<typeof generateText>>): AIMessage {
-  return new AIMessage({
+  return aiMessage({
     content: result.text ?? '',
     tool_calls: (result.toolCalls ?? []).map((tc) => ({
       id: tc.toolCallId,

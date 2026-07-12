@@ -1,6 +1,7 @@
 // src/core/mcp/tool-adapter.ts
-import { tool } from '@langchain/core/tools';
+
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
+import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
 import type { McpManager } from './manager';
 
@@ -95,25 +96,27 @@ export function parseMcpToolName(name: string): { serverName: string; toolName: 
 }
 
 /**
- * Adapt an MCP SDK Tool to a LangChain StructuredTool.
+ * Adapt an MCP SDK Tool to an AI SDK Tool.
  * Tool name format: mcp__<serverName>__<toolName>
+ * The caller assigns the tool name as the key in the ToolSet.
  */
 export function adaptMcpTool(serverName: string, mcpTool: SdkTool, manager: McpManager) {
-  const toolName = `mcp__${serverName}__${mcpTool.name}`;
   const inputSchema = mcpTool.inputSchema as unknown as JsonSchemaDef;
-  const zodSchema = jsonSchemaToZod(inputSchema);
+  const zodType = jsonSchemaToZod(inputSchema);
 
-  return tool(
-    async (input: Record<string, unknown>) => {
-      const raw = await manager.callTool(serverName, mcpTool.name, input);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MCP schemas are dynamic at runtime
+  return tool({
+    description: mcpTool.description ?? `MCP tool: ${mcpTool.name}`,
+    inputSchema: zodSchema(zodType as any),
+    execute: async (input: any) => {
+      const raw = await manager.callTool(
+        serverName,
+        mcpTool.name,
+        input as Record<string, unknown>,
+      );
       return truncateOutput(raw);
     },
-    {
-      name: toolName,
-      description: mcpTool.description ?? `MCP tool: ${mcpTool.name}`,
-      schema: zodSchema,
-    },
-  );
+  }) as any;
 }
 
 /** Truncate output text to MAX_MCP_OUTPUT_TOKENS approximate tokens */

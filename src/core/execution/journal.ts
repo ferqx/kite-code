@@ -1,4 +1,4 @@
-import { ToolMessage } from '@langchain/core/messages';
+import { type ToolMessage, toolMessage } from '@/core/messages';
 
 export interface ExecutionJournalEntry {
   toolCallId: string;
@@ -259,7 +259,7 @@ export function injectExhaustionSignal(
       reason: `Repeated failures exhausted retry limit for ${toolName}.`,
       suggestedAlternatives: ['Continue another independent step', 'Safely finalize if blocked'],
     };
-    return new ToolMessage({
+    return toolMessage({
       content: JSON.stringify({
         ...parsed,
         status: 'exhausted',
@@ -274,7 +274,7 @@ export function injectExhaustionSignal(
       }),
       tool_call_id: msg.tool_call_id,
       name: msg.name,
-      status: 'exhausted' as unknown as ToolMessage['status'],
+      status: 'exhausted',
     });
   } catch {
     return msg;

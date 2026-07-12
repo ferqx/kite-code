@@ -2,17 +2,17 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AIMessage } from '@langchain/core/messages';
 import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { aiMessage } from '../../src/core/messages';
 import { createMockModel } from '../mock-model';
 
 test('Runtime Kernel persists a direct model answer as a completed turn', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
-  const mockModel = createMockModel([{ message: new AIMessage({ content: 'Kernel answer' }) }]);
+  const mockModel = createMockModel([{ message: aiMessage({ content: 'Kernel answer' }) }]);
 
   try {
     const events: RuntimeEvent['type'][] = [];
@@ -62,12 +62,12 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
   writeFileSync(join(workspace, 'note.txt'), 'runtime kernel');
   const mockModel = createMockModel([
     {
-      message: new AIMessage({
+      message: aiMessage({
         content: '',
         tool_calls: [{ id: 'read-note', name: 'read_file', args: { path: 'note.txt' } }],
       }),
     },
-    { message: new AIMessage({ content: 'Read the note.' }) },
+    { message: aiMessage({ content: 'Read the note.' }) },
   ]);
 
   try {
@@ -108,14 +108,14 @@ test('Runtime Kernel rejects a write tool before a plan is approved', async () =
   const storePath = join(workspace, 'runtime.db');
   const mockModel = createMockModel([
     {
-      message: new AIMessage({
+      message: aiMessage({
         content: '',
         tool_calls: [
           { id: 'write-note', name: 'write_file', args: { path: 'note.txt', content: 'approved' } },
         ],
       }),
     },
-    { message: new AIMessage({ content: 'Wrote the note.' }) },
+    { message: aiMessage({ content: 'Wrote the note.' }) },
   ]);
 
   try {
@@ -154,7 +154,7 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const mockModel = createMockModel([
     {
-      message: new AIMessage({
+      message: aiMessage({
         content: '',
         tool_calls: [
           {
@@ -165,7 +165,7 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
         ],
       }),
     },
-    { message: new AIMessage({ content: 'Thanks for the answer.' }) },
+    { message: aiMessage({ content: 'Thanks for the answer.' }) },
   ]);
 
   try {
@@ -210,7 +210,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const mockModel = createMockModel([
     {
-      message: new AIMessage({
+      message: aiMessage({
         content: '',
         tool_calls: [
           {
@@ -225,7 +225,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
         ],
       }),
     },
-    { message: new AIMessage({ content: 'Plan draft saved.' }) },
+    { message: aiMessage({ content: 'Plan draft saved.' }) },
   ]);
   try {
     const events: RuntimeEvent['type'][] = [];

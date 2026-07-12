@@ -5,10 +5,16 @@
 // Kernel-native model invocation: build context from RuntimeState → call model → return RuntimeEvent[].
 // No LangGraph state dependency, no side effects.
 
-import { AIMessage, type BaseMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
+import {
+  type AIMessage,
+  aiMessage,
+  type BaseMessage,
+  humanMessage,
+  toolMessage,
+} from '@/core/messages';
 import { prepareModelContext } from '@/core/model/context';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
@@ -52,9 +58,9 @@ function runtimeTranscriptMessages(messages: TranscriptMessage[]): BaseMessage[]
   return messages.map((message) => {
     switch (message.kind) {
       case 'user':
-        return new HumanMessage({ id: message.messageId, content: message.content });
+        return humanMessage({ id: message.messageId, content: message.content });
       case 'assistant':
-        return new AIMessage({
+        return aiMessage({
           id: message.messageId,
           content: message.content ?? '',
           tool_calls: message.toolCalls.map((call) => ({
@@ -62,16 +68,19 @@ function runtimeTranscriptMessages(messages: TranscriptMessage[]): BaseMessage[]
             args: (call.args ?? {}) as Record<string, unknown>,
             type: 'tool_call' as const,
           })),
+          additional_kwargs: {
+            ...(message.reasoningText ? { reasoning_content: message.reasoningText } : {}),
+          },
         });
       case 'tool':
-        return new ToolMessage({
+        return toolMessage({
           tool_call_id: message.toolCallId,
           name: message.name,
           content: message.content,
           status: message.ok ? 'success' : 'error',
         });
       default:
-        return new HumanMessage({ content: '' });
+        return humanMessage({ content: '' });
     }
   });
 }

@@ -2,8 +2,8 @@
 // AI SDK-compatible mock model for tests.
 // Replaces the old StreamingMockModel that extended BaseChatModel.
 
-import type { AIMessage, BaseMessage } from '@langchain/core/messages';
 import type { LanguageModel } from 'ai';
+import type { AIMessage, BaseMessage } from '../src/core/messages';
 
 export interface MockResponse {
   message?: AIMessage;

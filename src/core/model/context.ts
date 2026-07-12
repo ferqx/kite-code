@@ -1,4 +1,11 @@
-import { AIMessage, type BaseMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import {
+  type AIMessage,
+  aiMessage,
+  type BaseMessage,
+  humanMessage,
+  isAIMessage,
+  systemMessage,
+} from '@/core/messages';
 import systemPrompt from '@/core/prompts/system-prompt.txt';
 import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
@@ -97,24 +104,20 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
   const toolResultIds = new Set<string>();
   for (const msg of messages) {
     const m = asObj(msg);
-    if (
-      typeof m.tool_call_id === 'string' &&
-      m.tool_call_id.length > 0 &&
-      !AIMessage.isInstance(msg)
-    ) {
+    if (typeof m.tool_call_id === 'string' && m.tool_call_id.length > 0 && !isAIMessage(msg)) {
       toolResultIds.add(m.tool_call_id);
     }
   }
 
   // 修复 AIMessage 中的 tool_calls 一致性问题：
   // 1. 孤儿 tool_calls（无匹配 ToolMessage）→ 移除
-  // 2. additional_kwargs.tool_calls 残留 → 无条件删除（LangChain converter
-  //    仅在 tool_calls 为空时 fallback 使用它，会导致 400 错误）
+  // 2. additional_kwargs.tool_calls 残留 → 无条件删除（防止残留数据
+  //    在 checkpoint 反序列化后被下游序列化带入 API 调用导致 400 错误）
   //
   // Fix tool_calls consistency in AIMessages:
   // 1. Orphaned tool_calls (no matching ToolMessage) → remove
-  // 2. additional_kwargs.tool_calls leakage → always delete (LangChain converter
-  //    fallback path triggers 400 when tool_calls is empty)
+  // 2. additional_kwargs.tool_calls leakage → always delete (prevents stale
+  //    data from checkpoint round-trips leaking into API calls and causing 400)
   let result: BaseMessage[] = [];
   for (const msg of messages) {
     const m = asObj(msg);
@@ -156,7 +159,7 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
       // 变成 plain object（AIMessage.isInstance = false）——converter 可能因
       // isInstance 失败而跳过 tool_calls 序列化，fallback 到 additional_kwargs 触发 400。
       // Rebuild when: orphaned, akw dangling, or deserialized plain object.
-      if (orphaned || akwDangling || !AIMessage.isInstance(msg)) {
+      if (orphaned || akwDangling || !isAIMessage(msg)) {
         // Only keep calls that have IDs AND matching ToolMessages
         const validCalls = (Array.isArray(toolCalls) ? toolCalls : []) as Array<
           Record<string, unknown>
@@ -164,12 +167,13 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
         const kept = validCalls.filter((tc) => tc.id && toolResultIds.has(tc.id as string));
         // Rebuild message — preserve non-tool additional_kwargs (e.g. reasoning_content)
         // and response_metadata while explicitly clearing tool_calls to prevent
-        // stale data from leaking through LangChain's API serialization.
+        // stale data from leaking through API serialization.
         const cleanAkw = { ...(msg.additional_kwargs ?? {}) } as Record<string, unknown>;
         delete cleanAkw.tool_calls;
-        const newMsg = new AIMessage({
+        const newMsg = aiMessage({
+          id: msg.id, // preserve original message id for correlation
           content: typeof msg.content === 'string' ? msg.content : '',
-          tool_calls: kept.length > 0 ? (kept as AIMessage['tool_calls']) : [],
+          tool_calls: kept.length > 0 ? (kept as unknown as AIMessage['tool_calls']) : [],
           additional_kwargs: cleanAkw,
           response_metadata: msg.response_metadata ?? {},
           usage_metadata: m.usage_metadata as AIMessage['usage_metadata'],
@@ -179,11 +183,7 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
       }
     }
     // Check for orphaned ToolMessage
-    if (
-      typeof m.tool_call_id === 'string' &&
-      m.tool_call_id.length > 0 &&
-      !AIMessage.isInstance(msg)
-    ) {
+    if (typeof m.tool_call_id === 'string' && m.tool_call_id.length > 0 && !isAIMessage(msg)) {
       if (!aiToolCallIds.has(m.tool_call_id)) {
         continue;
       }
@@ -264,7 +264,7 @@ export function prepareModelContext(
   let msgs =
     state.messages.length > 0
       ? reorderInterleavedMessages(sanitizeToolCallPairs(state.messages))
-      : [new HumanMessage('')];
+      : [humanMessage('')];
 
   // ── M1a: 连续重复工具折叠 / Micro-compaction (≥3 consecutive same-tool) ──
   msgs = microCompactToolOutputs(msgs);
@@ -278,7 +278,7 @@ export function prepareModelContext(
     '\n\n' +
     buildCacheableRuntimeContext({ workspace: state.workspace });
 
-  const modeSnapshot = new HumanMessage(
+  const modeSnapshot = humanMessage(
     buildRuntimeModeSnapshot({
       phase: state.phase ?? 'building',
       interactionMode: state.interactionMode ?? 'accept_edits',
@@ -292,11 +292,11 @@ export function prepareModelContext(
     state.planningState &&
     state.planningState.kind !== 'building_without_plan' &&
     state.planningState.kind !== 'planning_empty'
-      ? [new HumanMessage(formatPlanStateReminder(state.planningState))]
+      ? [humanMessage(formatPlanStateReminder(state.planningState))]
       : [];
 
   return {
-    messages: [new SystemMessage(systemPrompt), ...msgs, modeSnapshot, ...planReminder],
+    messages: [systemMessage(systemPrompt), ...msgs, modeSnapshot, ...planReminder],
   };
 }
 

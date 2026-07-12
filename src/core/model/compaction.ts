@@ -1,4 +1,4 @@
-import { type BaseMessage, ToolMessage } from '@langchain/core/messages';
+import { type BaseMessage, isToolMessage, type ToolMessage, toolMessage } from '@/core/messages';
 import { countTokens } from '@/core/token-counter';
 import type { ContextBudget } from '@/core/types';
 
@@ -70,7 +70,7 @@ function partitionIntoToolBlocks(messages: BaseMessage[]): Array<BaseMessage | T
     if (tool) {
       flush();
       pending = { aiMsg: msg, toolMsgs: [], tool: tool.name, key: tool.key };
-    } else if (pending && ToolMessage.isInstance(msg)) {
+    } else if (pending && isToolMessage(msg)) {
       pending.toolMsgs.push(msg);
     } else {
       flush();
@@ -139,7 +139,7 @@ export function microCompactToolOutputs(messages: BaseMessage[]): BaseMessage[] 
       result.push(block.aiMsg);
       if (collapsedSet.has(i)) {
         result.push(
-          new ToolMessage({
+          toolMessage({
             content: JSON.stringify({
               _compacted: true,
               note: `[repeated ${block.tool} output collapsed — same as first result in run]`,
@@ -315,7 +315,7 @@ export function foldOneToolResult(msg: ToolMessage): ToolMessage | null {
     const path = extractPath(msg);
     const lines = extractTotalLines(msg);
     const lineStr = lines != null ? `(${lines} lines)` : '';
-    return new ToolMessage({
+    return toolMessage({
       content: JSON.stringify({
         _folded: true,
         ok,
@@ -335,7 +335,7 @@ export function foldOneToolResult(msg: ToolMessage): ToolMessage | null {
       typeof (m.args as Record<string, unknown> | undefined)?.pattern === 'string'
         ? ((m.args as Record<string, unknown>).pattern as string)
         : '';
-    return new ToolMessage({
+    return toolMessage({
       content: JSON.stringify({
         _folded: true,
         ok,
@@ -353,7 +353,7 @@ export function foldOneToolResult(msg: ToolMessage): ToolMessage | null {
       typeof (m.args as Record<string, unknown> | undefined)?.pattern === 'string'
         ? ((m.args as Record<string, unknown>).pattern as string)
         : '';
-    return new ToolMessage({
+    return toolMessage({
       content: JSON.stringify({
         _folded: true,
         ok,
@@ -368,7 +368,7 @@ export function foldOneToolResult(msg: ToolMessage): ToolMessage | null {
   // read_mcp_resource → "Read MCP <server>/<uri>"
   if (toolName === 'read_mcp_resource') {
     const path = extractPath(msg);
-    return new ToolMessage({
+    return toolMessage({
       content: JSON.stringify({
         _folded: true,
         ok,
@@ -383,7 +383,7 @@ export function foldOneToolResult(msg: ToolMessage): ToolMessage | null {
   // shell_execute (intent=inspect) → "Searched: <command>"
   if (toolName === 'shell_execute' && isShellSearch(msg)) {
     const cmd = extractCommand(msg);
-    return new ToolMessage({
+    return toolMessage({
       content: JSON.stringify({
         _folded: true,
         ok,
@@ -430,7 +430,7 @@ export function foldToolOutputs(messages: BaseMessage[], budget?: ContextBudget)
     const msg = messages[i]!;
 
     // 非 ToolMessage → 直接通过
-    if (!ToolMessage.isInstance(msg)) {
+    if (!isToolMessage(msg)) {
       result.push(msg);
       continue;
     }

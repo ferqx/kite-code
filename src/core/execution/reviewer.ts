@@ -1,6 +1,6 @@
-import { type BaseMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { generateText, stepCountIs } from 'ai';
 import type { AgentConfig } from '@/core/config/index';
+import { type BaseMessage, humanMessage, isSystemMessage, systemMessage } from '@/core/messages';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import type { ShellApprovalGrant } from '@/protocol/events';
 import type { ToolApprovalPayload } from '../harness/tool-policy';
@@ -63,7 +63,7 @@ export async function reviewToolApproval(input: {
     const systemMsgs: string[] = [];
     const chatMsgs: Array<{ role: 'user'; content: string }> = [];
     for (const msg of messages) {
-      if (SystemMessage.isInstance(msg)) {
+      if (isSystemMessage(msg)) {
         systemMsgs.push(msg.content as string);
       } else {
         chatMsgs.push({ role: 'user' as const, content: msg.content as string });
@@ -193,10 +193,7 @@ function buildReviewPrompt(
     }
   }
 
-  return [
-    new SystemMessage(REVIEWER_SYSTEM_PROMPT),
-    new HumanMessage(JSON.stringify(reviewData, null, 2)),
-  ];
+  return [systemMessage(REVIEWER_SYSTEM_PROMPT), humanMessage(JSON.stringify(reviewData, null, 2))];
 }
 
 function riskAdjustedTimeout(risk: string, defaultTimeout: number): number {

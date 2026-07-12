@@ -1,6 +1,4 @@
 import { isAbsolute, relative, resolve } from 'node:path';
-import type { BaseMessage } from '@langchain/core/messages';
-import { HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import {
@@ -11,6 +9,8 @@ import {
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
+import type { BaseMessage } from '@/core/messages';
+import { humanMessage, systemMessage, toolMessage } from '@/core/messages';
 import { createChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
@@ -131,7 +131,7 @@ ${input.task}`;
     ].join('\n');
   }
   systemPrompt += `\n\n${cacheableRuntimeCtx}`;
-  return [new SystemMessage(systemPrompt), new HumanMessage(taskWithCwd)];
+  return [systemMessage(systemPrompt), humanMessage(taskWithCwd)];
 }
 
 function normalizeRoleConfig(role: SubAgentRoleConfig): SubAgentRoleConfig {
@@ -210,7 +210,7 @@ export async function resumeSubAgent(
     id: continuation.id,
     messages: [
       ...continuation.messages,
-      new ToolMessage({
+      toolMessage({
         content: toolOutput,
         tool_call_id: toolResult.toolCallId,
         name: toolResult.toolName,
@@ -362,7 +362,7 @@ async function runSubAgentLoop(
           const available = Object.keys(tools).sort().join(', ');
           const errMsg = `Tool "${tc.name}" is not available to this sub-agent. Available tools: ${available}. Use one of the available tools instead.`;
           messages.push(
-            new ToolMessage({
+            toolMessage({
               content: JSON.stringify({ ok: false, error: errMsg }),
               tool_call_id: tc.id ?? '',
               name: tc.name,
@@ -430,11 +430,11 @@ async function runSubAgentLoop(
             },
           });
           messages.push(
-            new ToolMessage({
+            toolMessage({
               content: blockedOutput,
               tool_call_id: tc.id ?? '',
               name: tc.name,
-              status: 'exhausted' as unknown as ToolMessage['status'],
+              status: 'exhausted',
             }),
           );
           stepSnapshot.ok = false;
@@ -580,10 +580,11 @@ async function runSubAgentLoop(
         });
 
         messages.push(
-          new ToolMessage({
+          toolMessage({
             content: toolOutput,
             tool_call_id: tc.id ?? '',
             name: tc.name,
+            status: ok ? 'success' : 'error',
           }),
         );
       }

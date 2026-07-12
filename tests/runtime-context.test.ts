@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { HumanMessage } from '@langchain/core/messages';
+import { humanMessage } from '../src/core/messages';
 import {
   buildCacheableRuntimeContext,
   buildRuntimeContext,
@@ -12,7 +12,7 @@ describe('buildRuntimeContext', () => {
   test('includes concise workspace access policy under read-only access without identity noise', () => {
     const context = buildRuntimeContext({
       workspace: 'D:\\workspace',
-      messages: [new HumanMessage('/plan please inspect the repo')],
+      messages: [humanMessage('/plan please inspect the repo')],
       workspaceAccess: 'write',
       now: new Date('2026-04-23T12:34:56.000Z'),
       timezone: 'Asia/Shanghai',
@@ -30,7 +30,7 @@ describe('buildRuntimeContext', () => {
   test('includes concise workspace access policy under write access', () => {
     const context = buildRuntimeContext({
       workspace: 'D:\\workspace',
-      messages: [new HumanMessage('please continue')],
+      messages: [humanMessage('please continue')],
       workspaceAccess: 'write',
       now: new Date('2026-04-23T12:34:56.000Z'),
       timezone: 'Asia/Shanghai',

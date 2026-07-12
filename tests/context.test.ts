@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  AIMessage,
+  type AIMessage,
+  aiMessage,
   type BaseMessage,
-  HumanMessage,
-  SystemMessage,
-  ToolMessage,
-} from '@langchain/core/messages';
+  humanMessage,
+  isAIMessage,
+  isHumanMessage,
+  isToolMessage,
+  type ToolMessage,
+  toolMessage,
+} from '../src/core/messages';
 import {
   estimateTokens,
   foldOneToolResult,
@@ -30,15 +34,15 @@ describe('model context protocol', () => {
     const messages = buildModelMessages('agent', {
       workspace: 'D:\\workspace',
       workspaceAccess: 'write',
-      messages: [new HumanMessage(task)],
+      messages: [humanMessage(task)],
       final: '',
     });
 
     expect(messages).toHaveLength(3); // 1 SystemMessage + user HumanMessage + mode snapshot
-    expect(messages[0]!).toBeInstanceOf(SystemMessage); // 合并后的系统提示词 / Merged system prompt (static + cacheable)
-    expect(messages[1]!).toBeInstanceOf(HumanMessage); // 用户任务 / User task
+    expect(messages[0]!.type).toBe('system'); // 合并后的系统提示词 / Merged system prompt (static + cacheable)
+    expect(messages[1]!.type).toBe('human'); // 用户任务 / User task
     expect(messages[1]!.content).toBe(task);
-    expect(messages[2]!).toBeInstanceOf(HumanMessage);
+    expect(messages[2]!.type).toBe('human');
     expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
     expect(String(messages[1]!.content)).not.toContain('Plan:');
     expect(String(messages[1]!.content)).not.toContain('Tool results:');
@@ -53,7 +57,7 @@ describe('model context protocol', () => {
   // 验证工具调用链保留在动态 SystemMessage 外部，不混入运行时上下文 / Verify tool-call chain stays outside dynamic SystemMessage, not mixed into runtime context
   test('preserves completed tool-call message chain outside dynamic SystemMessage', () => {
     const task = 'Create hello.txt';
-    const ai = new AIMessage({
+    const ai = aiMessage({
       content: '',
       tool_calls: [
         {
@@ -63,7 +67,7 @@ describe('model context protocol', () => {
         },
       ],
     });
-    const tool = new ToolMessage({
+    const tool = toolMessage({
       content: '{"ok":true,"path":"hello.txt"}',
       tool_call_id: 'call-1',
       status: 'success',
@@ -71,13 +75,13 @@ describe('model context protocol', () => {
     const messages = buildModelMessages('agent', {
       workspace: 'D:\\workspace',
       workspaceAccess: 'write',
-      messages: [new HumanMessage(task), ai, tool],
+      messages: [humanMessage(task), ai, tool],
       final: '',
     });
 
-    expect(messages[1]!).toBeInstanceOf(HumanMessage); // 用户消息 / User message
-    expect(messages[2]!).toBeInstanceOf(AIMessage); // AI 工具调用 / AI tool call
-    expect(messages[3]!).toBeInstanceOf(ToolMessage); // 工具返回 / Tool response
+    expect(messages[1]!.type).toBe('human'); // 用户消息 / User message
+    expect(messages[2]!.type).toBe('ai'); // AI 工具调用 / AI tool call
+    expect(messages[3]!.type).toBe('tool'); // 工具返回 / Tool response
     expect((messages[3] as ToolMessage).tool_call_id).toBe('call-1');
     expect(String(messages[0]!.content)).not.toContain('Tool result summary:');
     expect(String(messages[0]!.content)).not.toContain('Pending request:');
@@ -91,8 +95,8 @@ describe('model context protocol', () => {
       workspace: 'D:\\workspace',
       workspaceAccess: 'write',
       messages: [
-        new HumanMessage(task),
-        new AIMessage({
+        humanMessage(task),
+        aiMessage({
           content: '',
           tool_calls: [
             {
@@ -102,7 +106,7 @@ describe('model context protocol', () => {
             },
           ],
         }),
-        new ToolMessage({
+        toolMessage({
           content: 'ok',
           tool_call_id: 'call-1',
         }),
@@ -111,7 +115,7 @@ describe('model context protocol', () => {
     });
 
     // 消息顺序：合并系统提示词、用户消息、AI 调用、工具返回 / Order: merged system prompt, user message, AI call, tool response
-    expect(messages.slice(0, 4).map((message) => message.getType())).toEqual([
+    expect(messages.slice(0, 4).map((message) => message.type)).toEqual([
       'system',
       'human',
       'ai',
@@ -148,18 +152,18 @@ describe('model context protocol', () => {
       workspace: 'D:\\workspace',
       workspaceAccess: 'write',
       planningState,
-      messages: [new HumanMessage('Create dark mode')],
+      messages: [humanMessage('Create dark mode')],
       final: '',
     });
 
     // 消息顺序：system(merged), human(user), human(mode snapshot), human(synthetic plan reminder)
     expect(messages).toHaveLength(4);
-    expect(messages[0]!).toBeInstanceOf(SystemMessage);
-    expect(messages[1]!).toBeInstanceOf(HumanMessage);
+    expect(messages[0]!.type).toBe('system');
+    expect(messages[1]!.type).toBe('human');
     expect(String(messages[1]!.content)).toBe('Create dark mode');
-    expect(messages[2]!).toBeInstanceOf(HumanMessage);
+    expect(messages[2]!.type).toBe('human');
     expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
-    expect(messages[3]!).toBeInstanceOf(HumanMessage);
+    expect(messages[3]!.type).toBe('human');
     expect(String(messages[3]!.content)).toContain('<runtime-state source="runtime.kernel">');
     expect(String(messages[3]!.content)).toContain('lifecycle: executing');
     expect(String(messages[3]!.content)).toContain('plan_id: plan-dark-mode');
@@ -179,13 +183,13 @@ describe('model context protocol', () => {
     const messages = buildModelMessages('agent', {
       workspace: 'D:\\workspace',
       workspaceAccess: 'write',
-      messages: [new HumanMessage('Inspect before editing')],
+      messages: [humanMessage('Inspect before editing')],
       final: '',
     });
 
-    expect(messages.map((message) => message.getType())).toEqual(['system', 'human', 'human']);
-    expect(messages[1]!).toBeInstanceOf(HumanMessage);
-    expect(messages[2]!).toBeInstanceOf(HumanMessage);
+    expect(messages.map((message) => message.type)).toEqual(['system', 'human', 'human']);
+    expect(messages[1]!.type).toBe('human');
+    expect(messages[2]!.type).toBe('human');
     expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
     expect(String(messages[0]!.content)).not.toContain('Current workspace access:');
     expect(String(messages[0]!.content)).toContain('Cacheable runtime context:');
@@ -197,12 +201,12 @@ describe('model context protocol', () => {
     const messages = buildModelMessages('agent', {
       workspace: 'D:\\workspace',
       workspaceAccess: 'write',
-      messages: [new HumanMessage('Continue safely')],
+      messages: [humanMessage('Continue safely')],
       final: '',
       sandboxBackend: 'seatbelt',
     });
 
-    expect(messages[2]!).toBeInstanceOf(HumanMessage);
+    expect(messages[2]!.type).toBe('human');
     expect(String(messages[2]!.content)).toContain('runtime.kernel');
     expect(String(messages[2]!.content)).toContain('authorization_mode');
   });
@@ -231,18 +235,13 @@ describe('model context protocol', () => {
       workspace: 'D:\\workspace',
       workspaceAccess: 'write',
       planningState,
-      messages: [new HumanMessage('/plan inspect cache behavior')],
+      messages: [humanMessage('/plan inspect cache behavior')],
       final: '',
     });
 
-    expect(messages.map((message) => message.getType())).toEqual([
-      'system',
-      'human',
-      'human',
-      'human',
-    ]);
-    expect(messages[2]!).toBeInstanceOf(HumanMessage);
-    expect(messages[3]!).toBeInstanceOf(HumanMessage);
+    expect(messages.map((message) => message.type)).toEqual(['system', 'human', 'human', 'human']);
+    expect(messages[2]!.type).toBe('human');
+    expect(messages[3]!.type).toBe('human');
     expect(String(messages[1]!.content)).toBe('/plan inspect cache behavior');
     expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
     expect(String(messages[3]!.content)).toContain('<runtime-state source="runtime.kernel">');
@@ -343,44 +342,44 @@ describe('buildStaticSystemPrompt with skills', () => {
 // ============================================================================
 describe('sanitizeToolCallPairs', () => {
   test('passes through clean HumanMessages unchanged', () => {
-    const msgs: BaseMessage[] = [new HumanMessage('hello')];
+    const msgs: BaseMessage[] = [humanMessage('hello')];
     const result = sanitizeToolCallPairs(msgs);
     expect(result).toHaveLength(1);
-    expect(HumanMessage.isInstance(result[0])).toBe(true);
+    expect(isHumanMessage(result[0])).toBe(true);
   });
 
   test('passes through clean paired tool_call + ToolMessage unchanged', () => {
     const msgs: BaseMessage[] = [
-      new HumanMessage('run ls'),
-      new AIMessage({
+      humanMessage('run ls'),
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'shell_execute', args: { command: 'ls' } }],
       }),
-      new ToolMessage({ content: 'file list', tool_call_id: 'c1' }),
+      toolMessage({ content: 'file list', tool_call_id: 'c1' }),
     ];
     const result = sanitizeToolCallPairs(msgs);
     expect(result).toHaveLength(3);
-    expect(AIMessage.isInstance(result[1])).toBe(true);
+    expect(isAIMessage(result[1])).toBe(true);
     expect((result[1] as AIMessage).tool_calls).toHaveLength(1);
-    expect(ToolMessage.isInstance(result[2])).toBe(true);
+    expect(isToolMessage(result[2])).toBe(true);
   });
 
   test('strips orphaned tool_calls from AIMessage but keeps text content', () => {
     // 模拟：进程在工具执行前崩溃，AIMessage 有 tool_calls 但没有 ToolMessage
     const msgs: BaseMessage[] = [
-      new HumanMessage('run ls'),
-      new AIMessage({
+      humanMessage('run ls'),
+      aiMessage({
         content: 'Let me run that command',
         tool_calls: [{ id: 'orphan-1', name: 'shell_execute', args: { command: 'ls' } }],
       }),
-      new HumanMessage('next question'),
+      humanMessage('next question'),
     ];
     const result = sanitizeToolCallPairs(msgs);
     expect(result).toHaveLength(3);
 
     // AIMessage 保留文本内容，但 tool_calls 被清空
     const ai = result[1] as AIMessage;
-    expect(AIMessage.isInstance(ai)).toBe(true);
+    expect(isAIMessage(ai)).toBe(true);
     const content = typeof ai.content === 'string' ? ai.content : '';
     expect(content).toContain('Let me run that command');
     expect(ai.tool_calls).toHaveLength(0);
@@ -389,33 +388,33 @@ describe('sanitizeToolCallPairs', () => {
   test('removes orphaned ToolMessage with no matching AIMessage', () => {
     // 模拟：进程崩溃导致 ToolMessage 还在但 AIMessage 的 tool_calls 丢失
     const msgs: BaseMessage[] = [
-      new HumanMessage('hey'),
-      new ToolMessage({ content: 'orphan result', tool_call_id: 'ghost-1' }),
-      new HumanMessage('continue'),
+      humanMessage('hey'),
+      toolMessage({ content: 'orphan result', tool_call_id: 'ghost-1' }),
+      humanMessage('continue'),
     ];
     const result = sanitizeToolCallPairs(msgs);
     expect(result).toHaveLength(2);
-    expect(HumanMessage.isInstance(result[0])).toBe(true);
-    expect(HumanMessage.isInstance(result[1])).toBe(true);
+    expect(isHumanMessage(result[0])).toBe(true);
+    expect(isHumanMessage(result[1])).toBe(true);
   });
 
   test('handles mix of paired and orphaned messages correctly', () => {
     // 混合：有正常的配对，也有孤儿
     const msgs: BaseMessage[] = [
-      new HumanMessage('step 1'),
-      new AIMessage({
+      humanMessage('step 1'),
+      aiMessage({
         content: 'ok',
         tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
       }),
-      new ToolMessage({ content: 'content', tool_call_id: 'c1' }), // paired ✓
-      new HumanMessage('step 2'),
-      new AIMessage({
+      toolMessage({ content: 'content', tool_call_id: 'c1' }), // paired ✓
+      humanMessage('step 2'),
+      aiMessage({
         content: 'running',
         tool_calls: [{ id: 'c2', name: 'shell_execute', args: { command: 'npm test' } }],
       }),
       // ToolMessage for c2 is MISSING (crash before tool ran)
-      new AIMessage({ content: 'All done!' }),
-      new ToolMessage({ content: 'ghost result', tool_call_id: 'ghost' }), // orphan ToolMessage ✗
+      aiMessage({ content: 'All done!' }),
+      toolMessage({ content: 'ghost result', tool_call_id: 'ghost' }), // orphan ToolMessage ✗
     ];
     const result = sanitizeToolCallPairs(msgs);
     // Expected:
@@ -442,19 +441,19 @@ describe('sanitizeToolCallPairs', () => {
 
     // Orphan ToolMessage removed
     const lastMsgs = result.slice(-2);
-    expect(lastMsgs.every((m) => !ToolMessage.isInstance(m))).toBe(true);
+    expect(lastMsgs.every((m) => !isToolMessage(m))).toBe(true);
   });
 
   test('handles multiple tool_calls in one AIMessage — strips only orphaned ones', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [
           { id: 'c1', name: 'read_file', args: { path: 'x.txt' } },
           { id: 'c2', name: 'shell_execute', args: { command: 'ls' } },
         ],
       }),
-      new ToolMessage({ content: 'file', tool_call_id: 'c1' }), // only c1 has result
+      toolMessage({ content: 'file', tool_call_id: 'c1' }), // only c1 has result
       // c2 is orphaned — no ToolMessage
     ];
     const result = sanitizeToolCallPairs(msgs);
@@ -490,13 +489,13 @@ describe('sanitizeToolCallPairs', () => {
   test('detects orphaned tool_calls from additional_kwargs.tool_calls only', () => {
     // Some LangChain adapters store tool_calls only in additional_kwargs
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: 'ok',
         additional_kwargs: {
           tool_calls: [{ id: 'c1', name: 'shell_execute', args: { command: 'ls' } }],
         },
       } as any),
-      new HumanMessage('next'),
+      humanMessage('next'),
     ];
     const result = sanitizeToolCallPairs(msgs);
     expect(result).toHaveLength(2);
@@ -508,7 +507,7 @@ describe('sanitizeToolCallPairs', () => {
 
   test('rebuilds orphaned message preserving non-tool additional_kwargs and response_metadata', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: 'let me check',
         tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'x.txt' } }],
         additional_kwargs: {
@@ -517,7 +516,7 @@ describe('sanitizeToolCallPairs', () => {
         } as any,
         response_metadata: { model: 'deepseek', usage: { total_tokens: 100 } },
       }),
-      new HumanMessage('next'),
+      humanMessage('next'),
     ];
     const result = sanitizeToolCallPairs(msgs);
     expect(result).toHaveLength(2);
@@ -533,7 +532,7 @@ describe('sanitizeToolCallPairs', () => {
   });
   test('strips additional_kwargs.tool_calls when they have IDs not in top-level tool_calls (akwDangling)', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         // top-level tool_calls is empty — parseToolCall all failed
         tool_calls: [],
@@ -584,7 +583,7 @@ describe('sanitizeToolCallPairs', () => {
     } as unknown as BaseMessage;
 
     // Matching ToolMessage
-    const tm = new ToolMessage({
+    const tm = toolMessage({
       content: JSON.stringify({ ok: true }),
       tool_call_id: 'c1',
       name: 'read_file',
@@ -594,7 +593,7 @@ describe('sanitizeToolCallPairs', () => {
     const result = sanitizeToolCallPairs([plainObj, tm]);
     expect(result).toHaveLength(2);
     // Rebuilt as proper AIMessage instance
-    expect(AIMessage.isInstance(result[0]!)).toBe(true);
+    expect(isAIMessage(result[0]!)).toBe(true);
     // tool_calls preserved
     const rebuilt = result[0]! as AIMessage;
     expect(rebuilt.tool_calls).toHaveLength(1);
@@ -608,7 +607,7 @@ describe('sanitizeToolCallPairs', () => {
 // ============================================================================
 describe('reorderInterleavedMessages', () => {
   test('passes through messages with no tool_calls unchanged', () => {
-    const msgs: BaseMessage[] = [new HumanMessage('hello'), new AIMessage({ content: 'hi' })];
+    const msgs: BaseMessage[] = [humanMessage('hello'), aiMessage({ content: 'hi' })];
     const result = reorderInterleavedMessages(msgs);
     expect(result).toHaveLength(2);
     expect(result[0]).toBe(msgs[0]);
@@ -617,13 +616,13 @@ describe('reorderInterleavedMessages', () => {
 
   test('passes through already-correct order unchanged', () => {
     const msgs: BaseMessage[] = [
-      new HumanMessage('run ls'),
-      new AIMessage({
+      humanMessage('run ls'),
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'shell_execute', args: { command: 'ls' } }],
       }),
-      new ToolMessage({ content: 'output', tool_call_id: 'c1' }),
-      new AIMessage({ content: 'done' }),
+      toolMessage({ content: 'output', tool_call_id: 'c1' }),
+      aiMessage({ content: 'done' }),
     ];
     const result = reorderInterleavedMessages(msgs);
     expect(result).toHaveLength(4);
@@ -637,13 +636,13 @@ describe('reorderInterleavedMessages', () => {
   test('moves interleaved HumanMessage after ToolMessages', () => {
     // Scenario: user interrupted tool execution
     const msgs: BaseMessage[] = [
-      new HumanMessage('do it'),
-      new AIMessage({
+      humanMessage('do it'),
+      aiMessage({
         content: 'ok',
         tool_calls: [{ id: 'c1', name: 'shell_execute', args: { command: 'ls' } }],
       }),
-      new HumanMessage('stop'), // ← interrupt
-      new ToolMessage({ content: 'output', tool_call_id: 'c1' }),
+      humanMessage('stop'), // ← interrupt
+      toolMessage({ content: 'output', tool_call_id: 'c1' }),
     ];
     const result = reorderInterleavedMessages(msgs);
     expect(result).toHaveLength(4);
@@ -655,17 +654,17 @@ describe('reorderInterleavedMessages', () => {
 
   test('handles multiple tool_calls with some interleaved', () => {
     const msgs: BaseMessage[] = [
-      new HumanMessage('go'),
-      new AIMessage({
+      humanMessage('go'),
+      aiMessage({
         content: '',
         tool_calls: [
           { id: 'c1', name: 'read_file', args: { path: 'a.txt' } },
           { id: 'c2', name: 'shell_execute', args: { command: 'ls' } },
         ],
       }),
-      new ToolMessage({ content: 'file content', tool_call_id: 'c1' }),
-      new HumanMessage('wait'), // interrupt
-      new ToolMessage({ content: 'ls output', tool_call_id: 'c2' }),
+      toolMessage({ content: 'file content', tool_call_id: 'c1' }),
+      humanMessage('wait'), // interrupt
+      toolMessage({ content: 'ls output', tool_call_id: 'c2' }),
     ];
     const result = reorderInterleavedMessages(msgs);
     // AIMessage → ToolMessage(c1) → ToolMessage(c2) → HumanMessage
@@ -677,22 +676,22 @@ describe('reorderInterleavedMessages', () => {
   test('handles multiple consecutive AIMessages with cancelled ToolMessages at end', () => {
     // Critical case: cleanup node appends all cancelled TMs at the end
     const msgs: BaseMessage[] = [
-      new HumanMessage('start'),
-      new AIMessage({
+      humanMessage('start'),
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'shell_execute', args: { command: 'ls' } }],
       }),
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c2', name: 'read_file', args: { path: 'x.txt' } }],
       }),
-      new HumanMessage('new message'),
-      new ToolMessage({
+      humanMessage('new message'),
+      toolMessage({
         content: JSON.stringify({ cancelled: true }),
         tool_call_id: 'c1',
         status: 'error',
       }),
-      new ToolMessage({
+      toolMessage({
         content: JSON.stringify({ cancelled: true }),
         tool_call_id: 'c2',
         status: 'error',
@@ -710,22 +709,22 @@ describe('reorderInterleavedMessages', () => {
 
   test('handles three consecutive AIMessages with mixed interleaving', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
       }),
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c2', name: 'read_file', args: { path: 'b.txt' } }],
       }),
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c3', name: 'read_file', args: { path: 'c.txt' } }],
       }),
-      new HumanMessage('interrupt'),
-      new ToolMessage({ content: 'ok', tool_call_id: 'c1' }),
-      new ToolMessage({ content: 'ok', tool_call_id: 'c3' }),
-      new ToolMessage({ content: 'ok', tool_call_id: 'c2' }),
+      humanMessage('interrupt'),
+      toolMessage({ content: 'ok', tool_call_id: 'c1' }),
+      toolMessage({ content: 'ok', tool_call_id: 'c3' }),
+      toolMessage({ content: 'ok', tool_call_id: 'c2' }),
     ];
     const result = reorderInterleavedMessages(msgs);
     // Each AI gets its TM grouped after it, HM at end
@@ -739,14 +738,14 @@ describe('reorderInterleavedMessages', () => {
 
   test('handles multiple HumanMessages between AIMessage and ToolMessages', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'shell_execute', args: { command: 'ls' } }],
       }),
-      new HumanMessage('stop1'),
-      new HumanMessage('stop2'),
-      new HumanMessage('stop3'),
-      new ToolMessage({ content: 'output', tool_call_id: 'c1' }),
+      humanMessage('stop1'),
+      humanMessage('stop2'),
+      humanMessage('stop3'),
+      toolMessage({ content: 'output', tool_call_id: 'c1' }),
     ];
     const result = reorderInterleavedMessages(msgs);
     // All HumanMessages should be after ToolMessage
@@ -757,11 +756,7 @@ describe('reorderInterleavedMessages', () => {
   });
 
   test('no-op when there are no tool_calls anywhere', () => {
-    const msgs: BaseMessage[] = [
-      new HumanMessage('a'),
-      new AIMessage({ content: 'b' }),
-      new HumanMessage('c'),
-    ];
+    const msgs: BaseMessage[] = [humanMessage('a'), aiMessage({ content: 'b' }), humanMessage('c')];
     const result = reorderInterleavedMessages(msgs);
     expect(result).toHaveLength(3);
     expect(result[0]).toBe(msgs[0]);
@@ -771,9 +766,9 @@ describe('reorderInterleavedMessages', () => {
 
   test('does not move orphaned ToolMessages without matching AIMessage', () => {
     const msgs: BaseMessage[] = [
-      new HumanMessage('hello'),
-      new ToolMessage({ content: 'orphan', tool_call_id: 'ghost' }),
-      new HumanMessage('world'),
+      humanMessage('hello'),
+      toolMessage({ content: 'orphan', tool_call_id: 'ghost' }),
+      humanMessage('world'),
     ];
     const result = reorderInterleavedMessages(msgs);
     // ToolMessage stays in original position (no matching AI to group with)
@@ -834,10 +829,7 @@ describe('estimateTokens', () => {
   });
 
   test('counts simple text messages', () => {
-    const msgs: BaseMessage[] = [
-      new HumanMessage('Hello world'),
-      new AIMessage({ content: 'Hi there!' }),
-    ];
+    const msgs: BaseMessage[] = [humanMessage('Hello world'), aiMessage({ content: 'Hi there!' })];
     const tokens = estimateTokens(msgs);
     expect(tokens).toBeGreaterThan(0);
     expect(tokens).toBeLessThan(30);
@@ -845,7 +837,7 @@ describe('estimateTokens', () => {
 
   test('accounts for tool_calls overhead', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [
           { id: 'c1', name: 'shell_execute', args: { command: 'ls -la' } },
@@ -858,11 +850,11 @@ describe('estimateTokens', () => {
   });
 
   test('consistently grows with increasing message count', () => {
-    const small = estimateTokens([new HumanMessage('a')]);
+    const small = estimateTokens([humanMessage('a')]);
     const medium = estimateTokens([
-      new HumanMessage('a'),
-      new AIMessage({ content: 'b' }),
-      new HumanMessage('c'),
+      humanMessage('a'),
+      aiMessage({ content: 'b' }),
+      humanMessage('c'),
     ]);
     expect(medium).toBeGreaterThan(small);
   });
@@ -870,7 +862,7 @@ describe('estimateTokens', () => {
 
 describe('foldOneToolResult', () => {
   test('folds read_file into "Read <path> (<N> lines)"', () => {
-    const msg = new ToolMessage({
+    const msg = toolMessage({
       content: JSON.stringify({
         ok: true,
         command: 'read_file src/App.tsx',
@@ -891,7 +883,7 @@ describe('foldOneToolResult', () => {
   });
 
   test('folds read_file without line count when totalLines missing', () => {
-    const msg = new ToolMessage({
+    const msg = toolMessage({
       content: JSON.stringify({ ok: true, path: 'README.md' }),
       tool_call_id: 'c2',
       name: 'read_file',
@@ -903,7 +895,7 @@ describe('foldOneToolResult', () => {
   });
 
   test('folds shell_execute with rg command into "Searched: <cmd>"', () => {
-    const msg = new ToolMessage({
+    const msg = toolMessage({
       content: JSON.stringify({
         ok: true,
         command: 'rg "pattern" src/',
@@ -923,7 +915,7 @@ describe('foldOneToolResult', () => {
   });
 
   test('does not fold shell_execute with non-search command even if intent=inspect', () => {
-    const msg = new ToolMessage({
+    const msg = toolMessage({
       content: JSON.stringify({
         ok: true,
         command: 'ls -la',
@@ -939,7 +931,7 @@ describe('foldOneToolResult', () => {
   });
 
   test('does not fold shell_execute without search intent', () => {
-    const msg = new ToolMessage({
+    const msg = toolMessage({
       content: JSON.stringify({
         ok: true,
         command: 'npm run build',
@@ -955,7 +947,7 @@ describe('foldOneToolResult', () => {
   });
 
   test('folds read_mcp_resource into "Read MCP <path>"', () => {
-    const msg = new ToolMessage({
+    const msg = toolMessage({
       content: JSON.stringify({ ok: true, path: 'github/repo/docs' }),
       tool_call_id: 'c5',
       name: 'read_mcp_resource',
@@ -967,7 +959,7 @@ describe('foldOneToolResult', () => {
   });
 
   test('preserves tool_call_id, name, and status in folded message', () => {
-    const msg = new ToolMessage({
+    const msg = toolMessage({
       content: JSON.stringify({ ok: true, path: 'test.txt' }),
       tool_call_id: 'original-id-123',
       name: 'read_file',
@@ -981,7 +973,7 @@ describe('foldOneToolResult', () => {
 
   test('returns null for non-foldable tools', () => {
     for (const name of ['edit_file', 'write_file', 'ask_user', 'update_plan', 'Skill', 'task']) {
-      const msg = new ToolMessage({
+      const msg = toolMessage({
         content: JSON.stringify({ ok: true }),
         tool_call_id: 'cx',
         name,
@@ -995,12 +987,12 @@ describe('foldOneToolResult', () => {
 describe('foldToolOutputs', () => {
   test('preserves recent messages unfoled', () => {
     const msgs: BaseMessage[] = [
-      new HumanMessage('read file'),
-      new AIMessage({
+      humanMessage('read file'),
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
       }),
-      new ToolMessage({
+      toolMessage({
         content: JSON.stringify({ ok: true, path: 'a.txt', totalLines: 10, stdout: 'AAA' }),
         tool_call_id: 'c1',
         name: 'read_file',
@@ -1009,7 +1001,7 @@ describe('foldToolOutputs', () => {
     ];
     // Only 3 messages, recentWindowSize=6 → all within recent window, no folding
     const result = foldToolOutputs(msgs);
-    const tm = result.find((m) => ToolMessage.isInstance(m)) as ToolMessage;
+    const tm = result.find((m) => isToolMessage(m)) as ToolMessage;
     const data = JSON.parse(tm.content as string);
     expect(data._folded).toBeUndefined();
   });
@@ -1021,13 +1013,13 @@ describe('foldToolOutputs', () => {
     for (let i = 0; i < 4; i++) {
       for (const f of ['a.txt', 'b.txt', 'c.txt']) {
         msgs.push(
-          new AIMessage({
+          aiMessage({
             content: '',
             tool_calls: [{ id: `c_${f}_${i}`, name: 'read_file', args: { path: f } }],
           }),
         );
         msgs.push(
-          new ToolMessage({
+          toolMessage({
             content: JSON.stringify({
               ok: true,
               path: f,
@@ -1054,7 +1046,7 @@ describe('foldToolOutputs', () => {
 
     // Second occurrence of a.txt (at index ~7) → folded
     const secondA = result.find((m, _i) => {
-      if (!ToolMessage.isInstance(m)) return false;
+      if (!isToolMessage(m)) return false;
       try {
         const d = JSON.parse(m.content as string);
         return d.path === 'a.txt' && d._folded === true;
@@ -1076,13 +1068,13 @@ describe('foldToolOutputs', () => {
     // Last 2 messages protected, first occurrence preserved, 3 middle ones folded
     for (let i = 0; i < 6; i++) {
       msgs.push(
-        new AIMessage({
+        aiMessage({
           content: '',
           tool_calls: [{ id: `c${i}`, name: 'read_file', args: { path: 'config.json' } }],
         }),
       );
       msgs.push(
-        new ToolMessage({
+        toolMessage({
           content: JSON.stringify({
             ok: true,
             path: 'config.json',
@@ -1113,11 +1105,11 @@ describe('foldToolOutputs', () => {
 
   test('preserves the first read after a file mutation', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'read-1', name: 'read_file', args: { path: 'config.json' } }],
       }),
-      new ToolMessage({
+      toolMessage({
         content: JSON.stringify({
           ok: true,
           path: 'config.json',
@@ -1128,7 +1120,7 @@ describe('foldToolOutputs', () => {
         name: 'read_file',
         status: 'success',
       }),
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [
           {
@@ -1138,17 +1130,17 @@ describe('foldToolOutputs', () => {
           },
         ],
       }),
-      new ToolMessage({
+      toolMessage({
         content: JSON.stringify({ ok: true, path: 'config.json' }),
         tool_call_id: 'edit-1',
         name: 'edit_file',
         status: 'success',
       }),
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'read-2', name: 'read_file', args: { path: 'config.json' } }],
       }),
-      new ToolMessage({
+      toolMessage({
         content: JSON.stringify({
           ok: true,
           path: 'config.json',
@@ -1170,13 +1162,13 @@ describe('foldToolOutputs', () => {
 
   test('folds shell_execute with rg search command', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [
           { id: 'c1', name: 'shell_execute', args: { command: 'rg pattern', intent: 'inspect' } },
         ],
       }),
-      new ToolMessage({
+      toolMessage({
         content: JSON.stringify({
           ok: true,
           command: 'rg pattern',
@@ -1200,13 +1192,13 @@ describe('foldToolOutputs', () => {
 
   test('does not fold non-foldable tools like edit_file', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [
           { id: 'c1', name: 'edit_file', args: { path: 'x.ts', old_string: 'a', new_string: 'b' } },
         ],
       }),
-      new ToolMessage({
+      toolMessage({
         content: JSON.stringify({ ok: true, command: 'edit_file x.ts' }),
         tool_call_id: 'c1',
         name: 'edit_file',
@@ -1222,11 +1214,11 @@ describe('foldToolOutputs', () => {
   test('does not double-fold micro-compacted messages into "Read unknown"', () => {
     // Simulate a message that was already compacted by microCompactToolOutputs
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
       }),
-      new ToolMessage({
+      toolMessage({
         content: JSON.stringify({
           _compacted: true,
           note: '[repeated read_file output collapsed]',
@@ -1256,11 +1248,11 @@ describe('foldToolOutputs', () => {
       totalLines: 10,
     });
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c2', name: 'read_file', args: { path: 'a.txt' } }],
       }),
-      new ToolMessage({
+      toolMessage({
         content: foldedContent,
         tool_call_id: 'c2',
         name: 'read_file',
@@ -1274,7 +1266,7 @@ describe('foldToolOutputs', () => {
   });
 
   test('passes through non-ToolMessages unchanged', () => {
-    const msgs: BaseMessage[] = [new HumanMessage('hello'), new AIMessage({ content: 'hi' })];
+    const msgs: BaseMessage[] = [humanMessage('hello'), aiMessage({ content: 'hi' })];
     const result = foldToolOutputs(msgs);
     expect(result).toEqual(msgs);
   });
@@ -1283,11 +1275,11 @@ describe('foldToolOutputs', () => {
 describe('microCompactToolOutputs', () => {
   test('passes through non-consecutive ToolMessages unchanged', () => {
     const msgs: BaseMessage[] = [
-      new HumanMessage('go'),
-      new AIMessage({ content: '', tool_calls: [{ id: 'c1', name: 'read_file', args: {} }] }),
-      new ToolMessage({ content: 'file A', tool_call_id: 'c1', name: 'read_file' }),
-      new AIMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
-      new ToolMessage({ content: 'ls output', tool_call_id: 'c2', name: 'shell_execute' }),
+      humanMessage('go'),
+      aiMessage({ content: '', tool_calls: [{ id: 'c1', name: 'read_file', args: {} }] }),
+      toolMessage({ content: 'file A', tool_call_id: 'c1', name: 'read_file' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
+      toolMessage({ content: 'ls output', tool_call_id: 'c2', name: 'shell_execute' }),
     ];
     const result = microCompactToolOutputs(msgs);
     expect(result).toHaveLength(5);
@@ -1295,16 +1287,16 @@ describe('microCompactToolOutputs', () => {
 
   test('collapses 3+ consecutive same-tool outputs', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({ content: '', tool_calls: [{ id: 'c1', name: 'shell_execute', args: {} }] }),
-      new ToolMessage({ content: 'output1', tool_call_id: 'c1', name: 'shell_execute' }),
-      new AIMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
-      new ToolMessage({ content: 'output2', tool_call_id: 'c2', name: 'shell_execute' }),
-      new AIMessage({ content: '', tool_calls: [{ id: 'c3', name: 'shell_execute', args: {} }] }),
-      new ToolMessage({ content: 'output3', tool_call_id: 'c3', name: 'shell_execute' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c1', name: 'shell_execute', args: {} }] }),
+      toolMessage({ content: 'output1', tool_call_id: 'c1', name: 'shell_execute' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
+      toolMessage({ content: 'output2', tool_call_id: 'c2', name: 'shell_execute' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c3', name: 'shell_execute', args: {} }] }),
+      toolMessage({ content: 'output3', tool_call_id: 'c3', name: 'shell_execute' }),
     ];
     const result = microCompactToolOutputs(msgs);
     const contents = result
-      .filter((m) => ToolMessage.isInstance(m))
+      .filter((m) => isToolMessage(m))
       .map((m) => {
         try {
           return JSON.parse(m.content as string);
@@ -1319,15 +1311,15 @@ describe('microCompactToolOutputs', () => {
 
   test('does not collapse fewer than 3 consecutive calls', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({ content: '', tool_calls: [{ id: 'c1', name: 'shell_execute', args: {} }] }),
-      new ToolMessage({ content: 'output1', tool_call_id: 'c1', name: 'shell_execute' }),
-      new AIMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
-      new ToolMessage({ content: 'output2', tool_call_id: 'c2', name: 'shell_execute' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c1', name: 'shell_execute', args: {} }] }),
+      toolMessage({ content: 'output1', tool_call_id: 'c1', name: 'shell_execute' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
+      toolMessage({ content: 'output2', tool_call_id: 'c2', name: 'shell_execute' }),
     ];
     const result = microCompactToolOutputs(msgs);
     expect(result).toHaveLength(4);
     const contents = result
-      .filter((m) => ToolMessage.isInstance(m))
+      .filter((m) => isToolMessage(m))
       .map((m) => {
         try {
           return JSON.parse(m.content as string);
@@ -1340,26 +1332,26 @@ describe('microCompactToolOutputs', () => {
 
   test('does not collapse consecutive calls with different arguments', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
       }),
-      new ToolMessage({ content: 'file A', tool_call_id: 'c1', name: 'read_file' }),
-      new AIMessage({
+      toolMessage({ content: 'file A', tool_call_id: 'c1', name: 'read_file' }),
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c2', name: 'read_file', args: { path: 'b.txt' } }],
       }),
-      new ToolMessage({ content: 'file B', tool_call_id: 'c2', name: 'read_file' }),
-      new AIMessage({
+      toolMessage({ content: 'file B', tool_call_id: 'c2', name: 'read_file' }),
+      aiMessage({
         content: '',
         tool_calls: [{ id: 'c3', name: 'read_file', args: { path: 'c.txt' } }],
       }),
-      new ToolMessage({ content: 'file C', tool_call_id: 'c3', name: 'read_file' }),
+      toolMessage({ content: 'file C', tool_call_id: 'c3', name: 'read_file' }),
     ];
 
     const result = microCompactToolOutputs(msgs);
     const contents = result
-      .filter((m) => ToolMessage.isInstance(m))
+      .filter((m) => isToolMessage(m))
       .map((m) => {
         try {
           return JSON.parse(m.content as string);
@@ -1372,18 +1364,18 @@ describe('microCompactToolOutputs', () => {
 
   test('resets consecutive counter when tool name changes', () => {
     const msgs: BaseMessage[] = [
-      new AIMessage({ content: '', tool_calls: [{ id: 'c1', name: 'read_file', args: {} }] }),
-      new ToolMessage({ content: 'f1', tool_call_id: 'c1', name: 'read_file' }),
-      new AIMessage({ content: '', tool_calls: [{ id: 'c2', name: 'read_file', args: {} }] }),
-      new ToolMessage({ content: 'f2', tool_call_id: 'c2', name: 'read_file' }),
-      new AIMessage({ content: '', tool_calls: [{ id: 'c3', name: 'shell_execute', args: {} }] }),
-      new ToolMessage({ content: 'out', tool_call_id: 'c3', name: 'shell_execute' }),
-      new AIMessage({ content: '', tool_calls: [{ id: 'c4', name: 'read_file', args: {} }] }),
-      new ToolMessage({ content: 'f3', tool_call_id: 'c4', name: 'read_file' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c1', name: 'read_file', args: {} }] }),
+      toolMessage({ content: 'f1', tool_call_id: 'c1', name: 'read_file' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c2', name: 'read_file', args: {} }] }),
+      toolMessage({ content: 'f2', tool_call_id: 'c2', name: 'read_file' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c3', name: 'shell_execute', args: {} }] }),
+      toolMessage({ content: 'out', tool_call_id: 'c3', name: 'shell_execute' }),
+      aiMessage({ content: '', tool_calls: [{ id: 'c4', name: 'read_file', args: {} }] }),
+      toolMessage({ content: 'f3', tool_call_id: 'c4', name: 'read_file' }),
     ];
     const result = microCompactToolOutputs(msgs);
     const contents = result
-      .filter((m) => ToolMessage.isInstance(m))
+      .filter((m) => isToolMessage(m))
       .map((m) => {
         try {
           return JSON.parse(m.content as string);
