@@ -22,7 +22,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'sessions', aliases: [], description: 'Show sessions' },
   { name: 'new', aliases: [], description: 'Start a new session' },
   { name: 'plan', aliases: [], description: 'Enter planning mode' },
-  { name: 'mode', aliases: [], description: 'Set interaction mode', args: 'ask|auto|full' },
+  { name: 'permissions', aliases: [], description: 'Set permissions', args: 'ask|auto|full' },
   { name: 'clear', aliases: ['c'], description: 'Clear output' },
   { name: 'help', aliases: ['h'], description: 'Show help' },
   { name: 'exit', aliases: ['quit', 'q'], description: 'Exit Kite Code' },
@@ -41,7 +41,7 @@ export interface SuggestionItem {
 }
 
 export interface SlashSuggestionsResult {
-  kind: 'command' | 'model' | 'effort' | 'theme' | 'mode';
+  kind: 'command' | 'model' | 'effort' | 'theme' | 'permissions';
   partial: string;
   items: SuggestionItem[];
 }
@@ -165,8 +165,8 @@ export function useSlashSuggestions(
       };
     }
 
-    // /mode <partial-mode>
-    const modeMatch = inputValue.match(/^\/mode\s+(\S*)$/i);
+    // /permissions <partial-mode>
+    const modeMatch = inputValue.match(/^\/permissions\s+(\S*)$/i);
     if (modeMatch) {
       const partial = modeMatch[1]!.toLowerCase();
       const matched = buildModeSuggestionItems(
@@ -176,7 +176,7 @@ export function useSlashSuggestions(
       );
       if (matched.length === 0) return null;
       return {
-        kind: 'mode',
+        kind: 'permissions',
         partial,
         items: matched,
       };
@@ -237,7 +237,7 @@ export function useSlashSuggestions(
 
   const replaceCommand = (
     item: SuggestionItem,
-    kind: 'command' | 'model' | 'effort' | 'theme' | 'mode',
+    kind: 'command' | 'model' | 'effort' | 'theme' | 'permissions',
   ): string => {
     if (kind === 'model') {
       return inputValue.replace(/\/model\s+\S*$/, `/model ${item.command}`);
@@ -245,8 +245,8 @@ export function useSlashSuggestions(
     if (kind === 'effort') {
       return inputValue.replace(/\/effort\s+\S*$/, `/effort ${item.command}`);
     }
-    if (kind === 'mode') {
-      return inputValue.replace(/\/mode\s+\S*$/, `/mode ${item.command}`);
+    if (kind === 'permissions') {
+      return inputValue.replace(/\/permissions\s+\S*$/, `/permissions ${item.command}`);
     }
     if (kind === 'theme') {
       return inputValue.replace(/\/theme\s+\S*$/, `/theme ${item.command}`);

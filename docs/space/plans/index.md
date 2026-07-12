@@ -38,7 +38,7 @@
 | [`2026-06-26-shell-live-output.md`](2026-06-26-shell-live-output.md) | completed | P0 | — | — | Shell 工具实时输出展示：`tool_progress` 事件 + 流式 stdout/stderr 读取 + TUI tail-follow 渲染 |
 | [`2026-06-28-context-compaction.md`](2026-06-28-context-compaction.md) | active | P0 | — | — | M0 TUI 预整合 ✅ + M1 Core 工具折叠 ✅ + M2 对话摘要（延后） |
 | [`2026-06-27-plan-subagent-role-design.md`](2026-06-27-plan-subagent-role-design.md) | draft | P1 | — | — | Plan 子 Agent 角色：只读架构设计专家，多视角并行设计方案，主 agent 合并后调 `update_plan` |
-| [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | active | P0 | — | — | 审批层、执行层与沙箱 5 阶段：阶段四 `/mode` 交互模式 ✅、阶段五 执行可靠性 ✅，阶段一~三待实施 |
+| [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | active | P0 | — | — | 审批层、执行层与沙箱 5 阶段：阶段四 `/permissions` 交互模式 ✅、阶段五 执行可靠性 ✅，阶段一~三待实施 |
 | [`2026-07-01-web-search-tool.md`](2026-07-01-web-search-tool.md) | draft | P0 | — | — | Web 网络工具：Phase 1 `web_fetch`（fetch → SSRF → readability → turndown 正文提取），Phase 2 `web_search`（搜索发现 URL） |
 | [`2026-07-03-tui-pty-e2e-reform.md`](2026-07-03-tui-pty-e2e-reform.md) | active | P1 | — | 扩展 2026-05-25-e2e-restructure | TUI E2E 双层架构：PTY 终端系统测试 + Ink 组件集成测试。Phase 0-4 完成（19 tests / 6 files），多消息阻塞调查中 |
 | [`2026-07-08-agent-kernel-incremental-evolution.md`](2026-07-08-agent-kernel-incremental-evolution.md) | draft | P0 | — | — | Agent Runtime Kernel 重构：5 阶段建立事件驱动状态机，LangGraph 降级为执行引擎。Phase 1 RuntimeEvent+Projection → Phase 2 Reducer+Store → Phase 3 Controller 抽取 → Phase 4 Policy 策略化 → Phase 5 LangGraph 适配器化 |

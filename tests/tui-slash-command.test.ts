@@ -124,33 +124,36 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('')).toBeNull();
   });
 
-  // ── /mode ──
+  // ── /permissions ──
 
-  test('parses /mode auto', () => {
-    expect(parseSlashCommand('/mode auto')).toEqual({ type: 'mode', mode: 'auto' });
+  test('parses /permissions auto', () => {
+    expect(parseSlashCommand('/permissions auto')).toEqual({ type: 'permissions', mode: 'auto' });
   });
 
-  test('parses /mode full', () => {
-    expect(parseSlashCommand('/mode full')).toEqual({ type: 'mode', mode: 'full' });
+  test('parses /permissions full', () => {
+    expect(parseSlashCommand('/permissions full')).toEqual({ type: 'permissions', mode: 'full' });
   });
 
-  test('parses /mode accept_edits', () => {
-    expect(parseSlashCommand('/mode accept_edits')).toEqual({ type: 'mode', mode: 'accept_edits' });
+  test('parses /permissions accept_edits', () => {
+    expect(parseSlashCommand('/permissions accept_edits')).toEqual({
+      type: 'permissions',
+      mode: 'accept_edits',
+    });
   });
 
-  test('parses /mode with no arg', () => {
-    expect(parseSlashCommand('/mode')).toEqual({ type: 'mode', mode: undefined });
+  test('parses /permissions with no arg', () => {
+    expect(parseSlashCommand('/permissions')).toEqual({ type: 'permissions', mode: undefined });
   });
 
-  test('parses /mode with short form a', () => {
-    expect(parseSlashCommand('/mode a')).toEqual({ type: 'mode', mode: 'a' });
+  test('parses /permissions with short form a', () => {
+    expect(parseSlashCommand('/permissions a')).toEqual({ type: 'permissions', mode: 'a' });
   });
 
-  test('parses /mode with short form f', () => {
-    expect(parseSlashCommand('/mode f')).toEqual({ type: 'mode', mode: 'f' });
+  test('parses /permissions with short form f', () => {
+    expect(parseSlashCommand('/permissions f')).toEqual({ type: 'permissions', mode: 'f' });
   });
 
-  test('parses /mode with short form au', () => {
-    expect(parseSlashCommand('/mode au')).toEqual({ type: 'mode', mode: 'au' });
+  test('parses /permissions with short form au', () => {
+    expect(parseSlashCommand('/permissions au')).toEqual({ type: 'permissions', mode: 'au' });
   });
 });

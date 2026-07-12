@@ -128,7 +128,7 @@
 | `execution/completed/2026-06-04-turn-model-refactor.md` | completed | Turn 模型重构 — 引入 `Turn` 替代 flat `OutputBlock[]`，将 Static/Dynamic 分割退化为 `slice(-1)`。 |
 | `execution/completed/2026-06-23-agent-architecture-optimizations.md` | completed | edit_file 三级自动回退 + shell 输出截断 + sanitizeToolCallPairs 热路径移除（3 项优化，1 commit）。 |
 | `execution/completed/2026-06-09-sqlite-reliability-optimization.md` | completed | SQLite 连接管理、写入可靠性、WAL 清理、会话列表索引优化。 |
-| `execution/completed/2026-07-02-interaction-mode-slash-command.md` | completed | 阶段四：`/mode` 交互模式快捷指令 + 审批面板重设计 + 命名重构 `interactive/auto_review/unattended` → `ask/auto/full`。 |
+| `execution/completed/2026-07-02-interaction-mode-slash-command.md` | completed | 阶段四：`/permissions` 交互模式快捷指令 + 审批面板重设计 + 命名重构 `interactive/auto_review/unattended` → `ask/auto/full`。 |
 | `execution/completed/2026-07-02-execution-reliability.md` | completed | 阶段五：连续失败计数修复、耗尽信号 ToolMessage 注入、Gateway 预检拦截、写操作串行化、子 Agent Journal 集成。 |
 
 ## 参考资料

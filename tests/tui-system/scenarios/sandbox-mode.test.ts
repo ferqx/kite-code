@@ -35,9 +35,9 @@ describe('TUI PTY System — Sandbox Mode', () => {
   });
 
   test(
-    '/mode full is disabled when sandbox config is off',
+    '/permissions full is disabled when sandbox config is off',
     async () => {
-      await typeText(tui, '/mode f');
+      await typeText(tui, '/permissions f');
       await waitForText(() => tui.output(), '未启用沙箱，Full 不可用', 10000);
 
       const suggestionOutput = stripAnsi(tui.output());

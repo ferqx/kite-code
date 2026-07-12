@@ -323,8 +323,8 @@ export default function App({
                     ? `推理深度匹配 "${slashSuggestion.partial}"`
                     : slashSuggestion.kind === 'theme'
                       ? `主题匹配 "${slashSuggestion.partial}"`
-                      : slashSuggestion.kind === 'mode'
-                        ? `审核模式匹配 "${slashSuggestion.partial}"`
+                      : slashSuggestion.kind === 'permissions'
+                        ? `权限模式匹配 "${slashSuggestion.partial}"`
                         : `命令匹配 /${slashSuggestion.partial}`}
               </Text>
               <Box height={Math.min(slashSuggestion.items.length, listHeight)}>
@@ -338,7 +338,7 @@ export default function App({
                     const argsStr = item.args ? ` ${item.args}` : '';
                     const activeDot = item.isActive ? ACTIVE_DOT : INACTIVE_DOT;
                     const displayName =
-                      slashSuggestion.kind === 'mode' ? item.command : `/${item.command}`;
+                      slashSuggestion.kind === 'permissions' ? item.command : `/${item.command}`;
                     const itemColor = item.disabled
                       ? theme.dim
                       : isSelected

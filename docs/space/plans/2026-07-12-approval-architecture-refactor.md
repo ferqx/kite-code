@@ -50,8 +50,8 @@
 
 | 字段 | 值域 | 用途 | 设置方式 |
 |------|------|------|---------|
-| `state.mode` | ask / auto / accept_edits / full | tool-controller 用于路由 | plan.approved 或 /mode 命令 |
-| `state.authorization.mode` | default / full_access | `evaluateToolApproval` 用于 full_access 放行 | shell 审批 grant 或 /mode full |
+| `state.mode` | ask / auto / accept_edits / full | tool-controller 用于路由 | plan.approved 或 /permissions 命令 |
+| `state.authorization.mode` | default / full_access | `evaluateToolApproval` 用于 full_access 放行 | shell 审批 grant 或 /permissions full |
 | `state.planning.executionMode` | auto / accept_edits / manual | 审批后执行模式（仅记录） | plan.approved |
 
 `state.mode = 'full'` 时，TUI reducer `agentReducer.ts:376` 额外设置 `authorization.mode = 'full_access'`，形成隐式耦合。

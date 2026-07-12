@@ -25,7 +25,7 @@ interface PasteState {
 }
 
 export interface SlashSuggestionData {
-  kind: 'command' | 'model' | 'effort' | 'theme' | 'mode';
+  kind: 'command' | 'model' | 'effort' | 'theme' | 'permissions';
   partial: string;
   items: Array<{
     command: string;
@@ -409,8 +409,8 @@ export default function InputLine({
                   ? `/effort ${prefix}`
                   : ss.result.kind === 'theme'
                     ? `/theme ${prefix}`
-                    : ss.result.kind === 'mode'
-                      ? `/mode ${prefix}`
+                    : ss.result.kind === 'permissions'
+                      ? `/permissions ${prefix}`
                       : `/${prefix}`,
             );
           } else {

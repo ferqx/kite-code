@@ -105,7 +105,7 @@ loadAgentConfig()
 
 ### 沙箱开关
 
-`sandbox.enabled` 默认是 `true`。设置为 `false` 时，TUI 会在 `/mode` 候选中禁用 `full`，并显示“未启用沙箱，Full 不可用”；CLI/TUI 运行时都会把 sandbox backend 解析为 `none`。
+`sandbox.enabled` 默认是 `true`。设置为 `false` 时，TUI 会在 `/permissions` 候选中禁用 `full`，并显示”未启用沙箱，Full 不可用”；CLI/TUI 运行时都会把 sandbox backend 解析为 `none`。
 
 CLI 的 `--no-sandbox` 是单次运行覆盖项，优先级高于配置文件，可用于临时关闭沙箱。
 

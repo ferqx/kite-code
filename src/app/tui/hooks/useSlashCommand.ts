@@ -14,7 +14,7 @@ export type SlashAction =
   | { type: 'theme'; preset?: string }
   | { type: 'sessions'; id?: string }
   | { type: 'plan'; task?: string }
-  | { type: 'mode'; mode?: string }
+  | { type: 'permissions'; mode?: string }
   | { type: 'clear' }
   | { type: 'help' }
   | { type: 'new' }
@@ -41,8 +41,8 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'sessions' };
     case 'plan':
       return { type: 'plan', task: arg || undefined };
-    case 'mode':
-      return { type: 'mode', mode: arg || undefined };
+    case 'permissions':
+      return { type: 'permissions', mode: arg || undefined };
     case 'clear':
     case 'c':
       return { type: 'clear' };
@@ -123,7 +123,7 @@ export function useSlashCommand(
             onRunTask(action.task, 'planning');
           }
           break;
-        case 'mode': {
+        case 'permissions': {
           const target = resolveInteractionModeTarget(
             action.mode,
             currentInteractionMode,

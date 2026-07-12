@@ -56,7 +56,7 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
         ['/clear', '清空输出'],
         ['/effort', '设置推理深度（low/medium/high/max）'],
         ['/theme', '切换色彩主题（teal/blue/purple/cyan/mono）'],
-        ['/mode', modeHelp],
+        ['/permissions', modeHelp],
         ['/plan', '切换规划模式'],
         ['/mcp', 'MCP 面板'],
         ['/rewind', '回退检查点'],
