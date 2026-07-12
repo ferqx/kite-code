@@ -61,7 +61,7 @@ describe('tool safety', () => {
     expect(readFileSync(join(workspace, 'hello.txt'), 'utf8')).toBe('hello from write_file\n');
   });
 
-  test('write_file rejects absolute paths even inside the workspace', () => {
+  test('write_file allows absolute paths that resolve inside the workspace', () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write-absolute');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
@@ -73,9 +73,52 @@ describe('tool safety', () => {
       content: 'hello from absolute path\n',
     });
 
+    // Absolute path that resolves inside the workspace should succeed
+    expect(result.ok).toBe(true);
+    expect(result.lines).toBe(1);
+    expect(existsSync(absolutePath)).toBe(true);
+    expect(readFileSync(absolutePath, 'utf8')).toBe('hello from absolute path\n');
+  });
+
+  test('write_file rejects absolute paths that resolve outside the workspace', () => {
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write-absolute-outside');
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+
+    const result = writeFile({
+      workspace,
+      path: '/tmp/outside-workspace-test.txt',
+      content: 'hello from outside\n',
+    });
+
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('Absolute paths are not allowed');
-    expect(existsSync(absolutePath)).toBe(false);
+    expect(result.error).toContain('Path is outside workspace');
+  });
+
+  test('write_file allows absolute paths with allowExternal option', () => {
+    const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write-external');
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+    const externalPath = join(tmpdir(), 'kite-code-external-test.txt');
+    // Clean up from previous runs
+    try {
+      rmSync(externalPath);
+    } catch {
+      /* ignore */
+    }
+
+    const result = writeFile({
+      workspace,
+      path: externalPath,
+      content: 'external write allowed\n',
+      allowExternal: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(existsSync(externalPath)).toBe(true);
+    expect(readFileSync(externalPath, 'utf8')).toBe('external write allowed\n');
+    // Clean up / 清理
+    rmSync(externalPath);
   });
 
   test('edit_file finds and replaces text', () => {

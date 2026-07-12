@@ -375,6 +375,41 @@ describe('evaluateToolApproval', () => {
       expect(result.allowed).toBe(false);
       expect(result.decision).toBe('deny');
     });
+
+    it('sets externalWrite effect for absolute paths', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'write_file', toolArgs: { path: '/tmp/external.txt' } }),
+      );
+      expect(result.effects).toEqual({ externalWrite: true });
+    });
+
+    it('sets externalWrite effect for home-directory paths', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'write_file', toolArgs: { path: '~/external.txt' } }),
+      );
+      expect(result.effects).toEqual({ externalWrite: true });
+    });
+
+    it('does NOT set externalWrite effect for relative paths', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'write_file', toolArgs: { path: 'src/foo.ts' } }),
+      );
+      expect(result.effects).toBeUndefined();
+    });
+
+    it('sets externalWrite effect for edit_file with absolute path', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'edit_file', toolArgs: { path: '/etc/config' } }),
+      );
+      expect(result.effects).toEqual({ externalWrite: true });
+    });
+
+    it('marks external path in userVisibleSummary', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'write_file', toolArgs: { path: '/tmp/f' } }),
+      );
+      expect(result.userVisibleSummary).toContain('external');
+    });
   });
 
   // ── web_fetch / 网络请求 ──

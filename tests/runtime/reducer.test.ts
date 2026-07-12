@@ -6,7 +6,8 @@ import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
 } from '../../src/core/runtime/state';
-import type { AgentPlan, AgentPlanStep } from '../../src/protocol/events';
+import type { AgentPlan, AgentPlanStep, ToolApprovalPayload } from '../../src/protocol/events';
+import type { SuspendedSubagentSnapshot } from '../../src/protocol/subagent';
 
 // ── 测试辅助函数 / Test helpers ──
 
@@ -31,6 +32,52 @@ function makeInitialState(overrides?: Partial<RuntimeState>): RuntimeState {
   });
   if (!overrides) return base;
   return { ...base, ...overrides };
+}
+
+function makeSuspendedSubagentSnapshot(
+  overrides?: Partial<SuspendedSubagentSnapshot>,
+): SuspendedSubagentSnapshot {
+  return {
+    subagentId: 'subagent-1',
+    role: 'code',
+    task: 'Update the runtime state',
+    messages: [],
+    toolCallCount: 1,
+    steps: [],
+    blockedTool: {
+      toolCallId: 'nested-tool-1',
+      toolName: 'shell_execute',
+      args: { command: 'pwd' },
+      command: 'pwd',
+    },
+    ...overrides,
+  };
+}
+
+function queueTaskCall(state: RuntimeState, toolCallId = 'task-1'): RuntimeState {
+  return reduceRuntimeState(state, {
+    type: 'tool.queued',
+    toolCallId,
+    name: 'task',
+    args: { task: 'Update the runtime state' },
+  });
+}
+
+function makeToolApproval(command: string): ToolApprovalPayload {
+  return {
+    scope: 'once',
+    cwd: '/tmp/test',
+    threadId: 'thread-1',
+    tool: 'shell_execute',
+    command,
+    risk: 'execute_code',
+    approvalHash: 'approval-hash',
+    summary: `Run ${command}`,
+    reason: 'approval required',
+    expectedEffects: [],
+    grantOptions: ['approve_once'],
+    recommendedGrant: 'approve_once',
+  };
 }
 
 function uuidPattern() {
@@ -600,6 +647,163 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     const next = reduceRuntimeState(state, event);
 
     expect(next).toEqual(state);
+  });
+});
+
+describe('reduceRuntimeState — suspended subagents', () => {
+  test('subagent.suspended saves a snapshot for an existing task without changing its status', () => {
+    const snapshot = makeSuspendedSubagentSnapshot();
+    const state = queueTaskCall(makeInitialState());
+
+    const next = reduceRuntimeState(state, {
+      type: 'subagent.suspended',
+      toolCallId: 'task-1',
+      snapshot,
+    });
+
+    expect(next).toMatchObject({
+      suspendedSubagents: { 'task-1': snapshot },
+    });
+    expect(next.tools.calls['task-1']!.status).toBe('queued');
+  });
+
+  test('subagent.suspended replaces the existing snapshot for the same task call', () => {
+    const firstSnapshot = makeSuspendedSubagentSnapshot();
+    const replacementSnapshot = makeSuspendedSubagentSnapshot({
+      subagentId: 'subagent-2',
+      blockedTool: {
+        toolCallId: 'nested-tool-2',
+        toolName: 'shell_execute',
+        args: { command: 'git status' },
+        command: 'git status',
+      },
+    });
+    const suspended = reduceRuntimeState(queueTaskCall(makeInitialState()), {
+      type: 'subagent.suspended',
+      toolCallId: 'task-1',
+      snapshot: firstSnapshot,
+    });
+
+    const next = reduceRuntimeState(suspended, {
+      type: 'subagent.suspended',
+      toolCallId: 'task-1',
+      snapshot: replacementSnapshot,
+    });
+
+    expect(next).toMatchObject({
+      suspendedSubagents: { 'task-1': replacementSnapshot },
+    });
+  });
+
+  test('subagent.suspended ignores an unknown or non-task tool call', () => {
+    const snapshot = makeSuspendedSubagentSnapshot();
+    const withNonTask = reduceRuntimeState(makeInitialState(), {
+      type: 'tool.queued',
+      toolCallId: 'shell-1',
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+    });
+
+    const unknown = reduceRuntimeState(withNonTask, {
+      type: 'subagent.suspended',
+      toolCallId: 'missing-task',
+      snapshot,
+    });
+    const nonTask = reduceRuntimeState(withNonTask, {
+      type: 'subagent.suspended',
+      toolCallId: 'shell-1',
+      snapshot,
+    });
+
+    expect(unknown).not.toHaveProperty('suspendedSubagents.missing-task');
+    expect(nonTask).not.toHaveProperty('suspendedSubagents.shell-1');
+  });
+
+  test.each([
+    [
+      'tool.finished',
+      { name: 'task', result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' } },
+    ],
+    ['tool.failed', { error: 'failed' }],
+    ['tool.rejected', { reason: 'rejected' }],
+    ['tool.cancelled', { reason: 'cancelled' }],
+  ] as const)('%s clears the suspended snapshot for its task call', (type, details) => {
+    const snapshot = makeSuspendedSubagentSnapshot();
+    const suspended = reduceRuntimeState(queueTaskCall(makeInitialState()), {
+      type: 'subagent.suspended',
+      toolCallId: 'task-1',
+      snapshot,
+    });
+
+    const next = reduceRuntimeState(suspended, {
+      type,
+      toolCallId: 'task-1',
+      ...details,
+    } as RuntimeEvent);
+
+    expect(next).toMatchObject({ suspendedSubagents: {} });
+  });
+
+  test('tool.finished clears only the matching stale task approval interaction and legacy marker', () => {
+    const snapshot = makeSuspendedSubagentSnapshot();
+    const state = {
+      ...queueTaskCall(makeInitialState()),
+      interactions: {
+        kind: 'awaiting_tool_approval' as const,
+        interactionId: 'approval-1',
+        toolCallId: 'task-1',
+        approval: makeToolApproval('pwd'),
+      },
+      suspendedSubagents: { 'task-1': snapshot },
+      legacyUnrecoverableSubagentApproval: {
+        toolCallId: 'task-1',
+        subagentId: snapshot.subagentId,
+        reason: 'legacy approval cannot be resumed',
+      },
+    };
+
+    const next = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'task-1',
+      name: 'task',
+      result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
+    });
+
+    expect(next.interactions).toEqual({ kind: 'idle' });
+    expect(next).not.toHaveProperty('legacyUnrecoverableSubagentApproval');
+    expect(next).toMatchObject({ suspendedSubagents: {} });
+  });
+
+  test('tool.finished leaves an unrelated approval interaction and legacy marker intact', () => {
+    const snapshot = makeSuspendedSubagentSnapshot();
+    const state = {
+      ...queueTaskCall(makeInitialState()),
+      interactions: {
+        kind: 'awaiting_tool_approval' as const,
+        interactionId: 'approval-2',
+        toolCallId: 'other-task',
+        approval: makeToolApproval('git status'),
+      },
+      suspendedSubagents: { 'task-1': snapshot },
+      legacyUnrecoverableSubagentApproval: {
+        toolCallId: 'other-task',
+        subagentId: 'subagent-other',
+        reason: 'legacy approval cannot be resumed',
+      },
+    };
+
+    const next = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'task-1',
+      name: 'task',
+      result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
+    });
+
+    expect(next.interactions).toEqual(state.interactions);
+    expect(next).toMatchObject({
+      legacyUnrecoverableSubagentApproval: state.legacyUnrecoverableSubagentApproval,
+      suspendedSubagents: {},
+    });
   });
 });
 

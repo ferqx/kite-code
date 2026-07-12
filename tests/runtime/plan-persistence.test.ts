@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { unlinkSync } from 'node:fs';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
+import { createAgentKernel } from '../../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import {
   computePlanStructuralDigest,
@@ -11,6 +12,7 @@ import {
 } from '../../src/core/runtime/state';
 import { createRuntimeStore } from '../../src/core/runtime/store';
 import type { AgentPlan } from '../../src/protocol/events';
+import type { SuspendedSubagentSnapshot } from '../../src/protocol/subagent';
 
 const TEST_DB = '/tmp/test-plan-persistence.runtime.db';
 
@@ -32,6 +34,23 @@ function makeDigestInput(plan: AgentPlan) {
       title: s.step.slice(0, 160),
       status: 'pending' as const,
     })),
+  };
+}
+
+function makeSuspendedSubagentSnapshot(): SuspendedSubagentSnapshot {
+  return {
+    subagentId: 'subagent-persisted',
+    role: 'code',
+    task: 'Persist my approval state',
+    messages: [],
+    toolCallCount: 2,
+    steps: [],
+    blockedTool: {
+      toolCallId: 'nested-tool-persisted',
+      toolName: 'shell_execute',
+      args: { command: 'pwd' },
+      command: 'pwd',
+    },
   };
 }
 
@@ -146,21 +165,65 @@ describe('plan persistence', () => {
     }
   });
 
-  test('old schema snapshot is handled (schema version check)', () => {
+  test('suspended subagent snapshots survive persistence and reload', () => {
+    const store = createRuntimeStore(TEST_DB);
+    const snapshot = makeSuspendedSubagentSnapshot();
+    const state = reduceRuntimeState(
+      createInitialRuntimeState({ threadId: 't-suspended', userId: 'u1', workspace: '/tmp' }),
+      {
+        type: 'tool.queued',
+        toolCallId: 'task-persisted',
+        name: 'task',
+        args: { task: snapshot.task },
+      },
+    );
+    const suspended = reduceRuntimeState(state, {
+      type: 'subagent.suspended',
+      toolCallId: 'task-persisted',
+      snapshot,
+    });
+
+    store.appendEventsAndSnapshot('t-suspended', [], suspended);
+    const reloaded = store.loadSnapshot('t-suspended');
+
+    expect(reloaded).toMatchObject({
+      schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+      suspendedSubagents: { 'task-persisted': snapshot },
+    });
+    store.close();
+  });
+
+  test('restores a persisted schema-2 snapshot instead of discarding its runtime state', () => {
     const store = createRuntimeStore(TEST_DB);
     const state = createInitialRuntimeState({
       threadId: 't3',
       userId: 'u1',
       workspace: '/tmp',
     });
-    expect(state.schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-
-    // Save with current schema
-    store.saveSnapshot('t3', state);
-    const loaded = store.loadSnapshot('t3');
-    expect(loaded).not.toBeNull();
-    expect((loaded as typeof state)?.schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-
+    const queued = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'legacy-read',
+      name: 'read_file',
+      args: { path: 'legacy.txt' },
+    });
+    const {
+      suspendedSubagents: _suspended,
+      legacyUnrecoverableSubagentApproval: _marker,
+      ...v2
+    } = queued;
+    store.saveSnapshot('t3', { ...v2, schemaVersion: 2 });
     store.close();
+
+    const kernel = createAgentKernel({
+      threadId: 't3',
+      userId: 'u1',
+      workspace: '/tmp',
+      storePath: TEST_DB,
+    });
+    expect(kernel.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+    expect(kernel.getState().tools.queue).toEqual(['legacy-read']);
+    expect(kernel.getState().tools.calls['legacy-read']?.status).toBe('queued');
+    expect(kernel.getState().suspendedSubagents).toEqual({});
+    kernel.close();
   });
 });

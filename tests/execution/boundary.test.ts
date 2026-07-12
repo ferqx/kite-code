@@ -5,12 +5,13 @@ import { join } from 'node:path';
 import { readFile, writeFile } from '../../src/core/tools/file';
 
 describe('workspace path boundary', () => {
-  test('file tools reject absolute paths and home expansion', () => {
+  test('file tools allow absolute paths inside workspace, reject ~ and parent escape', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-boundary-'));
     try {
       const absolute = join(workspace, 'inside.txt');
-
-      expect(writeFile({ workspace, path: absolute, content: 'x' }).ok).toBe(false);
+      // Absolute path that resolves inside workspace → allowed
+      expect(writeFile({ workspace, path: absolute, content: 'x' }).ok).toBe(true);
+      // ~ home expansion → still rejected
       expect(readFile({ workspace, path: '~/.ssh/config' }).ok).toBe(false);
     } finally {
       rmSync(workspace, { recursive: true, force: true });

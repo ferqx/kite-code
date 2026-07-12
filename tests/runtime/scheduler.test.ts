@@ -40,4 +40,49 @@ describe('decideNextEffect', () => {
     };
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['tool'] });
   });
+
+  test('picks approved tool from active list (sub-agent approval resume)', () => {
+    // Bug reproduction: after tool.started moves a tool from queue → active,
+    // and the tool is later approved (approval.granted), the scheduler must
+    // find it in active to issue run_tools, not fall through to call_model.
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    // Tool was started → moved to active, not in queue
+    state.tools.active.push('task-tool');
+    state.tools.calls['task-tool'] = {
+      toolCallId: 'task-tool',
+      modelMessageId: '',
+      name: 'task',
+      args: {},
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    // Queue is empty — approval.granted cleared interaction, but tool stayed in active
+    expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['task-tool'] });
+  });
+
+  test('prefers queued tools over active tools', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    // Queued tool
+    state.tools.queue.push('queued-tool');
+    state.tools.calls['queued-tool'] = {
+      toolCallId: 'queued-tool',
+      modelMessageId: '',
+      name: 'read_file',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    // Active approved tool
+    state.tools.active.push('active-tool');
+    state.tools.calls['active-tool'] = {
+      toolCallId: 'active-tool',
+      modelMessageId: '',
+      name: 'task',
+      args: {},
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    // Queue takes priority
+    expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['queued-tool'] });
+  });
 });
