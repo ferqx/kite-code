@@ -96,31 +96,19 @@ export async function invokeRuntimeModel(params: {
   const requestId = genInteractionId();
   const retryEvents: RuntimeEvent[] = [];
 
-  // 注册 retry listener — 模型内部 _generate 有 withTransientModelRetry 包装，
-  // 但需要通过 listener 回调来收集重试事件为 RuntimeEvent。
-  // Register retry listener — the model's _generate is wrapped with
-  // withTransientModelRetry, but we need the listener callback to collect
-  // retry events as RuntimeEvents.
-  const modelWithRetry = params.model as {
-    setRetryListener?:
-      | ((
-          listener:
-            | ((attempt: number, maxAttempts: number, error: unknown, delayMs: number) => void)
-            | null,
-        ) => void)
-      | null;
-  };
-  if (typeof modelWithRetry.setRetryListener === 'function') {
-    modelWithRetry.setRetryListener((attempt, maxAttempts, error, delayMs) => {
-      retryEvents.push({
-        type: 'model.retry',
-        attempt,
-        maxAttempts,
-        error: typeof error === 'string' ? error : String(error).slice(0, 200),
-        delayMs,
-      });
+  // 注册 retry listener — 模型通过 transientRetryMiddleware 实现重试，
+  // 通过 setRetryListener 回调来收集重试事件为 RuntimeEvent。
+  // Register retry listener — the model retries via transientRetryMiddleware,
+  // we collect retry events as RuntimeEvents through the listener callback.
+  params.model.setRetryListener((attempt, maxAttempts, error, delayMs) => {
+    retryEvents.push({
+      type: 'model.retry',
+      attempt,
+      maxAttempts,
+      error: typeof error === 'string' ? error : String(error).slice(0, 200),
+      delayMs,
     });
-  }
+  });
 
   try {
     const tools = createAgentTools({
@@ -223,8 +211,6 @@ export async function invokeRuntimeModel(params: {
     }
     return events;
   } finally {
-    if (typeof modelWithRetry.setRetryListener === 'function') {
-      modelWithRetry.setRetryListener(null);
-    }
+    params.model.setRetryListener(null);
   }
 }

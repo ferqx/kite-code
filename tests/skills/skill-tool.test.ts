@@ -43,7 +43,9 @@ Always write tests first. Follow red-green-refactor.`,
   it('returns skill content when skill exists', async () => {
     const manifests = scanSkills(opts);
     const skillTool = createSkillTool(manifests, opts);
-    const result = await skillTool.invoke({ skill: 'tdd' });
+    // AI SDK tools use .execute() instead of .invoke()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execute() union return type
+    const result = (await (skillTool as any).execute({ skill: 'tdd' })) as string;
     const parsed = JSON.parse(result);
     expect(parsed.ok).toBe(true);
     expect(parsed.name).toBe('tdd');
@@ -53,22 +55,27 @@ Always write tests first. Follow red-green-refactor.`,
   it('returns error when skill not found', async () => {
     const manifests = scanSkills(opts);
     const skillTool = createSkillTool(manifests, opts);
-    const result = await skillTool.invoke({ skill: 'nope' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execute() union return type
+    const result = (await (skillTool as any).execute({ skill: 'nope' })) as string;
     const parsed = JSON.parse(result);
     expect(parsed.ok).toBe(false);
     expect(parsed.error).toContain('Skill not found');
   });
 
-  it('has correct name and description', () => {
+  it('has correct description', () => {
     const manifests = scanSkills(opts);
     const skillTool = createSkillTool(manifests, opts);
-    expect(skillTool.name).toBe('Skill');
+    // AI SDK tools don't have a .name property — name is the Record key in ToolSet
+    // Check description and that execute is available
     expect(skillTool.description).toContain('Invoke a skill');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execute() union type
+    expect(typeof (skillTool as any).execute).toBe('function');
   });
 
   it('works with empty manifests', async () => {
     const skillTool = createSkillTool([], opts);
-    const result = await skillTool.invoke({ skill: 'anything' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execute() union return type
+    const result = (await (skillTool as any).execute({ skill: 'anything' })) as string;
     const parsed = JSON.parse(result);
     expect(parsed.ok).toBe(false);
   });

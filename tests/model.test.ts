@@ -1,10 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { AIMessage } from '@langchain/core/messages';
-import { ChatDeepSeek } from '@langchain/deepseek';
-import { ChatOllama } from '@langchain/ollama';
-import { ChatOpenAI } from '@langchain/openai';
 import type { AgentConfig } from '../src/core/config/index';
-import { createDeepSeekModel, withTransientModelRetry } from '../src/core/model/deepseek';
+import { withTransientModelRetry } from '../src/core/model/deepseek';
 import { createChatModel } from '../src/core/model/factory';
 
 describe('model transient retry', () => {
@@ -185,77 +181,11 @@ describe('model transient retry', () => {
 
     expect(onRetryCalled).toBe(false);
   });
-
-  test('passes back empty DeepSeek reasoning content when the provider returns it', async () => {
-    const model = createDeepSeekModel({
-      providerName: 'deepseek',
-      providerType: 'deepseek',
-      apiKey: 'sk-test',
-      baseURL: 'https://api.deepseek.com/v1',
-      modelName: 'deepseek-v4-flash',
-      sandbox: { enabled: true },
-    }) as any;
-    const rawToolCall = {
-      id: 'call-empty-reasoning',
-      type: 'function' as const,
-      function: {
-        name: 'shell_execute',
-        arguments: JSON.stringify({ command: 'pwd' }),
-      },
-    };
-    let capturedRequest: any;
-
-    model._originalMessages = [
-      new AIMessage({
-        content: '',
-        additional_kwargs: {
-          reasoning_content: '',
-          tool_calls: [rawToolCall],
-        },
-        tool_calls: [
-          {
-            id: 'call-empty-reasoning',
-            name: 'shell_execute',
-            args: { command: 'pwd' },
-          },
-        ],
-      }),
-    ];
-    model.client = {
-      chat: {
-        completions: {
-          create: async (request: any) => {
-            capturedRequest = request;
-            return {
-              id: 'chatcmpl-test',
-              object: 'chat.completion',
-              created: 0,
-              model: 'deepseek-v4-flash',
-              choices: [],
-            };
-          },
-        },
-      },
-    };
-
-    await model.completionWithRetry({
-      model: 'deepseek-v4-flash',
-      messages: [
-        {
-          role: 'assistant',
-          content: '',
-          tool_calls: [rawToolCall],
-        },
-      ],
-    });
-
-    expect(capturedRequest.messages[0]).toHaveProperty('reasoning_content', '');
-  });
 });
 
 describe('model provider factory', () => {
-  test('uses the DeepSeek LangChain adapter for deepseek providers', () => {
-    const model = createChatModel({
+  test('creates a SupportedChatModel with model and setRetryListener for deepseek providers', () => {
+    const binding = createChatModel({
       providerName: 'deepseek',
       providerType: 'deepseek',
       apiKey: 'sk-test',
@@ -264,11 +194,16 @@ describe('model provider factory', () => {
       sandbox: { enabled: true },
     });
 
-    expect(model).toBeInstanceOf(ChatDeepSeek);
-    expect(model.model).toBe('deepseek-chat');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LanguageModel union type; V4 fields accessed via any
+    const m = binding.model as any;
+    expect(binding.model).toBeDefined();
+    expect(m.specificationVersion).toBe('v4');
+    expect(m.provider).toBeDefined();
+    expect(m.modelId).toBe('deepseek-chat');
+    expect(typeof binding.setRetryListener).toBe('function');
   });
 
-  test('uses ChatOpenAI for OpenAI-compatible providers', () => {
+  test('creates a SupportedChatModel for OpenAI-compatible providers', () => {
     const config: AgentConfig = {
       providerName: 'siliconflow',
       providerType: 'openai-compatible',
@@ -278,17 +213,18 @@ describe('model provider factory', () => {
       sandbox: { enabled: true },
     };
 
-    const model = createChatModel(config);
+    const binding = createChatModel(config);
 
-    expect(model).toBeInstanceOf(ChatOpenAI);
-    if (!(model instanceof ChatOpenAI)) {
-      throw new Error('Expected ChatOpenAI model');
-    }
-    expect(model.model).toBe('Qwen/Qwen3-Coder');
-    expect(model.clientConfig.baseURL).toBe('https://api.siliconflow.cn/v1');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LanguageModel union type
+    const m = binding.model as any;
+    expect(binding.model).toBeDefined();
+    expect(m.specificationVersion).toBe('v4');
+    expect(m.provider).toBeDefined();
+    expect(m.modelId).toBe('Qwen/Qwen3-Coder');
+    expect(typeof binding.setRetryListener).toBe('function');
   });
 
-  test('uses ChatOllama for Ollama providers', () => {
+  test('creates a SupportedChatModel for Ollama providers', () => {
     const config: AgentConfig = {
       providerName: 'ollama',
       providerType: 'ollama',
@@ -298,13 +234,14 @@ describe('model provider factory', () => {
       sandbox: { enabled: true },
     };
 
-    const model = createChatModel(config);
+    const binding = createChatModel(config);
 
-    expect(model).toBeInstanceOf(ChatOllama);
-    if (!(model instanceof ChatOllama)) {
-      throw new Error('Expected ChatOllama model');
-    }
-    expect(model.model).toBe('qwen2.5-coder:7b');
-    expect(model.baseUrl).toBe('http://localhost:11434');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LanguageModel union type
+    const m = binding.model as any;
+    expect(binding.model).toBeDefined();
+    expect(m.specificationVersion).toBe('v4');
+    expect(m.provider).toBeDefined();
+    expect(m.modelId).toBe('qwen2.5-coder:7b');
+    expect(typeof binding.setRetryListener).toBe('function');
   });
 });

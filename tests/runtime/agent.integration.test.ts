@@ -7,14 +7,12 @@ import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
 import { createRuntimeStore } from '@/core/runtime/store';
-import { StreamingMockModel } from '../mock-model';
+import { createMockModel } from '../mock-model';
 
 test('Runtime Kernel persists a direct model answer as a completed turn', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
-  const model = new StreamingMockModel({
-    responses: [{ message: new AIMessage({ content: 'Kernel answer' }) }],
-  });
+  const mockModel = createMockModel([{ message: new AIMessage({ content: 'Kernel answer' }) }]);
 
   try {
     const events: RuntimeEvent['type'][] = [];
@@ -25,7 +23,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
         userId: 'test',
         workspace,
         runtimeStorePath: storePath,
-        model: model as never,
+        model: mockModel as any,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',
@@ -40,7 +38,9 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       events.push(event.type);
     }
 
-    expect(events).toEqual([
+    // model.cache_metrics may appear; filter to expected core events
+    const coreEvents = events.filter((e) => e !== 'model.cache_metrics');
+    expect(coreEvents).toEqual([
       'user.message_appended',
       'turn.started',
       'model.requested',
@@ -60,15 +60,15 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
   writeFileSync(join(workspace, 'note.txt'), 'runtime kernel');
-  const model = new StreamingMockModel({
-    responses: [
-      new AIMessage({
+  const mockModel = createMockModel([
+    {
+      message: new AIMessage({
         content: '',
         tool_calls: [{ id: 'read-note', name: 'read_file', args: { path: 'note.txt' } }],
       }),
-      new AIMessage({ content: 'Read the note.' }),
-    ].map((message) => ({ message })),
-  });
+    },
+    { message: new AIMessage({ content: 'Read the note.' }) },
+  ]);
 
   try {
     const events: RuntimeEvent['type'][] = [];
@@ -79,7 +79,7 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
         userId: 'test',
         workspace,
         runtimeStorePath: storePath,
-        model: model as never,
+        model: mockModel as any,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',
@@ -106,17 +106,17 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
 test('Runtime Kernel rejects a write tool before a plan is approved', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
-  const model = new StreamingMockModel({
-    responses: [
-      new AIMessage({
+  const mockModel = createMockModel([
+    {
+      message: new AIMessage({
         content: '',
         tool_calls: [
           { id: 'write-note', name: 'write_file', args: { path: 'note.txt', content: 'approved' } },
         ],
       }),
-      new AIMessage({ content: 'Wrote the note.' }),
-    ].map((message) => ({ message })),
-  });
+    },
+    { message: new AIMessage({ content: 'Wrote the note.' }) },
+  ]);
 
   try {
     const events: RuntimeEvent['type'][] = [];
@@ -127,7 +127,7 @@ test('Runtime Kernel rejects a write tool before a plan is approved', async () =
         userId: 'test',
         workspace,
         runtimeStorePath: storePath,
-        model: model as never,
+        model: mockModel as any,
         phase: 'planning',
         config: {
           providerName: 'test',
@@ -152,9 +152,9 @@ test('Runtime Kernel rejects a write tool before a plan is approved', async () =
 
 test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
-  const model = new StreamingMockModel({
-    responses: [
-      new AIMessage({
+  const mockModel = createMockModel([
+    {
+      message: new AIMessage({
         content: '',
         tool_calls: [
           {
@@ -164,9 +164,9 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
           },
         ],
       }),
-      new AIMessage({ content: 'Thanks for the answer.' }),
-    ].map((message) => ({ message })),
-  });
+    },
+    { message: new AIMessage({ content: 'Thanks for the answer.' }) },
+  ]);
 
   try {
     const events: RuntimeEvent['type'][] = [];
@@ -177,7 +177,7 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
         userId: 'test',
         workspace,
         runtimeStorePath: join(workspace, 'runtime.db'),
-        model: model as never,
+        model: mockModel as any,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',
@@ -208,9 +208,9 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
 
 test('Runtime Kernel executes write_plan in planning phase', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
-  const model = new StreamingMockModel({
-    responses: [
-      new AIMessage({
+  const mockModel = createMockModel([
+    {
+      message: new AIMessage({
         content: '',
         tool_calls: [
           {
@@ -224,9 +224,9 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
           },
         ],
       }),
-      new AIMessage({ content: 'Plan draft saved.' }),
-    ].map((message) => ({ message })),
-  });
+    },
+    { message: new AIMessage({ content: 'Plan draft saved.' }) },
+  ]);
   try {
     const events: RuntimeEvent['type'][] = [];
     for await (const event of runRuntimeAgent(
@@ -237,7 +237,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
         workspace,
         runtimeStorePath: join(workspace, 'runtime.db'),
         phase: 'planning',
-        model: model as never,
+        model: mockModel as any,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',

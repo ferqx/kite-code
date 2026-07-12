@@ -1,7 +1,7 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
-import { type AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
-import { ChatOllama } from '@langchain/ollama';
+import { HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import {
   type ExecutionJournalEntry,
@@ -12,6 +12,7 @@ import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import { createChatModel } from '@/core/model/factory';
+import { invokeBoundModel } from '@/core/model/invoke';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
@@ -56,14 +57,6 @@ function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
     }
     return inner(shellInput);
   };
-}
-
-function bindTools(
-  model: ReturnType<typeof createChatModel>,
-  tools: ReturnType<typeof createAgentTools>,
-) {
-  if (model instanceof ChatOllama) return model.bindTools(tools);
-  return model.bindTools(tools, { tool_choice: 'auto' });
 }
 
 let _subAgentCounter = 0;
@@ -273,20 +266,33 @@ async function runSubAgentLoop(
   const depth = input.depth ?? 0;
   const maxDepth = input.maxDepth ?? 0;
   const canSpawnSubAgents = depth < maxDepth;
-  const tools = input.role.allowedTools
-    ? allTools.filter(
-        (t) => input.role.allowedTools?.has(t.name) && (canSpawnSubAgents || t.name !== 'task'),
-      )
-    : allTools.filter((t) => canSpawnSubAgents || t.name !== 'task');
+  // ToolSet is now Record<string, Tool> — filter by key (tool name)
+  const tools: ToolSet = {};
+  if (input.role.allowedTools) {
+    for (const [name, t] of Object.entries(allTools)) {
+      if (input.role.allowedTools.has(name) && (canSpawnSubAgents || name !== 'task')) {
+        tools[name] = t;
+      }
+    }
+  } else {
+    for (const [name, t] of Object.entries(allTools)) {
+      if (canSpawnSubAgents || name !== 'task') {
+        tools[name] = t;
+      }
+    }
+  }
 
   try {
     await new Promise((r) => setTimeout(r, 0));
 
     while (true) {
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
-      const response = (await bindTools(model, tools).invoke(messages, {
+      const response = await invokeBoundModel({
+        model,
+        tools,
+        messages,
         signal: combinedSignal,
-      })) as AIMessage;
+      });
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
 
       const cacheMetrics = extractPromptCacheMetrics(response);
@@ -351,9 +357,9 @@ async function runSubAgentLoop(
       messages.push(response);
       for (const tc of response.tool_calls) {
         if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
-        const tool = tools.find((t) => t.name === tc.name);
+        const tool = tools[tc.name];
         if (!tool) {
-          const available = [...new Set(tools.map((t) => t.name))].sort().join(', ');
+          const available = Object.keys(tools).sort().join(', ');
           const errMsg = `Tool "${tc.name}" is not available to this sub-agent. Available tools: ${available}. Use one of the available tools instead.`;
           messages.push(
             new ToolMessage({
