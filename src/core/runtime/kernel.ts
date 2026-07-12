@@ -159,6 +159,12 @@ export class AgentKernel {
   async run(executor: RuntimeEffectExecutor, maxEffects = 10_000): Promise<RuntimeEffect> {
     for (let index = 0; index < maxEffects; index++) {
       const effect = decideNextEffect(this.state);
+      if (effect.type === 'subagent.recovery_unavailable') {
+        const events = await executor(effect, this.getState());
+        if (events.length === 0) return { type: 'stop' };
+        this.processEventBatch(events);
+        continue;
+      }
       if (
         effect.type === 'request_user_input' ||
         effect.type === 'request_plan_review' ||
@@ -270,11 +276,13 @@ export function createAgentKernel(params: {
     phase: params.phase,
   });
   const restoredState = store.loadSnapshot<RuntimeState>(params.threadId);
+  const migratedState = restoredState ? migrateRuntimeState(restoredState) : null;
   const initialState =
-    restoredState?.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION &&
-    restoredState.session.threadId === params.threadId
-      ? restoredState
-      : freshState;
+    migratedState?.session.threadId === params.threadId ? migratedState : freshState;
+
+  if (migratedState && migratedState !== restoredState && initialState === migratedState) {
+    store.saveSnapshot(params.threadId, migratedState);
+  }
 
   return new AgentKernel({
     store,
@@ -282,4 +290,28 @@ export function createAgentKernel(params: {
     interactionMode: params.interactionMode ?? 'accept_edits',
     sandboxAvailable: params.sandboxAvailable,
   });
+}
+
+function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
+  if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION) return snapshot;
+  if (snapshot.schemaVersion !== 2) return null;
+
+  const legacyApprovalInteraction =
+    snapshot.interactions.kind === 'awaiting_tool_approval' ? snapshot.interactions : undefined;
+  const legacyMarker = legacyApprovalInteraction?.approval.subagentId
+    ? {
+        toolCallId: legacyApprovalInteraction.toolCallId,
+        subagentId: legacyApprovalInteraction.approval.subagentId,
+        reason: 'A legacy sub-agent approval cannot be resumed after recovery.',
+      }
+    : undefined;
+  // Build the migrated state before upgrading the version so all v2 fields are
+  // preserved and the recovery marker is durable with the schema transition.
+  const migratedState: RuntimeState = {
+    ...snapshot,
+    schemaVersion: 2,
+    suspendedSubagents: snapshot.suspendedSubagents ?? {},
+    ...(legacyMarker ? { legacyUnrecoverableSubagentApproval: legacyMarker } : {}),
+  };
+  return { ...migratedState, schemaVersion: RUNTIME_STATE_SCHEMA_VERSION };
 }

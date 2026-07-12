@@ -16,6 +16,7 @@ import type {
   UserInputPayload,
   UserInputResult,
 } from '@/protocol/events.js';
+import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
 
 export type { UserInputResult } from '@/protocol/events.js';
 
@@ -377,6 +378,13 @@ export interface SubagentCacheMetricsEvent {
   subagent: SubAgentCacheMetricsPayload;
 }
 
+/** A delegated subagent is paused pending approval and can be resumed from this snapshot. */
+export interface SubagentSuspendedEvent {
+  type: 'subagent.suspended';
+  toolCallId: string;
+  snapshot: SuspendedSubagentSnapshot;
+}
+
 // ── 运行时事件联合类型 / Runtime event discriminated union ──
 
 /** 运行时事件 — 所有状态变更的统一类型表示 */
@@ -420,4 +428,5 @@ export type RuntimeEvent =
   | SubagentToolResultEvent
   | SubagentCompletedEvent
   | SubagentFailedEvent
-  | SubagentCacheMetricsEvent;
+  | SubagentCacheMetricsEvent
+  | SubagentSuspendedEvent;

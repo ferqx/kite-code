@@ -8,6 +8,7 @@ interface SearchFilesInput {
   workspace: string;
   pattern: unknown;
   path?: unknown;
+  allowExternal?: boolean;
 }
 
 interface SearchContentInput {
@@ -15,6 +16,7 @@ interface SearchContentInput {
   pattern: unknown;
   path?: unknown;
   glob?: unknown;
+  allowExternal?: boolean;
 }
 
 const SKIP_DIRS = new Set(['.git']);
@@ -26,7 +28,7 @@ export function searchFiles(input: SearchFilesInput): ShellResult {
     const root = resolve(input.workspace, rawPath);
     const matches: string[] = [];
 
-    for (const file of walkFiles(input.workspace, root)) {
+    for (const file of walkFiles(input.workspace, root, input.allowExternal)) {
       const rel = toPosix(relative(input.workspace, file));
       if (matchesFilePattern(rel, pattern)) {
         matches.push(rel);
@@ -55,13 +57,13 @@ export function searchContent(input: SearchContentInput): ShellResult {
     const glob = input.glob === undefined ? null : String(input.glob);
     const lines: string[] = [];
 
-    for (const file of walkFiles(input.workspace, root)) {
+    for (const file of walkFiles(input.workspace, root, input.allowExternal)) {
       const rel = toPosix(relative(input.workspace, file));
       if (glob && !matchesFilePattern(rel, glob)) {
         continue;
       }
 
-      const read = readTextContent(input.workspace, rel);
+      const read = readTextContent(input.workspace, rel, { allowExternal: input.allowExternal });
       if (!read.ok) {
         continue;
       }
@@ -87,12 +89,14 @@ export function searchContent(input: SearchContentInput): ShellResult {
   }
 }
 
-function* walkFiles(workspace: string, root: string): Generator<string> {
+function* walkFiles(workspace: string, root: string, allowExternal?: boolean): Generator<string> {
   const workspaceRoot = resolve(workspace);
   const resolvedRoot = resolve(root);
-  const relRoot = relative(workspaceRoot, resolvedRoot);
-  if (relRoot && (relRoot === '..' || relRoot.startsWith('..\\') || relRoot.startsWith('../'))) {
-    throw new Error(`Refusing search outside workspace: ${root}`);
+  if (!allowExternal) {
+    const relRoot = relative(workspaceRoot, resolvedRoot);
+    if (relRoot && (relRoot === '..' || relRoot.startsWith('..\\') || relRoot.startsWith('../'))) {
+      throw new Error(`Refusing search outside workspace: ${root}`);
+    }
   }
 
   const stat = statSync(resolvedRoot);

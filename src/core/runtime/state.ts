@@ -14,6 +14,7 @@ import type {
   WorkspaceAccess,
 } from '@/protocol/events.js';
 import { getAgentPhase } from '@/protocol/events.js';
+import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
 
 // ── Re-export for convenience ──
 export { getAgentPhase };
@@ -182,7 +183,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 2;
+export const RUNTIME_STATE_SCHEMA_VERSION = 3;
 
 /**
  * 统一运行时状态 — runtime kernel 的核心状态对象。
@@ -220,6 +221,14 @@ export interface RuntimeState {
   interactions: InteractionState;
   /** 工具运行时状态 / Tool runtime state */
   tools: ToolRuntimeState;
+  /** Paused subagents keyed by their parent task tool call. */
+  suspendedSubagents: Record<string, SuspendedSubagentSnapshot>;
+  /** One-shot notice for a legacy subagent approval that cannot be resumed. */
+  legacyUnrecoverableSubagentApproval?: {
+    toolCallId: string;
+    subagentId: string;
+    reason: string;
+  };
   /** 授权状态 / Authorization state */
   authorization: {
     /** 授权模式 / Authorization mode */
@@ -287,6 +296,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       queue: [],
       active: [],
     },
+    suspendedSubagents: {},
     authorization: {
       mode: input.authorizationMode ?? 'default',
       commandGrants: {},

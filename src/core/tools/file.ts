@@ -22,18 +22,33 @@ function normalizeEOL(content: string): string {
 // 路径解析 / Path resolution
 // ============================================================================
 
-export function resolvePath(workspace: string, filePath: string): string {
+export function resolvePath(
+  workspace: string,
+  filePath: string,
+  opts?: { allowExternal?: boolean },
+): string {
   // MSYS2 路径先于 normalize 处理：/d/foo → D:\foo
   const asWindows = msys2ToWindowsPath(filePath);
   const normalized = asWindows.replace(/[\\/]+/g, sep);
   if (!normalized || normalized === '~' || normalized.startsWith(`~${sep}`)) {
+    if (opts?.allowExternal) return resolve(filePath);
     throw new Error(`Path is outside workspace: ${filePath}`);
   }
   if (isAbsolute(normalized)) {
-    throw new Error(`Absolute paths are not allowed for file tools: ${filePath}`);
+    if (opts?.allowExternal) return resolve(normalized);
+    // 绝对路径但可能在工作区内——先解析再验证 / Absolute path may be inside workspace — resolve first
+    const resolved = resolve(normalized);
+    try {
+      assertInsideWorkspace(workspace, resolved, filePath);
+      return resolved;
+    } catch {
+      throw new Error(`Path is outside workspace: ${filePath}`);
+    }
   }
   const target = resolve(workspace, normalized);
-  assertInsideWorkspace(workspace, target, filePath);
+  if (!opts?.allowExternal) {
+    assertInsideWorkspace(workspace, target, filePath);
+  }
   return target;
 }
 
@@ -119,9 +134,9 @@ interface TextContentError {
 export function readTextContent(
   workspace: string,
   filePath: string,
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; allowExternal?: boolean },
 ): TextContent | TextContentError {
-  const target = resolvePath(workspace, filePath);
+  const target = resolvePath(workspace, filePath, { allowExternal: opts?.allowExternal });
   if (!existsSync(target)) {
     return { ok: false, error: `File not found: ${filePath}`, totalLines: 0 };
   }
@@ -198,6 +213,7 @@ export interface ReadFileInput {
   offset?: number;
   limit?: number;
   force?: boolean;
+  allowExternal?: boolean;
 }
 
 export interface ReadFileResult {
@@ -212,7 +228,10 @@ export interface ReadFileResult {
 
 export function readFile(input: ReadFileInput): ReadFileResult {
   try {
-    const result = readTextContent(input.workspace, input.path, { force: input.force });
+    const result = readTextContent(input.workspace, input.path, {
+      force: input.force,
+      allowExternal: input.allowExternal,
+    });
     if (!result.ok) {
       return { ok: false, path: input.path, content: '', totalLines: 0, error: result.error };
     }
@@ -263,6 +282,7 @@ export interface EditFileInput {
   newString: string;
   replaceAll?: boolean;
   matchMode?: 'exact' | 'trimmed';
+  allowExternal?: boolean;
 }
 
 export interface EditFileResult {
@@ -279,12 +299,14 @@ export interface EditFileResult {
 
 export function editFile(input: EditFileInput): EditFileResult {
   try {
-    const result = readTextContent(input.workspace, input.path);
+    const result = readTextContent(input.workspace, input.path, {
+      allowExternal: input.allowExternal,
+    });
     if (!result.ok) {
       return { ok: false, path: input.path, error: result.error };
     }
 
-    const target = resolvePath(input.workspace, input.path);
+    const target = resolvePath(input.workspace, input.path, { allowExternal: input.allowExternal });
     const content = result.content;
 
     // old/new string 同步做换行正规化，与 readTextContent 对齐
@@ -696,6 +718,7 @@ export interface WriteFileInput {
   path: string;
   content: string;
   mode?: 'overwrite' | 'append';
+  allowExternal?: boolean;
 }
 
 export interface WriteFileResult {
@@ -708,7 +731,7 @@ export interface WriteFileResult {
 export function writeFile(input: WriteFileInput): WriteFileResult {
   try {
     mkdirSync(input.workspace, { recursive: true });
-    const target = resolvePath(input.workspace, input.path);
+    const target = resolvePath(input.workspace, input.path, { allowExternal: input.allowExternal });
     mkdirSync(dirname(target), { recursive: true });
 
     if (input.mode === 'append') {

@@ -25,6 +25,13 @@ export type RuntimeEffect =
   | { type: 'request_tool_approval'; interactionId: string; toolCallId: string }
   /** 执行自动审查 / Run auto-review */
   | { type: 'run_auto_review'; reviewId: string; toolCallId: string }
+  /** Terminate a legacy subagent approval that cannot safely be resumed after recovery. */
+  | {
+      type: 'subagent.recovery_unavailable';
+      toolCallId: string;
+      subagentId: string;
+      reason: string;
+    }
   /** 发出最终事件并终止 / Emit final event and terminate */
   | { type: 'emit_final' }
   /** 停止执行 / Stop execution */

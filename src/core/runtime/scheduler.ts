@@ -11,6 +11,13 @@ import type { RuntimeState } from './state';
  * before sibling tool calls execute.
  */
 export function decideNextEffect(state: RuntimeState): RuntimeEffect {
+  if (state.legacyUnrecoverableSubagentApproval) {
+    return {
+      type: 'subagent.recovery_unavailable',
+      ...state.legacyUnrecoverableSubagentApproval,
+    };
+  }
+
   switch (state.interactions.kind) {
     case 'awaiting_user_input':
       return {
@@ -43,10 +50,16 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   // Single-tool scheduling: run one tool at a time to support interaction barriers.
   // When an interaction-creating tool (write_plan action=submit, ask_user, approval) is reached,
   // the scheduler naturally stops before sibling tool calls execute.
-  const nextRunnable = state.tools.queue.find((id) => {
+  //
+  // Tools that need approval are moved from queue → active by tool.started before the
+  // approval interaction fires.  When approval is granted, the tool is still in active
+  // (not queue), so the scheduler must scan both lists.  Without this, approved
+  // sub-agent task tools are invisible to the scheduler and call_model runs prematurely.
+  const isRunnable = (id: string) => {
     const call = state.tools.calls[id];
     return call?.status === 'queued' || call?.status === 'approved';
-  });
+  };
+  const nextRunnable = state.tools.queue.find(isRunnable) ?? state.tools.active.find(isRunnable);
   if (nextRunnable) return { type: 'run_tools', toolCallIds: [nextRunnable] };
 
   if (state.transcript.final) return { type: 'emit_final' };

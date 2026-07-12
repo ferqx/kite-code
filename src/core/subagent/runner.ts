@@ -260,7 +260,20 @@ async function runSubAgentLoop(
 
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
-  const combinedSignal = AbortSignal.any([input.signal, timeoutController.signal]);
+  // 手动合并信号，避免 AbortSignal.any 的跨运行时兼容性问题
+  const combinedController = new AbortController();
+  const onAbort = () => combinedController.abort();
+  if (input.signal.aborted) {
+    combinedController.abort(input.signal.reason);
+  } else {
+    input.signal.addEventListener('abort', onAbort, { once: true });
+  }
+  if (timeoutController.signal.aborted) {
+    combinedController.abort(timeoutController.signal.reason);
+  } else {
+    timeoutController.signal.addEventListener('abort', onAbort, { once: true });
+  }
+  const combinedSignal = combinedController.signal;
 
   const allTools = createAgentTools({
     workspace: input.workspace,
@@ -475,33 +488,72 @@ async function runSubAgentLoop(
             skillManifests: input.skills,
             skillOptions: input.skillOptions,
             signal: combinedSignal,
+            interactionMode: 'accept_edits',
             taskConfig: input.config,
             taskModel: model,
             subagentEventSink: input.eventSink,
           });
-          const continuation: SubAgentContinuation = {
-            id,
-            role: input.role,
-            task: input.task,
-            messages: [...messages],
-            toolCallCount,
-            steps,
-            executionJournal: executionJournal.length > 0 ? [...executionJournal] : undefined,
-            exhaustedFingerprints:
-              Object.keys(exhaustedFingerprints).length > 0
-                ? { ...exhaustedFingerprints }
-                : undefined,
-          };
           const blocked = approvalRequiredBlock(
             result,
             pendingRequest.id ?? tc.id ?? `subagent-${toolCallCount}`,
             pendingRequest.name,
             toolArgs,
-            continuation,
+            {
+              id,
+              role: input.role,
+              task: input.task,
+              messages: [...messages],
+              toolCallCount,
+              steps,
+              executionJournal: executionJournal.length > 0 ? [...executionJournal] : undefined,
+              exhaustedFingerprints:
+                Object.keys(exhaustedFingerprints).length > 0
+                  ? { ...exhaustedFingerprints }
+                  : undefined,
+            },
           );
           if (blocked) {
             clearTimeout(timeoutId);
             const totalDurationMs = Date.now() - startTime;
+
+            // 同一 AI message 中可能有多个 tool call，blocked 后剩余的工具
+            // 未被处理。必须为它们添加 deferred ToolMessage，否则消息格式不合法
+            // （每个 tool_call_id 都需要对应 ToolMessage），resume 后模型调用会 400。
+            const currentIndex = response.tool_calls.indexOf(tc);
+            for (let i = currentIndex + 1; i < response.tool_calls.length; i++) {
+              const remaining = response.tool_calls[i]!;
+              messages.push(
+                new ToolMessage({
+                  content: JSON.stringify({
+                    ok: false,
+                    deferred: true,
+                    error: `Execution deferred: sub-agent paused for ${tc.name} approval before this tool could run.`,
+                  }),
+                  tool_call_id: remaining.id ?? `subagent-deferred-${i}`,
+                  name: remaining.name,
+                  status: 'error' as ToolMessage['status'],
+                }),
+              );
+            }
+
+            // 重建 continuation，包含 deferred ToolMessages
+            // Rebuild continuation WITH deferred messages so resumed state is valid
+            const continuation: SubAgentContinuation = {
+              id,
+              role: input.role,
+              task: input.task,
+              messages: [...messages],
+              toolCallCount,
+              steps,
+              executionJournal: executionJournal.length > 0 ? [...executionJournal] : undefined,
+              exhaustedFingerprints:
+                Object.keys(exhaustedFingerprints).length > 0
+                  ? { ...exhaustedFingerprints }
+                  : undefined,
+            };
+            // 更新 blocked.continuation 为包含 deferred 消息的新版本
+            blocked.continuation = continuation;
+
             // 子 agent 工具需要审批：标记步骤为 awaiting_approval，暂停子 agent，
             // 将 blocked 结果返回给调用方（tool-controller）以通过 Runtime Kernel
             // 的审批管线处理。Kernel 审批通过后通过 resumeSubAgent 恢复执行。

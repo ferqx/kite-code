@@ -60,7 +60,7 @@ export interface RunSummary {
     turns: number;
     toolCalls: { total: number; ok: number; failed: number };
     modelRetries: number;
-    subAgents: { total: number; ok: number; failed: number };
+    subAgents: { total: number; ok: number; failed: number; blocked: number };
     errors: number;
   };
 }

@@ -156,6 +156,7 @@ export function recordEvent(
           TRUNC_SUMMARY,
         );
       }
+      if (event.data.subagentId) base.attributes['kite_code.subagent.id'] = event.data.subagentId;
       if (event.data.objective) {
         base.attributes['kite_code.approval.objective'] = trunc(
           event.data.objective,
@@ -406,6 +407,10 @@ export function recordRuntimeEvent(
       base.attributes['kite_code.tool.call_id'] = event.toolCallId;
       base.attributes['kite_code.tool.args'] = safeStringify(event.args, TRUNC_ARGS);
       break;
+    case 'tool.started':
+      base.name = 'tool.start';
+      base.attributes['kite_code.tool.call_id'] = event.toolCallId;
+      break;
     case 'tool.finished':
       base.name = `tool.${event.name}`;
       base.attributes['kite_code.tool.name'] = event.name;
@@ -431,12 +436,48 @@ export function recordRuntimeEvent(
       base.attributes['kite_code.input.question'] = trunc(event.request.question, TRUNC_QUESTION);
       break;
     case 'approval.requested':
+      base.name = 'approval.requested';
       base.attributes['kite_code.interaction_id'] = event.interactionId;
+      base.attributes['kite_code.approval.tool'] = event.approval.tool;
       base.attributes['kite_code.approval.command'] = trunc(event.approval.command, TRUNC_COMMAND);
+      base.attributes['kite_code.approval.risk'] = event.approval.risk;
+      base.attributes['kite_code.approval.reason'] = trunc(event.approval.reason, TRUNC_SUMMARY);
+      if (event.approval.subagentId)
+        base.attributes['kite_code.subagent.id'] = event.approval.subagentId;
+      break;
+    case 'approval.granted':
+      base.name = 'approval.granted';
+      base.attributes['kite_code.interaction_id'] = event.interactionId;
+      base.attributes['kite_code.approval.grant'] = event.grant;
+      break;
+    case 'approval.rejected':
+      base.name = 'approval.rejected';
+      base.attributes['kite_code.interaction_id'] = event.interactionId;
+      if (event.reason)
+        base.attributes['kite_code.approval.reject_reason'] = trunc(event.reason, TRUNC_SUMMARY);
       break;
     case 'plan.review_requested':
       base.attributes['kite_code.interaction_id'] = event.interactionId;
       base.attributes['kite_code.plan'] = safeStringify(event.plan, TRUNC_SUMMARY);
+      break;
+    case 'auto_review.requested':
+      base.name = 'auto_review.requested';
+      base.attributes['kite_code.interaction_id'] = event.reviewId;
+      base.attributes['kite_code.tool.call_id'] = event.toolCallId;
+      base.attributes['kite_code.tool.name'] = event.toolName;
+      base.attributes['kite_code.auto_review.reason'] = trunc(event.reason, TRUNC_SUMMARY);
+      break;
+    case 'auto_review.completed':
+      base.name = 'auto_review.completed';
+      base.attributes['kite_code.interaction_id'] = event.reviewId;
+      base.attributes['kite_code.tool.call_id'] = event.toolCallId;
+      base.attributes['kite_code.auto_review.approved'] = event.result.approved;
+      base.attributes['kite_code.auto_review.reason'] = trunc(
+        event.result.reason ?? '',
+        TRUNC_SUMMARY,
+      );
+      base.attributes['kite_code.auto_review.model'] = event.result.reviewerModelName ?? 'unknown';
+      base.attributes['kite_code.auto_review.duration_ms'] = event.result.durationMs;
       break;
     case 'subagent.started':
       base.name = 'subagent.start';
@@ -455,13 +496,35 @@ export function recordRuntimeEvent(
       base.attributes['kite_code.subagent.id'] = event.subagent.id;
       base.attributes['kite_code.tool.name'] = event.subagent.toolName;
       base.attributes['kite_code.tool.ok'] = event.subagent.ok;
+      if (event.subagent.failureReason)
+        base.attributes['kite_code.tool.failure_reason'] = event.subagent.failureReason;
       if (!event.subagent.ok)
         base.status = { code: 'ERROR', message: event.subagent.summary ?? 'tool failed' };
+      break;
+    case 'subagent.suspended':
+      base.name = 'subagent.suspended';
+      base.attributes['kite_code.subagent.blocked_tool'] = event.snapshot.blockedTool.toolName;
+      base.attributes['kite_code.subagent.blocked_command'] = trunc(
+        event.snapshot.blockedTool.command,
+        TRUNC_SUMMARY,
+      );
+      base.attributes['kite_code.subagent.id'] = event.snapshot.subagentId;
+      base.attributes['kite_code.subagent.role'] = event.snapshot.role;
+      base.attributes['kite_code.subagent.tool_call_count'] = event.snapshot.toolCallCount;
       break;
     case 'subagent.completed':
     case 'subagent.failed':
       base.name = event.type === 'subagent.completed' ? 'subagent.done' : 'subagent.error';
       base.attributes['kite_code.subagent.id'] = event.subagent.id;
+      if (event.subagent.summary)
+        base.attributes['kite_code.subagent.summary'] = trunc(
+          event.subagent.summary,
+          TRUNC_SUMMARY,
+        );
+      if (event.subagent.toolCallCount != null)
+        base.attributes['kite_code.subagent.tool_call_count'] = event.subagent.toolCallCount;
+      if (event.subagent.durationMs != null)
+        base.attributes['kite_code.subagent.duration_ms'] = event.subagent.durationMs;
       if (event.type === 'subagent.failed')
         base.status = { code: 'ERROR', message: event.subagent.error };
       break;

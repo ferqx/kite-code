@@ -60,6 +60,19 @@ export interface SubAgentContinuation {
   exhaustedFingerprints?: Record<string, true>;
 }
 
+/** 已暂停子 agent 的待执行工具 / Pending tool preserved with a suspended continuation */
+export interface SubAgentBlockedTool {
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  command: string;
+}
+
+/** 从持久化快照恢复的 continuation，包含恢复前必须执行的阻塞工具 */
+export interface RestoredSubAgentContinuation extends SubAgentContinuation {
+  blockedTool: SubAgentBlockedTool;
+}
+
 /** 子 agent 步骤记录（用于持久化到 checkpoint）
  *  status 与 TUI 的 SubAgentStepRecord.status 保持一致 */
 export interface SubAgentStepSnapshot {

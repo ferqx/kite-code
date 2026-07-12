@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve } from 'node:path';
 import { hasSameCommandGrant, normalizeAuthorizationState } from '@/core/harness/tool-policy';
 import { parseMcpToolName } from '@/core/mcp/tool-adapter';
 import { isReadOnlyShellCommand } from '@/core/tools/definitions';
@@ -479,24 +480,45 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     return phaseDenial;
   }
 
-  // write_file / edit_file — 修改工作区文件
-  // write_file / edit_file — modify workspace files
+  // write_file / edit_file — 修改文件（工作区内外分别处理）
+  // write_file / edit_file — modify files (handle internal vs external paths)
   if (toolName === 'write_file' || toolName === 'edit_file') {
     const path = String(toolArgs.path ?? '<unknown>');
+    // 绝对路径可能指向工作区内部——解析后再判断外部性
+    // Absolute path may resolve inside workspace — check after resolution
+    const isOutside = (() => {
+      if (path.startsWith('~')) return true;
+      if (!isAbsolute(path)) return false;
+      try {
+        const rel = relative(resolve(workspace), resolve(path));
+        return rel.startsWith('..') || isAbsolute(rel);
+      } catch {
+        return true; // 解析失败，保守视为外部路径
+      }
+    })();
     if (effectiveMode === 'full_access') {
       return allow({
         risk: 'write_file',
+        ...(isOutside ? { effects: { externalWrite: true } } : {}),
         reason: 'full_access is enabled for this thread.',
-        userVisibleSummary: `Modify workspace file: ${path}`,
-        expectedEffects: ['Modifies files inside the workspace', 'May overwrite existing content'],
+        userVisibleSummary: `Modify ${isOutside ? 'external ' : 'workspace '}file: ${path}`,
+        expectedEffects: [
+          `Modifies files ${isOutside ? 'outside' : 'inside'} the workspace`,
+          'May overwrite existing content',
+        ],
         grantUsed: 'full_access',
       });
     }
     return requireApproval({
       risk: 'write_file',
-      reason: 'This tool modifies workspace files.',
-      userVisibleSummary: `Modify workspace file: ${path}`,
-      expectedEffects: ['Modifies files inside the workspace', 'May overwrite existing content'],
+      ...(isOutside ? { effects: { externalWrite: true } } : {}),
+      reason: isOutside
+        ? 'This tool modifies files outside the workspace.'
+        : 'This tool modifies workspace files.',
+      userVisibleSummary: `Modify ${isOutside ? 'external ' : 'workspace '}file: ${path}`,
+      expectedEffects: isOutside
+        ? ['Modifies files outside the workspace boundary', 'May overwrite existing content']
+        : ['Modifies files inside the workspace', 'May overwrite existing content'],
     });
   }
 

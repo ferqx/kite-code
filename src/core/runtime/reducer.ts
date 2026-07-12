@@ -170,6 +170,15 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.finished': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      const isTaskCall = existingCall.name === 'task';
+      const clearsMatchingApproval =
+        isTaskCall &&
+        state.interactions.kind === 'awaiting_tool_approval' &&
+        state.interactions.toolCallId === event.toolCallId;
+      const clearsLegacyMarker =
+        isTaskCall && state.legacyUnrecoverableSubagentApproval?.toolCallId === event.toolCallId;
+      const { legacyUnrecoverableSubagentApproval: _legacyMarker, ...stateWithoutLegacyMarker } =
+        state;
       const status =
         event.result.status === 'exhausted'
           ? ('exhausted' as const)
@@ -177,7 +186,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ? ('succeeded' as const)
             : ('failed' as const);
       return {
-        ...state,
+        ...(clearsLegacyMarker ? stateWithoutLegacyMarker : state),
         tools: {
           ...state.tools,
           calls: {
@@ -208,6 +217,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             },
           ],
         },
+        suspendedSubagents: clearSuspendedSubagent(state, event.toolCallId, isTaskCall),
+        interactions: clearsMatchingApproval ? { kind: 'idle' } : state.interactions,
       };
     }
 
@@ -229,6 +240,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
         },
+        suspendedSubagents: clearSuspendedSubagent(
+          state,
+          event.toolCallId,
+          existingCall.name === 'task',
+        ),
       };
     }
 
@@ -246,6 +262,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             queue: state.tools.queue.filter((id) => id !== event.toolCallId),
             active: state.tools.active.filter((id) => id !== event.toolCallId),
           },
+          suspendedSubagents: clearSuspendedSubagent(
+            state,
+            event.toolCallId,
+            existingCall.name === 'task',
+          ),
         };
       }
       return {
@@ -284,6 +305,23 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               ok: false,
             },
           ],
+        },
+        suspendedSubagents: clearSuspendedSubagent(
+          state,
+          event.toolCallId,
+          existingCall.name === 'task',
+        ),
+      };
+    }
+
+    case 'subagent.suspended': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (existingCall?.name !== 'task') return state;
+      return {
+        ...state,
+        suspendedSubagents: {
+          ...state.suspendedSubagents,
+          [event.toolCallId]: event.snapshot,
         },
       };
     }
@@ -608,6 +646,16 @@ function updateToolStatus(
     ...tools,
     calls: { ...tools.calls, [toolCallId]: { ...call, status } },
   };
+}
+
+function clearSuspendedSubagent(
+  state: RuntimeState,
+  toolCallId: string,
+  isTaskCall: boolean,
+): RuntimeState['suspendedSubagents'] {
+  if (!isTaskCall || !state.suspendedSubagents[toolCallId]) return state.suspendedSubagents;
+  const { [toolCallId]: _snapshot, ...remaining } = state.suspendedSubagents;
+  return remaining;
 }
 
 function planDocumentFromAgentPlan(

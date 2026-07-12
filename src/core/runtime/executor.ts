@@ -62,6 +62,33 @@ export function createRuntimeEffectExecutor(
     if (effect.type === 'run_auto_review') {
       return executeAutoReview(effect, state, dependencies);
     }
+    if (effect.type === 'subagent.recovery_unavailable') {
+      return [
+        {
+          type: 'subagent.failed',
+          subagent: {
+            id: effect.subagentId,
+            error: effect.reason,
+            summary: effect.reason,
+            toolCallCount: 0,
+            durationMs: 0,
+          },
+        },
+        {
+          type: 'tool.finished',
+          toolCallId: effect.toolCallId,
+          name: 'task',
+          result: {
+            ok: false,
+            command: '',
+            exitCode: -1,
+            stdout: '',
+            stderr: effect.reason,
+            status: 'error',
+          },
+        },
+      ];
+    }
     return [];
   };
 }

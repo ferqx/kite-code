@@ -12,28 +12,29 @@ import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState } from '@/core/runtime/state';
 import { computePlanStructuralDigest, getAgentPhase } from '@/core/runtime/state';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import {
+  deserializeSubagentContinuation,
+  serializeSubagentContinuation,
+} from '@/core/subagent/continuation-codec';
 import { resumeSubAgent } from '@/core/subagent/runner';
-import type { SubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
+import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
-
-/** Pending sub-agent continuations keyed by the main agent's task toolCallId.
- *  When a sub-agent pauses for approval, the continuation is stored here.
- *  After approval (grant or reject), the kernel resumes or terminates the sub-agent. */
-const pendingSubagentContinuations = new Map<string, SubAgentContinuation>();
 
 /** Resolve a sub-agent continuation that was rejected (user denied the approval).
  *  Emits subagent.failed + tool.finished so the TUI transitions the sub-agent block
  *  from awaiting_approval to error, and the task tool produces a result for the model.
  *  Called by the runner after approval.rejected is processed. */
-export function resolveRejectedSubagentContinuation(toolCallId: string): RuntimeEvent[] {
-  const continuation = pendingSubagentContinuations.get(toolCallId);
-  if (!continuation) return [];
-  pendingSubagentContinuations.delete(toolCallId);
+export function resolveRejectedSubagentContinuation(
+  state: RuntimeState,
+  toolCallId: string,
+): RuntimeEvent[] {
+  const snapshot = state.suspendedSubagents[toolCallId];
+  if (!snapshot) return [];
+  const continuation = deserializeSubagentContinuation(snapshot);
 
-  const lastStep = continuation.steps[continuation.steps.length - 1];
-  const blockedToolName = lastStep?.toolName ?? 'unknown';
+  const blockedToolName = continuation.blockedTool.toolName;
   const subagentId = continuation.id;
   const rejectionMsg = `Sub-agent tool "${blockedToolName}" was rejected by user.`;
 
@@ -90,7 +91,7 @@ export function toRuntimeSubagentEvent(event: SubagentEvent): RuntimeEvent {
 async function handleSubAgentResume(params: {
   state: RuntimeState;
   toolCallId: string;
-  continuation: SubAgentContinuation;
+  continuation: RestoredSubAgentContinuation;
   shellExecutor?: ShellExecutor;
   mcpManager?: McpManager;
   skillManifests?: SkillManifest[];
@@ -102,9 +103,7 @@ async function handleSubAgentResume(params: {
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   const { continuation } = params;
-  const lastStep = continuation.steps[continuation.steps.length - 1];
-  const blockedToolName = lastStep?.toolName ?? 'unknown';
-  const blockedToolArgs = lastStep?.toolArgs ?? {};
+  const { toolName: blockedToolName, args: blockedToolArgs } = continuation.blockedTool;
 
   // Execute the previously-blocked tool with the approval grant
   const call = params.state.tools.calls[params.toolCallId];
@@ -171,11 +170,54 @@ async function handleSubAgentResume(params: {
     },
     continuation,
     {
-      toolCallId: `${continuation.id}-resume`,
+      toolCallId: continuation.blockedTool.toolCallId,
       toolName: blockedToolName,
       result: toolResult,
     },
   );
+
+  // 子 agent 恢复后再次 blocked → 上报审批，不发射 tool.finished
+  if (result.blocked) {
+    const blocked = result.blocked;
+    const subagentId = blocked.continuation.id;
+    events.push({
+      type: 'subagent.suspended',
+      toolCallId: params.toolCallId,
+      snapshot: serializeSubagentContinuation(blocked.continuation, {
+        toolCallId: blocked.toolCallId,
+        toolName: blocked.toolName,
+        args: blocked.args,
+        command: blocked.command,
+      }),
+    });
+    const blockedDecision = evaluateToolApproval({
+      toolName: blocked.toolName,
+      toolArgs: blocked.args,
+      phase: getAgentPhase(params.state.planning),
+      workspace: params.state.session.workspace,
+      threadId: params.state.session.threadId,
+      authorization: params.state.authorization,
+    });
+    const blockedApproval = buildToolApproval({
+      workspace: params.state.session.workspace,
+      threadId: params.state.session.threadId,
+      request: {
+        id: blocked.toolCallId,
+        name: blocked.toolName,
+        args: blocked.args,
+        protectedCommand: blocked.command,
+      } as import('@/core/harness/tool-requests').PendingToolRequest,
+      decision: blockedDecision,
+    }) as import('@/protocol/events').ToolApprovalPayload;
+    blockedApproval.subagentId = subagentId;
+    events.push({
+      type: 'approval.requested',
+      interactionId: genInteractionId(),
+      toolCallId: params.toolCallId,
+      approval: blockedApproval,
+    });
+    return events;
+  }
 
   // Emit tool.finished for the task tool — the sub-agent has produced its final result
   const output = JSON.stringify(result);
@@ -540,13 +582,13 @@ export async function executeRuntimeTools(params: {
       // When a sub-agent paused for approval, the task tool call was set to
       // 'approved' by the reducer.  Instead of starting a fresh sub-agent,
       // execute the blocked tool with the approved grant and resume.
-      const pendingCont = pendingSubagentContinuations.get(toolCallId);
-      if (pendingCont && call.status === 'approved') {
-        pendingSubagentContinuations.delete(toolCallId);
+      const suspended = params.state.suspendedSubagents[toolCallId];
+      if (suspended && call.status === 'approved') {
+        const restored = deserializeSubagentContinuation(suspended);
         const resumeEvents = await handleSubAgentResume({
           state: params.state,
           toolCallId,
-          continuation: pendingCont,
+          continuation: restored,
           shellExecutor: params.shellExecutor,
           mcpManager: params.mcpManager,
           skillManifests: params.skillManifests,
@@ -590,7 +632,17 @@ export async function executeRuntimeTools(params: {
         if (result.subagentResult?.blocked) {
           const blocked = result.subagentResult.blocked;
           const subagentId = blocked.continuation.id;
-          pendingSubagentContinuations.set(toolCallId, blocked.continuation);
+          // Serialize continuation into RuntimeState for persistence
+          events.push({
+            type: 'subagent.suspended',
+            toolCallId,
+            snapshot: serializeSubagentContinuation(blocked.continuation, {
+              toolCallId: blocked.toolCallId,
+              toolName: blocked.toolName,
+              args: blocked.args,
+              command: blocked.command,
+            }),
+          });
 
           // Build approval payload for the blocked sub-agent tool
           const blockedDecision = evaluateToolApproval({

@@ -75,7 +75,7 @@ export class SessionLogCollector {
         turns: 0,
         toolCalls: { total: 0, ok: 0, failed: 0 },
         modelRetries: 0,
-        subAgents: { total: 0, ok: 0, failed: 0 },
+        subAgents: { total: 0, ok: 0, failed: 0, blocked: 0 },
         errors: 0,
       },
     };
@@ -176,10 +176,24 @@ export class SessionLogCollector {
         this._summary.stats.toolCalls.failed++;
       } else if (event.type === 'subagent.started') {
         this._summary.stats.subAgents.total++;
+      } else if (event.type === 'subagent.suspended') {
+        this._summary.stats.subAgents.blocked++;
       } else if (event.type === 'subagent.completed') {
         this._summary.stats.subAgents.ok++;
       } else if (event.type === 'subagent.failed') {
         this._summary.stats.subAgents.failed++;
+      }
+
+      // 开发模式下，子 agent 失败和工具错误输出到独立错误日志
+      // Dev mode: write sub-agent failures and tool errors to dedicated error log
+      if (
+        this._errorWriter &&
+        (event.type === 'subagent.failed' ||
+          event.type === 'subagent.tool_result' ||
+          (event.type === 'tool.finished' && !event.result.ok) ||
+          event.type === 'tool.failed')
+      ) {
+        this._errorWriter.write(rec);
       }
     } catch {
       // Logging cannot interrupt the runtime.

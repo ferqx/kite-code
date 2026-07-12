@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpManager } from '@/core/mcp';
@@ -222,19 +223,23 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'read_file') {
+    const filePath = (request.args.path ?? '') as string;
+    const isExternal = isAbsolute(filePath) || filePath.startsWith('~');
+    const allowExternal = hasExecutionGrant && isExternal;
     const result = readFile({
       workspace,
-      path: request.args.path ?? '',
+      path: filePath,
       offset: request.args.offset,
       limit: request.args.limit,
+      allowExternal,
     });
     return withFailureGuidance(request, {
       ok: result.ok,
-      command: `read_file ${request.args.path ?? ''}`,
+      command: `read_file ${filePath}`,
       exitCode: result.ok ? 0 : -1,
       stdout: result.content,
       stderr: result.error ?? '',
-      path: request.args.path,
+      path: filePath,
       totalLines: result.totalLines,
     });
   }
@@ -249,12 +254,16 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: 'edit_file requires old_string to locate the text to replace.',
       });
     }
+    const editPath = (request.args.path ?? '') as string;
+    const isExternal = isAbsolute(editPath) || editPath.startsWith('~');
+    const allowExternal = hasExecutionGrant && isExternal;
     const result = editFile({
       workspace,
-      path: request.args.path ?? '',
-      oldString: request.args.old_string,
-      newString: request.args.new_string ?? '',
-      replaceAll: request.args.replace_all,
+      path: editPath,
+      oldString: request.args.old_string as string,
+      newString: (request.args.new_string ?? '') as string,
+      replaceAll: request.args.replace_all as boolean | undefined,
+      allowExternal,
     });
     let stdout = '';
     if (result.ok) {
@@ -287,15 +296,20 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'write_file') {
+    const filePath = (request.args.path ?? '') as string;
+    const isExternal = isAbsolute(filePath) || filePath.startsWith('~');
+    const allowExternal = hasExecutionGrant && isExternal;
+
     // 写入前读取旧内容，用于生成 diff / Read old content before writing for diff
-    const oldRead = readTextContent(workspace, request.args.path ?? '');
+    const oldRead = readTextContent(workspace, filePath, { allowExternal });
     const oldExisted = oldRead.ok;
 
     const result = writeFile({
       workspace,
-      path: request.args.path ?? '',
-      content: request.args.content ?? '',
-      mode: request.args.mode,
+      path: filePath,
+      content: (request.args.content ?? '') as string,
+      mode: request.args.mode as 'overwrite' | 'append' | undefined,
+      allowExternal,
     });
 
     let stdout = '';
@@ -367,11 +381,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'search_content') {
+    const searchPath = (request.args.path ?? '.') as string;
+    const isExternal = isAbsolute(searchPath) || searchPath.startsWith('~');
+    const allowExternal = hasExecutionGrant && isExternal;
     const result = searchContentNative({
       workspace,
       pattern: request.args.pattern,
-      path: request.args.path,
+      path: searchPath,
       glob: request.args.glob,
+      allowExternal,
     });
     return withFailureGuidance(request, {
       ...result,
@@ -382,10 +400,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'search_files') {
+    const searchPath = (request.args.path ?? '.') as string;
+    const isExternal = isAbsolute(searchPath) || searchPath.startsWith('~');
+    const allowExternal = hasExecutionGrant && isExternal;
     const result = searchFilesNative({
       workspace,
       pattern: request.args.pattern,
-      path: request.args.path,
+      path: searchPath,
+      allowExternal,
     });
     return withFailureGuidance(request, {
       ...result,
@@ -571,7 +593,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'shell_execute') {
-    const networkMode = resolveShellNetworkMode(policy, approvedGrant);
+    const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant);
     const raw = await runShellForTool(
       workspace,
       request.args.command,
@@ -656,14 +678,10 @@ async function runShellForTool(
 
 function resolveShellNetworkMode(
   policy: ReturnType<typeof evaluateToolApproval>,
-  approvedGrant: ShellGrantUsed,
+  hasExecutionGrant: boolean,
 ): ShellNetworkMode {
   const mayNeedNetwork = policy.effects?.network || policy.effects?.uncertainEffects;
-  const hasNetworkApproval =
-    approvedGrant !== 'none' ||
-    policy.grantUsed === 'same_command' ||
-    policy.grantUsed === 'full_access';
-  return mayNeedNetwork && hasNetworkApproval ? 'allow_all' : 'disabled';
+  return mayNeedNetwork && hasExecutionGrant ? 'allow_all' : 'disabled';
 }
 
 /** 给失败工具结果补充模型可直接使用的原因和正确用法 / Add model-facing failure guidance to failed tool results */

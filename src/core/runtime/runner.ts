@@ -26,6 +26,13 @@ export async function* runRuntimeLoop(
   for (let count = 0; count < maxEffects; count++) {
     const effect = decideNextEffect(kernel.getState());
     if (effect.type === 'stop') return;
+    if (effect.type === 'subagent.recovery_unavailable') {
+      const events = await executor(effect, kernel.getState());
+      if (events.length === 0) return;
+      kernel.processEventBatch(events);
+      yield* events;
+      continue;
+    }
     if (effect.type === 'emit_final') {
       const completed: RuntimeEvent = {
         type: 'run.completed',
@@ -56,7 +63,10 @@ export async function* runRuntimeLoop(
       // When a sub-agent tool approval is rejected, emit subagent.failed +
       // tool.finished to terminate the sub-agent and produce a result for the model.
       if (action.type === 'reject' && effect.type === 'request_tool_approval') {
-        const subagentEvents = resolveRejectedSubagentContinuation(effect.toolCallId);
+        const subagentEvents = resolveRejectedSubagentContinuation(
+          kernel.getState(),
+          effect.toolCallId,
+        );
         if (subagentEvents.length > 0) {
           events.push(...subagentEvents);
         }
