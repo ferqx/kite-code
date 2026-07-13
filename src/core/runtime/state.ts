@@ -4,7 +4,7 @@
 
 import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
-import type { AuthorizationSource } from '@/core/types';
+import type { AuthorizationSource, ToolGrant } from '@/core/types';
 import type {
   AgentPlan,
   AuthorizationMode,
@@ -237,8 +237,12 @@ export interface RuntimeState {
   authorization: {
     /** 授权模式 / Authorization mode */
     mode: AuthorizationMode;
+    /** full_access 的来源（user / config / test / system）/ Source of full_access elevation */
+    modeSource?: AuthorizationSource;
+    /** full_access 的授予时间 / Timestamp when full_access was granted */
+    modeGrantedAt?: string;
     /** 命令授权记录，key 为 workspace+threadId+command 的组合键 / Command grant records */
-    commandGrants: Record<string, { workspace: string; threadId: string; command: string }>;
+    commandGrants: Record<string, ToolGrant>;
   };
   /** 交互模式（ask/auto/full）/ Interaction mode */
   mode: InteractionMode;

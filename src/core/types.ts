@@ -45,8 +45,10 @@ export interface ToolGrant {
   workspace: string;
   threadId: string;
   command: string;
-  source?: AuthorizationSource;
-  grantedAt?: string;
+  /** 授权来源 / Authorization source */
+  source: AuthorizationSource;
+  /** 授权时间 / Grant timestamp */
+  grantedAt: string;
   expiresAt?: string;
 }
 

@@ -91,6 +91,7 @@ export function eventsForRuntimeAction(
       const nextAuthorization = applyApprovalGrant({
         authorization: state.authorization,
         grant: action.grant,
+        source: 'user',
         workspace: state.session.workspace,
         threadId: state.session.threadId,
         request: {

@@ -40,6 +40,8 @@ export function normalizeAuthorizationState(
 ): ThreadAuthorizationState {
   return {
     mode: authorization?.mode === 'full_access' ? 'full_access' : 'default',
+    ...(authorization?.modeSource ? { modeSource: authorization.modeSource } : {}),
+    ...(authorization?.modeGrantedAt ? { modeGrantedAt: authorization.modeGrantedAt } : {}),
     commandGrants: authorization?.commandGrants ?? {},
   };
 }
