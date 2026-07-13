@@ -301,6 +301,8 @@ export interface UserInputPayload {
 
 export interface NeedPlanReviewPayload {
   plan: AgentPlan;
+  /** Durable user-level Markdown Artifact for this plan version. */
+  artifact?: PlanArtifactRef;
 }
 
 /** 用户输入消息负载 / User message payload */

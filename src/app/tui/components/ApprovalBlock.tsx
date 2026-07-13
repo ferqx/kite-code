@@ -1,5 +1,5 @@
 import { Box, Text, useInput, useStdout } from 'ink';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { ShellApprovalGrant } from '@/protocol/events';
@@ -27,6 +27,8 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
   const t = useTheme();
   const { stdout } = useStdout();
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedIndexRef = useRef(0);
+  const rawInputBuffer = useRef('');
   const cols = stdout?.columns ?? 80;
 
   function resolve(opt: Option) {
@@ -40,17 +42,32 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
     }
   }
 
-  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
-    if (key.upArrow) {
-      setSelectedIndex((i) => Math.max(0, i - 1));
+  useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+    rawInputBuffer.current = `${rawInputBuffer.current}${input}`.slice(-4);
+    const upArrow =
+      key.upArrow ||
+      rawInputBuffer.current.endsWith('\u001b[A') ||
+      rawInputBuffer.current.endsWith('[A');
+    const downArrow =
+      key.downArrow ||
+      rawInputBuffer.current.endsWith('\u001b[B') ||
+      rawInputBuffer.current.endsWith('[B');
+    if (upArrow) {
+      rawInputBuffer.current = '';
+      const nextIndex = Math.max(0, selectedIndexRef.current - 1);
+      selectedIndexRef.current = nextIndex;
+      setSelectedIndex(nextIndex);
       return;
     }
-    if (key.downArrow) {
-      setSelectedIndex((i) => Math.min(OPTIONS.length - 1, i + 1));
+    if (downArrow) {
+      rawInputBuffer.current = '';
+      const nextIndex = Math.min(OPTIONS.length - 1, selectedIndexRef.current + 1);
+      selectedIndexRef.current = nextIndex;
+      setSelectedIndex(nextIndex);
       return;
     }
     if (key.return) {
-      const opt = OPTIONS[selectedIndex];
+      const opt = OPTIONS[selectedIndexRef.current];
       if (opt) resolve(opt);
       return;
     }

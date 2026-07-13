@@ -4,6 +4,61 @@ import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import type { RuntimeState } from './state';
 
+/** 生成取消方案审核时的事件，统一处理显式拒绝和 Esc/取消动作。 */
+function planReviewCancelledEvents(
+  interaction: Extract<RuntimeState['interactions'], { kind: 'awaiting_review' }>,
+  reason?: string,
+): RuntimeEvent[] {
+  return [
+    {
+      type: 'plan.review_cancelled',
+      interactionId: interaction.interactionId,
+      reason: reason ?? 'Plan review cancelled by user.',
+    },
+    {
+      type: 'tool.finished',
+      toolCallId: interaction.toolCallId,
+      name: 'write_plan',
+      result: {
+        ok: true,
+        command: '',
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          status: 'review_cancelled',
+          plan_id: interaction.planId,
+          version: interaction.version,
+          ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
+          feedback: reason,
+        }),
+        stderr: '',
+      },
+    },
+  ];
+}
+
+/** 生成取消用户提问时的工具结果，确保挂起的 ask_user 交互可以继续收敛。 */
+function userInputCancelledEvents(
+  interaction: Extract<RuntimeState['interactions'], { kind: 'awaiting_user_input' }>,
+  reason?: string,
+): RuntimeEvent[] {
+  return [
+    {
+      type: 'tool.finished',
+      toolCallId: interaction.toolCallId,
+      name: 'ask_user',
+      result: {
+        ok: false,
+        command: '',
+        exitCode: -1,
+        stdout: 'Cancelled',
+        stderr: reason ?? 'User input cancelled by user.',
+        status: 'error',
+      },
+    },
+  ];
+}
+
 /** Actions accepted by the Kernel.  They are correlated to exactly one waiting interaction. */
 export type RuntimeUserAction =
   | { type: 'input'; interactionId: string; text: string; answers?: Record<string, string> }
@@ -32,6 +87,11 @@ export type RuntimeUserAction =
     }
   | { type: 'cancel'; interactionId: string; reason?: string };
 
+export type RuntimeActionResult =
+  | { status: 'applied'; events: RuntimeEvent[] }
+  | { status: 'stale'; reason: string; telemetry: RuntimeEvent }
+  | { status: 'rejected'; reason: string; telemetry: RuntimeEvent };
+
 /** Convert a validated user action to facts.  An invalid action intentionally has no effects. */
 export function eventsForRuntimeAction(
   state: RuntimeState,
@@ -42,6 +102,9 @@ export function eventsForRuntimeAction(
   if (interaction.kind === 'idle' || interaction.interactionId !== action.interactionId) return [];
 
   if (interaction.kind === 'awaiting_user_input') {
+    if (action.type === 'cancel') {
+      return userInputCancelledEvents(interaction, action.reason);
+    }
     if (action.type !== 'input') return [];
     return [
       {
@@ -127,6 +190,12 @@ export function eventsForRuntimeAction(
     return [];
   }
 
+  // TUI 的 Esc/取消操作使用通用 cancel；Plan 审核需要落成完整的审核取消事件，
+  // 否则运行循环会收到空事件并报 Runtime action does not match active interaction。
+  if (interaction.kind === 'awaiting_review' && action.type === 'cancel') {
+    return planReviewCancelledEvents(interaction, action.reason);
+  }
+
   // ── Plan Mode v2: unified plan_review_decision ──
   if (interaction.kind === 'awaiting_review' && action.type === 'plan_review_decision') {
     // Validate planId + version + structuralDigest match
@@ -195,32 +264,7 @@ export function eventsForRuntimeAction(
       ];
     }
     if (decision.kind === 'cancel') {
-      return [
-        {
-          type: 'plan.review_cancelled',
-          interactionId: action.interactionId,
-          reason: decision.reason ?? 'Plan review cancelled by user.',
-        },
-        {
-          type: 'tool.finished',
-          toolCallId: interaction.toolCallId,
-          name: 'write_plan',
-          result: {
-            ok: true,
-            command: '',
-            exitCode: 0,
-            stdout: JSON.stringify({
-              ok: true,
-              status: 'review_cancelled',
-              plan_id: interaction.planId,
-              version: interaction.version,
-              ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
-              feedback: decision.reason,
-            }),
-            stderr: '',
-          },
-        },
-      ];
+      return planReviewCancelledEvents(interaction, decision.reason);
     }
     return [];
   }

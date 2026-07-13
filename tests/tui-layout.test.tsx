@@ -605,6 +605,26 @@ describe('ApprovalBlock', () => {
     expect(frame).toContain('Full · 完全权限');
     expect(frame).toContain('Deny · 拒绝');
   });
+
+  test('recognizes raw terminal arrow sequences when selecting a grant', async () => {
+    const resolved: Array<{ action: string; grant?: string }> = [];
+    const { stdin } = render(
+      <ApprovalBlock
+        approval={fakeApproval()}
+        provider={fakeProvider()}
+        onResolved={(action, grant) => resolved.push({ action, grant })}
+      />,
+    );
+
+    stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(resolved).toEqual([{ action: 'approve', grant: 'full_access' }]);
+  });
 });
 
 // ── InputBlock ──
@@ -747,10 +767,40 @@ describe('PlanReviewBlock', () => {
     expect(lastFrame()).toContain('↑↓ select Enter confirm Esc cancel');
   });
 
+  test('notifies the UI when a review option is selected', () => {
+    const resolved: string[] = [];
+    const { stdin } = render(
+      <PlanReviewBlock
+        plan={fakePlan()}
+        provider={fakeProvider()}
+        onResolved={(action) => resolved.push(action)}
+      />,
+    );
+
+    stdin.write('\r');
+
+    expect(resolved).toEqual(['approved_auto']);
+  });
+
   test('renders plan review confirmation bar', () => {
     const plan = fakePlan();
     const { lastFrame } = render(
-      <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
+      <PlanReviewBlock
+        plan={plan}
+        artifact={{
+          artifactId: 'artifact-1',
+          taskId: 'task-1',
+          planId: 'plan-1',
+          version: 1,
+          fileName: 'v1.md',
+          relativePath: '.kite-code/plans/task-1/plan-1/v1.md',
+          displayPath: '/Users/test/.kite-code/plans/task-1/plan-1/v1.md',
+          structuralDigest: 'digest-1',
+          byteLength: 100,
+        }}
+        provider={fakeProvider()}
+        onResolved={onResolved}
+      />,
     );
     const frame = lastFrame();
     // 方案内容移至 OutputArea tool_card Markdown 渲染，Footer 仅显示确认操作条
@@ -759,6 +809,7 @@ describe('PlanReviewBlock', () => {
     expect(frame).toContain('Approve and start in Auto');
     expect(frame).toContain('Approve and accept edits');
     expect(frame).toContain('Keep planning with feedback');
+    expect(frame).not.toContain('Plan document:');
   });
 });
 

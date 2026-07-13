@@ -405,99 +405,130 @@ export function createPlanAgentTools(input: CreateAgentToolsInput) {
 /** 创建 write_plan 工具定义 — 保存草稿或提交审核。
  *  Create write_plan tool definition — save draft or submit for review. */
 function createWritePlanTool() {
+  const documentFields = {
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .describe('One-line plan title (required when writing a new Artifact)'),
+    body_markdown: z
+      .string()
+      .trim()
+      .min(20)
+      .max(30_000)
+      .describe('Full plan in Markdown (required when writing a new Artifact)'),
+    steps: z
+      .array(
+        z.object({
+          id: z
+            .string()
+            .regex(/^[a-z][a-z0-9_-]{0,31}$/)
+            .describe('Stable step ID (e.g. "inspect-runtime")'),
+          title: z.string().trim().min(1).max(160).describe('One-line step description'),
+        }),
+      )
+      .min(1)
+      .max(12)
+      .describe('Ordered execution steps (required when writing a new Artifact)'),
+  };
+  const artifactFields = {
+    plan_id: z
+      .string()
+      .trim()
+      .min(1)
+      .describe('Existing Plan ID to submit without resending the document'),
+    version: z.number().int().positive().describe('Existing Artifact version to submit'),
+    structural_digest: z
+      .string()
+      .trim()
+      .min(1)
+      .describe('Digest returned by save for the Artifact being submitted'),
+  };
+  const optionalDocumentFields = {
+    title: documentFields.title.optional(),
+    body_markdown: documentFields.body_markdown.optional(),
+    steps: documentFields.steps.optional(),
+  };
+  const optionalArtifactFields = {
+    plan_id: artifactFields.plan_id.optional(),
+    version: artifactFields.version.optional(),
+    structural_digest: artifactFields.structural_digest.optional(),
+  };
+  const commonFields = {
+    expected_version: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('Expected current version to prevent overwriting a newer draft'),
+    replan_reason: z
+      .string()
+      .trim()
+      .max(500)
+      .optional()
+      .describe('Why a new structural plan is needed while an approved plan is executing'),
+  };
+  const writePlanInputSchema = z
+    .object({
+      ...optionalDocumentFields,
+      ...optionalArtifactFields,
+      ...commonFields,
+      action: z.enum(['save', 'submit']).optional(),
+    })
+    .superRefine((value, context) => {
+      const action = value.action ?? 'save';
+      const hasDocument =
+        value.title !== undefined && value.body_markdown !== undefined && value.steps !== undefined;
+      const hasArtifactReference =
+        value.plan_id !== undefined &&
+        value.version !== undefined &&
+        value.structural_digest !== undefined;
+
+      if (action === 'save' && !hasDocument) {
+        if (value.title === undefined) {
+          context.addIssue({ code: z.ZodIssueCode.custom, path: ['title'], message: 'Required' });
+        }
+        if (value.body_markdown === undefined) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['body_markdown'],
+            message: 'Required',
+          });
+        }
+        if (value.steps === undefined) {
+          context.addIssue({ code: z.ZodIssueCode.custom, path: ['steps'], message: 'Required' });
+        }
+      }
+
+      if (action === 'submit' && !hasArtifactReference && !hasDocument) {
+        if (value.plan_id === undefined && value.title === undefined) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['plan_id'],
+            message: 'Submit requires an Artifact reference or a complete document',
+          });
+        }
+        if (value.version === undefined && value.body_markdown === undefined) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['version'],
+            message: 'Submit requires an Artifact reference or a complete document',
+          });
+        }
+        if (value.structural_digest === undefined && value.steps === undefined) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['structural_digest'],
+            message: 'Submit requires an Artifact reference or a complete document',
+          });
+        }
+      }
+    });
+
   return tool({
     description: WRITE_PLAN_CONTRACT.description,
-    inputSchema: zodSchema(
-      z
-        .object({
-          title: z
-            .string()
-            .trim()
-            .min(1)
-            .max(120)
-            .optional()
-            .describe('One-line plan title (required when writing a new Artifact)'),
-          body_markdown: z
-            .string()
-            .trim()
-            .min(20)
-            .max(30_000)
-            .optional()
-            .describe('Full plan in Markdown (required when writing a new Artifact)'),
-          steps: z
-            .array(
-              z.object({
-                id: z
-                  .string()
-                  .regex(/^[a-z][a-z0-9_-]{0,31}$/)
-                  .describe('Stable step ID (e.g. "inspect-runtime")'),
-                title: z.string().trim().min(1).max(160).describe('One-line step description'),
-              }),
-            )
-            .min(1)
-            .max(12)
-            .optional()
-            .describe('Ordered execution steps (required when writing a new Artifact)'),
-          expected_version: z
-            .number()
-            .int()
-            .positive()
-            .optional()
-            .describe('Expected current version to prevent overwriting a newer draft'),
-          action: z
-            .enum(['save', 'submit'])
-            .optional()
-            .default('save')
-            .describe(
-              'save: write a new Artifact. submit: submit an existing Artifact reference for user review.',
-            ),
-          plan_id: z
-            .string()
-            .trim()
-            .min(1)
-            .optional()
-            .describe('Existing Plan ID to submit without resending the document'),
-          version: z
-            .number()
-            .int()
-            .positive()
-            .optional()
-            .describe('Existing Artifact version to submit'),
-          structural_digest: z
-            .string()
-            .trim()
-            .min(1)
-            .optional()
-            .describe('Digest returned by save for the Artifact being submitted'),
-          replan_reason: z
-            .string()
-            .trim()
-            .max(500)
-            .optional()
-            .describe('Why a new structural plan is needed while an approved plan is executing'),
-        })
-        .superRefine((value, ctx) => {
-          const hasDocument =
-            value.title != null && value.body_markdown != null && value.steps != null;
-          const hasArtifactRef =
-            value.plan_id != null && value.version != null && value.structural_digest != null;
-          if (value.action === 'save' && !hasDocument) {
-            ctx.addIssue({
-              code: 'custom',
-              path: ['body_markdown'],
-              message: 'save requires the complete plan document.',
-            });
-          }
-          if (value.action === 'submit' && !hasDocument && !hasArtifactRef) {
-            ctx.addIssue({
-              code: 'custom',
-              path: ['plan_id'],
-              message:
-                'submit requires plan_id, version, structural_digest, or a complete legacy document.',
-            });
-          }
-        }),
-    ),
+    inputSchema: zodSchema(writePlanInputSchema),
     execute: async ({
       title,
       body_markdown,
@@ -618,38 +649,50 @@ function createAskUserTool() {
   return tool({
     description: ASK_USER_CONTRACT.description,
     inputSchema: zodSchema(
-      z.object({
-        question: z
-          .string()
-          .min(1)
-          .describe('Main question or summary (used when questions array not provided)'),
-        options: z
-          .array(optionSchema)
-          .min(1)
-          .max(3)
-          .optional()
-          .describe(
-            'Suggested answer options for single-question mode (max 3). Always provide options.',
-          ),
-        recommended: z
-          .string()
-          .optional()
-          .describe('Option id of the recommended choice for single-question mode.'),
-        allow_free_text: z
-          .boolean()
-          .optional()
-          .describe('Whether the user may type a custom answer; default true'),
-        context: z
-          .string()
-          .optional()
-          .describe('Short context explaining why this clarification is needed'),
-        questions: z
-          .array(questionItemSchema)
-          .optional()
-          .describe(
-            'Multiple questions at once — TUI renders as a step wizard. Use this to batch clarifications instead of making multiple ask_user calls.',
-          ),
-      }),
+      z
+        .object({
+          question: z
+            .string()
+            .min(1)
+            .optional()
+            .describe('Main question or summary (required unless questions is provided)'),
+          options: z
+            .array(optionSchema)
+            .min(1)
+            .max(3)
+            .optional()
+            .describe(
+              'Suggested answer options for single-question mode (max 3). Always provide options.',
+            ),
+          recommended: z
+            .string()
+            .optional()
+            .describe('Option id of the recommended choice for single-question mode.'),
+          allow_free_text: z
+            .boolean()
+            .optional()
+            .describe('Whether the user may type a custom answer; default true'),
+          context: z
+            .string()
+            .optional()
+            .describe('Short context explaining why this clarification is needed'),
+          questions: z
+            .array(questionItemSchema)
+            .min(1)
+            .optional()
+            .describe(
+              'Multiple questions at once — TUI renders as a step wizard. Use this to batch clarifications instead of making multiple ask_user calls.',
+            ),
+        })
+        .superRefine((value, context) => {
+          if (!value.question && !value.questions) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['question'],
+              message: 'Provide question or a non-empty questions array',
+            });
+          }
+        }),
     ),
     execute: async ({ question, options, allow_free_text, context, questions }) =>
       JSON.stringify({

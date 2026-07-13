@@ -35,14 +35,26 @@ export type RuntimeEffect =
   /** 发出最终事件并终止 / Emit final event and terminate */
   | { type: 'emit_final' }
   /** 停止执行 / Stop execution */
-  | { type: 'stop' };
+  | { type: 'stop' }
+  /** 第二个 runner 被拒绝 / A second runner was rejected */
+  | { type: 'busy'; reason: string }
+  /** 持久化状态损坏，禁止继续执行 / Persisted state is corrupted */
+  | { type: 'recovery_blocked'; reason: string };
+
+/** Returned when a second runner attempts to enter the same Kernel. */
+export type RuntimeBusyEffect = { type: 'busy'; reason: string };
 
 /**
  * 判断效果是否为终止型（不再产生后续效果）。
  * Returns true if the effect is terminal (no further effects follow).
  */
 export function isTerminalEffect(effect: RuntimeEffect): boolean {
-  return effect.type === 'emit_final' || effect.type === 'stop';
+  return (
+    effect.type === 'emit_final' ||
+    effect.type === 'stop' ||
+    effect.type === 'busy' ||
+    effect.type === 'recovery_blocked'
+  );
 }
 
 /**
@@ -55,4 +67,12 @@ export function isInterruptEffect(effect: RuntimeEffect): boolean {
     effect.type === 'request_plan_review' ||
     effect.type === 'request_tool_approval'
   );
+}
+
+/** Internal lease attached to an effect while it is executing. */
+export interface RuntimeEffectLease {
+  effectId: string;
+  expectedRevision: number;
+  turnId: string;
+  effect: RuntimeEffect;
 }

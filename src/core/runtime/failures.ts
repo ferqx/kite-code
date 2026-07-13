@@ -31,6 +31,22 @@ export interface ClassifiedFailure {
   journal: boolean;
 }
 
+export interface RuntimeFailureContext {
+  kind: FailureKind;
+  message: string;
+  phase: 'planning' | 'building';
+  turnId: string;
+  effectId?: string;
+  toolCallId?: string;
+  interactionId?: string;
+  userVisible?: boolean;
+}
+
+export interface RuntimeFailureRecord extends RuntimeFailureContext {
+  failure: ClassifiedFailure;
+  userVisible: boolean;
+}
+
 type FailureStrategy = Omit<ClassifiedFailure, 'kind' | 'message'>;
 const retryable: FailureStrategy = {
   retryable: true,
@@ -92,4 +108,14 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
 
 export function classifyFailure(kind: FailureKind, message: string): ClassifiedFailure {
   return { kind, message, ...STRATEGIES[kind] };
+}
+
+/** Create one structured failure record for logging and public error mapping. */
+export function recordRuntimeFailure(input: RuntimeFailureContext): RuntimeFailureRecord {
+  const failure = classifyFailure(input.kind, input.message);
+  return {
+    ...input,
+    failure,
+    userVisible: input.userVisible ?? failure.needsUserIntervention,
+  };
 }

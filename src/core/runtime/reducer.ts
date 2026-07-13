@@ -6,6 +6,7 @@ import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   evaluateCircuitBreaker,
 } from '@/core/execution/circuit-breaker';
+import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
@@ -278,14 +279,32 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       // LangGraph can replay an interrupted node.  A replayed queue event must
       // not reset a terminal call or append the same id to the queue again.
       if (state.tools.calls[event.toolCallId]) return state;
+      const taskId = event.taskId ?? state.activeTaskId ?? undefined;
       const call = {
         toolCallId: event.toolCallId,
+        ...(taskId ? { taskId } : {}),
         modelMessageId: event.modelMessageId ?? '',
         ordinal: event.ordinal,
         name: event.name,
         args: event.args,
         status: 'queued' as const,
         createdAtTurnId: state.turn.turnId,
+        ...(event.effectClass
+          ? {
+              effectClass: event.effectClass,
+              sideEffect:
+                event.sideEffect ??
+                (event.effectClass !== 'read_only' && event.effectClass !== 'plan_only'),
+              classificationReason: event.classificationReason,
+            }
+          : (() => {
+              const capability = classifyToolCapability(event.name, event.args);
+              return {
+                effectClass: capability.effectClass,
+                sideEffect: capability.sideEffect,
+                classificationReason: capability.classificationReason,
+              };
+            })()),
       };
       return {
         ...state,
@@ -312,7 +331,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           active: [...state.tools.active, event.toolCallId],
         },
       };
-      return isSideEffectfulTool(existingCall)
+      const sideEffect =
+        existingCall.sideEffect ??
+        classifyToolCapability(existingCall.name, existingCall.args).sideEffect;
+      return sideEffect
         ? updateActiveTask(next, (task) => ({ ...task, sideEffectsStarted: true }))
         : next;
     }
@@ -324,6 +346,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const clearsMatchingApproval =
         isTaskCall &&
         state.interactions.kind === 'awaiting_tool_approval' &&
+        state.interactions.toolCallId === event.toolCallId;
+      const clearsMatchingUserInput =
+        state.interactions.kind === 'awaiting_user_input' &&
         state.interactions.toolCallId === event.toolCallId;
       const clearsLegacyMarker =
         isTaskCall && state.legacyUnrecoverableSubagentApproval?.toolCallId === event.toolCallId;
@@ -368,7 +393,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ],
         },
         suspendedSubagents: clearSuspendedSubagent(state, event.toolCallId, isTaskCall),
-        interactions: clearsMatchingApproval ? { kind: 'idle' } : state.interactions,
+        interactions:
+          clearsMatchingApproval || clearsMatchingUserInput ? { kind: 'idle' } : state.interactions,
       };
     }
 
@@ -551,29 +577,34 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         interactions: { kind: 'idle' },
       };
 
-    case 'approval.rejected':
+    case 'approval.rejected': {
       if (
         state.interactions.kind !== 'awaiting_tool_approval' ||
         state.interactions.interactionId !== event.interactionId
       ) {
         return state;
       }
+      const toolCallId = state.interactions.toolCallId;
+      const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
       return {
         ...state,
         tools: {
-          ...updateToolStatus(state.tools, state.interactions.toolCallId, 'rejected'),
+          ...rejectedTools,
           calls: {
-            ...state.tools.calls,
-            [state.interactions.toolCallId]: {
-              ...state.tools.calls[state.interactions.toolCallId]!,
+            ...rejectedTools.calls,
+            [toolCallId]: {
+              ...rejectedTools.calls[toolCallId]!,
               status: 'rejected',
               error: event.reason,
               failure: event.failure ?? classifyFailure('approval_rejected', event.reason),
             },
           },
+          queue: rejectedTools.queue.filter((id) => id !== toolCallId),
+          active: rejectedTools.active.filter((id) => id !== toolCallId),
         },
         interactions: { kind: 'idle' },
       };
+    }
 
     // ── 运行时环境 / Runtime environment ──
 
@@ -671,6 +702,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
     }
     case 'run.error':
+    case 'runtime.action_ignored':
       return state;
 
     case 'model.responded':
@@ -861,14 +893,16 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           reason: result.reason ?? 'auto-review rejected',
         },
       );
+      const toolCallId = state.interactions.toolCallId;
+      const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
       return {
         ...state,
         tools: {
-          ...updateToolStatus(state.tools, state.interactions.toolCallId, 'rejected'),
+          ...rejectedTools,
           calls: {
-            ...state.tools.calls,
-            [state.interactions.toolCallId]: {
-              ...state.tools.calls[state.interactions.toolCallId]!,
+            ...rejectedTools.calls,
+            [toolCallId]: {
+              ...rejectedTools.calls[toolCallId]!,
               status: 'rejected',
               error: result.reason ?? 'auto-review rejected',
               failure: classifyFailure(
@@ -877,6 +911,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               ),
             },
           },
+          queue: rejectedTools.queue.filter((id) => id !== toolCallId),
+          active: rejectedTools.active.filter((id) => id !== toolCallId),
         },
         interactions: { kind: 'idle' },
         autoReview: {
@@ -977,36 +1013,4 @@ function mergeStepUpdates(existing: PlanStep[], updates: PlanStep[]): PlanStep[]
     }
     return step;
   });
-}
-
-function isSideEffectfulTool(call: { name: string; args: unknown }): boolean {
-  if (
-    new Set([
-      'read_file',
-      'list_files',
-      'search_content',
-      'search_files',
-      'read_mcp_resource',
-      'web_fetch',
-      'Skill',
-      'ask_user',
-      'write_plan',
-      'update_plan',
-    ]).has(call.name)
-  ) {
-    return false;
-  }
-
-  if (call.name !== 'shell_execute') return true;
-  const command =
-    call.args && typeof call.args === 'object'
-      ? String((call.args as Record<string, unknown>).command ?? '')
-          .trim()
-          .toLowerCase()
-      : '';
-  // Read-only shell inspection is allowed during plan discovery. Commands not
-  // on this conservative allowlist are treated as side-effectful.
-  return !/^(rg|grep|find|ls|dir|pwd|cat|head|tail|sed|awk|git\s+(status|diff|log|show|branch|rev-parse)|get-childitem|get-content|select-string)\b/.test(
-    command,
-  );
 }

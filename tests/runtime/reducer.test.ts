@@ -523,6 +523,48 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     expect(state.tools.calls['failed-1']!.status).toBe('failed');
   });
 
+  test('cancelled ask_user completion clears its active user-input interaction', () => {
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      tools: {
+        calls: {
+          'ask-1': {
+            toolCallId: 'ask-1',
+            modelMessageId: 'model-1',
+            name: 'ask_user',
+            args: { question: 'q' },
+            status: 'awaiting_user_input',
+            createdAtTurnId: 'turn-0',
+          },
+        },
+        queue: [],
+        active: [],
+      },
+      interactions: {
+        kind: 'awaiting_user_input',
+        interactionId: 'input-1',
+        toolCallId: 'ask-1',
+        request: { question: 'q', options: [], allow_free_text: true },
+      },
+    };
+
+    const next = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'ask-1',
+      name: 'ask_user',
+      result: {
+        ok: false,
+        command: '',
+        exitCode: -1,
+        stdout: 'Cancelled',
+        stderr: 'Cancelled by user.',
+      },
+    });
+
+    expect(next.interactions).toEqual({ kind: 'idle' });
+    expect(next.tools.calls['ask-1']!.status).toBe('failed');
+  });
+
   // 验证 tool.finished 对不存在的 toolCallId 静默忽略
   test('tool.finished is no-op for unknown toolCallId', () => {
     const state = makeInitialState();

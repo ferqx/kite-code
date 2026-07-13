@@ -3,9 +3,65 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { executeRuntimeTools, toRuntimeSubagentEvent } from '@/core/controllers/tool-controller';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 
 describe('executeRuntimeTools', () => {
+  test('rejects an empty ask_user request instead of opening a blank prompt', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-empty-ask',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.ask = {
+      toolCallId: 'ask',
+      modelMessageId: 'model',
+      name: 'ask_user',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('ask');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['ask'] });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'ask',
+        failure: expect.objectContaining({ kind: 'tool_invalid_args' }),
+      }),
+    ]);
+  });
+
+  test('uses the first batch question when ask_user omits the summary question', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-batch-ask',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.ask = {
+      toolCallId: 'ask',
+      modelMessageId: 'model',
+      name: 'ask_user',
+      args: {
+        questions: [{ id: 'scope', question: 'What scope should be covered?' }],
+      },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('ask');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['ask'] });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'user_input.requested',
+        request: expect.objectContaining({ question: 'What scope should be covered?' }),
+      }),
+    ]);
+  });
+
   test('converts delegated lifecycle facts to the public RuntimeEvent protocol', () => {
     expect(
       toRuntimeSubagentEvent({
@@ -309,6 +365,83 @@ describe('executeRuntimeTools', () => {
     // Should NOT have executed directly
     const finished = events.find((e) => e.type === 'tool.finished');
     expect(finished).toBeUndefined();
+  });
+
+  test('full_access authorization skips approval for later shell calls', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-full-access-follow-up',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization.mode = 'full_access';
+    state.tools.calls.followUp = {
+      toolCallId: 'followUp',
+      modelMessageId: 'model',
+      name: 'shell_execute',
+      args: { command: 'node -e "console.log(84)"' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('followUp');
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['followUp'],
+      shellExecutor: {
+        execute: async () => ({
+          ok: true,
+          command: 'node -e "console.log(84)"',
+          exitCode: 0,
+          stdout: '84\n',
+          stderr: '',
+        }),
+      } as never,
+    });
+
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
+  });
+
+  test('streams shell lifecycle and progress events while the command is running', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-shell-stream',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization.mode = 'full_access';
+    state.tools.calls.stream = {
+      toolCallId: 'stream',
+      modelMessageId: 'model',
+      name: 'shell_execute',
+      args: { command: 'bun --version' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('stream');
+
+    const streamed: RuntimeEvent[] = [];
+    const returned = await executeRuntimeTools({
+      state,
+      toolCallIds: ['stream'],
+      shellExecutor: async (input) => {
+        input.onProgress?.('live output', 'stdout');
+        return {
+          ok: true,
+          command: input.command,
+          exitCode: 0,
+          stdout: 'live output\n',
+          stderr: '',
+        };
+      },
+      emitRuntimeEvent: (event) => streamed.push(event),
+    });
+
+    expect(returned).toEqual([]);
+    expect(streamed.map((event) => event.type)).toEqual([
+      'tool.started',
+      'tool.progress',
+      'tool.finished',
+    ]);
   });
 
   test('requires approval for a network read in accept_edits mode', async () => {

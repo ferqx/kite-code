@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import {
   admitInteractionModeTarget,
   fullModeUnavailableReason,
+  isSilentCancellationMismatch,
   resolveInteractionModeTarget,
   SessionManager,
   SessionRuntime,
 } from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
+import { createInitialRuntimeState } from '../src/core/runtime/state';
 
 // ── Helpers ──
 
@@ -495,6 +497,82 @@ describe('SessionManager', () => {
 // ── SessionRuntime ──
 
 describe('SessionRuntime', () => {
+  test('suppresses the stale cancellation mismatch from user-visible runtime events', () => {
+    expect(
+      isSilentCancellationMismatch({
+        type: 'run.error',
+        message: 'Runtime action does not match the active interaction.',
+        recoverable: false,
+      }),
+    ).toBe(true);
+    expect(
+      isSilentCancellationMismatch({
+        type: 'run.error',
+        message: 'network failed',
+        recoverable: true,
+      }),
+    ).toBe(false);
+  });
+
+  test.each([
+    'request_user_input',
+    'request_tool_approval',
+    'request_plan_review',
+  ] as const)('binds a raw UI cancel to the active %s interaction id', async (effectType) => {
+    const rt = makeRuntime();
+    const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
+    const interactionId = `${effectType}-interaction`;
+    const toolCallId = `${effectType}-tool`;
+
+    if (effectType === 'request_user_input') {
+      state.interactions = {
+        kind: 'awaiting_user_input',
+        interactionId,
+        toolCallId,
+        request: { question: 'q', options: [], allow_free_text: true },
+      };
+    } else if (effectType === 'request_tool_approval') {
+      state.interactions = {
+        kind: 'awaiting_tool_approval',
+        interactionId,
+        toolCallId,
+        approval: {
+          scope: 'once',
+          cwd: '/tmp/ws',
+          threadId: 't1',
+          tool: 'shell_execute',
+          command: 'pwd',
+          risk: 'execute_code',
+          approvalHash: 'hash',
+          summary: 'Run pwd',
+          reason: 'test',
+          expectedEffects: [],
+          grantOptions: ['approve_once'],
+          recommendedGrant: 'approve_once',
+        },
+      };
+    } else {
+      state.interactions = {
+        kind: 'awaiting_review',
+        interactionId,
+        toolCallId,
+        planId: 'plan-1',
+        version: 1,
+        structuralDigest: 'digest',
+        plan: { name: 'Plan', description: '', status: 'pending', steps: [] },
+        planSummary: 'Plan',
+      };
+    }
+
+    const actionPromise = (rt as any)._requestRuntimeAction(
+      { type: effectType, interactionId, toolCallId },
+      state,
+    );
+    rt.resolveInterrupt({ type: 'cancel' });
+
+    await expect(actionPromise).resolves.toEqual({ type: 'cancel', interactionId });
+  });
+
   // ── abort ──
 
   test('abort resolves pending interrupt and signals AbortController', () => {

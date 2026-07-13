@@ -27,38 +27,47 @@ export function assertInsideWorkspace(workspace: string, targetPath: string): st
  *  returns accumulated full text when stream closes. */
 export async function readWithProgress(
   stream: ReadableStream<Uint8Array>,
-  onLine: (line: string) => void,
+  onLine?: (line: string) => void,
+  stopSignal?: AbortSignal,
 ): Promise<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let result = '';
   let buffer = '';
+  let stopped = false;
+  const stop = () => {
+    stopped = true;
+    void reader.cancel();
+  };
+  stopSignal?.addEventListener('abort', stop, { once: true });
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (stopped) break;
       const text = decoder.decode(value, { stream: true });
       result += text;
       buffer += text;
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
-      for (const line of lines) onLine(line);
+      for (const line of lines) onLine?.(line);
     }
     // Flush partial multi-byte sequences from TextDecoder internal buffer
-    if (buffer.length > 0) {
+    if (!stopped && buffer.length > 0) {
       const flushed = decoder.decode();
       if (flushed) {
         buffer += flushed;
         result += flushed;
       }
-      onLine(buffer);
+      onLine?.(buffer);
     }
   } catch {
     // Stream interrupted (e.g. process killed) — return what we have
-    if (buffer.length > 0) {
-      onLine(buffer);
+    if (!stopped && buffer.length > 0) {
+      onLine?.(buffer);
     }
   } finally {
+    stopSignal?.removeEventListener('abort', stop);
     // Release reader lock to avoid leaks
     try {
       reader.releaseLock();
@@ -73,6 +82,7 @@ export async function readWithProgress(
 export async function shellTool(input: ShellInput): Promise<ShellResult> {
   let timedOut = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const outputStop = new AbortController();
   try {
     const proc = Bun.spawn(buildShellInvocation(input.command), {
       cwd: input.workspace,
@@ -84,6 +94,10 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
     if (input.timeoutMs && input.timeoutMs > 0) {
       timeoutId = setTimeout(() => {
         timedOut = true;
+        // A background child can keep inherited stdout/stderr pipes open even
+        // after the shell process is killed. Stop readers first so timeout
+        // always reaches a terminal tool result.
+        outputStop.abort();
         try {
           proc.kill();
         } catch {
@@ -92,34 +106,20 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
       }, input.timeoutMs);
     }
 
-    if (input.onProgress) {
-      // 同时消费 stdout/stderr，避免进度输出写入 stderr 时被 stdout 读取阻塞。
-      // Consume both streams concurrently so stderr progress is not blocked
-      // while stdout is quiet.
-      const [stdout, rawStderr] = await Promise.all([
-        readWithProgress(proc.stdout, (line) => input.onProgress!(line, 'stdout')),
-        readWithProgress(proc.stderr, (line) => input.onProgress!(line, 'stderr')),
-      ]);
-      const exitCode = await proc.exited;
-      if (timeoutId) clearTimeout(timeoutId);
-
-      return {
-        ok: !timedOut && exitCode === 0,
-        command: input.command,
-        exitCode: timedOut ? 124 : exitCode,
-        stdout: normalizeMsys2PathsInText(stdout),
-        stderr: timedOut
-          ? appendTimeoutMessage(
-              cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
-              input.timeoutMs!,
-            )
-          : cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
-      };
-    }
-
-    // 无 onProgress → 原始路径，零开销
-    const stdout = await new Response(proc.stdout).text();
-    const rawStderr = await new Response(proc.stderr).text();
+    // Always consume both streams through the cancellable reader. This keeps
+    // the no-progress path from hanging on inherited pipes as well.
+    const [stdout, rawStderr] = await Promise.all([
+      readWithProgress(
+        proc.stdout,
+        input.onProgress ? (line) => input.onProgress!(line, 'stdout') : undefined,
+        outputStop.signal,
+      ),
+      readWithProgress(
+        proc.stderr,
+        input.onProgress ? (line) => input.onProgress!(line, 'stderr') : undefined,
+        outputStop.signal,
+      ),
+    ]);
     const exitCode = await proc.exited;
     if (timeoutId) clearTimeout(timeoutId);
 

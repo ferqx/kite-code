@@ -191,6 +191,21 @@ describe('plan_review_decision actions', () => {
     }
   });
 
+  test('generic cancel from Esc → plan.review_cancelled + tool.finished', () => {
+    const state = makeAwaitingReviewState();
+    const events = eventsForRuntimeAction(state, {
+      type: 'cancel',
+      interactionId: 'inter-99',
+      reason: 'Cancelled with Esc.',
+    });
+
+    expect(events.map((event) => event.type)).toEqual(['plan.review_cancelled', 'tool.finished']);
+    expect(events[0]).toMatchObject({
+      type: 'plan.review_cancelled',
+      reason: 'Cancelled with Esc.',
+    });
+  });
+
   test('wrong interactionId → no events', () => {
     const state = makeAwaitingReviewState();
     const action: RuntimeUserAction = {

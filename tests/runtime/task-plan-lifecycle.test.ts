@@ -132,6 +132,88 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     expect(submitted[0]?.type).toBe('planning.entered');
   });
 
+  test.each([
+    'explore',
+    'plan',
+    'review',
+  ] as const)('%s sub-agents do not block saving the initial plan', async (subagentType) => {
+    let state = startTask(
+      createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: process.cwd() }),
+    );
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: `subagent-${subagentType}`,
+      name: 'task',
+      args: { subagent_type: subagentType, task: 'Inspect the codebase.' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.started',
+      toolCallId: `subagent-${subagentType}`,
+    });
+
+    expect(state.tasks['task-1']?.sideEffectsStarted).toBe(false);
+
+    const submitted = await executeRuntimeTools({
+      state: withCall(state, `submit-${subagentType}`, 'write_plan', {
+        title: 'Inspect runtime',
+        body_markdown: 'Inspect the runtime before changing implementation details.',
+        steps: [{ id: 'inspect', title: 'Inspect the runtime' }],
+        action: 'save',
+      }),
+      toolCallIds: [`submit-${subagentType}`],
+    });
+
+    expect(submitted).toContainEqual(expect.objectContaining({ type: 'plan.drafted' }));
+    expect(submitted).not.toContainEqual(expect.objectContaining({ type: 'tool.rejected' }));
+  });
+
+  test.each(['code', 'unknown'] as const)('%s task calls remain side-effectful', (subagentType) => {
+    let state = startTask(
+      createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: process.cwd() }),
+    );
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: `subagent-${subagentType}`,
+      name: 'task',
+      args: { subagent_type: subagentType, task: 'Change the codebase.' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.started',
+      toolCallId: `subagent-${subagentType}`,
+    });
+
+    expect(state.tasks['task-1']?.sideEffectsStarted).toBe(true);
+  });
+
+  test('reports the side-effect boundary when a complete initial plan is too late', async () => {
+    let state = startTask(
+      createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: process.cwd() }),
+    );
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'write',
+      name: 'write_file',
+      args: { path: 'x.txt', content: 'x' },
+    });
+    state = reduceRuntimeState(state, { type: 'tool.started', toolCallId: 'write' });
+
+    const rejected = await executeRuntimeTools({
+      state: withCall(state, 'submit-late', 'write_plan', {
+        title: 'Complete plan',
+        body_markdown: 'This is a complete plan document that should be rejected late.',
+        steps: [{ id: 'inspect', title: 'Inspect the runtime' }],
+        action: 'save',
+      }),
+      toolCallIds: ['submit-late'],
+    });
+
+    expect(rejected).toContainEqual({
+      type: 'tool.rejected',
+      toolCallId: 'submit-late',
+      reason: 'write_plan cannot save a new plan after side effects have started.',
+    });
+  });
+
   test('cancel review closes the write_plan tool and keeps planning_draft', () => {
     let state = startTask(
       createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/tmp' }),

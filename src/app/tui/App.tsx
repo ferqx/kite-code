@@ -273,6 +273,7 @@ export default function App({
         {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (
           <PlanReviewBlock
             plan={state.interrupt.plan}
+            artifact={state.interrupt.artifact}
             provider={provider}
             onResolved={resolvePlanReview}
             supplementEscRef={supplementEscRef}

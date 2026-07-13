@@ -241,6 +241,68 @@ describe('eventReducer (blocks model)', () => {
         expect(ts.totalElapsedMs).toBeGreaterThanOrEqual(0);
       }
     });
+    test('write_plan displays the saved Artifact path instead of raw JSON', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('plan-1', 'write_plan', { title: 'Login page' }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.finished',
+          toolCallId: 'plan-1',
+          name: 'write_plan',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: JSON.stringify({
+              ok: true,
+              status: 'draft_saved',
+              artifact: { path: '/Users/test/.kite-code/plans/task/plan/v1.md' },
+            }),
+            stderr: '',
+          },
+        },
+      });
+
+      const card = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'plan-1',
+      );
+      expect(card?.summary).toBe('— ~/.kite-code/plans/task/plan/v1.md');
+    });
+    test('write_plan truncates a long Artifact path to one line', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('long-plan-1', 'write_plan', { title: 'Login page' }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.finished',
+          toolCallId: 'long-plan-1',
+          name: 'write_plan',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: JSON.stringify({
+              ok: true,
+              status: 'draft_saved',
+              artifact: {
+                path: `/Users/test/.kite-code/plans/${'eb9e8ecf-12345678/'.repeat(4)}v1.md`,
+              },
+            }),
+            stderr: '',
+          },
+        },
+      });
+
+      const card = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'long-plan-1',
+      );
+      expect(card?.summary).toBe('— ~/.kite-code/plans/eb9e8ecf…/…/eb9e8ecf…/v1.md');
+      expect(card?.summary).not.toContain('\n');
+      expect(card?.summary?.length).toBeLessThan(70);
+    });
     test('tool_done updates pre-consolidated summary even when the lookup map is stale', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));

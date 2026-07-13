@@ -1,7 +1,6 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import { hasSameCommandGrant, normalizeAuthorizationState } from '@/core/harness/tool-policy';
 import { parseMcpToolName } from '@/core/mcp/tool-adapter';
-import { isReadOnlyShellCommand } from '@/core/tools/definitions';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, ShellGrantUsed } from '@/protocol/events';
 import type { ToolEffects, ToolRisk } from './shell-classification';
@@ -15,6 +14,7 @@ import {
   isVcsMutationCommand,
   isWriteLikeShellCommand,
 } from './shell-classification';
+import { classifyToolCapability, type ToolCapability } from './tool-capabilities';
 
 export type { ToolRisk };
 export { classifyShellRisk, isDestructiveShellCommand };
@@ -37,6 +37,8 @@ export interface EvaluateToolApprovalParams {
   override?: AuthorizationOverride;
   /** 按 MCP 服务器名降低风险等级的配置覆盖 / Per-server MCP risk overrides from config */
   mcpRiskOverride?: Record<string, 'read'>;
+  /** Classification captured by the runtime queue, when available. */
+  capability?: ToolCapability;
 }
 
 /** 审批决策结果 / Approval decision result */
@@ -107,7 +109,11 @@ function deny(input: DecisionInput): ApprovalDecision {
 // ── 内部分类器 / Internal classifiers ──
 
 /** 对 shell_execute 命令进行分类（内部使用 classifyShellRisk）/ Classify shell_execute command */
-function classifyShellExecute(command: string, workspace: string): ApprovalDecision {
+function classifyShellExecute(
+  command: string,
+  workspace: string,
+  capability: ToolCapability,
+): ApprovalDecision {
   const trimmed = (command ?? '').trim();
   if (!trimmed) {
     return deny({
@@ -129,7 +135,7 @@ function classifyShellExecute(command: string, workspace: string): ApprovalDecis
 
   const effects = classifyShellEffects(trimmed, workspace);
 
-  if (isReadOnlyShellCommand(trimmed)) {
+  if (capability.effectClass === 'read_only') {
     return allow({
       risk: 'read',
       reason: 'Command is classified as read-only.',
@@ -217,6 +223,7 @@ function denyForPlanningPhase(params: {
  */
 export function evaluateToolApproval(params: EvaluateToolApprovalParams): ApprovalDecision {
   const { toolName, toolArgs, phase, workspace = '', threadId = '' } = params;
+  const capability = params.capability ?? classifyToolCapability(toolName, toolArgs);
   const authorization = normalizeAuthorizationState(params.authorization);
   const effectiveMode = params.override?.current ?? authorization.mode;
 
@@ -411,7 +418,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
 
     // 只读命令在任何 access/phase 下都允许直通
     // Read-only commands bypass approval regardless of access/phase
-    const shellDecision = classifyShellExecute(command, workspace);
+    const shellDecision = classifyShellExecute(command, workspace, capability);
     if (shellDecision.allowed && !shellDecision.requiresApproval && shellDecision.risk === 'read') {
       return shellDecision;
     }

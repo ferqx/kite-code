@@ -22,11 +22,13 @@
     "check:docs": "bun run scripts/check-docs.ts",
     "web": "bun run src/web-server/index.ts",
     "web:dev": "BUN_ENV=development bun --watch run src/web-server/index.ts",
+    "web:seed": "bun run src/web-server/index.ts --seed",
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "@ai-sdk/mcp": "^2.0.10",
     "@ai-sdk/openai-compatible": "^3.0.7",
+    "@clack/prompts": "^1.7.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
     "@types/jsdom": "^28.0.3",

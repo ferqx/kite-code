@@ -56,6 +56,64 @@ export function formatElapsed(ms: number): string {
   return `${m}m ${s}s`;
 }
 
+/** 将单行文本压缩到展示宽度，保留路径首尾 / Truncate a single-line display value while keeping both path ends. */
+function truncateSingleLine(value: string, maxLength = 100): string {
+  const line = value.replace(/\s+/g, ' ').trim();
+  if (line.length <= maxLength) return line;
+  const tailLength = Math.min(32, Math.floor((maxLength - 1) / 2));
+  return `${line.slice(0, maxLength - tailLength - 1)}…${line.slice(-tailLength)}`;
+}
+
+/** 压缩 Plan Artifact 路径，仅用于 TUI 展示，不改变实际文件路径。 */
+function formatPlanArtifactPath(path: string): string {
+  const normalized = path.replaceAll('\\', '/');
+  const marker = '.kite-code/plans/';
+  const markerIndex = normalized.indexOf(marker);
+  if (markerIndex < 0) return truncateSingleLine(normalized, 98);
+
+  const segments = normalized
+    .slice(markerIndex + marker.length)
+    .split('/')
+    .filter(Boolean);
+  const fileName = segments.at(-1);
+  if (!fileName) return '~/.kite-code/plans';
+
+  const directories = segments.slice(0, -1);
+  const shortenSegment = (segment: string) =>
+    segment.length > 12 ? `${segment.slice(0, 8)}…` : segment;
+  const displayDirectories =
+    directories.length > 2
+      ? [shortenSegment(directories[0]!), '…', shortenSegment(directories.at(-1)!)]
+      : directories.map(shortenSegment);
+
+  return `~/.kite-code/plans/${[...displayDirectories, fileName].join('/')}`;
+}
+
+/**
+ * 将工具结果转换为用户可读摘要。
+ *
+ * write_plan 的 stdout 是给模型继续调用 submit 使用的机器可读 JSON，不能直接
+ * 作为 TUI 文本展示；这里仅在展示层提取 Artifact 路径，保留模型侧协议不变。
+ */
+export function formatToolResultForDisplay(name: string, stdout: string, stderr: string): string {
+  const raw = stdout || stderr;
+  if (name === 'write_plan' && raw) {
+    try {
+      const result = JSON.parse(raw) as {
+        status?: string;
+        artifact?: { path?: string; relative_path?: string };
+      };
+      if (result.status === 'draft_saved') {
+        const path = result.artifact?.path ?? result.artifact?.relative_path;
+        return path ? `— ${formatPlanArtifactPath(path)}` : '— Plan draft saved';
+      }
+    } catch {
+      // 兼容旧版本或非 JSON 工具结果，回退到原始输出。
+    }
+  }
+  return raw.slice(0, 200);
+}
+
 /** 从工具 args 提取人类可读的 preview 文本（文件名/命令名等）
  *  Extract human-readable preview text from tool args (filename, command, etc.) */
 export function getToolPreview(name: string, args: Record<string, unknown>): string | undefined {

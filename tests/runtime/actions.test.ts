@@ -78,6 +78,124 @@ describe('runtime user actions', () => {
     if (toolFinished?.type !== 'tool.finished') throw new Error('Expected tool.finished event');
     expect(toolFinished.result.stdout.length).toBeGreaterThan(200);
   });
+
+  test('cancels a matching user-input interaction into a tool completion', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.tools.calls['ask-1'] = {
+      toolCallId: 'ask-1',
+      modelMessageId: 'model-1',
+      name: 'ask_user',
+      args: { question: 'q' },
+      status: 'awaiting_user_input',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.interactions = {
+      kind: 'awaiting_user_input',
+      interactionId: 'input-1',
+      toolCallId: 'ask-1',
+      request: { question: 'q', options: [], allow_free_text: true },
+    };
+
+    const events = eventsForRuntimeAction(state, {
+      type: 'cancel',
+      interactionId: 'input-1',
+      reason: 'Cancelled with Esc.',
+    });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.finished',
+        toolCallId: 'ask-1',
+        name: 'ask_user',
+        result: expect.objectContaining({ ok: false, stdout: 'Cancelled' }),
+      }),
+    );
+  });
+
+  test('cancels a matching tool approval into an approval rejection', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.interactions = {
+      kind: 'awaiting_tool_approval',
+      interactionId: 'approval-1',
+      toolCallId: 'shell-1',
+      approval: {
+        scope: 'once',
+        cwd: '/',
+        threadId: 't',
+        tool: 'shell_execute',
+        command: 'pwd',
+        risk: 'execute_code',
+        approvalHash: 'hash',
+        summary: 'Run pwd',
+        reason: 'test',
+        expectedEffects: [],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+      },
+    };
+
+    expect(
+      eventsForRuntimeAction(state, {
+        type: 'cancel',
+        interactionId: 'approval-1',
+        reason: 'Cancelled with Ctrl+C.',
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        type: 'approval.rejected',
+        interactionId: 'approval-1',
+        reason: 'Cancelled with Ctrl+C.',
+      }),
+    ]);
+  });
+
+  test.each([
+    'awaiting_user_input',
+    'awaiting_tool_approval',
+    'awaiting_review',
+  ] as const)('ignores a stale generic cancel for %s', (kind) => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.interactions =
+      kind === 'awaiting_user_input'
+        ? {
+            kind,
+            interactionId: 'current',
+            toolCallId: 'ask-1',
+            request: { question: 'q', options: [], allow_free_text: true },
+          }
+        : kind === 'awaiting_tool_approval'
+          ? {
+              kind,
+              interactionId: 'current',
+              toolCallId: 'approval-1',
+              approval: {
+                scope: 'once',
+                cwd: '/',
+                threadId: 't',
+                tool: 'shell_execute',
+                command: 'pwd',
+                risk: 'execute_code',
+                approvalHash: 'hash',
+                summary: 'Run pwd',
+                reason: 'test',
+                expectedEffects: [],
+                grantOptions: ['approve_once'],
+                recommendedGrant: 'approve_once',
+              },
+            }
+          : {
+              kind,
+              interactionId: 'current',
+              toolCallId: 'plan-1',
+              planId: 'plan-1',
+              version: 1,
+              structuralDigest: 'digest',
+              plan: { name: 'Plan', description: '', status: 'pending', steps: [] },
+              planSummary: 'Plan',
+            };
+
+    expect(eventsForRuntimeAction(state, { type: 'cancel', interactionId: 'stale' })).toEqual([]);
+  });
 });
 
 test('full access approval is rejected when no sandbox is available', () => {

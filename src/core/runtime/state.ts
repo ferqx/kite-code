@@ -4,6 +4,7 @@
 
 import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
+import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { AuthorizationSource, ToolGrant } from '@/core/types';
 import type {
   AgentPlan,
@@ -179,6 +180,8 @@ export type ToolCallStatus =
 export interface ToolCallRecord {
   /** 工具调用唯一标识 / Unique tool call identifier */
   toolCallId: string;
+  /** Top-level task that owns this call, when it was queued. */
+  taskId?: string;
   /** 触发该工具调用的模型消息 ID / Model message id that triggered this tool call */
   modelMessageId: string;
   /** Position in the originating model message, used to cancel later siblings. */
@@ -208,6 +211,12 @@ export interface ToolCallRecord {
   error?: string;
   /** Structured failure metadata retained for retry policy and replay. */
   failure?: ClassifiedFailure;
+  /** Capability classification captured when the call was queued. */
+  effectClass?: ToolEffectClass;
+  /** Whether the call has crossed the active task's side-effect boundary. */
+  sideEffect?: boolean;
+  /** Classification explanation retained for diagnostics. */
+  classificationReason?: string;
 }
 
 // ── 工具运行时状态 / Tool runtime state ──
@@ -248,6 +257,11 @@ export interface TranscriptState {
 /** Runtime state schema version for migration compatibility. */
 export const RUNTIME_STATE_SCHEMA_VERSION = 5;
 
+export type RuntimeRecoveryState =
+  | { kind: 'normal' }
+  | { kind: 'corrupted'; reason: string }
+  | { kind: 'incompatible'; schemaVersion: number };
+
 /**
  * 统一运行时状态 — runtime kernel 的核心状态对象。
  * Unified runtime state — the core state object for the runtime kernel.
@@ -264,6 +278,14 @@ export interface RuntimeState {
   tasks: Record<string, TaskState>;
   /** 状态 schema 版本，用于迁移兼容 / Schema version for migration compatibility */
   schemaVersion: number;
+  /** Monotonic revision incremented after each durable event. */
+  revision: number;
+  /** Last event identity applied by the kernel. */
+  lastAppliedEventId?: string;
+  /** Recent event identities used for idempotent replay. */
+  appliedEventIds: string[];
+  /** Recovery status; non-normal states prevent new effects. */
+  recoveryState: RuntimeRecoveryState;
   /** 会话信息 / Session information */
   session: {
     /** LangGraph 线程 ID / LangGraph thread id */
@@ -351,6 +373,9 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     phase === 'planning' ? { kind: 'planning_empty' } : { kind: 'building_without_plan' };
   return {
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+    revision: 0,
+    appliedEventIds: [],
+    recoveryState: { kind: 'normal' },
     session: {
       threadId: input.threadId,
       userId: input.userId,

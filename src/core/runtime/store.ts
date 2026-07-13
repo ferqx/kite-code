@@ -2,9 +2,25 @@
 // 提供 runtime_events（追加型事件日志）和 runtime_snapshots（可覆盖状态快照）的持久化
 
 import { Database } from 'bun:sqlite';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { RuntimeEvent } from './events.js';
+
+export const RUNTIME_STORE_SCHEMA_VERSION = 2;
+
+export interface RuntimeEventMetadata {
+  eventId: string;
+  revision: number;
+  causationId?: string;
+  occurredAt?: string;
+}
+
+export interface RuntimeSnapshotMetadata {
+  eventPosition: number;
+  stateRevision: number;
+  stateChecksum: string;
+  schemaVersion: number;
+}
 
 /** 事件日志条目 — 从 runtime_events 表加载时使用 */
 export interface StoredEvent {
@@ -16,6 +32,10 @@ export interface StoredEvent {
   event: RuntimeEvent;
   /** Unix 时间戳（秒） */
   created_at: number;
+  event_id?: string;
+  revision?: number;
+  causation_id?: string;
+  occurred_at?: string;
 }
 
 export interface RuntimeSessionInfo {
@@ -34,21 +54,32 @@ export interface RuntimeSnapshotEntry {
 /** Derive the runtime sidecar path without turning SQLite's memory sentinel into a file. */
 export function runtimeStorePathFor(checkpointPath: string): string {
   if (checkpointPath === ':memory:') return ':memory:';
-  return checkpointPath.replace(/\.sqlite$/, '') + '.runtime.db';
+  return `${checkpointPath.replace(/\.sqlite$/, '')}.runtime.db`;
 }
 
 /** RuntimeStore 接口 / Runtime store interface */
 export interface RuntimeStore {
   /** 批量追加事件（事务写入）/ Append events in a transaction */
-  appendEvents(threadId: string, events: RuntimeEvent[]): void;
+  appendEvents(threadId: string, events: RuntimeEvent[], metadata?: RuntimeEventMetadata[]): void;
   /** 批量追加事件并同时写入快照（单一事务原子写入）/ Append events and save snapshot in a single atomic transaction */
-  appendEventsAndSnapshot(threadId: string, events: RuntimeEvent[], nextState: unknown): void;
+  appendEventsAndSnapshot(
+    threadId: string,
+    events: RuntimeEvent[],
+    nextState: unknown,
+    metadata?: RuntimeEventMetadata[],
+    snapshotMetadata?: RuntimeSnapshotMetadata,
+  ): void;
   /** 加载线程事件，可选从某个 ID 之后开始 / Load events, optionally since a given id */
   loadEvents(threadId: string, since?: number): StoredEvent[];
+  /** Strict event loading for recovery paths; corrupted rows are surfaced. */
+  loadEventsStrict(threadId: string, since?: number): StoredEvent[];
   /** 保存状态快照（INSERT OR REPLACE）/ Save a state snapshot */
   saveSnapshot(threadId: string, state: unknown): void;
   /** 加载最新状态快照 / Load the latest state snapshot */
   loadSnapshot<T = unknown>(threadId: string): T | null;
+  loadSnapshotRecord<T = unknown>(
+    threadId: string,
+  ): { state: T; metadata: RuntimeSnapshotMetadata } | null;
   /** Persist a named recovery point independently from the rolling snapshot. */
   saveNamedSnapshot(threadId: string, name: string, state: unknown, eventPosition?: number): void;
   /** Load a named recovery point, or null when it is absent/corrupt. */
@@ -71,6 +102,10 @@ interface EventRow {
   thread_id: string;
   event_json: string;
   created_at: number;
+  event_id: string | null;
+  revision: number;
+  causation_id: string | null;
+  occurred_at: string | null;
 }
 
 /** snapshot 表行数据类型 / Snapshot table row data type */
@@ -78,6 +113,19 @@ interface SnapshotRow {
   thread_id: string;
   state_json: string;
   created_at: number;
+  event_position: number;
+  state_revision: number;
+  state_checksum: string;
+  schema_version: number;
+}
+
+function checksum(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 /**
@@ -90,6 +138,7 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
   // 确保父目录存在 / Ensure parent directory exists
   if (dbPath !== ':memory:') {
     mkdirSync(dirname(dbPath), { recursive: true });
+    quarantineLegacyRuntimeStore(dbPath);
   }
 
   const db = new Database(dbPath);
@@ -100,12 +149,37 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
   // 多会话并发写入时避免 SQLITE_BUSY / Avoid SQLITE_BUSY under concurrent multi-session writes
   db.run('PRAGMA busy_timeout = 5000');
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS runtime_store_meta (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+  db.run("INSERT OR IGNORE INTO runtime_store_meta (key, value) VALUES ('format_version', ?)", [
+    String(RUNTIME_STORE_SCHEMA_VERSION),
+  ]);
+  const formatVersion = db
+    .query<{ value: string }, []>(
+      "SELECT value FROM runtime_store_meta WHERE key = 'format_version'",
+    )
+    .get();
+  if (!formatVersion || Number(formatVersion.value) !== RUNTIME_STORE_SCHEMA_VERSION) {
+    db.close();
+    throw new Error(
+      `RuntimeStore format ${formatVersion?.value ?? 'missing'} is incompatible with ${RUNTIME_STORE_SCHEMA_VERSION}.`,
+    );
+  }
+
   // 建表 / Create tables
   db.run(`
     CREATE TABLE IF NOT EXISTS runtime_events (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       thread_id  TEXT    NOT NULL,
       event_json TEXT    NOT NULL,
+      event_id   TEXT,
+      revision   INTEGER NOT NULL DEFAULT 0,
+      causation_id TEXT,
+      occurred_at TEXT,
       created_at INTEGER DEFAULT (unixepoch())
     )
   `);
@@ -139,26 +213,55 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
     CREATE TABLE IF NOT EXISTS runtime_snapshots (
       thread_id  TEXT    PRIMARY KEY,
       state_json TEXT    NOT NULL,
+      event_position INTEGER NOT NULL DEFAULT 0,
+      state_revision INTEGER NOT NULL DEFAULT 0,
+      state_checksum TEXT NOT NULL DEFAULT '',
+      schema_version INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER DEFAULT (unixepoch())
     )
   `);
+
+  // Additive metadata upgrades for stores created before runtime tracing was added.
+  for (const [table, column, definition] of [
+    ['runtime_events', 'event_id', 'TEXT'],
+    ['runtime_events', 'revision', 'INTEGER NOT NULL DEFAULT 0'],
+    ['runtime_events', 'causation_id', 'TEXT'],
+    ['runtime_events', 'occurred_at', 'TEXT'],
+    ['runtime_snapshots', 'event_position', 'INTEGER NOT NULL DEFAULT 0'],
+    ['runtime_snapshots', 'state_revision', 'INTEGER NOT NULL DEFAULT 0'],
+    ['runtime_snapshots', 'state_checksum', "TEXT NOT NULL DEFAULT ''"],
+    ['runtime_snapshots', 'schema_version', 'INTEGER NOT NULL DEFAULT 0'],
+  ] as const) {
+    const columns = db
+      .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+      .all()
+      .map((entry) => entry.name);
+    if (!columns.includes(column))
+      db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+  db.run(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_events_event_id ON runtime_events(thread_id, event_id) WHERE event_id IS NOT NULL',
+  );
 
   // 索引加速按 thread_id 查询 / Index for thread_id lookups
   db.run('CREATE INDEX IF NOT EXISTS idx_runtime_events_thread ON runtime_events(thread_id)');
 
   // 预编译 SQL / Prepare cached statements
   const insertEvent = db.query('INSERT INTO runtime_events (thread_id, event_json) VALUES (?, ?)');
+  const insertEventWithMetadata = db.query(
+    'INSERT OR IGNORE INTO runtime_events (thread_id, event_json, event_id, revision, causation_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?)',
+  );
   const selectEvents = db.query<EventRow, [string, number]>(
-    'SELECT id, thread_id, event_json, created_at FROM runtime_events WHERE thread_id = ? AND id > ? ORDER BY id ASC',
+    'SELECT id, thread_id, event_json, event_id, revision, causation_id, occurred_at, created_at FROM runtime_events WHERE thread_id = ? AND id > ? ORDER BY id ASC',
   );
   const selectAllEvents = db.query<EventRow, [string]>(
-    'SELECT id, thread_id, event_json, created_at FROM runtime_events WHERE thread_id = ? ORDER BY id ASC',
+    'SELECT id, thread_id, event_json, event_id, revision, causation_id, occurred_at, created_at FROM runtime_events WHERE thread_id = ? ORDER BY id ASC',
   );
   const upsertSnapshot = db.query(
-    'INSERT OR REPLACE INTO runtime_snapshots (thread_id, state_json, created_at) VALUES (?, ?, unixepoch())',
+    'INSERT OR REPLACE INTO runtime_snapshots (thread_id, state_json, event_position, state_revision, state_checksum, schema_version, created_at) VALUES (?, ?, ?, ?, ?, ?, unixepoch())',
   );
   const selectSnapshot = db.query<SnapshotRow, [string]>(
-    'SELECT thread_id, state_json, created_at FROM runtime_snapshots WHERE thread_id = ? ORDER BY created_at DESC LIMIT 1',
+    'SELECT thread_id, state_json, event_position, state_revision, state_checksum, schema_version, created_at FROM runtime_snapshots WHERE thread_id = ? ORDER BY created_at DESC LIMIT 1',
   );
   const upsertNamedSnapshot = db.query(
     'INSERT OR REPLACE INTO runtime_named_snapshots (thread_id, name, event_position, state_json, created_at) VALUES (?, ?, ?, ?, unixepoch())',
@@ -202,15 +305,31 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
   );
 
   const store: RuntimeStore = {
-    appendEvents(threadId: string, events: RuntimeEvent[]): void {
+    appendEvents(
+      threadId: string,
+      events: RuntimeEvent[],
+      metadata?: RuntimeEventMetadata[],
+    ): void {
       if (isClosed) return;
       if (events.length === 0) return;
 
       try {
         db.transaction(() => {
           upsertSession.run(threadId);
-          for (const event of events) {
-            insertEvent.run(threadId, JSON.stringify(event));
+          for (const [index, event] of events.entries()) {
+            const entry = metadata?.[index];
+            if (entry) {
+              insertEventWithMetadata.run(
+                threadId,
+                JSON.stringify(event),
+                entry.eventId,
+                entry.revision,
+                entry.causationId ?? null,
+                entry.occurredAt ?? new Date().toISOString(),
+              );
+            } else {
+              insertEvent.run(threadId, JSON.stringify(event));
+            }
           }
         })();
       } catch (e) {
@@ -221,15 +340,42 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
       }
     },
 
-    appendEventsAndSnapshot(threadId: string, events: RuntimeEvent[], nextState: unknown): void {
+    appendEventsAndSnapshot(
+      threadId: string,
+      events: RuntimeEvent[],
+      nextState: unknown,
+      metadata?: RuntimeEventMetadata[],
+      snapshotMetadata?: RuntimeSnapshotMetadata,
+    ): void {
       if (isClosed) return;
       try {
         db.transaction(() => {
           upsertSession.run(threadId);
-          for (const event of events) {
-            insertEvent.run(threadId, JSON.stringify(event));
+          for (const [index, event] of events.entries()) {
+            const entry = metadata?.[index];
+            if (entry) {
+              insertEventWithMetadata.run(
+                threadId,
+                JSON.stringify(event),
+                entry.eventId,
+                entry.revision,
+                entry.causationId ?? null,
+                entry.occurredAt ?? new Date().toISOString(),
+              );
+            } else {
+              insertEvent.run(threadId, JSON.stringify(event));
+            }
           }
-          upsertSnapshot.run(threadId, JSON.stringify(nextState));
+          const serialized = JSON.stringify(nextState);
+          const state = nextState as { revision?: number; schemaVersion?: number };
+          upsertSnapshot.run(
+            threadId,
+            serialized,
+            snapshotMetadata?.eventPosition ?? selectLastEventPosition.get(threadId)?.id ?? 0,
+            snapshotMetadata?.stateRevision ?? state.revision ?? 0,
+            snapshotMetadata?.stateChecksum ?? checksum(serialized),
+            snapshotMetadata?.schemaVersion ?? state.schemaVersion ?? 0,
+          );
         })();
       } catch (e) {
         throw new Error(
@@ -240,30 +386,43 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
     },
 
     loadEvents(threadId: string, since?: number): StoredEvent[] {
+      try {
+        return store.loadEventsStrict(threadId, since);
+      } catch {
+        return [];
+      }
+    },
+
+    loadEventsStrict(threadId: string, since?: number): StoredEvent[] {
       if (isClosed) return [];
       const rows =
         since != null ? selectEvents.all(threadId, since) : selectAllEvents.all(threadId);
 
-      const events: StoredEvent[] = [];
-      for (const row of rows) {
-        try {
-          events.push({
-            id: row.id,
-            thread_id: row.thread_id,
-            event: JSON.parse(row.event_json) as RuntimeEvent,
-            created_at: row.created_at,
-          });
-        } catch {
-          // 跳过无法解析的事件行（数据损坏）/ Skip unparseable event rows (corrupted data)
-        }
-      }
-      return events;
+      return rows.map((row) => ({
+        id: row.id,
+        thread_id: row.thread_id,
+        event: JSON.parse(row.event_json) as RuntimeEvent,
+        created_at: row.created_at,
+        ...(row.event_id ? { event_id: row.event_id } : {}),
+        revision: row.revision,
+        ...(row.causation_id ? { causation_id: row.causation_id } : {}),
+        ...(row.occurred_at ? { occurred_at: row.occurred_at } : {}),
+      }));
     },
 
     saveSnapshot(threadId: string, state: unknown): void {
       if (isClosed) return;
       try {
-        upsertSnapshot.run(threadId, JSON.stringify(state));
+        const serialized = JSON.stringify(state);
+        const snapshot = state as { revision?: number; schemaVersion?: number };
+        upsertSnapshot.run(
+          threadId,
+          serialized,
+          selectLastEventPosition.get(threadId)?.id ?? 0,
+          snapshot.revision ?? 0,
+          checksum(serialized),
+          snapshot.schemaVersion ?? 0,
+        );
       } catch (e) {
         throw new Error(
           `Failed to save snapshot for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
@@ -273,11 +432,27 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
     },
 
     loadSnapshot<T = unknown>(threadId: string): T | null {
+      return store.loadSnapshotRecord<T>(threadId)?.state ?? null;
+    },
+
+    loadSnapshotRecord<T = unknown>(
+      threadId: string,
+    ): { state: T; metadata: RuntimeSnapshotMetadata } | null {
       if (isClosed) return null;
       const row = selectSnapshot.get(threadId);
       if (!row) return null;
       try {
-        return JSON.parse(row.state_json) as T;
+        const state = JSON.parse(row.state_json) as T;
+        if (row.state_checksum && checksum(row.state_json) !== row.state_checksum) return null;
+        return {
+          state,
+          metadata: {
+            eventPosition: row.event_position,
+            stateRevision: row.state_revision,
+            stateChecksum: row.state_checksum,
+            schemaVersion: row.schema_version,
+          },
+        };
       } catch {
         // 快照数据损坏时返回 null / Return null on corrupted snapshot data
         return null;
@@ -371,7 +546,16 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
       db.transaction(() => {
         deleteEventsAfter.run(threadId, entry.event_position);
         deleteNamedSnapshotsAfter.run(threadId, entry.event_position);
-        upsertSnapshot.run(threadId, JSON.stringify(snapshot));
+        const serialized = JSON.stringify(snapshot);
+        const state = snapshot as { revision?: number; schemaVersion?: number };
+        upsertSnapshot.run(
+          threadId,
+          serialized,
+          entry.event_position,
+          state.revision ?? 0,
+          checksum(serialized),
+          state.schemaVersion ?? 0,
+        );
         upsertSession.run(threadId);
       })();
       return true;
@@ -401,7 +585,16 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
         upsertSession.run(targetThreadId);
         for (const event of events) insertEvent.run(targetThreadId, JSON.stringify(event));
         const targetPosition = selectLastEventPosition.get(targetThreadId)?.id ?? 0;
-        upsertSnapshot.run(targetThreadId, JSON.stringify(forkState));
+        const serialized = JSON.stringify(forkState);
+        const state = forkState as { revision?: number; schemaVersion?: number };
+        upsertSnapshot.run(
+          targetThreadId,
+          serialized,
+          targetPosition,
+          state.revision ?? 0,
+          checksum(serialized),
+          state.schemaVersion ?? 0,
+        );
         upsertNamedSnapshot.run(
           targetThreadId,
           snapshotId,
@@ -425,4 +618,39 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
   };
 
   return store;
+}
+
+/**
+ * 隔离没有新格式标记的旧 RuntimeStore，避免把旧快照静默恢复成新状态。
+ * Quarantine an unmarked legacy RuntimeStore instead of silently restoring it.
+ */
+function quarantineLegacyRuntimeStore(dbPath: string): void {
+  if (!existsSync(dbPath)) return;
+
+  const database = new Database(dbPath);
+  try {
+    const hasLegacyRuntimeTable = database
+      .query<{ count: number }, []>(
+        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name IN ('runtime_events', 'runtime_snapshots', 'runtime_named_snapshots')",
+      )
+      .get()?.count;
+    const hasFormatMarker = database
+      .query<{ count: number }, []>(
+        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'runtime_store_meta'",
+      )
+      .get()?.count;
+    if (!hasLegacyRuntimeTable || hasFormatMarker) return;
+  } finally {
+    database.close();
+  }
+
+  const legacyPath = `${dbPath}.legacy`;
+  if (existsSync(legacyPath)) {
+    renameSync(legacyPath, `${legacyPath}.${Date.now()}`);
+  }
+  renameSync(dbPath, legacyPath);
+  for (const suffix of ['-wal', '-shm']) {
+    const sidecar = `${dbPath}${suffix}`;
+    if (existsSync(sidecar)) renameSync(sidecar, `${legacyPath}${suffix}`);
+  }
 }

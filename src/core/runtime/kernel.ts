@@ -5,14 +5,25 @@
 // AgentKernel encapsulates RuntimeState management, event pipeline,
 // and policy decisions.  Single entry point for state, persistence, and effect dispatch.
 
+import { createHash } from 'node:crypto';
 import { defaultPlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
 import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
-import { eventsForRuntimeAction, type RuntimeUserAction } from './actions';
-import type { RuntimeEffect } from './effects';
-import type { RuntimeEvent } from './events';
+import {
+  eventsForRuntimeAction,
+  type RuntimeActionResult,
+  type RuntimeUserAction,
+} from './actions';
+import type { RuntimeEffect, RuntimeEffectLease } from './effects';
+import {
+  isRuntimeEventEnvelope,
+  type RuntimeEvent,
+  type RuntimeEventEnvelope,
+  type RuntimeEventInput,
+} from './events';
+import { assertRuntimeStateInvariants } from './invariants';
 import { reduceRuntimeState } from './reducer';
 import { decideNextEffect } from './scheduler';
 import {
@@ -22,7 +33,12 @@ import {
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
 } from './state';
-import { createRuntimeStore, type RuntimeStore } from './store';
+import {
+  createRuntimeStore,
+  type RuntimeEventMetadata,
+  type RuntimeStore,
+  type StoredEvent,
+} from './store';
 
 // ── Kernel 配置 / Kernel configuration ──
 
@@ -39,9 +55,12 @@ export interface KernelConfig {
 }
 
 /** Executes an effect and returns facts for the Kernel to reduce/persist. */
+export type RuntimeEffectEventSink = (event: RuntimeEvent) => void;
+
 export type RuntimeEffectExecutor = (
   effect: RuntimeEffect,
   state: Readonly<RuntimeState>,
+  emit?: RuntimeEffectEventSink,
 ) => Promise<RuntimeEvent[]>;
 
 // ── AgentKernel 实现 / AgentKernel implementation ──
@@ -65,11 +84,14 @@ export class AgentKernel {
   private store: RuntimeStore;
   private state: RuntimeState;
   private sandboxAvailable: boolean;
+  private readonly appliedEventIds: Set<string>;
+  private activeRunnerId: string | null = null;
 
   constructor(config: KernelConfig) {
     this.store = config.store;
     this.state = config.initialState;
     this.sandboxAvailable = config.sandboxAvailable ?? false;
+    this.appliedEventIds = new Set(config.initialState.appliedEventIds ?? []);
   }
 
   // ── 事件处理 / Event processing ──
@@ -78,20 +100,27 @@ export class AgentKernel {
    * 处理单个 RuntimeEvent：reduce → persist。
    * Process a single RuntimeEvent: reduce → persist.
    */
-  processEvent(event: RuntimeEvent): void {
-    // 1. 更新状态 / Update state
-    this.state = reduceRuntimeState(this.state, event);
+  processEvent(event: RuntimeEventInput): { status: 'applied' | 'duplicate'; eventId: string } {
+    const envelope = this.createEnvelope(event, this.state.revision + 1);
+    if (this.appliedEventIds.has(envelope.eventId)) {
+      return { status: 'duplicate', eventId: envelope.eventId };
+    }
 
-    // 2. 原子持久化事件 + 快照 / Atomic persist events + snapshot in single transaction
-    this.store.appendEventsAndSnapshot(this.state.session.threadId, [event], this.state);
-
-    if (event.type === 'run.completed') {
+    const nextState = this.reduceEnvelope(this.state, envelope);
+    // Atomic persist events + snapshot before publishing the new in-memory state.
+    this.store.appendEventsAndSnapshot(this.state.session.threadId, [envelope.payload], nextState, [
+      this.metadataFor(envelope),
+    ]);
+    this.state = nextState;
+    this.appliedEventIds.add(envelope.eventId);
+    if (envelope.payload.type === 'run.completed') {
       this.store.saveNamedSnapshot(
         this.state.session.threadId,
-        `turn-${event.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
+        `turn-${envelope.payload.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
         this.state,
       );
     }
+    return { status: 'applied', eventId: envelope.eventId };
   }
 
   /**
@@ -101,18 +130,33 @@ export class AgentKernel {
    * 用于 Plan 审批等需要事件和快照同时落盘的关键路径。
    * Used for critical paths like plan approval where events and snapshot must be durably consistent.
    */
-  processEventBatch(events: RuntimeEvent[]): void {
+  processEventBatch(events: RuntimeEventInput[]): void {
     if (events.length === 0) return;
-    const nextState = events.reduce(reduceRuntimeState, this.state);
-    this.store.appendEventsAndSnapshot(this.state.session.threadId, events, nextState);
+    let nextState = this.state;
+    const payloads: RuntimeEvent[] = [];
+    const metadata: RuntimeEventMetadata[] = [];
+    const batchEventIds: string[] = [];
+    const batchSeen = new Set(this.appliedEventIds);
+    for (const event of events) {
+      const envelope = this.createEnvelope(event, nextState.revision + 1);
+      if (batchSeen.has(envelope.eventId)) continue;
+      nextState = this.reduceEnvelope(nextState, envelope);
+      payloads.push(envelope.payload);
+      metadata.push(this.metadataFor(envelope));
+      batchSeen.add(envelope.eventId);
+      batchEventIds.push(envelope.eventId);
+    }
+    if (payloads.length === 0) return;
+    this.store.appendEventsAndSnapshot(this.state.session.threadId, payloads, nextState, metadata);
     this.state = nextState;
+    for (const eventId of batchEventIds) this.appliedEventIds.add(eventId);
   }
 
   /**
    * 批量处理多个 RuntimeEvent。
    * Process multiple RuntimeEvents in batch.
    */
-  processEvents(events: RuntimeEvent[]): void {
+  processEvents(events: RuntimeEventInput[]): void {
     for (const event of events) {
       this.processEvent(event);
     }
@@ -155,41 +199,158 @@ export class AgentKernel {
     return this.sandboxAvailable;
   }
 
+  /** Acquire the single runner lease for this thread. */
+  acquireRunner(): string | null {
+    if (this.activeRunnerId) return null;
+    const runnerId = crypto.randomUUID();
+    this.activeRunnerId = runnerId;
+    return runnerId;
+  }
+
+  /** Release a runner lease only if it still belongs to the caller. */
+  releaseRunner(runnerId: string): void {
+    if (this.activeRunnerId === runnerId) this.activeRunnerId = null;
+  }
+
+  beginEffect(effect: RuntimeEffect): RuntimeEffectLease {
+    return {
+      effectId: crypto.randomUUID(),
+      expectedRevision: this.state.revision,
+      turnId: this.state.turn.turnId,
+      effect,
+    };
+  }
+
+  /** Apply an effect result only if no newer event changed the state. */
+  applyEffectResult(lease: RuntimeEffectLease, events: RuntimeEventInput[]): boolean {
+    if (lease.expectedRevision !== this.state.revision || lease.turnId !== this.state.turn.turnId) {
+      return false;
+    }
+    this.processEventBatch(events);
+    return true;
+  }
+
+  /**
+   * Apply one event produced while an effect is still running.
+   * Streaming events advance the lease revision so the final effect result
+   * remains subject to the same stale-result check as a batch result.
+   */
+  applyEffectEvent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
+    if (lease.expectedRevision !== this.state.revision || lease.turnId !== this.state.turn.turnId) {
+      return false;
+    }
+    this.processEvent(event);
+    lease.expectedRevision = this.state.revision;
+    return true;
+  }
+
   /**
    * Execute deterministic effects until the runtime needs user input or the
    * supplied executor stops emitting facts.  The executor never receives a
    * mutable state reference and cannot bypass processEvent().
    */
   async run(executor: RuntimeEffectExecutor, maxEffects = 10_000): Promise<RuntimeEffect> {
-    for (let index = 0; index < maxEffects; index++) {
-      const effect = decideNextEffect(this.state);
-      if (effect.type === 'subagent.recovery_unavailable') {
-        const events = await executor(effect, this.getState());
-        if (events.length === 0) return { type: 'stop' };
-        this.processEventBatch(events);
-        continue;
-      }
-      if (
-        effect.type === 'request_user_input' ||
-        effect.type === 'request_plan_review' ||
-        effect.type === 'request_tool_approval' ||
-        effect.type === 'stop' ||
-        effect.type === 'emit_final'
-      ) {
-        return effect;
-      }
-      const events = await executor(effect, this.getState());
-      if (events.length === 0) return { type: 'stop' };
-      this.processEvents(events);
+    const runnerId = this.acquireRunner();
+    if (!runnerId) {
+      return { type: 'busy', reason: 'A runtime runner is already active for this thread.' };
     }
-    throw new Error(`Runtime effect limit (${maxEffects}) exceeded`);
+    try {
+      for (let index = 0; index < maxEffects; index++) {
+        const effect = decideNextEffect(this.state);
+        if (effect.type === 'recovery_blocked') return effect;
+        if (effect.type === 'subagent.recovery_unavailable') {
+          const lease = this.beginEffect(effect);
+          const events = await executor(lease.effect, this.getState());
+          if (events.length === 0) return { type: 'stop' };
+          if (!this.applyEffectResult(lease, events)) continue;
+          continue;
+        }
+        if (
+          effect.type === 'request_user_input' ||
+          effect.type === 'request_plan_review' ||
+          effect.type === 'request_tool_approval' ||
+          effect.type === 'stop' ||
+          effect.type === 'emit_final'
+        ) {
+          return effect;
+        }
+        const lease = this.beginEffect(effect);
+        const events = await executor(lease.effect, this.getState());
+        if (events.length === 0) return { type: 'stop' };
+        if (!this.applyEffectResult(lease, events)) continue;
+      }
+      throw new Error(`Runtime effect limit (${maxEffects}) exceeded`);
+    } finally {
+      this.releaseRunner(runnerId);
+    }
   }
 
   /** Apply a user action only when it matches the currently persisted interaction. */
-  applyAction(action: RuntimeUserAction): void {
-    this.processEventBatch(
-      eventsForRuntimeAction(this.state, action, { sandboxAvailable: this.sandboxAvailable }),
-    );
+  applyAction(action: RuntimeUserAction): RuntimeActionResult {
+    const events = eventsForRuntimeAction(this.state, action, {
+      sandboxAvailable: this.sandboxAvailable,
+    });
+    if (events.length === 0) {
+      const reason =
+        this.state.interactions.kind === 'idle'
+          ? 'No active interaction accepts this action.'
+          : 'The action does not match the active interaction.';
+      return {
+        status: this.state.interactions.kind === 'idle' ? 'rejected' : 'stale',
+        reason,
+        telemetry: {
+          type: 'runtime.action_ignored',
+          interactionId: action.interactionId,
+          reason,
+        },
+      };
+    }
+    this.processEventBatch(events);
+    return { status: 'applied', events };
+  }
+
+  private createEnvelope(event: RuntimeEventInput, revision: number): RuntimeEventEnvelope {
+    if (isRuntimeEventEnvelope(event)) {
+      if (event.threadId !== this.state.session.threadId) {
+        throw new Error(`Runtime event thread mismatch: ${event.threadId}.`);
+      }
+      return event;
+    }
+    const serialized = JSON.stringify(event);
+    const eventId = createHash('sha256').update(serialized).digest('hex');
+    return {
+      eventId,
+      threadId: this.state.session.threadId,
+      revision,
+      occurredAt: new Date().toISOString(),
+      payload: event,
+    };
+  }
+
+  private reduceEnvelope(state: RuntimeState, envelope: RuntimeEventEnvelope): RuntimeState {
+    if (envelope.revision !== state.revision + 1) {
+      throw new Error(
+        `Runtime revision mismatch: expected ${state.revision + 1}, received ${envelope.revision}.`,
+      );
+    }
+    const reduced = reduceRuntimeState(state, envelope.payload);
+    const nextState: RuntimeState = {
+      ...reduced,
+      revision: envelope.revision,
+      lastAppliedEventId: envelope.eventId,
+      appliedEventIds: [...(reduced.appliedEventIds ?? []), envelope.eventId].slice(-4096),
+    };
+    assertRuntimeStateInvariants(nextState);
+    return nextState;
+  }
+
+  private metadataFor(envelope: RuntimeEventEnvelope): RuntimeEventMetadata {
+    return {
+      eventId: envelope.eventId,
+      revision: envelope.revision,
+      causationId: envelope.causationId,
+      occurredAt: envelope.occurredAt,
+    };
   }
 
   // ── 持久化 / Persistence ──
@@ -285,10 +446,55 @@ export function createAgentKernel(params: {
     authorizationSource: params.authorizationSource,
     phase: params.phase,
   });
-  const restoredState = store.loadSnapshot<RuntimeState>(params.threadId);
-  const migratedState = restoredState ? migrateRuntimeState(restoredState) : null;
+  const snapshotRecord = store.loadSnapshotRecord<RuntimeState>(params.threadId);
+  const restoredState = snapshotRecord?.state ?? null;
+  let migratedState = restoredState ? migrateRuntimeState(restoredState) : null;
+  const incompatibleSchemaVersion =
+    restoredState &&
+    (restoredState.schemaVersion < 2 || restoredState.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
+      ? restoredState.schemaVersion
+      : undefined;
+  let recoveryReason: string | undefined;
+  const lastEventPosition = store.getLastEventPosition(params.threadId);
+  if (snapshotRecord && snapshotRecord.metadata.eventPosition > lastEventPosition) {
+    recoveryReason = `Runtime snapshot event position ${snapshotRecord.metadata.eventPosition} exceeds the last event position ${lastEventPosition}.`;
+  }
+  if (!recoveryReason && lastEventPosition > 0) {
+    try {
+      const allEvents = store.loadEventsStrict(params.threadId);
+      const snapshotPosition = snapshotRecord?.metadata.eventPosition ?? 0;
+      const tail = allEvents.filter((entry) => entry.id > snapshotPosition);
+      if (migratedState && snapshotRecord) {
+        migratedState = replayPersistedTail(migratedState, tail, params.threadId);
+      }
+    } catch (error) {
+      recoveryReason = error instanceof Error ? error.message : String(error);
+    }
+  }
   const initialState =
-    migratedState?.session.threadId === params.threadId ? migratedState : freshState;
+    !recoveryReason &&
+    incompatibleSchemaVersion == null &&
+    migratedState?.session.threadId === params.threadId
+      ? migratedState
+      : incompatibleSchemaVersion != null
+        ? {
+            ...freshState,
+            recoveryState: {
+              kind: 'incompatible' as const,
+              schemaVersion: incompatibleSchemaVersion,
+            },
+          }
+        : recoveryReason || lastEventPosition > 0
+          ? {
+              ...freshState,
+              recoveryState: {
+                kind: 'corrupted' as const,
+                reason:
+                  recoveryReason ??
+                  'Runtime snapshot is missing, invalid, or failed checksum validation.',
+              },
+            }
+          : freshState;
 
   if (migratedState && migratedState !== restoredState && initialState === migratedState) {
     store.saveSnapshot(params.threadId, migratedState);
@@ -302,8 +508,39 @@ export function createAgentKernel(params: {
   });
 }
 
+function replayPersistedTail(
+  state: RuntimeState,
+  tail: StoredEvent[],
+  threadId: string,
+): RuntimeState {
+  let current = state;
+  for (const entry of tail) {
+    if (!entry.event_id || !entry.revision || !entry.occurred_at) {
+      throw new Error(`Runtime event ${entry.id} is missing envelope metadata.`);
+    }
+    if (entry.thread_id !== threadId) {
+      throw new Error(`Runtime event ${entry.id} belongs to another thread.`);
+    }
+    if (entry.revision !== current.revision + 1) {
+      throw new Error(
+        `Runtime event ${entry.id} revision mismatch: expected ${current.revision + 1}, received ${entry.revision}.`,
+      );
+    }
+    const reduced = reduceRuntimeState(current, entry.event);
+    current = {
+      ...reduced,
+      revision: entry.revision,
+      lastAppliedEventId: entry.event_id,
+      appliedEventIds: [...(reduced.appliedEventIds ?? []), entry.event_id].slice(-4096),
+    };
+    assertRuntimeStateInvariants(current);
+  }
+  return current;
+}
+
 function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
-  if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION) return snapshot;
+  if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION)
+    return normalizeRuntimeMetadata(snapshot);
   if (snapshot.schemaVersion < 2 || snapshot.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
     return null;
 
@@ -321,7 +558,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   // Build the migrated state before upgrading the version so all v2 fields are
   // preserved and the recovery marker is durable with the schema transition.
   let migratedState: RuntimeState = {
-    ...snapshot,
+    ...normalizeRuntimeMetadata(snapshot),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     suspendedSubagents: snapshot.suspendedSubagents ?? {},
     ...(legacyMarker ? { legacyUnrecoverableSubagentApproval: legacyMarker } : {}),
@@ -353,11 +590,28 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     migratedState = {
       ...migratedState,
       activeTaskId: snapshot.activeTaskId ?? (legacyTask.status === 'active' ? legacyTaskId : null),
-      tasks: snapshot.tasks ?? { [legacyTaskId]: legacyTask },
+      tasks:
+        snapshot.tasks && Object.keys(snapshot.tasks).length > 0
+          ? snapshot.tasks
+          : { [legacyTaskId]: legacyTask },
     };
   }
 
   return materializeLegacyPlanArtifacts(migratedState);
+}
+
+function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
+  const raw = state as RuntimeState & {
+    revision?: number;
+    appliedEventIds?: string[];
+    recoveryState?: RuntimeState['recoveryState'];
+  };
+  return {
+    ...state,
+    revision: Number.isInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0,
+    appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
+    recoveryState: raw.recoveryState ?? { kind: 'normal' },
+  };
 }
 
 /** Materialize inline legacy PlanDocument bodies without changing their versions. */

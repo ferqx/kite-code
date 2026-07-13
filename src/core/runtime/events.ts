@@ -21,6 +21,22 @@ import type {
 import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
 import type { ClassifiedFailure } from './failures';
 
+/** Runtime event metadata used for idempotency, tracing and stale-result checks. */
+export interface RuntimeEventEnvelope {
+  eventId: string;
+  threadId: string;
+  revision: number;
+  causationId?: string;
+  occurredAt: string;
+  payload: RuntimeEvent;
+}
+
+export type RuntimeEventInput = RuntimeEvent | RuntimeEventEnvelope;
+
+export function isRuntimeEventEnvelope(value: RuntimeEventInput): value is RuntimeEventEnvelope {
+  return 'payload' in value && typeof value.eventId === 'string';
+}
+
 export type { UserInputResult } from '@/protocol/events.js';
 
 // ── 工具生命周期事件 / Tool lifecycle events ──
@@ -29,12 +45,20 @@ export type { UserInputResult } from '@/protocol/events.js';
 export interface ToolQueuedEvent {
   type: 'tool.queued';
   toolCallId: string;
+  /** Top-level task that owns this call, when one is active. */
+  taskId?: string;
   name: string;
   args: unknown;
   /** 触发该工具调用的模型消息 ID / Model message ID that triggered this tool call */
   modelMessageId?: string;
   /** 该工具调用在模型消息中的序号（0-based）/ Ordinal position of this tool call in the model message */
   ordinal?: number;
+  /** Classification captured before execution. */
+  effectClass?: import('@/core/policies/tool-capabilities').ToolEffectClass;
+  /** Whether this call crosses the task side-effect boundary. */
+  sideEffect?: boolean;
+  /** Human-readable reason retained for diagnostics. */
+  classificationReason?: string;
 }
 
 /** 工具调用开始执行 */
@@ -350,6 +374,16 @@ export interface RunErrorEvent {
   type: 'run.error';
   message: string;
   recoverable: boolean;
+  failure?: ClassifiedFailure;
+  effectId?: string;
+  turnId?: string;
+}
+
+/** Internal telemetry for an action that lost a race with another interaction. */
+export interface RuntimeActionIgnoredEvent {
+  type: 'runtime.action_ignored';
+  interactionId?: string;
+  reason: string;
 }
 
 // ── Plan 生命周期补充事件 / Additional plan lifecycle events ──
@@ -491,6 +525,7 @@ export type RuntimeEvent =
   | ModelCacheMetricsEvent
   | RunCompletedEvent
   | RunErrorEvent
+  | RuntimeActionIgnoredEvent
   | PlanDraftedEvent
   | PlanProgressUpdatedEvent
   | PlanCompletedEvent

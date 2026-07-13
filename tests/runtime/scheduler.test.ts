@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
 
@@ -84,5 +85,53 @@ describe('decideNextEffect', () => {
     };
     // Queue takes priority
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['queued-tool'] });
+  });
+
+  test('resumes a queued tool after auto-review approval', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.tools.queue.push('shell-tool');
+    state.tools.calls['shell-tool'] = {
+      toolCallId: 'shell-tool',
+      modelMessageId: 'model',
+      name: 'shell_execute',
+      args: { command: 'printf ok' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    const approval = {
+      risk: 'execute_code',
+      summary: 'Run shell command',
+      reason: 'Needs review',
+      command: 'printf ok',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+    };
+    const awaiting = reduceRuntimeState(state, {
+      type: 'auto_review.requested',
+      reviewId: 'review-1',
+      toolCallId: 'shell-tool',
+      toolName: 'shell_execute',
+      reason: 'Needs review',
+      approval: approval as never,
+    });
+    const approved = reduceRuntimeState(awaiting, {
+      type: 'auto_review.completed',
+      reviewId: 'review-1',
+      toolCallId: 'shell-tool',
+      result: {
+        ok: true,
+        approved: true,
+        grant: 'approve_once',
+        reviewerModelName: 'test',
+        durationMs: 1,
+      },
+    });
+
+    expect(approved.interactions.kind).toBe('idle');
+    expect(decideNextEffect(approved)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['shell-tool'],
+    });
   });
 });

@@ -42,6 +42,7 @@
 | `../active/tui-e2e-testing-limits.md` | active | TUI E2E 测试方案与限制 — 旧 ink-testing-library e2e harness 退役原因、Bun PTY 方案和平台边界 | 编写 TUI E2E/PTTY 测试、考虑替代终端测试方案时必读，避免重复踩坑。 |
 | `../active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
 | `../active/plan-mode-implementation.md` | active | Plan Mode 全栈实现：plan_review 中断、PlanReviewBlock/InputBlock/TaskProgressBlock 渲染、多问题 ask_user、紧凑 tool_card 布局、计划路由优化、持久化恢复、UserInputResult 结构化答案 | 修改 plan 流程、plan_review 中断、ask_user 渲染、PlanReviewBlock、InputBlock 多问题向导、ToolCardBlock ask_user 渲染、userInput 数据流（protocol events → runtime events → TUI reducer → OutputBlock）时必读。 |
+| `../active/plan-artifact-lifecycle.md` | active | Plan Artifact 持久化、提交校验、审核交互与 Runtime 恢复边界 | 修改 `write_plan`、Plan review、Task 生命周期、Runtime Context、TUI/CLI 审核展示或会话恢复时必读。 |
 | `../active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
 | `../active/file-reading-shared-boundary.md` | active | 文件读取共享边界 — `readTextContent` 单入口、BOM/编码检测、`isTextByte` 字节分类、换行正规化、MSYS2 路径双层转换 | 修改 `file.ts`/`shell.ts`/`path-utils.ts`、二进制检测、编码处理、文件读取失败排查时必读。 |
 | `../active/authorization.md` | active | 授权溯源 — AuthorizationSource、ToolGrant.source/grantedAt、modeSource/modeGrantedAt、mode-policy 硬规则 | 修改授权状态类型、full_access 提升逻辑、mode-policy 时必读。 |

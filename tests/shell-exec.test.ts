@@ -84,6 +84,19 @@ describe('shell live output', () => {
     expect(result.exitCode).toBe(124);
     expect(result.stderr).toContain('timed out');
   });
+
+  test('does not wait for inherited pipes from a background child after timeout', async () => {
+    const startedAt = Date.now();
+    const result = await shellTool({
+      workspace,
+      command: 'sleep 1 & wait',
+      timeoutMs: 50,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(result.exitCode).toBe(124);
+    expect(result.stderr).toContain('timed out');
+  });
 });
 
 describe('findSystemBash — candidate selection logic', () => {

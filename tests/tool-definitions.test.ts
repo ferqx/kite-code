@@ -83,6 +83,52 @@ describe('code agent tool definitions', () => {
     expect(result._params.action).toBe('save');
   });
 
+  test('write_plan schema requires a complete save document', async () => {
+    const tools = createAgentTools({ workspace: '/tmp' });
+    const schema = (tools['write_plan'] as any).inputSchema;
+    const jsonSchema = await schema.jsonSchema;
+
+    // OpenAI-compatible function tools require an object at the schema root;
+    // a root-level anyOf is serialized as type=null by some providers.
+    expect(jsonSchema.type).toBe('object');
+
+    expect((await schema.validate({ action: 'save' })).success).toBe(false);
+    expect(
+      (
+        await schema.validate({
+          action: 'save',
+          title: 'Login page',
+          body_markdown: 'Implement the login flow and authentication boundary.',
+          steps: [{ id: 'build-login', title: 'Build the login interface' }],
+        })
+      ).success,
+    ).toBe(true);
+    expect(
+      (
+        await schema.validate({
+          action: 'submit',
+          plan_id: 'plan-1',
+          version: 1,
+          structural_digest: 'digest-1',
+        })
+      ).success,
+    ).toBe(true);
+  });
+
+  test('ask_user accepts batch questions without a duplicate top-level question', async () => {
+    const tools = createAgentTools({ workspace: '/tmp' });
+    const schema = (tools['ask_user'] as any).inputSchema;
+
+    expect(
+      (
+        await schema.validate({
+          questions: [{ id: 'scope', question: 'What scope should be covered?' }],
+        })
+      ).success,
+    ).toBe(true);
+    expect((await schema.validate({})).success).toBe(false);
+  });
+
   test('exposes one cache-stable tool set', () => {
     const tools = createAgentTools({
       workspace: 'D:\\workspace',

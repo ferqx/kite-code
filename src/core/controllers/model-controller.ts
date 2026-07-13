@@ -18,6 +18,7 @@ import {
 import { prepareModelContext } from '@/core/model/context';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
+import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
@@ -244,13 +245,18 @@ export async function invokeRuntimeModel(params: {
     const messageId = response.id ?? requestId;
     let ordinal = 0;
     for (const call of toolCalls) {
+      const capability = classifyToolCapability(call.name, call.args);
       events.push({
         type: 'tool.queued',
         toolCallId: call.id,
+        taskId: params.state.activeTaskId ?? undefined,
         name: call.name,
         args: call.args,
         modelMessageId: messageId,
         ordinal: ordinal++,
+        effectClass: capability.effectClass,
+        sideEffect: capability.sideEffect,
+        classificationReason: capability.classificationReason,
       });
     }
     events.push(...eventsForInvalidModelToolCalls(invalidToolCalls, messageId, ordinal));

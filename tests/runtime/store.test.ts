@@ -3,7 +3,7 @@
 
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
@@ -96,7 +96,7 @@ describe('createRuntimeStore', () => {
     store.close();
   });
 
-  test('backfills session metadata for stores created before runtime_sessions existed', () => {
+  test('isolates stores created before the RuntimeStore format marker existed', () => {
     const db = new Database(dbPath);
     db.run(
       'CREATE TABLE runtime_events (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, event_json TEXT NOT NULL, created_at INTEGER)',
@@ -107,10 +107,9 @@ describe('createRuntimeStore', () => {
     db.close();
 
     const store = createRuntimeStore(dbPath);
-    expect(store.listSessions()).toEqual([
-      expect.objectContaining({ threadId: 'legacy-runtime', name: 'hello' }),
-    ]);
+    expect(store.listSessions()).toEqual([]);
     store.close();
+    expect(existsSync(`${dbPath}.legacy`)).toBe(true);
   });
 });
 

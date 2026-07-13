@@ -269,8 +269,20 @@ export async function executeRuntimeTools(params: {
   taskModel?: SupportedChatModel;
   subagentEventSink?: SubAgentEventSink;
   planArtifactStore?: PlanArtifactStore;
+  /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
+  emitRuntimeEvent?: (event: RuntimeEvent) => void;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
+  // Keep the direct-call API unchanged for tests and legacy callers.  The
+  // Runtime runner replaces push with a streaming sink, so events are applied
+  // and rendered as soon as they are produced instead of after the tool exits.
+  if (params.emitRuntimeEvent) {
+    const append = events.push.bind(events);
+    events.push = (...items: RuntimeEvent[]) => {
+      for (const item of items) params.emitRuntimeEvent?.(item);
+      return append();
+    };
+  }
   const planArtifacts = params.planArtifactStore ?? defaultPlanArtifactStore;
   const emitSubagentEvent: SubAgentEventSink = (event) => {
     events.push(toRuntimeSubagentEvent(event));
@@ -292,6 +304,19 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (request.name === 'ask_user') {
+      const hasQuestion = request.args.question.trim().length > 0;
+      const hasBatchQuestions = (request.args.questions?.length ?? 0) > 0;
+      if (!hasQuestion && !hasBatchQuestions) {
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: classifyFailure(
+            'tool_invalid_args',
+            'ask_user requires a non-empty question or questions array.',
+          ),
+        });
+        continue;
+      }
       events.push({
         type: 'user_input.requested',
         interactionId: genInteractionId(),
@@ -428,13 +453,19 @@ export async function executeRuntimeTools(params: {
         args.plan_id === planning.document.planId &&
         args.version === planning.document.version &&
         args.structural_digest === planning.document.structuralDigest;
+      const sideEffectsBlockDraft =
+        hasDocument &&
+        (action === 'save' || isLegacyDocumentSubmit) &&
+        task?.sideEffectsStarted === true;
       if (!draftWrite && !replanDraftSubmit && !autoEnter && !replan && !submitExistingAllowed) {
         events.push({
           type: 'tool.rejected',
           toolCallId,
           reason: isSubmitExisting
             ? 'submit must reference the current saved plan_id, version, and structural_digest.'
-            : 'write_plan requires a complete plan document when saving.',
+            : sideEffectsBlockDraft
+              ? 'write_plan cannot save a new plan after side effects have started.'
+              : 'write_plan requires a complete plan document when saving.',
         });
         continue;
       }
@@ -801,6 +832,7 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     const requiresEffectReview =
+      params.state.authorization.mode !== 'full_access' &&
       getEffectiveInteractionMode(params.state) !== 'full' &&
       Boolean(
         decision.effects?.network ||

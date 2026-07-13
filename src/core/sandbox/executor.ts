@@ -103,6 +103,7 @@ function createWrappedExecutor(
   return async (input) => {
     let timedOut = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const outputStop = new AbortController();
     try {
       // 执行前检查命令是否引用危险文件路径 / Pre-execution dangerous path check
       const dangerous = checkDangerousPaths(input.command);
@@ -138,6 +139,9 @@ function createWrappedExecutor(
       if (input.timeoutMs && input.timeoutMs > 0) {
         timeoutId = setTimeout(() => {
           timedOut = true;
+          // Background descendants may retain inherited pipes after the shell
+          // is killed. Cancel readers so the tool cannot remain non-terminal.
+          outputStop.abort();
           try {
             proc.kill();
           } catch {
@@ -151,12 +155,18 @@ function createWrappedExecutor(
         proc.stdin.end();
       }
 
-      const [stdout, stderr] = input.onProgress
-        ? await Promise.all([
-            readWithProgress(proc.stdout, (line) => input.onProgress!(line, 'stdout')),
-            readWithProgress(proc.stderr, (line) => input.onProgress!(line, 'stderr')),
-          ])
-        : await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+      const [stdout, stderr] = await Promise.all([
+        readWithProgress(
+          proc.stdout,
+          input.onProgress ? (line) => input.onProgress!(line, 'stdout') : undefined,
+          outputStop.signal,
+        ),
+        readWithProgress(
+          proc.stderr,
+          input.onProgress ? (line) => input.onProgress!(line, 'stderr') : undefined,
+          outputStop.signal,
+        ),
+      ]);
       const exitCode = await proc.exited;
       if (timeoutId) clearTimeout(timeoutId);
 

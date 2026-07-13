@@ -63,6 +63,182 @@ test('runRuntimeLoop resumes a matching input action and persists its facts', as
   kernel.close();
 });
 
+test.each([
+  'awaiting_user_input',
+  'awaiting_tool_approval',
+  'awaiting_review',
+] as const)('runRuntimeLoop consumes generic cancel for %s without throwing', async (interactionKind) => {
+  const store = createRuntimeStore(':memory:');
+  const toolCallId =
+    interactionKind === 'awaiting_user_input'
+      ? 'ask-1'
+      : interactionKind === 'awaiting_tool_approval'
+        ? 'approval-1'
+        : 'plan-1';
+  const initial = createInitialRuntimeState({
+    threadId: `cancel-${interactionKind}`,
+    userId: 'u',
+    workspace: '/',
+    phase: interactionKind === 'awaiting_review' ? 'planning' : 'building',
+  });
+  initial.tools.calls[toolCallId] = {
+    toolCallId,
+    modelMessageId: 'model-1',
+    name:
+      interactionKind === 'awaiting_user_input'
+        ? 'ask_user'
+        : interactionKind === 'awaiting_tool_approval'
+          ? 'shell_execute'
+          : 'write_plan',
+    args: {},
+    status:
+      interactionKind === 'awaiting_user_input'
+        ? 'awaiting_user_input'
+        : interactionKind === 'awaiting_tool_approval'
+          ? 'awaiting_approval'
+          : 'awaiting_review',
+    createdAtTurnId: initial.turn.turnId,
+  };
+  if (interactionKind === 'awaiting_user_input') {
+    initial.interactions = {
+      kind: 'awaiting_user_input',
+      interactionId: 'interaction-1',
+      toolCallId,
+      request: { question: 'q', options: [], allow_free_text: true },
+    };
+  } else if (interactionKind === 'awaiting_tool_approval') {
+    initial.interactions = {
+      kind: 'awaiting_tool_approval',
+      interactionId: 'interaction-1',
+      toolCallId,
+      approval: {
+        scope: 'once',
+        cwd: '/',
+        threadId: initial.session.threadId,
+        tool: 'shell_execute',
+        command: 'pwd',
+        risk: 'execute_code',
+        approvalHash: 'approval-hash',
+        summary: 'Run pwd',
+        reason: 'Test approval cancellation.',
+        expectedEffects: [],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+      },
+    };
+  } else {
+    const document = {
+      planId: 'plan-1',
+      version: 1,
+      title: 'Plan',
+      bodyMarkdown: 'A plan to verify cancellation behavior.',
+      steps: [{ id: 'step-1', title: 'Verify cancellation', status: 'pending' as const }],
+      structuralDigest: 'digest-1',
+      createdAtTurnId: initial.turn.turnId,
+      updatedAtTurnId: initial.turn.turnId,
+    };
+    initial.planning = {
+      kind: 'awaiting_review',
+      document,
+      interactionId: 'interaction-1',
+      exitToolCallId: toolCallId,
+    };
+    initial.interactions = {
+      kind: 'awaiting_review',
+      interactionId: 'interaction-1',
+      toolCallId,
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan: {
+        name: document.title,
+        description: document.bodyMarkdown,
+        status: 'pending',
+        steps: [],
+      },
+      planSummary: document.title,
+    };
+  }
+
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const events: string[] = [];
+  for await (const event of runRuntimeLoop(kernel, async () => [], {
+    requestAction: async () => ({ type: 'cancel', interactionId: 'interaction-1' }),
+  })) {
+    events.push(event.type);
+  }
+
+  expect(events).toContain(
+    interactionKind === 'awaiting_tool_approval' ? 'approval.rejected' : 'tool.finished',
+  );
+  expect(kernel.getState().interactions.kind).toBe('idle');
+  kernel.close();
+});
+
+test('runRuntimeLoop closes a suspended subagent when its approval is cancelled', async () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'cancel-subagent-approval',
+    userId: 'u',
+    workspace: '/',
+  });
+  initial.tools.calls['task-1'] = {
+    toolCallId: 'task-1',
+    modelMessageId: 'model-1',
+    name: 'task',
+    args: { task: 'Run a nested command.' },
+    status: 'awaiting_approval',
+    createdAtTurnId: initial.turn.turnId,
+  };
+  initial.interactions = {
+    kind: 'awaiting_tool_approval',
+    interactionId: 'approval-1',
+    toolCallId: 'task-1',
+    approval: {
+      scope: 'once',
+      cwd: '/',
+      threadId: initial.session.threadId,
+      tool: 'shell_execute',
+      command: 'pwd',
+      risk: 'execute_code',
+      approvalHash: 'approval-hash',
+      summary: 'Run pwd',
+      reason: 'Nested command needs approval.',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+      subagentId: 'subagent-1',
+    },
+  };
+  initial.suspendedSubagents['task-1'] = {
+    subagentId: 'subagent-1',
+    role: 'code',
+    task: 'Run a nested command.',
+    messages: [],
+    toolCallCount: 1,
+    steps: [],
+    blockedTool: {
+      toolCallId: 'nested-1',
+      toolName: 'shell_execute',
+      args: { command: 'pwd' },
+      command: 'pwd',
+    },
+  };
+
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const events: string[] = [];
+  for await (const event of runRuntimeLoop(kernel, async () => [], {
+    requestAction: async () => ({ type: 'cancel', interactionId: 'approval-1' }),
+  })) {
+    events.push(event.type);
+  }
+
+  expect(events).toEqual(['approval.rejected', 'subagent.failed', 'tool.finished']);
+  expect(kernel.getState().interactions.kind).toBe('idle');
+  expect(kernel.getState().suspendedSubagents).toEqual({});
+  kernel.close();
+});
+
 test('runRuntimeLoop persists and yields a durable terminal output event', async () => {
   const store = createRuntimeStore(':memory:');
   const kernel = new AgentKernel({
@@ -90,6 +266,66 @@ test('runRuntimeLoop persists and yields a durable terminal output event', async
     type: 'turn.completed',
     turnId: kernel.getState().turn.turnId,
   });
+  kernel.close();
+});
+
+test('runRuntimeLoop applies streamed tool events before the effect completes', async () => {
+  const store = createRuntimeStore(':memory:');
+  const kernel = new AgentKernel({
+    store,
+    initialState: createInitialRuntimeState({
+      threadId: 'streamed-tool',
+      userId: 'u',
+      workspace: '/',
+    }),
+    interactionMode: 'accept_edits',
+  });
+  kernel.processEvent({
+    type: 'tool.queued',
+    toolCallId: 'shell-1',
+    name: 'shell_execute',
+    args: { command: 'printf live' },
+  });
+
+  const events: string[] = [];
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async (effect, _state, emit) => {
+      if (effect.type !== 'run_tools') return [];
+      emit?.({ type: 'tool.started', toolCallId: 'shell-1' });
+      emit?.({
+        type: 'tool.progress',
+        toolCallId: 'shell-1',
+        chunk: 'live',
+        stream: 'stdout',
+      });
+      return [
+        {
+          type: 'tool.finished',
+          toolCallId: 'shell-1',
+          name: 'shell_execute',
+          result: {
+            ok: true,
+            command: 'printf live',
+            exitCode: 0,
+            stdout: 'live',
+            stderr: '',
+          },
+        },
+      ];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+  )) {
+    events.push(event.type);
+    if (event.type === 'tool.progress') {
+      expect(kernel.getState().tools.calls['shell-1']?.status).toBe('running');
+    }
+  }
+
+  expect(events.slice(0, 3)).toEqual(['tool.started', 'tool.progress', 'tool.finished']);
+  expect(kernel.getState().tools.calls['shell-1']?.status).toBe('succeeded');
+  expect(kernel.getState().tools.queue).not.toContain('shell-1');
+  expect(kernel.getState().tools.active).not.toContain('shell-1');
   kernel.close();
 });
 

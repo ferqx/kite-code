@@ -12,6 +12,6 @@
 - 审核事件引用 Artifact，UI/CLI 从 Artifact 读取正文；
 - 同一 Task 内版本递增，新顶层目标创建新的 Task 和 Plan ID；
 - 审核取消保留草稿，Artifact 缺失或 digest 不匹配不得提前清除审核 interaction；
-- 旧 inline Plan 事件和 Runtime snapshot 继续支持迁移与回放。
+- 旧 inline Plan 状态仍可按状态 schema 迁移；旧 RuntimeStore 格式不自动恢复，首次打开时隔离为 `.legacy`，避免污染新 Runtime。
 
 详细实施方案见 [`2026-07-13-plan-artifact-lifecycle.md`](../space/plans/2026-07-13-plan-artifact-lifecycle.md)。

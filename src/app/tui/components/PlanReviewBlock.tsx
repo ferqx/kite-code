@@ -3,10 +3,11 @@ import TextInput from 'ink-text-input';
 import { type MutableRefObject, useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
-import type { AgentPlan } from '@/protocol/events';
+import type { AgentPlan, PlanArtifactRef } from '@/protocol/events';
 
 interface PlanReviewBlockProps {
   plan: AgentPlan;
+  artifact?: PlanArtifactRef;
   provider: TuiUserInputProvider;
   onResolved: (action: string, feedback?: string) => void;
   /** Ref set to true during supplement mode — global Esc handler checks this to avoid cancelling the interrupt */
@@ -16,7 +17,7 @@ interface PlanReviewBlockProps {
 export default function PlanReviewBlock({
   plan: _plan,
   provider,
-  onResolved: _onResolved,
+  onResolved,
   supplementEscRef,
 }: PlanReviewBlockProps) {
   const t = useTheme();
@@ -52,21 +53,25 @@ export default function PlanReviewBlock({
           type: 'plan_review_decision',
           decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
         });
+        onResolved('approved_auto');
         break;
       case 'approved_accept_edits':
         provider.submitAction({
           type: 'plan_review_decision',
           decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
         });
+        onResolved('approved_accept_edits');
         break;
       case 'supplemented':
         provider.submitAction({
           type: 'plan_review_decision',
           decision: { kind: 'revise', feedback: feedback ?? '' },
         });
+        onResolved('supplemented', feedback);
         break;
       case 'rejected':
         provider.submitAction({ type: 'plan_review_decision', decision: { kind: 'cancel' } });
+        onResolved('rejected');
         break;
     }
   }

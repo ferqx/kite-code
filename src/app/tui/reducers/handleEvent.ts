@@ -2,7 +2,11 @@
 
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type * as Protocol from '@/protocol/events';
-import { getToolDetail, getToolPreview } from '../components/render-utils';
+import {
+  formatToolResultForDisplay,
+  getToolDetail,
+  getToolPreview,
+} from '../components/render-utils';
 import { MAX_TOOL_LINES } from '../components/ToolCardBlock';
 import type { ConsolidatedToolEntry, FileChangeRecord, OutputBlock, TuiState } from '../types';
 import {
@@ -1135,7 +1139,11 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       }
       return {
         ...next,
-        interrupt: { kind: 'plan_review', plan: event.data.plan },
+        interrupt: {
+          kind: 'plan_review',
+          plan: event.data.plan,
+          ...(event.data.artifact ? { artifact: event.data.artifact } : {}),
+        },
         status: { ...next.status, pendingPlan: event.data.plan },
       };
     }
@@ -1481,7 +1489,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           call_id: event.toolCallId,
           name: event.name,
           ok: event.result.ok,
-          summary: (event.result.stdout || event.result.stderr).slice(0, 200),
+          summary: formatToolResultForDisplay(event.name, event.result.stdout, event.result.stderr),
           exitCode: event.result.exitCode,
           status: event.result.status,
           userInput: event.result.userInput,
@@ -1524,7 +1532,10 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
     case 'planning.entered':
       return { ...state, status: { ...state.status, phase: 'planning' } };
     case 'plan.review_requested':
-      return handleEventAction(state, { type: 'need_plan_review', data: { plan: event.plan } });
+      return handleEventAction(state, {
+        type: 'need_plan_review',
+        data: { plan: event.plan, ...(event.artifact ? { artifact: event.artifact } : {}) },
+      });
     case 'plan.approved':
       return {
         ...state,

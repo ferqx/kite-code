@@ -11,6 +11,15 @@ import type { RuntimeState } from './state';
  * before sibling tool calls execute.
  */
 export function decideNextEffect(state: RuntimeState): RuntimeEffect {
+  if (state.recoveryState.kind !== 'normal') {
+    return {
+      type: 'recovery_blocked',
+      reason:
+        state.recoveryState.kind === 'corrupted'
+          ? state.recoveryState.reason
+          : `Runtime schema ${state.recoveryState.schemaVersion} is not supported.`,
+    };
+  }
   if (state.legacyUnrecoverableSubagentApproval) {
     return {
       type: 'subagent.recovery_unavailable',
@@ -57,7 +66,8 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   // sub-agent task tools are invisible to the scheduler and call_model runs prematurely.
   const isRunnable = (id: string) => {
     const call = state.tools.calls[id];
-    return call?.status === 'queued' || call?.status === 'approved';
+    const belongsToCurrentTask = call?.taskId == null || call.taskId === state.activeTaskId;
+    return belongsToCurrentTask && (call?.status === 'queued' || call?.status === 'approved');
   };
   const nextRunnable = state.tools.queue.find(isRunnable) ?? state.tools.active.find(isRunnable);
   if (nextRunnable) return { type: 'run_tools', toolCallIds: [nextRunnable] };

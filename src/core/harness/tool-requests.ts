@@ -708,8 +708,13 @@ function normalizeUserInputRequest(value: Partial<UserInputRequest>): UserInputR
     });
   }
 
+  const question =
+    typeof value.question === 'string' && value.question.trim()
+      ? value.question
+      : (questions?.[0]?.question ?? '');
+
   return {
-    question: typeof value.question === 'string' ? value.question : '',
+    question,
     options,
     allow_free_text: value.allow_free_text !== false,
     ...(typeof value.context === 'string' && value.context.trim()

@@ -37,7 +37,7 @@ export function createRuntimeEffectExecutor(
   // executeRuntimeTools converts the real lifecycle callbacks into durable
   // RuntimeEvents, so this fallback is only a capability marker.
   const subagentEventSink: SubAgentEventSink = dependencies.subagentEventSink ?? (() => {});
-  return async (effect, state) => {
+  return async (effect, state, emit) => {
     if (effect.type === 'call_model') {
       return invokeRuntimeModel({
         model: dependencies.model,
@@ -63,6 +63,7 @@ export function createRuntimeEffectExecutor(
         taskConfig: dependencies.config,
         taskModel: dependencies.model,
         subagentEventSink,
+        emitRuntimeEvent: emit,
       });
     }
     if (effect.type === 'run_auto_review') {

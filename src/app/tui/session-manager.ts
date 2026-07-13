@@ -26,6 +26,14 @@ function isRecoverableError(error: unknown): boolean {
   return /timeout|timed out|rate limit|overloaded|\b429\b|\b5\d\d\b/.test(message);
 }
 
+/** 取消竞态不应作为用户可见错误输出。 */
+export function isSilentCancellationMismatch(event: RuntimeEvent): boolean {
+  return (
+    event.type === 'run.error' &&
+    event.message === 'Runtime action does not match the active interaction.'
+  );
+}
+
 export {
   admitInteractionModeTarget,
   fullModeUnavailableReason,
@@ -220,6 +228,7 @@ export class SessionRuntime {
       this.abortController = abortController;
       this.generator = generator;
       for await (const event of generator) {
+        if (isSilentCancellationMismatch(event)) continue;
         this._routeRuntimeEvent(event, deps.dispatch);
         if (abortController.signal.aborted) {
           aborted = true;

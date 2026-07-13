@@ -10,6 +10,7 @@ import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
 import type { RuntimeEvent } from './events';
 import { createRuntimeEffectExecutor } from './executor';
+import { recordRuntimeFailure } from './failures';
 import { createAgentKernel } from './kernel';
 import { type RuntimeActionProvider, runRuntimeLoop } from './runner';
 import { getActiveTask } from './state';
@@ -137,10 +138,19 @@ export async function* runRuntimeAgent(
     if (input.signal?.aborted) exitStatus = 'aborted';
   } catch (error) {
     exitStatus = 'fatal';
+    const failure = recordRuntimeFailure({
+      kind: 'unknown',
+      message: error instanceof Error ? error.message : String(error),
+      phase: 'building',
+      turnId: kernel.getState().turn.turnId,
+      userVisible: true,
+    });
     const errorEvent: RuntimeEvent = {
       type: 'run.error',
-      message: error instanceof Error ? error.message : String(error),
+      message: failure.message,
       recoverable: false,
+      failure: failure.failure,
+      turnId: failure.turnId,
     };
     kernel.processEvent(errorEvent);
     collector.recordRuntime(errorEvent);
