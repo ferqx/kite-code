@@ -15,6 +15,7 @@ export function useGlobalKeys(
   overlayActive = false,
   supplementEscRef?: MutableRefObject<boolean>,
   wizardEscBackRef?: MutableRefObject<boolean>,
+  onTogglePlanMode?: () => void,
 ) {
   const overlayActiveRef = useRef(overlayActive);
   overlayActiveRef.current = overlayActive;
@@ -36,7 +37,7 @@ export function useGlobalKeys(
     ) => {
       // Shift+Tab: 切换 plan mode（全局，任何时候都生效，无 overlay 限制）
       if (key.shift && key.tab) {
-        dispatch({ type: 'TOGGLE_PLAN_MODE' });
+        onTogglePlanMode ? onTogglePlanMode() : dispatch({ type: 'TOGGLE_PLAN_MODE' });
         return;
       }
       // Ctrl+C 始终生效

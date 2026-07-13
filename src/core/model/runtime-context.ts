@@ -50,6 +50,8 @@ export interface RuntimeModeSnapshotInput {
   sandboxBackend: SandboxBackend | 'unknown';
   /** v2: PlanningState for dynamic runtime-state block */
   planningState?: PlanningState;
+  taskId?: string;
+  sideEffectsStarted?: boolean;
 }
 
 /** 可缓存运行时上下文输入 — 仅包含 session 稳定的字段 / Cacheable runtime context input — only session-stable fields */
@@ -101,6 +103,10 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     `phase: ${input.phase}`,
     `interaction_mode: ${input.interactionMode}`,
     `authorization_mode: ${input.authorizationMode}`,
+    ...(input.taskId ? [`task_id: ${input.taskId}`] : []),
+    ...(input.sideEffectsStarted != null
+      ? [`side_effects_started: ${input.sideEffectsStarted}`]
+      : []),
   ];
 
   // dynamic plan state block from PlanningState
@@ -111,6 +117,7 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     lines.push(`  lifecycle: ${ps.kind}`);
     if (
       ps.kind === 'planning_draft' ||
+      ps.kind === 'replanning_draft' ||
       ps.kind === 'awaiting_review' ||
       ps.kind === 'executing' ||
       ps.kind === 'completed'
@@ -119,7 +126,7 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
       lines.push(`  version: ${ps.document.version}`);
       lines.push(`  structural_digest: sha256:${ps.document.structuralDigest.slice(0, 16)}...`);
     }
-    if (ps.kind === 'planning_draft' && ps.revisionFeedback) {
+    if ((ps.kind === 'planning_draft' || ps.kind === 'replanning_draft') && ps.revisionFeedback) {
       lines.push(`  revision_feedback: "${ps.revisionFeedback}"`);
     }
     if (ps.kind === 'executing') {
@@ -130,20 +137,26 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     }
     lines.push('');
     lines.push('policy:');
-    lines.push(
-      `  write_plan_allowed: ${ps.kind === 'planning_empty' || ps.kind === 'planning_draft'}`,
-    );
-    lines.push(`  write_plan_submit_allowed: ${ps.kind === 'planning_draft'}`);
+    const canEnterPlanning = input.sideEffectsStarted !== true;
+    const canWriteDraft =
+      canEnterPlanning &&
+      (ps.kind === 'building_without_plan' ||
+        ps.kind === 'planning_empty' ||
+        ps.kind === 'planning_draft' ||
+        ps.kind === 'replanning_draft');
+    lines.push(`  write_plan_allowed: ${canWriteDraft || ps.kind === 'executing'}`);
+    lines.push(`  write_plan_submit_allowed: ${canWriteDraft || ps.kind === 'executing'}`);
+    lines.push(`  replan_allowed: ${ps.kind === 'executing'}`);
     lines.push(`  update_plan_allowed: ${ps.kind === 'executing'}`);
   }
 
   if (input.phase === 'planning') {
     lines.push(
-      'Planning phase policy: read/search/research, ask_user, and write_plan are allowed; workspace mutation, code execution, full access escalation, and side-effectful MCP/sub-agent work are not allowed until plan approval moves the phase to building.',
+      'Planning phase policy: read/search/research, ask_user, read_plan, and write_plan are allowed; workspace mutation, code execution, full access escalation, and side-effectful MCP/sub-agent work are not allowed until plan approval moves the phase to building. An initial write_plan(action="save") may enter planning only before side effects begin, followed by submit of the saved Artifact.',
     );
   } else {
     lines.push(
-      'Building phase policy: execute the approved task under the current interaction mode and authorization; update_plan for progress tracking; tool policy still enforces approval and sandbox boundaries.',
+      'Building phase policy: execute the approved task under the current interaction mode and authorization; update_plan for progress tracking; write_plan(action="submit") may request a structural replan while an approved plan is executing; tool policy still enforces approval and sandbox boundaries.',
     );
   }
   lines.push('</runtime-state>');
@@ -192,6 +205,7 @@ export function formatPlanStateReminder(planning: PlanningState): string {
   const lines = ['<runtime-state source="runtime.kernel">', `lifecycle: ${planning.kind}`];
   if (
     planning.kind === 'planning_draft' ||
+    planning.kind === 'replanning_draft' ||
     planning.kind === 'awaiting_review' ||
     planning.kind === 'executing' ||
     planning.kind === 'completed'
@@ -206,7 +220,10 @@ export function formatPlanStateReminder(planning: PlanningState): string {
       lines.push(`  - ${step.id}: ${step.status}`);
     }
   }
-  if (planning.kind === 'planning_draft' && planning.revisionFeedback) {
+  if (
+    (planning.kind === 'planning_draft' || planning.kind === 'replanning_draft') &&
+    planning.revisionFeedback
+  ) {
     lines.push(`revision_feedback: ${planning.revisionFeedback}`);
   }
   lines.push('</runtime-state>');

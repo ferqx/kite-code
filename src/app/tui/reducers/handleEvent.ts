@@ -1521,27 +1521,39 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       });
     case 'approval.requested':
       return handleEventAction(state, { type: 'need_approval', data: event.approval });
+    case 'planning.entered':
+      return { ...state, status: { ...state.status, phase: 'planning' } };
     case 'plan.review_requested':
       return handleEventAction(state, { type: 'need_plan_review', data: { plan: event.plan } });
     case 'plan.approved':
       return {
         ...state,
-        interactionMode: event.executionMode as 'accept_edits' | 'auto',
         status: { ...state.status, phase: 'building' },
       };
     case 'plan.revision_requested':
       return {
         ...state,
+        interrupt: null,
         status: {
           ...state.status,
           pendingPlan: state.status.plan, // keep current plan for revision display
         },
+      };
+    case 'plan.review_cancelled':
+      return {
+        ...state,
+        interrupt: null,
+        status: { ...state.status, pendingPlan: null },
       };
     case 'plan.rejected':
       return {
         ...state,
         status: { ...state.status, pendingPlan: null },
       };
+    case 'task.completed':
+      return { ...state, status: { ...state.status, phase: 'building' } };
+    case 'task.cancelled':
+      return { ...state, status: { ...state.status, phase: 'building', pendingPlan: null } };
     default:
       return state;
   }

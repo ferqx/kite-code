@@ -75,7 +75,8 @@ export function useSlashCommand(
   >,
   skillManifests?: SkillManifest[],
   skillOptions?: SkillScanOptions,
-  onRunTask?: (task: string, initialPhase?: AgentPhase) => void,
+  onRunTask?: (task: string, requestedPhase?: AgentPhase) => void,
+  onEnterPlanMode?: () => void,
   onTheme?: (preset: string) => void,
   currentInteractionMode: 'accept_edits' | 'auto' | 'full' = 'accept_edits',
   sandboxBackend: SandboxBackend = 'none',
@@ -116,11 +117,12 @@ export function useSlashCommand(
           dispatch({ type: 'NEW_SESSION', threadId: '' });
           break;
         case 'plan':
-          dispatch({ type: 'SET_PHASE', phase: 'planning' as const });
           dispatch({ type: 'SWITCH_AUTH', mode: 'default' });
-          // /plan <task> — 立即提交任务 / submit task immediately
+          // The runtime persists planning.entered when this task starts.
           if (action.task && onRunTask) {
             onRunTask(action.task, 'planning');
+          } else {
+            onEnterPlanMode?.();
           }
           break;
         case 'permissions': {
@@ -211,6 +213,7 @@ export function useSlashCommand(
       skillManifests,
       skillOptions,
       onRunTask,
+      onEnterPlanMode,
       onTheme,
       currentInteractionMode,
       sandboxBackend,

@@ -1,6 +1,7 @@
 import type {
   AgentPlan,
   AuthorizationMode,
+  PlanArtifactRef,
   ShellGrantUsed,
   ToolApprovalPayload,
   UserInputPayload,
@@ -32,4 +33,4 @@ export type UserAction =
 export type InterruptPayload =
   | { kind: 'approval'; approval: ToolApprovalPayload }
   | { kind: 'input'; question: UserInputPayload }
-  | { kind: 'plan_review'; plan: AgentPlan };
+  | { kind: 'plan_review'; plan: AgentPlan; artifact?: PlanArtifactRef };

@@ -36,9 +36,22 @@ export async function invokeBoundModel(params: {
     .filter(Boolean)
     .join('\n\n');
 
+  // The Runtime Kernel owns tool execution and policy enforcement. AI SDK's
+  // generateText will execute a tool when its `execute` handler is present,
+  // even when stopWhen limits the call to one model step. Pass only the tool
+  // declarations here so a model response cannot mutate the workspace before
+  // the durable Runtime Controller validates and executes it.
+  const modelTools = Object.fromEntries(
+    Object.entries(params.tools).map(([name, definition]) => {
+      const copy = { ...definition } as typeof definition & { execute?: unknown };
+      delete copy.execute;
+      return [name, copy];
+    }),
+  ) as ToolSet;
+
   const result = await generateText({
     model: params.model.model,
-    tools: Object.keys(params.tools).length > 0 ? params.tools : undefined,
+    tools: Object.keys(modelTools).length > 0 ? modelTools : undefined,
     messages: chatMessages,
     system: systemText || undefined,
     stopWhen: stepCountIs(1),

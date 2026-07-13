@@ -9,8 +9,14 @@ import {
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
-import type { RuntimeState } from './state';
-import { computePlanStructuralDigest } from './state';
+import {
+  computePlanStructuralDigest,
+  getActivePlanning,
+  getActiveTask,
+  type RuntimeState,
+  setActivePlanning,
+  updateActiveTask,
+} from './state';
 
 /**
  * 纯函数：将运行时事件应用到状态，返回新的不可变状态。
@@ -25,29 +31,123 @@ import { computePlanStructuralDigest } from './state';
  */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
   switch (event.type) {
+    case 'task.started': {
+      const task = {
+        taskId: event.taskId,
+        userGoal: event.userGoal,
+        status: 'active' as const,
+        startedAtTurnId: event.turnId,
+        sideEffectsStarted: false,
+        planning: { kind: 'building_without_plan' as const },
+        planHistory: [],
+      };
+      return {
+        ...state,
+        activeTaskId: task.taskId,
+        tasks: { ...state.tasks, [task.taskId]: task },
+        planning: task.planning,
+        interactions: { kind: 'idle' },
+      };
+    }
+
+    case 'planning.entered': {
+      const active = getActiveTask(state);
+      if (!active || active.taskId !== event.taskId || active.status !== 'active') return state;
+      const planning = getActivePlanning(state);
+      if (
+        active.sideEffectsStarted ||
+        planning.kind === 'executing' ||
+        planning.kind === 'awaiting_review' ||
+        planning.kind === 'completed' ||
+        planning.kind === 'cancelled'
+      )
+        return state;
+      if (
+        planning.kind === 'planning_empty' ||
+        planning.kind === 'planning_draft' ||
+        planning.kind === 'replanning_draft'
+      )
+        return state;
+      return setActivePlanning(state, { kind: 'planning_empty' });
+    }
+
+    case 'task.completed': {
+      const active = getActiveTask(state);
+      if (!active || active.taskId !== event.taskId) return state;
+      const completed = {
+        ...active,
+        status: 'completed' as const,
+        completedAtTurnId: event.turnId,
+        executionMode: undefined,
+      };
+      return {
+        ...state,
+        activeTaskId: null,
+        tasks: { ...state.tasks, [completed.taskId]: completed },
+        planning: completed.planning,
+      };
+    }
+
+    case 'task.cancelled': {
+      const active = getActiveTask(state);
+      if (!active || active.taskId !== event.taskId) return state;
+      const cancelled = { ...active, status: 'cancelled' as const, executionMode: undefined };
+      return {
+        ...state,
+        activeTaskId: null,
+        tasks: { ...state.tasks, [cancelled.taskId]: cancelled },
+        planning: cancelled.planning,
+      };
+    }
+
+    case 'planning.exited':
+      return state;
+
     // ── 方案生命周期 / Plan lifecycle ──
 
     case 'plan.review_requested': {
+      if (event.taskId && state.activeTaskId !== event.taskId) return state;
+      const planning = getActivePlanning(state);
       const doc = planDocumentFromAgentPlan(event.plan, state.turn.turnId);
       const inherited =
-        state.planning.kind === 'planning_draft'
-          ? { planId: state.planning.document.planId, version: state.planning.document.version }
-          : { planId: doc.planId, version: 1 };
+        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
+          ? {
+              planId: planning.document.planId,
+              version: event.version ?? planning.document.version,
+            }
+          : { planId: event.planId ?? doc.planId, version: event.version ?? 1 };
+      const priorDocument =
+        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
+          ? planning.document
+          : undefined;
       const document: PlanDocument = {
         ...doc,
         planId: inherited.planId,
         version: inherited.version,
-        structuralDigest: computePlanStructuralDigest(doc),
+        structuralDigest: event.structuralDigest ?? computePlanStructuralDigest(doc),
+        ...(event.artifact ? { artifact: event.artifact } : {}),
+        ...(planning.kind === 'replanning_draft' || priorDocument?.supersedesPlanVersion != null
+          ? {
+              supersedesPlanVersion:
+                planning.kind === 'replanning_draft'
+                  ? planning.supersedesPlanVersion
+                  : priorDocument?.supersedesPlanVersion,
+              replanReason:
+                planning.kind === 'replanning_draft'
+                  ? planning.replanReason
+                  : (priorDocument?.replanReason ?? ''),
+            }
+          : {}),
       };
+      const next = setActivePlanning(state, {
+        kind: 'awaiting_review',
+        document,
+        interactionId: event.interactionId,
+        exitToolCallId: event.toolCallId,
+      });
       return {
-        ...state,
-        tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_review'),
-        planning: {
-          kind: 'awaiting_review',
-          document,
-          interactionId: event.interactionId,
-          exitToolCallId: event.toolCallId,
-        },
+        ...next,
+        tools: updateToolStatus(next.tools, event.toolCallId, 'awaiting_review'),
         interactions: {
           kind: 'awaiting_review',
           interactionId: event.interactionId,
@@ -57,6 +157,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           structuralDigest: document.structuralDigest,
           plan: event.plan,
           planSummary: event.planSummary,
+          ...(event.artifact ? { artifact: event.artifact } : {}),
         },
       };
     }
@@ -64,7 +165,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'plan.approved': {
       // 仅当方案在 awaiting_review 状态时转换为 executing
       // Only transition to executing when plan is in awaiting_review
-      if (state.planning.kind !== 'awaiting_review') return state;
+      const planning = getActivePlanning(state);
+      if (planning.kind !== 'awaiting_review') return state;
       if (
         state.interactions.kind !== 'idle' &&
         (state.interactions.kind !== 'awaiting_review' ||
@@ -72,23 +174,24 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       ) {
         return state;
       }
-      return {
-        ...state,
-        planning: {
-          kind: 'executing',
-          document: state.planning.document,
-          executionMode: event.executionMode,
-          approvedAtTurnId: state.turn.turnId,
-        },
-        mode: event.executionMode,
-        interactions: { kind: 'idle' },
-      };
+      const next = setActivePlanning(state, {
+        kind: 'executing',
+        document: planning.document,
+        executionMode: event.executionMode,
+        approvedAtTurnId: state.turn.turnId,
+      });
+      const legacyMode = getActiveTask(state) ? {} : { mode: event.executionMode };
+      return updateActiveTask(
+        { ...next, ...legacyMode, interactions: { kind: 'idle' } },
+        (task) => ({ ...task, executionMode: event.executionMode }),
+      );
     }
 
     case 'plan.revision_requested': {
       // 从 awaiting_review 迁回 planning_draft，携带修订反馈
       // Transition from awaiting_review back to planning_draft with revision feedback
-      if (state.planning.kind !== 'awaiting_review') return state;
+      const planning = getActivePlanning(state);
+      if (planning.kind !== 'awaiting_review') return state;
       if (
         state.interactions.kind !== 'idle' &&
         (state.interactions.kind !== 'awaiting_review' ||
@@ -97,17 +200,53 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         return state;
       }
       return {
-        ...state,
-        planning: {
+        ...setActivePlanning(state, {
           kind: 'planning_draft',
-          document: state.planning.document,
+          document: planning.document,
           revisionFeedback: event.feedback,
-        },
+        }),
         interactions: { kind: 'idle' },
       };
     }
 
-    case 'plan.rejected':
+    case 'plan.review_cancelled': {
+      const planning = getActivePlanning(state);
+      if (planning.kind !== 'awaiting_review') return state;
+      if (
+        state.interactions.kind !== 'idle' &&
+        (state.interactions.kind !== 'awaiting_review' ||
+          state.interactions.interactionId !== event.interactionId)
+      )
+        return state;
+      return {
+        ...setActivePlanning(state, {
+          kind: 'planning_draft',
+          document: planning.document,
+          revisionFeedback: event.reason,
+        }),
+        interactions: { kind: 'idle' },
+      };
+    }
+
+    case 'plan.replan_requested': {
+      const planning = getActivePlanning(state);
+      if (planning.kind !== 'executing') return state;
+      const nextPlanning = {
+        kind: 'replanning_draft' as const,
+        document: planning.document,
+        supersedesPlanVersion: event.supersedesPlanVersion,
+        replanReason: event.reason,
+      };
+      return updateActiveTask(
+        {
+          ...setActivePlanning(state, nextPlanning),
+          interactions: { kind: 'idle' },
+        },
+        (task) => ({ ...task, planHistory: [...task.planHistory, planning.document] }),
+      );
+    }
+
+    case 'plan.rejected': {
       if (
         state.interactions.kind !== 'idle' &&
         (state.interactions.kind !== 'awaiting_review' ||
@@ -115,16 +254,23 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       ) {
         return state;
       }
+      const rejectedPlanning = getActivePlanning(state);
+      if (rejectedPlanning.kind !== 'awaiting_review') return state;
+      const toolCallId =
+        state.interactions.kind === 'awaiting_review'
+          ? state.interactions.toolCallId
+          : rejectedPlanning.exitToolCallId;
+      const next = setActivePlanning(state, {
+        kind: 'planning_draft',
+        document: rejectedPlanning.document,
+        revisionFeedback: event.reason,
+      });
       return {
-        ...state,
-        planning: {
-          kind: 'cancelled',
-          document: state.planning.kind === 'awaiting_review' ? state.planning.document : undefined,
-          reason: event.reason,
-          cancelledAtTurnId: state.turn.turnId,
-        },
+        ...next,
+        tools: closeToolCall(next.tools, toolCallId),
         interactions: { kind: 'idle' },
       };
+    }
 
     // ── 工具生命周期 / Tool lifecycle ──
 
@@ -154,7 +300,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.started': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
-      return {
+      const next = {
         ...state,
         tools: {
           ...state.tools,
@@ -166,6 +312,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           active: [...state.tools.active, event.toolCallId],
         },
       };
+      return isSideEffectfulTool(existingCall)
+        ? updateActiveTask(next, (task) => ({ ...task, sideEffectsStarted: true }))
+        : next;
     }
 
     case 'tool.finished': {
@@ -455,18 +604,45 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     // ── 用户消息 / User message ──
 
-    case 'user.message_appended':
+    case 'user.message_appended': {
+      // Generate the id once so the task map key and activeTaskId always match.
+      let nextState =
+        state.activeTaskId === null
+          ? (() => {
+              const taskId = crypto.randomUUID();
+              const task = {
+                taskId,
+                userGoal: event.content,
+                status: 'active' as const,
+                startedAtTurnId: state.turn.turnId,
+                sideEffectsStarted: false,
+                planning: { kind: 'building_without_plan' as const },
+                planHistory: [],
+              };
+              return {
+                ...state,
+                activeTaskId: taskId,
+                tasks: { ...state.tasks, [taskId]: task },
+                planning: task.planning,
+              };
+            })()
+          : state;
+      const activeTask = getActiveTask(nextState);
+      if (activeTask && activeTask.userGoal.length === 0 && event.content.length > 0) {
+        nextState = updateActiveTask(nextState, (task) => ({ ...task, userGoal: event.content }));
+      }
       return {
-        ...state,
+        ...nextState,
         transcript: {
-          ...state.transcript,
+          ...nextState.transcript,
           final: undefined,
           messages: [
-            ...state.transcript.messages,
+            ...nextState.transcript.messages,
             { kind: 'user', messageId: event.messageId, content: event.content },
           ],
         },
       };
+    }
 
     // ── 模型交互 / Model interaction ──
 
@@ -477,7 +653,23 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     case 'model.retry':
     case 'model.cache_metrics':
-    case 'run.completed':
+      return state;
+    case 'run.completed': {
+      const active = getActiveTask(state);
+      if (!active) return state;
+      const completed = {
+        ...active,
+        status: 'completed' as const,
+        completedAtTurnId: event.turnId,
+        executionMode: undefined,
+      };
+      return {
+        ...state,
+        activeTaskId: null,
+        tasks: { ...state.tasks, [completed.taskId]: completed },
+        planning: completed.planning,
+      };
+    }
     case 'run.error':
       return state;
 
@@ -503,42 +695,70 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // ── Plan 生命周期补充 / Additional plan lifecycle ──
 
     case 'plan.drafted': {
-      if (state.planning.kind === 'planning_empty' || state.planning.kind === 'planning_draft') {
-        return {
-          ...state,
-          planning: {
-            kind: 'planning_draft',
-            document: {
-              ...planDocumentFromAgentPlan(event.plan, state.turn.turnId),
-              planId: event.planId,
-              version: event.version,
-              structuralDigest: event.structuralHash,
-            },
-          },
-        };
-      }
-      return state;
+      if (event.taskId && state.activeTaskId !== event.taskId) return state;
+      const planning = getActivePlanning(state);
+      if (
+        planning.kind !== 'planning_empty' &&
+        planning.kind !== 'planning_draft' &&
+        planning.kind !== 'replanning_draft'
+      )
+        return state;
+      const draftDocument =
+        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
+          ? planning.document
+          : undefined;
+      const document = {
+        ...planDocumentFromAgentPlan(event.plan, state.turn.turnId),
+        planId: event.planId,
+        version: event.version,
+        structuralDigest: event.structuralHash,
+        ...(event.artifact ? { artifact: event.artifact } : {}),
+        ...(planning.kind === 'replanning_draft'
+          ? {
+              supersedesPlanVersion: planning.supersedesPlanVersion,
+              replanReason: planning.replanReason,
+            }
+          : draftDocument?.supersedesPlanVersion != null
+            ? {
+                supersedesPlanVersion: draftDocument.supersedesPlanVersion,
+                replanReason: draftDocument.replanReason,
+              }
+            : {}),
+        ...(event.supersedesPlanVersion != null
+          ? { supersedesPlanVersion: event.supersedesPlanVersion }
+          : {}),
+        ...(event.replanReason ? { replanReason: event.replanReason } : {}),
+      };
+      const nextPlanning =
+        planning.kind === 'replanning_draft'
+          ? {
+              kind: 'replanning_draft' as const,
+              document,
+              supersedesPlanVersion: event.supersedesPlanVersion ?? planning.supersedesPlanVersion,
+              replanReason: event.replanReason ?? planning.replanReason,
+            }
+          : { kind: 'planning_draft' as const, document };
+      return setActivePlanning(state, nextPlanning);
     }
 
     case 'plan.progress_updated': {
       // 仅当 plan 在 executing 状态时更新步骤进度
       // Only update step progress when plan is in executing state
-      if (state.planning.kind === 'executing') {
+      const currentPlanning = getActivePlanning(state);
+      if (currentPlanning.kind === 'executing') {
+        const executing = currentPlanning;
         const updatedSteps = mergeStepUpdates(
-          state.planning.document.steps,
+          executing.document.steps,
           agentPlanToSteps(event.plan),
         );
-        return {
-          ...state,
-          planning: {
-            ...state.planning,
-            document: {
-              ...state.planning.document,
-              steps: updatedSteps,
-              updatedAtTurnId: state.turn.turnId,
-            },
+        return setActivePlanning(state, {
+          ...executing,
+          document: {
+            ...executing.document,
+            steps: updatedSteps,
+            updatedAtTurnId: state.turn.turnId,
           },
-        };
+        });
       }
       return state;
     }
@@ -546,15 +766,18 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'plan.completed': {
       // 从 executing 状态转换到 completed
       // Transition from executing to completed
-      if (state.planning.kind === 'executing') {
-        return {
-          ...state,
-          planning: {
-            kind: 'completed',
-            document: state.planning.document,
-            completedAtTurnId: state.turn.turnId,
-          },
-        };
+      const executing = getActivePlanning(state);
+      if (executing.kind === 'executing') {
+        const updatedSteps = mergeStepUpdates(
+          executing.document.steps,
+          agentPlanToSteps(event.plan),
+        );
+        const next = setActivePlanning(state, {
+          kind: 'completed',
+          document: { ...executing.document, steps: updatedSteps },
+          completedAtTurnId: state.turn.turnId,
+        });
+        return updateActiveTask(next, (task) => ({ ...task, executionMode: undefined }));
       }
       return state;
     }
@@ -689,6 +912,18 @@ function updateToolStatus(
   };
 }
 
+/** Close a legacy plan rejection without reviving the retired cancelled state. */
+function closeToolCall(tools: RuntimeState['tools'], toolCallId: string): RuntimeState['tools'] {
+  const call = tools.calls[toolCallId];
+  if (!call) return tools;
+  return {
+    ...tools,
+    calls: { ...tools.calls, [toolCallId]: { ...call, status: 'succeeded' } },
+    queue: tools.queue.filter((id) => id !== toolCallId),
+    active: tools.active.filter((id) => id !== toolCallId),
+  };
+}
+
 function clearSuspendedSubagent(
   state: RuntimeState,
   toolCallId: string,
@@ -742,4 +977,36 @@ function mergeStepUpdates(existing: PlanStep[], updates: PlanStep[]): PlanStep[]
     }
     return step;
   });
+}
+
+function isSideEffectfulTool(call: { name: string; args: unknown }): boolean {
+  if (
+    new Set([
+      'read_file',
+      'list_files',
+      'search_content',
+      'search_files',
+      'read_mcp_resource',
+      'web_fetch',
+      'Skill',
+      'ask_user',
+      'write_plan',
+      'update_plan',
+    ]).has(call.name)
+  ) {
+    return false;
+  }
+
+  if (call.name !== 'shell_execute') return true;
+  const command =
+    call.args && typeof call.args === 'object'
+      ? String((call.args as Record<string, unknown>).command ?? '')
+          .trim()
+          .toLowerCase()
+      : '';
+  // Read-only shell inspection is allowed during plan discovery. Commands not
+  // on this conservative allowlist are treated as side-effectful.
+  return !/^(rg|grep|find|ls|dir|pwd|cat|head|tail|sed|awk|git\s+(status|diff|log|show|branch|rev-parse)|get-childitem|get-content|select-string)\b/.test(
+    command,
+  );
 }

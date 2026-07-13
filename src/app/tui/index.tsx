@@ -145,7 +145,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   const interactionModeRef = React.useRef<'accept_edits' | 'auto' | 'full'>(
     config.interactionMode ?? 'accept_edits',
   );
-  const phaseRef = React.useRef<AgentPhase>('building');
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
@@ -153,7 +152,9 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   const skillManifestsRef = React.useRef<SkillManifest[]>([]);
   const skillOptionsRef = React.useRef<SkillScanOptions | null>(null);
   const pendingSkillsRef = React.useRef<string[]>([]);
-  const runTaskRef = React.useRef<(task: string) => Promise<void>>(async () => {});
+  const runTaskRef = React.useRef<(task: string, requestedPhase?: AgentPhase) => Promise<void>>(
+    async () => {},
+  );
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
   const interruptClearedByResolutionRef = React.useRef(false);
 
@@ -267,10 +268,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   React.useEffect(() => {
     interactionModeRef.current = state.interactionMode;
   }, [state.interactionMode]);
-
-  React.useEffect(() => {
-    phaseRef.current = state.status.phase;
-  }, [state.status.phase]);
 
   // 每当 token 统计变化时持久化到 DB，确保最新值始终写入
   // Persist token stats to DB on every change, guaranteeing latest values
@@ -573,12 +570,22 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     ],
   );
 
-  const runTaskBridge = React.useCallback((task: string, initialPhase?: AgentPhase) => {
-    if (initialPhase) {
-      phaseRef.current = initialPhase;
-    }
-    runTaskRef.current?.(task);
+  const runTaskBridge = React.useCallback((task: string, requestedPhase?: AgentPhase) => {
+    runTaskRef.current?.(task, requestedPhase);
   }, []);
+
+  const enterPlanMode = React.useCallback(() => {
+    const events = sessionManager.enterPlanningMode(threadIdRef.current);
+    for (const event of events) dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+  }, [dispatchSessionLoad, sessionManager]);
+
+  const togglePlanMode = React.useCallback(() => {
+    const events =
+      state.status.phase === 'planning'
+        ? sessionManager.exitPlanningMode(threadIdRef.current)
+        : sessionManager.enterPlanningMode(threadIdRef.current);
+    for (const event of events) dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+  }, [dispatchSessionLoad, sessionManager, state.status.phase]);
 
   const handleSlashCommand = useSlashCommand(
     dispatchSessionLoad,
@@ -587,6 +594,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     skillManifestsRef.current,
     skillOptionsRef.current ?? undefined,
     runTaskBridge,
+    enterPlanMode,
     (preset) => {
       const p = preset.toLowerCase();
       if (p === 'teal' || p === 'blue' || p === 'purple' || p === 'cyan' || p === 'mono') {
@@ -654,7 +662,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   }, [state.running, state.ctrlCPressed, sessionManager]);
 
   const runTask = React.useCallback(
-    async (task: string) => {
+    async (task: string, requestedPhase?: AgentPhase) => {
       const threadId = threadIdRef.current;
       const rt = sessionManager.getRuntime(threadId);
       if (!rt || rt.agentLoopActive) return;
@@ -663,7 +671,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       rt.pendingSkills = [...pendingSkillsRef.current];
       rt.thinkingLevel = thinkingLevelRef.current;
       rt.interactionMode = interactionModeRef.current;
-      rt.phase = phaseRef.current;
       rt.conversationHistory = [...conversationHistoryRef.current];
 
       dispatch({ type: 'SET_RUNNING' });
@@ -674,12 +681,16 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
 
       try {
-        await rt.runTask(task, {
-          dispatch,
-          provider,
-          config,
-          model: injectModel,
-        });
+        await rt.runTask(
+          task,
+          {
+            dispatch,
+            provider,
+            config,
+            model: injectModel,
+          },
+          requestedPhase,
+        );
       } finally {
         // Only dispatch global state changes if this session is still active.
         // A background session that finished must not corrupt the foreground's running/interrupt state.
@@ -755,6 +766,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         mcpManager={mcpManager ?? undefined}
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
+        onTogglePlanMode={togglePlanMode}
         resizeGeneration={resizeKey}
       >
         <InputLine

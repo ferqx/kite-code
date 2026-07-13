@@ -39,6 +39,13 @@ export type PendingToolRequest =
     }
   | {
       id?: string;
+      name: 'read_plan';
+      args: { plan_id: string; version?: number; structural_digest?: string };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
+      id?: string;
       name: 'edit_file';
       args: {
         path: string;
@@ -87,11 +94,15 @@ export type PendingToolRequest =
       name: 'write_plan';
       /** write_plan 参数 / write_plan params */
       args: {
-        title: string;
-        body_markdown: string;
-        steps: Array<{ id: string; title: string }>;
+        title?: string;
+        body_markdown?: string;
+        steps?: Array<{ id: string; title: string }>;
         expected_version?: number;
         action: 'save' | 'submit';
+        replan_reason?: string;
+        plan_id?: string;
+        version?: number;
+        structural_digest?: string;
       };
       /** 调用原因 / Call reason */
       reason: string;
@@ -250,6 +261,22 @@ export function toolRequestFromCall(
     };
   }
 
+  if (call.name === 'read_plan') {
+    const args = call.args as { plan_id?: string; version?: number; structural_digest?: string };
+    return {
+      id: call.id,
+      name: 'read_plan',
+      args: {
+        plan_id: String(args.plan_id ?? ''),
+        version: args.version != null ? Number(args.version) : undefined,
+        structural_digest:
+          typeof args.structural_digest === 'string' ? args.structural_digest : undefined,
+      },
+      reason: 'Model requested a saved Plan Artifact',
+      protectedCommand: 'read_plan',
+    };
+  }
+
   if (call.name === 'edit_file') {
     const args = call.args as {
       path?: string;
@@ -317,19 +344,30 @@ export function toolRequestFromCall(
   if (call.name === 'write_plan') {
     const args = call.args as Record<string, unknown>;
     const action = args.action === 'submit' ? 'submit' : 'save';
+    const normalizedArgs: Extract<PendingToolRequest, { name: 'write_plan' }>['args'] = {
+      expected_version: args.expected_version != null ? Number(args.expected_version) : undefined,
+      action,
+      replan_reason: typeof args.replan_reason === 'string' ? args.replan_reason : undefined,
+      ...(typeof args.title === 'string' ? { title: args.title } : {}),
+      ...(typeof args.body_markdown === 'string' ? { body_markdown: args.body_markdown } : {}),
+      ...(Array.isArray(args.steps)
+        ? {
+            steps: args.steps.map((s: Record<string, unknown>) => ({
+              id: String(s.id ?? ''),
+              title: String(s.title ?? ''),
+            })),
+          }
+        : {}),
+      ...(typeof args.plan_id === 'string' ? { plan_id: args.plan_id } : {}),
+      ...(args.version != null ? { version: Number(args.version) } : {}),
+      ...(typeof args.structural_digest === 'string'
+        ? { structural_digest: args.structural_digest }
+        : {}),
+    };
     return {
       id: call.id,
       name: 'write_plan',
-      args: {
-        title: String(args.title ?? ''),
-        body_markdown: String(args.body_markdown ?? ''),
-        steps: (Array.isArray(args.steps) ? args.steps : []).map((s: Record<string, unknown>) => ({
-          id: String(s.id ?? ''),
-          title: String(s.title ?? ''),
-        })),
-        expected_version: args.expected_version != null ? Number(args.expected_version) : undefined,
-        action,
-      },
+      args: normalizedArgs,
       reason: action === 'submit' ? 'Model submitted plan for review' : 'Model saved plan draft',
       protectedCommand: 'write_plan',
     };
@@ -530,6 +568,7 @@ export function toolRequestFromMessage(
         })),
         expected_version: args.expected_version != null ? Number(args.expected_version) : undefined,
         action,
+        replan_reason: typeof args.replan_reason === 'string' ? args.replan_reason : undefined,
       },
       reason: action === 'submit' ? 'Model submitted plan for review' : 'Model saved plan draft',
       protectedCommand: 'write_plan',

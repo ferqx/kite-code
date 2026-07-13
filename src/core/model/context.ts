@@ -34,6 +34,8 @@ export interface ModelContextState {
   contextBudget?: ContextBudget;
   /** PlanningState for dynamic runtime-state block */
   planningState?: PlanningState;
+  taskId?: string;
+  sideEffectsStarted?: boolean;
 }
 
 /** 准备好的模型上下文 / Prepared model context */
@@ -285,6 +287,8 @@ export function prepareModelContext(
       authorizationMode: state.authorization?.mode ?? 'default',
       sandboxBackend: state.sandboxBackend ?? 'none',
       planningState: state.planningState,
+      taskId: state.taskId,
+      sideEffectsStarted: state.sideEffectsStarted,
     }),
   );
 

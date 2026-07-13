@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { TuiUserInputProvider } from '../src/app/tui/provider';
 
 describe('TuiUserInputProvider', () => {
   test('TUI reducer exposes RuntimeEvent as its only streamed event action', () => {
-    const root = import.meta.dir.replace(/\/tests$/, '');
+    const root = dirname(import.meta.dir);
     const actions = readFileSync(join(root, 'src/app/tui/reducers/actions.ts'), 'utf8');
     const reducer = readFileSync(join(root, 'src/app/tui/reducers/index.ts'), 'utf8');
 

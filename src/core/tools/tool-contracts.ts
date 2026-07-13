@@ -53,6 +53,26 @@ export const READ_FILE_CONTRACT: ToolContract = {
 };
 READ_FILE_CONTRACT.description = buildDescription(READ_FILE_CONTRACT.sections);
 
+export const READ_PLAN_CONTRACT: ToolContract = {
+  name: 'read_plan',
+  sections: {
+    whenToUse:
+      'Read a saved Plan Artifact by plan_id and version when revising a plan or verifying the exact persisted document. ' +
+      'Use this instead of read_file for ~/.kite-code/plans artifacts; the runtime validates that the reference belongs to the active Task.',
+    commonMistakes:
+      'Reading an old version when the current review feedback points to a newer version. ' +
+      'Using a filesystem path instead of plan_id and version. ' +
+      'Submitting a plan without using the digest returned by the Artifact.',
+    outputFormat:
+      'JSON: ok, task_id, plan_id, version, structural_digest, title, body_markdown, and steps. ' +
+      'The full body is returned only because the model explicitly requested read_plan.',
+    failureHandling:
+      'If the Artifact is missing or its digest does not match, do not recreate it from memory; save a new revision only after confirming the current Task and feedback.',
+  },
+  description: '',
+};
+READ_PLAN_CONTRACT.description = buildDescription(READ_PLAN_CONTRACT.sections);
+
 export const EDIT_FILE_CONTRACT: ToolContract = {
   name: 'edit_file',
   sections: {
@@ -237,26 +257,27 @@ export const WRITE_PLAN_CONTRACT: ToolContract = {
   name: 'write_plan',
   sections: {
     whenToUse:
-      'Save or submit the current plan. Use action="save" to store a draft and continue planning. ' +
-      'Use action="submit" when the plan is complete and ready for user review — this pauses execution until approval. ' +
-      'You can call write_plan with action="save" multiple times as your plan evolves; each call increments the version. ' +
+      'Save or submit the current plan Artifact. Use action="save" once the complete draft is ready; this writes an immutable user-level Markdown Artifact and returns only its metadata. ' +
+      'Then call action="submit" with plan_id, version, and structural_digest from save; submit reads the Artifact and pauses for user review without creating another version. ' +
+      'A revision creates the next version with save, then submits that version. ' +
       'After approval, switch to update_plan for step-level progress tracking. ' +
-      'Include a clear title (one line, max 120 chars), detailed body_markdown (the full plan), and structured steps (1-12 items, each with stable id and one-line title). ' +
-      'Only call this in planning phase — building phase rejects write_plan.',
+      'save requires a clear title (one line, max 120 chars), detailed body_markdown, and structured steps (1-12 items, each with stable id and one-line title). ' +
+      'Use this in planning phase. While an approved plan is executing, save a revised Artifact and submit it for structural replan review.',
     outputFormat:
-      'action="save": { ok: true, status: "draft_saved", plan_id, version, structural_digest }.\n' +
+      'action="save": { ok: true, status: "draft_saved", task_id, plan_id, version, artifact: { artifact_id, path, structural_digest, byte_length }, next_action: "submit" }.\n' +
       'action="submit" on approval: { ok: true, status: "approved", plan_id, version, execution_mode }.\n' +
       'action="submit" on revision: { ok: false, status: "revision_requested", feedback, plan_id, version }.\n' +
       '- plan_id: stable identifier across versions\n' +
-      '- version: incremented on each call\n' +
-      '- structural_digest: SHA-256 of plan structure (title, body, step ids+titles)',
+      '- version: incremented only when save creates a new Artifact\n' +
+      '- structural_digest: SHA-256 of plan structure (title, body, step ids+titles)\n' +
+      '- submit does not return the full plan body and does not increment version',
     commonMistakes:
-      'Using action="submit" before the plan is complete — draft iteratively with action="save" first. ' +
+      'Calling save repeatedly instead of submitting the Artifact returned by the previous save. ' +
       'Using unstable step IDs that change across versions — use stable descriptive IDs like "inspect-runtime". ' +
       'Putting architecture details in step titles instead of body_markdown. ' +
-      'Forgetting to set expected_version to prevent overwriting a newer draft saved by the editor.',
+      'Forgetting to pass the exact plan_id, version, and structural_digest returned by save to submit.',
     failureHandling:
-      'Rejected in building/executing phase — only works in planning phase. ' +
+      'Rejected after side effects have started unless this is a structural replan submitted for review. ' +
       'Version conflict: if expected_version does not match current version, the call is rejected — re-read current plan state. ' +
       'Schema validation: title max 120 chars, body_markdown min 20 chars, steps 1-12 items. ' +
       'Revision feedback: read the feedback, update your plan with action="save" or action="submit".',
@@ -424,6 +445,7 @@ WEB_FETCH_CONTRACT.description = buildDescription(WEB_FETCH_CONTRACT.sections);
 
 export const KNOWN_TOOL_NAMES = [
   'read_file',
+  'read_plan',
   'edit_file',
   'write_file',
   'shell_execute',
@@ -444,6 +466,7 @@ export function getToolContract(toolName: string): ToolContract | undefined {
 
 export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ['read_file', READ_FILE_CONTRACT],
+  ['read_plan', READ_PLAN_CONTRACT],
   ['edit_file', EDIT_FILE_CONTRACT],
   ['write_file', WRITE_FILE_CONTRACT],
   ['shell_execute', SHELL_EXECUTE_CONTRACT],

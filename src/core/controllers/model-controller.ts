@@ -22,7 +22,12 @@ import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState, TranscriptMessage } from '@/core/runtime/state';
-import { getAgentPhase } from '@/core/runtime/state';
+import {
+  getActivePlanning,
+  getActiveTask,
+  getAgentPhase,
+  getEffectiveInteractionMode,
+} from '@/core/runtime/state';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { createAgentTools } from '@/core/tools/definitions';
@@ -161,10 +166,11 @@ export async function invokeRuntimeModel(params: {
       threadId: state.session.threadId,
       authorization: state.authorization,
       workspaceAccess: state.workspaceAccess,
-      phase: getAgentPhase(state.planning),
-      interactionMode: state.mode,
+      phase: getAgentPhase(getActivePlanning(state)),
+      interactionMode: getEffectiveInteractionMode(state),
     });
-    const phase = getAgentPhase(state.planning);
+    const planning = getActivePlanning(state);
+    const phase = getAgentPhase(planning);
     const prepared = prepareModelContext(
       'agent',
       {
@@ -173,9 +179,11 @@ export async function invokeRuntimeModel(params: {
         final: state.transcript.final ?? '',
         workspaceAccess: state.workspaceAccess,
         phase,
-        interactionMode: state.mode,
+        interactionMode: getEffectiveInteractionMode(state),
         authorization: state.authorization,
-        planningState: state.planning,
+        planningState: planning,
+        taskId: getActiveTask(state)?.taskId,
+        sideEffectsStarted: getActiveTask(state)?.sideEffectsStarted,
       },
       params.skills,
     );

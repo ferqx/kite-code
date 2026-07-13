@@ -7,6 +7,11 @@ function getKiteCodeDir(): string {
   return join(process.env.KITE_CODE_HOME ?? homedir(), '.kite-code');
 }
 
+/** User-level Kite Code directory used by durable control-plane artifacts. */
+export function userKiteCodeDir(): string {
+  return getKiteCodeDir();
+}
+
 export function defaultConfigPath(): string {
   return join(getKiteCodeDir(), 'kite-code.jsonc');
 }
@@ -25,6 +30,16 @@ export function editorInputPath(suffix: string): string {
 
 export function sessionExportPath(timestamp: string): string {
   return join(getKiteCodeDir(), `session-${timestamp}.md`);
+}
+
+/** Root directory for immutable user-level Plan Artifacts. */
+export function planArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'plans');
+}
+
+/** Deterministic path for one immutable Plan Artifact version. */
+export function planArtifactPath(taskId: string, planId: string, version: number): string {
+  return join(planArtifactRoot(), taskId, planId, `v${version}.md`);
 }
 
 export function skillDirs(workspace: string): SkillScanOptions {

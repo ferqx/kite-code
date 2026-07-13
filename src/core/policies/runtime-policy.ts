@@ -43,6 +43,7 @@ export interface PolicyInput {
     | 'building_without_plan'
     | 'planning_empty'
     | 'planning_draft'
+    | 'replanning_draft'
     | 'awaiting_review'
     | 'executing'
     | 'completed'

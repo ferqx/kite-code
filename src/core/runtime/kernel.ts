@@ -5,6 +5,7 @@
 // AgentKernel encapsulates RuntimeState management, event pipeline,
 // and policy decisions.  Single entry point for state, persistence, and effect dispatch.
 
+import { defaultPlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
 import type { AuthorizationSource } from '@/core/types';
@@ -15,7 +16,9 @@ import type { RuntimeEvent } from './events';
 import { reduceRuntimeState } from './reducer';
 import { decideNextEffect } from './scheduler';
 import {
+  computePlanStructuralDigest,
   createInitialRuntimeState,
+  getEffectiveInteractionMode,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
 } from './state';
@@ -133,7 +136,10 @@ export class AgentKernel {
    * v2: policy is no longer created once in constructor; re-evaluated from current state.mode each call.
    */
   getPolicy(): RuntimePolicy {
-    return createModePolicy(this.state.mode as InteractionMode, this.sandboxAvailable);
+    return createModePolicy(
+      getEffectiveInteractionMode(this.state) as InteractionMode,
+      this.sandboxAvailable,
+    );
   }
 
   /**
@@ -141,7 +147,7 @@ export class AgentKernel {
    * Get the current interaction mode.
    */
   getMode(): InteractionMode {
-    return this.state.mode;
+    return getEffectiveInteractionMode(this.state);
   }
 
   /** Whether this runtime may grant authorization that requires a sandbox. */
@@ -298,10 +304,13 @@ export function createAgentKernel(params: {
 
 function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION) return snapshot;
-  if (snapshot.schemaVersion !== 2) return null;
+  if (snapshot.schemaVersion < 2 || snapshot.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
+    return null;
 
   const legacyApprovalInteraction =
-    snapshot.interactions.kind === 'awaiting_tool_approval' ? snapshot.interactions : undefined;
+    snapshot.schemaVersion < 4 && snapshot.interactions.kind === 'awaiting_tool_approval'
+      ? snapshot.interactions
+      : undefined;
   const legacyMarker = legacyApprovalInteraction?.approval.subagentId
     ? {
         toolCallId: legacyApprovalInteraction.toolCallId,
@@ -311,11 +320,79 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     : undefined;
   // Build the migrated state before upgrading the version so all v2 fields are
   // preserved and the recovery marker is durable with the schema transition.
-  const migratedState: RuntimeState = {
+  let migratedState: RuntimeState = {
     ...snapshot,
-    schemaVersion: 2,
+    schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     suspendedSubagents: snapshot.suspendedSubagents ?? {},
     ...(legacyMarker ? { legacyUnrecoverableSubagentApproval: legacyMarker } : {}),
   };
-  return { ...migratedState, schemaVersion: RUNTIME_STATE_SCHEMA_VERSION };
+
+  if (snapshot.schemaVersion < 4) {
+    const legacyTaskId = `legacy-${snapshot.session.threadId}`;
+    const legacyPlanning = snapshot.planning;
+    const legacyTask = {
+      taskId: legacyTaskId,
+      userGoal:
+        [...(snapshot.transcript?.messages ?? [])]
+          .reverse()
+          .find((message) => message.kind === 'user')?.content ?? '',
+      status:
+        legacyPlanning.kind === 'completed'
+          ? ('completed' as const)
+          : legacyPlanning.kind === 'cancelled'
+            ? ('cancelled' as const)
+            : ('active' as const),
+      startedAtTurnId: snapshot.turn.turnId,
+      sideEffectsStarted: false,
+      planning: legacyPlanning,
+      planHistory: [],
+      ...(legacyPlanning.kind === 'completed'
+        ? { completedAtTurnId: legacyPlanning.completedAtTurnId }
+        : {}),
+    };
+    migratedState = {
+      ...migratedState,
+      activeTaskId: snapshot.activeTaskId ?? (legacyTask.status === 'active' ? legacyTaskId : null),
+      tasks: snapshot.tasks ?? { [legacyTaskId]: legacyTask },
+    };
+  }
+
+  return materializeLegacyPlanArtifacts(migratedState);
+}
+
+/** Materialize inline legacy PlanDocument bodies without changing their versions. */
+function materializeLegacyPlanArtifacts(state: RuntimeState): RuntimeState {
+  let changed = false;
+  const tasks = Object.fromEntries(
+    Object.entries(state.tasks).map(([taskId, task]) => {
+      const materialize = (document: import('@/protocol/events').PlanDocument) => {
+        if (document.artifact) return document;
+        const withDigest = document.structuralDigest
+          ? document
+          : { ...document, structuralDigest: computePlanStructuralDigest(document) };
+        try {
+          const artifact = defaultPlanArtifactStore.write(taskId, withDigest);
+          changed = true;
+          return { ...withDigest, artifact };
+        } catch {
+          // Keep the legacy inline document usable if the user artifact directory is unavailable.
+          return withDigest;
+        }
+      };
+      const planning = task.planning;
+      const nextPlanning =
+        'document' in planning && planning.document
+          ? { ...planning, document: materialize(planning.document) }
+          : planning;
+      const planHistory = task.planHistory.map(materialize);
+      return [taskId, { ...task, planning: nextPlanning, planHistory }] as const;
+    }),
+  );
+  if (!changed) return state;
+  const active = state.activeTaskId ? tasks[state.activeTaskId] : undefined;
+  return {
+    ...state,
+    tasks,
+    planning: active?.planning ?? state.planning,
+  };
 }

@@ -5,8 +5,10 @@ import type { RuntimeUserAction } from '@/core/runtime/actions';
 import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEffect } from '@/core/runtime/effects';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { createAgentKernel } from '@/core/runtime/kernel';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import type { RuntimeState } from '@/core/runtime/state';
+import { getActivePlanning, getActiveTask, getAgentPhase } from '@/core/runtime/state';
 import { runtimeStorePathFor } from '@/core/runtime/store';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
@@ -134,6 +136,7 @@ export class SessionRuntime {
       config: AgentConfig;
       model?: import('@/core/model/factory').SupportedChatModel;
     },
+    requestedPhase?: AgentPhase,
   ): Promise<void> {
     if (this.agentLoopActive) return;
 
@@ -178,7 +181,7 @@ export class SessionRuntime {
       pendingSkillsContent,
       shellContext,
       interactionMode: this.interactionMode,
-      phase: this.phase,
+      phase: requestedPhase ?? 'building',
       sandboxBackend: sandboxRuntime.backend,
       model: deps.model,
       // 后台会话不再默认注入 full_access；中断会挂起到该会话，等待切回前台处理。
@@ -347,7 +350,11 @@ export class SessionRuntime {
     ) {
       payload = { kind: 'approval', approval: interaction.approval };
     } else if (effect.type === 'request_plan_review' && interaction.kind === 'awaiting_review') {
-      payload = { kind: 'plan_review', plan: interaction.plan };
+      payload = {
+        kind: 'plan_review',
+        plan: interaction.plan,
+        ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
+      };
     } else {
       return {
         type: 'cancel',
@@ -570,6 +577,83 @@ export class SessionManager {
 
   getRuntime(threadId: string): SessionRuntime | undefined {
     return this.runtimes.get(threadId);
+  }
+
+  /** Persist a plan-mode intent before the user has supplied the task text. */
+  enterPlanningMode(threadId: string): RuntimeEvent[] {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return [];
+    const kernel = createAgentKernel({
+      threadId,
+      userId: 'tui',
+      workspace: rt.workspace,
+      storePath: runtimeStorePathFor(this.deps.checkpointPath),
+      interactionMode: rt.interactionMode,
+      phase: 'building',
+    });
+    try {
+      const events: RuntimeEvent[] = [];
+      let active = getActiveTask(kernel.getState());
+      const planning = getActivePlanning(kernel.getState());
+      if (active && planning.kind !== 'building_without_plan') {
+        return events;
+      }
+      if (active?.sideEffectsStarted) return events;
+      if (!active) {
+        const started: RuntimeEvent = {
+          type: 'task.started',
+          taskId: crypto.randomUUID(),
+          userGoal: '',
+          turnId: kernel.getState().turn.turnId,
+        };
+        events.push(started);
+        kernel.processEvent(started);
+        active = getActiveTask(kernel.getState());
+      }
+      if (!active) return events;
+      const entered: RuntimeEvent = {
+        type: 'planning.entered',
+        taskId: active.taskId,
+        source: 'user_command',
+      };
+      events.push(entered);
+      kernel.processEvent(entered);
+      return events;
+    } finally {
+      kernel.close();
+    }
+  }
+
+  /** Persist an explicit plan-mode exit; review cancellation remains separate. */
+  exitPlanningMode(threadId: string): RuntimeEvent[] {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return [];
+    const kernel = createAgentKernel({
+      threadId,
+      userId: 'tui',
+      workspace: rt.workspace,
+      storePath: runtimeStorePathFor(this.deps.checkpointPath),
+      interactionMode: rt.interactionMode,
+      phase: 'building',
+    });
+    try {
+      const active = getActiveTask(kernel.getState());
+      const planning = getActivePlanning(kernel.getState());
+      if (
+        !active ||
+        getAgentPhase(planning) !== 'planning' ||
+        kernel.getState().interactions.kind !== 'idle'
+      )
+        return [];
+      const events: RuntimeEvent[] = [
+        { type: 'planning.exited', taskId: active.taskId, reason: 'Exited Plan Mode.' },
+        { type: 'task.cancelled', taskId: active.taskId, reason: 'Exited Plan Mode.' },
+      ];
+      kernel.processEventBatch(events);
+      return events;
+    } finally {
+      kernel.close();
+    }
   }
 
   getActiveId(): string {

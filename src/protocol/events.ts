@@ -114,6 +114,27 @@ export interface PlanDocument {
   createdAtTurnId: string;
   /** 最后更新该版本的 turn ID / Turn ID when this version was last updated */
   updatedAtTurnId: string;
+  /** Version replaced by a structural replan, when applicable. */
+  supersedesPlanVersion?: number;
+  /** Why the structural replan was requested. */
+  replanReason?: string;
+  /** Durable user-level Markdown Artifact for this version. */
+  artifact?: PlanArtifactRef;
+}
+
+/** Durable reference to a user-level immutable Plan Artifact. */
+export interface PlanArtifactRef {
+  artifactId: string;
+  taskId: string;
+  planId: string;
+  version: number;
+  fileName: string;
+  /** Path relative to the user-level Kite Code directory. */
+  relativePath: string;
+  /** Resolved path for local UI/CLI display and controlled reads. */
+  displayPath: string;
+  structuralDigest: string;
+  byteLength: number;
 }
 
 /**
@@ -130,6 +151,13 @@ export type PlanningState =
       kind: 'planning_draft';
       document: PlanDocument;
       /** 用户修订反馈（仅在 revision_requested 后设置）/ User revision feedback (set after revision_requested) */
+      revisionFeedback?: string;
+    }
+  | {
+      kind: 'replanning_draft';
+      document: PlanDocument;
+      supersedesPlanVersion: number;
+      replanReason: string;
       revisionFeedback?: string;
     }
   | {
@@ -175,6 +203,7 @@ export function getAgentPhase(planning: PlanningState): AgentPhase {
   switch (planning.kind) {
     case 'planning_empty':
     case 'planning_draft':
+    case 'replanning_draft':
     case 'awaiting_review':
       return 'planning';
     default:

@@ -117,7 +117,11 @@ export function createAutoModePolicy(_config?: AutoModeConfig): RuntimePolicy {
     },
 
     shouldReviewPlan(input: PolicyInput): PolicyDecision {
-      if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
+      if (
+        input.planKind === 'planning_draft' ||
+        input.planKind === 'replanning_draft' ||
+        input.planKind === 'awaiting_review'
+      ) {
         return { kind: 'need_plan_review' };
       }
       return { kind: 'allow' };
@@ -167,7 +171,11 @@ export function createFullModePolicy(sandboxAvailable: boolean): RuntimePolicy {
       },
 
       shouldReviewPlan(input: PolicyInput): PolicyDecision {
-        if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
+        if (
+          input.planKind === 'planning_draft' ||
+          input.planKind === 'replanning_draft' ||
+          input.planKind === 'awaiting_review'
+        ) {
           return { kind: 'need_plan_review' };
         }
         return { kind: 'allow' };
@@ -205,7 +213,11 @@ export function createFullModePolicy(sandboxAvailable: boolean): RuntimePolicy {
     },
 
     shouldReviewPlan(input: PolicyInput): PolicyDecision {
-      if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
+      if (
+        input.planKind === 'planning_draft' ||
+        input.planKind === 'replanning_draft' ||
+        input.planKind === 'awaiting_review'
+      ) {
         return { kind: 'need_plan_review' };
       }
       return { kind: 'allow' };
@@ -271,7 +283,11 @@ export function createAcceptEditsModePolicy(): RuntimePolicy {
     },
 
     shouldReviewPlan(input: PolicyInput): PolicyDecision {
-      if (input.planKind === 'planning_draft' || input.planKind === 'awaiting_review') {
+      if (
+        input.planKind === 'planning_draft' ||
+        input.planKind === 'replanning_draft' ||
+        input.planKind === 'awaiting_review'
+      ) {
         return { kind: 'need_plan_review' };
       }
       return { kind: 'allow' };

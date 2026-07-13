@@ -24,7 +24,11 @@ export function sessionDataToUI(data: SessionData): {
       : data.interrupt?.kind === 'input'
         ? { kind: 'input', blockId: callIds.get(data.interrupt.callId ?? '') ?? 0 }
         : data.interrupt?.kind === 'plan_review'
-          ? { kind: 'plan_review', plan: data.interrupt.plan }
+          ? {
+              kind: 'plan_review',
+              plan: data.interrupt.plan,
+              ...(data.interrupt.artifact ? { artifact: data.interrupt.artifact } : {}),
+            }
           : null;
   return { blocks, interrupt };
 }

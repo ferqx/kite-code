@@ -1,6 +1,7 @@
-import type { AgentPlan, PlanDocument } from '../../protocol/events.js';
+import type { AgentPlan, PlanArtifactRef, PlanDocument } from '../../protocol/events.js';
 import type { RuntimeEvent } from '../runtime/events.js';
 import type { RuntimeState } from '../runtime/state.js';
+import { getActivePlanning } from '../runtime/state.js';
 import {
   createRuntimeStore,
   type RuntimeSessionInfo,
@@ -31,6 +32,7 @@ export interface ReplayInterrupt {
   kind: 'approval' | 'input' | 'plan_review';
   callId?: string;
   plan?: AgentPlan;
+  artifact?: PlanArtifactRef;
 }
 
 export interface SessionData {
@@ -96,9 +98,13 @@ export async function loadSession(
         : interaction?.kind === 'awaiting_user_input'
           ? { kind: 'input', callId: interaction.toolCallId }
           : interaction?.kind === 'awaiting_review'
-            ? { kind: 'plan_review', plan: interaction.plan }
+            ? {
+                kind: 'plan_review',
+                plan: interaction.plan,
+                ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
+              }
             : null;
-    const planState = state?.planning;
+    const planState = state ? getActivePlanning(state) : undefined;
     const plan =
       planState?.kind === 'executing' || planState?.kind === 'completed'
         ? planDocumentToAgentPlan(planState.document)

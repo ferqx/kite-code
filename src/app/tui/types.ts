@@ -196,7 +196,11 @@ export interface TuiState {
 export type InterruptState =
   | { kind: 'approval'; blockId: number }
   | { kind: 'input'; blockId: number }
-  | { kind: 'plan_review'; plan?: import('@/protocol/events').AgentPlan };
+  | {
+      kind: 'plan_review';
+      plan?: import('@/protocol/events').AgentPlan;
+      artifact?: import('@/protocol/events').PlanArtifactRef;
+    };
 
 export interface RetryState {
   attempt: number;

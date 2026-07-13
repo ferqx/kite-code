@@ -19,3 +19,10 @@ test('system prompt requires reading existing code before proposing a plan', () 
   expect(prompt).toMatch(/plan/i);
   expect(prompt).toMatch(/read|search|explore|gather|understand/i);
 });
+
+test('system prompt submits an initial plan without a redundant draft save', () => {
+  const prompt = buildStaticSystemPrompt('agent');
+  expect(prompt).toContain('submit the complete plan with `write_plan`');
+  expect(prompt).not.toContain('save it with `write_plan` (action="save"), then');
+  expect(prompt).toContain('Use action="save" only');
+});

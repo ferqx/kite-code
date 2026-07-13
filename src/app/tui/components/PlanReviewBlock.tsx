@@ -16,7 +16,7 @@ interface PlanReviewBlockProps {
 export default function PlanReviewBlock({
   plan: _plan,
   provider,
-  onResolved,
+  onResolved: _onResolved,
   supplementEscRef,
 }: PlanReviewBlockProps) {
   const t = useTheme();
@@ -52,25 +52,21 @@ export default function PlanReviewBlock({
           type: 'plan_review_decision',
           decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
         });
-        onResolved('approved_auto');
         break;
       case 'approved_accept_edits':
         provider.submitAction({
           type: 'plan_review_decision',
           decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
         });
-        onResolved('approved_accept_edits');
         break;
       case 'supplemented':
         provider.submitAction({
           type: 'plan_review_decision',
           decision: { kind: 'revise', feedback: feedback ?? '' },
         });
-        onResolved('supplemented', feedback);
         break;
       case 'rejected':
         provider.submitAction({ type: 'plan_review_decision', decision: { kind: 'cancel' } });
-        onResolved('rejected');
         break;
     }
   }

@@ -50,6 +50,7 @@ export interface AppProps {
   availableModels?: import('@/core/config').AvailableModel[];
   slashSuggestion?: import('./components/InputLine').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
+  onTogglePlanMode?: () => void;
   resizeGeneration?: number;
   children?: ReactNode;
 }
@@ -84,6 +85,7 @@ export default function App({
   mcpManager,
   slashSuggestion,
   sandboxBackend = 'none',
+  onTogglePlanMode,
   resizeGeneration,
   children,
 }: AppProps) {
@@ -99,7 +101,7 @@ export default function App({
     !!state.interrupt;
   const supplementEscRef = useRef(false);
   const wizardEscBackRef = useRef(false);
-  useGlobalKeys(dispatch, overlayOrInterrupt, supplementEscRef, wizardEscBackRef);
+  useGlobalKeys(dispatch, overlayOrInterrupt, supplementEscRef, wizardEscBackRef, onTogglePlanMode);
 
   // Stabilized callbacks for React.memo children
   const hideHelp = useCallback(() => dispatch({ type: 'HIDE_HELP' }), [dispatch]);

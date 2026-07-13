@@ -5,13 +5,24 @@ import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import type { McpManager } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
+import {
+  defaultPlanArtifactStore,
+  PlanArtifactError,
+  type PlanArtifactStore,
+} from '@/core/persistence/plan-artifacts';
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState } from '@/core/runtime/state';
-import { computePlanStructuralDigest, getAgentPhase } from '@/core/runtime/state';
+import {
+  computePlanStructuralDigest,
+  getActivePlanning,
+  getActiveTask,
+  getAgentPhase,
+  getEffectiveInteractionMode,
+} from '@/core/runtime/state';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import {
   deserializeSubagentContinuation,
@@ -20,7 +31,7 @@ import {
 import { resumeSubAgent } from '@/core/subagent/runner';
 import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
-import type { InteractionMode } from '@/protocol/events';
+import type { InteractionMode, PlanArtifactRef, PlanDocument } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
 
@@ -125,7 +136,7 @@ async function handleSubAgentResume(params: {
       request: blockedRequest,
       shellExecutor: params.shellExecutor,
       workspaceAccess: params.state.workspaceAccess,
-      phase: getAgentPhase(params.state.planning),
+      phase: getAgentPhase(getActivePlanning(params.state)),
       authorization: params.state.authorization,
       approvedGrant: call?.approvalGrant ?? 'none',
       threadId: params.state.session.threadId,
@@ -161,7 +172,7 @@ async function handleSubAgentResume(params: {
       skillOptions: params.skillOptions,
       authorization: params.state.authorization,
       workspaceAccess: params.state.workspaceAccess,
-      phase: getAgentPhase(params.state.planning),
+      phase: getAgentPhase(getActivePlanning(params.state)),
       threadId: params.state.session.threadId,
       timeoutMs: 30 * 60 * 1000,
       signal: params.signal ?? new AbortController().signal,
@@ -195,7 +206,7 @@ async function handleSubAgentResume(params: {
     const blockedDecision = evaluateToolApproval({
       toolName: blocked.toolName,
       toolArgs: blocked.args,
-      phase: getAgentPhase(params.state.planning),
+      phase: getAgentPhase(getActivePlanning(params.state)),
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
@@ -257,8 +268,10 @@ export async function executeRuntimeTools(params: {
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
   subagentEventSink?: SubAgentEventSink;
+  planArtifactStore?: PlanArtifactStore;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
+  const planArtifacts = params.planArtifactStore ?? defaultPlanArtifactStore;
   const emitSubagentEvent: SubAgentEventSink = (event) => {
     events.push(toRuntimeSubagentEvent(event));
     params.subagentEventSink?.(event);
@@ -288,54 +301,289 @@ export async function executeRuntimeTools(params: {
       continue;
     }
 
+    if (request.name === 'read_plan') {
+      const args = request.args as {
+        plan_id: string;
+        version?: number;
+        structural_digest?: string;
+      };
+      const planning = getActivePlanning(params.state);
+      const task = getActiveTask(params.state);
+      const taskId = task?.taskId ?? `legacy-${params.state.session.threadId}`;
+      const document =
+        planning.kind === 'planning_draft' ||
+        planning.kind === 'replanning_draft' ||
+        planning.kind === 'awaiting_review' ||
+        planning.kind === 'executing' ||
+        planning.kind === 'completed'
+          ? planning.document
+          : undefined;
+      const version = args.version ?? document?.version;
+      if (!document || args.plan_id !== document.planId || version !== document.version) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'read_plan must reference the active Task plan and its current version.',
+        });
+        continue;
+      }
+      if (args.structural_digest && args.structural_digest !== document.structuralDigest) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'read_plan structural_digest does not match the active Artifact.',
+        });
+        continue;
+      }
+      const artifactRef = document.artifact ?? {
+        artifactId: `${document.planId}:v${document.version}`,
+        taskId,
+        planId: document.planId,
+        version: document.version,
+        fileName: `v${document.version}.md`,
+        relativePath: '',
+        displayPath: '',
+        structuralDigest: document.structuralDigest,
+        byteLength: 0,
+      };
+      try {
+        const artifact = planArtifacts.read(artifactRef);
+        events.push({
+          type: 'tool.finished',
+          toolCallId,
+          name: 'read_plan',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: JSON.stringify({
+              ok: true,
+              status: 'plan_loaded',
+              task_id: taskId,
+              plan_id: artifact.plan.planId,
+              version: artifact.plan.version,
+              structural_digest: artifact.plan.structuralDigest,
+              title: artifact.plan.title,
+              body_markdown: artifact.plan.bodyMarkdown,
+              steps: artifact.plan.steps,
+              artifact: artifact.artifact,
+            }),
+            stderr: '',
+          },
+        });
+      } catch (error) {
+        const reason =
+          error instanceof PlanArtifactError ? error.message : 'Unable to read the Plan Artifact.';
+        events.push({ type: 'tool.rejected', toolCallId, reason });
+      }
+      continue;
+    }
+
     // ── Plan tools ──
 
     if (request.name === 'write_plan') {
       const args = request.args as {
-        title: string;
-        body_markdown: string;
-        steps: Array<{ id: string; title: string }>;
+        title?: string;
+        body_markdown?: string;
+        steps?: Array<{ id: string; title: string }>;
         expected_version?: number;
-        action: 'save' | 'submit';
+        action?: 'save' | 'submit';
+        replan_reason?: string;
+        plan_id?: string;
+        version?: number;
+        structural_digest?: string;
       };
-      const phase = getAgentPhase(params.state.planning);
-      if (phase !== 'planning') {
+      const action = args.action ?? 'save';
+      const hasDocument =
+        typeof args.title === 'string' &&
+        typeof args.body_markdown === 'string' &&
+        Array.isArray(args.steps);
+      const hasArtifactRef =
+        typeof args.plan_id === 'string' &&
+        Number.isInteger(args.version) &&
+        typeof args.structural_digest === 'string';
+      const planning = getActivePlanning(params.state);
+      const phase = getAgentPhase(planning);
+      const task = getActiveTask(params.state);
+      const taskId = task?.taskId ?? `legacy-${params.state.session.threadId}`;
+      const isSubmitExisting = action === 'submit' && hasArtifactRef && !hasDocument;
+      const isLegacyDocumentSubmit = action === 'submit' && hasDocument;
+      const autoEnter =
+        phase === 'building' &&
+        planning.kind === 'building_without_plan' &&
+        (action === 'save' || isLegacyDocumentSubmit) &&
+        Boolean(task && !task.sideEffectsStarted);
+      const draftWrite =
+        (planning.kind === 'planning_empty' || planning.kind === 'planning_draft') &&
+        hasDocument &&
+        (action === 'save' || isLegacyDocumentSubmit) &&
+        (task == null || !task.sideEffectsStarted);
+      const replanDraftSubmit =
+        planning.kind === 'replanning_draft' && (isSubmitExisting || isLegacyDocumentSubmit);
+      const replan =
+        phase === 'building' && planning.kind === 'executing' && args.action === 'submit';
+      const submitExistingAllowed =
+        isSubmitExisting &&
+        (planning.kind === 'planning_draft' || planning.kind === 'replanning_draft') &&
+        args.plan_id === planning.document.planId &&
+        args.version === planning.document.version &&
+        args.structural_digest === planning.document.structuralDigest;
+      if (!draftWrite && !replanDraftSubmit && !autoEnter && !replan && !submitExistingAllowed) {
         events.push({
           type: 'tool.rejected',
           toolCallId,
-          reason: 'write_plan is only available in planning phase.',
+          reason: isSubmitExisting
+            ? 'submit must reference the current saved plan_id, version, and structural_digest.'
+            : 'write_plan requires a complete plan document when saving.',
+        });
+        continue;
+      }
+      if (autoEnter && task) {
+        events.push({ type: 'planning.entered', taskId: task.taskId, source: 'model_request' });
+      }
+      if (replan && planning.kind === 'executing') {
+        events.push({
+          type: 'plan.replan_requested',
+          toolCallId,
+          reason: args.replan_reason ?? (args.body_markdown ?? '').slice(0, 500),
+          supersedesPlanVersion: planning.document.version,
+        });
+      }
+
+      if (submitExistingAllowed) {
+        let artifact: ReturnType<typeof defaultPlanArtifactStore.read>;
+        try {
+          artifact = planArtifacts.read({
+            artifactId: `${args.plan_id}:v${args.version}`,
+            taskId,
+            planId: args.plan_id!,
+            version: args.version!,
+            fileName: `v${args.version}.md`,
+            relativePath: '',
+            displayPath: '',
+            structuralDigest: args.structural_digest!,
+            byteLength: 0,
+          });
+        } catch (error) {
+          const reason =
+            error instanceof PlanArtifactError
+              ? error.message
+              : 'Unable to read the saved Plan Artifact.';
+          events.push({ type: 'tool.rejected', toolCallId, reason });
+          continue;
+        }
+        const document = artifact.plan;
+        const plan = {
+          name: document.title,
+          description: document.bodyMarkdown,
+          status: 'pending' as const,
+          steps: document.steps.map((step) => ({
+            step: step.title,
+            id: step.id,
+            status: step.status,
+          })),
+        };
+        const interactionId = genInteractionId();
+        events.push({
+          type: 'plan.review_requested',
+          interactionId,
+          toolCallId,
+          taskId,
+          plan,
+          planSummary: `${document.title}\n\n${document.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}`,
+          planId: document.planId,
+          version: document.version,
+          structuralDigest: document.structuralDigest,
+          artifact: artifact.artifact,
+        });
+        for (const sibling of Object.values(params.state.tools.calls)) {
+          if (
+            sibling.status === 'queued' &&
+            sibling.modelMessageId === call.modelMessageId &&
+            (sibling.ordinal ?? 0) > (call.ordinal ?? 0)
+          ) {
+            events.push({
+              type: 'tool.cancelled',
+              toolCallId: sibling.toolCallId,
+              reason: 'Cancelled because an earlier tool call opened an interaction.',
+            });
+          }
+        }
+        continue;
+      }
+
+      if (!hasDocument) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'write_plan save requires title, body_markdown, and steps.',
         });
         continue;
       }
       // Version conflict check
       if (
         args.expected_version != null &&
-        params.state.planning.kind === 'planning_draft' &&
-        args.expected_version !== params.state.planning.document.version
+        (planning.kind === 'planning_draft' || planning.kind === 'replanning_draft') &&
+        args.expected_version !== planning.document.version
       ) {
         events.push({
           type: 'tool.rejected',
           toolCallId,
-          reason: `Version conflict: expected v${args.expected_version}, current is v${params.state.planning.document.version}.`,
+          reason: `Version conflict: expected v${args.expected_version}, current is v${planning.document.version}.`,
         });
         continue;
       }
       const previous =
-        params.state.planning.kind === 'planning_draft'
-          ? params.state.planning.document
+        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
+          ? planning.document
           : undefined;
-      const document = {
+      const replanMetadata =
+        replan && planning.kind === 'executing'
+          ? {
+              supersedesPlanVersion: planning.document.version,
+              replanReason: args.replan_reason ?? (args.body_markdown ?? '').slice(0, 500),
+            }
+          : planning.kind === 'replanning_draft'
+            ? {
+                supersedesPlanVersion: planning.supersedesPlanVersion,
+                replanReason: planning.replanReason,
+              }
+            : previous?.supersedesPlanVersion != null
+              ? {
+                  supersedesPlanVersion: previous.supersedesPlanVersion,
+                  replanReason: previous.replanReason ?? '',
+                }
+              : {};
+      const candidateDocument: PlanDocument = {
         planId: previous?.planId ?? crypto.randomUUID(),
         version: (previous?.version ?? 0) + 1,
-        title: args.title,
-        bodyMarkdown: args.body_markdown,
-        steps: args.steps.map(({ id, title }) => ({ id, title, status: 'pending' as const })),
+        title: args.title!,
+        bodyMarkdown: args.body_markdown!,
+        steps: args.steps!.map(({ id, title }) => ({ id, title, status: 'pending' as const })),
         structuralDigest: '',
         createdAtTurnId: previous?.createdAtTurnId ?? params.state.turn.turnId,
         updatedAtTurnId: params.state.turn.turnId,
+        ...replanMetadata,
       };
-      document.structuralDigest = computePlanStructuralDigest(document);
-      const submit = args.action === 'submit';
+      candidateDocument.structuralDigest = computePlanStructuralDigest(candidateDocument);
+
+      // A repeated save with identical structure is idempotent and does not create vN+1.
+      const document =
+        previous && previous.structuralDigest === candidateDocument.structuralDigest
+          ? { ...candidateDocument, ...previous, updatedAtTurnId: params.state.turn.turnId }
+          : candidateDocument;
+      let artifact: PlanArtifactRef;
+      try {
+        artifact = planArtifacts.write(taskId, document);
+      } catch (error) {
+        const reason =
+          error instanceof PlanArtifactError
+            ? error.message
+            : 'Unable to persist the Plan Artifact.';
+        events.push({ type: 'tool.rejected', toolCallId, reason });
+        continue;
+      }
+      const submit = isLegacyDocumentSubmit;
 
       events.push({
         type: 'plan.drafted',
@@ -353,6 +601,9 @@ export async function executeRuntimeTools(params: {
           })),
         },
         structuralHash: document.structuralDigest,
+        taskId,
+        artifact,
+        ...replanMetadata,
       });
 
       if (submit) {
@@ -373,6 +624,11 @@ export async function executeRuntimeTools(params: {
             })),
           },
           planSummary: `${document.title}\n\n${document.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}`,
+          planId: document.planId,
+          version: document.version,
+          structuralDigest: document.structuralDigest,
+          taskId,
+          artifact,
         });
         // Cancel later sibling tool calls
         for (const sibling of Object.values(params.state.tools.calls)) {
@@ -401,9 +657,19 @@ export async function executeRuntimeTools(params: {
             stdout: JSON.stringify({
               ok: true,
               status: 'draft_saved',
+              task_id: taskId,
               plan_id: document.planId,
               version: document.version,
               structural_digest: document.structuralDigest,
+              artifact: {
+                artifact_id: artifact.artifactId,
+                file_name: artifact.fileName,
+                path: artifact.displayPath,
+                relative_path: artifact.relativePath,
+                structural_digest: artifact.structuralDigest,
+                byte_length: artifact.byteLength,
+              },
+              next_action: 'submit',
             }),
             stderr: '',
           },
@@ -418,7 +684,8 @@ export async function executeRuntimeTools(params: {
         updates: Array<{ step_id: string; status: string; note?: string }>;
         complete_plan?: boolean;
       };
-      const phase = getAgentPhase(params.state.planning);
+      const planning = getActivePlanning(params.state);
+      const phase = getAgentPhase(planning);
       if (phase !== 'building') {
         events.push({
           type: 'tool.rejected',
@@ -427,7 +694,7 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      if (params.state.planning.kind !== 'executing') {
+      if (planning.kind !== 'executing') {
         events.push({
           type: 'tool.rejected',
           toolCallId,
@@ -435,7 +702,7 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      const doc = params.state.planning.document;
+      const doc = planning.document;
       if (args.plan_id !== doc.planId) {
         events.push({
           type: 'tool.rejected',
@@ -473,6 +740,17 @@ export async function executeRuntimeTools(params: {
           };
         }),
       };
+      if (
+        args.complete_plan &&
+        plan.steps.some((step) => step.status === 'pending' || step.status === 'in_progress')
+      ) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'Cannot complete plan while steps are pending or in progress.',
+        });
+        continue;
+      }
       events.push({
         type: 'plan.progress_updated',
         toolCallId,
@@ -508,7 +786,7 @@ export async function executeRuntimeTools(params: {
     const decision = evaluateToolApproval({
       toolName: request.name,
       toolArgs: request.args as Record<string, unknown>,
-      phase: getAgentPhase(params.state.planning),
+      phase: getAgentPhase(getActivePlanning(params.state)),
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
@@ -523,7 +801,7 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     const requiresEffectReview =
-      params.state.mode !== 'full' &&
+      getEffectiveInteractionMode(params.state) !== 'full' &&
       Boolean(
         decision.effects?.network ||
           decision.effects?.externalWrite ||
@@ -531,11 +809,12 @@ export async function executeRuntimeTools(params: {
       );
     if ((decision.requiresApproval || requiresEffectReview) && call.status !== 'approved') {
       // Delegate mode-specific routing to mode-policy
-      const modePolicy = createModePolicy(params.state.mode);
+      const effectiveMode = getEffectiveInteractionMode(params.state);
+      const modePolicy = createModePolicy(effectiveMode);
       const modeDecision = modePolicy.shouldApproveTool({
-        interactionMode: params.state.mode as InteractionMode,
-        phase: getAgentPhase(params.state.planning),
-        planKind: params.state.planning.kind,
+        interactionMode: effectiveMode as InteractionMode,
+        phase: getAgentPhase(getActivePlanning(params.state)),
+        planKind: getActivePlanning(params.state).kind,
         toolName: request.name,
         toolRisk: decision.risk,
         effects: decision.effects,
@@ -625,7 +904,7 @@ export async function executeRuntimeTools(params: {
           request,
           shellExecutor: params.shellExecutor,
           workspaceAccess: params.state.workspaceAccess,
-          phase: getAgentPhase(params.state.planning),
+          phase: getAgentPhase(getActivePlanning(params.state)),
           authorization: params.state.authorization,
           approvedGrant: call.approvalGrant ?? 'none',
           threadId: params.state.session.threadId,
@@ -633,7 +912,7 @@ export async function executeRuntimeTools(params: {
           skillManifests: params.skillManifests,
           skillOptions: params.skillOptions,
           signal: params.signal,
-          interactionMode: params.state.mode,
+          interactionMode: getEffectiveInteractionMode(params.state),
           taskConfig: params.taskConfig,
           taskModel: params.taskModel,
           subagentEventSink: emitSubagentEvent,
@@ -662,7 +941,7 @@ export async function executeRuntimeTools(params: {
           const blockedDecision = evaluateToolApproval({
             toolName: blocked.toolName,
             toolArgs: blocked.args,
-            phase: getAgentPhase(params.state.planning),
+            phase: getAgentPhase(getActivePlanning(params.state)),
             workspace: params.state.session.workspace,
             threadId: params.state.session.threadId,
             authorization: params.state.authorization,
@@ -729,7 +1008,7 @@ export async function executeRuntimeTools(params: {
         request,
         shellExecutor: params.shellExecutor,
         workspaceAccess: params.state.workspaceAccess,
-        phase: getAgentPhase(params.state.planning),
+        phase: getAgentPhase(getActivePlanning(params.state)),
         authorization: params.state.authorization,
         approvedGrant: call.approvalGrant ?? 'none',
         threadId: params.state.session.threadId,
@@ -737,7 +1016,7 @@ export async function executeRuntimeTools(params: {
         skillManifests: params.skillManifests,
         skillOptions: params.skillOptions,
         signal: params.signal,
-        interactionMode: params.state.mode,
+        interactionMode: getEffectiveInteractionMode(params.state),
         taskConfig: params.taskConfig,
         taskModel: params.taskModel,
         subagentEventSink: emitSubagentEvent,

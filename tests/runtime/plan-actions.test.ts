@@ -160,7 +160,7 @@ describe('plan_review_decision actions', () => {
     }
   });
 
-  test('cancel → plan.rejected with reason', () => {
+  test('cancel → plan.review_cancelled + tool.finished with reason', () => {
     const state = makeAwaitingReviewState();
     const action: RuntimeUserAction = {
       type: 'plan_review_decision',
@@ -173,12 +173,21 @@ describe('plan_review_decision actions', () => {
 
     const events = eventsForRuntimeAction(state, action);
     const eventTypes = events.map((e) => e.type);
-    expect(eventTypes).toContain('plan.rejected');
+    expect(eventTypes).toContain('plan.review_cancelled');
+    expect(eventTypes).toContain('tool.finished');
 
-    const rejected = events.find((e) => e.type === 'plan.rejected');
-    expect(rejected).toBeDefined();
-    if (rejected && rejected.type === 'plan.rejected') {
-      expect(rejected.reason).toBe('Not needed');
+    const cancelled = events.find((e) => e.type === 'plan.review_cancelled');
+    expect(cancelled).toBeDefined();
+    if (cancelled && cancelled.type === 'plan.review_cancelled') {
+      expect(cancelled.reason).toBe('Not needed');
+    }
+
+    const finished = events.find((e) => e.type === 'tool.finished');
+    expect(finished).toBeDefined();
+    if (finished && finished.type === 'tool.finished') {
+      expect(finished.name).toBe('write_plan');
+      expect(finished.result.ok).toBe(true);
+      expect(finished.result.stdout).toContain('review_cancelled');
     }
   });
 

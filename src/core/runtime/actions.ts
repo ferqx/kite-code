@@ -24,7 +24,8 @@ export type RuntimeUserAction =
         | {
             kind: 'approve';
             nextMode: 'accept_edits' | 'auto';
-            clearPlanningContext: boolean;
+            /** @deprecated accepted from older TUI clients and intentionally ignored. */
+            clearPlanningContext?: boolean;
           }
         | { kind: 'revise'; feedback: string }
         | { kind: 'cancel'; reason?: string };
@@ -152,7 +153,14 @@ export function eventsForRuntimeAction(
             ok: true,
             command: '',
             exitCode: 0,
-            stdout: interaction.planSummary,
+            stdout: JSON.stringify({
+              ok: true,
+              status: 'approved',
+              plan_id: interaction.planId,
+              version: interaction.version,
+              ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
+              execution_mode: decision.nextMode,
+            }),
             stderr: '',
           },
         },
@@ -173,7 +181,14 @@ export function eventsForRuntimeAction(
             ok: true,
             command: '',
             exitCode: 0,
-            stdout: JSON.stringify({ decision: 'revise', feedback: decision.feedback }),
+            stdout: JSON.stringify({
+              ok: true,
+              status: 'revision_requested',
+              plan_id: interaction.planId,
+              version: interaction.version,
+              ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
+              feedback: decision.feedback,
+            }),
             stderr: '',
           },
         },
@@ -182,9 +197,28 @@ export function eventsForRuntimeAction(
     if (decision.kind === 'cancel') {
       return [
         {
-          type: 'plan.rejected',
+          type: 'plan.review_cancelled',
           interactionId: action.interactionId,
-          reason: decision.reason ?? 'Plan cancelled by user.',
+          reason: decision.reason ?? 'Plan review cancelled by user.',
+        },
+        {
+          type: 'tool.finished',
+          toolCallId: interaction.toolCallId,
+          name: 'write_plan',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: JSON.stringify({
+              ok: true,
+              status: 'review_cancelled',
+              plan_id: interaction.planId,
+              version: interaction.version,
+              ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
+              feedback: decision.reason,
+            }),
+            stderr: '',
+          },
         },
       ];
     }

@@ -318,7 +318,7 @@ describe('reduceRuntimeState — plan lifecycle', () => {
   });
 
   // 验证 plan.rejected 重置 plan 为 none
-  test('plan.rejected resets plan to none and clears interactions', () => {
+  test('plan.rejected keeps a draft and clears interactions', () => {
     const plan = makePlan('Rejected Plan', ['doom']);
     const state: RuntimeState = {
       ...makeInitialState(),
@@ -337,9 +337,9 @@ describe('reduceRuntimeState — plan lifecycle', () => {
 
     const next = reduceRuntimeState(state, event);
 
-    expect(next.planning.kind).toBe('cancelled');
-    if (next.planning.kind === 'cancelled') {
-      expect(next.planning.reason).toBe('Not what I want');
+    expect(next.planning.kind).toBe('planning_draft');
+    if (next.planning.kind === 'planning_draft') {
+      expect(next.planning.revisionFeedback).toBe('Not what I want');
       expect(next.planning.document).toBeDefined();
     }
     expect(next.interactions.kind).toBe('idle');

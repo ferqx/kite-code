@@ -12,6 +12,7 @@ import {
   EDIT_FILE_CONTRACT,
   READ_FILE_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
+  READ_PLAN_CONTRACT,
   SEARCH_CONTENT_CONTRACT,
   SEARCH_FILES_CONTRACT,
   SHELL_EXECUTE_CONTRACT,
@@ -348,6 +349,21 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
 
   const builtinTools: ToolSet = {
     read_file: readFileTool,
+    read_plan: tool({
+      description: READ_PLAN_CONTRACT.description,
+      inputSchema: zodSchema(
+        z.object({
+          plan_id: z.string().min(1),
+          version: z.number().int().positive().optional(),
+          structural_digest: z.string().min(1).optional(),
+        }),
+      ),
+      execute: async ({ plan_id, version, structural_digest }) =>
+        JSON.stringify({
+          ok: true,
+          _params: { plan_id, version, structural_digest },
+        }),
+    }),
     edit_file: editFileTool,
     write_file: writeFileTool,
     shell_execute: shellExecute,
@@ -392,43 +408,107 @@ function createWritePlanTool() {
   return tool({
     description: WRITE_PLAN_CONTRACT.description,
     inputSchema: zodSchema(
-      z.object({
-        title: z.string().trim().min(1).max(120).describe('One-line plan title (max 120 chars)'),
-        body_markdown: z
-          .string()
-          .trim()
-          .min(20)
-          .max(30_000)
-          .describe('Full plan in Markdown — the main content the user reviews'),
-        steps: z
-          .array(
-            z.object({
-              id: z
-                .string()
-                .regex(/^[a-z][a-z0-9_-]{0,31}$/)
-                .describe('Stable step ID (e.g. "inspect-runtime")'),
-              title: z.string().trim().min(1).max(160).describe('One-line step description'),
-            }),
-          )
-          .min(1)
-          .max(12)
-          .describe('Ordered execution steps (1-12 items)'),
-        expected_version: z
-          .number()
-          .int()
-          .positive()
-          .optional()
-          .describe('Expected current version to prevent overwriting a newer draft'),
-        action: z
-          .enum(['save', 'submit'])
-          .optional()
-          .default('save')
-          .describe(
-            'save: store draft and continue planning. submit: save and request user review (pauses execution).',
-          ),
-      }),
+      z
+        .object({
+          title: z
+            .string()
+            .trim()
+            .min(1)
+            .max(120)
+            .optional()
+            .describe('One-line plan title (required when writing a new Artifact)'),
+          body_markdown: z
+            .string()
+            .trim()
+            .min(20)
+            .max(30_000)
+            .optional()
+            .describe('Full plan in Markdown (required when writing a new Artifact)'),
+          steps: z
+            .array(
+              z.object({
+                id: z
+                  .string()
+                  .regex(/^[a-z][a-z0-9_-]{0,31}$/)
+                  .describe('Stable step ID (e.g. "inspect-runtime")'),
+                title: z.string().trim().min(1).max(160).describe('One-line step description'),
+              }),
+            )
+            .min(1)
+            .max(12)
+            .optional()
+            .describe('Ordered execution steps (required when writing a new Artifact)'),
+          expected_version: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe('Expected current version to prevent overwriting a newer draft'),
+          action: z
+            .enum(['save', 'submit'])
+            .optional()
+            .default('save')
+            .describe(
+              'save: write a new Artifact. submit: submit an existing Artifact reference for user review.',
+            ),
+          plan_id: z
+            .string()
+            .trim()
+            .min(1)
+            .optional()
+            .describe('Existing Plan ID to submit without resending the document'),
+          version: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe('Existing Artifact version to submit'),
+          structural_digest: z
+            .string()
+            .trim()
+            .min(1)
+            .optional()
+            .describe('Digest returned by save for the Artifact being submitted'),
+          replan_reason: z
+            .string()
+            .trim()
+            .max(500)
+            .optional()
+            .describe('Why a new structural plan is needed while an approved plan is executing'),
+        })
+        .superRefine((value, ctx) => {
+          const hasDocument =
+            value.title != null && value.body_markdown != null && value.steps != null;
+          const hasArtifactRef =
+            value.plan_id != null && value.version != null && value.structural_digest != null;
+          if (value.action === 'save' && !hasDocument) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['body_markdown'],
+              message: 'save requires the complete plan document.',
+            });
+          }
+          if (value.action === 'submit' && !hasDocument && !hasArtifactRef) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['plan_id'],
+              message:
+                'submit requires plan_id, version, structural_digest, or a complete legacy document.',
+            });
+          }
+        }),
     ),
-    execute: async ({ title, body_markdown, steps, expected_version, action }) => {
+    execute: async ({
+      title,
+      body_markdown,
+      steps,
+      expected_version,
+      action,
+      replan_reason,
+      plan_id,
+      version,
+      structural_digest,
+    }) => {
       const effectiveAction = action ?? 'save';
       const submit = effectiveAction === 'submit';
       return JSON.stringify({
@@ -437,7 +517,17 @@ function createWritePlanTool() {
         version: 0, // filled by tool-controller
         structural_digest: '', // filled by tool-controller
         review_required: submit,
-        _params: { title, body_markdown, steps, expected_version, action: effectiveAction },
+        _params: {
+          title,
+          body_markdown,
+          steps,
+          expected_version,
+          action: effectiveAction,
+          replan_reason,
+          plan_id,
+          version,
+          structural_digest,
+        },
       });
     },
   });

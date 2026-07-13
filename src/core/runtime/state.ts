@@ -9,6 +9,7 @@ import type {
   AgentPlan,
   AuthorizationMode,
   InteractionMode,
+  PlanArtifactRef,
   PlanningState,
   ToolApprovalPayload,
   UserInputPayload,
@@ -20,6 +21,62 @@ import type { ClassifiedFailure } from './failures';
 
 // ── Re-export for convenience ──
 export { getAgentPhase };
+
+export type TaskStatus = 'active' | 'completed' | 'cancelled';
+export type TaskExecutionMode = 'auto' | 'accept_edits';
+
+/** A top-level user task owns its complete planning lifecycle. */
+export interface TaskState {
+  taskId: string;
+  userGoal: string;
+  status: TaskStatus;
+  startedAtTurnId: string;
+  completedAtTurnId?: string;
+  sideEffectsStarted: boolean;
+  planning: PlanningState;
+  executionMode?: TaskExecutionMode;
+  /** Structural plan versions retained when a task is replanned. */
+  planHistory: import('@/protocol/events').PlanDocument[];
+}
+
+export function getActiveTask(state: RuntimeState): TaskState | null {
+  return state.activeTaskId ? (state.tasks[state.activeTaskId] ?? null) : null;
+}
+
+/** Active Task is authoritative; `planning` is a compatibility mirror for v3 callers. */
+export function getActivePlanning(state: RuntimeState): PlanningState {
+  const active = getActiveTask(state);
+  if (active) return active.planning;
+  // Once a Task has ended, its historical plan must not project as the
+  // current Thread phase. The legacy mirror is only used for pre-Task
+  // snapshots that have no task history at all.
+  if (Object.keys(state.tasks).length > 0) return { kind: 'building_without_plan' };
+  return state.planning;
+}
+
+export function getEffectiveInteractionMode(state: RuntimeState): InteractionMode {
+  return getActiveTask(state)?.executionMode ?? state.mode;
+}
+
+export function updateActiveTask(
+  state: RuntimeState,
+  update: (task: TaskState) => TaskState,
+): RuntimeState {
+  const active = getActiveTask(state);
+  if (!active) return state;
+  const nextTask = update(active);
+  return {
+    ...state,
+    tasks: { ...state.tasks, [nextTask.taskId]: nextTask },
+    planning: nextTask.planning,
+  };
+}
+
+export function setActivePlanning(state: RuntimeState, planning: PlanningState): RuntimeState {
+  const active = getActiveTask(state);
+  if (!active) return { ...state, planning };
+  return updateActiveTask(state, (task) => ({ ...task, planning }));
+}
 
 // ── 交互状态 / Interaction state ──
 
@@ -54,6 +111,8 @@ export type InteractionState =
       plan: AgentPlan;
       /** 方案摘要（用于用户展示）/ Plan summary for user display */
       planSummary: string;
+      /** Durable file reference used to load the reviewed content. */
+      artifact?: PlanArtifactRef;
     }
   | {
       kind: 'awaiting_tool_approval';
@@ -187,7 +246,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 3;
+export const RUNTIME_STATE_SCHEMA_VERSION = 5;
 
 /**
  * 统一运行时状态 — runtime kernel 的核心状态对象。
@@ -199,6 +258,10 @@ export const RUNTIME_STATE_SCHEMA_VERSION = 3;
  * providing type-safe access via discriminated unions.
  */
 export interface RuntimeState {
+  /** Active top-level task. Only this task is exposed to model execution. */
+  activeTaskId: string | null;
+  /** Historical and active top-level tasks, keyed by taskId. */
+  tasks: Record<string, TaskState>;
   /** 状态 schema 版本，用于迁移兼容 / Schema version for migration compatibility */
   schemaVersion: number;
   /** 会话信息 / Session information */
@@ -299,6 +362,8 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     },
     transcript: { messages: [] },
     planning: initialPlanning,
+    activeTaskId: null,
+    tasks: {},
     interactions: { kind: 'idle' },
     tools: {
       calls: {},

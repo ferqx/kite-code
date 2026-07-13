@@ -171,7 +171,7 @@ describe('PlanningState lifecycle transitions', () => {
     expect(s3.interactions.kind).toBe('idle');
   });
 
-  test('awaiting_review → cancelled (reject)', () => {
+  test('awaiting_review → planning_draft (legacy reject alias)', () => {
     const state = makeState();
     const plan = makePlan('Bad Plan', ['nope']);
     const e1: RuntimeEvent = {
@@ -199,10 +199,9 @@ describe('PlanningState lifecycle transitions', () => {
       reason: 'Not needed',
     };
     const s3 = reduceRuntimeState(s2, e3);
-    expect(s3.planning.kind).toBe('cancelled');
-    if (s3.planning.kind === 'cancelled') {
-      expect(s3.planning.reason).toBe('Not needed');
-      expect(s3.planning.cancelledAtTurnId).toBe(s3.turn.turnId);
+    expect(s3.planning.kind).toBe('planning_draft');
+    if (s3.planning.kind === 'planning_draft') {
+      expect(s3.planning.revisionFeedback).toBe('Not needed');
     }
     expect(s3.interactions.kind).toBe('idle');
   });

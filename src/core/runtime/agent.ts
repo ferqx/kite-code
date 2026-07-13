@@ -12,6 +12,7 @@ import type { RuntimeEvent } from './events';
 import { createRuntimeEffectExecutor } from './executor';
 import { createAgentKernel } from './kernel';
 import { type RuntimeActionProvider, runRuntimeLoop } from './runner';
+import { getActiveTask } from './state';
 
 /** Inputs for the graph-free runtime entry point. */
 export interface RunRuntimeAgentInput {
@@ -56,7 +57,9 @@ export async function* runRuntimeAgent(
     interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'accept_edits',
     authorizationMode: input.authorizationMode,
     authorizationSource: input.authorizationSource,
-    phase: input.phase,
+    // Plan entry is a persisted event below; initialPhase is no longer the
+    // source of truth for the task lifecycle.
+    phase: 'building',
     sandboxAvailable: input.sandboxBackend === 'seatbelt' || input.sandboxBackend === 'bubblewrap',
   });
   const collector = new SessionLogCollector(
@@ -67,22 +70,52 @@ export async function* runRuntimeAgent(
   );
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
   try {
-    const initial: RuntimeEvent = {
-      type: 'user.message_appended',
-      messageId: randomUUID(),
-      content: input.task,
-    };
-    kernel.processEvent(initial);
-    collector.recordRuntime(initial);
-    yield initial;
+    const resumedReview =
+      getActiveTask(kernel.getState()) && kernel.getState().interactions.kind === 'awaiting_review';
+    if (!resumedReview) {
+      if (input.phase === 'planning') {
+        const taskStarted: RuntimeEvent = {
+          type: 'task.started',
+          taskId: randomUUID(),
+          userGoal: input.task,
+          turnId: kernel.getState().turn.turnId,
+        };
+        kernel.processEvent(taskStarted);
+        collector.recordRuntime(taskStarted);
+        yield taskStarted;
+      }
 
-    const turnStarted: RuntimeEvent = {
-      type: 'turn.started',
-      turnId: crypto.randomUUID(),
-    };
-    kernel.processEvent(turnStarted);
-    collector.recordRuntime(turnStarted);
-    yield turnStarted;
+      if (input.phase === 'planning') {
+        const activeTask = getActiveTask(kernel.getState());
+        if (activeTask) {
+          const entered: RuntimeEvent = {
+            type: 'planning.entered',
+            taskId: activeTask.taskId,
+            source: 'user_command',
+          };
+          kernel.processEvent(entered);
+          collector.recordRuntime(entered);
+          yield entered;
+        }
+      }
+
+      const initial: RuntimeEvent = {
+        type: 'user.message_appended',
+        messageId: randomUUID(),
+        content: input.task,
+      };
+      kernel.processEvent(initial);
+      collector.recordRuntime(initial);
+      yield initial;
+
+      const turnStarted: RuntimeEvent = {
+        type: 'turn.started',
+        turnId: crypto.randomUUID(),
+      };
+      kernel.processEvent(turnStarted);
+      collector.recordRuntime(turnStarted);
+      yield turnStarted;
+    }
 
     const executor = createRuntimeEffectExecutor({
       config: input.config,
@@ -95,6 +128,10 @@ export async function* runRuntimeAgent(
     });
     for await (const event of runRuntimeLoop(kernel, executor, provider)) {
       collector.recordRuntime(event);
+      // Task lifecycle facts are durable RuntimeEvents, but remain internal to
+      // the legacy public stream; UI projections are driven by planning/tool
+      // events and existing consumers should not see extra turn markers.
+      if (event.type === 'task.completed') continue;
       yield event;
     }
     if (input.signal?.aborted) exitStatus = 'aborted';
