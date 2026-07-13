@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 interface Violation {
   check: string;
@@ -40,15 +40,17 @@ const violations = [
     join(root, 'src/core'),
     /\brunApprovedTool\(/,
     (file) =>
-      file.endsWith('/harness/tool-runner.ts') ||
-      file.endsWith('/controllers/tool-controller.ts') ||
-      file.endsWith('/subagent/runner.ts'),
+      file.endsWith(`${sep}harness${sep}tool-runner.ts`) ||
+      file.endsWith(`${sep}controllers${sep}tool-controller.ts`) ||
+      file.endsWith(`${sep}subagent${sep}runner.ts`),
   ),
   ...find(
     'planning state is reducer-owned',
     join(root, 'src/core'),
     /state\.planning\s*=/,
-    (file) => file.endsWith('/runtime/reducer.ts') || file.endsWith('/runtime/state.ts'),
+    (file) =>
+      file.endsWith(`${sep}runtime${sep}reducer.ts`) ||
+      file.endsWith(`${sep}runtime${sep}state.ts`),
   ),
 ];
 

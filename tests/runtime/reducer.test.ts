@@ -1109,7 +1109,13 @@ describe('reduceRuntimeState — runtime environment', () => {
       authorization: {
         mode: 'default',
         commandGrants: {
-          key1: { workspace: '/ws', threadId: 't1', command: 'ls' },
+          key1: {
+            workspace: '/ws',
+            threadId: 't1',
+            command: 'ls',
+            source: 'test' as const,
+            grantedAt: '2026-01-01T00:00:00.000Z',
+          },
         },
       },
     };
@@ -1130,7 +1136,13 @@ describe('reduceRuntimeState — runtime environment', () => {
       type: 'authorization.changed',
       mode: 'default',
       commandGrants: {
-        cmd: { workspace: '/ws', threadId: 'thread-1', command: 'bun test' },
+        cmd: {
+          workspace: '/ws',
+          threadId: 'thread-1',
+          command: 'bun test',
+          source: 'test' as const,
+          grantedAt: '2026-01-01T00:00:00.000Z',
+        },
       },
     });
 

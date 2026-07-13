@@ -155,7 +155,13 @@ describe('hasSameCommandGrant', () => {
     const auth = {
       mode: 'default' as const,
       commandGrants: {
-        [key]: { workspace: '/ws', threadId: 't1', command: 'npm test' },
+        [key]: {
+          workspace: '/ws',
+          threadId: 't1',
+          command: 'npm test',
+          source: 'test' as const,
+          grantedAt: '2026-01-01T00:00:00.000Z',
+        },
       },
     };
     expect(
@@ -168,7 +174,13 @@ describe('hasSameCommandGrant', () => {
     const auth = {
       mode: 'default' as const,
       commandGrants: {
-        [key]: { workspace: '/ws', threadId: 't1', command: 'npm test' },
+        [key]: {
+          workspace: '/ws',
+          threadId: 't1',
+          command: 'npm test',
+          source: 'test' as const,
+          grantedAt: '2026-01-01T00:00:00.000Z',
+        },
       },
     };
     expect(hasSameCommandGrant(auth, { workspace: '/ws', threadId: 't1', command: 'other' })).toBe(
@@ -478,7 +490,13 @@ describe('evaluateToolApproval', () => {
           authorization: {
             mode: 'default',
             commandGrants: {
-              [key]: { workspace: '/tmp/test', threadId: 'thread-1', command: 'npm test' },
+              [key]: {
+                workspace: '/tmp/test',
+                threadId: 'thread-1',
+                command: 'npm test',
+                source: 'test' as const,
+                grantedAt: '2026-01-01T00:00:00.000Z',
+              },
             },
           },
         }),

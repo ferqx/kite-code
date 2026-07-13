@@ -199,7 +199,8 @@ describe('code agent tool definitions', () => {
         workspace: '/tmp',
         threadId: 'thread-1',
         command: 'bun test a',
-        createdAt: 1,
+        source: 'test' as const,
+        grantedAt: '2026-01-01T00:00:00.000Z',
       },
     };
     const grantB = {
@@ -207,7 +208,8 @@ describe('code agent tool definitions', () => {
         workspace: '/tmp',
         threadId: 'thread-1',
         command: 'bun test b',
-        createdAt: 2,
+        source: 'test' as const,
+        grantedAt: '2026-01-01T00:00:00.000Z',
       },
     };
 
@@ -493,6 +495,8 @@ describe('tool contracts (ACI)', () => {
             workspace: '/tmp',
             threadId: 'thread-x',
             command: 'bun test',
+            source: 'test' as const,
+            grantedAt: '2026-01-01T00:00:00.000Z',
           },
         },
       },

@@ -19,8 +19,8 @@ describe('repository knowledge system', () => {
     const indexPath = join(repoRoot, 'docs', 'space', 'index.md');
     const index = readFileSync(indexPath, 'utf8');
     const indexedActiveRecords = Array.from(
-      index.matchAll(/\| `(execution\/active\/[^`]+)` \| active \|/g),
-      (match) => match[1]!.replace(/^execution\/active\//, ''),
+      index.matchAll(/\| `(\.\.\/active\/[^`]+)` \| active \|/g),
+      (match) => match[1]!.replace(/^\.\.\/active\//, ''),
     ).sort();
 
     const activeRecords = collectFilesIfExists(join(repoRoot, 'docs', 'active'))
