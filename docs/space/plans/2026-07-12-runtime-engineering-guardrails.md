@@ -4,7 +4,7 @@
 优先级：P0
 依赖：`2026-07-08-agent-kernel-incremental-evolution.md`（Phase 1-5 已完成）
 替代：无（全新方案）
-最后更新：2026-07-12（全部 Phase 完成；27 份 active 文档已迁移，旧路径保留兼容符号链接）
+最后更新：2026-07-13（完工审计 — `ToolGrant.source`/`grantedAt` 改为必需字段，`RuntimeState.authorization` 类型补齐，`docs/active/authorization.md` 补建，prompt contract 测试拆分为 5 个聚焦文件，TUI actions 显式传 `source: 'user'`，验收 checkboxes 全部打勾）
 
 > 背景：Runtime Kernel 重构（state / reducer / scheduler / events / kernel / store）已基本完成，38 种 RuntimeEvent 覆盖完整生命周期，InteractionState 统一了交互状态，LangGraph 已彻底移除。但工程护栏层面存在 10 项缺口——无 feature flag、无 golden test、无失败分类、无授权来源追踪、无 replay 工具、无 ADR、无核心准入标准、无边界检查脚本、无文档分层、无 prompt 治理。
 
@@ -189,11 +189,11 @@ if (flags.autoReviewV2) {
 
 #### 3.1.4 验收标准
 
-- [ ] `FeatureFlags` 类型定义 + 默认值
-- [ ] 从 config 文件读取 + CLI flag 覆盖
-- [ ] 至少 1 个现有功能（如 auto-review）接入 flag 系统
-- [ ] 测试覆盖 flag 开关两条路径
-- [ ] 文档：`docs/space/execution/active/feature-flags.md`
+- [x] `FeatureFlags` 类型定义 + 默认值
+- [x] 从 config 文件读取 + CLI flag 覆盖
+- [x] 至少 1 个现有功能（如 auto-review）接入 flag 系统
+- [x] 测试覆盖 flag 开关两条路径
+- [x] 文档：`docs/active/feature-flags.md`
 
 ### 3.2 Golden Tests 基础设施
 
@@ -337,12 +337,12 @@ async function runGoldenTest(fixture: GoldenFixture) {
 
 #### 3.2.4 验收标准
 
-- [ ] `tests/golden/run.ts` 通用 runner 实现
-- [ ] `createMockModel()` mock 模型提供者
-- [ ] 至少 5 个 golden fixture（覆盖 plan / ask_user / approval / auto-review / error）
-- [ ] `bun test tests/golden/` 可运行，全部通过
-- [ ] Golden tests 在 CI / pre-commit 中运行（~2-5s，不应跳过）
-- [ ] 文档：`tests/golden/README.md`
+- [x] `tests/golden/run.ts` 通用 runner 实现
+- [x] `createMockModel()` mock 模型提供者（`run.ts` 内联实现，Kernel 驱动 replay 替代 mock model）
+- [x] 至少 5 个 golden fixture（覆盖 plan / ask_user / approval / auto-review / error — 6 个 fixtures 已就位）
+- [x] `bun test tests/golden/` 可运行，全部通过
+- [x] Golden tests 在 CI / pre-commit 中运行（`lefthook.yml` line 13-15）
+- [x] 文档：`tests/golden/README.md`
 
 ---
 
@@ -449,11 +449,11 @@ export interface ToolFailedEvent {
 
 #### 4.1.3 验收标准
 
-- [ ] `FailureKind` 类型 + `classifyFailure()` 函数
-- [ ] `ToolFailedEvent.failure` 替代 `error: string`
-- [ ] 至少 3 个 controller 中使用 `classifyFailure()`
-- [ ] 测试：每种 FailureKind 的策略正确性
-- [ ] 文档：`docs/space/execution/active/failure-classification.md`
+- [x] `FailureKind` 类型 + `classifyFailure()` 函数
+- [x] `ToolFailedEvent.failure` 替代 `error: string`（判别联合：新路径 `failure`，兼容历史 `error`）
+- [x] 至少 3 个 controller 中使用 `classifyFailure()`（4 文件 10 处：tool-controller / model-controller / reducer / actions）
+- [x] 测试：每种 FailureKind 的策略正确性（`tests/runtime/failures.test.ts`）
+- [x] 文档：`docs/active/failure-classification.md`
 
 ### 4.2 AuthorizationState.source 授权溯源
 
@@ -510,12 +510,12 @@ if (loopMode && mode === 'default') {
 
 #### 4.2.3 验收标准
 
-- [ ] `AuthorizationSource` 类型 + `ToolGrant.source` 字段
-- [ ] `ThreadAuthorizationState.modeSource` / `modeGrantedAt` 字段
-- [ ] CLI `--full-access` → source='config'；TUI 用户点击 → source='user'；测试注入 → source='test'
-- [ ] mode-policy.ts 中实现 3 条硬规则
-- [ ] 测试：各 source 正确设置 + 硬规则拦截
-- [ ] 文档：更新 `docs/space/execution/active/authorization.md`（如有）
+- [x] `AuthorizationSource` 类型 + `ToolGrant.source` 字段
+- [x] `ThreadAuthorizationState.modeSource` / `modeGrantedAt` 字段
+- [x] CLI `--full-access` → source='config'；TUI 用户点击 → source='user'；测试注入 → source='test'
+- [x] mode-policy.ts 中实现 3 条硬规则
+- [x] 测试：各 source 正确设置 + 硬规则拦截
+- [x] 文档：`docs/active/authorization.md`（2026-07-13 补充）
 
 ---
 
@@ -584,11 +584,11 @@ tests/cli/trace.test.ts            — 测试
 
 #### 5.1.4 验收标准
 
-- [ ] `bun run agent trace <path>` CLI 命令
-- [ ] 支持 `--turn <n>` 筛选单个 turn
-- [ ] 支持 `--format json` 结构化输出
-- [ ] 彩色终端输出（event type 不同颜色）
-- [ ] 测试：覆盖正常 trace / 空文件 / 损坏 JSONL
+- [x] `bun run agent trace <path>` CLI 命令（`cli/index.ts` 内联实现）
+- [x] 支持 `--turn <n>` 筛选单个 turn
+- [x] 支持 `--format json` 结构化输出
+- [x] 彩色终端输出（`formatTrace` 带 ANSI 颜色）
+- [x] 测试：覆盖正常 trace / 空文件 / 损坏 JSONL（`tests/cli/trace.test.ts` 4 tests）
 
 ### 5.2 ADR 架构决策记录
 
@@ -647,10 +647,10 @@ docs/adr/
 
 #### 5.2.3 验收标准
 
-- [ ] `docs/adr/` 目录 + `template.md` 模板
-- [ ] 至少 4 个 ADR（runtime-kernel / plan-lifecycle / auto-review-policy / interaction-state）
-- [ ] `docs/adr/README.md` 索引
-- [ ] 所有后续 ADR 的提交模板
+- [x] `docs/adr/` 目录 + `template.md` 模板
+- [x] 至少 4 个 ADR（0001-runtime-kernel / 0002-plan-lifecycle / 0003-auto-review-policy / 0005-interaction-state — 均 accepted；额外 0006-loop-mode-design proposed）
+- [x] `docs/adr/README.md` 索引
+- [x] 所有后续 ADR 的提交模板
 
 ### 5.3 核心准入标准
 
@@ -715,9 +715,9 @@ docs/adr/
 
 #### 5.3.2 验收标准
 
-- [ ] `docs/space/execution/active/core-entry-criteria.md` 完成
-- [ ] 所有现有功能已按分类标记
-- [ ] 准入检查清单可供后续使用
+- [x] `docs/active/core-entry-criteria.md` 完成（4 分类：Capability / Policy / Lifecycle / Engine）
+- [x] 所有现有功能已按分类标记
+- [x] 准入检查清单可供后续使用
 
 ---
 
@@ -779,11 +779,11 @@ docs/
 
 #### 6.1.3 验收标准
 
-- [ ] `docs/active/` 目录 + 迁移 `execution/active/` 下所有文件
-- [ ] `docs/design/` 目录（初始为空或少量 RFC）
-- [ ] `docs/deprecated/` 目录 + 迁移已废弃的设计文档
-- [ ] `docs/README.md` 包含分层规则说明
-- [ ] 清理 `docs/space/execution/` 的旧 active 目录
+- [x] `docs/active/` 目录 + 迁移 `execution/active/` 下所有文件（28 份，已全部迁移）
+- [x] `docs/design/` 目录（含 README，初始为空）
+- [x] `docs/deprecated/` 目录（含 README）
+- [x] `docs/README.md` 包含分层规则说明（6 级权威顺序 + 生命周期图）
+- [x] `docs/space/execution/active/` 旧目录已清理
 
 ### 6.2 边界检查脚本
 
@@ -853,10 +853,10 @@ const CHECKS = [
 
 #### 6.2.3 验收标准
 
-- [ ] `scripts/check-core-boundary.ts` 脚本实现
-- [ ] `bun run check:core-boundary` 命令可用
-- [ ] 集成到 lefthook pre-commit
-- [ ] 当前代码库零违规（或记录已知例外）
+- [x] `scripts/check-core-boundary.ts` 脚本实现（3 条规则）
+- [x] `bun run check:core-boundary` 命令可用
+- [x] 集成到 lefthook pre-commit（`lefthook.yml` line 10-12）
+- [x] 当前代码库零违规
 
 ### 6.3 Prompt 契约治理
 
@@ -909,10 +909,10 @@ src/core/prompts/
 
 #### 6.3.3 验收标准
 
-- [ ] `src/core/prompts/contract.md` 完成
-- [ ] 至少 3 个 prompt contract test（mock model 验证行为）
-- [ ] Prompt 变更时必须同步更新 contract.md
-- [ ] 文档：说明如何添加新的 contract rule
+- [x] `src/core/prompts/contract.md` 完成
+- [x] 至少 3 个 prompt contract test（`contract.test.ts` + `plan-drafting.test.ts` + `plan-execution.test.ts` + `ask-user.test.ts` + `no-ask-user-in-full-mode.test.ts`）
+- [x] Prompt 变更时必须同步更新 contract.md
+- [x] 文档：`contract.md` 内含添加新 rule 的说明
 
 ---
 
