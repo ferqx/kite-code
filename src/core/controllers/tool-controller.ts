@@ -20,6 +20,7 @@ import {
 import { resumeSubAgent } from '@/core/subagent/runner';
 import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
+import type { InteractionMode } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
 
@@ -532,7 +533,7 @@ export async function executeRuntimeTools(params: {
       // Delegate mode-specific routing to mode-policy
       const modePolicy = createModePolicy(params.state.mode);
       const modeDecision = modePolicy.shouldApproveTool({
-        interactionMode: params.state.mode as 'accept_edits' | 'auto' | 'accept_edits' | 'full',
+        interactionMode: params.state.mode as InteractionMode,
         phase: getAgentPhase(params.state.planning),
         planKind: params.state.planning.kind,
         toolName: request.name,

@@ -1153,15 +1153,19 @@ describe('reduceRuntimeState — runtime environment', () => {
 // ── Turn 生命周期 / Turn lifecycle ──
 
 describe('reduceRuntimeState — turn lifecycle', () => {
-  // 验证 turn.started 不修改状态（信息性事件）
-  test('turn.started does not modify state', () => {
+  // 验证 turn.started 更新 turnId 和递增 turnIndex
+  test('turn.started advances turnId and turnIndex', () => {
     const state = makeInitialState();
+    const oldTurnId = state.turn.turnId;
+    const oldTurnIndex = state.turn.turnIndex;
     const event: RuntimeEvent = {
       type: 'turn.started',
       turnId: 'turn-new',
     };
     const next = reduceRuntimeState(state, event);
-    expect(next).toEqual(state);
+    expect(next.turn.turnId).toBe('turn-new');
+    expect(next.turn.turnIndex).toBe(oldTurnIndex + 1);
+    expect(next.turn.turnId).not.toBe(oldTurnId);
   });
 
   // 验证 turn.completed 不修改状态（信息性事件）

@@ -78,7 +78,7 @@ export async function* runRuntimeAgent(
 
     const turnStarted: RuntimeEvent = {
       type: 'turn.started',
-      turnId: kernel.getState().turn.turnId,
+      turnId: crypto.randomUUID(),
     };
     kernel.processEvent(turnStarted);
     collector.recordRuntime(turnStarted);

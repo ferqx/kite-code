@@ -25,7 +25,12 @@ import type {
   ThreadAuthorizationState,
 } from '@/core/types';
 import { fetchAndExtract } from '@/core/web/extractor';
-import type { AgentPhase, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
+import type {
+  AgentPhase,
+  InteractionMode,
+  ShellGrantUsed,
+  WorkspaceAccess,
+} from '@/protocol/events';
 import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
 import type { PendingToolRequest } from './tool-requests';
 import type { ToolExecutionResult } from './tool-result';
@@ -361,7 +366,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const askPolicy = createModePolicy(interactionMode);
     if (
       askPolicy.shouldAskUser({
-        interactionMode: interactionMode as 'accept_edits' | 'auto' | 'accept_edits' | 'full',
+        interactionMode: interactionMode as InteractionMode,
         phase: phase as 'planning' | 'building',
         planKind: 'building_without_plan',
         toolName: 'ask_user',

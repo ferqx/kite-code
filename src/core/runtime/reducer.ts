@@ -442,6 +442,13 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     // phase.changed — removed; phase is derived from planning.kind via getAgentPhase()
     case 'turn.started':
+      return {
+        ...state,
+        turn: {
+          turnId: event.turnId,
+          turnIndex: state.turn.turnIndex + 1,
+        },
+      };
     case 'turn.completed':
     case 'turn.aborted':
       return state;

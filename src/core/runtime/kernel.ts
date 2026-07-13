@@ -79,13 +79,8 @@ export class AgentKernel {
     // 1. 更新状态 / Update state
     this.state = reduceRuntimeState(this.state, event);
 
-    // 2. 持久化事件 / Persist event
-    this.store.appendEvents(this.state.session.threadId, [event]);
-
-    // Keep the snapshot at the same durability boundary as the append-only
-    // event log.  A process crash must not leave a newer event log behind an
-    // old (or absent) snapshot that resume would silently ignore.
-    this.store.saveSnapshot(this.state.session.threadId, this.state);
+    // 2. 原子持久化事件 + 快照 / Atomic persist events + snapshot in single transaction
+    this.store.appendEventsAndSnapshot(this.state.session.threadId, [event], this.state);
 
     if (event.type === 'run.completed') {
       this.store.saveNamedSnapshot(
@@ -138,10 +133,7 @@ export class AgentKernel {
    * v2: policy is no longer created once in constructor; re-evaluated from current state.mode each call.
    */
   getPolicy(): RuntimePolicy {
-    return createModePolicy(
-      this.state.mode as 'accept_edits' | 'accept_edits' | 'auto' | 'full',
-      this.sandboxAvailable,
-    );
+    return createModePolicy(this.state.mode as InteractionMode, this.sandboxAvailable);
   }
 
   /**

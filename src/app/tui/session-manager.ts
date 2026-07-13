@@ -322,7 +322,7 @@ export class SessionRuntime {
       decision:
         | {
             kind: 'approve';
-            nextMode: 'accept_edits' | 'accept_edits' | 'auto';
+            nextMode: 'accept_edits' | 'auto';
             clearPlanningContext: boolean;
           }
         | { kind: 'revise'; feedback: string }
