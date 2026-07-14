@@ -300,7 +300,7 @@ export class AgentKernel {
         reason,
         telemetry: {
           type: 'runtime.action_ignored',
-          interactionId: action.interactionId,
+          ...('interactionId' in action ? { interactionId: action.interactionId } : {}),
           reason,
         },
       };

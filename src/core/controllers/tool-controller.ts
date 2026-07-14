@@ -9,6 +9,10 @@ import { runApprovedTool } from '@/core/harness/tool-runner';
 import type { McpManager } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
+  type CapabilityArtifactStore,
+  defaultCapabilityArtifactStore,
+} from '@/core/persistence/capability-artifacts';
+import {
   defaultPlanArtifactStore,
   PlanArtifactError,
   type PlanArtifactStore,
@@ -272,6 +276,7 @@ export async function executeRuntimeTools(params: {
   taskModel?: SupportedChatModel;
   subagentEventSink?: SubAgentEventSink;
   planArtifactStore?: PlanArtifactStore;
+  capabilityArtifactStore?: CapabilityArtifactStore;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
 }): Promise<RuntimeEvent[]> {
@@ -287,6 +292,7 @@ export async function executeRuntimeTools(params: {
     };
   }
   const planArtifacts = params.planArtifactStore ?? defaultPlanArtifactStore;
+  const capabilityArtifacts = params.capabilityArtifactStore ?? defaultCapabilityArtifactStore;
   const emitSubagentEvent: SubAgentEventSink = (event) => {
     events.push(toRuntimeSubagentEvent(event));
     params.subagentEventSink?.(event);
@@ -1131,6 +1137,16 @@ export async function executeRuntimeTools(params: {
       descriptor: mcpDescriptor,
       flags: params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined,
     });
+    const executionRequest =
+      invocation?.idempotencyKeyArgument && invocation.idempotencyKey
+        ? ({
+            ...request,
+            args: {
+              ...request.args,
+              [invocation.idempotencyKeyArgument]: invocation.idempotencyKey,
+            },
+          } as typeof request)
+        : request;
     if (invocation) events.push(invocation.recorded);
     events.push({ type: 'tool.started', toolCallId });
     if (invocation) {
@@ -1144,7 +1160,7 @@ export async function executeRuntimeTools(params: {
     try {
       const result = await runApprovedTool({
         workspace: params.state.session.workspace,
-        request,
+        request: executionRequest,
         shellExecutor: params.shellExecutor,
         workspaceAccess: params.state.workspaceAccess,
         phase: getAgentPhase(getActivePlanning(params.state)),
@@ -1166,7 +1182,12 @@ export async function executeRuntimeTools(params: {
 
       if (invocation) {
         events.push(
-          invocationTerminalEvent(invocation.invocationId, result, new Date().toISOString()),
+          invocationTerminalEvent(
+            invocation.invocationId,
+            result,
+            new Date().toISOString(),
+            capabilityArtifacts,
+          ),
         );
       }
 
@@ -1229,6 +1250,8 @@ function createMcpInvocationRecord(params: {
 }):
   | {
       invocationId: string;
+      idempotencyKey?: string;
+      idempotencyKeyArgument?: string;
       recorded: Extract<RuntimeEvent, { type: 'capability.invocation_recorded' }>;
     }
   | undefined {
@@ -1255,8 +1278,15 @@ function createMcpInvocationRecord(params: {
     threadId: params.state.session.threadId,
     taskId: params.call.taskId ?? params.state.activeTaskId ?? null,
   });
+  const idempotencyKeyArgument = params.descriptor.execution?.idempotencyKeyArgument;
+  const idempotencyKey =
+    params.descriptor.execution?.retry === 'idempotency_key' && idempotencyKeyArgument
+      ? digestCapability({ invocationId, capabilityId: params.descriptor.capabilityId })
+      : undefined;
   return {
     invocationId,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+    ...(idempotencyKeyArgument ? { idempotencyKeyArgument } : {}),
     recorded: {
       type: 'capability.invocation_recorded',
       invocationId,
@@ -1272,6 +1302,7 @@ function createMcpInvocationRecord(params: {
       effectiveEffectsDigest: digestCapability(params.descriptor.effectiveEffects),
       effectiveEffects: params.descriptor.effectiveEffects,
       recordedAt: new Date().toISOString(),
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     },
   };
 }
@@ -1288,6 +1319,7 @@ function invocationTerminalEvent(
   invocationId: string,
   result: ToolExecutionResult,
   finishedAt: string,
+  artifactStore: CapabilityArtifactStore,
 ): Extract<
   RuntimeEvent,
   { type: 'capability.execution_succeeded' | 'capability.execution_failed' }
@@ -1317,6 +1349,13 @@ function invocationTerminalEvent(
         : undefined;
     return [uri, nestedUri].filter((value): value is string => Boolean(value));
   });
+  let artifact: import('@/protocol/capabilities').CapabilityArtifactRef | undefined;
+  try {
+    artifact = artifactStore.write(invocationId, result.capabilityResult);
+  } catch {
+    // The result remains available in the current turn, but a receipt never
+    // claims evidence that failed to reach the restricted Artifact Store.
+  }
   return {
     type: 'capability.execution_succeeded',
     invocationId,
@@ -1326,6 +1365,7 @@ function invocationTerminalEvent(
       structuredContent: result.capabilityResult.structuredContent,
     }),
     finishedAt,
+    ...(artifact ? { artifact } : {}),
     ...(externalReferences.length > 0 ? { externalReferences } : {}),
   };
 }

@@ -1,9 +1,38 @@
 import { describe, expect, test } from 'bun:test';
+import { eventsForRuntimeAction } from '../../src/core/runtime/actions';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
 
 describe('decideNextEffect', () => {
+  test('blocks scheduling until an unknown external invocation is reconciled', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.capabilities.invocations.unknown = {
+      invocationId: 'unknown',
+      toolCallId: 'mcp-call',
+      capabilityId: 'mcp:fixture/write',
+      capabilityRevision: 'revision',
+      argumentsDigest: 'args',
+      authorizationDigest: 'authorization',
+      effectiveEffectsDigest: 'effects',
+      status: 'unknown',
+      recordedAt: '2026-07-14T00:00:00.000Z',
+      finishedAt: '2026-07-14T00:00:01.000Z',
+    };
+    expect(decideNextEffect(state)).toMatchObject({
+      type: 'recovery_blocked',
+      reason: expect.stringContaining('unknown external outcome'),
+    });
+    const events = eventsForRuntimeAction(state, {
+      type: 'reconcile_invocation',
+      invocationId: 'unknown',
+      decision: 'confirmed_success',
+    });
+    const reconciled = reduceRuntimeState(state, events[0]!);
+    expect(reconciled.capabilities.invocations.unknown?.status).toBe('succeeded');
+    expect(decideNextEffect(reconciled)).toEqual({ type: 'call_model' });
+  });
+
   test('gives unresolved user interaction priority over queued tools', () => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
     state.tools.queue.push('tool');

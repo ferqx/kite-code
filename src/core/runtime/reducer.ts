@@ -331,6 +331,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         finishedAt: event.finishedAt,
         resultDigest: event.resultDigest,
         evidenceDigest: event.evidenceDigest,
+        ...(event.artifact ? { artifact: event.artifact } : {}),
         ...(event.externalReferences ? { externalReferences: event.externalReferences } : {}),
         error: undefined,
       }));
@@ -349,6 +350,18 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         status: 'unknown',
         finishedAt: event.finishedAt,
         error: event.reason,
+      }));
+
+    case 'capability.reconciliation_resolved':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) => ({
+        ...invocation,
+        status: event.decision === 'confirmed_success' ? 'succeeded' : 'failed',
+        finishedAt: event.reconciledAt,
+        reconciliation: event.decision,
+        reconciledAt: event.reconciledAt,
+        ...(event.decision === 'confirmed_success'
+          ? { error: undefined }
+          : { error: event.reason ?? 'External invocation outcome was not confirmed.' }),
       }));
 
     case 'tool.queued': {

@@ -37,6 +37,10 @@ export interface CapabilityDescriptor {
     workspaceTrustRequired: boolean;
     minimumApproval: CapabilityApproval;
   };
+  execution?: {
+    retry: 'never' | 'safe_read' | 'idempotency_key';
+    idempotencyKeyArgument?: string;
+  };
   availability: CapabilityAvailability;
   diagnostics: string[];
 }
@@ -81,9 +85,20 @@ export interface CapabilityInvocationRecord {
   finishedAt?: string;
   resultDigest?: string;
   evidenceDigest?: string;
+  artifact?: CapabilityArtifactRef;
   externalReferences?: string[];
   error?: string;
   idempotencyKey?: string;
+  reconciliation?: 'confirmed_success' | 'confirmed_failure' | 'waived';
+  reconciledAt?: string;
+}
+
+/** JSON-safe handle to an access-controlled capability result artifact. */
+export interface CapabilityArtifactRef {
+  artifactId: string;
+  relativePath: string;
+  byteLength: number;
+  digest: string;
 }
 
 /** Read-only projection of a durable invocation record for receipts and verification. */

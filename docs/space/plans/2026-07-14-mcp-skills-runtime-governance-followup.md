@@ -29,7 +29,7 @@
 
 ## Phase 2：Health、Execution Record 与恢复
 
-当前进度：实施中。已完成 health projection、熔断状态，以及受 `mcpExecutionRecordV1` 保护的 intent/terminal/unknown 事件和 receipt 投影；Artifact Store、idempotency/reconciliation 操作与 trusted provenance 生命周期仍待完成。
+当前进度：完成。已完成 health projection、熔断状态，以及受 `mcpExecutionRecordV1` 保护的 intent/terminal/unknown 事件和 receipt 投影；Artifact Store 已将受限 immutable handle 接入 success receipt。trusted provenance、稳定 idempotency key 与受控重试、unknown 的显式 reconciliation/waive 门禁均已实现，并覆盖了 restart/replay 崩溃边界。
 
 1. 将 MCP `connected` 布尔状态升级为 health projection，覆盖 connecting、discovering、ready、degraded、circuit_open 和 quarantined，以及退避/半开熔断。
 2. 新增 `capability.invocation_recorded`、started、succeeded、failed、unknown 等 Runtime events；外部写入必须在 provider call 前持久化 intent、稳定 invocation ID、authorization digest 和可选 idempotency key。

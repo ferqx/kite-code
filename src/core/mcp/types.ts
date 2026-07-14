@@ -16,6 +16,12 @@ export type McpHealthState =
   | 'circuit_open'
   | 'quarantined';
 
+/** Explicit local decision that permits only read-only server annotations. */
+export interface McpTrustedProvenance {
+  provenance: 'admin' | 'user' | 'project';
+  allowAnnotations: 'read_only';
+}
+
 /** MCP Server configuration */
 export interface McpServerConfig {
   type: McpTransportType;
@@ -25,13 +31,15 @@ export interface McpServerConfig {
   url?: string;
   headers?: Record<string, string>;
   /** Server annotations are ignored unless this explicit local trust decision is present. */
-  trust?: 'untrusted' | 'trusted';
+  trust?: 'untrusted' | 'trusted' | McpTrustedProvenance;
   /** Local policy overrides are keyed by the exact server tool name. */
   tools?: Record<
     string,
     {
       effects?: Partial<EffectProfile>;
       minimumApproval?: CapabilityApproval;
+      retry?: 'never' | 'safe_read' | 'idempotency_key';
+      idempotencyKeyArgument?: string;
     }
   >;
   /** 单次工具调用/资源读取超时（毫秒），覆盖默认值 / Per-operation timeout in ms, overrides defaults */

@@ -42,6 +42,16 @@ export function planArtifactPath(taskId: string, planId: string, version: number
   return join(planArtifactRoot(), taskId, planId, `v${version}.md`);
 }
 
+/** Root for access-controlled capability result artifacts, separate from Plan Artifacts. */
+export function capabilityArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'capability-results');
+}
+
+/** Deterministic immutable path for one governed capability invocation result. */
+export function capabilityArtifactPath(invocationId: string): string {
+  return join(capabilityArtifactRoot(), `${invocationId}.json`);
+}
+
 export function skillDirs(workspace: string): SkillScanOptions {
   return {
     projectKiteCodeSkillsDir: join(workspace, '.kite-code', 'skills'),

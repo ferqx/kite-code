@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { executeRuntimeTools, toRuntimeSubagentEvent } from '@/core/controllers/tool-controller';
 import { McpManager } from '@/core/mcp';
+import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 
@@ -85,6 +86,7 @@ describe('executeRuntimeTools', () => {
         externalState: 'write' as const,
       },
       policy: { workspaceTrustRequired: false, minimumApproval: 'user' as const },
+      execution: { retry: 'idempotency_key' as const, idempotencyKeyArgument: 'idempotency_key' },
       availability: 'available' as const,
       diagnostics: [],
     };
@@ -112,12 +114,13 @@ describe('executeRuntimeTools', () => {
     const manager = new McpManager();
     manager.findCapability = (capabilityId) =>
       capabilityId === descriptor.capabilityId ? descriptor : undefined;
-    manager.callTool = async () =>
+    manager.callTool = async (_server, _tool, args) =>
       ({
         content: [
           { type: 'resource_link', uri: 'resource://fixture/secret-argument', name: 'fixture' },
         ],
         structuredContent: { ok: true },
+        ...(typeof args.idempotency_key === 'string' ? {} : { isError: true }),
       }) as never;
     const config: AgentConfig = {
       apiKey: '',
@@ -133,11 +136,19 @@ describe('executeRuntimeTools', () => {
       },
     };
 
+    const artifactStore = new CapabilityArtifactStore();
+    artifactStore.write = () => ({
+      artifactId: 'a'.repeat(64),
+      relativePath: 'capability-results/a.json',
+      byteLength: 42,
+      digest: 'artifact-digest',
+    });
     const events = await executeRuntimeTools({
       state,
       toolCallIds: ['mcp'],
       mcpManager: manager,
       taskConfig: config,
+      capabilityArtifactStore: artifactStore,
     });
 
     const recorded = events.find((event) => event.type === 'capability.invocation_recorded');
@@ -146,6 +157,9 @@ describe('executeRuntimeTools', () => {
       capabilityRevision: descriptor.revision,
     });
     expect(JSON.stringify(recorded)).not.toContain('secret-argument');
+    expect(events.find((event) => event.type === 'capability.execution_succeeded')).toMatchObject({
+      artifact: { digest: 'artifact-digest' },
+    });
     expect(events.map((event) => event.type)).toEqual([
       'capability.invocation_recorded',
       'tool.started',

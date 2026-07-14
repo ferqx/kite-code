@@ -10,4 +10,6 @@ MCP list changes replace the immutable catalog snapshot. Existing bindings do no
 
 Remote server annotations are untrusted by default. Local per-tool policy in `mcpServers.<server>.tools.<tool>` may set effects and `minimumApproval`; only an explicitly trusted server may contribute a read-only annotation. Unknown, write and destructive MCP effects require a single-use user approval even under `full_access`.
 
+For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', allowAnnotations: 'read_only' }`. This local decision only permits a server's `readOnlyHint` to classify a tool as read-only; it cannot lower an explicit per-tool `minimumApproval` or grant new effects. The legacy `trust: 'trusted'` form remains a user-configured compatibility spelling and records no elevated provenance.
+
 MCP results retain protocol content blocks and structured content. `_meta` is not persisted. When `mcpExecutionRecordV1` is enabled, MCP calls with write, destructive or unknown effects persist intent and terminal digests; restart marks a non-terminal invocation `unknown` and never replays it automatically. Artifact handles, idempotency/reconciliation actions and verification remain deferred.

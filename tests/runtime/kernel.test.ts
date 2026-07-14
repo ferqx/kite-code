@@ -75,6 +75,60 @@ describe('AgentKernel durability', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test('persists reconciliation across a second restart without replaying the invocation', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-reconcile-'));
+    const storePath = join(dir, 'runtime.db');
+    try {
+      const first = createAgentKernel({
+        threadId: 'reconcile-recovery',
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      first.processEvent({
+        type: 'capability.invocation_recorded',
+        invocationId: 'invocation-reconcile',
+        toolCallId: 'tool-1',
+        capabilityId: 'mcp:fixture/write',
+        capabilityRevision: 'revision-1',
+        argumentsDigest: 'arguments',
+        authorizationDigest: 'authorization',
+        effectiveEffectsDigest: 'effects',
+        effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+        recordedAt: '2026-07-14T00:00:00.000Z',
+      });
+      first.close();
+
+      const recovered = createAgentKernel({
+        threadId: 'reconcile-recovery',
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      const action = recovered.applyAction({
+        type: 'reconcile_invocation',
+        invocationId: 'invocation-reconcile',
+        decision: 'confirmed_success',
+      });
+      expect(action.status).toBe('applied');
+      recovered.close();
+
+      const restored = createAgentKernel({
+        threadId: 'reconcile-recovery',
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().capabilities.invocations['invocation-reconcile']).toMatchObject({
+        status: 'succeeded',
+        reconciliation: 'confirmed_success',
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 test('runRuntimeLoop resumes a matching input action and persists its facts', async () => {

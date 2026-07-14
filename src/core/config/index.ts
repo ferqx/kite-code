@@ -46,7 +46,15 @@ const mcpServerSchema = z.object({
   url: z.string().optional(),
   env: z.record(z.string(), z.string()).optional(),
   headers: z.record(z.string(), z.string()).optional(),
-  trust: z.enum(['untrusted', 'trusted']).optional(),
+  trust: z
+    .union([
+      z.enum(['untrusted', 'trusted']),
+      z.object({
+        provenance: z.enum(['admin', 'user', 'project']),
+        allowAnnotations: z.literal('read_only'),
+      }),
+    ])
+    .optional(),
   tools: z
     .record(
       z.string(),
@@ -59,6 +67,8 @@ const mcpServerSchema = z.object({
           })
           .optional(),
         minimumApproval: z.enum(['none', 'auto_review', 'user']).optional(),
+        retry: z.enum(['never', 'safe_read', 'idempotency_key']).optional(),
+        idempotencyKeyArgument: z.string().min(1).optional(),
       }),
     )
     .optional(),
@@ -449,6 +459,20 @@ function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServerConfig
     config.headers = headers;
   }
   if (raw.trust === 'trusted' || raw.trust === 'untrusted') config.trust = raw.trust;
+  if (raw.trust && typeof raw.trust === 'object') {
+    const trust = raw.trust as Record<string, unknown>;
+    if (
+      (trust.provenance === 'admin' ||
+        trust.provenance === 'user' ||
+        trust.provenance === 'project') &&
+      trust.allowAnnotations === 'read_only'
+    ) {
+      config.trust = {
+        provenance: trust.provenance,
+        allowAnnotations: 'read_only',
+      };
+    }
+  }
   if (raw.tools && typeof raw.tools === 'object') {
     const tools: NonNullable<McpServerConfig['tools']> = {};
     for (const [toolName, rawPolicy] of Object.entries(raw.tools as Record<string, unknown>)) {
@@ -471,12 +495,20 @@ function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServerConfig
         }
       }
       const minimumApproval = policy.minimumApproval;
+      const retry = policy.retry;
+      const idempotencyKeyArgument = policy.idempotencyKeyArgument;
       tools[toolName] = {
         ...(Object.keys(normalizedEffects).length > 0 ? { effects: normalizedEffects } : {}),
         ...(minimumApproval === 'none' ||
         minimumApproval === 'auto_review' ||
         minimumApproval === 'user'
           ? { minimumApproval }
+          : {}),
+        ...(retry === 'never' || retry === 'safe_read' || retry === 'idempotency_key'
+          ? { retry }
+          : {}),
+        ...(typeof idempotencyKeyArgument === 'string' && idempotencyKeyArgument.length > 0
+          ? { idempotencyKeyArgument }
           : {}),
       };
     }

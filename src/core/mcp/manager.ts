@@ -241,17 +241,34 @@ export class McpManager {
     }
     this.assertCallable(state, server);
     const client = state.client as Client;
+    const execution = state.config.tools?.[toolName];
+    const canRetry =
+      execution?.retry === 'safe_read' ||
+      (execution?.retry === 'idempotency_key' &&
+        typeof execution.idempotencyKeyArgument === 'string' &&
+        typeof args[execution.idempotencyKeyArgument] === 'string' &&
+        args[execution.idempotencyKeyArgument] !== '');
     try {
-      const result = await client.callTool({ name: toolName, arguments: args }, undefined, {
-        timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
-      });
+      let result: CallToolResult | undefined;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < (canRetry ? 2 : 1); attempt++) {
+        try {
+          result = (await client.callTool({ name: toolName, arguments: args }, undefined, {
+            timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
+          })) as CallToolResult;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (!result) throw lastError;
       state.consecutiveCallFailures = 0;
       state.retryAt = undefined;
       state.health = 'ready';
       state.error = undefined;
       // The SDK's task-enabled overload includes an indirection result. P0 uses
       // synchronous tool calls only; the protocol result is validated by the server.
-      return result as CallToolResult;
+      return result;
     } catch (error) {
       this.noteCallFailure(state, error);
       throw error;
@@ -384,7 +401,7 @@ function createMcpToolDescriptor(
     kind: 'mcp_tool',
     displayName: tool.name,
     description: tool.description ?? `MCP tool: ${tool.name}`,
-    provider: { type: 'mcp', id: serverName, provenance: 'remote' },
+    provider: { type: 'mcp', id: serverName, provenance: trustedProvenance(config) },
     inputSchema,
     ...(tool.outputSchema ? { outputSchema: tool.outputSchema as Record<string, unknown> } : {}),
     declaredEffects,
@@ -392,6 +409,12 @@ function createMcpToolDescriptor(
     policy: {
       workspaceTrustRequired: false,
       minimumApproval: override?.minimumApproval ?? 'user',
+    },
+    execution: {
+      retry: override?.retry ?? 'never',
+      ...(override?.idempotencyKeyArgument
+        ? { idempotencyKeyArgument: override.idempotencyKeyArgument }
+        : {}),
     },
     availability: schema.ok ? 'available' : 'quarantined',
     diagnostics: schema.ok ? [] : [schema.diagnostic],
@@ -425,8 +448,23 @@ function effectsFromAnnotations(
   config: McpServerConfig,
   annotations: SdkTool['annotations'],
 ): EffectProfile {
-  if (config.trust !== 'trusted' || !annotations?.readOnlyHint) return UNKNOWN_EXTERNAL_EFFECTS;
+  if (!allowsReadOnlyAnnotations(config) || !annotations?.readOnlyHint) {
+    return UNKNOWN_EXTERNAL_EFFECTS;
+  }
   return { filesystem: 'read', network: 'read', externalState: 'read' };
+}
+
+function allowsReadOnlyAnnotations(config: McpServerConfig): boolean {
+  return (
+    config.trust === 'trusted' ||
+    (typeof config.trust === 'object' && config.trust.allowAnnotations === 'read_only')
+  );
+}
+
+function trustedProvenance(
+  config: McpServerConfig,
+): CapabilityDescriptor['provider']['provenance'] {
+  return typeof config.trust === 'object' ? config.trust.provenance : 'remote';
 }
 
 /** Create transport instance from server config */

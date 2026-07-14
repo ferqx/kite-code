@@ -58,4 +58,47 @@ describe('McpManager governance fixture', () => {
     expect(failingState.retryAt).toBeGreaterThan(Date.now());
     await expect(manager.callTool('failing', 'write', {})).rejects.toThrow('circuit is open');
   });
+
+  test('retries only an explicitly configured safe read with unchanged arguments', async () => {
+    const manager = new McpManager();
+    let calls = 0;
+    const args = { id: 'same-input' };
+    manager.getServerStates().set('retrying', {
+      config: { type: 'stdio', tools: { read: { retry: 'safe_read' } } },
+      client: {
+        callTool: async () => {
+          calls += 1;
+          if (calls === 1) throw new Error('transient failure');
+          return { content: [{ type: 'text', text: 'ok' }] };
+        },
+      },
+      tools: [],
+      prompts: [],
+      resources: [],
+      health: 'ready',
+      consecutiveCallFailures: 0,
+    });
+    await expect(manager.callTool('retrying', 'read', args)).resolves.toMatchObject({
+      content: [{ type: 'text', text: 'ok' }],
+    });
+    expect(calls).toBe(2);
+    expect(args).toEqual({ id: 'same-input' });
+  });
+
+  test('records explicit local provenance when trusting read-only annotations', async () => {
+    await manager.connect('trusted-fixture', {
+      type: 'stdio',
+      command: process.execPath,
+      args: [resolve(import.meta.dir, 'fixtures/mcp-governance-server.ts')],
+      trust: { provenance: 'admin', allowAnnotations: 'read_only' },
+    });
+    const descriptor = manager
+      .getCapabilitySnapshot()
+      .descriptors.find(
+        (candidate) => candidate.capabilityId === 'mcp:trusted-fixture/read_fixture',
+      );
+    expect(descriptor?.provider.provenance).toBe('admin');
+    expect(descriptor?.effectiveEffects.externalState).toBe('read');
+    expect(descriptor?.policy.minimumApproval).toBe('user');
+  });
 });

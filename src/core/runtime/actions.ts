@@ -61,6 +61,12 @@ function userInputCancelledEvents(
 
 /** Actions accepted by the Kernel.  They are correlated to exactly one waiting interaction. */
 export type RuntimeUserAction =
+  | {
+      type: 'reconcile_invocation';
+      invocationId: string;
+      decision: 'confirmed_success' | 'confirmed_failure' | 'waived';
+      reason?: string;
+    }
   | { type: 'input'; interactionId: string; text: string; answers?: Record<string, string> }
   | {
       type: 'approve';
@@ -98,6 +104,19 @@ export function eventsForRuntimeAction(
   action: RuntimeUserAction,
   options: { sandboxAvailable?: boolean } = {},
 ): RuntimeEvent[] {
+  if (action.type === 'reconcile_invocation') {
+    const invocation = state.capabilities.invocations[action.invocationId];
+    if (!invocation || invocation.status !== 'unknown') return [];
+    return [
+      {
+        type: 'capability.reconciliation_resolved',
+        invocationId: action.invocationId,
+        decision: action.decision,
+        reconciledAt: new Date().toISOString(),
+        ...(action.reason ? { reason: action.reason } : {}),
+      },
+    ];
+  }
   const interaction = state.interactions;
   if (interaction.kind === 'idle' || interaction.interactionId !== action.interactionId) return [];
 

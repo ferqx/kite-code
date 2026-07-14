@@ -26,6 +26,17 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       ...state.legacyUnrecoverableSubagentApproval,
     };
   }
+  const unknownInvocation = Object.values(state.capabilities.invocations).find(
+    (invocation) => invocation.status === 'unknown',
+  );
+  if (unknownInvocation) {
+    return {
+      type: 'recovery_blocked',
+      reason:
+        `Capability invocation ${unknownInvocation.invocationId} has an unknown external outcome. ` +
+        'Reconcile it or obtain a user decision before continuing.',
+    };
+  }
 
   switch (state.interactions.kind) {
     case 'awaiting_user_input':

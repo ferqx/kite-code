@@ -3,7 +3,11 @@
 // 所有状态变更通过类型化事件表示，供 runtime 内部及各层消费者使用
 
 import type { ToolGrant } from '@/core/types';
-import type { CapabilityBinding, EffectProfile } from '@/protocol/capabilities';
+import type {
+  CapabilityArtifactRef,
+  CapabilityBinding,
+  EffectProfile,
+} from '@/protocol/capabilities';
 import type {
   AgentPlan,
   AuthorizationMode,
@@ -103,6 +107,7 @@ export interface CapabilityExecutionSucceededEvent {
   resultDigest: string;
   evidenceDigest: string;
   finishedAt: string;
+  artifact?: CapabilityArtifactRef;
   externalReferences?: string[];
 }
 
@@ -119,6 +124,15 @@ export interface CapabilityExecutionUnknownEvent {
   invocationId: string;
   reason: string;
   finishedAt: string;
+}
+
+/** A user- or provider-backed reconciliation resolves an unknown external outcome. */
+export interface CapabilityReconciliationResolvedEvent {
+  type: 'capability.reconciliation_resolved';
+  invocationId: string;
+  decision: 'confirmed_success' | 'confirmed_failure' | 'waived';
+  reconciledAt: string;
+  reason?: string;
 }
 
 /** 工具调用开始执行 */
@@ -555,6 +569,7 @@ export type RuntimeEvent =
   | CapabilityExecutionSucceededEvent
   | CapabilityExecutionFailedEvent
   | CapabilityExecutionUnknownEvent
+  | CapabilityReconciliationResolvedEvent
   | ToolQueuedEvent
   | ToolStartedEvent
   | ToolProgressEvent
