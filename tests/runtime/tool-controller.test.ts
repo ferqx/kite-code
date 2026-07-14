@@ -61,6 +61,66 @@ describe('executeRuntimeTools', () => {
     ]);
   });
 
+  test('enforces an active Skill frame capability ceiling before executing a builtin', async () => {
+    let state = createInitialRuntimeState({
+      threadId: 'runtime-skill-ceiling',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state = {
+      ...state,
+      activeTaskId: 'task',
+      tasks: {
+        task: {
+          taskId: 'task',
+          userGoal: 'skill task',
+          status: 'active',
+          startedAtTurnId: state.turn.turnId,
+          sideEffectsStarted: false,
+          planning: { kind: 'building_without_plan' },
+          planHistory: [],
+        },
+      },
+      skills: {
+        catalogRevision: 'skills-r1',
+        frames: {
+          activation: {
+            activationId: 'activation',
+            skillId: 'skill:read-only',
+            skillRevision: 'skill-r1',
+            taskId: 'task',
+            input: {},
+            contextMode: 'inline',
+            agent: 'code',
+            capabilityCeiling: ['builtin:read_file'],
+            verificationMode: 'not_required',
+            requestedBy: 'user',
+            activatedAt: '2026-07-15T00:00:00.000Z',
+            status: 'active',
+          },
+        },
+      },
+    };
+    state.tools.calls.write = {
+      toolCallId: 'write',
+      modelMessageId: 'model',
+      name: 'write_file',
+      args: { path: 'blocked.txt', content: 'blocked' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('write');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['write'] });
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.rejected',
+        toolCallId: 'write',
+        reason: expect.stringContaining('capability ceiling'),
+      }),
+    ]);
+  });
+
   test('records a side-effecting MCP invocation before execution and persists only digests', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-recorded-mcp',

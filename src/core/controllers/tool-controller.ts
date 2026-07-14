@@ -1,4 +1,6 @@
-import { digestCapability } from '@/core/capabilities/catalog';
+import { lstatSync, readFileSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
+import { createBinding, digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
@@ -30,17 +32,155 @@ import {
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import { evaluateSkillActivation, type SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
 } from '@/core/subagent/continuation-codec';
 import { resumeSubAgent } from '@/core/subagent/runner';
+import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { InteractionMode, PlanArtifactRef, PlanDocument } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
+
+function skillCapabilityCeilingViolation(
+  state: RuntimeState,
+  call: import('@/core/runtime/state').ToolCallRecord,
+  request: import('@/core/harness/tool-requests').PendingToolRequest,
+): string | null {
+  const frames = Object.values(state.skills.frames).filter(
+    (frame) => frame.status === 'active' && frame.taskId === state.activeTaskId,
+  );
+  if (
+    frames.length === 0 ||
+    request.name === 'activate_skill' ||
+    request.name === 'complete_skill' ||
+    request.name === 'read_skill_reference'
+  )
+    return null;
+  const capabilityId = request.name.startsWith('mcp__')
+    ? call.capabilityId
+    : `builtin:${request.name}`;
+  if (!capabilityId || frames.some((frame) => !frame.capabilityCeiling.includes(capabilityId))) {
+    return `Skill capability ceiling does not allow '${capabilityId ?? request.name}'.`;
+  }
+  return null;
+}
+
+function forkToolCeiling(input: {
+  capabilityCeiling: string[];
+  mcpManager?: McpManager;
+  turnId: string;
+}): {
+  allowedTools: Set<string>;
+  mcpBindings: Array<{
+    binding: import('@/protocol/capabilities').CapabilityBinding;
+    descriptor: import('@/protocol/capabilities').CapabilityDescriptor;
+  }>;
+} | null {
+  const tools = new Set<string>();
+  const mcpBindings: Array<{
+    binding: import('@/protocol/capabilities').CapabilityBinding;
+    descriptor: import('@/protocol/capabilities').CapabilityDescriptor;
+  }> = [];
+  for (const capabilityId of input.capabilityCeiling) {
+    if (capabilityId.startsWith('builtin:')) {
+      tools.add(capabilityId.slice('builtin:'.length));
+      continue;
+    }
+    const descriptor = input.mcpManager?.findCapability(capabilityId);
+    if (
+      descriptor?.kind !== 'mcp_tool' ||
+      descriptor.availability !== 'available' ||
+      !descriptor.inputSchema
+    )
+      return null;
+    const binding = createBinding({
+      descriptor,
+      exposedToolName: `mcp__${descriptor.provider.id}__${descriptor.displayName}`,
+      turnId: input.turnId,
+    });
+    tools.add(binding.exposedToolName);
+    mcpBindings.push({ binding, descriptor });
+  }
+  return { allowedTools: tools, mcpBindings };
+}
+
+function forkRole(agent: string): 'explore' | 'plan' | 'code' | 'review' {
+  return agent === 'explore' || agent === 'plan' || agent === 'review' ? agent : 'code';
+}
+
+function parseForkWorkflowOutput(
+  summary: string,
+  outputSchema: Record<string, unknown>,
+): { ok: true; output: Record<string, unknown> } | { ok: false; reason: string } {
+  let output: unknown;
+  try {
+    output = JSON.parse(summary);
+  } catch {
+    return {
+      ok: false,
+      reason: 'Forked Skill must return exactly one JSON object matching its output schema.',
+    };
+  }
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    return { ok: false, reason: 'Forked Skill output must be a JSON object.' };
+  }
+  const outputError = validateCapabilityArguments(outputSchema, output as Record<string, unknown>);
+  return outputError
+    ? { ok: false, reason: outputError }
+    : { ok: true, output: output as Record<string, unknown> };
+}
+
+function readDeclaredSkillReference(input: {
+  sourcePath: string;
+  files: string[];
+  path: string;
+}): { ok: true; content: string; encoding: 'utf8' | 'base64' } | { ok: false; reason: string } {
+  const normalized = input.path.replaceAll('\\', '/');
+  if (
+    !/^(?:scripts|references|assets|evals)\//.test(normalized) ||
+    !input.files.includes(normalized) ||
+    normalized.includes('\0')
+  ) {
+    return {
+      ok: false,
+      reason: 'Skill reference is not declared by the active Workflow Contract.',
+    };
+  }
+  const root = resolve(input.sourcePath);
+  const target = resolve(root, normalized);
+  const rel = relative(root, target);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    return { ok: false, reason: 'Skill reference path escapes its Skill directory.' };
+  }
+  try {
+    const stat = lstatSync(target);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      return { ok: false, reason: 'Skill reference must be a regular non-symlink file.' };
+    }
+    if (stat.size > 128 * 1024) {
+      return {
+        ok: false,
+        reason:
+          'Skill reference exceeds the 128 KiB direct-read limit; expose it through an Artifact in a later workflow step.',
+      };
+    }
+    const content = readFileSync(target);
+    const utf8 = content.toString('utf8');
+    return Buffer.from(utf8, 'utf8').equals(content)
+      ? { ok: true, content: utf8, encoding: 'utf8' }
+      : { ok: true, content: content.toString('base64'), encoding: 'base64' };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `Unable to read Skill reference: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
 
 /** Resolve a sub-agent continuation that was rejected (user denied the approval).
  *  Emits subagent.failed + tool.finished so the TUI transitions the sub-agent block
@@ -116,6 +256,7 @@ async function handleSubAgentResume(params: {
   mcpManager?: McpManager;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
+  skillCatalog?: SkillCatalogSnapshot;
   signal?: AbortSignal;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
@@ -271,6 +412,7 @@ export async function executeRuntimeTools(params: {
   mcpManager?: McpManager;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
+  skillCatalog?: SkillCatalogSnapshot;
   signal?: AbortSignal;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
@@ -312,6 +454,11 @@ export async function executeRuntimeTools(params: {
       });
       continue;
     }
+    const ceilingViolation = skillCapabilityCeilingViolation(params.state, call, request);
+    if (ceilingViolation) {
+      events.push({ type: 'tool.rejected', toolCallId, reason: ceilingViolation });
+      continue;
+    }
     if (request.name.startsWith('mcp__')) {
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
       const binding = call.bindingId
@@ -341,6 +488,248 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
+    }
+    if (request.name === 'activate_skill') {
+      const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
+      const activation = params.skillCatalog
+        ? evaluateSkillActivation({
+            state: params.state,
+            catalog: params.skillCatalog,
+            flags,
+            request: {
+              skillId: request.args.skill_id,
+              input: request.args.input,
+              requestedBy: 'model',
+              implicit: true,
+            },
+          })
+        : { ok: false as const, reason: 'Skill catalog is unavailable.' };
+      if (!activation.ok) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: activation.reason,
+        });
+        continue;
+      }
+      if (activation.activation.contextMode === 'fork') {
+        const entry = params.skillCatalog?.entries.find(
+          (candidate) =>
+            !candidate.shadowedBy &&
+            candidate.descriptor.capabilityId === activation.activation.skillId &&
+            candidate.descriptor.revision === activation.activation.skillRevision &&
+            candidate.contract,
+        );
+        const forkCeiling = forkToolCeiling({
+          capabilityCeiling: activation.activation.capabilityCeiling,
+          mcpManager: params.mcpManager,
+          turnId: params.state.turn.turnId,
+        });
+        if (!entry?.contract || !forkCeiling || !params.taskConfig || !params.taskModel) {
+          events.push({
+            type: 'tool.rejected',
+            toolCallId,
+            reason:
+              'Forked Skill requires a current compiled contract, Runtime model, and resolvable capability bindings.',
+          });
+          continue;
+        }
+        events.push(...activation.events);
+        const result = await runTaskSubAgent(
+          {
+            config: params.taskConfig,
+            workspace: params.state.session.workspace,
+            shellExecutor: params.shellExecutor,
+            mcpManager: params.mcpManager,
+            skills: params.skillManifests,
+            skillOptions: params.skillOptions,
+            allowedTools: forkCeiling.allowedTools,
+            mcpBindings: forkCeiling.mcpBindings,
+            authorization: params.state.authorization,
+            workspaceAccess: params.state.workspaceAccess,
+            phase: getAgentPhase(getActivePlanning(params.state)),
+            threadId: params.state.session.threadId,
+            eventSink: emitSubagentEvent,
+            signal: params.signal,
+            model: params.taskModel,
+            maxDepth: 0,
+          },
+          {
+            subagent_type: forkRole(activation.activation.agent),
+            task: [
+              entry.contract.instructions,
+              '## Validated Workflow Input',
+              JSON.stringify(activation.activation.input),
+              '## Required completion format',
+              'When the work is complete, respond with only one JSON object. Do not add Markdown or commentary.',
+              `The object must validate against this output schema: ${JSON.stringify(entry.contract.outputSchema)}`,
+            ].join('\n\n'),
+          },
+        );
+        const validatedOutput = result.ok
+          ? parseForkWorkflowOutput(result.summary, entry.contract.outputSchema)
+          : { ok: false as const, reason: result.error ?? result.summary };
+        const completed = result.ok && validatedOutput.ok;
+        const failureReason = validatedOutput.ok ? undefined : validatedOutput.reason;
+        events.push({
+          type: 'skill.frame_closed',
+          activationId: activation.activation.activationId,
+          status: completed ? 'closed' : 'invalidated',
+          reason: completed
+            ? 'Forked Skill execution completed.'
+            : (failureReason ?? 'Forked Skill execution failed.'),
+          closedAt: new Date().toISOString(),
+          ...(completed ? { output: validatedOutput.output } : {}),
+        });
+        events.push({
+          type: 'tool.finished',
+          toolCallId,
+          name: request.name,
+          result: {
+            ok: completed,
+            command: request.name,
+            exitCode: completed ? 0 : -1,
+            stdout: JSON.stringify({
+              ok: completed,
+              activation_id: activation.activation.activationId,
+              skill_id: activation.activation.skillId,
+              context_mode: 'fork',
+              ...(completed ? { output: validatedOutput.output } : { summary: result.summary }),
+            }),
+            stderr: completed ? '' : (failureReason ?? 'Forked Skill execution failed.'),
+            status: completed ? 'success' : 'error',
+          },
+        });
+        continue;
+      }
+      events.push(...activation.events);
+      events.push({
+        type: 'tool.finished',
+        toolCallId,
+        name: request.name,
+        result: {
+          ok: true,
+          command: request.name,
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            activation_id: activation.activation.activationId,
+            skill_id: activation.activation.skillId,
+            context_mode: activation.activation.contextMode,
+          }),
+          stderr: '',
+        },
+      });
+      continue;
+    }
+    if (request.name === 'read_skill_reference') {
+      const frame = params.state.skills.frames[request.args.activation_id];
+      const entry =
+        frame &&
+        params.skillCatalog?.entries.find(
+          (candidate) =>
+            !candidate.shadowedBy &&
+            candidate.descriptor.capabilityId === frame.skillId &&
+            candidate.descriptor.revision === frame.skillRevision &&
+            candidate.contract,
+        );
+      if (
+        frame?.status !== 'active' ||
+        frame.taskId !== params.state.activeTaskId ||
+        !entry?.contract
+      ) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'Skill frame is unavailable or changed.',
+        });
+        continue;
+      }
+      const reference = readDeclaredSkillReference({
+        sourcePath: entry.sourcePath,
+        files: entry.contract.files,
+        path: request.args.path,
+      });
+      if (!reference.ok) {
+        events.push({ type: 'tool.rejected', toolCallId, reason: reference.reason });
+        continue;
+      }
+      events.push({
+        type: 'tool.finished',
+        toolCallId,
+        name: request.name,
+        result: {
+          ok: true,
+          command: request.name,
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            activation_id: frame.activationId,
+            path: request.args.path,
+            encoding: reference.encoding,
+            content: reference.content,
+          }),
+          stderr: '',
+        },
+      });
+      continue;
+    }
+    if (request.name === 'complete_skill') {
+      const frame = params.state.skills.frames[request.args.activation_id];
+      const entry =
+        frame &&
+        params.skillCatalog?.entries.find(
+          (candidate) =>
+            !candidate.shadowedBy &&
+            candidate.descriptor.capabilityId === frame.skillId &&
+            candidate.descriptor.revision === frame.skillRevision &&
+            candidate.contract,
+        );
+      const outputError = entry?.contract
+        ? validateCapabilityArguments(entry.contract.outputSchema, request.args.output)
+        : 'Skill frame is unavailable or changed.';
+      if (frame?.status !== 'active' || frame.taskId !== params.state.activeTaskId || outputError) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: outputError ?? 'Skill frame is not active.',
+        });
+        continue;
+      }
+      events.push({
+        type: 'skill.frame_closed',
+        activationId: frame.activationId,
+        status: 'closed',
+        reason: 'Workflow completed with validated structured output.',
+        closedAt: new Date().toISOString(),
+        output: request.args.output,
+      });
+      events.push({
+        type: 'tool.finished',
+        toolCallId,
+        name: request.name,
+        result: {
+          ok: true,
+          command: request.name,
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            activation_id: frame.activationId,
+            output: request.args.output,
+          }),
+          stderr: '',
+        },
+      });
+      continue;
+    }
+    if (request.name === 'Skill') {
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason:
+          'Legacy prompt Skill loading is retired. Use a Runtime Workflow Contract activation.',
+      });
+      continue;
     }
     if (request.name === 'ask_user') {
       const hasQuestion = request.args.question.trim().length > 0;

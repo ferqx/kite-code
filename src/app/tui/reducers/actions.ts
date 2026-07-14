@@ -63,8 +63,6 @@ export type Action =
   | { type: 'REVERT_TO_CHECKPOINT'; checkpointId: string }
   | { type: 'FORK_FROM_CHECKPOINT'; checkpointId: string }
   | { type: 'SET_CHECKPOINTS'; checkpoints: RuntimeSnapshotEntry[] }
-  | { type: 'ACTIVATE_SKILL'; name: string; content: string }
-  | { type: 'DEACTIVATE_SKILL' }
   | { type: 'LIST_SKILLS' }
   | { type: 'SET_SKILL_MANIFESTS'; manifests: import('@/core/skills/types').SkillManifest[] }
   | { type: 'SWITCH_SESSION'; threadId: string }

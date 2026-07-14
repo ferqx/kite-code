@@ -11,6 +11,29 @@ import type { ShellApprovalGrant, UserInputOption, UserInputRequest } from '@/pr
 /** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
 export type PendingToolRequest =
   | {
+      /** Reads a declared non-prompt Skill file through an active Runtime frame. */
+      id?: string;
+      name: 'read_skill_reference';
+      args: { activation_id: string; path: string };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
+      id?: string;
+      name: 'complete_skill';
+      args: { activation_id: string; output: Record<string, unknown> };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
+      /** Runtime-mediated Workflow Contract activation request. */
+      id?: string;
+      name: 'activate_skill';
+      args: { skill_id: string; input: Record<string, unknown> };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
       name: 'search_content';
@@ -443,6 +466,54 @@ export function toolRequestFromCall(
       args: { skill: args.skill || '' },
       reason: 'Model requested Skill tool',
       protectedCommand: 'Skill',
+    };
+  }
+
+  if (call.name === 'activate_skill') {
+    const args = call.args as { skill_id?: unknown; input?: unknown };
+    return {
+      id: call.id,
+      name: 'activate_skill',
+      args: {
+        skill_id: typeof args.skill_id === 'string' ? args.skill_id : '',
+        input:
+          args.input && typeof args.input === 'object' && !Array.isArray(args.input)
+            ? (args.input as Record<string, unknown>)
+            : {},
+      },
+      reason: 'Model requested Skill Workflow activation',
+      protectedCommand: 'activate_skill',
+    };
+  }
+
+  if (call.name === 'complete_skill') {
+    const args = call.args as { activation_id?: unknown; output?: unknown };
+    return {
+      id: call.id,
+      name: 'complete_skill',
+      args: {
+        activation_id: typeof args.activation_id === 'string' ? args.activation_id : '',
+        output:
+          args.output && typeof args.output === 'object' && !Array.isArray(args.output)
+            ? (args.output as Record<string, unknown>)
+            : {},
+      },
+      reason: 'Model completed a Skill Workflow',
+      protectedCommand: 'complete_skill',
+    };
+  }
+
+  if (call.name === 'read_skill_reference') {
+    const args = call.args as { activation_id?: unknown; path?: unknown };
+    return {
+      id: call.id,
+      name: 'read_skill_reference',
+      args: {
+        activation_id: typeof args.activation_id === 'string' ? args.activation_id : '',
+        path: typeof args.path === 'string' ? args.path : '',
+      },
+      reason: 'Model requested an active Skill reference',
+      protectedCommand: 'read_skill_reference',
     };
   }
 

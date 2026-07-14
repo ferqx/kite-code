@@ -7,12 +7,6 @@ export function skillReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
     case 'SET_SKILL_MANIFESTS':
       return { ...state, skillManifests: action.manifests };
-    case 'ACTIVATE_SKILL': {
-      const content = `[SKILL: ${action.name}]\n\n${action.content}\n\n---\n\n`;
-      return { ...state, pendingSkills: [...state.pendingSkills, content] };
-    }
-    case 'DEACTIVATE_SKILL':
-      return { ...state, pendingSkills: [] };
     case 'LIST_SKILLS': {
       const block: OutputBlock =
         state.skillManifests.length === 0

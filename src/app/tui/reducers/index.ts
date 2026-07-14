@@ -50,12 +50,7 @@ const CHECKPOINT_ACTIONS: ReadonlySet<string> = new Set([
   'SET_CHECKPOINTS',
 ]);
 
-const SKILL_ACTIONS: ReadonlySet<string> = new Set([
-  'SET_SKILL_MANIFESTS',
-  'ACTIVATE_SKILL',
-  'DEACTIVATE_SKILL',
-  'LIST_SKILLS',
-]);
+const SKILL_ACTIONS: ReadonlySet<string> = new Set(['SET_SKILL_MANIFESTS', 'LIST_SKILLS']);
 
 // AGENT_ACTIONS：剩余所有非 RuntimeEvent action（SET_RUNNING, SET_IDLE, SET_EXITED,
 // RESOLVE_INTERRUPT, SWITCH_AUTH, EXPORT_SESSION,

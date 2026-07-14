@@ -1,6 +1,8 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
+import { digestCapability } from '@/core/capabilities/catalog';
+import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import {
   type ExecutionJournalEntry,
   isFingerprintExhausted,
@@ -85,6 +87,34 @@ function normalizeSubAgentToolArgs(
     return { ...args, path: rel || '.' };
   }
   return args;
+}
+
+function mcpBindingError(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  mcpManager?: SubAgentRunnerInput['mcpManager'];
+  bindings: Map<string, NonNullable<SubAgentRunnerInput['mcpBindings']>[number]>;
+}): string | null {
+  const entry = input.bindings.get(input.toolName);
+  if (!entry) return 'MCP tool call has no Runtime-issued binding for this sub-agent.';
+  const { binding } = entry;
+  const descriptor = input.mcpManager?.findCapability(binding.capabilityId);
+  if (
+    binding.exposedToolName !== input.toolName ||
+    !descriptor ||
+    descriptor.revision !== binding.capabilityRevision
+  ) {
+    return 'MCP capability changed after its binding was issued; request a new Runtime turn.';
+  }
+  if (
+    descriptor.kind !== 'mcp_tool' ||
+    descriptor.availability !== 'available' ||
+    !descriptor.inputSchema ||
+    binding.schemaDigest !== digestCapability(descriptor.inputSchema)
+  ) {
+    return 'MCP capability is unavailable for execution.';
+  }
+  return validateCapabilityArguments(descriptor.inputSchema, input.args);
 }
 
 function approvalRequiredBlock(
@@ -274,8 +304,12 @@ async function runSubAgentLoop(
     mcpManager: input.mcpManager,
     skills: input.skills,
     skillOptions: input.skillOptions,
+    mcpBindings: input.mcpBindings,
     signal: combinedSignal,
   });
+  const mcpBindings = new Map(
+    (input.mcpBindings ?? []).map((entry) => [entry.binding.exposedToolName, entry]),
+  );
   const depth = input.depth ?? 0;
   const maxDepth = input.maxDepth ?? 0;
   const canSpawnSubAgents = depth < maxDepth;
@@ -421,6 +455,40 @@ async function runSubAgentLoop(
             toolArgs,
           },
         });
+
+        if (tc.name.startsWith('mcp__')) {
+          const bindingError = mcpBindingError({
+            toolName: tc.name,
+            args: toolArgs,
+            mcpManager: input.mcpManager,
+            bindings: mcpBindings,
+          });
+          if (bindingError) {
+            const blockedOutput = JSON.stringify({ ok: false, error: bindingError });
+            messages.push(
+              toolMessage({
+                content: blockedOutput,
+                tool_call_id: tc.id ?? '',
+                name: tc.name,
+                status: 'error',
+              }),
+            );
+            stepSnapshot.ok = false;
+            stepSnapshot.status = 'error';
+            input.eventSink({
+              type: 'tool_result',
+              data: {
+                id,
+                toolName: tc.name,
+                ok: false,
+                summary: bindingError,
+                durationMs: 0,
+                failureReason: 'invalid_mcp_binding',
+              },
+            });
+            continue;
+          }
+        }
 
         toolCallCount++;
 

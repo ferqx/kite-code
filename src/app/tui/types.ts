@@ -177,7 +177,6 @@ export interface TuiState {
   showRewind: boolean;
   checkpoints: import('@/core/runtime/store').RuntimeSnapshotEntry[];
   rewindCounter: number;
-  pendingSkills: string[];
   skillManifests: import('@/core/skills/types').SkillManifest[];
   ctrlCPressed: boolean;
   sessionKey: number;

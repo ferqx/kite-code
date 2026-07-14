@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import type { SandboxBackend } from '@/core/sandbox';
 import { SessionLogCollector } from '@/core/session-logger';
+import { evaluateSkillActivation, refreshSkillCatalog } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationSource } from '@/core/types';
@@ -28,6 +30,8 @@ export interface RunRuntimeAgentInput {
   mcpManager?: McpManager;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
+  /** Explicit user-requested Workflow Contract activations for the initial task. */
+  initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>;
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
@@ -116,6 +120,42 @@ export async function* runRuntimeAgent(
       kernel.processEvent(turnStarted);
       collector.recordRuntime(turnStarted);
       yield turnStarted;
+
+      if (input.initialSkillActivations && input.initialSkillActivations.length > 0) {
+        const catalog = input.skillOptions ? refreshSkillCatalog(input.skillOptions) : undefined;
+        for (const requested of input.initialSkillActivations) {
+          const evaluation = catalog
+            ? evaluateSkillActivation({
+                state: kernel.getState(),
+                catalog,
+                flags: getFeatureFlags(input.config),
+                request: {
+                  skillId: requested.skillId,
+                  input: requested.input,
+                  requestedBy: 'user',
+                  implicit: false,
+                },
+              })
+            : { ok: false as const, reason: 'Skill catalog is unavailable.' };
+          if (!evaluation.ok) {
+            const failed: RuntimeEvent = {
+              type: 'run.error',
+              message: `Skill activation rejected: ${evaluation.reason}`,
+              recoverable: false,
+              turnId: kernel.getState().turn.turnId,
+            };
+            kernel.processEvent(failed);
+            collector.recordRuntime(failed);
+            yield failed;
+            return;
+          }
+          kernel.processEvents(evaluation.events);
+          for (const event of evaluation.events) {
+            collector.recordRuntime(event);
+            yield event;
+          }
+        }
+      }
     }
 
     const executor = createRuntimeEffectExecutor({

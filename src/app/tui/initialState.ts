@@ -48,7 +48,6 @@ export const initialState: TuiState = {
   explorationSummaryIds: {},
   currentThoughtSummaryId: undefined,
   interactionMode: 'accept_edits',
-  pendingSkills: [],
   skillManifests: [],
 };
 

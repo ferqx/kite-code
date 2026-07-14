@@ -1,7 +1,8 @@
 import { dynamicTool, jsonSchema, type ToolSet, tool, zodSchema } from 'ai';
 import { z } from 'zod';
+import { getFeatureFlags } from '@/core/config/features';
 import type { SupportedChatModel } from '@/core/model/factory';
-import { createSkillTool } from '@/core/skills/skill-tool';
+import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import { createTaskTool } from '@/core/subagent/task-tool';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
@@ -37,6 +38,9 @@ export interface CreateAgentToolsInput {
   skills?: import('@/core/skills/types').SkillManifest[];
   /** 可选技能扫描选项 / Optional skill scan options */
   skillOptions?: import('@/core/skills/types').SkillScanOptions;
+  /** Compiled Workflow Contract catalog for this model request. */
+  skillCatalog?: SkillCatalogSnapshot;
+  activeSkillFrames?: Array<{ activationId: string }>;
   /** Agent 配置（task 工具创建模型实例时需要） */
   config?: import('@/core/config/index').AgentConfig;
   /** 子 agent 事件回调（用于 task 工具） */
@@ -91,7 +95,11 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
         commandGrants: input.authorization.commandGrants ?? {},
       })
     : '';
-  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpBindingRevision}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
+  const activeSkillFrameKey = (input.activeSkillFrames ?? [])
+    .map((frame) => frame.activationId)
+    .sort()
+    .join(',');
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpBindingRevision}|${input.skillCatalog?.revision ?? ''}|${activeSkillFrameKey}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
   const readFileTool = tool({
@@ -265,10 +273,58 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     },
   });
 
-  let skillTool: ReturnType<typeof createSkillTool> | null = null;
-  if (input.skills && input.skills.length > 0 && input.skillOptions) {
-    skillTool = createSkillTool(input.skills, input.skillOptions);
-  }
+  const skillActivationEnabled =
+    Boolean(input.config) &&
+    getFeatureFlags(input.config).skillWorkflowV1 &&
+    getFeatureFlags(input.config).skillActivationV2 &&
+    Boolean(
+      input.skillCatalog?.capabilities.descriptors.some(
+        (item) => item.availability === 'available',
+      ),
+    );
+  const activateSkillTool = skillActivationEnabled
+    ? dynamicTool({
+        description:
+          'Request activation of a compiled Skill Workflow Contract. The Runtime validates the Skill, its input, revision and activation policy; this tool does not load arbitrary prompt text.',
+        inputSchema: zodSchema(
+          z.object({
+            skill_id: z
+              .string()
+              .min(1)
+              .describe('Capability ID of the skill, for example skill:read-report'),
+            input: z
+              .record(z.string(), z.unknown())
+              .describe('Object input required by the Skill contract'),
+          }),
+        ),
+      })
+    : null;
+  const completeSkillTool =
+    input.activeSkillFrames && input.activeSkillFrames.length > 0
+      ? dynamicTool({
+          description:
+            'Complete an active inline Skill Workflow with structured output. Runtime validates it against the compiled output schema.',
+          inputSchema: zodSchema(
+            z.object({
+              activation_id: z.string().min(1),
+              output: z.record(z.string(), z.unknown()),
+            }),
+          ),
+        })
+      : null;
+  const readSkillReferenceTool =
+    input.activeSkillFrames && input.activeSkillFrames.length > 0
+      ? dynamicTool({
+          description:
+            'Read a declared scripts/, references/, assets/, or evals/ file from an active Skill on demand. Runtime permits only a file belonging to the current, revision-checked Skill Contract.',
+          inputSchema: zodSchema(
+            z.object({
+              activation_id: z.string().min(1),
+              path: z.string().min(1),
+            }),
+          ),
+        })
+      : null;
 
   const taskTool =
     input.subagentEventSink && input.config
@@ -379,7 +435,9 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     search_files: searchFiles,
     read_mcp_resource: readMcpResource,
     web_fetch: webFetchTool,
-    ...(skillTool ? { Skill: skillTool } : {}),
+    ...(activateSkillTool ? { activate_skill: activateSkillTool } : {}),
+    ...(completeSkillTool ? { complete_skill: completeSkillTool } : {}),
+    ...(readSkillReferenceTool ? { read_skill_reference: readSkillReferenceTool } : {}),
     ...(taskTool ? { task: taskTool } : {}),
     write_plan: createWritePlanTool(),
     update_plan: createProgressUpdatePlanTool(),

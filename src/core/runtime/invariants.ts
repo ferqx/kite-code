@@ -120,4 +120,21 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       'auto review interaction must reference an awaiting_auto_review tool.',
     );
   }
+  for (const frame of Object.values(state.skills.frames)) {
+    assert(
+      state.tasks[frame.taskId] != null,
+      `Skill frame ${frame.activationId} references a missing task.`,
+    );
+    if (frame.status === 'active') {
+      assert(
+        !frame.closedAt && !frame.closeReason,
+        `Active Skill frame ${frame.activationId} is closed.`,
+      );
+    } else {
+      assert(
+        Boolean(frame.closedAt && frame.closeReason),
+        `Closed Skill frame ${frame.activationId} lacks closure facts.`,
+      );
+    }
+  }
 }

@@ -151,10 +151,13 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   const mcpManagerRef = React.useRef<McpManager | null>(null);
   const skillManifestsRef = React.useRef<SkillManifest[]>([]);
   const skillOptionsRef = React.useRef<SkillScanOptions | null>(null);
-  const pendingSkillsRef = React.useRef<string[]>([]);
-  const runTaskRef = React.useRef<(task: string, requestedPhase?: AgentPhase) => Promise<void>>(
-    async () => {},
-  );
+  const runTaskRef = React.useRef<
+    (
+      task: string,
+      requestedPhase?: AgentPhase,
+      initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
+    ) => Promise<void>
+  >(async () => {});
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
   const interruptClearedByResolutionRef = React.useRef(false);
 
@@ -252,11 +255,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
 
   // Skills loader: scan on mount
   useSkillsLoader(workspace, dispatch, skillManifestsRef, skillOptionsRef, sessionManager);
-
-  // Keep pendingSkills ref in sync for use in runTask callback
-  React.useEffect(() => {
-    pendingSkillsRef.current = state.pendingSkills;
-  }, [state.pendingSkills]);
 
   // 将 thinkingLevel ref 与 state.status.thinkingMode 同步，确保 ModelSelector 切换后 runTask 拿到最新值
   // Sync thinkingLevel ref with state.status.thinkingMode so runTask uses latest value after ModelSelector changes
@@ -570,9 +568,16 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     ],
   );
 
-  const runTaskBridge = React.useCallback((task: string, requestedPhase?: AgentPhase) => {
-    runTaskRef.current?.(task, requestedPhase);
-  }, []);
+  const runTaskBridge = React.useCallback(
+    (
+      task: string,
+      requestedPhase?: AgentPhase,
+      initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
+    ) => {
+      runTaskRef.current?.(task, requestedPhase, initialSkillActivations);
+    },
+    [],
+  );
 
   const enterPlanMode = React.useCallback(() => {
     const events = sessionManager.enterPlanningMode(threadIdRef.current);
@@ -662,19 +667,21 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   }, [state.running, state.ctrlCPressed, sessionManager]);
 
   const runTask = React.useCallback(
-    async (task: string, requestedPhase?: AgentPhase) => {
+    async (
+      task: string,
+      requestedPhase?: AgentPhase,
+      initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
+    ) => {
       const threadId = threadIdRef.current;
       const rt = sessionManager.getRuntime(threadId);
       if (!rt || rt.agentLoopActive) return;
 
       // 将 React 层 per-session 状态同步到 Runtime / Sync React-layer per-session state to runtime
-      rt.pendingSkills = [...pendingSkillsRef.current];
       rt.thinkingLevel = thinkingLevelRef.current;
       rt.interactionMode = interactionModeRef.current;
       rt.conversationHistory = [...conversationHistoryRef.current];
 
       dispatch({ type: 'SET_RUNNING' });
-      dispatch({ type: 'DEACTIVATE_SKILL' }); // clear after capture into runtime
 
       // Update running state — agentLoopActive is managed by SessionRuntime.runTask internally
       sessionManager.onStatusChange(threadId);
@@ -690,6 +697,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
             model: injectModel,
           },
           requestedPhase,
+          initialSkillActivations,
         );
       } finally {
         // Only dispatch global state changes if this session is still active.

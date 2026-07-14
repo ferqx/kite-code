@@ -230,6 +230,33 @@ export interface CapabilityRuntimeState {
   invocations: Record<string, CapabilityInvocationRecord>;
 }
 
+export interface SkillActivation {
+  activationId: string;
+  skillId: string;
+  skillRevision: string;
+  taskId: string;
+  input: unknown;
+  contextMode: 'inline' | 'fork';
+  agent: string;
+  capabilityCeiling: string[];
+  verificationMode: 'not_required' | 'best_effort' | 'required';
+  requestedBy: 'user' | 'model';
+  activatedAt: string;
+}
+
+export interface SkillFrame extends SkillActivation {
+  status: 'active' | 'closed' | 'invalidated';
+  closedAt?: string;
+  closeReason?: string;
+  output?: Record<string, unknown>;
+}
+
+/** Event-sourced skill activation projection. Skill content remains in the immutable catalog, not state. */
+export interface SkillRuntimeState {
+  catalogRevision: string;
+  frames: Record<string, SkillFrame>;
+}
+
 // ── 工具运行时状态 / Tool runtime state ──
 
 /**
@@ -266,7 +293,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 7;
+export const RUNTIME_STATE_SCHEMA_VERSION = 8;
 
 export type RuntimeRecoveryState =
   | { kind: 'normal' }
@@ -322,6 +349,7 @@ export interface RuntimeState {
   /** 工具运行时状态 / Tool runtime state */
   tools: ToolRuntimeState;
   capabilities: CapabilityRuntimeState;
+  skills: SkillRuntimeState;
   /** Paused subagents keyed by their parent task tool call. */
   suspendedSubagents: Record<string, SuspendedSubagentSnapshot>;
   /** One-shot notice for a legacy subagent approval that cannot be resumed. */
@@ -408,6 +436,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       active: [],
     },
     capabilities: { catalogRevision: '', bindings: {}, invocations: {} },
+    skills: { catalogRevision: '', frames: {} },
     suspendedSubagents: {},
     authorization: {
       mode: input.authorizationMode ?? 'default',

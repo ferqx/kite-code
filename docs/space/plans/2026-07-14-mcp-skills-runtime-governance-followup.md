@@ -42,6 +42,8 @@
 
 ## Phase 3：Skill Workflow Compiler 与 Activation
 
+当前进度：完成。已引入完整 YAML parser 与 `compileSkillWorkflow()`，以严格 manifest 字段、对象根 JSON Schema、路径边界、风险隐式激活和依赖解析生成可诊断的 `skill` capability；revision 覆盖 Skill 目录中的所有文件与当前依赖 revision。catalog 已接入 Runtime 的 revision、activation/frame 事件与持久状态：模型只可请求受 flag 保护的 `activate_skill`，旧 `Skill` 调用被拒绝，CLI/TUI 均改为发送显式 activation 而不拼接正文；同 revision 的 inline contract 才进入模型上下文，catalog drift 会使 frame 失效。active frame 的 capability ceiling 已在每次工具执行前强制检查，inline 与 fork 均须以 `output_schema` 校验的结构化结果关闭 frame。fork contract 在隔离 subagent 中执行，将 ceiling 下推为工具 allowlist；其 MCP binding 在实际调用前重新验证 capability revision、schema digest 与参数，变化或不可用时 fail closed。supporting files 仅披露路径，模型须以受 active frame、revision、声明目录和大小限制约束的 `read_skill_reference` 按需读取，绝不将大型内容截断后注入 prompt。Verifier 的执行语义仍留在 Phase 4。
+
 1. 以标准 YAML parser 和严格版本化 schema 编译 `SKILL.md` Workflow Contract；校验输入/输出 schema、依赖 capability revision、effects、approval、脚本、references/assets/evals，并输出结构化 diagnostics。
 2. 将 Skill 注册为 catalog capability，计算覆盖 manifest、正文、脚本和资源的 revision；损坏 Skill 可诊断但不可激活，依赖 revision 变化使旧 activation 失效。
 3. 新增 activation/frame Runtime events 和 durable state；显式用户调用或模型工具请求都经 input validation、capability ceiling 与全局 policy；实现 manifest 声明的 `inline`/`fork` context mode。

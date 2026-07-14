@@ -2,7 +2,6 @@ import type { Dispatch } from 'react';
 import { useCallback } from 'react';
 import { listAvailableModels } from '@/core/config';
 import type { SandboxBackend } from '@/core/sandbox';
-import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { AgentPhase } from '@/protocol/events';
 import { admitInteractionModeTarget, resolveInteractionModeTarget } from '../interaction-mode';
@@ -74,8 +73,12 @@ export function useSlashCommand(
     { server: string; prompt: { name: string; description?: string; arguments?: any[] } }
   >,
   skillManifests?: SkillManifest[],
-  skillOptions?: SkillScanOptions,
-  onRunTask?: (task: string, requestedPhase?: AgentPhase) => void,
+  _skillOptions?: SkillScanOptions,
+  onRunTask?: (
+    task: string,
+    requestedPhase?: AgentPhase,
+    initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
+  ) => void,
   onEnterPlanMode?: () => void,
   onTheme?: (preset: string) => void,
   currentInteractionMode: 'accept_edits' | 'auto' | 'full' = 'accept_edits',
@@ -180,24 +183,15 @@ export function useSlashCommand(
           }
           // Check skills
           const raw = action.raw;
-          if (action.type === 'unknown' && skillManifests && skillOptions) {
+          if (action.type === 'unknown' && skillManifests && _skillOptions) {
             const parts = raw.slice(1).trim().split(/\s+/);
             const skillName = parts[0]!;
             const matched = skillManifests.find((s) => s.name === skillName);
             if (matched) {
-              const skillResult = getSkillContent(skillManifests, skillName, skillOptions);
-              if (skillResult) {
-                const taskPart = parts.slice(1).join(' ');
-                dispatch({
-                  type: 'ACTIVATE_SKILL',
-                  name: skillResult.name,
-                  content: skillResult.content,
-                });
-                if (taskPart && onRunTask) {
-                  const combined = `${skillResult.content}\n\n---\n\nUser task: ${taskPart}`;
-                  onRunTask(combined);
-                }
-              }
+              const taskPart = parts.slice(1).join(' ');
+              onRunTask?.(taskPart || `Run the ${matched.name} Skill Workflow.`, undefined, [
+                { skillId: `skill:${matched.name}`, input: {} },
+              ]);
               return true;
             }
           }
@@ -211,7 +205,7 @@ export function useSlashCommand(
       onExit,
       mcpPromptRegistry,
       skillManifests,
-      skillOptions,
+      _skillOptions,
       onRunTask,
       onEnterPlanMode,
       onTheme,

@@ -289,6 +289,49 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
     }
 
+    case 'skill.catalog_refreshed':
+      return {
+        ...state,
+        skills: { ...state.skills, catalogRevision: event.catalogRevision },
+      };
+
+    case 'skill.activation_started': {
+      const activation = event.activation;
+      if (state.skills.frames[activation.activationId]) return state;
+      if (state.activeTaskId !== activation.taskId) return state;
+      return {
+        ...state,
+        skills: {
+          ...state.skills,
+          frames: {
+            ...state.skills.frames,
+            [activation.activationId]: { ...activation, status: 'active' },
+          },
+        },
+      };
+    }
+
+    case 'skill.frame_closed': {
+      const frame = state.skills.frames[event.activationId];
+      if (frame?.status !== 'active') return state;
+      return {
+        ...state,
+        skills: {
+          ...state.skills,
+          frames: {
+            ...state.skills.frames,
+            [event.activationId]: {
+              ...frame,
+              status: event.status,
+              closedAt: event.closedAt,
+              closeReason: event.reason,
+              ...(event.output ? { output: event.output } : {}),
+            },
+          },
+        },
+      };
+    }
+
     case 'capability.invocation_recorded': {
       if (state.capabilities.invocations[event.invocationId]) return state;
       return {

@@ -1914,42 +1914,6 @@ describe('eventReducer (blocks model)', () => {
     });
   });
 
-  describe('ACTIVATE_SKILL', () => {
-    test('adds skill content to pendingSkills', () => {
-      const state = createInitialState();
-      const next = eventReducer(state, {
-        type: 'ACTIVATE_SKILL',
-        name: 'tdd',
-        content: 'Always test first.',
-      });
-      expect(next.pendingSkills).toHaveLength(1);
-      expect(next.pendingSkills[0]).toContain('[SKILL: tdd]');
-      expect(next.pendingSkills[0]).toContain('Always test first.');
-    });
-
-    test('appends multiple skills in activation order', () => {
-      const state = createInitialState();
-      const s1 = eventReducer(state, { type: 'ACTIVATE_SKILL', name: 'a', content: 'A' });
-      const s2 = eventReducer(s1, { type: 'ACTIVATE_SKILL', name: 'b', content: 'B' });
-      expect(s2.pendingSkills).toHaveLength(2);
-      expect(s2.pendingSkills[0]).toContain('[SKILL: a]');
-      expect(s2.pendingSkills[1]).toContain('[SKILL: b]');
-    });
-  });
-
-  describe('DEACTIVATE_SKILL', () => {
-    test('clears pendingSkills', () => {
-      const state = createInitialState();
-      const withSkills = eventReducer(state, {
-        type: 'ACTIVATE_SKILL',
-        name: 'tdd',
-        content: 'test',
-      });
-      const cleared = eventReducer(withSkills, { type: 'DEACTIVATE_SKILL' });
-      expect(cleared.pendingSkills).toEqual([]);
-    });
-  });
-
   describe('LIST_SKILLS', () => {
     test('adds text block listing all skills', () => {
       const state: TuiState = {

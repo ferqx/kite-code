@@ -25,6 +25,7 @@ import type {
 } from '@/protocol/events.js';
 import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
 import type { ClassifiedFailure } from './failures';
+import type { SkillActivation } from './state';
 
 /** Runtime event metadata used for idempotency, tracing and stale-result checks. */
 export interface RuntimeEventEnvelope {
@@ -75,6 +76,28 @@ export interface CapabilityBindingsIssuedEvent {
   type: 'capability.bindings_issued';
   catalogRevision: string;
   bindings: CapabilityBinding[];
+}
+
+/** The immutable Skill catalog observed by the Runtime for activation validation. */
+export interface SkillCatalogRefreshedEvent {
+  type: 'skill.catalog_refreshed';
+  catalogRevision: string;
+}
+
+/** A validated Workflow Contract activation creates a durable Runtime frame. */
+export interface SkillActivationStartedEvent {
+  type: 'skill.activation_started';
+  activation: SkillActivation;
+}
+
+/** A frame is closed once its work is terminal, or invalidated after catalog drift. */
+export interface SkillFrameClosedEvent {
+  type: 'skill.frame_closed';
+  activationId: string;
+  status: 'closed' | 'invalidated';
+  reason: string;
+  closedAt: string;
+  output?: Record<string, unknown>;
 }
 
 /** A side-effecting capability has a durable intent before provider execution begins. */
@@ -564,6 +587,9 @@ export interface SubagentSuspendedEvent {
 /** 运行时事件 — 所有状态变更的统一类型表示 */
 export type RuntimeEvent =
   | CapabilityBindingsIssuedEvent
+  | SkillCatalogRefreshedEvent
+  | SkillActivationStartedEvent
+  | SkillFrameClosedEvent
   | CapabilityInvocationRecordedEvent
   | CapabilityExecutionStartedEvent
   | CapabilityExecutionSucceededEvent

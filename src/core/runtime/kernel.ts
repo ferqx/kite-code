@@ -579,6 +579,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
       bindings: snapshot.capabilities?.bindings ?? {},
       invocations: snapshot.capabilities?.invocations ?? {},
     },
+    skills: snapshot.skills ?? { catalogRevision: '', frames: {} },
     ...(legacyMarker ? { legacyUnrecoverableSubagentApproval: legacyMarker } : {}),
   };
 

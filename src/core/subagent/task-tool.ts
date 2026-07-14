@@ -16,6 +16,11 @@ export interface TaskToolDeps {
   mcpManager?: McpManager;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
+  allowedTools?: Set<string>;
+  mcpBindings?: Array<{
+    binding: import('@/protocol/capabilities').CapabilityBinding;
+    descriptor: import('@/protocol/capabilities').CapabilityDescriptor;
+  }>;
   authorization?: import('@/core/types').ThreadAuthorizationState;
   workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
   phase?: import('@/protocol/events').AgentPhase;
@@ -42,15 +47,28 @@ export async function runTaskSubAgent(
 
   activeCounts.set(key, activeCount + 1);
   try {
+    const baseRole = getRoleConfig(args.subagent_type);
     return await runSubAgent({
       config: deps.config,
       workspace: deps.workspace,
-      role: getRoleConfig(args.subagent_type),
+      role: {
+        ...baseRole,
+        ...(deps.allowedTools
+          ? {
+              allowedTools: new Set(
+                [...deps.allowedTools].filter(
+                  (toolName) => !baseRole.allowedTools || baseRole.allowedTools.has(toolName),
+                ),
+              ),
+            }
+          : {}),
+      },
       task: args.task,
       shellExecutor: deps.shellExecutor,
       mcpManager: deps.mcpManager,
       skills: deps.skills,
       skillOptions: deps.skillOptions,
+      mcpBindings: deps.mcpBindings,
       authorization: deps.authorization,
       workspaceAccess: deps.workspaceAccess,
       phase: deps.phase,

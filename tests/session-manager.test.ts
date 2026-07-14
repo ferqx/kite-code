@@ -653,18 +653,16 @@ describe('SessionRuntime', () => {
 
   // ── clearBuffer ──
 
-  test('clearBuffer empties event buffer, history, skills, and interrupt flag', () => {
+  test('clearBuffer empties event buffer, history, and interrupt flag', () => {
     const rt = makeRuntime();
     rt.eventBuffer.push({ type: 'model.responded', messageId: 'm1', text: 'hello' });
     rt.conversationHistory = ['cmd1', 'cmd2'];
-    rt.pendingSkills = ['skill1'];
     rt.pendingInterrupt = true;
 
     rt.clearBuffer();
 
     expect(rt.eventBuffer.length).toBe(0);
     expect(rt.conversationHistory.length).toBe(0);
-    expect(rt.pendingSkills.length).toBe(0);
     expect(rt.pendingInterrupt).toBe(false);
   });
 

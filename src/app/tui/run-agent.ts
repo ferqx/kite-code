@@ -18,8 +18,8 @@ export interface BuildRunTaskParams {
   thinkingLevel: string | null;
   skills: SkillManifest[];
   skillOptions: SkillScanOptions | null;
+  initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>;
   mcpManager: McpManager | null;
-  pendingSkillsContent: string;
   shellContext: string;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
   phase?: 'planning' | 'building';
@@ -33,7 +33,7 @@ export type TuiRuntimeInput = RunRuntimeAgentInput & { checkpointPath: string };
 export function buildRunAgentParams(p: BuildRunTaskParams): TuiRuntimeInput {
   const checkpointPath = defaultCheckpointPath();
   return {
-    task: p.pendingSkillsContent + p.task + p.shellContext,
+    task: p.task + p.shellContext,
     userId: 'tui-user',
     threadId: p.threadId,
     workspace: p.workspace,
@@ -45,6 +45,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): TuiRuntimeInput {
     mcpManager: p.mcpManager ?? undefined,
     skills: p.skills,
     skillOptions: p.skillOptions ?? undefined,
+    initialSkillActivations: p.initialSkillActivations,
     interactionMode: p.interactionMode,
     phase: p.phase,
     thinkingLevel: p.thinkingLevel,

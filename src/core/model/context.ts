@@ -36,6 +36,7 @@ export interface ModelContextState {
   planningState?: PlanningState;
   taskId?: string;
   sideEffectsStarted?: boolean;
+  workflowSkills?: Array<{ capabilityId: string; description: string }>;
 }
 
 /** 准备好的模型上下文 / Prepared model context */
@@ -276,9 +277,12 @@ export function prepareModelContext(
 
   // 构建 SystemMessage（缓存稳定前缀 + 运行时上下文）
   const systemPrompt =
-    buildStaticSystemPrompt(role, skills) +
+    buildStaticSystemPrompt(role, skills, state.workflowSkills) +
     '\n\n' +
-    buildCacheableRuntimeContext({ workspace: state.workspace });
+    buildCacheableRuntimeContext({ workspace: state.workspace }) +
+    (state.activeSkillInstructions
+      ? `\n\n## Active Workflow Instructions\n\n${state.activeSkillInstructions}`
+      : '');
 
   const modeSnapshot = humanMessage(
     buildRuntimeModeSnapshot({
@@ -305,8 +309,24 @@ export function prepareModelContext(
 }
 
 /** 构建静态系统提示词 / Build static system prompt */
-export function buildStaticSystemPrompt(_role: AgentRole, skills?: SkillManifest[]): string {
+export function buildStaticSystemPrompt(
+  _role: AgentRole,
+  skills?: SkillManifest[],
+  workflowSkills?: Array<{ capabilityId: string; description: string }>,
+): string {
   const base = systemPrompt;
+  if (workflowSkills && workflowSkills.length > 0) {
+    const lines = workflowSkills.map((skill) => `- ${skill.capabilityId}: ${skill.description}`);
+    return [
+      base,
+      '',
+      '## Available Workflow Skills',
+      '',
+      'Use `activate_skill` only to request activation of a matching Workflow Contract. The Runtime validates each request; do not treat a Skill as arbitrary prompt text.',
+      '',
+      ...lines,
+    ].join('\n');
+  }
   if (!skills || skills.length === 0) return base;
 
   const lines = skills.map((s) => `- ${s.name}: ${s.description}`);

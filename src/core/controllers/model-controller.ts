@@ -31,6 +31,8 @@ import {
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import { skillFrameInvalidationReason } from '@/core/skills/activation';
+import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { createAgentTools } from '@/core/tools/definitions';
@@ -120,6 +122,41 @@ function runtimeTranscriptMessages(messages: TranscriptMessage[]): BaseMessage[]
   });
 }
 
+function activeInlineSkillInstructions(
+  state: RuntimeState,
+  catalog: SkillCatalogSnapshot | undefined,
+): string | undefined {
+  if (!catalog) return undefined;
+  const sections = Object.values(state.skills.frames)
+    .filter((frame) => frame.status === 'active' && frame.contextMode === 'inline')
+    .flatMap((frame) => {
+      const entry = catalog.entries.find(
+        (candidate) =>
+          !candidate.shadowedBy &&
+          candidate.descriptor.capabilityId === frame.skillId &&
+          candidate.descriptor.revision === frame.skillRevision &&
+          candidate.contract,
+      );
+      return entry?.contract
+        ? [
+            [
+              `## Active Workflow Skill: ${entry.contract.name}`,
+              entry.contract.instructions,
+              entry.contract.files.some((path) =>
+                /^(?:scripts|references|assets|evals)\//.test(path),
+              )
+                ? `Declared supporting files are not injected. Read one on demand with read_skill_reference using activation ID ${frame.activationId}: ${entry.contract.files.filter((path) => /^(?:scripts|references|assets|evals)\//.test(path)).join(', ')}`
+                : '',
+              `When finished, call complete_skill with this activation ID: ${frame.activationId}. Its output must match the contract schema.`,
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+          ]
+        : [];
+    });
+  return sections.length > 0 ? sections.join('\n\n') : undefined;
+}
+
 /**
  * Kernel-native model effect.  It uses only RuntimeState and emits all model
  * facts required by the reducer, including transient retry events captured
@@ -133,6 +170,7 @@ export async function invokeRuntimeModel(params: {
   mcpManager?: McpManager;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
+  skillCatalog?: SkillCatalogSnapshot;
   subagentEventSink?: SubAgentEventSink;
   signal?: AbortSignal;
   /** Persists bindings before the model can emit a dynamic MCP tool call. */
@@ -158,6 +196,30 @@ export async function invokeRuntimeModel(params: {
 
   try {
     const flags = getFeatureFlags(params.config);
+    if (
+      params.skillCatalog &&
+      params.state.skills.catalogRevision !== params.skillCatalog.revision
+    ) {
+      params.emitRuntimeEvent?.({
+        type: 'skill.catalog_refreshed',
+        catalogRevision: params.skillCatalog.revision,
+      });
+    }
+    if (params.skillCatalog) {
+      for (const frame of Object.values(params.state.skills.frames)) {
+        if (frame.status !== 'active') continue;
+        const reason = skillFrameInvalidationReason(frame, params.skillCatalog);
+        if (reason) {
+          params.emitRuntimeEvent?.({
+            type: 'skill.frame_closed',
+            activationId: frame.activationId,
+            status: 'invalidated',
+            reason,
+            closedAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
     const mcpBindings =
       flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1 && params.mcpManager
         ? params.mcpManager
@@ -189,6 +251,10 @@ export async function invokeRuntimeModel(params: {
       mcpBindings,
       skills: params.skills,
       skillOptions: params.skillOptions,
+      skillCatalog: params.skillCatalog,
+      activeSkillFrames: Object.values(state.skills.frames).filter(
+        (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+      ),
       config: params.config,
       subagentEventSink: params.subagentEventSink,
       subagentSignal: params.signal,
@@ -215,8 +281,17 @@ export async function invokeRuntimeModel(params: {
         planningState: planning,
         taskId: getActiveTask(state)?.taskId,
         sideEffectsStarted: getActiveTask(state)?.sideEffectsStarted,
+        workflowSkills: params.skillCatalog?.capabilities.descriptors
+          .filter(
+            (descriptor) => descriptor.kind === 'skill' && descriptor.availability === 'available',
+          )
+          .map((descriptor) => ({
+            capabilityId: descriptor.capabilityId,
+            description: descriptor.description,
+          })),
+        activeSkillInstructions: activeInlineSkillInstructions(state, params.skillCatalog),
       },
-      params.skills,
+      undefined,
     );
     const response = await invokeBoundModel({
       model: params.model,

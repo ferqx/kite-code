@@ -7,6 +7,7 @@ import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { McpManager } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { refreshSkillCatalog, type SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
@@ -20,6 +21,7 @@ export interface RuntimeExecutorDependencies {
   mcpManager?: McpManager;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
+  skillCatalog?: SkillCatalogSnapshot;
   signal?: AbortSignal;
   subagentEventSink?: SubAgentEventSink;
 }
@@ -37,6 +39,12 @@ export function createRuntimeEffectExecutor(
   // executeRuntimeTools converts the real lifecycle callbacks into durable
   // RuntimeEvents, so this fallback is only a capability marker.
   const subagentEventSink: SubAgentEventSink = dependencies.subagentEventSink ?? (() => {});
+  const currentSkillCatalog = (): SkillCatalogSnapshot | undefined =>
+    dependencies.skillOptions &&
+    getFeatureFlags(dependencies.config).skillWorkflowV1 &&
+    getFeatureFlags(dependencies.config).skillActivationV2
+      ? refreshSkillCatalog(dependencies.skillOptions)
+      : undefined;
   return async (effect, state, emit) => {
     if (effect.type === 'call_model') {
       return invokeRuntimeModel({
@@ -47,6 +55,7 @@ export function createRuntimeEffectExecutor(
         mcpManager: dependencies.mcpManager,
         skills: dependencies.skills,
         skillOptions: dependencies.skillOptions,
+        skillCatalog: currentSkillCatalog(),
         subagentEventSink,
         signal: dependencies.signal,
         emitRuntimeEvent: emit,
@@ -60,6 +69,7 @@ export function createRuntimeEffectExecutor(
         mcpManager: dependencies.mcpManager,
         skillManifests: dependencies.skills,
         skillOptions: dependencies.skillOptions,
+        skillCatalog: currentSkillCatalog(),
         signal: dependencies.signal,
         taskConfig: dependencies.config,
         taskModel: dependencies.model,

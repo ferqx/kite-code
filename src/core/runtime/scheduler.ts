@@ -83,7 +83,12 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   const nextRunnable = state.tools.queue.find(isRunnable) ?? state.tools.active.find(isRunnable);
   if (nextRunnable) return { type: 'run_tools', toolCallIds: [nextRunnable] };
 
-  if (state.transcript.final) return { type: 'emit_final' };
+  if (state.transcript.final) {
+    const activeSkill = Object.values(state.skills.frames).some(
+      (frame) => frame.status === 'active',
+    );
+    if (!activeSkill) return { type: 'emit_final' };
+  }
 
   return { type: 'call_model' };
 }

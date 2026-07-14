@@ -34,6 +34,12 @@ export interface SubAgentRunnerInput {
   mcpManager?: import('@/core/mcp').McpManager;
   skills?: import('@/core/skills/types').SkillManifest[];
   skillOptions?: import('@/core/skills/types').SkillScanOptions;
+  mcpBindings?: Array<{
+    binding: import('@/protocol/capabilities').CapabilityBinding;
+    descriptor: import('@/protocol/capabilities').CapabilityDescriptor;
+  }>;
+  /** Explicit capability-derived tool ceiling for a governed caller. */
+  allowedTools?: Set<string>;
   authorization?: import('@/core/types').ThreadAuthorizationState;
   workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
   phase?: import('@/protocol/events').AgentPhase;

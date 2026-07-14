@@ -68,7 +68,6 @@ export class SessionRuntime {
   static readonly MAX_BUFFER = 1000;
 
   conversationHistory: string[] = [];
-  pendingSkills: string[] = [];
   thinkingLevel: string | null = null;
   interactionMode: 'accept_edits' | 'auto' | 'full';
   phase: AgentPhase = 'building';
@@ -120,7 +119,6 @@ export class SessionRuntime {
   clearBuffer(): void {
     this.eventBuffer = [];
     this.conversationHistory = [];
-    this.pendingSkills = [];
     this.pendingInterrupt = false;
   }
 
@@ -145,15 +143,9 @@ export class SessionRuntime {
       model?: import('@/core/model/factory').SupportedChatModel;
     },
     requestedPhase?: AgentPhase,
+    initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
   ): Promise<void> {
     if (this.agentLoopActive) return;
-
-    // 构建待注入的 skills 内容
-    let pendingSkillsContent = '';
-    if (this.pendingSkills.length > 0) {
-      pendingSkillsContent = this.pendingSkills.join('');
-      this.pendingSkills = [];
-    }
 
     const shellContext =
       this.conversationHistory.length > 0 ? `\n${this.conversationHistory.join('\n')}` : '';
@@ -185,8 +177,8 @@ export class SessionRuntime {
       thinkingLevel: this.thinkingLevel,
       skills: this.skillManifests,
       skillOptions: this.skillOptions,
+      initialSkillActivations,
       mcpManager: this.mcpManager,
-      pendingSkillsContent,
       shellContext,
       interactionMode: this.interactionMode,
       phase: requestedPhase ?? 'building',
@@ -208,6 +200,7 @@ export class SessionRuntime {
       mcpManager: runAgentParams.mcpManager,
       skills: runAgentParams.skills,
       skillOptions: runAgentParams.skillOptions,
+      initialSkillActivations: runAgentParams.initialSkillActivations,
       interactionMode: runAgentParams.interactionMode,
       phase: runAgentParams.phase,
       thinkingLevel: runAgentParams.thinkingLevel,

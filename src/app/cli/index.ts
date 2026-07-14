@@ -9,7 +9,6 @@ import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { runtimeStorePathFor } from '@/core/runtime/store';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
-import { getSkillContent, scanSkills } from '@/core/skills/loader';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
 import type { UserInputProvider } from '@/protocol/provider';
@@ -89,22 +88,12 @@ export async function main(): Promise<void> {
     workspace: args.workspace,
   });
 
-  // Load skill contents and prepend to task
-  let task = args.task ?? '';
-  let manifests: import('@/core/skills/types').SkillManifest[] = [];
-  let skillOptions: import('@/core/skills/types').SkillScanOptions | undefined;
-  if (args.skills.length > 0) {
-    skillOptions = skillDirs(args.workspace);
-    manifests = scanSkills(skillOptions);
-    const skillContents: string[] = [];
-    for (const name of args.skills) {
-      const result = getSkillContent(manifests, name, skillOptions);
-      if (result) {
-        skillContents.push(`[SKILL: ${result.name}]\n\n${result.content}\n\n---\n\n`);
-      }
-    }
-    task = skillContents.join('') + task;
-  }
+  const task = args.task ?? '';
+  const skillOptions = skillDirs(args.workspace);
+  const initialSkillActivations = args.skills.map((name) => ({
+    skillId: `skill:${name}`,
+    input: {},
+  }));
 
   const provider = createCliRuntimeProvider();
   const generator = runRuntimeAgent(
@@ -121,8 +110,8 @@ export async function main(): Promise<void> {
       authorizationSource: authorizationMode === 'full_access' ? 'config' : undefined,
       sandboxBackend: sandboxRuntime.backend,
       frontend: 'cli',
-      skills: manifests,
       skillOptions,
+      initialSkillActivations,
     },
     provider,
   );

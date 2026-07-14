@@ -2202,7 +2202,6 @@ describe('App', () => {
       showRewind: false,
       checkpoints: [],
       rewindCounter: 0,
-      pendingSkills: [],
       skillManifests: [],
       ctrlCPressed: false,
       sessionKey: 0,

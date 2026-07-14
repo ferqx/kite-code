@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SkillManifest } from '../src/core/skills/types';
 import {
   clearToolCache,
   createAgentTools,
@@ -309,46 +308,50 @@ describe('code agent tool definitions', () => {
     expect(toolNames(toolsB)).toEqual(toolNames(toolsA));
   });
 
-  // ── Prompt cache: Skill tool placement / Skill 工具插入不影响其他工具 ──
+  // ── Workflow Skill activation / Workflow Skill 不使用正文注入 ──
 
-  test('Skill tool present in tool set when skills provided', () => {
-    const skills: SkillManifest[] = [
-      {
-        name: 'tdd',
-        description: 'Test-driven development',
-        source: 'project',
-        origin: '.kite-code',
-      },
-    ];
-
+  test('exposes activate_skill only with a compiled catalog and both feature flags', () => {
     const tools = createAgentTools({
       workspace: '/tmp',
-      skills,
-      skillOptions: {
-        projectKiteCodeSkillsDir: '/tmp/.kite-code/skills',
-        projectAgentsSkillsDir: '/tmp/.agents/skills',
-        userKiteCodeSkillsDir: '/tmp/user-skills',
-        userAgentsSkillsDir: '/tmp/user-agents-skills',
+      config: { features: { skillWorkflowV1: true, skillActivationV2: true } } as any,
+      skillCatalog: {
+        revision: 'skills-r1',
+        capabilities: {
+          revision: 'skills-r1',
+          descriptors: [
+            {
+              capabilityId: 'skill:tdd',
+              revision: 'tdd-r1',
+              kind: 'skill',
+              displayName: 'tdd',
+              description: 'Test-driven development',
+              provider: { type: 'skill', id: 'tdd', provenance: 'project' },
+              declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
+              effectiveEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
+              policy: { workspaceTrustRequired: true, minimumApproval: 'none' },
+              availability: 'available',
+              diagnostics: [],
+            },
+          ],
+        },
+        entries: [],
       },
     });
 
     const names = toolNames(tools);
-
-    // Skill 在工具集中
-    expect(names).toContain('Skill');
-    expect(tools['Skill']).toBeDefined();
+    expect(names).toContain('activate_skill');
+    expect(names).not.toContain('Skill');
+    expect(tools['activate_skill']).toBeDefined();
   });
 
-  test('builtin tools unchanged when Skill is present', () => {
+  test('legacy prompt skill inputs do not change builtin tools', () => {
     const baseNames = toolNames(createAgentTools({ workspace: '/tmp' }));
-
-    const skills: SkillManifest[] = [
-      { name: 'tdd', description: 'TDD workflow', source: 'project', origin: '.kite-code' },
-    ];
 
     const withSkill = createAgentTools({
       workspace: '/tmp',
-      skills,
+      skills: [
+        { name: 'tdd', description: 'TDD workflow', source: 'project', origin: '.kite-code' },
+      ],
       skillOptions: {
         projectKiteCodeSkillsDir: '/tmp/.kite-code/skills',
         projectAgentsSkillsDir: '/tmp/.agents/skills',
@@ -359,9 +362,7 @@ describe('code agent tool definitions', () => {
 
     const skillNames = toolNames(withSkill);
 
-    // 去掉 Skill 后，其余内置工具与 base 完全相同
-    const withoutSkill = skillNames.filter((n) => n !== 'Skill');
-    expect(withoutSkill).toEqual(baseNames);
+    expect(skillNames).toEqual(baseNames);
   });
 });
 

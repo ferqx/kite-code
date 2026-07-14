@@ -6,7 +6,6 @@ import { normalizeMcpToolResult, parseMcpToolName } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
-import { getSkillContent } from '@/core/skills/loader';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
@@ -472,47 +471,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
   }
 
-  if (request.name === 'Skill') {
-    if (!skillManifests || !skillOptions) {
-      return withFailureGuidance(request, {
-        ok: false,
-        command: 'Skill',
-        exitCode: -1,
-        stdout: '',
-        stderr: 'Skills system not configured. No skill manifests available.',
-      });
-    }
-    const skillName = request.args.skill as string;
-    if (!skillName) {
-      return withFailureGuidance(request, {
-        ok: false,
-        command: 'Skill',
-        exitCode: -1,
-        stdout: '',
-        stderr: 'Skill name is required.',
-      });
-    }
-    const result = getSkillContent(skillManifests, skillName, skillOptions);
-    if (!result) {
-      return withFailureGuidance(request, {
-        ok: false,
-        command: 'Skill',
-        exitCode: -1,
-        stdout: '',
-        stderr: `Skill not found: ${skillName}`,
-      });
-    }
-    const important = extractSkillImportant(result.content);
-    return withFailureGuidance(request, {
-      ok: true,
-      command: `Skill ${skillName}`,
-      exitCode: 0,
-      stdout: `Skill loaded: ${result.name}\n\n${result.content}`,
-      stderr: '',
-      ...(important ? { activeSkillInstructions: important } : {}),
-    });
-  }
-
   if (request.name.startsWith('mcp__')) {
     if (!mcpManager) {
       return withFailureGuidance(request, {
@@ -748,15 +706,7 @@ function toolUsageGuidance(request: PendingToolRequest): string {
       return 'Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.';
     case 'web_fetch':
       return 'Use web_fetch with a complete http/https URL. Verify the URL is public and accessible before calling. If fetch fails with HTTP error, the page may not exist or may be behind authentication. If readability fails, the page may not be a text article — try a different source.';
-    case 'Skill':
-      return 'Use Skill with the name of a skill from the Available Skills list. The skill name must exactly match. Only use skills listed in the system prompt under Available Skills.';
     default:
       return '';
   }
-}
-
-/** 从 Skill 内容中提取 <EXTREMELY-IMPORTANT> 标签文本，注入 runtime context / Extract <EXTREMELY-IMPORTANT> content from skill body for runtime context injection */
-function extractSkillImportant(content: string): string | null {
-  const match = content.match(/<EXTREMELY-IMPORTANT>([\s\S]*?)<\/EXTREMELY-IMPORTANT>/);
-  return match ? match[1]!.trim() : null;
 }
