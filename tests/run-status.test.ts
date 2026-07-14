@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AgentEvent } from '@/protocol/events';
 import type { Action } from '../src/app/tui/App';
 import { createInitialState, eventReducer } from '../src/app/tui/App';
-import { formatElapsed } from '../src/app/tui/components/render-utils';
+import { formatElapsed, formatToolResultForDisplay } from '../src/app/tui/components/render-utils';
 import { handleEventAction, type RenderEvent } from '../src/app/tui/reducers/handleEvent';
 import type { RunStatusTone } from '../src/app/tui/run-status';
 import {
@@ -530,5 +530,25 @@ describe('formatElapsed', () => {
     expect(formatElapsed(65000)).toBe('1m 5s');
     expect(formatElapsed(120000)).toBe('2m 0s');
     expect(formatElapsed(125000)).toBe('2m 5s');
+  });
+});
+
+describe('formatToolResultForDisplay', () => {
+  test('keeps the complete file edit diff instead of applying the generic summary cap', () => {
+    const diff = [
+      'Added 3 lines, removed 3 lines',
+      ' 1 -old line',
+      ' 1 +new line',
+      ' 2 +another line',
+    ].join('\n');
+
+    expect(formatToolResultForDisplay('edit_file', diff, '')).toBe(diff);
+    expect(formatToolResultForDisplay('write_file', diff, '')).toBe(diff);
+  });
+
+  test('continues to cap non-file tool summaries', () => {
+    const output = 'x'.repeat(250);
+
+    expect(formatToolResultForDisplay('shell_execute', output, '')).toBe('x'.repeat(200));
   });
 });

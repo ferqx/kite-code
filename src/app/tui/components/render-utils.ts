@@ -111,6 +111,11 @@ export function formatToolResultForDisplay(name: string, stdout: string, stderr:
       // 兼容旧版本或非 JSON 工具结果，回退到原始输出。
     }
   }
+  // 文件编辑结果本身就是面向用户的 diff。不能使用通用的 200 字符摘要
+  // 上限，否则变更统计行之后的新增内容可能被截掉。
+  // File edit results are already user-facing diffs. Do not apply the generic
+  // 200-character summary cap, or additions after the stats line can disappear.
+  if (name === 'edit_file' || name === 'write_file') return raw;
   return raw.slice(0, 200);
 }
 

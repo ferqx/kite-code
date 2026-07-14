@@ -20,9 +20,9 @@
     "lint": "biome lint .",
     "check:core-boundary": "bun run scripts/check-core-boundary.ts",
     "check:docs": "bun run scripts/check-docs.ts",
-    "web": "bun run src/web-server/index.ts",
-    "web:dev": "BUN_ENV=development bun --watch run src/web-server/index.ts",
-    "web:seed": "bun run src/web-server/index.ts --seed",
+    "web": "bun run src/web-server/index.tsx",
+    "web:dev": "BUN_ENV=development bun --watch run src/web-server/index.tsx",
+    "web:seed": "bun run src/web-server/index.tsx --seed",
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {

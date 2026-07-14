@@ -321,8 +321,9 @@ function renderFileSummary(summary: string, dt: Theme) {
   // Detect diff format: any content line starts with "lineNum +" or "lineNum -"
   const isDiff = diffLines.length > 0 && diffLines.some((line) => /^\s*\d+\s+[-+]/.test(line));
 
-  const displayLines = diffLines.slice(0, MAX_TOOL_LINES);
-  const truncated = diffLines.length > MAX_TOOL_LINES;
+  // 文件变更需要完整展示，避免用户只看到删除部分而看不到新增内容。
+  // File changes are user-facing output and should be shown in full.
+  const displayLines = diffLines;
 
   return (
     <React.Fragment>
@@ -342,7 +343,6 @@ function renderFileSummary(summary: string, dt: Theme) {
               </Box>
             );
           })}
-          {truncated && <Text color={dt.dim}>… +{diffLines.length - MAX_TOOL_LINES} lines</Text>}
         </Box>
       ) : diffLines.length > 0 ? (
         <Box paddingLeft={3} flexDirection="column">
@@ -351,7 +351,6 @@ function renderFileSummary(summary: string, dt: Theme) {
               {line}
             </Text>
           ))}
-          {truncated && <Text color={dt.dim}>… +{diffLines.length - MAX_TOOL_LINES} lines</Text>}
         </Box>
       ) : null}
     </React.Fragment>

@@ -1,6 +1,5 @@
 import type { SessionData } from '../../core/persistence/sessions.js';
 import { createInitialState } from './initialState.js';
-import { consolidateAllRuns } from './reducers/consolidateTools.js';
 import { handleRuntimeEventAction } from './reducers/handleEvent.js';
 import type { InterruptState, OutputBlock } from './types.js';
 
@@ -12,7 +11,9 @@ export function sessionDataToUI(data: SessionData): {
 } {
   let state = createInitialState();
   for (const event of data.runtimeEvents) state = handleRuntimeEventAction(state, event);
-  const blocks = consolidateAllRuns(state.turns.flatMap((turn) => turn.blocks));
+  // Replay uses the same event reducer as the live stream. Do not run a
+  // replay-only consolidation pass, or static output can diverge from live UI.
+  const blocks = state.turns.flatMap((turn) => turn.blocks);
   const callIds = new Map(
     blocks.flatMap((block) =>
       'callId' in block && block.callId ? [[block.callId, block.id] as const] : [],

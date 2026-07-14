@@ -858,6 +858,15 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         timedOut && TIMEOUT_RE.test(summaryText) && matched.liveOutput
           ? matched.liveOutput
           : summaryText;
+      // A reviewed write_plan already contains the full plan document from
+      // plan.review_requested. Its final tool.finished event carries only a
+      // machine-readable approval/revision payload; do not replace the plan
+      // document with that JSON in either live rendering or replay.
+      const preserveReviewedPlan =
+        matched.name === 'write_plan' &&
+        event.data.ok &&
+        (state.status.plan !== null || state.status.pendingPlan !== null) &&
+        matched.summary.trim().length > 0;
       const next: OutputBlock = {
         ...matched,
         status: exhaustedStatus
@@ -873,7 +882,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           event.data.reviewFailure ??
           ('reviewFailure' in matched ? matched.reviewFailure : undefined),
         userInput: event.data.userInput ?? matched.userInput,
-        summary: displaySummary,
+        summary: preserveReviewedPlan ? matched.summary : displaySummary,
         elapsedMs: elapsedMs ?? matched.elapsedMs,
         detail: getToolDetail(matched.name, matched.args, event.data.totalLines),
         ...(timeoutMs != null ? { timeoutMs } : {}),
@@ -1388,7 +1397,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
   }
 }
 
-/** Direct RuntimeEvent rendering path. */
+/** Shared RuntimeEvent rendering path for live updates and session replay. */
 export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
   switch (event.type) {
     case 'subagent.started':
@@ -1539,7 +1548,21 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
     case 'plan.approved':
       return {
         ...state,
-        status: { ...state.status, phase: 'building' },
+        status: {
+          ...state.status,
+          phase: 'building',
+          // Replay has no separate RESOLVE_PLAN_REVIEW UI action. Promote the
+          // pending plan here so replay and live rendering share the same
+          // update_plan visibility rule.
+          plan: state.status.pendingPlan ?? state.status.plan,
+          pendingPlan: null,
+        },
+      };
+    case 'plan.progress_updated':
+    case 'plan.completed':
+      return {
+        ...state,
+        status: { ...state.status, plan: event.plan },
       };
     case 'plan.revision_requested':
       return {

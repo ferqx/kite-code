@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import type { Action } from '../src/app/tui/App';
 import { createInitialState, eventReducer } from '../src/app/tui/App';
 import { buildToolSummaryLine } from '../src/app/tui/reducers/consolidateTools';
-import { handleEventAction, type RenderEvent } from '../src/app/tui/reducers/handleEvent';
+import {
+  handleEventAction,
+  handleRuntimeEventAction,
+  type RenderEvent,
+} from '../src/app/tui/reducers/handleEvent';
 import type { InterruptState, OutputBlock, SessionSnapshot, TuiState } from '../src/app/tui/types';
 import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
 
@@ -302,6 +306,57 @@ describe('eventReducer (blocks model)', () => {
       expect(card?.summary).toBe('— ~/.kite-code/plans/eb9e8ecf…/…/eb9e8ecf…/v1.md');
       expect(card?.summary).not.toContain('\n');
       expect(card?.summary?.length).toBeLessThan(70);
+    });
+    test('approved write_plan keeps the reviewed plan document instead of approval JSON', () => {
+      const plan = {
+        name: 'Login page',
+        description: 'Full reviewed plan body',
+        status: 'pending' as const,
+        steps: [{ step: 'Build entry point', id: 'entry-point', status: 'pending' as const }],
+      };
+      let s = fresh();
+      s = dispatch(s, tcEvt('reviewed-plan', 'write_plan', { title: plan.name }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'plan.review_requested',
+          interactionId: 'review-1',
+          toolCallId: 'reviewed-plan',
+          plan,
+          planSummary: plan.description,
+        },
+      });
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'plan.approved',
+          interactionId: 'review-1',
+          executionMode: 'auto',
+        },
+      });
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.finished',
+          toolCallId: 'reviewed-plan',
+          name: 'write_plan',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: JSON.stringify({ ok: true, status: 'approved', plan_id: 'plan-1' }),
+            stderr: '',
+          },
+        },
+      });
+
+      const card = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'reviewed-plan',
+      );
+      expect(card?.summary).toContain('Full reviewed plan body');
+      expect(card?.summary).toContain('Steps:');
+      expect(card?.summary).not.toContain('"status":"approved"');
     });
     test('tool_done updates pre-consolidated summary even when the lookup map is stale', () => {
       let s = fresh();
@@ -1234,6 +1289,48 @@ describe('eventReducer (blocks model)', () => {
       expect(s.interrupt).toBeNull();
       expect(s.status.plan).toEqual(eventPayload.plan);
       expect(s.status.pendingPlan).toBeNull();
+    });
+
+    test('replay promotes an approved plan before filtering update_plan', () => {
+      const plan = {
+        name: 'Replay plan',
+        description: 'Plan from runtime events',
+        status: 'pending' as const,
+        steps: [{ step: 'Entry point', id: 'entry-point', status: 'pending' as const }],
+      };
+      let s = fresh();
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.queued',
+        toolCallId: 'plan-call',
+        name: 'write_plan',
+        args: {},
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'plan.review_requested',
+        interactionId: 'review-1',
+        toolCallId: 'plan-call',
+        plan,
+        planSummary: plan.description,
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'plan.approved',
+        interactionId: 'review-1',
+        executionMode: 'auto',
+      });
+
+      expect(s.status.plan).toEqual(plan);
+      expect(s.status.pendingPlan).toBeNull();
+
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.queued',
+        toolCallId: 'progress-call',
+        name: 'update_plan',
+        args: { updates: [{ step_id: 'entry-point', status: 'completed' }] },
+      });
+
+      expect(
+        flatBlocks(s).some((block) => block.kind === 'tool_card' && block.name === 'update_plan'),
+      ).toBe(false);
     });
 
     test('need_plan_review populates tool_card summary and expanded', () => {
