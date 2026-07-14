@@ -6,7 +6,7 @@ import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { AuthorizationSource, ToolGrant } from '@/core/types';
-import type { CapabilityBinding } from '@/protocol/capabilities';
+import type { CapabilityBinding, CapabilityInvocationRecord } from '@/protocol/capabilities';
 import type {
   AgentPlan,
   AuthorizationMode,
@@ -226,6 +226,8 @@ export interface ToolCallRecord {
 export interface CapabilityRuntimeState {
   catalogRevision: string;
   bindings: Record<string, CapabilityBinding>;
+  /** Event-sourced records for side-effecting capability invocations. */
+  invocations: Record<string, CapabilityInvocationRecord>;
 }
 
 // ── 工具运行时状态 / Tool runtime state ──
@@ -264,7 +266,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 6;
+export const RUNTIME_STATE_SCHEMA_VERSION = 7;
 
 export type RuntimeRecoveryState =
   | { kind: 'normal' }
@@ -405,7 +407,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       queue: [],
       active: [],
     },
-    capabilities: { catalogRevision: '', bindings: {} },
+    capabilities: { catalogRevision: '', bindings: {}, invocations: {} },
     suspendedSubagents: {},
     authorization: {
       mode: input.authorizationMode ?? 'default',

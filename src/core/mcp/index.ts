@@ -5,6 +5,7 @@ export { McpManager } from './manager';
 export { normalizeMcpToolResult } from './result-normalizer';
 export { parseMcpToolName } from './tool-adapter';
 export type {
+  McpHealthState,
   McpPrompt,
   McpResource,
   McpResourceContent,

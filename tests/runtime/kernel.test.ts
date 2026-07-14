@@ -35,6 +35,46 @@ describe('AgentKernel durability', () => {
     expect(snapshot?.tools.queue).toEqual(['call-1']);
     kernel.close();
   });
+
+  test('marks a persisted invocation without a terminal result as unknown after restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-invocation-'));
+    const storePath = join(dir, 'runtime.db');
+    try {
+      const first = createAgentKernel({
+        threadId: 'invocation-recovery',
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      first.processEvent({
+        type: 'capability.invocation_recorded',
+        invocationId: 'invocation-1',
+        toolCallId: 'tool-1',
+        capabilityId: 'mcp:fixture/write',
+        capabilityRevision: 'revision-1',
+        argumentsDigest: 'arguments',
+        authorizationDigest: 'authorization',
+        effectiveEffectsDigest: 'effects',
+        effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+        recordedAt: '2026-07-14T00:00:00.000Z',
+      });
+      first.close();
+
+      const restored = createAgentKernel({
+        threadId: 'invocation-recovery',
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().capabilities.invocations['invocation-1']).toMatchObject({
+        status: 'unknown',
+        error: expect.stringContaining('without a terminal result'),
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 test('runRuntimeLoop resumes a matching input action and persists its facts', async () => {

@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-12（Runtime 工程护栏建设方案注册）
+最后更新：2026-07-14（MCP/Skills Runtime 治理 Phase 2 启动）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -48,7 +48,7 @@
 | [`2026-07-12-subagent-approval-continuation-implementation.md`](2026-07-12-subagent-approval-continuation-implementation.md) | draft | P0 | `2026-07-12-subagent-approval-continuation.md` | — | 子 agent 审批续跑状态机的五项 TDD 实施计划。 |
 | [`2026-07-12-runtime-engineering-guardrails.md`](2026-07-12-runtime-engineering-guardrails.md) | completed | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | — | Runtime 工程护栏建设：Feature Flags、Golden Tests、FailureKind、授权溯源、Replay、ADR、准入标准、边界检查、文档分层与 Prompt 契约均已实施。 |
 | [`2026-07-14-mcp-runtime-governance-p0.md`](2026-07-14-mcp-runtime-governance-p0.md) | completed | P0 | ADR-0007 | 落实 MCP/Skills Runtime 治理 RFC 的 Phase 0+1 | Revisioned MCP catalog、turn binding、fail-closed schema、policy 和结构化结果。 |
-| [`2026-07-14-mcp-skills-runtime-governance-followup.md`](2026-07-14-mcp-skills-runtime-governance-followup.md) | draft | P1 | `2026-07-14-mcp-runtime-governance-p0.md`、ADR-0007、ADR-0008 | 延续 MCP/Skills Runtime 治理 RFC | Phase 2 execution record/recovery → Phase 3 Skill Workflow → Phase 4 verification → Phase 5 progressive disclosure。 |
+| [`2026-07-14-mcp-skills-runtime-governance-followup.md`](2026-07-14-mcp-skills-runtime-governance-followup.md) | active | P1 | `2026-07-14-mcp-runtime-governance-p0.md`、ADR-0007、ADR-0008 | 延续 MCP/Skills Runtime 治理 RFC | Phase 2 execution record/recovery（实施中）→ Phase 3 Skill Workflow → Phase 4 verification → Phase 5 progressive disclosure。 |
 
 ## 计划文件命名规范
 

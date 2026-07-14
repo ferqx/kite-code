@@ -54,3 +54,37 @@ export interface CapabilitySnapshot {
   revision: string;
   descriptors: CapabilityDescriptor[];
 }
+
+/** Durable lifecycle for an invocation that may cross an external side-effect boundary. */
+export type CapabilityInvocationStatus =
+  | 'recorded'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'unknown';
+
+/** Event-sourced fact record; never contains raw arguments, content, or provider `_meta`. */
+export interface CapabilityInvocationRecord {
+  invocationId: string;
+  toolCallId: string;
+  capabilityId: string;
+  capabilityRevision: string;
+  taskId?: string;
+  planId?: string;
+  planStepId?: string;
+  argumentsDigest: string;
+  authorizationDigest: string;
+  effectiveEffectsDigest: string;
+  status: CapabilityInvocationStatus;
+  recordedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  resultDigest?: string;
+  evidenceDigest?: string;
+  externalReferences?: string[];
+  error?: string;
+  idempotencyKey?: string;
+}
+
+/** Read-only projection of a durable invocation record for receipts and verification. */
+export type ExecutionReceipt = CapabilityInvocationRecord;

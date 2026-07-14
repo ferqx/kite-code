@@ -5,6 +5,17 @@ import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities'
 /** MCP transport type */
 export type McpTransportType = 'stdio' | 'http';
 
+/** Connection health consumed by Runtime callers and the UI. */
+export type McpHealthState =
+  | 'disconnected'
+  | 'connecting'
+  | 'discovering'
+  | 'ready'
+  | 'degraded'
+  | 'half_open'
+  | 'circuit_open'
+  | 'quarantined';
+
 /** MCP Server configuration */
 export interface McpServerConfig {
   type: McpTransportType;
@@ -61,6 +72,8 @@ export interface McpServerState {
   tools: SdkTool[];
   prompts: McpPrompt[];
   resources: McpResource[];
-  connected: boolean;
+  health: McpHealthState;
   error?: string;
+  consecutiveCallFailures: number;
+  retryAt?: number;
 }

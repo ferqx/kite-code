@@ -542,13 +542,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         request.args as unknown as Record<string, unknown>,
       );
       const descriptor = mcpManager.findCapability(`mcp:${serverName}/${toolName}`);
-      const output = JSON.stringify(normalizeMcpToolResult(raw, descriptor?.outputSchema));
+      const capabilityResult = normalizeMcpToolResult(raw, descriptor?.outputSchema);
+      const output = JSON.stringify(capabilityResult);
       return withFailureGuidance(request, {
         ok: !raw.isError,
         command: request.name,
         exitCode: 0,
         stdout: output,
         stderr: '',
+        capabilityResult,
       });
     } catch (err) {
       return withFailureGuidance(request, {

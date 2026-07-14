@@ -78,15 +78,16 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
   const flatRows: FlatRow[] = [];
 
   for (const [name, state] of states.entries()) {
-    const connected = state.connected;
-    const statusColor = connected ? t.success : t.error;
-    const statusIcon = connected ? '●' : '○';
+    const callable =
+      state.health === 'ready' || state.health === 'degraded' || state.health === 'half_open';
+    const statusColor = state.health === 'ready' ? t.success : callable ? t.warning : t.error;
+    const statusIcon = state.health === 'ready' ? '●' : callable ? '◐' : '○';
     const transportLabel = state.config.type === 'http' ? 'http' : 'stdio';
     const toolCount = state.tools.length;
 
     flatRows.push({ type: 'server', name, statusColor, statusIcon, transportLabel, toolCount });
 
-    if (!connected && state.error) {
+    if (!callable && state.error) {
       flatRows.push({ type: 'error', message: state.error });
     }
 
@@ -102,7 +103,7 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
       flatRows.push({ type: 'more-tools', count: hiddenCount });
     }
 
-    if (connected && state.resources && state.resources.length > 0) {
+    if (callable && state.resources && state.resources.length > 0) {
       flatRows.push({ type: 'resources-header' });
       for (const r of state.resources.slice(0, 10)) {
         flatRows.push({ type: 'resource', name: r.name || r.uri, uri: r.uri });

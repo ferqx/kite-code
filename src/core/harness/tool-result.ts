@@ -1,3 +1,4 @@
+import type { CapabilityResult } from '@/core/capabilities/result';
 import type { ExhaustionSignal } from '@/core/execution/journal';
 import type { SubAgentResult } from '@/core/subagent/types';
 import type { ShellIntent, ShellResult, ThreadAuthorizationState } from '@/core/types';
@@ -51,6 +52,8 @@ export type ToolExecutionResult = ShellResult & {
   /** read_file 返回的文件总行数，用于 TUI 展示行号范围 / Total lines in file returned by read_file for TUI line range display */
   totalLines?: number;
   subagentResult?: SubAgentResult;
+  /** MCP result retained for Runtime evidence recording; transcript output remains serialized JSON. */
+  capabilityResult?: CapabilityResult;
 };
 
 /** executeOneTool 产出的副作用字段，与 ToolExecutionResult 中的非核心字段对应。

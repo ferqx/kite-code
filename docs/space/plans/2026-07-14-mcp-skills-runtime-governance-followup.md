@@ -1,6 +1,6 @@
 # MCP 与 Skills Runtime 治理后续计划
 
-状态：draft
+状态：active
 优先级：P1
 依赖：`2026-07-14-mcp-runtime-governance-p0.md`、ADR-0007、ADR-0008
 来源：`docs/design/2026-07-14-mcp-skills-runtime-governance-rfc.md`
@@ -28,6 +28,8 @@
 | Runtime 事件不变量、effect 扩展、replay/golden、安全与最终可追溯性验收 | Phase 2–5 | reducer 是唯一持久状态入口；完整链路可回答来源、可见性、授权、执行、证据、验证和恢复理由。 |
 
 ## Phase 2：Health、Execution Record 与恢复
+
+当前进度：实施中。已完成 health projection、熔断状态，以及受 `mcpExecutionRecordV1` 保护的 intent/terminal/unknown 事件和 receipt 投影；Artifact Store、idempotency/reconciliation 操作与 trusted provenance 生命周期仍待完成。
 
 1. 将 MCP `connected` 布尔状态升级为 health projection，覆盖 connecting、discovering、ready、degraded、circuit_open 和 quarantined，以及退避/半开熔断。
 2. 新增 `capability.invocation_recorded`、started、succeeded、failed、unknown 等 Runtime events；外部写入必须在 provider call 前持久化 intent、稳定 invocation ID、authorization digest 和可选 idempotency key。

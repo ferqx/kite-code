@@ -281,9 +281,75 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       );
       return {
         ...state,
-        capabilities: { catalogRevision: event.catalogRevision, bindings },
+        capabilities: {
+          catalogRevision: event.catalogRevision,
+          bindings,
+          invocations: state.capabilities.invocations,
+        },
       };
     }
+
+    case 'capability.invocation_recorded': {
+      if (state.capabilities.invocations[event.invocationId]) return state;
+      return {
+        ...state,
+        capabilities: {
+          ...state.capabilities,
+          invocations: {
+            ...state.capabilities.invocations,
+            [event.invocationId]: {
+              invocationId: event.invocationId,
+              toolCallId: event.toolCallId,
+              capabilityId: event.capabilityId,
+              capabilityRevision: event.capabilityRevision,
+              ...(event.taskId ? { taskId: event.taskId } : {}),
+              ...(event.planId ? { planId: event.planId } : {}),
+              ...(event.planStepId ? { planStepId: event.planStepId } : {}),
+              argumentsDigest: event.argumentsDigest,
+              authorizationDigest: event.authorizationDigest,
+              effectiveEffectsDigest: event.effectiveEffectsDigest,
+              status: 'recorded',
+              recordedAt: event.recordedAt,
+              ...(event.idempotencyKey ? { idempotencyKey: event.idempotencyKey } : {}),
+            },
+          },
+        },
+      };
+    }
+
+    case 'capability.execution_started':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'recorded'
+          ? { ...invocation, status: 'running', startedAt: event.startedAt }
+          : invocation,
+      );
+
+    case 'capability.execution_succeeded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) => ({
+        ...invocation,
+        status: 'succeeded',
+        finishedAt: event.finishedAt,
+        resultDigest: event.resultDigest,
+        evidenceDigest: event.evidenceDigest,
+        ...(event.externalReferences ? { externalReferences: event.externalReferences } : {}),
+        error: undefined,
+      }));
+
+    case 'capability.execution_failed':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) => ({
+        ...invocation,
+        status: 'failed',
+        finishedAt: event.finishedAt,
+        error: event.error,
+      }));
+
+    case 'capability.execution_unknown':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) => ({
+        ...invocation,
+        status: 'unknown',
+        finishedAt: event.finishedAt,
+        error: event.reason,
+      }));
 
     case 'tool.queued': {
       // LangGraph can replay an interrupted node.  A replayed queue event must
@@ -958,6 +1024,27 @@ function updateToolStatus(
   return {
     ...tools,
     calls: { ...tools.calls, [toolCallId]: { ...call, status } },
+  };
+}
+
+function updateCapabilityInvocation(
+  state: RuntimeState,
+  invocationId: string,
+  update: (
+    invocation: import('@/protocol/capabilities').CapabilityInvocationRecord,
+  ) => import('@/protocol/capabilities').CapabilityInvocationRecord,
+): RuntimeState {
+  const invocation = state.capabilities.invocations[invocationId];
+  if (!invocation) return state;
+  return {
+    ...state,
+    capabilities: {
+      ...state.capabilities,
+      invocations: {
+        ...state.capabilities.invocations,
+        [invocationId]: update(invocation),
+      },
+    },
   };
 }
 

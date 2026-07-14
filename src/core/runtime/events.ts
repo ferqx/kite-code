@@ -3,7 +3,7 @@
 // 所有状态变更通过类型化事件表示，供 runtime 内部及各层消费者使用
 
 import type { ToolGrant } from '@/core/types';
-import type { CapabilityBinding } from '@/protocol/capabilities';
+import type { CapabilityBinding, EffectProfile } from '@/protocol/capabilities';
 import type {
   AgentPlan,
   AuthorizationMode,
@@ -71,6 +71,54 @@ export interface CapabilityBindingsIssuedEvent {
   type: 'capability.bindings_issued';
   catalogRevision: string;
   bindings: CapabilityBinding[];
+}
+
+/** A side-effecting capability has a durable intent before provider execution begins. */
+export interface CapabilityInvocationRecordedEvent {
+  type: 'capability.invocation_recorded';
+  invocationId: string;
+  toolCallId: string;
+  capabilityId: string;
+  capabilityRevision: string;
+  taskId?: string;
+  planId?: string;
+  planStepId?: string;
+  argumentsDigest: string;
+  authorizationDigest: string;
+  effectiveEffectsDigest: string;
+  effectiveEffects: EffectProfile;
+  recordedAt: string;
+  idempotencyKey?: string;
+}
+
+export interface CapabilityExecutionStartedEvent {
+  type: 'capability.execution_started';
+  invocationId: string;
+  startedAt: string;
+}
+
+export interface CapabilityExecutionSucceededEvent {
+  type: 'capability.execution_succeeded';
+  invocationId: string;
+  resultDigest: string;
+  evidenceDigest: string;
+  finishedAt: string;
+  externalReferences?: string[];
+}
+
+export interface CapabilityExecutionFailedEvent {
+  type: 'capability.execution_failed';
+  invocationId: string;
+  error: string;
+  finishedAt: string;
+}
+
+/** Recovery found a request whose provider outcome was never durably recorded. */
+export interface CapabilityExecutionUnknownEvent {
+  type: 'capability.execution_unknown';
+  invocationId: string;
+  reason: string;
+  finishedAt: string;
 }
 
 /** 工具调用开始执行 */
@@ -502,6 +550,11 @@ export interface SubagentSuspendedEvent {
 /** 运行时事件 — 所有状态变更的统一类型表示 */
 export type RuntimeEvent =
   | CapabilityBindingsIssuedEvent
+  | CapabilityInvocationRecordedEvent
+  | CapabilityExecutionStartedEvent
+  | CapabilityExecutionSucceededEvent
+  | CapabilityExecutionFailedEvent
+  | CapabilityExecutionUnknownEvent
   | ToolQueuedEvent
   | ToolStartedEvent
   | ToolProgressEvent

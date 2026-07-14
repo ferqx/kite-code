@@ -26,6 +26,8 @@ const MCP_TOOL_CALL_TIMEOUT = 30_000;
 const MCP_RESOURCE_TIMEOUT = 10_000;
 const HTTP_MAX_RECONNECT = 5;
 const HTTP_RECONNECT_BASE_MS = 1000;
+const MCP_CIRCUIT_FAILURE_THRESHOLD = 3;
+const MCP_CIRCUIT_OPEN_MS = 30_000;
 
 /** Prompt registry entry: maps slash command key to server info */
 export interface PromptEntry {
@@ -60,6 +62,15 @@ export class McpManager {
   async connect(name: string, config: McpServerConfig): Promise<void> {
     const transport = createTransport(config);
     const client = new Client({ name: 'kite-code', version: '0.1.0' }, { capabilities: {} });
+    this.servers.set(name, {
+      config,
+      client,
+      tools: [],
+      prompts: [],
+      resources: [],
+      health: 'connecting',
+      consecutiveCallFailures: 0,
+    });
 
     try {
       await client.connect(transport, { timeout: MCP_STARTUP_TIMEOUT });
@@ -70,18 +81,24 @@ export class McpManager {
         tools: [],
         prompts: [],
         resources: [],
-        connected: false,
+        health: 'disconnected',
         error: String(err),
+        consecutiveCallFailures: 0,
       });
       throw err;
     }
 
+    const connectingState = this.servers.get(name);
+    if (connectingState) connectingState.health = 'discovering';
+
     // Fetch tools
     let tools: SdkTool[] = [];
+    let discoveryFailed = false;
     try {
       const result = await client.listTools();
       tools = result.tools as SdkTool[];
     } catch (err) {
+      discoveryFailed = true;
       console.error(`[MCP] Failed to list tools for ${name}:`, err);
     }
 
@@ -117,9 +134,16 @@ export class McpManager {
           const state = this.servers.get(name);
           if (state) {
             state.tools = result.tools as SdkTool[];
+            if (state.health !== 'circuit_open') state.health = 'ready';
+            state.error = undefined;
             this.refreshSnapshot();
           }
         } catch (err) {
+          const state = this.servers.get(name);
+          if (state && state.health !== 'circuit_open') {
+            state.health = 'degraded';
+            state.error = String(err);
+          }
           console.error(`[MCP] Failed to refresh tools for ${name}:`, err);
         }
       });
@@ -177,7 +201,9 @@ export class McpManager {
       tools,
       prompts,
       resources,
-      connected: true,
+      health: discoveryFailed ? 'degraded' : 'ready',
+      ...(discoveryFailed ? { error: 'MCP tool discovery failed.' } : {}),
+      consecutiveCallFailures: 0,
     });
     this.refreshSnapshot();
   }
@@ -186,7 +212,7 @@ export class McpManager {
   getAllTools(): Array<{ server: string; tool: SdkTool }> {
     const result: Array<{ server: string; tool: SdkTool }> = [];
     for (const [name, state] of this.servers) {
-      if (!state.connected) continue;
+      if (!isUsableForDiscovery(state)) continue;
       for (const tool of state.tools) {
         result.push({ server: name, tool });
       }
@@ -213,16 +239,23 @@ export class McpManager {
     if (!state) {
       throw new Error(`MCP server not found: ${server}`);
     }
-    if (!state.connected) {
-      throw new Error(`MCP server not connected: ${server}`);
-    }
+    this.assertCallable(state, server);
     const client = state.client as Client;
-    const result = await client.callTool({ name: toolName, arguments: args }, undefined, {
-      timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
-    });
-    // The SDK's task-enabled overload includes an indirection result. P0 uses
-    // synchronous tool calls only; the protocol result is validated by the server.
-    return result as CallToolResult;
+    try {
+      const result = await client.callTool({ name: toolName, arguments: args }, undefined, {
+        timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
+      });
+      state.consecutiveCallFailures = 0;
+      state.retryAt = undefined;
+      state.health = 'ready';
+      state.error = undefined;
+      // The SDK's task-enabled overload includes an indirection result. P0 uses
+      // synchronous tool calls only; the protocol result is validated by the server.
+      return result as CallToolResult;
+    } catch (error) {
+      this.noteCallFailure(state, error);
+      throw error;
+    }
   }
 
   /** 列出指定 server 的所有资源（从缓存） / List resources for a server (from cache) */
@@ -239,7 +272,7 @@ export class McpManager {
     if (!state) {
       throw new Error(`Unknown MCP server: ${serverName}`);
     }
-    if (!state.connected) {
+    if (!isUsableForDiscovery(state)) {
       throw new Error(`MCP server not connected: ${serverName}`);
     }
     const client = state.client as Client;
@@ -289,7 +322,7 @@ export class McpManager {
   private refreshSnapshot(): void {
     const descriptors: CapabilityDescriptor[] = [];
     for (const [serverName, state] of this.servers) {
-      if (!state.connected) continue;
+      if (!isUsableForDiscovery(state)) continue;
       for (const tool of state.tools) {
         descriptors.push(createMcpToolDescriptor(serverName, state.config, tool));
       }
@@ -304,6 +337,33 @@ export class McpManager {
     }
     this.snapshot = createSnapshot(descriptors);
   }
+
+  private assertCallable(state: McpServerState, server: string): void {
+    if (state.health === 'circuit_open') {
+      if ((state.retryAt ?? Number.POSITIVE_INFINITY) > Date.now()) {
+        throw new Error(`MCP server '${server}' circuit is open; retry after ${state.retryAt}.`);
+      }
+      state.health = 'half_open';
+    }
+    if (state.health !== 'ready' && state.health !== 'degraded' && state.health !== 'half_open') {
+      throw new Error(`MCP server not callable (${state.health}): ${server}`);
+    }
+  }
+
+  private noteCallFailure(state: McpServerState, error: unknown): void {
+    state.consecutiveCallFailures += 1;
+    state.error = error instanceof Error ? error.message : String(error);
+    if (state.consecutiveCallFailures >= MCP_CIRCUIT_FAILURE_THRESHOLD) {
+      state.health = 'circuit_open';
+      state.retryAt = Date.now() + MCP_CIRCUIT_OPEN_MS;
+      return;
+    }
+    state.health = 'degraded';
+  }
+}
+
+function isUsableForDiscovery(state: McpServerState): boolean {
+  return state.health === 'ready' || state.health === 'degraded' || state.health === 'half_open';
 }
 
 function createMcpToolDescriptor(

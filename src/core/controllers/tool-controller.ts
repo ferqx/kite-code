@@ -1,3 +1,4 @@
+import { digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
@@ -1124,7 +1125,21 @@ export async function executeRuntimeTools(params: {
       continue;
     }
 
+    const invocation = createMcpInvocationRecord({
+      state: params.state,
+      call,
+      descriptor: mcpDescriptor,
+      flags: params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined,
+    });
+    if (invocation) events.push(invocation.recorded);
     events.push({ type: 'tool.started', toolCallId });
+    if (invocation) {
+      events.push({
+        type: 'capability.execution_started',
+        invocationId: invocation.invocationId,
+        startedAt: new Date().toISOString(),
+      });
+    }
     const progress: RuntimeEvent[] = [];
     try {
       const result = await runApprovedTool({
@@ -1148,6 +1163,12 @@ export async function executeRuntimeTools(params: {
           progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
       });
       events.push(...progress);
+
+      if (invocation) {
+        events.push(
+          invocationTerminalEvent(invocation.invocationId, result, new Date().toISOString()),
+        );
+      }
 
       // 文件变更事件 — write_file / edit_file 的结果通知 TUI
       // File change event — notify TUI of write_file / edit_file results
@@ -1179,6 +1200,14 @@ export async function executeRuntimeTools(params: {
         },
       });
     } catch (error) {
+      if (invocation) {
+        events.push({
+          type: 'capability.execution_failed',
+          invocationId: invocation.invocationId,
+          error: error instanceof Error ? error.message : String(error),
+          finishedAt: new Date().toISOString(),
+        });
+      }
       events.push({
         type: 'tool.failed',
         toolCallId,
@@ -1190,4 +1219,113 @@ export async function executeRuntimeTools(params: {
     }
   }
   return events;
+}
+
+function createMcpInvocationRecord(params: {
+  state: RuntimeState;
+  call: RuntimeState['tools']['calls'][string];
+  descriptor: import('@/protocol/capabilities').CapabilityDescriptor | undefined;
+  flags: ReturnType<typeof getFeatureFlags> | undefined;
+}):
+  | {
+      invocationId: string;
+      recorded: Extract<RuntimeEvent, { type: 'capability.invocation_recorded' }>;
+    }
+  | undefined {
+  if (
+    !params.flags?.mcpExecutionRecordV1 ||
+    !params.call.name.startsWith('mcp__') ||
+    !params.descriptor ||
+    !requiresDurableInvocation(params.descriptor.effectiveEffects)
+  ) {
+    return undefined;
+  }
+  const invocationId = digestCapability({
+    threadId: params.state.session.threadId,
+    toolCallId: params.call.toolCallId,
+    capabilityId: params.descriptor.capabilityId,
+    capabilityRevision: params.descriptor.revision,
+    arguments: params.call.args,
+  });
+  const planning = getActivePlanning(params.state);
+  const planId = 'document' in planning ? planning.document?.planId : undefined;
+  const authorizationDigest = digestCapability({
+    approvalHash: params.call.approvalHash ?? null,
+    approvalGrant: params.call.approvalGrant ?? 'none',
+    threadId: params.state.session.threadId,
+    taskId: params.call.taskId ?? params.state.activeTaskId ?? null,
+  });
+  return {
+    invocationId,
+    recorded: {
+      type: 'capability.invocation_recorded',
+      invocationId,
+      toolCallId: params.call.toolCallId,
+      capabilityId: params.descriptor.capabilityId,
+      capabilityRevision: params.descriptor.revision,
+      ...((params.call.taskId ?? params.state.activeTaskId)
+        ? { taskId: params.call.taskId ?? params.state.activeTaskId ?? undefined }
+        : {}),
+      ...(planId ? { planId } : {}),
+      argumentsDigest: digestCapability(params.call.args),
+      authorizationDigest,
+      effectiveEffectsDigest: digestCapability(params.descriptor.effectiveEffects),
+      effectiveEffects: params.descriptor.effectiveEffects,
+      recordedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function requiresDurableInvocation(
+  effects: import('@/protocol/capabilities').EffectProfile,
+): boolean {
+  return [effects.filesystem, effects.network, effects.externalState].some(
+    (effect) => effect === 'write' || effect === 'destructive' || effect === 'unknown',
+  );
+}
+
+function invocationTerminalEvent(
+  invocationId: string,
+  result: ToolExecutionResult,
+  finishedAt: string,
+): Extract<
+  RuntimeEvent,
+  { type: 'capability.execution_succeeded' | 'capability.execution_failed' }
+> {
+  if (
+    result.ok === false ||
+    !result.capabilityResult ||
+    result.capabilityResult.status !== 'success'
+  ) {
+    return {
+      type: 'capability.execution_failed',
+      invocationId,
+      error:
+        result.capabilityResult?.error?.message ??
+        result.stderr ??
+        'MCP provider did not produce a successful capability result.',
+      finishedAt,
+    };
+  }
+  const externalReferences = result.capabilityResult.content.flatMap((content) => {
+    const uri = typeof content.uri === 'string' ? content.uri : undefined;
+    const nestedUri =
+      content.resource &&
+      typeof content.resource === 'object' &&
+      typeof (content.resource as Record<string, unknown>).uri === 'string'
+        ? ((content.resource as Record<string, unknown>).uri as string)
+        : undefined;
+    return [uri, nestedUri].filter((value): value is string => Boolean(value));
+  });
+  return {
+    type: 'capability.execution_succeeded',
+    invocationId,
+    resultDigest: digestCapability(result.capabilityResult),
+    evidenceDigest: digestCapability({
+      content: result.capabilityResult.content,
+      structuredContent: result.capabilityResult.structuredContent,
+    }),
+    finishedAt,
+    ...(externalReferences.length > 0 ? { externalReferences } : {}),
+  };
 }

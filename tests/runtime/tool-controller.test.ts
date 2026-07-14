@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentConfig } from '@/core/config/index';
 import { executeRuntimeTools, toRuntimeSubagentEvent } from '@/core/controllers/tool-controller';
+import { McpManager } from '@/core/mcp';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 
@@ -55,6 +57,101 @@ describe('executeRuntimeTools', () => {
         type: 'tool.failed',
         failure: expect.objectContaining({ kind: 'tool_invalid_args' }),
       }),
+    ]);
+  });
+
+  test('records a side-effecting MCP invocation before execution and persists only digests', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-recorded-mcp',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    const descriptor = {
+      capabilityId: 'mcp:fixture/write',
+      revision: 'write-revision',
+      kind: 'mcp_tool' as const,
+      displayName: 'write',
+      description: 'write fixture',
+      provider: { type: 'mcp' as const, id: 'fixture', provenance: 'remote' as const },
+      inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      declaredEffects: {
+        filesystem: 'none' as const,
+        network: 'write' as const,
+        externalState: 'write' as const,
+      },
+      effectiveEffects: {
+        filesystem: 'none' as const,
+        network: 'write' as const,
+        externalState: 'write' as const,
+      },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'user' as const },
+      availability: 'available' as const,
+      diagnostics: [],
+    };
+    state.capabilities.bindings.binding = {
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      exposedToolName: 'mcp__fixture__write',
+      schemaDigest: 'schema-digest',
+      issuedForTurnId: state.turn.turnId,
+    };
+    state.tools.calls.mcp = {
+      toolCallId: 'mcp',
+      modelMessageId: 'model',
+      name: 'mcp__fixture__write',
+      args: { id: 'secret-argument' },
+      status: 'approved',
+      approvalGrant: 'approve_once',
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.active.push('mcp');
+    const manager = new McpManager();
+    manager.findCapability = (capabilityId) =>
+      capabilityId === descriptor.capabilityId ? descriptor : undefined;
+    manager.callTool = async () =>
+      ({
+        content: [
+          { type: 'resource_link', uri: 'resource://fixture/secret-argument', name: 'fixture' },
+        ],
+        structuredContent: { ok: true },
+      }) as never;
+    const config: AgentConfig = {
+      apiKey: '',
+      baseURL: 'http://localhost',
+      modelName: 'test',
+      providerName: 'test',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: false },
+      features: {
+        capabilityCatalogV1: true,
+        mcpRuntimeBindingV1: true,
+        mcpExecutionRecordV1: true,
+      },
+    };
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['mcp'],
+      mcpManager: manager,
+      taskConfig: config,
+    });
+
+    const recorded = events.find((event) => event.type === 'capability.invocation_recorded');
+    expect(recorded).toMatchObject({
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+    });
+    expect(JSON.stringify(recorded)).not.toContain('secret-argument');
+    expect(events.map((event) => event.type)).toEqual([
+      'capability.invocation_recorded',
+      'tool.started',
+      'capability.execution_started',
+      'capability.execution_succeeded',
+      'tool.finished',
     ]);
   });
 

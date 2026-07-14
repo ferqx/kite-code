@@ -500,12 +500,25 @@ export function createAgentKernel(params: {
     store.saveSnapshot(params.threadId, migratedState);
   }
 
-  return new AgentKernel({
+  const kernel = new AgentKernel({
     store,
     initialState,
     interactionMode: params.interactionMode ?? 'accept_edits',
     sandboxAvailable: params.sandboxAvailable,
   });
+  // A persisted intent without a terminal provider result is deliberately not
+  // replayed.  Record the uncertainty durably so a later reconciliation/user
+  // decision can resolve it without issuing a duplicate external write.
+  for (const invocation of Object.values(kernel.getState().capabilities.invocations)) {
+    if (invocation.status !== 'recorded' && invocation.status !== 'running') continue;
+    kernel.processEvent({
+      type: 'capability.execution_unknown',
+      invocationId: invocation.invocationId,
+      reason: 'Runtime recovered after invocation intent was persisted without a terminal result.',
+      finishedAt: new Date().toISOString(),
+    });
+  }
+  return kernel;
 }
 
 function replayPersistedTail(
@@ -561,6 +574,11 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     ...normalizeRuntimeMetadata(snapshot),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     suspendedSubagents: snapshot.suspendedSubagents ?? {},
+    capabilities: {
+      catalogRevision: snapshot.capabilities?.catalogRevision ?? '',
+      bindings: snapshot.capabilities?.bindings ?? {},
+      invocations: snapshot.capabilities?.invocations ?? {},
+    },
     ...(legacyMarker ? { legacyUnrecoverableSubagentApproval: legacyMarker } : {}),
   };
 
@@ -611,6 +629,11 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     revision: Number.isInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0,
     appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
     recoveryState: raw.recoveryState ?? { kind: 'normal' },
+    capabilities: {
+      catalogRevision: state.capabilities?.catalogRevision ?? '',
+      bindings: state.capabilities?.bindings ?? {},
+      invocations: state.capabilities?.invocations ?? {},
+    },
   };
 }
 

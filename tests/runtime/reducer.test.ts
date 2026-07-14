@@ -101,6 +101,78 @@ describe('reduceRuntimeState — capability bindings', () => {
     expect(next.capabilities.bindings['binding-2']?.capabilityRevision).toBe('tool-2');
     expect(next).not.toBe(state);
   });
+
+  test('projects a durable capability invocation without raw arguments or result content', () => {
+    const state = makeInitialState();
+    const recorded = reduceRuntimeState(state, {
+      type: 'capability.invocation_recorded',
+      invocationId: 'invocation-1',
+      toolCallId: 'tool-1',
+      capabilityId: 'mcp:fixture/write',
+      capabilityRevision: 'revision-1',
+      argumentsDigest: 'arguments-digest',
+      authorizationDigest: 'approval-digest',
+      effectiveEffectsDigest: 'effects-digest',
+      effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+      recordedAt: '2026-07-14T00:00:00.000Z',
+    });
+    const started = reduceRuntimeState(recorded, {
+      type: 'capability.execution_started',
+      invocationId: 'invocation-1',
+      startedAt: '2026-07-14T00:00:01.000Z',
+    });
+    const finished = reduceRuntimeState(started, {
+      type: 'capability.execution_succeeded',
+      invocationId: 'invocation-1',
+      resultDigest: 'result-digest',
+      evidenceDigest: 'evidence-digest',
+      externalReferences: ['resource://fixture/1'],
+      finishedAt: '2026-07-14T00:00:02.000Z',
+    });
+
+    expect(finished.capabilities.invocations['invocation-1']).toEqual({
+      invocationId: 'invocation-1',
+      toolCallId: 'tool-1',
+      capabilityId: 'mcp:fixture/write',
+      capabilityRevision: 'revision-1',
+      argumentsDigest: 'arguments-digest',
+      authorizationDigest: 'approval-digest',
+      effectiveEffectsDigest: 'effects-digest',
+      status: 'succeeded',
+      recordedAt: '2026-07-14T00:00:00.000Z',
+      startedAt: '2026-07-14T00:00:01.000Z',
+      finishedAt: '2026-07-14T00:00:02.000Z',
+      resultDigest: 'result-digest',
+      evidenceDigest: 'evidence-digest',
+      externalReferences: ['resource://fixture/1'],
+    });
+  });
+
+  test('marks an uncompleted recorded invocation unknown during recovery projection', () => {
+    const state = reduceRuntimeState(makeInitialState(), {
+      type: 'capability.invocation_recorded',
+      invocationId: 'invocation-unknown',
+      toolCallId: 'tool-unknown',
+      capabilityId: 'mcp:fixture/write',
+      capabilityRevision: 'revision-1',
+      argumentsDigest: 'arguments-digest',
+      authorizationDigest: 'approval-digest',
+      effectiveEffectsDigest: 'effects-digest',
+      effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+      recordedAt: '2026-07-14T00:00:00.000Z',
+    });
+    const recovered = reduceRuntimeState(state, {
+      type: 'capability.execution_unknown',
+      invocationId: 'invocation-unknown',
+      reason: 'provider result was not persisted',
+      finishedAt: '2026-07-14T00:00:03.000Z',
+    });
+    expect(recovered.capabilities.invocations['invocation-unknown']).toMatchObject({
+      status: 'unknown',
+      error: 'provider result was not persisted',
+      finishedAt: '2026-07-14T00:00:03.000Z',
+    });
+  });
 });
 
 function uuidPattern() {
