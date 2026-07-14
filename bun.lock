@@ -5,7 +5,6 @@
     "": {
       "name": "kite-code",
       "dependencies": {
-        "@ai-sdk/mcp": "^2.0.10",
         "@ai-sdk/openai-compatible": "^3.0.7",
         "@clack/prompts": "^1.7.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
@@ -13,6 +12,7 @@
         "@types/jsdom": "^28.0.3",
         "@types/turndown": "^5.0.6",
         "ai": "^7.0.19",
+        "ajv": "^8.17.1",
         "gpt-tokenizer": "^3.4.0",
         "hono": "^4.12.29",
         "ink": "^7.1.0",
@@ -38,8 +38,6 @@
   },
   "packages": {
     "@ai-sdk/gateway": ["@ai-sdk/gateway@4.0.15", "https://registry.npmmirror.com/@ai-sdk/gateway/-/gateway-4.0.15.tgz", { "dependencies": { "@ai-sdk/provider": "4.0.3", "@ai-sdk/provider-utils": "5.0.7", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-JHvgCU4SR6OdjOI+8rxIF3zhIboFAkQ1vEa+QOIdkK5VyME1ONx8SbgM2YtnSY1DOsCtUyhd+EG876pYpRjopg=="],
-
-    "@ai-sdk/mcp": ["@ai-sdk/mcp@2.0.10", "https://registry.npmmirror.com/@ai-sdk/mcp/-/mcp-2.0.10.tgz", { "dependencies": { "@ai-sdk/provider": "4.0.3", "@ai-sdk/provider-utils": "5.0.7", "pkce-challenge": "^5.0.1" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-LP47CEk3e6BwCqXamvv4nKbgOWQ5z5T/qS/J2fola5h98KTy7JT7I1yw5LKtB89MZBLviYmEh98Ep4ovHOz/vA=="],
 
     "@ai-sdk/openai-compatible": ["@ai-sdk/openai-compatible@3.0.7", "https://registry.npmmirror.com/@ai-sdk/openai-compatible/-/openai-compatible-3.0.7.tgz", { "dependencies": { "@ai-sdk/provider": "4.0.3", "@ai-sdk/provider-utils": "5.0.7" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-y8RVpm8BZKNHDxlbNVt/GYmoBBqLx10m4d7bOzOnRD8V2aP3Cr6/g/bfubR4EkbW1ySrnPr62svZIeND2fdp3Q=="],
 

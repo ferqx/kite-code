@@ -1,3 +1,5 @@
+import { validateCapabilityArguments } from '@/core/capabilities/schema';
+import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { buildToolApproval } from '@/core/harness/tool-policy';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
@@ -302,6 +304,36 @@ export async function executeRuntimeTools(params: {
         failure: classifyFailure('tool_not_found', `Unsupported tool '${call.name}'.`),
       });
       continue;
+    }
+    if (request.name.startsWith('mcp__')) {
+      const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
+      const binding = call.bindingId
+        ? params.state.capabilities.bindings[call.bindingId]
+        : undefined;
+      const descriptor = binding
+        ? params.mcpManager?.findCapability(binding.capabilityId)
+        : undefined;
+      const invalidReason =
+        !flags?.capabilityCatalogV1 || !flags.mcpRuntimeBindingV1
+          ? 'MCP Runtime binding is disabled by feature flag.'
+          : !binding || binding.issuedForTurnId !== call.createdAtTurnId
+            ? 'MCP tool call has no valid Runtime-issued binding.'
+            : !descriptor || descriptor.revision !== binding.capabilityRevision
+              ? 'MCP capability changed after binding; request a new model turn before calling it.'
+              : descriptor.availability !== 'available' || !descriptor.inputSchema
+                ? 'MCP capability is unavailable for execution.'
+                : validateCapabilityArguments(
+                    descriptor.inputSchema,
+                    request.args as Record<string, unknown>,
+                  );
+      if (invalidReason) {
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: classifyFailure('tool_invalid_args', invalidReason),
+        });
+        continue;
+      }
     }
     if (request.name === 'ask_user') {
       const hasQuestion = request.args.question.trim().length > 0;
@@ -814,6 +846,12 @@ export async function executeRuntimeTools(params: {
       continue;
     }
 
+    const mcpDescriptor =
+      request.name.startsWith('mcp__') && call.bindingId
+        ? params.mcpManager?.findCapability(
+            params.state.capabilities.bindings[call.bindingId]?.capabilityId ?? '',
+          )
+        : undefined;
     const decision = evaluateToolApproval({
       toolName: request.name,
       toolArgs: request.args as Record<string, unknown>,
@@ -821,6 +859,14 @@ export async function executeRuntimeTools(params: {
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
+      ...(mcpDescriptor
+        ? {
+            mcpPolicy: {
+              effects: mcpDescriptor.effectiveEffects,
+              minimumApproval: mcpDescriptor.policy.minimumApproval,
+            },
+          }
+        : {}),
     });
     if (!decision.allowed) {
       events.push({
@@ -839,7 +885,11 @@ export async function executeRuntimeTools(params: {
           decision.effects?.externalWrite ||
           decision.effects?.uncertainEffects,
       );
-    if ((decision.requiresApproval || requiresEffectReview) && call.status !== 'approved') {
+    const requiresDirectMcpApproval = mcpDescriptor?.policy.minimumApproval === 'user';
+    if (
+      (decision.requiresApproval || requiresEffectReview || requiresDirectMcpApproval) &&
+      call.status !== 'approved'
+    ) {
       // Delegate mode-specific routing to mode-policy
       const effectiveMode = getEffectiveInteractionMode(params.state);
       const modePolicy = createModePolicy(effectiveMode);
@@ -853,6 +903,30 @@ export async function executeRuntimeTools(params: {
         circuitBreakerTripped: params.state.autoReview.circuitBreakerTripped,
       });
 
+      if (requiresDirectMcpApproval) {
+        const approval = buildToolApproval({
+          workspace: params.state.session.workspace,
+          threadId: params.state.session.threadId,
+          request,
+          decision,
+          ...(mcpDescriptor && call.capabilityId && call.capabilityRevision
+            ? {
+                capability: {
+                  capabilityId: call.capabilityId,
+                  capabilityRevision: call.capabilityRevision,
+                  effectiveEffects: mcpDescriptor.effectiveEffects,
+                },
+              }
+            : {}),
+        }) as import('@/protocol/events').ToolApprovalPayload;
+        events.push({
+          type: 'approval.requested',
+          interactionId: genInteractionId(),
+          toolCallId,
+          approval,
+        });
+        continue;
+      }
       if (modeDecision.kind === 'deny') {
         events.push({
           type: 'tool.rejected',
@@ -875,6 +949,15 @@ export async function executeRuntimeTools(params: {
           threadId: params.state.session.threadId,
           request,
           decision,
+          ...(mcpDescriptor && call.capabilityId && call.capabilityRevision
+            ? {
+                capability: {
+                  capabilityId: call.capabilityId,
+                  capabilityRevision: call.capabilityRevision,
+                  effectiveEffects: mcpDescriptor.effectiveEffects,
+                },
+              }
+            : {}),
         }) as unknown as import('@/protocol/events').ToolApprovalPayload;
         events.push({
           type: 'auto_review.requested',
@@ -891,6 +974,15 @@ export async function executeRuntimeTools(params: {
           threadId: params.state.session.threadId,
           request,
           decision,
+          ...(mcpDescriptor && call.capabilityId && call.capabilityRevision
+            ? {
+                capability: {
+                  capabilityId: call.capabilityId,
+                  capabilityRevision: call.capabilityRevision,
+                  effectiveEffects: mcpDescriptor.effectiveEffects,
+                },
+              }
+            : {}),
         }) as unknown as import('@/protocol/events').ToolApprovalPayload;
         events.push({
           type: 'approval.requested',

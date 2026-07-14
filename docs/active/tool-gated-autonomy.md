@@ -81,7 +81,7 @@ harness 不应使用 stop-check 节点硬阻断模型最终答案。模型结束
 底层调用 shell 的工具必须保留 shell 返回的 `stdout`、`stderr` 和 `exitCode`。非零退出或 shell executor 异常都应转换为 `ok: false` 的工具结果，不能抛出到图执行层并阻断 `ToolMessage` 返回。
 
 - MCP 工具命名格式为 `mcp__<server>__<tool>`，由 `getAllTools()` 聚合所有已连接 server 的工具并通过 `adaptMcpTool` 转为 LangChain StructuredTool；输出体积超过阈值时自动截断。MCP 资源读取通过 `read_mcp_resource` 工具，调用 `manager.readResource(server, uri)`。
-- MCP 工具默认需要审批（risk: `mcp`）。可通过 server config 中 `risk: "read"` 声明降低风险级别，此时直接放行；`full_access` 模式下 MCP 工具也直接放行。
+- MCP 工具仅在 `capabilityCatalogV1` 与 `mcpRuntimeBindingV1` 同时启用，且具有当前 turn binding 时可执行。默认 effects 为 unknown，必须逐次人工审批；`full_access` 不会绕过 `minimumApproval: user`。已移除 server-level `risk: "read"`，只允许本地 per-tool effect/approval override 收紧策略。
 - `Skill` 工具仅当运行时扫描到 `SKILL.md` 文件时才注册。它始终不需要审批（risk: `read`），调用 `getSkillContent` 读取磁盘上的技能指令内容返回给模型。
 - `read_mcp_resource` 的资源位置可能由外部 MCP 服务管理；在默认的 `accept_edits` 模式下它需要审批，其他模式保留各自的确认语义。`Skill` 被归类为只读工具，不会触发审批。二者均不受 `read-only` 访问权限阻止。
 - `Skill` 工具在基集中位于 `read_mcp_resource` 之后、`update_plan` 之前，MCP 工具追加在 `set_authorization_mode` 之后。此顺序保持基集不变，保证前缀缓存稳定。
@@ -146,7 +146,7 @@ const allowExternal = hasExecutionGrant && isExternal;
 - 重复只读工具调用不会被 tool-runner 进度状态阻断。
 - `tools` 和 `user_input` 完成后直接回到单一 `agent`。
 - `Skill` 工具路由到 tools 直接执行（不经过 approval），`Skill` 未在 manifests 中找到时返回 `ok: false`；`Skill` 不受 `read-only` 访问权限阻止。
-- `mcp__*` 工具默认路由到 approval 节点，`risk: "read"` 配置的 server 工具直接进入 tools，`full_access` 模式下直接进入 tools。
+- `mcp__*` 工具必须具有未过期 binding；默认和 `minimumApproval: user` 的能力进入 approval。仅本地 per-tool policy 证明为读且 `minimumApproval: none` 的能力可直接进入 tools；未知 MCP 能力即使在 `full_access` 下也进入 approval。
 - `read_mcp_resource` 在 `accept_edits` 下因外部副作用进入 approval；其他模式按各自策略路由到 tools，MCP manager 不可用时返回错误。
 - 前缀缓存：内置工具 schema 不因 MCP 或 Skill 的存在而改变；MCP 工具始终追加在末尾，Skill 工具插入在固定位置（`read_mcp_resource` 之后、`update_plan` 之前）；`buildStaticSystemPrompt` 的 base 始终是 skills 版本的严格前缀。
 

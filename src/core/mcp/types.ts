@@ -1,5 +1,6 @@
 // src/core/mcp/types.ts
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
+import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 
 /** MCP transport type */
 export type McpTransportType = 'stdio' | 'http';
@@ -12,7 +13,16 @@ export interface McpServerConfig {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
-  risk?: 'read';
+  /** Server annotations are ignored unless this explicit local trust decision is present. */
+  trust?: 'untrusted' | 'trusted';
+  /** Local policy overrides are keyed by the exact server tool name. */
+  tools?: Record<
+    string,
+    {
+      effects?: Partial<EffectProfile>;
+      minimumApproval?: CapabilityApproval;
+    }
+  >;
   /** 单次工具调用/资源读取超时（毫秒），覆盖默认值 / Per-operation timeout in ms, overrides defaults */
   timeout?: number;
 }

@@ -9,3 +9,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0003](0003-auto-review-policy.md) | accepted | Auto-review is policy-gated and feature-flagged |
 | [0005](0005-interaction-state.md) | accepted | InteractionState owns waiting UI states |
 | [0006](0006-loop-mode-design.md) | proposed | Loop mode requires a separate design decision |
+| [0007](0007-capability-bindings.md) | accepted | Dynamic capabilities require revisioned turn bindings |
+| [0008](0008-verification-completion-semantics.md) | accepted | Only required verification gates completion |

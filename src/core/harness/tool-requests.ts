@@ -131,6 +131,14 @@ export type PendingToolRequest =
       protectedCommand: string;
     }
   | {
+      /** Dynamic MCP calls are accepted only when the Runtime resolves a binding. */
+      id?: string;
+      name: `mcp__${string}`;
+      args: Record<string, unknown>;
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
       name: 'Skill';
@@ -392,6 +400,16 @@ export function toolRequestFromCall(
       args: { server: args.server || '', uri: args.uri || '' },
       reason: 'Model requested MCP resource read',
       protectedCommand: `read_mcp_resource ${args.server || ''}`,
+    };
+  }
+
+  if (call.name.startsWith('mcp__')) {
+    return {
+      id: call.id,
+      name: call.name as `mcp__${string}`,
+      args: call.args,
+      reason: `Model requested MCP tool ${call.name}`,
+      protectedCommand: call.name,
     };
   }
 

@@ -4,7 +4,7 @@
 
 - 运行时：Bun
 - 语言：TypeScript（ESM）
-- 核心依赖：`ai`（Vercel AI SDK v7）、`@ai-sdk/openai-compatible`、`@ai-sdk/mcp`
+- 核心依赖：`ai`（Vercel AI SDK v7）、`@ai-sdk/openai-compatible`、`@modelcontextprotocol/sdk`、`ajv`
 - 持久化：SQLite checkpoint（Bun SQLite）
 
 ## 常用命令

@@ -24,6 +24,10 @@ export interface ToolApprovalPayload {
   recommendedGrant: ShellApprovalGrant;
   subagentId?: string;
   reviewFailure?: string;
+  capabilityId?: string;
+  capabilityRevision?: string;
+  argumentsDigest?: string;
+  effectiveEffectsDigest?: string;
 }
 
 /** 创建默认 thread 授权状态 / Create default thread authorization state */
@@ -150,6 +154,11 @@ export function buildToolApproval(input: {
   threadId: string;
   request: PendingToolRequest;
   decision: ApprovalDecision;
+  capability?: {
+    capabilityId: string;
+    capabilityRevision: string;
+    effectiveEffects: unknown;
+  };
 }): ToolApprovalPayload {
   const shellAction = input.request.name === 'shell_execute' ? input.request.args : null;
   const grantOptions: ShellApprovalGrant[] =
@@ -173,6 +182,18 @@ export function buildToolApproval(input: {
     grantOptions,
     recommendedGrant:
       requestedGrant && grantOptions.includes(requestedGrant) ? requestedGrant : 'approve_once',
+    ...(input.capability
+      ? {
+          capabilityId: input.capability.capabilityId,
+          capabilityRevision: input.capability.capabilityRevision,
+          argumentsDigest: createHash('sha256')
+            .update(stableStringify(input.request.args))
+            .digest('hex'),
+          effectiveEffectsDigest: createHash('sha256')
+            .update(stableStringify(input.capability.effectiveEffects))
+            .digest('hex'),
+        }
+      : {}),
   };
 }
 
@@ -181,6 +202,11 @@ export function hashToolApprovalRequest(input: {
   workspace: string;
   threadId: string;
   request: PendingToolRequest;
+  capability?: {
+    capabilityId: string;
+    capabilityRevision: string;
+    effectiveEffects: unknown;
+  };
 }): string {
   return createHash('sha256')
     .update(
@@ -189,6 +215,7 @@ export function hashToolApprovalRequest(input: {
         args: input.request.args,
         workspace: input.workspace,
         threadId: input.threadId,
+        capability: input.capability,
       }),
     )
     .digest('hex');

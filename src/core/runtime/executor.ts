@@ -49,6 +49,7 @@ export function createRuntimeEffectExecutor(
         skillOptions: dependencies.skillOptions,
         subagentEventSink,
         signal: dependencies.signal,
+        emitRuntimeEvent: emit,
       });
     }
     if (effect.type === 'run_tools') {

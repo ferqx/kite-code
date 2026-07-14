@@ -565,7 +565,7 @@ describe('evaluateToolApproval', () => {
       expect(result.risk).toBe('mcp');
     });
 
-    it('allows MCP tools under full_access without approval', () => {
+    it('keeps unknown MCP tools behind approval under full_access', () => {
       const result = evaluateToolApproval(
         baseParams({
           toolName: 'mcp__server__tool',
@@ -574,15 +574,18 @@ describe('evaluateToolApproval', () => {
         }),
       );
       expect(result.allowed).toBe(true);
-      expect(result.requiresApproval).toBe(false);
+      expect(result.requiresApproval).toBe(true);
     });
 
-    it('allows MCP tools with config risk override to read', () => {
+    it('allows MCP tools only with a bound local read policy', () => {
       const result = evaluateToolApproval(
         baseParams({
           toolName: 'mcp__server__tool',
           toolArgs: {},
-          mcpRiskOverride: { server: 'read' },
+          mcpPolicy: {
+            effects: { filesystem: 'read', network: 'read', externalState: 'read' },
+            minimumApproval: 'none',
+          },
         }),
       );
       expect(result.allowed).toBe(true);

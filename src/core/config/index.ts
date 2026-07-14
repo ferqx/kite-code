@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
+import type { EffectProfile } from '@/protocol/capabilities';
 import type { McpServerConfig } from '../mcp/types';
 import type { FeatureFlags } from './features';
 import { defaultConfigPath, projectConfigPath } from './paths';
@@ -45,7 +46,22 @@ const mcpServerSchema = z.object({
   url: z.string().optional(),
   env: z.record(z.string(), z.string()).optional(),
   headers: z.record(z.string(), z.string()).optional(),
-  risk: z.enum(['read']).optional(),
+  trust: z.enum(['untrusted', 'trusted']).optional(),
+  tools: z
+    .record(
+      z.string(),
+      z.object({
+        effects: z
+          .object({
+            filesystem: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
+            network: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
+            externalState: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
+          })
+          .optional(),
+        minimumApproval: z.enum(['none', 'auto_review', 'user']).optional(),
+      }),
+    )
+    .optional(),
   timeout: z.number().optional(),
 });
 
@@ -64,6 +80,13 @@ const featuresSchema = z
     runtimeProjectionV2: z.boolean().optional(),
     nativeLoopEngine: z.boolean().optional(),
     loopMode: z.boolean().optional(),
+    capabilityCatalogV1: z.boolean().optional(),
+    mcpRuntimeBindingV1: z.boolean().optional(),
+    mcpExecutionRecordV1: z.boolean().optional(),
+    skillActivationV2: z.boolean().optional(),
+    skillWorkflowV1: z.boolean().optional(),
+    verificationV1: z.boolean().optional(),
+    capabilitySearchV1: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -425,8 +448,39 @@ function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServerConfig
     }
     config.headers = headers;
   }
-  if (raw.risk === 'read') {
-    config.risk = 'read';
+  if (raw.trust === 'trusted' || raw.trust === 'untrusted') config.trust = raw.trust;
+  if (raw.tools && typeof raw.tools === 'object') {
+    const tools: NonNullable<McpServerConfig['tools']> = {};
+    for (const [toolName, rawPolicy] of Object.entries(raw.tools as Record<string, unknown>)) {
+      if (!rawPolicy || typeof rawPolicy !== 'object') continue;
+      const policy = rawPolicy as Record<string, unknown>;
+      const effects = policy.effects;
+      const normalizedEffects: Partial<EffectProfile> = {};
+      if (effects && typeof effects === 'object') {
+        for (const key of ['filesystem', 'network', 'externalState'] as const) {
+          const level = (effects as Record<string, unknown>)[key];
+          if (
+            level === 'none' ||
+            level === 'read' ||
+            level === 'write' ||
+            level === 'destructive' ||
+            level === 'unknown'
+          ) {
+            normalizedEffects[key] = level;
+          }
+        }
+      }
+      const minimumApproval = policy.minimumApproval;
+      tools[toolName] = {
+        ...(Object.keys(normalizedEffects).length > 0 ? { effects: normalizedEffects } : {}),
+        ...(minimumApproval === 'none' ||
+        minimumApproval === 'auto_review' ||
+        minimumApproval === 'user'
+          ? { minimumApproval }
+          : {}),
+      };
+    }
+    config.tools = tools;
   }
   if (typeof raw.timeout === 'number' && raw.timeout > 0) {
     config.timeout = raw.timeout;

@@ -9,6 +9,13 @@ export interface FeatureFlags {
   runtimeProjectionV2: boolean;
   nativeLoopEngine: boolean;
   loopMode: boolean;
+  capabilityCatalogV1: boolean;
+  mcpRuntimeBindingV1: boolean;
+  mcpExecutionRecordV1: boolean;
+  skillActivationV2: boolean;
+  skillWorkflowV1: boolean;
+  verificationV1: boolean;
+  capabilitySearchV1: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
@@ -18,6 +25,13 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   runtimeProjectionV2: false,
   nativeLoopEngine: false,
   loopMode: false,
+  capabilityCatalogV1: false,
+  mcpRuntimeBindingV1: false,
+  mcpExecutionRecordV1: false,
+  skillActivationV2: false,
+  skillWorkflowV1: false,
+  verificationV1: false,
+  capabilitySearchV1: false,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

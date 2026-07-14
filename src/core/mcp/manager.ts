@@ -2,13 +2,23 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult, Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import {
   PromptListChangedNotificationSchema,
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { clearToolCache } from '@/core/tools/definitions';
+import {
+  createSnapshot,
+  descriptorRevision,
+  UNKNOWN_EXTERNAL_EFFECTS,
+} from '@/core/capabilities/catalog';
+import { compileCapabilitySchema } from '@/core/capabilities/schema';
+import type {
+  CapabilityDescriptor,
+  CapabilitySnapshot,
+  EffectProfile,
+} from '@/protocol/capabilities';
 import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
 
 const MCP_STARTUP_TIMEOUT = 5000;
@@ -29,6 +39,7 @@ export interface PromptEntry {
 export class McpManager {
   private servers = new Map<string, McpServerState>();
   private promptRegistry = new Map<string, PromptEntry>();
+  private snapshot: CapabilitySnapshot = createSnapshot([]);
 
   /** Connect to all configured servers in parallel, non-blocking on individual failures */
   async connectAll(servers: Record<string, McpServerConfig>): Promise<void> {
@@ -106,9 +117,7 @@ export class McpManager {
           const state = this.servers.get(name);
           if (state) {
             state.tools = result.tools as SdkTool[];
-            // Invalidate the agent tool cache so the next createAgentTools call
-            // picks up the updated MCP tool list.
-            clearToolCache();
+            this.refreshSnapshot();
           }
         } catch (err) {
           console.error(`[MCP] Failed to refresh tools for ${name}:`, err);
@@ -135,6 +144,7 @@ export class McpManager {
               const key = `mcp__${name}__${prompt.name}`;
               this.promptRegistry.set(key, { server: name, prompt });
             }
+            this.refreshSnapshot();
           }
         } catch (err) {
           console.error(`[MCP] Failed to refresh prompts for ${name}:`, err);
@@ -151,6 +161,7 @@ export class McpManager {
           try {
             const result = await client.listResources();
             state.resources = (result.resources ?? []) as McpResource[];
+            this.refreshSnapshot();
           } catch {
             /* ignore */
           }
@@ -168,6 +179,7 @@ export class McpManager {
       resources,
       connected: true,
     });
+    this.refreshSnapshot();
   }
 
   /** Return all tools from all connected servers */
@@ -182,8 +194,21 @@ export class McpManager {
     return result;
   }
 
+  /** Immutable discovery snapshot consumed by the Runtime binding controller. */
+  getCapabilitySnapshot(): CapabilitySnapshot {
+    return this.snapshot;
+  }
+
+  findCapability(capabilityId: string): CapabilityDescriptor | undefined {
+    return this.snapshot.descriptors.find((descriptor) => descriptor.capabilityId === capabilityId);
+  }
+
   /** Execute an MCP tool on the specified server */
-  async callTool(server: string, toolName: string, args: Record<string, unknown>): Promise<string> {
+  async callTool(
+    server: string,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
     const state = this.servers.get(server);
     if (!state) {
       throw new Error(`MCP server not found: ${server}`);
@@ -195,14 +220,9 @@ export class McpManager {
     const result = await client.callTool({ name: toolName, arguments: args }, undefined, {
       timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
     });
-    // Extract text content from the result
-    if (result.content && Array.isArray(result.content)) {
-      const textParts = result.content
-        .filter((c: { type: string }) => c.type === 'text')
-        .map((c: { text: string }) => c.text);
-      return textParts.join('\n');
-    }
-    return JSON.stringify(result);
+    // The SDK's task-enabled overload includes an indirection result. P0 uses
+    // synchronous tool calls only; the protocol result is validated by the server.
+    return result as CallToolResult;
   }
 
   /** 列出指定 server 的所有资源（从缓存） / List resources for a server (from cache) */
@@ -263,7 +283,90 @@ export class McpManager {
       }),
     );
     this.promptRegistry.clear();
+    this.refreshSnapshot();
   }
+
+  private refreshSnapshot(): void {
+    const descriptors: CapabilityDescriptor[] = [];
+    for (const [serverName, state] of this.servers) {
+      if (!state.connected) continue;
+      for (const tool of state.tools) {
+        descriptors.push(createMcpToolDescriptor(serverName, state.config, tool));
+      }
+      for (const resource of state.resources) {
+        descriptors.push(
+          createPassiveDescriptor('mcp_resource', serverName, state.config, resource),
+        );
+      }
+      for (const prompt of state.prompts) {
+        descriptors.push(createPassiveDescriptor('mcp_prompt', serverName, state.config, prompt));
+      }
+    }
+    this.snapshot = createSnapshot(descriptors);
+  }
+}
+
+function createMcpToolDescriptor(
+  serverName: string,
+  config: McpServerConfig,
+  tool: SdkTool,
+): CapabilityDescriptor {
+  const override = config.tools?.[tool.name];
+  const schema = compileCapabilitySchema(tool.inputSchema);
+  const declaredEffects = effectsFromAnnotations(config, tool.annotations);
+  const effectiveEffects: EffectProfile = {
+    ...declaredEffects,
+    ...override?.effects,
+  };
+  const inputSchema = tool.inputSchema as Record<string, unknown>;
+  const withoutRevision: Omit<CapabilityDescriptor, 'revision'> = {
+    capabilityId: `mcp:${serverName}/${tool.name}`,
+    kind: 'mcp_tool',
+    displayName: tool.name,
+    description: tool.description ?? `MCP tool: ${tool.name}`,
+    provider: { type: 'mcp', id: serverName, provenance: 'remote' },
+    inputSchema,
+    ...(tool.outputSchema ? { outputSchema: tool.outputSchema as Record<string, unknown> } : {}),
+    declaredEffects,
+    effectiveEffects,
+    policy: {
+      workspaceTrustRequired: false,
+      minimumApproval: override?.minimumApproval ?? 'user',
+    },
+    availability: schema.ok ? 'available' : 'quarantined',
+    diagnostics: schema.ok ? [] : [schema.diagnostic],
+  };
+  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
+}
+
+function createPassiveDescriptor(
+  kind: 'mcp_resource' | 'mcp_prompt',
+  serverName: string,
+  _config: McpServerConfig,
+  value: { name: string; description?: string; uri?: string },
+): CapabilityDescriptor {
+  const name = value.name ?? value.uri ?? 'unknown';
+  const withoutRevision: Omit<CapabilityDescriptor, 'revision'> = {
+    capabilityId: `mcp:${serverName}/${kind}/${name}`,
+    kind,
+    displayName: name,
+    description: value.description ?? name,
+    provider: { type: 'mcp', id: serverName, provenance: 'remote' },
+    declaredEffects: UNKNOWN_EXTERNAL_EFFECTS,
+    effectiveEffects: UNKNOWN_EXTERNAL_EFFECTS,
+    policy: { workspaceTrustRequired: false, minimumApproval: 'user' },
+    availability: 'available',
+    diagnostics: [],
+  };
+  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
+}
+
+function effectsFromAnnotations(
+  config: McpServerConfig,
+  annotations: SdkTool['annotations'],
+): EffectProfile {
+  if (config.trust !== 'trusted' || !annotations?.readOnlyHint) return UNKNOWN_EXTERNAL_EFFECTS;
+  return { filesystem: 'read', network: 'read', externalState: 'read' };
 }
 
 /** Create transport instance from server config */

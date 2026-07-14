@@ -1,9 +1,10 @@
-import { type ToolSet, tool, zodSchema } from 'ai';
+import { dynamicTool, jsonSchema, type ToolSet, tool, zodSchema } from 'ai';
 import { z } from 'zod';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { createSkillTool } from '@/core/skills/skill-tool';
 import { createTaskTool } from '@/core/subagent/task-tool';
 import { fetchAndExtract } from '@/core/web/extractor';
+import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
 import { editFile, readFile, writeFile } from './file';
 import { searchContent as searchContentNative, searchFiles as searchFilesNative } from './search';
 import { type ShellExecutor, shellTool } from './shell';
@@ -30,6 +31,8 @@ export interface CreateAgentToolsInput {
   shellExecutor?: ShellExecutor;
   /** 可选 MCP 管理器 / Optional MCP manager */
   mcpManager?: import('@/core/mcp/manager').McpManager;
+  /** Runtime-issued MCP tool bindings for the current model call. */
+  mcpBindings?: Array<{ binding: CapabilityBinding; descriptor: CapabilityDescriptor }>;
   /** 可选技能清单 / Optional skill manifests */
   skills?: import('@/core/skills/types').SkillManifest[];
   /** 可选技能扫描选项 / Optional skill scan options */
@@ -74,16 +77,21 @@ export function clearToolCache(): void {
 
 /** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
 export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
-  // 缓存：同一个 agent 迭代中参数不变时避免重建全部工具（包括 MCP 适配）
-  // Include subagentEventSink presence and MCP tool count to invalidate on tool list changes
-  const mcpToolCount = input.mcpManager?.getAllTools().length ?? 0;
+  // Bindings, not the number of discovered tools, determine MCP declaration identity.
+  const mcpBindingRevision = stableCacheStringify(
+    input.mcpBindings?.map(({ binding }) => ({
+      name: binding.exposedToolName,
+      revision: binding.capabilityRevision,
+      schema: binding.schemaDigest,
+    })) ?? [],
+  );
   const authorizationCacheKey = input.authorization
     ? stableCacheStringify({
         mode: input.authorization.mode,
         commandGrants: input.authorization.commandGrants ?? {},
       })
     : '';
-  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpToolCount}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpBindingRevision}|${input.skills?.length ?? 0}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
   const readFileTool = tool({
@@ -378,18 +386,21 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     ask_user: createAskUserTool(),
   };
 
-  // MCP 工具合成 — 暂时禁用，待 Step 6 MCP 迁移完成后恢复
-  // MCP tool synthesis — temporarily disabled, will be restored after Step 6 MCP migration
-  // TODO(Step 6): Replace adaptMcpTool with direct ToolSet from mcpManager.getToolSet()
-  if (input.mcpManager) {
-    // MCP tools require @ai-sdk/mcp integration; skip for now until Step 6
-    // Store only builtin tools; MCP integration will be restored after @ai-sdk/mcp migration
-    _toolCache.set(cacheKey, builtinTools);
-    return builtinTools;
+  const mcpTools: ToolSet = {};
+  for (const { binding, descriptor } of input.mcpBindings ?? []) {
+    if (descriptor.kind !== 'mcp_tool' || descriptor.availability !== 'available') continue;
+    if (!descriptor.inputSchema) continue;
+    // AI SDK's JSONSchema7 type is narrower than MCP's runtime schema. The
+    // binding was validated by compileCapabilitySchema before it reaches here.
+    const inputSchema = jsonSchema(descriptor.inputSchema as Parameters<typeof jsonSchema>[0]);
+    mcpTools[binding.exposedToolName] = dynamicTool({
+      description: descriptor.description,
+      inputSchema,
+    });
   }
-
-  _toolCache.set(cacheKey, builtinTools);
-  return builtinTools;
+  const tools = { ...builtinTools, ...mcpTools };
+  _toolCache.set(cacheKey, tools);
+  return tools;
 }
 
 /** 兼容旧名称：创建代码 Agent 工具集 / Backward-compatible alias for agent tools */

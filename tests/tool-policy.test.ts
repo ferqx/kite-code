@@ -403,12 +403,15 @@ describe('tool policy', () => {
       expect(decision.risk).toBe('mcp');
     });
 
-    test('allows MCP tool with server-level risk=read override', () => {
+    test('allows MCP tool with a local per-tool read policy', () => {
       const decision = evaluateToolApproval({
         toolName: 'mcp__safe_reader__list',
         toolArgs: {},
         phase: 'building',
-        mcpRiskOverride: { safe_reader: 'read' },
+        mcpPolicy: {
+          effects: { filesystem: 'read', network: 'read', externalState: 'read' },
+          minimumApproval: 'none',
+        },
       });
       expect(decision.allowed).toBe(true);
       expect(decision.requiresApproval).toBe(false);

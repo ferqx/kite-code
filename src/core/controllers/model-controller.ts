@@ -6,6 +6,8 @@
 // No LangGraph state dependency, no side effects.
 
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
+import { createBinding } from '@/core/capabilities/catalog';
+import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
 import {
@@ -133,6 +135,8 @@ export async function invokeRuntimeModel(params: {
   skillOptions?: SkillScanOptions;
   subagentEventSink?: SubAgentEventSink;
   signal?: AbortSignal;
+  /** Persists bindings before the model can emit a dynamic MCP tool call. */
+  emitRuntimeEvent?: (event: RuntimeEvent) => void;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const requestId = genInteractionId();
@@ -153,10 +157,36 @@ export async function invokeRuntimeModel(params: {
   });
 
   try {
+    const flags = getFeatureFlags(params.config);
+    const mcpBindings =
+      flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1 && params.mcpManager
+        ? params.mcpManager
+            .getCapabilitySnapshot()
+            .descriptors.filter(
+              (descriptor) =>
+                descriptor.kind === 'mcp_tool' && descriptor.availability === 'available',
+            )
+            .map((descriptor) => ({
+              descriptor,
+              binding: createBinding({
+                descriptor,
+                exposedToolName: `mcp__${descriptor.provider.id}__${descriptor.displayName}`,
+                turnId: state.turn.turnId,
+              }),
+            }))
+        : [];
+    if (mcpBindings.length > 0) {
+      params.emitRuntimeEvent?.({
+        type: 'capability.bindings_issued',
+        catalogRevision: params.mcpManager?.getCapabilitySnapshot().revision ?? '',
+        bindings: mcpBindings.map(({ binding }) => binding),
+      });
+    }
     const tools = createAgentTools({
       workspace: state.session.workspace,
       shellExecutor: params.shellExecutor,
       mcpManager: params.mcpManager,
+      mcpBindings,
       skills: params.skills,
       skillOptions: params.skillOptions,
       config: params.config,
@@ -246,6 +276,9 @@ export async function invokeRuntimeModel(params: {
     let ordinal = 0;
     for (const call of toolCalls) {
       const capability = classifyToolCapability(call.name, call.args);
+      const binding = mcpBindings.find(
+        ({ binding: candidate }) => candidate.exposedToolName === call.name,
+      )?.binding;
       events.push({
         type: 'tool.queued',
         toolCallId: call.id,
@@ -257,6 +290,13 @@ export async function invokeRuntimeModel(params: {
         effectClass: capability.effectClass,
         sideEffect: capability.sideEffect,
         classificationReason: capability.classificationReason,
+        ...(binding
+          ? {
+              bindingId: binding.bindingId,
+              capabilityId: binding.capabilityId,
+              capabilityRevision: binding.capabilityRevision,
+            }
+          : {}),
       });
     }
     events.push(...eventsForInvalidModelToolCalls(invalidToolCalls, messageId, ordinal));

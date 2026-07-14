@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpManager } from '@/core/mcp';
-import { parseMcpToolName } from '@/core/mcp/tool-adapter';
+import { normalizeMcpToolResult, parseMcpToolName } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
@@ -47,7 +47,6 @@ export interface RunApprovedToolInput {
   threadId?: string;
   override?: AuthorizationOverride;
   mcpManager?: McpManager;
-  mcpRiskOverride?: Record<string, 'read'>;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   signal?: AbortSignal;
@@ -73,7 +72,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     threadId = '',
     override,
     mcpManager,
-    mcpRiskOverride,
     skillManifests,
     skillOptions,
     signal,
@@ -111,7 +109,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     threadId,
     authorization: normalizeAuthorizationState(authorization),
     override,
-    mcpRiskOverride,
   });
   if (!policy.allowed) {
     return withFailureGuidance(request, {
@@ -539,13 +536,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       });
     }
     try {
-      const output = await mcpManager.callTool(
+      const raw = await mcpManager.callTool(
         serverName,
         toolName,
         request.args as unknown as Record<string, unknown>,
       );
+      const descriptor = mcpManager.findCapability(`mcp:${serverName}/${toolName}`);
+      const output = JSON.stringify(normalizeMcpToolResult(raw, descriptor?.outputSchema));
       return withFailureGuidance(request, {
-        ok: true,
+        ok: !raw.isError,
         command: request.name,
         exitCode: 0,
         stdout: output,

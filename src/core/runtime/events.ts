@@ -3,6 +3,7 @@
 // 所有状态变更通过类型化事件表示，供 runtime 内部及各层消费者使用
 
 import type { ToolGrant } from '@/core/types';
+import type { CapabilityBinding } from '@/protocol/capabilities';
 import type {
   AgentPlan,
   AuthorizationMode,
@@ -59,6 +60,17 @@ export interface ToolQueuedEvent {
   sideEffect?: boolean;
   /** Human-readable reason retained for diagnostics. */
   classificationReason?: string;
+  /** Dynamic MCP calls can execute only through a Runtime-issued binding. */
+  bindingId?: string;
+  capabilityId?: string;
+  capabilityRevision?: string;
+}
+
+/** Bindings are durable before a model can return a dynamic MCP call. */
+export interface CapabilityBindingsIssuedEvent {
+  type: 'capability.bindings_issued';
+  catalogRevision: string;
+  bindings: CapabilityBinding[];
 }
 
 /** 工具调用开始执行 */
@@ -489,6 +501,7 @@ export interface SubagentSuspendedEvent {
 
 /** 运行时事件 — 所有状态变更的统一类型表示 */
 export type RuntimeEvent =
+  | CapabilityBindingsIssuedEvent
   | ToolQueuedEvent
   | ToolStartedEvent
   | ToolProgressEvent

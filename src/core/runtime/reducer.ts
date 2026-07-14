@@ -275,6 +275,16 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     // ── 工具生命周期 / Tool lifecycle ──
 
+    case 'capability.bindings_issued': {
+      const bindings = Object.fromEntries(
+        event.bindings.map((binding) => [binding.bindingId, binding]),
+      );
+      return {
+        ...state,
+        capabilities: { catalogRevision: event.catalogRevision, bindings },
+      };
+    }
+
     case 'tool.queued': {
       // LangGraph can replay an interrupted node.  A replayed queue event must
       // not reset a terminal call or append the same id to the queue again.
@@ -289,6 +299,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         args: event.args,
         status: 'queued' as const,
         createdAtTurnId: state.turn.turnId,
+        ...(event.bindingId ? { bindingId: event.bindingId } : {}),
+        ...(event.capabilityId ? { capabilityId: event.capabilityId } : {}),
+        ...(event.capabilityRevision ? { capabilityRevision: event.capabilityRevision } : {}),
         ...(event.effectClass
           ? {
               effectClass: event.effectClass,

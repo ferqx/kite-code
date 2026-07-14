@@ -6,6 +6,7 @@ import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { AuthorizationSource, ToolGrant } from '@/core/types';
+import type { CapabilityBinding } from '@/protocol/capabilities';
 import type {
   AgentPlan,
   AuthorizationMode,
@@ -217,6 +218,14 @@ export interface ToolCallRecord {
   sideEffect?: boolean;
   /** Classification explanation retained for diagnostics. */
   classificationReason?: string;
+  bindingId?: string;
+  capabilityId?: string;
+  capabilityRevision?: string;
+}
+
+export interface CapabilityRuntimeState {
+  catalogRevision: string;
+  bindings: Record<string, CapabilityBinding>;
 }
 
 // ── 工具运行时状态 / Tool runtime state ──
@@ -255,7 +264,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 5;
+export const RUNTIME_STATE_SCHEMA_VERSION = 6;
 
 export type RuntimeRecoveryState =
   | { kind: 'normal' }
@@ -310,6 +319,7 @@ export interface RuntimeState {
   interactions: InteractionState;
   /** 工具运行时状态 / Tool runtime state */
   tools: ToolRuntimeState;
+  capabilities: CapabilityRuntimeState;
   /** Paused subagents keyed by their parent task tool call. */
   suspendedSubagents: Record<string, SuspendedSubagentSnapshot>;
   /** One-shot notice for a legacy subagent approval that cannot be resumed. */
@@ -395,6 +405,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       queue: [],
       active: [],
     },
+    capabilities: { catalogRevision: '', bindings: {} },
     suspendedSubagents: {},
     authorization: {
       mode: input.authorizationMode ?? 'default',

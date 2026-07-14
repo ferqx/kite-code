@@ -10,4 +10,6 @@ Use `bun run agent run --feature autoReviewV2` for a one-run override. A value c
 
 New flags must default to `false`, include tests for both values, and retain the old path for at least two weeks before it is removed. `planLifecycleV2` and `interactionControllerV2` are established migrations and default to `true`.
 
+Exception: ADR-0007 explicitly replaces the old MCP adapter. `capabilityCatalogV1` and `mcpRuntimeBindingV1` fail closed when disabled; they must never re-enable a legacy MCP execution path.
+
 `autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.

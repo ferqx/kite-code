@@ -34,6 +34,30 @@ describe('executeRuntimeTools', () => {
     ]);
   });
 
+  test('fails closed when a dynamic MCP call has no Runtime-issued binding', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-unbound-mcp',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.mcp = {
+      toolCallId: 'mcp',
+      modelMessageId: 'model',
+      name: 'mcp__fixture__read',
+      args: { id: '1' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('mcp');
+    const events = await executeRuntimeTools({ state, toolCallIds: ['mcp'] });
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.failed',
+        failure: expect.objectContaining({ kind: 'tool_invalid_args' }),
+      }),
+    ]);
+  });
+
   test('uses the first batch question when ask_user omits the summary question', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-batch-ask',

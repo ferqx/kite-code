@@ -16,11 +16,16 @@ describe('feature flags', () => {
     expect(getFeatureFlags()).toEqual(DEFAULT_FEATURE_FLAGS);
     expect(getFeatureFlags({ features: { autoReviewV2: true } }).autoReviewV2).toBe(true);
     expect(getFeatureFlags({ features: { autoReviewV2: true } }).loopMode).toBe(false);
+    expect(getFeatureFlags().capabilityCatalogV1).toBe(false);
+    expect(getFeatureFlags({ features: { mcpRuntimeBindingV1: true } }).mcpRuntimeBindingV1).toBe(
+      true,
+    );
   });
 
   test('parses CLI overrides and rejects unknown flags', () => {
     expect(parseFeatureOverride('autoReviewV2')).toEqual({ autoReviewV2: true });
     expect(parseFeatureOverride('autoReviewV2=false')).toEqual({ autoReviewV2: false });
+    expect(parseFeatureOverride('mcpRuntimeBindingV1')).toEqual({ mcpRuntimeBindingV1: true });
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');
   });
 

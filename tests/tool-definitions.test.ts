@@ -9,6 +9,7 @@ import {
   isReadOnlyShellCommand,
 } from '../src/core/tools/definitions';
 import { TOOL_CONTRACTS } from '../src/core/tools/tool-contracts';
+import type { CapabilityBinding, CapabilityDescriptor } from '../src/protocol/capabilities';
 
 // Helper: AI SDK tools are in a ToolSet (Record<string, Tool>), not an array.
 // Tool names are the Record keys; tool lookup is `tools[name]`.
@@ -20,6 +21,38 @@ function toolNames(tools: Record<string, unknown>): string[] {
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe('code agent tool definitions', () => {
+  test('appends only Runtime-issued MCP bindings without an execute handler', () => {
+    const descriptor: CapabilityDescriptor = {
+      capabilityId: 'mcp:fixture/read',
+      revision: 'revision-1',
+      kind: 'mcp_tool',
+      displayName: 'read',
+      description: 'Read fixture data',
+      provider: { type: 'mcp', id: 'fixture', provenance: 'remote' },
+      inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+      declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
+      effectiveEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'user' },
+      availability: 'available',
+      diagnostics: [],
+    };
+    const binding: CapabilityBinding = {
+      bindingId: 'binding-1',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      exposedToolName: 'mcp__fixture__read',
+      schemaDigest: 'schema-1',
+      issuedForTurnId: 'turn-1',
+    };
+    const tools = createAgentTools({
+      workspace: '/workspace',
+      mcpBindings: [{ binding, descriptor }],
+    });
+    expect(Object.keys(tools).at(-1)).toBe('mcp__fixture__read');
+    expect(tools['mcp__fixture__read']).toBeDefined();
+    expect('execute' in tools['mcp__fixture__read']!).toBe(false);
+  });
+
   // 验证 agent 暴露稳定工具 schema / Agent exposes the stable tool schema
   test('exposes cache-stable agent tools plus planning tools', () => {
     const tools = createAgentTools({

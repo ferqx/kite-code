@@ -2,8 +2,8 @@
 
 export type { PromptEntry } from './manager';
 export { McpManager } from './manager';
-export type { JsonSchemaDef } from './tool-adapter';
-export { adaptMcpTool, jsonSchemaToZod } from './tool-adapter';
+export { normalizeMcpToolResult } from './result-normalizer';
+export { parseMcpToolName } from './tool-adapter';
 export type {
   McpPrompt,
   McpResource,

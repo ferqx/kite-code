@@ -80,6 +80,29 @@ function makeToolApproval(command: string): ToolApprovalPayload {
   };
 }
 
+describe('reduceRuntimeState — capability bindings', () => {
+  test('persists the current catalog revision and replaces old bindings atomically', () => {
+    const state = makeInitialState();
+    const next = reduceRuntimeState(state, {
+      type: 'capability.bindings_issued',
+      catalogRevision: 'catalog-2',
+      bindings: [
+        {
+          bindingId: 'binding-2',
+          capabilityId: 'mcp:fixture/read',
+          capabilityRevision: 'tool-2',
+          exposedToolName: 'mcp__fixture__read',
+          schemaDigest: 'schema-2',
+          issuedForTurnId: state.turn.turnId,
+        },
+      ],
+    });
+    expect(next.capabilities.catalogRevision).toBe('catalog-2');
+    expect(next.capabilities.bindings['binding-2']?.capabilityRevision).toBe('tool-2');
+    expect(next).not.toBe(state);
+  });
+});
+
 function uuidPattern() {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 }

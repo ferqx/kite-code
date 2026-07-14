@@ -1,7 +1,7 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import { hasSameCommandGrant, normalizeAuthorizationState } from '@/core/harness/tool-policy';
-import { parseMcpToolName } from '@/core/mcp/tool-adapter';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
+import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 import type { AgentPhase, ShellGrantUsed } from '@/protocol/events';
 import type { ToolEffects, ToolRisk } from './shell-classification';
 import {
@@ -35,8 +35,8 @@ export interface EvaluateToolApprovalParams {
   authorization?: ThreadAuthorizationState | null;
   /** 运行时授权覆盖（如来自 checkpoint 或父线程）/ Runtime authorization override */
   override?: AuthorizationOverride;
-  /** 按 MCP 服务器名降低风险等级的配置覆盖 / Per-server MCP risk overrides from config */
-  mcpRiskOverride?: Record<string, 'read'>;
+  /** Runtime-resolved local MCP policy. Server annotations never reach this input directly. */
+  mcpPolicy?: { effects: EffectProfile; minimumApproval: CapabilityApproval };
   /** Classification captured by the runtime queue, when available. */
   capability?: ToolCapability;
 }
@@ -529,33 +529,20 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
-  // mcp__* 工具 — 需要审批（或通过 full_access / config override 放行）
-  // mcp__* tools — require approval (or allow via full_access / config override)
+  // MCP policy is derived from a bound descriptor, never a free server name.
   if (toolName.startsWith('mcp__')) {
-    const parsed = parseMcpToolName(toolName);
-    const serverName = parsed?.serverName ?? '';
-    const serverRisk = serverName ? params.mcpRiskOverride?.[serverName] : undefined;
-
-    if (serverRisk === 'read') {
+    const mcpPolicy = params.mcpPolicy;
+    const isProvenRead =
+      mcpPolicy?.minimumApproval === 'none' &&
+      (mcpPolicy.effects.externalState === 'none' || mcpPolicy.effects.externalState === 'read');
+    if (isProvenRead) {
       return allow({
         risk: 'read',
-        reason: `MCP server "${serverName}" risk explicitly lowered to read by config.`,
+        reason: 'Runtime-local MCP policy classifies this bound capability as read-only.',
         userVisibleSummary: `Run MCP tool: ${toolName}`,
-        expectedEffects: ['Calls MCP server tool (risk lowered by config)'],
+        expectedEffects: ['Calls a locally classified read-only MCP capability'],
       });
     }
-
-    if (effectiveMode === 'full_access') {
-      return allow({
-        risk: 'mcp',
-        effects: { uncertainEffects: true },
-        reason: 'full_access is enabled for this thread.',
-        userVisibleSummary: `Run MCP tool under full_access: ${toolName}`,
-        expectedEffects: ['Calls external MCP server tool', 'May have side effects'],
-        grantUsed: 'full_access',
-      });
-    }
-
     return requireApproval({
       risk: 'mcp',
       effects: { uncertainEffects: true },
