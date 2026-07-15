@@ -322,6 +322,78 @@ export class SessionRuntime {
     effect: Extract<RuntimeEffect, { interactionId: string }>,
     state: Readonly<RuntimeState>,
   ): Promise<RuntimeUserAction> {
+    if (effect.type === 'request_verification_decision') {
+      const record = state.verification.records[effect.verificationId];
+      if (!record) {
+        return {
+          type: 'replan_verification',
+          verificationId: effect.verificationId,
+          instruction: 'Re-evaluate the missing verification state before continuing.',
+        };
+      }
+      const options = [
+        {
+          id: 'replan',
+          label: 'Repair / replan',
+          description: 'Continue work using the verifier evidence.',
+        },
+        ...(record.spec.compensation
+          ? [
+              {
+                id: 'compensate',
+                label: 'Compensate',
+                description: 'Run the declared compensation before deciding completion.',
+              },
+            ]
+          : []),
+        {
+          id: 'waive',
+          label: 'Waive verification',
+          description: 'Finish explicitly marked as unverified.',
+        },
+      ];
+      const action = await this._proxyProvider.requestAction({
+        kind: 'input',
+        question: {
+          question: `Required verification is ${record.status}. Choose a recovery action.`,
+          options,
+          allow_free_text: true,
+          recommended: 'replan',
+          context: `verification:${record.spec.subject}`,
+        },
+      });
+      if (action.type === 'input') {
+        const answer = action.text.trim();
+        const normalized = answer.toLowerCase();
+        if (normalized.startsWith('compensate') && record.spec.compensation) {
+          return {
+            type: 'request_verification_compensation',
+            verificationId: effect.verificationId,
+          };
+        }
+        if (normalized.startsWith('waive')) {
+          return {
+            type: 'waive_verification',
+            verificationId: effect.verificationId,
+            reason:
+              answer.replace(/^waive\s*:?\s*/i, '').trim() ||
+              'User explicitly waived required verification in the verification decision prompt.',
+          };
+        }
+        return {
+          type: 'replan_verification',
+          verificationId: effect.verificationId,
+          instruction:
+            answer.replace(/^replan\s*:?\s*/i, '').trim() ||
+            'Repair the failed verification using its recorded evidence.',
+        };
+      }
+      return {
+        type: 'replan_verification',
+        verificationId: effect.verificationId,
+        instruction: 'The verification decision was cancelled; continue with a safe repair.',
+      };
+    }
     const interaction = state.interactions;
     const planReviewDecision = (
       decision:
@@ -405,7 +477,7 @@ export class SessionRuntime {
         if (!self._foreground) {
           // user_input in background: auto-cancel (user can't respond)
           // need_approval won't fire due to authorizationOverride, but guard anyway
-          if (payload.kind === 'input') {
+          if (payload.kind === 'input' && !payload.question?.context?.startsWith('verification:')) {
             return { type: 'cancel' as const };
           }
           // 后台 tool_approval 中断：标记并等待前台切换

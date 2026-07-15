@@ -126,7 +126,8 @@ export async function* runRuntimeLoop(
       if (
         effect.type === 'request_user_input' ||
         effect.type === 'request_plan_review' ||
-        effect.type === 'request_tool_approval'
+        effect.type === 'request_tool_approval' ||
+        effect.type === 'request_verification_decision'
       ) {
         const action = await provider.requestAction(effect, kernel.getState());
         const actionResult = kernel.applyAction(action);

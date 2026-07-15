@@ -42,6 +42,7 @@ import { resumeSubAgent } from '@/core/subagent/runner';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
+import { verificationRequestForCapability, verificationRequestForSkill } from '@/core/verification';
 import type { InteractionMode, PlanArtifactRef, PlanDocument } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
@@ -581,6 +582,15 @@ export async function executeRuntimeTools(params: {
           closedAt: new Date().toISOString(),
           ...(completed ? { output: validatedOutput.output } : {}),
         });
+        if (completed && getFeatureFlags(params.taskConfig).verificationV1) {
+          const verification = verificationRequestForSkill({
+            activation: activation.activation,
+            contract: entry.contract,
+            sourcePath: entry.sourcePath,
+            workspace: params.state.session.workspace,
+          });
+          if (verification) events.push(verification);
+        }
         events.push({
           type: 'tool.finished',
           toolCallId,
@@ -685,15 +695,22 @@ export async function executeRuntimeTools(params: {
             candidate.descriptor.revision === frame.skillRevision &&
             candidate.contract,
         );
-      const outputError = entry?.contract
-        ? validateCapabilityArguments(entry.contract.outputSchema, request.args.output)
-        : 'Skill frame is unavailable or changed.';
-      if (frame?.status !== 'active' || frame.taskId !== params.state.activeTaskId || outputError) {
+      if (
+        frame?.status !== 'active' ||
+        frame.taskId !== params.state.activeTaskId ||
+        !entry?.contract
+      ) {
         events.push({
           type: 'tool.rejected',
           toolCallId,
-          reason: outputError ?? 'Skill frame is not active.',
+          reason: 'Skill frame is unavailable or changed.',
         });
+        continue;
+      }
+      const contract = entry.contract;
+      const outputError = validateCapabilityArguments(contract.outputSchema, request.args.output);
+      if (outputError) {
+        events.push({ type: 'tool.rejected', toolCallId, reason: outputError });
         continue;
       }
       events.push({
@@ -704,6 +721,15 @@ export async function executeRuntimeTools(params: {
         closedAt: new Date().toISOString(),
         output: request.args.output,
       });
+      if (params.taskConfig && getFeatureFlags(params.taskConfig).verificationV1) {
+        const verification = verificationRequestForSkill({
+          activation: frame,
+          contract,
+          sourcePath: entry.sourcePath,
+          workspace: params.state.session.workspace,
+        });
+        if (verification) events.push(verification);
+      }
       events.push({
         type: 'tool.finished',
         toolCallId,
@@ -1570,14 +1596,29 @@ export async function executeRuntimeTools(params: {
       events.push(...progress);
 
       if (invocation) {
-        events.push(
-          invocationTerminalEvent(
-            invocation.invocationId,
-            result,
-            new Date().toISOString(),
-            capabilityArtifacts,
-          ),
+        const terminal = invocationTerminalEvent(
+          invocation.invocationId,
+          result,
+          new Date().toISOString(),
+          capabilityArtifacts,
         );
+        events.push(terminal);
+        if (
+          terminal.type === 'capability.execution_succeeded' &&
+          mcpDescriptor &&
+          params.taskConfig &&
+          getFeatureFlags(params.taskConfig).verificationV1
+        ) {
+          events.push(
+            verificationRequestForCapability({
+              invocationId: invocation.invocationId,
+              capabilityId: mcpDescriptor.capabilityId,
+              effects: mcpDescriptor.effectiveEffects,
+              taskId: call.taskId ?? params.state.activeTaskId ?? undefined,
+              externalReferences: terminal.externalReferences,
+            }),
+          );
+        }
       }
 
       // 文件变更事件 — write_file / edit_file 的结果通知 TUI

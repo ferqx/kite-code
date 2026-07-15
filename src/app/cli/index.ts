@@ -124,6 +124,40 @@ export async function main(): Promise<void> {
 function createCliRuntimeProvider(): RuntimeActionProvider {
   return {
     async requestAction(effect, state): Promise<RuntimeUserAction> {
+      if (effect.type === 'request_verification_decision') {
+        const record = state.verification.records[effect.verificationId];
+        if (!record) throw new Error('Runtime requested a decision for missing verification.');
+        console.error(`\n[VERIFICATION REQUIRED] ${record.spec.subject}: ${record.status}`);
+        console.error(
+          record.spec.compensation
+            ? 'Type r/replan, w/waive, or c/compensate:'
+            : 'Type r/replan or w/waive:',
+        );
+        const value = (await readStdin()).trim().toLowerCase();
+        if ((value === 'c' || value === 'compensate') && record.spec.compensation) {
+          return {
+            type: 'request_verification_compensation',
+            verificationId: effect.verificationId,
+          };
+        }
+        console.error(
+          value === 'w' || value === 'waive'
+            ? 'Enter waiver reason:'
+            : 'Enter replan/repair instruction:',
+        );
+        const detail = await readStdin();
+        return value === 'w' || value === 'waive'
+          ? {
+              type: 'waive_verification',
+              verificationId: effect.verificationId,
+              reason: detail,
+            }
+          : {
+              type: 'replan_verification',
+              verificationId: effect.verificationId,
+              instruction: detail,
+            };
+      }
       if (state.interactions.kind === 'awaiting_tool_approval') {
         const approval = state.interactions.approval;
         console.error(`\n[APPROVAL REQUIRED] ${approval.tool}: ${approval.command}`);

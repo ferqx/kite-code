@@ -1,5 +1,6 @@
 // ── Runtime 状态不变量 / Runtime state invariants ──
 
+import { validateVerificationSpec } from '@/core/verification/spec';
 import type { RuntimeState, ToolCallStatus } from './state';
 
 const TERMINAL_TOOL_STATUSES = new Set<ToolCallStatus>([
@@ -134,6 +135,29 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       assert(
         Boolean(frame.closedAt && frame.closeReason),
         `Closed Skill frame ${frame.activationId} lacks closure facts.`,
+      );
+    }
+  }
+  for (const [verificationId, verification] of Object.entries(state.verification.records)) {
+    assert(
+      verification.verificationId === verificationId &&
+        verification.spec.verificationId === verificationId,
+      `Verification ${verificationId} identity is inconsistent.`,
+    );
+    assert(
+      verification.attempts >= 0 && verification.repairAttempts >= 0,
+      `Verification ${verificationId} attempt counters must be non-negative.`,
+    );
+    if (verification.status !== 'budget_exhausted' || !verification.diagnostics?.length) {
+      assert(
+        validateVerificationSpec(verification.spec).length === 0,
+        `Verification ${verificationId} has an invalid spec.`,
+      );
+    }
+    if (verification.status === 'waived') {
+      assert(
+        verification.waiver?.actor === 'user',
+        `Verification ${verificationId} has an invalid waiver.`,
       );
     }
   }

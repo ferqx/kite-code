@@ -24,6 +24,12 @@ import type {
   UserInputResult,
 } from '@/protocol/events.js';
 import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
+import type {
+  VerificationCheckResult,
+  VerificationMode,
+  VerificationOutcome,
+  VerificationSpecV1,
+} from '@/protocol/verification';
 import type { ClassifiedFailure } from './failures';
 import type { SkillActivation } from './state';
 
@@ -156,6 +162,72 @@ export interface CapabilityReconciliationResolvedEvent {
   decision: 'confirmed_success' | 'confirmed_failure' | 'waived';
   reconciledAt: string;
   reason?: string;
+}
+
+export interface VerificationRequestedEvent {
+  type: 'verification.requested';
+  verificationId: string;
+  taskId?: string;
+  mode: VerificationMode;
+  spec: VerificationSpecV1;
+  requestedAt: string;
+}
+
+export interface VerificationStartedEvent {
+  type: 'verification.started';
+  verificationId: string;
+  attempt: number;
+  startedAt: string;
+}
+
+export interface VerificationCheckCompletedEvent {
+  type: 'verification.check_completed';
+  verificationId: string;
+  result: VerificationCheckResult;
+}
+
+export interface VerificationCompletedEvent {
+  type: 'verification.completed';
+  verificationId: string;
+  outcome: VerificationOutcome;
+  completedAt: string;
+}
+
+export interface VerificationRepairRequestedEvent {
+  type: 'verification.repair_requested';
+  verificationId: string;
+  repairAttempt: number;
+  instruction: string;
+  requestedAt: string;
+}
+
+export interface VerificationReplanRequestedEvent {
+  type: 'verification.replan_requested';
+  verificationId: string;
+  instruction: string;
+  requestedAt: string;
+}
+
+export interface VerificationWaivedEvent {
+  type: 'verification.waived';
+  verificationId: string;
+  actor: 'user';
+  reason: string;
+  waivedAt: string;
+}
+
+export interface VerificationCompensationRequestedEvent {
+  type: 'verification.compensation_requested';
+  verificationId: string;
+  requestedAt: string;
+}
+
+export interface VerificationCompensationCompletedEvent {
+  type: 'verification.compensation_completed';
+  verificationId: string;
+  outcome: VerificationOutcome;
+  summary: string;
+  completedAt: string;
 }
 
 /** 工具调用开始执行 */
@@ -596,6 +668,15 @@ export type RuntimeEvent =
   | CapabilityExecutionFailedEvent
   | CapabilityExecutionUnknownEvent
   | CapabilityReconciliationResolvedEvent
+  | VerificationRequestedEvent
+  | VerificationStartedEvent
+  | VerificationCheckCompletedEvent
+  | VerificationCompletedEvent
+  | VerificationRepairRequestedEvent
+  | VerificationReplanRequestedEvent
+  | VerificationWaivedEvent
+  | VerificationCompensationRequestedEvent
+  | VerificationCompensationCompletedEvent
   | ToolQueuedEvent
   | ToolStartedEvent
   | ToolProgressEvent

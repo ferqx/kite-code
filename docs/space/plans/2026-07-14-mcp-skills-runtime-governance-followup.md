@@ -55,6 +55,8 @@
 
 ## Phase 4：Verifier 与分级 Verification
 
+当前进度：完成。Runtime 已实现版本化 `VerificationSpecV1` 与 `not_required`、`best_effort`、`required` 单调策略，覆盖文件断言、命令、对象 schema、MCP read-after-write、外部引用和独立 reviewer。验证请求、attempt、逐项结果、repair/replan、用户 waiver、compensation 和 budget 均为持久化事件投影；reviewer 只读取原始 receipt、immutable artifact 和结构化 Skill output。Scheduler 会执行 pending/best-effort 验证，但仅 required 的未通过状态阻断 `emit_final`；failed/inconclusive 在 budget 内携带验证事实进入正常模型修复链路，budget 耗尽后 fail closed。`verificationV1` 默认关闭，只控制新验证的创建，不得绕过已开始的 required 验证。MCP 外部写成功凭据和 Skill completion 已接入自动验证，普通问答保持原完成路径。
+
 1. 实现 `not_required`、`best_effort`、`required` policy；外部写、高风险 capability、Skill required verifier 和用户明确验证要求只能提升强度。
 2. 实现版本化 `VerificationSpec`，覆盖文件断言、命令、schema、MCP read-after-write、外部引用和 reviewer；新增 verification events/effects/state，优先运行确定性本地断言、provider read-after-write、测试/构建，再使用独立 reviewer；reviewer 必须读取原始 receipt/evidence。
 3. Scheduler 仅在 required verification pending 时阻止 `emit_final`；实现 repair/replan、用户 waiver、compensation 与重试/repair budget。

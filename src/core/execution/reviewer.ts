@@ -3,6 +3,10 @@ import type { AgentConfig } from '@/core/config/index';
 import { type BaseMessage, humanMessage, isSystemMessage, systemMessage } from '@/core/messages';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import type { ShellApprovalGrant } from '@/protocol/events';
+import type {
+  VerificationReviewerInput,
+  VerificationReviewerResult,
+} from '@/protocol/verification';
 import type { ToolApprovalPayload } from '../harness/tool-policy';
 import type { PendingToolRequest } from '../harness/tool-requests';
 
@@ -103,6 +107,53 @@ export async function reviewToolApproval(input: {
       ok: false,
       reason: error instanceof Error ? error.message : String(error),
       failureType: 'technical',
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/** Review post-execution evidence in an isolated prompt with no main-model conclusion. */
+export async function reviewVerificationEvidence(input: {
+  model: SupportedChatModel;
+  evidence: VerificationReviewerInput;
+  timeoutMs?: number;
+}): Promise<VerificationReviewerResult> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(new Error('verification review timed out')),
+    input.timeoutMs ?? 30_000,
+  );
+  try {
+    const result = await generateText({
+      model: input.model.model,
+      system: [
+        'You are an independent post-execution verifier.',
+        'Use only the supplied original receipts, artifacts, and structured workflow outputs.',
+        'Do not trust or infer any main-model claim.',
+        'Return only JSON: {"outcome":"passed|failed|inconclusive","summary":"..."}.',
+      ].join('\n'),
+      messages: [{ role: 'user', content: JSON.stringify(input.evidence) }],
+      stopWhen: stepCountIs(1),
+      temperature: 0,
+      maxRetries: 0,
+      abortSignal: controller.signal,
+    });
+    const parsed = JSON.parse(result.text) as Record<string, unknown>;
+    if (
+      !['passed', 'failed', 'inconclusive'].includes(String(parsed.outcome)) ||
+      typeof parsed.summary !== 'string'
+    ) {
+      return { outcome: 'inconclusive', summary: 'Reviewer returned an invalid response.' };
+    }
+    return {
+      outcome: parsed.outcome as VerificationReviewerResult['outcome'],
+      summary: parsed.summary,
+    };
+  } catch (error) {
+    return {
+      outcome: 'inconclusive',
+      summary: error instanceof Error ? error.message : String(error),
     };
   } finally {
     clearTimeout(timeoutId);

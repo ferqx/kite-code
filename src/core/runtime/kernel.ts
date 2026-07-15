@@ -269,6 +269,7 @@ export class AgentKernel {
           effect.type === 'request_user_input' ||
           effect.type === 'request_plan_review' ||
           effect.type === 'request_tool_approval' ||
+          effect.type === 'request_verification_decision' ||
           effect.type === 'stop' ||
           effect.type === 'emit_final'
         ) {
@@ -573,6 +574,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   let migratedState: RuntimeState = {
     ...normalizeRuntimeMetadata(snapshot),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+    verification: (snapshot as Partial<RuntimeState>).verification ?? { records: {} },
     suspendedSubagents: snapshot.suspendedSubagents ?? {},
     capabilities: {
       catalogRevision: snapshot.capabilities?.catalogRevision ?? '',

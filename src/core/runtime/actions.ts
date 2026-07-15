@@ -67,6 +67,9 @@ export type RuntimeUserAction =
       decision: 'confirmed_success' | 'confirmed_failure' | 'waived';
       reason?: string;
     }
+  | { type: 'waive_verification'; verificationId: string; reason: string }
+  | { type: 'replan_verification'; verificationId: string; instruction: string }
+  | { type: 'request_verification_compensation'; verificationId: string }
   | { type: 'input'; interactionId: string; text: string; answers?: Record<string, string> }
   | {
       type: 'approve';
@@ -106,7 +109,7 @@ export function eventsForRuntimeAction(
 ): RuntimeEvent[] {
   if (action.type === 'reconcile_invocation') {
     const invocation = state.capabilities.invocations[action.invocationId];
-    if (!invocation || invocation.status !== 'unknown') return [];
+    if (invocation?.status !== 'unknown') return [];
     return [
       {
         type: 'capability.reconciliation_resolved',
@@ -114,6 +117,46 @@ export function eventsForRuntimeAction(
         decision: action.decision,
         reconciledAt: new Date().toISOString(),
         ...(action.reason ? { reason: action.reason } : {}),
+      },
+    ];
+  }
+  if (action.type === 'waive_verification') {
+    const record = state.verification.records[action.verificationId];
+    if (!record || record.status === 'passed' || !action.reason.trim()) return [];
+    return [
+      {
+        type: 'verification.waived',
+        verificationId: action.verificationId,
+        actor: 'user',
+        reason: action.reason.trim(),
+        waivedAt: new Date().toISOString(),
+      },
+    ];
+  }
+  if (action.type === 'replan_verification') {
+    const record = state.verification.records[action.verificationId];
+    if (!record || record.status === 'passed' || !action.instruction.trim()) return [];
+    return [
+      {
+        type: 'verification.replan_requested',
+        verificationId: action.verificationId,
+        instruction: action.instruction.trim(),
+        requestedAt: new Date().toISOString(),
+      },
+    ];
+  }
+  if (action.type === 'request_verification_compensation') {
+    const record = state.verification.records[action.verificationId];
+    if (
+      !record?.spec.compensation ||
+      !['failed', 'inconclusive', 'budget_exhausted'].includes(record.status)
+    )
+      return [];
+    return [
+      {
+        type: 'verification.compensation_requested',
+        verificationId: action.verificationId,
+        requestedAt: new Date().toISOString(),
       },
     ];
   }

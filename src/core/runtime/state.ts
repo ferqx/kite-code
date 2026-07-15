@@ -19,6 +19,11 @@ import type {
 } from '@/protocol/events.js';
 import { getAgentPhase } from '@/protocol/events.js';
 import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
+import type {
+  VerificationCheckResult,
+  VerificationMode,
+  VerificationSpecV1,
+} from '@/protocol/verification';
 import type { ClassifiedFailure } from './failures';
 
 // ── Re-export for convenience ──
@@ -257,6 +262,42 @@ export interface SkillRuntimeState {
   frames: Record<string, SkillFrame>;
 }
 
+export type VerificationStatus =
+  | 'pending'
+  | 'running'
+  | 'repair_pending'
+  | 'passed'
+  | 'failed'
+  | 'inconclusive'
+  | 'waived'
+  | 'compensating'
+  | 'compensated'
+  | 'budget_exhausted';
+
+export interface VerificationRecord {
+  verificationId: string;
+  taskId?: string;
+  mode: VerificationMode;
+  status: VerificationStatus;
+  spec: VerificationSpecV1;
+  requestedAt: string;
+  attempts: number;
+  repairAttempts: number;
+  checkResults: Record<string, VerificationCheckResult>;
+  completedAt?: string;
+  waiver?: { actor: 'user'; reason: string; waivedAt: string };
+  compensation?: {
+    outcome: 'passed' | 'failed' | 'inconclusive';
+    summary: string;
+    completedAt: string;
+  };
+  diagnostics?: string[];
+}
+
+export interface VerificationRuntimeState {
+  records: Record<string, VerificationRecord>;
+}
+
 // ── 工具运行时状态 / Tool runtime state ──
 
 /**
@@ -276,6 +317,7 @@ export interface ToolRuntimeState {
  * model boundary and are never persisted in RuntimeStore. */
 export type TranscriptMessage =
   | { kind: 'user'; messageId: string; content: string }
+  | { kind: 'runtime'; messageId: string; content: string }
   | {
       kind: 'assistant';
       messageId: string;
@@ -293,7 +335,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 8;
+export const RUNTIME_STATE_SCHEMA_VERSION = 9;
 
 export type RuntimeRecoveryState =
   | { kind: 'normal' }
@@ -350,6 +392,7 @@ export interface RuntimeState {
   tools: ToolRuntimeState;
   capabilities: CapabilityRuntimeState;
   skills: SkillRuntimeState;
+  verification: VerificationRuntimeState;
   /** Paused subagents keyed by their parent task tool call. */
   suspendedSubagents: Record<string, SuspendedSubagentSnapshot>;
   /** One-shot notice for a legacy subagent approval that cannot be resumed. */
@@ -437,6 +480,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     },
     capabilities: { catalogRevision: '', bindings: {}, invocations: {} },
     skills: { catalogRevision: '', frames: {} },
+    verification: { records: {} },
     suspendedSubagents: {},
     authorization: {
       mode: input.authorizationMode ?? 'default',

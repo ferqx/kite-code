@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 MCP discovery、动态工具绑定、MCP policy、MCP 调用或结果归一化时。
-验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/policies/approval-policy.test.ts`、`bun run typecheck`。
+验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/verification.test.ts tests/policies/approval-policy.test.ts`、`bun run typecheck`。
 
 MCP tool execution is available only when both `capabilityCatalogV1` and `mcpRuntimeBindingV1` are enabled. The ModelController records bindings before the model call; a dynamic `mcp__<server>__<tool>` call must match its binding, turn, descriptor revision and input schema at execution time.
 
@@ -12,6 +12,6 @@ Remote server annotations are untrusted by default. Local per-tool policy in `mc
 
 For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', allowAnnotations: 'read_only' }`. This local decision only permits a server's `readOnlyHint` to classify a tool as read-only; it cannot lower an explicit per-tool `minimumApproval` or grant new effects. The legacy `trust: 'trusted'` form remains a user-configured compatibility spelling and records no elevated provenance.
 
-MCP results retain protocol content blocks and structured content. `_meta` is not persisted. When `mcpExecutionRecordV1` is enabled, MCP calls with write, destructive or unknown effects persist intent and terminal digests; restart marks a non-terminal invocation `unknown` and never replays it automatically. Artifact handles, trusted idempotency retry and user reconciliation are implemented; verification remains deferred to Phase 4.
+MCP results retain protocol content blocks and structured content. `_meta` is not persisted. When `mcpExecutionRecordV1` is enabled, MCP calls with write, destructive or unknown effects persist intent and terminal digests; restart marks a non-terminal invocation `unknown` and never replays it automatically. Artifact handles, trusted idempotency retry and user reconciliation are implemented. When `verificationV1` is enabled, a successful side-effecting receipt creates required verification backed by its immutable artifact and external references; existing verification remains binding after the flag is disabled.
 
 Skill Workflow Contract Phase 3 is complete. A Skill is not a prompt fragment: only a strict, versioned YAML `SKILL.md` compiled into a `skill` capability can become activatable. While `skillWorkflowV1` and `skillActivationV2` are disabled, Skill activation fails closed. The legacy body-injection path and `Skill` tool are removed; valid inline activations are revision-checked Runtime frames and can close only with output that validates against the contract schema. Active frames enforce their capability ceiling. Fork activations run in an isolated subagent, propagate only ceiling-derived Runtime-issued MCP bindings, and recheck capability revision, schema digest and arguments immediately before execution; unavailable or changed capabilities fail closed. Supporting `scripts/`, `references/`, `assets/` and `evals/` files are never injected wholesale: an active frame may read only declared regular files through `read_skill_reference`, subject to the source/revision directory boundary and the direct-read size limit.

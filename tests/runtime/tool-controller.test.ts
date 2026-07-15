@@ -193,6 +193,7 @@ describe('executeRuntimeTools', () => {
         capabilityCatalogV1: true,
         mcpRuntimeBindingV1: true,
         mcpExecutionRecordV1: true,
+        verificationV1: true,
       },
     };
 
@@ -220,13 +221,29 @@ describe('executeRuntimeTools', () => {
     expect(events.find((event) => event.type === 'capability.execution_succeeded')).toMatchObject({
       artifact: { digest: 'artifact-digest' },
     });
+    const verification = events.find((event) => event.type === 'verification.requested');
+    expect(verification).toMatchObject({ mode: 'required' });
+    expect(JSON.stringify(verification)).not.toContain('secret-argument');
     expect(events.map((event) => event.type)).toEqual([
       'capability.invocation_recorded',
       'tool.started',
       'capability.execution_started',
       'capability.execution_succeeded',
+      'verification.requested',
       'tool.finished',
     ]);
+
+    const flagOffEvents = await executeRuntimeTools({
+      state,
+      toolCallIds: ['mcp'],
+      mcpManager: manager,
+      taskConfig: {
+        ...config,
+        features: { ...config.features, verificationV1: false },
+      },
+      capabilityArtifactStore: artifactStore,
+    });
+    expect(flagOffEvents.some((event) => event.type === 'verification.requested')).toBe(false);
   });
 
   test('uses the first batch question when ask_user omits the summary question', async () => {

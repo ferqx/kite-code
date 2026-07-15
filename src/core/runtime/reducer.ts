@@ -7,6 +7,7 @@ import {
   evaluateCircuitBreaker,
 } from '@/core/execution/circuit-breaker';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
+import { validateVerificationSpec } from '@/core/verification/spec';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
@@ -406,6 +407,128 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ? { error: undefined }
           : { error: event.reason ?? 'External invocation outcome was not confirmed.' }),
       }));
+
+    case 'verification.requested': {
+      if (state.verification.records[event.verificationId]) return state;
+      if (event.taskId && event.taskId !== state.activeTaskId) return state;
+      const diagnostics = validateVerificationSpec(event.spec);
+      return {
+        ...state,
+        verification: {
+          records: {
+            ...state.verification.records,
+            [event.verificationId]: {
+              verificationId: event.verificationId,
+              ...(event.taskId ? { taskId: event.taskId } : {}),
+              mode: event.mode,
+              status:
+                event.mode === 'not_required'
+                  ? 'passed'
+                  : diagnostics.length > 0
+                    ? 'budget_exhausted'
+                    : 'pending',
+              spec: event.spec,
+              requestedAt: event.requestedAt,
+              attempts: 0,
+              repairAttempts: 0,
+              checkResults: {},
+              ...(diagnostics.length > 0 ? { diagnostics } : {}),
+            },
+          },
+        },
+      };
+    }
+
+    case 'verification.started':
+      return updateVerification(state, event.verificationId, (record) => {
+        if (!['pending', 'running', 'repair_pending'].includes(record.status)) return record;
+        return {
+          ...record,
+          status: 'running',
+          attempts: Math.max(record.attempts, event.attempt),
+          checkResults: {},
+          completedAt: undefined,
+        };
+      });
+
+    case 'verification.check_completed':
+      return updateVerification(state, event.verificationId, (record) =>
+        record.status !== 'running'
+          ? record
+          : {
+              ...record,
+              checkResults: { ...record.checkResults, [event.result.checkId]: event.result },
+            },
+      );
+
+    case 'verification.completed':
+      return updateVerification(state, event.verificationId, (record) => {
+        if (record.status !== 'running') return record;
+        const failedStatus = event.outcome === 'failed' ? 'failed' : 'inconclusive';
+        const status =
+          event.outcome === 'passed'
+            ? 'passed'
+            : record.mode === 'required' && record.repairAttempts >= record.spec.repair.maxAttempts
+              ? 'budget_exhausted'
+              : failedStatus;
+        return { ...record, status, completedAt: event.completedAt };
+      });
+
+    case 'verification.repair_requested': {
+      const record = state.verification.records[event.verificationId];
+      if (!record || !['failed', 'inconclusive'].includes(record.status)) return state;
+      const next = updateVerification(state, event.verificationId, (current) => ({
+        ...current,
+        status: 'repair_pending',
+        repairAttempts: Math.max(current.repairAttempts, event.repairAttempt),
+      }));
+      return appendVerificationInstruction(next, event.verificationId, event.instruction);
+    }
+
+    case 'verification.replan_requested': {
+      const record = state.verification.records[event.verificationId];
+      if (!record || record.status === 'passed' || record.status === 'waived') return state;
+      const next = updateVerification(state, event.verificationId, (current) => ({
+        ...current,
+        status: 'repair_pending',
+        repairAttempts: 0,
+      }));
+      return appendVerificationInstruction(next, event.verificationId, event.instruction);
+    }
+
+    case 'verification.waived':
+      return updateVerification(state, event.verificationId, (record) =>
+        record.status === 'passed'
+          ? record
+          : {
+              ...record,
+              status: 'waived',
+              waiver: { actor: event.actor, reason: event.reason, waivedAt: event.waivedAt },
+            },
+      );
+
+    case 'verification.compensation_requested':
+      return updateVerification(state, event.verificationId, (record) =>
+        record.spec.compensation &&
+        ['failed', 'inconclusive', 'budget_exhausted'].includes(record.status)
+          ? { ...record, status: 'compensating' }
+          : record,
+      );
+
+    case 'verification.compensation_completed':
+      return updateVerification(state, event.verificationId, (record) =>
+        record.status !== 'compensating'
+          ? record
+          : {
+              ...record,
+              status: 'compensated',
+              compensation: {
+                outcome: event.outcome,
+                summary: event.summary,
+                completedAt: event.completedAt,
+              },
+            },
+      );
 
     case 'tool.queued': {
       // LangGraph can replay an interrupted node.  A replayed queue event must
@@ -1100,6 +1223,45 @@ function updateCapabilityInvocation(
         ...state.capabilities.invocations,
         [invocationId]: update(invocation),
       },
+    },
+  };
+}
+
+function updateVerification(
+  state: RuntimeState,
+  verificationId: string,
+  update: (
+    record: RuntimeState['verification']['records'][string],
+  ) => RuntimeState['verification']['records'][string],
+): RuntimeState {
+  const record = state.verification.records[verificationId];
+  if (!record) return state;
+  return {
+    ...state,
+    verification: {
+      records: { ...state.verification.records, [verificationId]: update(record) },
+    },
+  };
+}
+
+function appendVerificationInstruction(
+  state: RuntimeState,
+  verificationId: string,
+  instruction: string,
+): RuntimeState {
+  return {
+    ...state,
+    transcript: {
+      ...state.transcript,
+      final: undefined,
+      messages: [
+        ...state.transcript.messages,
+        {
+          kind: 'runtime',
+          messageId: `verification-${verificationId}-${state.revision}`,
+          content: instruction,
+        },
+      ],
     },
   };
 }

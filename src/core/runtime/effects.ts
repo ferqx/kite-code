@@ -23,8 +23,16 @@ export type RuntimeEffect =
   | { type: 'request_plan_review'; interactionId: string; toolCallId: string }
   /** 请求用户审批工具 / Request user tool approval */
   | { type: 'request_tool_approval'; interactionId: string; toolCallId: string }
+  /** Ask the user how to resolve a required verification that exhausted automatic repair. */
+  | { type: 'request_verification_decision'; interactionId: string; verificationId: string }
   /** 执行自动审查 / Run auto-review */
   | { type: 'run_auto_review'; reviewId: string; toolCallId: string }
+  /** Execute the next attempt of a durable VerificationSpec. */
+  | { type: 'run_verification'; verificationId: string }
+  /** Re-enter the model loop with deterministic verifier failures as repair context. */
+  | { type: 'repair_verification'; verificationId: string }
+  /** Execute a user-requested compensation after verification cannot establish success. */
+  | { type: 'run_verification_compensation'; verificationId: string }
   /** Terminate a legacy subagent approval that cannot safely be resumed after recovery. */
   | {
       type: 'subagent.recovery_unavailable';
@@ -65,7 +73,8 @@ export function isInterruptEffect(effect: RuntimeEffect): boolean {
   return (
     effect.type === 'request_user_input' ||
     effect.type === 'request_plan_review' ||
-    effect.type === 'request_tool_approval'
+    effect.type === 'request_tool_approval' ||
+    effect.type === 'request_verification_decision'
   );
 }
 

@@ -2,7 +2,11 @@ import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { invokeRuntimeModel } from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
-import { createAutoReviewModel, reviewToolApproval } from '@/core/execution/reviewer';
+import {
+  createAutoReviewModel,
+  reviewToolApproval,
+  reviewVerificationEvidence,
+} from '@/core/execution/reviewer';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { McpManager } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
@@ -11,6 +15,7 @@ import { refreshSkillCatalog, type SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
+import { executeVerificationEffect } from '@/core/verification';
 import type { RuntimeEffectExecutor } from './kernel';
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
@@ -79,6 +84,26 @@ export function createRuntimeEffectExecutor(
     }
     if (effect.type === 'run_auto_review') {
       return executeAutoReview(effect, state, dependencies);
+    }
+    if (
+      effect.type === 'run_verification' ||
+      effect.type === 'repair_verification' ||
+      effect.type === 'run_verification_compensation'
+    ) {
+      let reviewerModel: SupportedChatModel | undefined;
+      return executeVerificationEffect(effect, state, {
+        shellExecutor: dependencies.shellExecutor,
+        mcpManager: dependencies.mcpManager,
+        signal: dependencies.signal,
+        reviewer: async (evidence) => {
+          reviewerModel ??= createAutoReviewModel(dependencies.config);
+          return reviewVerificationEvidence({
+            model: reviewerModel,
+            evidence,
+            timeoutMs: dependencies.config.autoReview?.timeoutMs ?? 30_000,
+          });
+        },
+      });
     }
     if (effect.type === 'subagent.recovery_unavailable') {
       return [

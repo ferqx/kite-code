@@ -486,6 +486,35 @@ export function recordRuntimeEvent(
       base.attributes['kite_code.auto_review.model'] = event.result.reviewerModelName ?? 'unknown';
       base.attributes['kite_code.auto_review.duration_ms'] = event.result.durationMs;
       break;
+    case 'verification.requested':
+      base.attributes['kite_code.verification.id'] = event.verificationId;
+      base.attributes['kite_code.verification.mode'] = event.mode;
+      base.attributes['kite_code.verification.subject'] = trunc(event.spec.subject, TRUNC_SUMMARY);
+      break;
+    case 'verification.started':
+      base.attributes['kite_code.verification.id'] = event.verificationId;
+      base.attributes['kite_code.verification.attempt'] = event.attempt;
+      break;
+    case 'verification.check_completed':
+      base.attributes['kite_code.verification.id'] = event.verificationId;
+      base.attributes['kite_code.verification.check_id'] = event.result.checkId;
+      base.attributes['kite_code.verification.outcome'] = event.result.outcome;
+      break;
+    case 'verification.completed':
+      base.attributes['kite_code.verification.id'] = event.verificationId;
+      base.attributes['kite_code.verification.outcome'] = event.outcome;
+      if (event.outcome !== 'passed') base.status = { code: 'ERROR', message: event.outcome };
+      break;
+    case 'verification.waived':
+      base.attributes['kite_code.verification.id'] = event.verificationId;
+      base.attributes['kite_code.verification.waived_by'] = event.actor;
+      break;
+    case 'verification.repair_requested':
+    case 'verification.replan_requested':
+    case 'verification.compensation_requested':
+    case 'verification.compensation_completed':
+      base.attributes['kite_code.verification.id'] = event.verificationId;
+      break;
     case 'subagent.started':
       base.name = 'subagent.start';
       base.attributes['kite_code.subagent.id'] = event.subagent.id;

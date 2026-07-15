@@ -15,6 +15,7 @@ import {
   aiMessage,
   type BaseMessage,
   humanMessage,
+  systemMessage,
   toolMessage,
 } from '@/core/messages';
 import { prepareModelContext } from '@/core/model/context';
@@ -96,6 +97,8 @@ function runtimeTranscriptMessages(messages: TranscriptMessage[]): BaseMessage[]
     switch (message.kind) {
       case 'user':
         return humanMessage({ id: message.messageId, content: message.content });
+      case 'runtime':
+        return systemMessage(message.content);
       case 'assistant':
         return aiMessage({
           id: message.messageId,

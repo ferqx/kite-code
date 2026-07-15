@@ -573,6 +573,48 @@ describe('SessionRuntime', () => {
     await expect(actionPromise).resolves.toEqual({ type: 'cancel', interactionId });
   });
 
+  test('maps the verification decision prompt to an explicit user waiver', async () => {
+    const rt = makeRuntime();
+    const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
+    state.verification.records.verification = {
+      verificationId: 'verification',
+      mode: 'required',
+      status: 'budget_exhausted',
+      spec: {
+        schemaVersion: 1,
+        verificationId: 'verification',
+        subject: 'release result',
+        checks: [
+          {
+            checkId: 'review',
+            type: 'reviewer',
+            description: 'review evidence',
+            instructions: 'verify release',
+          },
+        ],
+        repair: { maxAttempts: 0 },
+      },
+      requestedAt: '2026-07-15T00:00:00.000Z',
+      attempts: 1,
+      repairAttempts: 0,
+      checkResults: {},
+    };
+    const actionPromise = (rt as any)._requestRuntimeAction(
+      {
+        type: 'request_verification_decision',
+        interactionId: 'verification',
+        verificationId: 'verification',
+      },
+      state,
+    );
+    rt.resolveInterrupt({ type: 'input', text: 'waive: accepted by user' });
+    expect(await actionPromise).toEqual({
+      type: 'waive_verification',
+      verificationId: 'verification',
+      reason: 'accepted by user',
+    });
+  });
+
   // ── abort ──
 
   test('abort resolves pending interrupt and signals AbortController', () => {

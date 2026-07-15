@@ -4,3 +4,10 @@ export type { RunRuntimeAgentInput } from './core/runtime/agent';
 export { runRuntimeAgent, runRuntimeAgent as runAgent } from './core/runtime/agent';
 export type { RuntimeEvent } from './core/runtime/events';
 export type { RuntimeActionProvider } from './core/runtime/runner';
+export type {
+  VerificationCheck,
+  VerificationCheckResult,
+  VerificationMode,
+  VerificationOutcome,
+  VerificationSpecV1,
+} from './protocol/verification';

@@ -16,6 +16,7 @@ export interface GoldenFixture {
     | { type: 'input'; text: string }
     | { type: 'approve'; grant: 'approve_once' | 'same_command' | 'full_access' }
     | { type: 'approve_plan'; executionMode: 'accept_edits' | 'auto' }
+    | { type: 'waive_verification'; reason: string }
   >;
   expectedEvents: RuntimeEvent['type'][];
   expectedEffects?: string[];
@@ -68,6 +69,16 @@ export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeStat
             return { type: 'input', interactionId: effect.interactionId, text: action.text };
           if (action.type === 'approve')
             return { type: 'approve', interactionId: effect.interactionId, grant: action.grant };
+          if (action.type === 'waive_verification') {
+            if (effect.type !== 'request_verification_decision') {
+              throw new Error(`${fixture.name}: verification waiver without a decision effect`);
+            }
+            return {
+              type: 'waive_verification',
+              verificationId: effect.verificationId,
+              reason: action.reason,
+            };
+          }
           if (state.interactions.kind !== 'awaiting_review') {
             throw new Error(`${fixture.name}: plan action without a plan review`);
           }

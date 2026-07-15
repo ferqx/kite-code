@@ -83,6 +83,47 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   const nextRunnable = state.tools.queue.find(isRunnable) ?? state.tools.active.find(isRunnable);
   if (nextRunnable) return { type: 'run_tools', toolCallIds: [nextRunnable] };
 
+  const verificationRecords = Object.values(state.verification.records)
+    .filter((record) => !record.taskId || record.taskId === state.activeTaskId)
+    .sort((left, right) => left.requestedAt.localeCompare(right.requestedAt));
+  const executableVerification = verificationRecords.find(
+    (record) =>
+      ['pending', 'running'].includes(record.status) &&
+      (record.mode === 'required' || !state.transcript.final),
+  );
+  if (executableVerification) {
+    return { type: 'run_verification', verificationId: executableVerification.verificationId };
+  }
+  const compensating = verificationRecords.find((record) => record.status === 'compensating');
+  if (compensating) {
+    return { type: 'run_verification_compensation', verificationId: compensating.verificationId };
+  }
+  const repairable = verificationRecords.find(
+    (record) =>
+      record.mode === 'required' &&
+      (record.status === 'failed' || record.status === 'inconclusive') &&
+      record.repairAttempts < record.spec.repair.maxAttempts,
+  );
+  if (repairable) {
+    return { type: 'repair_verification', verificationId: repairable.verificationId };
+  }
+  const repairPending = verificationRecords.find((record) => record.status === 'repair_pending');
+  if (repairPending && state.transcript.final) {
+    return { type: 'run_verification', verificationId: repairPending.verificationId };
+  }
+  const blockingVerification = verificationRecords.find(
+    (record) =>
+      record.mode === 'required' &&
+      ['failed', 'inconclusive', 'budget_exhausted', 'compensated'].includes(record.status),
+  );
+  if (blockingVerification) {
+    return {
+      type: 'request_verification_decision',
+      interactionId: blockingVerification.verificationId,
+      verificationId: blockingVerification.verificationId,
+    };
+  }
+
   if (state.transcript.final) {
     const activeSkill = Object.values(state.skills.frames).some(
       (frame) => frame.status === 'active',
