@@ -3,6 +3,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadMcpConfig } from '@/core/config';
+import { decideProjectMcpServer } from '@/core/config/mcp-project-approvals';
 import { McpManager } from '@/core/mcp';
 import { aiMessage } from '@/core/messages';
 import { runRuntimeAgent } from '@/core/runtime/agent';
@@ -21,7 +22,23 @@ const runtimeDir = join(workspace, '.kite-code');
 const storePath = join(runtimeDir, `mcp-e2e-${serverName}.db`);
 mkdirSync(runtimeDir, { recursive: true });
 
-const loaded = loadMcpConfig();
+let loaded = loadMcpConfig();
+if (process.env.MCP_E2E_APPROVE_PROJECT === '1') {
+  const approval = loaded.catalog.projectApprovals.find((view) => view.name === serverName);
+  if (!approval) throw new Error(`Project MCP server '${serverName}' has no approval view.`);
+  const decision = decideProjectMcpServer({
+    workspace,
+    serverName: approval.name,
+    sourceKind: approval.sourceKind,
+    sourcePath: approval.sourcePath,
+    expectedConfigDigest: approval.configDigest,
+    decision: 'approved',
+  });
+  if (decision.status !== 'recorded') {
+    throw new Error(`Project MCP approval failed: ${decision.status}`);
+  }
+  loaded = loadMcpConfig();
+}
 const serverConfig = loaded.servers[serverName];
 if (!serverConfig) throw new Error(`MCP server '${serverName}' was not loaded from config.`);
 
@@ -70,7 +87,12 @@ try {
         },
       },
     },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unexpected' }) },
+    {
+      requestAction: async (effect) =>
+        process.env.MCP_E2E_APPROVE_TOOL === '1'
+          ? { type: 'approve', interactionId: effect.interactionId, grant: 'approve_once' }
+          : { type: 'cancel', interactionId: effect.interactionId },
+    },
   )) {
     events.push(event);
   }

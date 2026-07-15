@@ -43,6 +43,7 @@ export function createTestWorkspace(opts?: {
   files?: Record<string, string>; // path → content, created in workspace
   workspaceFiles?: Record<string, string>;
   configOverrides?: Record<string, unknown>;
+  projectMcpServers?: Record<string, unknown>;
 }): TestWorkspace {
   const tempHome = mkdtempSync(join(tmpdir(), 'kite-code-e2e-'));
   const kiteCodeDir = join(tempHome, '.kite-code');
@@ -78,6 +79,13 @@ export function createTestWorkspace(opts?: {
       mkdirSync(parent, { recursive: true });
       writeFileSync(fullPath, content, 'utf-8');
     }
+  }
+  if (opts?.projectMcpServers) {
+    writeFileSync(
+      join(ws, '.mcp.json'),
+      `${JSON.stringify({ mcpServers: opts.projectMcpServers }, null, 2)}\n`,
+      'utf-8',
+    );
   }
 
   const env: Record<string, string> = {

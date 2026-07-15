@@ -11,3 +11,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0006](0006-loop-mode-design.md) | proposed | Loop mode requires a separate design decision |
 | [0007](0007-capability-bindings.md) | accepted | Dynamic capabilities require revisioned turn bindings |
 | [0008](0008-verification-completion-semantics.md) | accepted | Only required verification gates completion |
+| [0009](0009-project-mcp-local-approval.md) | accepted | 项目 MCP transport 必须获得绑定配置摘要的本地批准 |

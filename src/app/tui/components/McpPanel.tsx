@@ -1,16 +1,26 @@
 import { Box, Text, useInput } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import { useState } from 'react';
+import type { McpProjectServerApprovalView } from '@/core/config';
+import type { McpProjectDecision } from '@/core/config/mcp-project-approvals';
 import type { McpManager } from '@/core/mcp';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useTheme } from '../theme';
 
 interface McpPanelProps {
   manager: McpManager;
+  projectApprovals: readonly McpProjectServerApprovalView[];
+  decisionMessage?: string;
+  onProjectDecision?: (
+    view: McpProjectServerApprovalView,
+    decision: McpProjectDecision,
+  ) => void | Promise<void>;
   onClose: () => void;
 }
 
 type FlatRow =
+  | { type: 'approval'; view: McpProjectServerApprovalView }
+  | { type: 'approval-detail'; message: string; name: string }
   | {
       type: 'server';
       name: string;
@@ -27,14 +37,31 @@ type FlatRow =
   | { type: 'more-resources'; count: number }
   | { type: 'max-tools-notice'; max: number };
 
-export default function McpPanel({ manager, onClose }: McpPanelProps) {
+export default function McpPanel({
+  manager,
+  projectApprovals,
+  decisionMessage,
+  onProjectDecision,
+  onClose,
+}: McpPanelProps) {
   const t = useTheme();
   const [scrollOffset, setScrollOffset] = useState(0);
+  const [pendingDecision, setPendingDecision] = useState<{
+    view: McpProjectServerApprovalView;
+    decision: McpProjectDecision;
+  } | null>(null);
   const maxContentHeight = useOverlayHeight(8);
   const states = manager.getServerStates();
+  let totalToolsShown = 0;
+  const MAX_TOOLS = 10;
+  const flatRows: FlatRow[] = [];
 
   useInput((_input, key) => {
     if (key.escape) {
+      if (pendingDecision) {
+        setPendingDecision(null);
+        return;
+      }
       onClose();
       return;
     }
@@ -43,13 +70,36 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
       return;
     }
     if (key.downArrow) {
-      setScrollOffset((s) => Math.min(flatRows.length - 1, s + 1));
+      setScrollOffset((s) => Math.max(0, Math.min(flatRows.length - 1, s + 1)));
       return;
     }
-    // Only close on Escape — other keys are ignored
+    const selected = flatRows[scrollOffset];
+    if (selected?.type === 'approval' && onProjectDecision) {
+      if (_input === 'a' && selected.view.status !== 'approved') {
+        if (
+          pendingDecision?.view.configDigest === selected.view.configDigest &&
+          pendingDecision.decision === 'approved'
+        ) {
+          setPendingDecision(null);
+          void onProjectDecision(selected.view, 'approved');
+        } else {
+          setPendingDecision({ view: selected.view, decision: 'approved' });
+        }
+      } else if (_input === 'r' && selected.view.status !== 'rejected') {
+        if (
+          pendingDecision?.view.configDigest === selected.view.configDigest &&
+          pendingDecision.decision === 'rejected'
+        ) {
+          setPendingDecision(null);
+          void onProjectDecision(selected.view, 'rejected');
+        } else {
+          setPendingDecision({ view: selected.view, decision: 'rejected' });
+        }
+      }
+    }
   });
 
-  if (states.size === 0) {
+  if (states.size === 0 && projectApprovals.length === 0) {
     return (
       <Box
         flexDirection="column"
@@ -73,9 +123,12 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
   }
 
   // Flatten server/tool/resource structure into rows
-  let totalToolsShown = 0;
-  const MAX_TOOLS = 10;
-  const flatRows: FlatRow[] = [];
+  for (const view of projectApprovals) {
+    flatRows.push({ type: 'approval', view });
+    for (const message of view.diagnostics) {
+      flatRows.push({ type: 'approval-detail', message, name: view.name });
+    }
+  }
 
   for (const [name, state] of states.entries()) {
     const callable =
@@ -134,6 +187,46 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
         <ScrollList selectedIndex={scrollOffset} scrollAlignment="auto">
           {flatRows.map((row, i) => {
             switch (row.type) {
+              case 'approval': {
+                const statusColor =
+                  row.view.status === 'approved'
+                    ? t.success
+                    : row.view.status === 'pending_approval'
+                      ? t.warning
+                      : t.error;
+                const statusLabel = row.view.status.replaceAll('_', ' ');
+                return (
+                  <Box
+                    flexDirection="column"
+                    key={`a-${row.view.sourceKind}-${row.view.name}`}
+                    marginTop={i === 0 ? 0 : 1}
+                  >
+                    <Box>
+                      <Text color={statusColor}>{scrollOffset === i ? '›' : ' '} </Text>
+                      <Text bold>{row.view.name}</Text>
+                      <Text color={t.dim}> ({row.view.transport}, project)</Text>
+                      <Text color={statusColor}> — {statusLabel}</Text>
+                      <Text color={t.dim}> [{row.view.configDigest.slice(0, 8)}]</Text>
+                    </Box>
+                    <Box paddingLeft={2}>
+                      <Text color={t.dim}>来源：{row.view.sourcePath}</Text>
+                    </Box>
+                    <Box paddingLeft={2}>
+                      <Text color={t.muted}>
+                        {row.view.transport === 'stdio'
+                          ? `命令：${row.view.review.command ?? '(invalid)'}（${row.view.review.argumentCount ?? 0} 个参数）`
+                          : `端点：${row.view.review.endpoint ?? '(invalid or redacted)'}`}
+                      </Text>
+                    </Box>
+                  </Box>
+                );
+              }
+              case 'approval-detail':
+                return (
+                  <Box key={`ad-${row.name}-${row.message}`} paddingLeft={2}>
+                    <Text color={t.error}>{row.message}</Text>
+                  </Box>
+                );
               case 'server':
                 return (
                   <Box key={`s-${row.name}`} marginTop={i === 0 ? 0 : 1}>
@@ -196,8 +289,13 @@ export default function McpPanel({ manager, onClose }: McpPanelProps) {
       </Box>
 
       <Box marginTop={1}>
-        <Text color={t.dim}>Esc 关闭 ↑↓ 滚动</Text>
+        <Text color={pendingDecision ? t.warning : t.dim}>
+          {pendingDecision
+            ? `再次按 ${pendingDecision.decision === 'approved' ? 'a' : 'r'} 确认${pendingDecision.decision === 'approved' ? '批准' : '拒绝'}；Esc 取消`
+            : 'Esc 关闭 ↑↓ 选择 a 批准 r 拒绝'}
+        </Text>
       </Box>
+      {decisionMessage && <Text color={t.muted}>{decisionMessage}</Text>}
     </Box>
   );
 }

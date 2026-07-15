@@ -39,7 +39,9 @@ TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 
 
 ## 8.5 MCP 与 Skill 交互
 
-MCP 面板显示连接和健康状态；模型可调用能力来自 revisioned catalog/binding，而不是面板列表本身。Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到用户任务。
+MCP 面板显示项目审批、连接和健康状态；模型可调用能力来自 revisioned catalog/binding，而不是面板列表本身。项目 Server 尚未批准时也会以脱敏条目出现，连续两次按 `a` 确认批准当前摘要，连续两次按 `r` 确认拒绝，Esc 可取消确认；决定后 TUI 重新加载 connectable 集合。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
+
+Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到用户任务。
 
 ## 8.6 终端稳定性
 

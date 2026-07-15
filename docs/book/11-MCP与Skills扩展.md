@@ -12,6 +12,8 @@ Discovery 生成不可变 `CapabilitySnapshot`。MCP Tool 的稳定身份为 `mc
 
 远端 description 和 annotation 不可信。只有显式本地 trust 配置可让 read-only hint 参与分类，而且不能降低本地 `minimumApproval`。无效 schema 的能力可诊断但不可绑定或执行。
 
+项目配置在 discovery 之前还有独立的 transport 门禁。workspace `.kite-code` 和 `.mcp.json` 声明只有匹配本地 config digest 批准后才进入 `McpManager`；配置变化、拒绝或 Approval Store 异常均 fail closed。此批准不产生 annotation trust。项目 Tool 的 effect、minimum approval 和 retry override 被忽略，保持 unknown/user/never 的保守策略。
+
 MCP 调用保留 structured content、content blocks、错误、资源和外部引用；`_meta` 不持久化。外部写入先记录 invocation intent，并根据 `never`、`safe_read` 或可信 idempotency key 决定重试边界。
 
 ## 11.3 Health 与恢复

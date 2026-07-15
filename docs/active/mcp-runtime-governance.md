@@ -2,13 +2,15 @@
 
 状态：active
 读取时机：修改 MCP discovery、动态工具绑定、MCP policy、MCP 调用或结果归一化时。
-验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/verification.test.ts tests/policies/approval-policy.test.ts`、`bun run typecheck`。
+验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/verification.test.ts tests/policies/approval-policy.test.ts`、`bun run typecheck`。
 
 MCP tool execution is available only when both `capabilityCatalogV1` and `mcpRuntimeBindingV1` are enabled. The ModelController records bindings before the model call; a dynamic `mcp__<server>__<tool>` call must match its binding, turn, descriptor revision and input schema at execution time.
 
 MCP list changes replace the immutable catalog snapshot. Existing bindings do not update in place and fail closed. P0 accepts object-root JSON Schema Draft-07 only. Invalid or unsupported schemas remain diagnosable but are not model-visible or executable.
 
 Remote server annotations are untrusted by default. Local per-tool policy in `mcpServers.<server>.tools.<tool>` may set effects and `minimumApproval`; only an explicitly trusted server may contribute a read-only annotation. Unknown, write and destructive MCP effects require a single-use user approval even under `full_access`.
+
+Project-controlled MCP declarations are gated before transport construction. An effective Server from workspace `.kite-code/kite-code.jsonc` or `.mcp.json` must match a local approval bound to its workspace, source, name and raw-config digest; pending, rejected, changed, invalid or unreadable-store entries never enter the connection map. This execution approval is separate from annotation trust and Tool Approval. Project `trust` and per-tool policy relaxations are ignored after approval, so project Tools remain remote, unknown-effect, user-approved and non-retryable by default. The complete control-plane contract is defined in [`mcp-project-approval.md`](mcp-project-approval.md).
 
 For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', allowAnnotations: 'read_only' }`. This local decision only permits a server's `readOnlyHint` to classify a tool as read-only; it cannot lower an explicit per-tool `minimumApproval` or grant new effects. The legacy `trust: 'trusted'` form remains a user-configured compatibility spelling and records no elevated provenance.
 
@@ -18,4 +20,4 @@ Skill Workflow Contract Phase 3 is complete. A Skill is not a prompt fragment: o
 
 Phase 5 progressive disclosure is complete. With `capabilitySearchV1` enabled, catalogs that exceed the provider context budget expose only `capability_search`; its metadata-only result is persisted and revalidated before the next model request receives finite MCP bindings and Skill disclosures. Search never authorizes execution. Stale search results, unsupported providers and revision drift fail closed without restoring the legacy MCP or Prompt Skill paths. See `capability-progressive-disclosure.md` for the active invariants and budget controls.
 
-The E2E contract uses real MCP transports and real on-disk scope resolution. It covers user-level authenticated HTTP MCP with environment-expanded bearer headers, invalid-token fail-closed behavior, project-level authenticated stdio MCP with environment credentials and project-over-user precedence, plus user/project Skill discovery, shadowing, tool execution and frame closure. Credentials must not appear in Runtime or persisted events. OAuth/interactive `authProvider` flows are outside this matrix until the production runtime implements them.
+The E2E contract uses real MCP transports and real on-disk scope resolution. It covers user-level authenticated HTTP MCP with environment-expanded bearer headers, invalid-token fail-closed behavior, project-level authenticated stdio MCP after production approval, absence of stdio process and HTTP requests before approval, project-over-user precedence, plus user/project Skill discovery, shadowing, tool execution and frame closure. Credentials must not appear in Runtime or persisted events. OAuth/interactive `authProvider` flows are outside this matrix until the production runtime implements them.

@@ -251,7 +251,13 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   runRewindRef.current = runRewind;
 
   // MCP Manager lifecycle
-  const { mcpManager, mcpPromptRegistry } = useMcpConnection(mcpManagerRef, sessionManager);
+  const {
+    mcpManager,
+    mcpPromptRegistry,
+    mcpProjectApprovals,
+    mcpDecisionMessage,
+    decideMcpProjectServer,
+  } = useMcpConnection(mcpManagerRef, sessionManager, workspace);
 
   // Skills loader: scan on mount
   useSkillsLoader(workspace, dispatch, skillManifestsRef, skillOptionsRef, sessionManager);
@@ -772,6 +778,9 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         onToggleReason={onToggleReason}
         provider={provider}
         mcpManager={mcpManager ?? undefined}
+        mcpProjectApprovals={mcpProjectApprovals}
+        mcpDecisionMessage={mcpDecisionMessage}
+        onMcpProjectDecision={decideMcpProjectServer}
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}

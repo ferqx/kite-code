@@ -45,6 +45,8 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 
 MCP server 可配置 stdio/HTTP transport、timeout、trust 和逐工具 policy override。逐工具配置使用 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`，不使用旧的单一 `risk` 字段作为权威策略。
 
+默认 MCP 来源优先级为 project `.kite-code`、user `kite-code.jsonc`、project `.mcp.json`。两类 project 来源必须匹配 `~/.kite-code/mcp-project-approvals.jsonc` 中绑定 workspace/source/name/config digest 的本地决定；未批准、已拒绝、配置变化或存储损坏时不创建 transport，且不回退同名低优先级 Server。项目批准不采纳项目声明的 annotation trust 或逐工具放宽策略。显式 `configPath` 是调用方授权的单文件来源，不与 workspace 来源合并。
+
 ## 9.5 Feature flags
 
 Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时按各 active 规则 fail closed 或回到当前受治理路径，不允许恢复已删除的旧 MCP adapter、Prompt Skill 或旧状态机。

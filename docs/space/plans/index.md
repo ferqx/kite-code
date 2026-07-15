@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-15（MCP/Skills Runtime 治理计划归档）
+最后更新：2026-07-15（完成 MCP TUI 管理中心 Phase 0）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -52,6 +52,8 @@
 | [`2026-07-13-plan-artifact-lifecycle.md`](2026-07-13-plan-artifact-lifecycle.md) | archived | P0 | Plan Mode | — | Plan Artifact 文件化、版本化审核与 Task 隔离已实施。 |
 | [`2026-07-14-mcp-runtime-governance-p0.md`](2026-07-14-mcp-runtime-governance-p0.md) | archived | P0 | ADR-0007 | 落实 MCP/Skills Runtime 治理 RFC 的 Phase 0+1 | Revisioned MCP catalog、turn binding、fail-closed schema、policy 和结构化结果；[完成记录](../execution/completed/2026-07-14-mcp-runtime-governance-p0.md)。 |
 | [`2026-07-14-mcp-skills-runtime-governance-followup.md`](2026-07-14-mcp-skills-runtime-governance-followup.md) | archived | P1 | `2026-07-14-mcp-runtime-governance-p0.md`、ADR-0007、ADR-0008 | 延续 MCP/Skills Runtime 治理 RFC | Phase 2 execution record/recovery ✅ → Phase 3 Skill Workflow ✅ → Phase 4 verification ✅ → Phase 5 progressive disclosure ✅；[完成记录](../execution/completed/2026-07-15-mcp-skills-runtime-governance.md)。 |
+| [`2026-07-15-mcp-project-server-approval-p0.md`](2026-07-15-mcp-project-server-approval-p0.md) | archived | P0 | ADR-0007、ADR-0009 | MCP TUI 管理中心 RFC 的 Phase 0 | 项目来源识别、config digest、本地批准记录、transport 前置门禁、最小 TUI 审批和真实 transport/PTY 验证；[完成记录](../execution/completed/2026-07-15-mcp-project-server-approval-p0.md)。 |
+| [`2026-07-15-mcp-tui-management-center-implementation.md`](2026-07-15-mcp-tui-management-center-implementation.md) | active（Phase 1 待实施） | P0–P2 | MCP Runtime Governance、Phase 0 子计划 | MCP TUI 管理中心 RFC 的完整实施路线 | Phase 0 ✅ → Phase 1 Supervisor/只读 UI → Phase 2 配置管理 → Phase 3 OAuth → Phase 4 Tool Policy → Phase 5 Agent 恢复闭环。 |
 
 ## 计划文件命名规范
 

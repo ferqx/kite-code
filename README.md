@@ -39,6 +39,8 @@ bun install
 
 模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。
 
+项目中的 `.kite-code/kite-code.jsonc#mcpServers` 与 `.mcp.json#mcpServers` 不会在首次发现时自动启动。运行 TUI 后打开 `/mcp`，审阅 pending 条目的来源和脱敏连接信息，连续两次按 `a` 确认批准当前配置摘要，或连续两次按 `r` 确认拒绝；项目配置变化后必须重新批准。批准只允许连接，不能降低 MCP Tool 的 effect、审批或重试策略。
+
 ## 运行
 
 交互式 TUI：
@@ -62,6 +64,7 @@ bun run agent trace events.jsonl --turn 1
 - Capability discovery 不等于授权；动态能力必须具有当前轮 binding。
 - `accept_edits`、`auto`、`full` 不会绕过 schema、revision、强制审批或 sandbox。
 - 远端 MCP annotation 和 Skill manifest 不能自行授予权限。
+- 未获本机用户按配置摘要批准的项目 MCP 不会创建 stdio/HTTP transport。
 - 外部写入先记录 invocation intent；未知结果禁止盲重放。
 - Tool success 不等于任务完成；required Verification 未通过时不能完成。
 

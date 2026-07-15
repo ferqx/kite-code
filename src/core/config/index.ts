@@ -2,9 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
-import type { EffectProfile } from '@/protocol/capabilities';
-import type { McpServerConfig } from '../mcp/types';
 import type { FeatureFlags } from './features';
+import { mcpServerSchema } from './mcp-server-config';
 import { defaultConfigPath, projectConfigPath } from './paths';
 
 export {
@@ -13,6 +12,18 @@ export {
   isFeatureFlagName,
   parseFeatureOverride,
 } from './features';
+export type {
+  McpConfig,
+  McpConfigApprovalStatus,
+  McpConfigCatalog,
+  McpConfigDiagnostic,
+  McpConfigSource,
+  McpConfigSourceKind,
+  McpProjectServerApprovalView,
+  McpServerConfigEntry,
+} from './mcp-config';
+export { loadMcpConfig, loadMcpConfigCatalog } from './mcp-config';
+export { expandEnvVars } from './mcp-server-config';
 
 // ── Zod schemas ──
 
@@ -37,42 +48,6 @@ const legacyModelEntrySchema = z.object({
   provider: z.string().min(1),
   name: z.string().min(1),
   default: z.boolean().optional(),
-});
-
-const mcpServerSchema = z.object({
-  type: z.enum(['stdio', 'http']).optional(),
-  command: z.string().optional(),
-  args: z.array(z.string()).optional(),
-  url: z.string().optional(),
-  env: z.record(z.string(), z.string()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  trust: z
-    .union([
-      z.enum(['untrusted', 'trusted']),
-      z.object({
-        provenance: z.enum(['admin', 'user', 'project']),
-        allowAnnotations: z.literal('read_only'),
-      }),
-    ])
-    .optional(),
-  tools: z
-    .record(
-      z.string(),
-      z.object({
-        effects: z
-          .object({
-            filesystem: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
-            network: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
-            externalState: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
-          })
-          .optional(),
-        minimumApproval: z.enum(['none', 'auto_review', 'user']).optional(),
-        retry: z.enum(['never', 'safe_read', 'idempotency_key']).optional(),
-        idempotencyKeyArgument: z.string().min(1).optional(),
-      }),
-    )
-    .optional(),
-  timeout: z.number().optional(),
 });
 
 const interactionModeSchema = z.enum(['accept_edits', 'auto', 'full']);
@@ -178,6 +153,7 @@ export {
   defaultCheckpointPath,
   defaultConfigPath,
   editorInputPath,
+  mcpProjectApprovalPath,
   projectConfigPath,
   sessionExportPath,
 } from './paths';
@@ -382,145 +358,6 @@ function resolveProviderBaseURL(
   throw new Error(`Model provider '${providerName}' requires baseURL`);
 }
 
-// ── MCP config ──
-
-/** MCP configuration result */
-export interface McpConfig {
-  servers: Record<string, McpServerConfig>;
-}
-
-/**
- * Load MCP server configurations from:
- * 1. kite-code.jsonc (user + project merged) -> mcpServers section
- * 2. .mcp.json in project root (merged, project mcp doesn't override same-name servers)
- */
-export function loadMcpConfig(configPath?: string): McpConfig {
-  const servers: Record<string, McpServerConfig> = {};
-
-  // 1. Merged kite-code.jsonc
-  const cfg = configPath ? readConfigFile(configPath) : loadConfig();
-  if (cfg?.mcpServers) {
-    for (const [name, raw] of Object.entries(cfg.mcpServers)) {
-      servers[name] = normalizeMcpServerConfig(raw as Record<string, unknown>);
-    }
-  }
-
-  // 2. .mcp.json
-  const projectMcpPath = resolve(process.cwd(), '.mcp.json');
-  if (existsSync(projectMcpPath)) {
-    const raw = readFileSync(projectMcpPath, 'utf8');
-    const parsed = parse(raw);
-    if (parsed && typeof parsed === 'object' && 'mcpServers' in (parsed as object)) {
-      const mcpServers = (parsed as Record<string, unknown>).mcpServers;
-      if (mcpServers && typeof mcpServers === 'object') {
-        for (const [name, cfgEntry] of Object.entries(mcpServers as Record<string, unknown>)) {
-          if (!servers[name] && cfgEntry && typeof cfgEntry === 'object') {
-            servers[name] = normalizeMcpServerConfig(cfgEntry as Record<string, unknown>);
-          }
-        }
-      }
-    }
-  }
-
-  return { servers };
-}
-
-/** Normalize a raw MCP server config object */
-function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServerConfig {
-  const type: McpServerConfig['type'] = raw.type === 'http' ? 'http' : 'stdio';
-
-  const config: McpServerConfig = { type };
-
-  if (typeof raw.command === 'string') {
-    config.command = expandEnvVars(raw.command);
-  }
-  if (Array.isArray(raw.args)) {
-    config.args = raw.args.filter((a): a is string => typeof a === 'string').map(expandEnvVars);
-  }
-  if (raw.url && typeof raw.url === 'string') {
-    config.url = expandEnvVars(raw.url);
-  }
-  if (raw.env && typeof raw.env === 'object') {
-    const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(raw.env as Record<string, unknown>)) {
-      if (typeof v === 'string') {
-        env[k] = expandEnvVars(v);
-      }
-    }
-    config.env = env;
-  }
-  if (raw.headers && typeof raw.headers === 'object') {
-    const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(raw.headers as Record<string, unknown>)) {
-      if (typeof v === 'string') {
-        headers[k] = expandEnvVars(v);
-      }
-    }
-    config.headers = headers;
-  }
-  if (raw.trust === 'trusted' || raw.trust === 'untrusted') config.trust = raw.trust;
-  if (raw.trust && typeof raw.trust === 'object') {
-    const trust = raw.trust as Record<string, unknown>;
-    if (
-      (trust.provenance === 'admin' ||
-        trust.provenance === 'user' ||
-        trust.provenance === 'project') &&
-      trust.allowAnnotations === 'read_only'
-    ) {
-      config.trust = {
-        provenance: trust.provenance,
-        allowAnnotations: 'read_only',
-      };
-    }
-  }
-  if (raw.tools && typeof raw.tools === 'object') {
-    const tools: NonNullable<McpServerConfig['tools']> = {};
-    for (const [toolName, rawPolicy] of Object.entries(raw.tools as Record<string, unknown>)) {
-      if (!rawPolicy || typeof rawPolicy !== 'object') continue;
-      const policy = rawPolicy as Record<string, unknown>;
-      const effects = policy.effects;
-      const normalizedEffects: Partial<EffectProfile> = {};
-      if (effects && typeof effects === 'object') {
-        for (const key of ['filesystem', 'network', 'externalState'] as const) {
-          const level = (effects as Record<string, unknown>)[key];
-          if (
-            level === 'none' ||
-            level === 'read' ||
-            level === 'write' ||
-            level === 'destructive' ||
-            level === 'unknown'
-          ) {
-            normalizedEffects[key] = level;
-          }
-        }
-      }
-      const minimumApproval = policy.minimumApproval;
-      const retry = policy.retry;
-      const idempotencyKeyArgument = policy.idempotencyKeyArgument;
-      tools[toolName] = {
-        ...(Object.keys(normalizedEffects).length > 0 ? { effects: normalizedEffects } : {}),
-        ...(minimumApproval === 'none' ||
-        minimumApproval === 'auto_review' ||
-        minimumApproval === 'user'
-          ? { minimumApproval }
-          : {}),
-        ...(retry === 'never' || retry === 'safe_read' || retry === 'idempotency_key'
-          ? { retry }
-          : {}),
-        ...(typeof idempotencyKeyArgument === 'string' && idempotencyKeyArgument.length > 0
-          ? { idempotencyKeyArgument }
-          : {}),
-      };
-    }
-    config.tools = tools;
-  }
-  if (typeof raw.timeout === 'number' && raw.timeout > 0) {
-    config.timeout = raw.timeout;
-  }
-
-  return config;
-}
-
 // ── Available models ──
 
 /** 可用模型 / Available model */
@@ -701,26 +538,4 @@ export function saveProviderConfig(input: SaveProviderInput): boolean {
   } catch {
     return false;
   }
-}
-
-// ── Env var expansion ──
-
-/**
- * Expand environment variable references in a string.
- * Supports ${VAR} and ${VAR:-default} syntax.
- */
-export function expandEnvVars(value: string): string {
-  return value.replace(
-    /\$\{(\w+)(?::-([^}]*))?\}/g,
-    (_match, varName: string, defaultValue: string | undefined) => {
-      const envValue = process.env[varName];
-      if (envValue !== undefined && envValue !== '') {
-        return envValue;
-      }
-      if (defaultValue !== undefined) {
-        return defaultValue;
-      }
-      return '';
-    },
-  );
 }

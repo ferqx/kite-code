@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-07-12（Runtime 工程护栏：feature flags、失败分类与核心准入）
+最后更新：2026-07-15（完成 MCP TUI 管理中心 Phase 0）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -49,6 +49,7 @@
 | `../active/failure-classification.md` | active | FailureKind 分类和 `ClassifiedFailure` 恢复策略 | 新增工具/模型失败路径、错误日志或重试策略时必读。 |
 | `../active/core-entry-criteria.md` | active | 进入 core 的 Capability/Policy/Lifecycle/Engine 准入门槛 | 新增 `src/core/` 功能、状态机或执行引擎改动前必读。 |
 | `../active/mcp-runtime-governance.md` | active | MCP/Skill revisioned catalog、Runtime binding、policy、execution record 与恢复边界 | 修改 MCP discovery、动态工具 binding、MCP policy、调用结果或 Skill Runtime 治理时必读。 |
+| `../active/mcp-project-approval.md` | active | 项目 MCP 来源、config digest、本地决定、transport 前置门禁与 TUI 审批 | 修改 MCP 配置发现、项目来源、连接启动或 `/mcp` 审批交互时必读。 |
 | `../active/verification-governance.md` | active | Runtime 分级验证、VerificationSpec、required 完成门禁、repair/waive/compensation | 修改验证策略、事件、效果、Scheduler 完成语义、Skill/MCP verifier 或 reviewer 时必读。 |
 | `../active/capability-progressive-disclosure.md` | active | MCP/Skill 大目录按预算披露、metadata 搜索、下一轮有限 binding 与 fail-closed | 修改 capability catalog、模型工具上下文、`capability_search`、MCP binding 或 Skill activation 可见性时必读。 |
 
@@ -109,6 +110,8 @@
 | `plans/2026-06-28-context-compaction.md` | active | 上下文压缩方案 — M0 TUI 预整合 + M1 Core 工具折叠 + M2 对话摘要（延后）。 |
 | `plans/2026-07-14-mcp-runtime-governance-p0.md` | archived | MCP Runtime 治理 Phase 0 + 1：revisioned catalog、turn binding、fail-closed schema、policy 与结构化结果。 |
 | `plans/2026-07-14-mcp-skills-runtime-governance-followup.md` | archived | MCP/Skills Runtime 治理 Phase 2–5：执行恢复、Workflow Contract、分级验证与 progressive disclosure。 |
+| `plans/2026-07-15-mcp-project-server-approval-p0.md` | archived | MCP TUI 管理中心 Phase 0：项目来源识别、config digest、本地审批、transport 启动门禁与最小 TUI 审批入口。 |
+| `plans/2026-07-15-mcp-tui-management-center-implementation.md` | active（Phase 1 待实施） | MCP TUI 管理中心完整实施：Phase 0 已完成；后续为 Supervisor、三层配置、OAuth、Tool Policy、Provider Action 与 Required 准入。 |
 
 ## 完成执行记录
 
@@ -143,6 +146,7 @@
 | `execution/completed/2026-07-02-execution-reliability.md` | completed | 阶段五：连续失败计数修复、耗尽信号 ToolMessage 注入、Gateway 预检拦截、写操作串行化、子 Agent Journal 集成。 |
 | `execution/completed/2026-07-14-mcp-runtime-governance-p0.md` | completed | MCP Runtime 治理 Phase 0 + 1 完成记录：catalog、binding、schema、policy 与结构化结果。 |
 | `execution/completed/2026-07-15-mcp-skills-runtime-governance.md` | completed | MCP/Skills Runtime 治理 Phase 2–5 完成记录：恢复、Skill Workflow、verification 与 progressive disclosure。 |
+| `execution/completed/2026-07-15-mcp-project-server-approval-p0.md` | completed | MCP TUI 管理中心 Phase 0 完成记录：项目配置摘要审批、transport 门禁、保守 policy 与 TUI/PTY 闭环。 |
 
 ## 参考资料
 

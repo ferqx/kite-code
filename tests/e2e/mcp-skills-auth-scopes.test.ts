@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -276,12 +276,74 @@ describe('authenticated MCP and scoped Skill E2E', () => {
         MCP_E2E_SECRET: token,
         MCP_E2E_SERVER_NAME: 'shared_auth',
         MCP_E2E_EXPECTED_SCOPE: 'project',
+        MCP_E2E_APPROVE_PROJECT: '1',
+        MCP_E2E_APPROVE_TOOL: '1',
       });
       expect(result.exitCode, result.stderr).toBe(0);
-      expect(result.json?.provenance).toBe('project');
+      expect(result.json?.provenance).toBe('remote');
       expect(String(result.json?.toolStdout)).toContain('authenticated:project:project');
       expect(`${result.stdout}\n${result.stderr}`).not.toContain(token);
     } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test('does not create a real stdio transport before project approval', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-mcp-project-pending-e2e-'));
+    const home = join(root, 'home');
+    const workspace = join(root, 'workspace');
+    const marker = join(root, 'stdio-started');
+    mkdirSync(workspace, { recursive: true });
+    try {
+      writeJson(join(workspace, '.mcp.json'), {
+        mcpServers: {
+          pending_stdio: mcpConfig('stdio', 'project', {
+            command: process.execPath,
+            args: [fixture('mcp-auth-stdio-server.ts')],
+            env: {
+              MCP_AUTH_TOKEN: 'valid',
+              MCP_EXPECTED_TOKEN: 'valid',
+              MCP_STARTUP_MARKER: marker,
+            },
+          }),
+        },
+      });
+
+      const result = await runFixture('run-mcp-startup-probe.ts', workspace, home, {});
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(result.json?.connectable).toEqual([]);
+      expect(result.json?.states).toEqual([]);
+      expect(result.json?.approvals).toEqual([
+        { name: 'pending_stdio', status: 'pending_approval' },
+      ]);
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test('does not send an HTTP request before project approval', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-mcp-project-http-pending-e2e-'));
+    const home = join(root, 'home');
+    const workspace = join(root, 'workspace');
+    mkdirSync(workspace, { recursive: true });
+    const http = startAuthenticatedHttpServer('never-sent', 'project');
+    try {
+      writeJson(join(workspace, '.mcp.json'), {
+        mcpServers: {
+          pending_http: mcpConfig('http', 'project', {
+            url: http.url,
+            headers: { Authorization: 'Bearer never-sent' },
+          }),
+        },
+      });
+
+      const result = await runFixture('run-mcp-startup-probe.ts', workspace, home, {});
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(result.json?.connectable).toEqual([]);
+      expect(http.seenAuthorization).toEqual([]);
+    } finally {
+      http.stop();
       rmSync(root, { recursive: true, force: true });
     }
   }, 30_000);

@@ -16,6 +16,11 @@ export function defaultConfigPath(): string {
   return join(getKiteCodeDir(), 'kite-code.jsonc');
 }
 
+/** Local decisions authorizing exact project MCP server declarations. */
+export function mcpProjectApprovalPath(): string {
+  return join(getKiteCodeDir(), 'mcp-project-approvals.jsonc');
+}
+
 export function projectConfigPath(workspace?: string): string {
   return join(workspace ?? process.cwd(), '.kite-code', 'kite-code.jsonc');
 }

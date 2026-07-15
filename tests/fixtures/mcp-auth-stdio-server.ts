@@ -1,8 +1,13 @@
 #!/usr/bin/env bun
 
+import { writeFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+
+if (process.env.MCP_STARTUP_MARKER) {
+  writeFileSync(process.env.MCP_STARTUP_MARKER, 'started\n');
+}
 
 const providedToken = process.env.MCP_AUTH_TOKEN;
 const expectedToken = process.env.MCP_EXPECTED_TOKEN;

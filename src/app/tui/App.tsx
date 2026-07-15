@@ -8,6 +8,8 @@ import React, {
   useReducer,
   useRef,
 } from 'react';
+import type { McpProjectServerApprovalView } from '@/core/config';
+import type { McpProjectDecision } from '@/core/config/mcp-project-approvals';
 import type { McpManager } from '@/core/mcp';
 import type { SandboxBackend } from '@/core/sandbox';
 import ApprovalBlock from './components/ApprovalBlock';
@@ -47,6 +49,12 @@ export interface AppProps {
   onToggleReason: (id: number) => void;
   provider: import('./provider').TuiUserInputProvider;
   mcpManager?: McpManager;
+  mcpProjectApprovals?: readonly McpProjectServerApprovalView[];
+  mcpDecisionMessage?: string;
+  onMcpProjectDecision?: (
+    view: McpProjectServerApprovalView,
+    decision: McpProjectDecision,
+  ) => void | Promise<void>;
   availableModels?: import('@/core/config').AvailableModel[];
   slashSuggestion?: import('./components/InputLine').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
@@ -83,6 +91,9 @@ export default function App({
   onToggleReason,
   provider,
   mcpManager,
+  mcpProjectApprovals = [],
+  mcpDecisionMessage,
+  onMcpProjectDecision,
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
@@ -299,7 +310,15 @@ export default function App({
           onClose={hideModelSelector}
         />
       )}
-      {state.showMcp && mcpManager && <McpPanel manager={mcpManager} onClose={hideMcp} />}
+      {state.showMcp && mcpManager && (
+        <McpPanel
+          manager={mcpManager}
+          projectApprovals={mcpProjectApprovals}
+          decisionMessage={mcpDecisionMessage}
+          onProjectDecision={onMcpProjectDecision}
+          onClose={hideMcp}
+        />
+      )}
       {state.showRewind && (
         <CheckpointSelector
           checkpoints={state.checkpoints}
