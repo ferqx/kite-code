@@ -109,6 +109,31 @@ describe('project MCP approval', () => {
     expect(changed.connectableServers.project).toBeUndefined();
   });
 
+  test('keeps Phase 0 project_mcp_json approval records valid after source renaming', () => {
+    const raw = { command: 'node', args: ['server.js'] };
+    writeProjectConfig(raw);
+    const legacyDigest = computeProjectMcpConfigDigest({
+      serverName: 'project',
+      sourceKind: 'project_mcp_json',
+      rawConfig: raw,
+    });
+    expect(
+      decideProjectMcpServer({
+        workspace,
+        serverName: 'project',
+        sourceKind: 'project_mcp_json',
+        sourcePath,
+        expectedConfigDigest: legacyDigest,
+        decision: 'approved',
+      }).status,
+    ).toBe('recorded');
+
+    const catalog = loadMcpConfigCatalog();
+    expect(catalog.effective.get('project')?.source.kind).toBe('project');
+    expect(catalog.effective.get('project')?.approvalStatus).toBe('approved');
+    expect(catalog.connectableServers.project?.command).toBe('node');
+  });
+
   test('reject persists and config change returns to pending', () => {
     writeProjectConfig({ command: 'node', args: ['server.js'] });
     const view = loadMcpConfigCatalog().projectApprovals[0]!;

@@ -21,6 +21,7 @@ import Footer from './Footer';
 import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
 import { useOverlayHeight } from './hooks/useOverlayHeight';
+import type { McpSlashCommand } from './hooks/useSlashCommand';
 import { createInitialState, initialState } from './initialState';
 import McpOverlay from './mcp/McpOverlay';
 import type { McpController } from './mcp/types';
@@ -48,6 +49,7 @@ export interface AppProps {
   provider: import('./provider').TuiUserInputProvider;
   mcpController?: McpController;
   mcpInitialServer?: string;
+  mcpInitialCommand?: McpSlashCommand;
   availableModels?: import('@/core/config').AvailableModel[];
   slashSuggestion?: import('./components/InputLine').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
@@ -85,6 +87,7 @@ export default function App({
   provider,
   mcpController,
   mcpInitialServer,
+  mcpInitialCommand,
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
@@ -313,6 +316,7 @@ export default function App({
         <McpOverlay
           controller={mcpController}
           initialServer={mcpInitialServer}
+          initialCommand={mcpInitialCommand}
           layeredEscRef={layeredOverlayEscRef}
           onClose={hideMcp}
         />

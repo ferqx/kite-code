@@ -9,9 +9,12 @@ export default function McpServerDetail({ server }: { server: Readonly<McpServer
       <Text bold>{server.key.name}</Text>
       <Text>Health: {server.health.replaceAll('_', ' ')}</Text>
       <Text>Config: {server.configStatus.replaceAll('_', ' ')}</Text>
+      <Text>Enabled: {server.enabled ? 'yes' : 'no'}</Text>
+      <Text>Required: {server.required ? 'yes' : 'no'}</Text>
       <Text>Transport: {server.transport}</Text>
       <Text>Source: {server.source}</Text>
       <Text color={t.dim}>Path: {server.sourcePath}</Text>
+      {server.shadowedBy && <Text color={t.dim}>Shadowed by: {server.shadowedBy}</Text>}
       <Text>
         Capabilities: {server.availableToolCount}/{server.toolCount} tools, {server.resourceCount}{' '}
         resources, {server.promptCount} prompts

@@ -4,7 +4,7 @@ MCP 和 Skill 都属于 Capability，不拥有独立于 Runtime 的授权或完�
 
 ## 11.1 MCP Provider
 
-`McpSupervisor` 组合 source-aware config catalog、项目审批门禁和唯一 `McpManager`。它在后台连接前发布不可变 `McpControlSnapshot`，并把 health、list-changed、retry 和 typed diagnostic 投影给 App。`McpManager` 使用 `@modelcontextprotocol/sdk` 管理 stdio 与 streamable HTTP 连接，负责 tools/resources/prompts discovery、circuit breaker、调用与资源读取。
+`McpSupervisor` 组合 source-aware `McpConfigRepository`、项目审批门禁和唯一 `McpManager`。它在后台连接前发布不可变 `McpControlSnapshot`，串行处理 reload/mutation/retry，并把 health、list-changed 和 typed diagnostic 投影给 App。`McpManager` 使用 `@modelcontextprotocol/sdk` 管理 stdio 与 streamable HTTP 连接，负责 tools/resources/prompts discovery、circuit breaker、调用与资源读取。
 
 每个 Manager 连接携带 generation。reconnect/disable/remove 的失效顺序是先撤销未来 capability 可见性，再关闭旧 client；迟到的旧 generation 结果不得更新状态。Runtime 只依赖 `McpRuntimeProvider`，TUI 只依赖 App controller/control snapshot。
 
@@ -14,7 +14,7 @@ Discovery 生成不可变 `CapabilitySnapshot`。MCP Tool 的稳定身份为 `mc
 
 远端 description 和 annotation 不可信。只有显式本地 trust 配置可让 read-only hint 参与分类，而且不能降低本地 `minimumApproval`。无效 schema 的能力可诊断但不可绑定或执行。
 
-项目配置在 discovery 之前还有独立的 transport 门禁。workspace `.kite-code` 和 `.mcp.json` 声明只有匹配本地 config digest 批准后才进入 `McpManager`；配置变化、拒绝或 Approval Store 异常均 fail closed。此批准不产生 annotation trust。项目 Tool 的 effect、minimum approval 和 retry override 被忽略，保持 unknown/user/never 的保守策略。
+项目配置在 discovery 之前还有独立的 transport 门禁。workspace legacy `.kite-code` 和 current `.mcp.json` 声明只有匹配本地 config digest 批准后才进入 `McpManager`；配置变化、拒绝或 Approval Store 异常均 fail closed。local、legacy project、project、user 的有效优先级固定；legacy 只能显式迁移。此批准不产生 annotation trust。项目 Tool 的 effect、minimum approval 和 retry override 被忽略，保持 unknown/user/never 的保守策略。
 
 MCP 调用保留 structured content、content blocks、错误、资源和外部引用；`_meta` 不持久化。外部写入先记录 invocation intent，并根据 `never`、`safe_read` 或可信 idempotency key 决定重试边界。
 
@@ -22,7 +22,7 @@ MCP 调用保留 structured content、content blocks、错误、资源和外部�
 
 Server 状态覆盖 connecting、discovering、ready、degraded、half-open/circuit-open 和断开等运行阶段。Catalog 或 capability revision 变化使旧 binding 失效。崩溃后的非终态写入进入 reconciliation，不自动重复创建外部对象。
 
-`/mcp` 管理中心可响应式浏览全部 Server 和 discovered capability；`/mcp <server>` 打开详情，`/mcp retry <server>` 重新经过 config/approval gate。Phase 1 不提供普通配置 mutation。
+`/mcp` 管理中心可响应式浏览全部 Server 和 discovered capability；Add Wizard、enable/disable/remove、legacy migrate 和 reload 通过 Repository mutation 与 Supervisor reconcile 生效。changed/removed/disabled 先撤销未来 capability，provider version 变化使旧 binding fail closed，未变化连接继续保留。
 
 ## 11.4 Skill Workflow
 

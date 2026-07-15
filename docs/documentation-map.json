@@ -27,8 +27,10 @@
       "id": "mcp-control-plane",
       "sources": [
         "src/core/config/mcp-config.ts",
+        "src/core/config/mcp-config-repository.ts",
         "src/core/config/mcp-project-approvals.ts",
         "src/core/config/mcp-server-config.ts",
+        "src/core/config/paths.ts",
         "src/core/mcp/control-types.ts",
         "src/core/mcp/diagnostics.ts",
         "src/core/mcp/manager.ts",
@@ -44,6 +46,7 @@
       ],
       "documents": [
         "docs/active/mcp-control-plane.md",
+        "docs/active/mcp-config-management.md",
         "docs/active/mcp-project-approval.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/book/08-TUI交互全景.md",

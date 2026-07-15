@@ -1,9 +1,19 @@
 import {
+  McpConfigMutationError,
+  type McpServerConfigInput,
+  type McpWritableScope,
+} from '@/core/config';
+import {
   decideProjectMcpServer,
   type McpProjectDecision,
   type McpProjectSourceKind,
 } from '@/core/config/mcp-project-approvals';
-import type { McpRuntimeProvider, McpServerKey, McpSupervisor } from '@/core/mcp';
+import type {
+  McpRuntimeProvider,
+  McpServerControlState,
+  McpServerKey,
+  McpSupervisor,
+} from '@/core/mcp';
 import type { McpController, McpControllerSnapshot } from './types';
 
 export class TuiMcpController implements McpController {
@@ -61,6 +71,55 @@ export class TuiMcpController implements McpController {
     await this.retry(match.key);
   }
 
+  async reload(): Promise<void> {
+    await this.supervisor.reload();
+    this.setMessage('Reloaded MCP configuration.');
+  }
+
+  async add(scope: McpWritableScope, name: string, config: McpServerConfigInput): Promise<boolean> {
+    return this.runMutation(
+      {
+        type: 'add',
+        scope,
+        name,
+        config,
+        expectedRevision: this.snapshot.control.sourceRevisions[scope],
+      },
+      `Added MCP server ${name} to ${scope} scope.`,
+    );
+  }
+
+  async setEnabled(server: Readonly<McpServerControlState>, enabled: boolean): Promise<boolean> {
+    return this.runMutation(
+      {
+        type: 'set_enabled',
+        key: server.key,
+        expectedRevision: server.revision,
+        enabled,
+      },
+      `${enabled ? 'Enabled' : 'Disabled'} MCP server ${server.key.name}.`,
+    );
+  }
+
+  async remove(server: Readonly<McpServerControlState>): Promise<boolean> {
+    return this.runMutation(
+      { type: 'remove', key: server.key, expectedRevision: server.revision },
+      `Removed MCP server ${server.key.name} from ${server.source} scope.`,
+    );
+  }
+
+  async migrate(server: Readonly<McpServerControlState>): Promise<boolean> {
+    return this.runMutation(
+      {
+        type: 'migrate_legacy',
+        key: server.key,
+        expectedRevision: server.revision,
+        target: 'project',
+      },
+      `Migrated MCP server ${server.key.name} to project scope; approval is required.`,
+    );
+  }
+
   async decide(key: McpServerKey, decision: McpProjectDecision): Promise<void> {
     const server = this.snapshot.control.servers.find(
       (candidate) => candidate.key.name === key.name && candidate.key.source === key.source,
@@ -85,6 +144,24 @@ export class TuiMcpController implements McpController {
     await this.supervisor.reload();
   }
 
+  private async runMutation(
+    command: Parameters<McpSupervisor['mutate']>[0],
+    successMessage: string,
+  ): Promise<boolean> {
+    try {
+      await this.supervisor.mutate(command);
+      this.setMessage(successMessage);
+      return true;
+    } catch (error) {
+      this.setMessage(
+        error instanceof McpConfigMutationError
+          ? `${error.code}: ${error.message}`
+          : 'MCP configuration could not be updated.',
+      );
+      return false;
+    }
+  }
+
   private setMessage(message: string): void {
     this.snapshot = Object.freeze({ control: this.snapshot.control, message });
     this.emit();
@@ -96,5 +173,10 @@ export class TuiMcpController implements McpController {
 }
 
 function isProjectSource(source: string): source is McpProjectSourceKind {
-  return source === 'project_kite_code' || source === 'project_mcp_json';
+  return (
+    source === 'project' ||
+    source === 'project_legacy' ||
+    source === 'project_kite_code' ||
+    source === 'project_mcp_json'
+  );
 }

@@ -515,7 +515,12 @@ function createMcpToolDescriptor(
     kind: 'mcp_tool',
     displayName: tool.name,
     description: tool.description ?? `MCP tool: ${tool.name}`,
-    provider: { type: 'mcp', id: serverName, provenance: trustedProvenance(config) },
+    provider: {
+      type: 'mcp',
+      id: serverName,
+      ...(config.providerVersion ? { version: config.providerVersion } : {}),
+      provenance: trustedProvenance(config),
+    },
     inputSchema,
     ...(tool.outputSchema ? { outputSchema: tool.outputSchema as Record<string, unknown> } : {}),
     declaredEffects,
@@ -548,7 +553,12 @@ function createPassiveDescriptor(
     kind,
     displayName: name,
     description: value.description ?? name,
-    provider: { type: 'mcp', id: serverName, provenance: 'remote' },
+    provider: {
+      type: 'mcp',
+      id: serverName,
+      ...(_config.providerVersion ? { version: _config.providerVersion } : {}),
+      provenance: 'remote',
+    },
     declaredEffects: UNKNOWN_EXTERNAL_EFFECTS,
     effectiveEffects: UNKNOWN_EXTERNAL_EFFECTS,
     policy: { workspaceTrustRequired: false, minimumApproval: 'user' },
@@ -599,9 +609,10 @@ function createTransport(config: McpServerConfig) {
   return new StdioClientTransport({
     command: config.command ?? '',
     args: config.args ?? [],
+    cwd: config.cwd,
     env: {
       ...process.env,
-      KITE_CODE_PROJECT_DIR: process.cwd(),
+      KITE_CODE_PROJECT_DIR: config.cwd ?? process.cwd(),
       ...config.env,
     } as Record<string, string>,
   });

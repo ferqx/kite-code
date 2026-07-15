@@ -1,4 +1,4 @@
-import type { McpConfigSourceKind } from '@/core/config/mcp-config';
+import type { McpConfigSourceKind, McpWritableScope } from '@/core/config/mcp-config';
 import type { McpDiagnostic } from './diagnostics';
 import type { McpHealthState, McpPrompt, McpResource, McpTransportType } from './types';
 
@@ -45,6 +45,11 @@ export interface McpServerControlState {
   transport: McpTransportType;
   source: McpConfigSourceKind;
   sourcePath: string;
+  revision: string;
+  enabled: boolean;
+  required: boolean;
+  shadowedBy?: McpConfigSourceKind;
+  fallbackSource?: McpConfigSourceKind;
   capabilityRevision?: string;
   toolCount: number;
   availableToolCount: number;
@@ -63,4 +68,5 @@ export interface McpControlSnapshot {
   revision: string;
   generation: number;
   servers: readonly Readonly<McpServerControlState>[];
+  sourceRevisions: Readonly<Record<McpWritableScope, string>>;
 }

@@ -11,7 +11,8 @@ describe('slash command suggestions', () => {
       {
         name: 'mcp',
         aliases: [],
-        description: 'Open MCP management panel',
+        description: 'Manage MCP servers and configuration',
+        args: '[server|add|enable|disable|remove|approve|reject|retry|reload]',
       },
     ]);
   });

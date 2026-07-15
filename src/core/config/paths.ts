@@ -21,6 +21,11 @@ export function mcpProjectApprovalPath(): string {
   return join(getKiteCodeDir(), 'mcp-project-approvals.jsonc');
 }
 
+/** Workspace-local MCP config root. The key is a canonical, non-reversible workspace digest. */
+export function localMcpConfigPath(workspaceKey: string): string {
+  return join(getKiteCodeDir(), 'projects', workspaceKey, 'mcp.jsonc');
+}
+
 export function projectConfigPath(workspace?: string): string {
   return join(workspace ?? process.cwd(), '.kite-code', 'kite-code.jsonc');
 }

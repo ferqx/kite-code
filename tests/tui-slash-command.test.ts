@@ -75,6 +75,15 @@ describe('parseSlashCommand', () => {
       command: 'retry',
       server: 'github',
     });
+    expect(parseSlashCommand('/mcp add')).toEqual({ type: 'mcp', command: 'add' });
+    expect(parseSlashCommand('/mcp reload')).toEqual({ type: 'mcp', command: 'reload' });
+    for (const command of ['enable', 'disable', 'remove', 'approve', 'reject'] as const) {
+      expect(parseSlashCommand(`/mcp ${command} github`)).toEqual({
+        type: 'mcp',
+        command,
+        server: 'github',
+      });
+    }
   });
 
   // ── /clear ──

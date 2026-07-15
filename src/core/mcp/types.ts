@@ -26,6 +26,9 @@ export interface McpTrustedProvenance {
 /** MCP Server configuration */
 export interface McpServerConfig {
   type: McpTransportType;
+  enabled?: boolean;
+  required?: boolean;
+  cwd?: string;
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -45,6 +48,8 @@ export interface McpServerConfig {
   >;
   /** 单次工具调用/资源读取超时（毫秒），覆盖默认值 / Per-operation timeout in ms, overrides defaults */
   timeout?: number;
+  /** Internal digest that makes descriptors change when provider config/source changes. */
+  providerVersion?: string;
 }
 
 /** MCP Prompt */

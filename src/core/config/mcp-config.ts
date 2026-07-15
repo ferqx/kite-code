@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { type ParseError, parse } from 'jsonc-parser';
@@ -11,9 +12,15 @@ import {
   sourcePathDigest,
 } from './mcp-project-approvals';
 import { mcpServerSchema, normalizeMcpServerConfig } from './mcp-server-config';
-import { defaultConfigPath, projectConfigPath } from './paths';
+import { defaultConfigPath, localMcpConfigPath, projectConfigPath } from './paths';
 
-export type McpConfigSourceKind = 'user' | McpProjectSourceKind | 'explicit';
+export type McpWritableScope = 'local' | 'project' | 'user';
+export type McpConfigSourceKind =
+  | McpWritableScope
+  | 'project_legacy'
+  | 'project_kite_code'
+  | 'project_mcp_json'
+  | 'explicit';
 export type McpConfigApprovalStatus =
   | 'not_required'
   | 'pending_approval'
@@ -42,6 +49,9 @@ export interface McpServerConfigEntry {
   rawConfig: Readonly<Record<string, unknown>>;
   normalizedConfig?: McpServerConfig;
   configDigest?: string;
+  revision: string;
+  providerConfigDigest: string;
+  enabled: boolean;
   approvalStatus: McpConfigApprovalStatus;
   diagnostics: readonly McpConfigDiagnostic[];
   effective: boolean;
@@ -71,6 +81,7 @@ export interface McpConfigCatalog {
   projectApprovals: readonly McpProjectServerApprovalView[];
   diagnostics: readonly McpConfigDiagnostic[];
   workspace: string;
+  sourceRevisions: Readonly<Record<McpWritableScope, string>>;
 }
 
 export interface McpConfig {
@@ -83,6 +94,34 @@ interface SourceSpec {
   kind: McpConfigSourceKind;
   path: string;
   priority: number;
+}
+
+const CONFIG_REVISION_DOMAIN = 'kite-mcp-config-revision-v1\0';
+
+function revision(value: unknown): string {
+  return createHash('sha256')
+    .update(CONFIG_REVISION_DOMAIN)
+    .update(stableJson(value))
+    .digest('hex');
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sourceTextRevision(path: string): string {
+  try {
+    return revision(readFileSync(path, 'utf8'));
+  } catch {
+    return revision('missing');
+  }
 }
 
 function readSource(
@@ -136,6 +175,7 @@ function readSource(
 
   const entries: McpServerConfigEntry[] = [];
   const diagnostics: McpConfigDiagnostic[] = [];
+  const fileRevision = revision(text);
   for (const [name, value] of Object.entries(servers as Record<string, unknown>)) {
     const entryDiagnostics: McpConfigDiagnostic[] = [];
     let normalizedConfig: McpServerConfig | undefined;
@@ -180,19 +220,29 @@ function readSource(
         ? (value as Record<string, unknown>)
         : {};
     const configDigest =
-      spec.kind === 'project_kite_code' || spec.kind === 'project_mcp_json'
+      spec.kind === 'project_legacy' || spec.kind === 'project'
         ? computeProjectMcpConfigDigest({
             serverName: name,
             sourceKind: spec.kind,
             rawConfig,
           })
         : undefined;
+    const providerConfigDigest = revision({
+      source: spec.kind,
+      sourcePath: resolve(spec.path),
+      name,
+      rawConfig,
+    });
+    if (normalizedConfig) normalizedConfig.providerVersion = providerConfigDigest;
     entries.push({
       name,
       source: { kind: spec.kind, path: spec.path, workspace },
       rawConfig,
       normalizedConfig,
       configDigest,
+      revision: revision({ fileRevision, source: spec.kind, name, rawConfig }),
+      providerConfigDigest,
+      enabled: normalizedConfig?.enabled !== false,
       approvalStatus: normalizedConfig ? 'not_required' : 'invalid',
       diagnostics: entryDiagnostics,
       effective: false,
@@ -206,7 +256,7 @@ function isProjectEntry(entry: McpServerConfigEntry): entry is McpServerConfigEn
   configDigest: string;
 } {
   return (
-    (entry.source.kind === 'project_kite_code' || entry.source.kind === 'project_mcp_json') &&
+    (entry.source.kind === 'project_legacy' || entry.source.kind === 'project') &&
     typeof entry.configDigest === 'string'
   );
 }
@@ -234,19 +284,27 @@ function approvalReview(
 }
 
 /**
- * Load a provenance-preserving MCP catalog. Existing precedence remains:
- * project .kite-code > user kite-code > project .mcp.json.
+ * Load a provenance-preserving MCP catalog. Precedence is:
+ * local > legacy project .kite-code > project .mcp.json > user.
  */
 export function loadMcpConfigCatalog(
   options: { workspace?: string; configPath?: string } = {},
 ): McpConfigCatalog {
   const workspace = resolve(options.workspace ?? process.cwd());
+  let workspaceKey: string | undefined;
+  try {
+    workspaceKey = canonicalWorkspaceKey(workspace);
+  } catch {
+    // Reported below; local/project sources remain visible where possible.
+  }
+  const localPath = workspaceKey ? localMcpConfigPath(workspaceKey) : localMcpConfigPath('unknown');
   const specs: SourceSpec[] = options.configPath
     ? [{ kind: 'explicit', path: resolve(options.configPath), priority: 100 }]
     : [
-        { kind: 'project_mcp_json', path: resolve(workspace, '.mcp.json'), priority: 10 },
         { kind: 'user', path: defaultConfigPath(), priority: 20 },
-        { kind: 'project_kite_code', path: projectConfigPath(workspace), priority: 30 },
+        { kind: 'project', path: resolve(workspace, '.mcp.json'), priority: 30 },
+        { kind: 'project_legacy', path: projectConfigPath(workspace), priority: 35 },
+        { kind: 'local', path: localPath, priority: 40 },
       ];
 
   const priority = new Map(specs.map((spec) => [spec.kind, spec.priority]));
@@ -272,10 +330,7 @@ export function loadMcpConfigCatalog(
   }
 
   const store = readProjectMcpApprovalStore();
-  let workspaceKey: string | undefined;
-  try {
-    workspaceKey = canonicalWorkspaceKey(workspace);
-  } catch {
+  if (!workspaceKey) {
     diagnostics.push({
       code: 'workspace_unavailable',
       message: 'Workspace identity is unavailable; project MCP servers are blocked.',
@@ -290,7 +345,7 @@ export function loadMcpConfigCatalog(
       entry.approvalStatus = 'invalid';
     } else if (!isProjectEntry(entry)) {
       entry.approvalStatus = 'not_required';
-      connectableServers[entry.name] = entry.normalizedConfig;
+      if (entry.enabled) connectableServers[entry.name] = entry.normalizedConfig;
     } else if (!workspaceKey) {
       entry.approvalStatus = 'store_unavailable';
     } else if (store.status === 'corrupt') {
@@ -305,12 +360,29 @@ export function loadMcpConfigCatalog(
         sourceKind: entry.source.kind,
         sourcePathDigest: pathDigest,
       });
-      const record = store.records[id];
-      if (!record || record.configDigest !== entry.configDigest) {
+      const legacyKind = entry.source.kind === 'project' ? 'project_mcp_json' : 'project_kite_code';
+      const legacyDigest = computeProjectMcpConfigDigest({
+        serverName: entry.name,
+        sourceKind: legacyKind,
+        rawConfig: entry.rawConfig,
+      });
+      const legacyId = projectApprovalRecordId({
+        workspaceKey,
+        serverName: entry.name,
+        sourceKind: legacyKind,
+        sourcePathDigest: pathDigest,
+      });
+      const record =
+        store.records[id]?.configDigest === entry.configDigest
+          ? store.records[id]
+          : store.records[legacyId]?.configDigest === legacyDigest
+            ? store.records[legacyId]
+            : undefined;
+      if (!record) {
         entry.approvalStatus = 'pending_approval';
       } else {
         entry.approvalStatus = record.decision;
-        if (record.decision === 'approved') {
+        if (record.decision === 'approved' && entry.enabled) {
           connectableServers[entry.name] = conservativeProjectConfig(entry.normalizedConfig);
         }
       }
@@ -336,6 +408,11 @@ export function loadMcpConfigCatalog(
     projectApprovals,
     diagnostics,
     workspace,
+    sourceRevisions: Object.freeze({
+      local: sourceTextRevision(localPath),
+      project: sourceTextRevision(resolve(workspace, '.mcp.json')),
+      user: sourceTextRevision(defaultConfigPath()),
+    }),
   };
 }
 

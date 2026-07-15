@@ -10,7 +10,7 @@ App.tsx
 ├── InputLine 与交互面板
 ├── SessionManager / SessionRuntime
 ├── hooks/          键盘、窗口、会话、MCP controller、Skill、slash command
-├── mcp/            MCP overlay、controller、route reducer 与只读视图
+├── mcp/            MCP overlay、controller、route reducer、Wizard 与确认视图
 ├── reducers/       AgentEvent → UI state
 ├── components/     Block、审批、计划、子 Agent、模型选择
 └── render/         静态内容与终端输出稳定性
@@ -25,7 +25,7 @@ App.tsx
 
 TUI 不应根据展示文本反推工具是否成功，也不能自行构造 verification passed、approval granted 等 Runtime 事实。
 
-MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。MCP 搜索、selection、route 和审批二次确认只属于 `mcp/reducer.ts` 的展示状态。
+MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。MCP 搜索、selection、route、Wizard 输入和破坏性操作确认只属于 `mcp/reducer.ts` 的展示状态；controller 把 typed mutation 交给 Core Repository/Supervisor。
 
 ## 7.3 事件渲染
 

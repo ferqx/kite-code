@@ -1,15 +1,17 @@
-import type { McpOverlayState, McpRouteKind } from './types';
+import type { McpMutationAction, McpOverlayState, McpRouteKind } from './types';
 
 export type McpOverlayAction =
   | { type: 'move'; delta: number; count: number }
   | { type: 'open'; route: McpRouteKind; serverId: string }
   | { type: 'back' }
+  | { type: 'show_list' }
   | { type: 'start_search' }
   | { type: 'append_search'; value: string }
   | { type: 'backspace_search' }
   | { type: 'finish_search' }
   | { type: 'cancel_search' }
   | { type: 'set_pending_decision'; decision?: 'approved' | 'rejected' }
+  | { type: 'confirm_mutation'; serverId: string; mutation: McpMutationAction }
   | { type: 'clamp'; count: number };
 
 export const initialMcpOverlayState: McpOverlayState = {
@@ -35,16 +37,37 @@ export function mcpOverlayReducer(
         ...state,
         route: { kind: action.route, serverId: action.serverId },
         pendingDecision: undefined,
+        pendingMutation: undefined,
+      };
+    case 'confirm_mutation':
+      return {
+        ...state,
+        route: { kind: 'confirm', serverId: action.serverId },
+        pendingDecision: undefined,
+        pendingMutation: action.mutation,
       };
     case 'back':
       if (state.route.kind === 'list') return state;
-      if (state.route.kind === 'detail') {
-        return { ...state, route: { kind: 'list' }, pendingDecision: undefined };
+      if (state.route.kind === 'detail' || state.route.kind === 'add') {
+        return {
+          ...state,
+          route: { kind: 'list' },
+          pendingDecision: undefined,
+          pendingMutation: undefined,
+        };
       }
       return {
         ...state,
         route: { kind: 'detail', serverId: state.route.serverId },
         pendingDecision: undefined,
+        pendingMutation: undefined,
+      };
+    case 'show_list':
+      return {
+        ...state,
+        route: { kind: 'list' },
+        pendingDecision: undefined,
+        pendingMutation: undefined,
       };
     case 'start_search':
       return { ...state, searchActive: true, pendingDecision: undefined };

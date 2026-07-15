@@ -9,7 +9,10 @@ import {
 } from 'react';
 import type { McpServerControlState } from '@/core/mcp';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
+import type { McpSlashCommand } from '../hooks/useSlashCommand';
 import { useTheme } from '../theme';
+import McpAddWizard from './McpAddWizard';
+import McpConfirmDialog from './McpConfirmDialog';
 import McpErrorView from './McpErrorView';
 import McpPromptList from './McpPromptList';
 import McpResourceList from './McpResourceList';
@@ -22,6 +25,7 @@ import { type McpController, mcpServerId } from './types';
 export interface McpOverlayProps {
   controller: McpController;
   initialServer?: string;
+  initialCommand?: McpSlashCommand;
   layeredEscRef?: MutableRefObject<boolean>;
   onClose: () => void;
 }
@@ -29,6 +33,7 @@ export interface McpOverlayProps {
 export default function McpOverlay({
   controller,
   initialServer,
+  initialCommand = 'open',
   layeredEscRef,
   onClose,
 }: McpOverlayProps) {
@@ -61,17 +66,35 @@ export default function McpOverlay({
   }, [filtered.length]);
 
   useEffect(() => {
-    if (!initialServer || initialNavigationDone.current) return;
+    if (initialNavigationDone.current) return;
+    if (initialCommand === 'add') {
+      initialNavigationDone.current = true;
+      dispatch({ type: 'open', route: 'add', serverId: '' });
+      return;
+    }
+    if (!initialServer) return;
     const server = servers.find(
       (candidate) => candidate.effective && candidate.key.name === initialServer,
     );
     if (server) {
       initialNavigationDone.current = true;
-      dispatch({ type: 'open', route: 'detail', serverId: mcpServerId(server) });
+      const serverId = mcpServerId(server);
+      if (
+        initialCommand === 'enable' ||
+        initialCommand === 'disable' ||
+        initialCommand === 'remove'
+      ) {
+        dispatch({ type: 'confirm_mutation', mutation: initialCommand, serverId });
+      } else if (initialCommand === 'approve' || initialCommand === 'reject') {
+        dispatch({ type: 'open', route: 'approval', serverId });
+      } else {
+        dispatch({ type: 'open', route: 'detail', serverId });
+      }
     }
-  }, [initialServer, servers]);
+  }, [initialCommand, initialServer, servers]);
 
   useInput((input, key) => {
+    if (state.route.kind === 'add' || state.route.kind === 'confirm') return;
     if (state.searchActive) {
       if (key.escape) dispatch({ type: 'cancel_search' });
       else if (key.return) dispatch({ type: 'finish_search' });
@@ -90,6 +113,7 @@ export default function McpOverlay({
       if (key.upArrow) dispatch({ type: 'move', delta: -1, count: filtered.length });
       else if (key.downArrow) dispatch({ type: 'move', delta: 1, count: filtered.length });
       else if (input === '/') dispatch({ type: 'start_search' });
+      else if (input === 'a') dispatch({ type: 'open', route: 'add', serverId: '' });
       else if (key.return) {
         const server = filtered[state.selectedIndex];
         if (server) dispatch({ type: 'open', route: 'detail', serverId: mcpServerId(server) });
@@ -119,6 +143,13 @@ export default function McpOverlay({
     else if (input === 'p') openRoute('prompts', routedServer);
     else if (input === 'e' && routedServer.diagnostic) openRoute('error', routedServer);
     else if (input === 'a' && routedServer.approval) openRoute('approval', routedServer);
+    else if (input === 'g' && !routedServer.enabled) confirmMutation('enable', routedServer);
+    else if (input === 'd' && routedServer.enabled) confirmMutation('disable', routedServer);
+    else if (input === 'x' && isWritable(routedServer.source)) {
+      confirmMutation('remove', routedServer);
+    } else if (input === 'm' && routedServer.source === 'project_legacy') {
+      confirmMutation('migrate', routedServer);
+    }
   });
 
   function openRoute(
@@ -126,6 +157,13 @@ export default function McpOverlay({
     server: Readonly<McpServerControlState>,
   ): void {
     dispatch({ type: 'open', route, serverId: mcpServerId(server) });
+  }
+
+  function confirmMutation(
+    mutation: 'enable' | 'disable' | 'remove' | 'migrate',
+    server: Readonly<McpServerControlState>,
+  ): void {
+    dispatch({ type: 'confirm_mutation', mutation, serverId: mcpServerId(server) });
   }
 
   return (
@@ -147,6 +185,12 @@ export default function McpOverlay({
             search={state.search}
             searchActive={state.searchActive}
           />
+        ) : state.route.kind === 'add' ? (
+          <McpAddWizard
+            controller={controller}
+            onDone={() => dispatch({ type: 'show_list' })}
+            onCancel={() => dispatch({ type: 'back' })}
+          />
         ) : !routedServer ? (
           <Text color={t.error}>The selected MCP server is no longer available.</Text>
         ) : state.route.kind === 'detail' ? (
@@ -159,6 +203,14 @@ export default function McpOverlay({
           <McpPromptList prompts={routedServer.prompts} />
         ) : state.route.kind === 'error' ? (
           <McpErrorView diagnostic={routedServer.diagnostic} />
+        ) : state.route.kind === 'confirm' && state.pendingMutation ? (
+          <McpConfirmDialog
+            controller={controller}
+            server={routedServer}
+            action={state.pendingMutation}
+            onDone={() => dispatch({ type: 'show_list' })}
+            onCancel={() => dispatch({ type: 'back' })}
+          />
         ) : (
           <ApprovalView server={routedServer} pendingDecision={state.pendingDecision} />
         )}
@@ -207,6 +259,7 @@ function ApprovalView({
 
 function routeTitle(route: string, server: Readonly<McpServerControlState> | undefined): string {
   if (route === 'list') return 'MCP Management';
+  if (route === 'add') return 'MCP Management / add';
   return `${server?.key.name ?? 'MCP'} / ${route}`;
 }
 
@@ -216,10 +269,15 @@ function footerHint(
   pendingDecision?: 'approved' | 'rejected',
 ): string {
   if (pendingDecision) return 'Press the same key again to confirm; Esc cancels.';
-  if (route === 'list') return 'Up/Down select  Enter details  / search  Esc close';
+  if (route === 'list') return 'Up/Down select  Enter details  a add  / search  Esc close';
   if (route === 'detail') {
-    return `t tools  u resources  p prompts${server?.diagnostic ? '  e error' : ''}${server?.approval ? '  a approval' : ''}${server?.diagnostic?.retryable ? '  r retry' : ''}  Esc back`;
+    return `t tools  u resources  p prompts${server?.diagnostic ? '  e error' : ''}${server?.approval ? '  a approval' : ''}${server?.diagnostic?.retryable ? '  r retry' : ''}${server?.enabled ? '  d disable' : '  g enable'}${server && isWritable(server.source) ? '  x remove' : ''}${server?.source === 'project_legacy' ? '  m migrate' : ''}  Esc back`;
   }
+  if (route === 'add' || route === 'confirm') return '';
   if (route === 'approval') return 'a approve  r reject  Esc back';
   return `${server?.diagnostic?.retryable ? 'r retry  ' : ''}Esc back`;
+}
+
+function isWritable(source: string): boolean {
+  return source === 'local' || source === 'project' || source === 'user';
 }

@@ -146,7 +146,7 @@ describe('McpSupervisor', () => {
 
 function catalog(): McpConfigCatalog {
   const good = entry('good', 'user', 'not_required');
-  const approval = entry('approval', 'project_mcp_json', 'pending_approval');
+  const approval = entry('approval', 'project', 'pending_approval');
   return {
     entries: [good, approval],
     effective: new Map([
@@ -157,7 +157,7 @@ function catalog(): McpConfigCatalog {
     projectApprovals: [
       {
         name: 'approval',
-        sourceKind: 'project_mcp_json',
+        sourceKind: 'project',
         sourcePath: '/workspace/.mcp.json',
         transport: 'stdio',
         configDigest: 'digest',
@@ -168,6 +168,7 @@ function catalog(): McpConfigCatalog {
     ],
     diagnostics: [],
     workspace: '/workspace',
+    sourceRevisions: { local: 'local', project: 'project', user: 'user' },
   };
 }
 
@@ -185,7 +186,10 @@ function entry(
     },
     rawConfig: { type: 'stdio', command: 'bun' },
     normalizedConfig: { type: 'stdio', command: 'bun' },
-    ...(kind === 'project_mcp_json' ? { configDigest: 'digest' } : {}),
+    ...(kind === 'project' ? { configDigest: 'digest' } : {}),
+    revision: `${kind}:${name}:revision`,
+    providerConfigDigest: `${kind}:${name}:provider`,
+    enabled: true,
     approvalStatus,
     diagnostics: [],
     effective: true,

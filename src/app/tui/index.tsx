@@ -160,6 +160,8 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   >(async () => {});
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
   const [mcpInitialServer, setMcpInitialServer] = React.useState<string | undefined>();
+  const [mcpInitialCommand, setMcpInitialCommand] =
+    React.useState<import('./hooks/useSlashCommand').McpSlashCommand>('open');
   const interruptClearedByResolutionRef = React.useRef(false);
 
   const provider = React.useMemo(() => {
@@ -622,8 +624,10 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     state.interactionMode,
     sandboxBackend,
     (command, server) => {
+      setMcpInitialCommand(command);
       setMcpInitialServer(server);
       if (command === 'retry' && server) void mcpController.retryByName(server);
+      if (command === 'reload') void mcpController.reload();
     },
   );
 
@@ -782,6 +786,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         provider={provider}
         mcpController={mcpController}
         mcpInitialServer={mcpInitialServer}
+        mcpInitialCommand={mcpInitialCommand}
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}

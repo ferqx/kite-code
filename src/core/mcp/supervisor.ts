@@ -1,10 +1,11 @@
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import { digestCapability } from '@/core/capabilities/catalog';
+import type { McpConfigCatalog, McpServerConfigEntry } from '@/core/config/mcp-config';
 import {
-  loadMcpConfigCatalog,
-  type McpConfigCatalog,
-  type McpServerConfigEntry,
-} from '@/core/config/mcp-config';
+  DefaultMcpConfigRepository,
+  type McpConfigCommand,
+  type McpConfigRepository,
+} from '@/core/config/mcp-config-repository';
 import type { CapabilitySnapshot } from '@/protocol/capabilities';
 import type {
   McpConfigStatus,
@@ -22,6 +23,7 @@ const EMPTY_SNAPSHOT: McpControlSnapshot = Object.freeze({
   revision: digestCapability([]),
   generation: 0,
   servers: Object.freeze([]),
+  sourceRevisions: Object.freeze({ local: '', project: '', user: '' }),
 });
 
 export interface McpSupervisor {
@@ -29,6 +31,7 @@ export interface McpSupervisor {
   stop(): Promise<void>;
   reload(): Promise<void>;
   retry(key: McpServerKey): Promise<void>;
+  mutate(command: McpConfigCommand): Promise<void>;
   getSnapshot(): McpControlSnapshot;
   subscribe(listener: () => void): () => void;
   getRuntimeProvider(): McpRuntimeProvider;
@@ -46,22 +49,26 @@ export interface McpManagerControlPlane extends McpRuntimeProvider {
 export interface McpSupervisorOptions {
   manager?: McpManagerControlPlane;
   loadCatalog?: (options: { workspace: string }) => McpConfigCatalog;
+  repository?: McpConfigRepository;
 }
 
 export class DefaultMcpSupervisor implements McpSupervisor {
   private readonly manager: McpManagerControlPlane;
-  private readonly loadCatalog: (options: { workspace: string }) => McpConfigCatalog;
+  private readonly repository: McpConfigRepository;
   private readonly listeners = new Set<() => void>();
   private snapshot = EMPTY_SNAPSHOT;
   private catalog: McpConfigCatalog | undefined;
   private workspace: string | undefined;
   private managerUnsubscribe: (() => void) | undefined;
+  private configUnsubscribe: (() => void) | undefined;
   private generation = 0;
   private started = false;
+  private reconcileChain: Promise<void> = Promise.resolve();
 
   constructor(options: McpSupervisorOptions = {}) {
     this.manager = options.manager ?? new McpManager();
-    this.loadCatalog = options.loadCatalog ?? loadMcpConfigCatalog;
+    this.repository =
+      options.repository ?? new DefaultMcpConfigRepository({ loadCatalog: options.loadCatalog });
   }
 
   async start(workspace: string): Promise<void> {
@@ -71,7 +78,12 @@ export class DefaultMcpSupervisor implements McpSupervisor {
     this.workspace = workspace;
     this.generation += 1;
     this.managerUnsubscribe = this.manager.subscribe(() => this.projectSnapshot());
-    this.catalog = this.loadCatalog({ workspace });
+    this.catalog = await this.repository.load(workspace);
+    this.configUnsubscribe = this.repository.watch(workspace, () => {
+      void this.reload().catch(() => {
+        // Manual reload and the next file event can retry an unavailable source.
+      });
+    });
     this.projectSnapshot();
     this.connectCatalog(this.catalog, this.generation);
   }
@@ -82,6 +94,8 @@ export class DefaultMcpSupervisor implements McpSupervisor {
     this.generation += 1;
     this.managerUnsubscribe?.();
     this.managerUnsubscribe = undefined;
+    this.configUnsubscribe?.();
+    this.configUnsubscribe = undefined;
     this.catalog = undefined;
     this.workspace = undefined;
     this.setSnapshot(
@@ -89,6 +103,7 @@ export class DefaultMcpSupervisor implements McpSupervisor {
         revision: digestCapability({ generation: this.generation, servers: [] }),
         generation: this.generation,
         servers: Object.freeze([]),
+        sourceRevisions: Object.freeze({ local: '', project: '', user: '' }),
       }),
     );
     await this.manager.disconnectAll();
@@ -96,34 +111,47 @@ export class DefaultMcpSupervisor implements McpSupervisor {
 
   async reload(): Promise<void> {
     if (!this.started || !this.workspace) return;
-    this.generation += 1;
-    this.catalog = this.loadCatalog({ workspace: this.workspace });
-    this.projectSnapshot();
-    await this.manager.disconnectAll();
-    if (!this.started || !this.catalog) return;
-    this.connectCatalog(this.catalog, this.generation);
+    await this.enqueue(async () => {
+      if (!this.started || !this.workspace) return;
+      await this.reconcile(await this.repository.load(this.workspace));
+    });
   }
 
   async retry(key: McpServerKey): Promise<void> {
     if (!this.started || !this.workspace) return;
-    this.generation += 1;
-    this.catalog = this.loadCatalog({ workspace: this.workspace });
-    const entry = this.catalog.entries.find(
-      (candidate) =>
-        candidate.effective && candidate.name === key.name && candidate.source.kind === key.source,
-    );
-    const config = this.catalog.connectableServers[key.name];
-    if (!entry || !config) {
-      await this.manager.disconnect(key.name);
+    await this.enqueue(async () => {
+      if (!this.started || !this.workspace) return;
+      await this.reconcile(await this.repository.load(this.workspace));
+      const catalog = this.catalog;
+      if (!catalog) return;
+      this.generation += 1;
+      const entry = catalog.entries.find(
+        (candidate) =>
+          candidate.effective &&
+          candidate.name === key.name &&
+          candidate.source.kind === key.source,
+      );
+      const config = catalog.connectableServers[key.name];
+      if (!entry || !config) {
+        await this.manager.disconnect(key.name);
+        this.projectSnapshot();
+        return;
+      }
       this.projectSnapshot();
-      return;
-    }
-    this.projectSnapshot();
-    try {
-      await this.manager.reconnect(key.name, config, this.generation);
-    } catch {
-      // Manager publishes the typed failure state. A single provider never rejects the supervisor.
-    }
+      try {
+        await this.manager.reconnect(key.name, config, this.generation);
+      } catch {
+        // Manager publishes the typed failure state. A single provider never rejects the supervisor.
+      }
+    });
+  }
+
+  async mutate(command: McpConfigCommand): Promise<void> {
+    if (!this.started) return;
+    await this.enqueue(async () => {
+      if (!this.started) return;
+      await this.reconcile(await this.repository.mutate(command));
+    });
   }
 
   getSnapshot(): McpControlSnapshot {
@@ -149,6 +177,36 @@ export class DefaultMcpSupervisor implements McpSupervisor {
     }
   }
 
+  private enqueue(operation: () => Promise<void>): Promise<void> {
+    const next = this.reconcileChain.then(operation, operation);
+    this.reconcileChain = next.catch(() => {});
+    return next;
+  }
+
+  private async reconcile(next: McpConfigCatalog): Promise<void> {
+    if (!this.started) return;
+    const previous = this.catalog?.connectableServers ?? {};
+    const names = new Set([...Object.keys(previous), ...Object.keys(next.connectableServers)]);
+    const changed = [...names].filter(
+      (name) => previous[name]?.providerVersion !== next.connectableServers[name]?.providerVersion,
+    );
+    this.catalog = next;
+    this.projectSnapshot();
+    if (changed.length === 0) return;
+    this.generation += 1;
+    const generation = this.generation;
+    this.projectSnapshot();
+    await Promise.all(changed.map((name) => this.manager.disconnect(name)));
+    if (!this.started || generation !== this.generation) return;
+    for (const name of changed) {
+      const config = next.connectableServers[name];
+      if (!config) continue;
+      void this.manager.reconnect(name, config, generation).catch(() => {
+        // Manager publishes a typed failure without rejecting the control plane.
+      });
+    }
+  }
+
   private projectSnapshot(): void {
     if (!this.catalog) return;
     const managerStates = this.manager.getServerStates();
@@ -161,7 +219,13 @@ export class DefaultMcpSupervisor implements McpSupervisor {
     );
     const servers = this.catalog.entries
       .map((entry) =>
-        projectServer(entry, managerStates.get(entry.name), capabilitySnapshot, approvals),
+        projectServer(
+          entry,
+          managerStates.get(entry.name),
+          capabilitySnapshot,
+          approvals,
+          fallbackSource(entry, this.catalog!.entries),
+        ),
       )
       .sort(compareServers);
     const revision = digestCapability({ generation: this.generation, servers });
@@ -170,6 +234,7 @@ export class DefaultMcpSupervisor implements McpSupervisor {
         revision,
         generation: this.generation,
         servers: Object.freeze(servers),
+        sourceRevisions: Object.freeze({ ...this.catalog.sourceRevisions }),
       }),
     );
   }
@@ -197,10 +262,17 @@ function projectServer(
   managerState: Readonly<McpServerState> | undefined,
   capabilitySnapshot: CapabilitySnapshot,
   approvals: ReadonlyMap<string, McpConfigCatalog['projectApprovals'][number]>,
+  fallback: McpServerControlState['fallbackSource'],
 ): Readonly<McpServerControlState> {
   const runtimeState = entry.effective ? managerState : undefined;
+  const providerVersion = entry.normalizedConfig?.providerVersion;
+  const currentRuntimeState =
+    runtimeState?.config.providerVersion === providerVersion ? runtimeState : undefined;
   const descriptors = capabilitySnapshot.descriptors.filter(
-    (descriptor) => descriptor.provider.type === 'mcp' && descriptor.provider.id === entry.name,
+    (descriptor) =>
+      descriptor.provider.type === 'mcp' &&
+      descriptor.provider.id === entry.name &&
+      descriptor.provider.version === providerVersion,
   );
   const toolDescriptors = new Map(
     descriptors
@@ -208,10 +280,12 @@ function projectServer(
       .map((descriptor) => [descriptor.displayName, descriptor]),
   );
   const tools = Object.freeze(
-    (runtimeState?.tools ?? []).map((tool) => projectTool(tool, toolDescriptors.get(tool.name))),
+    (currentRuntimeState?.tools ?? []).map((tool) =>
+      projectTool(tool, toolDescriptors.get(tool.name)),
+    ),
   );
   const approval = approvals.get(`${entry.source.kind}:${entry.name}`);
-  const diagnostic = runtimeState?.diagnostic ?? configDiagnostic(entry);
+  const diagnostic = currentRuntimeState?.diagnostic ?? configDiagnostic(entry);
   const status = configStatus(entry);
   const capabilityRevision =
     descriptors.length > 0
@@ -227,21 +301,26 @@ function projectServer(
     effective: entry.effective,
     configStatus: status,
     authStatus: 'not_required',
-    health: runtimeState?.health ?? 'disconnected',
+    health: currentRuntimeState?.health ?? 'disconnected',
     transport: entry.normalizedConfig?.type ?? (entry.rawConfig.type === 'http' ? 'http' : 'stdio'),
     source: entry.source.kind,
     sourcePath: entry.source.path,
+    revision: entry.revision,
+    enabled: entry.enabled,
+    required: entry.normalizedConfig?.required === true,
+    ...(entry.shadowedBy ? { shadowedBy: entry.shadowedBy } : {}),
+    ...(fallback ? { fallbackSource: fallback } : {}),
     capabilityRevision,
     toolCount: tools.length,
     availableToolCount: tools.filter((tool) => tool.available).length,
-    resourceCount: runtimeState?.resources.length ?? 0,
-    promptCount: runtimeState?.prompts.length ?? 0,
+    resourceCount: currentRuntimeState?.resources.length ?? 0,
+    promptCount: currentRuntimeState?.prompts.length ?? 0,
     tools,
     resources: Object.freeze(
-      (runtimeState?.resources ?? []).map((resource) => Object.freeze({ ...resource })),
+      (currentRuntimeState?.resources ?? []).map((resource) => Object.freeze({ ...resource })),
     ),
     prompts: Object.freeze(
-      (runtimeState?.prompts ?? []).map((prompt) =>
+      (currentRuntimeState?.prompts ?? []).map((prompt) =>
         Object.freeze({
           ...prompt,
           arguments: prompt.arguments
@@ -258,10 +337,30 @@ function projectServer(
           }),
         }
       : {}),
-    ...(runtimeState?.retryAt !== undefined ? { retryAt: runtimeState.retryAt } : {}),
-    ...(runtimeState?.lastAttemptAt ? { lastAttemptAt: runtimeState.lastAttemptAt } : {}),
+    ...(currentRuntimeState?.retryAt !== undefined ? { retryAt: currentRuntimeState.retryAt } : {}),
+    ...(currentRuntimeState?.lastAttemptAt
+      ? { lastAttemptAt: currentRuntimeState.lastAttemptAt }
+      : {}),
     ...(diagnostic ? { diagnostic } : {}),
   });
+}
+
+function fallbackSource(
+  entry: McpServerConfigEntry,
+  entries: readonly McpServerConfigEntry[],
+): McpServerControlState['fallbackSource'] {
+  if (!entry.effective) return undefined;
+  const rank: Record<string, number> = {
+    local: 4,
+    project_legacy: 3,
+    project: 2,
+    user: 1,
+    explicit: 5,
+  };
+  return entries
+    .filter((candidate) => candidate.name === entry.name && candidate !== entry)
+    .sort((left, right) => (rank[right.source.kind] ?? 0) - (rank[left.source.kind] ?? 0))[0]
+    ?.source.kind;
 }
 
 function projectTool(
@@ -287,6 +386,7 @@ function projectTool(
 
 function configStatus(entry: McpServerConfigEntry): McpConfigStatus {
   if (!entry.effective) return 'shadowed';
+  if (!entry.enabled) return 'disabled';
   if (entry.approvalStatus === 'not_required') return 'configured';
   return entry.approvalStatus;
 }

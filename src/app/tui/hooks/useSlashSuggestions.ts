@@ -23,7 +23,12 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'new', aliases: [], description: 'Start a new session' },
   { name: 'plan', aliases: [], description: 'Enter planning mode' },
   { name: 'permissions', aliases: [], description: 'Set permissions', args: 'ask|auto|full' },
-  { name: 'mcp', aliases: [], description: 'Open MCP management panel' },
+  {
+    name: 'mcp',
+    aliases: [],
+    description: 'Manage MCP servers and configuration',
+    args: '[server|add|enable|disable|remove|approve|reject|retry|reload]',
+  },
   { name: 'clear', aliases: ['c'], description: 'Clear output' },
   { name: 'help', aliases: ['h'], description: 'Show help' },
   { name: 'exit', aliases: ['quit', 'q'], description: 'Exit Kite Code' },

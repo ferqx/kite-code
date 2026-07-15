@@ -4,6 +4,9 @@ import type { McpServerConfig } from '../mcp/types';
 
 export const mcpServerSchema = z.object({
   type: z.enum(['stdio', 'http']).optional(),
+  enabled: z.boolean().optional(),
+  required: z.boolean().optional(),
+  cwd: z.string().min(1).optional(),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   url: z.string().optional(),
@@ -54,6 +57,10 @@ export function expandEnvVars(value: string): string {
 export function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServerConfig {
   const type: McpServerConfig['type'] = raw.type === 'http' ? 'http' : 'stdio';
   const config: McpServerConfig = { type };
+
+  if (typeof raw.enabled === 'boolean') config.enabled = raw.enabled;
+  if (typeof raw.required === 'boolean') config.required = raw.required;
+  if (typeof raw.cwd === 'string' && raw.cwd.length > 0) config.cwd = expandEnvVars(raw.cwd);
 
   if (typeof raw.command === 'string') config.command = expandEnvVars(raw.command);
   if (Array.isArray(raw.args)) {

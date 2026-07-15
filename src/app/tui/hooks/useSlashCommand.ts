@@ -18,10 +18,21 @@ export type SlashAction =
   | { type: 'help' }
   | { type: 'new' }
   | { type: 'exit' }
-  | { type: 'mcp'; command: 'open' | 'retry'; server?: string }
+  | { type: 'mcp'; command: McpSlashCommand; server?: string }
   | { type: 'rewind' }
   | { type: 'export' }
   | { type: 'unknown'; raw: string };
+
+export type McpSlashCommand =
+  | 'open'
+  | 'retry'
+  | 'add'
+  | 'enable'
+  | 'disable'
+  | 'remove'
+  | 'approve'
+  | 'reject'
+  | 'reload';
 
 export function parseSlashCommand(input: string): SlashAction | null {
   if (!input.startsWith('/')) return null;
@@ -51,9 +62,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case 'new':
       return { type: 'new' };
     case 'mcp':
-      return args[0] === 'retry'
-        ? { type: 'mcp', command: 'retry', server: args[1] || undefined }
-        : { type: 'mcp', command: 'open', server: arg || undefined };
+      return parseMcpCommand(args);
     case 'rewind':
       return { type: 'rewind' };
     case 'export':
@@ -88,7 +97,7 @@ export function useSlashCommand(
   onTheme?: (preset: string) => void,
   currentInteractionMode: 'accept_edits' | 'auto' | 'full' = 'accept_edits',
   sandboxBackend: SandboxBackend = 'none',
-  onMcpCommand?: (command: 'open' | 'retry', server?: string) => void,
+  onMcpCommand?: (command: McpSlashCommand, server?: string) => void,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -221,4 +230,20 @@ export function useSlashCommand(
       onMcpCommand,
     ],
   );
+}
+
+function parseMcpCommand(args: string[]): Extract<SlashAction, { type: 'mcp' }> {
+  const command = args[0]?.toLowerCase();
+  if (
+    command === 'retry' ||
+    command === 'enable' ||
+    command === 'disable' ||
+    command === 'remove' ||
+    command === 'approve' ||
+    command === 'reject'
+  ) {
+    return { type: 'mcp', command, server: args[1] || undefined };
+  }
+  if (command === 'add' || command === 'reload') return { type: 'mcp', command };
+  return { type: 'mcp', command: 'open', server: args.join(' ') || undefined };
 }

@@ -43,11 +43,11 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 
 ## 9.4 MCP 配置
 
-MCP server 可配置 stdio/HTTP transport、timeout、trust 和逐工具 policy override。逐工具配置使用 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`，不使用旧的单一 `risk` 字段作为权威策略。
+MCP server 可配置 stdio/HTTP transport、`enabled`、`required`、`cwd`、timeout、trust 和逐工具 policy override。逐工具配置使用 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`，不使用旧的单一 `risk` 字段作为权威策略。Phase 2 只赋予 `enabled` 和 `cwd` 运行语义；`required` 的任务准入留给后续阶段。
 
-默认 MCP 来源优先级为 project `.kite-code`、user `kite-code.jsonc`、project `.mcp.json`。两类 project 来源必须匹配 `~/.kite-code/mcp-project-approvals.jsonc` 中绑定 workspace/source/name/config digest 的本地决定；未批准、已拒绝、配置变化或存储损坏时不创建 transport，且不回退同名低优先级 Server。项目批准不采纳项目声明的 annotation trust 或逐工具放宽策略。显式 `configPath` 是调用方授权的单文件来源，不与 workspace 来源合并。
+默认 MCP 来源优先级为 local `~/.kite-code/projects/<workspaceKey>/mcp.jsonc`、legacy project `.kite-code/kite-code.jsonc`、project `.mcp.json`、user `kite-code.jsonc`。前三个产品作用域中 local/project/user 可写，legacy project 只读并通过显式迁移进入 `.mcp.json`。两个 project 来源必须匹配 `~/.kite-code/mcp-project-approvals.jsonc` 中绑定 workspace/source/name/config digest 的本地决定；未批准、已拒绝、配置变化或存储损坏时不创建 transport，且不回退同名低优先级 Server。项目批准不采纳项目声明的 annotation trust 或逐工具放宽策略。显式 `configPath` 是调用方授权的单文件来源，不与 workspace 来源合并。
 
-TUI 当前通过 `McpSupervisor` 只读投影全部来源和 shadow 状态，并支持 retry/reload 与既有项目审批。普通配置的 add/remove/enable/disable、三层可写 scope 和文件 watcher 尚未开放，不能把管理中心的只读浏览误表述为配置 mutation 已完成。
+TUI 通过 `McpSupervisor` 投影全部来源和 shadow 状态。`McpConfigRepository` 使用 expected revision、JSONC edit 与原子 rename 提供 add/update/remove/set_enabled/migrate；文件 watcher 只触发 debounce 后全量 reload，外部冲突不覆盖。`/mcp add` 和 enable/disable/remove/reload 已开放，legacy migration 与破坏性操作必须确认；project add 不隐式自批。
 
 ## 9.5 Feature flags
 

@@ -39,9 +39,9 @@ bun install
 
 模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。
 
-项目中的 `.kite-code/kite-code.jsonc#mcpServers` 与 `.mcp.json#mcpServers` 不会在首次发现时自动启动。运行 TUI 后打开 `/mcp`，选择 pending Server 并进入 approval 页，连续两次按 `a` 确认批准当前配置摘要，或连续两次按 `r` 确认拒绝；项目配置变化后必须重新批准。批准只允许连接，不能降低 MCP Tool 的 effect、审批或重试策略。
+MCP 配置优先级为本机 workspace 覆盖 `~/.kite-code/projects/<workspaceKey>/mcp.jsonc`、legacy 项目 `.kite-code/kite-code.jsonc`、共享项目 `.mcp.json`、用户 `~/.kite-code/kite-code.jsonc`。legacy 来源只读，可在管理中心显式迁移到 `.mcp.json`。两个项目来源不会在首次发现时自动启动：打开 `/mcp` 进入 approval 页后，连续两次按 `a` 批准当前配置摘要，或连续两次按 `r` 拒绝；项目配置变化后必须重新批准。批准只允许连接，不能降低 MCP Tool 的 effect、审批或重试策略。
 
-`/mcp` 提供响应式只读管理中心；`/mcp <server>` 可直接打开详情，`/mcp retry <server>` 会重新经过配置与审批门禁。管理中心可浏览 Server health、typed diagnostic、Tools、Resources 与 Prompts。添加、删除和启停配置尚不属于当前只读阶段。
+`/mcp` 提供响应式管理中心；`/mcp <server>` 打开详情，`/mcp retry <server>` 重新经过配置与审批门禁。管理中心可浏览 health、typed diagnostic、Tools、Resources 与 Prompts，并通过 `/mcp add`、`/mcp enable|disable|remove <server>`、`/mcp approve|reject <server>` 和 `/mcp reload` 管理非 OAuth 配置。项目 add 保存后仍需单独批准，删除和迁移必须显式确认。
 
 ## 运行
 

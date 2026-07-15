@@ -21,8 +21,20 @@ export type {
   McpConfigSourceKind,
   McpProjectServerApprovalView,
   McpServerConfigEntry,
+  McpWritableScope,
 } from './mcp-config';
 export { loadMcpConfig, loadMcpConfigCatalog } from './mcp-config';
+export type {
+  McpConfigCommand,
+  McpConfigPatch,
+  McpConfigRepository,
+  McpServerConfigInput,
+} from './mcp-config-repository';
+export {
+  DefaultMcpConfigRepository,
+  McpConfigMutationError,
+  validateMcpServerName,
+} from './mcp-config-repository';
 export { expandEnvVars } from './mcp-server-config';
 
 // ── Zod schemas ──
@@ -153,6 +165,7 @@ export {
   defaultCheckpointPath,
   defaultConfigPath,
   editorInputPath,
+  localMcpConfigPath,
   mcpProjectApprovalPath,
   projectConfigPath,
   sessionExportPath,

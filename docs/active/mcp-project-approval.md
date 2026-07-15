@@ -7,15 +7,15 @@
 
 ## 当前安全性质
 
-默认配置发现保留以下兼容优先级：
+默认配置发现使用以下优先级：
 
 ```text
-project .kite-code > user kite-code > project .mcp.json
+local > project legacy .kite-code > project .mcp.json > user
 ```
 
-`project_kite_code` 与 `project_mcp_json` 的有效 Server 必须先获得本机用户对当前配置摘要的批准。`pending_approval`、`rejected`、`invalid`、`store_corrupt` 或 `store_unavailable` 的项目条目不会进入 `loadMcpConfig().servers`，因此 `McpManager` 不会为其创建 stdio 或 HTTP transport。高优先级项目条目被阻止时，不回退到同名用户条目。
+`project_legacy` 与 `project` 的有效 Server 必须先获得本机用户对当前配置摘要的批准。`pending_approval`、`rejected`、`invalid`、`store_corrupt` 或 `store_unavailable` 的项目条目不会进入 `loadMcpConfig().servers`，因此 `McpManager` 不会为其创建 stdio 或 HTTP transport。高优先级项目条目被阻止时，不回退到同名低优先级条目。Phase 0 保存的 `project_kite_code` 与 `project_mcp_json` 决定继续作为兼容别名读取。
 
-用户来源保持原有自动连接行为。调用方显式传入的 `configPath` 只读取该文件，并被视为调用方已经授权的 `explicit` 来源；生产 TUI 使用默认来源发现，不能通过 `explicit` 绕过项目识别。
+local 与 user 来源保持自动连接行为。调用方显式传入的 `configPath` 只读取该文件，并被视为调用方已经授权的 `explicit` 来源；生产 TUI 使用默认来源发现，不能通过 `explicit` 绕过项目识别。
 
 ## 批准绑定
 
@@ -47,4 +47,4 @@ Approval Store 和 `/mcp` 决策属于 MCP control plane，不写入任务 Runti
 - 连续两次按 `r`：确认拒绝当前摘要，由 Supervisor 重新加载目录并断开不再可连接的 Server；
 - 配置已变化或存储异常：显示 Core 返回的安全诊断，不创建 transport。
 
-Phase 1 已由可订阅 `McpSupervisor` 管理 Manager 生命周期，TUI 不再读取 Manager Map。完整 control-plane 边界见 [`mcp-control-plane.md`](mcp-control-plane.md)。三层配置 mutation 与文件 watcher 仍属于 Phase 2。
+Phase 2 的 project add 和 legacy migrate 只写配置，不隐式批准；写入后条目进入 pending approval。完整 control-plane 与配置边界见 [`mcp-control-plane.md`](mcp-control-plane.md) 和 [`mcp-config-management.md`](mcp-config-management.md)。

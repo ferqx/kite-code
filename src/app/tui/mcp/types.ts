@@ -1,6 +1,17 @@
+import type { McpServerConfigInput, McpWritableScope } from '@/core/config';
 import type { McpControlSnapshot, McpServerControlState, McpServerKey } from '@/core/mcp';
 
-export type McpRouteKind = 'detail' | 'tools' | 'resources' | 'prompts' | 'error' | 'approval';
+export type McpMutationAction = 'enable' | 'disable' | 'remove' | 'migrate';
+
+export type McpRouteKind =
+  | 'detail'
+  | 'tools'
+  | 'resources'
+  | 'prompts'
+  | 'error'
+  | 'approval'
+  | 'add'
+  | 'confirm';
 
 export type McpRoute = { kind: 'list' } | { kind: McpRouteKind; serverId: string };
 
@@ -10,6 +21,7 @@ export interface McpOverlayState {
   search: string;
   searchActive: boolean;
   pendingDecision?: 'approved' | 'rejected';
+  pendingMutation?: McpMutationAction;
 }
 
 export interface McpControllerSnapshot {
@@ -22,6 +34,11 @@ export interface McpController {
   subscribe(listener: () => void): () => void;
   retry(key: McpServerKey): Promise<void>;
   retryByName(name: string): Promise<void>;
+  reload(): Promise<void>;
+  add(scope: McpWritableScope, name: string, config: McpServerConfigInput): Promise<boolean>;
+  setEnabled(server: Readonly<McpServerControlState>, enabled: boolean): Promise<boolean>;
+  remove(server: Readonly<McpServerControlState>): Promise<boolean>;
+  migrate(server: Readonly<McpServerControlState>): Promise<boolean>;
   decide(key: McpServerKey, decision: 'approved' | 'rejected'): Promise<void>;
 }
 

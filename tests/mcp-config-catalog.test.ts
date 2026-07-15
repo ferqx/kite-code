@@ -30,7 +30,7 @@ describe('MCP source-aware config catalog', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  test('preserves project .kite-code > user > .mcp.json precedence without fallback', () => {
+  test('uses legacy project > project > user precedence without fallback', () => {
     writeFileSync(
       join(home, '.kite-code', 'kite-code.jsonc'),
       JSON.stringify({ mcpServers: { shared: { command: 'user-server' } } }),
@@ -46,15 +46,15 @@ describe('MCP source-aware config catalog', () => {
 
     const catalog = loadMcpConfigCatalog();
     const effective = catalog.effective.get('shared');
-    expect(effective?.source.kind).toBe('project_kite_code');
+    expect(effective?.source.kind).toBe('project_legacy');
     expect(effective?.approvalStatus).toBe('pending_approval');
     expect(catalog.connectableServers.shared).toBeUndefined();
     expect(catalog.entries.find((entry) => entry.source.kind === 'user')?.shadowedBy).toBe(
-      'project_kite_code',
+      'project_legacy',
     );
   });
 
-  test('user declaration shadows legacy .mcp.json and remains connectable', () => {
+  test('project declaration shadows user and remains gated', () => {
     writeFileSync(
       join(home, '.kite-code', 'kite-code.jsonc'),
       JSON.stringify({ mcpServers: { shared: { command: 'user-server' } } }),
@@ -65,8 +65,9 @@ describe('MCP source-aware config catalog', () => {
     );
 
     const loaded = loadMcpConfig();
-    expect(loaded.catalog.effective.get('shared')?.source.kind).toBe('user');
-    expect(loaded.servers.shared?.command).toBe('user-server');
+    expect(loaded.catalog.effective.get('shared')?.source.kind).toBe('project');
+    expect(loaded.catalog.effective.get('shared')?.approvalStatus).toBe('pending_approval');
+    expect(loaded.servers.shared).toBeUndefined();
   });
 
   test('explicit config is caller-authorized and does not merge workspace sources', () => {
