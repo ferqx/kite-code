@@ -1,148 +1,40 @@
-# 第十一章 MCP 与 Skills 扩展
+# 第十一章 MCP 与 Skill Workflow
 
-## 11.1 MCP 协议支持
+MCP 和 Skill 都属于 Capability，不拥有独立于 Runtime 的授权或完成通道。
 
-### 概述
+## 11.1 MCP Provider
 
-MCP（Model Context Protocol）是一个开放协议，允许 AI 应用连接外部工具服务器。
+`McpManager` 使用 `@modelcontextprotocol/sdk` 管理 stdio 与 streamable HTTP 连接，负责 tools/resources/prompts discovery、list-changed notification、health、circuit breaker、调用与资源读取。
 
-| Transport | 配置方式 | 适用场景 |
-|-----------|----------|----------|
-| stdio | `command` + `args` | 本地进程（如 filesystem server） |
-| streamable HTTP | `url` + `headers` | 远程服务（如 GitHub MCP） |
+Discovery 生成不可变 `CapabilitySnapshot`。MCP Tool 的稳定身份为 `mcp:<server>/<tool>`；`mcp__<server>__<tool>` 只是某一模型轮次的暴露名称。
 
-### 工具命名规则
+## 11.2 安全与执行
 
-MCP 工具以 `mcp__<server>__<tool>` 格式命名，例如：
-- `mcp__filesystem__read_file`
-- `mcp__github__create_issue`
+远端 description 和 annotation 不可信。只有显式本地 trust 配置可让 read-only hint 参与分类，而且不能降低本地 `minimumApproval`。无效 schema 的能力可诊断但不可绑定或执行。
 
-### 安全策略
+MCP 调用保留 structured content、content blocks、错误、资源和外部引用；`_meta` 不持久化。外部写入先记录 invocation intent，并根据 `never`、`safe_read` 或可信 idempotency key 决定重试边界。
 
-```
-MCP 工具默认需要审批（risk: mcp）
-  ├─ server config 中声明 risk: "read" → 直接放行
-  ├─ full_access 模式 → 直接放行
-  └─ 其他情况 → 触发审批
-```
+## 11.3 Health 与恢复
 
-### 超时配置
+Server 状态覆盖 connecting、discovering、ready、degraded、half-open/circuit-open 和断开等运行阶段。Catalog 或 capability revision 变化使旧 binding 失效。崩溃后的非终态写入进入 reconciliation，不自动重复创建外部对象。
 
-| 操作 | 默认超时 | 可配置 |
-|------|----------|--------|
-| 连接 | 5 秒 | 否 |
-| 工具调用 | 30 秒 | 是（per-server `timeout` 字段） |
-| 资源读取 | 10 秒 | 是（per-server `timeout` 字段） |
+## 11.4 Skill Workflow
 
-在 `kite-code.jsonc` 的 `mcpServers` 中可为每个 server 配置 `timeout`（毫秒），覆盖默认值。
+Kite Skill 是严格 YAML frontmatter 加正文/资源组成的版本化 Workflow Contract，而不是普通 Prompt 片段。编译结果声明：
 
-### MCP 连接生命周期
+- input/output schema；
+- invocation 方式；
+- context mode；
+- capability ceiling；
+- effects 与 approval 要求；
+- verification 与 recovery。
 
-```
-useMcpConnection hook
-  → loadMcpConfig() 读取 mcpServers 配置
-  → new McpManager()
-  → manager.connectAll(servers)
-  → 成功后构建 promptRegistry
-  → 组件卸载时 manager.disconnectAll()
-```
+激活产生 Runtime `SkillActivation`/frame。Inline Skill 在当前上下文执行；fork Skill 在隔离 Subagent 中执行。Skill 只能调用 ceiling 内、仍通过 Runtime Policy 的能力。
 
-## 11.2 MCP Resources
+Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入模型。活动 frame 只能通过 `read_skill_reference` 读取声明过、路径安全且大小受限的文件。
 
-MCP Resources 允许 Agent 读取外部资源注入上下文。
+## 11.5 Progressive disclosure
 
-### 工具：read_mcp_resource
+当 catalog 超出 provider 上下文预算时，模型只看到 provider-neutral `capability_search`。搜索返回安全元数据候选，不返回调用句柄；下一轮重新校验 catalog/revision 后才签发有限 binding 或 Skill disclosure。
 
-```typescript
-{
-  name: "read_mcp_resource",
-  schema: { server: string, uri: string }
-}
-```
-
-`read_mcp_resource` 被归类为只读工具，始终不需要审批。
-
-## 11.3 MCP 提示（Prompts）
-
-MCP Prompts 可注册为斜杠命令：
-
-```
-manager.getPromptRegistry() → Map<string, { server, prompt }>
-  → 用户输入 /mcp__servername__promptname
-  → dispatch INJECT_MCP_PROMPT
-```
-
-## 11.4 /mcp 管理面板
-
-```
-触发：/mcp → SHOW_MCP → McpPanel
-
-显示：已连接服务器列表、状态、transport 类型、工具数量、风险级别
-```
-
----
-
-## 11.5 Skills 系统
-
-### 概述
-
-Skills 系统对齐 [agentskills.io](https://agentskills.io) 开放标准，允许用户通过 Markdown 文件定义可复用的技能指令。
-
-### 技能文件结构
-
-```
-.kite-code/skills/          # 项目级（优先）
-~/.kite-code/skills/        # 用户级（fallback）
-├── code-review/
-│   └── SKILL.md
-├── refactor/
-│   └── SKILL.md
-└── test/
-    └── SKILL.md
-```
-
-### SKILL.md 格式
-
-```markdown
----
-name: code-review
-description: 代码审查技能
----
-
-你是一个代码审查专家。请按以下标准审查代码：
-1. 代码风格一致性
-2. 潜在 bug
-3. 性能问题
-4. 安全漏洞
-```
-
-### 技能激活方式
-
-1. **斜杠命令**：`/code-review 检查 src/App.tsx`
-   - 解析技能名 → `getSkillContent()` 读取 SKILL.md → dispatch `ACTIVATE_SKILL`
-   - 如有附带任务，组合为 `skillContent + task` 发送给 agent
-
-2. **Skill 工具**：Agent 自主调用
-   - Agent 识别到需要特定技能时，调用 `Skill` 工具
-   - 工具返回 SKILL.md 内容作为上下文
-
-### Skill 工具安全策略
-
-`Skill` 始终不需要审批（risk: `read`），不受 `read-only` 访问权限阻止。
-
-### 技能与前缀缓存
-
-`Skill` 工具在基集中的固定位置：`read_mcp_resource` 之后、`update_plan` 之前。此顺序保证前缀缓存稳定性。
-
----
-
-## 11.6 扩展能力对比
-
-| 维度 | MCP Tools | Skills |
-|------|-----------|--------|
-| 来源 | 外部服务器进程 | 本地 Markdown 文件 |
-| 能力 | 执行操作（读写、API 调用） | 注入指令（提示词增强） |
-| 注册时机 | MCP 连接成功后 | 启动时扫描 |
-| 安全策略 | 默认需审批 | 始终直通 |
-| 使用方式 | Agent 自主调用 | 斜杠命令或 Agent 调用 |
-| 命名格式 | `mcp__<server>__<tool>` | `/<skill-name>` |
+完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。

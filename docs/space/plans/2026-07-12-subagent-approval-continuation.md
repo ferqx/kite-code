@@ -1,6 +1,6 @@
 # 子 Agent 审批续跑状态机
 
-状态：draft
+状态：archived（Subagent continuation 已实施；当前行为以源码和测试为准）
 优先级：P0
 依赖：`2026-07-08-agent-kernel-incremental-evolution.md`
 

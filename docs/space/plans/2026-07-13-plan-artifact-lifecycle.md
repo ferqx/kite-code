@@ -1,6 +1,6 @@
 # Plan Artifact 文件化、版本化审核与 Task 隔离实施方案
 
-状态：active
+状态：archived（已实施；当前规则见 `docs/active/plan-artifact-lifecycle.md`）
 创建日期：2026-07-13
 
 ## 目标

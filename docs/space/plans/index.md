@@ -35,18 +35,21 @@
 | [`2026-06-18-kite-code-telemetry-collection.md`](2026-06-18-kite-code-telemetry-collection.md) | draft | P2 | `opentelemetry-observability` | — | Kite Code 遥测收集：双通道 opt-in，脱敏工具调用统计，驱动工具契约优化 |
 | [`2026-06-18-session-logger.md`](2026-06-18-session-logger.md) | archived | P0 | — | — | 会话日志本地记录：AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断 |
 | [`2026-06-19-event-mechanism-refactor.md`](2026-06-19-event-mechanism-refactor.md) | archived | P0 | `session-logger` | — | 事件机制重构：turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一 |
-| [`2026-06-26-shell-live-output.md`](2026-06-26-shell-live-output.md) | completed | P0 | — | — | Shell 工具实时输出展示：`tool_progress` 事件 + 流式 stdout/stderr 读取 + TUI tail-follow 渲染 |
-| [`2026-06-28-context-compaction.md`](2026-06-28-context-compaction.md) | active | P0 | — | — | M0 TUI 预整合 ✅ + M1 Core 工具折叠 ✅ + M2 对话摘要（延后） |
+| [`2026-06-26-shell-live-output.md`](2026-06-26-shell-live-output.md) | archived | P0 | — | — | Shell 实时输出已实施；计划仅作历史参考。 |
+| [`2026-06-28-context-compaction.md`](2026-06-28-context-compaction.md) | archived | P0 | — | — | M0/M1 已实施，M2 未纳入当前执行计划。 |
 | [`2026-06-27-plan-subagent-role-design.md`](2026-06-27-plan-subagent-role-design.md) | draft | P1 | — | — | Plan 子 Agent 角色：只读架构设计专家，多视角并行设计方案，主 agent 合并后调 `update_plan` |
-| [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | active | P0 | — | — | 审批层、执行层与沙箱 5 阶段：阶段四 `/permissions` 交互模式 ✅、阶段五 执行可靠性 ✅，阶段一~三待实施 |
+| [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | archived | P0 | — | — | 目标能力已进入当前 Runtime/Policy/Execution/Sandbox。 |
 | [`2026-07-01-web-search-tool.md`](2026-07-01-web-search-tool.md) | draft | P0 | — | — | Web 网络工具：Phase 1 `web_fetch`（fetch → SSRF → readability → turndown 正文提取），Phase 2 `web_search`（搜索发现 URL） |
-| [`2026-07-03-tui-pty-e2e-reform.md`](2026-07-03-tui-pty-e2e-reform.md) | active | P1 | — | 扩展 2026-05-25-e2e-restructure | TUI E2E 双层架构：PTY 终端系统测试 + Ink 组件集成测试。Phase 0-4 完成（19 tests / 6 files），多消息阻塞调查中 |
-| [`2026-07-08-agent-kernel-incremental-evolution.md`](2026-07-08-agent-kernel-incremental-evolution.md) | draft | P0 | — | — | Agent Runtime Kernel 重构：5 阶段建立事件驱动状态机，LangGraph 降级为执行引擎。Phase 1 RuntimeEvent+Projection → Phase 2 Reducer+Store → Phase 3 Controller 抽取 → Phase 4 Policy 策略化 → Phase 5 LangGraph 适配器化 |
+| [`2026-07-03-tui-pty-e2e-reform.md`](2026-07-03-tui-pty-e2e-reform.md) | archived | P1 | — | 扩展 2026-05-25-e2e-restructure | PTY 与 Ink 测试体系已落地；当前标准见 active 规则。 |
+| [`2026-07-08-agent-kernel-incremental-evolution.md`](2026-07-08-agent-kernel-incremental-evolution.md) | archived | P0 | — | — | Runtime Kernel 已完成并成为状态转换权威。 |
 | [`2026-07-10-langchain-to-ai-sdk-migration.md`](2026-07-10-langchain-to-ai-sdk-migration.md) | completed | P0 | `2026-07-10-runtime-kernel-cutover-status` | — | LangChain → AI SDK 依赖迁移：provider 包 + `@langchain/core` + MCP SDK → `ai` + `@ai-sdk/openai-compatible` + `@ai-sdk/mcp`。2026-07-12 @langchain/core 已完全移除 |
-| [`2026-07-11-plan-mode-refactor.md`](2026-07-11-plan-mode-refactor.md) | draft | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | 替代 [[plan-mode-design]] 中 `update_plan` 单工具设计 | Plan Mode 重构：`update_plan` → `write_plan` + `exit_plan_mode` + `update_plan`(进度版) 三工具职责分离，7 commits 实施 |
-| [`2026-07-12-subagent-approval-continuation.md`](2026-07-12-subagent-approval-continuation.md) | draft | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | — | 子 agent 审批续跑状态机：持久化 continuation，支持重复审批与会话恢复。 |
-| [`2026-07-12-subagent-approval-continuation-implementation.md`](2026-07-12-subagent-approval-continuation-implementation.md) | draft | P0 | `2026-07-12-subagent-approval-continuation.md` | — | 子 agent 审批续跑状态机的五项 TDD 实施计划。 |
+| [`2026-07-11-merge-exit-plan-mode.md`](2026-07-11-merge-exit-plan-mode.md) | archived | P0 | Plan Mode | — | `exit_plan_mode` 合并已实施。 |
+| [`2026-07-11-plan-mode-refactor.md`](2026-07-11-plan-mode-refactor.md) | archived | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | 替代旧 Plan 工具设计 | Plan Artifact 与三类 Plan 工具生命周期已实施。 |
+| [`2026-07-12-approval-architecture-refactor.md`](2026-07-12-approval-architecture-refactor.md) | archived | P0 | Runtime Kernel | — | Runtime Policy、审批与执行边界重构已实施。 |
+| [`2026-07-12-subagent-approval-continuation.md`](2026-07-12-subagent-approval-continuation.md) | archived | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | — | Subagent continuation 与审批恢复已实施。 |
+| [`2026-07-12-subagent-approval-continuation-implementation.md`](2026-07-12-subagent-approval-continuation-implementation.md) | archived | P0 | `2026-07-12-subagent-approval-continuation.md` | — | 实施完成，保留为历史 TDD 记录。 |
 | [`2026-07-12-runtime-engineering-guardrails.md`](2026-07-12-runtime-engineering-guardrails.md) | completed | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | — | Runtime 工程护栏建设：Feature Flags、Golden Tests、FailureKind、授权溯源、Replay、ADR、准入标准、边界检查、文档分层与 Prompt 契约均已实施。 |
+| [`2026-07-13-plan-artifact-lifecycle.md`](2026-07-13-plan-artifact-lifecycle.md) | archived | P0 | Plan Mode | — | Plan Artifact 文件化、版本化审核与 Task 隔离已实施。 |
 | [`2026-07-14-mcp-runtime-governance-p0.md`](2026-07-14-mcp-runtime-governance-p0.md) | archived | P0 | ADR-0007 | 落实 MCP/Skills Runtime 治理 RFC 的 Phase 0+1 | Revisioned MCP catalog、turn binding、fail-closed schema、policy 和结构化结果；[完成记录](../execution/completed/2026-07-14-mcp-runtime-governance-p0.md)。 |
 | [`2026-07-14-mcp-skills-runtime-governance-followup.md`](2026-07-14-mcp-skills-runtime-governance-followup.md) | archived | P1 | `2026-07-14-mcp-runtime-governance-p0.md`、ADR-0007、ADR-0008 | 延续 MCP/Skills Runtime 治理 RFC | Phase 2 execution record/recovery ✅ → Phase 3 Skill Workflow ✅ → Phase 4 verification ✅ → Phase 5 progressive disclosure ✅；[完成记录](../execution/completed/2026-07-15-mcp-skills-runtime-governance.md)。 |
 

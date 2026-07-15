@@ -1,52 +1,26 @@
-# 当前规则：模型 provider 边界
+# 当前规则：模型 Provider 边界
 
 状态：active
-最后更新：2026-04-27
-最后验证：2026-04-27
-范围：
 
-- `src/config/index.ts`
-- `src/model/factory.ts`
-- `src/model/deepseek.ts`
-- `src/model/context.ts`
-- `src/model/runtime-context.ts`
-- `src/shared/cache-metrics.ts`
-- `tests/real-agent.real.ts`
-- `README.md` 和 `AGENTS.md` 中的模型 provider 示例
+读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文或缓存指标时。
 
-读取时机：
+验证：`bun test tests/config.test.ts tests/model.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime-context.test.ts`、`bun run typecheck`。
 
-- 修改模型配置加载。
-- 新增或修改聊天模型适配器。
-- 修改某个 provider 的 prompt、运行时上下文或缓存指标行为。
-- 修改真实配置模型测试或 provider 文档。
-
-相关：
-
-- `real-model-test-boundary.md`
-- `plan-state-reminder.md`
-
-验证：
-
-- 纯文档更新可用 `git diff --check` 验证。
-- provider 实现改动应运行最近的 config/model 测试和 `bun run typecheck`。
-- 真实网络/模型验证仍通过显式 `bun run test:real` 完成。
+相关：`real-model-test-boundary.md`、`plan-state-reminder.md`。
 
 ## 规则
 
-本仓库不是 DeepSeek-only。DeepSeek 应视为更广义 OpenAI-compatible provider 边界内的一个已配置 provider。
+Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatible` 和 `ollama` 通过 AI SDK 模型边界接入；Runtime Kernel、Tool Controller、Policy 和 Verification 不得依赖某个 provider 的消息类或 SDK。
 
-默认设计方向：
+- 共享代码使用 `provider`、`providerType`、`baseURL`、`apiKey`、`modelName` 等中立命名。
+- Provider 专有 reasoning、缓存指标和请求参数隔离在 `src/core/model/` 或配置解析边界。
+- Model Controller 将 provider 输出规范化为 Runtime transcript/events；上游不读取私有响应对象。
+- Provider 是否支持 tool calling 与上下文预算会影响 Capability disclosure，但不能改变授权语义。
+- API key、base URL 和本地模型配置不得写入测试 fixture、日志或文档。
 
-- 共享代码、文档和测试中优先使用 provider-neutral 命名，例如 `provider`、`providerType`、`baseURL`、`apiKey`、`modelName` 和 `configured model`。
-- 对实现 OpenAI chat API 形状但不是 OpenAI 官方服务的 provider，使用 `openai-compatible`。
-- 只有需要 DeepSeek 适配器行为时才使用 `deepseek` provider 类型，例如 reasoning-content 回传或 DeepSeek 专有缓存指标。
-- provider 专有行为应隔离在 provider adapter 或明确命名的共享 helper 中。
-- 真实模型测试应覆盖配置的默认模型，不要假设默认 provider 是 DeepSeek。
+## 禁止事项
 
-## 不要做
-
-- 不要把 harness 描述成必须依赖 DeepSeek，除非主题就是 DeepSeek adapter。
-- provider-neutral 配置键足够时，不要新增 DeepSeek-only 配置键。
-- 不要把 DeepSeek 假设写入图路由、tool gating、工作区访问权限、上下文组装、CLI 行为或 checkpoint 行为。
-- 不要在 README 示例、测试或未来 provider 工作中把 OpenAI-compatible provider 当成附带支持。
+- 不得把 DeepSeek/OpenAI 假设写入 Scheduler、Policy、工具路由或持久化 schema。
+- 不得在模型 SDK 的 tool `execute` 中绕过 Runtime 执行工具。
+- 不得把真实网络测试混入默认确定性测试。
+- 不得在没有实际真实模型套件的情况下声称某 provider 已通过端到端验证。

@@ -1,121 +1,50 @@
-# 第九章 CLI 模式与配置系统
+# 第九章 CLI、模式与配置
 
-## 9.1 CLI 入口
+## 9.1 CLI
 
-CLI 提供 `run`（首次运行）和 `resume`（恢复运行）两种模式，适合脚本/CI 场景。
-
-### 用法
+入口为 `src/app/cli/index.ts`：
 
 ```bash
-# 首次运行
-kite-code run "帮我重构这个函数" --workspace ./my-project
-
-# 恢复运行（从 checkpoint）
-kite-code resume --thread-id run-abc123 --action approve --grant full-access
+bun run agent run --task "检查并修复测试"
+bun run agent resume --thread <thread-id>
+bun run agent trace <events.jsonl> --turn 1
 ```
 
-### CLI 与 TUI 的区别
+CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
 
-| 维度 | CLI | TUI |
-|------|-----|-----|
-| 事件消费 | NDJSON 输出到 stdout | React Ink 渲染 |
-| 用户输入 | stdin 读取 | 交互式 UI |
-| 会话管理 | 单次运行 | 多会话并发 |
-| 适用场景 | CI/CD、脚本 | 日常开发 |
+## 9.2 Interaction mode
 
-## 9.2 配置系统
+| 模式 | 目标 |
+| --- | --- |
+| `accept_edits` | 保持更强的人机确认边界 |
+| `auto` | 结合 effect classification 与 auto review 自动推进 |
+| `full` | 提高本地自治度，但不绕过未知/外部写入等强制边界 |
 
-### 配置文件位置
+Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者由 Runtime Policy 分别处理。
 
-| 文件 | 位置 | 用途 |
-|------|------|------|
-| 全局配置 | `~/.kite-code/kite-code.jsonc` | 模型、provider、MCP 服务器 |
-| 项目配置 | `<workspace>/.kite-code/kite-code.jsonc` | 项目级覆盖 |
+## 9.3 配置来源
 
-### 配置 Schema
+用户配置与项目配置使用 JSONC，并由 Zod 校验后合并。主要配置域包括：
 
 ```jsonc
 {
-  // Provider 配置（支持多个）
-  "provider": {
-    "deepseek": {
-      "type": "deepseek",
-      "apiKey": "sk-...",
-      "models": [
-        { "name": "deepseek-chat", "default": true },
-        { "name": "deepseek-reasoner" }
-      ]
-    },
-    "openai": {
-      "type": "openai",
-      "apiKey": "sk-...",
-      "models": [{ "name": "gpt-4o" }]
-    },
-    "ollama": {
-      "type": "ollama",
-      "baseURL": "http://localhost:11434",
-      "models": [{ "name": "llama3" }]
-    }
-  },
-
-  // 主题
-  "theme": "dark",  // "dark" | "light"
-
-  // 沙箱，默认启用。关闭后 Full 模式不可用。
-  "sandbox": {
-    "enabled": true
-  },
-
-  // MCP 服务器
-  "mcpServers": {
-    "filesystem": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
-      "risk": "read"
-    },
-    "github": {
-      "type": "http",
-      "url": "https://mcp.github.com/sse",
-      "headers": { "Authorization": "Bearer ..." },
-      "timeout": 30000  // 可选：单次工具调用超时（毫秒）
-    }
-  }
+  "provider": {},
+  "theme": "dark",
+  "colorPreset": "default",
+  "interactionMode": "auto",
+  "sandbox": { "enabled": true },
+  "autoReview": {},
+  "mcpServers": {},
+  "features": {}
 }
 ```
 
-### 多 Provider 支持
+Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统一通过 AI SDK 模型边界调用。API key 和配置字符串支持环境变量展开。
 
-| Provider | 类型 | 模型适配器 |
-|----------|------|-----------|
-| DeepSeek | `deepseek` | `@langchain/deepseek` ChatDeepSeek |
-| OpenAI | `openai` | `@langchain/openai` ChatOpenAI |
-| OpenAI-compatible | `openai-compatible` | ChatOpenAI (自定义 baseURL) |
-| Ollama | `ollama` | `@langchain/ollama` ChatOllama |
+## 9.4 MCP 配置
 
-### 配置加载流程
+MCP server 可配置 stdio/HTTP transport、timeout、trust 和逐工具 policy override。逐工具配置使用 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`，不使用旧的单一 `risk` 字段作为权威策略。
 
-```
-loadAgentConfig()
-  → 读取 ~/.kite-code/kite-code.jsonc（全局）
-  → 读取 <workspace>/.kite-code/kite-code.jsonc（项目级，覆盖全局）
-  → Zod schema 校验
-  → 返回 AgentConfig
-```
+## 9.5 Feature flags
 
-### 沙箱开关
-
-`sandbox.enabled` 默认是 `true`。设置为 `false` 时，TUI 会在 `/permissions` 候选中禁用 `full`，并显示”未启用沙箱，Full 不可用”；CLI/TUI 运行时都会把 sandbox backend 解析为 `none`。
-
-CLI 的 `--no-sandbox` 是单次运行覆盖项，优先级高于配置文件，可用于临时关闭沙箱。
-
-## 9.3 路径管理
-
-| 路径 | 用途 |
-|------|------|
-| `~/.kite-code/kite-code.jsonc` | 全局配置 |
-| `~/.kite-code/checkpoints.db` | SQLite checkpoint 数据库 |
-| `~/.kite-code/sessions/<date>.md` | 导出的会话文件 |
-| `<workspace>/.kite-code/kite-code.jsonc` | 项目配置 |
-| `<workspace>/.kite-code/skills/` | 项目级 Skills 目录 |
-| `~/.kite-code/skills/` | 用户级 Skills 目录 |
+Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时按各 active 规则 fail closed 或回到当前受治理路径，不允许恢复已删除的旧 MCP adapter、Prompt Skill 或旧状态机。

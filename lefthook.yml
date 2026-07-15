@@ -1,5 +1,7 @@
 pre-commit:
   commands:
+    docs-impact:
+      run: bun run check:docs-impact
     format:
       glob: "*.{ts,tsx,json,jsonc,yml,yaml}"
       run: node node_modules/@biomejs/biome/bin/biome check --write --no-errors-on-unmatched {staged_files}

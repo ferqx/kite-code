@@ -1,6 +1,6 @@
 # 审批层、执行层与沙箱渐进式开发方案
 
-状态：partially-implemented（阶段四、五已实现，阶段一~三待实现）
+状态：archived（目标能力已由当前 Runtime/Policy/Execution/Sandbox 实现；正文仅作历史参考）
 创建：2026-06-30
 优先级：P0
 实施记录：

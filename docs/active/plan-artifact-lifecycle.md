@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 `write_plan`、Plan review、Task 生命周期、Runtime Context、TUI/CLI 审核展示或会话恢复时
-验证：`bun test tests/runtime tests/ui-system/scenarios/plan-review.test.ts tests/ui-system/scenarios/plan-mode-policy.test.ts`
+验证：`bun test tests/runtime tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts`
 
 当前行为约束：
 

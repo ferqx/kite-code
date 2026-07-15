@@ -1,6 +1,6 @@
 # TUI E2E 测试体系改造：PTY 终端系统测试
 
-> 状态：active（Phase 0-4 完成；Phase 3.5 全覆盖扩展完成；Phase 5 待推进）
+> 状态：archived（PTY 体系已落地；当前规则见 `docs/active/tui-e2e-standards.md`）
 
 > 关联计划：[2026-05-25-e2e-restructure.md](2026-05-25-e2e-restructure.md)（archived — 原 ink-testing-library 方案，本计划新增 PTY 测试层）
 

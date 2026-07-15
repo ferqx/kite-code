@@ -1,9 +1,9 @@
 # 文件读取共享边界 — readTextContent 单入口设计
 
 状态：active
-范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/tools/search.ts`、`src/core/harness/tool-runner.ts`、`src/core/model/runtime-context.ts`、`src/core/subagent/runner.ts`、`src/core/harness/graph.ts`、`src/core/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/app/tui/components/SubAgentBlock.tsx`、`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/types.ts`、`src/app/tui/reducers/helpers.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
+范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/tools/search.ts`、`src/core/harness/tool-runner.ts`、`src/core/model/runtime-context.ts`、`src/core/runtime/agent.ts`、`src/core/subagent/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
 读取时机：修改 `readFile`/`editFile`/`writeFile`、二进制检测、编码处理、换行正规化、MSYS2 路径转换、runtime context 路径格式时必读。
-验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/graph.test.ts tests/integration.test.ts tests/context.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx`
+验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx`
 
 ## 设计目标
 
@@ -163,9 +163,9 @@ allowExternal = hasExecutionGrant && isExternal
 ```bash
 bun run typecheck
 bun test tests/tools.test.ts
-bun test tests/tool-definitions.test.ts tests/tool-policy.test.ts tests/graph.test.ts tests/integration.test.ts tests/subagent-runner.test.ts tests/context.test.ts
+bun test tests/tool-definitions.test.ts tests/tool-policy.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/context.test.ts
 bun test tests/subagent-approval.test.ts
-bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-session-switch.test.tsx
+bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/session-manager.test.ts
 ```
 
 ### LOAD_SESSION 未设置 nextBlockId + blockIndex 删除（`sessionReducer.ts`、`handleEvent.ts`、`helpers.ts`）
@@ -178,18 +178,18 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
 - `SWITCH_SESSION` 原先已有此逻辑，提取 `maxBlockIdInTurns` 到 `helpers.ts` 复用
 - 彻底删除 `blockIndex` 手动缓存（`callId→blockId` 映射，6 处同步点），换用 `findBlock`/`hasBlock` 全量扫描，消除所有缓存一致性 bug 类别
 
-### 子 agent 取消/异常收尾（`agentReducer.ts`、`runner.ts`、`SubAgentBlock.tsx`）
+### 子 agent 取消/异常收尾（`agentReducer.ts`、`subagent/runner.ts`、`SubAgentBlock.tsx`）
 
 - `cancelRunningBlocks`：Esc 取消时在 `running: false` 之前同步将 running subagent/tool_card 标记为 `"Cancelled"`，防止状态被 `<Static>` 永久冻结
 - `AbortError` 识别为 `"Cancelled"` 而非 `"The operation was aborted."`
 - `subagent_error` 事件携带 `summary`/`toolCallCount`/`durationMs`，TUI 与 `subagent_done` 一样展示步骤全景
 - done/error/cancelled 三态统一用 `●` 圆点（与 `tool_card` 一致），running 态用 `⠋` spinner
 
-### toolResultSink 渐进展示 + 统一 Promise.all（`graph.ts`、`runner.ts`）
+### Runtime 工具结果渐进展示
 
-- `toolResultSink` 逐项推送 `tool_done` 事件，`Promise.all` 并行期间 TUI 渐进刷新
-- task 子 agent 与普通工具合并为同一 `Promise.all`，消除先后两波等待
-- `tool_done` handler `elapsedMs` 优先保留首次计时，防 stream chunk 覆盖
+- Runtime 逐项投影工具生命周期事件，TUI 在并发执行期间渐进刷新。
+- task 子 agent 与普通工具都通过 Runtime/Tool Controller 调度，不建立 UI 专用执行通道。
+- `tool_done` handler 的 `elapsedMs` 优先保留首次计时，避免后续投影覆盖。
 
 ### `<Static key={blockFingerprint}>`（`useStaticContent.tsx`、`App.tsx`）
 

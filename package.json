@@ -20,6 +20,7 @@
     "lint": "biome lint .",
     "check:core-boundary": "bun run scripts/check-core-boundary.ts",
     "check:docs": "bun run scripts/check-docs.ts",
+    "check:docs-impact": "bun run scripts/check-docs-impact.ts",
     "web": "bun run src/web-server/index.tsx",
     "web:dev": "BUN_ENV=development bun --watch run src/web-server/index.tsx",
     "web:seed": "bun run src/web-server/index.tsx --seed",

@@ -1,6 +1,10 @@
 # TUI CtrlSafeTextInput 软换行与光标行为规范
 
 状态：active
+
+读取时机：修改 TextInput、软换行、光标导航、粘贴、宽字符或输入区域高度时。
+
+验证：`bun test tests/tui-soft-wrap.test.tsx tests/tui-mixed-script-wrap.test.tsx tests/tui-cursor-nav.test.tsx tests/tui-paste-placeholder.test.tsx`。
 范围：`src/app/tui/components/CtrlSafeTextInput.tsx`、`src/app/tui/components/InputLine.tsx`、相关 `tests/tui-*.test.tsx`
 读取时机：修改多行输入框的软换行、光标跨行移动、IME 空格清理或 `maxWidth` 传播逻辑时。
 

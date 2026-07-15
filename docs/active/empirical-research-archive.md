@@ -7,9 +7,9 @@
 
 - `docs/space/**`
 - 真实模型、provider 行为、prompt cache、性能和上下文布局实验
-- `src/model/**`
-- `src/app/runner.ts`
-- `src/shared/cache-metrics.ts`
+- `src/core/model/**`
+- `src/core/runtime/**`
+- `src/core/cache-metrics.ts`
 - 与实证结论直接相关的测试文件
 
 读取时机：

@@ -1,6 +1,6 @@
 # 审批体系重构方案
 
-状态：active
+状态：archived（已实施；当前规则见 `docs/active/tool-gated-autonomy.md` 与 `authorization.md`）
 范围：`src/core/policies/`、`src/core/controllers/`、`src/core/harness/`、`src/core/runtime/`
 读取时机：修改审批流程、新增 mode、调整工具权限时必须对照。
 

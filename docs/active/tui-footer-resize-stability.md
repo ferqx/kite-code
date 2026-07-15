@@ -1,6 +1,10 @@
 # TUI 终端缩放刷新方案
 
 状态：active
+
+读取时机：修改 Footer、高度测量、窗口 resize、InputLine 或 overlay 布局时。
+
+验证：`bun test tests/tui-layout.test.tsx tests/tui-extra-space.test.tsx tests/tui-system/scenarios/resize.test.ts`。
 范围：`src/app/tui/index.tsx`、`src/app/tui/components/InputLine.tsx`、`src/app/tui/hooks/useOverlayHeight.ts`、`src/app/tui/render/useStaticContent.tsx`
 读取时机：修改 TUI resize 逻辑、怀疑缩放行为异常时必读。
 

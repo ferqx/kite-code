@@ -1,0 +1,6 @@
+interface:
+  display_name: "Document Before Commit"
+  short_description: "Synchronize documentation before code commits"
+  default_prompt: "Use $document-before-commit to synchronize affected documentation before committing changes."
+policy:
+  allow_implicit_invocation: false

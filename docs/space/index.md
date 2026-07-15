@@ -20,28 +20,27 @@
 
 | 记录 | 状态 | 范围 | 读取时机 |
 | --- | --- | --- | --- |
+| `../active/six-concept-runtime-architecture.md` | active | Agent、Runtime Kernel、Capability、Policy、Execution、Verification 总体架构 | 修改跨模块 Runtime 架构、能力治理、执行或完成语义时。 |
 | `../active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
-| `../active/plan-state-reminder.md` | active | 模型上下文构建、计划投影、缓存敏感 prompt 布局 | 修改 `src/model/context.ts`、`src/model/runtime-context.ts`，或修改计划/上下文投影相关测试。 |
-| `../active/model-provider-boundary.md` | active | 模型 provider 配置、适配器、provider 专有行为、真实配置模型测试 | 修改 `src/config`、`src/model`、provider 文档或真实模型套件。 |
-| `../active/tool-gated-autonomy.md` | active | 工具审批边界、工具 gating、最终答案自主性 | 修改 `src/core/harness/tool-policy.ts`、`src/core/harness/tool-runner.ts`、`src/core/runtime/scheduler.ts`、`src/core/runtime/tool-controller.ts`，或修改审批/工具执行相关测试。 |
+| `../active/plan-state-reminder.md` | active | Runtime 动态状态投影与缓存敏感消息布局 | 修改 `src/core/model/context.ts`、`runtime-context.ts`、Plan/Mode/Verification 投影时。 |
+| `../active/model-provider-boundary.md` | active | AI SDK provider 配置、适配器和专有行为 | 修改 `src/core/config`、`src/core/model` 或 provider 文档时。 |
+| `../active/tool-gated-autonomy.md` | active | Capability 执行、审批、授权、sandbox 与完成边界 | 修改 Tool Controller、Runtime Policy、Scheduler 或能力执行测试时。 |
 | `../active/real-model-test-boundary.md` | active | 测试发现、真实模型端到端套件、package 脚本 | 修改测试命名、`package.json` 测试脚本或真实模型套件。 |
 | `../active/documentation-language.md` | active | 文档语言、Markdown 内容标准、文档测试 | 创建或修改 README、AGENTS、`docs/space` 或其他 Markdown 文档。 |
 | `../active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |
 | `../active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
 | `../active/project-conventions.md` | active | 文档语言、注释规范、测试纪律、CLI 行为、提交粒度、仓库卫生、TypeScript 类型安全 | 修改 Markdown 文档、测试、CLI、提交规范、仓库布局约束或 TypeScript 类型声明时。 |
 | `../active/tui-e2e-standards.md` | active | TUI E2E/PTTY 测试标准、PTY harness、mock model server、真实终端覆盖边界 | 编写或修改 TUI E2E/PTTY 测试、调整 mock server 行为、新增真实终端场景。 |
-| `../active/e2e-coverage-audit-2025-07-04.md` | active | TUI E2E/PTTY 系统测试覆盖率审计、测试方法论、已知限制 | 规划新一轮 E2E 测试覆盖、评估 PTY 测试体系成熟度、设计 mock server 响应队列 |
-| `../active/e2e-test-restructure.md` | active | 旧 ink-testing-library e2e 重构方案的退役指针 | 遇到旧 `tests/tui-integration/` 引用时查看迁移去向。 |
 | `../active/tui-textinput-wrapping-spec.md` | active | `CtrlSafeTextInput` 软换行、光标边界、IME 空格清理、CJK/ASCII 混合输入行为 | 修改 `CtrlSafeTextInput` 软换行、光标移动、IME 处理或 `maxWidth` 传播逻辑时。 |
 | `../active/tui-run-status-bar.md` | active | Run Status Bar 3 阶段单向状态行 — Thinking → Working → Finishing 只进不退 + 渐变动画 + arc spinner + timer 性能架构 | 修改 `StatusBar.tsx`、`run-status.ts`、`App.tsx`（shouldShowRunStatus）、Footer.tsx 或相关测试时必读。 |
 | `../active/tui-footer-resize-stability.md` | active | TUI 终端缩放刷新方案 — resize 事件驱动 + key remount + 输入保留 + DEC 同步输出缓冲 | 修改 TUI resize 逻辑、缩放行为异常时必读。 |
 | `../active/tui-dec-synchronized-output.md` | active | TUI DEC 同步输出缓冲 — `\x1B[?2026h/l` 帧刷新，消除 resize/会话切换的空白期和抖动 | 修改 `useStaticContent`、TUI 屏切换逻辑、缓冲/渲染时序时必读。 |
-| `../active/cancel-resume-cleanup.md` | active | Cancel-Resume 三层清理架构 — graph cleanup 节点 + sanitize + reorder，防止孤儿工具重新执行和 API 400 错误 | 修改 cancel/abort/resume 逻辑、检查点恢复、消息清理时必读。 |
+| `../active/cancel-resume-cleanup.md` | active | Cancel/Resume、Effect lease、工具消息对与 Subagent continuation | 修改取消、恢复、消息清理或 continuation 时。 |
 | `../active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
 | `../active/tui-reference-stability.md` | active | TUI useStaticContent 引用稳定性 — ref+fingerprint 替代 useMemo 的缓存层，消除 timer/spinner 引发的引用级联和重复渲染 | 修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。 |
-| `../active/tui-e2e-testing-limits.md` | active | TUI E2E 测试方案与限制 — 旧 ink-testing-library e2e harness 退役原因、Bun PTY 方案和平台边界 | 编写 TUI E2E/PTTY 测试、考虑替代终端测试方案时必读，避免重复踩坑。 |
+| `../active/tui-e2e-testing-limits.md` | active | PTY 能力、平台差异与测试分层边界 | 编写 TUI E2E、处理 PTY flaky 或选择测试层次时。 |
 | `../active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
-| `../active/plan-mode-implementation.md` | active | Plan Mode 全栈实现：plan_review 中断、PlanReviewBlock/InputBlock/TaskProgressBlock 渲染、多问题 ask_user、紧凑 tool_card 布局、计划路由优化、持久化恢复、UserInputResult 结构化答案 | 修改 plan 流程、plan_review 中断、ask_user 渲染、PlanReviewBlock、InputBlock 多问题向导、ToolCardBlock ask_user 渲染、userInput 数据流（protocol events → runtime events → TUI reducer → OutputBlock）时必读。 |
+| `../active/plan-mode-implementation.md` | active | Plan Artifact、planning/building、plan_review 与恢复 | 修改 Plan 生命周期、工具、策略或 TUI 审核交互时。 |
 | `../active/plan-artifact-lifecycle.md` | active | Plan Artifact 持久化、提交校验、审核交互与 Runtime 恢复边界 | 修改 `write_plan`、Plan review、Task 生命周期、Runtime Context、TUI/CLI 审核展示或会话恢复时必读。 |
 | `../active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
 | `../active/file-reading-shared-boundary.md` | active | 文件读取共享边界 — `readTextContent` 单入口、BOM/编码检测、`isTextByte` 字节分类、换行正规化、MSYS2 路径双层转换 | 修改 `file.ts`/`shell.ts`/`path-utils.ts`、二进制检测、编码处理、文件读取失败排查时必读。 |
@@ -66,7 +65,7 @@
 | `understanding/2026-05-20-tui-known-issues.md` | understanding | TUI 已知问题清单：死事件类型、compacting 字段、recoverable 标志、手动 compaction 空壳、剩余未修复项。 |
 
 | `understanding/2026-05-22-rewind-mcp-resources-design.md` | understanding | Rewind（Revert + Fork）和 MCP Resources 的设计规范。 |
-| `understanding/2026-05-23-skills-system-design.md` | understanding | Skills 系统设计 — 对齐 agentskills.io 开放标准，按需加载 + Skill 工具 + Available Skills 区段 + /skill-name。 |
+| `understanding/2026-05-23-skills-system-design.md` | understanding | 旧 Skills 设计背景；当前 Skill Workflow 以 `docs/active/mcp-runtime-governance.md` 为准。 |
 | `understanding/2026-05-24-multi-session-concurrency-design.md` | understanding | 多会话并发执行设计规范。 |
 | `understanding/2026-05-26-tui-claude-code-parity-design.md` | understanding | TUI Claude Code 对标设计 — 布局重构、快捷键精简、功能补全、配置、主题、实施记录。 |
 | `understanding/2026-05-30-multi-agent-design.md` | understanding | 多 Agent 架构设计 — Task Tool 模式、3 个内置角色（Explore/Code/Review）、星型拓扑、生命周期、审批策略、TUI 渲染。 |

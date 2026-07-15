@@ -1,6 +1,6 @@
 # 合并 `exit_plan_mode` 到 `write_plan`
 
-状态：active
+状态：archived（已实施；当前规则见 `docs/active/plan-mode-implementation.md`）
 范围：`src/core/`、`src/app/tui/`、`tests/`
 读取时机：修改 plan 工具定义、tool-controller、actions、tool-contracts 时必读。
 

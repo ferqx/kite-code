@@ -1,6 +1,6 @@
 # Agent Runtime Kernel 重构方案
 
-状态：**Phase 1-5 完成，采纳缺口全部修复，硬规则 7/7 合规** — Round 8 架构修复：`tool.queued` 移至 ModelController 消除节点重放重复发射、`emitInterruptEvent` 复合 key 去重、TUI 中断事件三层去重、approval-policy.ts 去重
+状态：archived（Runtime Kernel 已完成；正文仅记录迁移过程）
 优先级：P0
 依赖：无
 替代：无（全新方案）

@@ -2,7 +2,7 @@
 
 创建日期：2026-06-28
 重写日期：2026-06-29
-状态：active
+状态：archived（M0/M1 已实施，M2 延后；当前行为以 active 规则为准）
 优先级：P0
 
 ## 结论
@@ -144,7 +144,7 @@ bun test tests\tui-reducer.test.ts tests\context.test.ts --timeout 120000
 ## Legacy：旧三层方案原文（已废弃，仅保留历史）
 
 创建日期：2026-06-28
-状态：active（M0 + M1 已实现，M2 延后）
+状态：archived（旧方案原文；M0/M1 已实现，M2 未纳入当前计划）
 优先级：P0
 依赖：无
 

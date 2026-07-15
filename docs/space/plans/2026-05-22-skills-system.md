@@ -1,6 +1,6 @@
 # Skills 系统方案
 
-> 状态：draft | 优先级：P1 | 创建：2026-05-22
+> 状态：superseded（旧 Prompt Skill 方案已被 Skill Workflow Contract 替代） | 创建：2026-05-22
 
 ## 概述
 

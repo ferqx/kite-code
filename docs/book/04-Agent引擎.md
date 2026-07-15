@@ -1,185 +1,51 @@
-# 第四章 核心层：Agent 引擎
+# 第四章 核心层：Agent 与 Runtime Kernel
 
-## 4.1 LangGraph 图拓扑
+Kite Code 使用自有事件化 Runtime。`runRuntimeAgent()` 负责模型循环，`AgentKernel` 负责事实、调度和恢复，两者职责分离。
 
-Kite Code 的 Agent 核心是一个 LangGraph `StateGraph`，包含 4 个节点和确定性路由：
+## 4.1 主循环
 
-```
-                    ┌──────────────────┐
-                    │      START       │
-                    └────────┬─────────┘
-                             │
-                             ▼
-                    ┌──────────────────┐
-                    │      agent       │ ← LLM 调用 + 工具选择
-                    └────────┬─────────┘
-                             │
-                    route_after_agent
-                    ┌────────┼────────┐
-                    │        │        │
-                    ▼        ▼        ▼
-              ┌──────────┐ ┌──────┐ ┌──────────┐
-              │ approval  │ │ END  │ │  tools   │
-              │(需审批)   │ │      │ │(执行工具) │
-              └────┬─────┘ └──────┘ └────┬─────┘
-                   │                      │
-                   └──────────┬───────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │    user_input    │ ← ask_user 工具触发
-                    └────────┬─────────┘
-                             │
-                             └──→ 回到 agent
+```text
+RuntimeState
+  → decideNextEffect()
+  → invoke_model / execute_tools / request_approval / run_verification / emit_final
+  → RuntimeEffectExecutor
+  → RuntimeEvent
+  → reduceRuntimeState()
+  → 持久化并继续调度
 ```
 
-### 节点职责
+| 实现 | 职责 |
+| --- | --- |
+| `runtime/agent.ts` | 组装并运行 Agent loop |
+| `runtime/kernel.ts` | Effect lease、事件提交、状态权威 |
+| `runtime/scheduler.ts` | 根据 State 决定下一 Effect |
+| `runtime/reducer.ts` | 将 Event 归纳为新 State |
+| `runtime/executor.ts` | 把 Effect 路由到模型、工具、验证或交互边界 |
+| `runtime/runner.ts` | 驱动 Kernel 直至暂停或完成 |
+| `runtime/store.ts` | 事件、快照与恢复点 |
 
-| 节点 | 职责 | 产出 |
-|------|------|------|
-| `agent` | 调用 LLM，解析工具调用或最终回复 | AIMessage（含 text 或 tool_calls） |
-| `tools` | 执行已批准或直通的工具 | ToolMessage |
-| `approval` | 等待用户审批受保护工具 | interrupt → resume → ToolMessage |
-| `user_input` | 等待用户回答 ask_user 问题 | interrupt → resume → ToolMessage |
+## 4.2 模型边界
 
-### 路由规则
+Model Controller 只负责模型调用与 transcript 投影。模型获得：
 
-```typescript
-// route_after_agent
-if (AIMessage 无 tool_calls) → END
-if (tool 是 ask_user) → user_input
-if (工具需要审批) → approval
-else → tools
+- 静态 system prompt；
+- cacheable Runtime context；
+- 当前计划、模式和恢复信息；
+- 当前轮有限 Capability binding；
+- 对应的 transcript messages。
 
-// route_after_tools / route_after_approval / route_after_user_input
-→ agent（回到 LLM 节点）
-```
+模型输出被转换为 Runtime 事实。它不能直接写文件、批准操作、修改 State、签发 binding 或宣布 required verification 已通过。
 
-## 4.2 AgentState 图状态
+## 4.3 Plan 生命周期
 
-```typescript
-interface CodeAgentState {
-  messages: BaseMessage[];          // 完整消息历史
-  plan: AgentPlan | null;           // 当前计划
-  workspaceAccess: WorkspaceAccess; // "read-only" | "write"
-  phase: AgentPhase;                // "planning" | "building"
-  authorization: AuthorizationState; // shell 授权状态
-}
-```
+计划是 Runtime 管理的版本化 Artifact，而非模型消息中的临时文本。计划创建、更新、审核、批准、执行和恢复均有明确事件；结构摘要用于防止审核后计划被静默替换。
 
-状态通过 LangGraph checkpoint 自动持久化到 SQLite。
+Plan mode 与普通执行共享同一个 Kernel，只通过策略和可用工具边界限制行为，不建立第二套 Agent 引擎。
 
-## 4.3 Runner：runAgent / resumeCodeAgent
+## 4.4 完成与恢复
 
-### runAgent：首次运行
+Scheduler 只有在没有待执行工具、审批、恢复动作或 required verification 门禁时才可 `emit_final`。失败根据分类进入重试、repair、replan、用户决策或终止；关闭 feature flag 不能绕过已持久化的安全门禁。
 
-```typescript
-async function* runAgent(
-  provider: UserInputProvider,
-  input: RunAgentInput,
-): AsyncGenerator<AgentEvent>
-```
+## 4.5 上下文与缓存
 
-执行流程：
-1. 创建 ChatModel 实例
-2. 构建工具集（内置 + MCP + Skills + task）
-3. 构建 system prompt（静态 + 运行时上下文）
-4. 组装初始消息列表
-5. 创建 LangGraph StateGraph
-6. `graph.stream(state)` 开始执行
-7. 每个 chunk → `chunkToEvents()` 映射为 `AgentEvent[]`
-8. 通过 `provider.onEvent(event)` 推送给 UI
-9. 检测到 interrupt → `provider.requestAction(payload)` 暂停等待
-10. 用户 action → `graph.stream(Command({ resume }))` 恢复
-
-### resumeCodeAgent：恢复运行
-
-```typescript
-async function* resumeCodeAgent(
-  provider: UserInputProvider,
-  input: ResumeCodeAgentInput,
-): AsyncGenerator<AgentEvent>
-```
-
-从 checkpoint 恢复，用于：
-- 会话切换后恢复
-- CLI `resume` 命令
-- TUI 断点续接
-
-### 事件映射
-
-Runner 内部将 LangGraph stream chunk 映射为协议层事件：
-
-| LangGraph 产出 | 映射为 AgentEvent |
-|----------------|-------------------|
-| AIMessage 文本 | `text` |
-| AIMessage.reasoning_content | `reason` |
-| AIMessage.tool_calls | `tool_call` |
-| ToolMessage | `tool_done` |
-| state.plan/workspaceAccess 变更 | `state_change` |
-| tool_approval interrupt | `need_approval` |
-| user_input interrupt | `need_input` |
-| 上下文压缩触发 | `compact_begin` / `compact_end` |
-| 模型重试 | `model_retry` |
-| 文件操作 | `file_change` |
-
-## 4.4 上下文管理
-
-### 4.4.1 System Prompt 构建
-
-`buildStaticSystemPrompt()` 组装静态 system prompt：
-
-1. 基础角色指令
-2. 工具使用指南（来自 ACI 契约）
-3. 当前工作区信息
-4. Skills 内容（如有）
-5. MCP 提示（如有）
-
-### 4.4.2 运行时上下文投影
-
-`buildCacheableRuntimeContext()` 将动态状态投影为**尾部合成 HumanMessage**：
-
-```
-[system prompt]  ← 缓存稳定，不变
-[messages...]    ← 对话历史
-[运行时状态投影]  ← 动态：plan、workspaceAccess、authorization
-```
-
-这种布局保证了 prompt cache 命中率——动态内容只出现在尾部。
-
-### 4.4.3 上下文压缩（Compaction）
-
-两层压缩策略：
-
-```
-触发条件：token 数超过模型窗口限制
-  │
-  ├─ Attempt 1: 规则压缩（forceContextCompaction）
-  │   └─ 移除冗余 tool_call/ToolMessage 配对，清理孤儿消息
-  │
-  └─ Attempt 2: LLM 摘要
-      └─ 用模型生成上下文摘要替代旧消息，保留最近 8 条消息
-```
-
-用户可通过 `/compact` 命令手动触发压缩。
-
-## 4.5 模型工厂
-
-```typescript
-function createChatModel(config: AgentConfig): SupportedChatModel
-```
-
-根据配置创建模型实例，支持：
-- DeepSeek（`@langchain/deepseek`）
-- OpenAI（`@langchain/openai`）
-- OpenAI-compatible（自定义 baseURL）
-- Ollama（`@langchain/ollama`）
-
-## 4.6 Prompt Cache 优化
-
-Kite Code 针对 DeepSeek 的 prompt cache 机制做了专门优化：
-
-1. **静态 system prompt**：不变部分放在消息开头，最大化缓存命中
-2. **工具 schema 稳定**：基集工具顺序固定，MCP 工具追加在末尾
-3. **运行时状态尾部注入**：动态内容不破坏前缀缓存
-4. **cache_metrics 事件**：实时监控缓存命中率，TUI 状态栏显示
+静态 prompt、稳定工具契约和 cacheable Runtime context 尽量保持前缀稳定；动态状态、Skill disclosure、搜索结果和 turn binding 放在轮次投影中。上下文压缩保留任务事实、计划和工具结果语义，不取代 Runtime Store。

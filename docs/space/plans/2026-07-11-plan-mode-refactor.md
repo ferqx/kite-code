@@ -1,6 +1,6 @@
 # Plan Mode 重构：三工具职责分离
 
-状态：draft
+状态：archived（Plan Artifact 生命周期已实施；当前规则见 `docs/active/plan-mode-implementation.md`）
 优先级：P0
 依赖：`2026-07-08-agent-kernel-incremental-evolution.md`（Runtime Kernel 已切到主循环，Kernel + Store + Reducer + Scheduler 已就位）
 替代：[[plan-mode-design]]（产品方案）、[[plan-mode-implementation]]（当前实现记录）— 本方案替换其中 `update_plan` 单工具设计

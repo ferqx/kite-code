@@ -1,5 +1,7 @@
 # 子 Agent 审批续跑状态机实施计划
 
+状态：archived（实施完成；正文仅作历史 TDD 记录）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **目标：** 将子 agent 的审批暂停状态持久化为主 `task` 工具的 RuntimeState，使重复审批和会话恢复均不会让主 agent 提前结束。
