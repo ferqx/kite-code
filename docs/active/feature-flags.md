@@ -12,4 +12,6 @@ New flags must default to `false`, include tests for both values, and retain the
 
 Exception: ADR-0007 explicitly replaces the old MCP adapter. `capabilityCatalogV1` and `mcpRuntimeBindingV1` fail closed when disabled; they must never re-enable a legacy MCP execution path.
 
+`capabilitySearchV1` defaults to `false`. When enabled it selects governed all-binding, metadata-only search, or fail-closed disclosure from provider tool-call support and context budget. Disabling it restores only the revisioned Runtime all-binding path; search failures and unsupported providers never restore the legacy MCP adapter or Skill body injection.
+
 `autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.

@@ -6,7 +6,11 @@ import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { PlanArtifactError, PlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import { createAgentKernel } from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { computePlanStructuralDigest, createInitialRuntimeState } from '@/core/runtime/state';
+import {
+  computePlanStructuralDigest,
+  createInitialRuntimeState,
+  RUNTIME_STATE_SCHEMA_VERSION,
+} from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import type { PlanDocument } from '@/protocol/events';
 
@@ -283,7 +287,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       phase: 'building',
     });
     const migrated = kernel.getState();
-    expect(migrated.schemaVersion).toBe(5);
+    expect(migrated.schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
     const migratedPlan = migrated.tasks['task-legacy']?.planning;
     expect(migratedPlan?.kind).toBe('planning_draft');
     if (migratedPlan?.kind === 'planning_draft') {

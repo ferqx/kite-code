@@ -6,7 +6,12 @@ import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { AuthorizationSource, ToolGrant } from '@/core/types';
-import type { CapabilityBinding, CapabilityInvocationRecord } from '@/protocol/capabilities';
+import type {
+  CapabilityBinding,
+  CapabilityDisclosure,
+  CapabilityInvocationRecord,
+  CapabilitySearchResult,
+} from '@/protocol/capabilities';
 import type {
   AgentPlan,
   AuthorizationMode,
@@ -231,6 +236,10 @@ export interface ToolCallRecord {
 export interface CapabilityRuntimeState {
   catalogRevision: string;
   bindings: Record<string, CapabilityBinding>;
+  /** Capabilities visible to the model for this turn; not an approval grant. */
+  disclosures: Record<string, CapabilityDisclosure>;
+  /** One-shot search result consumed by the next model disclosure. */
+  pendingSearch?: CapabilitySearchResult;
   /** Event-sourced records for side-effecting capability invocations. */
   invocations: Record<string, CapabilityInvocationRecord>;
 }
@@ -335,7 +344,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 9;
+export const RUNTIME_STATE_SCHEMA_VERSION = 10;
 
 export type RuntimeRecoveryState =
   | { kind: 'normal' }
@@ -478,7 +487,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       queue: [],
       active: [],
     },
-    capabilities: { catalogRevision: '', bindings: {}, invocations: {} },
+    capabilities: { catalogRevision: '', bindings: {}, disclosures: {}, invocations: {} },
     skills: { catalogRevision: '', frames: {} },
     verification: { records: {} },
     suspendedSubagents: {},

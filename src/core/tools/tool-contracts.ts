@@ -345,6 +345,28 @@ export const READ_MCP_RESOURCE_CONTRACT: ToolContract = {
 };
 READ_MCP_RESOURCE_CONTRACT.description = buildDescription(READ_MCP_RESOURCE_CONTRACT.sections);
 
+export const CAPABILITY_SEARCH_CONTRACT: ToolContract = {
+  name: 'capability_search',
+  sections: {
+    whenToUse:
+      'Search the governed MCP and Skill catalog by intent when the Runtime has not disclosed a matching capability. ' +
+      'Use search_content instead for workspace text and search_files for file names. ' +
+      'This tool discovers metadata only; wait for the next model call before using a matching MCP tool or activate_skill.',
+    commonMistakes:
+      'Treating a candidate as authorization or trying to invoke its candidate_ref directly will fail. ' +
+      'Do not guess a hidden capability ID, request schemas, or substitute capability_search for search_content. ' +
+      'Avoid vague one-word queries that lack the action and target needed for deterministic recall.',
+    outputFormat:
+      'JSON: ok, search_id, candidate_count, candidates, and next_step. ' +
+      'Each candidate contains candidate_ref, kind, name, provider_type, and provider; it never contains schemas or executable IDs.',
+    failureHandling:
+      'If no candidates match, refine the query with the intended action and target, then retry capability_search. ' +
+      'If search is unavailable or the catalog revision changes, do not guess or call an old MCP name; search again on a supported model turn.',
+  },
+  description: '',
+};
+CAPABILITY_SEARCH_CONTRACT.description = buildDescription(CAPABILITY_SEARCH_CONTRACT.sections);
+
 /** @reserved — apply_patch 暂未注册为 Agent 工具，待需求确认后启用 / not yet registered as an agent tool */
 export const APPLY_PATCH_CONTRACT: ToolContract = {
   name: 'apply_patch',
@@ -451,6 +473,7 @@ export const KNOWN_TOOL_NAMES = [
   'shell_execute',
   'search_content',
   'search_files',
+  'capability_search',
   'read_mcp_resource',
   'write_plan',
   'update_plan',
@@ -472,6 +495,7 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ['shell_execute', SHELL_EXECUTE_CONTRACT],
   ['search_content', SEARCH_CONTENT_CONTRACT],
   ['search_files', SEARCH_FILES_CONTRACT],
+  ['capability_search', CAPABILITY_SEARCH_CONTRACT],
   ['read_mcp_resource', READ_MCP_RESOURCE_CONTRACT],
   ['write_plan', WRITE_PLAN_CONTRACT],
   ['update_plan', UPDATE_PLAN_CONTRACT],

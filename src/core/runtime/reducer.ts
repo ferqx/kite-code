@@ -280,15 +280,33 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const bindings = Object.fromEntries(
         event.bindings.map((binding) => [binding.bindingId, binding]),
       );
+      const disclosures = Object.fromEntries(
+        (event.disclosures ?? []).map((disclosure) => [disclosure.capabilityId, disclosure]),
+      );
       return {
         ...state,
         capabilities: {
           catalogRevision: event.catalogRevision,
           bindings,
+          disclosures,
+          ...(event.searchId === state.capabilities.pendingSearch?.searchId
+            ? {}
+            : state.capabilities.pendingSearch
+              ? { pendingSearch: state.capabilities.pendingSearch }
+              : {}),
           invocations: state.capabilities.invocations,
         },
       };
     }
+
+    case 'capability.search_completed':
+      return {
+        ...state,
+        capabilities: {
+          ...state.capabilities,
+          pendingSearch: event.result,
+        },
+      };
 
     case 'skill.catalog_refreshed':
       return {

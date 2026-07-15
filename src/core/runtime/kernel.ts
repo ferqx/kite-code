@@ -579,6 +579,10 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     capabilities: {
       catalogRevision: snapshot.capabilities?.catalogRevision ?? '',
       bindings: snapshot.capabilities?.bindings ?? {},
+      disclosures: snapshot.capabilities?.disclosures ?? {},
+      ...(snapshot.capabilities?.pendingSearch
+        ? { pendingSearch: snapshot.capabilities.pendingSearch }
+        : {}),
       invocations: snapshot.capabilities?.invocations ?? {},
     },
     skills: snapshot.skills ?? { catalogRevision: '', frames: {} },
@@ -635,6 +639,10 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     capabilities: {
       catalogRevision: state.capabilities?.catalogRevision ?? '',
       bindings: state.capabilities?.bindings ?? {},
+      disclosures: state.capabilities?.disclosures ?? {},
+      ...(state.capabilities?.pendingSearch
+        ? { pendingSearch: state.capabilities.pendingSearch }
+        : {}),
       invocations: state.capabilities?.invocations ?? {},
     },
   };

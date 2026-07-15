@@ -15,6 +15,8 @@ import {
 export type SupportedChatModel = {
   model: LanguageModel;
   setRetryListener: (listener: ModelRetryListener | null) => void;
+  /** Explicit false makes progressive capability disclosure fail closed. */
+  supportsToolCalls?: boolean;
 };
 
 /** 根据配置创建 AI SDK 聊天模型 / Create an AI SDK chat model from config */
@@ -51,6 +53,7 @@ export function createChatModel(config: AgentConfig): SupportedChatModel {
 
   return {
     model,
+    supportsToolCalls: config.modelKwargs?.supportsToolCalls !== false,
     setRetryListener: (fn) => {
       retryListener = fn;
     },

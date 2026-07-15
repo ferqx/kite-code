@@ -102,6 +102,51 @@ describe('reduceRuntimeState — capability bindings', () => {
     expect(next).not.toBe(state);
   });
 
+  test('persists a one-shot search and consumes it with finite disclosures', () => {
+    const state = makeInitialState();
+    const searched = reduceRuntimeState(state, {
+      type: 'capability.search_completed',
+      result: {
+        searchId: 'search-1',
+        query: 'publish release',
+        catalogRevision: 'catalog-1',
+        requestedAtTurnId: state.turn.turnId,
+        candidates: [
+          {
+            candidateRef: 'candidate-1',
+            capabilityId: 'skill:release',
+            capabilityRevision: 'skill-r1',
+            kind: 'skill',
+            displayName: 'release',
+            providerType: 'skill',
+            providerId: 'release',
+          },
+        ],
+      },
+    });
+    const disclosed = reduceRuntimeState(searched, {
+      type: 'capability.bindings_issued',
+      catalogRevision: 'catalog-1',
+      bindings: [],
+      disclosures: [
+        {
+          capabilityId: 'skill:release',
+          capabilityRevision: 'skill-r1',
+          issuedForTurnId: state.turn.turnId,
+        },
+      ],
+      searchId: 'search-1',
+    });
+
+    expect(searched.capabilities.pendingSearch?.searchId).toBe('search-1');
+    expect(disclosed.capabilities.pendingSearch).toBeUndefined();
+    expect(disclosed.capabilities.disclosures['skill:release']).toEqual({
+      capabilityId: 'skill:release',
+      capabilityRevision: 'skill-r1',
+      issuedForTurnId: state.turn.turnId,
+    });
+  });
+
   test('projects a durable capability invocation without raw arguments or result content', () => {
     const state = makeInitialState();
     const recorded = reduceRuntimeState(state, {

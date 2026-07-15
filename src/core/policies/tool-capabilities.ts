@@ -27,6 +27,7 @@ const READ_ONLY_TOOLS = new Set([
   'list_files',
   'search_content',
   'search_files',
+  'capability_search',
   'read_mcp_resource',
   'web_fetch',
   'Skill',

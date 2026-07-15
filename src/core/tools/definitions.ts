@@ -1,5 +1,6 @@
 import { dynamicTool, jsonSchema, type ToolSet, tool, zodSchema } from 'ai';
 import { z } from 'zod';
+import { modelVisibleCapabilitySchema } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
@@ -11,6 +12,7 @@ import { searchContent as searchContentNative, searchFiles as searchFilesNative 
 import { type ShellExecutor, shellTool } from './shell';
 import {
   ASK_USER_CONTRACT,
+  CAPABILITY_SEARCH_CONTRACT,
   EDIT_FILE_CONTRACT,
   READ_FILE_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
@@ -34,6 +36,8 @@ export interface CreateAgentToolsInput {
   mcpManager?: import('@/core/mcp/manager').McpManager;
   /** Runtime-issued MCP tool bindings for the current model call. */
   mcpBindings?: Array<{ binding: CapabilityBinding; descriptor: CapabilityDescriptor }>;
+  /** Expose provider-neutral metadata discovery instead of the full catalog. */
+  capabilitySearch?: boolean;
   /** 可选技能清单 / Optional skill manifests */
   skills?: import('@/core/skills/types').SkillManifest[];
   /** 可选技能扫描选项 / Optional skill scan options */
@@ -99,7 +103,7 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     .map((frame) => frame.activationId)
     .sort()
     .join(',');
-  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpBindingRevision}|${input.skillCatalog?.revision ?? ''}|${activeSkillFrameKey}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpBindingRevision}|${input.skillCatalog?.revision ?? ''}|${activeSkillFrameKey}|${!!input.capabilitySearch}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
   const readFileTool = tool({
@@ -325,6 +329,17 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
           ),
         })
       : null;
+  const capabilitySearchTool = input.capabilitySearch
+    ? dynamicTool({
+        description: CAPABILITY_SEARCH_CONTRACT.description,
+        inputSchema: zodSchema(
+          z.object({
+            query: z.string().trim().min(2).max(512).describe('Capability intent to search for'),
+            limit: z.number().int().min(1).max(12).optional().describe('Maximum candidates'),
+          }),
+        ),
+      })
+    : null;
 
   const taskTool =
     input.subagentEventSink && input.config
@@ -438,6 +453,7 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     ...(activateSkillTool ? { activate_skill: activateSkillTool } : {}),
     ...(completeSkillTool ? { complete_skill: completeSkillTool } : {}),
     ...(readSkillReferenceTool ? { read_skill_reference: readSkillReferenceTool } : {}),
+    ...(capabilitySearchTool ? { capability_search: capabilitySearchTool } : {}),
     ...(taskTool ? { task: taskTool } : {}),
     write_plan: createWritePlanTool(),
     update_plan: createProgressUpdatePlanTool(),
@@ -450,9 +466,12 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     if (!descriptor.inputSchema) continue;
     // AI SDK's JSONSchema7 type is narrower than MCP's runtime schema. The
     // binding was validated by compileCapabilitySchema before it reaches here.
-    const inputSchema = jsonSchema(descriptor.inputSchema as Parameters<typeof jsonSchema>[0]);
+    const inputSchema = jsonSchema(
+      modelVisibleCapabilitySchema(descriptor.inputSchema) as Parameters<typeof jsonSchema>[0],
+    );
     mcpTools[binding.exposedToolName] = dynamicTool({
-      description: descriptor.description,
+      description:
+        'Runtime-bound MCP capability. The Runtime validates its current revision, arguments, policy, approval, execution receipt, and verification before use.',
       inputSchema,
     });
   }

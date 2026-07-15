@@ -54,9 +54,36 @@ export interface CapabilityBinding {
   issuedForTurnId: string;
 }
 
+/** Turn-scoped visibility grant. It is discovery state, never execution authorization. */
+export interface CapabilityDisclosure {
+  capabilityId: string;
+  capabilityRevision: string;
+  issuedForTurnId: string;
+}
+
 export interface CapabilitySnapshot {
   revision: string;
   descriptors: CapabilityDescriptor[];
+}
+
+/** Non-executable metadata returned by provider-neutral capability discovery. */
+export interface CapabilitySearchCandidate {
+  candidateRef: string;
+  capabilityId: string;
+  capabilityRevision: string;
+  kind: Extract<CapabilityKind, 'mcp_tool' | 'skill'>;
+  displayName: string;
+  providerType: CapabilityDescriptor['provider']['type'];
+  providerId: string;
+}
+
+/** Durable search fact. Candidates never contain schemas, arguments, or invocation handles. */
+export interface CapabilitySearchResult {
+  searchId: string;
+  query: string;
+  catalogRevision: string;
+  requestedAtTurnId: string;
+  candidates: CapabilitySearchCandidate[];
 }
 
 /** Durable lifecycle for an invocation that may cross an external side-effect boundary. */

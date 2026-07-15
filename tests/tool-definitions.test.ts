@@ -375,6 +375,7 @@ describe('tool contracts (ACI)', () => {
     'shell_execute',
     'search_content',
     'search_files',
+    'capability_search',
     'update_plan',
     'write_plan',
     'read_mcp_resource',
@@ -417,6 +418,7 @@ describe('tool contracts (ACI)', () => {
   test('tool descriptions match contract descriptions', () => {
     const tools = createAgentTools({
       workspace: '/tmp/test-workspace',
+      capabilitySearch: true,
     });
     for (const name of registeredTools) {
       const contract = TOOL_CONTRACTS.get(name)!;

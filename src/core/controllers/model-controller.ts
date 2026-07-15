@@ -7,6 +7,10 @@
 
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { createBinding } from '@/core/capabilities/catalog';
+import {
+  chooseCapabilityDisclosure,
+  searchableCapabilitySnapshot,
+} from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpManager } from '@/core/mcp';
@@ -160,6 +164,12 @@ function activeInlineSkillInstructions(
   return sections.length > 0 ? sections.join('\n\n') : undefined;
 }
 
+function positiveConfigNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined;
+}
+
 /**
  * Kernel-native model effect.  It uses only RuntimeState and emits all model
  * facts required by the reducer, including transient retry events captured
@@ -223,11 +233,43 @@ export async function invokeRuntimeModel(params: {
         }
       }
     }
+    const capabilitySnapshot = searchableCapabilitySnapshot({
+      mcp: params.mcpManager?.getCapabilitySnapshot(),
+      skills: params.skillCatalog?.capabilities,
+    });
+    const disclosure = chooseCapabilityDisclosure({
+      featureEnabled: flags.capabilitySearchV1,
+      providerSupportsToolCalls: params.model.supportsToolCalls !== false,
+      descriptors: capabilitySnapshot.descriptors,
+      contextWindowTokens: positiveConfigNumber(params.config.modelKwargs?.contextWindowTokens),
+      budgetTokens: positiveConfigNumber(
+        params.config.modelKwargs?.capabilityDisclosureBudgetTokens,
+      ),
+    });
+    const pendingSearch = state.capabilities.pendingSearch;
+    const searchedDescriptors =
+      disclosure.mode === 'search' &&
+      pendingSearch?.requestedAtTurnId === state.turn.turnId &&
+      pendingSearch.catalogRevision === capabilitySnapshot.revision
+        ? pendingSearch.candidates.flatMap((candidate) => {
+            const descriptor = capabilitySnapshot.descriptors.find(
+              (item) =>
+                item.capabilityId === candidate.capabilityId &&
+                item.revision === candidate.capabilityRevision,
+            );
+            return descriptor ? [descriptor] : [];
+          })
+        : [];
+    const disclosedDescriptors =
+      disclosure.mode === 'all'
+        ? capabilitySnapshot.descriptors
+        : disclosure.mode === 'search'
+          ? searchedDescriptors
+          : [];
     const mcpBindings =
-      flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1 && params.mcpManager
-        ? params.mcpManager
-            .getCapabilitySnapshot()
-            .descriptors.filter(
+      flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1
+        ? disclosedDescriptors
+            .filter(
               (descriptor) =>
                 descriptor.kind === 'mcp_tool' && descriptor.availability === 'available',
             )
@@ -240,11 +282,26 @@ export async function invokeRuntimeModel(params: {
               }),
             }))
         : [];
-    if (mcpBindings.length > 0) {
+    const capabilityDisclosures = flags.capabilitySearchV1
+      ? disclosedDescriptors.map((descriptor) => ({
+          capabilityId: descriptor.capabilityId,
+          capabilityRevision: descriptor.revision,
+          issuedForTurnId: state.turn.turnId,
+        }))
+      : [];
+    if (
+      mcpBindings.length > 0 ||
+      capabilityDisclosures.length > 0 ||
+      (disclosure.mode === 'search' && pendingSearch)
+    ) {
       params.emitRuntimeEvent?.({
         type: 'capability.bindings_issued',
-        catalogRevision: params.mcpManager?.getCapabilitySnapshot().revision ?? '',
+        catalogRevision: capabilitySnapshot.revision,
         bindings: mcpBindings.map(({ binding }) => binding),
+        disclosures: capabilityDisclosures,
+        ...(disclosure.mode === 'search' && pendingSearch
+          ? { searchId: pendingSearch.searchId }
+          : {}),
       });
     }
     const tools = createAgentTools({
@@ -252,6 +309,7 @@ export async function invokeRuntimeModel(params: {
       shellExecutor: params.shellExecutor,
       mcpManager: params.mcpManager,
       mcpBindings,
+      capabilitySearch: disclosure.mode === 'search',
       skills: params.skills,
       skillOptions: params.skillOptions,
       skillCatalog: params.skillCatalog,
@@ -284,10 +342,8 @@ export async function invokeRuntimeModel(params: {
         planningState: planning,
         taskId: getActiveTask(state)?.taskId,
         sideEffectsStarted: getActiveTask(state)?.sideEffectsStarted,
-        workflowSkills: params.skillCatalog?.capabilities.descriptors
-          .filter(
-            (descriptor) => descriptor.kind === 'skill' && descriptor.availability === 'available',
-          )
+        workflowSkills: disclosedDescriptors
+          .filter((descriptor) => descriptor.kind === 'skill')
           .map((descriptor) => ({
             capabilityId: descriptor.capabilityId,
             description: descriptor.description,

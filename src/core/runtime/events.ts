@@ -6,6 +6,8 @@ import type { ToolGrant } from '@/core/types';
 import type {
   CapabilityArtifactRef,
   CapabilityBinding,
+  CapabilityDisclosure,
+  CapabilitySearchResult,
   EffectProfile,
 } from '@/protocol/capabilities';
 import type {
@@ -82,6 +84,15 @@ export interface CapabilityBindingsIssuedEvent {
   type: 'capability.bindings_issued';
   catalogRevision: string;
   bindings: CapabilityBinding[];
+  disclosures?: CapabilityDisclosure[];
+  /** When present, consumes exactly one persisted search result. */
+  searchId?: string;
+}
+
+/** Search discovers metadata only; it does not authorize or bind a capability. */
+export interface CapabilitySearchCompletedEvent {
+  type: 'capability.search_completed';
+  result: CapabilitySearchResult;
 }
 
 /** The immutable Skill catalog observed by the Runtime for activation validation. */
@@ -659,6 +670,7 @@ export interface SubagentSuspendedEvent {
 /** 运行时事件 — 所有状态变更的统一类型表示 */
 export type RuntimeEvent =
   | CapabilityBindingsIssuedEvent
+  | CapabilitySearchCompletedEvent
   | SkillCatalogRefreshedEvent
   | SkillActivationStartedEvent
   | SkillFrameClosedEvent

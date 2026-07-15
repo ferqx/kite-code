@@ -2,6 +2,11 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
+import {
+  publicSearchMetadata,
+  searchableCapabilitySnapshot,
+  searchCapabilities,
+} from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { buildToolApproval } from '@/core/harness/tool-policy';
@@ -490,8 +495,91 @@ export async function executeRuntimeTools(params: {
         continue;
       }
     }
+    if (request.name === 'capability_search') {
+      const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
+      if (!flags.capabilitySearchV1) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'Capability search is disabled by feature flag.',
+        });
+        continue;
+      }
+      if (request.args.query.length < 2) {
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: classifyFailure('tool_invalid_args', 'Capability search query is too short.'),
+        });
+        continue;
+      }
+      const snapshot = searchableCapabilitySnapshot({
+        mcp: params.mcpManager?.getCapabilitySnapshot(),
+        skills: params.skillCatalog?.capabilities,
+      });
+      const candidates = searchCapabilities({
+        snapshot,
+        query: request.args.query,
+        limit: request.args.limit,
+      });
+      const searchId = digestCapability({
+        threadId: params.state.session.threadId,
+        turnId: params.state.turn.turnId,
+        toolCallId,
+        query: request.args.query,
+        catalogRevision: snapshot.revision,
+      });
+      events.push({
+        type: 'capability.search_completed',
+        result: {
+          searchId,
+          query: request.args.query,
+          catalogRevision: snapshot.revision,
+          requestedAtTurnId: params.state.turn.turnId,
+          candidates,
+        },
+      });
+      events.push({
+        type: 'tool.finished',
+        toolCallId,
+        name: request.name,
+        result: {
+          ok: true,
+          command: request.name,
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            search_id: searchId,
+            candidate_count: candidates.length,
+            candidates: publicSearchMetadata(candidates),
+            next_step:
+              'The Runtime will disclose current matching capabilities on the next model call.',
+          }),
+          stderr: '',
+        },
+      });
+      continue;
+    }
     if (request.name === 'activate_skill') {
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
+      const descriptor = params.skillCatalog?.capabilities.descriptors.find(
+        (candidate) => candidate.capabilityId === request.args.skill_id,
+      );
+      const disclosure = params.state.capabilities.disclosures[request.args.skill_id];
+      if (
+        flags.capabilitySearchV1 &&
+        (!descriptor ||
+          !disclosure ||
+          disclosure.issuedForTurnId !== params.state.turn.turnId ||
+          disclosure.capabilityRevision !== descriptor.revision)
+      ) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'Skill is not disclosed for this model turn; search again before activation.',
+        });
+        continue;
+      }
       const activation = params.skillCatalog
         ? evaluateSkillActivation({
             state: params.state,

@@ -1,6 +1,6 @@
 # MCP 与 Skills Runtime 治理后续计划
 
-状态：active
+状态：completed
 优先级：P1
 依赖：`2026-07-14-mcp-runtime-governance-p0.md`、ADR-0007、ADR-0008
 来源：`docs/design/2026-07-14-mcp-skills-runtime-governance-rfc.md`
@@ -64,6 +64,8 @@
 退出标准：required verification 未通过或未经用户结构化 waive 时不能标记为已验证完成，普通问答仍可直接结束；模型不能自行豁免。
 
 ## Phase 5：Progressive Disclosure
+
+当前进度：完成。Runtime 已实现 provider-neutral `capability_search` 与 catalog token 估算：目录在预算内时继续使用 revisioned 全量治理 binding，超出预算时只暴露 metadata 搜索，不支持工具调用的 provider 则 fail closed。搜索结果以事件持久化，只包含内部候选事实；公开输出移除 capability ID、远端描述、schema 和执行句柄。下一次模型调用会核对 catalog/capability revision，只签发命中的 MCP turn binding 与 Skill turn disclosure，并一次性消费搜索结果。MCP 裸调用仍因缺少 binding 被拒绝，Skill ID 猜测也无法绕过 disclosure；catalog 漂移、空结果和 provider 不支持均不回退旧注入路径。500 项 catalog 基准覆盖上下文预算、确定性召回、有限重绑定、revision 漂移和 prompt-injection 回归。
 
 1. 实现 provider-neutral `capability_search`，仅返回候选 metadata，并在下一轮生成有限 binding；禁止裸 capability invoke 后门。
 2. 按 provider 能力和 context budget 在全部绑定、搜索和 fail-closed 之间选择；搜索失败或 provider 不支持时不回退旧 MCP 注入路径。

@@ -11,6 +11,14 @@ import type { ShellApprovalGrant, UserInputOption, UserInputRequest } from '@/pr
 /** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
 export type PendingToolRequest =
   | {
+      /** Provider-neutral metadata discovery; never an invocation request. */
+      id?: string;
+      name: 'capability_search';
+      args: { query: string; limit?: number };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
       /** Reads a declared non-prompt Skill file through an active Runtime frame. */
       id?: string;
       name: 'read_skill_reference';
@@ -289,6 +297,22 @@ export function toolRequestFromCall(
       args: { path: args.path || '', offset: args.offset, limit: args.limit },
       reason: 'Model requested read_file',
       protectedCommand: `read_file ${args.path || ''}`,
+    };
+  }
+
+  if (call.name === 'capability_search') {
+    const args = call.args as { query?: unknown; limit?: unknown };
+    return {
+      id: call.id,
+      name: 'capability_search',
+      args: {
+        query: typeof args.query === 'string' ? args.query.trim().slice(0, 512) : '',
+        ...(typeof args.limit === 'number' && Number.isFinite(args.limit)
+          ? { limit: Math.max(1, Math.min(12, Math.floor(args.limit))) }
+          : {}),
+      },
+      reason: 'Model requested governed capability metadata search',
+      protectedCommand: 'capability_search',
     };
   }
 
