@@ -165,7 +165,7 @@ Tool 执行成功只表示一次调用完成，不表示用户目标已经达成
 
 ## 8. MCP 与 Skill 的归属
 
-`McpManager` 是外部 Capability Provider，负责连接、协议 discovery、health、原始结构化调用结果与资源读取。它不拥有最终策略，也不直接宣布任务完成。
+MCP 对 Runtime 暴露中立的 `McpRuntimeProvider`；Runtime 不依赖连接 control plane 或 TUI。`McpSupervisor` 组合配置门禁与连接生命周期，`McpManager` 负责唯一 SDK client 路径、协议 discovery、health、原始结构化调用结果与资源读取。它们都不拥有最终策略，也不直接宣布任务完成。
 
 Skill 是受治理的组合 Capability。`SKILL.md` 被编译为 revisioned `SkillWorkflowContract`，激活后形成 Runtime `SkillActivation`/frame，并受到 capability ceiling、输入输出 schema、verification 和 recovery 约束。Skill 不再是直接拼接到用户任务的 Prompt 片段。
 

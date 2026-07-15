@@ -13,7 +13,7 @@ import {
 } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import {
   type AIMessage,
   aiMessage,
@@ -180,7 +180,7 @@ export async function invokeRuntimeModel(params: {
   state: RuntimeState;
   config: AgentConfig;
   shellExecutor?: ShellExecutor;
-  mcpManager?: McpManager;
+  mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;

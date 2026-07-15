@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import type { SandboxBackend } from '@/core/sandbox';
 import { SessionLogCollector } from '@/core/session-logger';
@@ -27,7 +27,7 @@ export interface RunRuntimeAgentInput {
   config: AgentConfig;
   model?: SupportedChatModel;
   shellExecutor?: ShellExecutor;
-  mcpManager?: McpManager;
+  mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   /** Explicit user-requested Workflow Contract activations for the initial task. */

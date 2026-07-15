@@ -8,15 +8,11 @@ import React, {
   useReducer,
   useRef,
 } from 'react';
-import type { McpProjectServerApprovalView } from '@/core/config';
-import type { McpProjectDecision } from '@/core/config/mcp-project-approvals';
-import type { McpManager } from '@/core/mcp';
 import type { SandboxBackend } from '@/core/sandbox';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
 import HelpPanel from './components/HelpPanel';
 import InputBlock from './components/InputBlock';
-import McpPanel from './components/McpPanel';
 import ModelSelector from './components/ModelSelector';
 import PlanReviewBlock from './components/PlanReviewBlock';
 import SessionSelector from './components/SessionSelector.js';
@@ -26,6 +22,8 @@ import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
 import { useOverlayHeight } from './hooks/useOverlayHeight';
 import { createInitialState, initialState } from './initialState';
+import McpOverlay from './mcp/McpOverlay';
+import type { McpController } from './mcp/types';
 import OutputArea, { useStaticContent } from './OutputArea';
 import { type Action, eventReducer } from './reducers';
 import { deriveRunStatusSnapshot } from './run-status';
@@ -48,13 +46,8 @@ export interface AppProps {
   dispatch: Dispatch<Action>;
   onToggleReason: (id: number) => void;
   provider: import('./provider').TuiUserInputProvider;
-  mcpManager?: McpManager;
-  mcpProjectApprovals?: readonly McpProjectServerApprovalView[];
-  mcpDecisionMessage?: string;
-  onMcpProjectDecision?: (
-    view: McpProjectServerApprovalView,
-    decision: McpProjectDecision,
-  ) => void | Promise<void>;
+  mcpController?: McpController;
+  mcpInitialServer?: string;
   availableModels?: import('@/core/config').AvailableModel[];
   slashSuggestion?: import('./components/InputLine').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
@@ -90,10 +83,8 @@ export default function App({
   dispatch,
   onToggleReason,
   provider,
-  mcpManager,
-  mcpProjectApprovals = [],
-  mcpDecisionMessage,
-  onMcpProjectDecision,
+  mcpController,
+  mcpInitialServer,
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
@@ -112,7 +103,15 @@ export default function App({
     !!state.interrupt;
   const supplementEscRef = useRef(false);
   const wizardEscBackRef = useRef(false);
-  useGlobalKeys(dispatch, overlayOrInterrupt, supplementEscRef, wizardEscBackRef, onTogglePlanMode);
+  const layeredOverlayEscRef = useRef(false);
+  useGlobalKeys(
+    dispatch,
+    overlayOrInterrupt,
+    supplementEscRef,
+    wizardEscBackRef,
+    layeredOverlayEscRef,
+    onTogglePlanMode,
+  );
 
   // Stabilized callbacks for React.memo children
   const hideHelp = useCallback(() => dispatch({ type: 'HIDE_HELP' }), [dispatch]);
@@ -310,12 +309,11 @@ export default function App({
           onClose={hideModelSelector}
         />
       )}
-      {state.showMcp && mcpManager && (
-        <McpPanel
-          manager={mcpManager}
-          projectApprovals={mcpProjectApprovals}
-          decisionMessage={mcpDecisionMessage}
-          onProjectDecision={onMcpProjectDecision}
+      {state.showMcp && mcpController && (
+        <McpOverlay
+          controller={mcpController}
+          initialServer={mcpInitialServer}
+          layeredEscRef={layeredOverlayEscRef}
           onClose={hideMcp}
         />
       )}

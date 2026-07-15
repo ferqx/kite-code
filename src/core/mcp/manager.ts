@@ -19,6 +19,8 @@ import type {
   CapabilitySnapshot,
   EffectProfile,
 } from '@/protocol/capabilities';
+import { diagnoseMcpError } from './diagnostics';
+import type { McpRuntimeProvider } from './runtime-provider';
 import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
 
 const MCP_STARTUP_TIMEOUT = 5000;
@@ -35,61 +37,99 @@ export interface PromptEntry {
   prompt: McpPrompt;
 }
 
+export interface McpManagerOptions {
+  createClient?: () => Client;
+  createTransport?: (config: McpServerConfig) => Parameters<Client['connect']>[0];
+}
+
 /**
  * Manages multiple MCP server connections, tool aggregation, and prompt registry.
  */
-export class McpManager {
+export class McpManager implements McpRuntimeProvider {
+  private readonly createClient: () => Client;
+  private readonly createManagerTransport: (
+    config: McpServerConfig,
+  ) => Parameters<Client['connect']>[0];
   private servers = new Map<string, McpServerState>();
   private promptRegistry = new Map<string, PromptEntry>();
   private snapshot: CapabilitySnapshot = createSnapshot([]);
+  private listeners = new Set<() => void>();
+
+  constructor(options: McpManagerOptions = {}) {
+    this.createClient =
+      options.createClient ??
+      (() => new Client({ name: 'kite-code', version: '0.1.0' }, { capabilities: {} }));
+    this.createManagerTransport = options.createTransport ?? createTransport;
+  }
 
   /** Connect to all configured servers in parallel, non-blocking on individual failures */
   async connectAll(servers: Record<string, McpServerConfig>): Promise<void> {
     const entries = Object.entries(servers);
     const results = await Promise.allSettled(
-      entries.map(([name, config]) => this.connect(name, config)),
+      entries.map(([name, config]) => this.connect(name, config, 0)),
     );
     for (let i = 0; i < results.length; i++) {
       const result = results[i]!;
       if (result.status === 'rejected') {
         const serverName = entries[i]![0];
-        console.error(`[MCP] Failed to connect ${serverName}:`, result.reason);
+        console.error(`[MCP] Failed to connect ${serverName}.`);
       }
     }
   }
 
   /** Connect a single MCP server */
-  async connect(name: string, config: McpServerConfig): Promise<void> {
-    const transport = createTransport(config);
-    const client = new Client({ name: 'kite-code', version: '0.1.0' }, { capabilities: {} });
-    this.servers.set(name, {
+  async connect(name: string, config: McpServerConfig, generation = 0): Promise<void> {
+    const client = this.createClient();
+    const initialState: McpServerState = {
       config,
       client,
       tools: [],
       prompts: [],
       resources: [],
       health: 'connecting',
+      generation,
+      lastAttemptAt: new Date().toISOString(),
       consecutiveCallFailures: 0,
-    });
+    };
+    this.servers.set(name, initialState);
+    this.publish();
+
+    let transport: Parameters<Client['connect']>[0];
+    try {
+      transport = this.createManagerTransport(config);
+    } catch (err) {
+      if (this.isCurrent(name, client, generation)) {
+        initialState.health = 'disconnected';
+        initialState.diagnostic = diagnoseMcpError(err, { phase: 'connect' });
+        this.publish();
+      }
+      await closeClient(client);
+      throw err;
+    }
 
     try {
       await client.connect(transport, { timeout: MCP_STARTUP_TIMEOUT });
     } catch (err) {
-      this.servers.set(name, {
-        config,
-        client,
-        tools: [],
-        prompts: [],
-        resources: [],
-        health: 'disconnected',
-        error: String(err),
-        consecutiveCallFailures: 0,
-      });
+      if (this.isCurrent(name, client, generation)) {
+        initialState.health = 'disconnected';
+        initialState.diagnostic = diagnoseMcpError(err, { phase: 'connect' });
+        this.publish();
+      } else {
+        await closeClient(client);
+      }
       throw err;
     }
 
+    if (!this.isCurrent(name, client, generation)) {
+      await closeClient(client);
+      return;
+    }
+
     const connectingState = this.servers.get(name);
-    if (connectingState) connectingState.health = 'discovering';
+    if (connectingState) {
+      connectingState.health = 'discovering';
+      this.publish();
+    }
 
     // Fetch tools
     let tools: SdkTool[] = [];
@@ -99,7 +139,15 @@ export class McpManager {
       tools = result.tools as SdkTool[];
     } catch (err) {
       discoveryFailed = true;
-      console.error(`[MCP] Failed to list tools for ${name}:`, err);
+      if (this.isCurrent(name, client, generation)) {
+        const state = this.servers.get(name);
+        if (state) state.diagnostic = diagnoseMcpError(err, { phase: 'discovery' });
+      }
+    }
+
+    if (!this.isCurrent(name, client, generation)) {
+      await closeClient(client);
+      return;
     }
 
     // Fetch prompts (optional)
@@ -120,6 +168,11 @@ export class McpManager {
       // Resources are optional in MCP
     }
 
+    if (!this.isCurrent(name, client, generation)) {
+      await closeClient(client);
+      return;
+    }
+
     // Register prompts in the global registry
     for (const prompt of prompts) {
       const key = `mcp__${name}__${prompt.name}`;
@@ -132,19 +185,23 @@ export class McpManager {
         try {
           const result = await client.listTools();
           const state = this.servers.get(name);
-          if (state) {
+          if (state && this.isCurrent(name, client, generation)) {
             state.tools = result.tools as SdkTool[];
             if (state.health !== 'circuit_open') state.health = 'ready';
-            state.error = undefined;
-            this.refreshSnapshot();
+            state.diagnostic = undefined;
+            this.publish();
           }
         } catch (err) {
           const state = this.servers.get(name);
-          if (state && state.health !== 'circuit_open') {
+          if (
+            state &&
+            this.isCurrent(name, client, generation) &&
+            state.health !== 'circuit_open'
+          ) {
             state.health = 'degraded';
-            state.error = String(err);
+            state.diagnostic = diagnoseMcpError(err, { phase: 'discovery' });
+            this.publish();
           }
-          console.error(`[MCP] Failed to refresh tools for ${name}:`, err);
         }
       });
     } catch {
@@ -156,7 +213,7 @@ export class McpManager {
         try {
           const result = await client.listPrompts();
           const state = this.servers.get(name);
-          if (state) {
+          if (state && this.isCurrent(name, client, generation)) {
             state.prompts = (result.prompts ?? []) as McpPrompt[];
             // Refresh prompt registry for this server
             for (const [key, entry] of this.promptRegistry) {
@@ -168,10 +225,10 @@ export class McpManager {
               const key = `mcp__${name}__${prompt.name}`;
               this.promptRegistry.set(key, { server: name, prompt });
             }
-            this.refreshSnapshot();
+            this.publish();
           }
-        } catch (err) {
-          console.error(`[MCP] Failed to refresh prompts for ${name}:`, err);
+        } catch {
+          // The previous prompt registry remains valid until a successful refresh.
         }
       });
     } catch {
@@ -181,11 +238,11 @@ export class McpManager {
     try {
       client.setNotificationHandler(ResourceListChangedNotificationSchema, async () => {
         const state = this.servers.get(name);
-        if (state) {
+        if (state && this.isCurrent(name, client, generation)) {
           try {
             const result = await client.listResources();
             state.resources = (result.resources ?? []) as McpResource[];
-            this.refreshSnapshot();
+            this.publish();
           } catch {
             /* ignore */
           }
@@ -195,17 +252,37 @@ export class McpManager {
       // handler setup best-effort
     }
 
-    this.servers.set(name, {
-      config,
-      client,
-      tools,
-      prompts,
-      resources,
-      health: discoveryFailed ? 'degraded' : 'ready',
-      ...(discoveryFailed ? { error: 'MCP tool discovery failed.' } : {}),
-      consecutiveCallFailures: 0,
-    });
-    this.refreshSnapshot();
+    if (!this.isCurrent(name, client, generation)) {
+      await closeClient(client);
+      return;
+    }
+    initialState.tools = tools;
+    initialState.prompts = prompts;
+    initialState.resources = resources;
+    initialState.health = discoveryFailed ? 'degraded' : 'ready';
+    if (!discoveryFailed) initialState.diagnostic = undefined;
+    this.publish();
+  }
+
+  /** Close the previous generation before starting one replacement connection. */
+  async reconnect(name: string, config: McpServerConfig, generation: number): Promise<void> {
+    await this.disconnect(name);
+    await this.connect(name, config, generation);
+  }
+
+  /** Invalidate future bindings before best-effort transport shutdown. */
+  async disconnect(name: string): Promise<void> {
+    const state = this.servers.get(name);
+    if (!state) return;
+    this.servers.delete(name);
+    this.removePromptsFor(name);
+    this.publish();
+    await closeClient(state.client as Client);
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   /** Return all tools from all connected servers */
@@ -265,7 +342,8 @@ export class McpManager {
       state.consecutiveCallFailures = 0;
       state.retryAt = undefined;
       state.health = 'ready';
-      state.error = undefined;
+      state.diagnostic = undefined;
+      this.publish();
       // The SDK's task-enabled overload includes an indirection result. P0 uses
       // synchronous tool calls only; the protocol result is validated by the server.
       return result;
@@ -311,32 +389,33 @@ export class McpManager {
     return this.promptRegistry;
   }
 
-  /** Return server states for UI consumption */
-  getServerStates(): Map<string, McpServerState> {
-    return this.servers;
+  /** @internal Migration/control-plane API. Frontends must consume McpControlSnapshot. */
+  getServerStates(): ReadonlyMap<string, Readonly<McpServerState>> {
+    return new Map(
+      [...this.servers].map(([name, state]) => [
+        name,
+        Object.freeze({
+          ...state,
+          tools: Object.freeze([...state.tools]),
+          prompts: Object.freeze(state.prompts.map((prompt) => Object.freeze({ ...prompt }))),
+          resources: Object.freeze(
+            state.resources.map((resource) => Object.freeze({ ...resource })),
+          ),
+        }) as Readonly<McpServerState>,
+      ]),
+    );
   }
 
   /** Disconnect all servers and clean up */
   async disconnectAll(): Promise<void> {
-    const names = [...this.servers.keys()];
-    await Promise.allSettled(
-      names.map(async (name) => {
-        const state = this.servers.get(name);
-        if (!state) return;
-        try {
-          const client = state.client as Client;
-          await client.close();
-        } catch {
-          // best-effort close
-        }
-        this.servers.delete(name);
-      }),
-    );
+    const clients = [...this.servers.values()].map((state) => state.client as Client);
+    this.servers.clear();
     this.promptRegistry.clear();
-    this.refreshSnapshot();
+    this.publish();
+    await Promise.allSettled(clients.map(closeClient));
   }
 
-  private refreshSnapshot(): void {
+  private publish(): void {
     const descriptors: CapabilityDescriptor[] = [];
     for (const [serverName, state] of this.servers) {
       if (!isUsableForDiscovery(state)) continue;
@@ -353,6 +432,13 @@ export class McpManager {
       }
     }
     this.snapshot = createSnapshot(descriptors);
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {
+        // One observer cannot break connection lifecycle updates for other consumers.
+      }
+    }
   }
 
   private assertCallable(state: McpServerState, server: string): void {
@@ -361,6 +447,7 @@ export class McpManager {
         throw new Error(`MCP server '${server}' circuit is open; retry after ${state.retryAt}.`);
       }
       state.health = 'half_open';
+      this.publish();
     }
     if (state.health !== 'ready' && state.health !== 'degraded' && state.health !== 'half_open') {
       throw new Error(`MCP server not callable (${state.health}): ${server}`);
@@ -369,13 +456,40 @@ export class McpManager {
 
   private noteCallFailure(state: McpServerState, error: unknown): void {
     state.consecutiveCallFailures += 1;
-    state.error = error instanceof Error ? error.message : String(error);
+    state.diagnostic = diagnoseMcpError(error, { phase: 'call' });
     if (state.consecutiveCallFailures >= MCP_CIRCUIT_FAILURE_THRESHOLD) {
       state.health = 'circuit_open';
       state.retryAt = Date.now() + MCP_CIRCUIT_OPEN_MS;
+      state.diagnostic = Object.freeze({
+        code: 'circuit_open',
+        retryable: true,
+        message: state.diagnostic.message,
+        technical: state.diagnostic.technical,
+      });
+      this.publish();
       return;
     }
     state.health = 'degraded';
+    this.publish();
+  }
+
+  private isCurrent(name: string, client: Client, generation: number): boolean {
+    const state = this.servers.get(name);
+    return state?.client === client && state.generation === generation;
+  }
+
+  private removePromptsFor(name: string): void {
+    for (const [key, entry] of this.promptRegistry) {
+      if (entry.server === name) this.promptRegistry.delete(key);
+    }
+  }
+}
+
+async function closeClient(client: Client): Promise<void> {
+  try {
+    await client.close();
+  } catch {
+    // best-effort close
   }
 }
 

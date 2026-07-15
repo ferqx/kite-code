@@ -21,4 +21,15 @@ server.registerTool(
   }),
 );
 
+server.registerTool('fail_fixture', { inputSchema: {} }, async () => {
+  throw new Error('fixture unavailable');
+});
+
+let retryCalls = 0;
+server.registerTool('retry_fixture', { inputSchema: {} }, async () => {
+  retryCalls += 1;
+  if (retryCalls === 1) throw new Error('transient failure');
+  return { content: [{ type: 'text' as const, text: 'ok' }] };
+});
+
 await server.connect(new StdioServerTransport());

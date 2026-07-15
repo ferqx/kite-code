@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import {
   type CapabilityArtifactStore,
   defaultCapabilityArtifactStore,
@@ -27,7 +27,7 @@ export type VerificationReviewer = (
 
 export interface VerificationExecutorDependencies {
   shellExecutor?: ShellExecutor;
-  mcpManager?: McpManager;
+  mcpManager?: McpRuntimeProvider;
   artifactStore?: CapabilityArtifactStore;
   reviewer?: VerificationReviewer;
   signal?: AbortSignal;

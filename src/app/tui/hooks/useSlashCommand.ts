@@ -18,7 +18,7 @@ export type SlashAction =
   | { type: 'help' }
   | { type: 'new' }
   | { type: 'exit' }
-  | { type: 'mcp' }
+  | { type: 'mcp'; command: 'open' | 'retry'; server?: string }
   | { type: 'rewind' }
   | { type: 'export' }
   | { type: 'unknown'; raw: string };
@@ -51,7 +51,9 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case 'new':
       return { type: 'new' };
     case 'mcp':
-      return { type: 'mcp' };
+      return args[0] === 'retry'
+        ? { type: 'mcp', command: 'retry', server: args[1] || undefined }
+        : { type: 'mcp', command: 'open', server: arg || undefined };
     case 'rewind':
       return { type: 'rewind' };
     case 'export':
@@ -70,7 +72,10 @@ export function useSlashCommand(
   onExit?: () => void,
   mcpPromptRegistry?: ReadonlyMap<
     string,
-    { server: string; prompt: { name: string; description?: string; arguments?: any[] } }
+    {
+      server: string;
+      prompt: { name: string; description?: string; arguments?: readonly unknown[] };
+    }
   >,
   skillManifests?: SkillManifest[],
   _skillOptions?: SkillScanOptions,
@@ -83,6 +88,7 @@ export function useSlashCommand(
   onTheme?: (preset: string) => void,
   currentInteractionMode: 'accept_edits' | 'auto' | 'full' = 'accept_edits',
   sandboxBackend: SandboxBackend = 'none',
+  onMcpCommand?: (command: 'open' | 'retry', server?: string) => void,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -155,6 +161,7 @@ export function useSlashCommand(
           dispatch({ type: 'SHOW_HELP' });
           break;
         case 'mcp':
+          onMcpCommand?.(action.command, action.server);
           dispatch({ type: 'SHOW_MCP' });
           break;
         case 'rewind':
@@ -211,6 +218,7 @@ export function useSlashCommand(
       onTheme,
       currentInteractionMode,
       sandboxBackend,
+      onMcpCommand,
     ],
   );
 }

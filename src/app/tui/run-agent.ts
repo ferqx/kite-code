@@ -1,6 +1,6 @@
 import type { AgentConfig } from '@/core/config/index';
 import { defaultCheckpointPath } from '@/core/config/paths';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { RunRuntimeAgentInput } from '@/core/runtime/agent';
 import { runtimeStorePathFor } from '@/core/runtime/store';
@@ -19,7 +19,7 @@ export interface BuildRunTaskParams {
   skills: SkillManifest[];
   skillOptions: SkillScanOptions | null;
   initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>;
-  mcpManager: McpManager | null;
+  mcpManager: McpRuntimeProvider | null;
   shellContext: string;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
   phase?: 'planning' | 'building';

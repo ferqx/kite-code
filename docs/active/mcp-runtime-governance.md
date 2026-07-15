@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 MCP discovery、动态工具绑定、MCP policy、MCP 调用或结果归一化时。
-验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/verification.test.ts tests/policies/approval-policy.test.ts`、`bun run typecheck`。
+验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/verification.test.ts tests/policies/approval-policy.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
 
 MCP tool execution is available only when both `capabilityCatalogV1` and `mcpRuntimeBindingV1` are enabled. The ModelController records bindings before the model call; a dynamic `mcp__<server>__<tool>` call must match its binding, turn, descriptor revision and input schema at execution time.
 
@@ -11,6 +11,8 @@ MCP list changes replace the immutable catalog snapshot. Existing bindings do no
 Remote server annotations are untrusted by default. Local per-tool policy in `mcpServers.<server>.tools.<tool>` may set effects and `minimumApproval`; only an explicitly trusted server may contribute a read-only annotation. Unknown, write and destructive MCP effects require a single-use user approval even under `full_access`.
 
 Project-controlled MCP declarations are gated before transport construction. An effective Server from workspace `.kite-code/kite-code.jsonc` or `.mcp.json` must match a local approval bound to its workspace, source, name and raw-config digest; pending, rejected, changed, invalid or unreadable-store entries never enter the connection map. This execution approval is separate from annotation trust and Tool Approval. Project `trust` and per-tool policy relaxations are ignored after approval, so project Tools remain remote, unknown-effect, user-approved and non-retryable by default. The complete control-plane contract is defined in [`mcp-project-approval.md`](mcp-project-approval.md).
+
+`McpSupervisor` is the sole App-facing MCP control plane. It publishes the config catalog before background connection, projects Manager health/list changes into an immutable `McpControlSnapshot`, and re-runs the config/approval gate for retry. Manager connections carry generation tokens; late connect/discovery/list-changed work cannot restore an old capability snapshot. Runtime depends only on `McpRuntimeProvider`, while TUI depends only on an App controller and the control snapshot. See [`mcp-control-plane.md`](mcp-control-plane.md).
 
 For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', allowAnnotations: 'read_only' }`. This local decision only permits a server's `readOnlyHint` to classify a tool as read-only; it cannot lower an explicit per-tool `minimumApproval` or grant new effects. The legacy `trust: 'trusted'` form remains a user-configured compatibility spelling and records no elevated provenance.
 

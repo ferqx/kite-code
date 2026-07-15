@@ -32,8 +32,8 @@ export interface CreateAgentToolsInput {
   workspace: string;
   /** 可选 Shell 执行器 / Optional shell executor */
   shellExecutor?: ShellExecutor;
-  /** 可选 MCP 管理器 / Optional MCP manager */
-  mcpManager?: import('@/core/mcp/manager').McpManager;
+  /** 可选 MCP Runtime provider / Optional MCP Runtime provider */
+  mcpManager?: import('@/core/mcp').McpRuntimeProvider;
   /** Runtime-issued MCP tool bindings for the current model call. */
   mcpBindings?: Array<{ binding: CapabilityBinding; descriptor: CapabilityDescriptor }>;
   /** Expose provider-neutral metadata discovery instead of the full catalog. */

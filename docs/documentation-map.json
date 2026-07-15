@@ -26,11 +26,24 @@
     {
       "id": "mcp-control-plane",
       "sources": [
-        "src/core/config/mcp-*.ts",
-        "src/app/tui/hooks/useMcpConnection.ts",
-        "src/app/tui/components/McpPanel.tsx"
+        "src/core/config/mcp-config.ts",
+        "src/core/config/mcp-project-approvals.ts",
+        "src/core/config/mcp-server-config.ts",
+        "src/core/mcp/control-types.ts",
+        "src/core/mcp/diagnostics.ts",
+        "src/core/mcp/manager.ts",
+        "src/core/mcp/runtime-provider.ts",
+        "src/core/mcp/supervisor.ts",
+        "src/app/tui/App.tsx",
+        "src/app/tui/index.tsx",
+        "src/app/tui/hooks/useMcpController.ts",
+        "src/app/tui/hooks/useSlashCommand.ts",
+        "src/app/tui/run-agent.ts",
+        "src/app/tui/session-manager.ts",
+        "src/app/tui/mcp/**"
       ],
       "documents": [
+        "docs/active/mcp-control-plane.md",
         "docs/active/mcp-project-approval.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/book/08-TUI交互全景.md",

@@ -9,7 +9,7 @@ import {
   tryLoadAgentConfig,
 } from '@/core/config/index';
 import { sessionExportPath } from '@/core/config/paths';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import { resolveSandboxRuntime } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
@@ -19,7 +19,7 @@ import App, { type Action, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import InputLine, { type SlashSuggestionData } from './components/InputLine';
 import SetupWizard from './components/SetupWizard';
-import { useMcpConnection } from './hooks/useMcpConnection';
+import { useMcpController } from './hooks/useMcpController';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
 import { useSkillsLoader } from './hooks/useSkillsLoader';
 import { useSlashCommand } from './hooks/useSlashCommand';
@@ -148,7 +148,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
-  const mcpManagerRef = React.useRef<McpManager | null>(null);
+  const mcpRuntimeProviderRef = React.useRef<McpRuntimeProvider | null>(null);
   const skillManifestsRef = React.useRef<SkillManifest[]>([]);
   const skillOptionsRef = React.useRef<SkillScanOptions | null>(null);
   const runTaskRef = React.useRef<
@@ -159,6 +159,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     ) => Promise<void>
   >(async () => {});
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
+  const [mcpInitialServer, setMcpInitialServer] = React.useState<string | undefined>();
   const interruptClearedByResolutionRef = React.useRef(false);
 
   const provider = React.useMemo(() => {
@@ -179,7 +180,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       provider,
       skillManifests: skillManifestsRef.current,
       skillOptions: skillOptionsRef.current,
-      mcpManager: mcpManagerRef.current,
+      mcpManager: mcpRuntimeProviderRef.current,
       checkpointPath: defaultCheckpointPath(),
     });
     mgr.setSnapshotCallback((threadId) => {
@@ -239,7 +240,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       thinkingLevelRef,
       skillManifestsRef,
       skillOptionsRef,
-      mcpManagerRef,
+      mcpRuntimeProviderRef,
       agentLoopActiveRef,
       abortControllerRef,
       stateRef,
@@ -250,14 +251,12 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   const runRewindRef = React.useRef(runRewind);
   runRewindRef.current = runRewind;
 
-  // MCP Manager lifecycle
-  const {
-    mcpManager,
-    mcpPromptRegistry,
-    mcpProjectApprovals,
-    mcpDecisionMessage,
-    decideMcpProjectServer,
-  } = useMcpConnection(mcpManagerRef, sessionManager, workspace);
+  // MCP control plane and runtime provider lifecycle
+  const { controller: mcpController, mcpPromptRegistry } = useMcpController(
+    mcpRuntimeProviderRef,
+    sessionManager,
+    workspace,
+  );
 
   // Skills loader: scan on mount
   useSkillsLoader(workspace, dispatch, skillManifestsRef, skillOptionsRef, sessionManager);
@@ -622,6 +621,10 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     },
     state.interactionMode,
     sandboxBackend,
+    (command, server) => {
+      setMcpInitialServer(server);
+      if (command === 'retry' && server) void mcpController.retryByName(server);
+    },
   );
 
   // Stable reference — avoids re-creating the object on every render and causing
@@ -777,10 +780,8 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         dispatch={dispatchSessionLoad}
         onToggleReason={onToggleReason}
         provider={provider}
-        mcpManager={mcpManager ?? undefined}
-        mcpProjectApprovals={mcpProjectApprovals}
-        mcpDecisionMessage={mcpDecisionMessage}
-        onMcpProjectDecision={decideMcpProjectServer}
+        mcpController={mcpController}
+        mcpInitialServer={mcpInitialServer}
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}

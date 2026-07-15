@@ -63,6 +63,20 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('/plan')).toEqual({ type: 'plan' });
   });
 
+  test('parses MCP management routes', () => {
+    expect(parseSlashCommand('/mcp')).toEqual({ type: 'mcp', command: 'open' });
+    expect(parseSlashCommand('/mcp github')).toEqual({
+      type: 'mcp',
+      command: 'open',
+      server: 'github',
+    });
+    expect(parseSlashCommand('/mcp retry github')).toEqual({
+      type: 'mcp',
+      command: 'retry',
+      server: 'github',
+    });
+  });
+
   // ── /clear ──
   test('parses /clear', () => {
     expect(parseSlashCommand('/clear')).toEqual({ type: 'clear' });

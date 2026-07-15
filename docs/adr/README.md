@@ -12,3 +12,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0007](0007-capability-bindings.md) | accepted | Dynamic capabilities require revisioned turn bindings |
 | [0008](0008-verification-completion-semantics.md) | accepted | Only required verification gates completion |
 | [0009](0009-project-mcp-local-approval.md) | accepted | 项目 MCP transport 必须获得绑定配置摘要的本地批准 |
+| [0010](0010-mcp-supervisor-control-plane.md) | accepted | MCP 连接由 Supervisor 统一投影到 control snapshot |

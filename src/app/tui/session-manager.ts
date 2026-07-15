@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import type { AgentConfig } from '@/core/config/index';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
 import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEffect } from '@/core/runtime/effects';
@@ -49,7 +49,7 @@ export interface SessionDeps {
   provider: TuiUserInputProvider;
   skillManifests: SkillManifest[];
   skillOptions: SkillScanOptions | null;
-  mcpManager: McpManager | null;
+  mcpManager: McpRuntimeProvider | null;
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
   checkpointPath: string;
 }
@@ -75,7 +75,7 @@ export class SessionRuntime {
 
   skillManifests: SkillManifest[];
   readonly skillOptions: SkillScanOptions | null;
-  mcpManager: McpManager | null;
+  mcpManager: McpRuntimeProvider | null;
 
   generator: AsyncGenerator<RuntimeEvent> | null = null;
   /** 当后台会话命中中断时通知 Manager 刷新快照 / Callback to notify Manager on background interrupt */
@@ -903,11 +903,11 @@ export class SessionManager {
     }
   }
 
-  /** 同步 MCP manager 到所有现有运行时（MCP 连接完成后调用）/ Sync MCP manager to all existing runtimes (called after MCP connect completes) */
-  updateMcpManager(mcp: McpManager): void {
-    this.deps.mcpManager = mcp;
+  /** Sync the runtime-facing MCP provider to all existing sessions. */
+  updateMcpRuntimeProvider(provider: McpRuntimeProvider | null): void {
+    this.deps.mcpManager = provider;
     for (const rt of this.runtimes.values()) {
-      rt.mcpManager = mcp;
+      rt.mcpManager = provider;
     }
   }
 }

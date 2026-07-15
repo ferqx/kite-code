@@ -1,6 +1,6 @@
 # MCP TUI 管理中心完整实施计划
 
-状态：active（Phase 1 待实施）
+状态：active（Phase 1 已完成，Phase 2 待实施）
 优先级：P0–P2
 创建日期：2026-07-15
 代码基线：`mcp` / `41585a14dcf3`
@@ -200,6 +200,10 @@ Phase 3 的 Credential Store backend 必须先完成兼容性 spike；在安全 
 ```
 
 ## 七、Phase 1：McpSupervisor 与响应式只读管理页
+
+完成日期：2026-07-15
+
+实现证据：`src/core/mcp/supervisor.ts`、`src/core/mcp/control-types.ts`、`src/core/mcp/diagnostics.ts`、`src/app/tui/mcp/`、`tests/mcp-supervisor.test.ts`、`tests/tui-system/scenarios/mcp-management-readonly.test.ts`。当前行为以 `docs/active/mcp-control-plane.md` 为准。
 
 ### 7.1 目标
 
@@ -1247,8 +1251,8 @@ bun run test:tui:system:core
 | Phase | 状态 | 完成记录 | 备注 |
 | --- | --- | --- | --- |
 | 0 项目 Server 审批 | completed | [`../execution/completed/2026-07-15-mcp-project-server-approval-p0.md`](../execution/completed/2026-07-15-mcp-project-server-approval-p0.md) | transport 前置门禁、TUI 审批与真实 stdio/HTTP/PTY 证据已收敛 |
-| 1 Supervisor/只读 UI | pending | — | Phase 0 已完成；下一实施阶段 |
-| 2 配置管理 | pending | — | 依赖 Phase 1 |
+| 1 Supervisor/只读 UI | completed | [`../execution/completed/2026-07-15-mcp-tui-management-center-phase1.md`](../execution/completed/2026-07-15-mcp-tui-management-center-phase1.md) | 单一 SDK client、可订阅 control snapshot、typed diagnostics 与只读管理中心已验证 |
+| 2 配置管理 | pending | — | 依赖已完成的 Phase 1；下一实施阶段 |
 | 3 Auth | pending | — | 依赖 Phase 2 和 backend spike |
 | 4 Tool 策略 | pending | — | 依赖 Phase 2，后半与 Phase 3 集成 |
 | 5 Agent 闭环 | pending | — | 依赖 Phase 1/3/4，需 Runtime flag/ADR |

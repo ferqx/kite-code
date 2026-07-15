@@ -439,8 +439,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
       const output = tui.output();
       console.log('  output after /mcp:', stripAnsi(output).slice(-500));
-      // MCP panel shows empty state: "No MCP servers configured"
-      expect(screenContains(output, 'MCP Servers')).toBe(true);
+      expect(screenContains(output, 'MCP Management')).toBe(true);
     },
     TIMEOUT,
   );

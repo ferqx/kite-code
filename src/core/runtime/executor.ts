@@ -8,7 +8,7 @@ import {
   reviewVerificationEvidence,
 } from '@/core/execution/reviewer';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { refreshSkillCatalog, type SkillCatalogSnapshot } from '@/core/skills';
@@ -23,7 +23,7 @@ export interface RuntimeExecutorDependencies {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
-  mcpManager?: McpManager;
+  mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;

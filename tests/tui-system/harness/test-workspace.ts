@@ -26,6 +26,8 @@ export interface TestWorkspace {
   env: Record<string, string>;
   /** Additional config fields merged into generated test config */
   configOverrides?: Record<string, unknown>;
+  /** Optional project-only overrides; defaults to configOverrides for compatibility. */
+  projectConfigOverrides?: Record<string, unknown>;
   /** Remove all temp directories */
   cleanup(): void;
 }
@@ -43,6 +45,7 @@ export function createTestWorkspace(opts?: {
   files?: Record<string, string>; // path → content, created in workspace
   workspaceFiles?: Record<string, string>;
   configOverrides?: Record<string, unknown>;
+  projectConfigOverrides?: Record<string, unknown>;
   projectMcpServers?: Record<string, unknown>;
 }): TestWorkspace {
   const tempHome = mkdtempSync(join(tmpdir(), 'kite-code-e2e-'));
@@ -117,6 +120,7 @@ export function createTestWorkspace(opts?: {
     checkpointDir,
     env,
     configOverrides: opts?.configOverrides,
+    projectConfigOverrides: opts?.projectConfigOverrides,
     cleanup,
   };
 }

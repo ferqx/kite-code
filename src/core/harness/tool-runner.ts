@@ -1,7 +1,7 @@
 import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import { normalizeMcpToolResult, parseMcpToolName } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
@@ -49,7 +49,7 @@ export interface RunApprovedToolInput {
   approvedGrant?: ShellGrantUsed;
   threadId?: string;
   override?: AuthorizationOverride;
-  mcpManager?: McpManager;
+  mcpManager?: McpRuntimeProvider;
   /** Runtime-resolved policy for a binding-validated MCP capability. */
   mcpPolicy?: RuntimeMcpPolicy;
   skillManifests?: SkillManifest[];

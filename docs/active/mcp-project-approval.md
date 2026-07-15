@@ -2,8 +2,8 @@
 
 状态：active
 读取时机：修改 MCP 配置发现、项目来源、连接启动、`/mcp` 审批交互或 Approval Store 时。
-验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp-panel.test.tsx tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0009、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/app/tui/hooks/useMcpConnection.ts`。
+验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-panel.test.tsx tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+相关：ADR-0009、ADR-0010、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
 
 ## 当前安全性质
 
@@ -41,10 +41,10 @@ Approval Store 和 `/mcp` 决策属于 MCP control plane，不写入任务 Runti
 
 `/mcp` 注册在 TUI 的静态斜杠命令表中。输入 `/m`、`/mc` 或完整命令时，候选面板显示 `/mcp` 及管理面板说明；Tab、右方向键和 Enter 遵循通用斜杠命令补全行为。
 
-`/mcp` 在 Server 尚未连接时也显示项目审批条目，只展示 Server 名称、transport、source path、状态、摘要短前缀、stdio command 与参数数量或只保留 origin 的 HTTP endpoint，以及脱敏诊断；不会展示 URL path/query/fragment/userinfo、env、header 或参数内容。选中条目后：
+`/mcp` 在 Server 尚未连接时也通过 control snapshot 显示项目审批条目。进入 Server detail 后按 `a` 打开统一 approval route；该页只展示 Server 名称、transport、source path、状态、摘要短前缀、stdio command 与参数数量或只保留 origin 的 HTTP endpoint，以及脱敏诊断；不会展示 URL path/query/fragment/userinfo、env、header 或参数内容。进入审批页后：
 
-- 连续两次按 `a`：确认批准当前摘要，重新加载目录并重建 MCP 连接集合；
-- 连续两次按 `r`：确认拒绝当前摘要，重新加载目录并断开不再可连接的 Server；
+- 连续两次按 `a`：确认批准当前摘要，由 Supervisor 重新加载目录并连接该 Server；
+- 连续两次按 `r`：确认拒绝当前摘要，由 Supervisor 重新加载目录并断开不再可连接的 Server；
 - 配置已变化或存储异常：显示 Core 返回的安全诊断，不创建 transport。
 
-Phase 0 仍由现有 `useMcpConnection` 管理一次性 Manager 生命周期，面板仍读取 Manager 状态。可订阅的 `McpSupervisor`、热重载和完整管理路由属于已激活总计划的 Phase 1/2，不能通过在 TUI 中复制第二套 SDK client 提前实现。
+Phase 1 已由可订阅 `McpSupervisor` 管理 Manager 生命周期，TUI 不再读取 Manager Map。完整 control-plane 边界见 [`mcp-control-plane.md`](mcp-control-plane.md)。三层配置 mutation 与文件 watcher 仍属于 Phase 2。

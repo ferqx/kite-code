@@ -13,7 +13,7 @@ import { buildToolApproval } from '@/core/harness/tool-policy';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
   type CapabilityArtifactStore,
@@ -78,7 +78,7 @@ function skillCapabilityCeilingViolation(
 
 function forkToolCeiling(input: {
   capabilityCeiling: string[];
-  mcpManager?: McpManager;
+  mcpManager?: McpRuntimeProvider;
   turnId: string;
 }): {
   allowedTools: Set<string>;
@@ -259,7 +259,7 @@ async function handleSubAgentResume(params: {
   toolCallId: string;
   continuation: RestoredSubAgentContinuation;
   shellExecutor?: ShellExecutor;
-  mcpManager?: McpManager;
+  mcpManager?: McpRuntimeProvider;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;
@@ -415,7 +415,7 @@ export async function executeRuntimeTools(params: {
   state: RuntimeState;
   toolCallIds: string[];
   shellExecutor?: ShellExecutor;
-  mcpManager?: McpManager;
+  mcpManager?: McpRuntimeProvider;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;

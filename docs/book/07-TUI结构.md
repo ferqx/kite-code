@@ -9,7 +9,8 @@ App.tsx
 ├── Header / OutputArea / Footer
 ├── InputLine 与交互面板
 ├── SessionManager / SessionRuntime
-├── hooks/          键盘、窗口、会话、MCP、Skill、slash command
+├── hooks/          键盘、窗口、会话、MCP controller、Skill、slash command
+├── mcp/            MCP overlay、controller、route reducer 与只读视图
 ├── reducers/       AgentEvent → UI state
 ├── components/     Block、审批、计划、子 Agent、模型选择
 └── render/         静态内容与终端输出稳定性
@@ -23,6 +24,8 @@ App.tsx
 - SessionRuntime：连接某一 thread 的运行、缓冲与取消控制。
 
 TUI 不应根据展示文本反推工具是否成功，也不能自行构造 verification passed、approval granted 等 Runtime 事实。
+
+MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。MCP 搜索、selection、route 和审批二次确认只属于 `mcp/reducer.ts` 的展示状态。
 
 ## 7.3 事件渲染
 

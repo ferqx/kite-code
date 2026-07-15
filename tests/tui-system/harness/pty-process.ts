@@ -123,7 +123,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   // workspace-level (.kite-code/) paths since the TUI merges both.
   // We set KITE_CODE_HOME env var so defaultConfigPath() resolves correctly.
   if (opts.mockServer && opts.workspace) {
-    const mockConfig = {
+    const baseMockConfig = {
       provider: {
         mock: {
           type: 'openai-compatible' as const,
@@ -136,21 +136,32 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       model: {
         default: { provider: 'mock' as const, name: 'mock-model' },
       },
-      ...(opts.workspace.configOverrides ?? {}),
     };
-    const configStr = JSON.stringify(mockConfig, null, 2);
+    const userConfigStr = JSON.stringify(
+      { ...baseMockConfig, ...(opts.workspace.configOverrides ?? {}) },
+      null,
+      2,
+    );
+    const projectConfigStr = JSON.stringify(
+      {
+        ...baseMockConfig,
+        ...(opts.workspace.projectConfigOverrides ?? opts.workspace.configOverrides ?? {}),
+      },
+      null,
+      2,
+    );
 
     // User-level config at KITE_CODE_HOME/.kite-code/
     const homeDir = join(opts.workspace.home, '.kite-code');
     mkdirSync(homeDir, { recursive: true });
     const configFilePath = join(homeDir, 'kite-code.jsonc');
-    writeFileSync(configFilePath, configStr);
+    writeFileSync(configFilePath, userConfigStr);
 
     // Also write to workspace dir's .kite-code/ (project-level config,
     // resolved via projectConfigPath() if cwd is set to workspace)
     const wsDir = join(opts.workspace.workspace, '.kite-code');
     mkdirSync(wsDir, { recursive: true });
-    writeFileSync(join(wsDir, 'kite-code.jsonc'), configStr);
+    writeFileSync(join(wsDir, 'kite-code.jsonc'), projectConfigStr);
   }
 
   const chunks: Uint8Array[] = [];

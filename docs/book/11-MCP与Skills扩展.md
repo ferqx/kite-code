@@ -4,7 +4,9 @@ MCP 和 Skill 都属于 Capability，不拥有独立于 Runtime 的授权或完�
 
 ## 11.1 MCP Provider
 
-`McpManager` 使用 `@modelcontextprotocol/sdk` 管理 stdio 与 streamable HTTP 连接，负责 tools/resources/prompts discovery、list-changed notification、health、circuit breaker、调用与资源读取。
+`McpSupervisor` 组合 source-aware config catalog、项目审批门禁和唯一 `McpManager`。它在后台连接前发布不可变 `McpControlSnapshot`，并把 health、list-changed、retry 和 typed diagnostic 投影给 App。`McpManager` 使用 `@modelcontextprotocol/sdk` 管理 stdio 与 streamable HTTP 连接，负责 tools/resources/prompts discovery、circuit breaker、调用与资源读取。
+
+每个 Manager 连接携带 generation。reconnect/disable/remove 的失效顺序是先撤销未来 capability 可见性，再关闭旧 client；迟到的旧 generation 结果不得更新状态。Runtime 只依赖 `McpRuntimeProvider`，TUI 只依赖 App controller/control snapshot。
 
 Discovery 生成不可变 `CapabilitySnapshot`。MCP Tool 的稳定身份为 `mcp:<server>/<tool>`；`mcp__<server>__<tool>` 只是某一模型轮次的暴露名称。
 
@@ -19,6 +21,8 @@ MCP 调用保留 structured content、content blocks、错误、资源和外部�
 ## 11.3 Health 与恢复
 
 Server 状态覆盖 connecting、discovering、ready、degraded、half-open/circuit-open 和断开等运行阶段。Catalog 或 capability revision 变化使旧 binding 失效。崩溃后的非终态写入进入 reconciliation，不自动重复创建外部对象。
+
+`/mcp` 管理中心可响应式浏览全部 Server 和 discovered capability；`/mcp <server>` 打开详情，`/mcp retry <server>` 重新经过 config/approval gate。Phase 1 不提供普通配置 mutation。
 
 ## 11.4 Skill Workflow
 
@@ -39,4 +43,4 @@ Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入�
 
 当 catalog 超出 provider 上下文预算时，模型只看到 provider-neutral `capability_search`。搜索返回安全元数据候选，不返回调用句柄；下一轮重新校验 catalog/revision 后才签发有限 binding 或 Skill disclosure。
 
-完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。
+完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。

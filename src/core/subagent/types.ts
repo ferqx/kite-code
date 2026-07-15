@@ -31,7 +31,7 @@ export interface SubAgentRunnerInput {
   role: SubAgentRoleConfig;
   task: string;
   shellExecutor?: import('@/core/tools/shell').ShellExecutor;
-  mcpManager?: import('@/core/mcp').McpManager;
+  mcpManager?: import('@/core/mcp').McpRuntimeProvider;
   skills?: import('@/core/skills/types').SkillManifest[];
   skillOptions?: import('@/core/skills/types').SkillScanOptions;
   mcpBindings?: Array<{

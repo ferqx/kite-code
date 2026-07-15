@@ -1,7 +1,7 @@
 import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
 import type { AgentConfig } from '@/core/config/index';
-import type { McpManager } from '@/core/mcp';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
@@ -13,7 +13,7 @@ export interface TaskToolDeps {
   config: AgentConfig;
   workspace: string;
   shellExecutor?: ShellExecutor;
-  mcpManager?: McpManager;
+  mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   allowedTools?: Set<string>;

@@ -39,7 +39,9 @@ bun install
 
 模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。
 
-项目中的 `.kite-code/kite-code.jsonc#mcpServers` 与 `.mcp.json#mcpServers` 不会在首次发现时自动启动。运行 TUI 后打开 `/mcp`，审阅 pending 条目的来源和脱敏连接信息，连续两次按 `a` 确认批准当前配置摘要，或连续两次按 `r` 确认拒绝；项目配置变化后必须重新批准。批准只允许连接，不能降低 MCP Tool 的 effect、审批或重试策略。
+项目中的 `.kite-code/kite-code.jsonc#mcpServers` 与 `.mcp.json#mcpServers` 不会在首次发现时自动启动。运行 TUI 后打开 `/mcp`，选择 pending Server 并进入 approval 页，连续两次按 `a` 确认批准当前配置摘要，或连续两次按 `r` 确认拒绝；项目配置变化后必须重新批准。批准只允许连接，不能降低 MCP Tool 的 effect、审批或重试策略。
+
+`/mcp` 提供响应式只读管理中心；`/mcp <server>` 可直接打开详情，`/mcp retry <server>` 会重新经过配置与审批门禁。管理中心可浏览 Server health、typed diagnostic、Tools、Resources 与 Prompts。添加、删除和启停配置尚不属于当前只读阶段。
 
 ## 运行
 
@@ -75,7 +77,7 @@ src/protocol/       跨层事件、动作、Capability 与 Verification 契约
 src/core/runtime/   Kernel、State、Event、Effect、Scheduler、Store
 src/core/model/     AI SDK provider 与上下文边界
 src/core/tools/     Builtin Capability provider
-src/core/mcp/       MCP provider
+src/core/mcp/       MCP supervisor、control snapshot 与 Runtime provider
 src/core/skills/    Skill Workflow provider
 src/core/subagent/  Subagent provider
 src/core/policies/  Mode、审批和副作用策略

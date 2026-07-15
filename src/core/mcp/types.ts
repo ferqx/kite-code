@@ -1,6 +1,7 @@
 // src/core/mcp/types.ts
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
+import type { McpDiagnostic } from './diagnostics';
 
 /** MCP transport type */
 export type McpTransportType = 'stdio' | 'http';
@@ -50,11 +51,11 @@ export interface McpServerConfig {
 export interface McpPrompt {
   name: string;
   description?: string;
-  arguments?: Array<{
+  arguments?: readonly Readonly<{
     name: string;
     description?: string;
     required?: boolean;
-  }>;
+  }>[];
 }
 
 /** MCP Resource */
@@ -81,7 +82,9 @@ export interface McpServerState {
   prompts: McpPrompt[];
   resources: McpResource[];
   health: McpHealthState;
-  error?: string;
+  generation: number;
+  lastAttemptAt: string;
+  diagnostic?: McpDiagnostic;
   consecutiveCallFailures: number;
   retryAt?: number;
 }

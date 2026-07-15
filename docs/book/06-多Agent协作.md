@@ -27,7 +27,7 @@ Subagent 是能够在隔离上下文中完成部分任务的 Capability。主 Ag
 
 Subagent 默认不读取主 Agent 的完整消息历史，只接收任务、角色 prompt、必要上下文和 Runtime 签发的有限能力。
 
-SubAgentRunner 执行动态 MCP 工具前先由 Runtime binding 找回 descriptor，并把其中的 effective effects 与 minimum approval 一并交给共享 Tool Runner。这样只读 MCP 不会在二次策略检查中被误判为未知能力，写入或不确定能力也不能借子 Agent 路径降低审批等级。
+SubAgentRunner 只通过父 Runtime 传入的 `McpRuntimeProvider` 访问 MCP，不依赖 Supervisor 或 Manager control API。执行动态 MCP 工具前先由 Runtime binding 找回 descriptor，并把其中的 effective effects 与 minimum approval 一并交给共享 Tool Runner。这样只读 MCP 不会在二次策略检查中被误判为未知能力，写入或不确定能力也不能借子 Agent 路径降低审批等级。
 
 ## 6.3 审批暂停与恢复
 
