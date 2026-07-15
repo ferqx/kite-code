@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 MCP 配置发现、项目来源、连接启动、`/mcp` 审批交互或 Approval Store 时。
-验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp-panel.test.tsx`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp-panel.test.tsx tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
 相关：ADR-0009、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/app/tui/hooks/useMcpConnection.ts`。
 
 ## 当前安全性质
@@ -38,6 +38,8 @@ project .kite-code > user kite-code > project .mcp.json
 Approval Store 和 `/mcp` 决策属于 MCP control plane，不写入任务 Runtime Event 或 session log。MCP capability 只有在批准、连接和 discovery 成功后才进入现有 revisioned catalog；后续 Tool 调用仍必须通过 turn binding、schema、Policy、Execution 与 Verification。
 
 ## TUI 行为
+
+`/mcp` 注册在 TUI 的静态斜杠命令表中。输入 `/m`、`/mc` 或完整命令时，候选面板显示 `/mcp` 及管理面板说明；Tab、右方向键和 Enter 遵循通用斜杠命令补全行为。
 
 `/mcp` 在 Server 尚未连接时也显示项目审批条目，只展示 Server 名称、transport、source path、状态、摘要短前缀、stdio command 与参数数量或只保留 origin 的 HTTP endpoint，以及脱敏诊断；不会展示 URL path/query/fragment/userinfo、env、header 或参数内容。选中条目后：
 

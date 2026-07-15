@@ -31,6 +31,8 @@ Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根�
 
 Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。
 
+`/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示管理面板说明，并支持 Tab、右方向键和 Enter 补全。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令，不是 `/mcp` 子指令。
+
 ## 8.4 Session 与恢复点
 
 会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。

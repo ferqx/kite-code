@@ -1,5 +1,25 @@
 import { describe, expect, test } from 'bun:test';
-import { buildModeSuggestionItems } from '../src/app/tui/hooks/useSlashSuggestions';
+import {
+  buildModeSuggestionItems,
+  findSlashCommandDefs,
+  SLASH_COMMANDS,
+} from '../src/app/tui/hooks/useSlashSuggestions';
+
+describe('slash command suggestions', () => {
+  test('suggests /mcp with its management-panel hint', () => {
+    expect(findSlashCommandDefs('mc')).toEqual([
+      {
+        name: 'mcp',
+        aliases: [],
+        description: 'Open MCP management panel',
+      },
+    ]);
+  });
+
+  test('makes /mcp available to tab completion and exact-command matching', () => {
+    expect(SLASH_COMMANDS).toContain('mcp');
+  });
+});
 
 describe('slash mode suggestions', () => {
   test('explains the local-only boundary of accept_edits', () => {

@@ -23,12 +23,22 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'new', aliases: [], description: 'Start a new session' },
   { name: 'plan', aliases: [], description: 'Enter planning mode' },
   { name: 'permissions', aliases: [], description: 'Set permissions', args: 'ask|auto|full' },
+  { name: 'mcp', aliases: [], description: 'Open MCP management panel' },
   { name: 'clear', aliases: ['c'], description: 'Clear output' },
   { name: 'help', aliases: ['h'], description: 'Show help' },
   { name: 'exit', aliases: ['quit', 'q'], description: 'Exit Kite Code' },
 ];
 
 export const SLASH_COMMANDS = SLASH_COMMAND_DEFS.map((c) => c.name);
+
+export function findSlashCommandDefs(partial: string): SlashCommandDef[] {
+  const normalized = partial.toLowerCase();
+  return SLASH_COMMAND_DEFS.filter(
+    (command) =>
+      command.name.startsWith(normalized) ||
+      command.aliases.some((alias) => alias.startsWith(normalized)),
+  );
+}
 
 export interface SuggestionItem {
   command: string;
@@ -187,9 +197,7 @@ export function useSlashSuggestions(
     if (!cmdMatch) return null;
 
     const partial = cmdMatch[1]!.toLowerCase();
-    const commands = SLASH_COMMAND_DEFS.filter(
-      (cmd) => cmd.name.startsWith(partial) || cmd.aliases.some((a) => a.startsWith(partial)),
-    );
+    const commands = findSlashCommandDefs(partial);
 
     // Also check skill manifests
     if (skillManifests && skillManifests.length > 0) {

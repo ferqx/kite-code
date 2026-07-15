@@ -411,7 +411,24 @@ describe('TUI PTY System — Slash Commands', () => {
     TIMEOUT,
   );
 
-  // ── /mcp opens MCP panel ───────────────────────────────────
+  // ── /mcp suggestion and panel ──────────────────────────────
+
+  test(
+    'partial /mc input suggests /mcp',
+    async () => {
+      await typeText(tui, '/mc');
+      await waitForText(() => tui.output(), 'Open MCP management panel', 10000);
+
+      const output = tui.output();
+      expect(screenContains(output, '命令匹配 /mc')).toBe(true);
+      expect(screenContains(output, '/mcp')).toBe(true);
+      expect(screenContains(output, 'Open MCP management panel')).toBe(true);
+
+      await clearInput(tui, '/mc'.length);
+      await sleep(300);
+    },
+    TIMEOUT,
+  );
 
   test(
     '/mcp opens MCP panel',
