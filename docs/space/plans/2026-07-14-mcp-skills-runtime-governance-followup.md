@@ -1,9 +1,10 @@
 # MCP 与 Skills Runtime 治理后续计划
 
-状态：completed
+状态：archived
 优先级：P1
 依赖：`2026-07-14-mcp-runtime-governance-p0.md`、ADR-0007、ADR-0008
 来源：`docs/design/2026-07-14-mcp-skills-runtime-governance-rfc.md`
+归档记录：`../execution/completed/2026-07-15-mcp-skills-runtime-governance.md`
 
 ## 目标
 

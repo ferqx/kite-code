@@ -3,6 +3,7 @@
 状态：completed
 实施日期：2026-07-14
 计划：`../../plans/2026-07-14-mcp-runtime-governance-p0.md`
+实现提交：`b470ad0`
 
 ## 完成内容
 

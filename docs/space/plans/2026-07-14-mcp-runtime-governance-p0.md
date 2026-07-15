@@ -1,8 +1,9 @@
 # MCP Runtime Governance P0
 
-状态：completed
+状态：archived
 优先级：P0
 来源：`docs/design/2026-07-14-mcp-skills-runtime-governance-rfc.md`
+归档记录：`../execution/completed/2026-07-14-mcp-runtime-governance-p0.md`
 
 ## 目标
 

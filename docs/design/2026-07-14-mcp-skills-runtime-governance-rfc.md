@@ -1,8 +1,9 @@
-# MCP 与 Skills 的 Runtime 治理重构 RFC（审核稿）
+# MCP 与 Skills 的 Runtime 治理重构 RFC（已实施）
 
-状态：approved（实施中）
+状态：approved（实施完成）
 审核日期：2026-07-14
 实施批准：2026-07-14
+实施完成：2026-07-15
 代码基线：`sp-0.1.0` / `bdc315e0bbee88d4fbfc9aad6a369de71d00bec9`
 范围：MCP、Skills、工具绑定、授权、执行证据、验证与恢复
 分类：Capability + Policy + Lifecycle + Engine
@@ -14,14 +15,29 @@
 - [`../active/authorization.md`](../active/authorization.md)
 - [`../active/feature-flags.md`](../active/feature-flags.md)
 - [`../active/failure-classification.md`](../active/failure-classification.md)
+- [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)
+- [`../active/verification-governance.md`](../active/verification-governance.md)
+- [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)
 - [`../adr/0001-runtime-kernel.md`](../adr/0001-runtime-kernel.md)
 - [`../adr/0007-capability-bindings.md`](../adr/0007-capability-bindings.md)
 - [`../adr/0008-verification-completion-semantics.md`](../adr/0008-verification-completion-semantics.md)
 - [`../space/plans/2026-07-14-mcp-runtime-governance-p0.md`](../space/plans/2026-07-14-mcp-runtime-governance-p0.md)（Phase 0 + 1，已完成）
-- [`../space/plans/2026-07-14-mcp-skills-runtime-governance-followup.md`](../space/plans/2026-07-14-mcp-skills-runtime-governance-followup.md)（Phase 2–5，实施中）
+- [`../space/plans/2026-07-14-mcp-skills-runtime-governance-followup.md`](../space/plans/2026-07-14-mcp-skills-runtime-governance-followup.md)（Phase 2–5，已完成）
+- [`../space/execution/completed/2026-07-14-mcp-runtime-governance-p0.md`](../space/execution/completed/2026-07-14-mcp-runtime-governance-p0.md)（Phase 0 + 1 完成记录）
+- [`../space/execution/completed/2026-07-15-mcp-skills-runtime-governance.md`](../space/execution/completed/2026-07-15-mcp-skills-runtime-governance.md)（Phase 2–5 完成记录）
 - [`../space/understanding/2026-05-23-skills-system-design.md`](../space/understanding/2026-05-23-skills-system-design.md)
 
-> 本文是设计基线，不描述完整的当前行为，也不能直接作为实现依据。已拆分为 `docs/space/plans/` 中的可验证实施计划；Runtime 完成语义、capability identity/binding 已分别由 ADR-0008、ADR-0007 约束。后续实施必须更新对应计划与完成记录，而非在本文追加实现细节。
+> 本文是设计基线，不描述完整的当前行为，也不能直接作为实现依据。当前行为以 `docs/active/`、ADR 和实现代码为准；实施过程与验证证据见对应计划和完成记录。
+
+## 实施结果
+
+RFC 的 Phase 0–5 已全部完成。Phase 0 + 1 的实现提交为 `b470ad0`；Phase 2–5 的实现提交依次为 `7f0b8d2`、`c67c0f0`、`3740558`、`8a76657`、`8cabc35`。最终形成 MCP Runtime 治理、分级验证和 progressive disclosure 三份 active 规则。
+
+实施相对审核稿有三项收敛，以下结论覆盖正文中的早期建议：
+
+1. `capabilitySearchV1=false` 恢复 revisioned Runtime 全量治理 binding，而不是仅保留显式配置的有限 binding；任何情况下都不恢复旧 MCP adapter 或 Skill 正文注入。
+2. Runtime schema v10 在 capability state 中增加一次性 `pendingSearch` 与 turn-scoped `disclosures`，用于保证搜索候选只在下一轮按 revision 生成有限 binding。
+3. 模型可见 MCP schema 会移除远端 `description`、`title`、`$comment`、`examples` 和 `default` 等自然语言注释；参数校验仍使用原始 revisioned schema。
 
 ## 一、审核结论
 
@@ -952,11 +968,11 @@ capabilitySearchV1
 - feature flag 只控制新子系统是否启用，不保留旧实现；
 - 关闭 `mcpRuntimeBindingV1` 时 MCP tool 不可调用；
 - 关闭 `skillWorkflowV1` 时 Skill 不可激活；
-- 关闭 `capabilitySearchV1` 时仅允许显式配置的有限 capability binding；
+- 关闭 `capabilitySearchV1` 时恢复 revisioned Runtime 全量治理 binding；不会恢复旧 MCP adapter 或 Skill 正文注入；
 - 关闭 `verificationV1` 不得绕过已经开始的外部写入 reconciliation；
 - 安全策略失败时 fail closed，不能以回滚为由自动放行未知 MCP tool。
 
-该策略与当前 [`../active/feature-flags.md`](../active/feature-flags.md) 要求“保留旧路径至少两周”的规则冲突。实施前必须通过新 ADR 和 active 文档更新明确替代该规则。
+该例外已在 [`../active/feature-flags.md`](../active/feature-flags.md) 中固化：MCP/Skill 治理开关不得重新启用被替代的旧执行路径。
 
 ## 十六、测试与验收
 

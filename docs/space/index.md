@@ -108,6 +108,8 @@
 | `plans/2026-06-18-session-logger.md` | draft | 会话日志本地记录 — AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断。 |
 | `plans/2026-06-19-event-mechanism-refactor.md` | draft | 事件机制重构 — turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一。 |
 | `plans/2026-06-28-context-compaction.md` | active | 上下文压缩方案 — M0 TUI 预整合 + M1 Core 工具折叠 + M2 对话摘要（延后）。 |
+| `plans/2026-07-14-mcp-runtime-governance-p0.md` | archived | MCP Runtime 治理 Phase 0 + 1：revisioned catalog、turn binding、fail-closed schema、policy 与结构化结果。 |
+| `plans/2026-07-14-mcp-skills-runtime-governance-followup.md` | archived | MCP/Skills Runtime 治理 Phase 2–5：执行恢复、Workflow Contract、分级验证与 progressive disclosure。 |
 
 ## 完成执行记录
 
@@ -140,6 +142,8 @@
 | `execution/completed/2026-06-09-sqlite-reliability-optimization.md` | completed | SQLite 连接管理、写入可靠性、WAL 清理、会话列表索引优化。 |
 | `execution/completed/2026-07-02-interaction-mode-slash-command.md` | completed | 阶段四：`/permissions` 交互模式快捷指令 + 审批面板重设计 + 命名重构 `interactive/auto_review/unattended` → `ask/auto/full`。 |
 | `execution/completed/2026-07-02-execution-reliability.md` | completed | 阶段五：连续失败计数修复、耗尽信号 ToolMessage 注入、Gateway 预检拦截、写操作串行化、子 Agent Journal 集成。 |
+| `execution/completed/2026-07-14-mcp-runtime-governance-p0.md` | completed | MCP Runtime 治理 Phase 0 + 1 完成记录：catalog、binding、schema、policy 与结构化结果。 |
+| `execution/completed/2026-07-15-mcp-skills-runtime-governance.md` | completed | MCP/Skills Runtime 治理 Phase 2–5 完成记录：恢复、Skill Workflow、verification 与 progressive disclosure。 |
 
 ## 参考资料
 
