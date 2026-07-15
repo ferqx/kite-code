@@ -550,6 +550,12 @@ async function runSubAgentLoop(
           if (!pendingRequest) {
             throw new Error(`Unknown tool requested by sub-agent: ${tc.name}`);
           }
+          const boundMcpDescriptor = tc.name.startsWith('mcp__')
+            ? (() => {
+                const binding = mcpBindings.get(tc.name)?.binding;
+                return binding ? input.mcpManager?.findCapability(binding.capabilityId) : undefined;
+              })()
+            : undefined;
           const result = await runApprovedTool({
             workspace: input.workspace,
             request: pendingRequest,
@@ -559,6 +565,14 @@ async function runSubAgentLoop(
             authorization: input.authorization,
             threadId: input.threadId ?? '',
             mcpManager: input.mcpManager,
+            ...(boundMcpDescriptor
+              ? {
+                  mcpPolicy: {
+                    effects: boundMcpDescriptor.effectiveEffects,
+                    minimumApproval: boundMcpDescriptor.policy.minimumApproval,
+                  },
+                }
+              : {}),
             skillManifests: input.skills,
             skillOptions: input.skillOptions,
             signal: combinedSignal,

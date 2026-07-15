@@ -54,12 +54,12 @@ export function evaluateDocumentationImpact(
 
 function stagedFiles(): string[] {
   const result = Bun.spawnSync({
-    cmd: ['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR'],
+    cmd: ['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'],
     stdout: 'pipe',
     stderr: 'inherit',
   });
   if (result.exitCode !== 0) process.exit(result.exitCode);
-  return result.stdout.toString().split(/\r?\n/u).filter(Boolean);
+  return result.stdout.toString().split('\0').filter(Boolean);
 }
 
 function loadMap(root: string): DocumentationMap {

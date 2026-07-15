@@ -24,7 +24,7 @@ import {
   PlanArtifactError,
   type PlanArtifactStore,
 } from '@/core/persistence/plan-artifacts';
-import { evaluateToolApproval } from '@/core/policies/approval-policy';
+import { evaluateToolApproval, isReadOnlyMcpPolicy } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -1362,6 +1362,12 @@ export async function executeRuntimeTools(params: {
             params.state.capabilities.bindings[call.bindingId]?.capabilityId ?? '',
           )
         : undefined;
+    const mcpPolicy = mcpDescriptor
+      ? {
+          effects: mcpDescriptor.effectiveEffects,
+          minimumApproval: mcpDescriptor.policy.minimumApproval,
+        }
+      : undefined;
     const decision = evaluateToolApproval({
       toolName: request.name,
       toolArgs: request.args as Record<string, unknown>,
@@ -1369,14 +1375,7 @@ export async function executeRuntimeTools(params: {
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
-      ...(mcpDescriptor
-        ? {
-            mcpPolicy: {
-              effects: mcpDescriptor.effectiveEffects,
-              minimumApproval: mcpDescriptor.policy.minimumApproval,
-            },
-          }
-        : {}),
+      ...(mcpPolicy ? { mcpPolicy } : {}),
     });
     if (!decision.allowed) {
       events.push({
@@ -1388,6 +1387,7 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     const requiresEffectReview =
+      !isReadOnlyMcpPolicy(mcpPolicy) &&
       params.state.authorization.mode !== 'full_access' &&
       getEffectiveInteractionMode(params.state) !== 'full' &&
       Boolean(
@@ -1671,6 +1671,7 @@ export async function executeRuntimeTools(params: {
         approvedGrant: call.approvalGrant ?? 'none',
         threadId: params.state.session.threadId,
         mcpManager: params.mcpManager,
+        ...(mcpPolicy ? { mcpPolicy } : {}),
         skillManifests: params.skillManifests,
         skillOptions: params.skillOptions,
         signal: params.signal,

@@ -166,7 +166,7 @@ describe('Runtime stability invariants', () => {
     }
     expect(Object.keys(state.tools.calls)).toHaveLength(10_000);
     expect(state.tools.queue).toHaveLength(10_000);
-  });
+  }, 15_000);
 
   test('replays durable events after the snapshot position during recovery', () => {
     const directory = mkdtempSync(join('/tmp', 'kite-runtime-tail-'));

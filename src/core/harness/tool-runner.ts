@@ -4,7 +4,11 @@ import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpManager } from '@/core/mcp';
 import { normalizeMcpToolResult, parseMcpToolName } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
-import { evaluateToolApproval } from '@/core/policies/approval-policy';
+import {
+  evaluateToolApproval,
+  isReadOnlyMcpPolicy,
+  type RuntimeMcpPolicy,
+} from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
@@ -46,6 +50,8 @@ export interface RunApprovedToolInput {
   threadId?: string;
   override?: AuthorizationOverride;
   mcpManager?: McpManager;
+  /** Runtime-resolved policy for a binding-validated MCP capability. */
+  mcpPolicy?: RuntimeMcpPolicy;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   signal?: AbortSignal;
@@ -71,6 +77,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     threadId = '',
     override,
     mcpManager,
+    mcpPolicy,
     skillManifests,
     skillOptions,
     signal,
@@ -108,6 +115,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     threadId,
     authorization: normalizeAuthorizationState(authorization),
     override,
+    mcpPolicy,
   });
   if (!policy.allowed) {
     return withFailureGuidance(request, {
@@ -131,7 +139,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     effects: policy.effects,
   });
   const requiresModeApproval =
-    modeDecision.kind === 'need_tool_approval' || modeDecision.kind === 'need_auto_review';
+    !isReadOnlyMcpPolicy(mcpPolicy) &&
+    (modeDecision.kind === 'need_tool_approval' || modeDecision.kind === 'need_auto_review');
   const hasExecutionGrant =
     approvedGrant !== 'none' ||
     policy.grantUsed === 'same_command' ||

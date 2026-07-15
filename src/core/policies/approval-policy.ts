@@ -19,6 +19,20 @@ import { classifyToolCapability, type ToolCapability } from './tool-capabilities
 export type { ToolRisk };
 export { classifyShellRisk, isDestructiveShellCommand };
 
+export interface RuntimeMcpPolicy {
+  effects: EffectProfile;
+  minimumApproval: CapabilityApproval;
+}
+
+export function isReadOnlyMcpPolicy(policy: RuntimeMcpPolicy | undefined): boolean {
+  return (
+    policy?.minimumApproval === 'none' &&
+    [policy.effects.filesystem, policy.effects.network, policy.effects.externalState].every(
+      (effect) => effect === 'none' || effect === 'read',
+    )
+  );
+}
+
 /** evaluateToolApproval 的输入参数 / Input parameters for evaluateToolApproval */
 export interface EvaluateToolApprovalParams {
   /** 工具名称（如 'shell_execute', 'write_file', 'mcp__server__tool'）/ Tool name */
@@ -36,7 +50,7 @@ export interface EvaluateToolApprovalParams {
   /** 运行时授权覆盖（如来自 checkpoint 或父线程）/ Runtime authorization override */
   override?: AuthorizationOverride;
   /** Runtime-resolved local MCP policy. Server annotations never reach this input directly. */
-  mcpPolicy?: { effects: EffectProfile; minimumApproval: CapabilityApproval };
+  mcpPolicy?: RuntimeMcpPolicy;
   /** Classification captured by the runtime queue, when available. */
   capability?: ToolCapability;
 }
@@ -531,11 +545,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
 
   // MCP policy is derived from a bound descriptor, never a free server name.
   if (toolName.startsWith('mcp__')) {
-    const mcpPolicy = params.mcpPolicy;
-    const isProvenRead =
-      mcpPolicy?.minimumApproval === 'none' &&
-      (mcpPolicy.effects.externalState === 'none' || mcpPolicy.effects.externalState === 'read');
-    if (isProvenRead) {
+    if (isReadOnlyMcpPolicy(params.mcpPolicy)) {
       return allow({
         risk: 'read',
         reason: 'Runtime-local MCP policy classifies this bound capability as read-only.',

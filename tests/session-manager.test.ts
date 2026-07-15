@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   admitInteractionModeTarget,
   fullModeUnavailableReason,
@@ -9,6 +12,7 @@ import {
 } from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
 import { createInitialRuntimeState } from '../src/core/runtime/state';
+import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
 
 // ── Helpers ──
 
@@ -412,6 +416,26 @@ describe('SessionManager', () => {
     const snapshots = mgr.getSnapshot();
     const snap = snapshots.find((s) => s.threadId === tid)!;
     expect(snap.status.cacheHitTokens).toBe(100);
+  });
+
+  test('shares one journal mode between the long-lived stats connection and RuntimeStore', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-session-journal-'));
+    const checkpointPath = join(root, 'checkpoints.sqlite');
+    const mgr = new SessionManager({ ...makeDeps(), checkpointPath });
+    try {
+      mgr.saveTokenStats(
+        'dual-connection',
+        makeStatus({ cacheHitTokens: 1, cacheMissTokens: 2, totalTokens: 3 }),
+        true,
+      );
+
+      const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
+      store.appendEvents('dual-connection', []);
+      store.close();
+    } finally {
+      mgr.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('saveTokenStats skips DB write when all stats are zero', () => {

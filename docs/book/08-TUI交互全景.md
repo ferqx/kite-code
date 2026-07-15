@@ -35,10 +35,12 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 
 会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。
 
+TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 Core 提供的统一 journal mode；Windows 为 DELETE，其他平台为 WAL。长期 stats 连接保持打开期间，RuntimeStore 仍须能够打开、持久化和关闭，不能因两个连接各自设置 journal mode 而在启动时报 `database is locked`。
+
 ## 8.5 MCP 与 Skill 交互
 
 MCP 面板显示连接和健康状态；模型可调用能力来自 revisioned catalog/binding，而不是面板列表本身。Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到用户任务。
 
 ## 8.6 终端稳定性
 
-TUI 的关键质量边界包括：DEC synchronized output、无 viewport culling、静态内容引用稳定、Footer resize、输入光标和 mixed-script wrapping。对应规则位于 `docs/active/tui-*.md`。
+TUI 的关键质量边界包括：DEC synchronized output、无 viewport culling、静态内容引用稳定、Footer resize、输入光标和 mixed-script wrapping。Spinner 帧由 elapsed time 的纯函数确定；测试使用受控时间验证帧序列，不依赖真实事件循环恰好在 120ms 内调度。对应规则位于 `docs/active/tui-*.md`。

@@ -96,6 +96,26 @@ describe('createRuntimeStore', () => {
     store.close();
   });
 
+  test('supports DELETE journal mode for immediate portable close and reopen', () => {
+    const store = createRuntimeStore(dbPath, { journalMode: 'delete' });
+    store.close();
+
+    const reopened = new Database(dbPath);
+    const mode = reopened.query<{ journal_mode: string }, []>('PRAGMA journal_mode').get();
+    reopened.close();
+    expect(mode?.journal_mode).toBe('delete');
+  });
+
+  test('selects a platform-safe default journal mode', () => {
+    const store = createRuntimeStore(dbPath);
+    store.close();
+
+    const reopened = new Database(dbPath);
+    const mode = reopened.query<{ journal_mode: string }, []>('PRAGMA journal_mode').get();
+    reopened.close();
+    expect(mode?.journal_mode).toBe(process.platform === 'win32' ? 'delete' : 'wal');
+  });
+
   test('isolates stores created before the RuntimeStore format marker existed', () => {
     const db = new Database(dbPath);
     db.run(

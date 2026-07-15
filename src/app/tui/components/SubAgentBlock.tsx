@@ -10,6 +10,7 @@ import {
   formatReadFileRange,
   SPINNER,
   SPINNER_INTERVAL_MS,
+  spinnerIndexForElapsed,
   toolColor,
 } from './render-utils';
 
@@ -171,7 +172,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   useEffect(() => {
     const tick = () => {
       if (!spinnerRunningRef.current) return;
-      const idx = Math.floor((Date.now() - spinnerStartRef.current) / 80) % SPINNER.length;
+      const idx = spinnerIndexForElapsed(Date.now() - spinnerStartRef.current);
       setSpinnerIdx(idx);
     };
     const spinnerTimer = setInterval(tick, SPINNER_INTERVAL_MS);

@@ -592,6 +592,27 @@ describe('evaluateToolApproval', () => {
       expect(result.requiresApproval).toBe(false);
       expect(result.risk).toBe('read');
     });
+
+    it('keeps MCP tools behind approval when any effect dimension can write', () => {
+      const writePolicies = [
+        { filesystem: 'write', network: 'read', externalState: 'read' },
+        { filesystem: 'read', network: 'write', externalState: 'read' },
+        { filesystem: 'read', network: 'read', externalState: 'write' },
+      ] as const;
+
+      for (const effects of writePolicies) {
+        const result = evaluateToolApproval(
+          baseParams({
+            toolName: 'mcp__server__tool',
+            toolArgs: {},
+            mcpPolicy: { effects, minimumApproval: 'none' },
+          }),
+        );
+        expect(result.allowed).toBe(true);
+        expect(result.requiresApproval).toBe(true);
+        expect(result.risk).toBe('mcp');
+      }
+    });
   });
 
   // ── read_mcp_resource / MCP 资源读取 ──

@@ -88,7 +88,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
     const manager = mockMcpManager(async () => 'content');
     const request = makeReadMcpResourceRequest({
       args: { server: '', uri: 'resource://test' },
-    } as any);
+    } as Partial<PendingToolRequest & { args: { server?: string; uri?: string } }>);
 
     const result = await runApprovedTool({
       workspace: '/ws',
@@ -135,6 +135,42 @@ describe('runApprovedTool — read_mcp_resource', () => {
     expect(result.ok).toBe(false);
     expect(result.stderr).toContain('requires approval');
     expect(readCalled).toBe(false);
+  });
+});
+
+describe('runApprovedTool — bound MCP policy', () => {
+  it('executes a binding-validated read-only MCP tool without inventing a second approval', async () => {
+    let called = false;
+    const manager = {
+      callTool: async () => {
+        called = true;
+        return {
+          content: [{ type: 'text', text: 'authenticated read' }],
+          structuredContent: { ok: true },
+        };
+      },
+      findCapability: () => undefined,
+    } as unknown as McpManager;
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-authenticated-read',
+        name: 'mcp__auth__read',
+        args: { id: '42' },
+        reason: 'Read authenticated fixture data',
+        protectedCommand: 'mcp__auth__read',
+      } as PendingToolRequest,
+      mcpManager: manager,
+      mcpPolicy: {
+        effects: { filesystem: 'none', network: 'read', externalState: 'read' },
+        minimumApproval: 'none',
+      },
+    });
+
+    expect(result.ok, result.stderr).toBe(true);
+    expect(result.stdout).toContain('authenticated read');
+    expect(called).toBe(true);
   });
 });
 

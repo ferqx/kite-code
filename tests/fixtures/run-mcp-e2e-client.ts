@@ -1,0 +1,118 @@
+#!/usr/bin/env bun
+
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { loadMcpConfig } from '@/core/config';
+import { McpManager } from '@/core/mcp';
+import { aiMessage } from '@/core/messages';
+import { runRuntimeAgent } from '@/core/runtime/agent';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import { createRuntimeStore } from '@/core/runtime/store';
+import { createMockModel } from '../mock-model';
+
+const serverName = process.env.MCP_E2E_SERVER_NAME;
+const expectedScope = process.env.MCP_E2E_EXPECTED_SCOPE;
+const secret = process.env.MCP_E2E_SECRET;
+
+if (!serverName || !expectedScope) throw new Error('Missing MCP E2E client parameters.');
+
+const workspace = process.cwd();
+const runtimeDir = join(workspace, '.kite-code');
+const storePath = join(runtimeDir, `mcp-e2e-${serverName}.db`);
+mkdirSync(runtimeDir, { recursive: true });
+
+const loaded = loadMcpConfig();
+const serverConfig = loaded.servers[serverName];
+if (!serverConfig) throw new Error(`MCP server '${serverName}' was not loaded from config.`);
+
+const manager = new McpManager();
+try {
+  await manager.connect(serverName, serverConfig);
+  const descriptor = manager.findCapability(`mcp:${serverName}/authenticated_echo`);
+  if (!descriptor) throw new Error('Authenticated MCP capability was not discovered.');
+
+  const model = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'authenticated-mcp-call',
+            name: `mcp__${serverName}__authenticated_echo`,
+            args: { message: expectedScope },
+          },
+        ],
+      }),
+    },
+    { message: aiMessage({ content: `Authenticated ${expectedScope} MCP call completed.` }) },
+  ]);
+  const events: RuntimeEvent[] = [];
+  for await (const event of runRuntimeAgent(
+    {
+      task: `Call the authenticated ${expectedScope} MCP server.`,
+      threadId: `mcp-e2e-${serverName}`,
+      userId: 'e2e',
+      workspace,
+      runtimeStorePath: storePath,
+      model,
+      mcpManager: manager,
+      config: {
+        providerName: 'test',
+        providerType: 'openai-compatible',
+        apiKey: 'test',
+        baseURL: 'http://localhost:1',
+        modelName: 'test',
+        sandbox: { enabled: true },
+        features: {
+          capabilityCatalogV1: true,
+          mcpRuntimeBindingV1: true,
+          mcpExecutionRecordV1: true,
+        },
+      },
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unexpected' }) },
+  )) {
+    events.push(event);
+  }
+
+  const store = createRuntimeStore(storePath);
+  const persisted = store.loadEvents(`mcp-e2e-${serverName}`).map((entry) => entry.event);
+  store.close();
+  const serialized = JSON.stringify({ events, persisted });
+  if (secret && serialized.includes(secret)) {
+    throw new Error('MCP credential leaked into Runtime events.');
+  }
+  const finished = events.find(
+    (event): event is Extract<RuntimeEvent, { type: 'tool.finished' }> =>
+      event.type === 'tool.finished' &&
+      event.result.stdout.includes(`authenticated:${expectedScope}`),
+  );
+  if (!finished) {
+    const toolOutcomes: Array<Record<string, unknown>> = [];
+    for (const event of events) {
+      if (event.type === 'tool.finished') {
+        toolOutcomes.push({
+          type: event.type,
+          stdout: event.result.stdout,
+          stderr: event.result.stderr,
+        });
+      } else if (event.type === 'tool.rejected') {
+        toolOutcomes.push({ type: event.type, reason: event.reason });
+      }
+    }
+    throw new Error(
+      `Authenticated MCP tool did not finish with the expected scope: ${JSON.stringify({ eventTypes: events.map((event) => event.type), toolOutcomes })}`,
+    );
+  }
+
+  console.log(
+    JSON.stringify({
+      provenance: descriptor.provider.provenance,
+      eventTypes: events.map((event) => event.type),
+      toolStdout: finished.result.stdout,
+      persistedEventTypes: persisted.map((event) => event.type),
+    }),
+  );
+} finally {
+  await manager.disconnectAll();
+}

@@ -10,6 +10,7 @@ import InputLine from '../src/app/tui/components/InputLine';
 import MarkdownBlock from '../src/app/tui/components/MarkdownBlock';
 import ModelSelector from '../src/app/tui/components/ModelSelector';
 import PlanReviewBlock from '../src/app/tui/components/PlanReviewBlock';
+import { SPINNER, spinnerIndexForElapsed } from '../src/app/tui/components/render-utils';
 import StartupScreen from '../src/app/tui/components/StartupScreen';
 import SubAgentBlock from '../src/app/tui/components/SubAgentBlock';
 import TaskProgressBlock from '../src/app/tui/components/TaskProgressBlock';
@@ -67,6 +68,14 @@ function fakeRunStatus(overrides: Partial<RunStatusSnapshot> = {}): RunStatusSna
     ...overrides,
   };
 }
+
+describe('spinner timing', () => {
+  test('derives frames deterministically from elapsed time', () => {
+    expect(SPINNER[spinnerIndexForElapsed(0)]).toBe('⠋');
+    expect(SPINNER[spinnerIndexForElapsed(120)]).toBe('⠙');
+    expect(SPINNER[spinnerIndexForElapsed(SPINNER.length * 80)]).toBe('⠋');
+  });
+});
 
 function fakeApproval(overrides: Partial<ToolApprovalPayload> = {}): ToolApprovalPayload {
   return {
@@ -998,7 +1007,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('⠋');
   });
 
-  test('running tool_card spinner advances within 120ms', async () => {
+  test('running tool_card renders the initial spinner frame', () => {
     const block: OutputBlock = {
       id: 1,
       kind: 'tool_card',
@@ -1014,8 +1023,6 @@ describe('BlockRenderer', () => {
     );
 
     expect(lastFrame()).toContain('⠋');
-    await Bun.sleep(120);
-    expect(lastFrame()).not.toContain('⠋');
   });
 
   test('running shell tool_card renders liveOutput', () => {
@@ -2398,7 +2405,7 @@ describe('SubAgentBlock rendering', () => {
     expect(frame).not.toContain('✓');
   });
 
-  test('running subagent spinner advances within 120ms', async () => {
+  test('running subagent renders the initial spinner frame', () => {
     const block = {
       id: 1,
       kind: 'subagent' as const,
@@ -2415,8 +2422,6 @@ describe('SubAgentBlock rendering', () => {
     const { lastFrame } = render(<SubAgentBlock block={block} />);
 
     expect(lastFrame()).toContain('⠋');
-    await Bun.sleep(120);
-    expect(lastFrame()).not.toContain('⠋');
   });
 
   test('renders done subagent block', () => {

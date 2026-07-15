@@ -9,7 +9,7 @@ import { createAgentKernel } from '@/core/runtime/kernel';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import type { RuntimeState } from '@/core/runtime/state';
 import { getActivePlanning, getActiveTask, getAgentPhase } from '@/core/runtime/state';
-import { runtimeStorePathFor } from '@/core/runtime/store';
+import { defaultRuntimeJournalMode, runtimeStorePathFor } from '@/core/runtime/store';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
@@ -571,7 +571,7 @@ export class SessionManager {
     if (!this._statsDb) {
       this._statsDb = new Database(runtimeStorePathFor(this.deps.checkpointPath));
       // Keep token-stat writes compatible with concurrent RuntimeStore access.
-      this._statsDb.run('pragma journal_mode = wal');
+      this._statsDb.run(`pragma journal_mode = ${defaultRuntimeJournalMode()}`);
       this._statsDb.run('pragma busy_timeout = 5000');
       this._statsDb.run(`create table if not exists session_stats (
         thread_id text primary key not null,

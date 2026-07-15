@@ -1,12 +1,25 @@
 // ── Runtime 事件存储 / Runtime event store ──
 // 提供 runtime_events（追加型事件日志）和 runtime_snapshots（可覆盖状态快照）的持久化
 
-import { Database } from 'bun:sqlite';
+import { constants, Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { RuntimeEvent } from './events.js';
 
 export const RUNTIME_STORE_SCHEMA_VERSION = 2;
+export type RuntimeJournalMode = 'wal' | 'delete';
+
+export function defaultRuntimeJournalMode(): RuntimeJournalMode {
+  return process.platform === 'win32' ? 'delete' : 'wal';
+}
+
+export interface RuntimeStoreOptions {
+  /**
+   * WAL is the normal production mode. Bun currently keeps WAL files locked
+   * after close on Windows, so DELETE is the safe platform default there.
+   */
+  journalMode?: RuntimeJournalMode;
+}
 
 export interface RuntimeEventMetadata {
   eventId: string;
@@ -134,7 +147,10 @@ function checksum(value: string): string {
  * @param dbPath SQLite 数据库路径（可使用 ':memory:'）
  * @returns RuntimeStore 实例
  */
-export function createRuntimeStore(dbPath: string): RuntimeStore {
+export function createRuntimeStore(
+  dbPath: string,
+  options: RuntimeStoreOptions = {},
+): RuntimeStore {
   // 确保父目录存在 / Ensure parent directory exists
   if (dbPath !== ':memory:') {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -143,9 +159,10 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
 
   const db = new Database(dbPath);
   let isClosed = false;
+  const journalMode = options.journalMode ?? defaultRuntimeJournalMode();
 
-  // WAL 模式提升并发读写性能 / WAL mode improves concurrent read/write performance
-  db.run('PRAGMA journal_mode = wal');
+  // WAL improves concurrency; Windows uses DELETE until Bun releases WAL file locks reliably.
+  db.run(`PRAGMA journal_mode = ${journalMode}`);
   // 多会话并发写入时避免 SQLITE_BUSY / Avoid SQLITE_BUSY under concurrent multi-session writes
   db.run('PRAGMA busy_timeout = 5000');
 
@@ -303,6 +320,27 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
   >(
     'SELECT name, event_position, created_at FROM runtime_named_snapshots WHERE thread_id = ? ORDER BY created_at DESC, name DESC',
   );
+  const statements = [
+    insertEvent,
+    insertEventWithMetadata,
+    selectEvents,
+    selectAllEvents,
+    upsertSnapshot,
+    selectSnapshot,
+    upsertNamedSnapshot,
+    selectNamedSnapshot,
+    selectLastEventPosition,
+    upsertSession,
+    setSessionName,
+    listSessions,
+    deleteEvents,
+    deleteEventsAfter,
+    deleteSnapshot,
+    deleteNamedSnapshots,
+    deleteNamedSnapshotsAfter,
+    deleteSession,
+    listNamedSnapshots,
+  ] as const;
 
   const store: RuntimeStore = {
     appendEvents(
@@ -608,10 +646,18 @@ export function createRuntimeStore(dbPath: string): RuntimeStore {
     close(): void {
       if (isClosed) return;
       isClosed = true;
-      try {
-        db.run('PRAGMA wal_checkpoint(TRUNCATE)');
-      } catch {
-        /* best-effort */
+      for (const statement of statements) statement.finalize();
+      if (journalMode === 'wal') {
+        try {
+          db.fileControl('main', constants.SQLITE_FCNTL_PERSIST_WAL, 0);
+        } catch {
+          /* best-effort WAL persistence cleanup */
+        }
+        try {
+          db.run('PRAGMA wal_checkpoint(TRUNCATE)');
+        } catch {
+          /* best-effort WAL checkpoint */
+        }
       }
       db.close();
     },
