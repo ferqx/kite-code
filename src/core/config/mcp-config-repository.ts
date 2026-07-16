@@ -27,7 +27,7 @@ import {
 import { canonicalWorkspaceKey } from './mcp-project-approvals';
 import { defaultConfigPath, localMcpConfigPath } from './paths';
 
-export type McpServerConfigInput = Omit<McpServerConfig, 'providerVersion'>;
+export type McpServerConfigInput = Omit<McpServerConfig, 'providerVersion' | 'credentialKey'>;
 export type McpConfigPatch = Partial<McpServerConfigInput>;
 
 export type McpConfigCommand =

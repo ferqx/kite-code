@@ -18,7 +18,9 @@ describe('CtrlSafeTextInput cursor boundary rendering', () => {
 
     const lines = (lastFrame() ?? '').split('\n');
     console.log('Cursor at end (offset 10):');
-    lines.forEach((l, i) => console.log(`${i}: |${l}|`));
+    lines.forEach((l, i) => {
+      console.log(`${i}: |${l}|`);
+    });
     expect(lines.length).toBe(2);
   });
 

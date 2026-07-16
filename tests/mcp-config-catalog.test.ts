@@ -117,4 +117,79 @@ describe('MCP source-aware config catalog', () => {
     expect(JSON.stringify(view)).not.toContain('password');
     expect(JSON.stringify(view)).not.toContain('secret');
   });
+
+  test('keeps only credential references and OAuth metadata in normalized config', () => {
+    writeFileSync(
+      join(home, '.kite-code', 'kite-code.jsonc'),
+      JSON.stringify({
+        mcpServers: {
+          bearer: {
+            type: 'http',
+            url: 'https://mcp.example.com',
+            auth: {
+              type: 'credential',
+              header: 'Authorization',
+              credentialRef: 'work-account',
+              scheme: 'Bearer',
+            },
+          },
+          oauth: {
+            type: 'http',
+            url: 'https://oauth.example.com',
+            auth: { type: 'oauth', credentialRef: 'oauth-account', scopes: ['mcp:tools'] },
+          },
+        },
+      }),
+    );
+
+    const catalog = loadMcpConfigCatalog();
+    expect(catalog.connectableServers.bearer?.auth).toEqual({
+      type: 'credential',
+      header: 'Authorization',
+      credentialRef: 'work-account',
+      scheme: 'Bearer',
+    });
+    expect(catalog.connectableServers.oauth?.auth).toEqual({
+      type: 'oauth',
+      credentialRef: 'oauth-account',
+      scopes: ['mcp:tools'],
+    });
+    expect(JSON.stringify(catalog.connectableServers)).not.toContain('access-secret');
+  });
+
+  test('rejects inline OAuth client secrets instead of silently ignoring them', () => {
+    writeFileSync(
+      join(home, '.kite-code', 'kite-code.jsonc'),
+      JSON.stringify({
+        mcpServers: {
+          oauth: {
+            type: 'http',
+            url: 'https://oauth.example.com',
+            auth: { type: 'oauth', clientSecret: 'inline-secret' },
+          },
+        },
+      }),
+    );
+    const entry = loadMcpConfigCatalog().effective.get('oauth');
+    expect(entry?.approvalStatus).toBe('invalid');
+    expect(entry?.normalizedConfig).toBeUndefined();
+  });
+
+  test('rejects authentication configuration on stdio servers', () => {
+    writeFileSync(
+      join(home, '.kite-code', 'kite-code.jsonc'),
+      JSON.stringify({
+        mcpServers: {
+          local: {
+            command: 'local-server',
+            auth: { type: 'environment', header: 'Authorization', env: 'LOCAL_TOKEN' },
+          },
+        },
+      }),
+    );
+
+    const entry = loadMcpConfigCatalog().effective.get('local');
+    expect(entry?.approvalStatus).toBe('invalid');
+    expect(entry?.normalizedConfig).toBeUndefined();
+  });
 });

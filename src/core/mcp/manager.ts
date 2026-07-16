@@ -1,4 +1,7 @@
 // src/core/mcp/manager.ts
+
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -19,6 +22,7 @@ import type {
   CapabilitySnapshot,
   EffectProfile,
 } from '@/protocol/capabilities';
+import { type McpCredentialStore, NativeMcpCredentialStore } from './credential-store';
 import { diagnoseMcpError } from './diagnostics';
 import type { McpRuntimeProvider } from './runtime-provider';
 import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
@@ -39,7 +43,11 @@ export interface PromptEntry {
 
 export interface McpManagerOptions {
   createClient?: () => Client;
-  createTransport?: (config: McpServerConfig) => Parameters<Client['connect']>[0];
+  createTransport?: (
+    config: McpServerConfig,
+    authProvider?: OAuthClientProvider,
+  ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
+  credentialStore?: McpCredentialStore;
 }
 
 /**
@@ -49,17 +57,26 @@ export class McpManager implements McpRuntimeProvider {
   private readonly createClient: () => Client;
   private readonly createManagerTransport: (
     config: McpServerConfig,
-  ) => Parameters<Client['connect']>[0];
+    authProvider?: OAuthClientProvider,
+  ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
   private servers = new Map<string, McpServerState>();
   private promptRegistry = new Map<string, PromptEntry>();
   private snapshot: CapabilitySnapshot = createSnapshot([]);
   private listeners = new Set<() => void>();
+  private oauthProviders = new Map<string, OAuthClientProvider>();
+  private oauthTransports = new Map<
+    string,
+    { generation: number; transport: OAuthFinishTransport }
+  >();
 
   constructor(options: McpManagerOptions = {}) {
     this.createClient =
       options.createClient ??
       (() => new Client({ name: 'kite-code', version: '0.1.0' }, { capabilities: {} }));
-    this.createManagerTransport = options.createTransport ?? createTransport;
+    const credentialStore = options.credentialStore ?? new NativeMcpCredentialStore();
+    this.createManagerTransport =
+      options.createTransport ??
+      ((config, authProvider) => createTransport(config, authProvider, credentialStore));
   }
 
   /** Connect to all configured servers in parallel, non-blocking on individual failures */
@@ -96,7 +113,12 @@ export class McpManager implements McpRuntimeProvider {
 
     let transport: Parameters<Client['connect']>[0];
     try {
-      transport = this.createManagerTransport(config);
+      transport = await this.createManagerTransport(config, this.oauthProviders.get(name));
+      if (isOAuthFinishTransport(transport)) {
+        this.oauthTransports.set(name, { generation, transport });
+      } else {
+        this.oauthTransports.delete(name);
+      }
     } catch (err) {
       if (this.isCurrent(name, client, generation)) {
         initialState.health = 'disconnected';
@@ -270,11 +292,51 @@ export class McpManager implements McpRuntimeProvider {
     await this.connect(name, config, generation);
   }
 
+  /** Begin an explicit user-authorized OAuth attempt without opening a browser in Core. */
+  async beginOAuth(
+    name: string,
+    config: McpServerConfig,
+    generation: number,
+    provider: OAuthClientProvider,
+  ): Promise<'authorization_required' | 'connected'> {
+    if (config.type !== 'http') throw new Error('OAuth is supported only for HTTP MCP servers.');
+    await this.disconnect(name);
+    this.oauthProviders.set(name, provider);
+    try {
+      await this.connect(name, config, generation);
+      return 'connected';
+    } catch (error) {
+      if (error instanceof UnauthorizedError || diagnoseMcpError(error).code === 'auth_required') {
+        return 'authorization_required';
+      }
+      throw error;
+    }
+  }
+
+  /** Exchange the callback code, then reconnect and rediscover through a new client generation. */
+  async finishOAuth(name: string, authorizationCode: string, generation: number): Promise<void> {
+    const session = this.oauthTransports.get(name);
+    const state = this.servers.get(name);
+    if (!session || session.generation !== generation || !state) {
+      throw new Error('OAuth session is no longer current.');
+    }
+    await session.transport.finishAuth(authorizationCode);
+    await this.reconnect(name, state.config, generation);
+  }
+
+  /** Clear in-memory auth session state. Persistent credential deletion belongs to the coordinator. */
+  async clearOAuth(name: string): Promise<void> {
+    this.oauthProviders.delete(name);
+    this.oauthTransports.delete(name);
+    await this.disconnect(name);
+  }
+
   /** Invalidate future bindings before best-effort transport shutdown. */
   async disconnect(name: string): Promise<void> {
     const state = this.servers.get(name);
     if (!state) return;
     this.servers.delete(name);
+    this.oauthTransports.delete(name);
     this.removePromptsFor(name);
     this.publish();
     await closeClient(state.client as Client);
@@ -411,6 +473,8 @@ export class McpManager implements McpRuntimeProvider {
     const clients = [...this.servers.values()].map((state) => state.client as Client);
     this.servers.clear();
     this.promptRegistry.clear();
+    this.oauthProviders.clear();
+    this.oauthTransports.clear();
     this.publish();
     await Promise.allSettled(clients.map(closeClient));
   }
@@ -592,11 +656,17 @@ function trustedProvenance(
 }
 
 /** Create transport instance from server config */
-function createTransport(config: McpServerConfig) {
+async function createTransport(
+  config: McpServerConfig,
+  authProvider: OAuthClientProvider | undefined,
+  credentialStore: McpCredentialStore,
+) {
   if (config.type === 'http') {
     const url = new URL(config.url ?? 'http://localhost');
+    const headers = await resolveHttpHeaders(config, credentialStore);
     return new StreamableHTTPClientTransport(url, {
-      requestInit: config.headers ? { headers: config.headers } : undefined,
+      authProvider,
+      requestInit: headers ? { headers } : undefined,
       reconnectionOptions: {
         maxReconnectionDelay: HTTP_RECONNECT_BASE_MS * 2 ** HTTP_MAX_RECONNECT,
         initialReconnectionDelay: HTTP_RECONNECT_BASE_MS,
@@ -616,4 +686,40 @@ function createTransport(config: McpServerConfig) {
       ...config.env,
     } as Record<string, string>,
   });
+}
+
+async function resolveHttpHeaders(
+  config: McpServerConfig,
+  credentialStore: McpCredentialStore,
+): Promise<Record<string, string> | undefined> {
+  const headers = { ...config.headers };
+  const auth = config.auth;
+  if (!auth || auth.type === 'none' || auth.type === 'oauth') {
+    return Object.keys(headers).length > 0 ? headers : undefined;
+  }
+  if (auth.type === 'environment') {
+    const secret = process.env[auth.env];
+    if (!secret) throw new Error('MCP authentication environment variable is unavailable.');
+    headers[auth.header] = `${auth.scheme ? `${auth.scheme} ` : ''}${secret}`;
+    return headers;
+  }
+  if (!config.credentialKey) throw new Error('MCP credential reference is unavailable.');
+  const material = await credentialStore.get(config.credentialKey);
+  if (material?.kind !== 'bearer') {
+    throw new Error('MCP credential reference is unavailable.');
+  }
+  headers[auth.header] = `${auth.scheme ? `${auth.scheme} ` : ''}${material.secret}`;
+  return headers;
+}
+
+interface OAuthFinishTransport {
+  finishAuth(authorizationCode: string): Promise<void>;
+}
+
+function isOAuthFinishTransport(transport: unknown): transport is OAuthFinishTransport {
+  return (
+    !!transport &&
+    typeof transport === 'object' &&
+    typeof (transport as { finishAuth?: unknown }).finishAuth === 'function'
+  );
 }

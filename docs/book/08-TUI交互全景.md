@@ -45,6 +45,8 @@ MCP 状态面板订阅 Core control snapshot，只显示 effective Server 的连
 
 项目 Server 尚未批准时会出现在 `/mcp` 的 pending 状态行，同时 App shell 独立显示脱敏信任提示。连续两次按 `a` 确认批准当前摘要，连续两次按 `r` 确认拒绝，Esc 只延后本次提示；决定后 Supervisor 重新加载 catalog。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
 
+HTTP Server 真实进入 `login_required` 或 `reauth_required` 时，App shell 在 `/mcp` 外显示独立认证提示。Enter/`l` 才启动 loopback callback 并调用系统 browser opener；Esc 可延后提示，authorizing 时 Esc 取消当前 flow。提示不显示 authorization URL、token、scope、transport 或 capability 详情，成功认证只影响后续 discovery 与新 model turn，不重放旧 Tool Call。
+
 MCP 配置由文件位置确定来源并由 Core watcher/reconcile 加载。TUI 不提供 scope、Add Wizard、启停、删除、迁移、retry 或 reload；这些能力仍可由 Core Repository 供非 TUI 调用方复用。
 
 Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到用户任务。

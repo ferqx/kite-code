@@ -71,6 +71,26 @@ export class TuiMcpController implements McpController {
     return result.status === 'recorded';
   }
 
+  async login(key: McpServerKey): Promise<boolean> {
+    try {
+      const result = await this.supervisor.login(key);
+      this.setMessage(
+        result.status === 'authenticated'
+          ? `Authenticated MCP server ${key.name}.`
+          : `Continue authentication for MCP server ${key.name} in your browser.`,
+      );
+      return true;
+    } catch {
+      this.setMessage(`Unable to start authentication for MCP server ${key.name}.`);
+      return false;
+    }
+  }
+
+  async cancelAuth(flowId: string): Promise<void> {
+    await this.supervisor.cancelAuth(flowId);
+    this.setMessage('MCP authentication cancelled.');
+  }
+
   private setMessage(message: string): void {
     this.snapshot = Object.freeze({ control: this.snapshot.control, message });
     this.emit();

@@ -15,3 +15,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0010](0010-mcp-supervisor-control-plane.md) | accepted | MCP 连接由 Supervisor 统一投影到 control snapshot |
 | [0011](0011-mcp-config-scopes-and-mutation.md) | accepted | MCP 配置使用三层可写作用域、乐观冲突检测与显式 legacy 迁移 |
 | [0012](0012-mcp-tui-readonly-list.md) | accepted | TUI `/mcp` 只显示 effective Server 的连接状态与名称 |
+| [0013](0013-mcp-credential-store-and-oauth-session.md) | accepted | MCP secret 只进入原生系统保险库，OAuth 由独立恢复提示显式启动 |

@@ -2,8 +2,8 @@
 
 状态：active
 读取时机：修改 `McpManager` 生命周期、`McpSupervisor`、MCP control snapshot、TUI `/mcp` 路由或 Runtime MCP provider 边界时。
-验证：`bun test tests/mcp-manager.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0010、ADR-0011、ADR-0012、[`mcp-config-management.md`](mcp-config-management.md)、`src/core/mcp/supervisor.ts`、`src/core/mcp/control-types.ts`、`src/app/tui/mcp/`。
+验证：`bun test tests/mcp-manager.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-credential-store.test.ts tests/mcp-auth-coordinator.test.ts tests/mcp-oauth-integration.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+相关：ADR-0010、ADR-0011、ADR-0012、ADR-0013、[`mcp-config-management.md`](mcp-config-management.md)、[`mcp-authentication.md`](mcp-authentication.md)、`src/core/mcp/supervisor.ts`、`src/core/mcp/control-types.ts`、`src/app/tui/mcp/`。
 
 ## 权威与依赖
 
@@ -26,7 +26,7 @@ Manager health、discovery、list-changed、call circuit 和 retry 变化均触�
 
 ## Snapshot 与诊断
 
-Control snapshot 包含全部有效和被遮蔽的 Server，并提供 source/revision、enabled/required、shadow/fallback、transport、config/auth/health、generation、capability revision、Tools/Resources/Prompts 只读投影、计数、retry 时间和 typed diagnostic。数组、key、审批 review 与嵌套 capability 数据均不可变。
+Control snapshot 包含全部有效和被遮蔽的 Server，并提供 source/revision、enabled/required、shadow/fallback、transport、config/auth/health、generation、capability revision、Tools/Resources/Prompts 只读投影、计数、retry 时间和 typed diagnostic。Auth 只投影状态、credential 是否存在、短生命周期 flow id 和安全错误码，不投影 authorization URL 或 material。数组、key、审批 review 与嵌套 capability 数据均不可变。
 
 Core diagnostic 只表达 code、retryable、脱敏 message 和有限 technical fields。Core 不提供展示标题或操作文案。URL 只保留 origin，authorization、token、secret 和 query credential 必须脱敏；TUI 决定标题、颜色、截断和建议动作。
 
@@ -37,3 +37,5 @@ Core diagnostic 只表达 code、retryable、脱敏 message 和有限 technical 
 Overlay 不存在 selection、搜索、详情或操作 route，只允许 Up/Down 滚动超长列表并用 Esc 关闭。带参数的 `/mcp ...` 作为 unknown command 处理，不触发任何副作用。动态 `/mcp__<server>__<prompt>` 命令不受影响。
 
 TUI controller 不暴露 add、enable/disable、remove、legacy migrate、reload 或 retry。项目 config-digest 决定由 App shell 的独立信任提示调用 `decide()`，不属于 `/mcp`；approve/reject 继续二次确认，Esc 只延后。revision conflict、原子写入、source 权威与 reconcile 仍属于 Core，可供非 TUI 调用方使用。完整配置规则见 [`mcp-config-management.md`](mcp-config-management.md)。
+
+HTTP 401 产生的 `login_required` 由 App shell 的独立认证提示恢复，不进入 `/mcp` route。只有用户显式 Login 后才创建 loopback callback 和打开浏览器；stored token resume 不打开浏览器。完成 code exchange 后 Manager 通过新连接重新 discovery，旧 binding 与旧 Tool Call 不更新或重放。完整认证规则见 [`mcp-authentication.md`](mcp-authentication.md)。

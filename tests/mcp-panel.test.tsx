@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
+import McpAuthPrompt from '@/app/tui/mcp/McpAuthPrompt';
 import McpOverlay from '@/app/tui/mcp/McpOverlay';
 import McpProjectTrustPrompt from '@/app/tui/mcp/McpProjectTrustPrompt';
 import type { McpController, McpControllerSnapshot } from '@/app/tui/mcp/types';
@@ -10,6 +11,7 @@ const pendingServer: Readonly<McpServerControlState> = Object.freeze({
   effective: true,
   configStatus: 'pending_approval',
   authStatus: 'not_required',
+  credentialPresent: false,
   health: 'disconnected',
   transport: 'stdio',
   source: 'project',
@@ -55,8 +57,23 @@ const disconnectedServer: Readonly<McpServerControlState> = Object.freeze({
   approval: undefined,
 });
 
+const authServer: Readonly<McpServerControlState> = Object.freeze({
+  ...disconnectedServer,
+  key: Object.freeze({ name: 'oauth-tools', source: 'user' }),
+  authStatus: 'login_required',
+  transport: 'http',
+  revision: 'user:oauth-tools:revision',
+  diagnostic: Object.freeze({
+    code: 'auth_required',
+    retryable: false,
+    message: 'Login required.',
+  }),
+});
+
 class FakeController implements McpController {
   readonly decisions: string[] = [];
+  readonly logins: string[] = [];
+  readonly cancelledFlows: string[] = [];
   private readonly snapshot: McpControllerSnapshot = Object.freeze({
     control: Object.freeze({
       revision: 'snapshot-1',
@@ -71,6 +88,13 @@ class FakeController implements McpController {
   decide = async (key: McpServerKey, decision: 'approved' | 'rejected') => {
     this.decisions.push(`${key.name}:${decision}`);
     return true;
+  };
+  login = async (key: McpServerKey) => {
+    this.logins.push(key.name);
+    return true;
+  };
+  cancelAuth = async (flowId: string) => {
+    this.cancelledFlows.push(flowId);
   };
 }
 
@@ -102,6 +126,36 @@ describe('MCP read-only list', () => {
     expect(lastFrame()).not.toContain('detail');
     expect(lastFrame()).not.toContain('add');
     expect(controller.decisions).toEqual([]);
+  });
+});
+
+describe('MCP authentication prompt', () => {
+  test('is separate from the read-only list and starts only on explicit input', async () => {
+    const controller = new FakeController();
+    const { stdin, lastFrame } = render(
+      <McpAuthPrompt controller={controller} server={authServer} onDefer={() => {}} />,
+    );
+    expect(lastFrame()).toContain('MCP authentication required');
+    expect(lastFrame()).toContain('oauth-tools');
+    expect(controller.logins).toEqual([]);
+    stdin.write('\r');
+    await Bun.sleep(10);
+    expect(controller.logins).toEqual(['oauth-tools']);
+  });
+
+  test('cancels the active callback flow on Esc', async () => {
+    const controller = new FakeController();
+    const authorizing = Object.freeze({
+      ...authServer,
+      authStatus: 'authorizing' as const,
+      authFlowId: 'flow-id',
+    });
+    const { stdin } = render(
+      <McpAuthPrompt controller={controller} server={authorizing} onDefer={() => {}} />,
+    );
+    stdin.write('\x1b');
+    await Bun.sleep(20);
+    expect(controller.cancelledFlows).toEqual(['flow-id']);
   });
 });
 

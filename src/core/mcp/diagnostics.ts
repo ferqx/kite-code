@@ -42,7 +42,11 @@ export function diagnoseMcpError(
   const phase = options.phase;
   const lower = rawMessage.toLowerCase();
 
-  if (status === 401 || status === 403 || /unauthori[sz]ed|authentication required/.test(lower)) {
+  if (
+    status === 401 ||
+    status === 403 ||
+    /unauthori[sz]ed|authentication required|login required/.test(lower)
+  ) {
     return diagnostic('auth_required', false, message, { status, errno, phase });
   }
   if (errno === 'ENOENT') {

@@ -48,6 +48,7 @@ export function useSessionList(): UseSessionListResult {
     };
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: search() deliberately debounces loads through _refreshKey.
   useEffect(() => {
     let cancelled = false;
 
@@ -75,7 +76,6 @@ export function useSessionList(): UseSessionListResult {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_refreshKey]);
 
   return { sessions, loading, error, refresh, search, searchQuery };

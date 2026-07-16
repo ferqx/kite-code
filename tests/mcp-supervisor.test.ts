@@ -126,6 +126,39 @@ describe('McpSupervisor', () => {
     await supervisor.stop();
   });
 
+  test('connects static-auth HTTP servers without registering an OAuth recovery flow', async () => {
+    const manager = new FakeManager();
+    const remote = httpEntry('remote', {
+      type: 'environment',
+      header: 'Authorization',
+      env: 'MCP_TOKEN',
+      scheme: 'Bearer',
+    });
+    const remoteCatalog: McpConfigCatalog = {
+      entries: [remote],
+      effective: new Map([['remote', remote]]),
+      connectableServers: { remote: remote.normalizedConfig! },
+      projectApprovals: [],
+      diagnostics: [],
+      workspace: '/workspace',
+      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+    };
+    const supervisor = new DefaultMcpSupervisor({
+      manager,
+      loadCatalog: () => remoteCatalog,
+    });
+
+    await supervisor.start('/workspace');
+    await Bun.sleep(0);
+
+    expect(manager.reconnects).toHaveLength(1);
+    expect(supervisor.getSnapshot().servers[0]).toMatchObject({
+      health: 'ready',
+      authStatus: 'not_required',
+    });
+    await supervisor.stop();
+  });
+
   test('maps and redacts technical diagnostics', () => {
     const auth = diagnoseMcpError(
       Object.assign(
@@ -191,6 +224,26 @@ function entry(
     providerConfigDigest: `${kind}:${name}:provider`,
     enabled: true,
     approvalStatus,
+    diagnostics: [],
+    effective: true,
+  };
+}
+
+function httpEntry(name: string, auth: NonNullable<McpServerConfig['auth']>): McpServerConfigEntry {
+  const config: McpServerConfig = {
+    type: 'http',
+    url: 'https://mcp.example.com/mcp',
+    auth,
+  };
+  return {
+    name,
+    source: { kind: 'user', path: '/home/config.jsonc', workspace: '/workspace' },
+    rawConfig: { type: 'http', url: config.url, auth },
+    normalizedConfig: config,
+    revision: `user:${name}:revision`,
+    providerConfigDigest: `user:${name}:provider`,
+    enabled: true,
+    approvalStatus: 'not_required',
     diagnostics: [],
     effective: true,
   };

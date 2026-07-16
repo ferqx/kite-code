@@ -239,7 +239,7 @@ function CtrlSafeTextInput({
       // Filter out CSI escape sequences (e.g., cursor position reports from terminal resize,
       // terminal focus reports [I / [O when ESC byte is stripped by Ink).
       if (
-        /[\x1b\u001b]/.test(rawInput) ||
+        rawInput.includes('\x1b') ||
         /\[\d+;\d+[A-Z]/.test(rawInput) ||
         /^\[[IO]$/.test(rawInput)
       ) {

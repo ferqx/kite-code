@@ -20,8 +20,16 @@
     },
     {
       "id": "mcp-and-skills",
-      "sources": ["src/core/mcp/**", "src/core/skills/**"],
-      "documents": ["docs/active/mcp-runtime-governance.md", "docs/book/11-MCP与Skills扩展.md"]
+      "sources": [
+        "src/core/mcp/**",
+        "src/core/skills/**",
+        ".github/workflows/mcp-native-keyring-smoke.yml"
+      ],
+      "documents": [
+        "docs/active/mcp-runtime-governance.md",
+        "docs/active/mcp-authentication.md",
+        "docs/book/11-MCP与Skills扩展.md"
+      ]
     },
     {
       "id": "mcp-control-plane",
@@ -51,6 +59,7 @@
         "docs/active/mcp-config-management.md",
         "docs/active/mcp-project-approval.md",
         "docs/active/mcp-runtime-governance.md",
+        "docs/active/mcp-authentication.md",
         "docs/book/08-TUI交互全景.md",
         "docs/book/09-CLI模式与配置.md",
         "docs/book/11-MCP与Skills扩展.md",

@@ -51,6 +51,7 @@
 | `../active/mcp-runtime-governance.md` | active | MCP/Skill revisioned catalog、Runtime binding、policy、execution record 与恢复边界 | 修改 MCP discovery、动态工具 binding、MCP policy、调用结果或 Skill Runtime 治理时必读。 |
 | `../active/mcp-control-plane.md` | active | MCP Supervisor、generation 生命周期、不可变 control snapshot 与 TUI 只读状态视图 | 修改 MCP Manager/Supervisor 生命周期、control snapshot、Runtime provider 边界或 `/mcp` 状态视图时必读。 |
 | `../active/mcp-config-management.md` | active | MCP 三层来源、原子 mutation、冲突检测、watch/reconcile 与 TUI 无配置写入边界 | 修改 MCP 配置路径/schema/repository、热重载或 TUI 配置职责时必读。 |
+| `../active/mcp-authentication.md` | active | MCP 原生凭据保险库、静态引用、HTTP OAuth 与独立认证恢复提示 | 修改 MCP auth schema、Credential Store、OAuth lifecycle、callback/browser opener 或认证提示时必读。 |
 | `../active/mcp-project-approval.md` | active | 项目 MCP 来源、config digest、本地决定、transport 前置门禁与 TUI 审批 | 修改 MCP 配置发现、项目来源、连接启动或 `/mcp` 审批交互时必读。 |
 | `../active/verification-governance.md` | active | Runtime 分级验证、VerificationSpec、required 完成门禁、repair/waive/compensation | 修改验证策略、事件、效果、Scheduler 完成语义、Skill/MCP verifier 或 reviewer 时必读。 |
 | `../active/capability-progressive-disclosure.md` | active | MCP/Skill 大目录按预算披露、metadata 搜索、下一轮有限 binding 与 fail-closed | 修改 capability catalog、模型工具上下文、`capability_search`、MCP binding 或 Skill activation 可见性时必读。 |

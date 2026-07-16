@@ -1,5 +1,11 @@
 import React, { useSyncExternalStore } from 'react';
-import { DefaultMcpSupervisor, type McpRuntimeProvider } from '@/core/mcp';
+import {
+  DefaultMcpAuthCoordinator,
+  DefaultMcpSupervisor,
+  McpManager,
+  type McpRuntimeProvider,
+  MemoryMcpCredentialStore,
+} from '@/core/mcp';
 import { TuiMcpController } from '../mcp/controller';
 
 export function useMcpController(
@@ -8,7 +14,7 @@ export function useMcpController(
   workspace: string,
 ) {
   const controller = React.useMemo(
-    () => new TuiMcpController(new DefaultMcpSupervisor(), workspace),
+    () => new TuiMcpController(createSupervisor(), workspace),
     [workspace],
   );
   const view = useSyncExternalStore(
@@ -50,4 +56,15 @@ export function useMcpController(
   }, [view.control.servers]);
 
   return { controller, mcpPromptRegistry, view };
+}
+
+function createSupervisor(): DefaultMcpSupervisor {
+  if (process.env.NODE_ENV === 'test' && process.env.KITE_TEST_MCP_CREDENTIAL_STORE === 'memory') {
+    const credentialStore = new MemoryMcpCredentialStore();
+    return new DefaultMcpSupervisor({
+      manager: new McpManager({ credentialStore }),
+      authCoordinator: new DefaultMcpAuthCoordinator({ credentialStore }),
+    });
+  }
+  return new DefaultMcpSupervisor();
 }

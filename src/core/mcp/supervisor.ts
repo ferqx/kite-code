@@ -1,3 +1,4 @@
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import { digestCapability } from '@/core/capabilities/catalog';
 import type { McpConfigCatalog, McpServerConfigEntry } from '@/core/config/mcp-config';
@@ -6,7 +7,14 @@ import {
   type McpConfigCommand,
   type McpConfigRepository,
 } from '@/core/config/mcp-config-repository';
+import { canonicalWorkspaceKey } from '@/core/config/mcp-project-approvals';
 import type { CapabilitySnapshot } from '@/protocol/capabilities';
+import {
+  DefaultMcpAuthCoordinator,
+  type McpAuthCoordinator,
+  type McpAuthResult,
+  type McpAuthSnapshot,
+} from './auth-coordinator';
 import type {
   McpConfigStatus,
   McpControlSnapshot,
@@ -16,6 +24,7 @@ import type {
 } from './control-types';
 import type { McpDiagnostic } from './diagnostics';
 import { McpManager } from './manager';
+import { revokeMcpOAuthToken } from './oauth-revocation';
 import type { McpRuntimeProvider } from './runtime-provider';
 import type { McpServerConfig, McpServerState } from './types';
 
@@ -32,6 +41,9 @@ export interface McpSupervisor {
   reload(): Promise<void>;
   retry(key: McpServerKey): Promise<void>;
   mutate(command: McpConfigCommand): Promise<void>;
+  login(key: McpServerKey): Promise<McpAuthResult>;
+  cancelAuth(flowId: string): Promise<McpAuthResult>;
+  logout(key: McpServerKey, revoke: boolean): Promise<McpAuthResult>;
   getSnapshot(): McpControlSnapshot;
   subscribe(listener: () => void): () => void;
   getRuntimeProvider(): McpRuntimeProvider;
@@ -44,23 +56,34 @@ export interface McpManagerControlPlane extends McpRuntimeProvider {
   disconnectAll(): Promise<void>;
   getServerStates(): ReadonlyMap<string, Readonly<McpServerState>>;
   getCapabilitySnapshot(): CapabilitySnapshot;
+  beginOAuth?(
+    name: string,
+    config: McpServerConfig,
+    generation: number,
+    provider: OAuthClientProvider,
+  ): Promise<'authorization_required' | 'connected'>;
+  finishOAuth?(name: string, authorizationCode: string, generation: number): Promise<void>;
+  clearOAuth?(name: string): Promise<void>;
 }
 
 export interface McpSupervisorOptions {
   manager?: McpManagerControlPlane;
   loadCatalog?: (options: { workspace: string }) => McpConfigCatalog;
   repository?: McpConfigRepository;
+  authCoordinator?: McpAuthCoordinator;
 }
 
 export class DefaultMcpSupervisor implements McpSupervisor {
   private readonly manager: McpManagerControlPlane;
   private readonly repository: McpConfigRepository;
+  private readonly authCoordinator: McpAuthCoordinator;
   private readonly listeners = new Set<() => void>();
   private snapshot = EMPTY_SNAPSHOT;
   private catalog: McpConfigCatalog | undefined;
   private workspace: string | undefined;
   private managerUnsubscribe: (() => void) | undefined;
   private configUnsubscribe: (() => void) | undefined;
+  private authUnsubscribe: (() => void) | undefined;
   private generation = 0;
   private started = false;
   private reconcileChain: Promise<void> = Promise.resolve();
@@ -69,6 +92,7 @@ export class DefaultMcpSupervisor implements McpSupervisor {
     this.manager = options.manager ?? new McpManager();
     this.repository =
       options.repository ?? new DefaultMcpConfigRepository({ loadCatalog: options.loadCatalog });
+    this.authCoordinator = options.authCoordinator ?? new DefaultMcpAuthCoordinator();
   }
 
   async start(workspace: string): Promise<void> {
@@ -78,7 +102,9 @@ export class DefaultMcpSupervisor implements McpSupervisor {
     this.workspace = workspace;
     this.generation += 1;
     this.managerUnsubscribe = this.manager.subscribe(() => this.projectSnapshot());
+    this.authUnsubscribe = this.authCoordinator.subscribe(() => this.projectSnapshot());
     this.catalog = await this.repository.load(workspace);
+    this.registerAuthTargets(this.catalog);
     this.configUnsubscribe = this.repository.watch(workspace, () => {
       void this.reload().catch(() => {
         // Manual reload and the next file event can retry an unavailable source.
@@ -94,6 +120,8 @@ export class DefaultMcpSupervisor implements McpSupervisor {
     this.generation += 1;
     this.managerUnsubscribe?.();
     this.managerUnsubscribe = undefined;
+    this.authUnsubscribe?.();
+    this.authUnsubscribe = undefined;
     this.configUnsubscribe?.();
     this.configUnsubscribe = undefined;
     this.catalog = undefined;
@@ -139,7 +167,7 @@ export class DefaultMcpSupervisor implements McpSupervisor {
       }
       this.projectSnapshot();
       try {
-        await this.manager.reconnect(key.name, config, this.generation);
+        await this.connectServer(entry, config, this.generation);
       } catch {
         // Manager publishes the typed failure state. A single provider never rejects the supervisor.
       }
@@ -152,6 +180,18 @@ export class DefaultMcpSupervisor implements McpSupervisor {
       if (!this.started) return;
       await this.reconcile(await this.repository.mutate(command));
     });
+  }
+
+  async login(key: McpServerKey): Promise<McpAuthResult> {
+    return this.authCoordinator.login(key);
+  }
+
+  async cancelAuth(flowId: string): Promise<McpAuthResult> {
+    return this.authCoordinator.cancel(flowId);
+  }
+
+  async logout(key: McpServerKey, revoke: boolean): Promise<McpAuthResult> {
+    return this.authCoordinator.logout(key, revoke);
   }
 
   getSnapshot(): McpControlSnapshot {
@@ -171,7 +211,9 @@ export class DefaultMcpSupervisor implements McpSupervisor {
 
   private connectCatalog(catalog: McpConfigCatalog, generation: number): void {
     for (const [name, config] of Object.entries(catalog.connectableServers)) {
-      void this.manager.reconnect(name, config, generation).catch(() => {
+      const entry = catalog.effective.get(name);
+      if (!entry) continue;
+      void this.connectServer(entry, config, generation).catch(() => {
         // The disconnected state and diagnostic are already observable through the manager.
       });
     }
@@ -191,6 +233,7 @@ export class DefaultMcpSupervisor implements McpSupervisor {
       (name) => previous[name]?.providerVersion !== next.connectableServers[name]?.providerVersion,
     );
     this.catalog = next;
+    this.registerAuthTargets(next);
     this.projectSnapshot();
     if (changed.length === 0) return;
     this.generation += 1;
@@ -201,7 +244,9 @@ export class DefaultMcpSupervisor implements McpSupervisor {
     for (const name of changed) {
       const config = next.connectableServers[name];
       if (!config) continue;
-      void this.manager.reconnect(name, config, generation).catch(() => {
+      const entry = next.effective.get(name);
+      if (!entry) continue;
+      void this.connectServer(entry, config, generation).catch(() => {
         // Manager publishes a typed failure without rejecting the control plane.
       });
     }
@@ -225,6 +270,7 @@ export class DefaultMcpSupervisor implements McpSupervisor {
           capabilitySnapshot,
           approvals,
           fallbackSource(entry, this.catalog!.entries),
+          this.authSnapshot(entry),
         ),
       )
       .sort(compareServers);
@@ -255,6 +301,119 @@ export class DefaultMcpSupervisor implements McpSupervisor {
       }
     }
   }
+
+  private registerAuthTargets(catalog: McpConfigCatalog): void {
+    if (!this.manager.beginOAuth || !this.manager.finishOAuth || !this.manager.clearOAuth) return;
+    let workspaceKey: string;
+    try {
+      workspaceKey = canonicalWorkspaceKey(catalog.workspace);
+    } catch {
+      return;
+    }
+    for (const entry of catalog.entries) {
+      if (
+        !entry.effective ||
+        entry.normalizedConfig?.type !== 'http' ||
+        !entry.normalizedConfig.url ||
+        (entry.normalizedConfig.auth !== undefined && entry.normalizedConfig.auth.type !== 'oauth')
+      ) {
+        this.authCoordinator.unregister({ name: entry.name, source: entry.source.kind });
+        continue;
+      }
+      const key = Object.freeze({ name: entry.name, source: entry.source.kind });
+      const config = entry.normalizedConfig;
+      const serverUrl = config.url;
+      if (!serverUrl) continue;
+      let authGeneration = this.generation;
+      this.authCoordinator.register({
+        key,
+        credentialKey: {
+          workspaceKey,
+          source: entry.source.kind,
+          server: entry.name,
+          profile: config.auth?.type === 'oauth' ? (config.auth.credentialRef ?? 'oauth') : 'oauth',
+        },
+        serverUrl: new URL(serverUrl),
+        ...(config.auth?.type === 'oauth' && config.auth.scopes
+          ? { scopes: config.auth.scopes }
+          : {}),
+        ...(config.auth?.type === 'oauth' && config.auth.clientId
+          ? { clientId: config.auth.clientId }
+          : {}),
+        ...(config.auth?.type === 'oauth' && config.auth.clientSecretRef
+          ? {
+              clientSecretKey: {
+                workspaceKey,
+                source: entry.source.kind,
+                server: entry.name,
+                profile: config.auth.clientSecretRef,
+              },
+            }
+          : {}),
+        begin: async (provider) => {
+          this.generation += 1;
+          authGeneration = this.generation;
+          this.projectSnapshot();
+          return this.manager.beginOAuth!(entry.name, config, authGeneration, provider);
+        },
+        complete: async (authorizationCode) => {
+          await this.manager.finishOAuth!(entry.name, authorizationCode, authGeneration);
+        },
+        logout: async () => {
+          await this.manager.clearOAuth!(entry.name);
+        },
+        revoke: async (provider) => {
+          await revokeMcpOAuthToken(provider, new URL(serverUrl));
+        },
+      });
+    }
+  }
+
+  private async connectServer(
+    entry: McpServerConfigEntry,
+    config: McpServerConfig,
+    generation: number,
+  ): Promise<void> {
+    const runtimeConfig = this.withCredentialIdentity(entry, config);
+    if (config.type === 'http') {
+      const resumed = await this.authCoordinator.resume({
+        name: entry.name,
+        source: entry.source.kind,
+      });
+      if (resumed !== 'not_configured') return;
+    }
+    await this.manager.reconnect(entry.name, runtimeConfig, generation);
+  }
+
+  private withCredentialIdentity(
+    entry: McpServerConfigEntry,
+    config: McpServerConfig,
+  ): McpServerConfig {
+    if (config.auth?.type !== 'credential') return config;
+    try {
+      return {
+        ...config,
+        credentialKey: {
+          workspaceKey: canonicalWorkspaceKey(entry.source.workspace),
+          source: entry.source.kind,
+          server: entry.name,
+          profile: config.auth.credentialRef,
+        },
+      };
+    } catch {
+      return config;
+    }
+  }
+
+  private authSnapshot(entry: McpServerConfigEntry): Readonly<McpAuthSnapshot> | undefined {
+    if (
+      entry.normalizedConfig?.type !== 'http' ||
+      (entry.normalizedConfig.auth !== undefined && entry.normalizedConfig.auth.type !== 'oauth')
+    ) {
+      return undefined;
+    }
+    return this.authCoordinator.getSnapshot({ name: entry.name, source: entry.source.kind });
+  }
 }
 
 function projectServer(
@@ -263,6 +422,7 @@ function projectServer(
   capabilitySnapshot: CapabilitySnapshot,
   approvals: ReadonlyMap<string, McpConfigCatalog['projectApprovals'][number]>,
   fallback: McpServerControlState['fallbackSource'],
+  auth: Readonly<McpAuthSnapshot> | undefined,
 ): Readonly<McpServerControlState> {
   const runtimeState = entry.effective ? managerState : undefined;
   const providerVersion = entry.normalizedConfig?.providerVersion;
@@ -287,6 +447,10 @@ function projectServer(
   const approval = approvals.get(`${entry.source.kind}:${entry.name}`);
   const diagnostic = currentRuntimeState?.diagnostic ?? configDiagnostic(entry);
   const status = configStatus(entry);
+  const authStatus =
+    auth?.status === 'not_required' && diagnostic?.code === 'auth_required'
+      ? 'login_required'
+      : (auth?.status ?? 'not_required');
   const capabilityRevision =
     descriptors.length > 0
       ? digestCapability(
@@ -300,7 +464,10 @@ function projectServer(
     key: Object.freeze({ name: entry.name, source: entry.source.kind }),
     effective: entry.effective,
     configStatus: status,
-    authStatus: 'not_required',
+    authStatus,
+    credentialPresent: auth?.credentialPresent ?? false,
+    ...(auth?.flowId ? { authFlowId: auth.flowId } : {}),
+    ...(auth?.errorCode ? { authErrorCode: auth.errorCode } : {}),
     health: currentRuntimeState?.health ?? 'disconnected',
     transport: entry.normalizedConfig?.type ?? (entry.rawConfig.type === 'http' ? 'http' : 'stdio'),
     source: entry.source.kind,

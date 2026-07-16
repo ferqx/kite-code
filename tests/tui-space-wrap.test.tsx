@@ -35,7 +35,9 @@ describe('CtrlSafeTextInput space wrapping', () => {
 
     const lines = (lastFrame() ?? '').split('\n');
     console.log('JSON lines:');
-    lines.forEach((l, i) => console.log(`${i}: ${JSON.stringify(l)} (length=${l.length})`));
+    lines.forEach((l, i) => {
+      console.log(`${i}: ${JSON.stringify(l)} (length=${l.length})`);
+    });
     expect(lines[0]).toContain('是');
   });
 

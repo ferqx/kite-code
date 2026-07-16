@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
+import {
+  type OAuthClientProvider,
+  UnauthorizedError,
+} from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { McpManager } from '@/core/mcp';
+import { type McpCredentialKey, McpManager, MemoryMcpCredentialStore } from '@/core/mcp';
 import { normalizeMcpToolResult } from '@/core/mcp/result-normalizer';
 
 describe('McpManager governance fixture', () => {
@@ -142,6 +146,47 @@ describe('McpManager governance fixture', () => {
     await manager.disconnectAll();
   });
 
+  test('keeps OAuth explicit, finishes the current callback, then rediscovers', async () => {
+    let finishCode = '';
+    const clients = [
+      fakeClient({
+        connect: async () => {
+          throw new UnauthorizedError('Login required');
+        },
+      }),
+      fakeClient({}),
+    ];
+    const manager = new McpManager({
+      createClient: () => clients.shift()!,
+      createTransport: (_config, authProvider) => {
+        expect(authProvider).toBeDefined();
+        return {
+          finishAuth: async (code: string) => {
+            finishCode = code;
+          },
+        } as never;
+      },
+    });
+    const provider = {} as OAuthClientProvider;
+    const config = { type: 'http' as const, url: 'https://mcp.example.com' };
+
+    await expect(manager.beginOAuth('oauth', config, 9, provider)).resolves.toBe(
+      'authorization_required',
+    );
+    expect(manager.getServerStates().get('oauth')).toMatchObject({
+      health: 'disconnected',
+      diagnostic: { code: 'auth_required' },
+    });
+    await manager.finishOAuth('oauth', 'authorization-code', 9);
+    expect(finishCode).toBe('authorization-code');
+    expect(manager.getServerStates().get('oauth')).toMatchObject({
+      health: 'ready',
+      generation: 9,
+    });
+    await manager.clearOAuth('oauth');
+    expect(manager.getServerStates().has('oauth')).toBe(false);
+  });
+
   test('records explicit local provenance when trusting read-only annotations', async () => {
     await manager.connect('trusted-fixture', {
       type: 'stdio',
@@ -157,6 +202,74 @@ describe('McpManager governance fixture', () => {
     expect(descriptor?.provider.provenance).toBe('admin');
     expect(descriptor?.effectiveEffects.externalState).toBe('read');
     expect(descriptor?.policy.minimumApproval).toBe('user');
+  });
+
+  test('resolves a bearer credential reference only while constructing HTTP headers', async () => {
+    const key: McpCredentialKey = {
+      workspaceKey: 'workspace',
+      source: 'user',
+      server: 'bearer',
+      profile: 'work-account',
+    };
+    const store = new MemoryMcpCredentialStore();
+    await store.put(key, {
+      version: 1,
+      kind: 'bearer',
+      secret: 'bearer-secret',
+      updatedAt: '2026-07-16T00:00:00.000Z',
+    });
+    let observedAuthorization = '';
+    const fixture = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        observedAuthorization = request.headers.get('authorization') ?? observedAuthorization;
+        if (observedAuthorization !== 'Bearer bearer-secret') {
+          return new Response('Unauthorized', { status: 401 });
+        }
+        if (request.method === 'GET' || request.method === 'DELETE') {
+          return new Response(null, { status: 405 });
+        }
+        const message = (await request.json()) as {
+          id?: string | number;
+          method?: string;
+          params?: { protocolVersion?: string };
+        };
+        const result =
+          message.method === 'initialize'
+            ? {
+                protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
+                capabilities: {},
+                serverInfo: { name: 'bearer-fixture', version: '1.0.0' },
+              }
+            : message.method === 'tools/list'
+              ? { tools: [] }
+              : message.method === 'prompts/list'
+                ? { prompts: [] }
+                : { resources: [] };
+        return Response.json({ jsonrpc: '2.0', id: message.id, result });
+      },
+    });
+    const bearerManager = new McpManager({ credentialStore: store });
+    try {
+      await bearerManager.connect('bearer', {
+        type: 'http',
+        url: `${fixture.url.origin}/mcp`,
+        auth: {
+          type: 'credential',
+          header: 'Authorization',
+          credentialRef: 'work-account',
+          scheme: 'Bearer',
+        },
+        credentialKey: key,
+      });
+      expect(observedAuthorization).toBe('Bearer bearer-secret');
+      expect(JSON.stringify(bearerManager.getServerStates().get('bearer')?.config)).not.toContain(
+        'bearer-secret',
+      );
+    } finally {
+      await bearerManager.disconnectAll();
+      fixture.stop(true);
+    }
   });
 });
 

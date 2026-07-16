@@ -1,6 +1,18 @@
 // src/core/mcp/index.ts
 
 export type {
+  CallbackServerFactory,
+  DefaultMcpAuthCoordinatorOptions,
+  McpAuthCoordinator,
+  McpAuthResult,
+  McpAuthSnapshot,
+  McpAuthStatus as McpOAuthStatus,
+  McpAuthTarget,
+} from './auth-coordinator';
+export { DefaultMcpAuthCoordinator } from './auth-coordinator';
+export type { BrowserOpener } from './browser-opener';
+export { NativeBrowserOpener } from './browser-opener';
+export type {
   McpApprovalControlState,
   McpAuthStatus,
   McpConfigStatus,
@@ -9,10 +21,28 @@ export type {
   McpServerKey,
   McpToolControlState,
 } from './control-types';
+export type {
+  McpBearerCredentialMaterial,
+  McpCredentialKey,
+  McpCredentialMaterial,
+  McpCredentialStore,
+  McpCredentialStoreStatus,
+  McpOAuthCredentialMaterial,
+  NativeMcpCredentialStoreOptions,
+} from './credential-store';
+export {
+  credentialAccount,
+  McpCredentialStoreError,
+  MemoryMcpCredentialStore,
+  NativeMcpCredentialStore,
+} from './credential-store';
 export type { McpDiagnostic, McpDiagnosticCode } from './diagnostics';
 export { diagnoseMcpError, redactDiagnosticMessage } from './diagnostics';
 export type { McpManagerOptions, PromptEntry } from './manager';
 export { McpManager } from './manager';
+export type { KiteMcpOAuthProviderOptions } from './oauth-provider';
+export { KiteMcpOAuthProvider } from './oauth-provider';
+export { revokeMcpOAuthToken } from './oauth-revocation';
 export { normalizeMcpToolResult } from './result-normalizer';
 export type { McpRuntimeProvider } from './runtime-provider';
 export {
@@ -23,6 +53,7 @@ export {
 } from './supervisor';
 export { parseMcpToolName } from './tool-adapter';
 export type {
+  McpAuthConfig,
   McpHealthState,
   McpPrompt,
   McpResource,

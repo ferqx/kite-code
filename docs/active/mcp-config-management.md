@@ -2,8 +2,8 @@
 
 状态：active
 读取时机：修改 MCP 配置来源、schema、路径、Repository mutation、文件 watcher、Supervisor reconcile 或 TUI 配置边界时。
-验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-config-repository.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0011、ADR-0012、`src/core/config/mcp-config-repository.ts`、`src/core/config/mcp-config.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
+验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-config-repository.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-credential-store.test.ts tests/mcp-oauth-integration.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+相关：ADR-0011、ADR-0012、ADR-0013、`src/core/config/mcp-config-repository.ts`、`src/core/config/mcp-config.ts`、`src/core/mcp/supervisor.ts`、[`mcp-authentication.md`](mcp-authentication.md)、`src/app/tui/mcp/`。
 
 ## 来源与优先级
 
@@ -37,7 +37,7 @@ Watcher 只把文件事件视为 reload 提示，debounce 后重新读取全部�
 
 Phase 2 的 schema、Repository 与手工 JSONC 支持 stdio/HTTP transport 以及 `enabled`、`required`、`cwd`、timeout、args、env/header 配置。`enabled: false` 保留完整配置和环境引用，但不连接、不发布未来 capability。`required` 当前仅被持久化并进入 Core control snapshot，Phase 5 才提供任务准入语义；`/mcp` 不展示该字段。
 
-Phase 2 不提供 Credential Store 或 OAuth。普通 JSONC 可以保存环境变量引用。任何未来配置或诊断前端都不能显示 header value、env value、URL query/fragment/userinfo 或参数内容。Core disable/remove 不删除未来 Phase 3 credential；HTTP OAuth 应由 Server 认证状态触发，而不是在新增时预选 auth mode。
+普通 JSONC 可以为 HTTP transport 保存环境变量名、credential profile 与 OAuth metadata，但不能保存 inline OAuth client secret；stdio 声明携带 `auth` 会被拒绝。`environment` 在 transport 构造时读取 env；`credential` 只保存 header、scheme 与 `credentialRef`；`oauth` 只保存 profile、scopes、client id、`clientSecretRef` 等非 secret metadata。TUI 不录入或修改这些字段。Core disable/remove 不删除 credential；未显式配置 auth mode 的 HTTP Server 可由真实认证状态触发 OAuth。完整持久化与生命周期见 [`mcp-authentication.md`](mcp-authentication.md)。
 
 ## Reconcile 与 Runtime 一致性
 

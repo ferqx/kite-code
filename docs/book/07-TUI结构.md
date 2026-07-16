@@ -25,7 +25,7 @@ App.tsx
 
 TUI 不应根据展示文本反推工具是否成功，也不能自行构造 verification passed、approval granted 等 Runtime 事实。
 
-MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。`/mcp` 只过滤 effective Server 并渲染状态与名称，不存在搜索、selection、详情或配置 route。项目配置摘要决定由独立信任提示调用 controller，Core Repository 的 typed mutation 不进入 TUI。
+MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。`/mcp` 只过滤 effective Server 并渲染状态与名称，不存在搜索、selection、详情或配置 route。项目配置摘要决定由独立信任提示调用 controller；HTTP 认证阻塞由独立 `McpAuthPrompt` 调用 Login/Cancel，Core Repository 的 typed mutation 不进入 TUI。
 
 ## 7.3 事件渲染
 

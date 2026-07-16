@@ -52,6 +52,10 @@ function mcpApprovalPromptKey(server: Readonly<McpServerControlState>): string {
   return `${server.key.source}:${server.key.name}:${server.approval?.configDigest ?? ''}`;
 }
 
+function mcpAuthPromptKey(server: Readonly<McpServerControlState>): string {
+  return `${server.key.source}:${server.key.name}:${server.revision}`;
+}
+
 export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   // Load config synchronously on first render — avoids a flash of SetupWizard
   // that would consume keystrokes before TuiApp mounts.
@@ -164,6 +168,9 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   >(async () => {});
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
   const [deferredMcpApprovals, setDeferredMcpApprovals] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [deferredMcpAuth, setDeferredMcpAuth] = React.useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const interruptClearedByResolutionRef = React.useRef(false);
@@ -279,6 +286,28 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     setDeferredMcpApprovals((current) => new Set([...current, key]));
   }, [mcpPendingApproval]);
   const visibleMcpPendingApproval = state.interrupt ? undefined : mcpPendingApproval;
+  const mcpPendingAuth = React.useMemo(
+    () =>
+      mcpView.control.servers.find((server) => {
+        if (!server.effective || server.transport !== 'http') return false;
+        if (
+          server.authStatus !== 'login_required' &&
+          server.authStatus !== 'reauth_required' &&
+          server.authStatus !== 'authorizing' &&
+          server.authStatus !== 'error'
+        ) {
+          return false;
+        }
+        return !deferredMcpAuth.has(mcpAuthPromptKey(server));
+      }),
+    [deferredMcpAuth, mcpView.control.servers],
+  );
+  const deferMcpAuth = React.useCallback(() => {
+    if (!mcpPendingAuth) return;
+    setDeferredMcpAuth((current) => new Set([...current, mcpAuthPromptKey(mcpPendingAuth)]));
+  }, [mcpPendingAuth]);
+  const visibleMcpPendingAuth =
+    state.interrupt || visibleMcpPendingApproval ? undefined : mcpPendingAuth;
 
   // Skills loader: scan on mount
   useSkillsLoader(workspace, dispatch, skillManifestsRef, skillOptionsRef, sessionManager);
@@ -800,7 +829,9 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         provider={provider}
         mcpController={mcpController}
         mcpPendingApproval={visibleMcpPendingApproval}
+        mcpPendingAuth={visibleMcpPendingAuth}
         onDeferMcpApproval={deferMcpApproval}
+        onDeferMcpAuth={deferMcpAuth}
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
@@ -825,6 +856,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
             state.showMcp ||
             state.showRewind ||
             !!visibleMcpPendingApproval ||
+            !!visibleMcpPendingAuth ||
             !!state.interrupt
           }
           onSlashSuggestionChange={setSlashSuggestion}

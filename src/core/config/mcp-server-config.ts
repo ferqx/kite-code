@@ -2,44 +2,89 @@ import { z } from 'zod';
 import type { EffectProfile } from '@/protocol/capabilities';
 import type { McpServerConfig } from '../mcp/types';
 
-export const mcpServerSchema = z.object({
-  type: z.enum(['stdio', 'http']).optional(),
-  enabled: z.boolean().optional(),
-  required: z.boolean().optional(),
-  cwd: z.string().min(1).optional(),
-  command: z.string().optional(),
-  args: z.array(z.string()).optional(),
-  url: z.string().optional(),
-  env: z.record(z.string(), z.string()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  trust: z
-    .union([
-      z.enum(['untrusted', 'trusted']),
-      z.object({
-        provenance: z.enum(['admin', 'user', 'project']),
-        allowAnnotations: z.literal('read_only'),
-      }),
-    ])
-    .optional(),
-  tools: z
-    .record(
-      z.string(),
-      z.object({
-        effects: z
-          .object({
-            filesystem: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
-            network: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
-            externalState: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
-          })
-          .optional(),
-        minimumApproval: z.enum(['none', 'auto_review', 'user']).optional(),
-        retry: z.enum(['never', 'safe_read', 'idempotency_key']).optional(),
-        idempotencyKeyArgument: z.string().min(1).optional(),
-      }),
-    )
-    .optional(),
-  timeout: z.number().optional(),
-});
+const authHeaderSchema = z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/);
+const authSchemeSchema = z
+  .string()
+  .min(1)
+  .refine((value) => !/[\r\n]/.test(value));
+const mcpAuthSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('none') }).strict(),
+  z
+    .object({
+      type: z.literal('environment'),
+      header: authHeaderSchema,
+      env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+      scheme: authSchemeSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('credential'),
+      header: authHeaderSchema,
+      credentialRef: z.string().min(1).max(128),
+      scheme: authSchemeSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('oauth'),
+      credentialRef: z.string().min(1).max(128).optional(),
+      scopes: z.array(z.string().min(1)).optional(),
+      clientId: z.string().min(1).optional(),
+      clientSecretRef: z.string().min(1).max(128).optional(),
+    })
+    .strict(),
+]);
+
+export const mcpServerSchema = z
+  .object({
+    type: z.enum(['stdio', 'http']).optional(),
+    enabled: z.boolean().optional(),
+    required: z.boolean().optional(),
+    cwd: z.string().min(1).optional(),
+    command: z.string().optional(),
+    args: z.array(z.string()).optional(),
+    url: z.string().optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    auth: mcpAuthSchema.optional(),
+    trust: z
+      .union([
+        z.enum(['untrusted', 'trusted']),
+        z.object({
+          provenance: z.enum(['admin', 'user', 'project']),
+          allowAnnotations: z.literal('read_only'),
+        }),
+      ])
+      .optional(),
+    tools: z
+      .record(
+        z.string(),
+        z.object({
+          effects: z
+            .object({
+              filesystem: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
+              network: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
+              externalState: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
+            })
+            .optional(),
+          minimumApproval: z.enum(['none', 'auto_review', 'user']).optional(),
+          retry: z.enum(['never', 'safe_read', 'idempotency_key']).optional(),
+          idempotencyKeyArgument: z.string().min(1).optional(),
+        }),
+      )
+      .optional(),
+    timeout: z.number().optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.auth && value.type !== 'http') {
+      context.addIssue({
+        code: 'custom',
+        path: ['auth'],
+        message: 'Authentication configuration is supported only for HTTP MCP servers.',
+      });
+    }
+  });
 
 /** Expand ${VAR} and ${VAR:-default} references at connection time. */
 export function expandEnvVars(value: string): string {
@@ -80,6 +125,47 @@ export function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServe
         .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
         .map(([key, value]) => [key, expandEnvVars(value)]),
     );
+  }
+  if (raw.auth && typeof raw.auth === 'object') {
+    const auth = raw.auth as Record<string, unknown>;
+    if (auth.type === 'none') config.auth = { type: 'none' };
+    if (
+      auth.type === 'environment' &&
+      typeof auth.header === 'string' &&
+      typeof auth.env === 'string'
+    ) {
+      config.auth = {
+        type: 'environment',
+        header: auth.header,
+        env: auth.env,
+        ...(typeof auth.scheme === 'string' ? { scheme: auth.scheme } : {}),
+      };
+    }
+    if (
+      auth.type === 'credential' &&
+      typeof auth.header === 'string' &&
+      typeof auth.credentialRef === 'string'
+    ) {
+      config.auth = {
+        type: 'credential',
+        header: auth.header,
+        credentialRef: auth.credentialRef,
+        ...(typeof auth.scheme === 'string' ? { scheme: auth.scheme } : {}),
+      };
+    }
+    if (auth.type === 'oauth') {
+      config.auth = {
+        type: 'oauth',
+        ...(typeof auth.credentialRef === 'string' ? { credentialRef: auth.credentialRef } : {}),
+        ...(Array.isArray(auth.scopes)
+          ? { scopes: auth.scopes.filter((scope): scope is string => typeof scope === 'string') }
+          : {}),
+        ...(typeof auth.clientId === 'string' ? { clientId: auth.clientId } : {}),
+        ...(typeof auth.clientSecretRef === 'string'
+          ? { clientSecretRef: auth.clientSecretRef }
+          : {}),
+      };
+    }
   }
   if (raw.trust === 'trusted' || raw.trust === 'untrusted') config.trust = raw.trust;
   if (raw.trust && typeof raw.trust === 'object') {

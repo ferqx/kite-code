@@ -1,0 +1,57 @@
+name: MCP native keyring smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - package.json
+      - bun.lock
+      - src/core/mcp/credential-store.ts
+      - tests/mcp-keyring-platform-smoke.test.ts
+      - .github/workflows/mcp-native-keyring-smoke.yml
+  pull_request:
+    paths:
+      - package.json
+      - bun.lock
+      - src/core/mcp/credential-store.ts
+      - tests/mcp-keyring-platform-smoke.test.ts
+      - .github/workflows/mcp-native-keyring-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  native-keyring:
+    name: ${{ matrix.os }} native keyring
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+          - ubuntu-latest
+    env:
+      KITE_RUN_NATIVE_KEYRING_SMOKE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - if: runner.os != 'Linux'
+        run: bun test tests/mcp-keyring-platform-smoke.test.ts
+      - if: runner.os == 'Linux'
+        name: Start Secret Service and run smoke
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes dbus-x11 gnome-keyring
+          dbus-run-session -- bash -euo pipefail -c '
+            export XDG_RUNTIME_DIR="${RUNNER_TEMP}/keyring-runtime"
+            mkdir -p "$XDG_RUNTIME_DIR"
+            chmod 700 "$XDG_RUNTIME_DIR"
+            eval "$(printf %s ci-keyring | gnome-keyring-daemon --unlock --components=secrets)"
+            bun test tests/mcp-keyring-platform-smoke.test.ts
+          '

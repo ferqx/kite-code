@@ -6,7 +6,7 @@
 // get-exe.js to find it when the platform-specific package is missing.
 
 import { execSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const LEFTHOOK_VERSION = '2.1.9';
@@ -19,7 +19,9 @@ async function main() {
   // Only needed on Windows
   if (process.platform !== 'win32') {
     // Still run lefthook install
-    try { execSync('npx lefthook install -f', { stdio: 'inherit', cwd: resolve(NODE_MODULES, '..') }); } catch {}
+    try {
+      execSync('npx lefthook install -f', { stdio: 'inherit', cwd: resolve(NODE_MODULES, '..') });
+    } catch {}
     return;
   }
 

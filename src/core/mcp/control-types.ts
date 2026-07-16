@@ -18,7 +18,15 @@ export type McpConfigStatus =
   | 'shadowed'
   | 'disabled';
 
-export type McpAuthStatus = 'not_required';
+export type McpAuthStatus =
+  | 'not_required'
+  | 'login_required'
+  | 'authorizing'
+  | 'authenticated'
+  | 'refreshing'
+  | 'reauth_required'
+  | 'revoked'
+  | 'error';
 
 export interface McpToolControlState {
   name: string;
@@ -41,6 +49,9 @@ export interface McpServerControlState {
   effective: boolean;
   configStatus: McpConfigStatus;
   authStatus: McpAuthStatus;
+  credentialPresent: boolean;
+  authFlowId?: string;
+  authErrorCode?: string;
   health: McpHealthState;
   transport: McpTransportType;
   source: McpConfigSourceKind;

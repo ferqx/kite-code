@@ -24,7 +24,15 @@ Server 状态覆盖 connecting、discovering、ready、degraded、half-open/circ
 
 `/mcp` 只读面板响应式显示 effective Server 的连接状态与名称，不浏览 capability，也不执行配置、retry 或 reload。配置来源由文件路径决定，变更通过 watcher 与 Supervisor reconcile 生效；项目来源的摘要决定由 App shell 独立信任提示完成。changed/removed/disabled 仍先撤销未来 capability，provider version 变化使旧 binding fail closed，未变化连接继续保留。
 
-## 11.4 Skill Workflow
+## 11.4 MCP 凭据与 OAuth
+
+HTTP 静态认证在配置中只保存环境变量名或 credential profile。生产 `McpCredentialStore` 使用原生 OS vault，不存在 JSON、加密文件或 keychain CLI fallback。Supervisor 在连接时附加 workspace/source/Server/profile 身份；Manager 只在 transport 构造期间把 secret 解析为 header。inline client secret 被拒绝，client secret 也必须通过独立 profile 引用。
+
+HTTP 401 与 connection health 分开投影为 `login_required`。后台连接不打开浏览器；App shell 独立认证提示收到用户显式 Login 后，Coordinator 才绑定 127.0.0.1 随机端口并驱动 SDK discovery、dynamic registration、PKCE 和 state-bound callback。成功 code exchange 后 Manager 创建新连接并重新 discovery；已有 token 可在重启时静默恢复。callback timeout/cancel 关闭 listener，refresh 失败进入 `reauth_required`，任何恢复都不自动重放旧 Tool Call。
+
+ADR-0012 仍然有效：`/mcp` 不承担 Login/Logout 或 auth 详情。认证提示只解决真实连接阻塞，不成为第二套配置管理中心。
+
+## 11.5 Skill Workflow
 
 Kite Skill 是严格 YAML frontmatter 加正文/资源组成的版本化 Workflow Contract，而不是普通 Prompt 片段。编译结果声明：
 
@@ -39,8 +47,8 @@ Kite Skill 是严格 YAML frontmatter 加正文/资源组成的版本化 Workflo
 
 Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入模型。活动 frame 只能通过 `read_skill_reference` 读取声明过、路径安全且大小受限的文件。
 
-## 11.5 Progressive disclosure
+## 11.6 Progressive disclosure
 
 当 catalog 超出 provider 上下文预算时，模型只看到 provider-neutral `capability_search`。搜索返回安全元数据候选，不返回调用句柄；下一轮重新校验 catalog/revision 后才签发有限 binding 或 Skill disclosure。
 
-完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。
+完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md)、[`../active/mcp-authentication.md`](../active/mcp-authentication.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。

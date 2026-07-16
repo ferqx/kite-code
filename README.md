@@ -43,6 +43,29 @@ MCP 配置优先级为本机 workspace 覆盖 `~/.kite-code/projects/<workspaceK
 
 `/mcp` 只显示当前 effective MCP Server 的连接状态与名称，不接受 Server 参数或管理子命令，也不展示 scope、transport、capability 详情或配置操作。配置文件变化由 watcher 自动重载；watcher 不可用时可重启 TUI 进行完整加载。动态 MCP Prompt 命令仍保持独立行为。
 
+HTTP Server 返回 OAuth 认证要求时，App shell 会在 `/mcp` 外显示独立登录提示；只有按 Enter 或 `l` 后才打开系统浏览器，Esc 可延后或取消进行中的 callback。OAuth token、dynamic client、PKCE verifier 和 discovery state 只保存在系统原生凭据保险库，成功后重新 discovery，不重放旧 Tool Call。已有 token 会在启动时静默恢复；恢复失败只进入 `reauth-required`，不会循环打开浏览器。
+
+静态 HTTP 认证继续支持环境变量引用，也支持由嵌入调用方预先写入系统保险库的 credential profile。普通配置只保存引用，例如：
+
+```jsonc
+{
+  "mcpServers": {
+    "remote": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "auth": {
+        "type": "environment",
+        "header": "Authorization",
+        "env": "MCP_TOKEN",
+        "scheme": "Bearer"
+      }
+    }
+  }
+}
+```
+
+`auth` 只适用于 HTTP transport。`auth.type: "credential"` 只接受 `credentialRef`；`auth.type: "oauth"` 可保存 scopes、client id、`clientSecretRef` 和 credential profile。inline client secret 会被拒绝。TUI 不录入 secret，也不修改 auth 配置；原生保险库 locked/unavailable 时认证 fail closed，绝不退回明文文件。
+
 ## 运行
 
 交互式 TUI：
@@ -67,6 +90,7 @@ bun run agent trace events.jsonl --turn 1
 - `accept_edits`、`auto`、`full` 不会绕过 schema、revision、强制审批或 sandbox。
 - 远端 MCP annotation 和 Skill manifest 不能自行授予权限。
 - 未获本机用户按配置摘要批准的项目 MCP 不会创建 stdio/HTTP transport。
+- MCP token、client secret 与 PKCE material 不进入普通配置、Runtime Event、session log 或 control snapshot。
 - 外部写入先记录 invocation intent；未知结果禁止盲重放。
 - Tool success 不等于任务完成；required Verification 未通过时不能完成。
 

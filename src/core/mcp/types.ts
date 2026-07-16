@@ -34,6 +34,9 @@ export interface McpServerConfig {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+  auth?: McpAuthConfig;
+  /** Internal vault identity attached by the Supervisor; never serialized to config. */
+  credentialKey?: import('./credential-store').McpCredentialKey;
   /** Server annotations are ignored unless this explicit local trust decision is present. */
   trust?: 'untrusted' | 'trusted' | McpTrustedProvenance;
   /** Local policy overrides are keyed by the exact server tool name. */
@@ -51,6 +54,18 @@ export interface McpServerConfig {
   /** Internal digest that makes descriptors change when provider config/source changes. */
   providerVersion?: string;
 }
+
+export type McpAuthConfig =
+  | { type: 'none' }
+  | { type: 'environment'; header: string; env: string; scheme?: string }
+  | { type: 'credential'; header: string; credentialRef: string; scheme?: string }
+  | {
+      type: 'oauth';
+      credentialRef?: string;
+      scopes?: string[];
+      clientId?: string;
+      clientSecretRef?: string;
+    };
 
 /** MCP Prompt */
 export interface McpPrompt {
