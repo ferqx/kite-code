@@ -49,5 +49,5 @@ export function useMcpController(
     return registry;
   }, [view.control.servers]);
 
-  return { controller, mcpPromptRegistry };
+  return { controller, mcpPromptRegistry, view };
 }

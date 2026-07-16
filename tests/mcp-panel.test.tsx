@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import McpOverlay from '@/app/tui/mcp/McpOverlay';
+import McpProjectTrustPrompt from '@/app/tui/mcp/McpProjectTrustPrompt';
 import type { McpController, McpControllerSnapshot } from '@/app/tui/mcp/types';
-import type { McpServerConfigInput, McpWritableScope } from '@/core/config';
 import type { McpServerControlState, McpServerKey } from '@/core/mcp';
 
 const pendingServer: Readonly<McpServerControlState> = Object.freeze({
@@ -35,66 +35,84 @@ const pendingServer: Readonly<McpServerControlState> = Object.freeze({
   }),
 });
 
+const shadowedServer: Readonly<McpServerControlState> = Object.freeze({
+  ...pendingServer,
+  key: Object.freeze({ name: 'shadowed-tools', source: 'user' }),
+  effective: false,
+  source: 'user',
+  sourcePath: '/home/user/.kite-code/kite-code.jsonc',
+  revision: 'user:shadowed-tools:revision',
+  approval: undefined,
+});
+
+const disconnectedServer: Readonly<McpServerControlState> = Object.freeze({
+  ...pendingServer,
+  key: Object.freeze({ name: 'offline-tools', source: 'user' }),
+  configStatus: 'configured',
+  source: 'user',
+  sourcePath: '/home/user/.kite-code/kite-code.jsonc',
+  revision: 'user:offline-tools:revision',
+  approval: undefined,
+});
+
 class FakeController implements McpController {
   readonly decisions: string[] = [];
-  readonly additions: Array<{
-    scope: McpWritableScope;
-    name: string;
-    config: McpServerConfigInput;
-  }> = [];
-  readonly mutations: string[] = [];
   private readonly snapshot: McpControllerSnapshot = Object.freeze({
     control: Object.freeze({
       revision: 'snapshot-1',
       generation: 1,
-      servers: Object.freeze([pendingServer]),
+      servers: Object.freeze([pendingServer, disconnectedServer, shadowedServer]),
       sourceRevisions: Object.freeze({ local: 'local', project: 'project', user: 'user' }),
     }),
   });
 
   getSnapshot = () => this.snapshot;
   subscribe = () => () => {};
-  retry = async () => {};
-  retryByName = async () => {};
-  reload = async () => {};
-  add = async (scope: McpWritableScope, name: string, config: McpServerConfigInput) => {
-    this.additions.push({ scope, name, config });
-    return true;
-  };
-  setEnabled = async (server: Readonly<McpServerControlState>, enabled: boolean) => {
-    this.mutations.push(`${enabled ? 'enable' : 'disable'}:${server.key.name}`);
-    return true;
-  };
-  remove = async (server: Readonly<McpServerControlState>) => {
-    this.mutations.push(`remove:${server.key.name}`);
-    return true;
-  };
-  migrate = async (server: Readonly<McpServerControlState>) => {
-    this.mutations.push(`migrate:${server.key.name}`);
-    return true;
-  };
   decide = async (key: McpServerKey, decision: 'approved' | 'rejected') => {
     this.decisions.push(`${key.name}:${decision}`);
+    return true;
   };
 }
 
-describe('MCP management overlay', () => {
-  test('renders a pending project server from the control snapshot', () => {
+describe('MCP read-only list', () => {
+  test('shows only effective server names and connection status', () => {
     const controller = new FakeController();
     const { lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
-    expect(lastFrame()).toContain('workspace-tools');
-    expect(lastFrame()).toContain('pending-approval');
-    expect(lastFrame()).toContain('project');
+
+    expect(lastFrame()).toContain('MCP Servers');
+    expect(lastFrame()).toContain('[pending-approval] workspace-tools');
+    expect(lastFrame()).toContain('[disconnected] offline-tools');
+    expect(lastFrame()).not.toContain('shadowed-tools');
+    expect(lastFrame()).not.toContain('stdio');
+    expect(lastFrame()).not.toContain('project');
+    expect(lastFrame()).not.toContain('tools)');
+    expect(lastFrame()).not.toContain('/workspace/.mcp.json');
   });
 
-  test('navigates to the redacted approval route and requires double confirmation', async () => {
+  test('does not expose detail or configuration actions', async () => {
     const controller = new FakeController();
     const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
+
     stdin.write('\r');
-    await Bun.sleep(10);
     stdin.write('a');
+    stdin.write('d');
     await Bun.sleep(10);
-    expect(lastFrame()).toContain('/ approval');
+
+    expect(lastFrame()).toContain('[pending-approval] workspace-tools');
+    expect(lastFrame()).not.toContain('detail');
+    expect(lastFrame()).not.toContain('add');
+    expect(controller.decisions).toEqual([]);
+  });
+});
+
+describe('Project MCP trust prompt', () => {
+  test('is separate from /mcp and requires double confirmation', async () => {
+    const controller = new FakeController();
+    const { stdin, lastFrame } = render(
+      <McpProjectTrustPrompt controller={controller} server={pendingServer} onDefer={() => {}} />,
+    );
+
+    expect(lastFrame()).toContain('Project MCP configuration');
     expect(lastFrame()).toContain('/workspace/.mcp.json');
     expect(lastFrame()).toContain('1234567890ab');
     expect(lastFrame()).toContain('Command: bun (2 arguments)');
@@ -102,79 +120,30 @@ describe('MCP management overlay', () => {
     stdin.write('a');
     await Bun.sleep(10);
     expect(controller.decisions).toEqual([]);
+    expect(lastFrame()).toContain('Press a again to confirm.');
+
     stdin.write('a');
     await Bun.sleep(10);
     expect(controller.decisions).toEqual(['workspace-tools:approved']);
   });
 
-  test('adds a project HTTP server through the non-OAuth wizard', async () => {
+  test('defers without recording a decision', async () => {
     const controller = new FakeController();
-    const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
-    stdin.write('a');
-    await Bun.sleep(10);
-    expect(lastFrame()).toContain('MCP Management / add');
+    let deferred = false;
+    const { stdin } = render(
+      <McpProjectTrustPrompt
+        controller={controller}
+        server={pendingServer}
+        onDefer={() => {
+          deferred = true;
+        }}
+      />,
+    );
 
-    await enter(stdin, 'phase2-demo');
-    await enter(stdin, 'http');
-    await enter(stdin, 'https://example.com/mcp?token=hidden');
-    await enter(stdin, 'n');
-    await enter(stdin, 'project');
-    await enter(stdin, '2500');
-    expect(lastFrame()).toContain('Project save will require separate approval.');
-    expect(lastFrame()).toContain('https://example.com');
-    expect(lastFrame()).not.toContain('token=hidden');
-    await enter(stdin);
-
-    expect(controller.additions).toEqual([
-      {
-        scope: 'project',
-        name: 'phase2-demo',
-        config: { type: 'http', url: 'https://example.com/mcp?token=hidden', timeout: 2500 },
-      },
-    ]);
-  });
-
-  test('stores HTTP authentication as an environment reference', async () => {
-    const controller = new FakeController();
-    const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
-    stdin.write('a');
     await Bun.sleep(10);
-    await enter(stdin, 'environment-http');
-    await enter(stdin, 'http');
-    await enter(stdin, 'https://example.com/mcp');
-    await enter(stdin, 'e');
-    await enter(stdin, 'Authorization=Bearer $' + '{MCP_TOKEN}');
-    await enter(stdin, 'local');
-    await enter(stdin);
-    expect(lastFrame()).toContain('Environment/header keys: Authorization');
-    expect(lastFrame()).not.toContain('MCP_TOKEN');
-    await enter(stdin);
-
-    expect(controller.additions[0]?.config).toEqual({
-      type: 'http',
-      url: 'https://example.com/mcp',
-      headers: { Authorization: 'Bearer $' + '{MCP_TOKEN}' },
-    });
-  });
-
-  test('navigates destructive actions to confirmation before mutation', async () => {
-    const controller = new FakeController();
-    const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
-    stdin.write('\r');
-    await Bun.sleep(10);
-    stdin.write('d');
-    await Bun.sleep(10);
-    expect(lastFrame()).toContain('Confirm disable: workspace-tools');
-    expect(controller.mutations).toEqual([]);
-    stdin.write('\r');
-    await Bun.sleep(10);
-    expect(controller.mutations).toEqual(['disable:workspace-tools']);
+    stdin.write('\x1b');
+    await Bun.sleep(30);
+    expect(deferred).toBe(true);
+    expect(controller.decisions).toEqual([]);
   });
 });
-
-async function enter(stdin: { write(value: string): void }, value = ''): Promise<void> {
-  if (value) stdin.write(value);
-  await Bun.sleep(5);
-  stdin.write('\r');
-  await Bun.sleep(10);
-}

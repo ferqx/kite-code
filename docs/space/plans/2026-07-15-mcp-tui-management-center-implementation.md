@@ -1,6 +1,6 @@
 # MCP TUI 管理中心完整实施计划
 
-状态：active（Phase 2 已完成，Phase 3 待实施）
+状态：superseded（Phase 0–2 为历史完成事实）
 优先级：P0–P2
 创建日期：2026-07-15
 代码基线：`mcp` / `41585a14dcf3`
@@ -8,6 +8,8 @@
 首个子计划：[`2026-07-15-mcp-project-server-approval-p0.md`](2026-07-15-mcp-project-server-approval-p0.md)
 依赖：ADR-0007、ADR-0008、ADR-0009、MCP Runtime Governance、Capability Progressive Disclosure
 分类：Security + Capability + Policy + Lifecycle + TUI
+
+> 2026-07-16 产品方向纠偏已完成：`/mcp` 已从配置管理中心收敛为只读连接列表。Phase 0–2 已完成实现保留为历史事实，后续 UI 结论以 [`2026-07-16-mcp-tui-readonly-list.md`](2026-07-16-mcp-tui-readonly-list.md) 和 ADR-0012 为准；本计划不再作为 OAuth、Tool Policy 或 Provider Action TUI 路由的实施依据。
 
 ## 一、计划结论
 
@@ -33,7 +35,7 @@ Phase 5  Agent 不可用原因、Provider Action、Required 准入
 打开 /mcp
 → 查看全部有效和被遮蔽 Server
 → 审批项目配置
-→ 添加 HTTP/STDIO Server
+→ 用 name + URL 添加 local HTTP Server，或用 JSONC 配置高级 Server
 → 保存 credential reference 或完成 OAuth
 → 后台连接与动态 discovery
 → 查看并配置 Tool
@@ -50,7 +52,7 @@ Phase 5  Agent 不可用原因、Provider Action、Required 准入
 - Tools、Resources、Prompts 浏览；
 - Local、Project、User 三层配置；
 - 项目 Server 审批和 config digest 失效；
-- Add HTTP/STDIO Wizard；
+- name + URL 的 local HTTP Add Wizard；
 - Enable、Disable、Retry、Reload、Remove；
 - HTTP OAuth Login、Logout、Refresh、Revoke；
 - Bearer/API key 安全录入和 credential reference；
@@ -462,26 +464,15 @@ Phase 2 只启用 `enabled`、`required`、`cwd`。后续字段先进入 schema 
 
 ### 8.6 Add Wizard
 
+2026-07-16 根据 Phase 2 实际 TUI 使用反馈校正交互。参考 [Claude Code MCP](https://code.claude.com/docs/en/mcp) 与 [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp) 的分层方式：`/mcp` 聚焦状态、诊断与认证，常规新增只收集建立连接所需的最小信息；高级字段留在配置文件，不逐项阻塞 Wizard。
+
 HTTP：
 
 1. name；
 2. URL；
-3. scope；
-4. auth mode 仅先显示 None/Environment reference，OAuth 转 Phase 3；
-5. timeout；
-6. 安全预览；
-7. project scope 保存后进入 pending approval，而不是同一按钮隐式自批。
+3. 安全预览并保存到当前 workspace 的 local scope。
 
-STDIO：
-
-1. name；
-2. command；
-3. args；
-4. cwd；
-5. env key 与 plain/reference 类型；
-6. scope；
-7. 安全预览；
-8. project scope 保存后单独审批。
+TUI Add 不提供 transport 或 scope 选择。stdio command/args、project/user scope、`cwd`、env/header、timeout、required 等字段继续由 schema、Repository、watch/reconcile 和详情展示支持，但只通过高级 JSONC 配置。HTTP OAuth 不作为新增配置字段；Phase 3 应在 URL 保存并收到认证需求后，从 `/mcp` 状态页启动登录。静态 header/env reference 同样属于高级 JSONC 配置。已有 project 配置仍须独立审批。
 
 Server name 使用稳定可验证规则，禁止与内置 slash command 或暴露 tool name 产生不可解析冲突。
 
@@ -528,12 +519,14 @@ Slash command：
 - mutation conflict；
 - watcher/reload；
 - changed generation 使 binding 失效；
-- project add 不自批；
+- project 配置不自批；
 - disable 不删除 credential placeholder；
+- Add Wizard 只询问 name 与 HTTP URL，并固定写入 local scope；
+- stdio、其他 scope、cwd、env/header、timeout、required 不进入 TUI 添加流程；
 - narrow terminal Wizard；
-- Windows path/cwd。
+- 高级 JSONC 仍覆盖 Windows path/cwd。
 
-退出标准：用户无需手改 JSON 即可完成非 OAuth MCP 配置，外部配置修改不会被覆盖，热重载不会复用旧 binding。
+退出标准：用户只需 name 与 URL 即可在 TUI 添加当前 workspace 的 local HTTP MCP；外部配置修改不会被覆盖，热重载不会复用旧 binding。stdio、其他 scope 与高级字段不扩大 TUI 基本流程。
 
 ## 九、Phase 3：Credential Store 与 HTTP OAuth
 
@@ -1252,7 +1245,8 @@ bun run test:tui:system:core
 | --- | --- | --- | --- |
 | 0 项目 Server 审批 | completed | [`../execution/completed/2026-07-15-mcp-project-server-approval-p0.md`](../execution/completed/2026-07-15-mcp-project-server-approval-p0.md) | transport 前置门禁、TUI 审批与真实 stdio/HTTP/PTY 证据已收敛 |
 | 1 Supervisor/只读 UI | completed | [`../execution/completed/2026-07-15-mcp-tui-management-center-phase1.md`](../execution/completed/2026-07-15-mcp-tui-management-center-phase1.md) | 单一 SDK client、可订阅 control snapshot、typed diagnostics 与只读管理中心已验证 |
-| 2 配置管理 | completed | [`../execution/completed/2026-07-15-mcp-tui-management-center-phase2.md`](../execution/completed/2026-07-15-mcp-tui-management-center-phase2.md) | 三层 repository、原子 mutation、watch/reconcile 与 TUI 配置管理已验证 |
+| 2 配置管理 | completed（含 TUI 简化校正） | [`Phase 2`](../execution/completed/2026-07-15-mcp-tui-management-center-phase2.md)、[`UX 校正`](../execution/completed/2026-07-16-mcp-tui-config-simplification.md) | 三层 repository、原子 mutation、watch/reconcile 与 name + URL 的 local HTTP TUI 流程已验证 |
+| 2R `/mcp` 只读纠偏 | completed | [`完成记录`](../execution/completed/2026-07-16-mcp-tui-readonly-list.md) | 配置 mutation 退出 TUI，project trust 独立，只保留 effective Server 名称与连接状态 |
 | 3 Auth | pending | — | 依赖已完成的 Phase 2 和 backend spike；下一实施阶段 |
 | 4 Tool 策略 | pending | — | 依赖 Phase 2，后半与 Phase 3 集成 |
 | 5 Agent 闭环 | pending | — | 依赖 Phase 1/3/4，需 Runtime flag/ADR |

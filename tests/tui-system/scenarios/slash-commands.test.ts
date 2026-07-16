@@ -417,12 +417,12 @@ describe('TUI PTY System — Slash Commands', () => {
     'partial /mc input suggests /mcp',
     async () => {
       await typeText(tui, '/mc');
-      await waitForText(() => tui.output(), 'Open MCP management panel', 10000);
+      await waitForText(() => tui.output(), 'View MCP connection status', 10000);
 
       const output = tui.output();
       expect(screenContains(output, '命令匹配 /mc')).toBe(true);
       expect(screenContains(output, '/mcp')).toBe(true);
-      expect(screenContains(output, 'Open MCP management panel')).toBe(true);
+      expect(screenContains(output, 'View MCP connection status')).toBe(true);
 
       await clearInput(tui, '/mc'.length);
       await sleep(300);
@@ -439,7 +439,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
       const output = tui.output();
       console.log('  output after /mcp:', stripAnsi(output).slice(-500));
-      expect(screenContains(output, 'MCP Management')).toBe(true);
+      expect(screenContains(output, 'MCP Servers')).toBe(true);
     },
     TIMEOUT,
   );

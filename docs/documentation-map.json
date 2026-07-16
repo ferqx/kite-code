@@ -37,9 +37,11 @@
         "src/core/mcp/runtime-provider.ts",
         "src/core/mcp/supervisor.ts",
         "src/app/tui/App.tsx",
+        "src/app/tui/components/HelpPanel.tsx",
         "src/app/tui/index.tsx",
         "src/app/tui/hooks/useMcpController.ts",
         "src/app/tui/hooks/useSlashCommand.ts",
+        "src/app/tui/hooks/useSlashSuggestions.ts",
         "src/app/tui/run-agent.ts",
         "src/app/tui/session-manager.ts",
         "src/app/tui/mcp/**"

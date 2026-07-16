@@ -228,7 +228,7 @@ export class DefaultMcpConfigRepository implements McpConfigRepository {
         try {
           watchers.set(directory, watchFs(directory, schedule));
         } catch {
-          // Manual /mcp reload remains available when a platform watcher cannot start.
+          // A later full repository load (including a TUI restart) remains the recovery path.
         }
       }
     };

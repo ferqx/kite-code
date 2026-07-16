@@ -31,7 +31,7 @@ Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根�
 
 Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。
 
-`/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示管理面板说明，并支持 Tab、右方向键和 Enter 补全。`/mcp <server>` 直接进入 Server detail，`/mcp retry <server>` 重新经过配置/审批门禁。`/mcp add`、`enable|disable|remove`、`approve|reject` 与 `reload` 进入同一管理中心 controller；破坏性命令只打开确认页。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
+`/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“查看 MCP 连接状态”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
 
 ## 8.4 Session 与恢复点
 
@@ -41,11 +41,11 @@ TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 
 
 ## 8.5 MCP 与 Skill 交互
 
-MCP 管理中心订阅 Core control snapshot，显示所有有效/被遮蔽 Server、连接 health、typed diagnostic 和 Tools/Resources/Prompts 只读详情；模型可调用能力仍来自 revisioned catalog/binding，而不是管理页列表本身。list/detail/tools/resources/prompts/error/approval/add/confirm 是 overlay 内部 route，Esc 逐层返回，搜索、selection、Wizard 和确认状态不进入 Runtime。
+MCP 状态面板订阅 Core control snapshot，只显示 effective Server 的连接/门禁状态与名称。面板不显示被遮蔽来源、scope、transport、typed diagnostic、Tools/Resources/Prompts 或配置动作；只允许滚动和 Esc 关闭。模型可调用能力仍来自 revisioned catalog/binding，而不是状态面板本身。
 
-项目 Server 尚未批准时也会以脱敏条目出现。detail 中按 `a` 进入 approval route，然后连续两次按 `a` 确认批准当前摘要，或连续两次按 `r` 确认拒绝；决定后 Supervisor 重新加载 catalog。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
+项目 Server 尚未批准时会出现在 `/mcp` 的 pending 状态行，同时 App shell 独立显示脱敏信任提示。连续两次按 `a` 确认批准当前摘要，连续两次按 `r` 确认拒绝，Esc 只延后本次提示；决定后 Supervisor 重新加载 catalog。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
 
-列表按 `a` 打开 HTTP/STDIO Add Wizard；detail 中可以启用、禁用、删除当前可写来源或迁移 legacy 项目来源。Preview 不显示 secret、URL query 或参数内容。project 保存后只进入 pending approval，不与添加按钮合并授权。
+MCP 配置由文件位置确定来源并由 Core watcher/reconcile 加载。TUI 不提供 scope、Add Wizard、启停、删除、迁移、retry 或 reload；这些能力仍可由 Core Repository 供非 TUI 调用方复用。
 
 Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到用户任务。
 

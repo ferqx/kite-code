@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-07-15（完成 MCP TUI 管理中心 Phase 2）
+最后更新：2026-07-16（完成 `/mcp` 只读连接列表纠偏）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -49,8 +49,8 @@
 | `../active/failure-classification.md` | active | FailureKind 分类和 `ClassifiedFailure` 恢复策略 | 新增工具/模型失败路径、错误日志或重试策略时必读。 |
 | `../active/core-entry-criteria.md` | active | 进入 core 的 Capability/Policy/Lifecycle/Engine 准入门槛 | 新增 `src/core/` 功能、状态机或执行引擎改动前必读。 |
 | `../active/mcp-runtime-governance.md` | active | MCP/Skill revisioned catalog、Runtime binding、policy、execution record 与恢复边界 | 修改 MCP discovery、动态工具 binding、MCP policy、调用结果或 Skill Runtime 治理时必读。 |
-| `../active/mcp-control-plane.md` | active | MCP Supervisor、generation 生命周期、不可变 control snapshot 与 TUI 管理路由 | 修改 MCP Manager/Supervisor 生命周期、control snapshot、Runtime provider 边界或 `/mcp` 管理页时必读。 |
-| `../active/mcp-config-management.md` | active | MCP 三层来源、原子 mutation、冲突检测、watch/reconcile 与配置 UI | 修改 MCP 配置路径/schema/repository、热重载、Wizard 或配置 slash command 时必读。 |
+| `../active/mcp-control-plane.md` | active | MCP Supervisor、generation 生命周期、不可变 control snapshot 与 TUI 只读状态视图 | 修改 MCP Manager/Supervisor 生命周期、control snapshot、Runtime provider 边界或 `/mcp` 状态视图时必读。 |
+| `../active/mcp-config-management.md` | active | MCP 三层来源、原子 mutation、冲突检测、watch/reconcile 与 TUI 无配置写入边界 | 修改 MCP 配置路径/schema/repository、热重载或 TUI 配置职责时必读。 |
 | `../active/mcp-project-approval.md` | active | 项目 MCP 来源、config digest、本地决定、transport 前置门禁与 TUI 审批 | 修改 MCP 配置发现、项目来源、连接启动或 `/mcp` 审批交互时必读。 |
 | `../active/verification-governance.md` | active | Runtime 分级验证、VerificationSpec、required 完成门禁、repair/waive/compensation | 修改验证策略、事件、效果、Scheduler 完成语义、Skill/MCP verifier 或 reviewer 时必读。 |
 | `../active/capability-progressive-disclosure.md` | active | MCP/Skill 大目录按预算披露、metadata 搜索、下一轮有限 binding 与 fail-closed | 修改 capability catalog、模型工具上下文、`capability_search`、MCP binding 或 Skill activation 可见性时必读。 |
@@ -113,7 +113,8 @@
 | `plans/2026-07-14-mcp-runtime-governance-p0.md` | archived | MCP Runtime 治理 Phase 0 + 1：revisioned catalog、turn binding、fail-closed schema、policy 与结构化结果。 |
 | `plans/2026-07-14-mcp-skills-runtime-governance-followup.md` | archived | MCP/Skills Runtime 治理 Phase 2–5：执行恢复、Workflow Contract、分级验证与 progressive disclosure。 |
 | `plans/2026-07-15-mcp-project-server-approval-p0.md` | archived | MCP TUI 管理中心 Phase 0：项目来源识别、config digest、本地审批、transport 启动门禁与最小 TUI 审批入口。 |
-| `plans/2026-07-15-mcp-tui-management-center-implementation.md` | active（Phase 2 已完成） | MCP TUI 管理中心完整实施：Phase 0–2 已完成；后续为 OAuth、Tool Policy、Provider Action 与 Required 准入。 |
+| `plans/2026-07-15-mcp-tui-management-center-implementation.md` | superseded | MCP TUI 管理中心 Phase 0–2 保留为历史；UI 方向由只读计划替代。 |
+| `plans/2026-07-16-mcp-tui-readonly-list.md` | archived | `/mcp` 只展示 effective MCP Server 名称与连接状态；配置和 project trust 移出该命令。 |
 
 ## 完成执行记录
 
@@ -151,6 +152,8 @@
 | `execution/completed/2026-07-15-mcp-project-server-approval-p0.md` | completed | MCP TUI 管理中心 Phase 0 完成记录：项目配置摘要审批、transport 门禁、保守 policy 与 TUI/PTY 闭环。 |
 | `execution/completed/2026-07-15-mcp-tui-management-center-phase1.md` | completed | MCP TUI 管理中心 Phase 1 完成记录：Supervisor、generation 生命周期、不可变 control snapshot、typed diagnostics 与只读 TUI 管理中心。 |
 | `execution/completed/2026-07-15-mcp-tui-management-center-phase2.md` | completed | MCP TUI 管理中心 Phase 2 完成记录：三层配置 repository、原子 mutation、热重载、增量 reconcile 与配置管理交互。 |
+| `execution/completed/2026-07-16-mcp-tui-config-simplification.md` | completed | MCP TUI 配置体验校正：name + URL 的 local HTTP Wizard 与高级 JSONC 边界。 |
+| `execution/completed/2026-07-16-mcp-tui-readonly-list.md` | completed | `/mcp` 收敛为无参数只读状态列表，项目配置摘要决定迁移为独立信任提示。 |
 
 ## 参考资料
 

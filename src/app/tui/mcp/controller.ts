@@ -1,19 +1,9 @@
 import {
-  McpConfigMutationError,
-  type McpServerConfigInput,
-  type McpWritableScope,
-} from '@/core/config';
-import {
   decideProjectMcpServer,
   type McpProjectDecision,
   type McpProjectSourceKind,
 } from '@/core/config/mcp-project-approvals';
-import type {
-  McpRuntimeProvider,
-  McpServerControlState,
-  McpServerKey,
-  McpSupervisor,
-} from '@/core/mcp';
+import type { McpRuntimeProvider, McpServerKey, McpSupervisor } from '@/core/mcp';
 import type { McpController, McpControllerSnapshot } from './types';
 
 export class TuiMcpController implements McpController {
@@ -56,77 +46,13 @@ export class TuiMcpController implements McpController {
     return () => this.listeners.delete(listener);
   };
 
-  async retry(key: McpServerKey): Promise<void> {
-    await this.supervisor.retry(key);
-  }
-
-  async retryByName(name: string): Promise<void> {
-    const match = this.snapshot.control.servers.find(
-      (server) => server.effective && server.key.name === name,
-    );
-    if (!match) {
-      this.setMessage(`MCP server '${name}' was not found.`);
-      return;
-    }
-    await this.retry(match.key);
-  }
-
-  async reload(): Promise<void> {
-    await this.supervisor.reload();
-    this.setMessage('Reloaded MCP configuration.');
-  }
-
-  async add(scope: McpWritableScope, name: string, config: McpServerConfigInput): Promise<boolean> {
-    return this.runMutation(
-      {
-        type: 'add',
-        scope,
-        name,
-        config,
-        expectedRevision: this.snapshot.control.sourceRevisions[scope],
-      },
-      `Added MCP server ${name} to ${scope} scope.`,
-    );
-  }
-
-  async setEnabled(server: Readonly<McpServerControlState>, enabled: boolean): Promise<boolean> {
-    return this.runMutation(
-      {
-        type: 'set_enabled',
-        key: server.key,
-        expectedRevision: server.revision,
-        enabled,
-      },
-      `${enabled ? 'Enabled' : 'Disabled'} MCP server ${server.key.name}.`,
-    );
-  }
-
-  async remove(server: Readonly<McpServerControlState>): Promise<boolean> {
-    return this.runMutation(
-      { type: 'remove', key: server.key, expectedRevision: server.revision },
-      `Removed MCP server ${server.key.name} from ${server.source} scope.`,
-    );
-  }
-
-  async migrate(server: Readonly<McpServerControlState>): Promise<boolean> {
-    return this.runMutation(
-      {
-        type: 'migrate_legacy',
-        key: server.key,
-        expectedRevision: server.revision,
-        target: 'project',
-      },
-      `Migrated MCP server ${server.key.name} to project scope; approval is required.`,
-    );
-  }
-
-  async decide(key: McpServerKey, decision: McpProjectDecision): Promise<void> {
+  async decide(key: McpServerKey, decision: McpProjectDecision): Promise<boolean> {
     const server = this.snapshot.control.servers.find(
       (candidate) => candidate.key.name === key.name && candidate.key.source === key.source,
     );
     if (!server?.approval || !isProjectSource(server.source)) {
       this.setMessage('This MCP server does not have a project approval action.');
-      return;
+      return false;
     }
     const result = decideProjectMcpServer({
       workspace: this.workspace,
@@ -142,24 +68,7 @@ export class TuiMcpController implements McpController {
         : result.message,
     );
     await this.supervisor.reload();
-  }
-
-  private async runMutation(
-    command: Parameters<McpSupervisor['mutate']>[0],
-    successMessage: string,
-  ): Promise<boolean> {
-    try {
-      await this.supervisor.mutate(command);
-      this.setMessage(successMessage);
-      return true;
-    } catch (error) {
-      this.setMessage(
-        error instanceof McpConfigMutationError
-          ? `${error.code}: ${error.message}`
-          : 'MCP configuration could not be updated.',
-      );
-      return false;
-    }
+    return result.status === 'recorded';
   }
 
   private setMessage(message: string): void {

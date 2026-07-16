@@ -58,7 +58,7 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
         ['/theme', '切换色彩主题（teal/blue/purple/cyan/mono）'],
         ['/permissions', modeHelp],
         ['/plan', '切换规划模式'],
-        ['/mcp', 'MCP 管理、增删与启停'],
+        ['/mcp', '查看 MCP 连接状态'],
         ['/rewind', '回退检查点'],
         ['/export', '导出会话'],
         ['/help', '帮助面板'],

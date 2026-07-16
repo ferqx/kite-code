@@ -9,7 +9,7 @@ import {
   tryLoadAgentConfig,
 } from '@/core/config/index';
 import { sessionExportPath } from '@/core/config/paths';
-import type { McpRuntimeProvider } from '@/core/mcp';
+import type { McpRuntimeProvider, McpServerControlState } from '@/core/mcp';
 import { resolveSandboxRuntime } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
@@ -46,6 +46,10 @@ interface TuiAppProps {
   config: AgentConfig;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   injectModel?: import('@/core/model/factory').SupportedChatModel;
+}
+
+function mcpApprovalPromptKey(server: Readonly<McpServerControlState>): string {
+  return `${server.key.source}:${server.key.name}:${server.approval?.configDigest ?? ''}`;
 }
 
 export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
@@ -159,9 +163,9 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     ) => Promise<void>
   >(async () => {});
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
-  const [mcpInitialServer, setMcpInitialServer] = React.useState<string | undefined>();
-  const [mcpInitialCommand, setMcpInitialCommand] =
-    React.useState<import('./hooks/useSlashCommand').McpSlashCommand>('open');
+  const [deferredMcpApprovals, setDeferredMcpApprovals] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const interruptClearedByResolutionRef = React.useRef(false);
 
   const provider = React.useMemo(() => {
@@ -254,11 +258,27 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   runRewindRef.current = runRewind;
 
   // MCP control plane and runtime provider lifecycle
-  const { controller: mcpController, mcpPromptRegistry } = useMcpController(
-    mcpRuntimeProviderRef,
-    sessionManager,
-    workspace,
+  const {
+    controller: mcpController,
+    mcpPromptRegistry,
+    view: mcpView,
+  } = useMcpController(mcpRuntimeProviderRef, sessionManager, workspace);
+  const mcpPendingApproval = React.useMemo(
+    () =>
+      mcpView.control.servers.find((server) => {
+        if (!server.effective || server.configStatus !== 'pending_approval' || !server.approval) {
+          return false;
+        }
+        return !deferredMcpApprovals.has(mcpApprovalPromptKey(server));
+      }),
+    [deferredMcpApprovals, mcpView.control.servers],
   );
+  const deferMcpApproval = React.useCallback(() => {
+    if (!mcpPendingApproval?.approval) return;
+    const key = mcpApprovalPromptKey(mcpPendingApproval);
+    setDeferredMcpApprovals((current) => new Set([...current, key]));
+  }, [mcpPendingApproval]);
+  const visibleMcpPendingApproval = state.interrupt ? undefined : mcpPendingApproval;
 
   // Skills loader: scan on mount
   useSkillsLoader(workspace, dispatch, skillManifestsRef, skillOptionsRef, sessionManager);
@@ -623,12 +643,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     },
     state.interactionMode,
     sandboxBackend,
-    (command, server) => {
-      setMcpInitialCommand(command);
-      setMcpInitialServer(server);
-      if (command === 'retry' && server) void mcpController.retryByName(server);
-      if (command === 'reload') void mcpController.reload();
-    },
   );
 
   // Stable reference — avoids re-creating the object on every render and causing
@@ -785,8 +799,8 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         onToggleReason={onToggleReason}
         provider={provider}
         mcpController={mcpController}
-        mcpInitialServer={mcpInitialServer}
-        mcpInitialCommand={mcpInitialCommand}
+        mcpPendingApproval={visibleMcpPendingApproval}
+        onDeferMcpApproval={deferMcpApproval}
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
@@ -810,6 +824,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
             state.showSessions ||
             state.showMcp ||
             state.showRewind ||
+            !!visibleMcpPendingApproval ||
             !!state.interrupt
           }
           onSlashSuggestionChange={setSlashSuggestion}

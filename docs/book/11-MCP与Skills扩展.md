@@ -22,7 +22,7 @@ MCP 调用保留 structured content、content blocks、错误、资源和外部�
 
 Server 状态覆盖 connecting、discovering、ready、degraded、half-open/circuit-open 和断开等运行阶段。Catalog 或 capability revision 变化使旧 binding 失效。崩溃后的非终态写入进入 reconciliation，不自动重复创建外部对象。
 
-`/mcp` 管理中心可响应式浏览全部 Server 和 discovered capability；Add Wizard、enable/disable/remove、legacy migrate 和 reload 通过 Repository mutation 与 Supervisor reconcile 生效。changed/removed/disabled 先撤销未来 capability，provider version 变化使旧 binding fail closed，未变化连接继续保留。
+`/mcp` 只读面板响应式显示 effective Server 的连接状态与名称，不浏览 capability，也不执行配置、retry 或 reload。配置来源由文件路径决定，变更通过 watcher 与 Supervisor reconcile 生效；项目来源的摘要决定由 App shell 独立信任提示完成。changed/removed/disabled 仍先撤销未来 capability，provider version 变化使旧 binding fail closed，未变化连接继续保留。
 
 ## 11.4 Skill Workflow
 

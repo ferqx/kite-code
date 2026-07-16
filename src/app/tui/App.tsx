@@ -8,6 +8,7 @@ import React, {
   useReducer,
   useRef,
 } from 'react';
+import type { McpServerControlState } from '@/core/mcp';
 import type { SandboxBackend } from '@/core/sandbox';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
@@ -21,9 +22,9 @@ import Footer from './Footer';
 import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
 import { useOverlayHeight } from './hooks/useOverlayHeight';
-import type { McpSlashCommand } from './hooks/useSlashCommand';
 import { createInitialState, initialState } from './initialState';
 import McpOverlay from './mcp/McpOverlay';
+import McpProjectTrustPrompt from './mcp/McpProjectTrustPrompt';
 import type { McpController } from './mcp/types';
 import OutputArea, { useStaticContent } from './OutputArea';
 import { type Action, eventReducer } from './reducers';
@@ -48,8 +49,8 @@ export interface AppProps {
   onToggleReason: (id: number) => void;
   provider: import('./provider').TuiUserInputProvider;
   mcpController?: McpController;
-  mcpInitialServer?: string;
-  mcpInitialCommand?: McpSlashCommand;
+  mcpPendingApproval?: Readonly<McpServerControlState>;
+  onDeferMcpApproval?: () => void;
   availableModels?: import('@/core/config').AvailableModel[];
   slashSuggestion?: import('./components/InputLine').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
@@ -86,8 +87,8 @@ export default function App({
   onToggleReason,
   provider,
   mcpController,
-  mcpInitialServer,
-  mcpInitialCommand,
+  mcpPendingApproval,
+  onDeferMcpApproval,
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
@@ -103,6 +104,7 @@ export default function App({
     state.showSessions ||
     state.showMcp ||
     state.showRewind ||
+    !!mcpPendingApproval ||
     !!state.interrupt;
   const supplementEscRef = useRef(false);
   const wizardEscBackRef = useRef(false);
@@ -295,8 +297,19 @@ export default function App({
       </Footer>
 
       {/* ── Overlay: panels below Footer ── */}
-      {state.showHelp && <HelpPanel onClose={hideHelp} sandboxBackend={sandboxBackend} />}
-      {state.showSessions && (
+      {mcpPendingApproval && mcpController && onDeferMcpApproval && (
+        <McpProjectTrustPrompt
+          key={`${mcpPendingApproval.key.source}:${mcpPendingApproval.key.name}:${mcpPendingApproval.approval?.configDigest ?? ''}`}
+          controller={mcpController}
+          server={mcpPendingApproval}
+          layeredEscRef={layeredOverlayEscRef}
+          onDefer={onDeferMcpApproval}
+        />
+      )}
+      {!mcpPendingApproval && state.showHelp && (
+        <HelpPanel onClose={hideHelp} sandboxBackend={sandboxBackend} />
+      )}
+      {!mcpPendingApproval && state.showSessions && (
         <SessionSelector
           onSelect={selectSession}
           onClose={hideSessions}
@@ -305,23 +318,21 @@ export default function App({
           activeSessionId={state.activeSessionId}
         />
       )}
-      {state.showModelSelector && (
+      {!mcpPendingApproval && state.showModelSelector && (
         <ModelSelector
           currentModel={state.status.modelName}
           onSelect={selectModel}
           onClose={hideModelSelector}
         />
       )}
-      {state.showMcp && mcpController && (
+      {!mcpPendingApproval && state.showMcp && mcpController && (
         <McpOverlay
           controller={mcpController}
-          initialServer={mcpInitialServer}
-          initialCommand={mcpInitialCommand}
           layeredEscRef={layeredOverlayEscRef}
           onClose={hideMcp}
         />
       )}
-      {state.showRewind && (
+      {!mcpPendingApproval && state.showRewind && (
         <CheckpointSelector
           checkpoints={state.checkpoints}
           onRevert={handleRevert}
@@ -329,7 +340,8 @@ export default function App({
           onClose={hideRewind}
         />
       )}
-      {slashSuggestion &&
+      {!mcpPendingApproval &&
+        slashSuggestion &&
         (() => {
           const listHeight = Math.max(3, slashMaxHeight - 2);
           return (

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
-import { sleep, typeText } from '../harness/input-helpers';
+import { sleep } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
@@ -67,22 +67,15 @@ describe('TUI PTY System — project MCP approval', () => {
     await sleep(300);
 
     expect(existsSync(markerPath)).toBe(false);
-    await typeText(tui, '/mcp', 30);
-    tui.write('\r');
-    await waitForText(() => tui!.output(), 'pending-approval', 10_000);
+    await waitForText(() => tui!.output(), 'Project MCP configuration', 10_000);
     expect(screenContains(tui.output(), 'project_stdio')).toBe(true);
     expect(existsSync(markerPath)).toBe(false);
 
-    tui.write('\r');
-    await waitForText(() => tui!.output(), 'project_stdio / detail', 10_000);
-    tui.write('a');
-    await waitForText(() => tui!.output(), 'project_stdio / approval', 10_000);
     tui.write('a');
     await waitForText(() => tui!.output(), 'Press a again to confirm', 10_000);
     expect(existsSync(markerPath)).toBe(false);
     tui.write('a');
     await waitForFile(markerPath);
-    await waitForText(() => tui!.output(), 'Approved project MCP server project_stdio.', 10_000);
-    expect(screenContains(tui.output(), 'approved')).toBe(true);
+    await waitForText(() => tui!.output(), '❯', 10_000);
   }, 30_000);
 });

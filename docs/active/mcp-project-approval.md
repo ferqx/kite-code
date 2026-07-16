@@ -1,9 +1,9 @@
 # MCP 项目配置审批门禁
 
 状态：active
-读取时机：修改 MCP 配置发现、项目来源、连接启动、`/mcp` 审批交互或 Approval Store 时。
+读取时机：修改 MCP 配置发现、项目来源、连接启动、项目信任提示或 Approval Store 时。
 验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-panel.test.tsx tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0009、ADR-0010、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
+相关：ADR-0009、ADR-0010、ADR-0012、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
 
 ## 当前安全性质
 
@@ -35,16 +35,17 @@ local 与 user 来源保持自动连接行为。调用方显式传入的 `config
 
 项目批准只允许创建 transport，不是 workspace authorization、annotation trust 或 Tool Approval。批准后的项目连接配置强制使用 `trust: untrusted`，并忽略项目声明的逐工具 `effects`、`minimumApproval`、`retry` 和 idempotency override。因此项目 Tool 默认保持 unknown effects、`minimumApproval: user` 与 `retry: never`。
 
-Approval Store 和 `/mcp` 决策属于 MCP control plane，不写入任务 Runtime Event 或 session log。MCP capability 只有在批准、连接和 discovery 成功后才进入现有 revisioned catalog；后续 Tool 调用仍必须通过 turn binding、schema、Policy、Execution 与 Verification。
+Approval Store 和项目配置信任决定属于 MCP control plane，不写入任务 Runtime Event 或 session log。MCP capability 只有在批准、连接和 discovery 成功后才进入现有 revisioned catalog；后续 Tool 调用仍必须通过 turn binding、schema、Policy、Execution 与 Verification。
 
 ## TUI 行为
 
-`/mcp` 注册在 TUI 的静态斜杠命令表中。输入 `/m`、`/mc` 或完整命令时，候选面板显示 `/mcp` 及管理面板说明；Tab、右方向键和 Enter 遵循通用斜杠命令补全行为。
+`/mcp` 注册在 TUI 的静态斜杠命令表中。输入 `/m`、`/mc` 或完整命令时，候选面板显示 `/mcp` 及“查看 MCP 连接状态”说明；Tab、右方向键和 Enter 遵循通用斜杠命令补全行为。该命令只显示 effective Server 的状态与名称，不承担审批。
 
-`/mcp` 在 Server 尚未连接时也通过 control snapshot 显示项目审批条目。进入 Server detail 后按 `a` 打开统一 approval route；该页只展示 Server 名称、transport、source path、状态、摘要短前缀、stdio command 与参数数量或只保留 origin 的 HTTP endpoint，以及脱敏诊断；不会展示 URL path/query/fragment/userinfo、env、header 或参数内容。进入审批页后：
+Supervisor 发布 effective `pending_approval` 项目条目后，App shell 在 `/mcp` 外独立显示信任提示。提示只展示 Server 名称、source path、摘要短前缀、stdio command 与参数数量或只保留 origin 的 HTTP endpoint；不会展示 URL path/query/fragment/userinfo、env、header 或参数内容。提示中：
 
 - 连续两次按 `a`：确认批准当前摘要，由 Supervisor 重新加载目录并连接该 Server；
 - 连续两次按 `r`：确认拒绝当前摘要，由 Supervisor 重新加载目录并断开不再可连接的 Server；
+- Esc：仅延后当前摘要在本次 TUI 会话中的提示，保持 pending 且不记录决定；
 - 配置已变化或存储异常：显示 Core 返回的安全诊断，不创建 transport。
 
-Phase 2 的 project add 和 legacy migrate 只写配置，不隐式批准；写入后条目进入 pending approval。完整 control-plane 与配置边界见 [`mcp-control-plane.md`](mcp-control-plane.md) 和 [`mcp-config-management.md`](mcp-config-management.md)。
+TUI 不提供 project add 或 legacy migrate；任何外部写入或 Core mutation 产生的新项目摘要都必须重新进入 pending approval。完整 control-plane 与配置边界见 [`mcp-control-plane.md`](mcp-control-plane.md) 和 [`mcp-config-management.md`](mcp-config-management.md)。

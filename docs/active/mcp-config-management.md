@@ -1,9 +1,9 @@
 # MCP 三层配置与热重载
 
 状态：active
-读取时机：修改 MCP 配置来源、schema、路径、Repository mutation、文件 watcher、Supervisor reconcile、Add Wizard 或 `/mcp` 配置命令时。
-验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-config-repository.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-config-management.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0011、`src/core/config/mcp-config-repository.ts`、`src/core/config/mcp-config.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
+读取时机：修改 MCP 配置来源、schema、路径、Repository mutation、文件 watcher、Supervisor reconcile 或 TUI 配置边界时。
+验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-config-repository.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+相关：ADR-0011、ADR-0012、`src/core/config/mcp-config-repository.ts`、`src/core/config/mcp-config.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
 
 ## 来源与优先级
 
@@ -16,9 +16,9 @@ local ~/.kite-code/projects/<workspaceKey>/mcp.jsonc
 > user ~/.kite-code/kite-code.jsonc#mcpServers
 ```
 
-`local`、`project`、`user` 可写；`project_legacy` 只兼容读取和显式迁移，不接受普通 TUI 写入。调用方显式 `configPath` 仍是单文件 `explicit` 来源，不与默认目录合并。`project` 与 `project_legacy` 都必须通过项目配置摘要审批；已有 `project_mcp_json`、`project_kite_code` 决定继续兼容读取。
+`local`、`project`、`user` 是 Core Repository 可写来源；`project_legacy` 只兼容读取和显式 mutation 迁移。TUI 不写任何来源，scope 完全由配置文件位置推导。调用方显式 `configPath` 仍是单文件 `explicit` 来源，不与默认目录合并。`project` 与 `project_legacy` 都必须通过项目配置摘要审批；已有 `project_mcp_json`、`project_kite_code` 决定继续兼容读取。
 
-移除只删除选中的 source entry。若下层存在同名配置，它会在下一次 catalog 计算中成为 effective，确认页必须显示 fallback source。被审批阻止的高优先级项目条目仍不回退到低优先级来源。
+移除只删除选中的 source entry。若下层存在同名配置，它会在下一次 catalog 计算中成为 effective；任何提供 remove 的非 TUI 前端都必须在确认前展示该 fallback source。被审批阻止的高优先级项目条目仍不回退到低优先级来源。
 
 ## Mutation 与文件安全
 
@@ -31,13 +31,13 @@ local ~/.kite-code/projects/<workspaceKey>/mcp.jsonc
 - legacy 迁移从原位置删除目标条目并写入 `.mcp.json`，两边无关内容保持不变；
 - project add/migrate 只产生 pending approval，保存动作不得同时批准。
 
-Watcher 只把文件事件视为 reload 提示，debounce 后重新读取全部来源。事件内容不作为配置事实；watcher 不可用或事件丢失时，`/mcp reload` 仍执行同一完整加载与 reconcile。
+Watcher 只把文件事件视为 reload 提示，debounce 后重新读取全部来源。事件内容不作为配置事实；TUI 不提供手动 reload，watcher 不可用或事件丢失时通过重启 TUI 触发完整加载与 reconcile。Core 的显式 `reload()` 能力继续保留给非 TUI 调用方。
 
 ## Schema 与 secret 边界
 
-Phase 2 支持 stdio/HTTP transport 以及 `enabled`、`required`、`cwd`、timeout、args、env/header 配置。`enabled: false` 保留完整配置和环境引用，但不连接、不发布未来 capability。`required` 当前仅被持久化和展示，Phase 5 才提供任务准入语义。
+Phase 2 的 schema、Repository 与手工 JSONC 支持 stdio/HTTP transport 以及 `enabled`、`required`、`cwd`、timeout、args、env/header 配置。`enabled: false` 保留完整配置和环境引用，但不连接、不发布未来 capability。`required` 当前仅被持久化并进入 Core control snapshot，Phase 5 才提供任务准入语义；`/mcp` 不展示该字段。
 
-Phase 2 不提供 Credential Store 或 OAuth。Wizard 的 HTTP auth 只允许 None/Environment reference；普通 JSONC 可以保存环境变量引用，但管理页预览不能显示 header value、env value、URL query/fragment/userinfo 或参数内容。Disable/remove 不删除未来 Phase 3 credential。
+Phase 2 不提供 Credential Store 或 OAuth。普通 JSONC 可以保存环境变量引用。任何未来配置或诊断前端都不能显示 header value、env value、URL query/fragment/userinfo 或参数内容。Core disable/remove 不删除未来 Phase 3 credential；HTTP OAuth 应由 Server 认证状态触发，而不是在新增时预选 auth mode。
 
 ## Reconcile 与 Runtime 一致性
 
@@ -53,6 +53,6 @@ provider version 绑定 source identity、Server 名称和规范化配置。即�
 
 ## TUI 行为
 
-`/mcp add` 打开非 OAuth HTTP/STDIO Wizard；`/mcp enable|disable|remove <server>` 只导航到确认页；`/mcp approve|reject <server>` 进入既有项目审批；`/mcp reload` 手动全量重读。列表中 `a` 添加，detail 中 `g` 启用、`d` 禁用、`x` 删除可写来源、`m` 迁移 legacy。
+`/mcp` 只是 effective Server 的只读连接状态列表。它不接受参数或 add、enable、disable、remove、migrate、approve、reject、retry、reload 子命令；列表键位不能调用 Repository、Supervisor mutation 或连接操作。
 
-Add Wizard 按字段收集配置并在写入前显示脱敏预览。project scope 保存后显示 pending approval 提示，用户必须通过独立审批路由决定。破坏性操作必须在 dialog 中显式确认；Esc 取消当前 Wizard/确认页并返回上层。
+TUI 不收集 name、URL、transport、scope、command/arguments、`cwd`、env/header、timeout 或 required，也不创建、修改或删除配置文件。项目配置的 transport 前置决定由独立信任提示完成，不属于配置 mutation 或 `/mcp`。Core Repository 的 typed mutation、legacy 迁移和安全写入语义保持不变。

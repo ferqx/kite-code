@@ -63,26 +63,10 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('/plan')).toEqual({ type: 'plan' });
   });
 
-  test('parses MCP management routes', () => {
-    expect(parseSlashCommand('/mcp')).toEqual({ type: 'mcp', command: 'open' });
-    expect(parseSlashCommand('/mcp github')).toEqual({
-      type: 'mcp',
-      command: 'open',
-      server: 'github',
-    });
-    expect(parseSlashCommand('/mcp retry github')).toEqual({
-      type: 'mcp',
-      command: 'retry',
-      server: 'github',
-    });
-    expect(parseSlashCommand('/mcp add')).toEqual({ type: 'mcp', command: 'add' });
-    expect(parseSlashCommand('/mcp reload')).toEqual({ type: 'mcp', command: 'reload' });
-    for (const command of ['enable', 'disable', 'remove', 'approve', 'reject'] as const) {
-      expect(parseSlashCommand(`/mcp ${command} github`)).toEqual({
-        type: 'mcp',
-        command,
-        server: 'github',
-      });
+  test('accepts only argument-free /mcp', () => {
+    expect(parseSlashCommand('/mcp')).toEqual({ type: 'mcp' });
+    for (const input of ['/mcp github', '/mcp add', '/mcp retry github', '/mcp reload']) {
+      expect(parseSlashCommand(input)).toEqual({ type: 'unknown', raw: input });
     }
   });
 

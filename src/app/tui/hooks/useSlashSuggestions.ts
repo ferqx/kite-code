@@ -26,8 +26,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   {
     name: 'mcp',
     aliases: [],
-    description: 'Manage MCP servers and configuration',
-    args: '[server|add|enable|disable|remove|approve|reject|retry|reload]',
+    description: 'View MCP connection status',
   },
   { name: 'clear', aliases: ['c'], description: 'Clear output' },
   { name: 'help', aliases: ['h'], description: 'Show help' },
