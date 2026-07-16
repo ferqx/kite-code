@@ -116,6 +116,7 @@
 | `plans/2026-07-15-mcp-project-server-approval-p0.md` | archived | MCP TUI 管理中心 Phase 0：项目来源识别、config digest、本地审批、transport 启动门禁与最小 TUI 审批入口。 |
 | `plans/2026-07-15-mcp-tui-management-center-implementation.md` | superseded | MCP TUI 管理中心 Phase 0–2 保留为历史；UI 方向由只读计划替代。 |
 | `plans/2026-07-16-mcp-tui-readonly-list.md` | archived | `/mcp` 只展示 effective MCP Server 名称与连接状态；配置和 project trust 移出该命令。 |
+| `plans/2026-07-16-mcp-auth-phase3.md` | archived | MCP 原生凭据保险库、静态 credential reference、HTTP OAuth 与独立认证恢复提示。 |
 
 ## 完成执行记录
 
@@ -155,6 +156,7 @@
 | `execution/completed/2026-07-15-mcp-tui-management-center-phase2.md` | completed | MCP TUI 管理中心 Phase 2 完成记录：三层配置 repository、原子 mutation、热重载、增量 reconcile 与配置管理交互。 |
 | `execution/completed/2026-07-16-mcp-tui-config-simplification.md` | completed | MCP TUI 配置体验校正：name + URL 的 local HTTP Wizard 与高级 JSONC 边界。 |
 | `execution/completed/2026-07-16-mcp-tui-readonly-list.md` | completed | `/mcp` 收敛为无参数只读状态列表，项目配置摘要决定迁移为独立信任提示。 |
+| `execution/completed/2026-07-16-mcp-auth-phase3.md` | completed | MCP Auth Phase 3：OS vault-only credential、HTTP OAuth、独立恢复提示与三平台原生 smoke。 |
 
 ## 参考资料
 

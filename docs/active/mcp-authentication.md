@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 MCP auth schema、Credential Store、HTTP header 注入、OAuth provider/coordinator、loopback callback、browser opener、认证状态投影或独立认证提示时。
-验证：`bun test tests/mcp-credential-store.test.ts tests/mcp-oauth-provider.test.ts tests/mcp-auth-coordinator.test.ts tests/mcp-oauth-integration.test.ts tests/mcp-manager.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-panel.test.tsx`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-authentication.test.ts`、`KITE_RUN_NATIVE_KEYRING_SMOKE=1 bun test tests/mcp-keyring-platform-smoke.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。`.github/workflows/mcp-native-keyring-smoke.yml` 在 macOS、Windows、Ubuntu 三个平台运行同一原生 smoke；Phase 3 完成前必须取得三个 job 的通过证据。
+验证：`bun test tests/mcp-credential-store.test.ts tests/mcp-oauth-provider.test.ts tests/mcp-auth-coordinator.test.ts tests/mcp-oauth-integration.test.ts tests/mcp-manager.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-panel.test.tsx`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-authentication.test.ts`、`KITE_RUN_NATIVE_KEYRING_SMOKE=1 bun test tests/mcp-keyring-platform-smoke.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。`.github/workflows/mcp-native-keyring-smoke.yml` 在 macOS、Windows、Ubuntu 三个平台运行同一原生 smoke；backend 或原生依赖变化必须维持三个 job 通过。
 相关：ADR-0013、ADR-0012、[`mcp-control-plane.md`](mcp-control-plane.md)、[`mcp-config-management.md`](mcp-config-management.md)、`src/core/mcp/credential-store.ts`、`src/core/mcp/oauth-provider.ts`、`src/core/mcp/auth-coordinator.ts`、`src/app/tui/mcp/McpAuthPrompt.tsx`。
 
 ## 凭据持久化
@@ -64,4 +64,4 @@ Auth 与 connection health 分离：`not_required`、`login_required`、`authori
 
 `/mcp` 仍是 ADR-0012 的只读 effective Server 列表，不能 Login、Logout、Retry 或进入 auth 详情。真实认证阻塞由 App shell 独立提示：Enter/`l` 显式开始登录，Esc 延后；authorizing 时 Esc 取消 callback。提示不显示 authorization URL、token、scope、transport 或 capability 详情。
 
-当前 Phase 3 尚未结束：macOS 原生 smoke 与 TUI PTY 认证场景已通过；Windows Credential Manager 和 Linux Secret Service 原生 smoke 仍是退出门禁。
+Phase 3 已完成：TUI PTY 的 Login、Cancel、opener failure 和输入恢复场景通过；macOS Keychain、Windows Credential Manager 与 Linux Secret Service 的原生 write/read/delete smoke 均通过。完成证据见 [`../space/execution/completed/2026-07-16-mcp-auth-phase3.md`](../space/execution/completed/2026-07-16-mcp-auth-phase3.md)。

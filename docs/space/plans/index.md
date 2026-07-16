@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-16（启动 MCP Auth Phase 3）
+最后更新：2026-07-16（完成 MCP Auth Phase 3）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -55,7 +55,7 @@
 | [`2026-07-15-mcp-project-server-approval-p0.md`](2026-07-15-mcp-project-server-approval-p0.md) | archived | P0 | ADR-0007、ADR-0009 | MCP TUI 管理中心 RFC 的 Phase 0 | 项目来源识别、config digest、本地批准记录、transport 前置门禁、最小 TUI 审批和真实 transport/PTY 验证；[完成记录](../execution/completed/2026-07-15-mcp-project-server-approval-p0.md)。 |
 | [`2026-07-15-mcp-tui-management-center-implementation.md`](2026-07-15-mcp-tui-management-center-implementation.md) | superseded | P0–P2 | MCP Runtime Governance、Phase 0 子计划 | 被 2026-07-16 `/mcp` 只读计划替代 UI 方向 | Phase 0–2 为历史完成事实；不再扩展 TUI 管理路由。 |
 | [`2026-07-16-mcp-tui-readonly-list.md`](2026-07-16-mcp-tui-readonly-list.md) | archived | P0 | MCP Phase 0–2、ADR-0009/0010/0011 | 纠偏 2026-07-15 总计划中的 `/mcp` 管理中心 UI | `/mcp` 无参数只读列表、project trust prompt 独立迁移、配置 mutation 退出 TUI；[完成记录](../execution/completed/2026-07-16-mcp-tui-readonly-list.md)。 |
-| [`2026-07-16-mcp-auth-phase3.md`](2026-07-16-mcp-auth-phase3.md) | active | P1 | Phase 2、ADR-0010/0012 | 承接旧总计划 Phase 3 的 Core auth，保留 `/mcp` 只读边界 | OS vault、credential reference、HTTP OAuth、独立恢复提示已实现；等待 Windows/Linux native smoke 与 TUI PTY。 |
+| [`2026-07-16-mcp-auth-phase3.md`](2026-07-16-mcp-auth-phase3.md) | archived | P1 | Phase 2、ADR-0010/0012 | 承接旧总计划 Phase 3 的 Core auth，保留 `/mcp` 只读边界 | OS vault、credential reference、HTTP OAuth、独立恢复提示与三平台 native smoke 已完成；[完成记录](../execution/completed/2026-07-16-mcp-auth-phase3.md)。 |
 
 ## 计划文件命名规范
 

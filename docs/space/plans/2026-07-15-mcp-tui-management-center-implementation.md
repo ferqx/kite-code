@@ -1247,7 +1247,7 @@ bun run test:tui:system:core
 | 1 Supervisor/只读 UI | completed | [`../execution/completed/2026-07-15-mcp-tui-management-center-phase1.md`](../execution/completed/2026-07-15-mcp-tui-management-center-phase1.md) | 单一 SDK client、可订阅 control snapshot、typed diagnostics 与只读管理中心已验证 |
 | 2 配置管理 | completed（含 TUI 简化校正） | [`Phase 2`](../execution/completed/2026-07-15-mcp-tui-management-center-phase2.md)、[`UX 校正`](../execution/completed/2026-07-16-mcp-tui-config-simplification.md) | 三层 repository、原子 mutation、watch/reconcile 与 name + URL 的 local HTTP TUI 流程已验证 |
 | 2R `/mcp` 只读纠偏 | completed | [`完成记录`](../execution/completed/2026-07-16-mcp-tui-readonly-list.md) | 配置 mutation 退出 TUI，project trust 独立，只保留 effective Server 名称与连接状态 |
-| 3 Auth | active | [`2026-07-16-mcp-auth-phase3.md`](2026-07-16-mcp-auth-phase3.md) | Core credential/OAuth、独立认证提示与 PTY 认证场景已实现；遵循 ADR-0012，不恢复 `/mcp` 管理 route；等待 Windows/Linux native smoke 与仓库级格式基线门禁 |
+| 3 Auth | completed | [`完成记录`](../execution/completed/2026-07-16-mcp-auth-phase3.md) | OS vault-only credential、HTTP OAuth、独立认证提示、PTY 场景与 macOS/Windows/Ubuntu 原生 smoke 全部通过；遵循 ADR-0012，不恢复 `/mcp` 管理 route |
 | 4 Tool 策略 | pending | — | 依赖 Phase 2，后半与 Phase 3 集成 |
 | 5 Agent 闭环 | pending | — | 依赖 Phase 1/3/4，需 Runtime flag/ADR |
 
