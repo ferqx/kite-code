@@ -52,6 +52,13 @@ export {
   type McpSupervisorOptions,
 } from './supervisor';
 export { parseMcpToolName } from './tool-adapter';
+export {
+  configuredMcpToolNames,
+  hasConfiguredMcpToolPolicy,
+  isMcpToolEnabled,
+  type ResolvedMcpToolPolicy,
+  resolveMcpToolPolicy,
+} from './tool-policy';
 export type {
   McpAuthConfig,
   McpHealthState,
@@ -60,4 +67,6 @@ export type {
   McpResourceContent,
   McpServerConfig,
   McpServerState,
+  McpToolPolicyConfig,
+  McpToolRetryPolicy,
 } from './types';

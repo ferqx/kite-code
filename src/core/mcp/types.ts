@@ -23,6 +23,16 @@ export interface McpTrustedProvenance {
   allowAnnotations: 'read_only';
 }
 
+export type McpToolRetryPolicy = 'never' | 'safe_read' | 'idempotency_key';
+
+export interface McpToolPolicyConfig {
+  enabled?: boolean;
+  effects?: Partial<EffectProfile>;
+  minimumApproval?: CapabilityApproval;
+  retry?: McpToolRetryPolicy;
+  idempotencyKeyArgument?: string;
+}
+
 /** MCP Server configuration */
 export interface McpServerConfig {
   type: McpTransportType;
@@ -39,16 +49,12 @@ export interface McpServerConfig {
   credentialKey?: import('./credential-store').McpCredentialKey;
   /** Server annotations are ignored unless this explicit local trust decision is present. */
   trust?: 'untrusted' | 'trusted' | McpTrustedProvenance;
+  /** Optional allowlist applied before disabledTools and exact per-tool overrides. */
+  enabledTools?: string[];
+  /** Optional denylist applied after enabledTools and before exact per-tool overrides. */
+  disabledTools?: string[];
   /** Local policy overrides are keyed by the exact server tool name. */
-  tools?: Record<
-    string,
-    {
-      effects?: Partial<EffectProfile>;
-      minimumApproval?: CapabilityApproval;
-      retry?: 'never' | 'safe_read' | 'idempotency_key';
-      idempotencyKeyArgument?: string;
-    }
-  >;
+  tools?: Record<string, McpToolPolicyConfig>;
   /** 单次工具调用/资源读取超时（毫秒），覆盖默认值 / Per-operation timeout in ms, overrides defaults */
   timeout?: number;
   /** Internal digest that makes descriptors change when provider config/source changes. */

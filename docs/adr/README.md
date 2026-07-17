@@ -16,3 +16,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0011](0011-mcp-config-scopes-and-mutation.md) | accepted | MCP 配置使用三层可写作用域、乐观冲突检测与显式 legacy 迁移 |
 | [0012](0012-mcp-tui-readonly-list.md) | accepted | TUI `/mcp` 只显示 effective Server 的连接状态与名称 |
 | [0013](0013-mcp-credential-store-and-oauth-session.md) | accepted | MCP secret 只进入原生系统保险库，OAuth 由独立恢复提示显式启动 |
+| [0014](0014-mcp-tool-visibility-and-policy.md) | accepted | MCP Tool filter 与 policy 必须进入同一 revision，并按配置来源限制放宽能力 |

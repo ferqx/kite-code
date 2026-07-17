@@ -1,6 +1,18 @@
 import type { McpConfigSourceKind, McpWritableScope } from '@/core/config/mcp-config';
+import type {
+  CapabilityApproval,
+  CapabilityAvailability,
+  CapabilityDescriptor,
+  EffectProfile,
+} from '@/protocol/capabilities';
 import type { McpDiagnostic } from './diagnostics';
-import type { McpHealthState, McpPrompt, McpResource, McpTransportType } from './types';
+import type {
+  McpHealthState,
+  McpPrompt,
+  McpResource,
+  McpToolRetryPolicy,
+  McpTransportType,
+} from './types';
 
 export interface McpServerKey {
   name: string;
@@ -31,7 +43,17 @@ export type McpAuthStatus =
 export interface McpToolControlState {
   name: string;
   description?: string;
+  discovered: boolean;
+  enabled: boolean;
+  availability: CapabilityAvailability;
   available: boolean;
+  declaredEffects: Readonly<EffectProfile>;
+  effectiveEffects: Readonly<EffectProfile>;
+  annotationProvenance: CapabilityDescriptor['provider']['provenance'];
+  policySource: 'default' | McpConfigSourceKind;
+  minimumApproval: CapabilityApproval;
+  retry: McpToolRetryPolicy;
+  idempotencyKeyArgument?: string;
   diagnostic?: McpDiagnostic;
 }
 

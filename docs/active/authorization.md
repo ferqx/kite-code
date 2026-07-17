@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改授权逻辑、安全审计、CLI/TUI 授权入口变更时
-验证：`bun test tests/policies/authorization-elevation.test.ts`
+验证：`bun test tests/policies/authorization-elevation.test.ts tests/policies/approval-policy.test.ts tests/mcp-tool-policy.test.ts`
 
 ## 概述
 
@@ -67,6 +67,10 @@ authorization: {
 1. **`full_access` 需要沙箱可用** — `mode === 'full_access' && !sandboxAvailable` → 拒绝
 2. **auto-review 不能授予 `full_access`** — `source === 'system' && autoReview` → 拒绝
 3. **loop-mode 不能自动提升授权** — `source === 'system' && loopMode` → 拒绝
+
+## MCP Tool 策略边界
+
+MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive effect 变成无审批调用。只有 effective effects 全部为 `none|read` 且 `minimumApproval: none` 时，Approval Policy 才把它当作只读；`minimumApproval: user` 始终要求单次用户批准。远端 annotation 不直接进入该判断，project 配置也不能降低 minimum approval 或 effect 风险。Tool filter 只决定 catalog 可见性，不产生 authorization grant。
 
 ## 入口覆盖
 

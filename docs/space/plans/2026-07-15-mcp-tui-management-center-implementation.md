@@ -672,6 +672,8 @@ Auth 和 connection health 分离。authenticated 不等于 ready；ready 也不
 
 ## 十、Phase 4：Tool 可见性与既有 Policy 管理
 
+> 2026-07-17 实施校正：Core Tool filter、policy、source-only-tighten、control projection 与 binding 失效已完成。依据 ADR-0012，原 10.3 的 TUI Tool List/Detail/editor 不再实施；策略只通过 JSONC/Repository 管理，`/mcp` 继续只读显示 Server 名称与连接状态。当前规则见 ADR-0014 与 `docs/active/mcp-runtime-governance.md`。
+
 ### 10.1 配置模型
 
 扩展 `McpServerConfig`：
@@ -1248,7 +1250,7 @@ bun run test:tui:system:core
 | 2 配置管理 | completed（含 TUI 简化校正） | [`Phase 2`](../execution/completed/2026-07-15-mcp-tui-management-center-phase2.md)、[`UX 校正`](../execution/completed/2026-07-16-mcp-tui-config-simplification.md) | 三层 repository、原子 mutation、watch/reconcile 与 name + URL 的 local HTTP TUI 流程已验证 |
 | 2R `/mcp` 只读纠偏 | completed | [`完成记录`](../execution/completed/2026-07-16-mcp-tui-readonly-list.md) | 配置 mutation 退出 TUI，project trust 独立，只保留 effective Server 名称与连接状态 |
 | 3 Auth | completed | [`完成记录`](../execution/completed/2026-07-16-mcp-auth-phase3.md) | OS vault-only credential、HTTP OAuth、独立认证提示、PTY 场景与 macOS/Windows/Ubuntu 原生 smoke 全部通过；遵循 ADR-0012，不恢复 `/mcp` 管理 route |
-| 4 Tool 策略 | pending | — | 依赖 Phase 2，后半与 Phase 3 集成 |
+| 4 Tool 策略 | completed（Core；TUI editor superseded） | [`完成记录`](../execution/completed/2026-07-17-mcp-tool-policy-phase4.md) | filter、policy provenance、project only-tighten、catalog/binding 失效与 control diagnostic 已完成；ADR-0012 排除 TUI 编辑器 |
 | 5 Agent 闭环 | pending | — | 依赖 Phase 1/3/4，需 Runtime flag/ADR |
 
 执行时一次最多将一个 Phase 标为 active；Phase 内按任务进度更新，不把未验证阶段提前标为完成。

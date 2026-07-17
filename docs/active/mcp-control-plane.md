@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 `McpManager` 生命周期、`McpSupervisor`、MCP control snapshot、TUI `/mcp` 路由或 Runtime MCP provider 边界时。
 验证：`bun test tests/mcp-manager.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-credential-store.test.ts tests/mcp-auth-coordinator.test.ts tests/mcp-oauth-integration.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0010、ADR-0011、ADR-0012、ADR-0013、[`mcp-config-management.md`](mcp-config-management.md)、[`mcp-authentication.md`](mcp-authentication.md)、`src/core/mcp/supervisor.ts`、`src/core/mcp/control-types.ts`、`src/app/tui/mcp/`。
+相关：ADR-0010、ADR-0011、ADR-0012、ADR-0013、ADR-0014、[`mcp-config-management.md`](mcp-config-management.md)、[`mcp-authentication.md`](mcp-authentication.md)、`src/core/mcp/supervisor.ts`、`src/core/mcp/control-types.ts`、`src/app/tui/mcp/`。
 
 ## 权威与依赖
 
@@ -26,7 +26,9 @@ Manager health、discovery、list-changed、call circuit 和 retry 变化均触�
 
 ## Snapshot 与诊断
 
-Control snapshot 包含全部有效和被遮蔽的 Server，并提供 source/revision、enabled/required、shadow/fallback、transport、config/auth/health、generation、capability revision、Tools/Resources/Prompts 只读投影、计数、retry 时间和 typed diagnostic。Auth 只投影状态、credential 是否存在、短生命周期 flow id 和安全错误码，不投影 authorization URL 或 material。数组、key、审批 review 与嵌套 capability 数据均不可变。
+Control snapshot 包含全部有效和被遮蔽的 Server，并提供 source/revision、enabled/required、shadow/fallback、transport、config/auth/health、generation、capability revision、Tools/Resources/Prompts 只读投影、计数、retry 时间和 typed diagnostic。每个 Tool 投影区分 discovered、enabled、available/unavailable/quarantined，并包含 declared/effective effects、annotation provenance、policy source、minimum approval、retry 和 schema diagnostic；配置引用但 discovery 未返回的名称以 `tool_not_discovered` 投影。`toolCount` 只统计真实 discovery，`availableToolCount` 只统计进入 Runtime catalog 的 enabled 且 schema-valid Tool。
+
+Auth 只投影状态、credential 是否存在、短生命周期 flow id 和安全错误码，不投影 authorization URL 或 material。数组、key、审批 review 与嵌套 capability 数据均不可变。
 
 Core diagnostic 只表达 code、retryable、脱敏 message 和有限 technical fields。Core 不提供展示标题或操作文案。URL 只保留 origin，authorization、token、secret 和 query credential 必须脱敏；TUI 决定标题、颜色、截断和建议动作。
 

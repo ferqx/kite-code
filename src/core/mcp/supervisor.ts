@@ -1,6 +1,7 @@
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import { digestCapability } from '@/core/capabilities/catalog';
+import { compileCapabilitySchema } from '@/core/capabilities/schema';
 import type { McpConfigCatalog, McpServerConfigEntry } from '@/core/config/mcp-config';
 import {
   DefaultMcpConfigRepository,
@@ -26,6 +27,11 @@ import type { McpDiagnostic } from './diagnostics';
 import { McpManager } from './manager';
 import { revokeMcpOAuthToken } from './oauth-revocation';
 import type { McpRuntimeProvider } from './runtime-provider';
+import {
+  configuredMcpToolNames,
+  hasConfiguredMcpToolPolicy,
+  resolveMcpToolPolicy,
+} from './tool-policy';
 import type { McpServerConfig, McpServerState } from './types';
 
 const EMPTY_SNAPSHOT: McpControlSnapshot = Object.freeze({
@@ -440,8 +446,11 @@ function projectServer(
       .map((descriptor) => [descriptor.displayName, descriptor]),
   );
   const tools = Object.freeze(
-    (currentRuntimeState?.tools ?? []).map((tool) =>
-      projectTool(tool, toolDescriptors.get(tool.name)),
+    projectTools(
+      currentRuntimeState?.tools ?? [],
+      entry.normalizedConfig,
+      entry.source.kind,
+      toolDescriptors,
     ),
   );
   const approval = approvals.get(`${entry.source.kind}:${entry.name}`);
@@ -478,7 +487,7 @@ function projectServer(
     ...(entry.shadowedBy ? { shadowedBy: entry.shadowedBy } : {}),
     ...(fallback ? { fallbackSource: fallback } : {}),
     capabilityRevision,
-    toolCount: tools.length,
+    toolCount: currentRuntimeState?.tools.length ?? 0,
     availableToolCount: tools.filter((tool) => tool.available).length,
     resourceCount: currentRuntimeState?.resources.length ?? 0,
     promptCount: currentRuntimeState?.prompts.length ?? 0,
@@ -532,22 +541,84 @@ function fallbackSource(
 
 function projectTool(
   tool: SdkTool,
+  config: McpServerConfig,
+  source: McpServerConfigEntry['source']['kind'],
   descriptor: CapabilitySnapshot['descriptors'][number] | undefined,
 ): Readonly<McpToolControlState> {
-  const available = descriptor?.availability === 'available';
+  const schema = compileCapabilitySchema(tool.inputSchema);
+  const policy = resolveMcpToolPolicy(config, tool);
+  const available = policy.enabled && descriptor?.availability === 'available';
   return Object.freeze({
     name: tool.name,
     ...(tool.description ? { description: tool.description } : {}),
+    discovered: true,
+    enabled: policy.enabled,
+    availability: !schema.ok ? 'quarantined' : available ? 'available' : 'unavailable',
     available,
-    ...(!available
+    declaredEffects: Object.freeze({ ...policy.declaredEffects }),
+    effectiveEffects: Object.freeze({ ...policy.effectiveEffects }),
+    annotationProvenance: policy.annotationProvenance,
+    policySource: hasConfiguredMcpToolPolicy(config, tool.name) ? source : 'default',
+    minimumApproval: policy.minimumApproval,
+    retry: policy.retry,
+    ...(policy.idempotencyKeyArgument
+      ? { idempotencyKeyArgument: policy.idempotencyKeyArgument }
+      : {}),
+    ...(!schema.ok
       ? {
           diagnostic: Object.freeze({
             code: 'invalid_schema' as const,
             retryable: false,
-            message: 'The discovered tool schema is not supported.',
+            message: schema.diagnostic,
           }),
         }
       : {}),
+  });
+}
+
+function projectTools(
+  discoveredTools: readonly SdkTool[],
+  config: McpServerConfig | undefined,
+  source: McpServerConfigEntry['source']['kind'],
+  descriptors: ReadonlyMap<string, CapabilitySnapshot['descriptors'][number]>,
+): Readonly<McpToolControlState>[] {
+  if (!config) return [];
+  const discoveredNames = new Set(discoveredTools.map((tool) => tool.name));
+  const discovered = discoveredTools.map((tool) =>
+    projectTool(tool, config, source, descriptors.get(tool.name)),
+  );
+  const missing = configuredMcpToolNames(config)
+    .filter((name) => !discoveredNames.has(name))
+    .map((name) => projectMissingTool(name, config, source));
+  return [...discovered, ...missing].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function projectMissingTool(
+  name: string,
+  config: McpServerConfig,
+  source: McpServerConfigEntry['source']['kind'],
+): Readonly<McpToolControlState> {
+  const policy = resolveMcpToolPolicy(config, { name });
+  return Object.freeze({
+    name,
+    discovered: false,
+    enabled: policy.enabled,
+    availability: 'unavailable',
+    available: false,
+    declaredEffects: Object.freeze({ ...policy.declaredEffects }),
+    effectiveEffects: Object.freeze({ ...policy.effectiveEffects }),
+    annotationProvenance: policy.annotationProvenance,
+    policySource: source,
+    minimumApproval: policy.minimumApproval,
+    retry: policy.retry,
+    ...(policy.idempotencyKeyArgument
+      ? { idempotencyKeyArgument: policy.idempotencyKeyArgument }
+      : {}),
+    diagnostic: Object.freeze({
+      code: 'tool_not_discovered',
+      retryable: false,
+      message: 'The configured Tool name was not returned by MCP discovery.',
+    }),
   });
 }
 

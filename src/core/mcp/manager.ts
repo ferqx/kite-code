@@ -17,14 +17,11 @@ import {
   UNKNOWN_EXTERNAL_EFFECTS,
 } from '@/core/capabilities/catalog';
 import { compileCapabilitySchema } from '@/core/capabilities/schema';
-import type {
-  CapabilityDescriptor,
-  CapabilitySnapshot,
-  EffectProfile,
-} from '@/protocol/capabilities';
+import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
 import { type McpCredentialStore, NativeMcpCredentialStore } from './credential-store';
 import { diagnoseMcpError } from './diagnostics';
 import type { McpRuntimeProvider } from './runtime-provider';
+import { isMcpToolEnabled, resolveMcpToolPolicy } from './tool-policy';
 import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
 
 const MCP_STARTUP_TIMEOUT = 5000;
@@ -353,6 +350,8 @@ export class McpManager implements McpRuntimeProvider {
     for (const [name, state] of this.servers) {
       if (!isUsableForDiscovery(state)) continue;
       for (const tool of state.tools) {
+        if (!isMcpToolEnabled(state.config, tool.name)) continue;
+        if (!compileCapabilitySchema(tool.inputSchema).ok) continue;
         result.push({ server: name, tool });
       }
     }
@@ -379,8 +378,13 @@ export class McpManager implements McpRuntimeProvider {
       throw new Error(`MCP server not found: ${server}`);
     }
     this.assertCallable(state, server);
+    const discoveredTool = state.tools.find((tool) => tool.name === toolName);
+    const descriptor = this.findCapability(`mcp:${server}/${toolName}`);
+    if (!discoveredTool || !descriptor || descriptor.availability !== 'available') {
+      throw new Error(`MCP tool is disabled, unavailable, or has an invalid schema: ${toolName}`);
+    }
     const client = state.client as Client;
-    const execution = state.config.tools?.[toolName];
+    const execution = descriptor.execution;
     const canRetry =
       execution?.retry === 'safe_read' ||
       (execution?.retry === 'idempotency_key' &&
@@ -484,7 +488,9 @@ export class McpManager implements McpRuntimeProvider {
     for (const [serverName, state] of this.servers) {
       if (!isUsableForDiscovery(state)) continue;
       for (const tool of state.tools) {
-        descriptors.push(createMcpToolDescriptor(serverName, state.config, tool));
+        if (!isMcpToolEnabled(state.config, tool.name)) continue;
+        const descriptor = createMcpToolDescriptor(serverName, state.config, tool);
+        if (descriptor.availability === 'available') descriptors.push(descriptor);
       }
       for (const resource of state.resources) {
         descriptors.push(
@@ -566,13 +572,8 @@ function createMcpToolDescriptor(
   config: McpServerConfig,
   tool: SdkTool,
 ): CapabilityDescriptor {
-  const override = config.tools?.[tool.name];
+  const resolvedPolicy = resolveMcpToolPolicy(config, tool);
   const schema = compileCapabilitySchema(tool.inputSchema);
-  const declaredEffects = effectsFromAnnotations(config, tool.annotations);
-  const effectiveEffects: EffectProfile = {
-    ...declaredEffects,
-    ...override?.effects,
-  };
   const inputSchema = tool.inputSchema as Record<string, unknown>;
   const withoutRevision: Omit<CapabilityDescriptor, 'revision'> = {
     capabilityId: `mcp:${serverName}/${tool.name}`,
@@ -587,16 +588,16 @@ function createMcpToolDescriptor(
     },
     inputSchema,
     ...(tool.outputSchema ? { outputSchema: tool.outputSchema as Record<string, unknown> } : {}),
-    declaredEffects,
-    effectiveEffects,
+    declaredEffects: resolvedPolicy.declaredEffects,
+    effectiveEffects: resolvedPolicy.effectiveEffects,
     policy: {
       workspaceTrustRequired: false,
-      minimumApproval: override?.minimumApproval ?? 'user',
+      minimumApproval: resolvedPolicy.minimumApproval,
     },
     execution: {
-      retry: override?.retry ?? 'never',
-      ...(override?.idempotencyKeyArgument
-        ? { idempotencyKeyArgument: override.idempotencyKeyArgument }
+      retry: resolvedPolicy.retry,
+      ...(resolvedPolicy.idempotencyKeyArgument
+        ? { idempotencyKeyArgument: resolvedPolicy.idempotencyKeyArgument }
         : {}),
     },
     availability: schema.ok ? 'available' : 'quarantined',
@@ -630,23 +631,6 @@ function createPassiveDescriptor(
     diagnostics: [],
   };
   return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
-}
-
-function effectsFromAnnotations(
-  config: McpServerConfig,
-  annotations: SdkTool['annotations'],
-): EffectProfile {
-  if (!allowsReadOnlyAnnotations(config) || !annotations?.readOnlyHint) {
-    return UNKNOWN_EXTERNAL_EFFECTS;
-  }
-  return { filesystem: 'read', network: 'read', externalState: 'read' };
-}
-
-function allowsReadOnlyAnnotations(config: McpServerConfig): boolean {
-  return (
-    config.trust === 'trusted' ||
-    (typeof config.trust === 'object' && config.trust.allowAnnotations === 'read_only')
-  );
 }
 
 function trustedProvenance(

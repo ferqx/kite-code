@@ -39,7 +39,7 @@ describe('McpManager governance fixture', () => {
   });
 
   test('opens a health circuit after repeated provider failures and fails closed', async () => {
-    const manager = managerWithCall(async () => {
+    const manager = managerWithCall('fail_fixture', async () => {
       throw new Error('fixture unavailable');
     });
     await manager.connect('failing', { type: 'stdio', command: 'fixture' });
@@ -61,7 +61,7 @@ describe('McpManager governance fixture', () => {
 
   test('retries only an explicitly configured safe read with unchanged arguments', async () => {
     let calls = 0;
-    const manager = managerWithCall(async () => {
+    const manager = managerWithCall('retry_fixture', async () => {
       calls += 1;
       if (calls === 1) throw new Error('transient failure');
       return { content: [{ type: 'text', text: 'ok' }] };
@@ -70,13 +70,37 @@ describe('McpManager governance fixture', () => {
     await manager.connect('retrying', {
       type: 'stdio',
       command: 'fixture',
-      tools: { retry_fixture: { retry: 'safe_read' } },
+      tools: {
+        retry_fixture: {
+          effects: { filesystem: 'read', network: 'read', externalState: 'read' },
+          retry: 'safe_read',
+        },
+      },
     });
     await expect(manager.callTool('retrying', 'retry_fixture', args)).resolves.toMatchObject({
       content: [{ type: 'text', text: 'ok' }],
     });
     expect(calls).toBe(2);
     expect(args).toEqual({ id: 'same-input' });
+    await manager.disconnectAll();
+  });
+
+  test('does not retry a safe_read label while effective effects remain unknown', async () => {
+    let calls = 0;
+    const manager = managerWithCall('unknown_retry', async () => {
+      calls += 1;
+      throw new Error('transient failure');
+    });
+    await manager.connect('retrying', {
+      type: 'stdio',
+      command: 'fixture',
+      tools: { unknown_retry: { retry: 'safe_read' } },
+    });
+
+    await expect(manager.callTool('retrying', 'unknown_retry', {})).rejects.toThrow(
+      'transient failure',
+    );
+    expect(calls).toBe(1);
     await manager.disconnectAll();
   });
 
@@ -274,12 +298,13 @@ describe('McpManager governance fixture', () => {
 });
 
 function managerWithCall(
+  toolName: string,
   callTool: (request: unknown) => Promise<{ content: Array<{ type: string; text: string }> }>,
 ): McpManager {
   const client = {
     connect: async () => {},
     close: async () => {},
-    listTools: async () => ({ tools: [{ name: 'fixture', inputSchema: { type: 'object' } }] }),
+    listTools: async () => ({ tools: [{ name: toolName, inputSchema: { type: 'object' } }] }),
     listPrompts: async () => ({ prompts: [] }),
     listResources: async () => ({ resources: [] }),
     setNotificationHandler: () => {},

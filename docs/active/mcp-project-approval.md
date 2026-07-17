@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 MCP 配置发现、项目来源、连接启动、项目信任提示或 Approval Store 时。
 验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-panel.test.tsx tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0009、ADR-0010、ADR-0012、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
+相关：ADR-0009、ADR-0010、ADR-0012、ADR-0014、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
 
 ## 当前安全性质
 
@@ -33,7 +33,7 @@ local 与 user 来源保持自动连接行为。调用方显式传入的 `config
 
 ## 与 Runtime Policy 的边界
 
-项目批准只允许创建 transport，不是 workspace authorization、annotation trust 或 Tool Approval。批准后的项目连接配置强制使用 `trust: untrusted`，并忽略项目声明的逐工具 `effects`、`minimumApproval`、`retry` 和 idempotency override。因此项目 Tool 默认保持 unknown effects、`minimumApproval: user` 与 `retry: never`。
+项目批准只允许创建 transport，不是 workspace authorization、annotation trust 或 Tool Approval。批准后的项目连接配置强制使用 `trust: untrusted`。项目可通过 `enabledTools` allowlist、`disabledTools` denylist、`tools.<name>.enabled: false`、`minimumApproval: user` 和 `retry: never` 收紧策略；精确 enable、逐工具 effect 降级、较低 minimum approval、可重试策略与 idempotency override 被忽略。因此未被进一步收紧的项目 Tool 仍保持 unknown effects、`minimumApproval: user` 与 `retry: never`。
 
 Approval Store 和项目配置信任决定属于 MCP control plane，不写入任务 Runtime Event 或 session log。MCP capability 只有在批准、连接和 discovery 成功后才进入现有 revisioned catalog；后续 Tool 调用仍必须通过 turn binding、schema、Policy、Execution 与 Verification。
 

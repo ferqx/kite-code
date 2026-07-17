@@ -8,6 +8,7 @@ import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabi
 class FakeManager implements McpManagerControlPlane {
   readonly states = new Map<string, McpServerState>();
   readonly reconnects: Array<{ name: string; generation: number }> = [];
+  discoveredTools: SdkTool[] = [{ name: 'read', inputSchema: { type: 'object' } } as SdkTool];
   private readonly listeners = new Set<() => void>();
   private capabilitySnapshot: CapabilitySnapshot = { revision: 'empty', descriptors: [] };
   connectGate: Promise<void> = Promise.resolve();
@@ -25,9 +26,11 @@ class FakeManager implements McpManagerControlPlane {
     const current = this.states.get(name);
     if (!current || current.generation !== generation) return;
     current.health = 'ready';
-    current.tools = [{ name: 'read', inputSchema: { type: 'object' } } as SdkTool];
-    const descriptor = toolDescriptor(name);
-    this.capabilitySnapshot = { revision: `cap-${generation}`, descriptors: [descriptor] };
+    current.tools = this.discoveredTools;
+    const descriptors = this.discoveredTools
+      .filter((tool) => tool.name === 'read')
+      .map(() => toolDescriptor(name));
+    this.capabilitySnapshot = { revision: `cap-${generation}`, descriptors };
     this.emit();
   }
 
@@ -155,6 +158,84 @@ describe('McpSupervisor', () => {
     expect(supervisor.getSnapshot().servers[0]).toMatchObject({
       health: 'ready',
       authStatus: 'not_required',
+    });
+    await supervisor.stop();
+  });
+
+  test('projects visibility, effective policy, schema quarantine, and missing Tool diagnostics', async () => {
+    const manager = new FakeManager();
+    manager.discoveredTools = [
+      {
+        name: 'read',
+        description: 'Read data',
+        inputSchema: { type: 'object' },
+        annotations: { readOnlyHint: true },
+      } as SdkTool,
+      { name: 'broken', inputSchema: { type: 'string' } } as unknown as SdkTool,
+    ];
+    const configured = entry('policy', 'user', 'not_required');
+    configured.rawConfig = {
+      type: 'stdio',
+      command: 'bun',
+      enabledTools: ['read', 'missing'],
+    };
+    configured.normalizedConfig = {
+      type: 'stdio',
+      command: 'bun',
+      enabledTools: ['read', 'missing'],
+      trust: { provenance: 'user', allowAnnotations: 'read_only' },
+      tools: {
+        read: { minimumApproval: 'none', retry: 'safe_read' },
+        missing: { enabled: false },
+      },
+    };
+    const policyCatalog: McpConfigCatalog = {
+      entries: [configured],
+      effective: new Map([['policy', configured]]),
+      connectableServers: { policy: configured.normalizedConfig },
+      projectApprovals: [],
+      diagnostics: [],
+      workspace: '/workspace',
+      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+    };
+    const supervisor = new DefaultMcpSupervisor({
+      manager,
+      loadCatalog: () => policyCatalog,
+    });
+
+    await supervisor.start('/workspace');
+    await Bun.sleep(0);
+
+    const server = supervisor.getSnapshot().servers[0]!;
+    expect(server).toMatchObject({ toolCount: 2, availableToolCount: 1 });
+    expect(server.tools.find((tool) => tool.name === 'read')).toMatchObject({
+      discovered: true,
+      enabled: true,
+      availability: 'available',
+      available: true,
+      annotationProvenance: 'user',
+      policySource: 'user',
+      minimumApproval: 'none',
+      retry: 'safe_read',
+      effectiveEffects: {
+        filesystem: 'read',
+        network: 'read',
+        externalState: 'read',
+      },
+    });
+    expect(server.tools.find((tool) => tool.name === 'broken')).toMatchObject({
+      discovered: true,
+      enabled: false,
+      availability: 'quarantined',
+      available: false,
+      diagnostic: { code: 'invalid_schema' },
+    });
+    expect(server.tools.find((tool) => tool.name === 'missing')).toMatchObject({
+      discovered: false,
+      enabled: false,
+      availability: 'unavailable',
+      available: false,
+      diagnostic: { code: 'tool_not_discovered' },
     });
     await supervisor.stop();
   });

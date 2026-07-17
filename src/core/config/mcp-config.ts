@@ -262,7 +262,23 @@ function isProjectEntry(entry: McpServerConfigEntry): entry is McpServerConfigEn
 }
 
 function conservativeProjectConfig(config: McpServerConfig): McpServerConfig {
-  return { ...config, trust: 'untrusted', tools: undefined };
+  const tools = Object.fromEntries(
+    Object.entries(config.tools ?? {}).flatMap(([name, policy]) => {
+      const restrictivePolicy = {
+        ...(policy.enabled === false ? { enabled: false } : {}),
+        ...(policy.minimumApproval === 'user' ? { minimumApproval: 'user' as const } : {}),
+        ...(policy.retry === 'never' ? { retry: 'never' as const } : {}),
+      };
+      return Object.keys(restrictivePolicy).length > 0 ? [[name, restrictivePolicy]] : [];
+    }),
+  );
+  return {
+    ...config,
+    trust: 'untrusted',
+    ...(config.enabledTools ? { enabledTools: [...config.enabledTools] } : {}),
+    ...(config.disabledTools ? { disabledTools: [...config.disabledTools] } : {}),
+    tools: Object.keys(tools).length > 0 ? tools : undefined,
+  };
 }
 
 function approvalReview(

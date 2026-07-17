@@ -88,11 +88,34 @@ describe('MCP config repository', () => {
       type: 'update',
       key: { name: entry.name, source: entry.source.kind },
       expectedRevision: entry.revision,
-      patch: { cwd: 'D:\\repo\\next', required: true },
+      patch: {
+        cwd: 'D:\\repo\\next',
+        required: true,
+        enabledTools: ['read'],
+        disabledTools: ['write'],
+        tools: {
+          read: {
+            enabled: true,
+            effects: { filesystem: 'read', network: 'read', externalState: 'read' },
+            minimumApproval: 'none',
+            retry: 'safe_read',
+          },
+        },
+      },
     });
     expect(catalog.effective.get('demo')?.rawConfig).toMatchObject({
       cwd: 'D:\\repo\\next',
       required: true,
+      enabledTools: ['read'],
+      disabledTools: ['write'],
+      tools: {
+        read: {
+          enabled: true,
+          effects: { filesystem: 'read', network: 'read', externalState: 'read' },
+          minimumApproval: 'none',
+          retry: 'safe_read',
+        },
+      },
     });
     entry = catalog.entries.find(
       (candidate) => candidate.name === 'demo' && candidate.source.kind === 'user',

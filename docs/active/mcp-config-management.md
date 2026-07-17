@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 MCP 配置来源、schema、路径、Repository mutation、文件 watcher、Supervisor reconcile 或 TUI 配置边界时。
 验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-config-repository.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-credential-store.test.ts tests/mcp-oauth-integration.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0011、ADR-0012、ADR-0013、`src/core/config/mcp-config-repository.ts`、`src/core/config/mcp-config.ts`、`src/core/mcp/supervisor.ts`、[`mcp-authentication.md`](mcp-authentication.md)、`src/app/tui/mcp/`。
+相关：ADR-0011、ADR-0012、ADR-0013、ADR-0014、`src/core/config/mcp-config-repository.ts`、`src/core/config/mcp-config.ts`、`src/core/mcp/supervisor.ts`、[`mcp-authentication.md`](mcp-authentication.md)、`src/app/tui/mcp/`。
 
 ## 来源与优先级
 
@@ -35,7 +35,15 @@ Watcher 只把文件事件视为 reload 提示，debounce 后重新读取全部�
 
 ## Schema 与 secret 边界
 
-Phase 2 的 schema、Repository 与手工 JSONC 支持 stdio/HTTP transport 以及 `enabled`、`required`、`cwd`、timeout、args、env/header 配置。`enabled: false` 保留完整配置和环境引用，但不连接、不发布未来 capability。`required` 当前仅被持久化并进入 Core control snapshot，Phase 5 才提供任务准入语义；`/mcp` 不展示该字段。
+Schema、Repository 与手工 JSONC 支持 stdio/HTTP transport 以及 `enabled`、`required`、`cwd`、timeout、args、env/header 配置。`enabled: false` 保留完整配置和环境引用，但不连接、不发布未来 capability。`required` 当前仅被持久化并进入 Core control snapshot，Phase 5 才提供任务准入语义；`/mcp` 不展示该字段。
+
+Tool 可见性按以下顺序解析：
+
+1. `enabledTools` 存在时作为 allowlist；
+2. `disabledTools` 在 allowlist 后应用；
+3. `tools.<name>.enabled` 作为精确 override。
+
+逐 Tool policy 还可配置 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`。local、user 与调用方授权的 explicit 来源可以使用完整字段；project/project_legacy 获批后只保留 allowlist、denylist、精确 disable、`minimumApproval: user` 和 `retry: never`。项目声明的精确 enable、annotation trust、effect 降级、较低 minimum approval 或 retry 放宽不会进入连接配置。引用 discovery 不存在的 Tool 只产生 control diagnostic，不使 Server 配置无效。
 
 普通 JSONC 可以为 HTTP transport 保存环境变量名、credential profile 与 OAuth metadata，但不能保存 inline OAuth client secret；stdio 声明携带 `auth` 会被拒绝。`environment` 在 transport 构造时读取 env；`credential` 只保存 header、scheme 与 `credentialRef`；`oauth` 只保存 profile、scopes、client id、`clientSecretRef` 等非 secret metadata。TUI 不录入或修改这些字段。Core disable/remove 不删除 credential；未显式配置 auth mode 的 HTTP Server 可由真实认证状态触发 OAuth。完整持久化与生命周期见 [`mcp-authentication.md`](mcp-authentication.md)。
 

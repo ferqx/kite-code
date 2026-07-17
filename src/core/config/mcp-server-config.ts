@@ -57,10 +57,13 @@ export const mcpServerSchema = z
         }),
       ])
       .optional(),
+    enabledTools: z.array(z.string().min(1)).optional(),
+    disabledTools: z.array(z.string().min(1)).optional(),
     tools: z
       .record(
-        z.string(),
+        z.string().min(1),
         z.object({
+          enabled: z.boolean().optional(),
           effects: z
             .object({
               filesystem: z.enum(['none', 'read', 'write', 'destructive', 'unknown']).optional(),
@@ -179,6 +182,16 @@ export function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServe
       config.trust = { provenance: trust.provenance, allowAnnotations: 'read_only' };
     }
   }
+  if (Array.isArray(raw.enabledTools)) {
+    config.enabledTools = [
+      ...new Set(raw.enabledTools.filter((name): name is string => typeof name === 'string')),
+    ];
+  }
+  if (Array.isArray(raw.disabledTools)) {
+    config.disabledTools = [
+      ...new Set(raw.disabledTools.filter((name): name is string => typeof name === 'string')),
+    ];
+  }
   if (raw.tools && typeof raw.tools === 'object') {
     const tools: NonNullable<McpServerConfig['tools']> = {};
     for (const [toolName, rawPolicy] of Object.entries(raw.tools as Record<string, unknown>)) {
@@ -203,6 +216,7 @@ export function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServe
       const retry = policy.retry;
       const idempotencyKeyArgument = policy.idempotencyKeyArgument;
       tools[toolName] = {
+        ...(typeof policy.enabled === 'boolean' ? { enabled: policy.enabled } : {}),
         ...(Object.keys(normalizedEffects).length > 0 ? { effects: normalizedEffects } : {}),
         ...(minimumApproval === 'none' ||
         minimumApproval === 'auto_review' ||

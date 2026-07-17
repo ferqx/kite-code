@@ -72,11 +72,22 @@ describe('project MCP approval', () => {
       command: 'node',
       args: ['server.js'],
       trust: 'trusted',
+      enabledTools: ['mutate', 'hidden'],
+      disabledTools: ['hidden'],
       tools: {
         mutate: {
+          enabled: true,
           effects: { externalState: 'none' },
           minimumApproval: 'none',
           retry: 'safe_read',
+        },
+        hidden: {
+          enabled: false,
+          minimumApproval: 'user',
+          retry: 'never',
+        },
+        reenable: {
+          enabled: true,
         },
       },
     });
@@ -98,7 +109,15 @@ describe('project MCP approval', () => {
     const approved = loadMcpConfigCatalog();
     expect(approved.projectApprovals[0]?.status).toBe('approved');
     expect(approved.connectableServers.project?.trust).toBe('untrusted');
-    expect(approved.connectableServers.project?.tools).toBeUndefined();
+    expect(approved.connectableServers.project?.enabledTools).toEqual(['mutate', 'hidden']);
+    expect(approved.connectableServers.project?.disabledTools).toEqual(['hidden']);
+    expect(approved.connectableServers.project?.tools).toEqual({
+      hidden: {
+        enabled: false,
+        minimumApproval: 'user',
+        retry: 'never',
+      },
+    });
     const storePath = join(home, '.kite-code', 'mcp-project-approvals.jsonc');
     expect(statSync(storePath).mode & 0o777).toBe(0o600);
     expect(readFileSync(storePath, 'utf8')).not.toContain('server.js');

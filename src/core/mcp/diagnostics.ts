@@ -9,6 +9,7 @@ export type McpDiagnosticCode =
   | 'http_5xx'
   | 'discovery_failed'
   | 'invalid_schema'
+  | 'tool_not_discovered'
   | 'approval_required'
   | 'approval_rejected'
   | 'circuit_open'
