@@ -28,7 +28,8 @@
       "sources": [
         "src/core/mcp/**",
         "src/core/skills/**",
-        ".github/workflows/mcp-native-keyring-smoke.yml"
+        ".github/workflows/mcp-native-keyring-smoke.yml",
+        ".github/workflows/mcp-langchain-live-smoke.yml"
       ],
       "documents": [
         "docs/active/mcp-runtime-governance.md",

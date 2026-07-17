@@ -119,9 +119,10 @@ src/app/cli/        CLI
 ```bash
 bun test
 bun run test:e2e
+bun run test:mcp:live
 bun run typecheck
 bun run check:core-boundary
 bun run check:docs
 ```
 
-默认测试不访问真实模型。仓库当前没有注册真实模型测试脚本；不要把 mock model 测试表述为真实 provider 验证。
+默认测试不访问真实模型或公网 MCP。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke，验证真实 HTTP transport、discovery 和只读 Tool Call；定时 CI 与手动 workflow 会运行它。仓库当前没有注册真实模型测试脚本；不要把 mock model 测试表述为真实 provider 验证。
