@@ -130,12 +130,16 @@ describe('MCP Tool visibility and policy', () => {
     expect(
       manager.getCapabilitySnapshot().descriptors.map((descriptor) => descriptor.capabilityId),
     ).toEqual(['mcp:fixture/allowed']);
-    await expect(manager.callTool('fixture', 'disabled', {})).rejects.toThrow(
-      'disabled, unavailable, or has an invalid schema',
-    );
-    await expect(manager.callTool('fixture', 'invalid', {})).rejects.toThrow(
-      'disabled, unavailable, or has an invalid schema',
-    );
+    await expect(manager.callTool('fixture', 'disabled', {})).rejects.toMatchObject({
+      name: 'McpProviderError',
+      providerId: 'fixture',
+      kind: 'provider_capability_changed',
+    });
+    await expect(manager.callTool('fixture', 'invalid', {})).rejects.toMatchObject({
+      name: 'McpProviderError',
+      providerId: 'fixture',
+      kind: 'provider_capability_changed',
+    });
     await expect(manager.callTool('fixture', 'allowed', {})).resolves.toMatchObject({
       content: [{ type: 'text', text: 'ok' }],
     });

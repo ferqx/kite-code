@@ -8,6 +8,8 @@
  * Uses Bun.serve() — zero additional dependencies.
  */
 
+import { startTestHttpServer } from '../../helpers/test-http-server';
+
 // Reuse the MockResponse shape from the existing mock model
 export interface MockResponse {
   message?: {
@@ -59,7 +61,7 @@ export function createMockModelServer(): MockModelServer {
   let callCount = 0;
   let requests: MockChatRequest[] = [];
 
-  const server = createServerWithRetry({
+  const server = startTestHttpServer({
     async fetch(req) {
       const url = new URL(req.url);
 
@@ -290,19 +292,6 @@ export function createMockModelServer(): MockModelServer {
       ),
     stop: () => server.stop(),
   };
-}
-
-function createServerWithRetry(options: { fetch: (req: Request) => Response | Promise<Response> }) {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const port = 30_000 + Math.floor(Math.random() * 30_000);
-    try {
-      return Bun.serve({ hostname: '127.0.0.1', port, fetch: options.fetch });
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError;
 }
 
 function messageContentIncludes(content: unknown, text: string): boolean {

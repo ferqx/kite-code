@@ -10,7 +10,10 @@ import { TuiMcpController } from '../mcp/controller';
 
 export function useMcpController(
   runtimeProviderRef: React.MutableRefObject<McpRuntimeProvider | null>,
-  sessionManager: { updateMcpRuntimeProvider(provider: McpRuntimeProvider | null): void },
+  sessionManager: {
+    updateMcpRuntimeProvider(provider: McpRuntimeProvider | null): void;
+    updateMcpRecoveryController(controller: TuiMcpController | null): void;
+  },
   workspace: string,
 ) {
   const controller = React.useMemo(
@@ -27,10 +30,12 @@ export function useMcpController(
     const runtimeProvider = controller.getRuntimeProvider();
     runtimeProviderRef.current = runtimeProvider;
     sessionManager.updateMcpRuntimeProvider(runtimeProvider);
+    sessionManager.updateMcpRecoveryController(controller);
     void controller.start();
     return () => {
       runtimeProviderRef.current = null;
       sessionManager.updateMcpRuntimeProvider(null);
+      sessionManager.updateMcpRecoveryController(null);
       void controller.stop();
     };
   }, [controller, runtimeProviderRef, sessionManager]);

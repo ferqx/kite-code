@@ -2,12 +2,154 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runRuntimeAgent } from '@/core/runtime/agent';
+import { McpManager } from '@/core/mcp';
+import { requiredProviderAdmissionEvents, runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
+import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { aiMessage } from '../../src/core/messages';
 import { createMockModel } from '../mock-model';
+
+test('Runtime gates an unavailable required MCP provider before the model and persists waiver', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-required-provider-'));
+  const storePath = join(workspace, 'runtime.db');
+  const mockModel = createMockModel([
+    { message: aiMessage({ content: 'Continued without MCP.' }) },
+  ]);
+  const manager = new McpManager();
+  manager.getProviderDirectorySnapshot = () => ({
+    revision: 'directory-r1',
+    entries: [
+      {
+        providerId: 'github',
+        status: 'login_required',
+        required: true,
+        source: 'project',
+        lastKnownCapabilityNames: ['publish'],
+        diagnosticCode: 'auth_required',
+        retryable: false,
+      },
+    ],
+  });
+
+  try {
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Continue without GitHub',
+        threadId: 'required-provider-waiver',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: mockModel as any,
+        mcpManager: manager,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+          features: { mcpProviderActionV1: true },
+        },
+      },
+      {
+        requestAction: async (effect) => {
+          if (effect.type !== 'request_provider_admission') {
+            return { type: 'cancel', interactionId: effect.interactionId };
+          }
+          return {
+            type: 'provider_admission_decision',
+            interactionId: effect.interactionId,
+            decision: { kind: 'waive' },
+          };
+        },
+      },
+    )) {
+      events.push(event);
+    }
+
+    expect(events[0]?.type).toBe('provider.admission_required');
+    expect(events.map((event) => event.type)).toContain('provider.admission_waived');
+    expect(events.findIndex((event) => event.type === 'provider.admission_waived')).toBeLessThan(
+      events.findIndex((event) => event.type === 'model.requested'),
+    );
+    const store = createRuntimeStore(storePath);
+    const snapshot = store.loadSnapshot<RuntimeState>('required-provider-waiver');
+    if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
+    expect(snapshot.providerAdmission.waivers.github).toMatchObject({
+      source: 'project',
+      reason: 'user_session_waiver',
+    });
+    expect(snapshot.capabilities.bindings).toEqual({});
+    store.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('required provider admission accepts ready/degraded and queues every other required entry', () => {
+  const state = createInitialRuntimeState({
+    threadId: 'required-provider-projection',
+    userId: 'test',
+    workspace: '/',
+  });
+  const manager = new McpManager();
+  manager.getProviderDirectorySnapshot = () => ({
+    revision: 'directory',
+    entries: [
+      {
+        providerId: 'ready',
+        status: 'ready',
+        required: true,
+        source: 'user',
+        lastKnownCapabilityNames: [],
+        retryable: false,
+      },
+      {
+        providerId: 'degraded',
+        status: 'degraded',
+        required: true,
+        source: 'user',
+        lastKnownCapabilityNames: [],
+        retryable: true,
+      },
+      {
+        providerId: 'failed',
+        status: 'failed',
+        required: true,
+        source: 'user',
+        lastKnownCapabilityNames: [],
+        retryable: true,
+      },
+      {
+        providerId: 'optional',
+        status: 'failed',
+        required: false,
+        source: 'user',
+        lastKnownCapabilityNames: [],
+        retryable: true,
+      },
+      {
+        providerId: 'login',
+        status: 'login_required',
+        required: true,
+        source: 'project',
+        lastKnownCapabilityNames: [],
+        diagnosticCode: 'auth_required',
+        retryable: false,
+      },
+    ],
+  });
+
+  expect(
+    requiredProviderAdmissionEvents(state, manager, true).map((event) =>
+      event.type === 'provider.admission_required' ? event.providerId : '',
+    ),
+  ).toEqual(['failed', 'login']);
+  expect(requiredProviderAdmissionEvents(state, manager, false)).toEqual([]);
+});
 
 test('Runtime Kernel persists a direct model answer as a completed turn', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));

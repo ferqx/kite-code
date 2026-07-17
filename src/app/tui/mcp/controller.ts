@@ -3,7 +3,12 @@ import {
   type McpProjectDecision,
   type McpProjectSourceKind,
 } from '@/core/config/mcp-project-approvals';
-import type { McpRuntimeProvider, McpServerKey, McpSupervisor } from '@/core/mcp';
+import type {
+  McpProviderRecoveryAction,
+  McpRuntimeProvider,
+  McpServerKey,
+  McpSupervisor,
+} from '@/core/mcp';
 import type { McpController, McpControllerSnapshot } from './types';
 
 export class TuiMcpController implements McpController {
@@ -89,6 +94,75 @@ export class TuiMcpController implements McpController {
   async cancelAuth(flowId: string): Promise<void> {
     await this.supervisor.cancelAuth(flowId);
     this.setMessage('MCP authentication cancelled.');
+  }
+
+  async recover(providerId: string, action: McpProviderRecoveryAction) {
+    const server = this.snapshot.control.servers.find(
+      (candidate) => candidate.effective && candidate.key.name === providerId,
+    );
+    if (!server) {
+      const directory = this.supervisor.getRuntimeProvider().getProviderDirectorySnapshot();
+      return {
+        outcome: 'failed' as const,
+        providerDirectoryRevision: directory.revision,
+      };
+    }
+
+    if (action === 'approve') {
+      await this.decide(server.key, 'approved');
+    } else if (action === 'retry') {
+      await this.supervisor.retry(server.key);
+    } else {
+      const result = await this.supervisor.login(server.key);
+      if (result.status === 'authorization_required') {
+        await this.waitForAuthentication(server.key);
+      }
+    }
+
+    const directory = this.supervisor.getRuntimeProvider().getProviderDirectorySnapshot();
+    const entry = directory.entries.find((candidate) => candidate.providerId === providerId);
+    return {
+      outcome:
+        entry?.status === 'ready' || entry?.status === 'degraded'
+          ? ('completed' as const)
+          : ('failed' as const),
+      providerDirectoryRevision: directory.revision,
+      ...(entry ? { providerStatus: entry.status } : {}),
+      ...(entry?.diagnosticCode ? { diagnosticCode: entry.diagnosticCode } : {}),
+    };
+  }
+
+  private async waitForAuthentication(key: McpServerKey): Promise<void> {
+    const current = () =>
+      this.supervisor
+        .getSnapshot()
+        .servers.find(
+          (candidate) =>
+            candidate.effective &&
+            candidate.key.name === key.name &&
+            candidate.key.source === key.source,
+        )?.authStatus;
+    if (current() === 'authenticated') return;
+    await new Promise<void>((resolve) => {
+      let unsubscribe = () => {};
+      const timeout = setTimeout(done, 120_000);
+      unsubscribe = this.supervisor.subscribe(() => {
+        const status = current();
+        if (
+          status === 'authenticated' ||
+          status === 'error' ||
+          status === 'login_required' ||
+          status === 'reauth_required'
+        ) {
+          done();
+        }
+      });
+      function done() {
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve();
+      }
+    });
   }
 
   private setMessage(message: string): void {

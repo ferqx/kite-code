@@ -6,6 +6,7 @@ import {
   DefaultMcpSupervisor,
   MemoryMcpCredentialStore,
 } from '@/core/mcp';
+import { startTestHttpServer } from './helpers/test-http-server';
 
 describe('HTTP MCP OAuth integration', () => {
   let stopServer: (() => void) | undefined;
@@ -20,8 +21,7 @@ describe('HTTP MCP OAuth integration', () => {
     let observedVerifier = '';
     let callback: ((url: URL) => void) | undefined;
     let baseUrl = '';
-    const fixture: ReturnType<typeof Bun.serve> = Bun.serve({
-      port: 0,
+    const fixture: ReturnType<typeof Bun.serve> = startTestHttpServer({
       fetch: async (request): Promise<Response> => {
         const url = new URL(request.url);
         requests.push({

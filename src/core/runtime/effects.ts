@@ -25,6 +25,22 @@ export type RuntimeEffect =
   | { type: 'request_tool_approval'; interactionId: string; toolCallId: string }
   /** Ask the user how to resolve a required verification that exhausted automatic repair. */
   | { type: 'request_verification_decision'; interactionId: string; verificationId: string }
+  /** Ask the App shell to perform one redacted MCP provider recovery action. */
+  | {
+      type: 'request_provider_action';
+      interactionId: string;
+      providerId: string;
+      action: import('@/core/mcp/provider-errors').McpProviderRecoveryAction;
+      originatingToolCallId: string;
+    }
+  /** Gate a new run until a required MCP provider is ready or explicitly waived. */
+  | {
+      type: 'request_provider_admission';
+      interactionId: string;
+      providerId: string;
+      providerStatus: import('@/core/mcp/runtime-provider').McpProviderDirectoryStatus;
+      retryable: boolean;
+    }
   /** 执行自动审查 / Run auto-review */
   | { type: 'run_auto_review'; reviewId: string; toolCallId: string }
   /** Execute the next attempt of a durable VerificationSpec. */
@@ -74,7 +90,9 @@ export function isInterruptEffect(effect: RuntimeEffect): boolean {
     effect.type === 'request_user_input' ||
     effect.type === 'request_plan_review' ||
     effect.type === 'request_tool_approval' ||
-    effect.type === 'request_verification_decision'
+    effect.type === 'request_verification_decision' ||
+    effect.type === 'request_provider_action' ||
+    effect.type === 'request_provider_admission'
   );
 }
 

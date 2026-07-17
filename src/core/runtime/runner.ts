@@ -127,9 +127,44 @@ export async function* runRuntimeLoop(
         effect.type === 'request_user_input' ||
         effect.type === 'request_plan_review' ||
         effect.type === 'request_tool_approval' ||
-        effect.type === 'request_verification_decision'
+        effect.type === 'request_verification_decision' ||
+        effect.type === 'request_provider_action' ||
+        effect.type === 'request_provider_admission'
       ) {
-        const action = await provider.requestAction(effect, kernel.getState());
+        const interaction = kernel.getState().interactions;
+        if (
+          effect.type === 'request_provider_action' &&
+          interaction.kind === 'awaiting_provider_action' &&
+          interaction.status === 'required'
+        ) {
+          const started: RuntimeEvent = {
+            type: 'provider.action_started',
+            interactionId: effect.interactionId,
+          };
+          kernel.processEvent(started);
+          yield started;
+        }
+        let action: RuntimeUserAction;
+        try {
+          action = await provider.requestAction(effect, kernel.getState());
+        } catch (error) {
+          if (effect.type === 'request_provider_action') {
+            action = {
+              type: 'provider_action_result',
+              interactionId: effect.interactionId,
+              outcome: 'failed',
+              failureCode: 'unknown',
+            };
+          } else if (effect.type === 'request_provider_admission') {
+            action = {
+              type: 'provider_admission_decision',
+              interactionId: effect.interactionId,
+              decision: { kind: 'cancel' },
+            };
+          } else {
+            throw error;
+          }
+        }
         const actionResult = kernel.applyAction(action);
         if (actionResult.status !== 'applied') {
           // Stale UI actions are expected during cancellation/session-switch races.
@@ -156,6 +191,13 @@ export async function* runRuntimeLoop(
         if (subagentEvents.length > 0) {
           kernel.processEventBatch(subagentEvents);
           yield* subagentEvents;
+        }
+        if (
+          effect.type === 'request_provider_admission' &&
+          (action.type === 'cancel' ||
+            (action.type === 'provider_admission_decision' && action.decision.kind === 'cancel'))
+        ) {
+          return;
         }
         continue;
       }

@@ -3,9 +3,11 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import {
+  publicProviderSearchMetadata,
   publicSearchMetadata,
   searchableCapabilitySnapshot,
   searchCapabilities,
+  searchUnavailableProviders,
 } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
@@ -13,7 +15,13 @@ import { buildToolApproval } from '@/core/harness/tool-policy';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
-import type { McpRuntimeProvider } from '@/core/mcp';
+import {
+  capabilityChangedProviderError,
+  isMcpProviderError,
+  type McpProviderRecoveryAction,
+  type McpRuntimeProvider,
+  providerErrorFromDirectoryEntry,
+} from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
   type CapabilityArtifactStore,
@@ -27,7 +35,7 @@ import {
 import { evaluateToolApproval, isReadOnlyMcpPolicy } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
-import { classifyFailure } from '@/core/runtime/failures';
+import { classifyFailure, classifyMcpProviderError } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
@@ -51,6 +59,31 @@ import { verificationRequestForCapability, verificationRequestForSkill } from '@
 import type { InteractionMode, PlanArtifactRef, PlanDocument } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
+
+function recoveryActionForFailure(
+  failure: import('@/core/runtime/failures').ClassifiedFailure,
+): McpProviderRecoveryAction | undefined {
+  if (failure.kind === 'provider_auth_required') return 'login';
+  if (failure.kind === 'provider_approval_required') return 'approve';
+  if (failure.kind === 'provider_unavailable' && failure.retryable) return 'retry';
+  return undefined;
+}
+
+function providerActionRequiredEvent(input: {
+  enabled: boolean;
+  providerId: string;
+  toolCallId: string;
+  action?: McpProviderRecoveryAction;
+}): RuntimeEvent | undefined {
+  if (!input.enabled || !input.action) return undefined;
+  return {
+    type: 'provider.action_required',
+    interactionId: genInteractionId(),
+    providerId: input.providerId,
+    action: input.action,
+    originatingToolCallId: input.toolCallId,
+  };
+}
 
 function skillCapabilityCeilingViolation(
   state: RuntimeState,
@@ -473,25 +506,56 @@ export async function executeRuntimeTools(params: {
       const descriptor = binding
         ? params.mcpManager?.findCapability(binding.capabilityId)
         : undefined;
-      const invalidReason =
+      const providerId =
+        binding?.capabilityId.match(/^mcp:([^/]+)\//)?.[1] ??
+        request.name.match(/^mcp__([^_]+)__/u)?.[1] ??
+        'unknown';
+      const directoryEntry = params.mcpManager
+        ?.getProviderDirectorySnapshot()
+        .entries.find((entry) => entry.providerId === providerId);
+      const invalidFailure =
         !flags?.capabilityCatalogV1 || !flags.mcpRuntimeBindingV1
-          ? 'MCP Runtime binding is disabled by feature flag.'
+          ? classifyFailure('tool_invalid_args', 'MCP Runtime binding is disabled by feature flag.')
           : !binding || binding.issuedForTurnId !== call.createdAtTurnId
-            ? 'MCP tool call has no valid Runtime-issued binding.'
+            ? classifyFailure(
+                'tool_invalid_args',
+                'MCP tool call has no valid Runtime-issued binding.',
+              )
             : !descriptor || descriptor.revision !== binding.capabilityRevision
-              ? 'MCP capability changed after binding; request a new model turn before calling it.'
-              : descriptor.availability !== 'available' || !descriptor.inputSchema
-                ? 'MCP capability is unavailable for execution.'
-                : validateCapabilityArguments(
-                    descriptor.inputSchema,
-                    request.args as Record<string, unknown>,
-                  );
-      if (invalidReason) {
+              ? classifyMcpProviderError(
+                  directoryEntry && directoryEntry.status !== 'ready'
+                    ? providerErrorFromDirectoryEntry(directoryEntry, providerId)
+                    : capabilityChangedProviderError(providerId),
+                )
+              : descriptor.availability !== 'available'
+                ? classifyMcpProviderError(
+                    providerErrorFromDirectoryEntry(directoryEntry, providerId),
+                  )
+                : !descriptor.inputSchema
+                  ? classifyFailure(
+                      'tool_invalid_args',
+                      'MCP capability has no executable input schema.',
+                    )
+                  : (() => {
+                      const reason = validateCapabilityArguments(
+                        descriptor.inputSchema,
+                        request.args as Record<string, unknown>,
+                      );
+                      return reason ? classifyFailure('tool_invalid_args', reason) : undefined;
+                    })();
+      if (invalidFailure) {
         events.push({
           type: 'tool.failed',
           toolCallId,
-          failure: classifyFailure('tool_invalid_args', invalidReason),
+          failure: invalidFailure,
         });
+        const providerAction = providerActionRequiredEvent({
+          enabled: flags?.mcpProviderActionV1 ?? false,
+          providerId,
+          toolCallId,
+          action: recoveryActionForFailure(invalidFailure),
+        });
+        if (providerAction) events.push(providerAction);
         continue;
       }
     }
@@ -517,8 +581,14 @@ export async function executeRuntimeTools(params: {
         mcp: params.mcpManager?.getCapabilitySnapshot(),
         skills: params.skillCatalog?.capabilities,
       });
+      const providerDirectory = params.mcpManager?.getProviderDirectorySnapshot();
       const candidates = searchCapabilities({
         snapshot,
+        query: request.args.query,
+        limit: request.args.limit,
+      });
+      const providers = searchUnavailableProviders({
+        directory: providerDirectory,
         query: request.args.query,
         limit: request.args.limit,
       });
@@ -537,6 +607,7 @@ export async function executeRuntimeTools(params: {
           catalogRevision: snapshot.revision,
           requestedAtTurnId: params.state.turn.turnId,
           candidates,
+          ...(providers.length > 0 ? { providers } : {}),
         },
       });
       events.push({
@@ -552,8 +623,14 @@ export async function executeRuntimeTools(params: {
             search_id: searchId,
             candidate_count: candidates.length,
             candidates: publicSearchMetadata(candidates),
+            provider_count: providers.length,
+            providers: publicProviderSearchMetadata(providers),
             next_step:
-              'The Runtime will disclose current matching capabilities on the next model call.',
+              candidates.length > 0
+                ? 'The Runtime will disclose current matching capabilities on the next model call.'
+                : providers.length > 0
+                  ? 'The matching providers are unavailable and no executable binding was issued.'
+                  : 'No matching capability or known unavailable provider was found.',
           }),
           stderr: '',
         },
@@ -1748,14 +1825,32 @@ export async function executeRuntimeTools(params: {
           finishedAt: new Date().toISOString(),
         });
       }
+      const failure = isMcpProviderError(error)
+        ? classifyMcpProviderError(error)
+        : classifyFailure(
+            'tool_runtime_error',
+            error instanceof Error ? error.message : String(error),
+          );
       events.push({
         type: 'tool.failed',
         toolCallId,
-        failure: classifyFailure(
-          'tool_runtime_error',
-          error instanceof Error ? error.message : String(error),
-        ),
+        failure,
       });
+      const providerAction = providerActionRequiredEvent({
+        enabled: Boolean(
+          params.taskConfig && getFeatureFlags(params.taskConfig).mcpProviderActionV1,
+        ),
+        providerId:
+          (isMcpProviderError(error) && error.providerId) ||
+          call.capabilityId?.match(/^mcp:([^/]+)\//)?.[1] ||
+          request.name.match(/^mcp__([^_]+)__/u)?.[1] ||
+          'unknown',
+        toolCallId,
+        action: isMcpProviderError(error)
+          ? error.recoveryAction
+          : recoveryActionForFailure(failure),
+      });
+      if (providerAction) events.push(providerAction);
     }
   }
   return events;

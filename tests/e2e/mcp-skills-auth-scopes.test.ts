@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
+import { startTestHttpServer } from '../helpers/test-http-server';
 
 const fixture = (name: string) => resolve(import.meta.dir, '..', 'fixtures', name);
 const envReference = (name: string) => `\${${name}}`;
@@ -75,9 +76,7 @@ function authenticatedServer(scope: string) {
 
 function startAuthenticatedHttpServer(token: string, scope: string) {
   const seenAuthorization: Array<string | null> = [];
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
+  const server = startTestHttpServer({
     fetch: async (request) => {
       const authorization = request.headers.get('authorization');
       seenAuthorization.push(authorization);

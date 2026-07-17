@@ -2,7 +2,7 @@ import { applyApprovalGrant } from '@/core/harness/tool-policy';
 import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
-import type { RuntimeState } from './state';
+import { getActiveTask, type RuntimeState } from './state';
 
 /** 生成取消方案审核时的事件，统一处理显式拒绝和 Esc/取消动作。 */
 function planReviewCancelledEvents(
@@ -93,6 +93,35 @@ export type RuntimeUserAction =
           }
         | { kind: 'revise'; feedback: string }
         | { kind: 'cancel'; reason?: string };
+    }
+  | {
+      type: 'provider_action_result';
+      interactionId: string;
+      outcome: 'completed' | 'deferred' | 'failed';
+      providerDirectoryRevision?: string;
+      failureCode?:
+        | 'authentication_failed'
+        | 'approval_denied'
+        | 'provider_unavailable'
+        | 'unknown';
+    }
+  | {
+      type: 'provider_admission_decision';
+      interactionId: string;
+      decision:
+        | {
+            kind: 'retry';
+            outcome: 'ready';
+            providerDirectoryRevision: string;
+          }
+        | {
+            kind: 'retry';
+            outcome: 'unavailable';
+            providerStatus: import('@/core/mcp/runtime-provider').McpProviderDirectoryStatus;
+            diagnosticCode?: import('@/core/mcp/runtime-provider').McpProviderDirectoryEntry['diagnosticCode'];
+          }
+        | { kind: 'waive' }
+        | { kind: 'cancel' };
     }
   | { type: 'cancel'; interactionId: string; reason?: string };
 
@@ -250,6 +279,105 @@ export function eventsForRuntimeAction(
       ];
     }
     return [];
+  }
+
+  if (interaction.kind === 'awaiting_provider_action') {
+    if (action.type === 'cancel') {
+      return [{ type: 'provider.action_deferred', interactionId: interaction.interactionId }];
+    }
+    if (action.type !== 'provider_action_result') return [];
+    if (action.outcome === 'completed') {
+      return [
+        {
+          type: 'provider.action_completed',
+          interactionId: interaction.interactionId,
+          ...(action.providerDirectoryRevision
+            ? { providerDirectoryRevision: action.providerDirectoryRevision }
+            : {}),
+        },
+        { type: 'turn.started', turnId: crypto.randomUUID() },
+      ];
+    }
+    if (action.outcome === 'deferred') {
+      return [{ type: 'provider.action_deferred', interactionId: interaction.interactionId }];
+    }
+    return [
+      {
+        type: 'provider.action_failed',
+        interactionId: interaction.interactionId,
+        failureCode: action.failureCode ?? 'unknown',
+      },
+    ];
+  }
+
+  if (interaction.kind === 'awaiting_provider_admission') {
+    const decision =
+      action.type === 'cancel'
+        ? ({ kind: 'cancel' } as const)
+        : action.type === 'provider_admission_decision'
+          ? action.decision
+          : undefined;
+    if (!decision) return [];
+    if (decision.kind === 'retry') {
+      return decision.outcome === 'ready'
+        ? [
+            {
+              type: 'provider.admission_retry_requested',
+              interactionId: interaction.interactionId,
+            },
+            {
+              type: 'provider.admission_satisfied',
+              interactionId: interaction.interactionId,
+              providerDirectoryRevision: decision.providerDirectoryRevision,
+            },
+          ]
+        : [
+            {
+              type: 'provider.admission_retry_requested',
+              interactionId: interaction.interactionId,
+            },
+            {
+              type: 'provider.admission_retry_failed',
+              interactionId: interaction.interactionId,
+              providerStatus: decision.providerStatus,
+              ...(decision.diagnosticCode ? { diagnosticCode: decision.diagnosticCode } : {}),
+            },
+          ];
+    }
+    if (decision.kind === 'waive') {
+      return [
+        {
+          type: 'provider.admission_waived',
+          interactionId: interaction.interactionId,
+          providerId: interaction.providerId,
+          source: interaction.source,
+          reason: 'user_session_waiver',
+          waivedAt: new Date().toISOString(),
+        },
+      ];
+    }
+    const activeTask = getActiveTask(state);
+    return [
+      {
+        type: 'provider.admission_cancelled',
+        interactionId: interaction.interactionId,
+        providerId: interaction.providerId,
+      },
+      ...(activeTask
+        ? [
+            {
+              type: 'task.cancelled' as const,
+              taskId: activeTask.taskId,
+              reason: `Required MCP provider '${interaction.providerId}' admission was cancelled.`,
+            },
+          ]
+        : []),
+      {
+        type: 'turn.aborted',
+        turnId: state.turn.turnId,
+        reason: `Required MCP provider '${interaction.providerId}' admission was cancelled.`,
+      },
+    ];
   }
 
   // TUI 的 Esc/取消操作使用通用 cancel；Plan 审核需要落成完整的审核取消事件，

@@ -63,6 +63,22 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
         reviewId: state.interactions.interactionId,
         toolCallId: state.interactions.toolCallId,
       };
+    case 'awaiting_provider_action':
+      return {
+        type: 'request_provider_action',
+        interactionId: state.interactions.interactionId,
+        providerId: state.interactions.providerId,
+        action: state.interactions.action,
+        originatingToolCallId: state.interactions.originatingToolCallId,
+      };
+    case 'awaiting_provider_admission':
+      return {
+        type: 'request_provider_admission',
+        interactionId: state.interactions.interactionId,
+        providerId: state.interactions.providerId,
+        providerStatus: state.interactions.providerStatus,
+        retryable: state.interactions.retryable,
+      };
     case 'idle':
       break;
   }

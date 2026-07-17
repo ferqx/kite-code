@@ -882,6 +882,206 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
     }
 
+    // ── Required MCP Provider admission ──
+
+    case 'provider.admission_required': {
+      if (
+        (state.interactions.kind !== 'idle' &&
+          state.interactions.kind !== 'awaiting_provider_admission') ||
+        state.providerAdmission.waivers[event.providerId] ||
+        state.providerAdmission.pending.some((entry) => entry.providerId === event.providerId)
+      ) {
+        return state;
+      }
+      const record = {
+        interactionId: event.interactionId,
+        providerId: event.providerId,
+        source: event.source,
+        providerStatus: event.providerStatus,
+        ...(event.diagnosticCode ? { diagnosticCode: event.diagnosticCode } : {}),
+        retryable: event.retryable,
+      };
+      return {
+        ...state,
+        providerAdmission: {
+          ...state.providerAdmission,
+          pending: [...state.providerAdmission.pending, record],
+        },
+        interactions:
+          state.interactions.kind === 'idle'
+            ? { kind: 'awaiting_provider_admission', ...record }
+            : state.interactions,
+      };
+    }
+
+    case 'provider.admission_retry_requested':
+      return state;
+
+    case 'provider.admission_retry_failed': {
+      if (
+        state.interactions.kind !== 'awaiting_provider_admission' ||
+        state.interactions.interactionId !== event.interactionId
+      ) {
+        return state;
+      }
+      const update = (entry: (typeof state.providerAdmission.pending)[number]) =>
+        entry.interactionId === event.interactionId
+          ? {
+              ...entry,
+              providerStatus: event.providerStatus,
+              ...(event.diagnosticCode ? { diagnosticCode: event.diagnosticCode } : {}),
+            }
+          : entry;
+      const pending = state.providerAdmission.pending.map(update);
+      const current = pending.find((entry) => entry.interactionId === event.interactionId)!;
+      return {
+        ...state,
+        providerAdmission: { ...state.providerAdmission, pending },
+        interactions: { kind: 'awaiting_provider_admission', ...current },
+      };
+    }
+
+    case 'provider.admission_satisfied': {
+      if (
+        state.interactions.kind !== 'awaiting_provider_admission' ||
+        state.interactions.interactionId !== event.interactionId
+      ) {
+        return state;
+      }
+      return settleProviderAdmission(state, event.interactionId);
+    }
+
+    case 'provider.admission_waived': {
+      if (
+        state.interactions.kind !== 'awaiting_provider_admission' ||
+        state.interactions.interactionId !== event.interactionId ||
+        state.interactions.providerId !== event.providerId
+      ) {
+        return state;
+      }
+      const settled = settleProviderAdmission(state, event.interactionId);
+      return {
+        ...settled,
+        providerAdmission: {
+          ...settled.providerAdmission,
+          waivers: {
+            ...settled.providerAdmission.waivers,
+            [event.providerId]: {
+              providerId: event.providerId,
+              source: event.source,
+              reason: event.reason,
+              waivedAt: event.waivedAt,
+            },
+          },
+        },
+        transcript: {
+          ...settled.transcript,
+          messages: [
+            ...settled.transcript.messages,
+            {
+              kind: 'runtime',
+              messageId: `provider-admission-waiver-${event.interactionId}`,
+              content:
+                `Required MCP provider '${event.providerId}' is unavailable. ` +
+                'The user waived it for this session; its capabilities remain unavailable.',
+            },
+          ],
+        },
+      };
+    }
+
+    case 'provider.admission_cancelled':
+      if (
+        state.interactions.kind !== 'awaiting_provider_admission' ||
+        state.interactions.interactionId !== event.interactionId ||
+        state.interactions.providerId !== event.providerId
+      ) {
+        return state;
+      }
+      return settleProviderAdmission(state, event.interactionId);
+
+    // ── MCP Provider recovery interaction ──
+
+    case 'provider.action_required': {
+      if (state.interactions.kind !== 'idle') return state;
+      const call = state.tools.calls[event.originatingToolCallId];
+      if (call?.status !== 'failed') return state;
+      const alreadyHasToolResult = state.transcript.messages.some(
+        (message) => message.kind === 'tool' && message.toolCallId === event.originatingToolCallId,
+      );
+      return {
+        ...state,
+        interactions: {
+          kind: 'awaiting_provider_action',
+          interactionId: event.interactionId,
+          providerId: event.providerId,
+          action: event.action,
+          originatingToolCallId: event.originatingToolCallId,
+          status: 'required',
+        },
+        transcript: alreadyHasToolResult
+          ? state.transcript
+          : {
+              ...state.transcript,
+              messages: [
+                ...state.transcript.messages,
+                {
+                  kind: 'tool',
+                  toolCallId: call.toolCallId,
+                  name: call.name,
+                  content: call.error ?? 'MCP provider action is required.',
+                  ok: false,
+                },
+              ],
+            },
+      };
+    }
+
+    case 'provider.action_started':
+      if (
+        state.interactions.kind !== 'awaiting_provider_action' ||
+        state.interactions.interactionId !== event.interactionId
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        interactions: { ...state.interactions, status: 'started' },
+      };
+
+    case 'provider.action_completed':
+    case 'provider.action_deferred':
+    case 'provider.action_failed': {
+      if (
+        state.interactions.kind !== 'awaiting_provider_action' ||
+        state.interactions.interactionId !== event.interactionId
+      ) {
+        return state;
+      }
+      const providerId = state.interactions.providerId;
+      const outcome =
+        event.type === 'provider.action_completed'
+          ? 'completed'
+          : event.type === 'provider.action_deferred'
+            ? 'deferred'
+            : `failed (${event.failureCode})`;
+      return {
+        ...state,
+        interactions: { kind: 'idle' },
+        transcript: {
+          ...state.transcript,
+          messages: [
+            ...state.transcript.messages,
+            {
+              kind: 'runtime',
+              messageId: `provider-action-${event.interactionId}`,
+              content: `MCP provider '${providerId}' recovery ${outcome}.`,
+            },
+          ],
+        },
+      };
+    }
+
     // ── 运行时环境 / Runtime environment ──
 
     case 'authorization.changed':
@@ -1221,6 +1421,18 @@ function updateToolStatus(
   return {
     ...tools,
     calls: { ...tools.calls, [toolCallId]: { ...call, status } },
+  };
+}
+
+function settleProviderAdmission(state: RuntimeState, interactionId: string): RuntimeState {
+  const pending = state.providerAdmission.pending.filter(
+    (entry) => entry.interactionId !== interactionId,
+  );
+  const next = pending[0];
+  return {
+    ...state,
+    providerAdmission: { ...state.providerAdmission, pending },
+    interactions: next ? { kind: 'awaiting_provider_admission', ...next } : { kind: 'idle' },
   };
 }
 

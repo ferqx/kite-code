@@ -8,6 +8,7 @@ import {
   getToolPreview,
 } from '../components/render-utils';
 import { MAX_TOOL_LINES } from '../components/ToolCardBlock';
+import { providerActionInput, providerAdmissionInput } from '../mcp/runtime-interrupts';
 import type { ConsolidatedToolEntry, FileChangeRecord, OutputBlock, TuiState } from '../types';
 import {
   buildToolSummaryLine,
@@ -1535,6 +1536,17 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         type: 'need_input',
         data: event.request,
         toolCallId: event.toolCallId,
+      });
+    case 'provider.action_required':
+      return handleEventAction(state, {
+        type: 'need_input',
+        data: providerActionInput(event.providerId, event.action),
+        toolCallId: event.originatingToolCallId,
+      });
+    case 'provider.admission_required':
+      return handleEventAction(state, {
+        type: 'need_input',
+        data: providerAdmissionInput(event.providerId, event.providerStatus, event.retryable),
       });
     case 'approval.requested':
       return handleEventAction(state, { type: 'need_approval', data: event.approval });

@@ -12,7 +12,12 @@
     },
     {
       "id": "capabilities",
-      "sources": ["src/core/capabilities/**", "src/protocol/capabilities.ts"],
+      "sources": [
+        "src/core/capabilities/**",
+        "src/core/controllers/model-controller.ts",
+        "src/core/controllers/tool-controller.ts",
+        "src/protocol/capabilities.ts"
+      ],
       "documents": [
         "docs/active/capability-progressive-disclosure.md",
         "docs/active/six-concept-runtime-architecture.md"

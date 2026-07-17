@@ -17,6 +17,8 @@ export interface GoldenFixture {
     | { type: 'approve'; grant: 'approve_once' | 'same_command' | 'full_access' }
     | { type: 'approve_plan'; executionMode: 'accept_edits' | 'auto' }
     | { type: 'waive_verification'; reason: string }
+    | { type: 'complete_provider_action'; providerDirectoryRevision?: string }
+    | { type: 'waive_provider_admission' }
   >;
   expectedEvents: RuntimeEvent['type'][];
   expectedEffects?: string[];
@@ -77,6 +79,29 @@ export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeStat
               type: 'waive_verification',
               verificationId: effect.verificationId,
               reason: action.reason,
+            };
+          }
+          if (action.type === 'complete_provider_action') {
+            if (effect.type !== 'request_provider_action') {
+              throw new Error(`${fixture.name}: provider completion without a provider effect`);
+            }
+            return {
+              type: 'provider_action_result',
+              interactionId: effect.interactionId,
+              outcome: 'completed',
+              ...(action.providerDirectoryRevision
+                ? { providerDirectoryRevision: action.providerDirectoryRevision }
+                : {}),
+            };
+          }
+          if (action.type === 'waive_provider_admission') {
+            if (effect.type !== 'request_provider_admission') {
+              throw new Error(`${fixture.name}: provider waiver without an admission effect`);
+            }
+            return {
+              type: 'provider_admission_decision',
+              interactionId: effect.interactionId,
+              decision: { kind: 'waive' },
             };
           }
           if (state.interactions.kind !== 'awaiting_review') {

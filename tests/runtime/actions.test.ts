@@ -3,6 +3,122 @@ import { eventsForRuntimeAction } from '../../src/core/runtime/actions';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
 
 describe('runtime user actions', () => {
+  test('waives a required provider with a redacted session-scoped fact', () => {
+    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    state.interactions = {
+      kind: 'awaiting_provider_admission',
+      interactionId: 'admission',
+      providerId: 'github',
+      source: 'project',
+      providerStatus: 'login_required',
+      diagnosticCode: 'auth_required',
+      retryable: false,
+    };
+    const events = eventsForRuntimeAction(state, {
+      type: 'provider_admission_decision',
+      interactionId: 'admission',
+      decision: { kind: 'waive' },
+    });
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'provider.admission_waived',
+        interactionId: 'admission',
+        providerId: 'github',
+        source: 'project',
+        reason: 'user_session_waiver',
+        waivedAt: expect.any(String),
+      }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain('auth_required');
+  });
+
+  test('records required-provider retry outcome without inventing capability visibility', () => {
+    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    state.interactions = {
+      kind: 'awaiting_provider_admission',
+      interactionId: 'admission',
+      providerId: 'github',
+      source: 'user',
+      providerStatus: 'failed',
+      retryable: true,
+    };
+    expect(
+      eventsForRuntimeAction(state, {
+        type: 'provider_admission_decision',
+        interactionId: 'admission',
+        decision: {
+          kind: 'retry',
+          outcome: 'ready',
+          providerDirectoryRevision: 'directory-r2',
+        },
+      }),
+    ).toEqual([
+      { type: 'provider.admission_retry_requested', interactionId: 'admission' },
+      {
+        type: 'provider.admission_satisfied',
+        interactionId: 'admission',
+        providerDirectoryRevision: 'directory-r2',
+      },
+    ]);
+  });
+
+  test('completes provider recovery by clearing the interaction and starting a new turn', () => {
+    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    const previousTurnId = state.turn.turnId;
+    state.tools.calls.mcp = {
+      toolCallId: 'mcp',
+      modelMessageId: 'model',
+      name: 'mcp__github__publish',
+      args: { secret: 'must-not-be-copied' },
+      status: 'failed',
+      createdAtTurnId: previousTurnId,
+    };
+    state.interactions = {
+      kind: 'awaiting_provider_action',
+      interactionId: 'provider-action',
+      providerId: 'github',
+      action: 'login',
+      originatingToolCallId: 'mcp',
+      status: 'started',
+    };
+
+    const events = eventsForRuntimeAction(state, {
+      type: 'provider_action_result',
+      interactionId: 'provider-action',
+      outcome: 'completed',
+      providerDirectoryRevision: 'directory-r2',
+    });
+
+    expect(events[0]).toEqual({
+      type: 'provider.action_completed',
+      interactionId: 'provider-action',
+      providerDirectoryRevision: 'directory-r2',
+    });
+    expect(events[1]).toMatchObject({ type: 'turn.started' });
+    if (events[1]?.type !== 'turn.started') throw new Error('Expected a new turn');
+    expect(events[1].turnId).not.toBe(previousTurnId);
+    expect(JSON.stringify(events)).not.toContain('must-not-be-copied');
+  });
+
+  test('maps provider recovery cancellation to a durable defer without starting a turn', () => {
+    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    state.interactions = {
+      kind: 'awaiting_provider_action',
+      interactionId: 'provider-action',
+      providerId: 'github',
+      action: 'login',
+      originatingToolCallId: 'mcp',
+      status: 'required',
+    };
+    expect(
+      eventsForRuntimeAction(state, {
+        type: 'cancel',
+        interactionId: 'provider-action',
+        reason: 'contains no durable payload',
+      }),
+    ).toEqual([{ type: 'provider.action_deferred', interactionId: 'provider-action' }]);
+  });
+
   test('ignores an action whose interaction id does not match', () => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
     state.interactions = {

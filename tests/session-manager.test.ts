@@ -639,6 +639,68 @@ describe('SessionRuntime', () => {
     });
   });
 
+  test('runs an MCP provider recovery action and returns the refreshed directory revision', async () => {
+    const rt = makeRuntime();
+    rt.mcpRecoveryController = {
+      recover: async () => ({
+        outcome: 'completed',
+        providerDirectoryRevision: 'directory-r2',
+        providerStatus: 'ready',
+      }),
+    };
+    const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
+    const actionPromise = (rt as any)._requestRuntimeAction(
+      {
+        type: 'request_provider_action',
+        interactionId: 'provider-action',
+        providerId: 'github',
+        action: 'login',
+        originatingToolCallId: 'mcp-call',
+      },
+      state,
+    );
+    rt.resolveInterrupt({ type: 'input', text: 'Run login' });
+    await expect(actionPromise).resolves.toEqual({
+      type: 'provider_action_result',
+      interactionId: 'provider-action',
+      outcome: 'completed',
+      providerDirectoryRevision: 'directory-r2',
+    });
+  });
+
+  test('maps required-provider Session Waive without calling the recovery controller', async () => {
+    const rt = makeRuntime();
+    let recovered = false;
+    rt.mcpRecoveryController = {
+      recover: async () => {
+        recovered = true;
+        return {
+          outcome: 'failed',
+          providerDirectoryRevision: 'directory-r1',
+          providerStatus: 'login_required',
+        };
+      },
+    };
+    const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
+    const actionPromise = (rt as any)._requestRuntimeAction(
+      {
+        type: 'request_provider_admission',
+        interactionId: 'provider-admission',
+        providerId: 'github',
+        providerStatus: 'login_required',
+        retryable: false,
+      },
+      state,
+    );
+    rt.resolveInterrupt({ type: 'input', text: 'Session Waive' });
+    await expect(actionPromise).resolves.toEqual({
+      type: 'provider_admission_decision',
+      interactionId: 'provider-admission',
+      decision: { kind: 'waive' },
+    });
+    expect(recovered).toBe(false);
+  });
+
   // ── abort ──
 
   test('abort resolves pending interrupt and signals AbortController', () => {

@@ -270,6 +270,8 @@ export class AgentKernel {
           effect.type === 'request_plan_review' ||
           effect.type === 'request_tool_approval' ||
           effect.type === 'request_verification_decision' ||
+          effect.type === 'request_provider_action' ||
+          effect.type === 'request_provider_admission' ||
           effect.type === 'stop' ||
           effect.type === 'emit_final'
         ) {
@@ -575,6 +577,10 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     ...normalizeRuntimeMetadata(snapshot),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     verification: (snapshot as Partial<RuntimeState>).verification ?? { records: {} },
+    providerAdmission: (snapshot as Partial<RuntimeState>).providerAdmission ?? {
+      pending: [],
+      waivers: {},
+    },
     suspendedSubagents: snapshot.suspendedSubagents ?? {},
     capabilities: {
       catalogRevision: snapshot.capabilities?.catalogRevision ?? '',

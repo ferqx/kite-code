@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpRuntimeProvider } from '@/core/mcp';
-import { normalizeMcpToolResult, parseMcpToolName } from '@/core/mcp';
+import { isMcpProviderError, normalizeMcpToolResult, parseMcpToolName } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
   evaluateToolApproval,
@@ -470,6 +470,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: '',
       });
     } catch (err) {
+      if (isMcpProviderError(err)) throw err;
       return withFailureGuidance(request, {
         ok: false,
         command: `read_mcp_resource ${server}`,
@@ -520,6 +521,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         capabilityResult,
       });
     } catch (err) {
+      if (isMcpProviderError(err)) throw err;
       return withFailureGuidance(request, {
         ok: false,
         command: request.name,

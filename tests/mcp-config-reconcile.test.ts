@@ -96,6 +96,8 @@ class RecordingManager implements McpManagerControlPlane {
   };
   getServerStates = () => new Map(this.states);
   getCapabilitySnapshot = () => this.snapshot;
+
+  getProviderDirectorySnapshot = () => ({ revision: 'fake-directory', entries: [] });
   findCapability = (capabilityId: string) =>
     this.snapshot.descriptors.find((descriptor) => descriptor.capabilityId === capabilityId);
   getAllTools = () => [];

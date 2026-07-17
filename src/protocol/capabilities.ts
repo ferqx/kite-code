@@ -77,6 +77,22 @@ export interface CapabilitySearchCandidate {
   providerId: string;
 }
 
+/** Durable, non-executable fact that an MCP provider matched but is unavailable. */
+export interface CapabilitySearchProviderDiagnostic {
+  providerId: string;
+  status:
+    | 'pending_approval'
+    | 'rejected'
+    | 'disabled'
+    | 'login_required'
+    | 'connecting'
+    | 'degraded'
+    | 'failed'
+    | 'quarantined';
+  nextAction: string;
+  diagnosticCode?: string;
+}
+
 /** Durable search fact. Candidates never contain schemas, arguments, or invocation handles. */
 export interface CapabilitySearchResult {
   searchId: string;
@@ -84,6 +100,7 @@ export interface CapabilitySearchResult {
   catalogRevision: string;
   requestedAtTurnId: string;
   candidates: CapabilitySearchCandidate[];
+  providers?: CapabilitySearchProviderDiagnostic[];
 }
 
 /** Durable lifecycle for an invocation that may cross an external side-effect boundary. */

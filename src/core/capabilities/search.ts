@@ -1,6 +1,11 @@
 import type {
+  McpProviderDirectoryEntry,
+  McpProviderDirectorySnapshot,
+} from '@/core/mcp/runtime-provider';
+import type {
   CapabilityDescriptor,
   CapabilitySearchCandidate,
+  CapabilitySearchProviderDiagnostic,
   CapabilitySnapshot,
 } from '@/protocol/capabilities';
 import { createSnapshot, digestCapability } from './catalog';
@@ -183,6 +188,51 @@ export function searchCapabilities(input: {
     }));
 }
 
+export function searchUnavailableProviders(input: {
+  directory?: McpProviderDirectorySnapshot;
+  query: string;
+  limit?: number;
+}): CapabilitySearchProviderDiagnostic[] {
+  const query = input.query.trim().slice(0, 512);
+  const queryTerms = terms(query);
+  const phrase = query.toLocaleLowerCase();
+  const limit = Math.max(1, Math.min(4, Math.floor(input.limit ?? 4)));
+
+  return (input.directory?.entries ?? [])
+    .filter(
+      (
+        entry,
+      ): entry is Readonly<
+        McpProviderDirectoryEntry & {
+          status: Exclude<McpProviderDirectoryEntry['status'], 'ready'>;
+        }
+      > => entry.status !== 'ready',
+    )
+    .map((entry) => {
+      const searchable = [entry.providerId, ...entry.lastKnownCapabilityNames]
+        .join(' ')
+        .toLocaleLowerCase();
+      const matchedTerms = queryTerms.filter((term) => searchable.includes(term));
+      const score =
+        (phrase.length > 1 && searchable.includes(phrase) ? 100 : 0) +
+        matchedTerms.length * 10 +
+        (queryTerms.length > 0 && matchedTerms.length === queryTerms.length ? 25 : 0);
+      return { entry, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score || left.entry.providerId.localeCompare(right.entry.providerId),
+    )
+    .slice(0, limit)
+    .map(({ entry }) => ({
+      providerId: safeMetadata(entry.providerId),
+      status: entry.status,
+      nextAction: providerNextAction(entry.status),
+      ...(entry.diagnosticCode ? { diagnosticCode: entry.diagnosticCode } : {}),
+    }));
+}
+
 /** Public result intentionally omits IDs, descriptions, schemas, and executable handles. */
 export function publicSearchMetadata(candidates: CapabilitySearchCandidate[]) {
   return candidates.map((candidate) => ({
@@ -192,4 +242,41 @@ export function publicSearchMetadata(candidates: CapabilitySearchCandidate[]) {
     provider_type: candidate.providerType,
     provider: candidate.providerId,
   }));
+}
+
+export function publicProviderSearchMetadata(
+  providers: CapabilitySearchProviderDiagnostic[],
+): Array<{ name: string; status: string; next_action: string; diagnostic_code?: string }> {
+  return providers.map((provider) => ({
+    name: provider.providerId,
+    status: provider.status,
+    next_action: provider.nextAction,
+    ...(provider.diagnosticCode ? { diagnostic_code: provider.diagnosticCode } : {}),
+  }));
+}
+
+export function hasUnavailableMcpProviders(
+  directory: McpProviderDirectorySnapshot | undefined,
+): boolean {
+  return directory?.entries.some((entry) => entry.status !== 'ready') ?? false;
+}
+
+function providerNextAction(status: CapabilitySearchProviderDiagnostic['status']): string {
+  switch (status) {
+    case 'pending_approval':
+      return 'Complete the MCP project approval prompt.';
+    case 'rejected':
+      return 'Update the MCP project approval decision.';
+    case 'disabled':
+      return 'Enable the provider in MCP configuration.';
+    case 'login_required':
+      return 'Complete the MCP authentication prompt.';
+    case 'connecting':
+      return 'Wait for the provider to finish connecting.';
+    case 'degraded':
+    case 'failed':
+      return 'Retry the provider connection outside the current tool call.';
+    case 'quarantined':
+      return 'Fix the MCP provider configuration or capability schema.';
+  }
 }

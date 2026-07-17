@@ -10,6 +10,104 @@ import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 
 describe('executeRuntimeTools', () => {
+  test('classifies an unavailable bound MCP provider without string matching', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-provider-auth',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.capabilities.bindings.binding = {
+      bindingId: 'binding',
+      capabilityId: 'mcp:github/publish',
+      capabilityRevision: 'old-revision',
+      exposedToolName: 'mcp__github__publish',
+      schemaDigest: 'schema',
+      issuedForTurnId: state.turn.turnId,
+    };
+    state.tools.calls.mcp = {
+      toolCallId: 'mcp',
+      modelMessageId: 'model',
+      name: 'mcp__github__publish',
+      args: {},
+      status: 'queued',
+      bindingId: 'binding',
+      capabilityId: 'mcp:github/publish',
+      capabilityRevision: 'old-revision',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('mcp');
+    const manager = new McpManager();
+    manager.getProviderDirectorySnapshot = () => ({
+      revision: 'directory',
+      entries: [
+        {
+          providerId: 'github',
+          status: 'login_required',
+          required: false,
+          source: 'user',
+          lastKnownCapabilityNames: ['publish'],
+          diagnosticCode: 'auth_required',
+          retryable: false,
+        },
+      ],
+    });
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['mcp'],
+      mcpManager: manager,
+      taskConfig: {
+        apiKey: '',
+        baseURL: 'http://localhost',
+        modelName: 'test',
+        providerName: 'test',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+        features: { capabilityCatalogV1: true, mcpRuntimeBindingV1: true },
+      },
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.failed',
+        failure: expect.objectContaining({
+          kind: 'provider_auth_required',
+          needsUserIntervention: true,
+          retryable: false,
+        }),
+      }),
+    ]);
+
+    const actionEvents = await executeRuntimeTools({
+      state,
+      toolCallIds: ['mcp'],
+      mcpManager: manager,
+      taskConfig: {
+        apiKey: '',
+        baseURL: 'http://localhost',
+        modelName: 'test',
+        providerName: 'test',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+        features: {
+          capabilityCatalogV1: true,
+          mcpRuntimeBindingV1: true,
+          mcpProviderActionV1: true,
+        },
+      },
+    });
+    expect(actionEvents.map((event) => event.type)).toEqual([
+      'tool.failed',
+      'provider.action_required',
+    ]);
+    expect(actionEvents[1]).toMatchObject({
+      providerId: 'github',
+      action: 'login',
+      originatingToolCallId: 'mcp',
+    });
+    expect(JSON.stringify(actionEvents[1])).not.toContain('old-revision');
+  });
+
   test('rejects an empty ask_user request instead of opening a blank prompt', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-empty-ask',

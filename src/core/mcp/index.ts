@@ -43,8 +43,21 @@ export { McpManager } from './manager';
 export type { KiteMcpOAuthProviderOptions } from './oauth-provider';
 export { KiteMcpOAuthProvider } from './oauth-provider';
 export { revokeMcpOAuthToken } from './oauth-revocation';
+export type { McpProviderFailureKind, McpProviderRecoveryAction } from './provider-errors';
+export {
+  capabilityChangedProviderError,
+  isMcpProviderError,
+  McpProviderError,
+  providerErrorFromDiagnostic,
+  providerErrorFromDirectoryEntry,
+} from './provider-errors';
 export { normalizeMcpToolResult } from './result-normalizer';
-export type { McpRuntimeProvider } from './runtime-provider';
+export type {
+  McpProviderDirectoryEntry,
+  McpProviderDirectorySnapshot,
+  McpProviderDirectoryStatus,
+  McpRuntimeProvider,
+} from './runtime-provider';
 export {
   DefaultMcpSupervisor,
   type McpManagerControlPlane,

@@ -1,3 +1,5 @@
+import type { McpProviderError } from '@/core/mcp/provider-errors';
+
 export type FailureKind =
   | 'model_invalid_tool_args'
   | 'model_refused'
@@ -12,6 +14,10 @@ export type FailureKind =
   | 'tool_timeout'
   | 'tool_invalid_args'
   | 'tool_not_found'
+  | 'provider_auth_required'
+  | 'provider_approval_required'
+  | 'provider_unavailable'
+  | 'provider_capability_changed'
   | 'user_input_cancelled'
   | 'user_input_timeout'
   | 'sandbox_error'
@@ -86,6 +92,20 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
     terminatesTurn: false,
   },
   tool_not_found: terminal,
+  provider_auth_required: { ...terminal, terminatesTurn: false },
+  provider_approval_required: { ...terminal, terminatesTurn: false },
+  provider_unavailable: {
+    ...terminal,
+    retryable: true,
+    needsUserIntervention: false,
+    terminatesTurn: false,
+  },
+  provider_capability_changed: {
+    ...terminal,
+    modelFixable: true,
+    needsUserIntervention: false,
+    terminatesTurn: false,
+  },
   user_input_cancelled: {
     ...terminal,
     needsUserIntervention: false,
@@ -108,6 +128,19 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
 
 export function classifyFailure(kind: FailureKind, message: string): ClassifiedFailure {
   return { kind, message, ...STRATEGIES[kind] };
+}
+
+export function classifyMcpProviderError(error: McpProviderError): ClassifiedFailure {
+  return {
+    kind: error.kind,
+    message: error.message,
+    retryable: error.retryable,
+    modelFixable: error.kind === 'provider_capability_changed',
+    needsUserIntervention:
+      error.kind === 'provider_auth_required' || error.kind === 'provider_approval_required',
+    terminatesTurn: false,
+    journal: true,
+  };
 }
 
 /** Create one structured failure record for logging and public error mapping. */

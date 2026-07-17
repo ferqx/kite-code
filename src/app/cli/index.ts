@@ -158,6 +158,28 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
               instruction: detail,
             };
       }
+      if (effect.type === 'request_provider_action') {
+        console.error(
+          `\n[MCP PROVIDER ACTION] ${effect.providerId} requires ${effect.action}. ` +
+            'This client does not yet provide an in-process recovery handler; deferring.',
+        );
+        return {
+          type: 'provider_action_result',
+          interactionId: effect.interactionId,
+          outcome: 'deferred',
+        };
+      }
+      if (effect.type === 'request_provider_admission') {
+        console.error(
+          `\n[REQUIRED MCP PROVIDER] ${effect.providerId} is ${effect.providerStatus}. ` +
+            'This client does not yet provide the required-provider gate; cancelling this run.',
+        );
+        return {
+          type: 'provider_admission_decision',
+          interactionId: effect.interactionId,
+          decision: { kind: 'cancel' },
+        };
+      }
       if (state.interactions.kind === 'awaiting_tool_approval') {
         const approval = state.interactions.approval;
         console.error(`\n[APPROVAL REQUIRED] ${approval.tool}: ${approval.command}`);

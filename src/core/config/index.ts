@@ -80,6 +80,7 @@ const featuresSchema = z
     capabilityCatalogV1: z.boolean().optional(),
     mcpRuntimeBindingV1: z.boolean().optional(),
     mcpExecutionRecordV1: z.boolean().optional(),
+    mcpProviderActionV1: z.boolean().optional(),
     skillActivationV2: z.boolean().optional(),
     skillWorkflowV1: z.boolean().optional(),
     verificationV1: z.boolean().optional(),

@@ -1333,6 +1333,52 @@ describe('eventReducer (blocks model)', () => {
       ).toBe(false);
     });
 
+    test('projects a provider recovery requirement into the shared TUI input surface', () => {
+      const s = handleRuntimeEventAction(fresh(), {
+        type: 'provider.action_required',
+        interactionId: 'provider-action',
+        providerId: 'github',
+        action: 'login',
+        originatingToolCallId: 'mcp-call',
+      });
+
+      expect(s.interrupt?.kind).toBe('input');
+      expect(flatBlocks(s).at(-1)).toMatchObject({
+        kind: 'question',
+        toolCallId: 'mcp-call',
+        question: {
+          question: "MCP provider 'github' requires login.",
+          recommended: 'recover',
+          allow_free_text: false,
+        },
+      });
+    });
+
+    test('projects required provider admission without offering an unavailable retry', () => {
+      const s = handleRuntimeEventAction(fresh(), {
+        type: 'provider.admission_required',
+        interactionId: 'provider-admission',
+        providerId: 'github',
+        source: 'user',
+        providerStatus: 'login_required',
+        diagnosticCode: 'auth_required',
+        retryable: false,
+      });
+
+      expect(s.interrupt?.kind).toBe('input');
+      expect(flatBlocks(s).at(-1)).toMatchObject({
+        kind: 'question',
+        question: {
+          question: "Required MCP provider 'github' is login_required.",
+          recommended: 'waive',
+          options: [
+            { id: 'waive', label: 'Session Waive' },
+            { id: 'cancel', label: 'Cancel Run' },
+          ],
+        },
+      });
+    });
+
     test('need_plan_review populates tool_card summary and expanded', () => {
       // First create a tool_call for update_plan (simulating the agent calling the tool)
       let s = dispatch(fresh(), {

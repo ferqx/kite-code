@@ -1251,7 +1251,7 @@ bun run test:tui:system:core
 | 2R `/mcp` 只读纠偏 | completed | [`完成记录`](../execution/completed/2026-07-16-mcp-tui-readonly-list.md) | 配置 mutation 退出 TUI，project trust 独立，只保留 effective Server 名称与连接状态 |
 | 3 Auth | completed | [`完成记录`](../execution/completed/2026-07-16-mcp-auth-phase3.md) | OS vault-only credential、HTTP OAuth、独立认证提示、PTY 场景与 macOS/Windows/Ubuntu 原生 smoke 全部通过；遵循 ADR-0012，不恢复 `/mcp` 管理 route |
 | 4 Tool 策略 | completed（Core；TUI editor superseded） | [`完成记录`](../execution/completed/2026-07-17-mcp-tool-policy-phase4.md) | filter、policy provenance、project only-tighten、catalog/binding 失效与 control diagnostic 已完成；ADR-0012 排除 TUI 编辑器 |
-| 5 Agent 闭环 | pending | — | 依赖 Phase 1/3/4，需 Runtime flag/ADR |
+| 5 Agent 闭环 | active（由新计划承接） | [`2026-07-17-mcp-agent-provider-recovery-phase5.md`](2026-07-17-mcp-agent-provider-recovery-phase5.md) | 5A provider directory/typed failure/unavailable search 已完成；5B Provider Action lifecycle 待开始，本 superseded 计划不再决定其 TUI 路由 |
 
 执行时一次最多将一个 Phase 标为 active；Phase 内按任务进度更新，不把未验证阶段提前标为完成。
 

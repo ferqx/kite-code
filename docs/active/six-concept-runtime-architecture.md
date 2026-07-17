@@ -74,6 +74,8 @@ src/core/runtime/
 
 Capability、Skill 和 Verification 不得直接修改 RuntimeState。任何具有恢复价值的变化都必须先形成 Runtime Event，再由 reducer 归纳为当前事实。
 
+MCP Provider Action 也遵循同一边界。typed provider failure 先把原 Tool Call 终结为 `failed`，再由独立 interaction 调度 App shell；原调用不重新入队。恢复完成事件与新的 `turn.started` 一起提交，确保后续 binding 不可能沿用旧 turn。
+
 RuntimeStore 的所有连接必须使用同一 journal 策略。默认在 Linux/macOS 使用 WAL；Windows 使用 DELETE journal，规避 Bun 在关闭 WAL 数据库后仍持有 WAL/SHM 文件锁的问题。TUI 的长期 stats 连接与 AgentKernel 的 RuntimeStore 连接必须从同一策略函数取值，禁止分别硬编码 journal mode。关闭 Store 时先 finalize 缓存 statement，再执行适用的 WAL cleanup/checkpoint，最后关闭数据库。
 
 ## 4. Capability：统一能力身份
@@ -99,7 +101,7 @@ subagent:review
 
 模型看到的工具名称只是当前轮的 `CapabilityBinding`。执行前必须重新核对 binding token、turn、capability revision 和参数 schema。Catalog 变化不会原地修改旧 binding；旧 binding 必须 fail closed。
 
-Capability discovery 只回答“系统有哪些能力”，不构成授权。大目录可通过 `capability_search` 渐进披露，但搜索结果同样不授予执行权限。
+Capability discovery 只回答“系统有哪些能力”，不构成授权。大目录可通过 `capability_search` 渐进披露；MCP provider directory 还可提供不可执行的 unavailable 摘要。两种搜索结果都不授予执行权限，只有当前 revision 的 available descriptor 才能在后续 turn 形成 binding。
 
 ## 5. Policy：发现与授权分离
 
@@ -165,7 +167,11 @@ Tool 执行成功只表示一次调用完成，不表示用户目标已经达成
 
 ## 8. MCP 与 Skill 的归属
 
-MCP 对 Runtime 暴露中立的 `McpRuntimeProvider`；Runtime 不依赖连接 control plane 或 TUI。`McpSupervisor` 组合配置门禁与连接生命周期，`McpManager` 负责唯一 SDK client 路径、协议 discovery、health、原始结构化调用结果与资源读取。它们都不拥有最终策略，也不直接宣布任务完成。
+MCP 对 Runtime 暴露中立的 `McpRuntimeProvider`；Runtime 不依赖连接 control API 或 TUI。`McpSupervisor` 组合配置门禁与连接生命周期，并通过 provider façade 暴露 capability snapshot 与脱敏 availability directory；`McpManager` 负责唯一 SDK client 路径、协议 discovery、health、原始结构化调用结果与资源读取。它们都不拥有最终策略，也不直接宣布任务完成。
+
+默认关闭的 `mcpProviderActionV1` 只增加 Runtime lifecycle，不把 control-plane mutation 移入 Core。Runtime 持久化 required/started/completed/deferred/failed，App shell 执行 login/approve/retry；成功后强制新 turn，defer/failure 则留下明确事实。TUI 把 required 事件投影到既有 foreground/background interrupt surface，并由 App controller 委托 Supervisor。
+
+该 flag 也保护 required-provider admission：首次模型调用前，Runtime 把 unavailable required Provider 排入持久 gate。Retry 结果、session waiver 和 cancel 都是事件；waiver 只解除本次 session 准入，不会改变 Capability snapshot 或签发 binding。TUI 与 CLI 均在没有恢复能力时安全降级，且不得绕过持久 gate。
 
 Skill 是受治理的组合 Capability。`SKILL.md` 被编译为 revisioned `SkillWorkflowContract`，激活后形成 Runtime `SkillActivation`/frame，并受到 capability ceiling、输入输出 schema、verification 和 recovery 约束。Skill 不再是直接拼接到用户任务的 Prompt 片段。
 

@@ -431,6 +431,88 @@ export interface ApprovalRejectedEvent {
   failure?: ClassifiedFailure;
 }
 
+// ── MCP Provider recovery interaction events ──
+
+/** A terminal MCP Tool Call requires an out-of-band provider recovery action. */
+export interface ProviderActionRequiredEvent {
+  type: 'provider.action_required';
+  interactionId: string;
+  providerId: string;
+  action: import('@/core/mcp/provider-errors').McpProviderRecoveryAction;
+  originatingToolCallId: string;
+}
+
+/** The App shell accepted responsibility for the requested provider action. */
+export interface ProviderActionStartedEvent {
+  type: 'provider.action_started';
+  interactionId: string;
+}
+
+/** Provider recovery completed; any subsequent capability use requires a new turn. */
+export interface ProviderActionCompletedEvent {
+  type: 'provider.action_completed';
+  interactionId: string;
+  providerDirectoryRevision?: string;
+}
+
+/** The user deferred provider recovery without changing provider state. */
+export interface ProviderActionDeferredEvent {
+  type: 'provider.action_deferred';
+  interactionId: string;
+}
+
+/** The App shell attempted recovery but could not complete it. */
+export interface ProviderActionFailedEvent {
+  type: 'provider.action_failed';
+  interactionId: string;
+  failureCode: 'authentication_failed' | 'approval_denied' | 'provider_unavailable' | 'unknown';
+}
+
+// ── Required MCP Provider admission events ──
+
+export interface ProviderAdmissionRequiredEvent {
+  type: 'provider.admission_required';
+  interactionId: string;
+  providerId: string;
+  source: import('@/core/mcp/runtime-provider').McpProviderDirectoryEntry['source'];
+  providerStatus: import('@/core/mcp/runtime-provider').McpProviderDirectoryStatus;
+  diagnosticCode?: import('@/core/mcp/runtime-provider').McpProviderDirectoryEntry['diagnosticCode'];
+  retryable: boolean;
+}
+
+export interface ProviderAdmissionRetryRequestedEvent {
+  type: 'provider.admission_retry_requested';
+  interactionId: string;
+}
+
+export interface ProviderAdmissionRetryFailedEvent {
+  type: 'provider.admission_retry_failed';
+  interactionId: string;
+  providerStatus: import('@/core/mcp/runtime-provider').McpProviderDirectoryStatus;
+  diagnosticCode?: import('@/core/mcp/runtime-provider').McpProviderDirectoryEntry['diagnosticCode'];
+}
+
+export interface ProviderAdmissionSatisfiedEvent {
+  type: 'provider.admission_satisfied';
+  interactionId: string;
+  providerDirectoryRevision: string;
+}
+
+export interface ProviderAdmissionWaivedEvent {
+  type: 'provider.admission_waived';
+  interactionId: string;
+  providerId: string;
+  source: import('@/core/mcp/runtime-provider').McpProviderDirectoryEntry['source'];
+  reason: 'user_session_waiver';
+  waivedAt: string;
+}
+
+export interface ProviderAdmissionCancelledEvent {
+  type: 'provider.admission_cancelled';
+  interactionId: string;
+  providerId: string;
+}
+
 // ── 运行时环境事件 / Runtime environment events ──
 
 /** 授权模式变更 / Authorization mode changed */
@@ -712,6 +794,17 @@ export type RuntimeEvent =
   | ApprovalRequestedEvent
   | ApprovalGrantedEvent
   | ApprovalRejectedEvent
+  | ProviderActionRequiredEvent
+  | ProviderActionStartedEvent
+  | ProviderActionCompletedEvent
+  | ProviderActionDeferredEvent
+  | ProviderActionFailedEvent
+  | ProviderAdmissionRequiredEvent
+  | ProviderAdmissionRetryRequestedEvent
+  | ProviderAdmissionRetryFailedEvent
+  | ProviderAdmissionSatisfiedEvent
+  | ProviderAdmissionWaivedEvent
+  | ProviderAdmissionCancelledEvent
   | AuthorizationChangedEvent
   | AutoReviewRequestedEvent
   | AutoReviewCompletedEvent

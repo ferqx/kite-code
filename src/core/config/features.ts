@@ -12,6 +12,7 @@ export interface FeatureFlags {
   capabilityCatalogV1: boolean;
   mcpRuntimeBindingV1: boolean;
   mcpExecutionRecordV1: boolean;
+  mcpProviderActionV1: boolean;
   skillActivationV2: boolean;
   skillWorkflowV1: boolean;
   verificationV1: boolean;
@@ -28,6 +29,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   capabilityCatalogV1: false,
   mcpRuntimeBindingV1: false,
   mcpExecutionRecordV1: false,
+  mcpProviderActionV1: false,
   skillActivationV2: false,
   skillWorkflowV1: false,
   verificationV1: false,

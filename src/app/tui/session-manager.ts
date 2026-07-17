@@ -16,6 +16,8 @@ import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentPhase } from '@/protocol/events';
 import type { Action } from './App';
 import { fullModeUnavailableReason } from './interaction-mode';
+import { providerActionInput, providerAdmissionInput } from './mcp/runtime-interrupts';
+import type { McpController } from './mcp/types';
 import type { TuiUserInputProvider } from './provider';
 import { buildRunAgentParams } from './run-agent';
 import type { SessionSnapshot, StatusState } from './types';
@@ -50,6 +52,7 @@ export interface SessionDeps {
   skillManifests: SkillManifest[];
   skillOptions: SkillScanOptions | null;
   mcpManager: McpRuntimeProvider | null;
+  mcpRecoveryController?: Pick<McpController, 'recover'> | null;
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
   checkpointPath: string;
 }
@@ -76,6 +79,7 @@ export class SessionRuntime {
   skillManifests: SkillManifest[];
   readonly skillOptions: SkillScanOptions | null;
   mcpManager: McpRuntimeProvider | null;
+  mcpRecoveryController: Pick<McpController, 'recover'> | null;
 
   generator: AsyncGenerator<RuntimeEvent> | null = null;
   /** 当后台会话命中中断时通知 Manager 刷新快照 / Callback to notify Manager on background interrupt */
@@ -96,6 +100,7 @@ export class SessionRuntime {
     this.skillManifests = deps.skillManifests;
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
+    this.mcpRecoveryController = deps.mcpRecoveryController ?? null;
     this.interactionMode = deps.config.interactionMode ?? 'accept_edits';
 
     this._proxyProvider = this._createProxyProvider();
@@ -322,6 +327,80 @@ export class SessionRuntime {
     effect: Extract<RuntimeEffect, { interactionId: string }>,
     state: Readonly<RuntimeState>,
   ): Promise<RuntimeUserAction> {
+    if (effect.type === 'request_provider_action') {
+      const response = await this._proxyProvider.requestAction({
+        kind: 'input',
+        question: providerActionInput(effect.providerId, effect.action),
+      });
+      if (response.type !== 'input' || response.text.toLowerCase().startsWith('later')) {
+        return {
+          type: 'provider_action_result',
+          interactionId: effect.interactionId,
+          outcome: 'deferred',
+        };
+      }
+      const result = await this.mcpRecoveryController?.recover?.(effect.providerId, effect.action);
+      return result?.outcome === 'completed'
+        ? {
+            type: 'provider_action_result',
+            interactionId: effect.interactionId,
+            outcome: 'completed',
+            providerDirectoryRevision: result.providerDirectoryRevision,
+          }
+        : {
+            type: 'provider_action_result',
+            interactionId: effect.interactionId,
+            outcome: 'failed',
+            failureCode:
+              effect.action === 'login'
+                ? 'authentication_failed'
+                : effect.action === 'approve'
+                  ? 'approval_denied'
+                  : 'provider_unavailable',
+          };
+    }
+    if (effect.type === 'request_provider_admission') {
+      const response = await this._proxyProvider.requestAction({
+        kind: 'input',
+        question: providerAdmissionInput(
+          effect.providerId,
+          effect.providerStatus,
+          effect.retryable,
+        ),
+      });
+      const choice = response.type === 'input' ? response.text.toLowerCase() : 'cancel';
+      if (choice.startsWith('session') || choice.startsWith('waive')) {
+        return {
+          type: 'provider_admission_decision',
+          interactionId: effect.interactionId,
+          decision: { kind: 'waive' },
+        };
+      }
+      if (choice.startsWith('retry')) {
+        const result = await this.mcpRecoveryController?.recover?.(effect.providerId, 'retry');
+        return {
+          type: 'provider_admission_decision',
+          interactionId: effect.interactionId,
+          decision:
+            result?.outcome === 'completed'
+              ? {
+                  kind: 'retry',
+                  outcome: 'ready',
+                  providerDirectoryRevision: result.providerDirectoryRevision,
+                }
+              : {
+                  kind: 'retry',
+                  outcome: 'unavailable',
+                  providerStatus: result?.providerStatus ?? effect.providerStatus,
+                },
+        };
+      }
+      return {
+        type: 'provider_admission_decision',
+        interactionId: effect.interactionId,
+        decision: { kind: 'cancel' },
+      };
+    }
     if (effect.type === 'request_verification_decision') {
       const record = state.verification.records[effect.verificationId];
       if (!record) {
@@ -477,7 +556,11 @@ export class SessionRuntime {
         if (!self._foreground) {
           // user_input in background: auto-cancel (user can't respond)
           // need_approval won't fire due to authorizationOverride, but guard anyway
-          if (payload.kind === 'input' && !payload.question?.context?.startsWith('verification:')) {
+          if (
+            payload.kind === 'input' &&
+            !payload.question?.context?.startsWith('verification:') &&
+            !payload.question?.context?.startsWith('mcp-provider-')
+          ) {
             return { type: 'cancel' as const };
           }
           // 后台 tool_approval 中断：标记并等待前台切换
@@ -908,6 +991,13 @@ export class SessionManager {
     this.deps.mcpManager = provider;
     for (const rt of this.runtimes.values()) {
       rt.mcpManager = provider;
+    }
+  }
+
+  updateMcpRecoveryController(controller: Pick<McpController, 'recover'> | null): void {
+    this.deps.mcpRecoveryController = controller;
+    for (const runtime of this.runtimes.values()) {
+      runtime.mcpRecoveryController = controller;
     }
   }
 }

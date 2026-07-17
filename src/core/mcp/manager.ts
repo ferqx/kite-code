@@ -14,13 +14,23 @@ import {
 import {
   createSnapshot,
   descriptorRevision,
+  digestCapability,
   UNKNOWN_EXTERNAL_EFFECTS,
 } from '@/core/capabilities/catalog';
 import { compileCapabilitySchema } from '@/core/capabilities/schema';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
 import { type McpCredentialStore, NativeMcpCredentialStore } from './credential-store';
 import { diagnoseMcpError } from './diagnostics';
-import type { McpRuntimeProvider } from './runtime-provider';
+import {
+  capabilityChangedProviderError,
+  McpProviderError,
+  providerErrorFromDiagnostic,
+} from './provider-errors';
+import type {
+  McpProviderDirectoryEntry,
+  McpProviderDirectorySnapshot,
+  McpRuntimeProvider,
+} from './runtime-provider';
 import { isMcpToolEnabled, resolveMcpToolPolicy } from './tool-policy';
 import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
 
@@ -363,6 +373,42 @@ export class McpManager implements McpRuntimeProvider {
     return this.snapshot;
   }
 
+  getProviderDirectorySnapshot(): McpProviderDirectorySnapshot {
+    const entries = [...this.servers.entries()]
+      .map(([providerId, state]): Readonly<McpProviderDirectoryEntry> => {
+        const status =
+          state.diagnostic?.code === 'auth_required'
+            ? 'login_required'
+            : state.health === 'connecting' || state.health === 'discovering'
+              ? 'connecting'
+              : state.health === 'ready'
+                ? 'ready'
+                : state.health === 'degraded' ||
+                    state.health === 'half_open' ||
+                    state.health === 'circuit_open'
+                  ? 'degraded'
+                  : state.health === 'quarantined'
+                    ? 'quarantined'
+                    : 'failed';
+        return Object.freeze({
+          providerId,
+          status,
+          required: state.config.required === true,
+          source: 'explicit',
+          lastKnownCapabilityNames: Object.freeze(
+            state.tools.map((tool) => safeProviderMetadata(tool.name)).sort(),
+          ),
+          ...(state.diagnostic ? { diagnosticCode: state.diagnostic.code } : {}),
+          retryable: state.diagnostic?.retryable ?? false,
+        });
+      })
+      .sort((left, right) => left.providerId.localeCompare(right.providerId));
+    return Object.freeze({
+      revision: digestCapability(entries),
+      entries: Object.freeze(entries),
+    });
+  }
+
   findCapability(capabilityId: string): CapabilityDescriptor | undefined {
     return this.snapshot.descriptors.find((descriptor) => descriptor.capabilityId === capabilityId);
   }
@@ -375,13 +421,13 @@ export class McpManager implements McpRuntimeProvider {
   ): Promise<CallToolResult> {
     const state = this.servers.get(server);
     if (!state) {
-      throw new Error(`MCP server not found: ${server}`);
+      throw providerErrorFromDiagnostic(server, undefined);
     }
     this.assertCallable(state, server);
     const discoveredTool = state.tools.find((tool) => tool.name === toolName);
     const descriptor = this.findCapability(`mcp:${server}/${toolName}`);
     if (!discoveredTool || !descriptor || descriptor.availability !== 'available') {
-      throw new Error(`MCP tool is disabled, unavailable, or has an invalid schema: ${toolName}`);
+      throw capabilityChangedProviderError(server);
     }
     const client = state.client as Client;
     const execution = descriptor.execution;
@@ -415,7 +461,7 @@ export class McpManager implements McpRuntimeProvider {
       return result;
     } catch (error) {
       this.noteCallFailure(state, error);
-      throw error;
+      throw providerErrorFromDiagnostic(server, state.diagnostic);
     }
   }
 
@@ -431,23 +477,28 @@ export class McpManager implements McpRuntimeProvider {
     }
     const state = this.servers.get(serverName);
     if (!state) {
-      throw new Error(`Unknown MCP server: ${serverName}`);
+      throw providerErrorFromDiagnostic(serverName, undefined);
     }
     if (!isUsableForDiscovery(state)) {
-      throw new Error(`MCP server not connected: ${serverName}`);
+      throw providerErrorFromDiagnostic(serverName, state.diagnostic);
     }
     const client = state.client as Client;
-    const result = await client.readResource(
-      { uri },
-      { timeout: state.config.timeout ?? MCP_RESOURCE_TIMEOUT },
-    );
-    // Extract text from resource contents
-    if (result.contents && result.contents.length > 0) {
-      return result.contents
-        .map((c: { text?: string; blob?: string }) => c.text ?? c.blob ?? '')
-        .join('\n');
+    try {
+      const result = await client.readResource(
+        { uri },
+        { timeout: state.config.timeout ?? MCP_RESOURCE_TIMEOUT },
+      );
+      // Extract text from resource contents
+      if (result.contents && result.contents.length > 0) {
+        return result.contents
+          .map((c: { text?: string; blob?: string }) => c.text ?? c.blob ?? '')
+          .join('\n');
+      }
+      return JSON.stringify(result);
+    } catch (error) {
+      this.noteCallFailure(state, error);
+      throw providerErrorFromDiagnostic(serverName, state.diagnostic);
     }
-    return JSON.stringify(result);
   }
 
   /** Return the prompt registry (slash command key -> server/prompt) */
@@ -514,13 +565,20 @@ export class McpManager implements McpRuntimeProvider {
   private assertCallable(state: McpServerState, server: string): void {
     if (state.health === 'circuit_open') {
       if ((state.retryAt ?? Number.POSITIVE_INFINITY) > Date.now()) {
-        throw new Error(`MCP server '${server}' circuit is open; retry after ${state.retryAt}.`);
+        throw new McpProviderError({
+          providerId: server,
+          kind: 'provider_unavailable',
+          message: 'MCP provider circuit is open; retry later.',
+          recoveryAction: 'retry',
+          retryable: true,
+          diagnosticCode: 'circuit_open',
+        });
       }
       state.health = 'half_open';
       this.publish();
     }
     if (state.health !== 'ready' && state.health !== 'degraded' && state.health !== 'half_open') {
-      throw new Error(`MCP server not callable (${state.health}): ${server}`);
+      throw providerErrorFromDiagnostic(server, state.diagnostic);
     }
   }
 
@@ -637,6 +695,17 @@ function trustedProvenance(
   config: McpServerConfig,
 ): CapabilityDescriptor['provider']['provenance'] {
   return typeof config.trust === 'object' ? config.trust.provenance : 'remote';
+}
+
+function safeProviderMetadata(value: string, maximum = 96): string {
+  return Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 32 || codePoint === 127 ? ' ' : character;
+  })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maximum);
 }
 
 /** Create transport instance from server config */

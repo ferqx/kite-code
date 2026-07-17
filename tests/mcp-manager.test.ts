@@ -7,8 +7,22 @@ import {
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { type McpCredentialKey, McpManager, MemoryMcpCredentialStore } from '@/core/mcp';
 import { normalizeMcpToolResult } from '@/core/mcp/result-normalizer';
+import { startTestHttpServer } from './helpers/test-http-server';
 
 describe('McpManager governance fixture', () => {
+  test('uses a typed provider failure when a direct call targets an unavailable server', async () => {
+    const manager = new McpManager();
+    expect(manager.getProviderDirectorySnapshot()).toEqual({
+      revision: expect.any(String),
+      entries: [],
+    });
+    await expect(manager.callTool('missing', 'read', {})).rejects.toMatchObject({
+      name: 'McpProviderError',
+      providerId: 'missing',
+      kind: 'provider_unavailable',
+    });
+  });
+
   const manager = new McpManager();
 
   afterEach(async () => {
@@ -243,8 +257,7 @@ describe('McpManager governance fixture', () => {
       updatedAt: '2026-07-16T00:00:00.000Z',
     });
     let observedAuthorization = '';
-    const fixture = Bun.serve({
-      port: 0,
+    const fixture = startTestHttpServer({
       fetch: async (request) => {
         observedAuthorization = request.headers.get('authorization') ?? observedAuthorization;
         if (observedAuthorization !== 'Bearer bearer-secret') {

@@ -17,6 +17,43 @@ import { createAgentKernel } from './kernel';
 import { type RuntimeActionProvider, runRuntimeLoop } from './runner';
 import { getActiveTask } from './state';
 
+/** Build redacted admission facts for unavailable required providers before model execution. */
+export function requiredProviderAdmissionEvents(
+  state: Readonly<import('./state').RuntimeState>,
+  mcpManager: McpRuntimeProvider | undefined,
+  enabled: boolean,
+): RuntimeEvent[] {
+  if (
+    !enabled ||
+    !mcpManager ||
+    (state.interactions.kind !== 'idle' &&
+      state.interactions.kind !== 'awaiting_provider_admission')
+  ) {
+    return [];
+  }
+  const pending = new Set(state.providerAdmission.pending.map((entry) => entry.providerId));
+  return mcpManager
+    .getProviderDirectorySnapshot()
+    .entries.filter(
+      (entry) =>
+        entry.required &&
+        entry.status !== 'ready' &&
+        entry.status !== 'degraded' &&
+        !pending.has(entry.providerId) &&
+        !state.providerAdmission.waivers[entry.providerId],
+    )
+    .sort((left, right) => left.providerId.localeCompare(right.providerId))
+    .map((entry) => ({
+      type: 'provider.admission_required' as const,
+      interactionId: randomUUID(),
+      providerId: entry.providerId,
+      source: entry.source,
+      providerStatus: entry.status,
+      ...(entry.diagnosticCode ? { diagnosticCode: entry.diagnosticCode } : {}),
+      retryable: entry.retryable,
+    }));
+}
+
 /** Inputs for the graph-free runtime entry point. */
 export interface RunRuntimeAgentInput {
   task: string;
@@ -75,9 +112,20 @@ export async function* runRuntimeAgent(
   );
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
   try {
-    const resumedReview =
-      getActiveTask(kernel.getState()) && kernel.getState().interactions.kind === 'awaiting_review';
-    if (!resumedReview) {
+    const admissionEvents = requiredProviderAdmissionEvents(
+      kernel.getState(),
+      input.mcpManager,
+      getFeatureFlags(input.config).mcpProviderActionV1,
+    );
+    for (const event of admissionEvents) {
+      kernel.processEvent(event);
+      collector.recordRuntime(event);
+      yield event;
+    }
+
+    const resumedInteraction =
+      getActiveTask(kernel.getState()) && kernel.getState().interactions.kind !== 'idle';
+    if (!resumedInteraction) {
       if (input.phase === 'planning') {
         const taskStarted: RuntimeEvent = {
           type: 'task.started',

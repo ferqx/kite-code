@@ -1,5 +1,5 @@
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
-import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult, Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { compileCapabilitySchema } from '@/core/capabilities/schema';
 import type { McpConfigCatalog, McpServerConfigEntry } from '@/core/config/mcp-config';
@@ -26,7 +26,13 @@ import type {
 import type { McpDiagnostic } from './diagnostics';
 import { McpManager } from './manager';
 import { revokeMcpOAuthToken } from './oauth-revocation';
-import type { McpRuntimeProvider } from './runtime-provider';
+import { McpProviderError, providerErrorFromDiagnostic } from './provider-errors';
+import type {
+  McpProviderDirectoryEntry,
+  McpProviderDirectorySnapshot,
+  McpProviderDirectoryStatus,
+  McpRuntimeProvider,
+} from './runtime-provider';
 import {
   configuredMcpToolNames,
   hasConfiguredMcpToolPolicy,
@@ -79,7 +85,7 @@ export interface McpSupervisorOptions {
   authCoordinator?: McpAuthCoordinator;
 }
 
-export class DefaultMcpSupervisor implements McpSupervisor {
+export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   private readonly manager: McpManagerControlPlane;
   private readonly repository: McpConfigRepository;
   private readonly authCoordinator: McpAuthCoordinator;
@@ -93,6 +99,7 @@ export class DefaultMcpSupervisor implements McpSupervisor {
   private generation = 0;
   private started = false;
   private reconcileChain: Promise<void> = Promise.resolve();
+  private readonly lastKnownCapabilityNames = new Map<string, readonly string[]>();
 
   constructor(options: McpSupervisorOptions = {}) {
     this.manager = options.manager ?? new McpManager();
@@ -132,6 +139,7 @@ export class DefaultMcpSupervisor implements McpSupervisor {
     this.configUnsubscribe = undefined;
     this.catalog = undefined;
     this.workspace = undefined;
+    this.lastKnownCapabilityNames.clear();
     this.setSnapshot(
       Object.freeze({
         revision: digestCapability({ generation: this.generation, servers: [] }),
@@ -212,7 +220,53 @@ export class DefaultMcpSupervisor implements McpSupervisor {
   }
 
   getRuntimeProvider(): McpRuntimeProvider {
-    return this.manager;
+    return this;
+  }
+
+  getCapabilitySnapshot(): CapabilitySnapshot {
+    return this.manager.getCapabilitySnapshot();
+  }
+
+  getProviderDirectorySnapshot(): McpProviderDirectorySnapshot {
+    const entries = this.snapshot.servers
+      .filter((server) => server.effective)
+      .map(
+        (server): Readonly<McpProviderDirectoryEntry> =>
+          Object.freeze({
+            providerId: server.key.name,
+            status: providerDirectoryStatus(server),
+            required: server.required,
+            source: server.source,
+            lastKnownCapabilityNames: Object.freeze([
+              ...(this.lastKnownCapabilityNames.get(server.key.name) ?? []),
+            ]),
+            ...(server.diagnostic ? { diagnosticCode: server.diagnostic.code } : {}),
+            retryable: server.diagnostic?.retryable ?? false,
+          }),
+      )
+      .sort((left, right) => left.providerId.localeCompare(right.providerId));
+    return Object.freeze({
+      revision: digestCapability(entries),
+      entries: Object.freeze(entries),
+    });
+  }
+
+  findCapability(capabilityId: string) {
+    return this.manager.findCapability(capabilityId);
+  }
+
+  async callTool(
+    server: string,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    this.assertProviderAvailable(server);
+    return this.manager.callTool(server, toolName, args);
+  }
+
+  async readResource(server: string, uri: string): Promise<string> {
+    this.assertProviderAvailable(server);
+    return this.manager.readResource(server, uri);
   }
 
   private connectCatalog(catalog: McpConfigCatalog, generation: number): void {
@@ -280,6 +334,23 @@ export class DefaultMcpSupervisor implements McpSupervisor {
         ),
       )
       .sort(compareServers);
+    const effectiveNames = new Set(
+      servers.filter((server) => server.effective).map((server) => server.key.name),
+    );
+    for (const server of servers) {
+      if (!server.effective) continue;
+      const discovered = server.tools
+        .filter((tool) => tool.discovered)
+        .map((tool) => safeProviderMetadata(tool.name))
+        .filter(Boolean)
+        .sort();
+      if (discovered.length > 0) {
+        this.lastKnownCapabilityNames.set(server.key.name, Object.freeze(discovered));
+      }
+    }
+    for (const providerId of this.lastKnownCapabilityNames.keys()) {
+      if (!effectiveNames.has(providerId)) this.lastKnownCapabilityNames.delete(providerId);
+    }
     const revision = digestCapability({ generation: this.generation, servers });
     this.setSnapshot(
       Object.freeze({
@@ -306,6 +377,41 @@ export class DefaultMcpSupervisor implements McpSupervisor {
         // One frontend observer cannot break the control-plane projection.
       }
     }
+  }
+
+  private assertProviderAvailable(providerId: string): void {
+    const entry = this.getProviderDirectorySnapshot().entries.find(
+      (candidate) => candidate.providerId === providerId,
+    );
+    if (!entry || entry.status === 'ready' || entry.status === 'degraded') return;
+    if (entry.status === 'pending_approval') {
+      throw new McpProviderError({
+        providerId,
+        kind: 'provider_approval_required',
+        message: 'MCP provider approval is required.',
+        recoveryAction: 'approve',
+        diagnosticCode: entry.diagnosticCode,
+      });
+    }
+    if (entry.status === 'login_required') {
+      throw new McpProviderError({
+        providerId,
+        kind: 'provider_auth_required',
+        message: 'MCP provider authentication is required.',
+        recoveryAction: 'login',
+        diagnosticCode: entry.diagnosticCode,
+      });
+    }
+    throw providerErrorFromDiagnostic(
+      providerId,
+      entry.diagnosticCode
+        ? {
+            code: entry.diagnosticCode,
+            retryable: entry.retryable,
+            message: 'MCP provider is unavailable.',
+          }
+        : undefined,
+    );
   }
 
   private registerAuthTargets(catalog: McpConfigCatalog): void {
@@ -674,4 +780,41 @@ function statusRank(server: Readonly<McpServerControlState>): number {
   if (server.health === 'degraded' || server.health === 'half_open') return 3;
   if (server.configStatus === 'shadowed') return 5;
   return 4;
+}
+
+function providerDirectoryStatus(
+  server: Readonly<McpServerControlState>,
+): McpProviderDirectoryStatus {
+  if (server.configStatus === 'pending_approval') return 'pending_approval';
+  if (server.configStatus === 'rejected') return 'rejected';
+  if (server.configStatus === 'disabled') return 'disabled';
+  if (server.diagnostic?.code === 'auth_required') return 'login_required';
+  if (server.authStatus === 'login_required' || server.authStatus === 'reauth_required') {
+    return 'login_required';
+  }
+  if (server.configStatus === 'invalid' || server.configStatus.startsWith('store_')) {
+    return 'quarantined';
+  }
+  if (server.health === 'quarantined') return 'quarantined';
+  if (server.health === 'connecting' || server.health === 'discovering') return 'connecting';
+  if (server.health === 'ready') return 'ready';
+  if (
+    server.health === 'degraded' ||
+    server.health === 'half_open' ||
+    server.health === 'circuit_open'
+  ) {
+    return 'degraded';
+  }
+  return server.diagnostic ? 'failed' : 'connecting';
+}
+
+function safeProviderMetadata(value: string, maximum = 96): string {
+  return Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 32 || codePoint === 127 ? ' ' : character;
+  })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maximum);
 }

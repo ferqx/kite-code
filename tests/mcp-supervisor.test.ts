@@ -54,6 +54,10 @@ class FakeManager implements McpManagerControlPlane {
     return this.capabilitySnapshot;
   }
 
+  getProviderDirectorySnapshot() {
+    return { revision: 'fake-directory', entries: [] };
+  }
+
   findCapability(capabilityId: string): CapabilityDescriptor | undefined {
     return this.capabilitySnapshot.descriptors.find(
       (descriptor) => descriptor.capabilityId === capabilityId,
@@ -112,6 +116,53 @@ describe('McpSupervisor', () => {
       health: 'disconnected',
       diagnostic: { code: 'approval_required' },
     });
+    await supervisor.stop();
+  });
+
+  test('exposes a redacted provider directory and retains last-known Tool names while unavailable', async () => {
+    const manager = new FakeManager();
+    const supervisor = new DefaultMcpSupervisor({
+      manager,
+      loadCatalog: () => catalog(),
+    });
+
+    await supervisor.start('/workspace');
+    await Bun.sleep(0);
+
+    const provider = supervisor.getRuntimeProvider();
+    expect(provider).toBe(supervisor);
+    expect(provider.getProviderDirectorySnapshot().entries).toEqual([
+      expect.objectContaining({
+        providerId: 'approval',
+        status: 'pending_approval',
+        lastKnownCapabilityNames: [],
+        diagnosticCode: 'approval_required',
+      }),
+      expect.objectContaining({
+        providerId: 'good',
+        status: 'ready',
+        lastKnownCapabilityNames: ['read'],
+      }),
+    ]);
+
+    const good = manager.states.get('good')!;
+    good.health = 'disconnected';
+    good.tools = [];
+    good.diagnostic = {
+      code: 'auth_required',
+      retryable: false,
+      message: 'Bearer [REDACTED]',
+    };
+    manager.emit();
+
+    expect(
+      provider.getProviderDirectorySnapshot().entries.find((entry) => entry.providerId === 'good'),
+    ).toMatchObject({
+      status: 'login_required',
+      lastKnownCapabilityNames: ['read'],
+      diagnosticCode: 'auth_required',
+    });
+    expect(JSON.stringify(provider.getProviderDirectorySnapshot())).not.toContain('Bearer');
     await supervisor.stop();
   });
 

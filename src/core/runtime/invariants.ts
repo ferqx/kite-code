@@ -30,7 +30,11 @@ function assertUnique(values: string[], label: string): void {
 
 function interactionToolId(state: RuntimeState): string | undefined {
   const interaction = state.interactions;
-  return interaction.kind === 'idle' ? undefined : interaction.toolCallId;
+  return interaction.kind === 'idle' ||
+    interaction.kind === 'awaiting_provider_action' ||
+    interaction.kind === 'awaiting_provider_admission'
+    ? undefined
+    : interaction.toolCallId;
 }
 
 /**
@@ -119,6 +123,38 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
     assert(
       state.tools.calls[state.interactions.toolCallId]?.status === 'awaiting_auto_review',
       'auto review interaction must reference an awaiting_auto_review tool.',
+    );
+  }
+  if (state.interactions.kind === 'awaiting_provider_action') {
+    const toolCallId = state.interactions.originatingToolCallId;
+    assert(
+      state.tools.calls[toolCallId]?.status === 'failed',
+      'provider action must reference a terminal failed tool.',
+    );
+    assert(
+      !state.tools.queue.includes(toolCallId) && !state.tools.active.includes(toolCallId),
+      'provider action must not requeue its originating tool.',
+    );
+  }
+  const pendingProviderIds = state.providerAdmission.pending.map((entry) => entry.providerId);
+  assertUnique(pendingProviderIds, 'pending provider admissions');
+  for (const providerId of pendingProviderIds) {
+    assert(
+      !state.providerAdmission.waivers[providerId],
+      `provider ${providerId} cannot be pending and waived.`,
+    );
+  }
+  if (state.interactions.kind === 'awaiting_provider_admission') {
+    const current = state.providerAdmission.pending[0];
+    assert(
+      current?.interactionId === state.interactions.interactionId &&
+        current.providerId === state.interactions.providerId,
+      'provider admission interaction must match the first pending provider.',
+    );
+  } else {
+    assert(
+      state.providerAdmission.pending.length === 0,
+      'pending provider admission requires an active admission interaction.',
     );
   }
   for (const frame of Object.values(state.skills.frames)) {

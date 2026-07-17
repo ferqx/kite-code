@@ -5,6 +5,56 @@ import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
 
 describe('decideNextEffect', () => {
+  test('gates model execution on the first required provider admission', () => {
+    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    const record = {
+      interactionId: 'admission',
+      providerId: 'github',
+      source: 'project' as const,
+      providerStatus: 'login_required' as const,
+      diagnosticCode: 'auth_required' as const,
+      retryable: false,
+    };
+    state.providerAdmission.pending = [record];
+    state.interactions = { kind: 'awaiting_provider_admission', ...record };
+    expect(decideNextEffect(state)).toEqual({
+      type: 'request_provider_admission',
+      interactionId: 'admission',
+      providerId: 'github',
+      providerStatus: 'login_required',
+      retryable: false,
+    });
+  });
+
+  test('schedules a provider action without requeueing its terminal tool', () => {
+    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    state.tools.calls.mcp = {
+      toolCallId: 'mcp',
+      modelMessageId: 'model',
+      name: 'mcp__github__publish',
+      args: {},
+      status: 'failed',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.interactions = {
+      kind: 'awaiting_provider_action',
+      interactionId: 'provider-action',
+      providerId: 'github',
+      action: 'login',
+      originatingToolCallId: 'mcp',
+      status: 'required',
+    };
+    expect(decideNextEffect(state)).toEqual({
+      type: 'request_provider_action',
+      interactionId: 'provider-action',
+      providerId: 'github',
+      action: 'login',
+      originatingToolCallId: 'mcp',
+    });
+    expect(state.tools.queue).toEqual([]);
+    expect(state.tools.active).toEqual([]);
+  });
+
   test('blocks scheduling until an unknown external invocation is reconciled', () => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
     state.capabilities.invocations.unknown = {

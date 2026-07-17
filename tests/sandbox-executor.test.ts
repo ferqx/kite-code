@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSandboxExecutor } from '../src/core/sandbox/executor';
+import { startTestHttpServer } from './helpers/test-http-server';
 
 const isMacOS = process.platform === 'darwin';
 
@@ -154,8 +155,7 @@ describe('sandbox executor integration', () => {
 
   test('applies network permission independently to each sandboxed command', async () => {
     const ws = setupWorkspace();
-    const server = Bun.serve({
-      port: 0,
+    const server = startTestHttpServer({
       fetch: () => new Response('sandbox-network-ok'),
     });
     try {

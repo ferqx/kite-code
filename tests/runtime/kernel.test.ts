@@ -7,10 +7,91 @@ import { createRuntimeEffectExecutor } from '../../src/core/runtime/executor';
 import { AgentKernel, createAgentKernel } from '../../src/core/runtime/kernel';
 import { runRuntimeLoop } from '../../src/core/runtime/runner';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
-import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
+import {
+  createInitialRuntimeState,
+  RUNTIME_STATE_SCHEMA_VERSION,
+  type RuntimeState,
+} from '../../src/core/runtime/state';
 import { createRuntimeStore } from '../../src/core/runtime/store';
 
 describe('AgentKernel durability', () => {
+  test('migrates schema 11 snapshots with an empty required-provider admission state', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-admission-migration-'));
+    const storePath = join(dir, 'runtime.db');
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'provider-admission-migration',
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      const { providerAdmission: _admission, ...schema11 } = state;
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(state.session.threadId, { ...schema11, schemaVersion: 11 });
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId: state.session.threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+      expect(restored.getState().providerAdmission).toEqual({ pending: [], waivers: {} });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('migrates and resumes a persisted provider action interaction', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-action-'));
+    const storePath = join(dir, 'runtime.db');
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'provider-action-restart',
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      state.schemaVersion = 10;
+      state.tools.calls.mcp = {
+        toolCallId: 'mcp',
+        modelMessageId: 'model',
+        name: 'mcp__github__publish',
+        args: {},
+        status: 'failed',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.interactions = {
+        kind: 'awaiting_provider_action',
+        interactionId: 'provider-action',
+        providerId: 'github',
+        action: 'login',
+        originatingToolCallId: 'mcp',
+        status: 'started',
+      };
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(state.session.threadId, state);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId: state.session.threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+      expect(restored.getState().interactions).toMatchObject({
+        kind: 'awaiting_provider_action',
+        interactionId: 'provider-action',
+        status: 'started',
+      });
+      expect(decideNextEffect(restored.getState()).type).toBe('request_provider_action');
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('persists a snapshot with each processed event', () => {
     const store = createRuntimeStore(':memory:');
     const kernel = new AgentKernel({
@@ -154,6 +235,73 @@ test('runRuntimeLoop resumes a matching input action and persists its facts', as
     events.push(event.type);
   expect(events).toEqual(['user_input.answered', 'tool.finished']);
   expect(kernel.getState().interactions.kind).toBe('idle');
+  kernel.close();
+});
+
+test('runRuntimeLoop completes provider recovery on a fresh turn without replaying the tool', async () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'provider-recovery-loop',
+    userId: 'u',
+    workspace: '/',
+  });
+  const previousTurnId = initial.turn.turnId;
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  kernel.processEvents([
+    {
+      type: 'tool.queued',
+      toolCallId: 'mcp-call',
+      name: 'mcp__github__publish',
+      args: { private: 'not-copied-to-provider-events' },
+    },
+    {
+      type: 'tool.failed',
+      toolCallId: 'mcp-call',
+      failure: {
+        kind: 'provider_auth_required',
+        message: 'MCP provider authentication is required.',
+        retryable: false,
+        modelFixable: false,
+        needsUserIntervention: true,
+        terminatesTurn: false,
+        journal: true,
+      },
+    },
+    {
+      type: 'provider.action_required',
+      interactionId: 'provider-action',
+      providerId: 'github',
+      action: 'login',
+      originatingToolCallId: 'mcp-call',
+    },
+  ]);
+
+  const events: RuntimeEvent[] = [];
+  for await (const event of runRuntimeLoop(kernel, async () => [], {
+    requestAction: async () => ({
+      type: 'provider_action_result',
+      interactionId: 'provider-action',
+      outcome: 'completed',
+      providerDirectoryRevision: 'directory-r2',
+    }),
+  })) {
+    events.push(event);
+  }
+
+  expect(events.map((event) => event.type)).toEqual([
+    'provider.action_started',
+    'provider.action_completed',
+    'turn.started',
+  ]);
+  expect(kernel.getState().turn.turnId).not.toBe(previousTurnId);
+  expect(kernel.getState().tools.calls['mcp-call']?.status).toBe('failed');
+  expect(kernel.getState().tools.queue).toEqual([]);
+  expect(kernel.getState().tools.active).toEqual([]);
+  expect(JSON.stringify(events)).not.toContain('not-copied-to-provider-events');
   kernel.close();
 });
 

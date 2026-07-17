@@ -9,6 +9,7 @@ import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { createBinding } from '@/core/capabilities/catalog';
 import {
   chooseCapabilityDisclosure,
+  hasUnavailableMcpProviders,
   searchableCapabilitySnapshot,
 } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
@@ -237,6 +238,7 @@ export async function invokeRuntimeModel(params: {
       mcp: params.mcpManager?.getCapabilitySnapshot(),
       skills: params.skillCatalog?.capabilities,
     });
+    const providerDirectory = params.mcpManager?.getProviderDirectorySnapshot();
     const disclosure = chooseCapabilityDisclosure({
       featureEnabled: flags.capabilitySearchV1,
       providerSupportsToolCalls: params.model.supportsToolCalls !== false,
@@ -247,11 +249,15 @@ export async function invokeRuntimeModel(params: {
       ),
     });
     const pendingSearch = state.capabilities.pendingSearch;
-    const searchedDescriptors =
-      disclosure.mode === 'search' &&
+    const searchToConsume = pendingSearch;
+    const currentSearch =
       pendingSearch?.requestedAtTurnId === state.turn.turnId &&
       pendingSearch.catalogRevision === capabilitySnapshot.revision
-        ? pendingSearch.candidates.flatMap((candidate) => {
+        ? pendingSearch
+        : undefined;
+    const searchedDescriptors =
+      disclosure.mode === 'search' && currentSearch
+        ? currentSearch.candidates.flatMap((candidate) => {
             const descriptor = capabilitySnapshot.descriptors.find(
               (item) =>
                 item.capabilityId === candidate.capabilityId &&
@@ -289,19 +295,13 @@ export async function invokeRuntimeModel(params: {
           issuedForTurnId: state.turn.turnId,
         }))
       : [];
-    if (
-      mcpBindings.length > 0 ||
-      capabilityDisclosures.length > 0 ||
-      (disclosure.mode === 'search' && pendingSearch)
-    ) {
+    if (mcpBindings.length > 0 || capabilityDisclosures.length > 0 || searchToConsume) {
       params.emitRuntimeEvent?.({
         type: 'capability.bindings_issued',
         catalogRevision: capabilitySnapshot.revision,
         bindings: mcpBindings.map(({ binding }) => binding),
         disclosures: capabilityDisclosures,
-        ...(disclosure.mode === 'search' && pendingSearch
-          ? { searchId: pendingSearch.searchId }
-          : {}),
+        ...(searchToConsume ? { searchId: searchToConsume.searchId } : {}),
       });
     }
     const tools = createAgentTools({
@@ -309,7 +309,9 @@ export async function invokeRuntimeModel(params: {
       shellExecutor: params.shellExecutor,
       mcpManager: params.mcpManager,
       mcpBindings,
-      capabilitySearch: disclosure.mode === 'search',
+      capabilitySearch:
+        flags.capabilitySearchV1 &&
+        (disclosure.mode === 'search' || hasUnavailableMcpProviders(providerDirectory)),
       skills: params.skills,
       skillOptions: params.skillOptions,
       skillCatalog: params.skillCatalog,

@@ -4,6 +4,11 @@
 
 import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
+import type { McpProviderRecoveryAction } from '@/core/mcp/provider-errors';
+import type {
+  McpProviderDirectoryEntry,
+  McpProviderDirectoryStatus,
+} from '@/core/mcp/runtime-provider';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { AuthorizationSource, ToolGrant } from '@/core/types';
 import type {
@@ -147,6 +152,23 @@ export type InteractionState =
       reason: string;
       /** 工具审批负载 / Tool approval payload */
       approval: ToolApprovalPayload;
+    }
+  | {
+      kind: 'awaiting_provider_action';
+      interactionId: string;
+      providerId: string;
+      action: McpProviderRecoveryAction;
+      originatingToolCallId: string;
+      status: 'required' | 'started';
+    }
+  | {
+      kind: 'awaiting_provider_admission';
+      interactionId: string;
+      providerId: string;
+      source: McpProviderDirectoryEntry['source'];
+      providerStatus: McpProviderDirectoryStatus;
+      diagnosticCode?: McpProviderDirectoryEntry['diagnosticCode'];
+      retryable: boolean;
     };
 
 // ── 工具调用状态 / Tool call status ──
@@ -344,7 +366,29 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 10;
+export const RUNTIME_STATE_SCHEMA_VERSION = 12;
+
+export interface ProviderAdmissionRecord {
+  interactionId: string;
+  providerId: string;
+  source: McpProviderDirectoryEntry['source'];
+  providerStatus: McpProviderDirectoryStatus;
+  diagnosticCode?: McpProviderDirectoryEntry['diagnosticCode'];
+  retryable: boolean;
+}
+
+export interface ProviderAdmissionState {
+  pending: ProviderAdmissionRecord[];
+  waivers: Record<
+    string,
+    {
+      providerId: string;
+      source: McpProviderDirectoryEntry['source'];
+      reason: 'user_session_waiver';
+      waivedAt: string;
+    }
+  >;
+}
 
 export type RuntimeRecoveryState =
   | { kind: 'normal' }
@@ -402,6 +446,8 @@ export interface RuntimeState {
   capabilities: CapabilityRuntimeState;
   skills: SkillRuntimeState;
   verification: VerificationRuntimeState;
+  /** Required MCP providers gated or waived for this Runtime session. */
+  providerAdmission: ProviderAdmissionState;
   /** Paused subagents keyed by their parent task tool call. */
   suspendedSubagents: Record<string, SuspendedSubagentSnapshot>;
   /** One-shot notice for a legacy subagent approval that cannot be resumed. */
@@ -490,6 +536,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     capabilities: { catalogRevision: '', bindings: {}, disclosures: {}, invocations: {} },
     skills: { catalogRevision: '', frames: {} },
     verification: { records: {} },
+    providerAdmission: { pending: [], waivers: {} },
     suspendedSubagents: {},
     authorization: {
       mode: input.authorizationMode ?? 'default',
