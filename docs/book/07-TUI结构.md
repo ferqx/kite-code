@@ -10,7 +10,7 @@ App.tsx
 ├── InputLine 与交互面板
 ├── SessionManager / SessionRuntime
 ├── hooks/          键盘、窗口、会话、MCP controller、Skill、slash command
-├── mcp/            MCP 只读状态 overlay、项目配置信任提示与 controller
+├── mcp/            MCP Select 管理 overlay、ViewModel 与 controller
 ├── reducers/       AgentEvent → UI state
 ├── components/     Block、审批、计划、子 Agent、模型选择
 └── render/         静态内容与终端输出稳定性
@@ -25,7 +25,7 @@ App.tsx
 
 TUI 不应根据展示文本反推工具是否成功，也不能自行构造 verification passed、approval granted 等 Runtime 事实。
 
-MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。`/mcp` 只过滤 effective Server 并渲染状态与名称，不存在搜索、selection、详情或配置 route。项目配置摘要决定由独立信任提示调用 controller；HTTP 认证阻塞由独立 `McpAuthPrompt` 调用 Login/Cancel，Core Repository 的 typed mutation 不进入 TUI。
+MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。`/mcp` 的 list、detail、add、authenticate、project approval 和 confirm route，以及 selection、draft 和动态操作菜单都属于 App。业务键只产生 move/confirm/back，再由 controller 调用 Core retry、typed mutation、摘要决定和 auth flow；Core 不依赖 Select 或 TUI 展示类型。
 
 ## 7.3 事件渲染
 

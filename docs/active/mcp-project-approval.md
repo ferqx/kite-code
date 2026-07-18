@@ -2,15 +2,15 @@
 
 状态：active
 读取时机：修改 MCP 配置发现、项目来源、连接启动、项目信任提示或 Approval Store 时。
-验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-panel.test.tsx tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0009、ADR-0010、ADR-0012、ADR-0014、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
+验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-panel.test.tsx tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/local/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+相关：ADR-0009、ADR-0010、ADR-0014、ADR-0018、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
 
 ## 当前安全性质
 
 默认配置发现使用以下优先级：
 
 ```text
-local > project legacy .kite-code > project .mcp.json > user
+project .kite-code/mcp.json > user ~/.kite-code/mcp.json > read-only legacy sources
 ```
 
 `project_legacy` 与 `project` 的有效 Server 必须先获得本机用户对当前配置摘要的批准。`pending_approval`、`rejected`、`invalid`、`store_corrupt` 或 `store_unavailable` 的项目条目不会进入 `loadMcpConfig().servers`，因此 `McpManager` 不会为其创建 stdio 或 HTTP transport。高优先级项目条目被阻止时，不回退到同名低优先级条目。Phase 0 保存的 `project_kite_code` 与 `project_mcp_json` 决定继续作为兼容别名读取。
@@ -39,13 +39,13 @@ Approval Store 和项目配置信任决定属于 MCP control plane，不写入�
 
 ## TUI 行为
 
-`/mcp` 注册在 TUI 的静态斜杠命令表中。输入 `/m`、`/mc` 或完整命令时，候选面板显示 `/mcp` 及“查看 MCP 连接状态”说明；Tab、右方向键和 Enter 遵循通用斜杠命令补全行为。该命令只显示 effective Server 的状态与名称，不承担审批。
+`/mcp` 注册在 TUI 的静态斜杠命令表中。输入 `/m`、`/mc` 或完整命令时，候选面板显示 `/mcp` 及“管理 MCP Servers”说明；Tab、右方向键和 Enter 遵循通用补全行为。命令只接受无参数形式。
 
-Supervisor 发布 effective `pending_approval` 项目条目后，App shell 在 `/mcp` 外独立显示信任提示。提示只展示 Server 名称、source path、摘要短前缀、stdio command 与参数数量或只保留 origin 的 HTTP endpoint；不会展示 URL path/query/fragment/userinfo、env、header 或参数内容。提示中：
+Supervisor 发布 effective `pending_approval` 或 `rejected` 项目条目后，它出现在 Server List。用户进入 Detail 并选择 Review server/Review decision 后，Review 页面只展示 Server 名称、transport、stdio command 或 HTTP origin 和固定信任警告；不会展示 URL path/query/fragment/userinfo、env、header 或参数内容。Select 默认 Decide later，并提供 Approve and connect 与 Reject server：
 
-- 连续两次按 `a`：确认批准当前摘要，由 Supervisor 重新加载目录并连接该 Server；
-- 连续两次按 `r`：确认拒绝当前摘要，由 Supervisor 重新加载目录并断开不再可连接的 Server；
-- Esc：仅延后当前摘要在本次 TUI 会话中的提示，保持 pending 且不记录决定；
-- 配置已变化或存储异常：显示 Core 返回的安全诊断，不创建 transport。
+- Decide later/Esc：保持当前决定，不创建 transport；
+- Approve：绑定当前 digest 记录批准，reload 后进入 connecting；
+- Reject：绑定当前 digest 记录拒绝，Detail 原地投影 Rejected；
+- 配置已变化或 Store 异常：显示 Core 安全诊断，不创建 transport。
 
-TUI 不提供 project add 或 legacy migrate；任何外部写入或 Core mutation 产生的新项目摘要都必须重新进入 pending approval。完整 control-plane 与配置边界见 [`mcp-control-plane.md`](mcp-control-plane.md) 和 [`mcp-config-management.md`](mcp-config-management.md)。
+TUI 不使用 `a/r` 功能键，不提供 project add 或 legacy migrate。任何外部写入或 Core mutation 产生的新项目摘要都必须重新进入 pending approval。完整 control-plane 与配置边界见 [`mcp-control-plane.md`](mcp-control-plane.md) 和 [`mcp-config-management.md`](mcp-config-management.md)。

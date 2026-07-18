@@ -103,6 +103,8 @@ subagent:review
 
 Capability discovery 只回答“系统有哪些能力”，不构成授权。大目录可通过 `capability_search` 渐进披露；MCP provider directory 还可提供不可执行的 unavailable 摘要。两种搜索结果都不授予执行权限，只有当前 revision 的 available descriptor 才能在后续 turn 形成 binding。
 
+MCP Tool 的按需披露会把搜索命中的 `capabilityId + revision + firstLoadedAtTurnId` 持久化为 session-loaded set；恢复后的每个新 turn 都重新签发 Binding，并在 descriptor 漂移、禁用、删除时自动淘汰。MCP Resource 列表与读取由稳定内置工具访问，不进入 loaded set 或 Binding。Tool/Resource 调用失败必须形成成对的 Tool Result，不能因 Provider 或适配逻辑异常中断会话。
+
 ## 5. Policy：发现与授权分离
 
 Policy 使用本地计算得到的 effective effects，而不是直接相信 provider 声明。它依次处理：

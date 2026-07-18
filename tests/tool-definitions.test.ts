@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { exposedMcpToolName } from '../src/core/mcp';
 import {
   clearToolCache,
   createAgentTools,
@@ -20,6 +21,23 @@ function toolNames(tools: Record<string, unknown>): string[] {
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe('code agent tool definitions', () => {
+  test('normalizes remote MCP tool names into stable model-safe identifiers', () => {
+    expect(exposedMcpToolName('docs', 'search_docs')).toBe('mcp__docs__search_docs');
+    const unsafe = exposedMcpToolName(
+      'provider.with.dots',
+      '搜索 documentation / with spaces and a very long remote tool name'.repeat(2),
+    );
+    expect(unsafe).toMatch(/^[a-zA-Z0-9_-]+$/);
+    expect(unsafe.length).toBeLessThanOrEqual(64);
+    expect(unsafe).toBe(
+      exposedMcpToolName(
+        'provider.with.dots',
+        '搜索 documentation / with spaces and a very long remote tool name'.repeat(2),
+      ),
+    );
+    expect(unsafe).not.toBe(exposedMcpToolName('provider.with.dots', `${unsafe}-other`));
+  });
+
   test('appends only Runtime-issued MCP bindings without an execute handler', () => {
     const descriptor: CapabilityDescriptor = {
       capabilityId: 'mcp:fixture/read',
@@ -48,8 +66,8 @@ describe('code agent tool definitions', () => {
       mcpBindings: [{ binding, descriptor }],
     });
     expect(Object.keys(tools).at(-1)).toBe('mcp__fixture__read');
-    expect(tools['mcp__fixture__read']).toBeDefined();
-    expect('execute' in tools['mcp__fixture__read']!).toBe(false);
+    expect(tools.mcp__fixture__read).toBeDefined();
+    expect('execute' in tools.mcp__fixture__read!).toBe(false);
   });
 
   // 验证 agent 暴露稳定工具 schema / Agent exposes the stable tool schema
@@ -71,7 +89,7 @@ describe('code agent tool definitions', () => {
     expect(names).toContain('update_plan');
     expect(names).toContain('ask_user');
     expect(names.length).toBeGreaterThanOrEqual(10);
-    expect(tools['read_file']).toBeDefined();
+    expect(tools.read_file).toBeDefined();
   });
 
   // ask_user 描述包含 "Ask the user"
@@ -79,7 +97,7 @@ describe('code agent tool definitions', () => {
     const tools = createAgentTools({
       workspace: 'D:\\workspace',
     });
-    const askUserTool = tools['ask_user']!;
+    const askUserTool = tools.ask_user!;
 
     expect(askUserTool).toBeDefined();
     expect(String(askUserTool.description)).toContain('Ask the user');
@@ -89,15 +107,15 @@ describe('code agent tool definitions', () => {
 
   test('write_plan and update_plan are present', () => {
     const tools = createAgentTools({ workspace: '/tmp' });
-    expect(tools['write_plan']).toBeDefined();
-    expect(tools['update_plan']).toBeDefined();
-    expect(String(tools['write_plan']!.description)).toContain('Save');
-    expect(String(tools['update_plan']!.description)).toContain('progress');
+    expect(tools.write_plan).toBeDefined();
+    expect(tools.update_plan).toBeDefined();
+    expect(String(tools.write_plan!.description)).toContain('Save');
+    expect(String(tools.update_plan!.description)).toContain('progress');
   });
 
   test('invokes write_plan and returns plan JSON', async () => {
     const tools = createAgentTools({ workspace: '/tmp' });
-    const wp = tools['write_plan']!;
+    const wp = tools.write_plan!;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execute() return type
     const raw = (await (wp as any).execute({
       title: 'Refactor',
@@ -117,7 +135,7 @@ describe('code agent tool definitions', () => {
 
   test('write_plan schema requires a complete save document', async () => {
     const tools = createAgentTools({ workspace: '/tmp' });
-    const schema = (tools['write_plan'] as any).inputSchema;
+    const schema = (tools.write_plan as any).inputSchema;
     const jsonSchema = await schema.jsonSchema;
 
     // OpenAI-compatible function tools require an object at the schema root;
@@ -149,7 +167,7 @@ describe('code agent tool definitions', () => {
 
   test('ask_user accepts batch questions without a duplicate top-level question', async () => {
     const tools = createAgentTools({ workspace: '/tmp' });
-    const schema = (tools['ask_user'] as any).inputSchema;
+    const schema = (tools.ask_user as any).inputSchema;
 
     expect(
       (
@@ -171,9 +189,9 @@ describe('code agent tool definitions', () => {
     expect(names).toContain('write_plan');
     expect(names).toContain('update_plan');
     expect(names).toContain('ask_user');
-    expect(String(tools['write_plan']?.description)).toContain('Save');
-    expect(String(tools['update_plan']?.description)).toContain('progress');
-    expect(String(tools['ask_user']?.description)).toContain('uncertainty');
+    expect(String(tools.write_plan?.description)).toContain('Save');
+    expect(String(tools.update_plan?.description)).toContain('progress');
+    expect(String(tools.ask_user?.description)).toContain('uncertainty');
   });
 
   // 验证 search 工具可以不依赖 shell 独立执行 / Search tools execute without shell access
@@ -190,8 +208,8 @@ describe('code agent tool definitions', () => {
         throw new Error('search tools must not invoke shell');
       },
     });
-    const searchFiles = tools['search_files']!;
-    const searchContent = tools['search_content']!;
+    const searchFiles = tools.search_files!;
+    const searchContent = tools.search_content!;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execute() return type
     const filesResult = JSON.parse(
@@ -341,7 +359,7 @@ describe('code agent tool definitions', () => {
     const names = toolNames(tools);
     expect(names).toContain('activate_skill');
     expect(names).not.toContain('Skill');
-    expect(tools['activate_skill']).toBeDefined();
+    expect(tools.activate_skill).toBeDefined();
   });
 
   test('legacy prompt skill inputs do not change builtin tools', () => {
@@ -376,6 +394,7 @@ describe('tool contracts (ACI)', () => {
     'search_content',
     'search_files',
     'capability_search',
+    'list_mcp_resources',
     'update_plan',
     'write_plan',
     'read_mcp_resource',
@@ -490,14 +509,17 @@ describe('tool contracts (ACI)', () => {
     expect(contract.sections.failureHandling).toMatch(/rejected by policy|denied|plan mode/);
   });
 
-  // read_mcp_resource 工具定义验证 / read_mcp_resource tool definition validation
-  test('read_mcp_resource tool is defined', () => {
+  // MCP resource tools form one discover/read client-side chain.
+  test('MCP resource list and read tools are defined with the client-side contract', () => {
     const tools = createAgentTools({
       workspace: '/workspace',
     });
-    const tool = tools['read_mcp_resource']!;
-    expect(tool).toBeDefined();
-    expect(String(tool.description)).toContain('MCP');
+    expect(tools.list_mcp_resources).toBeDefined();
+    expect(tools.read_mcp_resource).toBeDefined();
+    expect(String(tools.read_mcp_resource?.description)).toContain('list_mcp_resources');
+    expect(String(tools.read_mcp_resource?.description)).not.toContain(
+      'mcp__<server>__list_resources',
+    );
   });
 
   // apply_patch 契约标记为 @reserved，待需求确认后启用 / apply_patch contract is reserved for future enablement
@@ -505,7 +527,7 @@ describe('tool contracts (ACI)', () => {
     const contract = TOOL_CONTRACTS.get('apply_patch');
     expect(contract).toBeUndefined();
     const tools = createAgentTools({ workspace: '/tmp' });
-    expect(tools['apply_patch']).toBeUndefined();
+    expect(tools.apply_patch).toBeUndefined();
   });
 
   // ── Cache key stabilization ──
@@ -528,6 +550,71 @@ describe('tool contracts (ACI)', () => {
     });
     // Same state → cache hit → same object reference returned
     expect(a).toBe(b);
+  });
+
+  test('keeps MCP tool cache identity stable across turns but invalidates revision or schema drift', () => {
+    clearToolCache();
+    const descriptor: CapabilityDescriptor = {
+      capabilityId: 'mcp:fixture/read',
+      revision: 'revision-1',
+      kind: 'mcp_tool',
+      displayName: 'read',
+      description: 'Read fixture data',
+      provider: { type: 'mcp', id: 'fixture', provenance: 'remote' },
+      inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+      declaredEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      effectiveEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'none' },
+      availability: 'available',
+      diagnostics: [],
+    };
+    const binding = (overrides: Partial<CapabilityBinding> = {}): CapabilityBinding => ({
+      bindingId: 'binding-turn-1',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      exposedToolName: 'mcp__fixture__read',
+      schemaDigest: 'schema-1',
+      issuedForTurnId: 'turn-1',
+      ...overrides,
+    });
+    const first = createAgentTools({
+      workspace: '/tmp',
+      mcpBindings: [{ descriptor, binding: binding() }],
+    });
+    const nextTurn = createAgentTools({
+      workspace: '/tmp',
+      mcpBindings: [
+        {
+          descriptor,
+          binding: binding({ bindingId: 'binding-turn-2', issuedForTurnId: 'turn-2' }),
+        },
+      ],
+    });
+    const revisionChanged = createAgentTools({
+      workspace: '/tmp',
+      mcpBindings: [
+        {
+          descriptor: { ...descriptor, revision: 'revision-2' },
+          binding: binding({
+            capabilityRevision: 'revision-2',
+            bindingId: 'binding-revision-2',
+          }),
+        },
+      ],
+    });
+    const schemaChanged = createAgentTools({
+      workspace: '/tmp',
+      mcpBindings: [
+        {
+          descriptor,
+          binding: binding({ schemaDigest: 'schema-2', bindingId: 'binding-schema-2' }),
+        },
+      ],
+    });
+
+    expect(nextTurn).toBe(first);
+    expect(revisionChanged).not.toBe(first);
+    expect(schemaChanged).not.toBe(first);
   });
 
   test('different phase produces different cache key (cache miss)', () => {

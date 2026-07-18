@@ -3,6 +3,8 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import {
+  isMcpInventoryQuery,
+  lastKnownMcpToolMetadata,
   publicProviderSearchMetadata,
   publicSearchMetadata,
   searchableCapabilitySnapshot,
@@ -17,6 +19,7 @@ import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import {
   capabilityChangedProviderError,
+  exposedMcpToolName,
   isMcpProviderError,
   type McpProviderRecoveryAction,
   type McpRuntimeProvider,
@@ -139,7 +142,7 @@ function forkToolCeiling(input: {
       return null;
     const binding = createBinding({
       descriptor,
-      exposedToolName: `mcp__${descriptor.provider.id}__${descriptor.displayName}`,
+      exposedToolName: exposedMcpToolName(descriptor.provider.id, descriptor.displayName),
       turnId: input.turnId,
     });
     tools.add(binding.exposedToolName);
@@ -577,21 +580,48 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      const snapshot = searchableCapabilitySnapshot({
+      let snapshot = searchableCapabilitySnapshot({
         mcp: params.mcpManager?.getCapabilitySnapshot(),
         skills: params.skillCatalog?.capabilities,
       });
-      const providerDirectory = params.mcpManager?.getProviderDirectorySnapshot();
-      const candidates = searchCapabilities({
+      let providerDirectory = params.mcpManager?.getProviderDirectorySnapshot();
+      let candidates = searchCapabilities({
         snapshot,
         query: request.args.query,
         limit: request.args.limit,
       });
-      const providers = searchUnavailableProviders({
+      let providers = searchUnavailableProviders({
         directory: providerDirectory,
         query: request.args.query,
         limit: request.args.limit,
       });
+      const connectingProviders = providers.filter((provider) => provider.status === 'connecting');
+      if (
+        candidates.length === 0 &&
+        connectingProviders.length > 0 &&
+        params.mcpManager?.ensureProviderReady
+      ) {
+        await Promise.allSettled(
+          connectingProviders.map((provider) =>
+            params.mcpManager!.ensureProviderReady!(provider.providerId, 5_000, params.signal),
+          ),
+        );
+        snapshot = searchableCapabilitySnapshot({
+          mcp: params.mcpManager.getCapabilitySnapshot(),
+          skills: params.skillCatalog?.capabilities,
+        });
+        providerDirectory = params.mcpManager.getProviderDirectorySnapshot();
+        candidates = searchCapabilities({
+          snapshot,
+          query: request.args.query,
+          limit: request.args.limit,
+        });
+        providers = searchUnavailableProviders({
+          directory: providerDirectory,
+          query: request.args.query,
+          limit: request.args.limit,
+        });
+      }
       const searchId = digestCapability({
         threadId: params.state.session.threadId,
         turnId: params.state.turn.turnId,
@@ -599,6 +629,15 @@ export async function executeRuntimeTools(params: {
         query: request.args.query,
         catalogRevision: snapshot.revision,
       });
+      const publicCandidates = publicSearchMetadata(candidates);
+      const lastKnownTools =
+        candidates.length === 0 && isMcpInventoryQuery(request.args.query)
+          ? lastKnownMcpToolMetadata({
+              directory: providerDirectory,
+              limit: request.args.limit,
+            })
+          : [];
+      const displayedCandidates = publicCandidates.length > 0 ? publicCandidates : lastKnownTools;
       events.push({
         type: 'capability.search_completed',
         result: {
@@ -621,16 +660,19 @@ export async function executeRuntimeTools(params: {
           stdout: JSON.stringify({
             ok: true,
             search_id: searchId,
-            candidate_count: candidates.length,
-            candidates: publicSearchMetadata(candidates),
+            candidate_count: displayedCandidates.length,
+            candidates: displayedCandidates,
+            executable_candidate_count: candidates.length,
             provider_count: providers.length,
             providers: publicProviderSearchMetadata(providers),
             next_step:
               candidates.length > 0
                 ? 'The Runtime will disclose current matching capabilities on the next model call.'
-                : providers.length > 0
-                  ? 'The matching providers are unavailable and no executable binding was issued.'
-                  : 'No matching capability or known unavailable provider was found.',
+                : lastKnownTools.length > 0
+                  ? 'These are last-known MCP Tool names from a catalog revision transition. Search for a specific tool before calling it.'
+                  : providers.length > 0
+                    ? 'The matching providers are unavailable and no executable binding was issued.'
+                    : 'No matching capability or known unavailable provider was found.',
           }),
           stderr: '',
         },
@@ -1717,16 +1759,22 @@ export async function executeRuntimeTools(params: {
       descriptor: mcpDescriptor,
       flags: params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined,
     });
+    const rawMcpToolName = mcpDescriptor
+      ? `mcp__${mcpDescriptor.provider.id}__${mcpDescriptor.displayName}`
+      : undefined;
     const executionRequest =
       invocation?.idempotencyKeyArgument && invocation.idempotencyKey
         ? ({
             ...request,
+            ...(rawMcpToolName ? { name: rawMcpToolName } : {}),
             args: {
               ...request.args,
               [invocation.idempotencyKeyArgument]: invocation.idempotencyKey,
             },
           } as typeof request)
-        : request;
+        : rawMcpToolName
+          ? ({ ...request, name: rawMcpToolName } as typeof request)
+          : request;
     if (invocation) events.push(invocation.recorded);
     events.push({ type: 'tool.started', toolCallId });
     if (invocation) {
@@ -1738,6 +1786,20 @@ export async function executeRuntimeTools(params: {
     }
     const progress: RuntimeEvent[] = [];
     try {
+      if (request.name === 'read_mcp_resource') {
+        await params.mcpManager?.ensureProviderReady?.(request.args.server, 30_000, params.signal);
+      }
+      if (mcpDescriptor) {
+        await params.mcpManager?.ensureProviderReady?.(
+          mcpDescriptor.provider.id,
+          30_000,
+          params.signal,
+        );
+        const currentDescriptor = params.mcpManager?.findCapability(mcpDescriptor.capabilityId);
+        if (!currentDescriptor || currentDescriptor.revision !== mcpDescriptor.revision) {
+          throw capabilityChangedProviderError(mcpDescriptor.provider.id);
+        }
+      }
       const result = await runApprovedTool({
         workspace: params.state.session.workspace,
         request: executionRequest,

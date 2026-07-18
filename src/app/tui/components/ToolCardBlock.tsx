@@ -21,6 +21,45 @@ const SHELL_PREFIX = '⎿   ';
  *  (like "    ") is vulnerable to collapsing in Ink's Yoga text layout. */
 const SHELL_ALIGN = SHELL_PREFIX;
 
+interface CapabilitySearchDisplayResult {
+  candidate_count?: number;
+  candidates?: Array<{
+    kind?: string;
+    name?: string;
+    provider?: string;
+  }>;
+}
+
+interface McpResourceListDisplayResult {
+  resource_count?: number;
+  resources?: Array<{ server?: string; uri?: string; name?: string; mime_type?: string }>;
+}
+
+function parseCapabilitySearchResult(summary: string): CapabilitySearchDisplayResult | undefined {
+  try {
+    const parsed = JSON.parse(summary) as CapabilitySearchDisplayResult;
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseMcpResourceList(summary: string): McpResourceListDisplayResult | undefined {
+  try {
+    const parsed = JSON.parse(summary) as McpResourceListDisplayResult;
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mcpToolDisplayName(name: string): string {
+  if (!name.startsWith('mcp__')) return ACTION_NAMES[name] ?? name;
+  const parts = name.slice('mcp__'.length).split('__');
+  if (parts.length < 2) return name;
+  return `${parts.shift()} · ${parts.join('__')}`;
+}
+
 /** 从工具参数中提取可读的文件路径（仅末级文件名）/ Extract readable path label from tool args (filename only) */
 function pathLabel(args: Record<string, unknown>): string {
   const p = args.path;
@@ -421,10 +460,16 @@ export default function ToolCardBlock({
   const isShell = block.name === 'shell_execute';
 
   if (block.status === 'queued') {
+    const displayName =
+      block.name === 'capability_search'
+        ? 'Searching for tools…'
+        : block.name === 'list_mcp_resources'
+          ? 'Listing MCP resources…'
+          : mcpToolDisplayName(block.name);
     return (
       <Box>
         <Text color={dt.muted}>○ </Text>
-        <Text>{ACTION_NAMES[block.name] ?? block.name}</Text>
+        <Text>{displayName}</Text>
         {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
         <Text color={dt.dim}> (queued)</Text>
       </Box>
@@ -435,12 +480,18 @@ export default function ToolCardBlock({
     // 等待审批/输入时用静态 ○ 代替轮播 spinner / Static dot for tools awaiting approval or input
     const isWaiting = awaitingApproval || block.name === 'ask_user';
     const spinner = isWaiting ? '○' : SPINNER[spinnerIdx];
+    const displayName =
+      block.name === 'capability_search'
+        ? 'Searching for tools…'
+        : block.name === 'list_mcp_resources'
+          ? 'Listing MCP resources…'
+          : mcpToolDisplayName(block.name);
     // isAskUserRunning 已移除：running 状态的问题由 Footer InputBlock 渲染，scrollback 不重复
     return (
       <Box flexDirection="column">
         <Box>
           <Text>{spinner} </Text>
-          <Text>{ACTION_NAMES[block.name] ?? block.name}</Text>
+          <Text>{displayName}</Text>
           {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
           {awaitingApproval ? (
             <Text color={dt.dim}> (awaiting approval)</Text>
@@ -479,7 +530,32 @@ export default function ToolCardBlock({
       block.status === 'timeout' ||
       block.status === 'exhausted');
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
-  const displayName = ACTION_NAMES[block.name] ?? block.name;
+  const capabilitySearch =
+    block.name === 'capability_search' ? parseCapabilitySearchResult(block.summary) : undefined;
+  const searchCandidates = capabilitySearch?.candidates?.filter(
+    (candidate) => typeof candidate.name === 'string' && candidate.name.length > 0,
+  );
+  const resourceList =
+    block.name === 'list_mcp_resources' ? parseMcpResourceList(block.summary) : undefined;
+  const listedResources = resourceList?.resources?.filter(
+    (resource) =>
+      typeof resource.server === 'string' &&
+      resource.server.length > 0 &&
+      typeof resource.uri === 'string' &&
+      resource.uri.length > 0,
+  );
+  const displayName =
+    block.name === 'capability_search'
+      ? block.status === 'done'
+        ? (capabilitySearch?.candidate_count ?? searchCandidates?.length ?? 0) > 0
+          ? 'Searched for tools'
+          : 'No matching tools found'
+        : 'Tool search failed'
+      : block.name === 'list_mcp_resources'
+        ? block.status === 'done'
+          ? 'Listed MCP resources'
+          : 'MCP resource listing failed'
+        : mcpToolDisplayName(block.name);
   return (
     <Box flexDirection="column">
       <Box>
@@ -490,6 +566,40 @@ export default function ToolCardBlock({
           <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
         ) : null}
       </Box>
+      {block.name === 'capability_search' &&
+        block.status === 'done' &&
+        searchCandidates &&
+        searchCandidates.length > 0 && (
+          <Box paddingLeft={2} flexDirection="column">
+            {searchCandidates.map((candidate, index) => {
+              const provider =
+                typeof candidate.provider === 'string' && candidate.provider.length > 0
+                  ? candidate.provider
+                  : candidate.kind === 'skill'
+                    ? 'skill'
+                    : 'MCP';
+              const branch = index === searchCandidates.length - 1 ? '└' : '├';
+              return (
+                <Text key={`${provider}-${candidate.name}-${index}`} color={dt.muted}>
+                  {branch} {provider} · {candidate.name}
+                </Text>
+              );
+            })}
+          </Box>
+        )}
+      {block.name === 'list_mcp_resources' &&
+        block.status === 'done' &&
+        listedResources &&
+        listedResources.length > 0 && (
+          <Box paddingLeft={2} flexDirection="column">
+            {listedResources.map((resource, index) => (
+              <Text key={`${resource.server}-${resource.uri}-${index}`} color={dt.muted}>
+                {index === listedResources.length - 1 ? '└' : '├'} {resource.server} ·{' '}
+                {resource.uri}
+              </Text>
+            ))}
+          </Box>
+        )}
       {/* 方案工具：Markdown 完整渲染，不截断 / Plan: full Markdown, no truncation */}
       {isExpanded && isPlan && hasSummary && (
         <Box paddingLeft={2} marginTop={1} flexDirection="column">

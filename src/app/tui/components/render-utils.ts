@@ -20,6 +20,8 @@ export const ACTION_NAMES: Record<string, string> = {
   task: 'Task',
   Skill: 'Skill',
   web_fetch: 'Web Fetch',
+  capability_search: 'Searched for tools',
+  list_mcp_resources: 'Listed MCP resources',
 };
 
 /** 取工具显示名，无映射则返回原名 / Get display name, fallback to original */
@@ -101,6 +103,9 @@ function formatPlanArtifactPath(path: string): string {
  */
 export function formatToolResultForDisplay(name: string, stdout: string, stderr: string): string {
   const raw = stdout || stderr;
+  // capability_search returns a bounded, names-only JSON result. Keep it intact so
+  // the TUI can render the matched Provider · Tool tree instead of a truncated blob.
+  if (name === 'capability_search' || name === 'list_mcp_resources') return raw;
   if (name === 'write_plan' && raw) {
     try {
       const result = JSON.parse(raw) as {

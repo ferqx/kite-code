@@ -9,6 +9,7 @@ import type {
   CapabilityDisclosure,
   CapabilitySearchResult,
   EffectProfile,
+  LoadedCapability,
 } from '@/protocol/capabilities';
 import type {
   AgentPlan,
@@ -85,6 +86,8 @@ export interface CapabilityBindingsIssuedEvent {
   catalogRevision: string;
   bindings: CapabilityBinding[];
   disclosures?: CapabilityDisclosure[];
+  /** Complete revision-checked MCP schema set retained by this session. */
+  loadedCapabilities?: LoadedCapability[];
   /** When present, consumes exactly one persisted search result. */
   searchId?: string;
 }

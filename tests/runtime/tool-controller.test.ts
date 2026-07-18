@@ -4,12 +4,193 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { executeRuntimeTools, toRuntimeSubagentEvent } from '@/core/controllers/tool-controller';
-import { McpManager } from '@/core/mcp';
+import { exposedMcpToolName, McpManager } from '@/core/mcp';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 
 describe('executeRuntimeTools', () => {
+  test('executes a normalized model tool name against the original remote MCP name', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-normalized-mcp-name',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization = { mode: 'full_access', commandGrants: {} };
+    const remoteToolName = '搜索 docs / latest';
+    const exposedName = exposedMcpToolName('docs.provider', remoteToolName);
+    const descriptor = {
+      capabilityId: `mcp:docs.provider/${remoteToolName}`,
+      revision: 'revision-1',
+      kind: 'mcp_tool' as const,
+      displayName: remoteToolName,
+      description: 'search fixture',
+      provider: { type: 'mcp' as const, id: 'docs.provider', provenance: 'remote' as const },
+      inputSchema: {
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      },
+      declaredEffects: {
+        filesystem: 'none' as const,
+        network: 'read' as const,
+        externalState: 'read' as const,
+      },
+      effectiveEffects: {
+        filesystem: 'none' as const,
+        network: 'read' as const,
+        externalState: 'read' as const,
+      },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
+      availability: 'available' as const,
+      diagnostics: [],
+    };
+    state.capabilities.bindings.binding = {
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      exposedToolName: exposedName,
+      schemaDigest: 'schema',
+      issuedForTurnId: state.turn.turnId,
+    };
+    state.tools.calls.mcp = {
+      toolCallId: 'mcp',
+      modelMessageId: 'model',
+      name: exposedName,
+      args: { query: 'runtime' },
+      status: 'queued',
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('mcp');
+    const manager = new McpManager();
+    const runtimeManager = manager as McpManager & {
+      ensureProviderReady(
+        providerId: string,
+        timeoutMs?: number,
+        signal?: AbortSignal,
+      ): Promise<void>;
+    };
+    let calledWith: { server: string; tool: string } | undefined;
+    runtimeManager.ensureProviderReady = async () => {};
+    manager.findCapability = () => descriptor;
+    manager.callTool = async (server, tool) => {
+      calledWith = { server, tool };
+      return { content: [{ type: 'text', text: 'ok' }] };
+    };
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['mcp'],
+      mcpManager: runtimeManager,
+      taskConfig: {
+        apiKey: 'test',
+        baseURL: 'http://localhost',
+        modelName: 'mock',
+        providerName: 'mock',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+        features: { capabilityCatalogV1: true, mcpRuntimeBindingV1: true },
+      },
+    });
+
+    expect(calledWith).toEqual({ server: 'docs.provider', tool: remoteToolName });
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
+  });
+
+  test('fails closed when a provider reconnect changes the bound descriptor revision', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-provider-revision-drift',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    const descriptor = {
+      capabilityId: 'mcp:github/read',
+      revision: 'revision-1',
+      kind: 'mcp_tool' as const,
+      displayName: 'read',
+      description: 'read fixture',
+      provider: { type: 'mcp' as const, id: 'github', provenance: 'remote' as const },
+      inputSchema: { type: 'object', properties: {} },
+      declaredEffects: {
+        filesystem: 'none' as const,
+        network: 'read' as const,
+        externalState: 'read' as const,
+      },
+      effectiveEffects: {
+        filesystem: 'none' as const,
+        network: 'read' as const,
+        externalState: 'read' as const,
+      },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
+      availability: 'available' as const,
+      diagnostics: [],
+    };
+    state.capabilities.bindings.binding = {
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      exposedToolName: 'mcp__github__read',
+      schemaDigest: 'schema',
+      issuedForTurnId: state.turn.turnId,
+    };
+    state.tools.calls.mcp = {
+      toolCallId: 'mcp',
+      modelMessageId: 'model',
+      name: 'mcp__github__read',
+      args: {},
+      status: 'queued',
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('mcp');
+    const manager = new McpManager();
+    const runtimeManager = manager as McpManager & {
+      ensureProviderReady(providerId: string, timeoutMs?: number): Promise<void>;
+    };
+    let reconnected = false;
+    let called = false;
+    manager.findCapability = () =>
+      reconnected ? { ...descriptor, revision: 'revision-2' } : descriptor;
+    runtimeManager.ensureProviderReady = async () => {
+      reconnected = true;
+    };
+    manager.callTool = async () => {
+      called = true;
+      return { content: [] };
+    };
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['mcp'],
+      mcpManager: runtimeManager,
+      taskConfig: {
+        apiKey: '',
+        baseURL: 'http://localhost',
+        modelName: 'test',
+        providerName: 'test',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+        features: { capabilityCatalogV1: true, mcpRuntimeBindingV1: true },
+      },
+    });
+
+    expect(called).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        failure: expect.objectContaining({
+          kind: 'provider_capability_changed',
+          retryable: false,
+        }),
+      }),
+    );
+  });
+
   test('classifies an unavailable bound MCP provider without string matching', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-provider-auth',

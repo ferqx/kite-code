@@ -8,13 +8,13 @@
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { createBinding } from '@/core/capabilities/catalog';
 import {
+  capabilityNameSummary,
   chooseCapabilityDisclosure,
-  hasUnavailableMcpProviders,
   searchableCapabilitySnapshot,
 } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import type { McpRuntimeProvider } from '@/core/mcp';
+import { exposedMcpToolName, type McpRuntimeProvider } from '@/core/mcp';
 import {
   type AIMessage,
   aiMessage,
@@ -238,7 +238,6 @@ export async function invokeRuntimeModel(params: {
       mcp: params.mcpManager?.getCapabilitySnapshot(),
       skills: params.skillCatalog?.capabilities,
     });
-    const providerDirectory = params.mcpManager?.getProviderDirectorySnapshot();
     const disclosure = chooseCapabilityDisclosure({
       featureEnabled: flags.capabilitySearchV1,
       providerSupportsToolCalls: params.model.supportsToolCalls !== false,
@@ -256,7 +255,7 @@ export async function invokeRuntimeModel(params: {
         ? pendingSearch
         : undefined;
     const searchedDescriptors =
-      disclosure.mode === 'search' && currentSearch
+      flags.capabilitySearchV1 && currentSearch
         ? currentSearch.candidates.flatMap((candidate) => {
             const descriptor = capabilitySnapshot.descriptors.find(
               (item) =>
@@ -266,12 +265,52 @@ export async function invokeRuntimeModel(params: {
             return descriptor ? [descriptor] : [];
           })
         : [];
-    const disclosedDescriptors =
+    const loadedMcpDescriptors = Object.values(state.capabilities.loadedCapabilities ?? {}).flatMap(
+      (loaded) => {
+        const descriptor = capabilitySnapshot.descriptors.find(
+          (item) =>
+            item.kind === 'mcp_tool' &&
+            item.capabilityId === loaded.capabilityId &&
+            item.revision === loaded.capabilityRevision,
+        );
+        return descriptor ? [descriptor] : [];
+      },
+    );
+    const searchedMcpDescriptors = searchedDescriptors.filter(
+      (descriptor) => descriptor.kind === 'mcp_tool',
+    );
+    const disclosedMcpDescriptors = (
+      flags.capabilitySearchV1
+        ? [...loadedMcpDescriptors, ...searchedMcpDescriptors]
+        : capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
+    ).filter(
+      (descriptor, index, all) =>
+        all.findIndex((candidate) => candidate.capabilityId === descriptor.capabilityId) === index,
+    );
+    const disclosedSkillDescriptors =
       disclosure.mode === 'all'
-        ? capabilitySnapshot.descriptors
+        ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'skill')
         : disclosure.mode === 'search'
-          ? searchedDescriptors
+          ? searchedDescriptors.filter((descriptor) => descriptor.kind === 'skill')
           : [];
+    const disclosedDescriptors = [...disclosedMcpDescriptors, ...disclosedSkillDescriptors];
+    const loadedCapabilities = flags.capabilitySearchV1
+      ? disclosedMcpDescriptors.map((descriptor) => {
+          const existing = state.capabilities.loadedCapabilities?.[descriptor.capabilityId];
+          return {
+            capabilityId: descriptor.capabilityId,
+            capabilityRevision: descriptor.revision,
+            firstLoadedAtTurnId: existing?.firstLoadedAtTurnId ?? state.turn.turnId,
+          };
+        })
+      : [];
+    const previousLoadedCapabilities = Object.values(state.capabilities.loadedCapabilities ?? {});
+    const loadedSetChanged =
+      previousLoadedCapabilities.length !== loadedCapabilities.length ||
+      loadedCapabilities.some((loaded) => {
+        const previous = state.capabilities.loadedCapabilities?.[loaded.capabilityId];
+        return previous?.capabilityRevision !== loaded.capabilityRevision;
+      });
     const mcpBindings =
       flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1
         ? disclosedDescriptors
@@ -283,7 +322,7 @@ export async function invokeRuntimeModel(params: {
               descriptor,
               binding: createBinding({
                 descriptor,
-                exposedToolName: `mcp__${descriptor.provider.id}__${descriptor.displayName}`,
+                exposedToolName: exposedMcpToolName(descriptor.provider.id, descriptor.displayName),
                 turnId: state.turn.turnId,
               }),
             }))
@@ -295,12 +334,18 @@ export async function invokeRuntimeModel(params: {
           issuedForTurnId: state.turn.turnId,
         }))
       : [];
-    if (mcpBindings.length > 0 || capabilityDisclosures.length > 0 || searchToConsume) {
+    if (
+      mcpBindings.length > 0 ||
+      capabilityDisclosures.length > 0 ||
+      searchToConsume ||
+      loadedSetChanged
+    ) {
       params.emitRuntimeEvent?.({
         type: 'capability.bindings_issued',
         catalogRevision: capabilitySnapshot.revision,
         bindings: mcpBindings.map(({ binding }) => binding),
         disclosures: capabilityDisclosures,
+        loadedCapabilities,
         ...(searchToConsume ? { searchId: searchToConsume.searchId } : {}),
       });
     }
@@ -309,9 +354,7 @@ export async function invokeRuntimeModel(params: {
       shellExecutor: params.shellExecutor,
       mcpManager: params.mcpManager,
       mcpBindings,
-      capabilitySearch:
-        flags.capabilitySearchV1 &&
-        (disclosure.mode === 'search' || hasUnavailableMcpProviders(providerDirectory)),
+      capabilitySearch: flags.capabilitySearchV1 && params.model.supportsToolCalls !== false,
       skills: params.skills,
       skillOptions: params.skillOptions,
       skillCatalog: params.skillCatalog,
@@ -350,6 +393,9 @@ export async function invokeRuntimeModel(params: {
             capabilityId: descriptor.capabilityId,
             description: descriptor.description,
           })),
+        mcpCapabilityNames: flags.capabilitySearchV1
+          ? capabilityNameSummary(capabilitySnapshot.descriptors)
+          : [],
         activeSkillInstructions: activeInlineSkillInstructions(state, params.skillCatalog),
       },
       undefined,

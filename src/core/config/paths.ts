@@ -16,12 +16,22 @@ export function defaultConfigPath(): string {
   return join(getKiteCodeDir(), 'kite-code.jsonc');
 }
 
+/** User-level MCP configuration shared by all workspaces. */
+export function userMcpConfigPath(): string {
+  return join(getKiteCodeDir(), 'mcp.json');
+}
+
+/** Project-controlled MCP configuration. */
+export function projectMcpConfigPath(workspace?: string): string {
+  return join(workspace ?? process.cwd(), '.kite-code', 'mcp.json');
+}
+
 /** Local decisions authorizing exact project MCP server declarations. */
 export function mcpProjectApprovalPath(): string {
   return join(getKiteCodeDir(), 'mcp-project-approvals.jsonc');
 }
 
-/** Workspace-local MCP config root. The key is a canonical, non-reversible workspace digest. */
+/** Legacy workspace-local MCP config retained for read-only migration compatibility. */
 export function localMcpConfigPath(workspaceKey: string): string {
   return join(getKiteCodeDir(), 'projects', workspaceKey, 'mcp.jsonc');
 }

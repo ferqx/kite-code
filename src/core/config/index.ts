@@ -169,7 +169,9 @@ export {
   localMcpConfigPath,
   mcpProjectApprovalPath,
   projectConfigPath,
+  projectMcpConfigPath,
   sessionExportPath,
+  userMcpConfigPath,
 } from './paths';
 
 // ── Defaults (DeepSeek) ──

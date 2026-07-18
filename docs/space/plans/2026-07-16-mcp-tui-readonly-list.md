@@ -7,6 +7,8 @@
 上游计划：[`2026-07-15-mcp-tui-management-center-implementation.md`](2026-07-15-mcp-tui-management-center-implementation.md)
 依赖：ADR-0009、ADR-0010、ADR-0011、MCP Phase 0–2 已完成实现
 
+> 本计划记录当前只读实现的完成过程。2026-07-18 的后续产品方向由 ADR-0018 和 [`2026-07-18-mcp-tui-select-management-center.md`](2026-07-18-mcp-tui-select-management-center.md) 替代；在新计划实施完成前，当前行为仍以源码、测试和 `docs/active/` 为准。
+
 ## 一、结论
 
 `/mcp` 不再是配置管理中心，只是当前 workspace 的 MCP 连接状态视图。命令不接受 Server 名称或管理子命令，Overlay 不提供选择、详情、搜索、添加、编辑、启停、删除、迁移、重试、重载或审批操作。

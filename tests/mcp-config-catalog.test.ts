@@ -30,13 +30,13 @@ describe('MCP source-aware config catalog', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  test('uses legacy project > project > user precedence without fallback', () => {
+  test('uses project > user > legacy precedence without fallback', () => {
     writeFileSync(
-      join(home, '.kite-code', 'kite-code.jsonc'),
+      join(home, '.kite-code', 'mcp.json'),
       JSON.stringify({ mcpServers: { shared: { command: 'user-server' } } }),
     );
     writeFileSync(
-      join(workspace, '.mcp.json'),
+      join(workspace, '.kite-code', 'mcp.json'),
       JSON.stringify({ mcpServers: { shared: { command: 'legacy-project-server' } } }),
     );
     writeFileSync(
@@ -46,21 +46,21 @@ describe('MCP source-aware config catalog', () => {
 
     const catalog = loadMcpConfigCatalog();
     const effective = catalog.effective.get('shared');
-    expect(effective?.source.kind).toBe('project_legacy');
+    expect(effective?.source.kind).toBe('project');
     expect(effective?.approvalStatus).toBe('pending_approval');
     expect(catalog.connectableServers.shared).toBeUndefined();
     expect(catalog.entries.find((entry) => entry.source.kind === 'user')?.shadowedBy).toBe(
-      'project_legacy',
+      'project',
     );
   });
 
   test('project declaration shadows user and remains gated', () => {
     writeFileSync(
-      join(home, '.kite-code', 'kite-code.jsonc'),
+      join(home, '.kite-code', 'mcp.json'),
       JSON.stringify({ mcpServers: { shared: { command: 'user-server' } } }),
     );
     writeFileSync(
-      join(workspace, '.mcp.json'),
+      join(workspace, '.kite-code', 'mcp.json'),
       JSON.stringify({ mcpServers: { shared: { command: 'project-server' } } }),
     );
 

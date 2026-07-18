@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PendingToolRequest } from '../src/core/harness/tool-requests';
 import { runApprovedTool } from '../src/core/harness/tool-runner';
-import type { McpManager } from '../src/core/mcp';
+import type { McpRuntimeProvider } from '../src/core/mcp';
 
 // ── Helpers ──
 
@@ -46,11 +46,109 @@ function makeSearchContentRequest(pattern: string): PendingToolRequest {
 
 function mockMcpManager(
   readResourceImpl: (server: string, uri: string) => Promise<string>,
-): McpManager {
+  resources: Array<{ providerId: string; uri: string; name: string; mimeType?: string }> = [],
+): McpRuntimeProvider {
   return {
+    getCapabilitySnapshot: () => ({ revision: 'empty', descriptors: [] }),
+    getProviderDirectorySnapshot: () => ({
+      revision: 'providers',
+      entries: [
+        {
+          providerId: 'test-server',
+          status: 'ready',
+          required: false,
+          source: 'explicit',
+          lastKnownCapabilityNames: [],
+          retryable: true,
+        },
+      ],
+    }),
+    getResourceDirectorySnapshot: () => ({ revision: 'resources', resources }),
+    findCapability: () => undefined,
+    callTool: async () => ({ content: [] }),
     readResource: readResourceImpl,
-  } as unknown as McpManager;
+  };
 }
+
+describe('runApprovedTool — list_mcp_resources', () => {
+  it('stable-sorts all providers and returns only safe resource metadata', async () => {
+    const manager = mockMcpManager(
+      async () => '',
+      [
+        {
+          providerId: 'zeta',
+          uri: 'docs://z',
+          name: 'Z',
+          mimeType: 'text/plain',
+        },
+        { providerId: 'alpha', uri: 'docs://a', name: 'A' },
+      ],
+    );
+    const request: PendingToolRequest = {
+      name: 'list_mcp_resources',
+      args: {},
+      reason: 'discover resources',
+      protectedCommand: 'list_mcp_resources',
+    };
+
+    const result = await runApprovedTool({ workspace: '/ws', request, mcpManager: manager });
+    const output = JSON.parse(result.stdout);
+
+    expect(result.ok).toBe(true);
+    expect(output.resources).toEqual([
+      { server: 'alpha', uri: 'docs://a', name: 'A' },
+      { server: 'zeta', uri: 'docs://z', name: 'Z', mime_type: 'text/plain' },
+    ]);
+    expect(JSON.stringify(output)).not.toContain('description');
+  });
+
+  it('filters by provider, caps output at 100, and reports truncation', async () => {
+    const resources = Array.from({ length: 101 }, (_, index) => ({
+      providerId: 'docs',
+      uri: `docs://${String(index).padStart(3, '0')}`,
+      name: `Resource ${index}`,
+    }));
+    const manager = mockMcpManager(async () => '', resources);
+    const request: PendingToolRequest = {
+      name: 'list_mcp_resources',
+      args: { server: 'docs' },
+      reason: 'discover resources',
+      protectedCommand: 'list_mcp_resources docs',
+    };
+
+    const result = await runApprovedTool({ workspace: '/ws', request, mcpManager: manager });
+    const output = JSON.parse(result.stdout);
+    expect(output.resource_count).toBe(100);
+    expect(output.truncated).toBe(true);
+  });
+
+  it('distinguishes unknown providers from providers with no static resources', async () => {
+    const manager = mockMcpManager(async () => '');
+    const known = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        name: 'list_mcp_resources',
+        args: { server: 'test-server' },
+        reason: 'discover',
+        protectedCommand: 'list_mcp_resources test-server',
+      },
+      mcpManager: manager,
+    });
+    const unknown = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        name: 'list_mcp_resources',
+        args: { server: 'missing' },
+        reason: 'discover',
+        protectedCommand: 'list_mcp_resources missing',
+      },
+      mcpManager: manager,
+    });
+
+    expect(known.stderr).toContain('No available static MCP resources');
+    expect(unknown.stderr).toContain('Unknown MCP server');
+  });
+});
 
 // ── read_mcp_resource ──
 
@@ -118,7 +216,22 @@ describe('runApprovedTool — read_mcp_resource', () => {
     expect(result.stderr).toContain('Connection refused');
   });
 
-  it('rejects an external MCP resource in auto mode without an auto-review grant', async () => {
+  it('bounds oversized resource content without silently truncating it', async () => {
+    const manager = mockMcpManager(async () => 'x'.repeat(128 * 1024 + 20));
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: makeReadMcpResourceRequest(),
+      mcpManager: manager,
+      approvedGrant: 'approve_once',
+    });
+    const output = JSON.parse(result.stdout);
+
+    expect(output.status).toBe('partial');
+    expect(output.truncated).toBe(true);
+    expect(output.original_characters).toBe(128 * 1024 + 20);
+  });
+
+  it('allows a governed MCP resource read in auto mode without approval', async () => {
     let readCalled = false;
     const manager = mockMcpManager(async () => {
       readCalled = true;
@@ -132,9 +245,8 @@ describe('runApprovedTool — read_mcp_resource', () => {
       interactionMode: 'auto',
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.stderr).toContain('requires approval');
-    expect(readCalled).toBe(false);
+    expect(result.ok).toBe(true);
+    expect(readCalled).toBe(true);
   });
 });
 
@@ -150,7 +262,7 @@ describe('runApprovedTool — bound MCP policy', () => {
         };
       },
       findCapability: () => undefined,
-    } as unknown as McpManager;
+    } as unknown as McpRuntimeProvider;
 
     const result = await runApprovedTool({
       workspace: '/ws',

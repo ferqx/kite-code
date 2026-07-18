@@ -15,6 +15,105 @@ import {
 import { createRuntimeStore } from '../../src/core/runtime/store';
 
 describe('AgentKernel durability', () => {
+  test('restores a non-empty session-loaded capability set after restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-loaded-capability-restart-'));
+    const storePath = join(dir, 'runtime.db');
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'loaded-capability-restart',
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      const loaded = {
+        capabilityId: 'mcp:github/publish',
+        capabilityRevision: 'revision-1',
+        firstLoadedAtTurnId: state.turn.turnId,
+      };
+      const store = createRuntimeStore(storePath);
+      const kernel = new AgentKernel({
+        store,
+        initialState: state,
+        interactionMode: 'accept_edits',
+      });
+      kernel.processEvent({
+        type: 'capability.bindings_issued',
+        catalogRevision: 'catalog-r1',
+        bindings: [
+          {
+            bindingId: 'binding-r1',
+            capabilityId: loaded.capabilityId,
+            capabilityRevision: loaded.capabilityRevision,
+            exposedToolName: 'mcp__github__publish',
+            schemaDigest: 'schema-r1',
+            issuedForTurnId: state.turn.turnId,
+          },
+        ],
+        disclosures: [
+          {
+            capabilityId: loaded.capabilityId,
+            capabilityRevision: loaded.capabilityRevision,
+            issuedForTurnId: state.turn.turnId,
+          },
+        ],
+        loadedCapabilities: [loaded],
+        searchId: 'search-r1',
+      });
+      expect(kernel.getState().capabilities.loadedCapabilities).toEqual({
+        [loaded.capabilityId]: loaded,
+      });
+      kernel.close();
+
+      const restored = createAgentKernel({
+        threadId: state.session.threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().capabilities.loadedCapabilities).toEqual({
+        [loaded.capabilityId]: loaded,
+      });
+      expect(restored.getState().capabilities.bindings['binding-r1']).toMatchObject({
+        capabilityId: loaded.capabilityId,
+        capabilityRevision: loaded.capabilityRevision,
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('migrates schema 12 snapshots with an empty session-loaded capability set', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-loaded-capability-migration-'));
+    const storePath = join(dir, 'runtime.db');
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'loaded-capability-migration',
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      const { loadedCapabilities: _loaded, ...legacyCapabilities } = state.capabilities;
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(state.session.threadId, {
+        ...state,
+        schemaVersion: 12,
+        capabilities: legacyCapabilities,
+      });
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId: state.session.threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+      expect(restored.getState().capabilities.loadedCapabilities).toEqual({});
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('migrates schema 11 snapshots with an empty required-provider admission state', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-admission-migration-'));
     const storePath = join(dir, 'runtime.db');

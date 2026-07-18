@@ -133,6 +133,52 @@ function safeMetadata(value: string, maximum = 96): string {
     .slice(0, maximum);
 }
 
+const MCP_INVENTORY_TERMS = new Set([
+  'available',
+  'catalog',
+  'configured',
+  'list',
+  'mcp',
+  'server',
+  'servers',
+  'tool',
+  'tools',
+]);
+
+export function isMcpInventoryQuery(query: string): boolean {
+  const queryTerms = terms(query.trim().slice(0, 512));
+  const normalized = query.toLocaleLowerCase();
+  if (!queryTerms.includes('mcp')) return false;
+  if (
+    !queryTerms.some((term) =>
+      ['available', 'catalog', 'configured', 'list', 'server', 'servers', 'tool', 'tools'].includes(
+        term,
+      ),
+    )
+  ) {
+    return false;
+  }
+  return (
+    queryTerms.every((term) => MCP_INVENTORY_TERMS.has(term)) ||
+    /(?:what|which)\s+(?:mcp\s+)?tools?/u.test(normalized)
+  );
+}
+
+/** Stable names-only context; remote prose and executable identities stay hidden. */
+export function capabilityNameSummary(descriptors: CapabilityDescriptor[]) {
+  return descriptors
+    .filter((descriptor) => descriptor.kind === 'mcp_tool')
+    .map((descriptor) => ({
+      provider: safeMetadata(descriptor.provider.id),
+      tool: safeMetadata(descriptor.displayName),
+    }))
+    .filter(({ provider, tool }) => provider.length > 0 && tool.length > 0)
+    .sort(
+      (left, right) =>
+        left.provider.localeCompare(right.provider) || left.tool.localeCompare(right.tool),
+    );
+}
+
 export function searchCapabilities(input: {
   snapshot: CapabilitySnapshot;
   query: string;
@@ -142,12 +188,14 @@ export function searchCapabilities(input: {
   const queryTerms = terms(query);
   const phrase = query.toLocaleLowerCase();
   const limit = Math.max(1, Math.min(12, Math.floor(input.limit ?? 8)));
+  const inventoryQuery = isMcpInventoryQuery(query);
 
   return input.snapshot.descriptors
     .filter(
       (descriptor): descriptor is CapabilityDescriptor & { kind: 'mcp_tool' | 'skill' } =>
         (descriptor.kind === 'mcp_tool' || descriptor.kind === 'skill') &&
-        descriptor.availability === 'available',
+        descriptor.availability === 'available' &&
+        (!inventoryQuery || descriptor.kind === 'mcp_tool'),
     )
     .map((descriptor) => {
       const searchable = [
@@ -160,10 +208,11 @@ export function searchCapabilities(input: {
         .join(' ')
         .toLocaleLowerCase();
       const matchedTerms = queryTerms.filter((term) => searchable.includes(term));
-      const score =
-        (phrase.length > 1 && searchable.includes(phrase) ? 100 : 0) +
-        matchedTerms.length * 10 +
-        (queryTerms.length > 0 && matchedTerms.length === queryTerms.length ? 25 : 0);
+      const score = inventoryQuery
+        ? 1
+        : (phrase.length > 1 && searchable.includes(phrase) ? 100 : 0) +
+          matchedTerms.length * 10 +
+          (queryTerms.length > 0 && matchedTerms.length === queryTerms.length ? 25 : 0);
       return { descriptor, score };
     })
     .filter(({ score }) => score > 0)
@@ -253,6 +302,46 @@ export function publicProviderSearchMetadata(
     next_action: provider.nextAction,
     ...(provider.diagnosticCode ? { diagnostic_code: provider.diagnosticCode } : {}),
   }));
+}
+
+/**
+ * Names-only fallback for an inventory request that crossed a catalog revision boundary.
+ * These entries are informational and never become search candidates or bindings.
+ */
+export function lastKnownMcpToolMetadata(input: {
+  directory?: McpProviderDirectorySnapshot;
+  limit?: number;
+}): Array<{
+  kind: 'mcp_tool';
+  name: string;
+  provider_type: 'mcp';
+  provider: string;
+  catalog_status: 'last_known';
+}> {
+  const limit = Math.max(1, Math.min(12, Math.floor(input.limit ?? 8)));
+  return (input.directory?.entries ?? [])
+    .flatMap((entry) =>
+      entry.lastKnownCapabilityNames.map((name) => ({
+        kind: 'mcp_tool' as const,
+        name: safeMetadata(name),
+        provider_type: 'mcp' as const,
+        provider: safeMetadata(entry.providerId),
+        catalog_status: 'last_known' as const,
+      })),
+    )
+    .filter(
+      (entry, index, all) =>
+        entry.name.length > 0 &&
+        entry.provider.length > 0 &&
+        all.findIndex(
+          (candidate) => candidate.provider === entry.provider && candidate.name === entry.name,
+        ) === index,
+    )
+    .sort(
+      (left, right) =>
+        left.provider.localeCompare(right.provider) || left.name.localeCompare(right.name),
+    )
+    .slice(0, limit);
 }
 
 export function hasUnavailableMcpProviders(

@@ -1,6 +1,6 @@
 # ADR-0011: MCP 配置使用三层可写作用域与显式 legacy 迁移
 
-**Status**: accepted
+**Status**: superseded by ADR-0019
 **Date**: 2026-07-15
 **Decision makers**: @chenchao
 

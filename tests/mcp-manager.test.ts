@@ -5,7 +5,16 @@ import {
   UnauthorizedError,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { type McpCredentialKey, McpManager, MemoryMcpCredentialStore } from '@/core/mcp';
+import {
+  ResourceListChangedNotificationSchema,
+  ToolListChangedNotificationSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import {
+  type McpCredentialKey,
+  McpManager,
+  type McpResource,
+  MemoryMcpCredentialStore,
+} from '@/core/mcp';
 import { normalizeMcpToolResult } from '@/core/mcp/result-normalizer';
 import { startTestHttpServer } from './helpers/test-http-server';
 
@@ -50,6 +59,174 @@ describe('McpManager governance fixture', () => {
     expect(result.status).toBe('success');
     expect(result.structuredContent).toEqual({ id: '42', value: 'ok' });
     expect(result.content).toHaveLength(2);
+  });
+
+  test('retains the last successful capability catalog during a failed reconnect', async () => {
+    await manager.connect('stable', {
+      type: 'stdio',
+      command: process.execPath,
+      args: [resolve(import.meta.dir, 'fixtures/mcp-governance-server.ts')],
+    });
+    const before = manager.findCapability('mcp:stable/read_fixture');
+    expect(before).toBeDefined();
+
+    await expect(
+      manager.reconnect('stable', { type: 'http', url: 'not a valid url' }, 2),
+    ).rejects.toThrow();
+    expect(manager.findCapability('mcp:stable/read_fixture')?.revision).toBe(before?.revision);
+    expect(manager.getProviderDirectorySnapshot().entries[0]?.status).toBe('failed');
+
+    await manager.disconnect('stable');
+    expect(manager.findCapability('mcp:stable/read_fixture')).toBeUndefined();
+  });
+
+  test('replaces the retained catalog when a successful rediscovery is empty', async () => {
+    let clientIndex = 0;
+    const clients = [
+      {
+        connect: async () => {},
+        close: async () => {},
+        listTools: async () => ({
+          tools: [{ name: 'old_tool', inputSchema: { type: 'object' } }],
+        }),
+        listPrompts: async () => ({ prompts: [] }),
+        listResources: async () => ({ resources: [] }),
+        setNotificationHandler: () => {},
+      },
+      {
+        connect: async () => {},
+        close: async () => {},
+        listTools: async () => ({ tools: [] }),
+        listPrompts: async () => ({ prompts: [] }),
+        listResources: async () => ({ resources: [] }),
+        setNotificationHandler: () => {},
+      },
+    ] as unknown as Client[];
+    const emptyRefreshManager = new McpManager({
+      createClient: () => clients[clientIndex++]!,
+      createTransport: () => ({}) as never,
+    });
+    try {
+      await emptyRefreshManager.connect('refresh', { type: 'stdio', command: 'fixture' }, 1);
+      expect(emptyRefreshManager.findCapability('mcp:refresh/old_tool')).toBeDefined();
+
+      await emptyRefreshManager.reconnect('refresh', { type: 'stdio', command: 'fixture' }, 2);
+      expect(emptyRefreshManager.findCapability('mcp:refresh/old_tool')).toBeUndefined();
+      expect(emptyRefreshManager.getCapabilitySnapshot().descriptors).toEqual([]);
+    } finally {
+      await emptyRefreshManager.disconnectAll();
+    }
+  });
+
+  test('refreshes tools from the registered list_changed handler and retains the catalog on failure', async () => {
+    let toolHandler: (() => Promise<void>) | undefined;
+    let tools = [{ name: 'old_tool', inputSchema: { type: 'object' } }];
+    let refreshError: Error | undefined;
+    const client = {
+      connect: async () => {},
+      close: async () => {},
+      listTools: async () => {
+        if (refreshError) throw refreshError;
+        return { tools };
+      },
+      listPrompts: async () => ({ prompts: [] }),
+      listResources: async () => ({ resources: [] }),
+      setNotificationHandler: (schema: unknown, handler: () => Promise<void>) => {
+        if (schema === ToolListChangedNotificationSchema) toolHandler = handler;
+      },
+    } as unknown as Client;
+    const notificationManager = new McpManager({
+      createClient: () => client,
+      createTransport: () => ({}) as never,
+    });
+    try {
+      await notificationManager.connect('notifications', { type: 'stdio', command: 'fixture' }, 1);
+      expect(toolHandler).toBeDefined();
+      expect(notificationManager.findCapability('mcp:notifications/old_tool')).toBeDefined();
+
+      tools = [{ name: 'new_tool', inputSchema: { type: 'object' } }];
+      await toolHandler?.();
+      expect(notificationManager.findCapability('mcp:notifications/old_tool')).toBeUndefined();
+      const retained = notificationManager.findCapability('mcp:notifications/new_tool');
+      expect(retained).toBeDefined();
+
+      refreshError = new Error('list refresh failed');
+      await toolHandler?.();
+      expect(notificationManager.findCapability('mcp:notifications/new_tool')?.revision).toBe(
+        retained?.revision,
+      );
+      expect(notificationManager.getServerStates().get('notifications')).toMatchObject({
+        health: 'degraded',
+        diagnostic: { code: 'discovery_failed' },
+      });
+    } finally {
+      await notificationManager.disconnectAll();
+    }
+  });
+
+  test('publishes static resources, validates reads, and retains the last list on refresh failure', async () => {
+    let resourceHandler: (() => Promise<void>) | undefined;
+    let resources: McpResource[] = [
+      { uri: 'docs://b', name: 'B', description: 'untrusted prose' },
+      { uri: 'docs://a', name: 'A', mimeType: 'text/markdown' },
+    ];
+    let refreshError: Error | undefined;
+    const client = {
+      connect: async () => {},
+      close: async () => {},
+      listTools: async () => ({ tools: [] }),
+      listPrompts: async () => ({ prompts: [] }),
+      listResources: async () => {
+        if (refreshError) throw refreshError;
+        return { resources };
+      },
+      readResource: async ({ uri }: { uri: string }) => ({
+        contents: [{ uri, text: `content:${uri}` }],
+      }),
+      setNotificationHandler: (schema: unknown, handler: () => Promise<void>) => {
+        if (schema === ResourceListChangedNotificationSchema) resourceHandler = handler;
+      },
+    } as unknown as Client;
+    const resourceManager = new McpManager({
+      createClient: () => client,
+      createTransport: () => ({}) as never,
+    });
+    try {
+      await resourceManager.connect('docs', { type: 'stdio', command: 'fixture' }, 1);
+      expect(resourceManager.getResourceDirectorySnapshot().resources).toEqual([
+        {
+          providerId: 'docs',
+          uri: 'docs://a',
+          name: 'A',
+          mimeType: 'text/markdown',
+        },
+        { providerId: 'docs', uri: 'docs://b', name: 'B' },
+      ]);
+      expect(
+        JSON.stringify(resourceManager.getResourceDirectorySnapshot().resources),
+      ).not.toContain('untrusted prose');
+      await expect(resourceManager.readResource('docs', 'docs://a')).resolves.toBe(
+        'content:docs://a',
+      );
+      await expect(resourceManager.readResource('docs', 'docs://missing')).rejects.toThrow(
+        'not present in the current discovery snapshot',
+      );
+
+      resources = [{ uri: 'docs://new', name: 'New' }];
+      await resourceHandler?.();
+      expect(resourceManager.getResourceDirectorySnapshot().resources).toEqual([
+        { providerId: 'docs', uri: 'docs://new', name: 'New' },
+      ]);
+
+      refreshError = new Error('resource refresh failed');
+      await resourceHandler?.();
+      expect(resourceManager.getResourceDirectorySnapshot().resources).toEqual([
+        { providerId: 'docs', uri: 'docs://new', name: 'New' },
+      ]);
+      expect(resourceManager.getServerStates().get('docs')?.health).toBe('degraded');
+    } finally {
+      await resourceManager.disconnectAll();
+    }
   });
 
   test('opens a health circuit after repeated provider failures and fails closed', async () => {

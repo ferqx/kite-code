@@ -6,12 +6,12 @@ import {
 } from '../src/app/tui/hooks/useSlashSuggestions';
 
 describe('slash command suggestions', () => {
-  test('suggests /mcp with its read-only status hint', () => {
+  test('suggests /mcp with its management hint', () => {
     expect(findSlashCommandDefs('mc')).toEqual([
       {
         name: 'mcp',
         aliases: [],
-        description: 'View MCP connection status',
+        description: 'Manage MCP servers',
       },
     ]);
   });

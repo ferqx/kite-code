@@ -57,5 +57,25 @@ describe('failure classification', () => {
     const failure = classifyFailure('tool_runtime_error', 'disk unavailable');
     const state = reduceRuntimeState(queued, { type: 'tool.failed', toolCallId: 'call', failure });
     expect(state.tools.calls.call?.failure).toEqual(failure);
+    expect(state.transcript.messages.at(-1)).toMatchObject({
+      kind: 'tool',
+      toolCallId: 'call',
+      name: 'read_file',
+      ok: false,
+    });
+    expect(JSON.parse(String(state.transcript.messages.at(-1)?.content))).toMatchObject({
+      ok: false,
+      error: {
+        kind: 'tool_runtime_error',
+        message: 'disk unavailable',
+        retryable: true,
+      },
+    });
+    const replayed = reduceRuntimeState(state, {
+      type: 'tool.failed',
+      toolCallId: 'call',
+      failure,
+    });
+    expect(replayed.transcript.messages).toHaveLength(state.transcript.messages.length);
   });
 });

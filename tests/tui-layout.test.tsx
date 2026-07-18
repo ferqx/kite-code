@@ -1772,6 +1772,236 @@ describe('Block spacing', () => {
 });
 
 describe('OutputArea', () => {
+  test('renders capability search as a matched Provider · Tool tree', () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'tool.queued',
+        toolCallId: 'search-1',
+        name: 'capability_search',
+        args: { query: 'LangGraph documentation' },
+      },
+      { type: 'tool.started', toolCallId: 'search-1' },
+      {
+        type: 'tool.finished',
+        toolCallId: 'search-1',
+        name: 'capability_search',
+        result: {
+          ok: true,
+          command: 'capability_search',
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            candidate_count: 2,
+            candidates: [
+              {
+                kind: 'mcp_tool',
+                name: 'search_docs_by_lang_chain',
+                provider: 'langchian',
+              },
+              { kind: 'mcp_tool', name: 'search_reference', provider: 'docs' },
+            ],
+          }),
+          stderr: '',
+        },
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={state.turns} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('● Searched for tools');
+    expect(frame).toContain('├ langchian · search_docs_by_lang_chain');
+    expect(frame).toContain('└ docs · search_reference');
+    expect(frame).not.toContain('candidate_count');
+  });
+
+  test('renders a stable empty capability search result', () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'tool.queued',
+        toolCallId: 'search-empty',
+        name: 'capability_search',
+        args: { query: 'missing capability' },
+      },
+      {
+        type: 'tool.finished',
+        toolCallId: 'search-empty',
+        name: 'capability_search',
+        result: {
+          ok: true,
+          command: 'capability_search',
+          exitCode: 0,
+          stdout: JSON.stringify({ ok: true, candidate_count: 0, candidates: [] }),
+          stderr: '',
+        },
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={state.turns} onToggleReason={noop} />,
+    );
+
+    expect(lastFrame()).toContain('● No matching tools found');
+  });
+
+  test('renders last-known MCP inventory names during a catalog revision transition', () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'tool.queued',
+        toolCallId: 'search-transition',
+        name: 'capability_search',
+        args: { query: 'available MCP tools' },
+      },
+      {
+        type: 'tool.finished',
+        toolCallId: 'search-transition',
+        name: 'capability_search',
+        result: {
+          ok: true,
+          command: 'capability_search',
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            candidate_count: 1,
+            executable_candidate_count: 0,
+            candidates: [
+              {
+                kind: 'mcp_tool',
+                name: 'search_docs_by_lang_chain',
+                provider: 'langchian',
+                catalog_status: 'last_known',
+              },
+            ],
+          }),
+          stderr: '',
+        },
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={state.turns} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('● Searched for tools');
+    expect(frame).toContain('└ langchian · search_docs_by_lang_chain');
+    expect(frame).not.toContain('No matching tools found');
+    expect(frame).not.toContain('catalog_status');
+  });
+
+  test('renders a failed capability search without exposing raw protocol output', () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'tool.queued',
+        toolCallId: 'search-failed',
+        name: 'capability_search',
+        args: { query: 'documentation' },
+      },
+      {
+        type: 'tool.failed',
+        toolCallId: 'search-failed',
+        failure: {
+          kind: 'tool_invalid_args',
+          message: 'Capability search is temporarily unavailable.',
+          retryable: true,
+          modelFixable: false,
+          needsUserIntervention: false,
+          terminatesTurn: false,
+          journal: false,
+        },
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={state.turns} onToggleReason={noop} />,
+    );
+
+    expect(lastFrame()).toContain('● Tool search failed');
+  });
+
+  test('renders MCP executable names as Provider · Tool', () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'tool.queued',
+        toolCallId: 'mcp-1',
+        name: 'mcp__langchian__search_docs_by_lang_chain',
+        args: { query: 'LangGraph' },
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={true} turns={state.turns} onToggleReason={noop} />,
+    );
+
+    expect(lastFrame()).toContain('langchian · search_docs_by_lang_chain');
+    expect(lastFrame()).not.toContain('mcp__langchian__');
+  });
+
+  test('renders MCP resource discovery as a Provider · URI tree', () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'tool.queued',
+        toolCallId: 'resources-1',
+        name: 'list_mcp_resources',
+        args: {},
+      },
+      {
+        type: 'tool.finished',
+        toolCallId: 'resources-1',
+        name: 'list_mcp_resources',
+        result: {
+          ok: true,
+          command: 'list_mcp_resources',
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            resource_count: 2,
+            resources: [
+              { server: 'langchian', uri: 'docs://langgraph/overview', name: 'Overview' },
+              {
+                server: 'langchian',
+                uri: 'docs://langgraph/persistence',
+                name: 'Persistence',
+              },
+            ],
+            truncated: false,
+          }),
+          stderr: '',
+        },
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={state.turns} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('● Listed MCP resources');
+    expect(frame).toContain('├ langchian · docs://langgraph/overview');
+    expect(frame).toContain('└ langchian · docs://langgraph/persistence');
+    expect(frame).not.toContain('resource_count');
+  });
+
   test('renders the message list produced exclusively from RuntimeEvents', () => {
     const events: RuntimeEvent[] = [
       { type: 'user.message_appended', messageId: 'u-1', content: 'Inspect the runtime bridge' },

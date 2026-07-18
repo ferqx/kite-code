@@ -99,6 +99,30 @@ describe('recordEvent — 全量映射', () => {
     expect(r.status.code).toBe('OK');
   });
 
+  test('tool_done 会脱敏配置和认证材料', () => {
+    const secret = `sk-${'a'.repeat(32)}`;
+    const r = recordEvent(
+      {
+        type: 'tool_done',
+        data: {
+          call_id: 'c-secret',
+          name: 'shell_execute',
+          ok: true,
+          summary: JSON.stringify({
+            apiKey: secret,
+            Authorization: `Bearer ${secret}`,
+            nested: { access_token: secret },
+          }),
+        },
+      },
+      TRACE,
+      PARENT,
+    );
+    const summary = String(r.attributes['kite_code.tool.summary']);
+    expect(summary).not.toContain(secret);
+    expect(summary).toContain('[REDACTED]');
+  });
+
   test('tool_done (失败) — 含 failure_reason + error event', () => {
     const r = recordEvent(
       {

@@ -1,9 +1,11 @@
 # ADR-0012：TUI `/mcp` 收敛为只读连接状态列表
 
-状态：accepted
+状态：superseded by ADR-0018
 日期：2026-07-16
 决策者：@chenchao
 替代：ADR-0011 中关于 TUI mutation、显式 legacy 迁移入口和 `/mcp reload` 的 UI 结论
+
+> ADR-0018 于 2026-07-18 接受 Select 驱动的 MCP 管理中心。本文继续记录当前只读实现的历史决策；在 ADR-0018 尚未完成实施时，实际行为仍以源码、测试和 `docs/active/` 为准。
 
 ## 背景
 

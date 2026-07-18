@@ -56,6 +56,8 @@ export type {
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
   McpProviderDirectoryStatus,
+  McpResourceDirectoryEntry,
+  McpResourceDirectorySnapshot,
   McpRuntimeProvider,
 } from './runtime-provider';
 export {
@@ -64,7 +66,7 @@ export {
   type McpSupervisor,
   type McpSupervisorOptions,
 } from './supervisor';
-export { parseMcpToolName } from './tool-adapter';
+export { exposedMcpToolName, parseMcpToolName } from './tool-adapter';
 export {
   configuredMcpToolNames,
   hasConfiguredMcpToolPolicy,

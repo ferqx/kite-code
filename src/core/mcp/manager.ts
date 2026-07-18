@@ -29,6 +29,7 @@ import {
 import type {
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
+  McpResourceDirectorySnapshot,
   McpRuntimeProvider,
 } from './runtime-provider';
 import { isMcpToolEnabled, resolveMcpToolPolicy } from './tool-policy';
@@ -69,6 +70,8 @@ export class McpManager implements McpRuntimeProvider {
   private servers = new Map<string, McpServerState>();
   private promptRegistry = new Map<string, PromptEntry>();
   private snapshot: CapabilitySnapshot = createSnapshot([]);
+  private retainedDescriptors = new Map<string, readonly CapabilityDescriptor[]>();
+  private retainedResources = new Map<string, readonly McpResource[]>();
   private listeners = new Set<() => void>();
   private oauthProviders = new Map<string, OAuthClientProvider>();
   private oauthTransports = new Map<
@@ -102,7 +105,12 @@ export class McpManager implements McpRuntimeProvider {
   }
 
   /** Connect a single MCP server */
-  async connect(name: string, config: McpServerConfig, generation = 0): Promise<void> {
+  async connect(
+    name: string,
+    config: McpServerConfig,
+    generation = 0,
+    timeoutMs = MCP_STARTUP_TIMEOUT,
+  ): Promise<void> {
     const client = this.createClient();
     const initialState: McpServerState = {
       config,
@@ -137,7 +145,9 @@ export class McpManager implements McpRuntimeProvider {
     }
 
     try {
-      await client.connect(transport, { timeout: MCP_STARTUP_TIMEOUT });
+      await client.connect(transport, {
+        timeout: Math.max(1, Math.min(MCP_STARTUP_TIMEOUT, timeoutMs)),
+      });
     } catch (err) {
       if (this.isCurrent(name, client, generation)) {
         initialState.health = 'disconnected';
@@ -271,9 +281,13 @@ export class McpManager implements McpRuntimeProvider {
           try {
             const result = await client.listResources();
             state.resources = (result.resources ?? []) as McpResource[];
+            if (state.health !== 'circuit_open') state.health = 'ready';
+            state.diagnostic = undefined;
             this.publish();
-          } catch {
-            /* ignore */
+          } catch (err) {
+            if (state.health !== 'circuit_open') state.health = 'degraded';
+            state.diagnostic = diagnoseMcpError(err, { phase: 'discovery' });
+            this.publish();
           }
         }
       });
@@ -294,9 +308,14 @@ export class McpManager implements McpRuntimeProvider {
   }
 
   /** Close the previous generation before starting one replacement connection. */
-  async reconnect(name: string, config: McpServerConfig, generation: number): Promise<void> {
-    await this.disconnect(name);
-    await this.connect(name, config, generation);
+  async reconnect(
+    name: string,
+    config: McpServerConfig,
+    generation: number,
+    timeoutMs?: number,
+  ): Promise<void> {
+    await this.disconnect(name, { retainCapabilities: true });
+    await this.connect(name, config, generation, timeoutMs);
   }
 
   /** Begin an explicit user-authorized OAuth attempt without opening a browser in Core. */
@@ -307,7 +326,7 @@ export class McpManager implements McpRuntimeProvider {
     provider: OAuthClientProvider,
   ): Promise<'authorization_required' | 'connected'> {
     if (config.type !== 'http') throw new Error('OAuth is supported only for HTTP MCP servers.');
-    await this.disconnect(name);
+    await this.disconnect(name, { retainCapabilities: true });
     this.oauthProviders.set(name, provider);
     try {
       await this.connect(name, config, generation);
@@ -335,16 +354,18 @@ export class McpManager implements McpRuntimeProvider {
   async clearOAuth(name: string): Promise<void> {
     this.oauthProviders.delete(name);
     this.oauthTransports.delete(name);
-    await this.disconnect(name);
+    await this.disconnect(name, { retainCapabilities: true });
   }
 
   /** Invalidate future bindings before best-effort transport shutdown. */
-  async disconnect(name: string): Promise<void> {
+  async disconnect(name: string, options: { retainCapabilities?: boolean } = {}): Promise<void> {
     const state = this.servers.get(name);
     if (!state) return;
     this.servers.delete(name);
     this.oauthTransports.delete(name);
     this.removePromptsFor(name);
+    if (!options.retainCapabilities) this.retainedDescriptors.delete(name);
+    if (!options.retainCapabilities) this.retainedResources.delete(name);
     this.publish();
     await closeClient(state.client as Client);
   }
@@ -418,6 +439,7 @@ export class McpManager implements McpRuntimeProvider {
     server: string,
     toolName: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<CallToolResult> {
     const state = this.servers.get(server);
     if (!state) {
@@ -444,6 +466,7 @@ export class McpManager implements McpRuntimeProvider {
         try {
           result = (await client.callTool({ name: toolName, arguments: args }, undefined, {
             timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
+            signal,
           })) as CallToolResult;
           break;
         } catch (error) {
@@ -470,8 +493,30 @@ export class McpManager implements McpRuntimeProvider {
     return this.servers.get(serverName)?.resources ?? [];
   }
 
+  getResourceDirectorySnapshot(): McpResourceDirectorySnapshot {
+    const resources = [...this.retainedResources]
+      .flatMap(([providerId, entries]) =>
+        entries.map((resource) => ({
+          providerId,
+          uri: resource.uri,
+          name: resource.name || resource.uri,
+          ...(resource.mimeType ? { mimeType: resource.mimeType } : {}),
+        })),
+      )
+      .sort(
+        (left, right) =>
+          left.providerId.localeCompare(right.providerId) ||
+          left.uri.localeCompare(right.uri) ||
+          left.name.localeCompare(right.name),
+      );
+    return Object.freeze({
+      revision: digestCapability(resources),
+      resources: Object.freeze(resources.map((resource) => Object.freeze(resource))),
+    });
+  }
+
   /** 从指定 server 读取资源内容 / Read resource content from a server */
-  async readResource(serverName: string, uri: string): Promise<string> {
+  async readResource(serverName: string, uri: string, signal?: AbortSignal): Promise<string> {
     if (!serverName || !uri) {
       throw new Error('server and uri are required');
     }
@@ -482,11 +527,14 @@ export class McpManager implements McpRuntimeProvider {
     if (!isUsableForDiscovery(state)) {
       throw providerErrorFromDiagnostic(serverName, state.diagnostic);
     }
+    if (!state.resources.some((resource) => resource.uri === uri)) {
+      throw new Error(`MCP resource URI is not present in the current discovery snapshot: ${uri}`);
+    }
     const client = state.client as Client;
     try {
       const result = await client.readResource(
         { uri },
-        { timeout: state.config.timeout ?? MCP_RESOURCE_TIMEOUT },
+        { timeout: state.config.timeout ?? MCP_RESOURCE_TIMEOUT, signal },
       );
       // Extract text from resource contents
       if (result.contents && result.contents.length > 0) {
@@ -530,27 +578,42 @@ export class McpManager implements McpRuntimeProvider {
     this.promptRegistry.clear();
     this.oauthProviders.clear();
     this.oauthTransports.clear();
+    this.retainedDescriptors.clear();
+    this.retainedResources.clear();
     this.publish();
     await Promise.allSettled(clients.map(closeClient));
   }
 
   private publish(): void {
     const descriptors: CapabilityDescriptor[] = [];
+    const projectedProviders = new Set<string>();
     for (const [serverName, state] of this.servers) {
-      if (!isUsableForDiscovery(state)) continue;
-      for (const tool of state.tools) {
-        if (!isMcpToolEnabled(state.config, tool.name)) continue;
-        const descriptor = createMcpToolDescriptor(serverName, state.config, tool);
-        if (descriptor.availability === 'available') descriptors.push(descriptor);
+      projectedProviders.add(serverName);
+      if (isUsableForDiscovery(state)) {
+        const current: CapabilityDescriptor[] = [];
+        for (const tool of state.tools) {
+          if (!isMcpToolEnabled(state.config, tool.name)) continue;
+          const descriptor = createMcpToolDescriptor(serverName, state.config, tool);
+          if (descriptor.availability === 'available') current.push(descriptor);
+        }
+        for (const resource of state.resources) {
+          current.push(createPassiveDescriptor('mcp_resource', serverName, state.config, resource));
+        }
+        for (const prompt of state.prompts) {
+          current.push(createPassiveDescriptor('mcp_prompt', serverName, state.config, prompt));
+        }
+        if (state.health === 'ready' || current.length > 0) {
+          this.retainedDescriptors.set(serverName, Object.freeze(current));
+          this.retainedResources.set(
+            serverName,
+            Object.freeze(state.resources.map((resource) => Object.freeze({ ...resource }))),
+          );
+        }
       }
-      for (const resource of state.resources) {
-        descriptors.push(
-          createPassiveDescriptor('mcp_resource', serverName, state.config, resource),
-        );
-      }
-      for (const prompt of state.prompts) {
-        descriptors.push(createPassiveDescriptor('mcp_prompt', serverName, state.config, prompt));
-      }
+      descriptors.push(...(this.retainedDescriptors.get(serverName) ?? []));
+    }
+    for (const [serverName, retained] of this.retainedDescriptors) {
+      if (!projectedProviders.has(serverName)) descriptors.push(...retained);
     }
     this.snapshot = createSnapshot(descriptors);
     for (const listener of this.listeners) {

@@ -283,12 +283,18 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const disclosures = Object.fromEntries(
         (event.disclosures ?? []).map((disclosure) => [disclosure.capabilityId, disclosure]),
       );
+      const loadedCapabilities = Object.fromEntries(
+        (
+          event.loadedCapabilities ?? Object.values(state.capabilities.loadedCapabilities ?? {})
+        ).map((loaded) => [loaded.capabilityId, loaded]),
+      );
       return {
         ...state,
         capabilities: {
           catalogRevision: event.catalogRevision,
           bindings,
           disclosures,
+          loadedCapabilities,
           ...(event.searchId === state.capabilities.pendingSearch?.searchId
             ? {}
             : state.capabilities.pendingSearch
@@ -677,6 +683,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.failed': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      if (existingCall.status === 'failed') return state;
+      const failure =
+        event.failure ??
+        classifyFailure('tool_runtime_error', event.error ?? 'Tool failed unexpectedly.');
       return {
         ...state,
         tools: {
@@ -686,12 +696,36 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             [event.toolCallId]: {
               ...existingCall,
               status: 'failed' as const,
-              error: event.failure?.message ?? event.error ?? 'Tool failed.',
-              ...(event.failure ? { failure: event.failure } : {}),
+              error: failure.message,
+              failure,
             },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
+        },
+        transcript: {
+          ...state.transcript,
+          messages: [
+            ...state.transcript.messages,
+            {
+              kind: 'tool',
+              toolCallId: event.toolCallId,
+              name: existingCall.name,
+              content: JSON.stringify({
+                ok: false,
+                error: {
+                  kind: failure.kind,
+                  message: failure.message,
+                  retryable: failure.retryable,
+                  model_fixable: failure.modelFixable,
+                },
+                next_step: failure.modelFixable
+                  ? 'Explain the failure, adjust the request or choose another available capability, and continue the conversation.'
+                  : 'Explain the failure to the user and continue without assuming the tool succeeded.',
+              }),
+              ok: false,
+            },
+          ],
         },
         suspendedSubagents: clearSuspendedSubagent(
           state,
@@ -704,6 +738,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.rejected': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (existingCall) {
+        if (existingCall.status === 'rejected') return state;
+        const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
         return {
           ...state,
           tools: {
@@ -714,11 +750,35 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                 ...existingCall,
                 status: 'rejected' as const,
                 error: event.reason,
-                ...(event.failure ? { failure: event.failure } : {}),
+                failure,
               },
             },
             queue: state.tools.queue.filter((id) => id !== event.toolCallId),
             active: state.tools.active.filter((id) => id !== event.toolCallId),
+          },
+          transcript: {
+            ...state.transcript,
+            messages: [
+              ...state.transcript.messages,
+              {
+                kind: 'tool',
+                toolCallId: event.toolCallId,
+                name: existingCall.name,
+                content: JSON.stringify({
+                  ok: false,
+                  rejected: true,
+                  error: {
+                    kind: failure.kind,
+                    message: event.reason,
+                    retryable: failure.retryable,
+                    model_fixable: failure.modelFixable,
+                  },
+                  next_step:
+                    'Respect the rejection, explain it when relevant, and continue without assuming the tool ran.',
+                }),
+                ok: false,
+              },
+            ],
           },
           suspendedSubagents: clearSuspendedSubagent(
             state,

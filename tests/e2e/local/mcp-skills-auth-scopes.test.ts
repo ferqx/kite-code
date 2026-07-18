@@ -5,9 +5,9 @@ import { join, resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
-import { startTestHttpServer } from '../helpers/test-http-server';
+import { startTestHttpServer } from '../../helpers/test-http-server';
 
-const fixture = (name: string) => resolve(import.meta.dir, '..', 'fixtures', name);
+const fixture = (name: string) => resolve(import.meta.dir, '..', '..', 'fixtures', name);
 const envReference = (name: string) => `\${${name}}`;
 
 interface FixtureResult {

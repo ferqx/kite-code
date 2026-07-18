@@ -55,6 +55,7 @@ export function createTestWorkspace(opts?: {
   // Minimal config pointing to a fake DeepSeek provider.
   // In PTY tests, the model will be overridden by the mock model server
   // or env-var-injected mock model.
+  const { mcpServers: userMcpServers, ...configOverrides } = opts?.configOverrides ?? {};
   const config = {
     provider: {
       deepseek: {
@@ -66,9 +67,16 @@ export function createTestWorkspace(opts?: {
     model: {
       default: { provider: 'deepseek' as const, name: 'deepseek-v4-flash' },
     },
-    ...(opts?.configOverrides ?? {}),
+    ...configOverrides,
   };
   writeFileSync(join(kiteCodeDir, 'kite-code.jsonc'), JSON.stringify(config, null, 2));
+  if (userMcpServers && typeof userMcpServers === 'object') {
+    writeFileSync(
+      join(kiteCodeDir, 'mcp.json'),
+      `${JSON.stringify({ mcpServers: userMcpServers }, null, 2)}\n`,
+      'utf-8',
+    );
+  }
 
   const checkpointDir = join(tempHome, 'checkpoints');
   mkdirSync(checkpointDir, { recursive: true });
@@ -84,8 +92,10 @@ export function createTestWorkspace(opts?: {
     }
   }
   if (opts?.projectMcpServers) {
+    const projectKiteCodeDir = join(ws, '.kite-code');
+    mkdirSync(projectKiteCodeDir, { recursive: true });
     writeFileSync(
-      join(ws, '.mcp.json'),
+      join(projectKiteCodeDir, 'mcp.json'),
       `${JSON.stringify({ mcpServers: opts.projectMcpServers }, null, 2)}\n`,
       'utf-8',
     );

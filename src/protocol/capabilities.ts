@@ -54,6 +54,13 @@ export interface CapabilityBinding {
   issuedForTurnId: string;
 }
 
+/** A capability schema selected for stable reuse in one Runtime session. */
+export interface LoadedCapability {
+  capabilityId: string;
+  capabilityRevision: string;
+  firstLoadedAtTurnId: string;
+}
+
 /** Turn-scoped visibility grant. It is discovery state, never execution authorization. */
 export interface CapabilityDisclosure {
   capabilityId: string;

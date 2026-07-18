@@ -627,7 +627,7 @@ describe('evaluateToolApproval', () => {
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(false);
       expect(result.risk).toBe('read');
-      expect(result.effects).toEqual({ uncertainEffects: true });
+      expect(result.effects).toBeUndefined();
     });
   });
 

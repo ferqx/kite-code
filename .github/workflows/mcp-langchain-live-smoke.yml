@@ -21,4 +21,4 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
-      - run: bun test tests/mcp-langchain-live-smoke.test.ts
+      - run: bun run test:mcp:live

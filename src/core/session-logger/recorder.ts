@@ -2,7 +2,7 @@
 // AgentEvent → TraceRecord 映射器（全量记录，所有事件都留痕）
 //
 // 截断策略：本地会话日志用于调试回溯，保留完整语义但控制文件体积。
-// 隐私脱敏由遥测通道的 scrubber 负责，本层不裁剪内容。
+// 本地日志也必须执行最小敏感信息脱敏；遥测通道会再执行独立 scrubber。
 
 import { genSpanId } from '@/core/id-utils';
 import type { RuntimeEvent } from '@/core/runtime/events';
@@ -20,8 +20,9 @@ const TRUNC_QUESTION = 500; // 用户提问
 
 /** 安全截断字符串，超过长度时追加 "…(truncated)" */
 function trunc(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, max)}…(truncated, ${s.length} total)`;
+  const redacted = redactSensitiveText(s);
+  if (redacted.length <= max) return redacted;
+  return `${redacted.slice(0, max)}…(truncated, ${redacted.length} total)`;
 }
 
 /** 安全序列化对象为 JSON 字符串并截断 */
@@ -31,6 +32,16 @@ function safeStringify(value: unknown, max: number): string {
   } catch {
     return '[unserializable]';
   }
+}
+
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(
+      /((?:["']?)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization)(?:["']?)\s*[:=]\s*["'])([^"'\r\n]+)(["'])/gi,
+      '$1[REDACTED]$3',
+    )
+    .replace(/\b(bearer|basic)\s+[a-z0-9._~+/=-]+/gi, '$1 [REDACTED]')
+    .replace(/\bsk-[a-z0-9_-]{16,}\b/gi, '[REDACTED]');
 }
 
 /** ISO 8601 with ns (OTel 格式) */

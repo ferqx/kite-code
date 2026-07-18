@@ -440,6 +440,67 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     });
   }
 
+  if (request.name === 'list_mcp_resources') {
+    if (!mcpManager) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr: 'MCP manager is not available. No MCP servers are configured.',
+      });
+    }
+    const { server } = request.args;
+    const snapshot = mcpManager.getResourceDirectorySnapshot();
+    const matching = snapshot.resources
+      .filter((resource) => server == null || resource.providerId === server)
+      .slice()
+      .sort(
+        (left, right) =>
+          left.providerId.localeCompare(right.providerId) ||
+          left.uri.localeCompare(right.uri) ||
+          left.name.localeCompare(right.name),
+      );
+    if (server && matching.length === 0) {
+      const provider = mcpManager
+        .getProviderDirectorySnapshot()
+        .entries.find((entry) => entry.providerId === server);
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr: provider
+          ? `No available static MCP resources were discovered for server: ${server}`
+          : `Unknown MCP server: ${server}`,
+      });
+    }
+    const resources = matching.slice(0, 100).map((resource) => ({
+      server: resource.providerId,
+      uri: resource.uri,
+      name: resource.name,
+      ...(resource.mimeType ? { mime_type: resource.mimeType } : {}),
+    }));
+    return withFailureGuidance(request, {
+      ok: true,
+      command: request.protectedCommand,
+      exitCode: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        resource_count: resources.length,
+        resources,
+        truncated: matching.length > resources.length,
+        next_step:
+          matching.length > resources.length
+            ? 'Call list_mcp_resources with an exact server to narrow the result.'
+            : resources.length > 0
+              ? 'Call read_mcp_resource with an exact server and URI.'
+              : 'No static MCP resources are currently available.',
+      }),
+      stderr: '',
+    });
+  }
+
   if (request.name === 'read_mcp_resource') {
     if (!mcpManager) {
       return withFailureGuidance(request, {
@@ -461,12 +522,12 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       });
     }
     try {
-      const content = await mcpManager.readResource(server, uri);
+      const content = await mcpManager.readResource(server, uri, signal);
       return withFailureGuidance(request, {
         ok: true,
         command: `read_mcp_resource ${server}`,
         exitCode: 0,
-        stdout: content,
+        stdout: serializeMcpResourceForModel(content),
         stderr: '',
       });
     } catch (err) {
@@ -508,10 +569,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         serverName,
         toolName,
         request.args as unknown as Record<string, unknown>,
+        signal,
       );
       const descriptor = mcpManager.findCapability(`mcp:${serverName}/${toolName}`);
       const capabilityResult = normalizeMcpToolResult(raw, descriptor?.outputSchema);
-      const output = JSON.stringify(capabilityResult);
+      const output = serializeMcpResultForModel(capabilityResult);
       return withFailureGuidance(request, {
         ok: !raw.isError,
         command: request.name,
@@ -616,6 +678,37 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     stdout: '',
     stderr: 'Unsupported tool request.',
   };
+}
+
+const MAX_MODEL_MCP_RESULT_CHARS = 128 * 1024;
+
+function serializeMcpResourceForModel(content: string): string {
+  if (content.length <= MAX_MODEL_MCP_RESULT_CHARS) return content;
+  return JSON.stringify({
+    status: 'partial',
+    content: content.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+    truncated: true,
+    original_characters: content.length,
+    message: 'The MCP resource exceeded the model-facing output limit.',
+  });
+}
+
+function serializeMcpResultForModel(result: import('@/core/capabilities/result').CapabilityResult) {
+  const serialized = JSON.stringify(result);
+  if (serialized.length <= MAX_MODEL_MCP_RESULT_CHARS) return serialized;
+  return JSON.stringify({
+    status: 'partial',
+    content: [
+      {
+        type: 'text',
+        text: serialized.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+      },
+    ],
+    truncated: true,
+    original_characters: serialized.length,
+    message:
+      'The MCP result exceeded the model-facing output limit. The complete governed result remains available to Runtime execution records when applicable.',
+  });
 }
 
 /** 共享截断函数：保留头部 + 尾部，中间标注省略行数。

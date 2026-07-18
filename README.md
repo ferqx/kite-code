@@ -39,13 +39,13 @@ bun install
 
 模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。
 
-MCP 配置优先级为本机 workspace 覆盖 `~/.kite-code/projects/<workspaceKey>/mcp.jsonc`、legacy 项目 `.kite-code/kite-code.jsonc`、共享项目 `.mcp.json`、用户 `~/.kite-code/kite-code.jsonc`。配置由文件位置确定来源，TUI 不创建或修改这些文件。两个项目来源不会在首次发现时自动启动：TUI 会显示独立的项目 MCP 信任提示，连续两次按 `a` 批准当前配置摘要，或连续两次按 `r` 拒绝；Esc 只延后提示，项目配置变化后必须重新批准。批准只允许连接，不能降低 MCP Tool 的 effect、审批或重试策略。
+MCP 默认配置只有两个规范位置：项目级 `<project>/.kite-code/mcp.json` 与用户级 `~/.kite-code/mcp.json`，同名 Server 按 `project > user` 选择。`/mcp` 的 Current project 与 All projects 分别写入这两个文件；项目声明必须在 Server Detail 的 Review 页面显式批准。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 仅只读兼容与显式迁移，不再作为写入目标。
 
 Tool 可见性可在 JSONC 中用 `enabledTools` allowlist、`disabledTools` denylist 和 `tools.<name>.enabled` 精确 override 控制；逐 Tool policy 还支持 `effects`、`minimumApproval`、`retry` 与 `idempotencyKeyArgument`。项目配置只能用这些字段收紧可见性或策略，不能信任远端 annotation、降低风险或扩大重试。任何 filter/policy 变化都会使旧 turn binding 失效。
 
-`/mcp` 只显示当前 effective MCP Server 的连接状态与名称，不接受 Server 参数或管理子命令，也不展示 scope、transport、capability 详情或配置操作。配置文件变化由 watcher 自动重载；watcher 不可用时可重启 TUI 进行完整加载。动态 MCP Prompt 命令仍保持独立行为。
+`/mcp` 不接受参数，打开使用 `↑/↓/Enter/Esc` 的 MCP 管理 Overlay。Server List 只负责选择；Enter 进入只读详情，再通过可见菜单执行 Connect/Retry、Authenticate、Enable/Disable、Remove 或项目审批。配置文件变化仍由 watcher 自动重载；watcher 不可用时可重启 TUI 进行完整加载。动态 MCP Prompt 命令保持独立行为。
 
-HTTP Server 返回 OAuth 认证要求时，App shell 会在 `/mcp` 外显示独立登录提示；只有按 Enter 或 `l` 后才打开系统浏览器，Esc 可延后或取消进行中的 callback。OAuth token、dynamic client、PKCE verifier 和 discovery state 只保存在系统原生凭据保险库，成功后重新 discovery，不重放旧 Tool Call。已有 token 会在启动时静默恢复；恢复失败只进入 `reauth-required`，不会循环打开浏览器。
+HTTP Server 返回 OAuth 认证要求时，Server Detail 提供 Authenticate；只有在认证页选择 Open browser 后才创建 callback 并打开系统浏览器，Esc 可返回或取消进行中的 callback。OAuth token、dynamic client、PKCE verifier 和 discovery state 只保存在系统原生凭据保险库，成功后重新 discovery，不重放旧 Tool Call。已有 token 会在启动时静默恢复；恢复失败只进入 `reauth-required`，不会循环打开浏览器。
 
 开启默认关闭的 `features.mcpProviderActionV1` 后，MCP Tool 因登录、项目批准或 Provider 暂时不可用而失败时，Runtime 会通过 App shell 提供固定的 Login、Approve 或 Retry 恢复动作。恢复成功从新 turn 继续，延后或失败不会重放旧调用。配置为 `required: true` 的不可用 Provider 还会在首次模型调用前要求 Retry、当前 session waiver 或 Cancel Run；waiver 不会让不可用能力重新进入 catalog。
 
@@ -125,4 +125,4 @@ bun run check:core-boundary
 bun run check:docs
 ```
 
-默认测试不访问真实模型或公网 MCP。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke，验证真实 HTTP transport、discovery 和只读 Tool Call；定时 CI 与手动 workflow 会运行它。仓库当前没有注册真实模型测试脚本；不要把 mock model 测试表述为真实 provider 验证。
+默认测试不访问真实模型或公网 MCP。确定性跨进程 E2E 位于 `tests/e2e/local/`；公网 MCP 位于 `tests/e2e/live/mcp/`；真实模型套件保留在 `tests/e2e/live/model/`，当前尚无受维护用例。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke，验证真实 HTTP transport、discovery 和只读 Tool Call；它不等于真实模型验证。仓库当前没有注册真实模型测试脚本，不要把 mock model 测试表述为真实 provider 验证。

@@ -43,6 +43,12 @@ export type McpAuthStatus =
 export interface McpToolControlState {
   name: string;
   description?: string;
+  parameters: readonly Readonly<{
+    name: string;
+    required: boolean;
+    type: string;
+    description?: string;
+  }>[];
   discovered: boolean;
   enabled: boolean;
   availability: CapabilityAvailability;
@@ -66,6 +72,12 @@ export interface McpApprovalControlState {
   }>;
 }
 
+export interface McpServerConfigurationView {
+  command?: string;
+  argumentCount?: number;
+  endpoint?: string;
+}
+
 export interface McpServerControlState {
   key: Readonly<McpServerKey>;
   effective: boolean;
@@ -78,6 +90,7 @@ export interface McpServerControlState {
   transport: McpTransportType;
   source: McpConfigSourceKind;
   sourcePath: string;
+  configuration: Readonly<McpServerConfigurationView>;
   revision: string;
   enabled: boolean;
   required: boolean;
@@ -101,5 +114,5 @@ export interface McpControlSnapshot {
   revision: string;
   generation: number;
   servers: readonly Readonly<McpServerControlState>[];
-  sourceRevisions: Readonly<Record<McpWritableScope, string>>;
+  sourceRevisions: Readonly<Record<McpWritableScope | 'local', string>>;
 }

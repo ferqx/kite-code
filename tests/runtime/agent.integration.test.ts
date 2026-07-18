@@ -245,6 +245,113 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
   }
 });
 
+test('Runtime isolates an MCP adapter exception and continues the same conversation', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-mcp-failure-'));
+  const storePath = join(workspace, 'runtime.db');
+  const manager = new McpManager();
+  const descriptor = {
+    capabilityId: 'mcp:fixture/broken_tool',
+    revision: 'revision-1',
+    kind: 'mcp_tool' as const,
+    displayName: 'broken_tool',
+    description: 'A deliberately broken MCP fixture.',
+    provider: { type: 'mcp' as const, id: 'fixture', provenance: 'remote' as const },
+    inputSchema: { type: 'object', properties: {} },
+    declaredEffects: {
+      filesystem: 'none' as const,
+      network: 'read' as const,
+      externalState: 'read' as const,
+    },
+    effectiveEffects: {
+      filesystem: 'none' as const,
+      network: 'read' as const,
+      externalState: 'read' as const,
+    },
+    policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
+    availability: 'available' as const,
+    diagnostics: [],
+  };
+  manager.getCapabilitySnapshot = () => ({ revision: 'snapshot-1', descriptors: [descriptor] });
+  manager.findCapability = () => {
+    throw new Error('deliberate local adapter defect');
+  };
+  const mockModel = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'search-mcp',
+            name: 'capability_search',
+            args: { query: 'broken tool' },
+          },
+        ],
+      }),
+    },
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'call-broken-mcp',
+            name: 'mcp__fixture__broken_tool',
+            args: {},
+          },
+        ],
+      }),
+    },
+    {
+      message: aiMessage({
+        content: 'The MCP tool failed, but this conversation is still active.',
+      }),
+    },
+  ]);
+
+  try {
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Use the broken MCP fixture and explain any failure.',
+        threadId: 'kernel-mcp-failure-continuation',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: mockModel as any,
+        mcpManager: manager,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.type)).toContain('tool.failed');
+    expect(events.filter((event) => event.type === 'model.responded')).toHaveLength(3);
+    const store = createRuntimeStore(storePath);
+    const snapshot = store.loadSnapshot<RuntimeState>('kernel-mcp-failure-continuation');
+    expect(snapshot?.transcript.final).toBe(
+      'The MCP tool failed, but this conversation is still active.',
+    );
+    expect(snapshot?.transcript.messages).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool',
+        toolCallId: 'call-broken-mcp',
+        ok: false,
+      }),
+    );
+    store.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('Runtime Kernel rejects a write tool before a plan is approved', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');

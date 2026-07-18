@@ -36,6 +36,24 @@ describe('test discovery boundaries', () => {
     expect(liveModelDefaultTests).toEqual([]);
   });
 
+  test('classifies E2E suites by local, live MCP, and live model boundaries', () => {
+    const e2eFiles = collectFiles(join(repoRoot, 'tests', 'e2e')).map((path) =>
+      relative(repoRoot, path).replace(/\\/g, '/'),
+    );
+    const liveCode = e2eFiles.filter(
+      (path) => path.startsWith('tests/e2e/live/') && /\.[cm]?[tj]sx?$/.test(path),
+    );
+
+    expect(
+      e2eFiles.filter(
+        (path) => /\.(test|spec)\.[cm]?[tj]sx?$/.test(path) && !path.startsWith('tests/e2e/local/'),
+      ),
+    ).toEqual([]);
+    expect(liveCode.every((path) => path.endsWith('.live.ts'))).toBe(true);
+    expect(e2eFiles).toContain('tests/e2e/live/mcp/langchain-docs.live.ts');
+    expect(e2eFiles).toContain('tests/e2e/live/model/README.md');
+  });
+
   test('keeps real-agent and PTY suites out of the default test script', () => {
     const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
@@ -44,6 +62,10 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.test).toContain('bun test');
     expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/tui-system/**'");
     expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/pty-spike/**'");
+    expect(pkg.scripts?.['test:e2e']).toContain('tests/e2e/local/');
+    expect(pkg.scripts?.['test:e2e']).not.toContain('tests/e2e/live/');
+    expect(pkg.scripts?.['test:mcp:live']).toContain('tests/e2e/live/mcp/');
+    expect(pkg.scripts?.['test:mcp:live']).toContain('bun run');
     expect(pkg.scripts?.['test:real']).toBeUndefined();
     expect(pkg.scripts?.['test:real:direct']).toBeUndefined();
   });

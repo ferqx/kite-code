@@ -152,6 +152,13 @@ export type PendingToolRequest =
       protectedCommand: string;
     }
   | {
+      id?: string;
+      name: 'list_mcp_resources';
+      args: { server?: string };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
       /** 工具调用 ID / Tool call ID */
       id?: string;
       name: 'read_mcp_resource';
@@ -439,6 +446,17 @@ export function toolRequestFromCall(
     };
   }
 
+  if (call.name === 'list_mcp_resources') {
+    const args = call.args as { server?: string };
+    return {
+      id: call.id,
+      name: 'list_mcp_resources',
+      args: { ...(args.server ? { server: args.server } : {}) },
+      reason: 'Model requested MCP resource discovery',
+      protectedCommand: `list_mcp_resources ${args.server || ''}`.trim(),
+    };
+  }
+
   if (call.name === 'read_mcp_resource') {
     const args = call.args as { server?: string; uri?: string };
     return {
@@ -696,6 +714,17 @@ export function toolRequestFromMessage(
       args: normalizeUserInputRequest(args),
       reason: 'Model requested user clarification',
       protectedCommand: 'ask_user',
+    };
+  }
+
+  if (call.name === 'list_mcp_resources') {
+    const args = call.args as { server?: string };
+    return {
+      id: call.id,
+      name: 'list_mcp_resources',
+      args: { ...(args.server ? { server: args.server } : {}) },
+      reason: 'Model requested MCP resource discovery',
+      protectedCommand: `list_mcp_resources ${args.server || ''}`.trim(),
     };
   }
 

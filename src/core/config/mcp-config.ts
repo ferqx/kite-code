@@ -12,12 +12,20 @@ import {
   sourcePathDigest,
 } from './mcp-project-approvals';
 import { mcpServerSchema, normalizeMcpServerConfig } from './mcp-server-config';
-import { defaultConfigPath, localMcpConfigPath, projectConfigPath } from './paths';
+import {
+  defaultConfigPath,
+  localMcpConfigPath,
+  projectConfigPath,
+  projectMcpConfigPath,
+  userMcpConfigPath,
+} from './paths';
 
-export type McpWritableScope = 'local' | 'project' | 'user';
+export type McpWritableScope = 'project' | 'user';
 export type McpConfigSourceKind =
   | McpWritableScope
+  | 'local'
   | 'project_legacy'
+  | 'user_legacy'
   | 'project_kite_code'
   | 'project_mcp_json'
   | 'explicit';
@@ -81,7 +89,7 @@ export interface McpConfigCatalog {
   projectApprovals: readonly McpProjectServerApprovalView[];
   diagnostics: readonly McpConfigDiagnostic[];
   workspace: string;
-  sourceRevisions: Readonly<Record<McpWritableScope, string>>;
+  sourceRevisions: Readonly<Record<McpWritableScope | 'local', string>>;
 }
 
 export interface McpConfig {
@@ -220,7 +228,7 @@ function readSource(
         ? (value as Record<string, unknown>)
         : {};
     const configDigest =
-      spec.kind === 'project_legacy' || spec.kind === 'project'
+      spec.kind === 'project_legacy' || spec.kind === 'project_mcp_json' || spec.kind === 'project'
         ? computeProjectMcpConfigDigest({
             serverName: name,
             sourceKind: spec.kind,
@@ -256,7 +264,9 @@ function isProjectEntry(entry: McpServerConfigEntry): entry is McpServerConfigEn
   configDigest: string;
 } {
   return (
-    (entry.source.kind === 'project_legacy' || entry.source.kind === 'project') &&
+    (entry.source.kind === 'project_legacy' ||
+      entry.source.kind === 'project_mcp_json' ||
+      entry.source.kind === 'project') &&
     typeof entry.configDigest === 'string'
   );
 }
@@ -301,7 +311,8 @@ function approvalReview(
 
 /**
  * Load a provenance-preserving MCP catalog. Precedence is:
- * local > legacy project .kite-code > project .mcp.json > user.
+ * Current sources: project .kite-code/mcp.json > user ~/.kite-code/mcp.json.
+ * Older sources remain read-only at lower precedence for explicit migration.
  */
 export function loadMcpConfigCatalog(
   options: { workspace?: string; configPath?: string } = {},
@@ -317,10 +328,12 @@ export function loadMcpConfigCatalog(
   const specs: SourceSpec[] = options.configPath
     ? [{ kind: 'explicit', path: resolve(options.configPath), priority: 100 }]
     : [
-        { kind: 'user', path: defaultConfigPath(), priority: 20 },
-        { kind: 'project', path: resolve(workspace, '.mcp.json'), priority: 30 },
-        { kind: 'project_legacy', path: projectConfigPath(workspace), priority: 35 },
+        { kind: 'user_legacy', path: defaultConfigPath(), priority: 10 },
+        { kind: 'project_legacy', path: projectConfigPath(workspace), priority: 20 },
+        { kind: 'project_mcp_json', path: resolve(workspace, '.mcp.json'), priority: 30 },
         { kind: 'local', path: localPath, priority: 40 },
+        { kind: 'user', path: userMcpConfigPath(), priority: 50 },
+        { kind: 'project', path: projectMcpConfigPath(workspace), priority: 60 },
       ];
 
   const priority = new Map(specs.map((spec) => [spec.kind, spec.priority]));
@@ -376,7 +389,8 @@ export function loadMcpConfigCatalog(
         sourceKind: entry.source.kind,
         sourcePathDigest: pathDigest,
       });
-      const legacyKind = entry.source.kind === 'project' ? 'project_mcp_json' : 'project_kite_code';
+      const legacyKind =
+        entry.source.kind === 'project_mcp_json' ? 'project_mcp_json' : 'project_kite_code';
       const legacyDigest = computeProjectMcpConfigDigest({
         serverName: entry.name,
         sourceKind: legacyKind,
@@ -426,8 +440,8 @@ export function loadMcpConfigCatalog(
     workspace,
     sourceRevisions: Object.freeze({
       local: sourceTextRevision(localPath),
-      project: sourceTextRevision(resolve(workspace, '.mcp.json')),
-      user: sourceTextRevision(defaultConfigPath()),
+      project: sourceTextRevision(projectMcpConfigPath(workspace)),
+      user: sourceTextRevision(userMcpConfigPath()),
     }),
   };
 }

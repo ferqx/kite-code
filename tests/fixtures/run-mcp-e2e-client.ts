@@ -54,6 +54,18 @@ try {
         content: '',
         tool_calls: [
           {
+            id: 'authenticated-mcp-search',
+            name: 'capability_search',
+            args: { query: 'authenticated echo' },
+          },
+        ],
+      }),
+    },
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
             id: 'authenticated-mcp-call',
             name: `mcp__${serverName}__authenticated_echo`,
             args: { message: expectedScope },
@@ -83,6 +95,7 @@ try {
         features: {
           capabilityCatalogV1: true,
           mcpRuntimeBindingV1: true,
+          capabilitySearchV1: true,
           mcpExecutionRecordV1: true,
         },
       },

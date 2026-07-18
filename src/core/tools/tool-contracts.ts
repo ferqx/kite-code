@@ -322,12 +322,12 @@ export const READ_MCP_RESOURCE_CONTRACT: ToolContract = {
     whenToUse:
       'Read a resource (documentation, API spec, or other content) from an MCP server. ' +
       'Use this to fetch external reference materials exposed by configured MCP servers. ' +
-      'ALWAYS use mcp__<server>__list_resources first to discover available URIs before calling read_mcp_resource. ' +
+      'ALWAYS use list_mcp_resources first to discover available URIs before calling read_mcp_resource. ' +
       'Do NOT use read_mcp_resource for tools or prompts — use the dedicated mcp__<server>__<tool> functions instead. ' +
       'Do NOT use read_mcp_resource for reading workspace files — use read_file instead. ' +
       'This tool only accesses content explicitly exposed by the MCP server; it cannot read arbitrary files.',
     commonMistakes:
-      'Calling read_mcp_resource without first discovering available URIs via list_resources — the call will fail with an unknown URI. ' +
+      'Calling read_mcp_resource without first discovering available URIs via list_mcp_resources — the call will fail closed. ' +
       'Using a wrong server name — verify the server is connected via /mcp panel before calling. ' +
       'Assuming the MCP server exposes resources when it only has tools — check the MCP panel to confirm resources are available. ' +
       'Not handling the case where no MCP manager is available — calls fail gracefully with a clear message.',
@@ -339,11 +339,32 @@ export const READ_MCP_RESOURCE_CONTRACT: ToolContract = {
       "If 'Unknown MCP server': verify the server name matches the configuration in kite-code.jsonc or .mcp.json. " +
       "If 'MCP server not connected': check /mcp panel for connection status and errors. " +
       "If 'No MCP manager available': configure mcpServers in kite-code.jsonc to enable MCP integration. " +
-      'If the resource content is unexpectedly empty: verify the URI with list_resources and try again.',
+      'If the resource content is unexpectedly empty: verify the URI with list_mcp_resources and try again.',
   },
   description: '',
 };
 READ_MCP_RESOURCE_CONTRACT.description = buildDescription(READ_MCP_RESOURCE_CONTRACT.sections);
+
+export const LIST_MCP_RESOURCES_CONTRACT: ToolContract = {
+  name: 'list_mcp_resources',
+  sections: {
+    whenToUse:
+      'List static resources discovered from connected MCP servers before calling read_mcp_resource. ' +
+      'Omit server to inspect all available providers, or provide an exact server name to narrow the result. ' +
+      'Use capability_search for executable MCP tools; it does not list resources.',
+    commonMistakes:
+      'Do not invent a URI or treat a resource as an executable MCP tool. ' +
+      'Avoid calling this tool repeatedly when the result is empty; the provider may expose tools but no resources.',
+    outputFormat:
+      'JSON: ok, resource_count, resources, truncated, and next_step. ' +
+      'Each resource contains server, uri, name, and optional mime_type. Results are stable-sorted and limited to 100 entries.',
+    failureHandling:
+      'An unknown or unavailable server returns a structured error. ' +
+      'If truncated is true, call again with an exact server to narrow the result.',
+  },
+  description: '',
+};
+LIST_MCP_RESOURCES_CONTRACT.description = buildDescription(LIST_MCP_RESOURCES_CONTRACT.sections);
 
 export const CAPABILITY_SEARCH_CONTRACT: ToolContract = {
   name: 'capability_search',
@@ -474,6 +495,7 @@ export const KNOWN_TOOL_NAMES = [
   'search_content',
   'search_files',
   'capability_search',
+  'list_mcp_resources',
   'read_mcp_resource',
   'write_plan',
   'update_plan',
@@ -496,6 +518,7 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ['search_content', SEARCH_CONTENT_CONTRACT],
   ['search_files', SEARCH_FILES_CONTRACT],
   ['capability_search', CAPABILITY_SEARCH_CONTRACT],
+  ['list_mcp_resources', LIST_MCP_RESOURCES_CONTRACT],
   ['read_mcp_resource', READ_MCP_RESOURCE_CONTRACT],
   ['write_plan', WRITE_PLAN_CONTRACT],
   ['update_plan', UPDATE_PLAN_CONTRACT],

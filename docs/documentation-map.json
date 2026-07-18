@@ -106,6 +106,16 @@
       ]
     },
     {
+      "id": "live-e2e-boundary",
+      "sources": [
+        "package.json",
+        "tests/e2e/live/**",
+        "tests/test-discovery.test.ts",
+        ".github/workflows/mcp-langchain-live-smoke.yml"
+      ],
+      "documents": ["docs/active/real-model-test-boundary.md", "README.md"]
+    },
+    {
       "id": "subagent",
       "sources": ["src/core/subagent/**", "src/protocol/subagent.ts"],
       "documents": ["docs/active/cancel-resume-cleanup.md", "docs/book/06-多Agent协作.md"]
@@ -116,7 +126,10 @@
       "documents": [
         "docs/active/tool-description-contracts.md",
         "docs/active/tool-gated-autonomy.md",
-        "docs/book/05-工具系统与安全策略.md"
+        "docs/active/mcp-runtime-governance.md",
+        "docs/active/capability-progressive-disclosure.md",
+        "docs/book/05-工具系统与安全策略.md",
+        "docs/book/11-MCP与Skills扩展.md"
       ]
     },
     {

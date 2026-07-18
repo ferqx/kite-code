@@ -8,7 +8,6 @@ import React, {
   useReducer,
   useRef,
 } from 'react';
-import type { McpServerControlState } from '@/core/mcp';
 import type { SandboxBackend } from '@/core/sandbox';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
@@ -23,9 +22,7 @@ import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
 import { useOverlayHeight } from './hooks/useOverlayHeight';
 import { createInitialState, initialState } from './initialState';
-import McpAuthPrompt from './mcp/McpAuthPrompt';
 import McpOverlay from './mcp/McpOverlay';
-import McpProjectTrustPrompt from './mcp/McpProjectTrustPrompt';
 import type { McpController } from './mcp/types';
 import OutputArea, { useStaticContent } from './OutputArea';
 import { type Action, eventReducer } from './reducers';
@@ -50,10 +47,6 @@ export interface AppProps {
   onToggleReason: (id: number) => void;
   provider: import('./provider').TuiUserInputProvider;
   mcpController?: McpController;
-  mcpPendingApproval?: Readonly<McpServerControlState>;
-  mcpPendingAuth?: Readonly<McpServerControlState>;
-  onDeferMcpApproval?: () => void;
-  onDeferMcpAuth?: () => void;
   availableModels?: import('@/core/config').AvailableModel[];
   slashSuggestion?: import('./components/InputLine').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
@@ -90,10 +83,6 @@ export default function App({
   onToggleReason,
   provider,
   mcpController,
-  mcpPendingApproval,
-  mcpPendingAuth,
-  onDeferMcpApproval,
-  onDeferMcpAuth,
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
@@ -109,8 +98,6 @@ export default function App({
     state.showSessions ||
     state.showMcp ||
     state.showRewind ||
-    !!mcpPendingApproval ||
-    !!mcpPendingAuth ||
     !!state.interrupt;
   const supplementEscRef = useRef(false);
   const wizardEscBackRef = useRef(false);
@@ -244,9 +231,7 @@ export default function App({
     state.showModelSelector ||
     state.showSessions ||
     state.showMcp ||
-    state.showRewind ||
-    !!mcpPendingApproval ||
-    !!mcpPendingAuth;
+    state.showRewind;
   const showRunStatus = shouldShowRunStatus(state);
   const runStatus = showRunStatus ? deriveRunStatusSnapshot(state) : undefined;
 
@@ -305,28 +290,8 @@ export default function App({
       </Footer>
 
       {/* ── Overlay: panels below Footer ── */}
-      {mcpPendingApproval && mcpController && onDeferMcpApproval && (
-        <McpProjectTrustPrompt
-          key={`${mcpPendingApproval.key.source}:${mcpPendingApproval.key.name}:${mcpPendingApproval.approval?.configDigest ?? ''}`}
-          controller={mcpController}
-          server={mcpPendingApproval}
-          layeredEscRef={layeredOverlayEscRef}
-          onDefer={onDeferMcpApproval}
-        />
-      )}
-      {!mcpPendingApproval && mcpPendingAuth && mcpController && onDeferMcpAuth && (
-        <McpAuthPrompt
-          key={`${mcpPendingAuth.key.source}:${mcpPendingAuth.key.name}:${mcpPendingAuth.revision}:${mcpPendingAuth.authStatus}`}
-          controller={mcpController}
-          server={mcpPendingAuth}
-          layeredEscRef={layeredOverlayEscRef}
-          onDefer={onDeferMcpAuth}
-        />
-      )}
-      {!mcpPendingApproval && !mcpPendingAuth && state.showHelp && (
-        <HelpPanel onClose={hideHelp} sandboxBackend={sandboxBackend} />
-      )}
-      {!mcpPendingApproval && !mcpPendingAuth && state.showSessions && (
+      {state.showHelp && <HelpPanel onClose={hideHelp} sandboxBackend={sandboxBackend} />}
+      {state.showSessions && (
         <SessionSelector
           onSelect={selectSession}
           onClose={hideSessions}
@@ -335,21 +300,21 @@ export default function App({
           activeSessionId={state.activeSessionId}
         />
       )}
-      {!mcpPendingApproval && !mcpPendingAuth && state.showModelSelector && (
+      {state.showModelSelector && (
         <ModelSelector
           currentModel={state.status.modelName}
           onSelect={selectModel}
           onClose={hideModelSelector}
         />
       )}
-      {!mcpPendingApproval && !mcpPendingAuth && state.showMcp && mcpController && (
+      {state.showMcp && mcpController && (
         <McpOverlay
           controller={mcpController}
           layeredEscRef={layeredOverlayEscRef}
           onClose={hideMcp}
         />
       )}
-      {!mcpPendingApproval && !mcpPendingAuth && state.showRewind && (
+      {state.showRewind && (
         <CheckpointSelector
           checkpoints={state.checkpoints}
           onRevert={handleRevert}
@@ -357,9 +322,7 @@ export default function App({
           onClose={hideRewind}
         />
       )}
-      {!mcpPendingApproval &&
-        !mcpPendingAuth &&
-        slashSuggestion &&
+      {slashSuggestion &&
         (() => {
           const listHeight = Math.max(3, slashMaxHeight - 2);
           return (

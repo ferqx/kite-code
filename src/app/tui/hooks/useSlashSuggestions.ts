@@ -26,7 +26,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   {
     name: 'mcp',
     aliases: [],
-    description: 'View MCP connection status',
+    description: 'Manage MCP servers',
   },
   { name: 'clear', aliases: ['c'], description: 'Clear output' },
   { name: 'help', aliases: ['h'], description: 'Show help' },

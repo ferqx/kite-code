@@ -31,6 +31,7 @@ import type {
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
   McpProviderDirectoryStatus,
+  McpResourceDirectorySnapshot,
   McpRuntimeProvider,
 } from './runtime-provider';
 import {
@@ -53,6 +54,12 @@ export interface McpSupervisor {
   reload(): Promise<void>;
   retry(key: McpServerKey): Promise<void>;
   mutate(command: McpConfigCommand): Promise<void>;
+  remove(
+    key: McpServerKey,
+    expectedRevision: string,
+  ): Promise<{
+    credentialCleanup: 'not_needed' | 'completed' | 'failed';
+  }>;
   login(key: McpServerKey): Promise<McpAuthResult>;
   cancelAuth(flowId: string): Promise<McpAuthResult>;
   logout(key: McpServerKey, revoke: boolean): Promise<McpAuthResult>;
@@ -63,8 +70,13 @@ export interface McpSupervisor {
 
 export interface McpManagerControlPlane extends McpRuntimeProvider {
   subscribe(listener: () => void): () => void;
-  reconnect(name: string, config: McpServerConfig, generation: number): Promise<void>;
-  disconnect(name: string): Promise<void>;
+  reconnect(
+    name: string,
+    config: McpServerConfig,
+    generation: number,
+    timeoutMs?: number,
+  ): Promise<void>;
+  disconnect(name: string, options?: { retainCapabilities?: boolean }): Promise<void>;
   disconnectAll(): Promise<void>;
   getServerStates(): ReadonlyMap<string, Readonly<McpServerState>>;
   getCapabilitySnapshot(): CapabilitySnapshot;
@@ -83,12 +95,16 @@ export interface McpSupervisorOptions {
   loadCatalog?: (options: { workspace: string }) => McpConfigCatalog;
   repository?: McpConfigRepository;
   authCoordinator?: McpAuthCoordinator;
+  sleep?: (milliseconds: number) => Promise<void>;
+  now?: () => number;
 }
 
 export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   private readonly manager: McpManagerControlPlane;
   private readonly repository: McpConfigRepository;
   private readonly authCoordinator: McpAuthCoordinator;
+  private readonly sleep: (milliseconds: number) => Promise<void>;
+  private readonly now: () => number;
   private readonly listeners = new Set<() => void>();
   private snapshot = EMPTY_SNAPSHOT;
   private catalog: McpConfigCatalog | undefined;
@@ -99,6 +115,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   private generation = 0;
   private started = false;
   private reconcileChain: Promise<void> = Promise.resolve();
+  private readonly providerRecoveryChains = new Map<string, Promise<void>>();
   private readonly lastKnownCapabilityNames = new Map<string, readonly string[]>();
 
   constructor(options: McpSupervisorOptions = {}) {
@@ -106,6 +123,10 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     this.repository =
       options.repository ?? new DefaultMcpConfigRepository({ loadCatalog: options.loadCatalog });
     this.authCoordinator = options.authCoordinator ?? new DefaultMcpAuthCoordinator();
+    this.sleep =
+      options.sleep ??
+      ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+    this.now = options.now ?? Date.now;
   }
 
   async start(workspace: string): Promise<void> {
@@ -196,6 +217,34 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     });
   }
 
+  async remove(
+    key: McpServerKey,
+    expectedRevision: string,
+  ): Promise<{ credentialCleanup: 'not_needed' | 'completed' | 'failed' }> {
+    if (!this.started) return { credentialCleanup: 'not_needed' };
+    return this.enqueue(async () => {
+      const current = this.snapshot.servers.find(
+        (candidate) => candidate.key.name === key.name && candidate.key.source === key.source,
+      );
+      const nextCatalog = await this.repository.mutate({
+        type: 'remove',
+        key,
+        expectedRevision,
+      });
+      let credentialCleanup: 'not_needed' | 'completed' | 'failed' = 'not_needed';
+      if (current?.credentialPresent) {
+        try {
+          await this.authCoordinator.logout(key, false);
+          credentialCleanup = 'completed';
+        } catch {
+          credentialCleanup = 'failed';
+        }
+      }
+      await this.reconcile(nextCatalog);
+      return { credentialCleanup };
+    });
+  }
+
   async login(key: McpServerKey): Promise<McpAuthResult> {
     return this.authCoordinator.login(key);
   }
@@ -251,22 +300,214 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     });
   }
 
+  async ensureProviderReady(
+    providerId: string,
+    timeoutMs = 30_000,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    const current = this.snapshot.servers.find(
+      (server) => server.effective && server.key.name === providerId,
+    )?.health;
+    if (current === 'ready' || current === 'degraded' || current === 'half_open') return;
+    const deadline = this.now() + Math.max(0, timeoutMs);
+    return this.enqueueProviderRecovery(providerId, () =>
+      this.ensureProviderReadySerialized(providerId, deadline, signal),
+    );
+  }
+
+  private async ensureProviderReadySerialized(
+    providerId: string,
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    const ready = () =>
+      this.getProviderDirectorySnapshot().entries.find((entry) => entry.providerId === providerId);
+    const health = () =>
+      this.snapshot.servers.find((server) => server.effective && server.key.name === providerId)
+        ?.health;
+    const isCallable = () => {
+      const current = health();
+      return current === 'ready' || current === 'degraded' || current === 'half_open';
+    };
+    if (isCallable()) return;
+    if (health() === 'connecting' || health() === 'discovering') {
+      await this.waitForProviderTransition(providerId, deadline, signal);
+      if (isCallable()) return;
+    }
+    if (this.now() >= deadline) throw providerReconnectTimeout(providerId);
+    const catalog = this.catalog;
+    const config = catalog?.connectableServers[providerId];
+    const entry = catalog?.entries.find(
+      (candidate) => candidate.effective && candidate.name === providerId,
+    );
+    if (!config || !entry || config.type !== 'http') {
+      this.assertProviderAvailable(providerId);
+      return;
+    }
+
+    const delays = [1_000, 2_000, 4_000, 8_000, 16_000];
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= delays.length && this.now() < deadline; attempt++) {
+      throwIfAborted(signal);
+      if (attempt > 0) {
+        await abortable(
+          this.sleep(Math.min(delays[attempt - 1]!, Math.max(0, deadline - this.now()))),
+          signal,
+        );
+      }
+      throwIfAborted(signal);
+      if (this.now() >= deadline) break;
+      try {
+        this.generation += 1;
+        const attemptGeneration = this.generation;
+        const remainingMs = Math.max(1, deadline - this.now());
+        await this.withProviderDeadline(
+          providerId,
+          attemptGeneration,
+          remainingMs,
+          this.connectServer(entry, config, attemptGeneration, 1, remainingMs),
+          signal,
+        );
+        if (isCallable()) return;
+      } catch (error) {
+        lastError = error;
+        if (error instanceof McpProviderError) throw error;
+        const current = ready();
+        if (current && !current.retryable) {
+          this.assertProviderAvailable(providerId);
+          throw error;
+        }
+      }
+    }
+    if (lastError instanceof McpProviderError) throw lastError;
+    this.assertProviderAvailable(providerId);
+    throw new McpProviderError({
+      providerId,
+      kind: 'provider_unavailable',
+      message: lastError instanceof Error ? lastError.message : 'MCP provider is unavailable.',
+      recoveryAction: 'retry',
+      retryable: true,
+    });
+  }
+
+  private async waitForProviderTransition(
+    providerId: string,
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let unsubscribe = () => {};
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        unsubscribe();
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(abortReason(signal));
+      };
+      const finish = () => {
+        cleanup();
+        resolve();
+      };
+      if (signal?.aborted) {
+        reject(abortReason(signal));
+        return;
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
+      unsubscribe = this.subscribe(() => {
+        const current = this.snapshot.servers.find(
+          (server) => server.effective && server.key.name === providerId,
+        )?.health;
+        if (current !== 'connecting' && current !== 'discovering') finish();
+      });
+      timer = setTimeout(finish, Math.max(0, deadline - this.now()));
+      const current = this.snapshot.servers.find(
+        (server) => server.effective && server.key.name === providerId,
+      )?.health;
+      if (current !== 'connecting' && current !== 'discovering') finish();
+    });
+  }
+
+  private async withProviderDeadline<T>(
+    providerId: string,
+    generation: number,
+    timeoutMs: number,
+    operation: Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        if (this.generation === generation) this.generation += 1;
+        void this.manager.disconnect(providerId, { retainCapabilities: true });
+        reject(
+          new McpProviderError({
+            providerId,
+            kind: 'provider_unavailable',
+            message: `MCP provider did not reconnect within ${timeoutMs}ms.`,
+            recoveryAction: 'retry',
+            retryable: true,
+          }),
+        );
+      }, timeoutMs);
+    });
+    try {
+      return await abortable(Promise.race([operation, timeout]), signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        if (this.generation === generation) this.generation += 1;
+        void this.manager.disconnect(providerId, { retainCapabilities: true });
+      }
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   findCapability(capabilityId: string) {
     return this.manager.findCapability(capabilityId);
+  }
+
+  getResourceDirectorySnapshot(): McpResourceDirectorySnapshot {
+    const callableProviders = new Set(
+      this.snapshot.servers
+        .filter(
+          (server) =>
+            server.effective &&
+            server.enabled &&
+            (server.health === 'ready' ||
+              server.health === 'degraded' ||
+              server.health === 'half_open'),
+        )
+        .map((server) => server.key.name),
+    );
+    const current = this.manager.getResourceDirectorySnapshot();
+    const resources = current.resources.filter((resource) =>
+      callableProviders.has(resource.providerId),
+    );
+    return Object.freeze({
+      revision: digestCapability(resources),
+      resources: Object.freeze(resources),
+    });
   }
 
   async callTool(
     server: string,
     toolName: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<CallToolResult> {
     this.assertProviderAvailable(server);
-    return this.manager.callTool(server, toolName, args);
+    return this.manager.callTool(server, toolName, args, signal);
   }
 
-  async readResource(server: string, uri: string): Promise<string> {
+  async readResource(server: string, uri: string, signal?: AbortSignal): Promise<string> {
     this.assertProviderAvailable(server);
-    return this.manager.readResource(server, uri);
+    return this.manager.readResource(server, uri, signal);
   }
 
   private connectCatalog(catalog: McpConfigCatalog, generation: number): void {
@@ -279,9 +520,28 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     }
   }
 
-  private enqueue(operation: () => Promise<void>): Promise<void> {
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.reconcileChain.then(operation, operation);
-    this.reconcileChain = next.catch(() => {});
+    this.reconcileChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  private enqueueProviderRecovery<T>(providerId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.providerRecoveryChains.get(providerId) ?? Promise.resolve();
+    const next = previous.then(operation, operation);
+    const settled = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.providerRecoveryChains.set(providerId, settled);
+    void settled.finally(() => {
+      if (this.providerRecoveryChains.get(providerId) === settled) {
+        this.providerRecoveryChains.delete(providerId);
+      }
+    });
     return next;
   }
 
@@ -485,6 +745,8 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     entry: McpServerConfigEntry,
     config: McpServerConfig,
     generation: number,
+    maximumAttempts = 3,
+    attemptTimeoutMs?: number,
   ): Promise<void> {
     const runtimeConfig = this.withCredentialIdentity(entry, config);
     if (config.type === 'http') {
@@ -494,7 +756,23 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
       });
       if (resumed !== 'not_configured') return;
     }
-    await this.manager.reconnect(entry.name, runtimeConfig, generation);
+    let lastError: unknown;
+    for (let attempt = 0; attempt < maximumAttempts; attempt++) {
+      try {
+        await this.manager.reconnect(entry.name, runtimeConfig, generation, attemptTimeoutMs);
+        return;
+      } catch (error) {
+        lastError = error;
+        const directory = this.manager
+          .getProviderDirectorySnapshot()
+          .entries.find((candidate) => candidate.providerId === entry.name);
+        if (config.type !== 'http' || !directory?.retryable || attempt + 1 >= maximumAttempts) {
+          throw error;
+        }
+        await this.sleep(2 ** attempt * 1_000);
+      }
+    }
+    throw lastError;
   }
 
   private withCredentialIdentity(
@@ -587,6 +865,13 @@ function projectServer(
     transport: entry.normalizedConfig?.type ?? (entry.rawConfig.type === 'http' ? 'http' : 'stdio'),
     source: entry.source.kind,
     sourcePath: entry.source.path,
+    configuration: Object.freeze({
+      ...(typeof entry.rawConfig.command === 'string' ? { command: entry.rawConfig.command } : {}),
+      ...(Array.isArray(entry.rawConfig.args)
+        ? { argumentCount: entry.rawConfig.args.length }
+        : {}),
+      ...safeEndpoint(entry.rawConfig.url),
+    }),
     revision: entry.revision,
     enabled: entry.enabled,
     required: entry.normalizedConfig?.required === true,
@@ -627,16 +912,38 @@ function projectServer(
   });
 }
 
+function safeEndpoint(value: unknown): { endpoint?: string } {
+  if (typeof value !== 'string') return {};
+  try {
+    const endpoint = new URL(value);
+    return { endpoint: endpoint.origin };
+  } catch {
+    return {};
+  }
+}
+
+function providerReconnectTimeout(providerId: string): McpProviderError {
+  return new McpProviderError({
+    providerId,
+    kind: 'provider_unavailable',
+    message: 'MCP provider did not reconnect within the Tool Call wait budget.',
+    recoveryAction: 'retry',
+    retryable: true,
+  });
+}
+
 function fallbackSource(
   entry: McpServerConfigEntry,
   entries: readonly McpServerConfigEntry[],
 ): McpServerControlState['fallbackSource'] {
   if (!entry.effective) return undefined;
   const rank: Record<string, number> = {
+    project: 6,
+    user: 5,
     local: 4,
-    project_legacy: 3,
-    project: 2,
-    user: 1,
+    project_mcp_json: 3,
+    project_legacy: 2,
+    user_legacy: 1,
     explicit: 5,
   };
   return entries
@@ -657,6 +964,7 @@ function projectTool(
   return Object.freeze({
     name: tool.name,
     ...(tool.description ? { description: tool.description } : {}),
+    parameters: projectToolParameters(tool.inputSchema),
     discovered: true,
     enabled: policy.enabled,
     availability: !schema.ok ? 'quarantined' : available ? 'available' : 'unavailable',
@@ -707,6 +1015,7 @@ function projectMissingTool(
   const policy = resolveMcpToolPolicy(config, { name });
   return Object.freeze({
     name,
+    parameters: Object.freeze([]),
     discovered: false,
     enabled: policy.enabled,
     availability: 'unavailable',
@@ -726,6 +1035,45 @@ function projectMissingTool(
       message: 'The configured Tool name was not returned by MCP discovery.',
     }),
   });
+}
+
+function projectToolParameters(inputSchema: unknown): McpToolControlState['parameters'] {
+  if (!inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema)) {
+    return Object.freeze([]);
+  }
+  const schema = inputSchema as Record<string, unknown>;
+  if (
+    !schema.properties ||
+    typeof schema.properties !== 'object' ||
+    Array.isArray(schema.properties)
+  ) {
+    return Object.freeze([]);
+  }
+  const required = new Set(
+    Array.isArray(schema.required)
+      ? schema.required.filter((name): name is string => typeof name === 'string')
+      : [],
+  );
+  return Object.freeze(
+    Object.entries(schema.properties as Record<string, unknown>).map(([name, value]) => {
+      const property =
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {};
+      const rawType = property.type;
+      const type = Array.isArray(rawType)
+        ? rawType.filter((item): item is string => typeof item === 'string').join(' | ')
+        : typeof rawType === 'string'
+          ? rawType
+          : 'unknown';
+      return Object.freeze({
+        name,
+        required: required.has(name),
+        type,
+        ...(typeof property.description === 'string' ? { description: property.description } : {}),
+      });
+    }),
+  );
 }
 
 function configStatus(entry: McpServerConfigEntry): McpConfigStatus {
@@ -817,4 +1165,23 @@ function safeProviderMetadata(value: string, maximum = 96): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maximum);
+}
+
+function abortReason(signal?: AbortSignal): Error {
+  if (signal?.reason instanceof Error) return signal.reason;
+  return new DOMException('The MCP operation was aborted.', 'AbortError');
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+async function abortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation;
+  throwIfAborted(signal);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }

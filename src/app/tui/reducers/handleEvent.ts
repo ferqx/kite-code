@@ -1426,6 +1426,13 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       if (event.text) next = handleEventAction(next, { type: 'text', data: { text: event.text } });
       return next;
     }
+    case 'run.completed':
+      // `model.responded` may be rendered while the run is still active, leaving
+      // its final line in the dynamic streaming tree. Reconcile against the
+      // authoritative persisted output and finalize it before SET_IDLE moves
+      // the turn into Ink <Static>; otherwise the tail can be lost during the
+      // same-frame Static/Dynamic handoff and appear only after session replay.
+      return handleEventAction(state, { type: 'final', data: event.output });
     case 'model.retry':
       return handleEventAction(state, {
         type: 'model_retry',

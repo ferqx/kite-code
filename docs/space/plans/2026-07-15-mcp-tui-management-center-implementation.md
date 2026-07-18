@@ -10,6 +10,8 @@
 分类：Security + Capability + Policy + Lifecycle + TUI
 
 > 2026-07-16 产品方向纠偏已完成：`/mcp` 已从配置管理中心收敛为只读连接列表。Phase 0–2 已完成实现保留为历史事实，后续 UI 结论以 [`2026-07-16-mcp-tui-readonly-list.md`](2026-07-16-mcp-tui-readonly-list.md) 和 ADR-0012 为准；本计划不再作为 OAuth、Tool Policy 或 Provider Action TUI 路由的实施依据。
+>
+> 2026-07-18 后续产品方向再次调整：Select 驱动的管理中心以 [`2026-07-18-mcp-tui-select-management-center.md`](2026-07-18-mcp-tui-select-management-center.md) 和 ADR-0018 为唯一实施依据；本文仍只保留历史阶段事实。
 
 ## 一、计划结论
 

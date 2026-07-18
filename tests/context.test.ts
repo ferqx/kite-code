@@ -252,6 +252,17 @@ describe('model context protocol', () => {
 });
 
 describe('buildStaticSystemPrompt with skills', () => {
+  test('includes only stable MCP provider and tool names for on-demand discovery', () => {
+    const prompt = buildStaticSystemPrompt('agent', undefined, undefined, [
+      { provider: 'docs', tool: 'search' },
+    ]);
+
+    expect(prompt).toContain('## Available MCP Tool Names');
+    expect(prompt).toContain('- docs/search');
+    expect(prompt).toContain('capability_search');
+    expect(prompt).not.toContain('inputSchema');
+  });
+
   test('includes Available Skills section when skills provided', () => {
     const skills: SkillManifest[] = [
       {

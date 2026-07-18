@@ -85,6 +85,36 @@ function question(data: Partial<UserInputPayload> = {}): UserInputPayload {
 
 describe('eventReducer (blocks model)', () => {
   describe('tool summary text', () => {
+    test('preserves the complete bounded capability search result for tree rendering', () => {
+      const candidates = Array.from({ length: 4 }, (_, index) => ({
+        kind: 'mcp_tool',
+        name: `search_tool_${index}`,
+        provider: `provider_${index}`,
+      }));
+      const stdout = JSON.stringify({ ok: true, candidate_count: candidates.length, candidates });
+      let s = fresh();
+      s = dispatch(s, tcEvt('search-1', 'capability_search', { query: 'search docs' }));
+      s = eventReducer(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.finished',
+          toolCallId: 'search-1',
+          name: 'capability_search',
+          result: {
+            ok: true,
+            command: 'capability_search',
+            exitCode: 0,
+            stdout,
+            stderr: '',
+          },
+        },
+      });
+
+      const card = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(card.summary).toBe(stdout);
+      expect(card.summary.length).toBeGreaterThan(200);
+    });
+
     test('describes search_files as file pattern searches, not found results', () => {
       const line = buildToolSummaryLine([
         {
@@ -1500,6 +1530,30 @@ describe('eventReducer (blocks model)', () => {
       s = { ...s, running: true }; // simulate mid-run
       s = dispatch(s, { type: 'SET_IDLE' });
       expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).streaming).toBe(false);
+    });
+    test('run.completed reconciles and finalizes the authoritative answer tail before idle', () => {
+      let s = { ...fresh(), running: true };
+      s = handleRuntimeEventAction(s, {
+        type: 'model.responded',
+        messageId: 'model-final',
+        text: 'First paragraph.\n\nSecond paragraph.',
+        toolCalls: [],
+      });
+      expect(flatBlocks(s).some((block) => block.kind === 'text' && block.streaming)).toBe(true);
+
+      s = handleRuntimeEventAction(s, {
+        type: 'run.completed',
+        turnId: 'turn-final',
+        output:
+          'First paragraph.\n\nSecond paragraph.\n\nTAIL_MARKER must be visible before the prompt.',
+      });
+
+      const text = flatBlocks(s)
+        .filter((block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text')
+        .map((block) => block.content)
+        .join('\n');
+      expect(text).toContain('TAIL_MARKER must be visible before the prompt.');
+      expect(flatBlocks(s).some((block) => block.kind === 'text' && block.streaming)).toBe(false);
     });
     test('SET_EXITED sets exited flag', () => {
       let s = fresh();

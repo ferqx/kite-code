@@ -1,6 +1,6 @@
 # MCP TUI 管理中心 RFC
 
-状态：approved（Phase 0 已完成，Phase 1 待实施）
+状态：superseded（历史设计；新交互以 ADR-0018 与 2026-07-18 实施计划为准）
 审核日期：2026-07-15
 批准日期：2026-07-15
 代码基线：`mcp` / `41585a14dcf3`
@@ -24,7 +24,7 @@
 - [`../space/plans/2026-07-15-mcp-tui-management-center-implementation.md`](../space/plans/2026-07-15-mcp-tui-management-center-implementation.md)
 - [`../space/plans/2026-07-15-mcp-project-server-approval-p0.md`](../space/plans/2026-07-15-mcp-project-server-approval-p0.md)
 
-> 本文是已批准设计，不描述当前行为。实现依据为已激活的 `docs/space/plans/` 计划、源码与测试；各阶段完成后必须同步更新相关 `docs/active/`、book、ADR 和完成记录。
+> 本文保留 2026-07-15 的历史设计。2026-07-16 的只读纠偏曾替代其 TUI 结论；2026-07-18 又由 ADR-0018 接受更窄的 Select 管理中心。新的实施依据为 [`../adr/0018-mcp-tui-select-management-center.md`](../adr/0018-mcp-tui-select-management-center.md) 和 [`../space/plans/2026-07-18-mcp-tui-select-management-center.md`](../space/plans/2026-07-18-mcp-tui-select-management-center.md)。
 
 ## 一、结论
 

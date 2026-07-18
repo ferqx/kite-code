@@ -26,14 +26,14 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   runtimeProjectionV2: false,
   nativeLoopEngine: false,
   loopMode: false,
-  capabilityCatalogV1: false,
-  mcpRuntimeBindingV1: false,
+  capabilityCatalogV1: true,
+  mcpRuntimeBindingV1: true,
   mcpExecutionRecordV1: false,
   mcpProviderActionV1: false,
   skillActivationV2: false,
   skillWorkflowV1: false,
   verificationV1: false,
-  capabilitySearchV1: false,
+  capabilitySearchV1: true,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

@@ -366,7 +366,7 @@ describe('tool policy', () => {
     expect(decision.allowed).toBe(true);
     expect(decision.requiresApproval).toBe(false);
     expect(decision.risk).toBe('read');
-    expect(decision.effects).toEqual({ uncertainEffects: true });
+    expect(decision.effects).toBeUndefined();
   });
 
   test('keeps MCP resource reads available in planning', () => {

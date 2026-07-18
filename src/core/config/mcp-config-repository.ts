@@ -11,6 +11,8 @@ import {
   renameSync,
   statSync,
   unlinkSync,
+  unwatchFile,
+  watchFile,
   watch as watchFs,
   writeFileSync,
 } from 'node:fs';
@@ -25,7 +27,13 @@ import {
   type McpWritableScope,
 } from './mcp-config';
 import { canonicalWorkspaceKey } from './mcp-project-approvals';
-import { defaultConfigPath, localMcpConfigPath } from './paths';
+import {
+  defaultConfigPath,
+  localMcpConfigPath,
+  projectConfigPath,
+  projectMcpConfigPath,
+  userMcpConfigPath,
+} from './paths';
 
 export type McpServerConfigInput = Omit<McpServerConfig, 'providerVersion' | 'credentialKey'>;
 export type McpConfigPatch = Partial<McpServerConfigInput>;
@@ -59,7 +67,7 @@ export type McpConfigCommand =
       type: 'migrate_legacy';
       key: { name: string; source: McpConfigSourceKind };
       expectedRevision: string;
-      target: 'project';
+      target: McpWritableScope;
     };
 
 export type McpConfigMutationErrorCode =
@@ -176,10 +184,16 @@ export class DefaultMcpConfigRepository implements McpConfigRepository {
       }
       case 'migrate_legacy': {
         const entry = requireEntry(catalog, command.key, command.expectedRevision);
-        if (entry.source.kind !== 'project_legacy') {
+        const validTarget =
+          (entry.source.kind === 'user_legacy' && command.target === 'user') ||
+          ((entry.source.kind === 'project_legacy' ||
+            entry.source.kind === 'project_mcp_json' ||
+            entry.source.kind === 'local') &&
+            command.target === 'project');
+        if (!validTarget) {
           throw new McpConfigMutationError(
             'scope_read_only',
-            'Only a project_legacy MCP server can be migrated.',
+            'Legacy user MCP servers migrate to user scope; legacy project servers migrate to project scope.',
           );
         }
         const targetPath = sourcePath(workspace, command.target);
@@ -209,6 +223,7 @@ export class DefaultMcpConfigRepository implements McpConfigRepository {
     const resolvedWorkspace = resolve(workspace);
     const paths = sourcePaths(resolvedWorkspace);
     const watchers = new Map<string, FSWatcher>();
+    const polledFiles = new Set<string>();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
     const schedule = () => {
@@ -223,13 +238,20 @@ export class DefaultMcpConfigRepository implements McpConfigRepository {
     const rebind = () => {
       for (const watcher of watchers.values()) watcher.close();
       watchers.clear();
+      for (const path of polledFiles) unwatchFile(path);
+      polledFiles.clear();
       const directories = paths.map((path) => nearestExistingDirectory(dirname(path)));
-      for (const directory of new Set(directories)) {
+      const targets = new Set([...directories, ...paths.filter((path) => existsSync(path))]);
+      for (const target of targets) {
         try {
-          watchers.set(directory, watchFs(directory, schedule));
+          watchers.set(target, watchFs(target, schedule));
         } catch {
           // A later full repository load (including a TUI restart) remains the recovery path.
         }
+      }
+      for (const path of paths) {
+        watchFile(path, { interval: Math.max(20, this.debounceMs) }, schedule);
+        polledFiles.add(path);
       }
     };
     rebind();
@@ -238,6 +260,8 @@ export class DefaultMcpConfigRepository implements McpConfigRepository {
       if (timer) clearTimeout(timer);
       for (const watcher of watchers.values()) watcher.close();
       watchers.clear();
+      for (const path of polledFiles) unwatchFile(path);
+      polledFiles.clear();
     };
   }
 
@@ -266,7 +290,7 @@ function requireEntry(
 }
 
 function assertWritable(source: McpConfigSourceKind): asserts source is McpWritableScope {
-  if (source !== 'local' && source !== 'project' && source !== 'user') {
+  if (source !== 'project' && source !== 'user') {
     throw new McpConfigMutationError(
       'scope_read_only',
       'This MCP source is read-only; migrate legacy project config before editing it.',
@@ -282,22 +306,22 @@ function conflict(): never {
 }
 
 function sourcePath(workspace: string, scope: McpWritableScope): string {
-  if (scope === 'user') return defaultConfigPath();
-  if (scope === 'project') return resolve(workspace, '.mcp.json');
-  return localMcpConfigPath(canonicalWorkspaceKey(workspace));
+  return scope === 'user' ? userMcpConfigPath() : projectMcpConfigPath(workspace);
 }
 
 function sourcePaths(workspace: string): string[] {
   let localPath: string | undefined;
   try {
-    localPath = sourcePath(workspace, 'local');
+    localPath = localMcpConfigPath(canonicalWorkspaceKey(workspace));
   } catch {
     // The catalog will report the unavailable workspace identity.
   }
   return [
     defaultConfigPath(),
+    userMcpConfigPath(),
     resolve(workspace, '.mcp.json'),
-    resolve(workspace, '.kite-code', 'kite-code.jsonc'),
+    projectConfigPath(workspace),
+    projectMcpConfigPath(workspace),
     ...(localPath ? [localPath] : []),
   ];
 }
@@ -386,7 +410,8 @@ function atomicWrite(path: string, text: string): void {
 }
 
 function defaultMode(path: string): number {
-  return path.endsWith('.mcp.json') ? 0o644 : 0o600;
+  if (resolve(path) === resolve(userMcpConfigPath())) return 0o600;
+  return path.endsWith('.kite-code/mcp.json') ? 0o644 : 0o600;
 }
 
 function syncDirectory(directory: string): void {

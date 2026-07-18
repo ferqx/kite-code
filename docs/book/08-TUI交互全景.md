@@ -31,7 +31,7 @@ Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根�
 
 Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。
 
-`/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“查看 MCP 连接状态”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
+`/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“管理 MCP Servers”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令，管理动作只在 Overlay 的可见 Select 中执行。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
 
 ## 8.4 Session 与恢复点
 
@@ -41,15 +41,15 @@ TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 
 
 ## 8.5 MCP 与 Skill 交互
 
-MCP 状态面板订阅 Core control snapshot，只显示 effective Server 的连接/门禁状态与名称。面板不显示被遮蔽来源、scope、transport、typed diagnostic、Tools/Resources/Prompts 或配置动作；只允许滚动和 Esc 关闭。模型可调用能力仍来自 revisioned catalog/binding，而不是状态面板本身。
+MCP Overlay 订阅 Core control snapshot。Server List 只显示 effective Server、状态和 Add 入口，只负责 selection/navigation；Enter 打开只读 Detail，操作菜单按 config/auth/health/diagnostic 动态生成。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
 
-项目 Server 尚未批准时会出现在 `/mcp` 的 pending 状态行，同时 App shell 独立显示脱敏信任提示。连续两次按 `a` 确认批准当前摘要，连续两次按 `r` 确认拒绝，Esc 只延后本次提示；决定后 Supervisor 重新加载 catalog。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
+项目 Server 尚未批准时出现在 `/mcp` 的 Approval required 状态行。Detail 的 Review server 进入脱敏审批页，默认选择 Decide later，并提供 Approve and connect 与 Reject server；决定继续绑定当前 config digest 并执行 TOCTOU 复核。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
 
-HTTP Server 真实进入 `login_required` 或 `reauth_required` 时，App shell 在 `/mcp` 外显示独立认证提示。Enter/`l` 才启动 loopback callback 并调用系统 browser opener；Esc 可延后提示，authorizing 时 Esc 取消当前 flow。提示不显示 authorization URL、token、scope、transport 或 capability 详情，成功认证只影响后续 discovery 与新 model turn，不重放旧 Tool Call。
+HTTP Server 真实进入 `login_required` 或 `reauth_required` 时，Detail 提供 Authenticate。认证页只有选择 Open browser 才启动 loopback callback 并调用系统 browser opener；authorizing 时 Esc/Cancel authentication 取消当前 flow。页面不显示 token、scope、authorization code 或 secret，成功认证只影响后续 discovery 与新 model turn，不重放旧 Tool Call。
 
 开启 `mcpProviderActionV1` 后，Runtime 可在 Tool 失败后请求固定的 Login、Approve 或 Retry Provider Action。TUI 复用既有 input interrupt 收集决定并委托 MCP controller；成功恢复只开始新 turn，Later 或恢复失败都不会重放旧 Tool Call。新任务首次模型调用前还会对 unavailable required Provider 逐个显示 Retry、Session Waive 或 Cancel Run，waiver 只解除当前 session 的准入门禁。
 
-MCP 配置由文件位置确定来源并由 Core watcher/reconcile 加载。TUI 不提供 scope、Add Wizard、启停、删除、迁移、retry 或 reload；这些能力仍可由 Core Repository 供非 TUI 调用方复用。
+Add Wizard 只收集 transport、name、URL/command 和 availability：Current project 写 `<project>/.kite-code/mcp.json`，All projects 写 `~/.kite-code/mcp.json`。Detail 可 retry/reconnect、enable/disable 和 remove；disable/remove 使用安全默认确认，remove 同时尝试清理对应本地 OAuth credential。高级配置、legacy migrate、Tool policy 和手动 reload 不进入 TUI。
 
 Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到用户任务。
 

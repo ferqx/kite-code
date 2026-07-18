@@ -14,6 +14,7 @@ import {
   ASK_USER_CONTRACT,
   CAPABILITY_SEARCH_CONTRACT,
   EDIT_FILE_CONTRACT,
+  LIST_MCP_RESOURCES_CONTRACT,
   READ_FILE_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
   READ_PLAN_CONTRACT,
@@ -216,6 +217,48 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
       ),
   });
 
+  const listMcpResources = tool({
+    description: LIST_MCP_RESOURCES_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
+        server: z.string().min(1).optional().describe('Optional exact MCP server name'),
+      }),
+    ),
+    execute: async ({ server }) => {
+      if (!input.mcpManager) {
+        return JSON.stringify({ ok: false, stderr: 'MCP manager is not available.' });
+      }
+      const snapshot = input.mcpManager.getResourceDirectorySnapshot();
+      const matching = snapshot.resources.filter(
+        (resource) => server == null || resource.providerId === server,
+      );
+      if (server && matching.length === 0) {
+        return JSON.stringify({
+          ok: false,
+          stderr: `No available MCP resources were discovered for server: ${server}`,
+        });
+      }
+      const resources = matching.slice(0, 100).map((resource) => ({
+        server: resource.providerId,
+        uri: resource.uri,
+        name: resource.name,
+        ...(resource.mimeType ? { mime_type: resource.mimeType } : {}),
+      }));
+      return JSON.stringify({
+        ok: true,
+        resource_count: resources.length,
+        resources,
+        truncated: matching.length > resources.length,
+        next_step:
+          matching.length > resources.length
+            ? 'Call list_mcp_resources with an exact server to narrow the result.'
+            : resources.length > 0
+              ? 'Call read_mcp_resource with an exact server and URI.'
+              : 'No static MCP resources are currently available.',
+      });
+    },
+  });
+
   const readMcpResource = tool({
     description: READ_MCP_RESOURCE_CONTRACT.description,
     inputSchema: zodSchema(
@@ -232,7 +275,7 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
         });
       }
       try {
-        const content = await input.mcpManager.readResource(server, uri);
+        const content = await input.mcpManager.readResource(server, uri, input.signal);
         return JSON.stringify({ ok: true, content });
       } catch (err) {
         return JSON.stringify({
@@ -448,6 +491,7 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     shell_execute: shellExecute,
     search_content: searchContent,
     search_files: searchFiles,
+    list_mcp_resources: listMcpResources,
     read_mcp_resource: readMcpResource,
     web_fetch: webFetchTool,
     ...(activateSkillTool ? { activate_skill: activateSkillTool } : {}),

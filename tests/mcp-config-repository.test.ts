@@ -30,42 +30,29 @@ describe('MCP config repository', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  test('uses local > legacy > project > user precedence and reveals lower scope after remove', async () => {
+  test('uses project > user precedence and reveals user scope after remove', async () => {
     writeFileSync(
-      join(home, '.kite-code', 'kite-code.jsonc'),
+      join(home, '.kite-code', 'mcp.json'),
       JSON.stringify({ mcpServers: { shared: { command: 'user' } } }),
     );
     writeFileSync(
-      join(workspace, '.mcp.json'),
+      join(workspace, '.kite-code', 'mcp.json'),
       JSON.stringify({ mcpServers: { shared: { command: 'project' } } }),
-    );
-    writeFileSync(
-      join(workspace, '.kite-code', 'kite-code.jsonc'),
-      JSON.stringify({ mcpServers: { shared: { command: 'legacy' } } }),
     );
     const repository = new DefaultMcpConfigRepository();
     let catalog = await repository.load(workspace);
-    await repository.mutate({
-      type: 'add',
-      scope: 'local',
-      name: 'shared',
-      config: { type: 'stdio', command: 'local' },
-      expectedRevision: catalog.sourceRevisions.local,
-    });
-
-    catalog = await repository.load(workspace);
-    expect(catalog.effective.get('shared')?.source.kind).toBe('local');
-    const local = catalog.effective.get('shared')!;
+    expect(catalog.effective.get('shared')?.source.kind).toBe('project');
+    const project = catalog.effective.get('shared')!;
     catalog = await repository.mutate({
       type: 'remove',
-      key: { name: 'shared', source: 'local' },
-      expectedRevision: local.revision,
+      key: { name: 'shared', source: 'project' },
+      expectedRevision: project.revision,
     });
-    expect(catalog.effective.get('shared')?.source.kind).toBe('project_legacy');
+    expect(catalog.effective.get('shared')?.source.kind).toBe('user');
   });
 
   test('preserves unrelated JSONC comments and detects external modification conflicts', async () => {
-    const userPath = join(home, '.kite-code', 'kite-code.jsonc');
+    const userPath = join(home, '.kite-code', 'mcp.json');
     writeFileSync(
       userPath,
       '{\n  // keep provider comment\n  "provider": {},\n  "mcpServers": {}\n}\n',
@@ -141,14 +128,14 @@ describe('MCP config repository', () => {
     let catalog = await repository.load(workspace);
     catalog = await repository.mutate({
       type: 'add',
-      scope: 'local',
+      scope: 'project',
       name: 'env-demo',
       config: {
         type: 'stdio',
         command: 'node',
         env: { TOKEN: '$' + '{MCP_TOKEN}' },
       },
-      expectedRevision: catalog.sourceRevisions.local,
+      expectedRevision: catalog.sourceRevisions.project,
     });
     const entry = catalog.effective.get('env-demo')!;
     catalog = await repository.mutate({
@@ -182,27 +169,27 @@ describe('MCP config repository', () => {
     expect(catalog.effective.get('legacy')?.source.kind).toBe('project');
     expect(readFileSync(legacyPath, 'utf8')).toContain('// project settings');
     expect(readFileSync(legacyPath, 'utf8')).toContain('"theme": "dark"');
-    expect(readFileSync(join(workspace, '.mcp.json'), 'utf8')).toContain('"legacy"');
+    expect(readFileSync(join(workspace, '.kite-code', 'mcp.json'), 'utf8')).toContain('"legacy"');
     expect(catalog.effective.get('legacy')?.approvalStatus).toBe('pending_approval');
   });
 
-  test('watch rebinds when a missing local scope is created and manual load remains available', async () => {
+  test('watch rebinds when a missing project scope is created and manual load remains available', async () => {
     const repository = new DefaultMcpConfigRepository({ debounceMs: 10 });
     let catalog = await repository.load(workspace);
     let calls = 0;
     const stop = repository.watch(workspace, () => calls++);
     catalog = await repository.mutate({
       type: 'add',
-      scope: 'local',
+      scope: 'project',
       name: 'watched',
       config: { type: 'stdio', command: 'first' },
-      expectedRevision: catalog.sourceRevisions.local,
+      expectedRevision: catalog.sourceRevisions.project,
     });
-    await Bun.sleep(120);
+    await waitFor(() => calls > 0);
     calls = 0;
     const localPath = catalog.effective.get('watched')!.source.path;
     writeFileSync(localPath, '{ "mcpServers": { "watched": { "command": "second" } } }\n');
-    await Bun.sleep(120);
+    await waitFor(() => calls > 0);
     stop();
     expect(calls).toBeGreaterThanOrEqual(1);
     expect((await repository.load(workspace)).effective.get('watched')?.rawConfig.command).toBe(
@@ -226,3 +213,10 @@ describe('MCP config repository', () => {
     expect(loadMcpConfigCatalog({ workspace }).projectApprovals).toHaveLength(1);
   });
 });
+
+async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) {
+    await Bun.sleep(20);
+  }
+}

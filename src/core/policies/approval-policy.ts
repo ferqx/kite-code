@@ -369,14 +369,18 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
 
   // read_mcp_resource — 资源位置可能是外部服务
   // read_mcp_resource — resource locations may be externally managed
-  if (toolName === 'read_mcp_resource') {
+  if (toolName === 'list_mcp_resources' || toolName === 'read_mcp_resource') {
     return allow({
       risk: 'read',
-      effects: { uncertainEffects: true },
-      reason: 'MCP resource locations may be remote or externally managed.',
-      userVisibleSummary: `Read MCP resource from ${String(toolArgs.server ?? 'MCP server')}: ${String(toolArgs.uri ?? '?')}`,
+      reason: 'MCP resource metadata and content may be remote or externally managed.',
+      userVisibleSummary:
+        toolName === 'list_mcp_resources'
+          ? `List MCP resources${toolArgs.server ? ` from ${String(toolArgs.server)}` : ''}.`
+          : `Read MCP resource from ${String(toolArgs.server ?? 'MCP server')}: ${String(toolArgs.uri ?? '?')}`,
       expectedEffects: [
-        'Reads content from external MCP server',
+        toolName === 'list_mcp_resources'
+          ? 'Reads cached resource metadata from connected MCP servers'
+          : 'Reads content from external MCP server',
         'Does not mutate workspace files',
       ],
     });

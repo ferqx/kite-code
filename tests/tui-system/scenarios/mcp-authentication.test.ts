@@ -19,7 +19,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     workspace?.cleanup();
   });
 
-  test('publishes login-required without browser navigation and Esc defers the shell prompt', async () => {
+  test('publishes login-required without browser navigation and exposes it through /mcp', async () => {
     let mcpRequests = 0;
     let authorizationRequests = 0;
     authServer = startTestHttpServer({
@@ -44,17 +44,22 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       projectConfigOverrides: {},
     });
     tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.output(), 'MCP authentication required', 15_000);
+    await waitForText(() => tui!.output(), '❯', 15_000);
+    await sleep(300);
     expect(mcpRequests).toBeGreaterThan(0);
     expect(authorizationRequests).toBe(0);
-    expect(screenContains(tui.output(), 'oauth')).toBe(true);
 
     tui.setRawMode(true);
-    tui.write('\x1b');
-    await sleep(200);
-    await typeText(tui, '/help');
+    await typeText(tui, '/mcp');
     tui.write('\r');
-    await waitForText(() => tui!.output(), '快捷键', 10_000);
+    await waitForText(() => tui!.output(), 'oauth · ✘ login required', 10_000);
+    tui.write('\r');
+    await waitForText(() => tui!.output(), 'Authenticate', 10_000);
+    tui.write('\r');
+    await waitForText(() => tui!.output(), 'Open browser', 10_000);
+    expect(authorizationRequests).toBe(0);
+    tui.write('\x1b');
+    await waitForText(() => tui!.output(), 'Authenticate', 10_000);
     expect(authorizationRequests).toBe(0);
   }, 40_000);
 
@@ -114,9 +119,17 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     workspace.env.NODE_ENV = 'test';
     workspace.env.KITE_TEST_MCP_CREDENTIAL_STORE = 'memory';
     tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.output(), 'MCP authentication required', 15_000);
+    await waitForText(() => tui!.output(), '❯', 15_000);
+    await sleep(300);
 
     tui.setRawMode(true);
+    await typeText(tui, '/mcp');
+    tui.write('\r');
+    await waitForText(() => tui!.output(), 'oauth · ✘ login required', 10_000);
+    tui.write('\r');
+    await waitForText(() => tui!.output(), 'Authenticate', 10_000);
+    tui.write('\r');
+    await waitForText(() => tui!.output(), 'Open browser', 10_000);
     tui.write('\r');
     const openerFailureOutput = await waitForText(
       () => tui!.output(),
@@ -130,11 +143,6 @@ describe('TUI PTY System — MCP authentication recovery', () => {
 
     tui.write('\x1b');
     await waitForText(() => tui!.output(), 'MCP authentication cancelled.', 10_000);
-    tui.write('\x1b');
-    await sleep(200);
-    await typeText(tui, '/help');
-    tui.write('\r');
-    await waitForText(() => tui!.output(), '快捷键', 10_000);
   }, 50_000);
 
   test('required login provider gates the model and Session Waive continues without exposing it', async () => {
@@ -157,11 +165,10 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       projectConfigOverrides: {},
     });
     tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.output(), 'MCP authentication required', 15_000);
+    await waitForText(() => tui!.output(), '❯', 15_000);
+    await sleep(300);
 
     tui.setRawMode(true);
-    tui.write('\x1b');
-    await sleep(200);
     await typeText(tui, 'continue without required provider');
     tui.write('\r');
     await waitForText(() => tui!.output(), "Required MCP provider 'oauth'", 15_000);
@@ -233,6 +240,17 @@ describe('TUI PTY System — MCP authentication recovery', () => {
         message: {
           tool_calls: [
             {
+              id: 'capability-search',
+              name: 'capability_search',
+              args: { query: 'recoverable echo' },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          tool_calls: [
+            {
               id: 'mcp-call',
               name: 'mcp__recoverable__echo',
               args: { message: 'hello' },
@@ -276,12 +294,12 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     await waitForRequestMessage(modelServer, 'call the recoverable echo tool', 15_000);
     await waitForText(() => tui!.output(), "MCP provider 'recoverable' requires login.", 15_000);
     expect(toolCalls).toBe(1);
-    expect(modelServer.getRequestCount()).toBe(1);
+    expect(modelServer.getRequestCount()).toBe(2);
     await waitForText(() => tui!.output(), 'Later', 5_000);
     tui.write('\x1b[B');
     tui.write('\r');
     await waitForText(() => tui!.output(), 'continued after deferring provider login', 15_000);
     expect(toolCalls).toBe(1);
-    expect(modelServer.getRequestCount()).toBe(2);
+    expect(modelServer.getRequestCount()).toBe(3);
   }, 50_000);
 });

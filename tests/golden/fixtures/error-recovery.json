@@ -26,7 +26,9 @@
   "expectedEvents": ["tool.failed", "model.requested", "model.responded"],
   "expectedFinalState": {
     "tools.calls.call-1.status": "failed",
-    "transcript.messages.0.kind": "assistant",
-    "transcript.messages.0.content": "I will try another approach."
+    "transcript.messages.0.kind": "tool",
+    "transcript.messages.0.ok": false,
+    "transcript.messages.1.kind": "assistant",
+    "transcript.messages.1.content": "I will try another approach."
   }
 }

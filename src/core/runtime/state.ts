@@ -16,6 +16,7 @@ import type {
   CapabilityDisclosure,
   CapabilityInvocationRecord,
   CapabilitySearchResult,
+  LoadedCapability,
 } from '@/protocol/capabilities';
 import type {
   AgentPlan,
@@ -262,6 +263,8 @@ export interface CapabilityRuntimeState {
   disclosures: Record<string, CapabilityDisclosure>;
   /** One-shot search result consumed by the next model disclosure. */
   pendingSearch?: CapabilitySearchResult;
+  /** MCP schemas selected for stable reuse across turns in this session. */
+  loadedCapabilities: Record<string, LoadedCapability>;
   /** Event-sourced records for side-effecting capability invocations. */
   invocations: Record<string, CapabilityInvocationRecord>;
 }
@@ -366,7 +369,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 12;
+export const RUNTIME_STATE_SCHEMA_VERSION = 13;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -533,7 +536,13 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       queue: [],
       active: [],
     },
-    capabilities: { catalogRevision: '', bindings: {}, disclosures: {}, invocations: {} },
+    capabilities: {
+      catalogRevision: '',
+      bindings: {},
+      disclosures: {},
+      loadedCapabilities: {},
+      invocations: {},
+    },
     skills: { catalogRevision: '', frames: {} },
     verification: { records: {} },
     providerAdmission: { pending: [], waivers: {} },

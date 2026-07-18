@@ -11,6 +11,7 @@ import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { classifyFailure } from '@/core/runtime/failures';
 import { refreshSkillCatalog, type SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
@@ -67,20 +68,36 @@ export function createRuntimeEffectExecutor(
       });
     }
     if (effect.type === 'run_tools') {
-      return executeRuntimeTools({
-        state,
-        toolCallIds: effect.toolCallIds,
-        shellExecutor: dependencies.shellExecutor,
-        mcpManager: dependencies.mcpManager,
-        skillManifests: dependencies.skills,
-        skillOptions: dependencies.skillOptions,
-        skillCatalog: currentSkillCatalog(),
-        signal: dependencies.signal,
-        taskConfig: dependencies.config,
-        taskModel: dependencies.model,
-        subagentEventSink,
-        emitRuntimeEvent: emit,
-      });
+      try {
+        return await executeRuntimeTools({
+          state,
+          toolCallIds: effect.toolCallIds,
+          shellExecutor: dependencies.shellExecutor,
+          mcpManager: dependencies.mcpManager,
+          skillManifests: dependencies.skills,
+          skillOptions: dependencies.skillOptions,
+          skillCatalog: currentSkillCatalog(),
+          signal: dependencies.signal,
+          taskConfig: dependencies.config,
+          taskModel: dependencies.model,
+          subagentEventSink,
+          emitRuntimeEvent: emit,
+        });
+      } catch (error) {
+        const mcpCalls = effect.toolCallIds.flatMap((toolCallId) => {
+          const call = state.tools.calls[toolCallId];
+          return call?.name.startsWith('mcp__') ? [{ toolCallId, call }] : [];
+        });
+        if (mcpCalls.length !== effect.toolCallIds.length) throw error;
+        return mcpCalls.map(({ toolCallId }) => ({
+          type: 'tool.failed' as const,
+          toolCallId,
+          failure: classifyFailure(
+            'tool_runtime_error',
+            'The MCP tool failed inside the local execution adapter. The current call was isolated and the conversation can continue.',
+          ),
+        }));
+      }
     }
     if (effect.type === 'run_auto_review') {
       return executeAutoReview(effect, state, dependencies);
