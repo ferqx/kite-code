@@ -19,6 +19,9 @@ describe('feature flags', () => {
     expect(getFeatureFlags().capabilityCatalogV1).toBe(true);
     expect(getFeatureFlags().mcpRuntimeBindingV1).toBe(true);
     expect(getFeatureFlags().toolSearchV1).toBe(true);
+    expect(getFeatureFlags().contextCompactionV2).toBe(true);
+    expect(getFeatureFlags().contextCompactionAutoV1).toBe(false);
+    expect(getFeatureFlags().contextCompactionManualV1).toBe(true);
     expect(getFeatureFlags().verificationV1).toBe(false);
     expect(getFeatureFlags().mcpProviderActionV1).toBe(false);
     expect(getFeatureFlags({ features: { verificationV1: true } }).verificationV1).toBe(true);
@@ -33,6 +36,9 @@ describe('feature flags', () => {
     expect(parseFeatureOverride('mcpRuntimeBindingV1')).toEqual({ mcpRuntimeBindingV1: true });
     expect(parseFeatureOverride('mcpProviderActionV1')).toEqual({ mcpProviderActionV1: true });
     expect(parseFeatureOverride('verificationV1=false')).toEqual({ verificationV1: false });
+    expect(parseFeatureOverride('contextCompactionAutoV1')).toEqual({
+      contextCompactionAutoV1: true,
+    });
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');
   });
 

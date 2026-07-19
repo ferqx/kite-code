@@ -620,6 +620,33 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     },
     state.interactionMode,
     sandboxBackend,
+    (customInstructions) => {
+      const label = customInstructions ? `/compact ${customInstructions}` : '/compact';
+      dispatchSessionLoad({ type: 'USER_MESSAGE', text: label });
+      dispatchSessionLoad({ type: 'LOCAL_TEXT', text: '  ✳ Compacting conversation…' });
+      void sessionManager
+        .handleContextCompaction(threadIdRef.current, customInstructions)
+        .then((result) => {
+          for (const event of result.events) {
+            dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+          }
+          if (
+            !result.events.some((event) =>
+              [
+                'context.compaction_completed',
+                'context.compaction_failed',
+                'context.compaction_reset',
+              ].includes(event.type),
+            )
+          ) {
+            dispatchSessionLoad({
+              type: 'LOCAL_TEXT',
+              text: `  ⎿  ${result.text}`,
+              ...(result.isError ? { isError: true } : {}),
+            });
+          }
+        });
+    },
   );
 
   // Stable reference — avoids re-creating the object on every render and causing

@@ -34,12 +34,38 @@ Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者
   "interactionMode": "auto",
   "sandbox": { "enabled": true },
   "autoReview": {},
+  "compaction": {},
   "mcpServers": {},
   "features": {}
 }
 ```
 
 Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统一通过 AI SDK 模型边界调用。API key 和配置字符串支持环境变量展开。
+
+模型可使用字符串简写，也可声明正式能力字段：
+
+```jsonc
+{
+  "provider": {
+    "local": {
+      "type": "openai-compatible",
+      "model": "coder",
+      "models": [{
+        "name": "coder",
+        "contextWindow": 131072,
+        "maxOutputTokens": 8192,
+        "tokenizerFamily": "cl100k_base",
+        "supportsUsageMetadata": true,
+        "supportsPromptCache": false
+      }]
+    }
+  }
+}
+```
+
+显式模型条目优先于内置模型目录和兼容 `modelKwargs`。未知模型不会获得假定上下文窗口；此时 Runtime 仍可调用模型，但上下文 utilization 显示为 unknown，并对 Capability disclosure 使用保守预算。
+
+自动 M2 由 `features.contextCompactionAutoV1` 单独开启，默认关闭。`compaction` 可配置 `softRatio`、`hardRatio`、`targetRatio`、`minimumReductionRatio`、`cooldownTurns`、`recentTurns`、`maxSummaryTokens` 与 `maxSummaryInputTokens`；所有 ratio 限制在 0–1，token/turn 数必须为非负或正整数。当前 summary 请求复用主模型，但不绑定工具并使用独立的确定性输出限制。
 
 ## 9.4 MCP 配置
 
@@ -54,3 +80,5 @@ MCP server 可配置 stdio/HTTP transport、`enabled`、`required`、`cwd`、tim
 Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时按各 active 规则 fail closed 或回到当前受治理路径，不允许恢复已删除的旧 MCP adapter、Prompt Skill 或旧状态机。
 
 `toolSearchV1`（原 `capabilitySearchV1`）控制 MCP 工具渐进披露：≤20 工具时直接 binding，>20 工具时通过 `tool_search` 搜索发现。
+
+上下文压缩使用三个独立 flag：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动 soft/hard 与 overflow recovery，默认关闭；`contextCompactionManualV1` 控制 `/compact` 命令，默认开启。`/compact` 接受可选的自定义摘要指令（例如 `/compact focus on auth changes`）注入到 summary prompt。

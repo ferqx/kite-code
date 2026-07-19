@@ -56,6 +56,63 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   assert(state.recoveryState.kind === 'normal', 'recovery state must be normal before execution.');
   assertUnique(state.tools.queue, 'tool queue');
   assertUnique(state.tools.active, 'active tools');
+  assert(state.context != null, 'context runtime state is required.');
+  assert(state.context.history.length <= 128, 'context compaction history exceeds its bound.');
+  if (state.context.pendingCompaction) {
+    const pending = state.context.pendingCompaction;
+    assert(Boolean(pending.compactionId), 'pending compaction id is required.');
+    assert(
+      Number.isInteger(pending.requestedAtRevision) && pending.requestedAtRevision >= 0,
+      'pending compaction source revision must be a non-negative integer.',
+    );
+    assert(Boolean(pending.requestedAtTurnId), 'pending compaction turn id is required.');
+    assert(
+      Number.isFinite(pending.estimate.totalInputTokens) && pending.estimate.totalInputTokens >= 0,
+      'pending compaction token estimate must be non-negative.',
+    );
+  }
+  if (state.context.lastPreflight) {
+    assert(
+      state.context.lastPreflight.estimate.totalInputTokens >= 0,
+      'last context preflight estimate must be non-negative.',
+    );
+    assert(
+      state.context.lastPreflight.utilization == null ||
+        state.context.lastPreflight.utilization >= 0,
+      'last context preflight utilization must be non-negative.',
+    );
+  }
+  if (state.context.activeCheckpoint) {
+    const checkpoint = state.context.activeCheckpoint;
+    assert(checkpoint.version === 1, 'active context checkpoint version must be 1.');
+    assert(
+      checkpoint.summary.version === 1,
+      'active structured context summary version must be 1.',
+    );
+    assert(
+      checkpoint.summary.provenance.sourceDigest === checkpoint.sourceDigest,
+      'active structured context summary provenance digest is inconsistent.',
+    );
+    assert(
+      checkpoint.summary.provenance.lastMessageId === checkpoint.coveredThroughMessageId,
+      'active structured context summary coverage is inconsistent.',
+    );
+    assert(Boolean(checkpoint.compactionId), 'active context checkpoint id is required.');
+    assert(Boolean(checkpoint.sourceDigest), 'active context checkpoint digest is required.');
+    assert(
+      checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
+        checkpoint.inputTokensAfter <= checkpoint.targetTokens,
+      'active context checkpoint must satisfy its token reduction target.',
+    );
+    const boundary = state.transcript.messages.find(
+      (message) => message.messageId === checkpoint.coveredThroughMessageId,
+    );
+    assert(boundary != null, 'active context checkpoint boundary must exist in the transcript.');
+    assert(
+      boundary.turnId === checkpoint.coveredThroughTurnId,
+      'active context checkpoint boundary turn is inconsistent.',
+    );
+  }
 
   const activeIds = new Set(state.tools.active);
   for (const toolCallId of state.tools.queue) {

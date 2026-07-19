@@ -321,12 +321,20 @@ export class AgentKernel {
     }
     const serialized = JSON.stringify(event);
     const eventId = createHash('sha256').update(serialized).digest('hex');
+    const occurredAt = new Date().toISOString();
+    const payload =
+      (event.type === 'user.message_appended' ||
+        event.type === 'model.responded' ||
+        event.type === 'tool.finished') &&
+      !event.createdAt
+        ? { ...event, createdAt: occurredAt }
+        : event;
     return {
       eventId,
       threadId: this.state.session.threadId,
       revision,
-      occurredAt: new Date().toISOString(),
-      payload: event,
+      occurredAt,
+      payload,
     };
   }
 
@@ -577,6 +585,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     ...normalizeRuntimeMetadata(snapshot),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     verification: (snapshot as Partial<RuntimeState>).verification ?? { records: {} },
+    context: (snapshot as Partial<RuntimeState>).context ?? { history: [] },
     providerAdmission: (snapshot as Partial<RuntimeState>).providerAdmission ?? {
       pending: [],
       waivers: {},
@@ -637,12 +646,28 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     revision?: number;
     appliedEventIds?: string[];
     recoveryState?: RuntimeState['recoveryState'];
+    context?: RuntimeState['context'];
   };
   return {
     ...state,
     revision: Number.isInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0,
     appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
     recoveryState: raw.recoveryState ?? { kind: 'normal' },
+    context: raw.context ?? { history: [] },
+    transcript: {
+      ...state.transcript,
+      messages: (state.transcript?.messages ?? []).map((message, ordinal) => ({
+        ...message,
+        messageId:
+          message.messageId ??
+          (message.kind === 'tool'
+            ? `tool-${message.toolCallId}`
+            : `legacy-${state.session.threadId}-${ordinal}`),
+        turnId: message.turnId ?? state.turn.turnId,
+        ordinal: Number.isInteger(message.ordinal) ? message.ordinal : ordinal,
+        createdAt: message.createdAt ?? new Date(0).toISOString(),
+      })),
+    },
     capabilities: {
       catalogRevision: state.capabilities?.catalogRevision ?? '',
       bindings: state.capabilities?.bindings ?? {},

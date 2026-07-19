@@ -224,6 +224,9 @@ export interface StatusState {
   modelName: string;
   thinkingMode: string;
   retryState: RetryState | null;
+  /** Context compaction info for StatsLine display */
+  compactionBefore?: number;
+  compactionAfter?: number;
 }
 
 export interface SessionSnapshot {

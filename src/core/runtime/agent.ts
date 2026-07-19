@@ -82,6 +82,13 @@ export interface RunRuntimeAgentInput {
   sandboxBackend?: SandboxBackend | 'unknown';
   signal?: AbortSignal;
   frontend?: string;
+  /** App-shell control plane for injecting durable user commands into a live Kernel. */
+  onKernelControl?: (
+    control: {
+      getState: () => Readonly<import('./state').RuntimeState>;
+      processEvent: (event: RuntimeEvent) => void;
+    } | null,
+  ) => void;
 }
 
 /** Start a fresh RuntimeStore-backed session without LangGraph/checkpoint state. */
@@ -115,6 +122,12 @@ export async function* runRuntimeAgent(
     { provider: input.config.providerName, name: input.config.modelName },
   );
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
+  input.onKernelControl?.({
+    getState: () => kernel.getState(),
+    processEvent: (event) => {
+      kernel.processEvent(event);
+    },
+  });
   try {
     const admissionEvents = requiredProviderAdmissionEvents(
       kernel.getState(),
@@ -261,6 +274,7 @@ export async function* runRuntimeAgent(
     collector.recordRuntime(aborted);
     yield aborted;
   } finally {
+    input.onKernelControl?.(null);
     await collector.finalize(exitStatus);
     kernel.close();
   }

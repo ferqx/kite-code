@@ -10,19 +10,16 @@ import {
   type ToolMessage,
   toolMessage,
 } from '../src/core/messages';
-import {
-  estimateTokens,
-  foldOneToolResult,
-  foldToolOutputs,
-  microCompactToolOutputs,
-  shouldCompact,
-} from '../src/core/model/compaction';
+import { estimateTokens, shouldCompact } from '../src/core/model/compaction';
 import {
   buildModelMessages,
   buildStaticSystemPrompt,
   reorderInterleavedMessages,
   sanitizeToolCallPairs,
 } from '../src/core/model/context';
+import { buildCanonicalFrames } from '../src/core/model/context-frame-builder';
+import { serializeFramesToMessages } from '../src/core/model/context-serializer';
+import { validateFramePairs, validateMessagePairs } from '../src/core/model/context-validator';
 import type { SkillManifest } from '../src/core/skills/types';
 import type { ContextBudget } from '../src/core/types';
 
@@ -871,529 +868,369 @@ describe('estimateTokens', () => {
   });
 });
 
-describe('foldOneToolResult', () => {
-  test('folds read_file into "Read <path> (<N> lines)"', () => {
-    const msg = toolMessage({
-      content: JSON.stringify({
-        ok: true,
-        command: 'read_file src/App.tsx',
-        path: 'src/App.tsx',
-        stdout: 'import React from "react";\nconst App = () => {...};\n',
-        totalLines: 343,
+describe('P0: pairing validator', () => {
+  test('passes for valid single-tool pairs', () => {
+    const msgs: BaseMessage[] = [
+      aiMessage({
+        content: '',
+        tool_calls: [{ id: 'c1', name: 'read_file', args: {} }],
       }),
-      tool_call_id: 'c1',
-      name: 'read_file',
-      status: 'success',
-    });
-    const folded = foldOneToolResult(msg);
-    expect(folded).not.toBeNull();
-    const data = JSON.parse(folded!.content as string);
-    expect(data._folded).toBe(true);
-    expect(data.note).toBe('Read src/App.tsx (343 lines)');
-    expect(data.path).toBe('src/App.tsx');
-  });
-
-  test('folds read_file without line count when totalLines missing', () => {
-    const msg = toolMessage({
-      content: JSON.stringify({ ok: true, path: 'README.md' }),
-      tool_call_id: 'c2',
-      name: 'read_file',
-      status: 'success',
-    });
-    const folded = foldOneToolResult(msg);
-    const data = JSON.parse(folded!.content as string);
-    expect(data.note).toBe('Read README.md');
-  });
-
-  test('folds shell_execute with rg command into "Searched: <cmd>"', () => {
-    const msg = toolMessage({
-      content: JSON.stringify({
-        ok: true,
-        command: 'rg "pattern" src/',
-        exitCode: 0,
-        stdout: 'src/a.ts:42: pattern found\nsrc/b.ts:7: pattern found',
-        action: { intent: 'inspect' },
-      }),
-      tool_call_id: 'c3',
-      name: 'shell_execute',
-      status: 'success',
-    });
-    const folded = foldOneToolResult(msg);
-    expect(folded).not.toBeNull();
-    const data = JSON.parse(folded!.content as string);
-    expect(data.note).toContain('Searched:');
-    expect(data.note).toContain('rg "pattern" src/');
-  });
-
-  test('does not fold shell_execute with non-search command even if intent=inspect', () => {
-    const msg = toolMessage({
-      content: JSON.stringify({
-        ok: true,
-        command: 'ls -la',
-        exitCode: 0,
-        stdout: 'total 42',
-        action: { intent: 'inspect' },
-      }),
-      tool_call_id: 'c5',
-      name: 'shell_execute',
-      status: 'success',
-    });
-    expect(foldOneToolResult(msg)).toBeNull();
-  });
-
-  test('does not fold shell_execute without search intent', () => {
-    const msg = toolMessage({
-      content: JSON.stringify({
-        ok: true,
-        command: 'npm run build',
-        exitCode: 0,
-        stdout: 'Build successful',
-        action: { intent: 'build' },
-      }),
-      tool_call_id: 'c4',
-      name: 'shell_execute',
-      status: 'success',
-    });
-    expect(foldOneToolResult(msg)).toBeNull();
-  });
-
-  test('folds read_mcp_resource into "Read MCP <path>"', () => {
-    const msg = toolMessage({
-      content: JSON.stringify({ ok: true, path: 'github/repo/docs' }),
-      tool_call_id: 'c5',
-      name: 'read_mcp_resource',
-      status: 'success',
-    });
-    const folded = foldOneToolResult(msg);
-    const data = JSON.parse(folded!.content as string);
-    expect(data.note).toBe('Read MCP github/repo/docs');
-  });
-
-  test('preserves tool_call_id, name, and status in folded message', () => {
-    const msg = toolMessage({
-      content: JSON.stringify({ ok: true, path: 'test.txt' }),
-      tool_call_id: 'original-id-123',
-      name: 'read_file',
-      status: 'success',
-    });
-    const folded = foldOneToolResult(msg);
-    expect(folded!.tool_call_id).toBe('original-id-123');
-    expect((folded as unknown as Record<string, unknown>).name).toBe('read_file');
-    expect((folded as unknown as Record<string, unknown>).status).toBe('success');
-  });
-
-  test('returns null for non-foldable tools', () => {
-    for (const name of ['edit_file', 'write_file', 'ask_user', 'update_plan', 'Skill', 'task']) {
-      const msg = toolMessage({
-        content: JSON.stringify({ ok: true }),
-        tool_call_id: 'cx',
-        name,
+      toolMessage({
+        content: 'content',
+        tool_call_id: 'c1',
+        name: 'read_file',
         status: 'success',
-      });
-      expect(foldOneToolResult(msg)).toBeNull();
-    }
+      }),
+    ];
+    expect(() => validateMessagePairs(msgs)).not.toThrow();
+  });
+
+  test('passes for valid multi-tool pairs', () => {
+    const msgs: BaseMessage[] = [
+      aiMessage({
+        content: '',
+        tool_calls: [
+          { id: 'c1', name: 'read_file', args: { path: 'a.ts' } },
+          { id: 'c2', name: 'search_content', args: { pattern: 'x' } },
+        ],
+      }),
+      toolMessage({
+        content: 'file content',
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
+      }),
+      toolMessage({
+        content: 'matches',
+        tool_call_id: 'c2',
+        name: 'search_content',
+        status: 'success',
+      }),
+    ];
+    expect(() => validateMessagePairs(msgs)).not.toThrow();
+  });
+
+  test('throws on missing ToolMessage', () => {
+    const msgs: BaseMessage[] = [
+      aiMessage({
+        content: '',
+        tool_calls: [{ id: 'orphan-call', name: 'read_file', args: {} }],
+      }),
+    ];
+    expect(() => validateMessagePairs(msgs)).toThrow('Missing ToolMessages');
+  });
+
+  test('throws on orphan ToolMessage (no matching AIMessage)', () => {
+    const msgs: BaseMessage[] = [
+      toolMessage({
+        content: 'orphan result',
+        tool_call_id: 'no-such-call',
+        name: 'read_file',
+        status: 'success',
+      }),
+    ];
+    expect(() => validateMessagePairs(msgs)).toThrow('Orphan ToolMessages');
+  });
+
+  test('throws on duplicate ToolMessages for same tool_call_id', () => {
+    const msgs: BaseMessage[] = [
+      aiMessage({
+        content: '',
+        tool_calls: [{ id: 'dup-call', name: 'read_file', args: {} }],
+      }),
+      toolMessage({
+        content: 'result 1',
+        tool_call_id: 'dup-call',
+        name: 'read_file',
+        status: 'success',
+      }),
+      toolMessage({
+        content: 'result 2',
+        tool_call_id: 'dup-call',
+        name: 'read_file',
+        status: 'success',
+      }),
+    ];
+    expect(() => validateMessagePairs(msgs)).toThrow('Duplicate ToolMessages');
+  });
+
+  test('passes for messages with no tool calls', () => {
+    const msgs: BaseMessage[] = [humanMessage('hello'), aiMessage({ content: 'hi' })];
+    expect(() => validateMessagePairs(msgs)).not.toThrow();
   });
 });
 
-describe('foldToolOutputs', () => {
-  test('preserves recent messages unfoled', () => {
-    const msgs: BaseMessage[] = [
-      humanMessage('read file'),
-      aiMessage({
-        content: '',
-        tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
-      }),
-      toolMessage({
-        content: JSON.stringify({ ok: true, path: 'a.txt', totalLines: 10, stdout: 'AAA' }),
-        tool_call_id: 'c1',
-        name: 'read_file',
-        status: 'success',
-      }),
-    ];
-    // Only 3 messages, recentWindowSize=6 → all within recent window, no folding
-    const result = foldToolOutputs(msgs);
-    const tm = result.find((m) => isToolMessage(m)) as ToolMessage;
-    const data = JSON.parse(tm.content as string);
-    expect(data._folded).toBeUndefined();
+// ============================================================================
+// PR 2：Canonical Context Frame — 帧构建、序列化、帧级校验
+// PR 2: Canonical Context Frame — frame building, serialization, frame-level validation
+// ============================================================================
+
+describe('PR 2: canonical frame building', () => {
+  test('builds UserFrame for human messages', () => {
+    const msgs: BaseMessage[] = [humanMessage('hello')];
+    const frames = buildCanonicalFrames(msgs);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.kind).toBe('user');
   });
 
-  test('folds old read_file messages beyond recent window', () => {
-    const msgs: BaseMessage[] = [];
-    // Create 3 files, each read 4 times (24 messages total)
-    // First read of each file = preserved, subsequent reads of same file = folded
-    for (let i = 0; i < 4; i++) {
-      for (const f of ['a.txt', 'b.txt', 'c.txt']) {
-        msgs.push(
-          aiMessage({
-            content: '',
-            tool_calls: [{ id: `c_${f}_${i}`, name: 'read_file', args: { path: f } }],
-          }),
-        );
-        msgs.push(
-          toolMessage({
-            content: JSON.stringify({
-              ok: true,
-              path: f,
-              totalLines: 10,
-              stdout: `Content of ${f} read ${i}`,
-            }),
-            tool_call_id: `c_${f}_${i}`,
-            name: 'read_file',
-            status: 'success',
-          }),
-        );
-      }
-    }
-
-    // recentWindowSize=2 → last 2 messages protected
-    // First occurrence of each file → preserved (3 messages kept)
-    // Remaining (24 - 2 - 3 = 19) messages → folded
-    const result = foldToolOutputs(msgs, { recentWindowSize: 2 });
-
-    // First ToolMessage (a.txt, first read) → preserved (first path)
-    const firstTM = result[1] as ToolMessage;
-    const firstData = JSON.parse(firstTM.content as string);
-    expect(firstData._folded).toBeUndefined();
-
-    // Second occurrence of a.txt (at index ~7) → folded
-    const secondA = result.find((m, _i) => {
-      if (!isToolMessage(m)) return false;
-      try {
-        const d = JSON.parse(m.content as string);
-        return d.path === 'a.txt' && d._folded === true;
-      } catch {
-        return false;
-      }
-    });
-    expect(secondA).toBeDefined();
-
-    // Last 2 messages are within recent window → not folded
-    const lastTM = result[result.length - 1] as ToolMessage;
-    const lastData = JSON.parse(lastTM.content as string);
-    expect(lastData._folded).toBeUndefined();
+  test('builds AssistantFrame for AI messages without tool calls', () => {
+    const msgs: BaseMessage[] = [aiMessage({ content: 'hi there' })];
+    const frames = buildCanonicalFrames(msgs);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.kind).toBe('assistant');
   });
 
-  test('preserves first occurrence of each file path', () => {
-    const msgs: BaseMessage[] = [];
-    // Same file read 6 times (12 messages), recentWindowSize=2
-    // Last 2 messages protected, first occurrence preserved, 3 middle ones folded
-    for (let i = 0; i < 6; i++) {
-      msgs.push(
-        aiMessage({
-          content: '',
-          tool_calls: [{ id: `c${i}`, name: 'read_file', args: { path: 'config.json' } }],
-        }),
-      );
-      msgs.push(
-        toolMessage({
-          content: JSON.stringify({
-            ok: true,
-            path: 'config.json',
-            totalLines: 20,
-            stdout: `v${i}`,
-          }),
-          tool_call_id: `c${i}`,
-          name: 'read_file',
-          status: 'success',
-        }),
-      );
-    }
-
-    // recentWindowSize=2 → last 2 of 12 messages protected
-    // First occurrence preserved
-    const result = foldToolOutputs(msgs, { recentWindowSize: 2 });
-
-    // First occurrence preserved (unfolded)
-    const firstTM = result[1] as ToolMessage;
-    const firstData = JSON.parse(firstTM.content as string);
-    expect(firstData._folded).toBeUndefined();
-
-    // Second occurrence should be folded (old + not first path)
-    const secondTM = result[3] as ToolMessage;
-    const secondData = JSON.parse(secondTM.content as string);
-    expect(secondData._folded).toBe(true);
-  });
-
-  test('preserves the first read after a file mutation', () => {
-    const msgs: BaseMessage[] = [
-      aiMessage({
-        content: '',
-        tool_calls: [{ id: 'read-1', name: 'read_file', args: { path: 'config.json' } }],
-      }),
-      toolMessage({
-        content: JSON.stringify({
-          ok: true,
-          path: 'config.json',
-          totalLines: 20,
-          stdout: 'before edit',
-        }),
-        tool_call_id: 'read-1',
-        name: 'read_file',
-        status: 'success',
-      }),
-      aiMessage({
-        content: '',
-        tool_calls: [
-          {
-            id: 'edit-1',
-            name: 'edit_file',
-            args: { path: 'config.json', old_string: 'before', new_string: 'after' },
-          },
-        ],
-      }),
-      toolMessage({
-        content: JSON.stringify({ ok: true, path: 'config.json' }),
-        tool_call_id: 'edit-1',
-        name: 'edit_file',
-        status: 'success',
-      }),
-      aiMessage({
-        content: '',
-        tool_calls: [{ id: 'read-2', name: 'read_file', args: { path: 'config.json' } }],
-      }),
-      toolMessage({
-        content: JSON.stringify({
-          ok: true,
-          path: 'config.json',
-          totalLines: 20,
-          stdout: 'after edit',
-        }),
-        tool_call_id: 'read-2',
-        name: 'read_file',
-        status: 'success',
-      }),
-    ];
-
-    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
-    const secondRead = result[5] as ToolMessage;
-    const secondData = JSON.parse(secondRead.content as string);
-    expect(secondData._folded).toBeUndefined();
-    expect(secondData.stdout).toBe('after edit');
-  });
-
-  test('folds shell_execute with rg search command', () => {
-    const msgs: BaseMessage[] = [
-      aiMessage({
-        content: '',
-        tool_calls: [
-          { id: 'c1', name: 'shell_execute', args: { command: 'rg pattern', intent: 'inspect' } },
-        ],
-      }),
-      toolMessage({
-        content: JSON.stringify({
-          ok: true,
-          command: 'rg pattern',
-          exitCode: 0,
-          stdout: 'Found 5 matches',
-          action: { intent: 'inspect' },
-        }),
-        tool_call_id: 'c1',
-        name: 'shell_execute',
-        status: 'success',
-      }),
-    ];
-
-    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
-    const tm = result[1] as ToolMessage;
-    const data = JSON.parse(tm.content as string);
-    expect(data._folded).toBe(true);
-    expect(data.note).toContain('Searched:');
-    expect(data.note).toContain('rg pattern');
-  });
-
-  test('does not fold non-foldable tools like edit_file', () => {
-    const msgs: BaseMessage[] = [
-      aiMessage({
-        content: '',
-        tool_calls: [
-          { id: 'c1', name: 'edit_file', args: { path: 'x.ts', old_string: 'a', new_string: 'b' } },
-        ],
-      }),
-      toolMessage({
-        content: JSON.stringify({ ok: true, command: 'edit_file x.ts' }),
-        tool_call_id: 'c1',
-        name: 'edit_file',
-        status: 'success',
-      }),
-    ];
-
-    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
-    const data = JSON.parse((result[1] as ToolMessage).content as string);
-    expect(data._folded).toBeUndefined();
-  });
-
-  test('does not double-fold micro-compacted messages into "Read unknown"', () => {
-    // Simulate a message that was already compacted by microCompactToolOutputs
+  test('builds ToolCallBlockFrame for single-tool AIMessage', () => {
     const msgs: BaseMessage[] = [
       aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
       }),
       toolMessage({
-        content: JSON.stringify({
-          _compacted: true,
-          note: '[repeated read_file output collapsed]',
-        }),
+        content: JSON.stringify({ ok: true, path: 'a.txt', totalLines: 10 }),
         tool_call_id: 'c1',
         name: 'read_file',
         status: 'success',
       }),
     ];
-
-    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
-    const tm = result[1] as ToolMessage;
-    const data = JSON.parse(tm.content as string);
-    // Should pass through unchanged, NOT become "Read unknown"
-    expect(data._compacted).toBe(true);
-    expect(data._folded).toBeUndefined();
-    expect(data.note).toContain('repeated read_file');
+    const frames = buildCanonicalFrames(msgs);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.kind).toBe('tool_block');
+    const block = frames[0]!;
+    if (block.kind === 'tool_block') {
+      expect(block.calls).toHaveLength(1);
+      expect(block.calls[0]!.toolCallId).toBe('c1');
+      expect(block.calls[0]!.name).toBe('read_file');
+      expect(block.calls[0]!.ok).toBe(true);
+    }
   });
 
-  test('does not double-fold messages already folded by foldOneToolResult', () => {
-    // Simulate a message already folded during a prior turn
-    const foldedContent = JSON.stringify({
-      _folded: true,
-      ok: true,
-      note: 'Read a.txt (10 lines)',
-      path: 'a.txt',
-      totalLines: 10,
-    });
+  test('builds ToolCallBlockFrame for multi-tool AIMessage with all calls', () => {
+    const msgs: BaseMessage[] = [
+      aiMessage({
+        content: 'Let me check several things.',
+        tool_calls: [
+          { id: 'c1', name: 'read_file', args: { path: 'a.ts' } },
+          { id: 'c2', name: 'search_content', args: { pattern: 'TODO' } },
+        ],
+      }),
+      toolMessage({
+        content: JSON.stringify({ ok: true, path: 'a.ts', totalLines: 50 }),
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
+      }),
+      toolMessage({
+        content: JSON.stringify({ ok: true, matchCount: 3 }),
+        tool_call_id: 'c2',
+        name: 'search_content',
+        status: 'success',
+      }),
+    ];
+    const frames = buildCanonicalFrames(msgs);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.kind).toBe('tool_block');
+    const block = frames[0]!;
+    if (block.kind === 'tool_block') {
+      expect(block.calls).toHaveLength(2);
+      expect(block.calls[0]!.toolCallId).toBe('c1');
+      expect(block.calls[0]!.name).toBe('read_file');
+      expect(block.calls[1]!.toolCallId).toBe('c2');
+      expect(block.calls[1]!.name).toBe('search_content');
+      // assistant content preserved
+      expect(block.assistantContent).toBe('Let me check several things.');
+    }
+  });
+
+  test('handles interleaved user messages between tool blocks', () => {
     const msgs: BaseMessage[] = [
       aiMessage({
         content: '',
-        tool_calls: [{ id: 'c2', name: 'read_file', args: { path: 'a.txt' } }],
+        tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
       }),
       toolMessage({
-        content: foldedContent,
+        content: 'content',
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
+      }),
+      humanMessage('now check b'),
+      aiMessage({
+        content: '',
+        tool_calls: [{ id: 'c2', name: 'read_file', args: { path: 'b.txt' } }],
+      }),
+      toolMessage({
+        content: 'content b',
         tool_call_id: 'c2',
         name: 'read_file',
         status: 'success',
       }),
     ];
-
-    const result = foldToolOutputs(msgs, { recentWindowSize: 0 });
-    const tm = result[1] as ToolMessage;
-    expect(tm.content).toBe(foldedContent); // identical, not re-folded
-  });
-
-  test('passes through non-ToolMessages unchanged', () => {
-    const msgs: BaseMessage[] = [humanMessage('hello'), aiMessage({ content: 'hi' })];
-    const result = foldToolOutputs(msgs);
-    expect(result).toEqual(msgs);
+    const frames = buildCanonicalFrames(msgs);
+    expect(frames).toHaveLength(3);
+    expect(frames[0]!.kind).toBe('tool_block');
+    expect(frames[1]!.kind).toBe('user');
+    expect(frames[2]!.kind).toBe('tool_block');
   });
 });
 
-describe('microCompactToolOutputs', () => {
-  test('passes through non-consecutive ToolMessages unchanged', () => {
+describe('PR 2: frame serialization round-trip', () => {
+  test('round-trips single-tool block preserving all pairings', () => {
     const msgs: BaseMessage[] = [
-      humanMessage('go'),
-      aiMessage({ content: '', tool_calls: [{ id: 'c1', name: 'read_file', args: {} }] }),
-      toolMessage({ content: 'file A', tool_call_id: 'c1', name: 'read_file' }),
-      aiMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
-      toolMessage({ content: 'ls output', tool_call_id: 'c2', name: 'shell_execute' }),
+      aiMessage({
+        content: '',
+        tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'config.ts' } }],
+      }),
+      toolMessage({
+        content: JSON.stringify({ ok: true, path: 'config.ts', totalLines: 100 }),
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
+      }),
     ];
-    const result = microCompactToolOutputs(msgs);
-    expect(result).toHaveLength(5);
+    const frames = buildCanonicalFrames(msgs);
+    const result = serializeFramesToMessages(frames);
+
+    // Should have AIMessage + ToolMessage
+    expect(result).toHaveLength(2);
+    expect(result[0]!.type).toBe('ai');
+
+    const rm = result[1]! as unknown as Record<string, unknown>;
+    expect(rm.tool_call_id).toBe('c1');
+    expect(rm.name).toBe('read_file');
   });
 
-  test('collapses 3+ consecutive same-tool outputs', () => {
+  test('round-trips multi-tool block preserving all pairings', () => {
     const msgs: BaseMessage[] = [
-      aiMessage({ content: '', tool_calls: [{ id: 'c1', name: 'shell_execute', args: {} }] }),
-      toolMessage({ content: 'output1', tool_call_id: 'c1', name: 'shell_execute' }),
-      aiMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
-      toolMessage({ content: 'output2', tool_call_id: 'c2', name: 'shell_execute' }),
-      aiMessage({ content: '', tool_calls: [{ id: 'c3', name: 'shell_execute', args: {} }] }),
-      toolMessage({ content: 'output3', tool_call_id: 'c3', name: 'shell_execute' }),
+      aiMessage({
+        content: '',
+        tool_calls: [
+          { id: 'ca', name: 'read_file', args: { path: 'x.ts' } },
+          { id: 'cb', name: 'search_content', args: { pattern: 'bug' } },
+        ],
+      }),
+      toolMessage({
+        content: JSON.stringify({ ok: true, path: 'x.ts' }),
+        tool_call_id: 'ca',
+        name: 'read_file',
+        status: 'success',
+      }),
+      toolMessage({
+        content: JSON.stringify({ ok: true, matchCount: 2 }),
+        tool_call_id: 'cb',
+        name: 'search_content',
+        status: 'success',
+      }),
     ];
-    const result = microCompactToolOutputs(msgs);
-    const contents = result
-      .filter((m) => isToolMessage(m))
-      .map((m) => {
-        try {
-          return JSON.parse(m.content as string);
-        } catch {
-          return {};
-        }
-      });
-    const collapsed = contents.find((c) => c._compacted === true);
-    expect(collapsed).toBeDefined();
-    expect(collapsed.note).toContain('shell_execute');
+    const frames = buildCanonicalFrames(msgs);
+    const result = serializeFramesToMessages(frames);
+
+    // 1 AIMessage + 2 ToolMessages
+    expect(result).toHaveLength(3);
+    // Verify tool_call_ids match in order
+    const toolResults = result.filter((_, i) => i > 0);
+    expect(toolResults).toHaveLength(2);
+    const r1 = toolResults[0]! as unknown as Record<string, unknown>;
+    const r2 = toolResults[1]! as unknown as Record<string, unknown>;
+    expect(r1.tool_call_id).toBe('ca');
+    expect(r2.tool_call_id).toBe('cb');
   });
 
-  test('does not collapse fewer than 3 consecutive calls', () => {
+  test('round-trip with interleaved user messages preserves order', () => {
     const msgs: BaseMessage[] = [
-      aiMessage({ content: '', tool_calls: [{ id: 'c1', name: 'shell_execute', args: {} }] }),
-      toolMessage({ content: 'output1', tool_call_id: 'c1', name: 'shell_execute' }),
-      aiMessage({ content: '', tool_calls: [{ id: 'c2', name: 'shell_execute', args: {} }] }),
-      toolMessage({ content: 'output2', tool_call_id: 'c2', name: 'shell_execute' }),
-    ];
-    const result = microCompactToolOutputs(msgs);
-    expect(result).toHaveLength(4);
-    const contents = result
-      .filter((m) => isToolMessage(m))
-      .map((m) => {
-        try {
-          return JSON.parse(m.content as string);
-        } catch {
-          return {};
-        }
-      });
-    expect(contents.some((c) => c._compacted === true)).toBe(false);
-  });
-
-  test('does not collapse consecutive calls with different arguments', () => {
-    const msgs: BaseMessage[] = [
+      humanMessage('start'),
       aiMessage({
         content: '',
         tool_calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.txt' } }],
       }),
-      toolMessage({ content: 'file A', tool_call_id: 'c1', name: 'read_file' }),
-      aiMessage({
-        content: '',
-        tool_calls: [{ id: 'c2', name: 'read_file', args: { path: 'b.txt' } }],
+      toolMessage({
+        content: 'a content',
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
       }),
-      toolMessage({ content: 'file B', tool_call_id: 'c2', name: 'read_file' }),
-      aiMessage({
-        content: '',
-        tool_calls: [{ id: 'c3', name: 'read_file', args: { path: 'c.txt' } }],
-      }),
-      toolMessage({ content: 'file C', tool_call_id: 'c3', name: 'read_file' }),
+      humanMessage('next'),
     ];
+    const frames = buildCanonicalFrames(msgs);
+    const result = serializeFramesToMessages(frames);
 
-    const result = microCompactToolOutputs(msgs);
-    const contents = result
-      .filter((m) => isToolMessage(m))
-      .map((m) => {
-        try {
-          return JSON.parse(m.content as string);
-        } catch {
-          return {};
-        }
-      });
-    expect(contents.some((c) => c._compacted === true)).toBe(false);
+    expect(result).toHaveLength(4);
+    expect(result[0]!.type).toBe('human');
+    expect(result[1]!.type).toBe('ai');
+    expect((result[2]! as unknown as Record<string, unknown>).tool_call_id).toBe('c1');
+    expect(result[3]!.type).toBe('human');
+  });
+});
+
+describe('PR 2: frame-level validation', () => {
+  test('passes for valid single-tool block', () => {
+    const msgs: BaseMessage[] = [
+      aiMessage({
+        content: '',
+        tool_calls: [{ id: 'c1', name: 'read_file', args: {} }],
+      }),
+      toolMessage({
+        content: 'content',
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
+      }),
+    ];
+    const frames = buildCanonicalFrames(msgs);
+    expect(() => validateFramePairs(frames)).not.toThrow();
   });
 
-  test('resets consecutive counter when tool name changes', () => {
+  test('passes for valid multi-tool block', () => {
     const msgs: BaseMessage[] = [
-      aiMessage({ content: '', tool_calls: [{ id: 'c1', name: 'read_file', args: {} }] }),
-      toolMessage({ content: 'f1', tool_call_id: 'c1', name: 'read_file' }),
-      aiMessage({ content: '', tool_calls: [{ id: 'c2', name: 'read_file', args: {} }] }),
-      toolMessage({ content: 'f2', tool_call_id: 'c2', name: 'read_file' }),
-      aiMessage({ content: '', tool_calls: [{ id: 'c3', name: 'shell_execute', args: {} }] }),
-      toolMessage({ content: 'out', tool_call_id: 'c3', name: 'shell_execute' }),
-      aiMessage({ content: '', tool_calls: [{ id: 'c4', name: 'read_file', args: {} }] }),
-      toolMessage({ content: 'f3', tool_call_id: 'c4', name: 'read_file' }),
+      aiMessage({
+        content: '',
+        tool_calls: [
+          { id: 'c1', name: 'read_file', args: {} },
+          { id: 'c2', name: 'search_content', args: {} },
+        ],
+      }),
+      toolMessage({
+        content: 'f1',
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
+      }),
+      toolMessage({
+        content: 'f2',
+        tool_call_id: 'c2',
+        name: 'search_content',
+        status: 'success',
+      }),
     ];
-    const result = microCompactToolOutputs(msgs);
-    const contents = result
-      .filter((m) => isToolMessage(m))
-      .map((m) => {
-        try {
-          return JSON.parse(m.content as string);
-        } catch {
-          return {};
-        }
-      });
-    expect(contents.some((c) => c._compacted === true)).toBe(false);
+    const frames = buildCanonicalFrames(msgs);
+    expect(() => validateFramePairs(frames)).not.toThrow();
+  });
+
+  test('throws when calls count does not match tool_calls count', () => {
+    // Manually construct a frame with mismatched counts
+    const msgs: BaseMessage[] = [
+      aiMessage({
+        content: '',
+        tool_calls: [
+          { id: 'c1', name: 'read_file', args: {} },
+          { id: 'c2', name: 'read_file', args: {} },
+        ],
+      }),
+      toolMessage({
+        content: 'only one result',
+        tool_call_id: 'c1',
+        name: 'read_file',
+        status: 'success',
+      }),
+      // Missing ToolMessage for c2
+    ];
+    const frames = buildCanonicalFrames(msgs);
+    expect(() => validateFramePairs(frames)).toThrow('calls count');
+  });
+
+  test('passes for frames with no tool blocks', () => {
+    const msgs: BaseMessage[] = [humanMessage('hello'), aiMessage({ content: 'hi' })];
+    const frames = buildCanonicalFrames(msgs);
+    expect(() => validateFramePairs(frames)).not.toThrow();
   });
 });

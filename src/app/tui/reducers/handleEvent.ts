@@ -1474,6 +1474,45 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           },
         },
       });
+    case 'context.compaction_completed': {
+      const next = handleEventAction(state, {
+        type: 'text',
+        data: {
+          text: `Compacted ${event.checkpoint.inputTokensBefore} → ${event.checkpoint.inputTokensAfter} tokens.`,
+        },
+      });
+      return {
+        ...next,
+        status: {
+          ...next.status,
+          compactionBefore: event.checkpoint.inputTokensBefore,
+          compactionAfter: event.checkpoint.inputTokensAfter,
+        },
+      };
+    }
+    case 'context.compaction_failed':
+      return handleEventAction(state, {
+        type: 'error',
+        data: {
+          message: `Context compaction failed: ${event.message}. The original conversation was preserved.`,
+          recoverable: event.retryable,
+        },
+      });
+    case 'context.compaction_reset':
+      return handleEventAction(
+        {
+          ...state,
+          status: {
+            ...state.status,
+            compactionBefore: undefined,
+            compactionAfter: undefined,
+          },
+        },
+        {
+          type: 'text',
+          data: { text: 'Context checkpoint reset; using the original transcript.' },
+        },
+      );
     case 'run.error':
       return handleEventAction(state, {
         type: 'error',

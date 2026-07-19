@@ -20,6 +20,17 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
           : `Runtime schema ${state.recoveryState.schemaVersion} is not supported.`,
     };
   }
+  const compactionFailure = state.context.lastFailure;
+  if (
+    compactionFailure &&
+    ['auto_hard', 'overflow_recovery'].includes(compactionFailure.reason ?? '') &&
+    state.revision <= compactionFailure.sourceRevision + 1
+  ) {
+    return {
+      type: 'recovery_blocked',
+      reason: `Context compaction failed at the hard model boundary: ${compactionFailure.message}`,
+    };
+  }
   if (state.legacyUnrecoverableSubagentApproval) {
     return {
       type: 'subagent.recovery_unavailable',
@@ -145,6 +156,13 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       (frame) => frame.status === 'active',
     );
     if (!activeSkill) return { type: 'emit_final' };
+  }
+
+  if (state.context.pendingCompaction) {
+    return {
+      type: 'compact_context',
+      compactionId: state.context.pendingCompaction.compactionId,
+    };
   }
 
   return { type: 'call_model' };

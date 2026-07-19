@@ -1386,7 +1386,89 @@ describe('reduceRuntimeState — user messages', () => {
     };
     const next = reduceRuntimeState(state, event);
     expect(next.transcript.messages).toEqual([
-      { kind: 'user', messageId: 'msg-1', content: 'Hello, can you help?' },
+      expect.objectContaining({
+        kind: 'user',
+        messageId: 'msg-1',
+        turnId: state.turn.turnId,
+        ordinal: 0,
+        createdAt: '1970-01-01T00:00:00.000Z',
+        content: 'Hello, can you help?',
+      }),
+    ]);
+  });
+});
+
+describe('PR 3 — structured transcript and tool result metadata', () => {
+  test('persists structured tool facts without decoding stdout', () => {
+    let state = makeInitialState();
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'read-1',
+      modelMessageId: 'model-1',
+      name: 'read_file',
+      args: { path: 'src/main.ts' },
+    });
+
+    const next = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'read-1',
+      name: 'read_file',
+      createdAt: '2026-07-20T08:00:00.000Z',
+      result: {
+        ok: true,
+        command: 'read_file',
+        exitCode: 0,
+        stdout: 'plain file content, not JSON',
+        stderr: '',
+        totalLines: 42,
+        resultMeta: { resourceRevision: 'sha256:resource-1' },
+      },
+    });
+
+    expect(next.tools.calls['read-1']?.result?.resultMeta).toMatchObject({
+      path: 'src/main.ts',
+      totalLines: 42,
+      command: 'read_file',
+      resourceRevision: 'sha256:resource-1',
+    });
+    expect(next.tools.calls['read-1']?.result?.resultMeta?.contentDigest).toHaveLength(64);
+    expect(next.transcript.messages.at(-1)).toMatchObject({
+      kind: 'tool',
+      messageId: 'tool-read-1',
+      turnId: state.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-07-20T08:00:00.000Z',
+      resultMeta: {
+        path: 'src/main.ts',
+        totalLines: 42,
+        resourceRevision: 'sha256:resource-1',
+      },
+    });
+  });
+
+  test('records workspace mutation scope from authoritative tool args', () => {
+    let state = makeInitialState();
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'edit-1',
+      modelMessageId: 'model-1',
+      name: 'edit_file',
+      args: { path: 'src/main.ts', old_string: 'a', new_string: 'b' },
+    });
+    const next = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'edit-1',
+      name: 'edit_file',
+      result: {
+        ok: true,
+        command: 'edit_file',
+        exitCode: 0,
+        stdout: 'updated',
+        stderr: '',
+      },
+    });
+    expect(next.tools.calls['edit-1']?.result?.resultMeta?.workspaceMutationScope).toEqual([
+      'src/main.ts',
     ]);
   });
 });

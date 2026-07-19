@@ -55,3 +55,7 @@ Capability search 只负责发现。搜索候选不能作为调用句柄，也�
 - 不得让 Skill manifest 自行授予权限。
 - 不得把 approval 与 sandbox 合并为一个开关。
 - 不得从 UI summary、模型 final 或 ToolMessage 文本推断任务完成。
+
+## 工具结果结构化元数据
+
+工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`contentDigest`、`intent`、`truncated`、`resourceRevision`）从 `harness/tool-runner.ts` 写入 `ToolCallRecord`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。上下文压缩（M1 V2 `compactContextFrames`）从 `resultMeta` 读取结构化信息进行折叠决策和资源失效判断，不再从 ToolMessage 正文反向解析 JSON。行为上不改变权限决策或审批路由。

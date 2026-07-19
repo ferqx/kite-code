@@ -91,9 +91,11 @@ export function chooseCapabilityDisclosure(input: {
   const estimatedMcpTokens = estimateCapabilityCatalogTokens(mcpDescriptors);
   const estimatedSkillTokens = estimateCapabilityCatalogTokens(skillDescriptors);
   const estimatedTokens = estimatedMcpTokens + estimatedSkillTokens;
-  const contextWindow = input.contextWindowTokens ?? 128_000;
   const budgetTokens =
-    input.budgetTokens ?? Math.min(8_192, Math.max(1_024, Math.floor(contextWindow * 0.01)));
+    input.budgetTokens ??
+    (input.contextWindowTokens
+      ? Math.min(8_192, Math.max(1_024, Math.floor(input.contextWindowTokens * 0.01)))
+      : 1_024);
 
   if (!input.featureEnabled) {
     return {

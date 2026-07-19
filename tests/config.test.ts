@@ -75,6 +75,131 @@ describe('loadAgentConfig', () => {
     }
   });
 
+  test('loads formal model context and output capabilities from the selected entry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'model-capabilities.jsonc');
+      writeFileSync(
+        configPath,
+        `{
+          "provider": {
+            "ollama": {
+              "models": [{
+                "name": "local-custom",
+                "default": true,
+                "contextWindow": 32768,
+                "maxOutputTokens": 2048,
+                "tokenizerFamily": "llama",
+                "supportsUsageMetadata": true,
+                "supportsPromptCache": false
+              }]
+            }
+          }
+        }`,
+      );
+      expect(loadAgentConfig({ configPath }).modelCapabilities).toEqual({
+        contextWindowTokens: 32768,
+        maxOutputTokens: 2048,
+        tokenizerFamily: 'llama',
+        supportsUsageMetadata: true,
+        supportsPromptCache: false,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('loads bounded automatic context compaction thresholds', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'compaction.jsonc');
+      writeFileSync(
+        configPath,
+        `{
+          "provider": {
+            "ollama": {
+              "models": [{ "name": "local", "default": true }]
+            }
+          },
+          "compaction": {
+            "maxSummaryTokens": 5000,
+            "maxSummaryInputTokens": 24000,
+            "softRatio": 0.7,
+            "hardRatio": 0.86,
+            "targetRatio": 0.52,
+            "minimumReductionRatio": 0.18,
+            "cooldownTurns": 4,
+            "recentTurns": 3
+          }
+        }`,
+      );
+      expect(loadAgentConfig({ configPath }).compaction).toEqual({
+        maxSummaryTokens: 5000,
+        maxSummaryInputTokens: 24000,
+        softRatio: 0.7,
+        hardRatio: 0.86,
+        targetRatio: 0.52,
+        minimumReductionRatio: 0.18,
+        cooldownTurns: 4,
+        recentTurns: 3,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects compaction softRatio outside 0–1', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'bad-ratio.jsonc');
+      for (const bad of [1.5, -0.1]) {
+        writeFileSync(
+          configPath,
+          `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "softRatio": ${bad} } }`,
+        );
+        expect(() => loadAgentConfig({ configPath })).toThrow();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects compaction negative cooldownTurns and recentTurns', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'bad-turns.jsonc');
+      writeFileSync(
+        configPath,
+        `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "cooldownTurns": -1 } }`,
+      );
+      expect(() => loadAgentConfig({ configPath })).toThrow();
+      writeFileSync(
+        configPath,
+        `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "recentTurns": -5 } }`,
+      );
+      expect(() => loadAgentConfig({ configPath })).toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('accepts boundary values for compaction ratios', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'boundary-ratios.jsonc');
+      writeFileSync(
+        configPath,
+        `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "softRatio": 0.01, "hardRatio": 1, "minimumReductionRatio": 0, "targetRatio": 1 } }`,
+      );
+      const cfg = loadAgentConfig({ configPath });
+      expect(cfg.compaction?.minimumReductionRatio).toBe(0);
+      expect(cfg.compaction?.hardRatio).toBe(1);
+      expect(cfg.compaction?.targetRatio).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('loads an Ollama provider with local defaults', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
     try {

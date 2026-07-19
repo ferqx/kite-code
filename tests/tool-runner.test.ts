@@ -499,5 +499,10 @@ describe('runApprovedTool 鈥?search_content', () => {
     expect(result.stdout).toContain('src/alpha.ts:1:export const marker = "needle";');
     expect(result.stdout).not.toContain('beta.ts');
     expect(result.command).toBe('search_content needle');
+    expect(result.resultMeta).toEqual({
+      path: '.',
+      matchCount: 1,
+      truncated: false,
+    });
   });
 });

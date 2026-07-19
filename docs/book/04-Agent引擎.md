@@ -7,7 +7,7 @@ Kite Code 使用自有事件化 Runtime。`runRuntimeAgent()` 负责模型循环
 ```text
 RuntimeState
   → decideNextEffect()
-  → invoke_model / execute_tools / request_approval / run_verification / emit_final
+  → invoke_model / execute_tools / compact_context / request_approval / run_verification / emit_final
   → RuntimeEffectExecutor
   → RuntimeEvent
   → reduceRuntimeState()
@@ -53,3 +53,7 @@ MCP Provider Action 是持久化交互。旧 Tool Call 必须先失败并退出�
 ## 4.5 上下文与缓存
 
 静态 prompt、稳定工具契约和 cacheable Runtime context 尽量保持前缀稳定；动态状态、Skill disclosure、搜索结果和 turn binding 放在轮次投影中。上下文压缩保留任务事实、计划和工具结果语义，不取代 Runtime Store。
+
+Runtime schema v15 把 M2 checkpoint lifecycle 纳入事件循环。`context.compaction_requested` 形成 pending 状态，scheduler 在工具、交互、verification 和 final 等更高优先级工作结束后调度 `compact_context`，controller 以 completed/failed 事件收敛。压缩复用普通 Effect lease；来源 revision 变化时结果不会提交。Checkpoint 只是一种可 reset 的模型上下文投影，原始 transcript 仍保持不变。
+
+M2 摘要不是自由文本。Runtime 先生成 mandatory fact ledger，再要求无工具的 summary model 输出 `StructuredContextSummaryV1`；结果必须通过 schema、provenance、fact coverage、message coverage 与 token gain 校验。长历史按完整 turn/tool block 分块并最终 merge，中间摘要不会写入 RuntimeState。

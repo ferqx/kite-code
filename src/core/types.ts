@@ -115,10 +115,12 @@ export type AgentResumeValue =
 
 /** 上下文预算配置 / Context budget configuration */
 export interface ContextBudget {
-  /** 模型上下文窗口最大 token 数（0 表示不限制）/ Maximum tokens in the model context window (0 = no limit). Required for M2 soft/hard thresholds (shouldCompact). */
+  /** 模型上下文窗口最大 token 数（0 表示不限制）/ Maximum tokens in the model context window (0 = no limit). Used by M1 frame compactor and context projection for token-aware folding. */
   maxTokens?: number;
-  /** M1: 保留的最近消息数（活跃窗口大小，不折叠）/ Number of most recent messages to keep un-compacted (default 6) */
+  /** M1 V2: 保留的最近 turn 数（不折叠）/ Number of most recent turns to keep un-compacted (default 3). Used by compactContextFrames. */
   recentWindowSize?: number;
+  /** M1 V2: number of latest semantic turns kept verbatim (default 3). */
+  recentTurns?: number;
   /** M2(预留): 软压缩触发阈值（maxTokens 的比例，默认 0.75）/ Soft compaction trigger threshold as fraction of maxTokens (default 0.75) */
   compactionThreshold?: number;
 }

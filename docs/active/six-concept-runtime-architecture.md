@@ -6,7 +6,7 @@
 
 验证：`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
 ## 1. 两个正交视角
 
@@ -73,6 +73,16 @@ src/core/runtime/
 ```
 
 Capability、Skill 和 Verification 不得直接修改 RuntimeState。任何具有恢复价值的变化都必须先形成 Runtime Event，再由 reducer 归纳为当前事实。
+
+Runtime schema v15 将 transcript message identity、结构化 Tool Result 和 M2 checkpoint lifecycle 作为可恢复事实持久化。Kernel 为新产生的 user/model/tool transcript event 固化 `createdAt`，reducer 分配 turn、ordinal 和稳定 message ID；工具结果元数据同时投影到 `ToolCallRecord` 与 transcript。旧 snapshot migration 只补齐可确定的身份默认值，不从 stdout 反向推断 path、command 或其他结构化结果。
+
+`RuntimeState.context` 保存 active checkpoint、pending compaction、最近失败与有界历史。压缩通过 `context.compaction_requested/completed/failed/reset` 事件和 `compact_context` effect 进入同一个 State → Effect → Event → State 循环；scheduler 在 recovery、外部交互、工具、verification 和 final 之后、再次调用模型之前执行 pending compaction。Controller 只返回类型化事件，结果仍通过 Kernel effect lease 的 `expectedRevision` 提交；期间 revision 变化时结果被丢弃，不引入第二套锁。
+
+M2 使用严格的 `StructuredContextSummaryV1`。Runtime 先从任务目标、明确用户约束、文件与 side-effecting capability 结果、失败、verification、plan 引用和最近可靠观察生成 deterministic fact ledger；summary model 只能压缩叙述，不能决定 mandatory fact 是否保留。候选结果依次经过 JSON/Zod、provenance、mandatory fact IDs、message coverage 和 token gain 校验，并只允许一次 schema repair。超出单次输入预算或 hard 路径校验失败时按完整 turn/tool block 分块；chunk summary 只是 merge 输入，只有最终 summary 能成为 checkpoint。
+
+启用 `contextCompactionAutoV1` 后，Model Controller 在 provider 调用前根据完整请求估算产生 soft/hard 自动请求。Soft 受安全边界、收益与 cooldown 约束；hard 在无法安全切分或压缩失败时阻断新的模型调用。Provider overflow 每个 turn 只允许一次 checkpoint recovery，不能作为普通 retry 重放。Active checkpoint 只替换模型投影中的 covered prefix，原始 transcript 继续由 RuntimeStore 保存。
+
+手动 `/compact` 同样不能绕过 Kernel。App shell 对空闲 session 可打开 Kernel 并执行单次 `compact_context`；若 agent loop 正在运行，则使用其暴露的受限 live control 只注入 RuntimeEvent，依靠现有 scheduler 排队。Live control 不暴露可变 State 或直接 reducer，外部事件推进 revision 后，正在运行的旧 effect 仍由 lease 机制判 stale。
 
 MCP Provider Action 也遵循同一边界。typed provider failure 先把原 Tool Call 终结为 `failed`，再由独立 interaction 调度 App shell；原调用不重新入队。恢复完成事件与新的 `turn.started` 一起提交，确保后续 binding 不可能沿用旧 turn。
 

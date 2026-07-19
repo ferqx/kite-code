@@ -2941,3 +2941,84 @@ describe('eventReducer (blocks model)', () => {
     });
   });
 });
+
+describe('context compaction RuntimeEvent rendering', () => {
+  test('renders failure and reset feedback without exposing summary content', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'context.compaction_failed',
+      compactionId: 'compact',
+      sourceRevision: 1,
+      errorKind: 'missing_mandatory_facts',
+      message: 'summary omitted required facts',
+      retryable: false,
+    });
+    expect(JSON.stringify(flatBlocks(state))).toContain('summary omitted required facts');
+    expect(JSON.stringify(flatBlocks(state))).toContain('original conversation was preserved');
+
+    state = handleRuntimeEventAction(state, {
+      type: 'context.compaction_reset',
+      checkpointId: 'compact',
+      reason: 'manual',
+    });
+    expect(JSON.stringify(flatBlocks(state))).toContain('original transcript');
+  });
+
+  test('compaction_completed updates status.compactionBefore/After for StatsLine display', () => {
+    const state = handleRuntimeEventAction(fresh(), {
+      type: 'context.compaction_completed',
+      compactionId: 'compact',
+      sourceRevision: 0,
+      checkpoint: {
+        compactionId: 'compact',
+        version: 1,
+        sourceRevision: 0,
+        sourceDigest: 'sha256:test',
+        coveredThroughMessageId: 'msg-1',
+        coveredThroughTurnId: 'turn-1',
+        summary: {
+          version: 1,
+          objective: 'test',
+          userConstraints: [],
+          decisions: [],
+          completedWork: [],
+          observations: [],
+          failures: [],
+          pendingWork: [],
+          unresolvedQuestions: [],
+          recentUserIntent: 'test',
+          provenance: {
+            firstMessageId: 'msg-0',
+            lastMessageId: 'msg-1',
+            sourceDigest: 'sha256:test',
+            mandatoryFactIds: [],
+          },
+        },
+        inputTokensBefore: 12_345,
+        inputTokensAfter: 4_567,
+        targetTokens: 6_000,
+        reason: 'manual',
+        createdAt: new Date().toISOString(),
+      },
+    });
+    expect(JSON.stringify(flatBlocks(state))).toContain('12345');
+    expect(JSON.stringify(flatBlocks(state))).toContain('4567');
+    expect(JSON.stringify(flatBlocks(state))).toContain('tokens');
+    expect(state.status.compactionBefore).toBe(12_345);
+    expect(state.status.compactionAfter).toBe(4_567);
+  });
+
+  test('compaction_reset clears compactionBefore/After on status', () => {
+    let state = fresh();
+    state = {
+      ...state,
+      status: { ...state.status, compactionBefore: 10_000, compactionAfter: 3_000 },
+    };
+    state = handleRuntimeEventAction(state, {
+      type: 'context.compaction_reset',
+      checkpointId: 'compact',
+      reason: 'manual',
+    });
+    expect(state.status.compactionBefore).toBeUndefined();
+    expect(state.status.compactionAfter).toBeUndefined();
+  });
+});

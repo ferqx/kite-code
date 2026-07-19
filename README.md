@@ -29,7 +29,12 @@ bun install
       "type": "openai-compatible",
       "apiKey": "${OPENAI_API_KEY}",
       "baseURL": "https://example.com/v1",
-      "model": "model-name"
+      "model": "model-name",
+      "models": [{
+        "name": "model-name",
+        "contextWindow": 131072,
+        "maxOutputTokens": 8192
+      }]
     }
   },
   "interactionMode": "auto",
@@ -37,7 +42,11 @@ bun install
 }
 ```
 
-模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。
+模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。自定义模型建议显式配置 `contextWindow` 和 `maxOutputTokens`；未配置且目录/adapter 无元数据时，Runtime 会将窗口视为 unknown，而不会假定一个大窗口。
+
+自动 M2 上下文压缩默认关闭，可通过 `features.contextCompactionAutoV1` 灰度开启。`compaction` 配置支持 `softRatio`、`hardRatio`、`targetRatio`、`minimumReductionRatio`、`cooldownTurns`、`recentTurns`、`maxSummaryTokens` 和 `maxSummaryInputTokens`。自动压缩保留原始 transcript；provider overflow 每个 turn 最多恢复一次，失败时不会反复重试模型请求。
+
+启用 `features.contextCompactionManualV1`（默认开启）后可使用 `/compact` 命令，支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。运行中请求会排队到安全边界；消息不足时提示 `Not enough messages to compact.`。
 
 MCP 默认配置只有两个规范位置：项目级 `<project>/.kite-code/mcp.json` 与用户级 `~/.kite-code/mcp.json`，同名 Server 按 `project > user` 选择。`/mcp` 的 Current project 与 All projects 分别写入这两个文件；项目声明必须在 Server Detail 的 Review 页面显式批准。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 仅只读兼容与显式迁移，不再作为写入目标。
 

@@ -40,6 +40,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
           currentNode: null,
           plan: null,
           retryState: null,
+          compactionBefore: undefined,
+          compactionAfter: undefined,
         },
         turns: [],
       };
@@ -74,6 +76,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
           currentNode: null,
           plan: null,
           retryState: null,
+          compactionBefore: undefined,
+          compactionAfter: undefined,
         },
       };
     }

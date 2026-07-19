@@ -15,6 +15,8 @@
 export type RuntimeEffect =
   /** 调用模型生成响应 / Call the model to generate a response */
   | { type: 'call_model' }
+  /** Build one durable M2 context checkpoint. */
+  | { type: 'compact_context'; compactionId: string }
   /** 执行指定工具调用 / Execute the specified tool calls */
   | { type: 'run_tools'; toolCallIds: string[] }
   /** 向用户请求输入（ask_user）/ Request user input (ask_user) */

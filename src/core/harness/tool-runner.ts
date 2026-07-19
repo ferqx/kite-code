@@ -256,6 +256,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stderr: result.error ?? '',
       path: filePath,
       totalLines: result.totalLines,
+      resultMeta: { path: filePath, totalLines: result.totalLines },
     });
   }
 
@@ -310,6 +311,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stdout,
       stderr: result.error ?? '',
       path: request.args.path,
+      resultMeta: {
+        path: editPath,
+        truncated: stdout.endsWith('... (truncated)'),
+        workspaceMutationScope: editPath ? [editPath] : [],
+      },
     });
   }
 
@@ -367,6 +373,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stdout,
       stderr: result.error ?? '',
       path: request.args.path,
+      resultMeta: {
+        path: filePath,
+        truncated: stdout.endsWith('... (truncated)'),
+        workspaceMutationScope: filePath ? [filePath] : [],
+      },
     });
   }
 
@@ -419,11 +430,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       glob: request.args.glob,
       allowExternal,
     });
+    const stdout = truncateToolOutput(result.stdout);
     return withFailureGuidance(request, {
       ...result,
-      stdout: truncateToolOutput(result.stdout),
+      stdout,
       stderr: truncateToolOutput(result.stderr),
       command: `search_content ${request.args.pattern ?? ''}`,
+      resultMeta: {
+        path: searchPath,
+        matchCount: result.stdout.split('\n').filter(Boolean).length,
+        truncated: stdout.length < result.stdout.length,
+      },
     });
   }
 
@@ -437,11 +454,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       path: searchPath,
       allowExternal,
     });
+    const stdout = truncateToolOutput(result.stdout);
     return withFailureGuidance(request, {
       ...result,
-      stdout: truncateToolOutput(result.stdout),
+      stdout,
       stderr: truncateToolOutput(result.stderr),
       command: `search_files ${request.args.pattern ?? ''}`,
+      resultMeta: {
+        path: searchPath,
+        matchCount: result.stdout.split('\n').filter(Boolean).length,
+        truncated: stdout.length < result.stdout.length,
+      },
     });
   }
 

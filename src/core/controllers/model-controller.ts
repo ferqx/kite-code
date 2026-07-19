@@ -22,9 +22,16 @@ import {
   systemMessage,
   toolMessage,
 } from '@/core/messages';
+import { compactionMetrics } from '@/core/model/compaction-metrics';
 import { prepareModelContext } from '@/core/model/context';
+import { addToolSchemasToEstimate, preflightModelContext } from '@/core/model/context-budget';
+import {
+  decideAutomaticContextCompaction,
+  isProviderContextOverflow,
+} from '@/core/model/context-compaction-decision';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
+import { resolveModelCapabilities, usableInputBudget } from '@/core/model/model-capabilities';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -96,37 +103,87 @@ export function eventsForInvalidModelToolCalls(
   ]);
 }
 
-function runtimeTranscriptMessages(messages: TranscriptMessage[]): BaseMessage[] {
+function runtimeTranscriptMessages(
+  messages: TranscriptMessage[],
+  calls: RuntimeState['tools']['calls'],
+): BaseMessage[] {
   return messages.map((message) => {
+    const identity = {
+      ...(message.turnId ? { turnId: message.turnId } : {}),
+      ...(message.ordinal != null ? { ordinal: message.ordinal } : {}),
+      ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+    };
     switch (message.kind) {
       case 'user':
-        return humanMessage({ id: message.messageId, content: message.content });
+        return Object.assign(
+          humanMessage({ id: message.messageId, content: message.content }),
+          identity,
+        );
       case 'runtime':
-        return systemMessage(message.content);
+        return Object.assign(systemMessage(message.content), identity);
       case 'assistant':
-        return aiMessage({
-          id: message.messageId,
-          content: message.content ?? '',
-          tool_calls: message.toolCalls.map((call) => ({
-            ...call,
-            args: (call.args ?? {}) as Record<string, unknown>,
-            type: 'tool_call' as const,
-          })),
-          additional_kwargs: {
-            ...(message.reasoningText ? { reasoning_content: message.reasoningText } : {}),
-          },
-        });
+        return Object.assign(
+          aiMessage({
+            id: message.messageId,
+            content: message.content ?? '',
+            tool_calls: message.toolCalls.map((call) => ({
+              ...call,
+              args: (call.args ?? {}) as Record<string, unknown>,
+              type: 'tool_call' as const,
+            })),
+            additional_kwargs: {
+              ...(message.reasoningText ? { reasoning_content: message.reasoningText } : {}),
+            },
+          }),
+          identity,
+        );
       case 'tool':
-        return toolMessage({
-          tool_call_id: message.toolCallId,
-          name: message.name,
-          content: message.content,
-          status: message.ok ? 'success' : 'error',
-        });
+        return Object.assign(
+          toolMessage({
+            id: message.messageId,
+            tool_call_id: message.toolCallId,
+            name: message.name,
+            content: message.content,
+            status: message.ok ? 'success' : 'error',
+          }),
+          identity,
+          message.resultMeta ?? {},
+          {
+            args: calls[message.toolCallId]?.args,
+            effectClass: calls[message.toolCallId]?.effectClass,
+          },
+        );
       default:
         return humanMessage({ content: '' });
     }
   });
+}
+
+function compactedTranscriptProjection(state: RuntimeState): {
+  messages: BaseMessage[];
+  summaryMessages?: BaseMessage[];
+} {
+  const checkpoint = state.context.activeCheckpoint;
+  if (!checkpoint) {
+    return { messages: runtimeTranscriptMessages(state.transcript.messages, state.tools.calls) };
+  }
+  const boundaryIndex = state.transcript.messages.findIndex(
+    (message) => message.messageId === checkpoint.coveredThroughMessageId,
+  );
+  if (boundaryIndex < 0) {
+    return { messages: runtimeTranscriptMessages(state.transcript.messages, state.tools.calls) };
+  }
+  return {
+    messages: runtimeTranscriptMessages(
+      state.transcript.messages.slice(boundaryIndex + 1),
+      state.tools.calls,
+    ),
+    summaryMessages: [
+      systemMessage(
+        `## Compacted Historical Context\n\nThis is a validated Runtime-derived summary, not current state authority.\n\n${JSON.stringify(checkpoint.summary)}`,
+      ),
+    ],
+  };
 }
 
 function activeInlineSkillInstructions(
@@ -237,11 +294,15 @@ export async function invokeRuntimeModel(params: {
       mcp: params.mcpManager?.getCapabilitySnapshot(),
       skills: params.skillCatalog?.capabilities,
     });
+    const modelCapabilities = resolveModelCapabilities({
+      config: params.config,
+      adapter: params.model.capabilityMetadata,
+    });
     const disclosure = chooseCapabilityDisclosure({
       featureEnabled: flags.toolSearchV1,
       providerSupportsToolCalls: params.model.supportsToolCalls !== false,
       descriptors: capabilitySnapshot.descriptors,
-      contextWindowTokens: positiveConfigNumber(params.config.modelKwargs?.contextWindowTokens),
+      contextWindowTokens: modelCapabilities.contextWindowTokens,
       budgetTokens: positiveConfigNumber(
         params.config.modelKwargs?.capabilityDisclosureBudgetTokens,
       ),
@@ -376,11 +437,18 @@ export async function invokeRuntimeModel(params: {
     });
     const planning = getActivePlanning(state);
     const phase = getAgentPhase(planning);
+    const inputBudget = usableInputBudget(
+      modelCapabilities,
+      positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
+        positiveConfigNumber(params.config.modelKwargs?.maxTokens),
+    );
+    const transcriptProjection = compactedTranscriptProjection(state);
     const prepared = prepareModelContext(
       'agent',
       {
         workspace: state.session.workspace,
-        messages: runtimeTranscriptMessages(state.transcript.messages),
+        messages: transcriptProjection.messages,
+        summaryMessages: transcriptProjection.summaryMessages,
         final: state.transcript.final ?? '',
         workspaceAccess: state.workspaceAccess,
         phase,
@@ -396,15 +464,117 @@ export async function invokeRuntimeModel(params: {
             description: descriptor.description,
           })),
         activeSkillInstructions: activeInlineSkillInstructions(state, params.skillCatalog),
+        contextBudget: {
+          ...(inputBudget.usableInputTokens ? { maxTokens: inputBudget.usableInputTokens } : {}),
+          recentTurns: 3,
+        },
       },
       undefined,
     );
-    const response = await invokeBoundModel({
-      model: params.model,
-      tools,
-      messages: prepared.messages,
-      signal: params.signal,
+    const estimate = addToolSchemasToEstimate(
+      prepared.tokenEstimate,
+      tools as unknown as Record<string, unknown>,
+    );
+    const preflight = preflightModelContext({
+      estimate,
+      capabilities: modelCapabilities,
+      requestMaxOutputTokens:
+        positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
+        positiveConfigNumber(params.config.modelKwargs?.maxTokens),
+      softRatio: params.config.compaction?.softRatio,
+      hardRatio: params.config.compaction?.hardRatio,
+      targetRatio: params.config.compaction?.targetRatio,
     });
+    const contextMetricsEvent: RuntimeEvent = {
+      type: 'model.context_metrics',
+      modelName: modelCapabilities.modelName,
+      ...(modelCapabilities.contextWindowTokens
+        ? { contextWindowTokens: modelCapabilities.contextWindowTokens }
+        : {}),
+      ...(preflight.usableInputTokens ? { usableInputTokens: preflight.usableInputTokens } : {}),
+      reservedOutputTokens: preflight.reservedOutputTokens,
+      providerSafetyMarginTokens: preflight.providerSafetyMarginTokens,
+      ...(preflight.targetTokens ? { targetTokens: preflight.targetTokens } : {}),
+      totalInputTokens: preflight.estimate.totalInputTokens,
+      ...(preflight.utilization != null ? { utilization: preflight.utilization } : {}),
+      status: preflight.status,
+      estimate: preflight.estimate,
+    };
+    const automaticCompaction = decideAutomaticContextCompaction({
+      state,
+      preflight,
+      enabled: flags.contextCompactionV2 && flags.contextCompactionAutoV1,
+      recentTurns: params.config.compaction?.recentTurns,
+      cooldownTurns: params.config.compaction?.cooldownTurns,
+      minimumReductionRatio: params.config.compaction?.minimumReductionRatio,
+      maxSummaryTokens: params.config.compaction?.maxSummaryTokens,
+    });
+    if (automaticCompaction.action === 'block') {
+      throw new Error(automaticCompaction.reason);
+    }
+    if (automaticCompaction.action === 'request_compaction') {
+      compactionMetrics.recordRequested();
+      return [
+        ...retryEvents,
+        contextMetricsEvent,
+        {
+          type: 'context.compaction_requested',
+          compactionId: automaticCompaction.compactionId,
+          reason: automaticCompaction.reason,
+          requestedAtRevision: state.revision,
+          requestedAtTurnId: state.turn.turnId,
+          force: false,
+          estimate: preflight.estimate,
+        },
+      ];
+    }
+    let response: Awaited<ReturnType<typeof invokeBoundModel>>;
+    try {
+      response = await invokeBoundModel({
+        model: params.model,
+        tools,
+        messages: prepared.messages,
+        signal: params.signal,
+        maxOutputTokens:
+          positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
+          modelCapabilities.maxOutputTokens,
+      });
+    } catch (error) {
+      if (
+        flags.contextCompactionV2 &&
+        flags.contextCompactionAutoV1 &&
+        isProviderContextOverflow(error) &&
+        state.context.overflowRecoveryTurnId !== state.turn.turnId
+      ) {
+        compactionMetrics.recordRequested();
+        compactionMetrics.recordOverflowRecovery();
+        return [
+          ...retryEvents,
+          contextMetricsEvent,
+          {
+            type: 'context.compaction_requested',
+            compactionId: crypto.randomUUID(),
+            reason: 'overflow_recovery',
+            requestedAtRevision: state.revision,
+            requestedAtTurnId: state.turn.turnId,
+            force: true,
+            estimate: preflight.estimate,
+          },
+        ];
+      }
+      if (
+        flags.contextCompactionV2 &&
+        flags.contextCompactionAutoV1 &&
+        isProviderContextOverflow(error) &&
+        state.context.overflowRecoveryTurnId === state.turn.turnId
+      ) {
+        throw new Error(
+          'Provider context overflow persisted after the single compaction recovery attempt.',
+          { cause: error },
+        );
+      }
+      throw error;
+    }
     const toolCalls =
       response.tool_calls?.map((call) => ({
         id: call.id ?? crypto.randomUUID(),
@@ -432,6 +602,7 @@ export async function invokeRuntimeModel(params: {
       }));
     const events: RuntimeEvent[] = [
       ...retryEvents,
+      contextMetricsEvent,
       { type: 'model.requested', requestId },
       {
         type: 'model.responded',

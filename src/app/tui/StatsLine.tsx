@@ -24,6 +24,7 @@ function fullWidth(
   interactionMode?: string,
   planMode?: boolean,
   contextPct?: string,
+  compactedPct?: string,
 ): number {
   let w = status.modelName.length;
   const isDS = status.modelProvider === 'deepseek';
@@ -32,6 +33,7 @@ function fullWidth(
   if (contextPct)
     w += 3 + contextPct.length + 8; // " · 30% context"
   else if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " · tokens: 78.4k"
+  if (compactedPct) w += 3 + compactedPct.length + 9; // " · 31% compacted"
   if (interactionMode) w += 3 + 6;
   // plan mode adds: "  Shift+Tab to exit" ≈ 19 chars
   if (planMode) w += 19;
@@ -72,8 +74,21 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
     cw && cw > 0 ? `${Math.round((status.totalTokens / cw) * 100)}% context` : null;
   const showTokens = !contextPct && status.totalTokens > 0;
 
+  // Compaction reduction display
+  const compactedPct =
+    status.compactionBefore && status.compactionAfter && status.compactionBefore > 0
+      ? `${Math.round(((status.compactionBefore - status.compactionAfter) / status.compactionBefore) * 100)}% compacted`
+      : null;
+
   const cols = stdout?.columns ?? 80;
-  const compact = fullWidth(status, interactionMode, planMode, contextPct ?? undefined) > cols;
+  const compact =
+    fullWidth(
+      status,
+      interactionMode,
+      planMode,
+      contextPct ?? undefined,
+      compactedPct ?? undefined,
+    ) > cols;
 
   return (
     <Box>
@@ -96,6 +111,12 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
         <>
           <Text color={t.dim}> · </Text>
           <Text color={t.muted}>{contextPct}</Text>
+        </>
+      )}
+      {!compact && compactedPct && (
+        <>
+          <Text color={t.dim}> · </Text>
+          <Text color={t.success}>{compactedPct}</Text>
         </>
       )}
       {!compact && showTokens && (

@@ -1867,6 +1867,12 @@ export async function executeRuntimeTools(params: {
             exitCode: result.exitCode ?? 0,
             stdout: result.stdout ?? '',
             stderr: result.stderr ?? '',
+            resultMeta: {
+              ...result.resultMeta,
+              ...(result.path ? { path: result.path } : {}),
+              ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
+              ...(result.action?.intent ? { intent: result.action.intent } : {}),
+            },
             status:
               result.status === 'exhausted'
                 ? 'exhausted'
@@ -2031,6 +2037,12 @@ export async function executeRuntimeTools(params: {
           exitCode: result.exitCode ?? 0,
           stdout: result.stdout ?? '',
           stderr: result.stderr ?? '',
+          resultMeta: {
+            ...result.resultMeta,
+            ...(result.path ? { path: result.path } : {}),
+            ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
+            ...(result.action?.intent ? { intent: result.action.intent } : {}),
+          },
           status:
             result.status === 'exhausted' ? 'exhausted' : result.ok === false ? 'error' : 'success',
         },

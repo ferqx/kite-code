@@ -1,5 +1,9 @@
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
+import {
+  type ContextCompactor,
+  executeContextCompaction,
+} from '@/core/controllers/compaction-controller';
 import { invokeRuntimeModel } from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import {
@@ -9,6 +13,10 @@ import {
 } from '@/core/execution/reviewer';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { McpRuntimeProvider } from '@/core/mcp';
+import {
+  createModelContextSummaryGenerator,
+  createStructuredContextCompactor,
+} from '@/core/model/compaction-summary';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -34,6 +42,7 @@ export interface RuntimeExecutorDependencies {
   skillCatalog?: SkillCatalogSnapshot;
   signal?: AbortSignal;
   subagentEventSink?: SubAgentEventSink;
+  contextCompactor?: ContextCompactor;
 }
 
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
@@ -57,7 +66,26 @@ export function createRuntimeEffectExecutor(
           resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
         })
       : undefined;
+  const contextCompactor =
+    dependencies.contextCompactor ??
+    createStructuredContextCompactor({
+      generate: createModelContextSummaryGenerator({
+        model: dependencies.model,
+        signal: dependencies.signal,
+      }),
+      recentTurns: dependencies.config.compaction?.recentTurns,
+      maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
+      maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
+      targetRatio: dependencies.config.compaction?.targetRatio,
+    });
   return async (effect, state, emit) => {
+    if (effect.type === 'compact_context') {
+      return executeContextCompaction({
+        state,
+        compactionId: effect.compactionId,
+        compact: contextCompactor,
+      });
+    }
     if (effect.type === 'call_model') {
       return invokeRuntimeModel({
         model: dependencies.model,

@@ -105,6 +105,121 @@ describe('interaction mode admission', () => {
 });
 
 describe('SessionManager', () => {
+  test('queues manual compaction through a live Kernel control plane', async () => {
+    const deps = makeDeps();
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+    const mgr = new SessionManager(deps);
+    const threadId = mgr.createSession('/tmp/ws');
+    const runtime = mgr.getRuntime(threadId)!;
+    const state = createInitialRuntimeState({
+      threadId,
+      userId: 'tui',
+      workspace: '/tmp/ws',
+    });
+    state.interactions = {
+      kind: 'awaiting_user_input',
+      interactionId: 'input',
+      toolCallId: 'ask',
+      request: { question: 'Continue?', options: [], allow_free_text: true },
+    };
+    let persisted: unknown;
+    runtime.runtimeControl = {
+      getState: () => state,
+      processEvent: (event) => {
+        persisted = event;
+      },
+    };
+
+    const result = await mgr.handleContextCompaction(threadId);
+    expect(persisted).toMatchObject({
+      type: 'context.compaction_requested',
+      reason: 'manual',
+      force: false,
+    });
+    expect(result.text).toContain('queued');
+  });
+
+  test('returns "not enough messages" when session has no transcript', async () => {
+    const deps = makeDeps();
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+    const mgr = new SessionManager(deps);
+    const threadId = mgr.createSession('/tmp/ws');
+    const runtime = mgr.getRuntime(threadId)!;
+    const state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    // transcript has only 2 messages (default initial state), not enough for safe boundary
+    runtime.runtimeControl = { getState: () => state, processEvent: () => {} };
+
+    const result = await mgr.handleContextCompaction(threadId);
+    expect(result.events).toEqual([]);
+    expect(result.text).toBe('Not enough messages to compact.');
+  });
+
+  test('normal compaction succeeds when session has enough messages', async () => {
+    const deps = makeDeps();
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+      compaction: { recentTurns: 1 },
+    };
+    const mgr = new SessionManager(deps);
+    const threadId = mgr.createSession('/tmp/ws');
+    const runtime = mgr.getRuntime(threadId)!;
+    const state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    // Add transcript messages spanning several turns
+    state.transcript.messages = Array.from({ length: 6 }, (_, i) => ({
+      kind: 'user' as const,
+      messageId: `msg-${i}`,
+      turnId: `turn-${i}`,
+      ordinal: i,
+      createdAt: `2026-07-20T00:0${i}:00.000Z`,
+      content: `message ${i}`,
+    }));
+    state.turn.turnIndex = 6;
+    state.turn.turnId = 'turn-5';
+    state.interactions = {
+      kind: 'awaiting_user_input',
+      interactionId: 'input',
+      toolCallId: 'ask',
+      request: { question: 'Continue?', options: [], allow_free_text: true },
+    };
+    let persisted: unknown;
+    runtime.runtimeControl = {
+      getState: () => state,
+      processEvent: (event) => {
+        persisted = event;
+      },
+    };
+
+    const result = await mgr.handleContextCompaction(threadId);
+    expect(persisted).toMatchObject({
+      type: 'context.compaction_requested',
+      reason: 'manual',
+      force: false,
+    });
+    expect(result.text).toContain('queued');
+  });
+
   // ── createSession ──
 
   test('createSession returns unique threadId', () => {

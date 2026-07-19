@@ -1,12 +1,21 @@
 import { Database } from 'bun:sqlite';
+import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpRuntimeProvider } from '@/core/mcp';
+import { compactionMetrics } from '@/core/model/compaction-metrics';
+import {
+  inspectManualContextCompaction,
+  manualContextCompactionEvent,
+} from '@/core/model/context-compaction-manual';
+import { createChatModel } from '@/core/model/factory';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
 import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEffect } from '@/core/runtime/effects';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
 import { createAgentKernel } from '@/core/runtime/kernel';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
+import { decideNextEffect } from '@/core/runtime/scheduler';
 import type { RuntimeState } from '@/core/runtime/state';
 import { getActivePlanning, getActiveTask, getAgentPhase } from '@/core/runtime/state';
 import { defaultRuntimeJournalMode, runtimeStorePathFor } from '@/core/runtime/store';
@@ -57,6 +66,12 @@ export interface SessionDeps {
   checkpointPath: string;
 }
 
+export interface ContextCompactionCommandResult {
+  events: RuntimeEvent[];
+  text: string;
+  isError?: boolean;
+}
+
 /** 单会话运行时：持有独立的 AbortController、generator、缓冲 */
 export class SessionRuntime {
   readonly threadId: string;
@@ -82,6 +97,10 @@ export class SessionRuntime {
   mcpRecoveryController: Pick<McpController, 'recover'> | null;
 
   generator: AsyncGenerator<RuntimeEvent> | null = null;
+  runtimeControl: {
+    getState: () => Readonly<RuntimeState>;
+    processEvent: (event: RuntimeEvent) => void;
+  } | null = null;
   /** 当后台会话命中中断时通知 Manager 刷新快照 / Callback to notify Manager on background interrupt */
   notifyInterrupt: (() => void) | null = null;
 
@@ -212,6 +231,9 @@ export class SessionRuntime {
       sandboxBackend: runAgentParams.sandboxBackend,
       signal: runAgentParams.signal,
       frontend: 'tui',
+      onKernelControl: (control) => {
+        this.runtimeControl = control;
+      },
     };
     const runtimeProvider: RuntimeActionProvider = {
       requestAction: (effect, state) => this._requestRuntimeAction(effect, state),
@@ -280,6 +302,7 @@ export class SessionRuntime {
         deps.dispatch({ type: 'SET_EXITED' });
       }
     } finally {
+      this.runtimeControl = null;
       this.agentLoopActive = false;
       this.abortController = null;
       this.generator = null;
@@ -734,6 +757,124 @@ export class SessionManager {
 
   getRuntime(threadId: string): SessionRuntime | undefined {
     return this.runtimes.get(threadId);
+  }
+
+  /** Execute or queue a manual compaction command through the durable Kernel boundary. */
+  async handleContextCompaction(
+    threadId: string,
+    customInstructions?: string,
+  ): Promise<ContextCompactionCommandResult> {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
+    const flags = getFeatureFlags(this.deps.config);
+    if (!flags.contextCompactionV2 || !flags.contextCompactionManualV1) {
+      return {
+        events: [],
+        text: 'Context compaction is disabled by feature flags.',
+        isError: true,
+      };
+    }
+
+    const runWithState = async (
+      state: Readonly<RuntimeState>,
+      processEvent: (event: RuntimeEvent) => void,
+      execute?: (event: RuntimeEvent) => Promise<RuntimeEvent[]>,
+    ): Promise<ContextCompactionCommandResult> => {
+      const status = inspectManualContextCompaction(state, this.deps.config);
+
+      // Reject early when there are genuinely no settled turns to compact.
+      if (
+        !status.safeBoundary.eligible &&
+        status.safeBoundary.reason === 'No settled historical turn is old enough to compact.'
+      ) {
+        return { events: [], text: 'Not enough messages to compact.' };
+      }
+
+      const event = manualContextCompactionEvent({
+        state,
+        config: this.deps.config,
+        customInstructions,
+      });
+      if (!event) {
+        return {
+          events: [],
+          text: 'A context compaction request is already pending.',
+        };
+      }
+      compactionMetrics.recordRequested();
+      processEvent(event);
+      if (!execute) {
+        return {
+          events: [event],
+          text: 'Compaction queued; it will run after the current interaction reaches a settled boundary.',
+        };
+      }
+      const produced = await execute(event);
+      const completed = produced.find(
+        (candidate) => candidate.type === 'context.compaction_completed',
+      );
+      const failed = produced.find((candidate) => candidate.type === 'context.compaction_failed');
+      if (completed?.type === 'context.compaction_completed') {
+        return {
+          events: [event, ...produced],
+          text: `Compacted history: ${completed.checkpoint.inputTokensBefore} → ${completed.checkpoint.inputTokensAfter} tokens.`,
+        };
+      }
+      return {
+        events: [event, ...produced],
+        text:
+          failed?.type === 'context.compaction_failed'
+            ? `Context compaction failed: ${failed.message}. The original conversation was preserved.`
+            : 'Compaction queued; it will run when the Runtime reaches a safe boundary.',
+        ...(failed ? { isError: true } : {}),
+      };
+    };
+
+    if (rt.runtimeControl) {
+      return runWithState(rt.runtimeControl.getState(), rt.runtimeControl.processEvent);
+    }
+
+    const kernel = createAgentKernel({
+      threadId,
+      userId: 'tui',
+      workspace: rt.workspace,
+      storePath: runtimeStorePathFor(this.deps.checkpointPath),
+      interactionMode: rt.interactionMode,
+      phase: 'building',
+    });
+    try {
+      return await runWithState(
+        kernel.getState(),
+        (event) => {
+          kernel.processEvent(event);
+        },
+        async () => {
+          const scheduled = decideNextEffect(kernel.getState());
+          const pending = kernel.getState().context.pendingCompaction;
+          const effect =
+            scheduled.type === 'compact_context' ||
+            (scheduled.type === 'emit_final' && pending?.reason === 'manual')
+              ? {
+                  type: 'compact_context' as const,
+                  compactionId: pending?.compactionId ?? '',
+                }
+              : scheduled;
+          if (effect.type !== 'compact_context' || !effect.compactionId) return [];
+          const executor = createRuntimeEffectExecutor({
+            config: this.deps.config,
+            model: createChatModel(this.deps.config),
+            mcpManager: rt.mcpManager ?? undefined,
+            skills: rt.skillManifests,
+            skillOptions: rt.skillOptions ?? undefined,
+          });
+          const lease = kernel.beginEffect(effect);
+          const events = await executor(effect, kernel.getState());
+          return kernel.applyEffectResult(lease, events) ? events : [];
+        },
+      );
+    } finally {
+      kernel.close();
+    }
   }
 
   /** Persist a plan-mode intent before the user has supplied the task text. */

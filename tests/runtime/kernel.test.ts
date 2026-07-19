@@ -15,6 +15,86 @@ import {
 import { createRuntimeStore } from '../../src/core/runtime/store';
 
 describe('AgentKernel durability', () => {
+  test('migrates v14 snapshots with an empty context checkpoint runtime', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-pr6-migration-'));
+    const storePath = join(dir, 'runtime.db');
+    try {
+      const legacy = createInitialRuntimeState({
+        threadId: 'pr6-migration',
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      legacy.schemaVersion = 14;
+      delete (legacy as Partial<RuntimeState>).context;
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(legacy.session.threadId, legacy);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId: legacy.session.threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+      expect(restored.getState().context).toEqual({ history: [] });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('migrates v13 transcript messages to stable PR 3 identities', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-pr3-migration-'));
+    const storePath = join(dir, 'runtime.db');
+    try {
+      const legacy = createInitialRuntimeState({
+        threadId: 'pr3-migration',
+        userId: 'user',
+        workspace: '/workspace',
+      }) as RuntimeState;
+      legacy.schemaVersion = 13;
+      legacy.transcript.messages = [
+        { kind: 'user', messageId: 'user-1', content: 'hello' },
+        {
+          kind: 'tool',
+          toolCallId: 'tool-1',
+          name: 'read_file',
+          content: 'legacy content',
+          ok: true,
+        },
+      ];
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(legacy.session.threadId, legacy);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId: legacy.session.threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+      expect(restored.getState().transcript.messages).toEqual([
+        expect.objectContaining({
+          messageId: 'user-1',
+          turnId: legacy.turn.turnId,
+          ordinal: 0,
+          createdAt: '1970-01-01T00:00:00.000Z',
+        }),
+        expect.objectContaining({
+          messageId: 'tool-tool-1',
+          turnId: legacy.turn.turnId,
+          ordinal: 1,
+          createdAt: '1970-01-01T00:00:00.000Z',
+        }),
+      ]);
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('restores a non-empty session-loaded capability set after restart', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-loaded-capability-restart-'));
     const storePath = join(dir, 'runtime.db');

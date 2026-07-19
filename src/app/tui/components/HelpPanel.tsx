@@ -59,6 +59,7 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
         ['/permissions', modeHelp],
         ['/plan', '切换规划模式'],
         ['/mcp', '管理 MCP Server'],
+        ['/compact', '压缩对话上下文（支持自定义指令）'],
         ['/rewind', '回退检查点'],
         ['/export', '导出会话'],
         ['/help', '帮助面板'],

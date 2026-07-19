@@ -180,8 +180,10 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       events.push(event.type);
     }
 
-    // model.cache_metrics may appear; filter to expected core events
-    const coreEvents = events.filter((e) => e !== 'model.cache_metrics');
+    // Model telemetry may appear; filter to expected lifecycle events.
+    const coreEvents = events.filter(
+      (event) => event !== 'model.cache_metrics' && event !== 'model.context_metrics',
+    );
     expect(coreEvents).toEqual([
       'user.message_appended',
       'turn.started',

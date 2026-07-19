@@ -2,6 +2,7 @@
 // Phase 2: 纯函数 reduceRuntimeState — 将 RuntimeEvent 应用到 RuntimeState，返回新的不可变状态
 // Phase 2: Pure function reduceRuntimeState — applies a RuntimeEvent to RuntimeState, returns new immutable state
 
+import { createHash } from 'node:crypto';
 import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   evaluateCircuitBreaker,
@@ -17,8 +18,57 @@ import {
   getActiveTask,
   type RuntimeState,
   setActivePlanning,
+  type ToolCallRecord,
+  type ToolResultMeta,
   updateActiveTask,
 } from './state';
+
+function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: string) {
+  return {
+    messageId,
+    turnId: state.turn.turnId,
+    ordinal: state.transcript.messages.length,
+    createdAt: createdAt ?? new Date(0).toISOString(),
+  };
+}
+
+function stringArg(args: unknown, key: string): string | undefined {
+  if (!args || typeof args !== 'object') return undefined;
+  const value = (args as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function toolResultMeta(
+  call: ToolCallRecord,
+  event: Extract<RuntimeEvent, { type: 'tool.finished' }>,
+): ToolResultMeta {
+  const supplied = event.result.resultMeta ?? {};
+  const path = supplied.path ?? stringArg(call.args, 'path') ?? stringArg(call.args, 'uri');
+  const intent =
+    supplied.intent ??
+    (call.args && typeof call.args === 'object'
+      ? stringArg((call.args as Record<string, unknown>).action, 'intent')
+      : undefined);
+  const effect = call.effectClass ?? classifyToolCapability(call.name, call.args).effectClass;
+  const workspaceMutationScope =
+    supplied.workspaceMutationScope ??
+    ((effect === 'workspace_write' || (effect === 'unknown' && call.sideEffect)) && path
+      ? [path]
+      : undefined);
+  return {
+    ...supplied,
+    ...(path ? { path } : {}),
+    ...(event.result.totalLines != null ? { totalLines: event.result.totalLines } : {}),
+    ...(event.result.command ? { command: event.result.command } : {}),
+    ...(intent ? { intent } : {}),
+    ...(workspaceMutationScope ? { workspaceMutationScope } : {}),
+    contentDigest:
+      supplied.contentDigest ??
+      createHash('sha256')
+        .update(event.result.stdout || event.result.stderr)
+        .digest('hex'),
+  };
+}
 
 /**
  * 纯函数：将运行时事件应用到状态，返回新的不可变状态。
@@ -33,6 +83,93 @@ import {
  */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
   switch (event.type) {
+    case 'context.compaction_requested': {
+      const pending = state.context.pendingCompaction;
+      if (pending && pending.compactionId !== event.compactionId) return state;
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          pendingCompaction: {
+            compactionId: event.compactionId,
+            reason: event.reason,
+            requestedAtRevision: event.requestedAtRevision,
+            requestedAtTurnId: event.requestedAtTurnId,
+            force: event.force,
+            estimate: event.estimate,
+            ...(event.customInstructions ? { customInstructions: event.customInstructions } : {}),
+          },
+          lastFailure: undefined,
+          ...(event.reason === 'overflow_recovery'
+            ? { overflowRecoveryTurnId: event.requestedAtTurnId }
+            : {}),
+        },
+      };
+    }
+
+    case 'context.compaction_completed': {
+      if (
+        state.context.pendingCompaction?.compactionId !== event.compactionId ||
+        event.checkpoint.compactionId !== event.compactionId ||
+        event.checkpoint.sourceRevision !== event.sourceRevision
+      )
+        return state;
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          activeCheckpoint: event.checkpoint,
+          pendingCompaction: undefined,
+          lastFailure: undefined,
+          history: [
+            ...state.context.history,
+            { kind: 'completed' as const, checkpoint: event.checkpoint },
+          ].slice(-128),
+          lastCompactionTurnIndex: state.turn.turnIndex,
+        },
+      };
+    }
+
+    case 'context.compaction_failed': {
+      if (state.context.pendingCompaction?.compactionId !== event.compactionId) return state;
+      const failure = {
+        compactionId: event.compactionId,
+        sourceRevision: event.sourceRevision,
+        errorKind: event.errorKind,
+        message: event.message,
+        retryable: event.retryable,
+        reason: state.context.pendingCompaction.reason,
+      };
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          pendingCompaction: undefined,
+          lastFailure: failure,
+          history: [...state.context.history, { kind: 'failed' as const, failure }].slice(-128),
+        },
+      };
+    }
+
+    case 'context.compaction_reset': {
+      if (state.context.activeCheckpoint?.compactionId !== event.checkpointId) return state;
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          activeCheckpoint: undefined,
+          history: [
+            ...state.context.history,
+            {
+              kind: 'reset' as const,
+              compactionId: event.checkpointId,
+              reason: event.reason,
+            },
+          ].slice(-128),
+        },
+      };
+    }
+
     case 'task.started': {
       const task = {
         taskId: event.taskId,
@@ -655,6 +792,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                 ok: event.result.ok,
                 summary: `Command: ${event.result.command}, exit code: ${event.result.exitCode}`,
                 exitCode: event.result.exitCode,
+                resultMeta: toolResultMeta(existingCall, event),
               },
             },
           },
@@ -667,10 +805,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...state.transcript.messages,
             {
               kind: 'tool',
+              ...transcriptMeta(state, `tool-${event.toolCallId}`, event.createdAt),
               toolCallId: event.toolCallId,
               name: event.name,
               content: event.result.stdout || event.result.stderr,
               ok: event.result.ok,
+              resultMeta: toolResultMeta(existingCall, event),
             },
           ],
         },
@@ -709,6 +849,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...state.transcript.messages,
             {
               kind: 'tool',
+              ...transcriptMeta(state, `tool-${event.toolCallId}`),
               toolCallId: event.toolCallId,
               name: existingCall.name,
               content: JSON.stringify({
@@ -762,6 +903,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               ...state.transcript.messages,
               {
                 kind: 'tool',
+                ...transcriptMeta(state, `tool-${event.toolCallId}`),
                 toolCallId: event.toolCallId,
                 name: existingCall.name,
                 content: JSON.stringify({
@@ -817,6 +959,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...state.transcript.messages,
             {
               kind: 'tool',
+              ...transcriptMeta(state, `tool-${event.toolCallId}`),
               toolCallId: event.toolCallId,
               name: existingCall.name,
               content: event.reason,
@@ -1040,7 +1183,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...settled.transcript.messages,
             {
               kind: 'runtime',
-              messageId: `provider-admission-waiver-${event.interactionId}`,
+              ...transcriptMeta(
+                settled,
+                `provider-admission-waiver-${event.interactionId}`,
+                event.waivedAt,
+              ),
               content:
                 `Required MCP provider '${event.providerId}' is unavailable. ` +
                 'The user waived it for this session; its capabilities remain unavailable.',
@@ -1087,6 +1234,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                 ...state.transcript.messages,
                 {
                   kind: 'tool',
+                  ...transcriptMeta(state, `tool-${call.toolCallId}`),
                   toolCallId: call.toolCallId,
                   name: call.name,
                   content: call.error ?? 'MCP provider action is required.',
@@ -1134,7 +1282,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...state.transcript.messages,
             {
               kind: 'runtime',
-              messageId: `provider-action-${event.interactionId}`,
+              ...transcriptMeta(state, `provider-action-${event.interactionId}`),
               content: `MCP provider '${providerId}' recovery ${outcome}.`,
             },
           ],
@@ -1160,6 +1308,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'turn.started':
       return {
         ...state,
+        context:
+          state.context.overflowRecoveryTurnId &&
+          state.context.overflowRecoveryTurnId !== event.turnId
+            ? { ...state.context, overflowRecoveryTurnId: undefined }
+            : state.context,
         turn: {
           turnId: event.turnId,
           turnIndex: state.turn.turnIndex + 1,
@@ -1205,7 +1358,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           final: undefined,
           messages: [
             ...nextState.transcript.messages,
-            { kind: 'user', messageId: event.messageId, content: event.content },
+            {
+              kind: 'user',
+              ...transcriptMeta(nextState, event.messageId, event.createdAt),
+              content: event.content,
+            },
           ],
         },
       };
@@ -1221,6 +1378,22 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'model.retry':
     case 'model.cache_metrics':
       return state;
+    case 'model.context_metrics':
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          lastPreflight: {
+            estimate: event.estimate,
+            usableInputTokens: event.usableInputTokens,
+            reservedOutputTokens: event.reservedOutputTokens ?? 0,
+            providerSafetyMarginTokens: event.providerSafetyMarginTokens ?? 0,
+            utilization: event.utilization,
+            status: event.status,
+            targetTokens: event.targetTokens,
+          },
+        },
+      };
     case 'run.completed': {
       const active = getActiveTask(state);
       if (!active) return state;
@@ -1251,7 +1424,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...state.transcript.messages,
             {
               kind: 'assistant',
-              messageId: event.messageId,
+              ...transcriptMeta(state, event.messageId, event.createdAt),
               content: event.text,
               reasoningText: event.reasoningText,
               toolCalls: event.toolCalls ?? [],
@@ -1548,7 +1721,7 @@ function appendVerificationInstruction(
         ...state.transcript.messages,
         {
           kind: 'runtime',
-          messageId: `verification-${verificationId}-${state.revision}`,
+          ...transcriptMeta(state, `verification-${verificationId}-${state.revision}`),
           content: instruction,
         },
       ],

@@ -99,7 +99,12 @@
     },
     {
       "id": "model-and-context",
-      "sources": ["src/core/model/**", "src/core/prompts/**"],
+      "sources": [
+        "src/core/model/**",
+        "src/core/prompts/**",
+        "src/core/controllers/tool-controller.ts",
+        "src/core/harness/tool-runner.ts"
+      ],
       "documents": [
         "docs/active/model-provider-boundary.md",
         "docs/active/plan-state-reminder.md",

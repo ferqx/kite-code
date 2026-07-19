@@ -39,6 +39,23 @@ export { expandEnvVars } from './mcp-server-config';
 
 // ── Zod schemas ──
 
+const modelEntrySchema = z.union([
+  z.string().min(1),
+  z
+    .object({
+      name: z.string().min(1),
+      default: z.boolean().optional(),
+      contextWindow: z.number().int().positive().optional(),
+      /** @deprecated Use contextWindow. */
+      tokens: z.number().int().positive().optional(),
+      maxOutputTokens: z.number().int().positive().optional(),
+      tokenizerFamily: z.string().min(1).optional(),
+      supportsUsageMetadata: z.boolean().optional(),
+      supportsPromptCache: z.boolean().optional(),
+    })
+    .strict(),
+]);
+
 const providerSchema = z.object({
   type: z.enum(['deepseek', 'openai', 'openai-compatible', 'ollama']).optional(),
   apiKey: z.string().min(1).optional(),
@@ -52,7 +69,7 @@ const providerSchema = z.object({
   /** Extra kwargs passed through to the LangChain model constructor */
   modelKwargs: z.record(z.string(), z.any()).optional(),
   /** Available model names (string[]) */
-  models: z.array(z.any()).optional(),
+  models: z.array(modelEntrySchema).optional(),
 });
 
 // Deprecated: kept for backward compatibility with old top-level models array
@@ -74,7 +91,6 @@ const featuresSchema = z
     planLifecycleV2: z.boolean().optional(),
     interactionControllerV2: z.boolean().optional(),
     autoReviewV2: z.boolean().optional(),
-    runtimeProjectionV2: z.boolean().optional(),
     nativeLoopEngine: z.boolean().optional(),
     loopMode: z.boolean().optional(),
     capabilityCatalogV1: z.boolean().optional(),
@@ -85,6 +101,9 @@ const featuresSchema = z
     skillWorkflowV1: z.boolean().optional(),
     verificationV1: z.boolean().optional(),
     toolSearchV1: z.boolean().optional(),
+    contextCompactionV2: z.boolean().optional(),
+    contextCompactionAutoV1: z.boolean().optional(),
+    contextCompactionManualV1: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -108,6 +127,19 @@ export const configSchema = z.object({
       circuitBreakerMaxRejections: z.number().int().positive().optional(),
       circuitBreakerWindowMs: z.number().int().positive().optional(),
     })
+    .optional(),
+  compaction: z
+    .object({
+      maxSummaryTokens: z.number().int().positive().optional(),
+      maxSummaryInputTokens: z.number().int().positive().optional(),
+      softRatio: z.number().positive().max(1).optional(),
+      hardRatio: z.number().positive().max(1).optional(),
+      targetRatio: z.number().positive().max(1).optional(),
+      minimumReductionRatio: z.number().nonnegative().max(1).optional(),
+      cooldownTurns: z.number().int().nonnegative().optional(),
+      recentTurns: z.number().int().nonnegative().optional(),
+    })
+    .strict()
     .optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });
@@ -136,6 +168,14 @@ export interface AgentConfig {
   reasoning?: boolean;
   /** 透传给 LangChain 模型构造器的额外参数 */
   modelKwargs?: Record<string, unknown>;
+  /** Explicit capabilities from the selected model entry, before catalog fallback resolution. */
+  modelCapabilities?: {
+    contextWindowTokens?: number;
+    maxOutputTokens?: number;
+    tokenizerFamily?: string;
+    supportsUsageMetadata?: boolean;
+    supportsPromptCache?: boolean;
+  };
   interactionMode?: z.infer<typeof interactionModeSchema>;
   features?: Partial<FeatureFlags>;
   sandbox: {
@@ -150,6 +190,7 @@ export interface AgentConfig {
     circuitBreakerMaxRejections?: number;
     circuitBreakerWindowMs?: number;
   };
+  compaction?: NonNullable<KiteCodeConfig['compaction']>;
 }
 
 /** 加载配置选项 / Configuration loading options */
@@ -201,6 +242,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     features: { ...user.features, ...project.features },
     sandbox: project.sandbox ?? user.sandbox,
     autoReview: project.autoReview ?? user.autoReview,
+    compaction: project.compaction ?? user.compaction,
     mcpServers: { ...user.mcpServers, ...project.mcpServers },
   };
 }
@@ -265,20 +307,42 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
 
   const reasoningEffort = provider.effort ?? null;
   const reasoning = provider.reasoning ?? inferReasoningDefault(providerType);
+  const modelName =
+    options.modelName ?? provider.model ?? defaultModel?.name ?? 'deepseek-v4-flash';
+  const selectedModel = provider.models?.find((entry) => modelEntryName(entry) === modelName);
+  const selected = selectedModel && typeof selectedModel === 'object' ? selectedModel : undefined;
 
   return {
     apiKey: resolveProviderApiKey(providerName, providerType, provider.apiKey),
     baseURL: resolveProviderBaseURL(providerName, providerType, provider.baseURL),
-    modelName: options.modelName ?? provider.model ?? defaultModel?.name ?? 'deepseek-v4-flash',
+    modelName,
     providerName,
     providerType,
     reasoningEffort,
     reasoning,
     modelKwargs: provider.modelKwargs as Record<string, unknown> | undefined,
+    ...(selected
+      ? {
+          modelCapabilities: {
+            ...((selected.contextWindow ?? selected.tokens)
+              ? { contextWindowTokens: selected.contextWindow ?? selected.tokens }
+              : {}),
+            ...(selected.maxOutputTokens ? { maxOutputTokens: selected.maxOutputTokens } : {}),
+            ...(selected.tokenizerFamily ? { tokenizerFamily: selected.tokenizerFamily } : {}),
+            ...(selected.supportsUsageMetadata != null
+              ? { supportsUsageMetadata: selected.supportsUsageMetadata }
+              : {}),
+            ...(selected.supportsPromptCache != null
+              ? { supportsPromptCache: selected.supportsPromptCache }
+              : {}),
+          },
+        }
+      : {}),
     interactionMode: cfg.interactionMode,
     features: cfg.features,
     sandbox: { enabled: cfg.sandbox?.enabled ?? true },
     autoReview: cfg.autoReview,
+    compaction: cfg.compaction,
   };
 }
 
@@ -318,6 +382,22 @@ function modelEntryName(entry: unknown): string | null {
   return null;
 }
 
+function modelEntryObject(entry: unknown): {
+  default?: boolean;
+  contextWindow?: number;
+  tokens?: number;
+  maxOutputTokens?: number;
+} | null {
+  return entry && typeof entry === 'object'
+    ? (entry as {
+        default?: boolean;
+        contextWindow?: number;
+        tokens?: number;
+        maxOutputTokens?: number;
+      })
+    : null;
+}
+
 /**
  * Find the default model from config.
  * Priority: provider.model > legacy default:true > first model > null
@@ -328,7 +408,7 @@ function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string
     // Legacy: model entry with default:true
     if (prov.models) {
       for (const m of prov.models) {
-        if (m && typeof m === 'object' && (m as any).default) {
+        if (modelEntryObject(m)?.default) {
           const name = modelEntryName(m);
           if (name) return { provider: provName, name };
         }
@@ -383,6 +463,7 @@ export interface AvailableModel {
   isDefault: boolean;
   /** 上下文窗口大小（token 数）/ Context window size in tokens */
   contextWindow?: number;
+  maxOutputTokens?: number;
 }
 
 let _cachedModels: AvailableModel[] | null = null;
@@ -417,11 +498,11 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
       for (const m of prov.models) {
         const name = modelEntryName(m);
         if (!name) continue;
-        const isDefault =
-          name === defaultName || (m && typeof m === 'object' && !!(m as any).default);
-        const contextWindow =
-          m && typeof m === 'object' ? ((m as any).contextWindow ?? (m as any).tokens) : undefined;
-        models.push({ provider: provName, name, isDefault, contextWindow });
+        const entry = modelEntryObject(m);
+        const isDefault = name === defaultName || Boolean(entry?.default);
+        const contextWindow = entry?.contextWindow ?? entry?.tokens;
+        const maxOutputTokens = entry?.maxOutputTokens;
+        models.push({ provider: provName, name, isDefault, contextWindow, maxOutputTokens });
       }
     }
   }
