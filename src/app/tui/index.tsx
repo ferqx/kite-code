@@ -623,7 +623,6 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     (customInstructions) => {
       const label = customInstructions ? `/compact ${customInstructions}` : '/compact';
       dispatchSessionLoad({ type: 'USER_MESSAGE', text: label });
-      dispatchSessionLoad({ type: 'LOCAL_TEXT', text: '  ✳ Compacting conversation…' });
       void sessionManager
         .handleContextCompaction(threadIdRef.current, customInstructions)
         .then((result) => {
