@@ -1,219 +1,128 @@
-# Bun LangGraph 代码 Agent
+# Kite Code
 
-这是一个基于 Bun、TypeScript、LangGraph.js 和 LangChain 聊天模型适配器构建的独立代码 agent 参考实现。
+Kite Code 是一个基于 Bun、TypeScript 和事件化 Runtime Kernel 的多模型代码 Agent。模型、工具、审批、恢复与验收统一由 Kernel 调度；TUI 和 CLI 共享相同的 Core 行为。
 
-## 功能
+## 当前能力
 
-- 使用 LangGraph `StateGraph` 维护 `agent -> approval/user_input/tools -> agent` 循环。
-- 支持 `read-only` / `write` 工作区访问权限；只读访问由工具执行层强制，静态系统提示和工具 schema 不随访问权限变化，以提升 provider 前缀缓存命中。
-- 支持上下文预算和历史消息压缩摘要。
-- 当 provider 元数据暴露缓存 token 计数时，从流式模型响应中提取 prompt cache 指标，并在 `cache_metrics` 事件内附带 coding 场景缓存命中标准评估。
-- 使用 Bun 原生 SQLite checkpointer 持久化短期 thread 状态。
-- 输出标准化的图事件流，包括 interrupt 和 final 事件。
-- 通过 LangGraph `interrupt()` 和 `Command({ resume })` 为受保护工具执行提供人工审批；审批 payload 由 harness 生成，包含风险、预期影响和 `approvalHash`。
-- 提供工作区安全的文件 patch 工具和结构化 shell 工具结果。
-- 模型可见工具表面固定为 `read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan` 和 `ask_user`。
-- `shell_execute` 使用 action envelope 表达命令、意图、目标、预期观察和失败策略；验证命令通过 `intent: "verify"` 表达。
-- 文件定位、文本检索、目录查看和 git 只读检查统一通过 `shell_execute` 的 `intent: "inspect"` 承载；没有独立的只读 shell 或文本检索工具。
-- 支持当前 thread 内的 shell 授权状态：默认可单次审批或授权同一命令，用户显式开启 `full_access` 后后续 `shell_execute` 不再请求确认。
-- 提供真实配置模型的端到端测试入口。
+- React Ink TUI 与 Headless CLI；
+- AI SDK 模型边界，支持 DeepSeek、OpenAI、OpenAI-compatible 与 Ollama 配置；
+- Runtime Event/State/Effect、SQLite Event Store、Snapshot、Restore/Fork；
+- Builtin、MCP、Skill Workflow 与 Subagent 统一 Capability Catalog；
+- interaction mode、authorization、approval、auto review 与 sandbox；
+- Execution Receipt、Artifact、分级 Verification 与 repair/replan；
+- Plan Artifact、上下文压缩、多会话和 PTY 系统测试。
 
-## 源码结构
-
-- `src/app/tui/`：基于 React Ink 的交互式 TUI（OutputArea、App 布局、reducer、键盘快捷键、斜杠命令支持）。
-- `src/app/`：CLI 入口、run/resume 编排和事件流标准化。
-- `src/harness/`：LangGraph 控制循环、状态、路由、审批和工具分发。
-- `src/model/`：模型适配器工厂、OpenAI-compatible provider 适配、Ollama provider 适配、DeepSeek 专用 patch、静态 prompt、运行时上下文和上下文压缩。
-- `src/tools/`：模型工具定义，以及文件、shell、patch 工具实现。
-- `src/persistence/`：Bun SQLite LangGraph checkpointer。
-- `src/config/`：本地 `~/.openpx/openpx.jsonc` 配置加载器。
-- `tests/e2e/`：TUI 端到端测试套件（mock agent，88 个场景，覆盖斜杠命令、键盘快捷键、设置/会话、真实 agent 对话、视口回归）。
-- `src/shared/`：共享类型和 prompt cache 指标。
+总体架构见 [六概念 Runtime 架构](docs/active/six-concept-runtime-architecture.md)，当前行为规则见 [docs/active](docs/active)。
 
 ## 安装
-
-安装依赖：
 
 ```bash
 bun install
 ```
 
-默认模型配置从当前用户目录读取：
-
-```text
-~/.openpx/openpx.jsonc
-```
-
-示例路径：Windows 为 `C:\Users\<user>\.openpx\openpx.jsonc`，macOS 为 `/Users/<user>/.openpx/openpx.jsonc`，Linux 为 `/home/<user>/.openpx/openpx.jsonc`。
-
-配置结构使用命名 provider 和默认模型：
+用户配置位于 `~/.kite-code/kite-code.jsonc`，项目可用 `<workspace>/.kite-code/kite-code.jsonc` 覆盖。最小示例：
 
 ```jsonc
 {
   "provider": {
-    "my-provider": {
+    "default": {
       "type": "openai-compatible",
-      "apiKey": "sk-...",
-      "baseURL": "https://example.com/v1"
+      "apiKey": "${OPENAI_API_KEY}",
+      "baseURL": "https://example.com/v1",
+      "model": "model-name"
     }
   },
-  "model": {
-    "default": {
-      "provider": "my-provider",
-      "name": "provider-model-name"
-    }
-  }
+  "interactionMode": "auto",
+  "sandbox": { "enabled": true }
 }
 ```
 
-本项目不是 DeepSeek-only。DeepSeek 只是一个受支持的 provider。除非正在处理 provider 专有行为，否则新的模型相关改动应保持通用 OpenAI-compatible 边界。
+模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。
 
-支持的 provider `type` 值：
+MCP 默认配置只有两个规范位置：项目级 `<project>/.kite-code/mcp.json` 与用户级 `~/.kite-code/mcp.json`，同名 Server 按 `project > user` 选择。`/mcp` 的 Current project 与 All projects 分别写入这两个文件；项目声明必须在 Server Detail 的 Review 页面显式批准。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 仅只读兼容与显式迁移，不再作为写入目标。
 
-- `deepseek`：使用 `@langchain/deepseek`，并保留 DeepSeek reasoning-content patch。
-- `openai`：使用 `@langchain/openai` 访问配置的 OpenAI API base URL。
-- `openai-compatible`：使用 `@langchain/openai` 访问任意兼容 OpenAI API 的 base URL。
-- `ollama`：使用 `@langchain/ollama` 的 `ChatOllama` 访问 Ollama 原生 API；省略 `apiKey` 时不使用密钥，省略 `baseURL` 时使用 `http://localhost:11434`。
+Tool 可见性可在 JSONC 中用 `enabledTools` allowlist、`disabledTools` denylist 和 `tools.<name>.enabled` 精确 override 控制；逐 Tool policy 还支持 `effects`、`minimumApproval`、`retry` 与 `idempotencyKeyArgument`。项目配置只能用这些字段收紧可见性或策略，不能信任远端 annotation、降低风险或扩大重试。任何 filter/policy 变化都会使旧 turn binding 失效。
 
-为了保持向后兼容，省略 `type` 时，provider 名称 `deepseek` 仍映射为 `deepseek`，provider 名称 `ollama` 映射为 `ollama`；其他 provider 名称默认映射为 `openai-compatible`。
+`/mcp` 不接受参数，打开使用 `↑/↓/Enter/Esc` 的 MCP 管理 Overlay。Server List 只负责选择；Enter 进入只读详情，再通过可见菜单执行 Connect/Retry、Authenticate、Enable/Disable、Remove 或项目审批。配置文件变化仍由 watcher 自动重载；watcher 不可用时可重启 TUI 进行完整加载。动态 MCP Prompt 命令保持独立行为。
 
-当需要 DeepSeek 适配器专有行为时，可以这样配置：
+HTTP Server 返回 OAuth 认证要求时，Server Detail 提供 Authenticate；只有在认证页选择 Open browser 后才创建 callback 并打开系统浏览器，Esc 可返回或取消进行中的 callback。OAuth token、dynamic client、PKCE verifier 和 discovery state 只保存在系统原生凭据保险库，成功后重新 discovery，不重放旧 Tool Call。已有 token 会在启动时静默恢复；恢复失败只进入 `reauth-required`，不会循环打开浏览器。
+
+开启默认关闭的 `features.mcpProviderActionV1` 后，MCP Tool 因登录、项目批准或 Provider 暂时不可用而失败时，Runtime 会通过 App shell 提供固定的 Login、Approve 或 Retry 恢复动作。恢复成功从新 turn 继续，延后或失败不会重放旧调用。配置为 `required: true` 的不可用 Provider 还会在首次模型调用前要求 Retry、当前 session waiver 或 Cancel Run；waiver 不会让不可用能力重新进入 catalog。
+
+静态 HTTP 认证继续支持环境变量引用，也支持由嵌入调用方预先写入系统保险库的 credential profile。普通配置只保存引用，例如：
 
 ```jsonc
 {
-  "provider": {
-    "deepseek": {
-      "type": "deepseek",
-      "apiKey": "sk-...",
-      "baseURL": "https://api.deepseek.com/v1"
-    }
-  },
-  "model": {
-    "default": {
-      "provider": "deepseek",
-      "name": "deepseek-chat"
-    }
-  }
-}
-```
-
-provider 专有逻辑应保持隔离。例如 DeepSeek 适配器保留 reasoning-content 回传 patch，Ollama 适配器走 `@langchain/ollama`，普通 OpenAI-compatible provider 走通用 OpenAI-compatible 适配器。
-
-使用本地 Ollama 时，可以先拉取需要的模型，再用最小配置指向本地服务：
-
-```bash
-ollama pull qwen2.5-coder:7b
-ollama serve
-```
-
-```jsonc
-{
-  "provider": {
-    "ollama": {}
-  },
-  "model": {
-    "default": {
-      "provider": "ollama",
-      "name": "qwen2.5-coder:7b"
+  "mcpServers": {
+    "remote": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "auth": {
+        "type": "environment",
+        "header": "Authorization",
+        "env": "MCP_TOKEN",
+        "scheme": "Bearer"
+      }
     }
   }
 }
 ```
+
+`auth` 只适用于 HTTP transport。`auth.type: "credential"` 只接受 `credentialRef`；`auth.type: "oauth"` 可保存 scopes、client id、`clientSecretRef` 和 credential profile。inline client secret 会被拒绝。TUI 不录入 secret，也不修改 auth 配置；原生保险库 locked/unavailable 时认证 fail closed，绝不退回明文文件。
 
 ## 运行
 
-启动一次任务：
+交互式 TUI：
 
 ```bash
-bun run agent run --thread demo --user local --task "Create hello.txt with exact content \"hello\""
+bun run tui
 ```
 
-默认 `auto` 使用 `write` 工作区访问权限，由模型自主决定是否调用 `update_plan`。如需强制只读访问，可使用 `--mode read-only`，也可以继续使用兼容入口 `--mode plan` 或任务前缀 `/plan`：
+CLI：
 
 ```bash
-bun run agent run --mode read-only --thread demo --user local --task "Inspect the change and propose a plan"
+bun run agent run --thread demo --workspace . --task "检查并修复测试"
+bun run agent resume --thread demo --approve
+bun run agent trace events.jsonl --turn 1
 ```
 
-`read-only` 访问状态会作为尾部合成运行时消息注入，而不是切换另一套 system prompt。只读访问下写入、删除和执行类工具即使被模型调用也会被工具执行层拒绝；`write` 访问下这些受保护工具仍需要审批。`--mode plan` / `--mode builder` 是兼容旧入口，内部会分别映射到 `read-only` / `write`。
+常用参数以 `bun run agent --help` 输出和 `src/app/cli/index.ts` 为准。`--checkpoints` 是保留的 CLI 参数名，当前数据由 Runtime Store 管理。
 
-当事件流发出受保护工具的 `interrupt` 事件时，可以审批并恢复执行：
+## 安全边界
 
-```bash
-bun run agent resume --thread demo --user local --approve
+- Capability discovery 不等于授权；动态能力必须具有当前轮 binding。
+- `accept_edits`、`auto`、`full` 不会绕过 schema、revision、强制审批或 sandbox。
+- 远端 MCP annotation 和 Skill manifest 不能自行授予权限。
+- 未获本机用户按配置摘要批准的项目 MCP 不会创建 stdio/HTTP transport。
+- MCP token、client secret 与 PKCE material 不进入普通配置、Runtime Event、session log 或 control snapshot。
+- 外部写入先记录 invocation intent；未知结果禁止盲重放。
+- Tool success 不等于任务完成；required Verification 未通过时不能完成。
+
+## 源码结构
+
+```text
+src/protocol/       跨层事件、动作、Capability 与 Verification 契约
+src/core/runtime/   Kernel、State、Event、Effect、Scheduler、Store
+src/core/model/     AI SDK provider 与上下文边界
+src/core/tools/     Builtin Capability provider
+src/core/mcp/       MCP supervisor、control snapshot 与 Runtime provider
+src/core/skills/    Skill Workflow provider
+src/core/subagent/  Subagent provider
+src/core/policies/  Mode、审批和副作用策略
+src/core/verification/ 验收与恢复
+src/app/tui/        React Ink TUI
+src/app/cli/        CLI
 ```
 
-推荐把 interrupt 中的 `approval.approvalHash` 一并带回，确保恢复时审批的是同一个工具请求：
-
-```bash
-bun run agent resume --thread demo --user local --approve --approval-hash "<hash-from-interrupt>"
-```
-
-如果需要调整待执行命令，可以在同一次恢复中替换命令。替换后的命令仍会经过工具安全策略判定：
-
-```bash
-bun run agent resume --thread demo --user local --approve --approval-hash "<hash-from-interrupt>" --replace-command "bun test tests/graph.test.ts"
-```
-
-如果希望当前 thread 后续重复执行完全相同的 shell 命令不再请求确认，可以使用同命令授权。匹配规则是同一 workspace/thread 下 `command.trim()` 完全一致，和模型解释文本或 `prefix_rule` 无关：
-
-```bash
-bun run agent resume --thread demo --user local --approve-same-command --approval-hash "<hash-from-interrupt>"
-```
-
-如果用户明确允许当前 thread 后续所有 `shell_execute` 命令直接执行，可以开启 `full_access`。该授权只保存在当前 thread checkpoint 中，新 thread 不继承；开启后包括原本 destructive 分类的 shell 命令也不会再进入审批或默认拒绝：
-
-```bash
-bun run agent resume --thread demo --user local --full-access --approval-hash "<hash-from-interrupt>"
-```
-
-当模型在规划时调用 `ask_user` 并发出 `kind: "user_input"` 的中断事件时，可以传入用户选择或自由文本恢复执行：
-
-```bash
-bun run agent resume --thread demo --user local --answer "使用最小实现，暂不支持批量配置"
-```
-
-默认情况下，CLI 会把 checkpoint SQLite 文件写入当前工作区的 `.openpx/` 目录。可以用 `--checkpoints` 覆盖路径。
-
-### 缓存命中标准
-
-`cache_metrics` 事件以 provider 返回的 token 计数为事实来源。DeepSeek 返回的 `prompt_cache_hit_tokens` 和 `prompt_cache_miss_tokens` 会被归一化为 `cacheHitTokens`、`cacheMissTokens` 和 `hitRate`。
-
-事件内的 `standard` 字段用于判断 coding 场景是否达到缓存目标：
-
-- 目标命中率为 `0.95`。
-- 每个 run / resume 流的第一条缓存指标视为 warmup，不计入达标判断。
-- 计入标准的输入 token 累计至少达到 `8000` 后才判断是否达标；样本不足时 `meetsTarget` 为 `null`。
-- 后续指标按 token 加权累计，使用 `cacheHitTokens / inputTokens` 计算汇总命中率。
-- `standard.summary.meetsTarget` 在没有足够计入样本时为 `null`，样本足够后表示当前累计结果是否达到目标。
-
-## 测试
-
-默认测试，不包含真实模型/网络套件：
+## 验证
 
 ```bash
 bun test
+bun run test:e2e
+bun run test:mcp:live
+bun run typecheck
+bun run check:core-boundary
+bun run check:docs
 ```
 
-TUI 端到端测试（mock agent，无需 API 密钥）：
-
-```bash
-bun test tests/e2e/
-```
-
-覆盖 88 个场景：斜杠命令、键盘快捷键、设置/会话管理、真实 agent 对话（StreamingMockModel + 完整 TUI 渲染）和视口回归测试。
-
-真实配置模型端到端测试：
-
-```bash
-bun run test:real
-```
-
-可以在运行真实测试时临时覆盖默认 provider 和模型。除内置 `ollama` provider 会使用本地默认连接参数外，provider 名称必须已经存在于 `~/.openpx/openpx.jsonc` 的 `provider` 配置中；命令行只覆盖选择哪个 provider 和哪个模型，不传递密钥：
-
-```bash
-bun run test:real --provider=ollama --model=gemma4:31b-cloud
-```
-
-`bun test` 本身不会把自定义 `--provider` / `--model` 参数暴露给测试文件，因此 provider/model 覆盖必须通过 `bun run test:real` 入口传入。
-
-真实测试套件位于 `tests/real-agent.real.ts`，因此不会被 Bun 默认测试发现机制拾取。`test:real` 入口会解析 `--provider` 和 `--model`，再用 `--concurrent --max-concurrency 3` 启动真实模型用例，以缩短等待时间并避免过高并发压到 provider。它默认调用配置的默认模型；传入 `--provider` 或 `--model` 时使用命令行覆盖后的模型。真实套件覆盖当前全部模型可见工具：`read_file`、`edit_file`、`write_file`、`shell_execute`、`update_plan` 和 `ask_user`，同时覆盖受保护工具审批、shell 授权和 checkpoint 数据库检查。脚本会沿用当前 shell 的代理环境；如果网络需要代理或需要取消代理，请在项目脚本外部配置环境变量。
+默认测试不访问真实模型或公网 MCP。确定性跨进程 E2E 位于 `tests/e2e/local/`；公网 MCP 位于 `tests/e2e/live/mcp/`；真实模型套件保留在 `tests/e2e/live/model/`，当前尚无受维护用例。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke，验证真实 HTTP transport、discovery 和只读 Tool Call；它不等于真实模型验证。仓库当前没有注册真实模型测试脚本，不要把 mock model 测试表述为真实 provider 验证。

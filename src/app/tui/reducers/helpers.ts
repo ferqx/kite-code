@@ -1,31 +1,44 @@
-import type { TuiState, OutputBlock, Turn } from "../types";
+import type { OutputBlock, TuiState, Turn } from '../types';
 
 /** Soft cap on turns to prevent unbounded memory growth in long sessions */
 const MAX_TURNS = 500;
 
-/** Rebuild blockIndex from all current turns — used after trimming or clearing */
-export function buildBlockIndex(turns: Turn[]): Record<string, number> {
-  const idx: Record<string, number> = {};
-  for (const turn of turns) {
-    for (const b of turn.blocks) {
-      if (b.kind === "tool_card") idx[b.callId] = b.id;
-      else if (b.kind === "subagent") idx[b.subagentId] = b.id;
-    }
-  }
-  return idx;
-}
-
 function trimTurns(state: TuiState): TuiState {
   if (state.turns.length <= MAX_TURNS) return state;
   const trimmed = state.turns.slice(state.turns.length - MAX_TURNS);
-  return { ...state, turns: trimmed, blockIndex: buildBlockIndex(trimmed) };
+  return { ...state, turns: trimmed };
+}
+
+/** Find the first block matching the predicate across all turns (backward scan). */
+export function findBlock(
+  state: TuiState,
+  match: (b: OutputBlock) => boolean,
+): OutputBlock | undefined {
+  for (let t = state.turns.length - 1; t >= 0; t--) {
+    for (let i = state.turns[t]!.blocks.length - 1; i >= 0; i--) {
+      if (match(state.turns[t]!.blocks[i]!)) return state.turns[t]!.blocks[i]!;
+    }
+  }
+  return undefined;
+}
+
+/** Returns true if any block in any turn matches the predicate. */
+export function hasBlock(state: TuiState, match: (b: OutputBlock) => boolean): boolean {
+  for (const turn of state.turns) {
+    if (turn.blocks.some(match)) return true;
+  }
+  return false;
 }
 
 /** 追加 block 到最后 turn，自增 nextBlockId。
  *  若 turns 为空，自动创建首个 turn。 */
 export function appendBlock(state: TuiState, block: OutputBlock): TuiState {
   if (state.turns.length === 0) {
-    return trimTurns({ ...state, turns: [{ blocks: [block] }], nextBlockId: state.nextBlockId + 1 });
+    return trimTurns({
+      ...state,
+      turns: [{ blocks: [block] }],
+      nextBlockId: state.nextBlockId + 1,
+    });
   }
   const turns = state.turns.slice();
   const last = turns.at(-1)!;
@@ -34,10 +47,7 @@ export function appendBlock(state: TuiState, block: OutputBlock): TuiState {
 }
 
 /** 按 id 查找 block（跨所有 turns） */
-export function findBlockById(
-  state: TuiState,
-  blockId: number,
-): OutputBlock | undefined {
+export function findBlockById(state: TuiState, blockId: number): OutputBlock | undefined {
   for (const turn of state.turns) {
     const found = turn.blocks.find((b) => b.id === blockId);
     if (found) return found;
@@ -47,10 +57,7 @@ export function findBlockById(
 
 /** 替换最后 turn 的最后 block（流式更新 text content）。
  *  前置条件：最后 turn 至少有一个 block。 */
-export function updateLastBlock(
-  state: TuiState,
-  block: OutputBlock,
-): TuiState {
+export function updateLastBlock(state: TuiState, block: OutputBlock): TuiState {
   const turns = state.turns.slice();
   const last = turns.at(-1)!;
   const blocks = last.blocks.slice();
@@ -60,11 +67,7 @@ export function updateLastBlock(
 }
 
 /** 全局按 id 替换 block（toggle 展开/折叠、resolve interrupt 用） */
-export function replaceBlockById(
-  state: TuiState,
-  blockId: number,
-  next: OutputBlock,
-): TuiState {
+export function replaceBlockById(state: TuiState, blockId: number, next: OutputBlock): TuiState {
   const turns = state.turns.map((turn) => {
     const idx = turn.blocks.findIndex((b) => b.id === blockId);
     if (idx === -1) return turn;
@@ -82,7 +85,7 @@ export function finalizeLastTurnStreaming(state: TuiState): TuiState {
   if (!last) return state;
   let changed = false;
   const blocks = last.blocks.map((b) => {
-    if (b.kind === "text" && b.streaming) {
+    if (b.kind === 'text' && b.streaming) {
       changed = true;
       return { ...b, streaming: false } as typeof b;
     }
@@ -94,12 +97,65 @@ export function finalizeLastTurnStreaming(state: TuiState): TuiState {
   return { ...state, turns };
 }
 
+/** 合并最后一个 turn 中连续的 text block（中间无其他类型块）。
+ *  流式渲染期间 text 事件按行拆分为独立 OutputBlock，导致段落双倍间距和
+ *  列表项意外间距。合并后 MarkdownBlock 通过 spacingBetween 正确处理。
+ *  Merge consecutive text blocks in the last turn into a single block.
+ *  During streaming, text events are split into per-line blocks, causing
+ *  double paragraph spacing and unwanted list-item gaps. Merging lets
+ *  MarkdownBlock handle spacing correctly via spacingBetween. */
+export function mergeConsecutiveTextBlocksInLastTurn(state: TuiState): TuiState {
+  const last = state.turns.at(-1);
+  if (!last) return state;
+
+  const merged: OutputBlock[] = [];
+  let changed = false;
+  let textBuffer: { id: number; content: string } | null = null;
+
+  for (const b of last.blocks) {
+    if (b.kind === 'text') {
+      if (textBuffer) {
+        // Append to existing text buffer with \n separator
+        textBuffer.content += '\n' + b.content;
+        changed = true;
+      } else {
+        textBuffer = { id: b.id, content: b.content };
+      }
+    } else {
+      if (textBuffer) {
+        merged.push({
+          id: textBuffer.id,
+          kind: 'text',
+          content: textBuffer.content,
+          streaming: false,
+        });
+        textBuffer = null;
+      }
+      merged.push(b);
+    }
+  }
+  // Flush remaining text buffer
+  if (textBuffer) {
+    merged.push({
+      id: textBuffer.id,
+      kind: 'text',
+      content: textBuffer.content,
+      streaming: false,
+    });
+  }
+
+  if (!changed) return state;
+  const turns = state.turns.slice();
+  turns[turns.length - 1] = { blocks: merged };
+  return { ...state, turns };
+}
+
 /** 从扁平的 OutputBlock[] 按 kind === "user" 切分 turns */
 export function reconstructTurns(blocks: OutputBlock[]): Turn[] {
   const turns: Turn[] = [];
   let current: OutputBlock[] = [];
   for (const block of blocks) {
-    if (block.kind === "user" && current.length > 0) {
+    if (block.kind === 'user' && current.length > 0) {
       turns.push({ blocks: current });
       current = [];
     }
@@ -112,4 +168,15 @@ export function reconstructTurns(blocks: OutputBlock[]): Turn[] {
 /** 获取最后 turn */
 export function lastTurn(state: TuiState): Turn | undefined {
   return state.turns.at(-1);
+}
+
+/** Compute next block ID from turns (max ID + 1, or 0 if empty) */
+export function maxBlockIdInTurns(turns: Turn[]): number {
+  let max = 0;
+  for (const turn of turns) {
+    for (const b of turn.blocks) {
+      if (b.id >= max) max = b.id;
+    }
+  }
+  return max;
 }

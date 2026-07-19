@@ -8,7 +8,7 @@
 
 ## 目标
 
-补齐上次路线图（2026-05-20-tui-production-roadmap.md）遗留的缺口，将 OpenPX 提升到对标 Claude Code 的生产级水平。
+补齐上次路线图（2026-05-20-tui-production-roadmap.md）遗留的缺口，将 Kite Code 提升到对标 Claude Code 的生产级水平。
 
 ## 背景
 
@@ -35,7 +35,7 @@
 #### 配置模型
 
 ```jsonc
-// ~/.openpx/openpx.jsonc 新增 mcpServers 段
+// ~/.kite-code/kite-code.jsonc 新增 mcpServers 段
 // 同时兼容项目根目录 .mcp.json（与 Claude Code 共享配置格式）
 {
   "mcpServers": {
@@ -56,7 +56,7 @@
 
 - `type`：`"stdio"` 或 `"http"`（streamable HTTP，跳过已废弃的 SSE）
 - 环境变量展开：支持 `${VAR}` 和 `${VAR:-default}`
-- 配置 lookup 顺序：`openpx.jsonc` → 项目根 `.mcp.json`（合并）
+- 配置 lookup 顺序：`kite-code.jsonc` → 项目根 `.mcp.json`（合并）
 
 #### 工具命名
 
@@ -65,14 +65,14 @@ mcp__playwright__navigate    → server "playwright" 的 "navigate" 工具
 mcp__github__list_prs        → server "github" 的 "list_prs" 工具
 ```
 
-与 Claude Code 完全一致的前缀格式 `mcp__servername__toolname`。与 OpenPX 内置工具名（`read_file`、`edit_file`、`shell_execute` 等）无冲突。
+与 Claude Code 完全一致的前缀格式 `mcp__servername__toolname`。与 Kite Code 内置工具名（`read_file`、`edit_file`、`shell_execute` 等）无冲突。
 
 #### Transport 层
 
 **StdioTransport**：
 - `child_process.spawn` 启动 server 子进程
 - JSON-RPC 2.0 通过 stdin/stdout 通信
-- 设置 `CLAUDE_PROJECT_DIR` 等效环境变量（`OPENPX_PROJECT_DIR`）供 server 解析项目路径
+- 设置 `CLAUDE_PROJECT_DIR` 等效环境变量（`KITE_CODE_PROJECT_DIR`）供 server 解析项目路径
 
 **HttpTransport**（streamable HTTP）：
 - GET 建立 SSE 长连接（server→client 通知）
@@ -177,7 +177,7 @@ Prompts 在 tools/list 之后通过 `prompts/list` 拉取，纳入 `useSlashComm
 #### 暂缓项
 
 以下 Claude Code MCP 特性暂不实现，待后续评估：
-- **OAuth 2.0 认证**：HTTP server 的动态客户端注册、pre-configured credentials、回调端口。初期仅支持 static headers 和 `OPENPX_MCP_*` 环境变量传递 token
+- **OAuth 2.0 认证**：HTTP server 的动态客户端注册、pre-configured credentials、回调端口。初期仅支持 static headers 和 `KITE_CODE_MCP_*` 环境变量传递 token
 - **`headersHelper`**：动态 header 生成命令
 - **`alwaysLoad` / Tool Search**：按需加载 MCP 工具定义的上下文优化（当工具数量 > 50 时再考虑）
 
@@ -350,8 +350,8 @@ emit({
 严格遵循 agentskills.io 开放标准。Skill 是按需加载的 Markdown 指令文件，通过 `Skill` 工具和 `/skill-name` 斜杠命令两种方式触发。
 
 **存放路径**（按优先级）：
-- 项目 `.openpx/skills/` > `.agents/skills/`
-- 用户 `~/.openpx/skills/` > `~/.agents/skills/`
+- 项目 `.kite-code/skills/` > `.agents/skills/`
+- 用户 `~/.kite-code/skills/` > `~/.agents/skills/`
 
 **两种触发方式**：
 - **Agent 自激活**：system prompt 中 Available Skills 区段列出所有 skill 的 name + description，Agent 根据任务判断匹配后调用 `Skill` 工具加载完整指令

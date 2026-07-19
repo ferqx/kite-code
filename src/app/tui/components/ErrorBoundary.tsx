@@ -1,6 +1,7 @@
-import React, { Component } from "react";
-import { Box, Text, useInput } from "ink";
-import { darkTheme } from "../theme";
+import { Box, Text, useInput } from 'ink';
+import type React from 'react';
+import { Component } from 'react';
+import { darkTheme } from '../theme';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -36,7 +37,9 @@ function ErrorFallback({ error }: { error: Error }) {
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text color={darkTheme.warning}>Press Enter or Esc to exit</Text>
+        <Text color={darkTheme.warning}>
+          Press Enter or Esc to exit · Run "kite-code setup" to configure your model provider
+        </Text>
       </Box>
     </Box>
   );
@@ -52,14 +55,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { error };
   }
 
-  componentDidCatch(error: Error, info: React.ErrorInfo): void {
+  override componentDidCatch(error: Error, _info: React.ErrorInfo): void {
     // Log the error so it appears in stderr even if TUI is broken
-    console.error("[ErrorBoundary] Caught render error name:", error.name);
-    console.error("[ErrorBoundary] Caught render error message:", error.message);
-    console.error("[ErrorBoundary] Caught render error stack:", error.stack?.slice(0, 500));
+    console.error('[ErrorBoundary] Caught render error name:', error.name);
+    console.error('[ErrorBoundary] Caught render error message:', error.message);
+    console.error('[ErrorBoundary] Caught render error stack:', error.stack?.slice(0, 500));
   }
 
-  render() {
+  override render() {
     if (this.state.error) {
       return <ErrorFallback error={this.state.error} />;
     }

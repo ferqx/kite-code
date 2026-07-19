@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from 'react';
 
 // Terminal focus events (DEC private mode 1004)
 //   CSI I  -> focus gained
 //   CSI O  -> focus lost
-const ENABLE_FOCUS_REPORTING = "\x1b[?1004h";
-const DISABLE_FOCUS_REPORTING = "\x1b[?1004l";
-const FOCUS_IN = "\x1b[I";
-const FOCUS_OUT = "\x1b[O";
+const ENABLE_FOCUS_REPORTING = '\x1b[?1004h';
+const DISABLE_FOCUS_REPORTING = '\x1b[?1004l';
+const FOCUS_IN = '\x1b[I';
+const FOCUS_OUT = '\x1b[O';
 
 /**
  * Tracks terminal window focus via DEC private mode 1004 focus-reporting.
@@ -30,11 +30,11 @@ export function useTerminalFocus(): boolean {
       }
     };
 
-    process.stdin.on("data", onData);
+    process.stdin.on('data', onData);
 
     return () => {
       process.stdout.write(DISABLE_FOCUS_REPORTING);
-      process.stdin.off("data", onData);
+      process.stdin.off('data', onData);
     };
   }, []);
 

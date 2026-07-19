@@ -1,33 +1,45 @@
-import type { ShellExecutor } from "@/core/tools/shell";
-import { shellTool } from "@/core/tools/shell";
-import { generateBwrapArgs } from "./bwrap";
-import { detectSandboxBackend, type SandboxBackend } from "./platform";
-import { findApplySeccomp, resolveSeccompPath } from "./seccomp";
-import { generateSandboxProfile } from "./profile";
+import type { ShellExecutor } from '@/core/tools/shell';
 import {
-  buildEnvStripSnippet,
+  appendTimeoutMessage,
+  readWithProgress,
+  shellTool,
+  timeoutMessage,
+} from '@/core/tools/shell';
+import type { ShellNetworkMode } from '@/core/types';
+import { generateBwrapArgs } from './bwrap';
+import { detectSandboxBackend } from './platform';
+import { generateSandboxProfile } from './profile';
+import { findApplySeccomp, resolveSeccompPath } from './seccomp';
+import {
   buildEnvExportSnippet,
+  buildEnvStripSnippet,
   buildHardenedEnv,
   buildUlimitPreamble,
   checkDangerousPaths,
-} from "./shell-wrapper";
-import type { SandboxOptions } from "./types";
+  getSandboxRuntimeDir,
+} from './shell-wrapper';
+import type { SandboxOptions } from './types';
+
+/** 获取当前系统 shell 路径 / Get current system shell path */
+function getSystemShell(): string {
+  return process.env.SHELL || '/bin/sh';
+}
 
 /** 创建沙箱化的 ShellExecutor / Create a sandboxed ShellExecutor */
 export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
   const { enabled } = options;
 
   if (!enabled) {
-    warn("Sandbox disabled by flag. Shell commands will run without isolation.");
+    warn('Sandbox disabled by flag. Shell commands will run without isolation.');
     return shellTool;
   }
 
   const backend = detectSandboxBackend();
 
   switch (backend) {
-    case "seatbelt":
+    case 'seatbelt':
       return createSeatbeltExecutor(options);
-    case "bubblewrap":
+    case 'bubblewrap':
       return createBwrapExecutor(options);
     default:
       return shellTool;
@@ -37,33 +49,42 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
 /** macOS Seatbelt executor（参照 Codex create_seatbelt_command_args 使用 -p 传 profile）*/
 function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
-  const profile = generateSandboxProfile(workspace);
 
-  return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => ({
-    cmd: [
-      "/usr/bin/sandbox-exec",
-      "-p",
-      profile,
-      "/bin/sh",
-      "-c",
-      wrappedCommand,
-    ],
-  }));
+  return createWrappedExecutor(
+    workspace,
+    resourceLimits,
+    (wrappedCommand, networkMode) => {
+      const profile = generateSandboxProfile(workspace, { network: networkMode });
+      return {
+        cmd: ['/usr/bin/sandbox-exec', '-p', profile, getSystemShell(), '-c', wrappedCommand],
+      };
+    },
+    options.network?.mode,
+  );
 }
 
 /** Linux Bubblewrap executor */
 function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
-  const bwrapArgs = generateBwrapArgs(workspace);
-  const bwrapPath = Bun.which("bwrap")!;
+  const bwrapPath = Bun.which('bwrap')!;
   const seccompPath = resolveSeccompPath(findApplySeccomp(), workspace);
 
-  return createWrappedExecutor(workspace, resourceLimits, (wrappedCommand) => {
-    const innerCmd = seccompPath
-      ? [seccompPath, "/bin/sh", "-c", wrappedCommand]
-      : ["/bin/sh", "-c", wrappedCommand];
-    return { cmd: [bwrapPath, ...bwrapArgs, ...innerCmd] };
-  });
+  return createWrappedExecutor(
+    workspace,
+    resourceLimits,
+    (wrappedCommand, networkMode) => {
+      const bwrapArgs = generateBwrapArgs(workspace, {
+        network: networkMode,
+        sandboxRuntimeDir: getSandboxRuntimeDir(),
+      });
+      const shell = getSystemShell();
+      const innerCmd = seccompPath
+        ? [seccompPath, shell, '-c', wrappedCommand]
+        : [shell, '-c', wrappedCommand];
+      return { cmd: [bwrapPath, ...bwrapArgs, ...innerCmd] };
+    },
+    options.network?.mode,
+  );
 }
 
 /**
@@ -72,12 +93,17 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
  */
 function createWrappedExecutor(
   workspace: string,
-  resourceLimits: SandboxOptions["resourceLimits"],
+  resourceLimits: SandboxOptions['resourceLimits'],
   buildSpawn: (
     wrappedCommand: string,
+    networkMode: ShellNetworkMode,
   ) => { cmd: string[]; stdin?: string },
+  defaultNetworkMode: ShellNetworkMode = 'disabled',
 ): ShellExecutor {
   return async (input) => {
+    let timedOut = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const outputStop = new AbortController();
     try {
       // 执行前检查命令是否引用危险文件路径 / Pre-execution dangerous path check
       const dangerous = checkDangerousPaths(input.command);
@@ -86,7 +112,7 @@ function createWrappedExecutor(
           ok: false,
           command: input.command,
           exitCode: -1,
-          stdout: "",
+          stdout: '',
           stderr: `Rejected: command references protected path '${dangerous}'`,
         };
       }
@@ -97,43 +123,75 @@ function createWrappedExecutor(
         buildEnvStripSnippet(),
         buildUlimitPreamble(resourceLimits),
         buildEnvExportSnippet(hardenedEnv),
-      ].join(" ");
+      ].join(' ');
 
       const wrappedCommand = `${preamble} ${input.command}`;
-      const { cmd, stdin } = buildSpawn(wrappedCommand);
+      const { cmd, stdin } = buildSpawn(wrappedCommand, input.networkMode ?? defaultNetworkMode);
 
       const proc = Bun.spawn(cmd, {
         cwd: workspace,
-        stdin: stdin !== undefined ? "pipe" : "inherit",
-        stdout: "pipe",
-        stderr: "pipe",
+        stdin: stdin !== undefined ? 'pipe' : 'inherit',
+        stdout: 'pipe',
+        stderr: 'pipe',
         signal: input.signal,
       });
+
+      if (input.timeoutMs && input.timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          // Background descendants may retain inherited pipes after the shell
+          // is killed. Cancel readers so the tool cannot remain non-terminal.
+          outputStop.abort();
+          try {
+            proc.kill();
+          } catch {
+            /* process may have exited already */
+          }
+        }, input.timeoutMs);
+      }
 
       if (stdin !== undefined && proc.stdin) {
         proc.stdin.write(stdin);
         proc.stdin.end();
       }
 
-      const stdout = await new Response(proc.stdout).text();
-      const stderr = await new Response(proc.stderr).text();
+      const [stdout, stderr] = await Promise.all([
+        readWithProgress(
+          proc.stdout,
+          input.onProgress ? (line) => input.onProgress!(line, 'stdout') : undefined,
+          outputStop.signal,
+        ),
+        readWithProgress(
+          proc.stderr,
+          input.onProgress ? (line) => input.onProgress!(line, 'stderr') : undefined,
+          outputStop.signal,
+        ),
+      ]);
       const exitCode = await proc.exited;
+      if (timeoutId) clearTimeout(timeoutId);
 
       return {
-        ok: exitCode === 0,
+        ok: !timedOut && exitCode === 0,
         command: input.command,
-        exitCode,
+        exitCode: timedOut ? 124 : exitCode,
         stdout,
-        stderr,
+        stderr: timedOut ? appendTimeoutMessage(stderr, input.timeoutMs!) : stderr,
       };
     } catch (error) {
-      const isAbort = error instanceof Error && error.name === "AbortError";
+      if (timeoutId) clearTimeout(timeoutId);
+      const isAbort = error instanceof Error && error.name === 'AbortError';
       return {
         ok: false,
         command: input.command,
-        exitCode: isAbort ? 130 : -1,
-        stdout: "",
-        stderr: isAbort ? "Command cancelled by user." : (error instanceof Error ? error.message : String(error)),
+        exitCode: timedOut ? 124 : isAbort ? 130 : -1,
+        stdout: '',
+        stderr: timedOut
+          ? timeoutMessage(input.timeoutMs ?? 0)
+          : isAbort
+            ? 'Command cancelled by user.'
+            : error instanceof Error
+              ? error.message
+              : String(error),
       };
     }
   };

@@ -10,7 +10,7 @@
 
 ## 背景
 
-OpenPX 需要在 TUI Footer 展示 token 统计（缓存命中/未命中/总计），让用户感知每次交互的成本和缓存效果。此前依赖 provider 的 `prompt_cache_miss_tokens` 字段，但该字段语义不稳定且 DeepSeek 的实现存在边界情况。
+Kite Code 需要在 TUI Footer 展示 token 统计（缓存命中/未命中/总计），让用户感知每次交互的成本和缓存效果。此前依赖 provider 的 `prompt_cache_miss_tokens` 字段，但该字段语义不稳定且 DeepSeek 的实现存在边界情况。
 
 ## 设计方案
 

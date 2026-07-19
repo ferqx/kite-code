@@ -1,0 +1,20 @@
+pre-commit:
+  commands:
+    docs-impact:
+      run: bun run check:docs-impact
+    format:
+      glob: "*.{ts,tsx,json,jsonc,yml,yaml}"
+      run: node node_modules/@biomejs/biome/bin/biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+    typecheck:
+      glob: "*.{ts,tsx}"
+      run: node node_modules/typescript/bin/tsc --noEmit
+    core-boundary:
+      glob: "*.{ts,tsx}"
+      run: bun run check:core-boundary
+    golden:
+      glob: "*.{ts,tsx,json}"
+      run: bun test tests/golden/
+    docs:
+      glob: "*.md"
+      run: bun run check:docs

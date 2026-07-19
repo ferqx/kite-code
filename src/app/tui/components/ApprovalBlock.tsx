@@ -1,94 +1,106 @@
-import React, { useState } from "react";
-import { Box, Text } from "ink";
-import { useInput } from "ink";
-import type { ToolApprovalPayload, ShellApprovalGrant } from "@/protocol/events";
-import type { TuiUserInputProvider } from "@/app/tui/provider";
-import { useTheme } from "@/app/tui/theme";
+import { Box, Text, useInput, useStdout } from 'ink';
+import { useRef, useState } from 'react';
+import type { TuiUserInputProvider } from '@/app/tui/provider';
+import { useTheme } from '@/app/tui/theme';
+import type { ShellApprovalGrant } from '@/protocol/events';
 
 interface Option {
-  key: string;
   label: string;
-  grant: ShellApprovalGrant | null;
+  action: 'approve' | 'deny';
+  grant?: ShellApprovalGrant;
 }
 
 interface ApprovalBlockProps {
-  approval: ToolApprovalPayload;
+  approval?: unknown;
   provider: TuiUserInputProvider;
-  onResolved: (action: string, grant?: string, pattern?: string) => void;
+  onResolved: (action: string, grant?: string) => void;
 }
 
-export default function ApprovalBlock({ approval, provider, onResolved }: ApprovalBlockProps) {
+const OPTIONS: Option[] = [
+  { label: 'Yes · 仅本次', action: 'approve', grant: 'approve_once' },
+  { label: 'Auto · 自动审批', action: 'approve', grant: 'same_command' },
+  { label: 'Full · 完全权限', action: 'approve', grant: 'full_access' },
+  { label: 'Deny · 拒绝', action: 'deny' },
+];
+
+export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockProps) {
   const t = useTheme();
-  const riskColor = t.risk[approval.risk] ?? t.risk.unknown;
-
-  const options: Option[] = [];
-  for (const g of approval.grantOptions) {
-    switch (g) {
-      case "approve_once": options.push({ key: "a", label: "Approve", grant: "approve_once" }); break;
-      case "same_command": options.push({ key: "s", label: "Same Cmd", grant: "same_command" }); break;
-      case "full_access": options.push({ key: "f", label: "Full Access", grant: "full_access" }); break;
-    }
-  }
-  options.push({ key: "d", label: "Deny", grant: null });
-
+  const { stdout } = useStdout();
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedIndexRef = useRef(0);
+  const rawInputBuffer = useRef('');
+  const cols = stdout?.columns ?? 80;
 
-  const prefix = approval.suggestedPrefixRule?.[0]
-    ?? approval.command.split(/[;&|]/)[0]?.trim();
-
-  function resolve(grant: ShellApprovalGrant | null) {
-    if (grant) {
-      const pat = grant === "same_command" && prefix ? prefix : undefined;
-      provider.submitAction({ type: "approve", grant });
-      onResolved(grant, grant, pat);
+  function resolve(opt: Option) {
+    if (opt.action === 'approve') {
+      const grant = opt.grant ?? 'approve_once';
+      provider.submitAction({ type: 'approve', grant });
+      onResolved('approve', grant);
     } else {
-      provider.submitAction({ type: "reject" });
-      onResolved("denied");
+      provider.submitAction({ type: 'reject' });
+      onResolved('denied');
     }
   }
 
-  useInput((input: string, key: { escape?: boolean; upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
-    if (key.escape) {
-      provider.submitAction({ type: "cancel" });
-      onResolved("cancelled");
+  useInput((input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean }) => {
+    rawInputBuffer.current = `${rawInputBuffer.current}${input}`.slice(-4);
+    const upArrow =
+      key.upArrow ||
+      rawInputBuffer.current.endsWith('\u001b[A') ||
+      rawInputBuffer.current.endsWith('[A');
+    const downArrow =
+      key.downArrow ||
+      rawInputBuffer.current.endsWith('\u001b[B') ||
+      rawInputBuffer.current.endsWith('[B');
+    if (upArrow) {
+      rawInputBuffer.current = '';
+      const nextIndex = Math.max(0, selectedIndexRef.current - 1);
+      selectedIndexRef.current = nextIndex;
+      setSelectedIndex(nextIndex);
       return;
     }
-    if (key.upArrow) {
-      setSelectedIndex(i => Math.max(0, i - 1));
-      return;
-    }
-    if (key.downArrow) {
-      setSelectedIndex(i => Math.min(options.length - 1, i + 1));
+    if (downArrow) {
+      rawInputBuffer.current = '';
+      const nextIndex = Math.min(OPTIONS.length - 1, selectedIndexRef.current + 1);
+      selectedIndexRef.current = nextIndex;
+      setSelectedIndex(nextIndex);
       return;
     }
     if (key.return) {
-      resolve(options[selectedIndex].grant);
+      const opt = OPTIONS[selectedIndexRef.current];
+      if (opt) resolve(opt);
       return;
     }
-    // 字母快捷键 / Letter shortcut
-    const match = options.find((o) => o.key === input.toLowerCase());
-    if (match) resolve(match.grant);
   });
 
-  const cmd = approval.command.length > 100
-    ? approval.command.slice(0, 97) + "..."
-    : approval.command;
-
   return (
-    <Box flexDirection="column" marginY={1}>
-      <Box>
-        <Text color={riskColor}>⚠ </Text>
-        <Text color={t.primary}>{cmd}</Text>
+    <Box flexDirection="column">
+      {/* top border */}
+      <Text color={t.dim}>{'─'.repeat(cols)}</Text>
+
+      {/* title */}
+      <Box marginTop={1}>
+        <Text>Approve this tool call?</Text>
       </Box>
-      <Box flexDirection="column">
-        {options.map((o, i) => {
+
+      {/* options */}
+      <Box flexDirection="column" marginTop={1}>
+        {OPTIONS.map((o, i) => {
           const isSelected = i === selectedIndex;
+          const color = isSelected ? t.primary : o.action === 'deny' ? t.dim : t.muted;
           return (
-            <Text key={o.key} color={isSelected ? t.primary : (o.grant ? t.muted : t.error)}>
-              {isSelected ? "▶ " : "  "}[{o.key.toUpperCase()}]{o.label}
-            </Text>
+            <Box key={i} marginTop={i > 0 ? 1 : 0}>
+              <Text color={color}>
+                {isSelected ? '>' : ' '} {o.label}
+              </Text>
+            </Box>
           );
         })}
+      </Box>
+
+      {/* footer */}
+      <Box marginTop={1} marginBottom={1}>
+        <Text color={t.dim}>↑↓ select Enter confirm Esc cancel</Text>
       </Box>
     </Box>
   );

@@ -1,0 +1,34 @@
+{
+  "name": "error-recovery",
+  "description": "After a failed tool result, a later model response remains available for recovery.",
+  "initialEvents": [
+    {
+      "type": "tool.queued",
+      "toolCallId": "call-1",
+      "name": "shell_execute",
+      "args": { "command": "false" }
+    }
+  ],
+  "effects": [
+    { "events": [{ "type": "tool.failed", "toolCallId": "call-1", "error": "exit 1" }] },
+    {
+      "events": [
+        { "type": "model.requested", "requestId": "request-2" },
+        {
+          "type": "model.responded",
+          "messageId": "message-2",
+          "toolCalls": [],
+          "text": "I will try another approach."
+        }
+      ]
+    }
+  ],
+  "expectedEvents": ["tool.failed", "model.requested", "model.responded"],
+  "expectedFinalState": {
+    "tools.calls.call-1.status": "failed",
+    "transcript.messages.0.kind": "tool",
+    "transcript.messages.0.ok": false,
+    "transcript.messages.1.kind": "assistant",
+    "transcript.messages.1.content": "I will try another approach."
+  }
+}

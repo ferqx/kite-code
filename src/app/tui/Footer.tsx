@@ -1,32 +1,38 @@
-import React, { type ReactNode } from "react";
-import { Box } from "ink";
-import StatusBar from "./StatusBar";
-import StatsLine from "./StatsLine";
-import type { StatusState } from "./types";
+import { Box } from 'ink';
+import type { ReactNode } from 'react';
+import type { RunStatusSnapshot } from './run-status';
+import StatsLine from './StatsLine';
+import StatusBar from './StatusBar';
+import type { StatusState } from './types';
 
 interface FooterProps {
   status: StatusState;
+  runStatus?: RunStatusSnapshot;
   running: boolean;
   timerKey: number;
+  interactionMode?: 'accept_edits' | 'auto' | 'full';
   children?: ReactNode;
 }
 
 export default function Footer({
-  status, running, timerKey, children,
+  status,
+  runStatus,
+  running,
+  timerKey,
+  interactionMode,
+  children,
 }: FooterProps) {
   return (
     <Box flexDirection="column">
-      <StatusBar
-        status={status}
-        running={running}
-        timerKey={timerKey}
-      />
+      <StatusBar status={status} runStatus={runStatus} running={running} timerKey={timerKey} />
       {children}
       <StatsLine
         status={status}
         running={running}
         modelProvider={status.modelProvider}
         modelName={status.modelName}
+        interactionMode={interactionMode}
+        planMode={status.phase === 'planning'}
       />
     </Box>
   );

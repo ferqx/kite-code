@@ -1,10 +1,11 @@
 // ── Skills 扫描 ──
-import React from "react";
-import type { Dispatch } from "react";
-import { scanSkills } from "@/core/skills/loader";
-import { skillDirs } from "@/core/config/paths";
-import type { SkillManifest, SkillScanOptions } from "@/core/skills/types";
-import type { Action } from "../reducers/actions";
+
+import type { Dispatch } from 'react';
+import React from 'react';
+import { skillDirs } from '@/core/config/paths';
+import { scanCompiledSkillManifests } from '@/core/skills/catalog';
+import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import type { Action } from '../reducers/actions';
 
 export function useSkillsLoader(
   workspace: string,
@@ -16,9 +17,15 @@ export function useSkillsLoader(
   React.useEffect(() => {
     const opts = skillDirs(workspace);
     skillOptionsRef.current = opts;
-    const manifests = scanSkills(opts);
+    const manifests = scanCompiledSkillManifests(opts);
     skillManifestsRef.current = manifests;
-    dispatch({ type: "SET_SKILL_MANIFESTS", manifests });
+    dispatch({ type: 'SET_SKILL_MANIFESTS', manifests });
     sessionManager.updateSkillManifests(manifests);
-  }, [workspace, dispatch]);
+  }, [
+    workspace,
+    dispatch,
+    skillOptionsRef,
+    skillManifestsRef,
+    sessionManager.updateSkillManifests,
+  ]);
 }

@@ -1,0 +1,53 @@
+{
+  "name": "provider-action-success",
+  "description": "A terminal MCP call enters provider recovery and successful recovery starts a fresh turn without requeueing the call.",
+  "initialEvents": [
+    {
+      "type": "tool.queued",
+      "toolCallId": "mcp-call",
+      "name": "mcp__github__publish",
+      "args": {}
+    },
+    {
+      "type": "tool.failed",
+      "toolCallId": "mcp-call",
+      "failure": {
+        "kind": "provider_auth_required",
+        "message": "MCP provider authentication is required.",
+        "retryable": false,
+        "modelFixable": false,
+        "needsUserIntervention": true,
+        "terminatesTurn": false,
+        "journal": true
+      }
+    },
+    {
+      "type": "provider.action_required",
+      "interactionId": "provider-action",
+      "providerId": "github",
+      "action": "login",
+      "originatingToolCallId": "mcp-call"
+    }
+  ],
+  "effects": [],
+  "userActions": [
+    {
+      "type": "complete_provider_action",
+      "providerDirectoryRevision": "directory-r2"
+    }
+  ],
+  "expectedEvents": [
+    "tool.failed",
+    "provider.action_required",
+    "provider.action_started",
+    "provider.action_completed",
+    "turn.started"
+  ],
+  "expectedEffects": ["request_provider_action", "call_model"],
+  "expectedFinalState": {
+    "interactions.kind": "idle",
+    "tools.calls.mcp-call.status": "failed",
+    "tools.queue": [],
+    "tools.active": []
+  }
+}

@@ -1,30 +1,42 @@
 import {
-  AIMessage,
-  HumanMessage,
-  SystemMessage,
+  type AIMessage,
+  aiMessage,
   type BaseMessage,
-} from "@langchain/core/messages";
-import { buildCacheableRuntimeContext, formatPlanStateReminder } from "./runtime-context";
-import type { AgentPlan } from "@/protocol/events";
-import systemPrompt from "@/core/prompts/system-prompt.txt";
-import type { SkillManifest } from "@/core/skills/types";
+  humanMessage,
+  isAIMessage,
+  systemMessage,
+} from '@/core/messages';
+import systemPrompt from '@/core/prompts/system-prompt.txt';
+import type { SandboxBackend } from '@/core/sandbox';
+import type { SkillManifest } from '@/core/skills/types';
+import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
+import type { AgentPhase, InteractionMode, PlanningState } from '@/protocol/events';
+import { foldToolOutputs, microCompactToolOutputs } from './compaction';
+import {
+  buildCacheableRuntimeContext,
+  buildRuntimeModeSnapshot,
+  formatPlanStateReminder,
+} from './runtime-context';
 /** Agent 角色定义 / Agent role definition */
-export type AgentRole = "agent";
+export type AgentRole = 'agent';
 
 /** 模型上下文状态输入 / Model context state input */
 export interface ModelContextState {
-  /** 工作目录 / Workspace path */
   workspace: string;
-  /** 对话消息列表 / Conversation messages */
   messages: BaseMessage[];
-  /** 最终回答文本 / Final answer text */
   final: string;
-  /** 工作区访问权限 / Workspace access level (always "write") */
-  workspaceAccess?: "write";
-  /** 执行计划 / Execution plan */
-  plan?: AgentPlan | null;
-  /** 激活的 Skill 关键指令 / Active skill critical instructions */
+  workspaceAccess?: 'write';
+  phase?: AgentPhase;
+  interactionMode?: InteractionMode;
+  authorization?: ThreadAuthorizationState;
+  sandboxBackend?: SandboxBackend | 'unknown';
   activeSkillInstructions?: string;
+  contextBudget?: ContextBudget;
+  /** PlanningState for dynamic runtime-state block */
+  planningState?: PlanningState;
+  taskId?: string;
+  sideEffectsStarted?: boolean;
+  workflowSkills?: Array<{ capabilityId: string; description: string }>;
 }
 
 /** 准备好的模型上下文 / Prepared model context */
@@ -34,7 +46,11 @@ export interface PreparedModelContext {
 }
 
 /** 构建模型消息列表 / Build model message list */
-export function buildModelMessages(role: AgentRole, state: ModelContextState, skills?: SkillManifest[]): BaseMessage[] {
+export function buildModelMessages(
+  role: AgentRole,
+  state: ModelContextState,
+  skills?: SkillManifest[],
+): BaseMessage[] {
   return prepareModelContext(role, state, skills).messages;
 }
 
@@ -61,7 +77,8 @@ export function buildModelMessages(role: AgentRole, state: ModelContextState, sk
  */
 export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
   // Helper: get a plain object view of a message for field-based detection
-  const asObj = (msg: BaseMessage): Record<string, unknown> => msg as unknown as Record<string, unknown>;
+  const asObj = (msg: BaseMessage): Record<string, unknown> =>
+    msg as unknown as Record<string, unknown>;
 
   // Collect all tool_call_ids from AIMessages in the list
   const aiToolCallIds = new Set<string>();
@@ -73,7 +90,12 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
     for (const tc of [toolCalls, akwToolCalls]) {
       if (Array.isArray(tc)) {
         for (const item of tc) {
-          if (item && typeof item === "object" && "id" in item && (item as Record<string, unknown>).id) {
+          if (
+            item &&
+            typeof item === 'object' &&
+            'id' in item &&
+            (item as Record<string, unknown>).id
+          ) {
             aiToolCallIds.add((item as Record<string, unknown>).id as string);
           }
         }
@@ -85,48 +107,86 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
   const toolResultIds = new Set<string>();
   for (const msg of messages) {
     const m = asObj(msg);
-    if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0 && !AIMessage.isInstance(msg)) {
+    if (typeof m.tool_call_id === 'string' && m.tool_call_id.length > 0 && !isAIMessage(msg)) {
       toolResultIds.add(m.tool_call_id);
     }
   }
 
-  // Fix orphaned AIMessages: strip tool_calls that have no matching ToolMessage
+  // 修复 AIMessage 中的 tool_calls 一致性问题：
+  // 1. 孤儿 tool_calls（无匹配 ToolMessage）→ 移除
+  // 2. additional_kwargs.tool_calls 残留 → 无条件删除（防止残留数据
+  //    在 checkpoint 反序列化后被下游序列化带入 API 调用导致 400 错误）
+  //
+  // Fix tool_calls consistency in AIMessages:
+  // 1. Orphaned tool_calls (no matching ToolMessage) → remove
+  // 2. additional_kwargs.tool_calls leakage → always delete (prevents stale
+  //    data from checkpoint round-trips leaking into API calls and causing 400)
   let result: BaseMessage[] = [];
   for (const msg of messages) {
     const m = asObj(msg);
     const toolCalls = m.tool_calls;
     const akwToolCalls = (m.additional_kwargs as Record<string, unknown> | undefined)?.tool_calls;
+    const hasAkwToolCalls = Array.isArray(akwToolCalls) && akwToolCalls.length > 0;
     // Check both tool_calls sources
     const allToolCalls = (Array.isArray(toolCalls) ? toolCalls : []).concat(
-      Array.isArray(akwToolCalls) ? akwToolCalls : [],
+      hasAkwToolCalls ? akwToolCalls : [],
     );
     if (allToolCalls.length > 0) {
       const orphaned = allToolCalls.some((tc: unknown) => {
-        if (!tc || typeof tc !== "object") return true;
+        if (!tc || typeof tc !== 'object') return true;
         const id = (tc as Record<string, unknown>).id;
         return !id || !toolResultIds.has(id as string);
       });
-      if (orphaned) {
+
+      // akwDangling: additional_kwargs.tool_calls 中有条目但顶层 tool_calls 中
+      // 没有对应 ID。若不清除，LangChain converter 在 tool_calls 为空时
+      // fallback 使用 additional_kwargs.tool_calls → 触发 API 400。
+      // akwDangling: entries in additional_kwargs.tool_calls with no matching
+      // entry in top-level tool_calls. Must be cleaned to prevent converter fallback.
+      const topLevelIds = new Set(
+        (Array.isArray(toolCalls) ? toolCalls : [])
+          .filter((tc) => tc && typeof tc === 'object' && 'id' in tc)
+          .map((tc) => (tc as Record<string, unknown>).id),
+      );
+      const akwDangling =
+        hasAkwToolCalls &&
+        akwToolCalls.some(
+          (tc) =>
+            tc &&
+            typeof tc === 'object' &&
+            'id' in tc &&
+            !topLevelIds.has((tc as Record<string, unknown>).id),
+        );
+
+      // 重建条件：孤儿调用、additional_kwargs 残留、或 checkpoint 反序列化后
+      // 变成 plain object（AIMessage.isInstance = false）——converter 可能因
+      // isInstance 失败而跳过 tool_calls 序列化，fallback 到 additional_kwargs 触发 400。
+      // Rebuild when: orphaned, akw dangling, or deserialized plain object.
+      if (orphaned || akwDangling || !isAIMessage(msg)) {
         // Only keep calls that have IDs AND matching ToolMessages
-        const validCalls = (Array.isArray(toolCalls) ? toolCalls : []) as Array<Record<string, unknown>>;
+        const validCalls = (Array.isArray(toolCalls) ? toolCalls : []) as Array<
+          Record<string, unknown>
+        >;
         const kept = validCalls.filter((tc) => tc.id && toolResultIds.has(tc.id as string));
         // Rebuild message — preserve non-tool additional_kwargs (e.g. reasoning_content)
         // and response_metadata while explicitly clearing tool_calls to prevent
-        // stale data from leaking through LangChain's API serialization.
+        // stale data from leaking through API serialization.
         const cleanAkw = { ...(msg.additional_kwargs ?? {}) } as Record<string, unknown>;
         delete cleanAkw.tool_calls;
-        const newMsg = new AIMessage({
-          content: typeof msg.content === "string" ? msg.content : "",
-          tool_calls: kept.length > 0 ? (kept as AIMessage["tool_calls"]) : [],
+        const newMsg = aiMessage({
+          id: msg.id, // preserve original message id for correlation
+          content: typeof msg.content === 'string' ? msg.content : '',
+          tool_calls: kept.length > 0 ? (kept as unknown as AIMessage['tool_calls']) : [],
           additional_kwargs: cleanAkw,
           response_metadata: msg.response_metadata ?? {},
+          usage_metadata: m.usage_metadata as AIMessage['usage_metadata'],
         });
         result.push(newMsg);
         continue;
       }
     }
     // Check for orphaned ToolMessage
-    if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0 && !AIMessage.isInstance(msg)) {
+    if (typeof m.tool_call_id === 'string' && m.tool_call_id.length > 0 && !isAIMessage(msg)) {
       if (!aiToolCallIds.has(m.tool_call_id)) {
         continue;
       }
@@ -157,7 +217,7 @@ export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage
   const toolMsgByCallId = new Map<string, BaseMessage[]>();
   for (const msg of messages) {
     const m = msg as unknown as Record<string, unknown>;
-    if (typeof m.tool_call_id === "string" && m.tool_call_id.length > 0) {
+    if (typeof m.tool_call_id === 'string' && m.tool_call_id.length > 0) {
       const list = toolMsgByCallId.get(m.tool_call_id);
       if (list) list.push(msg);
       else toolMsgByCallId.set(m.tool_call_id, [msg]);
@@ -177,7 +237,7 @@ export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage
 
       // Emit matching ToolMessages immediately after, in declaration order
       for (const tc of tcField) {
-        if (tc && typeof tc === "object" && "id" in tc && tc.id) {
+        if (tc && typeof tc === 'object' && 'id' in tc && tc.id) {
           const tms = toolMsgByCallId.get(tc.id as string);
           if (tms) {
             for (const tm of tms) {
@@ -198,32 +258,53 @@ export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage
   return ordered;
 }
 
-/** 准备模型上下文（组装系统提示词 + 对话消息，接近阈值时清理旧工具结果） / Prepare model context (assemble, clear old tool results when near threshold) */
+/** 准备模型上下文（组装系统提示词 + 对话消息，含压缩流水线） / Prepare model context (assemble with compaction pipeline) */
 export function prepareModelContext(
   role: AgentRole,
   state: ModelContextState,
   skills?: SkillManifest[],
 ): PreparedModelContext {
-  const msgs = state.messages.length > 0
-    ? sanitizeToolCallPairs(state.messages)
-    : [new HumanMessage("")];
+  let msgs =
+    state.messages.length > 0
+      ? reorderInterleavedMessages(sanitizeToolCallPairs(state.messages))
+      : [humanMessage('')];
 
-  // 合并静态系统提示词与可缓存运行时上下文为单个 SystemMessage，
-  // 避免依赖 LangChain 内部的连续 SystemMessage 合并行为。
-  // Merge static system prompt and cacheable runtime context into one SystemMessage
-  // to avoid relying on LangChain's internal consecutive SystemMessage merging.
-  const systemPrompt = buildStaticSystemPrompt(role, skills)
-    + "\n\n"
-    + buildCacheableRuntimeContext({ workspace: state.workspace });
+  // ── M1a: 连续重复工具折叠 / Micro-compaction (≥3 consecutive same-tool) ──
+  msgs = microCompactToolOutputs(msgs);
+
+  // ── M1b: 只读工具结果折叠 / Read-only tool output folding (每轮默认) ──
+  msgs = foldToolOutputs(msgs, state.contextBudget);
+
+  // 构建 SystemMessage（缓存稳定前缀 + 运行时上下文）
+  const systemPrompt =
+    buildStaticSystemPrompt(role, skills, state.workflowSkills) +
+    '\n\n' +
+    buildCacheableRuntimeContext({ workspace: state.workspace }) +
+    (state.activeSkillInstructions
+      ? `\n\n## Active Workflow Instructions\n\n${state.activeSkillInstructions}`
+      : '');
+
+  const modeSnapshot = humanMessage(
+    buildRuntimeModeSnapshot({
+      phase: state.phase ?? 'building',
+      interactionMode: state.interactionMode ?? 'accept_edits',
+      authorizationMode: state.authorization?.mode ?? 'default',
+      sandboxBackend: state.sandboxBackend ?? 'none',
+      planningState: state.planningState,
+      taskId: state.taskId,
+      sideEffectsStarted: state.sideEffectsStarted,
+    }),
+  );
+
+  const planReminder =
+    state.planningState &&
+    state.planningState.kind !== 'building_without_plan' &&
+    state.planningState.kind !== 'planning_empty'
+      ? [humanMessage(formatPlanStateReminder(state.planningState))]
+      : [];
 
   return {
-    messages: [
-      new SystemMessage(systemPrompt),
-      ...msgs,
-      ...(state.plan
-        ? [new HumanMessage(formatPlanStateReminder(state.plan))]
-        : []),
-    ],
+    messages: [systemMessage(systemPrompt), ...msgs, modeSnapshot, ...planReminder],
   };
 }
 
@@ -231,23 +312,35 @@ export function prepareModelContext(
 export function buildStaticSystemPrompt(
   _role: AgentRole,
   skills?: SkillManifest[],
+  workflowSkills?: Array<{ capabilityId: string; description: string }>,
 ): string {
   const base = systemPrompt;
+  if (workflowSkills && workflowSkills.length > 0) {
+    const lines = workflowSkills.map((skill) => `- ${skill.capabilityId}: ${skill.description}`);
+    return [
+      base,
+      '',
+      '## Available Workflow Skills',
+      '',
+      'Use `activate_skill` only to request activation of a matching Workflow Contract. The Runtime validates each request; do not treat a Skill as arbitrary prompt text.',
+      '',
+      ...lines,
+    ].join('\n');
+  }
   if (!skills || skills.length === 0) return base;
 
   const lines = skills.map((s) => `- ${s.name}: ${s.description}`);
   const section = [
-    "",
-    "## Available Skills",
-    "",
-    "The following skills are available. Use the `Skill` tool to invoke a skill when its",
-    "description matches your task. Invoking a skill loads detailed instructions you MUST follow.",
-    "",
+    '',
+    '## Available Skills',
+    '',
+    'The following skills are available. Use the `Skill` tool to invoke a skill when its',
+    'description matches your task. Invoking a skill loads detailed instructions you MUST follow.',
+    '',
     ...lines,
-    "",
-    "IMPORTANT: If there is even a 1% chance a skill might apply, invoke it.",
-  ].join("\n");
+    '',
+    'IMPORTANT: If there is even a 1% chance a skill might apply, invoke it.',
+  ].join('\n');
 
   return base + section;
 }
-

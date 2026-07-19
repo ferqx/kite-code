@@ -28,7 +28,7 @@
 
 ### 配置
 
-- 模型列表从 `openpx.jsonc` 动态加载，替换硬编码
+- 模型列表从 `kite-code.jsonc` 动态加载，替换硬编码
 - 新增 `theme` 字段支持 dark / light 双主题
 - 全部组件迁移至 ThemeContext
 
@@ -46,7 +46,7 @@ a270989 feat: 新增 StatsLine 组件 — Footer Bottom 状态行
 f65bc10 refactor: 快捷键精简为 Ctrl+C/T/E，移除 Leader 键体系
 bf59a8f feat: Markdown 链接渲染 [text](url) + /export 命令注册
 7465dbc feat: @file 搜索遵循 .gitignore 规则
-df1aa3f feat: 模型列表从 openpx.jsonc 动态加载
+df1aa3f feat: 模型列表从 kite-code.jsonc 动态加载
 8f28919 feat: 新增 light 主题支持，ThemeContext
 95d1ec7 fix: forceContextCompaction 确保配对完整性
 6d0212a test: sanitizeToolCallPairs 7 个测试

@@ -1,0 +1,75 @@
+{
+  "name": "verification-user-waiver",
+  "description": "Inconclusive required verification exhausts its budget and requires an explicit user waiver.",
+  "initialEvents": [
+    {
+      "type": "model.responded",
+      "messageId": "final-message",
+      "text": "implementation complete"
+    },
+    {
+      "type": "verification.requested",
+      "verificationId": "verification-waive",
+      "mode": "required",
+      "requestedAt": "2026-07-15T00:00:00.000Z",
+      "spec": {
+        "schemaVersion": 1,
+        "verificationId": "verification-waive",
+        "subject": "external release",
+        "checks": [
+          {
+            "checkId": "review",
+            "type": "reviewer",
+            "description": "review release evidence",
+            "instructions": "verify the release"
+          }
+        ],
+        "repair": { "maxAttempts": 0 }
+      }
+    }
+  ],
+  "effects": [
+    {
+      "events": [
+        {
+          "type": "verification.started",
+          "verificationId": "verification-waive",
+          "attempt": 1,
+          "startedAt": "2026-07-15T00:00:01.000Z"
+        },
+        {
+          "type": "verification.check_completed",
+          "verificationId": "verification-waive",
+          "result": {
+            "checkId": "review",
+            "outcome": "inconclusive",
+            "summary": "provider unavailable",
+            "startedAt": "2026-07-15T00:00:01.000Z",
+            "finishedAt": "2026-07-15T00:00:02.000Z"
+          }
+        },
+        {
+          "type": "verification.completed",
+          "verificationId": "verification-waive",
+          "outcome": "inconclusive",
+          "completedAt": "2026-07-15T00:00:02.000Z"
+        }
+      ]
+    }
+  ],
+  "userActions": [
+    { "type": "waive_verification", "reason": "user accepted missing provider evidence" }
+  ],
+  "expectedEvents": [
+    "verification.completed",
+    "verification.waived",
+    "run.completed",
+    "turn.completed"
+  ],
+  "expectedEffects": ["run_verification", "request_verification_decision"],
+  "expectedFinalState": {
+    "verification.records.verification-waive.status": "waived",
+    "verification.records.verification-waive.waiver.actor": "user",
+    "verification.records.verification-waive.waiver.reason": "user accepted missing provider evidence"
+  }
+}

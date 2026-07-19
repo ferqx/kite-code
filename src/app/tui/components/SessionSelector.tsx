@@ -1,29 +1,51 @@
-import React, { useState, useRef, useEffect } from "react";
-import { Box, Text, useStdout } from "ink";
-import { useInput } from "ink";
-import { ScrollList } from "ink-scroll-list";
-import { useSessionList } from "../hooks/useSessionList.js";
-import { useTheme } from "@/app/tui/theme";
-import { useOverlayHeight } from "../hooks/useOverlayHeight";
+import { Box, Text, useInput, useStdout } from 'ink';
+import { VirtualList } from 'ink-virtual-list';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import stringWidth from 'string-width';
+import { ACTIVE_DOT, INACTIVE_DOT } from '@/app/tui/constants';
+import { useTheme } from '@/app/tui/theme';
+import type { SessionInfo } from '@/core/persistence/sessions.js';
+import { useOverlayHeight } from '../hooks/useOverlayHeight';
+import { useSessionList } from '../hooks/useSessionList.js';
+
+function truncateByDisplayWidth(text: string, maxCols: number): string {
+  if (maxCols <= 0) return '';
+  if (stringWidth(text) <= maxCols) return text;
+  const ellipsisWidth = stringWidth('…');
+  let result = '';
+  let used = 0;
+  for (const char of text) {
+    const cw = stringWidth(char);
+    if (used + cw + ellipsisWidth > maxCols) break;
+    result += char;
+    used += cw;
+  }
+  return result ? `${result}…` : `${text.slice(0, 1)}…`;
+}
 
 interface SessionSelectorProps {
   onSelect: (sessionId: string) => void;
   onClose: () => void;
   onDelete?: (sessionId: string) => void;
   initialQuery?: string;
-  /** 正在从 DB 加载的会话 ID / ID of the session currently being loaded from DB */
   loadingSessionId?: string | null;
-  /** 当前活跃会话 ID，用于标记显示 / Current active session ID, for visual indicator */
   activeSessionId?: string | null;
 }
 
-export default function SessionSelector({ onSelect, onClose, onDelete, initialQuery, loadingSessionId, activeSessionId }: SessionSelectorProps) {
+export default function SessionSelector({
+  onSelect,
+  onClose,
+  onDelete,
+  initialQuery,
+  loadingSessionId,
+  activeSessionId,
+}: SessionSelectorProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const { sessions, loading, error, refresh, search } = useSessionList();
   const [selected, setSelected] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [searchInput, setSearchInput] = useState(initialQuery ?? "");
+  const [searchInput, setSearchInput] = useState(initialQuery ?? '');
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const deleteConfirmRef = useRef(deleteConfirm);
@@ -44,84 +66,157 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
 
   const maxContentHeight = useOverlayHeight(12);
 
-  // Trigger search when input changes
   useEffect(() => {
     search(searchInput);
   }, [searchInput, search]);
 
-  // Re-fetch on mount
-  React.useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
-  // Apply initial query
   useEffect(() => {
     if (initialQuery) setSearchInput(initialQuery);
   }, [initialQuery]);
 
-  useInput((input, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean; backspace?: boolean; ctrl?: boolean; meta?: boolean }) => {
-    const s = sessionsRef.current;
-    // Delete confirmation mode
-    if (deleteConfirmRef.current) {
+  const handleInput = useCallback(
+    (
+      input: string,
+      key: {
+        upArrow?: boolean;
+        downArrow?: boolean;
+        return?: boolean;
+        escape?: boolean;
+        backspace?: boolean;
+        ctrl?: boolean;
+        meta?: boolean;
+      },
+    ) => {
+      const s = sessionsRef.current;
+      if (deleteConfirmRef.current) {
+        if (key.escape) {
+          setDeleteConfirm(false);
+          return;
+        }
+        if (key.return && s.length > 0) {
+          const session = s[selectedRef.current];
+          if (session) {
+            onDeleteRef.current?.(session.threadId);
+            onCloseRef.current();
+          }
+          return;
+        }
+        return;
+      }
       if (key.escape) {
-        setDeleteConfirm(false);
+        if (searchInputRef.current.length > 0) {
+          setSearchInput('');
+          return;
+        }
+        onCloseRef.current();
         return;
       }
       if (key.return && s.length > 0) {
         const session = s[selectedRef.current];
-        if (session) {
-          onDeleteRef.current?.(session.threadId);
-          onCloseRef.current();
+        if (session && session.threadId !== activeSessionRef.current) {
+          onSelectRef.current(session.threadId);
         }
         return;
       }
-      return;
-    }
-
-    if (key.escape) {
-      if (searchInputRef.current.length > 0) {
-        setSearchInput("");
+      if (key.upArrow) {
+        setSelected((p) => Math.max(0, p - 1));
         return;
       }
-      onCloseRef.current();
-      return;
-    }
-
-    if (key.return && s.length > 0) {
-      const session = s[selectedRef.current];
-      if (session && session.threadId !== activeSessionRef.current) {
-        onSelectRef.current(session.threadId);
+      if (key.downArrow) {
+        setSelected((p) => Math.min(s.length - 1, p + 1));
+        return;
       }
-      return;
-    }
+      if (key.backspace || input === '\x7f') {
+        setSearchInput((prev) => prev.slice(0, -1));
+        return;
+      }
+      if (
+        (input === 'd' || input === 'D') &&
+        searchInputRef.current.length === 0 &&
+        s.length > 0 &&
+        onDeleteRef.current
+      ) {
+        setDeleteConfirm(true);
+        return;
+      }
+      if (input && !key.ctrl && !key.meta) {
+        let text = input;
+        const prev = searchInputRef.current;
+        if (
+          text.length >= 2 &&
+          text[0] === ' ' &&
+          text[1] !== ' ' &&
+          (prev.length === 0 || prev[prev.length - 1] !== ' ')
+        ) {
+          text = text.slice(1);
+        }
+        setSearchInput((p) => p + text);
+      }
+    },
+    [],
+  );
 
-    if (key.upArrow) { setSelected((p) => Math.max(0, p - 1)); return; }
-    if (key.downArrow) { setSelected((p) => Math.min(s.length - 1, p + 1)); return; }
+  useInput(handleInput);
 
-    // Backspace removes last character from search
-    if (key.backspace || input === '\x7f') {
-      setSearchInput(prev => prev.slice(0, -1));
-      return;
-    }
-
-    // D to delete (only when search is empty)
-    if ((input === "d" || input === "D") && searchInputRef.current.length === 0 && s.length > 0 && onDeleteRef.current) {
-      setDeleteConfirm(true);
-      return;
-    }
-
-    // Regular character input goes to search
-    if (input && !key.ctrl && !key.meta && input.length === 1) {
-      setSearchInput(prev => prev + input);
-    }
-  });
-
-  // Reset selection when search results change
-  useEffect(() => { setSelected(0); }, [sessions.length]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset selection when search results change
+  useEffect(() => {
+    setSelected(0);
+  }, [sessions]);
 
   const selectedSession = sessions[selected];
 
+  // Precompute display strings — NOT dependent on `selected`, so arrow keys
+  // don't re-trigger expensive stringWidth / truncation.
+  const cols = stdout?.columns ?? 80;
+  const maxWidth = cols - 6;
+  const rightColWidth = 21;
+  const nameMaxCols = Math.max(4, maxWidth - 4 - rightColWidth);
+
+  const renderItem = useCallback(
+    ({ index, isSelected }: { item: SessionInfo; index: number; isSelected: boolean }) => {
+      const session = sessions[index];
+      if (!session) return null;
+
+      const isLoading = loadingSessionId === session.threadId;
+      const isActive = activeSessionId === session.threadId;
+      const cursor = isLoading ? '⏳' : isSelected ? '>' : ' ';
+      const activeDot = isActive ? ACTIVE_DOT : INACTIVE_DOT;
+      const rightCol = isLoading ? '  Loading...        ' : `  ${session.updatedAt}`;
+      const rawName = session.name.replace(/\n/g, ' ');
+      const displayName = truncateByDisplayWidth(rawName, nameMaxCols);
+      const namePad = Math.max(0, nameMaxCols - stringWidth(displayName));
+      const paddedName = displayName + ' '.repeat(namePad);
+      const lineColor = isLoading ? t.warning : isSelected ? t.primary : t.muted;
+      const dimColor = isLoading ? t.warning : t.dim;
+
+      return (
+        <Box width={maxWidth} flexShrink={0} flexGrow={0}>
+          <Text color={lineColor}>
+            {cursor} {activeDot}
+            {paddedName}
+          </Text>
+          <Text color={dimColor}>{rightCol}</Text>
+        </Box>
+      );
+    },
+    [sessions, loadingSessionId, activeSessionId, nameMaxCols, maxWidth, t],
+  );
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
-      <Text bold color={t.primary}>会话列表</Text>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={t.primary}
+      paddingX={1}
+      marginY={1}
+    >
+      <Text bold color={t.primary}>
+        会话列表
+      </Text>
       <Box marginTop={1}>
         <Text color={t.muted}>搜索: </Text>
         <Text color={t.primary}>{searchInput}</Text>
@@ -130,7 +225,7 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
       {deleteConfirm && selectedSession && (
         <Box marginTop={1} flexDirection="column">
           <Text color={activeSessionId === selectedSession.threadId ? t.error : t.warning}>
-            删除 "{selectedSession.name}"? Enter 确认  Esc 取消
+            删除 "{selectedSession.name}"? Enter 确认 Esc 取消
           </Text>
           {activeSessionId === selectedSession.threadId && (
             <Text color={t.warning}>注意：这是当前活跃会话，删除后将自动创建新会话</Text>
@@ -141,38 +236,24 @@ export default function SessionSelector({ onSelect, onClose, onDelete, initialQu
         {loading && <Text color={t.muted}>Loading...</Text>}
         {error && <Text color={t.error}>Error: {error}</Text>}
         {!loading && !error && sessions.length === 0 && (
-          <Text color={t.muted}>{isSearching ? "未找到匹配的会话" : "暂无历史会话"}</Text>
+          <Text color={t.muted}>{isSearching ? '未找到匹配的会话' : '暂无历史会话'}</Text>
         )}
-        <ScrollList selectedIndex={selected} scrollAlignment="auto">
-          {sessions.map((session, i) => {
-            const isLoading = loadingSessionId === session.threadId;
-            const isActive = activeSessionId === session.threadId;
-            const cursor = isLoading ? "⏳" : i === selected ? ">" : " ";
-            const marker = isActive ? "● " : "";
-            const suffix = isLoading ? "  Loading..." : `  ${session.updatedAt}`;
-            // 预留：border(2) + paddingX(2) = 4，Safe margin = 2
-            const cols = stdout?.columns ?? 80;
-            const maxWidth = cols - 6;
-            const prefix = `${cursor} ${marker}`;
-            const rawName = session.name.replace(/\n/g, " ");
-            const available = maxWidth - prefix.length - suffix.length - 1;
-            const displayName = available > 4
-              ? (rawName.length > available ? rawName.slice(0, available - 1) + "…" : rawName)
-              : rawName.slice(0, Math.max(4, maxWidth - prefix.length - 4)) + "…";
-            const lineColor = isLoading ? t.warning : i === selected ? t.primary : t.muted;
-            return (
-              <Box key={session.threadId} width={maxWidth} flexShrink={0} flexGrow={0}>
-                <Text color={lineColor}>
-                  {prefix}{displayName}
-                  <Text color={isLoading ? t.warning : t.dim}>{suffix}</Text>
-                </Text>
-              </Box>
-            );
-          })}
-        </ScrollList>
+        <VirtualList<SessionInfo>
+          items={sessions}
+          selectedIndex={selected}
+          renderItem={renderItem}
+          keyExtractor={(s) => s.threadId}
+          height={maxContentHeight}
+          itemHeight={1}
+          showOverflowIndicators={true}
+        />
       </Box>
       <Box height={1} />
-      <Text color={t.dim}>{onDelete ? "输入搜索  上/下 导航  Enter 选择  D 删除  Esc 关闭" : "输入搜索  上/下 导航  Enter 选择  Esc 关闭"}</Text>
+      <Text color={t.dim}>
+        {onDelete
+          ? '输入搜索  上/下 导航  Enter 选择  D 删除  Esc 关闭'
+          : '输入搜索  上/下 导航  Enter 选择  Esc 关闭'}
+      </Text>
     </Box>
   );
 }

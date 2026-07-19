@@ -20,8 +20,8 @@
  *   *** End Patch
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 // ============================================================================
 // 类型定义 / Types
@@ -42,9 +42,9 @@ export interface ApplyPatchResult {
 
 /** 补丁操作类型 / Patch operation type */
 type PatchOp =
-  | { kind: "add"; file: string; lines: string[] }
-  | { kind: "delete"; file: string }
-  | { kind: "update"; file: string; moveTo?: string; chunks: PatchChunk[] };
+  | { kind: 'add'; file: string; lines: string[] }
+  | { kind: 'delete'; file: string }
+  | { kind: 'update'; file: string; moveTo?: string; chunks: PatchChunk[] };
 
 /** 补丁中的变更块 / A hunk within a patch */
 interface PatchChunk {
@@ -67,17 +67,19 @@ interface PatchChunk {
 // ============================================================================
 
 class PatchParseError extends Error {
-  constructor(message: string, public line?: number) {
+  line?: number;
+  constructor(message: string, line?: number) {
     super(message);
-    this.name = "PatchParseError";
+    this.name = 'PatchParseError';
+    this.line = line;
   }
 }
 
 function resolvePath(workspace: string, file: string): string {
   const resolved = join(resolve(workspace), file);
   // 安全检查：确保路径在工作区内 / Safety: ensure path stays within workspace
-  const rel = resolved.replace(resolve(workspace) + sep, "");
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  const rel = resolved.replace(resolve(workspace) + sep, '');
+  if (rel.startsWith('..') || isAbsolute(rel)) {
     throw new PatchParseError(`Refusing path outside workspace: ${file}`);
   }
   return resolved;
@@ -85,16 +87,16 @@ function resolvePath(workspace: string, file: string): string {
 
 /** 解析补丁文本，返回操作列表和原始内容 / Parse patch text, return operations and raw content */
 export function parsePatch(patchContent: string): PatchOp[] {
-  const lines = patchContent.split("\n");
+  const lines = patchContent.split('\n');
   let i = 0;
 
   // 跳过开头的空白 / Skip leading whitespace
-  while (i < lines.length && lines[i].trim() === "") i++;
+  while (i < lines.length && lines[i]!.trim() === '') i++;
 
   // 匹配 *** Begin Patch / Match *** Begin Patch
-  if (lines[i]?.trim() !== "*** Begin Patch") {
+  if (lines[i]?.trim() !== '*** Begin Patch') {
     throw new PatchParseError(
-      `Expected "*** Begin Patch" but got: ${lines[i]?.trim() ?? "EOF"}`,
+      `Expected "*** Begin Patch" but got: ${lines[i]?.trim() ?? 'EOF'}`,
       i + 1,
     );
   }
@@ -103,9 +105,9 @@ export function parsePatch(patchContent: string): PatchOp[] {
   const ops: PatchOp[] = [];
 
   while (i < lines.length) {
-    const line = lines[i].trim();
+    const line = lines[i]!.trim();
 
-    if (line === "*** End Patch" || line === "") {
+    if (line === '*** End Patch' || line === '') {
       i++;
       continue;
     }
@@ -113,21 +115,21 @@ export function parsePatch(patchContent: string): PatchOp[] {
     // *** Add File: <path>
     const addMatch = line.match(/^\*\*\* Add File:\s+(.+)/i);
     if (addMatch) {
-      const file = addMatch[1].trim();
+      const file = addMatch[1]!.trim();
       const contentLines: string[] = [];
       i++;
-      while (i < lines.length && lines[i].startsWith("+")) {
-        contentLines.push(lines[i].slice(1)); // 去掉 + 前缀 / Strip + prefix
+      while (i < lines.length && lines[i]!.startsWith('+')) {
+        contentLines.push(lines[i]!.slice(1)); // 去掉 + 前缀 / Strip + prefix
         i++;
       }
-      ops.push({ kind: "add", file, lines: contentLines });
+      ops.push({ kind: 'add', file, lines: contentLines });
       continue;
     }
 
     // *** Delete File: <path>
     const deleteMatch = line.match(/^\*\*\* Delete File:\s+(.+)/i);
     if (deleteMatch) {
-      ops.push({ kind: "delete", file: deleteMatch[1].trim() });
+      ops.push({ kind: 'delete', file: deleteMatch[1]!.trim() });
       i++;
       continue;
     }
@@ -135,23 +137,23 @@ export function parsePatch(patchContent: string): PatchOp[] {
     // *** Update File: <path>
     const updateMatch = line.match(/^\*\*\* Update File:\s+(.+)/i);
     if (updateMatch) {
-      const file = updateMatch[1].trim();
+      const file = updateMatch[1]!.trim();
       let moveTo: string | undefined;
       i++;
 
       // 可选 *** Move to: <new path> / Optional *** Move to: <new path>
       if (i < lines.length) {
-        const moveMatch = lines[i].trim().match(/^\*\*\* Move to:\s+(.+)/i);
+        const moveMatch = lines[i]!.trim().match(/^\*\*\* Move to:\s+(.+)/i);
         if (moveMatch) {
-          moveTo = moveMatch[1].trim();
+          moveTo = moveMatch[1]!.trim();
           i++;
         }
       }
 
       // 解析 hunks / Parse hunks
       const chunks: PatchChunk[] = parseHunks(lines, i);
-      i = chunks.length > 0 ? (chunks as any)._endIndex ?? i + 1 : i + 1;
-      ops.push({ kind: "update", file, moveTo, chunks });
+      i = chunks.length > 0 ? ((chunks as any)._endIndex ?? i + 1) : i + 1;
+      ops.push({ kind: 'update', file, moveTo, chunks });
       continue;
     }
 
@@ -168,26 +170,26 @@ function parseHunks(lines: string[], start: number): PatchChunk[] {
   let i = start;
 
   while (i < lines.length) {
-    const line = lines[i];
+    const line = lines[i]!;
 
     // 下一个文件操作或结束 / Next file operation or end
     if (
-      line.trim().startsWith("*** Add") ||
-      line.trim().startsWith("*** Delete") ||
-      line.trim().startsWith("*** Update") ||
-      line.trim() === "*** End Patch"
+      line.trim().startsWith('*** Add') ||
+      line.trim().startsWith('*** Delete') ||
+      line.trim().startsWith('*** Update') ||
+      line.trim() === '*** End Patch'
     ) {
       break;
     }
 
     // 跳过空行 / Skip empty lines
-    if (line.trim() === "") {
+    if (line.trim() === '') {
       i++;
       continue;
     }
 
     // @@ [header]
-    if (line.trim().startsWith("@@")) {
+    if (line.trim().startsWith('@@')) {
       const headerMatch = line.match(/^@@\s*(.*)/);
       const header = headerMatch?.[1]?.trim() || undefined;
       i++;
@@ -200,25 +202,27 @@ function parseHunks(lines: string[], start: number): PatchChunk[] {
       let inContextAfter = false;
 
       while (i < lines.length) {
-        const hunkLine = lines[i];
+        const hunkLine = lines[i]!;
 
         // *** End of File
-        if (hunkLine.trim() === "*** End of File") {
+        if (hunkLine.trim() === '*** End of File') {
           isEof = true;
           i++;
           break;
         }
 
         // 下一个 @@ 或结束 / Next @@ or end
-        if (hunkLine.trim().startsWith("@@") ||
-            hunkLine.trim().startsWith("*** Add") ||
-            hunkLine.trim().startsWith("*** Delete") ||
-            hunkLine.trim().startsWith("*** Update") ||
-            hunkLine.trim() === "*** End Patch") {
+        if (
+          hunkLine.trim().startsWith('@@') ||
+          hunkLine.trim().startsWith('*** Add') ||
+          hunkLine.trim().startsWith('*** Delete') ||
+          hunkLine.trim().startsWith('*** Update') ||
+          hunkLine.trim() === '*** End Patch'
+        ) {
           break;
         }
 
-        if (hunkLine.startsWith(" ")) {
+        if (hunkLine.startsWith(' ')) {
           // 上下文行 / Context line
           const ctxLine = hunkLine.slice(1);
           if (inContextAfter || oldLines.length > 0 || newLines.length > 0) {
@@ -227,17 +231,17 @@ function parseHunks(lines: string[], start: number): PatchChunk[] {
           } else {
             contextBefore.push(ctxLine);
           }
-        } else if (hunkLine.startsWith("-")) {
+        } else if (hunkLine.startsWith('-')) {
           oldLines.push(hunkLine.slice(1));
           inContextAfter = false;
-        } else if (hunkLine.startsWith("+")) {
+        } else if (hunkLine.startsWith('+')) {
           newLines.push(hunkLine.slice(1));
           inContextAfter = false;
-        } else if (hunkLine.trim() === "") {
+        } else if (hunkLine.trim() === '') {
           // 空行可能导致提前结束？不，继续 / Empty line, continue
           if (oldLines.length > 0 || newLines.length > 0) {
             // 在变更后的空行视为 contextAfter / Empty line after change is contextAfter
-            contextAfter.push("");
+            contextAfter.push('');
           }
           i++;
           continue;
@@ -276,22 +280,22 @@ export function applyPatch(workspace: string, patchContent: string): ApplyPatchR
     const ops = parsePatch(patchContent);
 
     if (ops.length === 0) {
-      return { ok: false, path: "", message: "No valid patch operations found." };
+      return { ok: false, path: '', message: 'No valid patch operations found.' };
     }
 
     const result: AppliedResult = { added: [], modified: [], deleted: [] };
 
     for (const op of ops) {
       switch (op.kind) {
-        case "add":
+        case 'add':
           applyAddFile(workspace, op.file, op.lines);
           result.added.push(op.file);
           break;
-        case "delete":
+        case 'delete':
           applyDeleteFile(workspace, op.file);
           result.deleted.push(op.file);
           break;
-        case "update":
+        case 'update':
           applyUpdateFile(workspace, op.file, op.moveTo, op.chunks);
           if (op.moveTo) {
             result.deleted.push(op.file);
@@ -306,16 +310,16 @@ export function applyPatch(workspace: string, patchContent: string): ApplyPatchR
     const summary = buildSummary(result);
     return {
       ok: true,
-      path: result.added[0] ?? result.modified[0] ?? result.deleted[0] ?? "",
-      message: "Patch applied successfully.",
+      path: result.added[0] ?? result.modified[0] ?? result.deleted[0] ?? '',
+      message: 'Patch applied successfully.',
       summary,
     };
   } catch (e) {
     if (e instanceof PatchParseError) {
       return {
         ok: false,
-        path: "",
-        message: `Patch parse error${e.line ? ` at line ${e.line}` : ""}: ${e.message}`,
+        path: '',
+        message: `Patch parse error${e.line ? ` at line ${e.line}` : ''}: ${e.message}`,
       };
     }
     if (e instanceof ApplyError) {
@@ -327,7 +331,7 @@ export function applyPatch(workspace: string, patchContent: string): ApplyPatchR
     }
     return {
       ok: false,
-      path: "",
+      path: '',
       message: `Unexpected error: ${e instanceof Error ? e.message : String(e)}`,
     };
   }
@@ -338,16 +342,18 @@ export function applyPatch(workspace: string, patchContent: string): ApplyPatchR
 // ============================================================================
 
 class ApplyError extends Error {
-  constructor(public file: string, message: string) {
+  file: string;
+  constructor(file: string, message: string) {
     super(message);
-    this.name = "ApplyError";
+    this.name = 'ApplyError';
+    this.file = file;
   }
 }
 
 function applyAddFile(workspace: string, file: string, lines: string[]): void {
   const target = resolvePath(workspace, file);
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, lines.join("\n") + "\n", "utf8");
+  writeFileSync(target, `${lines.join('\n')}\n`, 'utf8');
 }
 
 function applyDeleteFile(workspace: string, file: string): void {
@@ -355,7 +361,7 @@ function applyDeleteFile(workspace: string, file: string): void {
   if (!existsSync(target)) {
     throw new ApplyError(file, `Cannot delete: file "${file}" does not exist.`);
   }
-  const { unlinkSync } = require("node:fs");
+  const { unlinkSync } = require('node:fs');
   unlinkSync(target);
 }
 
@@ -371,14 +377,14 @@ function applyUpdateFile(
     throw new ApplyError(file, `Cannot update: file "${file}" does not exist.`);
   }
 
-  const content = readFileSync(target, "utf8");
-  const originalLines = content.split("\n");
+  const content = readFileSync(target, 'utf8');
+  const originalLines = content.split('\n');
   // 去掉末尾空行（split 产生的） / Remove trailing empty line from split
-  if (originalLines.length > 0 && originalLines[originalLines.length - 1] === "") {
+  if (originalLines.length > 0 && originalLines[originalLines.length - 1] === '') {
     originalLines.pop();
   }
 
-  let lines = [...originalLines];
+  const lines = [...originalLines];
 
   // 按降序应用替换（防止索引偏移）/ Apply replacements in descending order (prevent index shifting)
   const replacements: Array<{
@@ -409,7 +415,7 @@ function applyUpdateFile(
     if (chunk.oldLines.length === 0 && chunk.newLines.length > 0) {
       let insertIdx = lines.length;
       // 如果最后一行是空行，插入前 / If last line is empty, insert before it
-      if (lines.length > 0 && lines[lines.length - 1] === "") {
+      if (lines.length > 0 && lines[lines.length - 1] === '') {
         insertIdx = lines.length - 1;
       }
       replacements.push({
@@ -460,10 +466,13 @@ function applyUpdateFile(
       const attempted = [
         ...chunk.contextBefore.map((l) => `  ${l}`),
         ...chunk.oldLines.map((l) => `- ${l}`),
-      ].join("\n");
+      ].join('\n');
       throw new ApplyError(
         file,
-        `Cannot find matching lines in "${file}"${chunk.header ? ` near "${chunk.header}"` : ""}. Tried to match:\n${attempted}\nFile content around line ${searchStart + 1}:\n${lines.slice(searchStart, searchStart + 5).map((l, idx) => `${searchStart + idx + 1}: ${l}`).join("\n")}`,
+        `Cannot find matching lines in "${file}"${chunk.header ? ` near "${chunk.header}"` : ''}. Tried to match:\n${attempted}\nFile content around line ${searchStart + 1}:\n${lines
+          .slice(searchStart, searchStart + 5)
+          .map((l, idx) => `${searchStart + idx + 1}: ${l}`)
+          .join('\n')}`,
       );
     }
 
@@ -473,7 +482,8 @@ function applyUpdateFile(
       newLines: chunk.newLines,
     });
 
-    lineIndex = foundIndex + chunk.contextBefore.length + chunk.oldLines.length + chunk.contextAfter.length;
+    lineIndex =
+      foundIndex + chunk.contextBefore.length + chunk.oldLines.length + chunk.contextAfter.length;
 
     // 如果匹配到 contextAfter，需要调整替换范围 / If contextAfter matched, adjust replacement range
     if (chunk.contextAfter.length > 0) {
@@ -487,16 +497,16 @@ function applyUpdateFile(
     lines.splice(rep.index, rep.deleteCount, ...rep.newLines);
   }
 
-  const newContent = lines.join("\n") + "\n";
+  const newContent = `${lines.join('\n')}\n`;
 
   if (moveTo) {
     const destTarget = resolvePath(workspace, moveTo);
     mkdirSync(dirname(destTarget), { recursive: true });
-    writeFileSync(destTarget, newContent, "utf8");
-    const { unlinkSync } = require("node:fs");
+    writeFileSync(destTarget, newContent, 'utf8');
+    const { unlinkSync } = require('node:fs');
     unlinkSync(target);
   } else {
-    writeFileSync(target, newContent, "utf8");
+    writeFileSync(target, newContent, 'utf8');
   }
 }
 
@@ -507,7 +517,7 @@ function applyUpdateFile(
 /** 在 lines 中查找指定文本 / Find specified text in lines */
 function findLineIndex(lines: string[], text: string, start: number): number {
   for (let i = start; i < lines.length; i++) {
-    if (lines[i].includes(text)) return i;
+    if (lines[i]!.includes(text)) return i;
   }
   return -1;
 }
@@ -521,7 +531,7 @@ function findPatchLocation(lines: string[], start: number, chunk: PatchChunk): n
   for (let i = start; i <= lines.length - searchFor.length; i++) {
     let match = true;
     for (let j = 0; j < searchFor.length; j++) {
-      if (normalizeForMatch(lines[i + j]) !== normalizeForMatch(searchFor[j])) {
+      if (normalizeForMatch(lines[i + j]!) !== normalizeForMatch(searchFor[j]!)) {
         match = false;
         break;
       }
@@ -532,7 +542,9 @@ function findPatchLocation(lines: string[], start: number, chunk: PatchChunk): n
         const afterStart = i + searchFor.length;
         let afterMatch = true;
         for (let j = 0; j < chunk.contextAfter.length && afterStart + j < lines.length; j++) {
-          if (normalizeForMatch(lines[afterStart + j]) !== normalizeForMatch(chunk.contextAfter[j])) {
+          if (
+            normalizeForMatch(lines[afterStart + j]!) !== normalizeForMatch(chunk.contextAfter[j]!)
+          ) {
             afterMatch = false;
             break;
           }
@@ -552,7 +564,7 @@ function findLinesExact(lines: string[], start: number, searchFor: string[]): nu
   for (let i = start; i <= lines.length - searchFor.length; i++) {
     let match = true;
     for (let j = 0; j < searchFor.length; j++) {
-      if (lines[i + j] !== searchFor[j]) {
+      if (lines[i + j]! !== searchFor[j]!) {
         match = false;
         break;
       }
@@ -570,7 +582,7 @@ function findPatchLocationFuzzy(lines: string[], start: number, chunk: PatchChun
   for (let i = start; i <= lines.length - searchFor.length; i++) {
     let match = true;
     for (let j = 0; j < searchFor.length; j++) {
-      if (!fuzzyEquals(lines[i + j], searchFor[j])) {
+      if (!fuzzyEquals(lines[i + j]!, searchFor[j]!)) {
         match = false;
         break;
       }
@@ -582,27 +594,27 @@ function findPatchLocationFuzzy(lines: string[], start: number, chunk: PatchChun
 
 /** 行匹配标准化：统一空格、去除尾部空白 / Line match normalization: unify spaces, strip trailing whitespace */
 function normalizeForMatch(line: string): string {
-  return line.replace(/\s+/g, " ").trim();
+  return line.replace(/\s+/g, ' ').trim();
 }
 
 /** 模糊相等：忽略 Unicode 标点差异 / Fuzzy equality: ignore Unicode punctuation differences */
 function fuzzyEquals(a: string, b: string): boolean {
   const normalized = (s: string) =>
     s
-      .normalize("NFKD")
+      .normalize('NFKD')
       .replace(/[\u2010-\u2015\u2018\u2019\u201c\u201d\u2013\u2014]/g, (c) => {
         // 映射常见 Unicode 标点到 ASCII / Map common Unicode punctuation to ASCII
         const map: Record<string, string> = {
-          "\u2010": "-", // HYPHEN
-          "\u2011": "-", // NON-BREAKING HYPHEN
-          "\u2012": "-", // FIGURE DASH
-          "\u2013": "-", // EN DASH
-          "\u2014": "-", // EM DASH
-          "\u2015": "-", // HORIZONTAL BAR
-          "\u2018": "'", // LEFT SINGLE QUOTE
-          "\u2019": "'", // RIGHT SINGLE QUOTE
-          "\u201c": '"', // LEFT DOUBLE QUOTE
-          "\u201d": '"', // RIGHT DOUBLE QUOTE
+          '\u2010': '-', // HYPHEN
+          '\u2011': '-', // NON-BREAKING HYPHEN
+          '\u2012': '-', // FIGURE DASH
+          '\u2013': '-', // EN DASH
+          '\u2014': '-', // EM DASH
+          '\u2015': '-', // HORIZONTAL BAR
+          '\u2018': "'", // LEFT SINGLE QUOTE
+          '\u2019': "'", // RIGHT SINGLE QUOTE
+          '\u201c': '"', // LEFT DOUBLE QUOTE
+          '\u201d': '"', // RIGHT DOUBLE QUOTE
         };
         return map[c] ?? c;
       })
@@ -617,11 +629,11 @@ function fuzzyEquals(a: string, b: string): boolean {
 
 /** 构建 git-style 摘要 / Build git-style summary */
 function buildSummary(result: AppliedResult): string {
-  const lines: string[] = ["Success. Updated the following files:"];
+  const lines: string[] = ['Success. Updated the following files:'];
   for (const path of result.deleted) lines.push(`D ${path}`);
   for (const path of result.added) lines.push(`A ${path}`);
   for (const path of result.modified) lines.push(`M ${path}`);
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 // ============================================================================

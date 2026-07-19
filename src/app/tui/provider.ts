@@ -1,19 +1,10 @@
-import type { AgentEvent } from "@/protocol/events";
-import type { InterruptPayload, UserAction } from "@/protocol/actions";
-import type { UserInputProvider } from "@/protocol/provider";
+import type { InterruptPayload, UserAction } from '@/protocol/actions';
 
-export class TuiUserInputProvider implements UserInputProvider {
-  private dispatch: (event: AgentEvent) => void;
+export class TuiUserInputProvider {
   private pendingResolve: ((action: UserAction) => void) | null = null;
   private pendingInterrupt: InterruptPayload | null = null;
 
-  constructor(dispatch: (event: AgentEvent) => void) {
-    this.dispatch = dispatch;
-  }
-
-  onEvent(event: AgentEvent): void {
-    this.dispatch(event);
-  }
+  constructor(_legacyDispatch?: unknown) {}
 
   /** 获取当前待处理的中断负载 / Get current pending interrupt payload */
   getPendingInterrupt(): InterruptPayload | null {
@@ -40,7 +31,7 @@ export class TuiUserInputProvider implements UserInputProvider {
 
   async teardown(): Promise<void> {
     if (this.pendingResolve) {
-      this.pendingResolve({ type: "cancel" });
+      this.pendingResolve({ type: 'cancel' });
       this.pendingResolve = null;
       this.pendingInterrupt = null;
     }
@@ -48,7 +39,7 @@ export class TuiUserInputProvider implements UserInputProvider {
 
   reset(): void {
     if (this.pendingResolve) {
-      this.pendingResolve({ type: "cancel" });
+      this.pendingResolve({ type: 'cancel' });
     }
     this.pendingResolve = null;
     this.pendingInterrupt = null;

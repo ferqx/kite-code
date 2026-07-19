@@ -1,19 +1,14 @@
 export interface SkillManifest {
-  name: string;          // frontmatter name, unique identifier
-  description: string;   // frontmatter description
-  source: "project" | "user";
-  origin: ".openpx" | ".agents";
-}
-
-export interface ValidatedSkill {
+  /** Presentation metadata projected from a compiled Workflow Contract. */
   name: string;
   description: string;
-  content: string;       // SKILL.md body without frontmatter
+  source: 'project' | 'user';
+  origin: '.kite-code' | '.agents';
 }
 
 export interface SkillScanOptions {
-  userOpenpxSkillsDir: string;
+  userKiteCodeSkillsDir: string;
   userAgentsSkillsDir: string;
-  projectOpenpxSkillsDir: string;
+  projectKiteCodeSkillsDir: string;
   projectAgentsSkillsDir: string;
 }

@@ -1,3 +1,3 @@
-# MSYS2 fstab for vendored openpx bash
-# /tmp mount — use workspace-local .openpx-tmp directory
+# MSYS2 fstab for vendored kite-code bash
+# /tmp mount — use workspace-local .kite-code-tmp directory
 none /cygdrive cygdrive binary,posix=0,user 0 0

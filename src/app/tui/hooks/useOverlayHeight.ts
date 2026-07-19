@@ -1,4 +1,4 @@
-import { useStdout } from "ink";
+import { useStdout } from 'ink';
 
 // Header(5) + Footer(4) + gap(1) = 10 rows of fixed app chrome
 const APP_CHROME = 10;

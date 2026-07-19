@@ -1,8 +1,8 @@
-import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { describe, expect, test } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 
-const repoRoot = join(import.meta.dir, "..");
+const repoRoot = join(import.meta.dir, '..');
 
 function collectFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -15,19 +15,20 @@ function isBunDefaultTestFile(path: string): boolean {
   return /\.(test|spec)\.[cm]?[tj]sx?$/.test(path);
 }
 
-describe("test discovery boundaries", () => {
-  test("keeps real model suites out of Bun default test discovery", () => {
-    const defaultTests = collectFiles(join(repoRoot, "tests"))
+describe('test discovery boundaries', () => {
+  test('keeps real model suites out of Bun default test discovery', () => {
+    const defaultTests = collectFiles(join(repoRoot, 'tests'))
       .map((path) => relative(repoRoot, path))
+      .map((path) => path.replace(/\\/g, '/'))
       .filter(isBunDefaultTestFile)
-      .filter((path) => path !== "tests/test-discovery.test.ts");
-    const realDefaultTests = defaultTests.filter((path) => path.includes("real"));
+      .filter((path) => path !== 'tests/test-discovery.test.ts');
+    const realDefaultTests = defaultTests.filter((path) => path.includes('real'));
     const liveModelDefaultTests = defaultTests.filter((path) => {
-      const source = readFileSync(join(repoRoot, path), "utf8");
+      const source = readFileSync(join(repoRoot, path), 'utf8');
       return (
         /createDeepSeekModel\([\s\S]*?\)\.invoke\(/.test(source) ||
         /createChatModel\([\s\S]*?\)\.invoke\(/.test(source) ||
-        source.includes("ensureRealModelAvailable(")
+        source.includes('ensureRealModelAvailable(')
       );
     });
 
@@ -35,14 +36,37 @@ describe("test discovery boundaries", () => {
     expect(liveModelDefaultTests).toEqual([]);
   });
 
-  test("keeps real model tests behind explicit scripts", () => {
-    const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
+  test('classifies E2E suites by local, live MCP, and live model boundaries', () => {
+    const e2eFiles = collectFiles(join(repoRoot, 'tests', 'e2e')).map((path) =>
+      relative(repoRoot, path).replace(/\\/g, '/'),
+    );
+    const liveCode = e2eFiles.filter(
+      (path) => path.startsWith('tests/e2e/live/') && /\.[cm]?[tj]sx?$/.test(path),
+    );
+
+    expect(
+      e2eFiles.filter(
+        (path) => /\.(test|spec)\.[cm]?[tj]sx?$/.test(path) && !path.startsWith('tests/e2e/local/'),
+      ),
+    ).toEqual([]);
+    expect(liveCode.every((path) => path.endsWith('.live.ts'))).toBe(true);
+    expect(e2eFiles).toContain('tests/e2e/live/mcp/langchain-docs.live.ts');
+    expect(e2eFiles).toContain('tests/e2e/live/model/README.md');
+  });
+
+  test('keeps real-agent and PTY suites out of the default test script', () => {
+    const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
 
-    expect(pkg.scripts?.test).toBe("bun test");
-    expect(pkg.scripts?.["test:real"]).toBe("bun run tests/real-test-cli.ts");
-    expect(pkg.scripts?.["test:real"]).not.toContain("proxy");
-    expect(pkg.scripts?.["test:real:direct"]).toBeUndefined();
+    expect(pkg.scripts?.test).toContain('bun test');
+    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/tui-system/**'");
+    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/pty-spike/**'");
+    expect(pkg.scripts?.['test:e2e']).toContain('tests/e2e/local/');
+    expect(pkg.scripts?.['test:e2e']).not.toContain('tests/e2e/live/');
+    expect(pkg.scripts?.['test:mcp:live']).toContain('tests/e2e/live/mcp/');
+    expect(pkg.scripts?.['test:mcp:live']).toContain('bun run');
+    expect(pkg.scripts?.['test:real']).toBeUndefined();
+    expect(pkg.scripts?.['test:real:direct']).toBeUndefined();
   });
 });

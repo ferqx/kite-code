@@ -2,7 +2,7 @@
  * Singleton useWindowSize — registers exactly one "resize" listener on
  * process.stdout regardless of how many components consume it.
  */
-import { useState, useEffect } from "react";
+import { useEffect, useState } from 'react';
 
 interface WindowSize {
   columns: number;
@@ -23,7 +23,7 @@ let installed = false;
 function install() {
   if (installed) return;
   installed = true;
-  process.stdout.on("resize", () => {
+  process.stdout.on('resize', () => {
     current = readSize();
     for (const fn of listeners) {
       fn(current);

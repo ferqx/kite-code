@@ -1,20 +1,25 @@
-import React, { useState, useEffect } from "react";
-import { Box, Text, useInput } from "ink";
-import { ScrollList } from "ink-scroll-list";
-import { useTheme } from "../theme";
-import type { CheckpointEntry } from "@/core/persistence/checkpoint";
-import { useOverlayHeight } from "../hooks/useOverlayHeight";
+import { Box, Text, useInput } from 'ink';
+import { ScrollList } from 'ink-scroll-list';
+import { useState } from 'react';
+import type { RuntimeSnapshotEntry } from '@/core/runtime/store';
+import { useOverlayHeight } from '../hooks/useOverlayHeight';
+import { useTheme } from '../theme';
 
-export type { CheckpointEntry };
+export type { RuntimeSnapshotEntry };
 
 interface CheckpointSelectorProps {
-  checkpoints: CheckpointEntry[];
+  checkpoints: RuntimeSnapshotEntry[];
   onRevert: (checkpointId: string) => void;
   onFork: (checkpointId: string) => void;
   onClose: () => void;
 }
 
-export default function CheckpointSelector({ checkpoints, onRevert, onFork, onClose }: CheckpointSelectorProps) {
+export default function CheckpointSelector({
+  checkpoints,
+  onRevert,
+  onFork,
+  onClose,
+}: CheckpointSelectorProps) {
   const t = useTheme();
   const [selected, setSelected] = useState(0);
   const maxContentHeight = useOverlayHeight(8);
@@ -34,26 +39,34 @@ export default function CheckpointSelector({ checkpoints, onRevert, onFork, onCl
     }
     if (key.return) {
       const cp = checkpoints[selected];
-      if (cp) onRevert(cp.checkpointId);
+      if (cp) onRevert(cp.snapshotId);
       return;
     }
     const char = _input.toLowerCase();
-    if (char === "r") {
+    if (char === 'r') {
       const cp = checkpoints[selected];
-      if (cp) onRevert(cp.checkpointId);
+      if (cp) onRevert(cp.snapshotId);
       return;
     }
-    if (char === "f") {
+    if (char === 'f') {
       const cp = checkpoints[selected];
-      if (cp) onFork(cp.checkpointId);
+      if (cp) onFork(cp.snapshotId);
       return;
     }
   });
 
   if (checkpoints.length === 0) {
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
-        <Text bold color={t.primary}>Rewind</Text>
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={t.primary}
+        paddingX={1}
+        marginY={1}
+      >
+        <Text bold color={t.primary}>
+          Rewind
+        </Text>
         <Box marginTop={1}>
           <Text color={t.muted}>No checkpoints found for the current session.</Text>
         </Box>
@@ -65,24 +78,31 @@ export default function CheckpointSelector({ checkpoints, onRevert, onFork, onCl
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1} marginY={1}>
-      <Text bold color={t.primary}>回退 — 选择检查点</Text>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={t.primary}
+      paddingX={1}
+      marginY={1}
+    >
+      <Text bold color={t.primary}>
+        回退 — 选择检查点
+      </Text>
 
       <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
           {checkpoints.map((cp, i) => {
             const isSelected = i === selected;
-            const prefix = isSelected ? "\u276f" : " ";
+            const prefix = isSelected ? '\u276f' : ' ';
             const color = isSelected ? t.primary : t.muted;
-            const displayId = cp.checkpointId.slice(0, 8);
-            const rawMsg = cp.firstUserMessage || "";
-            const displayMsg = rawMsg.length > 60 ? rawMsg.slice(0, 60) + "..." : rawMsg || "(no message)";
-            const displayTime = cp.createdAt ? cp.createdAt.slice(0, 19) : "";
+            const displayId = cp.snapshotId.slice(0, 8);
+            const displayMsg = `event #${cp.eventPosition}`;
+            const displayTime = new Date(cp.createdAt * 1000).toLocaleString();
 
             return (
-              <Text key={cp.checkpointId} color={color}>
+              <Text key={cp.snapshotId} color={color}>
                 {prefix} {i + 1}. [{displayId}] {displayMsg}
-                {displayTime ? ` \u2014 ${displayTime}` : ""}
+                {displayTime ? ` \u2014 ${displayTime}` : ''}
               </Text>
             );
           })}
@@ -91,7 +111,7 @@ export default function CheckpointSelector({ checkpoints, onRevert, onFork, onCl
 
       <Box marginTop={1}>
         <Text color={t.dim}>
-          Enter/R \u56de\u9000  F \u5206\u53c9  Esc \u53d6\u6d88  \u2191\u2193 \u5bfc\u822a
+          Enter/R \u56de\u9000 F \u5206\u53c9 Esc \u53d6\u6d88 \u2191\u2193 \u5bfc\u822a
         </Text>
       </Box>
     </Box>

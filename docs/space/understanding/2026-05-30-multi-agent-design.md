@@ -19,7 +19,7 @@
 | 不做 | 理由 |
 |------|------|
 | **D. 多 Agent 协作（peer-to-peer 协商）** | 工程复杂度远超收益；Anthropic 的 Agent Teams 仍处于实验阶段 |
-| **自定义 Agent 配置** | 先用内置固定角色验证稳定性，后续开放 `.openpx/agents/` 用户自定义 |
+| **自定义 Agent 配置** | 先用内置固定角色验证稳定性，后续开放 `.kite-code/agents/` 用户自定义 |
 | **子 Agent 嵌套（depth > 0）** | 防止 agent 无限递归派生，子 agent 不可调用 `task` 工具 |
 
 ---
@@ -51,7 +51,7 @@
 
 ### 2.3 对比业界
 
-| 维度 | OpenPX | Claude Code | Codex CLI |
+| 维度 | Kite Code | Claude Code | Codex CLI |
 |------|--------|-------------|-----------|
 | 子 Agent 模型 | 独立 graph runner | 独立 query loop | 独立 agent 线程 |
 | 上下文模型 | 完全隔离（仅 prompt） | 完全隔离（仅 summary 返回） | 独立上下文窗口 |

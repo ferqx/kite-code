@@ -1,17 +1,22 @@
-import React from "react";
-import { Box, Text } from "ink";
-import type { FileChangeRecord } from "./types";
-import { useTheme } from "./theme";
+import { Box, Text } from 'ink';
+import { useTheme } from './theme';
+import type { FileChangeRecord } from './types';
 
 interface DiffPreviewProps {
   changes: FileChangeRecord[];
 }
 
-function changePrefix(kind: FileChangeRecord["kind"], t: { success: string; warning: string; error: string }): { prefix: string; color: string } {
+function changePrefix(
+  kind: FileChangeRecord['kind'],
+  t: { success: string; warning: string; error: string },
+): { prefix: string; color: string } {
   switch (kind) {
-    case "add": return { prefix: "+", color: t.success };
-    case "edit": return { prefix: "~", color: t.warning };
-    case "delete": return { prefix: "-", color: t.error };
+    case 'add':
+      return { prefix: '+', color: t.success };
+    case 'edit':
+      return { prefix: '~', color: t.warning };
+    case 'delete':
+      return { prefix: '-', color: t.error };
   }
 }
 

@@ -4,20 +4,24 @@
  * 分层策略：
  *   1. 静态基础层  — 进程执行、mach-lookup、sysctl、IOKit、IPC、PTY
  *   2. 文件读取层  — 全局读取（dev tools 兼容），由 checkDangerousPaths + 工具策略兜底
- *   3. 文件写入层  — 仅 workspace + /tmp 可写
+ *   3. 文件写入层  — 全局允许，由 tool-policy 授权
  *   4. 网络层      — deny default，需要时追加
  */
 
 /** 生成完整的 macOS Seatbelt 沙箱 profile / Generate full macOS Seatbelt sandbox profile */
-export function generateSandboxProfile(workspace: string): string {
+export function generateSandboxProfile(
+  workspace: string,
+  options?: { network?: 'disabled' | 'allow_all' },
+): string {
   return [
     SEATBELT_BASE_POLICY,
     fileReadPolicy(),
     fileWritePolicy(workspace),
     fileWriteUnlinkPolicy(workspace),
+    networkPolicy(options?.network ?? 'disabled'),
   ]
     .filter(Boolean)
-    .join("\n");
+    .join('\n');
 }
 
 /** 1. 静态基础层 — 进程、系统 IPC、sysctl、IOKit、PTY（参照 Codex seatbelt_base_policy.sbpl）*/
@@ -129,19 +133,23 @@ function fileReadPolicy(): string {
 (allow file-map-executable (subpath "/"))`;
 }
 
-/** 3. 文件写入层 — 全局可写，授权由 tool-policy + checkDangerousPaths 兜底 */
+/** 3. 文件写入层 — 普通路径由 tool-policy 授权 */
 function fileWritePolicy(_workspace: string): string {
-  return `;; ── 文件写入：全局可写，授权由 tool-policy 审批 + checkDangerousPaths 兜底 ──
+  return `;; ── 文件写入：普通路径由 tool-policy 授权，危险路径由 checkDangerousPaths 拒绝 ──
 (allow file-write* file-ioctl (subpath "/"))`;
 }
 
-/** 4. 文件创建/删除层 — 全局允许，危险路径由 checkDangerousPaths 拦截 */
+/** 4. 文件创建/删除层 — 普通路径由 tool-policy 授权 */
 function fileWriteUnlinkPolicy(_workspace: string): string {
-  return `;; ── 文件创建/删除：全局允许，危险路径由 checkDangerousPaths 拦截 ──
+  return `;; ── 文件创建/删除：普通路径由 tool-policy 授权，危险路径由 checkDangerousPaths 拒绝 ──
 (allow file-write-unlink file-write-create (subpath "/"))`;
 }
 
-/** 转义 SBPL 字符串字面量中的反斜杠 */
-function esc(s: string): string {
-  return s.replace(/\\/g, "\\\\");
+function networkPolicy(mode: 'disabled' | 'allow_all'): string {
+  if (mode === 'disabled') {
+    return `;; ── 网络：禁用 ──
+(deny network*)`;
+  }
+  return `;; ── 网络：允许 ──
+(allow network*)`;
 }

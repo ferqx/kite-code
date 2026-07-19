@@ -1,0 +1,23 @@
+{
+  "name": "ask-user",
+  "description": "A question blocks execution and its answer returns the runtime to idle.",
+  "initialEvents": [
+    { "type": "tool.queued", "toolCallId": "call-1", "name": "ask_user", "args": {} }
+  ],
+  "effects": [
+    {
+      "events": [
+        {
+          "type": "user_input.requested",
+          "interactionId": "input-1",
+          "toolCallId": "call-1",
+          "request": { "question": "Proceed?", "options": [] }
+        }
+      ]
+    }
+  ],
+  "userActions": [{ "type": "input", "text": "yes" }],
+  "expectedEffects": ["run_tools", "request_user_input"],
+  "expectedEvents": ["user_input.requested", "user_input.answered", "tool.finished"],
+  "expectedFinalState": { "interactions.kind": "idle", "tools.calls.call-1.status": "succeeded" }
+}

@@ -1,13 +1,16 @@
-import React from "react";
-import { Box, Text, useStdout } from "ink";
-import type { StatusState } from "./types";
-import { useTheme } from "./theme";
+import { Box, Text, useStdout } from 'ink';
+import { listAvailableModels } from '@/core/config';
+import { InteractionMode } from '@/protocol/events';
+import { useTheme } from './theme';
+import type { StatusState } from './types';
 
 interface StatsLineProps {
   status: StatusState;
   running: boolean;
   modelProvider?: string;
   modelName?: string;
+  interactionMode?: 'accept_edits' | 'auto' | 'full';
+  planMode?: boolean;
 }
 
 function formatTokens(n: number): string {
@@ -16,63 +19,101 @@ function formatTokens(n: number): string {
 }
 
 /** Estimate the visible width of the full stats line. */
-function fullWidth(status: StatusState): number {
+function fullWidth(
+  status: StatusState,
+  interactionMode?: string,
+  planMode?: boolean,
+  contextPct?: string,
+): number {
   let w = status.modelName.length;
-  const isDS = status.modelProvider === "deepseek";
-  if (isDS && status.thinkingMode) w += 3 + 7 + String(status.thinkingMode).length; // " · effort: max"
+  const isDS = status.modelProvider === 'deepseek';
+  if (isDS && status.thinkingMode) w += 3 + String(status.thinkingMode).length; // " · medium"
   if (isDS && status.totalTokens > 0) w += 3 + 7 + 3; // " · cache: 0%"
-  if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " · tokens: 78.4k"
-  w += 3 + 4; // " · [安全]"
+  if (contextPct)
+    w += 3 + contextPct.length + 8; // " · 30% context"
+  else if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " · tokens: 78.4k"
+  if (interactionMode) w += 3 + 6;
+  // plan mode adds: "  Shift+Tab to exit" ≈ 19 chars
+  if (planMode) w += 19;
   return w;
 }
 
-export default function StatsLine({ status, running, modelProvider, modelName }: StatsLineProps) {
+export default function StatsLine({ status, interactionMode, planMode }: StatsLineProps) {
   const t = useTheme();
   const { stdout } = useStdout();
-  const cachePct = status.cacheHitRate * 100;
+  const cacheTotal = status.cacheHitTokens + status.cacheMissTokens;
+  const cachePct = cacheTotal > 0 ? (status.cacheHitTokens / cacheTotal) * 100 : 0;
   const cacheColor = cachePct > 50 ? t.success : cachePct > 20 ? t.warning : t.muted;
-  const authLabel = status.authorization === "full_access" ? "完全" : "安全";
 
-  const isDeepSeek = status.modelProvider === "deepseek";
+  const label =
+    interactionMode === InteractionMode.Auto
+      ? '自动审批'
+      : interactionMode === InteractionMode.Full
+        ? '完全权限'
+        : '接受编辑';
+  const labelColor =
+    interactionMode === InteractionMode.Auto
+      ? t.success
+      : interactionMode === InteractionMode.Full
+        ? t.warning
+        : t.muted;
+
+  const isDeepSeek = status.modelProvider === 'deepseek';
   const showThink = isDeepSeek && !!status.thinkingMode;
   const showCache = isDeepSeek && status.totalTokens > 0;
-  const showTokens = status.totalTokens > 0;
 
-  // When the full line would exceed the terminal width, render a shorter
-  // version to prevent wrapping — wrapping causes Footer height to jump,
-  // which triggers input box duplication during resize.
+  // Look up context window from model config; compute percentage if available
+  const models = listAvailableModels();
+  const currentModel = models.find(
+    (m) => m.provider === (status.modelProvider || 'deepseek') && m.name === status.modelName,
+  );
+  const cw = currentModel?.contextWindow;
+  const contextPct =
+    cw && cw > 0 ? `${Math.round((status.totalTokens / cw) * 100)}% context` : null;
+  const showTokens = !contextPct && status.totalTokens > 0;
+
   const cols = stdout?.columns ?? 80;
-  const compact = fullWidth(status) > cols;
+  const compact = fullWidth(status, interactionMode, planMode, contextPct ?? undefined) > cols;
 
   return (
     <Box>
+      {/* Left side: model + config chips */}
       <Text color={t.muted}>{status.modelName}</Text>
       {!compact && showThink && (
         <>
           <Text color={t.dim}> · </Text>
-          <Text color={t.success}>effort: {status.thinkingMode}</Text>
+          <Text color={t.success}>{status.thinkingMode}</Text>
         </>
       )}
       {!compact && showCache && (
         <>
           <Text color={t.dim}> · </Text>
-          <Text>
-            <Text color={t.muted}>cache: </Text>
-            <Text color={cacheColor}>{cachePct.toFixed(0)}%</Text>
-          </Text>
+          <Text color={cacheColor}>{cachePct.toFixed(0)}%</Text>
+          <Text color={t.muted}> cache</Text>
+        </>
+      )}
+      {!compact && contextPct && (
+        <>
+          <Text color={t.dim}> · </Text>
+          <Text color={t.muted}>{contextPct}</Text>
         </>
       )}
       {!compact && showTokens && (
         <>
           <Text color={t.dim}> · </Text>
-          <Text>
-            <Text color={t.muted}>tokens: </Text>
-            <Text>{formatTokens(status.totalTokens)}</Text>
-          </Text>
+          <Text>{formatTokens(status.totalTokens)}</Text>
         </>
       )}
-      <Text color={t.dim}> · </Text>
-      <Text color={t.muted}>[{authLabel}]</Text>
+      {interactionMode && (
+        <>
+          <Text color={t.dim}> · </Text>
+          <Text color={labelColor}>[{label}]</Text>
+        </>
+      )}
+      {/* Spacer — push hint to the right */}
+      {!compact && planMode && <Box flexGrow={1} />}
+      {/* Right side: Shift+Tab to exit hint */}
+      {!compact && planMode && <Text color={t.dim}>Shift+Tab to exit</Text>}
     </Box>
   );
 }

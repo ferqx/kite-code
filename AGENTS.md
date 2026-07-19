@@ -1,12 +1,27 @@
-# AGENTS.md
+# 仓库 Agent 规则
 
-> 本文件是协议入口。完整的行为规范、技术栈、命令和约束以 [CLAUDE.md](./CLAUDE.md) 为准。
-> 以下仅补充 CLAUDE.md 未覆盖或面向多 agent 协作的说明。
+修改文档前，先阅读 `docs/AGENTS.md`。项目事实的权威顺序为：用户直接指令、源码与测试、`docs/active/` 当前规则、已接受的 ADR、其他历史或设计文档。
 
-## 对后续 Agent 的提醒
+## 基本规则
 
-- 不要把 `tests/.tmp-*` 下的文件当成正式源码或稳定夹具。
-- 仓库的很多「真实约束」写在测试里；遇到不确定行为时，优先读测试。
-- 执行计划优先留在对话或任务计划里。
-- `docs/space/` 是仓库内记录系统，不是聊天记录归档。进入 `docs/space` 后先读 `index.md`，再按任务范围读取被索引的 active / understanding / reference 记录。
-- 当某类知识反复出现、跨模块扩散，或 `docs/space` 记录开始难以导航时，应主动参考 `docs/space/understanding/space-system-design.md` 的文档晋升规则，提议或创建合适的顶层入口文档。
+1. `src/core/` 不得依赖 `src/app/` 或 TUI 展示类型。
+2. 当前行为发生变化时，必须在同一改动中更新相关 `docs/active/` 文档。
+3. `docs/design/`、`docs/space/plans/`、`docs/space/execution/completed/` 和 `docs/deprecated/` 不是当前实现依据。
+4. 架构决策需要新增 ADR，不得改写已接受 ADR 的历史结论。
+5. 不得覆盖或清理与当前任务无关的用户改动。
+
+## 提交前文档门禁
+
+在暂存已完成的功能实现、创建提交、推送代码或创建 Pull Request 前，必须读取 `.agents/skills/document-before-commit/SKILL.md`，显式激活项目 Skill `document-before-commit`，并完整执行该 Skill。
+
+Skill 必须：
+
+1. 检查已暂存、未暂存和未跟踪的实现及文档变更；
+2. 根据 `docs/documentation-map.json` 判断文档影响；
+3. 更新相关 `docs/active/`、根文档、`docs/book/`、ADR 或计划状态；
+4. 运行 `bun run check:docs-impact`、`bun run check:docs` 和相关验证；
+5. 在文档与实现未共同收敛时返回 blocked，并停止提交。
+
+行为无变化的内部重构不要求制造无意义的文档修改。但仍必须完成文档影响判断；如果映射范围不准确，应在同一改动中修正 `docs/documentation-map.json`，不得绕过检查。
+
+在 `bun run check:docs-impact` 失败时，不得宣称任务完成、创建提交、推送或创建 Pull Request。禁止使用 `--no-verify` 绕过仓库的文档与验证钩子。

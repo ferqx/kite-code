@@ -150,7 +150,7 @@ describe("listCheckpoints", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "openpx-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "kite-code-test-"));
     saver = new BunSqliteSaver(join(tmpDir, "checkpoints.db"));
     saver.setup();
   });
@@ -867,7 +867,7 @@ const readMcpResource = tool(
     if (!input.mcpManager) {
       return JSON.stringify({
         ok: false,
-        stderr: "No MCP manager available. Configure mcpServers in openpx.jsonc.",
+        stderr: "No MCP manager available. Configure mcpServers in kite-code.jsonc.",
       });
     }
     try {

@@ -1,6 +1,6 @@
-import { useState, useMemo, useRef } from "react";
-import { readdirSync, statSync, readFileSync, existsSync } from "node:fs";
-import { join, relative, sep, dirname } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+import { useMemo, useRef, useState } from 'react';
 
 interface FileMatch {
   name: string;
@@ -8,31 +8,40 @@ interface FileMatch {
 }
 
 function parseGitignore(dir: string): string[] {
-  const gitignorePath = join(dir, ".gitignore");
+  const gitignorePath = join(dir, '.gitignore');
   if (!existsSync(gitignorePath)) return [];
   try {
-    const content = readFileSync(gitignorePath, "utf-8");
+    const content = readFileSync(gitignorePath, 'utf-8');
     return content
-      .split("\n")
+      .split('\n')
       .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith("#"));
+      .filter((l) => l && !l.startsWith('#'));
   } catch {
     return [];
   }
 }
 
 function gitignoreToRegex(pattern: string): RegExp {
-  let p = pattern.replace(/\./g, "\\.");
-  p = p.replace(/\*\*/g, "__DS__");
-  p = p.replace(/\*/g, "[^/]*");
-  p = p.replace(/__DS__/g, ".*");
-  if (p.endsWith("/.*")) p = p.slice(0, -3) + "(/.*)?";
+  let p = pattern.replace(/\./g, '\\.');
+  p = p.replace(/\*\*/g, '__DS__');
+  p = p.replace(/\*/g, '[^/]*');
+  p = p.replace(/__DS__/g, '.*');
+  if (p.endsWith('/.*')) p = `${p.slice(0, -3)}(/.*)?`;
   return new RegExp(`^${p}$`);
 }
 
 function listFiles(dir: string, base: string, maxFiles: number = 500): string[] {
   const files: string[] = [];
-  const skip = new Set(["node_modules", ".git", ".openpx", "dist", "build", "__pycache__", ".DS_Store", "coverage"]);
+  const skip = new Set([
+    'node_modules',
+    '.git',
+    '.kite-code',
+    'dist',
+    'build',
+    '__pycache__',
+    '.DS_Store',
+    'coverage',
+  ]);
 
   function walk(current: string, gitignorePatterns: string[]) {
     if (files.length >= maxFiles) return;
@@ -43,14 +52,14 @@ function listFiles(dir: string, base: string, maxFiles: number = 500): string[] 
       const entries = readdirSync(current);
       for (const entry of entries) {
         if (skip.has(entry)) continue;
-        if (entry.startsWith(".") && entry !== ".gitignore") continue;
+        if (entry.startsWith('.') && entry !== '.gitignore') continue;
         const full = join(current, entry);
-        const rel = relative(base, full).replace(/\\/g, "/");
+        const rel = relative(base, full).replace(/\\/g, '/');
 
         try {
           const s = statSync(full);
           if (s.isDirectory()) {
-            if (!allPatterns.some((p) => gitignoreToRegex(p).test(rel + "/"))) {
+            if (!allPatterns.some((p) => gitignoreToRegex(p).test(`${rel}/`))) {
               walk(full, allPatterns);
             }
           } else if (s.isFile()) {
@@ -83,7 +92,13 @@ function fuzzyScore(query: string, target: string): number {
       qi++;
       consecutive++;
       score += consecutive * 2;
-      if (ti === 0 || t[ti - 1] === sep || t[ti - 1] === "/" || t[ti - 1] === "-" || t[ti - 1] === "_") {
+      if (
+        ti === 0 ||
+        t[ti - 1] === sep ||
+        t[ti - 1] === '/' ||
+        t[ti - 1] === '-' ||
+        t[ti - 1] === '_'
+      ) {
         score += 5;
       }
     } else {
@@ -102,7 +117,7 @@ export function useFileSearch(inputValue: string, workspace: string) {
 
   const query = useMemo(() => {
     const match = inputValue.match(/@(\S*)$/);
-    return match ? match[1] : null;
+    return match ? match[1]! : null;
   }, [inputValue]);
 
   // Trigger lazy file listing when @ is first detected

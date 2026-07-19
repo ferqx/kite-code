@@ -1,0 +1,24 @@
+name: MCP LangChain live smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  langchain-docs:
+    name: LangChain docs MCP
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KITE_RUN_LIVE_MCP_SMOKE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run test:mcp:live

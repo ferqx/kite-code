@@ -1,0 +1,552 @@
+import { expect, test } from 'bun:test';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { McpConnectionManager } from '@/core/mcp/manager';
+import { requiredProviderAdmissionEvents, runRuntimeAgent } from '@/core/runtime/agent';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import { createAgentKernel } from '@/core/runtime/kernel';
+import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
+import { createRuntimeStore } from '@/core/runtime/store';
+import { aiMessage } from '../../src/core/messages';
+import { createMockModel } from '../mock-model';
+
+test('Runtime gates an unavailable required MCP provider before the model and persists waiver', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-required-provider-'));
+  const storePath = join(workspace, 'runtime.db');
+  const mockModel = createMockModel([
+    { message: aiMessage({ content: 'Continued without MCP.' }) },
+  ]);
+  const manager = new McpConnectionManager();
+  manager.getProviderDirectorySnapshot = () => ({
+    revision: 'directory-r1',
+    entries: [
+      {
+        providerId: 'github',
+        status: 'login_required',
+        required: true,
+        source: 'project',
+        lastKnownCapabilityNames: ['publish'],
+        diagnosticCode: 'auth_required',
+        retryable: false,
+      },
+    ],
+  });
+
+  try {
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Continue without GitHub',
+        threadId: 'required-provider-waiver',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: mockModel as any,
+        mcpManager: manager,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+          features: { mcpProviderActionV1: true },
+        },
+      },
+      {
+        requestAction: async (effect) => {
+          if (effect.type !== 'request_provider_admission') {
+            return { type: 'cancel', interactionId: effect.interactionId };
+          }
+          return {
+            type: 'provider_admission_decision',
+            interactionId: effect.interactionId,
+            decision: { kind: 'waive' },
+          };
+        },
+      },
+    )) {
+      events.push(event);
+    }
+
+    expect(events[0]?.type).toBe('provider.admission_required');
+    expect(events.map((event) => event.type)).toContain('provider.admission_waived');
+    expect(events.findIndex((event) => event.type === 'provider.admission_waived')).toBeLessThan(
+      events.findIndex((event) => event.type === 'model.requested'),
+    );
+    const store = createRuntimeStore(storePath);
+    const snapshot = store.loadSnapshot<RuntimeState>('required-provider-waiver');
+    if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
+    expect(snapshot.providerAdmission.waivers.github).toMatchObject({
+      source: 'project',
+      reason: 'user_session_waiver',
+    });
+    expect(snapshot.capabilities.bindings).toEqual({});
+    store.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('required provider admission accepts ready/degraded and queues every other required entry', () => {
+  const state = createInitialRuntimeState({
+    threadId: 'required-provider-projection',
+    userId: 'test',
+    workspace: '/',
+  });
+  const manager = new McpConnectionManager();
+  manager.getProviderDirectorySnapshot = () => ({
+    revision: 'directory',
+    entries: [
+      {
+        providerId: 'ready',
+        status: 'ready',
+        required: true,
+        source: 'user',
+        lastKnownCapabilityNames: [],
+        retryable: false,
+      },
+      {
+        providerId: 'degraded',
+        status: 'degraded',
+        required: true,
+        source: 'user',
+        lastKnownCapabilityNames: [],
+        retryable: true,
+      },
+      {
+        providerId: 'failed',
+        status: 'failed',
+        required: true,
+        source: 'user',
+        lastKnownCapabilityNames: [],
+        retryable: true,
+      },
+      {
+        providerId: 'optional',
+        status: 'failed',
+        required: false,
+        source: 'user',
+        lastKnownCapabilityNames: [],
+        retryable: true,
+      },
+      {
+        providerId: 'login',
+        status: 'login_required',
+        required: true,
+        source: 'project',
+        lastKnownCapabilityNames: [],
+        diagnosticCode: 'auth_required',
+        retryable: false,
+      },
+    ],
+  });
+
+  expect(
+    requiredProviderAdmissionEvents(state, manager, true).map((event) =>
+      event.type === 'provider.admission_required' ? event.providerId : '',
+    ),
+  ).toEqual(['failed', 'login']);
+  expect(requiredProviderAdmissionEvents(state, manager, false)).toEqual([]);
+});
+
+test('Runtime Kernel persists a direct model answer as a completed turn', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const storePath = join(workspace, 'runtime.db');
+  const mockModel = createMockModel([{ message: aiMessage({ content: 'Kernel answer' }) }]);
+
+  try {
+    const events: RuntimeEvent['type'][] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Say hello',
+        threadId: 'kernel-integration',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: mockModel as any,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      events.push(event.type);
+    }
+
+    // model.cache_metrics may appear; filter to expected core events
+    const coreEvents = events.filter((e) => e !== 'model.cache_metrics');
+    expect(coreEvents).toEqual([
+      'user.message_appended',
+      'turn.started',
+      'model.requested',
+      'model.responded',
+      'run.completed',
+      'turn.completed',
+    ]);
+    const store = createRuntimeStore(storePath);
+    expect(store.loadEvents('kernel-integration').map((entry) => entry.event.type)).toEqual(events);
+    store.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('Runtime Kernel executes a read tool before completing the answer', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const storePath = join(workspace, 'runtime.db');
+  writeFileSync(join(workspace, 'note.txt'), 'runtime kernel');
+  const mockModel = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [{ id: 'read-note', name: 'read_file', args: { path: 'note.txt' } }],
+      }),
+    },
+    { message: aiMessage({ content: 'Read the note.' }) },
+  ]);
+
+  try {
+    const events: RuntimeEvent['type'][] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Read note.txt',
+        threadId: 'kernel-tool-integration',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: mockModel as any,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      events.push(event.type);
+    }
+
+    expect(events).toContain('tool.queued');
+    expect(events).toContain('tool.started');
+    expect(events).toContain('tool.finished');
+    expect(events.at(-2)).toBe('run.completed');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('Runtime isolates an MCP adapter exception and continues the same conversation', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-mcp-failure-'));
+  const storePath = join(workspace, 'runtime.db');
+  const manager = new McpConnectionManager();
+  const descriptor = {
+    capabilityId: 'mcp:fixture/broken_tool',
+    revision: 'revision-1',
+    kind: 'mcp_tool' as const,
+    displayName: 'broken_tool',
+    description: 'A deliberately broken MCP fixture.',
+    provider: { type: 'mcp' as const, id: 'fixture', provenance: 'remote' as const },
+    inputSchema: { type: 'object', properties: {} },
+    declaredEffects: {
+      filesystem: 'none' as const,
+      network: 'read' as const,
+      externalState: 'read' as const,
+    },
+    effectiveEffects: {
+      filesystem: 'none' as const,
+      network: 'read' as const,
+      externalState: 'read' as const,
+    },
+    policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
+    availability: 'available' as const,
+    diagnostics: [],
+  };
+  manager.getCapabilitySnapshot = () => ({ revision: 'snapshot-1', descriptors: [descriptor] });
+  manager.findCapability = () => {
+    throw new Error('deliberate local adapter defect');
+  };
+  const mockModel = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'search-mcp',
+            name: 'tool_search',
+            args: { query: 'broken tool' },
+          },
+        ],
+      }),
+    },
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'call-broken-mcp',
+            name: 'mcp__fixture__broken_tool',
+            args: {},
+          },
+        ],
+      }),
+    },
+    {
+      message: aiMessage({
+        content: 'The MCP tool failed, but this conversation is still active.',
+      }),
+    },
+  ]);
+
+  try {
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Use the broken MCP fixture and explain any failure.',
+        threadId: 'kernel-mcp-failure-continuation',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: mockModel as any,
+        mcpManager: manager,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.type)).toContain('tool.failed');
+    expect(events.filter((event) => event.type === 'model.responded')).toHaveLength(3);
+    const store = createRuntimeStore(storePath);
+    const snapshot = store.loadSnapshot<RuntimeState>('kernel-mcp-failure-continuation');
+    expect(snapshot?.transcript.final).toBe(
+      'The MCP tool failed, but this conversation is still active.',
+    );
+    expect(snapshot?.transcript.messages).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool',
+        toolCallId: 'call-broken-mcp',
+        ok: false,
+      }),
+    );
+    store.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('Runtime Kernel rejects a write tool before a plan is approved', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const storePath = join(workspace, 'runtime.db');
+  const mockModel = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          { id: 'write-note', name: 'write_file', args: { path: 'note.txt', content: 'approved' } },
+        ],
+      }),
+    },
+    { message: aiMessage({ content: 'Wrote the note.' }) },
+  ]);
+
+  try {
+    const events: RuntimeEvent['type'][] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Write note.txt',
+        threadId: 'kernel-approval-integration',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: mockModel as any,
+        phase: 'planning',
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      events.push(event.type);
+    }
+
+    expect(events).toContain('tool.rejected');
+    expect(existsSync(join(workspace, 'note.txt'))).toBe(false);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const mockModel = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'ask-name',
+            name: 'ask_user',
+            args: { question: 'What is your name?', options: [], allow_free_text: true },
+          },
+        ],
+      }),
+    },
+    { message: aiMessage({ content: 'Thanks for the answer.' }) },
+  ]);
+
+  try {
+    const events: RuntimeEvent['type'][] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Ask for a name',
+        threadId: 'kernel-input-integration',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: join(workspace, 'runtime.db'),
+        model: mockModel as any,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      {
+        requestAction: async (effect) => ({
+          type: 'input',
+          interactionId: effect.interactionId,
+          text: 'Ada',
+        }),
+      },
+    ))
+      events.push(event.type);
+
+    expect(events).toContain('user_input.requested');
+    expect(events).toContain('user_input.answered');
+    expect(events).toContain('tool.finished');
+    expect(events.at(-1)).toBe('turn.completed');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('Runtime Kernel executes write_plan in planning phase', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const mockModel = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'wp-1',
+            name: 'write_plan',
+            args: {
+              title: 'Write note',
+              body_markdown: 'Create a note file with planned content for testing.',
+              steps: [{ id: 'write-note', title: 'Write note.txt' }],
+            },
+          },
+        ],
+      }),
+    },
+    { message: aiMessage({ content: 'Plan draft saved.' }) },
+  ]);
+  try {
+    const events: RuntimeEvent['type'][] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Create note.txt',
+        threadId: 'kernel-plan-draft',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: join(workspace, 'runtime.db'),
+        phase: 'planning',
+        model: mockModel as any,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      {
+        requestAction: async () => ({
+          type: 'approve',
+          interactionId: 'any',
+          grant: 'approve_once',
+        }),
+      },
+    ))
+      events.push(event.type);
+
+    // write_plan should succeed and produce plan.drafted
+    expect(events).toContain('plan.drafted');
+    // No review requested (write_plan does not trigger interrupt)
+    expect(events).not.toContain('plan.review_requested');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+// Note: full exit_plan_mode → approve → execute flow is tested at unit level
+// (plan-state.test.ts, plan-actions.test.ts) because the dynamic planId/digest
+// generated by write_plan cannot be predicted by mock models in integration tests.
+
+test('Runtime Kernel restores a persisted snapshot when reopening the same thread', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const storePath = join(workspace, 'runtime.db');
+  try {
+    const first = createAgentKernel({
+      threadId: 'kernel-recovery',
+      userId: 'test',
+      workspace,
+      storePath,
+    });
+    first.processEvent({
+      type: 'tool.queued',
+      toolCallId: 'persisted-read',
+      name: 'read_file',
+      args: { path: 'note.txt' },
+    });
+    first.close();
+
+    const restored = createAgentKernel({
+      threadId: 'kernel-recovery',
+      userId: 'test',
+      workspace,
+      storePath,
+    });
+    expect(restored.getState().tools.queue).toEqual(['persisted-read']);
+    expect(restored.getState().tools.calls['persisted-read']?.status).toBe('queued');
+    restored.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});

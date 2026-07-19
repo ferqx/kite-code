@@ -1,123 +1,299 @@
-import { join, resolve } from "node:path";
-import { loadAgentConfig, defaultCheckpointPath } from "@/core/config/index";
-import { skillDirs } from "@/core/config/paths";
-import { scanSkills, getSkillContent } from "@/core/skills/loader";
-import { createSandboxExecutor } from "@/core/sandbox/index";
-import { runAgent } from "@/core/runner";
-import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from "@/protocol/events";
-import type { InterruptPayload, UserAction } from "@/protocol/actions";
-import type { UserInputProvider } from "@/protocol/provider";
-import type { AuthorizationOverride } from "@/core/types";
+import { resolve } from 'node:path';
+import type { FeatureFlags } from '@/core/config/features';
+import { defaultCheckpointPath, loadAgentConfig, parseFeatureOverride } from '@/core/config/index';
+import { skillDirs } from '@/core/config/paths';
+import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
+import type { RuntimeUserAction } from '@/core/runtime/actions';
+import { runRuntimeAgent } from '@/core/runtime/agent';
+import type { RuntimeActionProvider } from '@/core/runtime/runner';
+import { runtimeStorePathFor } from '@/core/runtime/store';
+import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
+import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
+import type { InterruptPayload, UserAction } from '@/protocol/actions';
+import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
+import type { UserInputProvider } from '@/protocol/provider';
 
 export interface ParsedArgs {
-  command: "run" | "resume" | "help";
+  command: 'run' | 'resume' | 'trace' | 'help';
   task?: string;
   threadId: string;
   userId: string;
   workspace: string;
   checkpointPath: string;
   mode: WorkspaceAccessRequest;
-  authorizationMode?: "default" | "full_access";
+  authorizationMode?: 'default' | 'full_access';
   approve: boolean;
   approvalGrant?: ShellApprovalGrant;
   approvalHash?: string;
   replacementCommand?: string;
   answer?: string;
   sandbox: boolean;
+  interactionMode?: import('@/protocol/events').InteractionMode;
   skills: string[];
+  featureOverrides: Partial<FeatureFlags>;
+  tracePath?: string;
+  traceTurn?: number;
+  traceFormat?: 'text' | 'json';
 }
 
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  if (args.command === "help") {
+  if (args.command === 'help') {
     printHelp();
     return;
   }
-
-  const config = loadAgentConfig();
-  const shellExecutor = createSandboxExecutor({
-    enabled: args.sandbox,
-    workspace: args.workspace,
-  });
-
-  const authorizationOverride: AuthorizationOverride | undefined =
-    args.authorizationMode !== undefined
-      ? { current: args.authorizationMode }
-      : undefined;
-
-  // Load skill contents and prepend to task
-  let task = args.task ?? "";
-  let manifests: import("@/core/skills/types").SkillManifest[] = [];
-  let skillOptions: import("@/core/skills/types").SkillScanOptions | undefined;
-  if (args.skills.length > 0) {
-    skillOptions = skillDirs(args.workspace);
-    manifests = scanSkills(skillOptions);
-    const skillContents: string[] = [];
-    for (const name of args.skills) {
-      const result = getSkillContent(manifests, name, skillOptions);
-      if (result) {
-        skillContents.push(`[SKILL: ${result.name}]\n\n${result.content}\n\n---\n\n`);
-      }
+  if (args.command === 'trace') {
+    if (!args.tracePath) throw new Error('trace requires a JSONL path.');
+    const records = parseTraceJsonl(args.tracePath);
+    if (args.traceFormat === 'json') {
+      const turn = args.traceTurn;
+      const selected = filterTraceTurn(records, turn);
+      console.log(JSON.stringify(selected, null, 2));
+    } else {
+      console.log(
+        formatTrace(records, { turn: args.traceTurn, color: Boolean(process.stdout.isTTY) }),
+      );
     }
-    task = skillContents.join("") + task;
+    return;
+  }
+  if (args.command === 'resume') {
+    throw new Error(
+      'Legacy checkpoint sessions are not compatible with the Runtime Kernel. Start a new task.',
+    );
   }
 
-  const provider = createCliProvider(args);
-
-  const generator = runAgent(provider, {
-    task,
-    userId: args.userId,
-    threadId: args.threadId,
+  const loadedConfig = loadAgentConfig();
+  const config = {
+    ...loadedConfig,
+    features: { ...loadedConfig.features, ...args.featureOverrides },
+  };
+  const interactionMode = args.interactionMode ?? config.interactionMode ?? 'accept_edits';
+  const sandboxRuntime = resolveSandboxRuntime({
+    enabled: args.sandbox && config.sandbox.enabled,
+  });
+  if (interactionMode === 'full' && !sandboxRuntime.available) {
+    throw new Error('full mode requires an available workspace sandbox.');
+  }
+  const authorizationMode =
+    args.authorizationMode ?? (args.approvalGrant === 'full_access' ? 'full_access' : undefined);
+  if (authorizationMode) {
+    assertAuthorizationElevation({
+      mode: authorizationMode,
+      source: 'config',
+      sandboxAvailable: sandboxRuntime.available,
+    });
+  }
+  const shellExecutor = createSandboxExecutor({
+    enabled: sandboxRuntime.enabled,
     workspace: args.workspace,
-    checkpointPath: args.checkpointPath,
-    config,
-    mode: args.mode,
-    shellExecutor,
-    authorizationOverride,
-    skills: manifests,
-    skillOptions,
-    resume: args.command === "resume"
-      ? (
-        args.answer === undefined
-          ? { approved: args.approve, grant: args.approvalGrant, approvalHash: args.approvalHash, replacementCommand: args.replacementCommand }
-          : { answer: args.answer }
-      )
-      : undefined,
   });
 
-  for await (const _ of generator) {
-    // Events handled by provider.onEvent
+  const task = args.task ?? '';
+  const skillOptions = skillDirs(args.workspace);
+  const initialSkillActivations = args.skills.map((name) => ({
+    skillId: `skill:${name}`,
+    input: {},
+  }));
+
+  const provider = createCliRuntimeProvider();
+  const generator = runRuntimeAgent(
+    {
+      task,
+      userId: args.userId,
+      threadId: args.threadId,
+      workspace: args.workspace,
+      runtimeStorePath: runtimeStorePathFor(args.checkpointPath),
+      config,
+      shellExecutor,
+      interactionMode,
+      authorizationMode,
+      authorizationSource: authorizationMode === 'full_access' ? 'config' : undefined,
+      sandboxBackend: sandboxRuntime.backend,
+      frontend: 'cli',
+      skillOptions,
+      initialSkillActivations,
+    },
+    provider,
+  );
+
+  for await (const event of generator) {
+    console.log(JSON.stringify(event));
   }
 }
 
-function createCliProvider(args: ParsedArgs): UserInputProvider {
+function createCliRuntimeProvider(): RuntimeActionProvider {
+  return {
+    async requestAction(effect, state): Promise<RuntimeUserAction> {
+      if (effect.type === 'request_verification_decision') {
+        const record = state.verification.records[effect.verificationId];
+        if (!record) throw new Error('Runtime requested a decision for missing verification.');
+        console.error(`\n[VERIFICATION REQUIRED] ${record.spec.subject}: ${record.status}`);
+        console.error(
+          record.spec.compensation
+            ? 'Type r/replan, w/waive, or c/compensate:'
+            : 'Type r/replan or w/waive:',
+        );
+        const value = (await readStdin()).trim().toLowerCase();
+        if ((value === 'c' || value === 'compensate') && record.spec.compensation) {
+          return {
+            type: 'request_verification_compensation',
+            verificationId: effect.verificationId,
+          };
+        }
+        console.error(
+          value === 'w' || value === 'waive'
+            ? 'Enter waiver reason:'
+            : 'Enter replan/repair instruction:',
+        );
+        const detail = await readStdin();
+        return value === 'w' || value === 'waive'
+          ? {
+              type: 'waive_verification',
+              verificationId: effect.verificationId,
+              reason: detail,
+            }
+          : {
+              type: 'replan_verification',
+              verificationId: effect.verificationId,
+              instruction: detail,
+            };
+      }
+      if (effect.type === 'request_provider_action') {
+        console.error(
+          `\n[MCP PROVIDER ACTION] ${effect.providerId} requires ${effect.action}. ` +
+            'This client does not yet provide an in-process recovery handler; deferring.',
+        );
+        return {
+          type: 'provider_action_result',
+          interactionId: effect.interactionId,
+          outcome: 'deferred',
+        };
+      }
+      if (effect.type === 'request_provider_admission') {
+        console.error(
+          `\n[REQUIRED MCP PROVIDER] ${effect.providerId} is ${effect.providerStatus}. ` +
+            'This client does not yet provide the required-provider gate; cancelling this run.',
+        );
+        return {
+          type: 'provider_admission_decision',
+          interactionId: effect.interactionId,
+          decision: { kind: 'cancel' },
+        };
+      }
+      if (state.interactions.kind === 'awaiting_tool_approval') {
+        const approval = state.interactions.approval;
+        console.error(`\n[APPROVAL REQUIRED] ${approval.tool}: ${approval.command}`);
+        console.error(`Risk: ${approval.risk} | ${approval.summary}`);
+        console.error('Type y/yes to approve, n to reject, f/full_access for full access:');
+        const value = (await readStdin()).toLowerCase();
+        if (value === 'f' || value === 'full_access')
+          return { type: 'approve', interactionId: effect.interactionId, grant: 'full_access' };
+        if (value === 'y' || value === 'yes')
+          return { type: 'approve', interactionId: effect.interactionId, grant: 'approve_once' };
+        return { type: 'reject', interactionId: effect.interactionId };
+      }
+      if (state.interactions.kind === 'awaiting_review') {
+        const plan = state.interactions.plan;
+        console.error(`\n[PLAN REVIEW] ${plan.name}\n${plan.description}`);
+        console.error('Type a/auto, e/accept-edits, f/feedback, or c/cancel:');
+        const value = (await readStdin()).toLowerCase();
+        const review = {
+          type: 'plan_review_decision' as const,
+          interactionId: effect.interactionId,
+          planId: state.interactions.planId,
+          version: state.interactions.version,
+          structuralDigest: state.interactions.structuralDigest,
+        };
+        if (value === 'a' || value === 'auto')
+          return {
+            ...review,
+            decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+          };
+        if (value === 'e' || value === 'accept-edits')
+          return {
+            ...review,
+            decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+          };
+        if (value === 'f' || value === 'feedback') {
+          console.error('Enter your feedback:');
+          return { ...review, decision: { kind: 'revise', feedback: await readStdin() } };
+        }
+        return { ...review, decision: { kind: 'cancel' } };
+      }
+      if (state.interactions.kind !== 'awaiting_user_input') {
+        throw new Error('Runtime requested input without an input interaction.');
+      }
+      const request = state.interactions.request;
+      console.error(`\n[QUESTION] ${request.question}`);
+      request.options.forEach((option, index) => {
+        console.error(`  ${index + 1}. ${option.label}`);
+      });
+      return { type: 'input', interactionId: effect.interactionId, text: await readStdin() };
+    },
+  };
+}
+
+export function createCliProvider(_args: ParsedArgs): UserInputProvider {
   return {
     onEvent(event: AgentEvent) {
       console.log(JSON.stringify(event));
     },
     async requestAction(payload: InterruptPayload): Promise<UserAction> {
-      if (payload.kind === "approval") {
+      if (payload.kind === 'approval') {
         const a = payload.approval;
         console.error(`\n[APPROVAL REQUIRED] ${a.tool}: ${a.command}`);
         console.error(`Risk: ${a.risk} | ${a.summary}`);
-        console.error("Type y/yes to approve, n to reject, f/full_access for full access:");
-      } else {
+        console.error('Type y/yes to approve, n to reject, f/full_access for full access:');
+      } else if (payload.kind === 'input') {
         const q = payload.question;
         console.error(`\n[QUESTION] ${q.question}`);
         if (q.options.length > 0) {
-          q.options.forEach((o, i) => console.error(`  ${i + 1}. ${o.label}`));
+          q.options.forEach((o, i) => {
+            console.error(`  ${i + 1}. ${o.label}`);
+          });
         }
-        console.error("Enter your answer:");
+        console.error('Enter your answer:');
+      } else {
+        // plan_review
+        const p = payload.plan;
+        console.error(`\n[PLAN REVIEW] ${p.name}`);
+        console.error(p.description);
+        if (p.steps.length > 0) {
+          p.steps.forEach((s, i) => {
+            console.error(`  ${i + 1}. ${s.step} [${s.status}]`);
+          });
+        }
+        console.error('Type a/auto, e/accept-edits, f/feedback, or c/cancel:');
       }
 
       const data = await readStdin();
-      if (payload.kind === "approval") {
+      if (payload.kind === 'approval') {
         const lower = data.toLowerCase();
-        if (lower === "f" || lower === "full_access") return { type: "approve", grant: "full_access" };
-        if (lower === "y" || lower === "yes") return { type: "approve", grant: "approve_once" };
-        return { type: "reject" };
+        if (lower === 'f' || lower === 'full_access')
+          return { type: 'approve', grant: 'full_access' };
+        if (lower === 'y' || lower === 'yes') return { type: 'approve', grant: 'approve_once' };
+        return { type: 'reject' };
       }
-      return { type: "input", text: data };
+      if (payload.kind === 'plan_review') {
+        const lower = data.toLowerCase();
+        if (lower === 'a' || lower === 'auto')
+          return {
+            type: 'plan_review_decision',
+            decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+          };
+        if (lower === 'e' || lower === 'accept-edits')
+          return {
+            type: 'plan_review_decision',
+            decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+          };
+        if (lower === 'f' || lower === 'feedback') {
+          console.error('Enter your feedback:');
+          const feedback = await readStdin();
+          return { type: 'plan_review_decision', decision: { kind: 'revise', feedback } };
+        }
+        return { type: 'plan_review_decision', decision: { kind: 'cancel' } };
+      }
+      return { type: 'input', text: data };
     },
   };
 }
@@ -126,10 +302,10 @@ function readStdin(): Promise<string> {
   return new Promise((resolve) => {
     const { stdin } = process;
     const onData = (chunk: Buffer) => {
-      stdin.removeListener("data", onData);
+      stdin.removeListener('data', onData);
       resolve(chunk.toString().trim());
     };
-    stdin.on("data", onData);
+    stdin.on('data', onData);
     stdin.resume();
   });
 }
@@ -137,43 +313,68 @@ function readStdin(): Promise<string> {
 // ── Argument parsing (unchanged from original cli.ts) ──
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const command = argv[0] === "resume" ? "resume" : argv[0] === "run" ? "run" : "help";
+  const command =
+    argv[0] === 'resume'
+      ? 'resume'
+      : argv[0] === 'run'
+        ? 'run'
+        : argv[0] === 'trace'
+          ? 'trace'
+          : 'help';
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
     const index = argv.indexOf(name);
-    return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
+    const next = index >= 0 ? argv[index + 1] : undefined;
+    return next || fallback;
   };
   const optionalValue = (name: string) => {
     const index = argv.indexOf(name);
-    return index >= 0 ? argv[index + 1] ?? "" : undefined;
+    return index >= 0 ? (argv[index + 1] ?? '') : undefined;
   };
-  const noSandbox = argv.includes("--no-sandbox");
-  const explicitThread = value("--thread", "");
-  const mode = parseMode(value("--mode", "auto"));
-  const authorizationMode = parseAuthorizationMode(optionalValue("--authorization-mode") ?? "");
-  const answer = optionalValue("--answer");
-  const approvalHash = optionalValue("--approval-hash");
-  const replacementCommand = optionalValue("--replace-command");
+  const noSandbox = argv.includes('--no-sandbox');
+  const interactionMode = argv.includes('--full')
+    ? 'full'
+    : argv.includes('--auto')
+      ? 'auto'
+      : argv.includes('--ask')
+        ? 'accept_edits'
+        : undefined;
+  const explicitThread = value('--thread', '');
+  const mode = parseMode(value('--mode', 'auto'));
+  const authorizationMode = parseAuthorizationMode(optionalValue('--authorization-mode') ?? '');
+  const answer = optionalValue('--answer');
+  const approvalHash = optionalValue('--approval-hash');
+  const replacementCommand = optionalValue('--replace-command');
   const approvalGrant = parseApprovalGrant(argv);
+  const traceTurnValue = optionalValue('--turn');
+  const traceTurn = traceTurnValue === undefined ? undefined : Number(traceTurnValue);
+  if (traceTurn !== undefined && (!Number.isSafeInteger(traceTurn) || traceTurn < 1)) {
+    throw new Error('--turn must be a positive integer.');
+  }
 
   const multi = (flag: string): string[] => {
     const values: string[] = [];
     for (let i = 0; i < argv.length; i++) {
       if (argv[i] === flag && i + 1 < argv.length) {
-        values.push(argv[i + 1]);
+        const val = argv[i + 1];
+        if (val !== undefined) values.push(val);
         i++;
       }
     }
     return values;
   };
 
+  const featureOverrides: Partial<FeatureFlags> = {};
+  for (const feature of multi('--feature')) {
+    Object.assign(featureOverrides, parseFeatureOverride(feature));
+  }
   return {
     command,
-    task: command === "run" ? value("--task", positionalTask(argv)) : "",
-    threadId: explicitThread || (command === "run" ? freshThreadId() : "default-thread"),
-    userId: value("--user", "default-user"),
-    workspace: resolve(value("--workspace", cwd)),
-    checkpointPath: resolve(value("--checkpoints", defaultCheckpointPath())),
+    task: command === 'run' ? value('--task', positionalTask(argv)) : '',
+    threadId: explicitThread || (command === 'run' ? freshThreadId() : 'default-thread'),
+    userId: value('--user', 'default-user'),
+    workspace: resolve(value('--workspace', cwd)),
+    checkpointPath: resolve(value('--checkpoints', defaultCheckpointPath())),
     mode,
     authorizationMode,
     approve: approvalGrant !== undefined,
@@ -182,38 +383,59 @@ export function parseArgs(argv: string[]): ParsedArgs {
     replacementCommand,
     answer,
     sandbox: !noSandbox,
-    skills: multi("--skill"),
+    interactionMode,
+    skills: multi('--skill'),
+    featureOverrides,
+    tracePath: command === 'trace' ? argv[1] : undefined,
+    traceTurn,
+    traceFormat: optionalValue('--format') === 'json' ? 'json' : 'text',
   };
 }
 
 function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
-  if (argv.includes("--full-access")) return "full_access";
-  if (argv.includes("--approve-same-command")) return "same_command";
-  if (argv.includes("--approve")) return "approve_once";
+  if (argv.includes('--full-access')) return 'full_access';
+  if (argv.includes('--approve-same-command')) return 'same_command';
+  if (argv.includes('--approve')) return 'approve_once';
   return undefined;
 }
 
 function positionalTask(argv: string[]): string {
-  if (argv[0] !== "run") return "";
-  const optionNamesWithValues = new Set(["--task", "--thread", "--user", "--workspace", "--checkpoints", "--mode", "--answer", "--approval-hash", "--replace-command", "--skill"]);
+  if (argv[0] !== 'run') return '';
+  const optionNamesWithValues = new Set([
+    '--task',
+    '--thread',
+    '--user',
+    '--workspace',
+    '--checkpoints',
+    '--mode',
+    '--answer',
+    '--approval-hash',
+    '--replace-command',
+    '--skill',
+    '--feature',
+  ]);
   const parts: string[] = [];
   for (let index = 1; index < argv.length; index++) {
     const item = argv[index];
-    if (optionNamesWithValues.has(item)) { index++; continue; }
-    if (item.startsWith("--")) continue;
+    if (item === undefined) continue;
+    if (optionNamesWithValues.has(item)) {
+      index++;
+      continue;
+    }
+    if (item.startsWith('--')) continue;
     parts.push(item);
   }
-  return parts.join(" ").trim();
+  return parts.join(' ').trim();
 }
 
 function parseMode(value: string): WorkspaceAccessRequest {
-  if (value === "write" || value === "builder") return value;
-  return "auto";
+  if (value === 'write' || value === 'builder') return value;
+  return 'auto';
 }
 
-function parseAuthorizationMode(value: string): "default" | "full_access" | undefined {
-  if (value === "full_access" || value === "full-access") return "full_access";
-  if (value === "default") return "default";
+function parseAuthorizationMode(value: string): 'default' | 'full_access' | undefined {
+  if (value === 'full_access' || value === 'full-access') return 'full_access';
+  if (value === 'default') return 'default';
   return undefined;
 }
 
@@ -228,19 +450,26 @@ function printHelp(): void {
 
 Options:
   --task <text>          Task for run
+  trace <events.jsonl>   Replay a runtime trace
   --thread <id>          LangGraph thread id
   --user <id>            User id
   --workspace <path>     Tool workspace
   --checkpoints <path>   SQLite checkpoint path
   --mode <mode>          auto, write, or builder
   --skill <name>         Activate a skill (repeatable)
+  --feature <name[=bool]> Temporarily override a registered feature flag (repeatable)
+  --turn <n>             Limit trace output to a turn
+  --format json          Emit a trace as JSON
   --approve              Approve tool call on resume
   --approve-same-command Approve same future commands
-  --full-access          Allow all future shell_execute
+  --full-access          Start with full authorization (requires sandbox; source=config)
   --approval-hash <hash> Approval hash
   --replace-command <cmd> Replace pending command
   --answer <text>        Answer user input interrupt
   --authorization-mode <mode>  default or full-access
+  --ask                  Ask before every tool (default)
+  --auto                 Auto-review tools, ask when uncertain
+  --full           Run with full permissions, never ask
   --no-sandbox           Disable sandbox`);
 }
 

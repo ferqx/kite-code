@@ -1,4 +1,3 @@
-import React from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from './theme';
 
@@ -13,7 +12,7 @@ function catMood(running: boolean, error: boolean): CatMood {
 const CAT_LINES: Record<CatMood, [string, string, string]> = {
   working: ['  /\\_/\\  ', ' ( ^ ^ ) ', '  > w <  '],
   error: ['  /\\_/\\  ', ' ( T T ) ', '  > . <  '],
-  idle: ['  /\\_/\\  ', ' ( = = ) ', '  > ~ <  ']
+  idle: ['  /\\_/\\  ', ' ( = = ) ', '  > ~ <  '],
 };
 
 interface HeaderProps {
@@ -31,15 +30,15 @@ export default function Header({ running, error }: HeaderProps) {
       <Box>
         <Text color={t.primary}>{catTop} </Text>
         <Text bold color={t.primary}>
-          OpenPX
+          Kite Code
         </Text>
       </Box>
       <Box>
-        <Text color={t.primary}>{catMid}   </Text>
+        <Text color={t.primary}>{catMid} </Text>
         <Text color={t.dim}>/help shortcuts · Ctrl+C exit</Text>
       </Box>
       <Box>
-        <Text color={t.primary}>{catBot}   </Text>
+        <Text color={t.primary}>{catBot} </Text>
         <Text color={t.dim}>/ commands</Text>
       </Box>
     </Box>

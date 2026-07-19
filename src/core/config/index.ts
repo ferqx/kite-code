@@ -1,22 +1,58 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { resolve } from "node:path";
-import { parse } from "jsonc-parser";
-import { z } from "zod";
-import { defaultConfigPath, projectConfigPath } from "./paths";
-import type { McpServerConfig } from "../mcp/types";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { applyEdits, modify, parse } from 'jsonc-parser';
+import { z } from 'zod';
+import type { FeatureFlags } from './features';
+import { mcpServerSchema } from './mcp-server-config';
+import { defaultConfigPath, projectConfigPath } from './paths';
+
+export {
+  DEFAULT_FEATURE_FLAGS,
+  getFeatureFlags,
+  isFeatureFlagName,
+  parseFeatureOverride,
+} from './features';
+export type {
+  McpConfig,
+  McpConfigApprovalStatus,
+  McpConfigCatalog,
+  McpConfigDiagnostic,
+  McpConfigSource,
+  McpConfigSourceKind,
+  McpProjectServerApprovalView,
+  McpServerConfigEntry,
+  McpWritableScope,
+} from './mcp-config';
+export { loadMcpConfig, loadMcpConfigCatalog } from './mcp-config';
+export type {
+  McpConfigCommand,
+  McpConfigPatch,
+  McpConfigRepository,
+  McpServerConfigInput,
+} from './mcp-config-repository';
+export {
+  DefaultMcpConfigRepository,
+  McpConfigMutationError,
+  validateMcpServerName,
+} from './mcp-config-repository';
+export { expandEnvVars } from './mcp-server-config';
 
 // ── Zod schemas ──
 
-const providerModelEntrySchema = z.object({
-  name: z.string().min(1),
-  default: z.boolean().optional(),
-});
-
 const providerSchema = z.object({
-  type: z.enum(["deepseek", "openai", "openai-compatible", "ollama"]).optional(),
+  type: z.enum(['deepseek', 'openai', 'openai-compatible', 'ollama']).optional(),
   apiKey: z.string().min(1).optional(),
   baseURL: z.string().url().optional(),
-  models: z.array(providerModelEntrySchema).optional(),
+  /** Default model name */
+  model: z.string().optional(),
+  /** Reasoning effort (low | medium | high | xhigh | max) */
+  effort: z.string().optional(),
+  /** Whether to pass reasoning_effort to the API. Default: deepseek=true, others=false. */
+  reasoning: z.boolean().optional(),
+  /** Extra kwargs passed through to the LangChain model constructor */
+  modelKwargs: z.record(z.string(), z.any()).optional(),
+  /** Available model names (string[]) */
+  models: z.array(z.any()).optional(),
 });
 
 // Deprecated: kept for backward compatibility with old top-level models array
@@ -26,31 +62,61 @@ const legacyModelEntrySchema = z.object({
   default: z.boolean().optional(),
 });
 
-const mcpServerSchema = z.object({
-  type: z.enum(["stdio", "http"]).optional(),
-  command: z.string().optional(),
-  args: z.array(z.string()).optional(),
-  url: z.string().optional(),
-  env: z.record(z.string(), z.string()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  risk: z.enum(["read"]).optional(),
-  timeout: z.number().optional(),
-});
+const interactionModeSchema = z.enum(['accept_edits', 'auto', 'full']);
+const sandboxSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+  })
+  .optional();
+
+const featuresSchema = z
+  .object({
+    planLifecycleV2: z.boolean().optional(),
+    interactionControllerV2: z.boolean().optional(),
+    autoReviewV2: z.boolean().optional(),
+    runtimeProjectionV2: z.boolean().optional(),
+    nativeLoopEngine: z.boolean().optional(),
+    loopMode: z.boolean().optional(),
+    capabilityCatalogV1: z.boolean().optional(),
+    mcpRuntimeBindingV1: z.boolean().optional(),
+    mcpExecutionRecordV1: z.boolean().optional(),
+    mcpProviderActionV1: z.boolean().optional(),
+    skillActivationV2: z.boolean().optional(),
+    skillWorkflowV1: z.boolean().optional(),
+    verificationV1: z.boolean().optional(),
+    toolSearchV1: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
 
 export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
   /** @deprecated Use provider[name].models instead */
   models: z.array(legacyModelEntrySchema).optional(),
-  theme: z.enum(["dark", "light"]).optional(),
+  theme: z.enum(['dark', 'light']).optional(),
   colorPreset: z.string().optional(),
+  interactionMode: interactionModeSchema.optional(),
+  features: featuresSchema,
+  sandbox: sandboxSchema,
+  autoReview: z
+    .object({
+      provider: z.string().optional(),
+      model: z.string().optional(),
+      timeoutMs: z.number().int().positive().optional(),
+      failOpen: z.boolean().optional(),
+      doomLoopRepeatThreshold: z.number().int().positive().optional(),
+      circuitBreakerMaxRejections: z.number().int().positive().optional(),
+      circuitBreakerWindowMs: z.number().int().positive().optional(),
+    })
+    .optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });
 
-export type OpenpxConfig = z.infer<typeof configSchema>;
+export type KiteCodeConfig = z.infer<typeof configSchema>;
 
 // ── Types ──
 
-export type ModelProviderType = "deepseek" | "openai" | "openai-compatible" | "ollama";
+export type ModelProviderType = 'deepseek' | 'openai' | 'openai-compatible' | 'ollama';
 
 /** Agent 配置 / Agent configuration */
 export interface AgentConfig {
@@ -64,8 +130,26 @@ export interface AgentConfig {
   providerName: string;
   /** LangChain adapter 类型 / LangChain adapter type */
   providerType: ModelProviderType;
-  /** 思考程度，映射到 reasoning_effort API 参数 / Thinking level, mapped to reasoning_effort API param */
+  /** 思考程度，映射到 reasoning_effort API 参数。仅 reasoning=true 时生效。 */
   reasoningEffort?: string | null;
+  /** 是否启用思考字段回传。缺省时按 providerType 推断：deepseek=true，其他=false。 */
+  reasoning?: boolean;
+  /** 透传给 LangChain 模型构造器的额外参数 */
+  modelKwargs?: Record<string, unknown>;
+  interactionMode?: z.infer<typeof interactionModeSchema>;
+  features?: Partial<FeatureFlags>;
+  sandbox: {
+    enabled: boolean;
+  };
+  autoReview?: {
+    provider?: string;
+    model?: string;
+    timeoutMs?: number;
+    failOpen?: boolean;
+    doomLoopRepeatThreshold?: number;
+    circuitBreakerMaxRejections?: number;
+    circuitBreakerWindowMs?: number;
+  };
 }
 
 /** 加载配置选项 / Configuration loading options */
@@ -78,46 +162,60 @@ export interface LoadAgentConfigOptions {
   modelName?: string;
 }
 
-export { defaultConfigPath, projectConfigPath, defaultCheckpointPath, editorInputPath, sessionExportPath } from "./paths";
+export {
+  defaultCheckpointPath,
+  defaultConfigPath,
+  editorInputPath,
+  localMcpConfigPath,
+  mcpProjectApprovalPath,
+  projectConfigPath,
+  projectMcpConfigPath,
+  sessionExportPath,
+  userMcpConfigPath,
+} from './paths';
 
 // ── Defaults (DeepSeek) ──
 
 const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
-  { provider: "deepseek", name: "deepseek-v4-flash", isDefault: true },
-  { provider: "deepseek", name: "deepseek-v4-pro", isDefault: false },
+  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true, contextWindow: 1048576 },
+  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false, contextWindow: 1048576 },
 ];
 
 // ── Config file loading ──
 
 /** Read and parse a single config file. Returns null if not found. */
-function readConfigFile(path: string): OpenpxConfig | null {
+function readConfigFile(path: string): KiteCodeConfig | null {
   if (!existsSync(path)) return null;
-  const raw = readFileSync(path, "utf8");
+  const raw = readFileSync(path, 'utf8');
   return configSchema.parse(parse(raw));
 }
 
 /** Merge project config over user config. */
-function mergeConfigs(user: OpenpxConfig, project: OpenpxConfig): OpenpxConfig {
+function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeConfig {
   return {
     provider: { ...user.provider, ...project.provider },
     models: project.models ?? user.models,
     theme: project.theme ?? user.theme,
     colorPreset: project.colorPreset ?? user.colorPreset,
+    interactionMode: project.interactionMode ?? user.interactionMode,
+    features: { ...user.features, ...project.features },
+    sandbox: project.sandbox ?? user.sandbox,
+    autoReview: project.autoReview ?? user.autoReview,
     mcpServers: { ...user.mcpServers, ...project.mcpServers },
   };
 }
 
 /**
- * Load and merge user-level (~/.openpx/openpx.jsonc) + project-level (.openpx/openpx.jsonc).
+ * Load and merge user-level (~/.kite-code/kite-code.jsonc) + project-level (.kite-code/kite-code.jsonc).
  * Project overrides user.
  * When explicitPath is given, loads only that file (no merge).
  * Falls back to DeepSeek defaults when no config file exists.
  */
-function loadConfig(workspace?: string, explicitPath?: string): OpenpxConfig {
+function loadConfig(workspace?: string, explicitPath?: string): KiteCodeConfig {
   if (explicitPath) {
     const cfg = readConfigFile(explicitPath);
     if (!cfg) {
-      throw new Error(`OpenPX config file not found: ${explicitPath}`);
+      throw new Error(`Kite Code config file not found: ${explicitPath}`);
     }
     return cfg;
   }
@@ -127,22 +225,22 @@ function loadConfig(workspace?: string, explicitPath?: string): OpenpxConfig {
   if (user) return user;
   if (project) return project;
   // No config file → DeepSeek defaults
-  return defaultOpenpxConfig();
+  return defaultKiteCodeConfig();
 }
 
-function defaultOpenpxConfig(): OpenpxConfig {
+function defaultKiteCodeConfig(): KiteCodeConfig {
   return {
     provider: {
       deepseek: {
-        type: "deepseek",
-        baseURL: "https://api.deepseek.com/v1",
-        models: [
-          { name: "deepseek-v4-flash", default: true },
-          { name: "deepseek-v4-pro" },
-        ],
+        baseURL: 'https://api.deepseek.com/v1',
+        model: 'deepseek-v4-flash',
+        models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
       },
     },
-    theme: "dark",
+    theme: 'dark',
+    interactionMode: 'accept_edits',
+    features: {},
+    sandbox: { enabled: true },
     mcpServers: {},
   };
 }
@@ -156,7 +254,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
 
   const defaultModel = findDefaultModel(cfg);
 
-  const providerName = options.providerName ?? defaultModel?.provider ?? "deepseek";
+  const providerName = options.providerName ?? defaultModel?.provider ?? 'deepseek';
   const provider = cfg.provider?.[providerName] ?? builtInProvider(providerName);
 
   if (!provider) {
@@ -165,45 +263,83 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
 
   const providerType = provider.type ?? inferProviderType(providerName);
 
+  const reasoningEffort = provider.effort ?? null;
+  const reasoning = provider.reasoning ?? inferReasoningDefault(providerType);
+
   return {
     apiKey: resolveProviderApiKey(providerName, providerType, provider.apiKey),
     baseURL: resolveProviderBaseURL(providerName, providerType, provider.baseURL),
-    modelName: options.modelName ?? defaultModel?.name ?? "deepseek-v4-flash",
+    modelName: options.modelName ?? provider.model ?? defaultModel?.name ?? 'deepseek-v4-flash',
     providerName,
     providerType,
+    reasoningEffort,
+    reasoning,
+    modelKwargs: provider.modelKwargs as Record<string, unknown> | undefined,
+    interactionMode: cfg.interactionMode,
+    features: cfg.features,
+    sandbox: { enabled: cfg.sandbox?.enabled ?? true },
+    autoReview: cfg.autoReview,
   };
 }
 
-function inferProviderType(providerName: string): ModelProviderType {
-  if (providerName === "deepseek") return "deepseek";
-  if (providerName === "ollama") return "ollama";
-  return "openai-compatible";
+/** Like loadAgentConfig but returns null instead of throwing when no API key is configured. */
+export function tryLoadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConfig | null {
+  try {
+    return loadAgentConfig(options);
+  } catch {
+    // No config file or missing API key → first-run setup needed
+    return null;
+  }
 }
 
-function builtInProvider(
-  providerName: string,
-): z.infer<typeof providerSchema> | null {
-  if (providerName === "ollama") return { type: "ollama" };
-  if (providerName === "deepseek") return { type: "deepseek", baseURL: "https://api.deepseek.com/v1" };
+function inferProviderType(providerName: string): ModelProviderType {
+  if (providerName === 'deepseek') return 'deepseek';
+  if (providerName === 'ollama') return 'ollama';
+  return 'openai-compatible';
+}
+
+/** Default reasoning support: only DeepSeek enables it by default. */
+function inferReasoningDefault(type: ModelProviderType): boolean {
+  return type === 'deepseek';
+}
+
+function builtInProvider(providerName: string): z.infer<typeof providerSchema> | null {
+  if (providerName === 'ollama') return { type: 'ollama' };
+  if (providerName === 'deepseek')
+    return { type: 'deepseek', baseURL: 'https://api.deepseek.com/v1' };
+  return null;
+}
+
+/** Normalize a model entry (string or object) to its name string. */
+function modelEntryName(entry: unknown): string | null {
+  if (typeof entry === 'string') return entry;
+  if (entry && typeof entry === 'object' && 'name' in entry)
+    return (entry as { name: string }).name;
   return null;
 }
 
 /**
  * Find the default model from config.
- * Priority: first model with default:true in provider models > first model of first provider > null
+ * Priority: provider.model > legacy default:true > first model > null
  */
-function findDefaultModel(cfg: OpenpxConfig): { provider: string; name: string } | null {
-  // Look for explicit default in provider models
+function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string } | null {
   for (const [provName, prov] of Object.entries(cfg.provider)) {
+    if (prov.model && prov.models?.length) return { provider: provName, name: prov.model };
+    // Legacy: model entry with default:true
     if (prov.models) {
-      const def = prov.models.find((m) => m.default);
-      if (def) return { provider: provName, name: def.name };
+      for (const m of prov.models) {
+        if (m && typeof m === 'object' && (m as any).default) {
+          const name = modelEntryName(m);
+          if (name) return { provider: provName, name };
+        }
+      }
     }
   }
-  // Fallback: first model of first provider
+  // Fallback: first model of first provider with models
   for (const [provName, prov] of Object.entries(cfg.provider)) {
-    if (prov.models && prov.models.length > 0) {
-      return { provider: provName, name: prov.models[0].name };
+    if (prov.models?.length) {
+      const name = modelEntryName(prov.models[0]);
+      if (name) return { provider: provName, name };
     }
   }
   return null;
@@ -215,11 +351,13 @@ function resolveProviderApiKey(
   apiKey: string | undefined,
 ): string {
   if (apiKey) return apiKey;
-  if (providerType === "ollama") return "";
+  if (providerType === 'ollama') return '';
   // Try env var: PROVIDERNAME_API_KEY
   const envKey = process.env[`${providerName.toUpperCase()}_API_KEY`];
   if (envKey) return envKey;
-  throw new Error(`Model provider '${providerName}' requires apiKey (set ${providerName.toUpperCase()}_API_KEY)`);
+  throw new Error(
+    `Model provider '${providerName}' requires apiKey (set ${providerName.toUpperCase()}_API_KEY)`,
+  );
 }
 
 function resolveProviderBaseURL(
@@ -228,115 +366,12 @@ function resolveProviderBaseURL(
   baseURL: string | undefined,
 ): string {
   if (baseURL) return baseURL;
-  if (providerType === "ollama") return "http://localhost:11434";
-  if (providerType === "deepseek") return "https://api.deepseek.com/v1";
+  if (providerType === 'ollama') return 'http://localhost:11434';
+  if (providerType === 'deepseek') return 'https://api.deepseek.com/v1';
   // Try env var: PROVIDERNAME_BASE_URL
   const envURL = process.env[`${providerName.toUpperCase()}_BASE_URL`];
   if (envURL) return envURL;
   throw new Error(`Model provider '${providerName}' requires baseURL`);
-}
-
-// ── MCP config ──
-
-/** MCP configuration result */
-export interface McpConfig {
-  servers: Record<string, McpServerConfig>;
-}
-
-/**
- * Load MCP server configurations from:
- * 1. openpx.jsonc (user + project merged) -> mcpServers section
- * 2. .mcp.json in project root (merged, project mcp doesn't override same-name servers)
- */
-export function loadMcpConfig(configPath?: string): McpConfig {
-  const servers: Record<string, McpServerConfig> = {};
-
-  // 1. Merged openpx.jsonc
-  const cfg = configPath ? readConfigFile(configPath) : loadConfig();
-  if (cfg?.mcpServers) {
-    for (const [name, raw] of Object.entries(cfg.mcpServers)) {
-      servers[name] = normalizeMcpServerConfig(raw as Record<string, unknown>);
-    }
-  }
-
-  // 2. .mcp.json
-  const projectMcpPath = resolve(process.cwd(), ".mcp.json");
-  if (existsSync(projectMcpPath)) {
-    const raw = readFileSync(projectMcpPath, "utf8");
-    const parsed = parse(raw);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "mcpServers" in (parsed as object)
-    ) {
-      const mcpServers = (parsed as Record<string, unknown>).mcpServers;
-      if (mcpServers && typeof mcpServers === "object") {
-        for (const [name, cfgEntry] of Object.entries(
-          mcpServers as Record<string, unknown>,
-        )) {
-          if (!servers[name] && cfgEntry && typeof cfgEntry === "object") {
-            servers[name] = normalizeMcpServerConfig(
-              cfgEntry as Record<string, unknown>,
-            );
-          }
-        }
-      }
-    }
-  }
-
-  return { servers };
-}
-
-/** Normalize a raw MCP server config object */
-function normalizeMcpServerConfig(
-  raw: Record<string, unknown>,
-): McpServerConfig {
-  const type: McpServerConfig["type"] =
-    raw.type === "http" ? "http" : "stdio";
-
-  const config: McpServerConfig = { type };
-
-  if (typeof raw.command === "string") {
-    config.command = expandEnvVars(raw.command);
-  }
-  if (Array.isArray(raw.args)) {
-    config.args = raw.args
-      .filter((a): a is string => typeof a === "string")
-      .map(expandEnvVars);
-  }
-  if (raw.url && typeof raw.url === "string") {
-    config.url = expandEnvVars(raw.url);
-  }
-  if (raw.env && typeof raw.env === "object") {
-    const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(
-      raw.env as Record<string, unknown>,
-    )) {
-      if (typeof v === "string") {
-        env[k] = expandEnvVars(v);
-      }
-    }
-    config.env = env;
-  }
-  if (raw.headers && typeof raw.headers === "object") {
-    const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(
-      raw.headers as Record<string, unknown>,
-    )) {
-      if (typeof v === "string") {
-        headers[k] = expandEnvVars(v);
-      }
-    }
-    config.headers = headers;
-  }
-  if (raw.risk === "read") {
-    config.risk = "read";
-  }
-  if (typeof raw.timeout === "number" && raw.timeout > 0) {
-    config.timeout = raw.timeout;
-  }
-
-  return config;
 }
 
 // ── Available models ──
@@ -346,6 +381,8 @@ export interface AvailableModel {
   provider: string;
   name: string;
   isDefault: boolean;
+  /** 上下文窗口大小（token 数）/ Context window size in tokens */
+  contextWindow?: number;
 }
 
 let _cachedModels: AvailableModel[] | null = null;
@@ -376,8 +413,15 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
   const models: AvailableModel[] = [];
   for (const [provName, prov] of Object.entries(cfg.provider)) {
     if (prov.models) {
+      const defaultName = prov.model ?? null;
       for (const m of prov.models) {
-        models.push({ provider: provName, name: m.name, isDefault: m.default ?? false });
+        const name = modelEntryName(m);
+        if (!name) continue;
+        const isDefault =
+          name === defaultName || (m && typeof m === 'object' && !!(m as any).default);
+        const contextWindow =
+          m && typeof m === 'object' ? ((m as any).contextWindow ?? (m as any).tokens) : undefined;
+        models.push({ provider: provName, name, isDefault, contextWindow });
       }
     }
   }
@@ -392,79 +436,122 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
 
 // ── Theme ──
 
-export type ThemeName = "dark" | "light";
+export type ThemeName = 'dark' | 'light';
 
 /** Read theme from config. Falls back to "dark". */
 export function loadTheme(workspace?: string): ThemeName {
   const cfg = loadConfig(workspace);
-  return cfg?.theme ?? "dark";
+  return cfg?.theme ?? 'dark';
 }
 
 /** Read color preset from config. Falls back to "blue". */
 export function loadColorPreset(workspace?: string): string {
   const cfg = loadConfig(workspace);
-  return cfg?.colorPreset ?? "blue";
+  return cfg?.colorPreset ?? 'blue';
 }
 
 /** Persist colorPreset to the user-level config file (creates file if missing). */
 export function saveColorPreset(preset: string): void {
   const path = defaultConfigPath();
   try {
-    let text: string;
-    if (existsSync(path)) {
-      text = readFileSync(path, "utf-8");
-    } else {
-      // Create minimal config file
-      const dir = resolve(path, "..");
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      text = `{\n  "theme": "dark",\n  "colorPreset": "${preset}"\n}\n`;
-      writeFileSync(path, text, "utf-8");
-      return;
-    }
-
-    // Simple line-based edit: find existing "colorPreset" or add it
-    const lines = text.split("\n");
-    const idx = lines.findIndex((l) => /"colorPreset"/.test(l));
-    if (idx >= 0) {
-      lines[idx] = lines[idx].replace(/"colorPreset"\s*:\s*"[^"]*"/, `"colorPreset": "${preset}"`);
-    } else {
-      // Insert before "mcpServers" or before last "}"
-      const insertIdx = lines.findIndex((l) => /"mcpServers"/.test(l));
-      if (insertIdx >= 0) {
-        lines.splice(insertIdx, 0, `  "colorPreset": "${preset}",`);
-      } else {
-        // Insert before closing }
-        const closeIdx = lines.lastIndexOf("}");
-        if (closeIdx >= 0) {
-          const indent = lines[closeIdx].match(/^(\s*)/)?.[1] ?? "";
-          lines.splice(closeIdx, 0, `${indent}"colorPreset": "${preset}"`);
-        }
-      }
-    }
-    writeFileSync(path, lines.join("\n"), "utf-8");
+    const dir = resolve(path, '..');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
+    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+    text = applyEdits(text, modify(text, ['colorPreset'], preset, fmt));
+    writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
   } catch {
     // Non-critical — silently ignore write failures
   }
 }
 
-// ── Env var expansion ──
+// ── Provider config saving ──
+
+/** Input for saving a provider configuration. */
+export interface SaveProviderInput {
+  /** Provider key name (e.g., 'deepseek', 'my-openai') */
+  name: string;
+  /** Provider type */
+  type: ModelProviderType;
+  /** API key (empty string for ollama) */
+  apiKey?: string;
+  /** Base URL (omit to use built-in default) */
+  baseURL?: string;
+  /** Models with their default flag */
+  models?: { name: string; default: boolean }[];
+  /** Reasoning effort (low | medium | high | xhigh | max) */
+  effort?: string;
+  /** Whether to pass reasoning_effort to the API */
+  reasoning?: boolean;
+  /** Extra kwargs passed through to the LangChain model constructor */
+  modelKwargs?: Record<string, unknown>;
+}
 
 /**
- * Expand environment variable references in a string.
- * Supports ${VAR} and ${VAR:-default} syntax.
+ * Save a provider configuration to the user-level config file.
+ * Creates the file and directory if they don't exist.
+ * Preserves existing config sections (other providers, theme, mcpServers, etc.).
  */
-export function expandEnvVars(value: string): string {
-  return value.replace(
-    /\$\{(\w+)(?::-([^}]*))?\}/g,
-    (_match, varName: string, defaultValue: string | undefined) => {
-      const envValue = process.env[varName];
-      if (envValue !== undefined && envValue !== "") {
-        return envValue;
-      }
-      if (defaultValue !== undefined) {
-        return defaultValue;
-      }
-      return "";
-    },
-  );
+/** Sensible default models per provider type (used when no models are provided). */
+function defaultModelsForProvider(
+  type: ModelProviderType,
+): { name: string; default: boolean; contextWindow?: number }[] {
+  switch (type) {
+    case 'deepseek':
+      return [
+        { name: 'deepseek-v4-flash', default: true, contextWindow: 1048576 },
+        { name: 'deepseek-v4-pro', default: false, contextWindow: 1048576 },
+      ];
+    case 'openai':
+      return [
+        { name: 'gpt-4o', default: true, contextWindow: 128000 },
+        { name: 'gpt-4.1', default: false, contextWindow: 1000000 },
+      ];
+    case 'ollama':
+      return [{ name: 'llama3.2', default: true, contextWindow: 131072 }];
+    default:
+      // openai-compatible — no well-known defaults, let user type their own
+      return [];
+  }
+}
+
+export function saveProviderConfig(input: SaveProviderInput): boolean {
+  const path = defaultConfigPath();
+  try {
+    const dir = resolve(path, '..');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+    let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
+    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+
+    const provPath = ['provider', input.name];
+    text = applyEdits(text, modify(text, provPath, {}, fmt));
+
+    const setField = (jsonPath: string[], value: unknown) => {
+      text = applyEdits(text, modify(text, jsonPath, value, fmt));
+    };
+
+    // type is omitted — inferProviderType handles it from the provider name
+    if (input.apiKey !== undefined) setField([...provPath, 'apiKey'], input.apiKey);
+    if (input.baseURL) setField([...provPath, 'baseURL'], input.baseURL);
+
+    const models =
+      input.models && input.models.length > 0
+        ? input.models.map((m) => m.name)
+        : defaultModelsForProvider(input.type).map((m) => m.name);
+    const defaultModel = input.models?.find((m) => m.default)?.name ?? models[0];
+    if (models.length > 0) setField([...provPath, 'models'], models);
+    if (defaultModel) setField([...provPath, 'model'], defaultModel);
+    if (input.effort && input.reasoning !== false) setField([...provPath, 'effort'], input.effort);
+    if (input.reasoning !== undefined) setField([...provPath, 'reasoning'], input.reasoning);
+    if (input.modelKwargs && Object.keys(input.modelKwargs).length > 0) {
+      setField([...provPath, 'modelKwargs'], input.modelKwargs);
+    }
+
+    writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
+    _cachedModels = null;
+    return true;
+  } catch {
+    return false;
+  }
 }

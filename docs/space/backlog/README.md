@@ -6,8 +6,8 @@
 - `understanding/` — 记录设计理由、心智模型、背景解释（"为什么是这样"）
 - `backlog/` — 记录已识别但尚未排期的问题和缺口（"还欠什么"）
 
-与 `execution/active/` 的区别：
-- `execution/active/` — 约束当前改动的强制性规则
+与 `../active/` 的区别：
+- `../active/` — 约束当前改动的强制性规则
 - `backlog/` — 不约束当前改动，仅标记已知缺口
 
 与 `plans/` 的区别：

@@ -1,0 +1,74 @@
+{
+  "name": "verification-required-pass",
+  "description": "A required verifier runs before final completion and persists its evidence projection.",
+  "initialEvents": [
+    {
+      "type": "model.responded",
+      "messageId": "final-message",
+      "text": "implementation complete"
+    },
+    {
+      "type": "verification.requested",
+      "verificationId": "verification-1",
+      "mode": "required",
+      "requestedAt": "2026-07-15T00:00:00.000Z",
+      "spec": {
+        "schemaVersion": 1,
+        "verificationId": "verification-1",
+        "subject": "golden outcome",
+        "checks": [
+          {
+            "checkId": "tests",
+            "type": "command",
+            "description": "run tests",
+            "command": "bun test"
+          }
+        ],
+        "repair": { "maxAttempts": 1 }
+      }
+    }
+  ],
+  "effects": [
+    {
+      "events": [
+        {
+          "type": "verification.started",
+          "verificationId": "verification-1",
+          "attempt": 1,
+          "startedAt": "2026-07-15T00:00:01.000Z"
+        },
+        {
+          "type": "verification.check_completed",
+          "verificationId": "verification-1",
+          "result": {
+            "checkId": "tests",
+            "outcome": "passed",
+            "summary": "tests passed",
+            "evidenceDigest": "digest",
+            "startedAt": "2026-07-15T00:00:01.000Z",
+            "finishedAt": "2026-07-15T00:00:02.000Z"
+          }
+        },
+        {
+          "type": "verification.completed",
+          "verificationId": "verification-1",
+          "outcome": "passed",
+          "completedAt": "2026-07-15T00:00:02.000Z"
+        }
+      ]
+    }
+  ],
+  "expectedEvents": [
+    "verification.requested",
+    "verification.started",
+    "verification.check_completed",
+    "verification.completed",
+    "run.completed",
+    "turn.completed"
+  ],
+  "expectedEffects": ["run_verification"],
+  "expectedFinalState": {
+    "verification.records.verification-1.status": "passed",
+    "verification.records.verification-1.attempts": 1
+  }
+}

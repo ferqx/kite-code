@@ -1,10 +1,10 @@
 # Space 索引
 
-最后更新：2026-06-15（TUI DEC 同步输出缓冲、StatsLine 样式统一、InputLine 分割线）
+最后更新：2026-07-16（完成 `/mcp` 只读连接列表纠偏）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
-`docs/space/` 不存储每次运行的 `graph.state.plan`。运行时计划仍属于 checkpoint 状态；本索引只跟踪持久项目记录。
+`docs/space/` 不存储每次运行的 Runtime Kernel 计划状态；本索引只跟踪持久项目记录。
 
 状态含义：
 
@@ -16,26 +16,45 @@
 
 ## 当前规则记录
 
+> 权威文件位于 `docs/active/`，下表使用 `../active/` 相对路径。
+
 | 记录 | 状态 | 范围 | 读取时机 |
 | --- | --- | --- | --- |
-| `execution/active/plan-state-reminder.md` | active | 模型上下文构建、计划投影、缓存敏感 prompt 布局 | 修改 `src/model/context.ts`、`src/model/runtime-context.ts`，或修改计划/上下文投影相关测试。 |
-| `execution/active/model-provider-boundary.md` | active | 模型 provider 配置、适配器、provider 专有行为、真实配置模型测试 | 修改 `src/config`、`src/model`、provider 文档或真实模型套件。 |
-| `execution/active/tool-gated-autonomy.md` | active | 图路由、审批边界、工具 gating、最终答案自主性 | 修改 `src/harness/graph.ts`、`src/harness/routes.ts`、`src/harness/tool-policy.ts`、`src/harness/tool-runner.ts`，或修改审批/最终路由相关测试。 |
-| `execution/active/real-model-test-boundary.md` | active | 测试发现、真实模型端到端套件、package 脚本 | 修改测试命名、`package.json` 测试脚本或真实模型套件。 |
-| `execution/active/documentation-language.md` | active | 文档语言、Markdown 内容标准、文档测试 | 创建或修改 README、AGENTS、`docs/space` 或其他 Markdown 文档。 |
-| `execution/active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |
-| `execution/active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
-| `execution/active/project-conventions.md` | active | 文档语言、注释规范、测试纪律、CLI 行为、提交粒度、仓库卫生、TypeScript 类型安全 | 修改 Markdown 文档、测试、CLI、提交规范、仓库布局约束或 TypeScript 类型声明时。 |
-| `execution/active/tui-e2e-standards.md` | active | TUI E2E 测试标准、响应分配器、Harness 增强、P0-P3 覆盖分层 | 编写或修改 TUI E2E 测试、调整 mock agent 行为、新增 E2E 场景。 |
-| `execution/active/e2e-test-restructure.md` | active | E2E 测试用例体系重构方案 — 3 文件 60 测试覆盖 P0-P3 | E2E 测试重构、新增测试层级、调整测试文件组织。 |
-| `execution/active/tui-textinput-wrapping-spec.md` | active | `CtrlSafeTextInput` 软换行、光标边界、IME 空格清理、CJK/ASCII 混合输入行为 | 修改 `CtrlSafeTextInput` 软换行、光标移动、IME 处理或 `maxWidth` 传播逻辑时。 |
-| `execution/active/tui-footer-resize-stability.md` | active | TUI 终端缩放刷新方案 — resize 事件驱动 + key remount + 输入保留 + DEC 同步输出缓冲 | 修改 TUI resize 逻辑、缩放行为异常时必读。 |
-| `execution/active/tui-dec-synchronized-output.md` | active | TUI DEC 同步输出缓冲 — `\x1B[?2026h/l` 帧刷新，消除 resize/会话切换的空白期和抖动 | 修改 `useStaticContent`、TUI 屏切换逻辑、缓冲/渲染时序时必读。 |
-| `execution/active/cancel-resume-cleanup.md` | active | Cancel-Resume 三层清理架构 — graph cleanup 节点 + sanitize + reorder，防止孤儿工具重新执行和 API 400 错误 | 修改 cancel/abort/resume 逻辑、检查点恢复、消息清理时必读。 |
-| `execution/active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
-| `execution/active/tui-e2e-testing-limits.md` | active | TUI E2E 测试方案与限制 — ink-testing-library 适用场景、PTY 方案探索结论（Bun PTY / node-pty 均不可用） | 编写 TUI E2E 测试、考虑替代终端测试方案时必读，避免重复踩坑。 |
-| `execution/active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
-| `execution/active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
+| `../active/six-concept-runtime-architecture.md` | active | Agent、Runtime Kernel、Capability、Policy、Execution、Verification 总体架构 | 修改跨模块 Runtime 架构、能力治理、执行或完成语义时。 |
+| `../active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
+| `../active/plan-state-reminder.md` | active | Runtime 动态状态投影与缓存敏感消息布局 | 修改 `src/core/model/context.ts`、`runtime-context.ts`、Plan/Mode/Verification 投影时。 |
+| `../active/model-provider-boundary.md` | active | AI SDK provider 配置、适配器和专有行为 | 修改 `src/core/config`、`src/core/model` 或 provider 文档时。 |
+| `../active/tool-gated-autonomy.md` | active | Capability 执行、审批、授权、sandbox 与完成边界 | 修改 Tool Controller、Runtime Policy、Scheduler 或能力执行测试时。 |
+| `../active/real-model-test-boundary.md` | active | 测试发现、真实模型端到端套件、package 脚本 | 修改测试命名、`package.json` 测试脚本或真实模型套件。 |
+| `../active/documentation-language.md` | active | 文档语言、Markdown 内容标准、文档测试 | 创建或修改 README、AGENTS、`docs/space` 或其他 Markdown 文档。 |
+| `../active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |
+| `../active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
+| `../active/project-conventions.md` | active | 文档语言、注释规范、测试纪律、CLI 行为、提交粒度、仓库卫生、TypeScript 类型安全 | 修改 Markdown 文档、测试、CLI、提交规范、仓库布局约束或 TypeScript 类型声明时。 |
+| `../active/tui-e2e-standards.md` | active | TUI E2E/PTTY 测试标准、PTY harness、mock model server、真实终端覆盖边界 | 编写或修改 TUI E2E/PTTY 测试、调整 mock server 行为、新增真实终端场景。 |
+| `../active/tui-textinput-wrapping-spec.md` | active | `CtrlSafeTextInput` 软换行、光标边界、IME 空格清理、CJK/ASCII 混合输入行为 | 修改 `CtrlSafeTextInput` 软换行、光标移动、IME 处理或 `maxWidth` 传播逻辑时。 |
+| `../active/tui-run-status-bar.md` | active | Run Status Bar 3 阶段单向状态行 — Thinking → Working → Finishing 只进不退 + 渐变动画 + arc spinner + timer 性能架构 | 修改 `StatusBar.tsx`、`run-status.ts`、`App.tsx`（shouldShowRunStatus）、Footer.tsx 或相关测试时必读。 |
+| `../active/tui-footer-resize-stability.md` | active | TUI 终端缩放刷新方案 — resize 事件驱动 + key remount + 输入保留 + DEC 同步输出缓冲 | 修改 TUI resize 逻辑、缩放行为异常时必读。 |
+| `../active/tui-dec-synchronized-output.md` | active | TUI DEC 同步输出缓冲 — `\x1B[?2026h/l` 帧刷新，消除 resize/会话切换的空白期和抖动 | 修改 `useStaticContent`、TUI 屏切换逻辑、缓冲/渲染时序时必读。 |
+| `../active/cancel-resume-cleanup.md` | active | Cancel/Resume、Effect lease、工具消息对与 Subagent continuation | 修改取消、恢复、消息清理或 continuation 时。 |
+| `../active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
+| `../active/tui-reference-stability.md` | active | TUI useStaticContent 引用稳定性 — ref+fingerprint 替代 useMemo 的缓存层，消除 timer/spinner 引发的引用级联和重复渲染 | 修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。 |
+| `../active/tui-e2e-testing-limits.md` | active | PTY 能力、平台差异与测试分层边界 | 编写 TUI E2E、处理 PTY flaky 或选择测试层次时。 |
+| `../active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
+| `../active/plan-mode-implementation.md` | active | Plan Artifact、planning/building、plan_review 与恢复 | 修改 Plan 生命周期、工具、策略或 TUI 审核交互时。 |
+| `../active/plan-artifact-lifecycle.md` | active | Plan Artifact 持久化、提交校验、审核交互与 Runtime 恢复边界 | 修改 `write_plan`、Plan review、Task 生命周期、Runtime Context、TUI/CLI 审核展示或会话恢复时必读。 |
+| `../active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
+| `../active/file-reading-shared-boundary.md` | active | 文件读取共享边界 — `readTextContent` 单入口、BOM/编码检测、`isTextByte` 字节分类、换行正规化、MSYS2 路径双层转换 | 修改 `file.ts`/`shell.ts`/`path-utils.ts`、二进制检测、编码处理、文件读取失败排查时必读。 |
+| `../active/authorization.md` | active | 授权溯源 — AuthorizationSource、ToolGrant.source/grantedAt、modeSource/modeGrantedAt、mode-policy 硬规则 | 修改授权状态类型、full_access 提升逻辑、mode-policy 时必读。 |
+| `../active/feature-flags.md` | active | Runtime feature flag 注册、配置合并、CLI 临时覆盖和灰度生命周期 | 新增或调整 runtime 开关、auto-review rollout、配置字段时必读。 |
+| `../active/failure-classification.md` | active | FailureKind 分类和 `ClassifiedFailure` 恢复策略 | 新增工具/模型失败路径、错误日志或重试策略时必读。 |
+| `../active/core-entry-criteria.md` | active | 进入 core 的 Capability/Policy/Lifecycle/Engine 准入门槛 | 新增 `src/core/` 功能、状态机或执行引擎改动前必读。 |
+| `../active/mcp-runtime-governance.md` | active | MCP/Skill revisioned catalog、Runtime binding、policy、execution record 与恢复边界 | 修改 MCP discovery、动态工具 binding、MCP policy、调用结果或 Skill Runtime 治理时必读。 |
+| `../active/mcp-control-plane.md` | active | MCP Supervisor、generation 生命周期、不可变 control snapshot 与 TUI 只读状态视图 | 修改 MCP Manager/Supervisor 生命周期、control snapshot、Runtime provider 边界或 `/mcp` 状态视图时必读。 |
+| `../active/mcp-config-management.md` | active | MCP 三层来源、原子 mutation、冲突检测、watch/reconcile 与 TUI 无配置写入边界 | 修改 MCP 配置路径/schema/repository、热重载或 TUI 配置职责时必读。 |
+| `../active/mcp-authentication.md` | active | MCP 原生凭据保险库、静态引用、HTTP OAuth 与独立认证恢复提示 | 修改 MCP auth schema、Credential Store、OAuth lifecycle、callback/browser opener 或认证提示时必读。 |
+| `../active/mcp-project-approval.md` | active | 项目 MCP 来源、config digest、本地决定、transport 前置门禁与 TUI 审批 | 修改 MCP 配置发现、项目来源、连接启动或 `/mcp` 审批交互时必读。 |
+| `../active/verification-governance.md` | active | Runtime 分级验证、VerificationSpec、required 完成门禁、repair/waive/compensation | 修改验证策略、事件、效果、Scheduler 完成语义、Skill/MCP verifier 或 reviewer 时必读。 |
+| `../active/capability-progressive-disclosure.md` | active | MCP/Skill 大目录按预算披露、metadata 搜索、下一轮有限 binding 与 fail-closed | 修改 capability catalog、模型工具上下文、`capability_search`、MCP binding 或 Skill activation 可见性时必读。 |
 
 ## 理解记录
 
@@ -50,16 +69,18 @@
 | `understanding/2026-05-20-tui-known-issues.md` | understanding | TUI 已知问题清单：死事件类型、compacting 字段、recoverable 标志、手动 compaction 空壳、剩余未修复项。 |
 
 | `understanding/2026-05-22-rewind-mcp-resources-design.md` | understanding | Rewind（Revert + Fork）和 MCP Resources 的设计规范。 |
-| `understanding/2026-05-23-skills-system-design.md` | understanding | Skills 系统设计 — 对齐 agentskills.io 开放标准，按需加载 + Skill 工具 + Available Skills 区段 + /skill-name。 |
+| `understanding/2026-05-23-skills-system-design.md` | understanding | 旧 Skills 设计背景；当前 Skill Workflow 以 `docs/active/mcp-runtime-governance.md` 为准。 |
 | `understanding/2026-05-24-multi-session-concurrency-design.md` | understanding | 多会话并发执行设计规范。 |
 | `understanding/2026-05-26-tui-claude-code-parity-design.md` | understanding | TUI Claude Code 对标设计 — 布局重构、快捷键精简、功能补全、配置、主题、实施记录。 |
 | `understanding/2026-05-30-multi-agent-design.md` | understanding | 多 Agent 架构设计 — Task Tool 模式、3 个内置角色（Explore/Code/Review）、星型拓扑、生命周期、审批策略、TUI 渲染。 |
 | `understanding/2026-06-02-ink-rendering-scroll-selection-issue.md` | understanding | Ink 渲染机制导致的滚动和文本选择问题 — 根本原因分析、已尝试方案、可能解决方向。 |
 | `understanding/2026-06-03-tui-block-turn-model-design.md` | completed | TUI 消息列表重构 — 引入 Turn 模型替代 flat OutputBlock[]，简化 Static/Dynamic 分割逻辑。 |
-| `understanding/2026-06-08-prefix-cache-hit-rate-analysis.md` | understanding | 前缀缓存命中率分析 — DeepSeek KV cache 机制、前缀大小与命中率关系、当前 OpenPX 前缀构成、影响因素和优化方向。 |
+| `understanding/2026-06-08-prefix-cache-hit-rate-analysis.md` | understanding | 前缀缓存命中率分析 — DeepSeek KV cache 机制、前缀大小与命中率关系、当前 Kite Code 前缀构成、影响因素和优化方向。 |
 | `understanding/2026-06-09-prompt-cache-optimization.md` | understanding | Prompt Cache 优化：合并 SystemMessage、清理死参数、修复 reasoning_content 注入 key 碰撞、TUI 缓存日志、子 agent 缓存震荡根因、对标 Claude Code/Codex/OpenCode 子 agent 结果回传机制。 |
 | `understanding/2026-06-09-token-stats-persistence-design.md` | understanding | Token 统计持久化系统：手动统计（不依赖 provider）、SQLite 持久化跨重启保留、useEffect 自动保存消除 stateRef 滞后、getSnapshot 内存缓存消除回车卡顿。 |
-| `understanding/2026-06-10-shell-concurrent-execution-design.md` | understanding | Shell 工具并发执行 + 批量审批流程：`approvedBatch` 状态注解、approval→approval 循环路由、全量并行执行、full_access 自动放行、recursionLimit 9999999。 |
+| `understanding/2026-06-10-shell-concurrent-execution-design.md` | understanding | Shell 工具并发执行 + 批量审批流程 |
+| `understanding/2026-06-28-thought-pre-consolidation-design.md` | understanding | Thought 预整合设计 — 探索工具合并为 tool_summary、ToolSummaryBlock 三态渲染、explorationSummaryIds 映射、与 SubAgentBlock 对齐。 |
+| `understanding/2026-06-27-osc4-bold-bright-slot.md` | understanding | OSC 4 高亮调色槽发现：终端 bold 文本使用 slot 8-15，OSC 4 需同时重编程基础槽和高亮槽才能让 bold+color 文本跟随主题 |
 
 ## Backlog（工作待办）
 
@@ -85,6 +106,17 @@
 | `plans/2026-05-24-multi-session-concurrency.md` | archived | 多会话并发执行（3 tasks）。 |
 | `plans/2026-05-25-e2e-restructure.md` | archived | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
 | `plans/2026-05-26-tui-claude-code-parity.md` | archived | TUI Claude Code 全面对标（14 tasks）：布局、快捷键、功能、配置、主题。 |
+| `plans/2026-06-17-background-subagent.md` | draft | 后台子 Agent — `background: true` 异步派发、SessionContext 容器、BackgroundTaskManager、跨 run 并发模型（8 phases）。 |
+| `plans/2026-06-18-opentelemetry-observability.md` | draft | Agent OpenTelemetry 可观测性 — Trace/Span 建模 + OTLP/HTTP 导出，工具失败分类驱动提示词优化闭环。 |
+| `plans/2026-06-18-session-logger.md` | draft | 会话日志本地记录 — AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断。 |
+| `plans/2026-06-19-event-mechanism-refactor.md` | draft | 事件机制重构 — turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一。 |
+| `plans/2026-06-28-context-compaction.md` | active | 上下文压缩方案 — M0 TUI 预整合 + M1 Core 工具折叠 + M2 对话摘要（延后）。 |
+| `plans/2026-07-14-mcp-runtime-governance-p0.md` | archived | MCP Runtime 治理 Phase 0 + 1：revisioned catalog、turn binding、fail-closed schema、policy 与结构化结果。 |
+| `plans/2026-07-14-mcp-skills-runtime-governance-followup.md` | archived | MCP/Skills Runtime 治理 Phase 2–5：执行恢复、Workflow Contract、分级验证与 progressive disclosure。 |
+| `plans/2026-07-15-mcp-project-server-approval-p0.md` | archived | MCP TUI 管理中心 Phase 0：项目来源识别、config digest、本地审批、transport 启动门禁与最小 TUI 审批入口。 |
+| `plans/2026-07-15-mcp-tui-management-center-implementation.md` | superseded | MCP TUI 管理中心 Phase 0–2 保留为历史；UI 方向由只读计划替代。 |
+| `plans/2026-07-16-mcp-tui-readonly-list.md` | archived | `/mcp` 只展示 effective MCP Server 名称与连接状态；配置和 project trust 移出该命令。 |
+| `plans/2026-07-16-mcp-auth-phase3.md` | archived | MCP 原生凭据保险库、静态 credential reference、HTTP OAuth 与独立认证恢复提示。 |
 
 ## 完成执行记录
 
@@ -113,7 +145,18 @@
 | `execution/completed/2026-06-02-remove-static-react-memo.md` | completed | 移除 Ink `<Static>`，改用 React.memo block 组件 + 引用稳定 reducer。（已被 2026-06-03 方案替代） |
 | `execution/completed/2026-06-03-restore-static-height-zero.md` | completed | 恢复 `<Static>` 渲染架构解决 Windows 输入卡顿，用 `<Box height={0}>` 消除布局空白。 |
 | `execution/completed/2026-06-04-turn-model-refactor.md` | completed | Turn 模型重构 — 引入 `Turn` 替代 flat `OutputBlock[]`，将 Static/Dynamic 分割退化为 `slice(-1)`。 |
+| `execution/completed/2026-06-23-agent-architecture-optimizations.md` | completed | edit_file 三级自动回退 + shell 输出截断 + sanitizeToolCallPairs 热路径移除（3 项优化，1 commit）。 |
 | `execution/completed/2026-06-09-sqlite-reliability-optimization.md` | completed | SQLite 连接管理、写入可靠性、WAL 清理、会话列表索引优化。 |
+| `execution/completed/2026-07-02-interaction-mode-slash-command.md` | completed | 阶段四：`/permissions` 交互模式快捷指令 + 审批面板重设计 + 命名重构 `interactive/auto_review/unattended` → `ask/auto/full`。 |
+| `execution/completed/2026-07-02-execution-reliability.md` | completed | 阶段五：连续失败计数修复、耗尽信号 ToolMessage 注入、Gateway 预检拦截、写操作串行化、子 Agent Journal 集成。 |
+| `execution/completed/2026-07-14-mcp-runtime-governance-p0.md` | completed | MCP Runtime 治理 Phase 0 + 1 完成记录：catalog、binding、schema、policy 与结构化结果。 |
+| `execution/completed/2026-07-15-mcp-skills-runtime-governance.md` | completed | MCP/Skills Runtime 治理 Phase 2–5 完成记录：恢复、Skill Workflow、verification 与 progressive disclosure。 |
+| `execution/completed/2026-07-15-mcp-project-server-approval-p0.md` | completed | MCP TUI 管理中心 Phase 0 完成记录：项目配置摘要审批、transport 门禁、保守 policy 与 TUI/PTY 闭环。 |
+| `execution/completed/2026-07-15-mcp-tui-management-center-phase1.md` | completed | MCP TUI 管理中心 Phase 1 完成记录：Supervisor、generation 生命周期、不可变 control snapshot、typed diagnostics 与只读 TUI 管理中心。 |
+| `execution/completed/2026-07-15-mcp-tui-management-center-phase2.md` | completed | MCP TUI 管理中心 Phase 2 完成记录：三层配置 repository、原子 mutation、热重载、增量 reconcile 与配置管理交互。 |
+| `execution/completed/2026-07-16-mcp-tui-config-simplification.md` | completed | MCP TUI 配置体验校正：name + URL 的 local HTTP Wizard 与高级 JSONC 边界。 |
+| `execution/completed/2026-07-16-mcp-tui-readonly-list.md` | completed | `/mcp` 收敛为无参数只读状态列表，项目配置摘要决定迁移为独立信任提示。 |
+| `execution/completed/2026-07-16-mcp-auth-phase3.md` | completed | MCP Auth Phase 3：OS vault-only credential、HTTP OAuth、独立恢复提示与三平台原生 smoke。 |
 
 ## 参考资料
 
@@ -121,7 +164,7 @@
 | --- | --- | --- |
 | `references/openai-harness-engineering.md` | reference | OpenAI 关于 Codex harness engineering 和仓库知识系统的文章。 |
 | `references/opencode-codex-plan-handling.md` | reference | Opencode 与 Codex 计划处理方式的本地对比。 |
-| `references/claude-code-codex-architecture-research.md` | reference | Claude Code 与 OpenAI Codex 多端架构对比调研 — 入口分离 vs App Server，对 OpenPX 的建议。 |
+| `references/claude-code-codex-architecture-research.md` | reference | Claude Code 与 OpenAI Codex 多端架构对比调研 — 入口分离 vs App Server，对 Kite Code 的建议。 |
 
 ## 生成材料边界
 
@@ -133,5 +176,5 @@
 
 - 保持 `AGENTS.md` 简短，把它作为指向本索引的地图。
 - 可能影响未来实现的记录必须包含状态、范围、相关记录和验证说明。
-- 只有在形成具体本地规则，并且可行时配套测试后，才能把 generated 或 reference 记录晋升到 `execution/active/`。
+- 只有在形成具体本地规则，并且可行时配套测试后，才能把 generated 或 reference 记录晋升到 `../active/`。
 - 退役过期 active 规则时，应更新记录状态，必要时移出 active，并补充说明理由的 completed 记录。

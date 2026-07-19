@@ -1,0 +1,25 @@
+{
+  "name": "provider-admission-waiver",
+  "description": "An unavailable required provider gates the run until the user records a session waiver.",
+  "initialEvents": [
+    {
+      "type": "provider.admission_required",
+      "interactionId": "provider-admission",
+      "providerId": "github",
+      "source": "project",
+      "providerStatus": "login_required",
+      "diagnosticCode": "auth_required",
+      "retryable": false
+    }
+  ],
+  "effects": [],
+  "userActions": [{ "type": "waive_provider_admission" }],
+  "expectedEvents": ["provider.admission_required", "provider.admission_waived"],
+  "expectedEffects": ["request_provider_admission", "call_model"],
+  "expectedFinalState": {
+    "interactions.kind": "idle",
+    "providerAdmission.pending": [],
+    "providerAdmission.waivers.github.reason": "user_session_waiver",
+    "capabilities.bindings": {}
+  }
+}

@@ -9,7 +9,7 @@
 
 ## 目标
 
-为 OpenPX 实现 Skills（技能）系统，严格遵循 agentskills.io 开放标准。Skill 是按需加载的 Markdown 指令文件，通过 `Skill` 工具和 `/skill-name` 斜杠命令两种方式触发。
+为 Kite Code 实现 Skills（技能）系统，严格遵循 agentskills.io 开放标准。Skill 是按需加载的 Markdown 指令文件，通过 `Skill` 工具和 `/skill-name` 斜杠命令两种方式触发。
 
 ---
 
@@ -67,9 +67,9 @@ Skill 加载采用容错策略：所有异常情况静默跳过，**不抛出异
 Skill 从 4 个目录扫描，同名 skill 按以下优先级覆盖：
 
 ```
-1. 项目 .openpx/skills/    (最高)
+1. 项目 .kite-code/skills/    (最高)
 2. 项目 .agents/skills/
-3. 用户 ~/.openpx/skills/
+3. 用户 ~/.kite-code/skills/
 4. 用户 ~/.agents/skills/  (最低)
 ```
 
@@ -96,7 +96,7 @@ export interface SkillManifest {
   name: string;          // frontmatter name，唯一标识
   description: string;   // frontmatter description
   source: "project" | "user";
-  origin: ".openpx" | ".agents";  // 具体来源目录
+  origin: ".kite-code" | ".agents";  // 具体来源目录
   dirPath: string;       // Skill 目录绝对路径
 }
 
@@ -119,7 +119,7 @@ export function getSkillContent(
 ): ValidatedSkill | null;
 ```
 
-**热加载策略：** `getContent()` 每次重新从磁盘读取 SKILL.md，不缓存 body。用户编辑 SKILL.md 后下次触发即生效，无需重启 OpenPX。SKILL.md 文件很小（规范建议 <500 行），磁盘 I/O 可忽略。
+**热加载策略：** `getContent()` 每次重新从磁盘读取 SKILL.md，不缓存 body。用户编辑 SKILL.md 后下次触发即生效，无需重启 Kite Code。SKILL.md 文件很小（规范建议 <500 行），磁盘 I/O 可忽略。
 
 ### Skill 工具（skill-tool.ts）
 
@@ -170,7 +170,7 @@ IMPORTANT: If there is even a 1% chance a skill might apply, invoke it.
 **规则：**
 - 仅在 manifests 非空时输出此区段
 - 仅列出 name + description，不注入 body 内容
-- 排序：按优先级链（项目 `.openpx/` → 项目 `.agents/` → 用户 `~/.openpx/` → 用户 `~/.agents/`）
+- 排序：按优先级链（项目 `.kite-code/` → 项目 `.agents/` → 用户 `~/.kite-code/` → 用户 `~/.agents/`）
 - `description` 原样使用（不强制改写），对齐 agentskills.io 规范
 
 **Token 估算：** 20 个 skill × 平均 100 字符 description ≈ 2000 字符（~500 tokens），可接受。
@@ -281,7 +281,7 @@ bun run agent run --task "fix bug" --skill debugging --skill tdd
 
 ## Section 8: 特殊标签
 
-Skill body 中保留 agentskills.io 标准特殊标签，由模型解读，不在 OpenPX 运行时解析：
+Skill body 中保留 agentskills.io 标准特殊标签，由模型解读，不在 Kite Code 运行时解析：
 
 | 标签 | 含义 |
 |------|------|
