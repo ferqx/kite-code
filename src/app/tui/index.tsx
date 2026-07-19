@@ -770,11 +770,16 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   );
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;
+  // Ref to avoid Ink 7 stale closure: useInput in InputLine may fire with
+  // a captured handleInput that references an outdated handleSlashCommand
+  // from before a session switch.
+  const handleSlashCommandRef = React.useRef(handleSlashCommand);
+  handleSlashCommandRef.current = handleSlashCommand;
 
   const handleInput = React.useCallback(
     (value: string) => {
       if (value.startsWith('/')) {
-        handleSlashCommand(value);
+        handleSlashCommandRef.current(value);
         return;
       }
 
@@ -784,7 +789,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
 
       runTask(value);
     },
-    [runTask, handleSlashCommand, sessionManager],
+    [runTask, sessionManager],
   );
 
   React.useEffect(() => {

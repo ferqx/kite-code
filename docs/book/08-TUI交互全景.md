@@ -37,7 +37,7 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 
 会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。
 
-`/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。当没有足够的历史消息时直接返回"Not enough messages to compact."，不再显示多余的进度指示器。命令通过 live Kernel control 写入 compaction request event；interaction/tool/verification barrier 优先，compaction 排队而不会创建并发 Kernel。
+`/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。当没有足够的历史消息时直接返回"Not enough messages to compact."，不再显示多余的进度指示器。命令通过 live Kernel control 写入 compaction request event；interaction/tool/verification barrier 优先，compaction 排队而不会创建并发 Kernel。会话切换后 slash command handler 通过 ref 保持最新，避免 Ink 7 `useInput` 闭包过期。
 
 TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 Core 提供的统一 journal mode；Windows 为 DELETE，其他平台为 WAL。长期 stats 连接保持打开期间，RuntimeStore 仍须能够打开、持久化和关闭，不能因两个连接各自设置 journal mode 而在启动时报 `database is locked`。
 
