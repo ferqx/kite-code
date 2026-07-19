@@ -39,7 +39,7 @@ flowchart LR
 | Execution | `src/core/runtime/executor.ts`、`src/core/controllers/tool-controller.ts`、`src/core/execution/` | `createRuntimeEffectExecutor()`、`executeRuntimeTools()`、`ToolExecutionRequest`、`ExecutionReceipt` | 执行已经解析并获准的能力，持久化 invocation intent、结果、副作用和 artifact |
 | Verification | `src/core/verification/`、`src/protocol/verification.ts` | `VerificationSpecV1`、`executeVerificationEffect()`、`resolveVerificationMode()` | 使用 Receipt、Artifact 和外部查询形成证据，决定通过、修复、重规划、补偿或 waiver |
 
-仓库采用 TypeScript 的类型、纯函数和少量状态类组合，因此这里的“核心实现”不要求都是 `class`。`AgentKernel` 和 `McpManager` 是显式类；Scheduler、Reducer、Policy 和 Verification 主要通过类型与纯函数表达。
+仓库采用 TypeScript 的类型、纯函数和少量状态类组合，因此这里的“核心实现”不要求都是 `class`。`AgentKernel` 和 `McpConnectionManager` 是显式类；Scheduler、Reducer、Policy 和 Verification 主要通过类型与纯函数表达。
 
 ## 3. Runtime Kernel：唯一状态转换权威
 
@@ -136,7 +136,7 @@ RuntimeEffectExecutor
       → persist invocation intent
       → provider adapter
           ├── Builtin tool
-          ├── McpManager
+          ├── McpConnectionManager
           ├── Skill workflow
           └── Subagent runner
       → normalize result
@@ -169,13 +169,13 @@ Tool 执行成功只表示一次调用完成，不表示用户目标已经达成
 
 ## 8. MCP 与 Skill 的归属
 
-MCP 对 Runtime 暴露中立的 `McpRuntimeProvider`；Runtime 不依赖连接 control API 或 TUI。`McpSupervisor` 组合配置门禁与连接生命周期，并通过 provider façade 暴露 capability snapshot 与脱敏 availability directory；`McpManager` 负责唯一 SDK client 路径、协议 discovery、health、原始结构化调用结果与资源读取。它们都不拥有最终策略，也不直接宣布任务完成。
+MCP 对 Runtime 暴露中立的 `McpRuntimeProvider`；Runtime 不依赖连接 control API 或 TUI。`McpSupervisor` 组合配置门禁与连接生命周期，并作为唯一 façade 暴露 capability snapshot、脱敏 availability directory 和 revision-bearing `callCapability`。内部 `McpConnectionManager` 负责唯一 SDK client 路径、协议 discovery、health、单次原始结构化调用与资源读取，不实现 Runtime provider，也不从公共 MCP barrel 导出。模型工具名只用于 binding 展示，执行身份始终是 `capabilityId + expectedRevision`。
 
 默认关闭的 `mcpProviderActionV1` 只增加 Runtime lifecycle，不把 control-plane mutation 移入 Core。Runtime 持久化 required/started/completed/deferred/failed，App shell 执行 login/approve/retry；成功后强制新 turn，defer/failure 则留下明确事实。TUI 把 required 事件投影到既有 foreground/background interrupt surface，并由 App controller 委托 Supervisor。
 
 该 flag 也保护 required-provider admission：首次模型调用前，Runtime 把 unavailable required Provider 排入持久 gate。Retry 结果、session waiver 和 cancel 都是事件；waiver 只解除本次 session 准入，不会改变 Capability snapshot 或签发 binding。TUI 与 CLI 均在没有恢复能力时安全降级，且不得绕过持久 gate。
 
-Skill 是受治理的组合 Capability。`SKILL.md` 被编译为 revisioned `SkillWorkflowContract`，激活后形成 Runtime `SkillActivation`/frame，并受到 capability ceiling、输入输出 schema、verification 和 recovery 约束。Skill 不再是直接拼接到用户任务的 Prompt 片段。
+Skill 是受治理的组合 Capability。`SKILL.md` 被编译为 revisioned `SkillWorkflowContract`，生产 catalog 使用当前 Builtin/MCP resolver 计算 `require - deny` 的统一 effective ceiling，并保守合并依赖 effects 与 minimum approval；模型激活先经过正常 approval/auto-review gateway，激活后的 inline/fork frame 使用同一 ceiling，并受到输入输出 schema、verification 和 recovery 约束。无效高优先级候选不能遮蔽有效低优先级 Skill，扫描受固定资源预算约束，忽略目录中的内容不能作为验证或补偿入口。Skill 不再是直接拼接到用户任务的 Prompt 片段。
 
 ## 9. 迁移后的核心关系
 
@@ -222,7 +222,7 @@ class RuntimePolicy {
 }
 class RuntimeEffectExecutor
 class ToolController
-class McpManager
+class McpConnectionManager
 class SkillWorkflowContract
 class SkillActivation
 class ExecutionReceipt
@@ -243,7 +243,7 @@ CapabilityBinding --> CapabilityDescriptor
 RuntimeEffectExecutor --> ToolController
 ToolController --> CapabilityBinding
 ToolController --> RuntimePolicy
-ToolController --> McpManager
+ToolController --> McpConnectionManager
 ToolController --> SkillWorkflowContract
 SkillWorkflowContract --> SkillActivation
 ToolController --> ExecutionReceipt

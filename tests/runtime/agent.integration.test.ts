@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { McpManager } from '@/core/mcp';
+import { McpConnectionManager } from '@/core/mcp/manager';
 import { requiredProviderAdmissionEvents, runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
@@ -17,7 +17,7 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
   const mockModel = createMockModel([
     { message: aiMessage({ content: 'Continued without MCP.' }) },
   ]);
-  const manager = new McpManager();
+  const manager = new McpConnectionManager();
   manager.getProviderDirectorySnapshot = () => ({
     revision: 'directory-r1',
     entries: [
@@ -95,7 +95,7 @@ test('required provider admission accepts ready/degraded and queues every other 
     userId: 'test',
     workspace: '/',
   });
-  const manager = new McpManager();
+  const manager = new McpConnectionManager();
   manager.getProviderDirectorySnapshot = () => ({
     revision: 'directory',
     entries: [
@@ -248,7 +248,7 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
 test('Runtime isolates an MCP adapter exception and continues the same conversation', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-mcp-failure-'));
   const storePath = join(workspace, 'runtime.db');
-  const manager = new McpManager();
+  const manager = new McpConnectionManager();
   const descriptor = {
     capabilityId: 'mcp:fixture/broken_tool',
     revision: 'revision-1',

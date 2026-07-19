@@ -321,6 +321,9 @@ async function handleSubAgentResume(params: {
 
   let toolResult: ToolExecutionResult;
   if (blockedRequest) {
+    const resumedBinding = call?.bindingId
+      ? params.state.capabilities.bindings[call.bindingId]
+      : undefined;
     toolResult = await runApprovedTool({
       workspace: params.state.session.workspace,
       request: blockedRequest,
@@ -331,6 +334,14 @@ async function handleSubAgentResume(params: {
       approvedGrant: call?.approvalGrant ?? 'none',
       threadId: params.state.session.threadId,
       mcpManager: params.mcpManager,
+      ...(resumedBinding
+        ? {
+            mcpInvocation: {
+              capabilityId: resumedBinding.capabilityId,
+              expectedRevision: resumedBinding.capabilityRevision,
+            },
+          }
+        : {}),
       skillManifests: params.skillManifests,
       skillOptions: params.skillOptions,
       signal: params.signal,
@@ -698,6 +709,73 @@ export async function executeRuntimeTools(params: {
           reason: 'Skill is not disclosed for this model turn; search again before activation.',
         });
         continue;
+      }
+      if (descriptor && call.status !== 'approved') {
+        const skillPolicy = {
+          effects: descriptor.effectiveEffects,
+          minimumApproval: descriptor.policy.minimumApproval,
+        };
+        const activationDecision = evaluateToolApproval({
+          toolName: 'mcp__skill__activation',
+          toolArgs: request.args as Record<string, unknown>,
+          phase: getAgentPhase(getActivePlanning(params.state)),
+          workspace: params.state.session.workspace,
+          threadId: params.state.session.threadId,
+          authorization: params.state.authorization,
+          mcpPolicy: skillPolicy,
+        });
+        if (activationDecision.requiresApproval || descriptor.policy.minimumApproval !== 'none') {
+          const approval = buildToolApproval({
+            workspace: params.state.session.workspace,
+            threadId: params.state.session.threadId,
+            request,
+            decision: activationDecision,
+            capability: {
+              capabilityId: descriptor.capabilityId,
+              capabilityRevision: descriptor.revision,
+              effectiveEffects: descriptor.effectiveEffects,
+            },
+          }) as import('@/protocol/events').ToolApprovalPayload;
+          if (descriptor.policy.minimumApproval === 'user') {
+            events.push({
+              type: 'approval.requested',
+              interactionId: genInteractionId(),
+              toolCallId,
+              approval,
+            });
+            continue;
+          }
+          const effectiveMode = getEffectiveInteractionMode(params.state);
+          const modeDecision = createModePolicy(effectiveMode).shouldApproveTool({
+            interactionMode: effectiveMode as InteractionMode,
+            phase: getAgentPhase(getActivePlanning(params.state)),
+            planKind: getActivePlanning(params.state).kind,
+            toolName: request.name,
+            toolRisk: activationDecision.risk,
+            effects: activationDecision.effects,
+            circuitBreakerTripped: params.state.autoReview.circuitBreakerTripped,
+          });
+          if (modeDecision.kind === 'need_auto_review') {
+            events.push({
+              type: 'auto_review.requested',
+              reviewId: genInteractionId(),
+              toolCallId,
+              toolName: request.name,
+              reason: activationDecision.reason,
+              approval,
+            });
+            continue;
+          }
+          if (modeDecision.kind !== 'allow') {
+            events.push({
+              type: 'approval.requested',
+              interactionId: genInteractionId(),
+              toolCallId,
+              approval,
+            });
+            continue;
+          }
+        }
       }
       const activation = params.skillCatalog
         ? evaluateSkillActivation({
@@ -1759,22 +1837,16 @@ export async function executeRuntimeTools(params: {
       descriptor: mcpDescriptor,
       flags: params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined,
     });
-    const rawMcpToolName = mcpDescriptor
-      ? `mcp__${mcpDescriptor.provider.id}__${mcpDescriptor.displayName}`
-      : undefined;
     const executionRequest =
       invocation?.idempotencyKeyArgument && invocation.idempotencyKey
         ? ({
             ...request,
-            ...(rawMcpToolName ? { name: rawMcpToolName } : {}),
             args: {
               ...request.args,
               [invocation.idempotencyKeyArgument]: invocation.idempotencyKey,
             },
           } as typeof request)
-        : rawMcpToolName
-          ? ({ ...request, name: rawMcpToolName } as typeof request)
-          : request;
+        : request;
     if (invocation) events.push(invocation.recorded);
     events.push({ type: 'tool.started', toolCallId });
     if (invocation) {
@@ -1800,27 +1872,55 @@ export async function executeRuntimeTools(params: {
           throw capabilityChangedProviderError(mcpDescriptor.provider.id);
         }
       }
-      const result = await runApprovedTool({
-        workspace: params.state.session.workspace,
-        request: executionRequest,
-        shellExecutor: params.shellExecutor,
-        workspaceAccess: params.state.workspaceAccess,
-        phase: getAgentPhase(getActivePlanning(params.state)),
-        authorization: params.state.authorization,
-        approvedGrant: call.approvalGrant ?? 'none',
-        threadId: params.state.session.threadId,
-        mcpManager: params.mcpManager,
-        ...(mcpPolicy ? { mcpPolicy } : {}),
-        skillManifests: params.skillManifests,
-        skillOptions: params.skillOptions,
-        signal: params.signal,
-        interactionMode: getEffectiveInteractionMode(params.state),
-        taskConfig: params.taskConfig,
-        taskModel: params.taskModel,
-        subagentEventSink: emitSubagentEvent,
-        onShellProgress: (chunk, stream) =>
-          progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
-      });
+      const maximumAttempts =
+        mcpDescriptor?.execution?.retry === 'safe_read' ||
+        (mcpDescriptor?.execution?.retry === 'idempotency_key' &&
+          typeof mcpDescriptor.execution.idempotencyKeyArgument === 'string' &&
+          typeof (executionRequest.args as Record<string, unknown>)[
+            mcpDescriptor.execution.idempotencyKeyArgument
+          ] === 'string')
+          ? 2
+          : 1;
+      let result: ToolExecutionResult | undefined;
+      for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+        try {
+          result = await runApprovedTool({
+            workspace: params.state.session.workspace,
+            request: executionRequest,
+            shellExecutor: params.shellExecutor,
+            workspaceAccess: params.state.workspaceAccess,
+            phase: getAgentPhase(getActivePlanning(params.state)),
+            authorization: params.state.authorization,
+            approvedGrant: call.approvalGrant ?? 'none',
+            threadId: params.state.session.threadId,
+            mcpManager: params.mcpManager,
+            ...(mcpDescriptor
+              ? {
+                  mcpInvocation: {
+                    capabilityId: mcpDescriptor.capabilityId,
+                    expectedRevision: mcpDescriptor.revision,
+                  },
+                }
+              : {}),
+            ...(mcpPolicy ? { mcpPolicy } : {}),
+            skillManifests: params.skillManifests,
+            skillOptions: params.skillOptions,
+            signal: params.signal,
+            interactionMode: getEffectiveInteractionMode(params.state),
+            taskConfig: params.taskConfig,
+            taskModel: params.taskModel,
+            subagentEventSink: emitSubagentEvent,
+            onShellProgress: (chunk, stream) =>
+              progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
+          });
+          break;
+        } catch (error) {
+          if (attempt + 1 >= maximumAttempts || !isMcpProviderError(error) || !error.retryable) {
+            throw error;
+          }
+        }
+      }
+      if (!result) throw new Error('MCP execution completed without a result.');
       events.push(...progress);
 
       if (invocation) {

@@ -2,7 +2,6 @@ import React, { useSyncExternalStore } from 'react';
 import {
   DefaultMcpAuthCoordinator,
   DefaultMcpSupervisor,
-  McpManager,
   type McpRuntimeProvider,
   MemoryMcpCredentialStore,
 } from '@/core/mcp';
@@ -67,7 +66,7 @@ function createSupervisor(): DefaultMcpSupervisor {
   if (process.env.NODE_ENV === 'test' && process.env.KITE_TEST_MCP_CREDENTIAL_STORE === 'memory') {
     const credentialStore = new MemoryMcpCredentialStore();
     return new DefaultMcpSupervisor({
-      manager: new McpManager({ credentialStore }),
+      connectionManagerOptions: { credentialStore },
       authCoordinator: new DefaultMcpAuthCoordinator({ credentialStore }),
     });
   }

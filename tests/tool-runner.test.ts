@@ -65,7 +65,7 @@ function mockMcpManager(
     }),
     getResourceDirectorySnapshot: () => ({ revision: 'resources', resources }),
     findCapability: () => undefined,
-    callTool: async () => ({ content: [] }),
+    callCapability: async () => ({ content: [] }),
     readResource: readResourceImpl,
   };
 }
@@ -254,7 +254,7 @@ describe('runApprovedTool — bound MCP policy', () => {
   it('executes a binding-validated read-only MCP tool without inventing a second approval', async () => {
     let called = false;
     const manager = {
-      callTool: async () => {
+      callCapability: async () => {
         called = true;
         return {
           content: [{ type: 'text', text: 'authenticated read' }],
@@ -274,6 +274,7 @@ describe('runApprovedTool — bound MCP policy', () => {
         protectedCommand: 'mcp__auth__read',
       } as PendingToolRequest,
       mcpManager: manager,
+      mcpInvocation: { capabilityId: 'mcp:auth/read', expectedRevision: 'revision' },
       mcpPolicy: {
         effects: { filesystem: 'none', network: 'read', externalState: 'read' },
         minimumApproval: 'none',

@@ -24,10 +24,11 @@ import type {
   McpToolControlState,
 } from './control-types';
 import type { McpDiagnostic } from './diagnostics';
-import { McpManager } from './manager';
+import { McpConnectionManager, type McpConnectionManagerOptions } from './manager';
 import { revokeMcpOAuthToken } from './oauth-revocation';
 import { McpProviderError, providerErrorFromDiagnostic } from './provider-errors';
 import type {
+  McpCapabilityInvocation,
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
   McpProviderDirectoryStatus,
@@ -68,7 +69,7 @@ export interface McpSupervisor {
   getRuntimeProvider(): McpRuntimeProvider;
 }
 
-export interface McpManagerControlPlane extends McpRuntimeProvider {
+export interface McpConnectionManagerControlPlane {
   subscribe(listener: () => void): () => void;
   reconnect(
     name: string,
@@ -80,6 +81,13 @@ export interface McpManagerControlPlane extends McpRuntimeProvider {
   disconnectAll(): Promise<void>;
   getServerStates(): ReadonlyMap<string, Readonly<McpServerState>>;
   getCapabilitySnapshot(): CapabilitySnapshot;
+  getProviderDirectorySnapshot(): McpProviderDirectorySnapshot;
+  getResourceDirectorySnapshot(): McpResourceDirectorySnapshot;
+  findCapability(
+    capabilityId: string,
+  ): import('@/protocol/capabilities').CapabilityDescriptor | undefined;
+  callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult>;
+  readResource(serverName: string, uri: string, signal?: AbortSignal): Promise<string>;
   beginOAuth?(
     name: string,
     config: McpServerConfig,
@@ -91,7 +99,8 @@ export interface McpManagerControlPlane extends McpRuntimeProvider {
 }
 
 export interface McpSupervisorOptions {
-  manager?: McpManagerControlPlane;
+  manager?: McpConnectionManagerControlPlane;
+  connectionManagerOptions?: McpConnectionManagerOptions;
   loadCatalog?: (options: { workspace: string }) => McpConfigCatalog;
   repository?: McpConfigRepository;
   authCoordinator?: McpAuthCoordinator;
@@ -100,7 +109,7 @@ export interface McpSupervisorOptions {
 }
 
 export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
-  private readonly manager: McpManagerControlPlane;
+  private readonly manager: McpConnectionManagerControlPlane;
   private readonly repository: McpConfigRepository;
   private readonly authCoordinator: McpAuthCoordinator;
   private readonly sleep: (milliseconds: number) => Promise<void>;
@@ -119,7 +128,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   private readonly lastKnownCapabilityNames = new Map<string, readonly string[]>();
 
   constructor(options: McpSupervisorOptions = {}) {
-    this.manager = options.manager ?? new McpManager();
+    this.manager = options.manager ?? new McpConnectionManager(options.connectionManagerOptions);
     this.repository =
       options.repository ?? new DefaultMcpConfigRepository({ loadCatalog: options.loadCatalog });
     this.authCoordinator = options.authCoordinator ?? new DefaultMcpAuthCoordinator();
@@ -495,14 +504,12 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     });
   }
 
-  async callTool(
-    server: string,
-    toolName: string,
-    args: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<CallToolResult> {
-    this.assertProviderAvailable(server);
-    return this.manager.callTool(server, toolName, args, signal);
+  async callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult> {
+    const descriptor = this.manager.findCapability(invocation.capabilityId);
+    const providerId =
+      descriptor?.provider.id ?? invocation.capabilityId.match(/^mcp:([^/]+)\//u)?.[1] ?? 'unknown';
+    this.assertProviderAvailable(providerId);
+    return this.manager.callCapability(invocation);
   }
 
   async readResource(server: string, uri: string, signal?: AbortSignal): Promise<string> {

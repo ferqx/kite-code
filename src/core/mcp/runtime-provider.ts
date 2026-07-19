@@ -42,6 +42,13 @@ export interface McpResourceDirectorySnapshot {
   resources: readonly Readonly<McpResourceDirectoryEntry>[];
 }
 
+export interface McpCapabilityInvocation {
+  capabilityId: string;
+  expectedRevision: string;
+  arguments: Record<string, unknown>;
+  signal?: AbortSignal;
+}
+
 /** Runtime-facing MCP contract. It intentionally excludes control-plane mutation and UI state. */
 export interface McpRuntimeProvider {
   getCapabilitySnapshot(): CapabilitySnapshot;
@@ -50,11 +57,6 @@ export interface McpRuntimeProvider {
   findCapability(capabilityId: string): CapabilityDescriptor | undefined;
   /** Wait for an already-configured remote provider to become executable. */
   ensureProviderReady?(providerId: string, timeoutMs?: number, signal?: AbortSignal): Promise<void>;
-  callTool(
-    server: string,
-    toolName: string,
-    args: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<CallToolResult>;
+  callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult>;
   readResource(serverName: string, uri: string, signal?: AbortSignal): Promise<string>;
 }

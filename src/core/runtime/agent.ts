@@ -5,7 +5,11 @@ import type { McpRuntimeProvider } from '@/core/mcp';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import type { SandboxBackend } from '@/core/sandbox';
 import { SessionLogCollector } from '@/core/session-logger';
-import { evaluateSkillActivation, refreshSkillCatalog } from '@/core/skills';
+import {
+  createSkillCapabilityResolver,
+  evaluateSkillActivation,
+  refreshSkillCatalog,
+} from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationSource } from '@/core/types';
@@ -170,7 +174,11 @@ export async function* runRuntimeAgent(
       yield turnStarted;
 
       if (input.initialSkillActivations && input.initialSkillActivations.length > 0) {
-        const catalog = input.skillOptions ? refreshSkillCatalog(input.skillOptions) : undefined;
+        const catalog = input.skillOptions
+          ? refreshSkillCatalog(input.skillOptions, {
+              resolveCapability: createSkillCapabilityResolver(input.mcpManager),
+            })
+          : undefined;
         for (const requested of input.initialSkillActivations) {
           const evaluation = catalog
             ? evaluateSkillActivation({

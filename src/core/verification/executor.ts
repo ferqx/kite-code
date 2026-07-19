@@ -266,15 +266,18 @@ async function observeCheck(
         evidence: descriptor.effectiveEffects,
       };
     }
-    const match = /^mcp:([^/]+)\/(.+)$/.exec(check.capabilityId);
-    if (!match || !dependencies.mcpManager) {
+    if (!dependencies.mcpManager) {
       return {
         outcome: 'inconclusive',
         summary: 'MCP read-after-write provider is unavailable.',
         evidence: null,
       };
     }
-    const result = await dependencies.mcpManager.callTool(match[1]!, match[2]!, check.arguments);
+    const result = await dependencies.mcpManager.callCapability({
+      capabilityId: check.capabilityId,
+      expectedRevision: check.capabilityRevision,
+      arguments: check.arguments,
+    });
     const value = (result as { structuredContent?: unknown }).structuredContent ?? result;
     const schemaError = check.outputSchema
       ? validateCapabilityArguments(check.outputSchema, value as Record<string, unknown>)

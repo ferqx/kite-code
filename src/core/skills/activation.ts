@@ -72,7 +72,7 @@ export function evaluateSkillActivation(input: {
     input: input.request.input,
     contextMode: entry.contract.context.mode,
     agent: entry.contract.context.agent,
-    capabilityCeiling: entry.contract.capabilityCeiling,
+    capabilityCeiling: entry.contract.effectiveCapabilityCeiling,
     verificationMode: entry.contract.verification.mode,
     requestedBy: input.request.requestedBy,
     activatedAt: (input.now ?? new Date()).toISOString(),

@@ -567,6 +567,10 @@ async function runSubAgentLoop(
             mcpManager: input.mcpManager,
             ...(boundMcpDescriptor
               ? {
+                  mcpInvocation: {
+                    capabilityId: boundMcpDescriptor.capabilityId,
+                    expectedRevision: boundMcpDescriptor.revision,
+                  },
                   mcpPolicy: {
                     effects: boundMcpDescriptor.effectiveEffects,
                     minimumApproval: boundMcpDescriptor.policy.minimumApproval,

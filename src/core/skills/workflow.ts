@@ -42,8 +42,11 @@ export interface SkillWorkflowContract {
   outputSchema: JsonSchema;
   capabilityCeiling: string[];
   deniedCapabilities: string[];
+  effectiveCapabilityCeiling: string[];
   effects: EffectProfile;
+  effectiveEffects: EffectProfile;
   minimumApproval: CapabilityApproval;
+  effectiveMinimumApproval: CapabilityApproval;
   execution: { timeoutMs: number; maxAttempts: number };
   verification: {
     mode: 'not_required' | 'best_effort' | 'required';
@@ -76,6 +79,23 @@ export interface CompileSkillWorkflowInput {
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const EFFECTS = new Set(['none', 'read', 'write', 'destructive', 'unknown']);
+const EFFECT_ORDER = ['none', 'read', 'write', 'destructive', 'unknown'] as const;
+const APPROVAL_ORDER = ['none', 'auto_review', 'user'] as const;
+const SKILL_SCAN_MAX_DEPTH = 8;
+const SKILL_SCAN_MAX_FILES = 256;
+const SKILL_SCAN_MAX_FILE_BYTES = 1024 * 1024;
+const SKILL_SCAN_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+const SKILL_SCAN_IGNORED_DIRECTORIES = new Set([
+  '.cache',
+  '.git',
+  '.next',
+  '.turbo',
+  'build',
+  'coverage',
+  'dist',
+  'node_modules',
+  'target',
+]);
 const TOP_LEVEL_FIELDS = new Set([
   'name',
   'version',
@@ -171,7 +191,17 @@ function readSkillFiles(
 ): Array<{ path: string; content: Buffer }> {
   const files: Array<{ path: string; content: Buffer }> = [];
   const root = resolve(skillDir);
-  const walk = (directory: string): void => {
+  let totalBytes = 0;
+  let budgetExceeded = false;
+  const exceed = (message: string, path: string): void => {
+    if (!budgetExceeded) diagnostic(diagnostics, 'invalid_path', message, path);
+    budgetExceeded = true;
+  };
+  const walk = (directory: string, depth: number): void => {
+    if (depth > SKILL_SCAN_MAX_DEPTH) {
+      exceed(`Skill directory depth exceeds ${SKILL_SCAN_MAX_DEPTH}.`, relative(root, directory));
+      return;
+    }
     let entries: string[];
     try {
       entries = readdirSync(directory).sort((left, right) => left.localeCompare(right));
@@ -185,6 +215,8 @@ function readSkillFiles(
       return;
     }
     for (const entry of entries) {
+      if (budgetExceeded) return;
+      if (SKILL_SCAN_IGNORED_DIRECTORIES.has(entry)) continue;
       const absolute = join(directory, entry);
       const rel = relative(root, absolute);
       try {
@@ -197,9 +229,23 @@ function readSkillFiles(
             rel,
           );
         } else if (stat.isDirectory()) {
-          walk(absolute);
+          walk(absolute, depth + 1);
         } else if (stat.isFile()) {
-          files.push({ path: rel, content: readFileSync(absolute) });
+          if (files.length >= SKILL_SCAN_MAX_FILES) {
+            exceed(`Skill contains more than ${SKILL_SCAN_MAX_FILES} files.`, rel);
+            return;
+          }
+          if (stat.size > SKILL_SCAN_MAX_FILE_BYTES) {
+            exceed(`Skill file exceeds ${SKILL_SCAN_MAX_FILE_BYTES} bytes.`, rel);
+            return;
+          }
+          if (totalBytes + stat.size > SKILL_SCAN_MAX_TOTAL_BYTES) {
+            exceed(`Skill content exceeds ${SKILL_SCAN_MAX_TOTAL_BYTES} total bytes.`, rel);
+            return;
+          }
+          const content = readFileSync(absolute);
+          totalBytes += content.length;
+          files.push({ path: rel, content });
         }
       } catch (error) {
         diagnostic(diagnostics, 'missing_path', `Unable to read ${rel}: ${String(error)}`, rel);
@@ -210,8 +256,53 @@ function readSkillFiles(
     diagnostic(diagnostics, 'missing_path', `Skill directory does not exist: ${root}`, root);
     return files;
   }
-  walk(root);
-  return files;
+  walk(root, 0);
+  return budgetExceeded ? [] : files;
+}
+
+function fileSetDigest(files: Array<{ path: string; content: Buffer }>): string {
+  const hash = createHash('sha256');
+  for (const file of files) {
+    hash.update(file.path);
+    hash.update('\0');
+    hash.update(String(file.content.length));
+    hash.update('\0');
+    hash.update(file.content);
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+function conservativeEffects(
+  declared: EffectProfile,
+  dependencies: CapabilityDescriptor[],
+): EffectProfile {
+  const join = (field: keyof EffectProfile): EffectProfile[typeof field] =>
+    dependencies.reduce(
+      (current, dependency) =>
+        EFFECT_ORDER.indexOf(dependency.effectiveEffects[field]) > EFFECT_ORDER.indexOf(current)
+          ? dependency.effectiveEffects[field]
+          : current,
+      declared[field],
+    );
+  return {
+    filesystem: join('filesystem'),
+    network: join('network'),
+    externalState: join('externalState'),
+  };
+}
+
+function conservativeApproval(
+  declared: CapabilityApproval,
+  dependencies: CapabilityDescriptor[],
+): CapabilityApproval {
+  return dependencies.reduce(
+    (current, dependency) =>
+      APPROVAL_ORDER.indexOf(dependency.policy.minimumApproval) > APPROVAL_ORDER.indexOf(current)
+        ? dependency.policy.minimumApproval
+        : current,
+    declared,
+  );
 }
 
 function safeDeclaredPath(
@@ -241,6 +332,10 @@ function safeDeclaredPath(
     return undefined;
   }
   return value;
+}
+
+function pathUsesIgnoredDirectory(value: string): boolean {
+  return value.split(/[\\/]/u).some((segment) => SKILL_SCAN_IGNORED_DIRECTORIES.has(segment));
 }
 
 function effectsFrom(value: unknown, diagnostics: SkillDiagnostic[]): EffectProfile | undefined {
@@ -292,14 +387,14 @@ function buildDescriptor(input: {
       network: 'unknown',
       externalState: 'unknown',
     },
-    effectiveEffects: contract?.effects ?? {
+    effectiveEffects: contract?.effectiveEffects ?? {
       filesystem: 'unknown',
       network: 'unknown',
       externalState: 'unknown',
     },
     policy: {
       workspaceTrustRequired: input.source === 'project',
-      minimumApproval: contract?.minimumApproval ?? 'user',
+      minimumApproval: contract?.effectiveMinimumApproval ?? 'user',
     },
     execution: contract ? { retry: contract.recovery.retry } : { retry: 'never' },
     availability,
@@ -325,9 +420,7 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
         source: input.source,
         origin: input.origin,
         diagnostics,
-        revision: digestCapability(
-          files.map((file) => [file.path, file.content.toString('base64')]),
-        ),
+        revision: fileSetDigest(files),
       }),
     };
   }
@@ -456,6 +549,18 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
         'capabilities.require and capabilities.deny must be string arrays.',
         'capabilities',
       );
+    if (capabilitiesValid) {
+      const requiredSet = new Set(required as string[]);
+      for (const capabilityId of denied as string[]) {
+        if (!requiredSet.has(capabilityId))
+          diagnostic(
+            diagnostics,
+            'invalid_field',
+            `Denied capability '${capabilityId}' is not present in capabilities.require.`,
+            'capabilities.deny',
+          );
+      }
+    }
     const minimum = approval?.minimum as CapabilityApproval | undefined;
     if (minimum !== 'none' && minimum !== 'auto_review' && minimum !== 'user')
       diagnostic(diagnostics, 'invalid_field', 'approval.minimum is invalid.', 'approval.minimum');
@@ -489,8 +594,16 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
         'Script verification requires verification.entrypoint.',
         'verification.entrypoint',
       );
-    if (entrypoint)
-      safeDeclaredPath(input.skillDir, entrypoint, 'verification.entrypoint', diagnostics);
+    if (entrypoint) {
+      if (pathUsesIgnoredDirectory(entrypoint))
+        diagnostic(
+          diagnostics,
+          'invalid_path',
+          'verification.entrypoint cannot be inside an ignored Skill directory.',
+          'verification.entrypoint',
+        );
+      else safeDeclaredPath(input.skillDir, entrypoint, 'verification.entrypoint', diagnostics);
+    }
     const verificationTimeout =
       verification?.timeout_ms === undefined
         ? undefined
@@ -500,20 +613,37 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
       diagnostic(diagnostics, 'invalid_field', 'recovery.retry is invalid.', 'recovery.retry');
     const compensation =
       typeof recovery?.compensation === 'string' ? recovery.compensation : undefined;
-    if (compensation)
-      safeDeclaredPath(input.skillDir, compensation, 'recovery.compensation', diagnostics);
+    if (compensation) {
+      if (pathUsesIgnoredDirectory(compensation))
+        diagnostic(
+          diagnostics,
+          'invalid_path',
+          'recovery.compensation cannot be inside an ignored Skill directory.',
+          'recovery.compensation',
+        );
+      else safeDeclaredPath(input.skillDir, compensation, 'recovery.compensation', diagnostics);
+    }
+    const effectiveCapabilityCeiling = capabilitiesValid
+      ? [...new Set(required as string[])]
+          .filter((capabilityId) => !(denied as string[]).includes(capabilityId))
+          .sort()
+      : [];
     const dependencyRevisions: Record<string, string> = {};
-    if (Array.isArray(required))
-      for (const capabilityId of required as string[]) {
+    const resolvedDependencies: CapabilityDescriptor[] = [];
+    if (capabilitiesValid)
+      for (const capabilityId of effectiveCapabilityCeiling) {
         const dependency = input.resolveCapability?.(capabilityId);
-        if (input.resolveCapability && !dependency)
+        if (input.resolveCapability && dependency?.availability !== 'available')
           diagnostic(
             diagnostics,
             'missing_capability',
             `Required capability '${capabilityId}' is unavailable.`,
             'capabilities.require',
           );
-        if (dependency) dependencyRevisions[capabilityId] = dependency.revision;
+        if (dependency?.availability === 'available') {
+          dependencyRevisions[capabilityId] = dependency.revision;
+          resolvedDependencies.push(dependency);
+        }
       }
     if (
       name &&
@@ -547,8 +677,11 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
         outputSchema: outputCompiled.compiled.schema,
         capabilityCeiling: [...(required as string[])].sort(),
         deniedCapabilities: [...(denied as string[])].sort(),
+        effectiveCapabilityCeiling,
         effects,
+        effectiveEffects: conservativeEffects(effects, resolvedDependencies),
         minimumApproval: minimum,
+        effectiveMinimumApproval: conservativeApproval(minimum, resolvedDependencies),
         execution: { timeoutMs, maxAttempts },
         verification: {
           mode: verificationMode as SkillWorkflowContract['verification']['mode'],
@@ -572,16 +705,12 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
         );
     }
   }
-  const revision = createHash('sha256')
-    .update(
-      JSON.stringify({
-        files: files.map((file) => [file.path, file.content.toString('base64')]),
-        contract: contract
-          ? { ...contract, dependencyRevisions: contract.dependencyRevisions }
-          : undefined,
-      }),
-    )
-    .digest('hex');
+  const revision = digestCapability({
+    files: fileSetDigest(files),
+    contract: contract
+      ? { ...contract, dependencyRevisions: contract.dependencyRevisions }
+      : undefined,
+  });
   return {
     sourcePath: resolve(input.skillDir),
     source: input.source,

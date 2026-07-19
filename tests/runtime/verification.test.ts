@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { McpManager } from '@/core/mcp';
+import { McpConnectionManager } from '@/core/mcp/manager';
 import { eventsForRuntimeAction } from '@/core/runtime/actions';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
@@ -399,7 +399,7 @@ describe('VerificationSpec execution and recovery', () => {
         ]),
       ),
     );
-    const manager = new McpManager();
+    const manager = new McpConnectionManager();
     manager.findCapability = () => ({
       capabilityId: 'mcp:fixture/read',
       revision: 'read-r1',
@@ -413,7 +413,8 @@ describe('VerificationSpec execution and recovery', () => {
       availability: 'available',
       diagnostics: [],
     });
-    manager.callTool = async () => ({ structuredContent: { exists: true }, content: [] }) as never;
+    manager.callCapability = async () =>
+      ({ structuredContent: { exists: true }, content: [] }) as never;
     state = reduceAll(
       state,
       await executeVerificationEffect(
@@ -517,8 +518,11 @@ describe('VerificationSpec execution and recovery', () => {
         outputSchema: { type: 'object' },
         capabilityCeiling: [],
         deniedCapabilities: [],
+        effectiveCapabilityCeiling: [],
         effects: { filesystem: 'none', network: 'write', externalState: 'write' },
+        effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
         minimumApproval: 'user',
+        effectiveMinimumApproval: 'user',
         execution: { timeoutMs: 1_000, maxAttempts: 1 },
         verification: { mode: 'best_effort' },
         recovery: { retry: 'never' },

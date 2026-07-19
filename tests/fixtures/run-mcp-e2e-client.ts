@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadMcpConfig } from '@/core/config';
 import { decideProjectMcpServer } from '@/core/config/mcp-project-approvals';
-import { McpManager } from '@/core/mcp';
+import { McpConnectionManager } from '@/core/mcp/manager';
 import { aiMessage } from '@/core/messages';
 import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
@@ -42,7 +42,7 @@ if (process.env.MCP_E2E_APPROVE_PROJECT === '1') {
 const serverConfig = loaded.servers[serverName];
 if (!serverConfig) throw new Error(`MCP server '${serverName}' was not loaded from config.`);
 
-const manager = new McpManager();
+const manager = new McpConnectionManager();
 try {
   await manager.connect(serverName, serverConfig);
   const descriptor = manager.findCapability(`mcp:${serverName}/authenticated_echo`);

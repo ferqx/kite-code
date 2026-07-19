@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { executeRuntimeTools, toRuntimeSubagentEvent } from '@/core/controllers/tool-controller';
-import { exposedMcpToolName, McpManager } from '@/core/mcp';
+import { exposedMcpToolName } from '@/core/mcp';
+import { McpConnectionManager } from '@/core/mcp/manager';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
@@ -65,8 +66,8 @@ describe('executeRuntimeTools', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue.push('mcp');
-    const manager = new McpManager();
-    const runtimeManager = manager as McpManager & {
+    const manager = new McpConnectionManager();
+    const runtimeManager = manager as McpConnectionManager & {
       ensureProviderReady(
         providerId: string,
         timeoutMs?: number,
@@ -76,8 +77,8 @@ describe('executeRuntimeTools', () => {
     let calledWith: { server: string; tool: string } | undefined;
     runtimeManager.ensureProviderReady = async () => {};
     manager.findCapability = () => descriptor;
-    manager.callTool = async (server, tool) => {
-      calledWith = { server, tool };
+    manager.callCapability = async () => {
+      calledWith = { server: descriptor.provider.id, tool: descriptor.displayName };
       return { content: [{ type: 'text', text: 'ok' }] };
     };
 
@@ -148,8 +149,8 @@ describe('executeRuntimeTools', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue.push('mcp');
-    const manager = new McpManager();
-    const runtimeManager = manager as McpManager & {
+    const manager = new McpConnectionManager();
+    const runtimeManager = manager as McpConnectionManager & {
       ensureProviderReady(providerId: string, timeoutMs?: number): Promise<void>;
     };
     let reconnected = false;
@@ -159,7 +160,7 @@ describe('executeRuntimeTools', () => {
     runtimeManager.ensureProviderReady = async () => {
       reconnected = true;
     };
-    manager.callTool = async () => {
+    manager.callCapability = async () => {
       called = true;
       return { content: [] };
     };
@@ -217,7 +218,7 @@ describe('executeRuntimeTools', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue.push('mcp');
-    const manager = new McpManager();
+    const manager = new McpConnectionManager();
     manager.getProviderDirectorySnapshot = () => ({
       revision: 'directory',
       entries: [
@@ -450,10 +451,10 @@ describe('executeRuntimeTools', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.active.push('mcp');
-    const manager = new McpManager();
+    const manager = new McpConnectionManager();
     manager.findCapability = (capabilityId) =>
       capabilityId === descriptor.capabilityId ? descriptor : undefined;
-    manager.callTool = async (_server, _tool, args) =>
+    manager.callCapability = async ({ arguments: args }) =>
       ({
         content: [
           { type: 'resource_link', uri: 'resource://fixture/secret-argument', name: 'fixture' },

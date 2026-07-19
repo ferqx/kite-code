@@ -12,7 +12,11 @@ import type { McpRuntimeProvider } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
-import { refreshSkillCatalog, type SkillCatalogSnapshot } from '@/core/skills';
+import {
+  createSkillCapabilityResolver,
+  refreshSkillCatalog,
+  type SkillCatalogSnapshot,
+} from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
@@ -49,7 +53,9 @@ export function createRuntimeEffectExecutor(
     dependencies.skillOptions &&
     getFeatureFlags(dependencies.config).skillWorkflowV1 &&
     getFeatureFlags(dependencies.config).skillActivationV2
-      ? refreshSkillCatalog(dependencies.skillOptions)
+      ? refreshSkillCatalog(dependencies.skillOptions, {
+          resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
+        })
       : undefined;
   return async (effect, state, emit) => {
     if (effect.type === 'call_model') {

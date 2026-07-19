@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import type { CallToolResult, Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import type { McpConfigCatalog, McpConfigRepository, McpServerConfigEntry } from '@/core/config';
-import { DefaultMcpSupervisor, diagnoseMcpError, type McpManagerControlPlane } from '@/core/mcp';
+import {
+  DefaultMcpSupervisor,
+  diagnoseMcpError,
+  type McpConnectionManagerControlPlane,
+} from '@/core/mcp';
 import type { McpServerConfig, McpServerState } from '@/core/mcp/types';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
 
-class FakeManager implements McpManagerControlPlane {
+class FakeManager implements McpConnectionManagerControlPlane {
   readonly states = new Map<string, McpServerState>();
   readonly reconnects: Array<{ name: string; generation: number }> = [];
   discoveredTools: SdkTool[] = [{ name: 'read', inputSchema: { type: 'object' } } as SdkTool];
@@ -14,6 +18,10 @@ class FakeManager implements McpManagerControlPlane {
   private capabilitySnapshot: CapabilitySnapshot = { revision: 'empty', descriptors: [] };
   connectGate: Promise<void> = Promise.resolve();
   reconnectFailure: Error | undefined;
+
+  async callCapability(): Promise<CallToolResult> {
+    return { content: [] };
+  }
 
   subscribe(listener: () => void) {
     this.listeners.add(listener);

@@ -14,7 +14,7 @@ function request(name = 'mcp__docs__search_docs') {
 }
 
 function provider(
-  callTool: McpRuntimeProvider['callTool'],
+  callCapability: McpRuntimeProvider['callCapability'],
   toolName = 'search_docs',
 ): McpRuntimeProvider {
   const descriptor: CapabilityDescriptor = {
@@ -36,7 +36,7 @@ function provider(
     getProviderDirectorySnapshot: () => ({ revision: 'directory', entries: [] }),
     getResourceDirectorySnapshot: () => ({ revision: 'resources', resources: [] }),
     findCapability: () => descriptor,
-    callTool,
+    callCapability,
     readResource: async () => '',
   };
 }
@@ -57,10 +57,11 @@ describe('MCP tool runner', () => {
         effects: { filesystem: 'none', network: 'read', externalState: 'read' },
         minimumApproval: 'none',
       },
-      mcpManager: provider(async (_server, _tool, _args, signal) => {
-        observedSignal = signal;
+      mcpManager: provider(async (invocation) => {
+        observedSignal = invocation.signal;
         return { content: [] };
       }),
+      mcpInvocation: { capabilityId: 'mcp:docs/search_docs', expectedRevision: 'revision' },
     });
 
     expect(result.ok).toBe(true);
@@ -82,6 +83,7 @@ describe('MCP tool runner', () => {
       mcpManager: provider(async () => ({
         content: [{ type: 'text', text: 'x'.repeat(256 * 1024) }],
       })),
+      mcpInvocation: { capabilityId: 'mcp:docs/search_docs', expectedRevision: 'revision' },
     });
 
     expect(result.ok).toBe(true);

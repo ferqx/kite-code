@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createSnapshot, descriptorRevision } from '@/core/capabilities/catalog';
 import type { McpConfigCatalog, McpServerConfigEntry } from '@/core/config/mcp-config';
 import type { McpConfigCommand, McpConfigRepository } from '@/core/config/mcp-config-repository';
-import { DefaultMcpSupervisor, type McpManagerControlPlane } from '@/core/mcp/supervisor';
+import { DefaultMcpSupervisor, type McpConnectionManagerControlPlane } from '@/core/mcp/supervisor';
 import type { McpServerConfig, McpServerState } from '@/core/mcp/types';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
 
@@ -60,7 +60,7 @@ class MutableRepository implements McpConfigRepository {
   watch = () => () => {};
 }
 
-class RecordingManager implements McpManagerControlPlane {
+class RecordingManager implements McpConnectionManagerControlPlane {
   readonly operations: string[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly states = new Map<string, McpServerState>();
@@ -102,7 +102,7 @@ class RecordingManager implements McpManagerControlPlane {
   findCapability = (capabilityId: string) =>
     this.snapshot.descriptors.find((descriptor) => descriptor.capabilityId === capabilityId);
   getAllTools = () => [];
-  callTool = async () => ({ content: [] });
+  callCapability = async () => ({ content: [] });
   getResources = () => [];
   readResource = async () => '';
 

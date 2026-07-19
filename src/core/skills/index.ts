@@ -5,6 +5,7 @@ export {
   skillFrameInvalidationReason,
 } from './activation';
 export {
+  createSkillCapabilityResolver,
   findSkillCatalogEntry,
   type RefreshSkillCatalogOptions,
   refreshSkillCatalog,

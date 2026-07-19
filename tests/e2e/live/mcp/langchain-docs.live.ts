@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { McpManager } from '@/core/mcp';
+import { McpConnectionManager } from '@/core/mcp/manager';
 
 const endpoint = 'https://docs.langchain.com/mcp';
 const searchTool = 'search_docs_by_lang_chain';
@@ -9,7 +9,7 @@ if (process.env.KITE_RUN_LIVE_MCP_SMOKE !== '1') {
   throw new Error('Set KITE_RUN_LIVE_MCP_SMOKE=1 to run the public MCP live smoke.');
 }
 
-const manager = new McpManager();
+const manager = new McpConnectionManager();
 const deadline = setTimeout(() => {
   console.error(`LangChain MCP live smoke exceeded ${LIVE_SMOKE_TIMEOUT_MS}ms.`);
   process.exit(1);

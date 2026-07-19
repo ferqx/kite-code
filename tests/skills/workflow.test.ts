@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { refreshSkillCatalog } from '../../src/core/skills/catalog';
+import { createSkillCapabilityResolver, refreshSkillCatalog } from '../../src/core/skills/catalog';
 import { compileSkillWorkflow } from '../../src/core/skills/workflow';
 
 let root: string;
@@ -45,7 +45,7 @@ output_schema:
   required: [url]
 capabilities:
   require: [builtin:read_file]
-  deny: [mcp:github/delete_repository]
+  deny: []
 effects:
   filesystem: read
   network: write
@@ -148,6 +148,100 @@ describe('compileSkillWorkflow', () => {
     });
   });
 
+  it('subtracts denied requirements and rejects ineffective deny declarations', () => {
+    const overlap = compile(
+      writeWorkflow('overlap', VALID_MANIFEST.replace('deny: []', 'deny: [builtin:read_file]')),
+    );
+    expect(overlap.descriptor.availability).toBe('available');
+    expect(overlap.contract?.effectiveCapabilityCeiling).toEqual([]);
+    expect(overlap.contract?.dependencyRevisions).toEqual({});
+
+    const outside = compile(
+      writeWorkflow('outside', VALID_MANIFEST.replace('deny: []', 'deny: [builtin:write_file]')),
+    );
+    expect(outside.descriptor.availability).toBe('unavailable');
+    expect(outside.diagnostics.some((item) => item.message.includes('not present'))).toBe(true);
+  });
+
+  it('conservatively joins dependency effects and approval', () => {
+    const result = compileSkillWorkflow({
+      skillDir: writeWorkflow('publish-docs', VALID_MANIFEST),
+      source: 'project',
+      origin: '.kite-code',
+      resolveCapability: (capabilityId) => ({
+        capabilityId,
+        revision: 'write-revision',
+        kind: 'builtin_tool',
+        displayName: capabilityId,
+        description: 'write fixture',
+        provider: { type: 'builtin', id: capabilityId, provenance: 'builtin' },
+        declaredEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
+        effectiveEffects: { filesystem: 'write', network: 'unknown', externalState: 'none' },
+        policy: { workspaceTrustRequired: false, minimumApproval: 'user' },
+        availability: 'available',
+        diagnostics: [],
+      }),
+    });
+    expect(result.contract?.effectiveEffects).toEqual({
+      filesystem: 'write',
+      network: 'unknown',
+      externalState: 'write',
+    });
+    expect(result.contract?.effectiveMinimumApproval).toBe('user');
+    expect(result.descriptor.effectiveEffects.network).toBe('unknown');
+  });
+
+  it('resolves production builtin and MCP dependencies conservatively', () => {
+    const resolver = createSkillCapabilityResolver({
+      findCapability: (capabilityId: string) =>
+        capabilityId === 'mcp:docs/search'
+          ? ({
+              capabilityId,
+              revision: 'mcp-revision',
+              kind: 'mcp_tool',
+              displayName: 'search',
+              description: 'fixture',
+              provider: { type: 'mcp', id: 'docs', provenance: 'remote' },
+              declaredEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+              effectiveEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+              policy: { workspaceTrustRequired: false, minimumApproval: 'none' },
+              availability: 'available',
+              diagnostics: [],
+            } as const)
+          : undefined,
+    } as never);
+    expect(resolver('builtin:read_file')?.effectiveEffects.filesystem).toBe('read');
+    expect(resolver('builtin:write_file')?.policy.minimumApproval).toBe('user');
+    expect(resolver('builtin:typo')).toBeUndefined();
+    expect(resolver('mcp:docs/search')?.revision).toBe('mcp-revision');
+  });
+
+  it('fails closed when scan budgets are exceeded and ignores build directories', () => {
+    const directory = writeWorkflow('publish-docs', VALID_MANIFEST);
+    writeFileSync(join(directory, 'oversized.bin'), Buffer.alloc(1024 * 1024 + 1));
+    const oversized = compile(directory);
+    expect(oversized.descriptor.availability).toBe('unavailable');
+    expect(oversized.diagnostics.some((item) => item.message.includes('exceeds'))).toBe(true);
+
+    rmSync(join(directory, 'oversized.bin'));
+    mkdirSync(join(directory, 'node_modules'), { recursive: true });
+    writeFileSync(join(directory, 'node_modules', 'ignored.bin'), Buffer.alloc(1024 * 1024 + 1));
+    const ignored = compile(directory);
+    expect(ignored.descriptor.availability).toBe('available');
+  });
+
+  it('rejects executable paths inside ignored directories', () => {
+    const manifest = VALID_MANIFEST.replace(
+      'verification:\n  mode: best_effort',
+      'verification:\n  mode: best_effort\n  strategy: script\n  entrypoint: node_modules/check.ts',
+    );
+    const result = compile(writeWorkflow('ignored-entrypoint', manifest));
+    expect(result.descriptor.availability).toBe('unavailable');
+    expect(
+      result.diagnostics.some((item) => item.message.includes('ignored Skill directory')),
+    ).toBe(true);
+  });
+
   it('keeps shadowed skills diagnosable instead of silently skipping them', () => {
     const projectRoot = join(root, 'project');
     const userRoot = join(root, 'user');
@@ -168,5 +262,26 @@ describe('compileSkillWorkflow', () => {
     expect(catalog.entries.find((entry) => entry.shadowedBy)?.descriptor.availability).toBe(
       'unavailable',
     );
+  });
+
+  it('allows a valid user skill to win over an invalid project skill', () => {
+    const projectRoot = join(root, 'invalid-project');
+    const userRoot = join(root, 'valid-user');
+    mkdirSync(join(projectRoot, 'publish-docs'), { recursive: true });
+    mkdirSync(join(userRoot, 'publish-docs'), { recursive: true });
+    writeFileSync(join(projectRoot, 'publish-docs', 'SKILL.md'), 'invalid');
+    writeFileSync(
+      join(userRoot, 'publish-docs', 'SKILL.md'),
+      `---\n${VALID_MANIFEST}\n---\nUser body.`,
+    );
+    const catalog = refreshSkillCatalog({
+      projectKiteCodeSkillsDir: projectRoot,
+      projectAgentsSkillsDir: join(root, 'missing-project-agents'),
+      userKiteCodeSkillsDir: userRoot,
+      userAgentsSkillsDir: join(root, 'missing-user-agents'),
+    });
+    expect(catalog.capabilities.descriptors).toHaveLength(1);
+    expect(catalog.capabilities.descriptors[0]?.provider.provenance).toBe('user');
+    expect(catalog.entries[0]?.descriptor.availability).toBe('unavailable');
   });
 });

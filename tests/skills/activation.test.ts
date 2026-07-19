@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { getFeatureFlags } from '../../src/core/config/features';
+import { executeRuntimeTools } from '../../src/core/controllers/tool-controller';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
 import {
@@ -77,8 +78,11 @@ const catalog: SkillCatalogSnapshot = {
         outputSchema: { type: 'object' },
         capabilityCeiling: ['builtin:read_file'],
         deniedCapabilities: [],
+        effectiveCapabilityCeiling: ['builtin:read_file'],
         effects: { filesystem: 'read', network: 'none', externalState: 'none' },
+        effectiveEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
         minimumApproval: 'none',
+        effectiveMinimumApproval: 'none',
         execution: { timeoutMs: 1_000, maxAttempts: 1 },
         verification: { mode: 'not_required' },
         recovery: { retry: 'never' },
@@ -181,5 +185,56 @@ describe('Skill Workflow activation', () => {
     expect(skillFrameInvalidationReason(valid.activation, drifted)).toContain(
       'changed after activation',
     );
+  });
+
+  it('routes model activation through the effective minimum approval', async () => {
+    const state = activeState();
+    const descriptor = {
+      ...catalog.capabilities.descriptors[0]!,
+      policy: { workspaceTrustRequired: true, minimumApproval: 'user' as const },
+      effectiveEffects: {
+        filesystem: 'write' as const,
+        network: 'none' as const,
+        externalState: 'none' as const,
+      },
+    };
+    state.capabilities.disclosures[descriptor.capabilityId] = {
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      issuedForTurnId: state.turn.turnId,
+    };
+    state.tools.calls.activate = {
+      toolCallId: 'activate',
+      modelMessageId: 'model',
+      name: 'activate_skill',
+      args: { skill_id: descriptor.capabilityId, input: { report: 'daily' } },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('activate');
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['activate'],
+      skillCatalog: {
+        ...catalog,
+        capabilities: { revision: 'risk-r1', descriptors: [descriptor] },
+        entries: catalog.entries.map((entry) => ({ ...entry, descriptor })),
+      },
+      taskConfig: {
+        apiKey: '',
+        baseURL: 'http://localhost',
+        modelName: 'test',
+        providerName: 'test',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+        features: {
+          capabilitySearchV1: true,
+          skillWorkflowV1: true,
+          skillActivationV2: true,
+        },
+      },
+    });
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(true);
+    expect(events.some((event) => event.type === 'skill.activation_started')).toBe(false);
   });
 });

@@ -78,7 +78,7 @@ export function verificationRequestForSkill(input: {
 }): Extract<RuntimeEvent, { type: 'verification.requested' }> | undefined {
   const mode = resolveVerificationMode({
     skillMode: input.contract.verification.mode,
-    capabilityEffects: input.contract.effects,
+    capabilityEffects: input.contract.effectiveEffects,
   });
   if (mode === 'not_required') return undefined;
   const verificationId = digestCapability({

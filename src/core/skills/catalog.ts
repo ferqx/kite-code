@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { createSnapshot } from '@/core/capabilities/catalog';
+import { createSnapshot, descriptorRevision } from '@/core/capabilities/catalog';
+import type { McpRuntimeProvider } from '@/core/mcp';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
 import type { SkillManifest, SkillScanOptions } from './types';
 import { type CompiledSkillWorkflow, compileSkillWorkflow } from './workflow';
@@ -24,6 +25,64 @@ interface SourceRoot {
   path: string;
   source: 'project' | 'user';
   origin: '.kite-code' | '.agents';
+}
+
+const READ_ONLY_BUILTINS = new Set([
+  'read_file',
+  'list_files',
+  'search_content',
+  'search_files',
+  'list_mcp_resources',
+  'read_mcp_resource',
+]);
+const KNOWN_BUILTINS = new Set([
+  ...READ_ONLY_BUILTINS,
+  'apply_patch',
+  'ask_user',
+  'capability_search',
+  'edit_file',
+  'read_plan',
+  'shell_execute',
+  'task',
+  'update_plan',
+  'web_fetch',
+  'write_file',
+  'write_plan',
+]);
+
+/** Resolve Skill dependencies against the current Runtime capability boundary. */
+export function createSkillCapabilityResolver(
+  mcpProvider?: McpRuntimeProvider,
+): (capabilityId: string) => CapabilityDescriptor | undefined {
+  return (capabilityId) => {
+    if (capabilityId.startsWith('mcp:')) return mcpProvider?.findCapability(capabilityId);
+    const match = /^builtin:([a-z0-9_]+)$/u.exec(capabilityId);
+    if (!match) return undefined;
+    const toolName = match[1]!;
+    if (!KNOWN_BUILTINS.has(toolName)) return undefined;
+    const readOnly = READ_ONLY_BUILTINS.has(toolName);
+    const descriptor: Omit<CapabilityDescriptor, 'revision'> = {
+      capabilityId,
+      kind: 'builtin_tool',
+      displayName: toolName,
+      description: `Runtime builtin capability ${toolName}.`,
+      provider: { type: 'builtin', id: toolName, provenance: 'builtin' },
+      declaredEffects: readOnly
+        ? { filesystem: 'read', network: 'none', externalState: 'none' }
+        : { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
+      effectiveEffects: readOnly
+        ? { filesystem: 'read', network: 'none', externalState: 'none' }
+        : { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
+      policy: {
+        workspaceTrustRequired: false,
+        minimumApproval: readOnly ? 'none' : 'user',
+      },
+      execution: { retry: 'never' },
+      availability: 'available',
+      diagnostics: [],
+    };
+    return { ...descriptor, revision: descriptorRevision(descriptor) };
+  };
 }
 
 function roots(options: SkillScanOptions): SourceRoot[] {
@@ -83,7 +142,7 @@ export function refreshSkillCatalog(
           availability: 'unavailable',
           diagnostics: [...entry.descriptor.diagnostics, `shadowed: ${winner.sourcePath}`],
         };
-      } else {
+      } else if (entry.descriptor.availability === 'available') {
         selected.set(canonicalName, entry);
       }
       entries.push(entry);
@@ -99,7 +158,10 @@ export function findSkillCatalogEntry(
   skillId: string,
 ): SkillCatalogEntry | undefined {
   return catalog.entries.find(
-    (entry) => !entry.shadowedBy && entry.descriptor.capabilityId === skillId,
+    (entry) =>
+      !entry.shadowedBy &&
+      entry.descriptor.availability === 'available' &&
+      entry.descriptor.capabilityId === skillId,
   );
 }
 

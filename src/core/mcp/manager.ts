@@ -17,7 +17,7 @@ import {
   digestCapability,
   UNKNOWN_EXTERNAL_EFFECTS,
 } from '@/core/capabilities/catalog';
-import { compileCapabilitySchema } from '@/core/capabilities/schema';
+import { compileCapabilitySchema, validateCapabilityArguments } from '@/core/capabilities/schema';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
 import { type McpCredentialStore, NativeMcpCredentialStore } from './credential-store';
 import { diagnoseMcpError } from './diagnostics';
@@ -27,10 +27,10 @@ import {
   providerErrorFromDiagnostic,
 } from './provider-errors';
 import type {
+  McpCapabilityInvocation,
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
   McpResourceDirectorySnapshot,
-  McpRuntimeProvider,
 } from './runtime-provider';
 import { isMcpToolEnabled, resolveMcpToolPolicy } from './tool-policy';
 import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
@@ -43,13 +43,17 @@ const HTTP_RECONNECT_BASE_MS = 1000;
 const MCP_CIRCUIT_FAILURE_THRESHOLD = 3;
 const MCP_CIRCUIT_OPEN_MS = 30_000;
 
+function providerIdFromCapability(capabilityId: string): string {
+  return capabilityId.match(/^mcp:([^/]+)\//u)?.[1] ?? 'unknown';
+}
+
 /** Prompt registry entry: maps slash command key to server info */
 export interface PromptEntry {
   server: string;
   prompt: McpPrompt;
 }
 
-export interface McpManagerOptions {
+export interface McpConnectionManagerOptions {
   createClient?: () => Client;
   createTransport?: (
     config: McpServerConfig,
@@ -61,7 +65,7 @@ export interface McpManagerOptions {
 /**
  * Manages multiple MCP server connections, tool aggregation, and prompt registry.
  */
-export class McpManager implements McpRuntimeProvider {
+export class McpConnectionManager {
   private readonly createClient: () => Client;
   private readonly createManagerTransport: (
     config: McpServerConfig,
@@ -79,7 +83,7 @@ export class McpManager implements McpRuntimeProvider {
     { generation: number; transport: OAuthFinishTransport }
   >();
 
-  constructor(options: McpManagerOptions = {}) {
+  constructor(options: McpConnectionManagerOptions = {}) {
     this.createClient =
       options.createClient ??
       (() => new Client({ name: 'kite-code', version: '0.1.0' }, { capabilities: {} }));
@@ -434,46 +438,46 @@ export class McpManager implements McpRuntimeProvider {
     return this.snapshot.descriptors.find((descriptor) => descriptor.capabilityId === capabilityId);
   }
 
-  /** Execute an MCP tool on the specified server */
-  async callTool(
-    server: string,
-    toolName: string,
-    args: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<CallToolResult> {
+  /** Execute exactly one revision-checked MCP capability invocation. */
+  async callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult> {
+    const descriptor = this.findCapability(invocation.capabilityId);
+    if (
+      descriptor?.kind !== 'mcp_tool' ||
+      descriptor.availability !== 'available' ||
+      descriptor.revision !== invocation.expectedRevision ||
+      !descriptor.inputSchema
+    ) {
+      const providerId =
+        descriptor?.provider.id ?? providerIdFromCapability(invocation.capabilityId);
+      throw capabilityChangedProviderError(providerId);
+    }
+    const argumentError = validateCapabilityArguments(descriptor.inputSchema, invocation.arguments);
+    if (argumentError) {
+      throw new McpProviderError({
+        providerId: descriptor.provider.id,
+        kind: 'provider_capability_changed',
+        message: argumentError,
+        retryable: false,
+      });
+    }
+    const server = descriptor.provider.id;
+    const toolName = descriptor.displayName;
+    const args = invocation.arguments;
     const state = this.servers.get(server);
     if (!state) {
       throw providerErrorFromDiagnostic(server, undefined);
     }
     this.assertCallable(state, server);
     const discoveredTool = state.tools.find((tool) => tool.name === toolName);
-    const descriptor = this.findCapability(`mcp:${server}/${toolName}`);
-    if (!discoveredTool || !descriptor || descriptor.availability !== 'available') {
+    if (!discoveredTool || discoveredTool.name !== toolName) {
       throw capabilityChangedProviderError(server);
     }
     const client = state.client as Client;
-    const execution = descriptor.execution;
-    const canRetry =
-      execution?.retry === 'safe_read' ||
-      (execution?.retry === 'idempotency_key' &&
-        typeof execution.idempotencyKeyArgument === 'string' &&
-        typeof args[execution.idempotencyKeyArgument] === 'string' &&
-        args[execution.idempotencyKeyArgument] !== '');
     try {
-      let result: CallToolResult | undefined;
-      let lastError: unknown;
-      for (let attempt = 0; attempt < (canRetry ? 2 : 1); attempt++) {
-        try {
-          result = (await client.callTool({ name: toolName, arguments: args }, undefined, {
-            timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
-            signal,
-          })) as CallToolResult;
-          break;
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      if (!result) throw lastError;
+      const result = (await client.callTool({ name: toolName, arguments: args }, undefined, {
+        timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
+        signal: invocation.signal,
+      })) as CallToolResult;
       state.consecutiveCallFailures = 0;
       state.retryAt = undefined;
       state.health = 'ready';
@@ -486,6 +490,26 @@ export class McpManager implements McpRuntimeProvider {
       this.noteCallFailure(state, error);
       throw providerErrorFromDiagnostic(server, state.diagnostic);
     }
+  }
+
+  /**
+   * Internal control-plane/test convenience. Runtime callers must use the
+   * revision-bearing callCapability contract exposed by the Supervisor façade.
+   */
+  async callTool(
+    server: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<CallToolResult> {
+    const descriptor = this.findCapability(`mcp:${server}/${toolName}`);
+    if (!descriptor) throw capabilityChangedProviderError(server);
+    return this.callCapability({
+      capabilityId: descriptor.capabilityId,
+      expectedRevision: descriptor.revision,
+      arguments: args,
+      signal,
+    });
   }
 
   /** 列出指定 server 的所有资源（从缓存） / List resources for a server (from cache) */

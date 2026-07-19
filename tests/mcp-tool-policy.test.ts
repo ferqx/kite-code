@@ -2,15 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import { createBinding } from '@/core/capabilities/catalog';
-import {
-  isMcpToolEnabled,
-  McpManager,
-  type McpServerConfig,
-  resolveMcpToolPolicy,
-} from '@/core/mcp';
+import { isMcpToolEnabled, type McpServerConfig, resolveMcpToolPolicy } from '@/core/mcp';
+import { McpConnectionManager } from '@/core/mcp/manager';
 
 describe('MCP Tool visibility and policy', () => {
-  const managers: McpManager[] = [];
+  const managers: McpConnectionManager[] = [];
 
   afterEach(async () => {
     await Promise.all(managers.splice(0).map((manager) => manager.disconnectAll()));
@@ -191,7 +187,7 @@ function managerWithTools(
   callTool: (request: unknown) => Promise<{
     content: Array<{ type: 'text'; text: string }>;
   }> = async () => ({ content: [{ type: 'text', text: 'ok' }] }),
-): McpManager {
+): McpConnectionManager {
   const client = {
     connect: async () => {},
     close: async () => {},
@@ -201,7 +197,7 @@ function managerWithTools(
     setNotificationHandler: () => {},
     callTool,
   } as unknown as Client;
-  return new McpManager({
+  return new McpConnectionManager({
     createClient: () => client,
     createTransport: () => ({}) as never,
   });

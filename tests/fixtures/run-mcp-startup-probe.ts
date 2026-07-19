@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 
 import { loadMcpConfig } from '@/core/config';
-import { McpManager } from '@/core/mcp';
+import { McpConnectionManager } from '@/core/mcp/manager';
 
 const loaded = loadMcpConfig();
-const manager = new McpManager();
+const manager = new McpConnectionManager();
 try {
   await manager.connectAll(loaded.servers);
   console.log(

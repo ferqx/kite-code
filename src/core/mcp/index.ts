@@ -38,8 +38,6 @@ export {
 } from './credential-store';
 export type { McpDiagnostic, McpDiagnosticCode } from './diagnostics';
 export { diagnoseMcpError, redactDiagnosticMessage } from './diagnostics';
-export type { McpManagerOptions, PromptEntry } from './manager';
-export { McpManager } from './manager';
 export type { KiteMcpOAuthProviderOptions } from './oauth-provider';
 export { KiteMcpOAuthProvider } from './oauth-provider';
 export { revokeMcpOAuthToken } from './oauth-revocation';
@@ -53,6 +51,7 @@ export {
 } from './provider-errors';
 export { normalizeMcpToolResult } from './result-normalizer';
 export type {
+  McpCapabilityInvocation,
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
   McpProviderDirectoryStatus,
@@ -62,11 +61,11 @@ export type {
 } from './runtime-provider';
 export {
   DefaultMcpSupervisor,
-  type McpManagerControlPlane,
+  type McpConnectionManagerControlPlane,
   type McpSupervisor,
   type McpSupervisorOptions,
 } from './supervisor';
-export { exposedMcpToolName, parseMcpToolName } from './tool-adapter';
+export { exposedMcpToolName } from './tool-adapter';
 export {
   configuredMcpToolNames,
   hasConfiguredMcpToolPolicy,

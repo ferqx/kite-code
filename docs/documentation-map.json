@@ -93,6 +93,7 @@
       "documents": [
         "docs/active/tool-gated-autonomy.md",
         "docs/active/authorization.md",
+        "docs/active/mcp-runtime-governance.md",
         "docs/book/05-工具系统与安全策略.md"
       ]
     },
@@ -113,12 +114,20 @@
         "tests/test-discovery.test.ts",
         ".github/workflows/mcp-langchain-live-smoke.yml"
       ],
-      "documents": ["docs/active/real-model-test-boundary.md", "README.md"]
+      "documents": [
+        "docs/active/real-model-test-boundary.md",
+        "docs/active/mcp-runtime-governance.md",
+        "README.md"
+      ]
     },
     {
       "id": "subagent",
       "sources": ["src/core/subagent/**", "src/protocol/subagent.ts"],
-      "documents": ["docs/active/cancel-resume-cleanup.md", "docs/book/06-多Agent协作.md"]
+      "documents": [
+        "docs/active/cancel-resume-cleanup.md",
+        "docs/active/mcp-runtime-governance.md",
+        "docs/book/06-多Agent协作.md"
+      ]
     },
     {
       "id": "builtin-tools",
@@ -135,7 +144,11 @@
     {
       "id": "tui",
       "sources": ["src/app/tui/**"],
-      "documents": ["docs/book/07-TUI结构.md", "docs/book/08-TUI交互全景.md"]
+      "documents": [
+        "docs/active/mcp-control-plane.md",
+        "docs/book/07-TUI结构.md",
+        "docs/book/08-TUI交互全景.md"
+      ]
     },
     {
       "id": "cli-and-config",

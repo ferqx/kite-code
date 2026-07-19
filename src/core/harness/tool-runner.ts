@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpRuntimeProvider } from '@/core/mcp';
-import { isMcpProviderError, normalizeMcpToolResult, parseMcpToolName } from '@/core/mcp';
+import { isMcpProviderError, normalizeMcpToolResult } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
   evaluateToolApproval,
@@ -50,6 +50,10 @@ export interface RunApprovedToolInput {
   threadId?: string;
   override?: AuthorizationOverride;
   mcpManager?: McpRuntimeProvider;
+  mcpInvocation?: {
+    capabilityId: string;
+    expectedRevision: string;
+  };
   /** Runtime-resolved policy for a binding-validated MCP capability. */
   mcpPolicy?: RuntimeMcpPolicy;
   skillManifests?: SkillManifest[];
@@ -77,6 +81,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     threadId = '',
     override,
     mcpManager,
+    mcpInvocation,
     mcpPolicy,
     skillManifests,
     skillOptions,
@@ -552,26 +557,23 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: 'MCP manager is not available. No MCP servers are configured.',
       });
     }
-    const parsed = parseMcpToolName(request.name);
-    const serverName = parsed?.serverName ?? '';
-    const toolName = parsed?.toolName ?? '';
-    if (!serverName || !toolName) {
+    if (!mcpInvocation) {
       return withFailureGuidance(request, {
         ok: false,
         command: request.name,
         exitCode: -1,
         stdout: '',
-        stderr: `Invalid MCP tool name format: ${request.name}. Expected mcp__<server>__<tool>.`,
+        stderr: 'MCP capability invocation identity is missing.',
       });
     }
     try {
-      const raw = await mcpManager.callTool(
-        serverName,
-        toolName,
-        request.args as unknown as Record<string, unknown>,
+      const raw = await mcpManager.callCapability({
+        capabilityId: mcpInvocation.capabilityId,
+        expectedRevision: mcpInvocation.expectedRevision,
+        arguments: request.args as unknown as Record<string, unknown>,
         signal,
-      );
-      const descriptor = mcpManager.findCapability(`mcp:${serverName}/${toolName}`);
+      });
+      const descriptor = mcpManager.findCapability(mcpInvocation.capabilityId);
       const capabilityResult = normalizeMcpToolResult(raw, descriptor?.outputSchema);
       const output = serializeMcpResultForModel(capabilityResult);
       return withFailureGuidance(request, {

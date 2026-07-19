@@ -9,18 +9,14 @@ import {
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import {
-  type McpCredentialKey,
-  McpManager,
-  type McpResource,
-  MemoryMcpCredentialStore,
-} from '@/core/mcp';
+import { type McpCredentialKey, type McpResource, MemoryMcpCredentialStore } from '@/core/mcp';
+import { McpConnectionManager } from '@/core/mcp/manager';
 import { normalizeMcpToolResult } from '@/core/mcp/result-normalizer';
 import { startTestHttpServer } from './helpers/test-http-server';
 
-describe('McpManager governance fixture', () => {
+describe('McpConnectionManager governance fixture', () => {
   test('uses a typed provider failure when a direct call targets an unavailable server', async () => {
-    const manager = new McpManager();
+    const manager = new McpConnectionManager();
     expect(manager.getProviderDirectorySnapshot()).toEqual({
       revision: expect.any(String),
       entries: [],
@@ -28,11 +24,11 @@ describe('McpManager governance fixture', () => {
     await expect(manager.callTool('missing', 'read', {})).rejects.toMatchObject({
       name: 'McpProviderError',
       providerId: 'missing',
-      kind: 'provider_unavailable',
+      kind: 'provider_capability_changed',
     });
   });
 
-  const manager = new McpManager();
+  const manager = new McpConnectionManager();
 
   afterEach(async () => {
     await manager.disconnectAll();
@@ -102,7 +98,7 @@ describe('McpManager governance fixture', () => {
         setNotificationHandler: () => {},
       },
     ] as unknown as Client[];
-    const emptyRefreshManager = new McpManager({
+    const emptyRefreshManager = new McpConnectionManager({
       createClient: () => clients[clientIndex++]!,
       createTransport: () => ({}) as never,
     });
@@ -135,7 +131,7 @@ describe('McpManager governance fixture', () => {
         if (schema === ToolListChangedNotificationSchema) toolHandler = handler;
       },
     } as unknown as Client;
-    const notificationManager = new McpManager({
+    const notificationManager = new McpConnectionManager({
       createClient: () => client,
       createTransport: () => ({}) as never,
     });
@@ -187,7 +183,7 @@ describe('McpManager governance fixture', () => {
         if (schema === ResourceListChangedNotificationSchema) resourceHandler = handler;
       },
     } as unknown as Client;
-    const resourceManager = new McpManager({
+    const resourceManager = new McpConnectionManager({
       createClient: () => client,
       createTransport: () => ({}) as never,
     });
@@ -250,7 +246,7 @@ describe('McpManager governance fixture', () => {
     await manager.disconnectAll();
   });
 
-  test('retries only an explicitly configured safe read with unchanged arguments', async () => {
+  test('does not retry a business invocation inside the connection manager', async () => {
     let calls = 0;
     const manager = managerWithCall('retry_fixture', async () => {
       calls += 1;
@@ -268,10 +264,10 @@ describe('McpManager governance fixture', () => {
         },
       },
     });
-    await expect(manager.callTool('retrying', 'retry_fixture', args)).resolves.toMatchObject({
-      content: [{ type: 'text', text: 'ok' }],
-    });
-    expect(calls).toBe(2);
+    await expect(manager.callTool('retrying', 'retry_fixture', args)).rejects.toThrow(
+      'transient failure',
+    );
+    expect(calls).toBe(1);
     expect(args).toEqual({ id: 'same-input' });
     await manager.disconnectAll();
   });
@@ -296,7 +292,7 @@ describe('McpManager governance fixture', () => {
   });
 
   test('publishes immutable state and invalidates capabilities before disconnect returns', async () => {
-    const manager = new McpManager();
+    const manager = new McpConnectionManager();
     let notifications = 0;
     const unsubscribe = manager.subscribe(() => {
       notifications += 1;
@@ -327,7 +323,7 @@ describe('McpManager governance fixture', () => {
       fakeClient({ connect: () => firstGate.promise, close: async () => firstCloses++ }),
       fakeClient({ connect: () => secondGate.promise }),
     ];
-    const manager = new McpManager({
+    const manager = new McpConnectionManager({
       createClient: () => clients.shift()!,
       createTransport: () => ({}) as never,
     });
@@ -350,7 +346,7 @@ describe('McpManager governance fixture', () => {
   });
 
   test('publishes a typed diagnostic when transport construction fails', async () => {
-    const manager = new McpManager();
+    const manager = new McpConnectionManager();
     await expect(
       manager.connect('invalid-url', { type: 'http', url: 'not a valid url' }, 1),
     ).rejects.toThrow();
@@ -371,7 +367,7 @@ describe('McpManager governance fixture', () => {
       }),
       fakeClient({}),
     ];
-    const manager = new McpManager({
+    const manager = new McpConnectionManager({
       createClient: () => clients.shift()!,
       createTransport: (_config, authProvider) => {
         expect(authProvider).toBeDefined();
@@ -463,7 +459,7 @@ describe('McpManager governance fixture', () => {
         return Response.json({ jsonrpc: '2.0', id: message.id, result });
       },
     });
-    const bearerManager = new McpManager({ credentialStore: store });
+    const bearerManager = new McpConnectionManager({ credentialStore: store });
     try {
       await bearerManager.connect('bearer', {
         type: 'http',
@@ -490,7 +486,7 @@ describe('McpManager governance fixture', () => {
 function managerWithCall(
   toolName: string,
   callTool: (request: unknown) => Promise<{ content: Array<{ type: string; text: string }> }>,
-): McpManager {
+): McpConnectionManager {
   const client = {
     connect: async () => {},
     close: async () => {},
@@ -500,7 +496,7 @@ function managerWithCall(
     setNotificationHandler: () => {},
     callTool,
   } as unknown as Client;
-  return new McpManager({
+  return new McpConnectionManager({
     createClient: () => client,
     createTransport: () => ({}) as never,
   });

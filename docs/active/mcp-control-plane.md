@@ -1,15 +1,15 @@
 # MCP Control Plane 与 TUI 状态视图
 
 状态：active
-读取时机：修改 `McpManager` 生命周期、`McpSupervisor`、MCP control snapshot、TUI `/mcp` 路由或 Runtime MCP provider 边界时。
+读取时机：修改 `McpConnectionManager` 生命周期、`McpSupervisor`、MCP control snapshot、TUI `/mcp` 路由或 Runtime MCP provider 边界时。
 验证：`bun test tests/mcp-manager.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-credential-store.test.ts tests/mcp-auth-coordinator.test.ts tests/mcp-oauth-integration.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
 相关：ADR-0010、ADR-0011、ADR-0013、ADR-0014、ADR-0015、ADR-0016、ADR-0017、ADR-0018、[`mcp-config-management.md`](mcp-config-management.md)、[`mcp-authentication.md`](mcp-authentication.md)、`src/core/mcp/supervisor.ts`、`src/core/mcp/control-types.ts`、`src/app/tui/mcp/`。
 
 ## 权威与依赖
 
-`McpSupervisor` 是 MCP 连接 control plane 的唯一 App 入口。它通过 `McpConfigRepository` 加载 source-aware config catalog，立即发布 configured、disabled、pending、rejected、invalid 和 shadowed 条目，再在后台通过唯一的 `McpManager`/SDK client 路径连接可连接 Server。单个 Server 失败不阻塞 TUI mount 或其他 Server。
+`McpSupervisor` 是 MCP 连接 control plane 的唯一 App 入口。它通过 `McpConfigRepository` 加载 source-aware config catalog，立即发布 configured、disabled、pending、rejected、invalid 和 shadowed 条目，再在后台通过内部唯一的 `McpConnectionManager`/SDK client 路径连接可连接 Server。单个 Server 失败不阻塞 TUI mount 或其他 Server。
 
-Runtime 只接收 `McpRuntimeProvider`，不依赖 Supervisor control API 或 TUI controller。`DefaultMcpSupervisor` 实现该中立接口并把真实 discovery/call/resource 委托给 Manager，因此 Runtime 能读取 capability snapshot、脱敏 provider directory 和只读 resource directory；它不能调用 reload、retry、login 或配置 mutation。TUI 只接收 `McpController` 和不可变 `McpControlSnapshot`，不得持有 `McpManager`，也不得调用 `getServerStates()`。Manager 的该方法只保留为 Core control-plane 迁移 API，并返回隔离副本。
+Runtime 只接收由 `DefaultMcpSupervisor` 生成的 `McpRuntimeProvider` façade，不依赖 Supervisor control API、内部连接对象或 TUI controller。Runtime 能读取 capability snapshot、脱敏 provider/resource directory，并通过 revision-bearing `callCapability` 调用；它不能调用 reload、retry、login 或配置 mutation。TUI 只接收 `McpController` 和不可变 `McpControlSnapshot`。`McpConnectionManager` 不实现 Runtime provider、不从公共 MCP barrel 导出，其状态读取只供 Core control-plane 组合使用。
 
 ## 生命周期与 generation
 
@@ -22,7 +22,7 @@ Runtime 只接收 `McpRuntimeProvider`，不依赖 Supervisor control API 或 TU
 - catalog diff 中 changed、removed、disabled 先撤销能力再关闭旧 client；unchanged 保留现有连接；
 - provider config version 变化必须改变 capability descriptor revision，旧 turn binding fail closed。
 
-Manager health、discovery、list-changed、call circuit 和 retry 变化均触发订阅。Supervisor 将其与 config catalog 投影为新的稳定 snapshot；snapshot revision 对规范化的可见字段计算，同一内容不会因 React render 产生伪 revision。
+Connection Manager health、discovery、list-changed 和 call circuit 变化均触发订阅。业务调用重试由 Runtime/Execution 负责，Manager 不重放 SDK Tool Call。Supervisor 将连接状态与 config catalog 投影为新的稳定 snapshot；snapshot revision 对规范化的可见字段计算，同一内容不会因 React render 产生伪 revision。
 
 ## Snapshot 与诊断
 
