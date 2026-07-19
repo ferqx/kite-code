@@ -9,11 +9,17 @@ import type {
   CapabilitySnapshot,
 } from '@/protocol/capabilities';
 import { createSnapshot, digestCapability } from './catalog';
+import { isProviderUnavailable, providerSearchNextAction } from './provider-status';
+import { safeCapabilityMetadata } from './public-metadata';
 
 export type CapabilityDisclosureMode = 'all' | 'search' | 'fail_closed';
 
 export interface CapabilityDisclosureDecision {
   mode: CapabilityDisclosureMode;
+  /** When MCP tools are directly bound but Skills are behind tool_search,
+   *  this field carries the Skill-specific mode.  Undefined when the
+   *  single `mode` field applies uniformly to both kinds. */
+  skillMode?: CapabilityDisclosureMode;
   estimatedTokens: number;
   budgetTokens: number;
   reason: string;
@@ -70,7 +76,7 @@ export function estimateCapabilityCatalogTokens(descriptors: CapabilityDescripto
   return Math.ceil(characters / 4);
 }
 
-/** Maximum number of MCP tools that are always directly bound without requiring search. */
+/** Maximum number of MCP tools directly bound without requiring search. */
 const MAX_DIRECT_BIND_TOOL_COUNT = 20;
 
 export function chooseCapabilityDisclosure(input: {
@@ -80,7 +86,11 @@ export function chooseCapabilityDisclosure(input: {
   contextWindowTokens?: number;
   budgetTokens?: number;
 }): CapabilityDisclosureDecision {
-  const estimatedTokens = estimateCapabilityCatalogTokens(input.descriptors);
+  const mcpDescriptors = input.descriptors.filter((d) => d.kind === 'mcp_tool');
+  const skillDescriptors = input.descriptors.filter((d) => d.kind === 'skill');
+  const estimatedMcpTokens = estimateCapabilityCatalogTokens(mcpDescriptors);
+  const estimatedSkillTokens = estimateCapabilityCatalogTokens(skillDescriptors);
+  const estimatedTokens = estimatedMcpTokens + estimatedSkillTokens;
   const contextWindow = input.contextWindowTokens ?? 128_000;
   const budgetTokens =
     input.budgetTokens ?? Math.min(8_192, Math.max(1_024, Math.floor(contextWindow * 0.01)));
@@ -101,15 +111,28 @@ export function chooseCapabilityDisclosure(input: {
       reason: 'The provider cannot issue the tool_search tool call.',
     };
   }
-  // Small catalogs skip the search round-trip: tools are bound directly so the model
-  // can call them without a tool_search → bind → call two-turn delay.
-  const mcpToolCount = input.descriptors.filter((d) => d.kind === 'mcp_tool').length;
-  if (mcpToolCount <= MAX_DIRECT_BIND_TOOL_COUNT) {
+  // Small MCP catalogs skip the search round-trip: tools are bound directly so
+  // the model can call them without a tool_search → bind → call two-turn delay.
+  // The fast path only applies when BOTH MCP count AND token budget are within
+  // bounds.  Skill count is intentionally excluded — a large Skill catalog must
+  // not be force-disclosed just because MCP tools are few.
+  const mcpToolCount = mcpDescriptors.length;
+  if (
+    mcpToolCount > 0 &&
+    mcpToolCount <= MAX_DIRECT_BIND_TOOL_COUNT &&
+    estimatedMcpTokens <= budgetTokens
+  ) {
+    // Skills follow their own decision path — if they exceed budget, they stay
+    // behind tool_search while MCP tools are directly bound.
+    const skillBehindSearch = skillDescriptors.length > 0 && estimatedSkillTokens > budgetTokens;
     return {
       mode: 'all',
+      ...(skillBehindSearch ? { skillMode: 'search' as const } : {}),
       estimatedTokens,
       budgetTokens,
-      reason: `${mcpToolCount} MCP tool(s) ≤ ${MAX_DIRECT_BIND_TOOL_COUNT}; direct binding avoids search latency.`,
+      reason: skillBehindSearch
+        ? `${mcpToolCount} MCP tool(s) ≤ ${MAX_DIRECT_BIND_TOOL_COUNT} within token budget; ${skillDescriptors.length} Skill(s) exceed budget — use tool_search for skills.`
+        : `${mcpToolCount} MCP tool(s) ≤ ${MAX_DIRECT_BIND_TOOL_COUNT} within token budget; direct binding avoids search latency.`,
     };
   }
   if (estimatedTokens <= budgetTokens) {
@@ -137,45 +160,7 @@ function terms(value: string): string[] {
 }
 
 function safeMetadata(value: string, maximum = 96): string {
-  return Array.from(value, (character) => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint < 32 || codePoint === 127 ? ' ' : character;
-  })
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maximum);
-}
-
-const MCP_INVENTORY_TERMS = new Set([
-  'available',
-  'catalog',
-  'configured',
-  'list',
-  'mcp',
-  'server',
-  'servers',
-  'tool',
-  'tools',
-]);
-
-export function isMcpInventoryQuery(query: string): boolean {
-  const queryTerms = terms(query.trim().slice(0, 512));
-  const normalized = query.toLocaleLowerCase();
-  if (!queryTerms.includes('mcp')) return false;
-  if (
-    !queryTerms.some((term) =>
-      ['available', 'catalog', 'configured', 'list', 'server', 'servers', 'tool', 'tools'].includes(
-        term,
-      ),
-    )
-  ) {
-    return false;
-  }
-  return (
-    queryTerms.every((term) => MCP_INVENTORY_TERMS.has(term)) ||
-    /(?:what|which)\s+(?:mcp\s+)?tools?/u.test(normalized)
-  );
+  return safeCapabilityMetadata(value, maximum);
 }
 
 /**
@@ -198,22 +183,20 @@ export function isMcpInventoryIntent(query: string): boolean {
   // English set-based detection (preserve existing logic for backward compat)
   if (containsMcp) {
     const queryTerms = terms(normalized);
-    if (
-      queryTerms.some((term) =>
-        [
-          'available',
-          'catalog',
-          'configured',
-          'list',
-          'server',
-          'servers',
-          'tool',
-          'tools',
-        ].includes(term),
-      )
-    ) {
+    const inventoryTerms = new Set([
+      'available',
+      'catalog',
+      'configured',
+      'list',
+      'mcp',
+      'server',
+      'servers',
+      'tool',
+      'tools',
+    ]);
+    if (queryTerms.some((term) => inventoryTerms.has(term))) {
       return (
-        queryTerms.every((term) => MCP_INVENTORY_TERMS.has(term)) ||
+        queryTerms.every((term) => inventoryTerms.has(term)) ||
         /(?:what|which)\s+(?:mcp\s+)?tools?/u.test(normalized)
       );
     }
@@ -254,14 +237,12 @@ export function searchCapabilities(input: {
   const queryTerms = terms(query);
   const phrase = query.toLocaleLowerCase();
   const limit = Math.max(1, Math.min(12, Math.floor(input.limit ?? 8)));
-  const inventoryQuery = isMcpInventoryQuery(query);
 
   return input.snapshot.descriptors
     .filter(
       (descriptor): descriptor is CapabilityDescriptor & { kind: 'mcp_tool' | 'skill' } =>
         (descriptor.kind === 'mcp_tool' || descriptor.kind === 'skill') &&
-        descriptor.availability === 'available' &&
-        (!inventoryQuery || descriptor.kind === 'mcp_tool'),
+        descriptor.availability === 'available',
     )
     .map((descriptor) => {
       const searchable = [
@@ -274,11 +255,10 @@ export function searchCapabilities(input: {
         .join(' ')
         .toLocaleLowerCase();
       const matchedTerms = queryTerms.filter((term) => searchable.includes(term));
-      const score = inventoryQuery
-        ? 1
-        : (phrase.length > 1 && searchable.includes(phrase) ? 100 : 0) +
-          matchedTerms.length * 10 +
-          (queryTerms.length > 0 && matchedTerms.length === queryTerms.length ? 25 : 0);
+      const score =
+        (phrase.length > 1 && searchable.includes(phrase) ? 100 : 0) +
+        matchedTerms.length * 10 +
+        (queryTerms.length > 0 && matchedTerms.length === queryTerms.length ? 25 : 0);
       return { descriptor, score };
     })
     .filter(({ score }) => score > 0)
@@ -319,9 +299,9 @@ export function searchUnavailableProviders(input: {
         entry,
       ): entry is Readonly<
         McpProviderDirectoryEntry & {
-          status: Exclude<McpProviderDirectoryEntry['status'], 'ready'>;
+          status: Exclude<McpProviderDirectoryEntry['status'], 'ready' | 'degraded'>;
         }
-      > => entry.status !== 'ready',
+      > => isProviderUnavailable(entry.status),
     )
     .map((entry) => {
       const searchable = [entry.providerId, ...entry.lastKnownCapabilityNames]
@@ -343,7 +323,7 @@ export function searchUnavailableProviders(input: {
     .map(({ entry }) => ({
       providerId: safeMetadata(entry.providerId),
       status: entry.status,
-      nextAction: providerNextAction(entry.status),
+      nextAction: providerSearchNextAction(entry.status),
       ...(entry.diagnosticCode ? { diagnosticCode: entry.diagnosticCode } : {}),
     }));
 }
@@ -368,70 +348,4 @@ export function publicProviderSearchMetadata(
     next_action: provider.nextAction,
     ...(provider.diagnosticCode ? { diagnostic_code: provider.diagnosticCode } : {}),
   }));
-}
-
-/**
- * Names-only fallback for an inventory request that crossed a catalog revision boundary.
- * These entries are informational and never become search candidates or bindings.
- */
-export function lastKnownMcpToolMetadata(input: {
-  directory?: McpProviderDirectorySnapshot;
-  limit?: number;
-}): Array<{
-  kind: 'mcp_tool';
-  name: string;
-  provider_type: 'mcp';
-  provider: string;
-  catalog_status: 'last_known';
-}> {
-  const limit = Math.max(1, Math.min(12, Math.floor(input.limit ?? 8)));
-  return (input.directory?.entries ?? [])
-    .flatMap((entry) =>
-      entry.lastKnownCapabilityNames.map((name) => ({
-        kind: 'mcp_tool' as const,
-        name: safeMetadata(name),
-        provider_type: 'mcp' as const,
-        provider: safeMetadata(entry.providerId),
-        catalog_status: 'last_known' as const,
-      })),
-    )
-    .filter(
-      (entry, index, all) =>
-        entry.name.length > 0 &&
-        entry.provider.length > 0 &&
-        all.findIndex(
-          (candidate) => candidate.provider === entry.provider && candidate.name === entry.name,
-        ) === index,
-    )
-    .sort(
-      (left, right) =>
-        left.provider.localeCompare(right.provider) || left.name.localeCompare(right.name),
-    )
-    .slice(0, limit);
-}
-
-export function hasUnavailableMcpProviders(
-  directory: McpProviderDirectorySnapshot | undefined,
-): boolean {
-  return directory?.entries.some((entry) => entry.status !== 'ready') ?? false;
-}
-
-function providerNextAction(status: CapabilitySearchProviderDiagnostic['status']): string {
-  switch (status) {
-    case 'pending_approval':
-      return 'Complete the MCP project approval prompt.';
-    case 'rejected':
-      return 'Update the MCP project approval decision.';
-    case 'disabled':
-      return 'Enable the provider in MCP configuration.';
-    case 'login_required':
-      return 'Complete the MCP authentication prompt.';
-    case 'connecting':
-      return 'Wait for the provider to finish connecting.';
-    case 'degraded':
-    case 'failed':
-      return 'Retry the provider connection outside the current tool call.';
-    case 'quarantined':
-      return 'Fix the MCP provider configuration or capability schema.';
-  }
 }

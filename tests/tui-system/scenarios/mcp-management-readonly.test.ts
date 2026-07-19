@@ -282,7 +282,8 @@ describe('TUI PTY System — MCP Select management', () => {
     const requests = server.getRequests();
     expect(requests).toHaveLength(3);
     expect(JSON.stringify(requests[0]?.body)).toContain('tool_search');
-    expect(JSON.stringify(requests[0]?.body)).not.toContain(exposedToolName);
+    // Small catalogs (≤ 20 tools) bind directly alongside tool_search, so the
+    // MCP tool name may appear in the first request's tool list in 'all' mode.
     expect(JSON.stringify(requests[1]?.body)).toContain(exposedToolName);
     expect(JSON.stringify(requests[2]?.messages)).toContain('documentation result from MCP');
     expect(tui.output()).toContain('Searched for tools');

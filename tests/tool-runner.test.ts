@@ -179,7 +179,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.stderr).toContain('MCP manager is not available');
+    expect(result.stderr).toContain('MCP Runtime is not available');
   });
 
   it('returns error when server is empty', async () => {

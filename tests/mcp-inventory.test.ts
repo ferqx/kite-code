@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { createSnapshot } from '@/core/capabilities/catalog';
+import { providerInventoryNextAction } from '@/core/capabilities/provider-status';
 import {
   buildMcpInventory,
   type McpInventoryResult,
   type McpInventorySuccess,
-  nextActionForProvider,
 } from '@/core/mcp/inventory';
 import type {
   McpProviderDirectoryEntry,
@@ -433,20 +433,20 @@ describe('buildMcpInventory', () => {
   });
 });
 
-describe('nextActionForProvider', () => {
+describe('providerInventoryNextAction', () => {
   test('maps all non-ready statuses to actions', () => {
-    expect(nextActionForProvider('pending_approval')).toBe('approve_project_provider');
-    expect(nextActionForProvider('rejected')).toBe('review_project_approval');
-    expect(nextActionForProvider('disabled')).toBe('enable_provider');
-    expect(nextActionForProvider('login_required')).toBe('authenticate');
-    expect(nextActionForProvider('connecting')).toBe('wait_or_retry');
-    expect(nextActionForProvider('failed')).toBe('retry_connection');
-    expect(nextActionForProvider('degraded')).toBe('retry_if_needed');
-    expect(nextActionForProvider('quarantined')).toBe('fix_configuration_or_schema');
+    expect(providerInventoryNextAction('pending_approval')).toBe('approve_project_provider');
+    expect(providerInventoryNextAction('rejected')).toBe('review_project_approval');
+    expect(providerInventoryNextAction('disabled')).toBe('enable_provider');
+    expect(providerInventoryNextAction('login_required')).toBe('authenticate');
+    expect(providerInventoryNextAction('connecting')).toBe('wait_or_retry');
+    expect(providerInventoryNextAction('failed')).toBe('retry_connection');
+    expect(providerInventoryNextAction('degraded')).toBe('retry_if_needed');
+    expect(providerInventoryNextAction('quarantined')).toBe('fix_configuration_or_schema');
   });
 
   test('returns undefined for ready', () => {
-    expect(nextActionForProvider('ready')).toBeUndefined();
+    expect(providerInventoryNextAction('ready')).toBeUndefined();
   });
 });
 

@@ -452,7 +452,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         command: request.protectedCommand,
         exitCode: -1,
         stdout: '',
-        stderr: 'MCP manager is not available. No MCP servers are configured.',
+        stderr:
+          'MCP Runtime is not available in this execution context. Use list_mcp_tools or /mcp to inspect configured providers.',
       });
     }
     const { server } = request.args;
@@ -524,16 +525,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: '',
       });
     }
-    // Wait for connecting providers to finish initial discovery before building inventory
-    const initialDir = mcpManager.getProviderDirectorySnapshot();
-    const connectingProviders = initialDir.entries.filter((e) => e.status === 'connecting');
-    if (connectingProviders.length > 0 && mcpManager.ensureProviderReady) {
-      await Promise.allSettled(
-        connectingProviders.map((p) =>
-          mcpManager.ensureProviderReady!(p.providerId, 5_000, signal),
-        ),
-      );
-    }
     const result = buildMcpInventory({
       capabilities: mcpManager.getCapabilitySnapshot(),
       providers: mcpManager.getProviderDirectorySnapshot(),
@@ -559,7 +550,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         command: `read_mcp_resource ${request.args.server ?? ''}`,
         exitCode: -1,
         stdout: '',
-        stderr: 'MCP manager is not available. No MCP servers are configured.',
+        stderr:
+          'MCP Runtime is not available in this execution context. Use list_mcp_tools or /mcp to inspect configured providers.',
       });
     }
     const { server, uri } = request.args;
@@ -600,7 +592,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         command: request.name,
         exitCode: -1,
         stdout: '',
-        stderr: 'MCP manager is not available. No MCP servers are configured.',
+        stderr:
+          'MCP Runtime is not available in this execution context. Use list_mcp_tools or /mcp to inspect configured providers.',
       });
     }
     if (!mcpInvocation) {

@@ -288,10 +288,11 @@ export async function invokeRuntimeModel(params: {
       (descriptor, index, all) =>
         all.findIndex((candidate) => candidate.capabilityId === descriptor.capabilityId) === index,
     );
+    const effectiveSkillMode = disclosure.skillMode ?? disclosure.mode;
     const disclosedSkillDescriptors =
-      disclosure.mode === 'all'
+      effectiveSkillMode === 'all'
         ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'skill')
-        : disclosure.mode === 'search'
+        : effectiveSkillMode === 'search'
           ? searchedDescriptors.filter((descriptor) => descriptor.kind === 'skill')
           : [];
     const disclosedDescriptors = [...disclosedMcpDescriptors, ...disclosedSkillDescriptors];
@@ -355,8 +356,7 @@ export async function invokeRuntimeModel(params: {
       shellExecutor: params.shellExecutor,
       mcpManager: params.mcpManager,
       mcpBindings,
-      toolSearch:
-        flags.toolSearchV1 && params.model.supportsToolCalls !== false && disclosure.mode !== 'all',
+      toolSearch: flags.toolSearchV1 && params.model.supportsToolCalls !== false,
       skills: params.skills,
       skillOptions: params.skillOptions,
       skillCatalog: params.skillCatalog,

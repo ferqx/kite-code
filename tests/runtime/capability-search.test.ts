@@ -52,7 +52,7 @@ function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
       mcpRuntimeBindingV1: true,
       toolSearchV1: true,
     },
-    modelKwargs: { contextWindowTokens: 128_000, capabilityDisclosureBudgetTokens: 1 },
+    modelKwargs: { contextWindowTokens: 128_000, capabilityDisclosureBudgetTokens: 8_192 },
     ...overrides,
   };
 }
@@ -434,7 +434,7 @@ describe('progressive capability disclosure', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    // Use >20 tools to stay in progressive-disclosure search mode for this test
+    // Use >20 tools and a low budget to stay in progressive-disclosure search mode for this test
     const largeCatalog = Array.from({ length: 25 }, (_, i) =>
       i < 2
         ? descriptor(i === 0 ? 'publish-release' : 'delete-repository')
@@ -456,7 +456,9 @@ describe('progressive capability disclosure', () => {
     await invokeRuntimeModel({
       model: createMockModel([{ message: aiMessage({ content: 'ready' }) }]),
       state,
-      config: config(),
+      config: config({
+        modelKwargs: { contextWindowTokens: 128_000, capabilityDisclosureBudgetTokens: 1 },
+      }),
       mcpManager: manager,
       emitRuntimeEvent: (event) => emitted.push(event),
     });
@@ -584,7 +586,7 @@ describe('progressive capability disclosure', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    // Use >20 tools to stay in progressive-disclosure search mode for this test
+    // Use >20 tools and a low budget to stay in progressive-disclosure search mode for this test
     const oldLarge = [
       descriptor('publish-release'),
       ...Array.from({ length: 24 }, (_, i) => descriptor(`filler-${i}`)),
@@ -607,7 +609,9 @@ describe('progressive capability disclosure', () => {
     await invokeRuntimeModel({
       model: createMockModel([{ message: aiMessage({ content: 'search again' }) }]),
       state,
-      config: config(),
+      config: config({
+        modelKwargs: { contextWindowTokens: 128_000, capabilityDisclosureBudgetTokens: 1 },
+      }),
       mcpManager: manager,
       emitRuntimeEvent: (event) => emitted.push(event),
     });

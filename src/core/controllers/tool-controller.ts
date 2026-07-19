@@ -1,12 +1,10 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
+import { isProviderUnavailable } from '@/core/capabilities/provider-status';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import {
   checkInventoryRedirect,
-  isMcpInventoryQuery,
-  lastKnownMcpToolMetadata,
-  modelVisibleCapabilitySchema,
   publicProviderSearchMetadata,
   publicSearchMetadata,
   searchableCapabilitySnapshot,
@@ -660,31 +658,7 @@ export async function executeRuntimeTools(params: {
         catalogRevision: snapshot.revision,
       });
       const publicCandidates = publicSearchMetadata(candidates);
-      const lastKnownTools =
-        candidates.length === 0 && isMcpInventoryQuery(request.args.query)
-          ? lastKnownMcpToolMetadata({
-              directory: providerDirectory,
-              limit: request.args.limit,
-            })
-          : [];
-      // Enrich candidates with model-visible schemas (stripped of prose)
-      const candidatesWithSchemas = publicCandidates.map((pc, i) => {
-        const candidate = candidates[i];
-        if (!candidate) return pc;
-        const descriptor = snapshot.descriptors.find(
-          (d) =>
-            d.capabilityId === candidate.capabilityId &&
-            d.revision === candidate.capabilityRevision,
-        );
-        return {
-          ...pc,
-          ...(descriptor?.inputSchema
-            ? { input_schema: modelVisibleCapabilitySchema(descriptor.inputSchema) }
-            : {}),
-        };
-      });
-      const displayedCandidates =
-        candidatesWithSchemas.length > 0 ? candidatesWithSchemas : lastKnownTools;
+      const displayedCandidates = publicCandidates;
       events.push({
         type: 'capability.search_completed',
         result: {
@@ -696,6 +670,12 @@ export async function executeRuntimeTools(params: {
           ...(providers.length > 0 ? { providers } : {}),
         },
       });
+      const showSummary = candidates.length === 0;
+      const providerDir = params.mcpManager?.getProviderDirectorySnapshot();
+      const catalogMsg =
+        providers.length > 0
+          ? 'No executable capabilities matched. Matching providers are currently unavailable; the overall catalog may still contain other tools.'
+          : 'No capabilities matched this query. This does not mean the capability catalog is empty.';
       events.push({
         type: 'tool.finished',
         toolCallId,
@@ -712,7 +692,7 @@ export async function executeRuntimeTools(params: {
             executable_candidate_count: candidates.length,
             provider_count: providers.length,
             providers: publicProviderSearchMetadata(providers),
-            ...(candidates.length === 0 && lastKnownTools.length === 0 && providers.length === 0
+            ...(showSummary
               ? {
                   catalog_summary: {
                     available_mcp_tool_count:
@@ -725,25 +705,29 @@ export async function executeRuntimeTools(params: {
                       params.skillCatalog?.capabilities.descriptors.filter(
                         (d) => d.kind === 'skill' && d.availability === 'available',
                       ).length ?? 0,
-                    configured_provider_count:
-                      params.mcpManager?.getProviderDirectorySnapshot().entries.length ?? 0,
+                    configured_provider_count: providerDir?.entries.length ?? 0,
                     unavailable_provider_count:
-                      params.mcpManager
-                        ?.getProviderDirectorySnapshot()
-                        .entries.filter((e) => e.status !== 'ready').length ?? 0,
+                      providerDir?.entries.filter((e) => isProviderUnavailable(e.status)).length ??
+                      0,
+                    ...(providerDir?.entries.some(
+                      (e) => !isProviderUnavailable(e.status) && e.status !== 'ready',
+                    )
+                      ? {
+                          non_healthy_provider_count: providerDir.entries.filter(
+                            (e) => e.status !== 'ready',
+                          ).length,
+                        }
+                      : {}),
                   },
-                  message:
-                    'No capabilities matched this query. This does not mean the capability catalog is empty.',
+                  message: catalogMsg,
                 }
               : {}),
             next_step:
               candidates.length > 0
                 ? 'The Runtime will disclose current matching capabilities on the next model call.'
-                : lastKnownTools.length > 0
-                  ? 'These are last-known MCP Tool names from a catalog revision transition. Search for a specific tool before calling it.'
-                  : providers.length > 0
-                    ? 'The matching providers are unavailable and no executable binding was issued.'
-                    : 'No matching capability or known unavailable provider was found.',
+                : providers.length > 0
+                  ? 'The matching providers are unavailable and no executable binding was issued.'
+                  : 'No matching capability or known unavailable provider was found.',
           }),
           stderr: '',
         },
