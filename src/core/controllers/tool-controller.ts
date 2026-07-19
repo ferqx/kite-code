@@ -1,7 +1,7 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
-import { isProviderUnavailable } from '@/core/capabilities/provider-status';
+import { isProviderHealthy, isProviderUnavailable } from '@/core/capabilities/provider-status';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import {
   checkInventoryRedirect,
@@ -629,10 +629,22 @@ export async function executeRuntimeTools(params: {
         connectingProviders.length > 0 &&
         params.mcpManager?.ensureProviderReady
       ) {
-        await Promise.allSettled(
-          connectingProviders.map((provider) =>
-            params.mcpManager!.ensureProviderReady!(provider.providerId, 5_000, params.signal),
-          ),
+        await Promise.all(
+          connectingProviders.map(async (provider) => {
+            try {
+              await params.mcpManager!.ensureProviderReady!(
+                provider.providerId,
+                5_000,
+                params.signal,
+              );
+            } catch (error) {
+              if (params.signal?.aborted) {
+                throw params.signal.reason ?? error;
+              }
+              // Provider connection failure is reflected by the refreshed directory
+              // below; do not cancel the whole search.
+            }
+          }),
         );
         snapshot = searchableCapabilitySnapshot({
           mcp: params.mcpManager.getCapabilitySnapshot(),
@@ -709,14 +721,15 @@ export async function executeRuntimeTools(params: {
                     unavailable_provider_count:
                       providerDir?.entries.filter((e) => isProviderUnavailable(e.status)).length ??
                       0,
-                    ...(providerDir?.entries.some(
-                      (e) => !isProviderUnavailable(e.status) && e.status !== 'ready',
-                    )
-                      ? {
-                          non_healthy_provider_count: providerDir.entries.filter(
-                            (e) => e.status !== 'ready',
-                          ).length,
-                        }
+                    ...(providerDir
+                      ? (() => {
+                          const nonHealthy = providerDir.entries.filter(
+                            (e) => !isProviderHealthy(e.status),
+                          );
+                          return nonHealthy.length > 0
+                            ? { non_healthy_provider_count: nonHealthy.length }
+                            : {};
+                        })()
                       : {}),
                   },
                   message: catalogMsg,

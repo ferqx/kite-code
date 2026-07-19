@@ -47,6 +47,7 @@ export interface McpInventorySuccess {
   configured_provider_count: number;
   matched_provider_count?: number;
   callable_provider_count: number;
+  matched_callable_provider_count?: number;
   available_tool_count: number;
   matched_tool_count?: number;
   providers: McpInventoryProviderSummary[];
@@ -237,12 +238,14 @@ export function buildMcpInventory(input: {
     ...providers.entries.map((e) => e.providerId),
     ...capabilityProviderIds,
   ]).size;
+  const globalCallableCount = providers.entries.filter((e) => isProviderCallable(e.status)).length;
 
   return {
     ok: true,
     configured_provider_count: globalProviderCount,
     matched_provider_count: query.provider ? providerList.length : undefined,
-    callable_provider_count: callable.length,
+    callable_provider_count: globalCallableCount,
+    matched_callable_provider_count: query.provider ? callable.length : undefined,
     available_tool_count: globalToolCount,
     matched_tool_count: query.provider ? allTools.length : undefined,
     providers: providerList,

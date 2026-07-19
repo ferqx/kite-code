@@ -122,16 +122,19 @@ export function chooseCapabilityDisclosure(input: {
     mcpToolCount <= MAX_DIRECT_BIND_TOOL_COUNT &&
     estimatedMcpTokens <= budgetTokens
   ) {
-    // Skills follow their own decision path — if they exceed budget, they stay
-    // behind tool_search while MCP tools are directly bound.
-    const skillBehindSearch = skillDescriptors.length > 0 && estimatedSkillTokens > budgetTokens;
+    // Skills follow their own decision path — if skills alone or MCP+skills
+    // combined exceed budget, they stay behind tool_search while MCP tools
+    // are directly bound.  Using the remaining budget prevents two
+    // individually-small catalogs from collectively blowing the window.
+    const remainingBudget = Math.max(0, budgetTokens - estimatedMcpTokens);
+    const skillBehindSearch = skillDescriptors.length > 0 && estimatedSkillTokens > remainingBudget;
     return {
       mode: 'all',
       ...(skillBehindSearch ? { skillMode: 'search' as const } : {}),
       estimatedTokens,
       budgetTokens,
       reason: skillBehindSearch
-        ? `${mcpToolCount} MCP tool(s) ≤ ${MAX_DIRECT_BIND_TOOL_COUNT} within token budget; ${skillDescriptors.length} Skill(s) exceed budget — use tool_search for skills.`
+        ? `${mcpToolCount} MCP tool(s) ≤ ${MAX_DIRECT_BIND_TOOL_COUNT} within token budget; remaining budget ${remainingBudget} insufficient for ${skillDescriptors.length} Skill(s) — use tool_search for skills.`
         : `${mcpToolCount} MCP tool(s) ≤ ${MAX_DIRECT_BIND_TOOL_COUNT} within token budget; direct binding avoids search latency.`,
     };
   }

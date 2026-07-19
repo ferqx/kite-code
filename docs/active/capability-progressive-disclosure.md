@@ -6,7 +6,7 @@
 
 验证：`bun test tests/runtime/capability-search.test.ts tests/runtime/tool-controller.test.ts tests/mcp-supervisor.test.ts tests/tool-definitions.test.ts`、`bun run typecheck`。
 
-`capabilityCatalogV1`、`mcpRuntimeBindingV1` 与 `toolSearchV1` 已完成迁移并默认开启。MCP Tool ≤20 且 token budget 充足时直接绑定，跳过 `tool_search` 往返；Skill 独立判断，不因 MCP 工具数量少而被强制全量披露。显式关闭任一 MCP flag 只用于 fail-closed 诊断，不恢复旧 adapter。
+`capabilityCatalogV1`、`mcpRuntimeBindingV1` 与 `toolSearchV1` 已完成迁移并默认开启。MCP Tool ≤20 且 token budget 充足时直接绑定，跳过 `tool_search` 往返；Skill 使用扣除 MCP 后的剩余预算独立判断，防止各自不超预算的小目录合计撑爆上下文窗口。显式关闭任一 MCP flag 只用于 fail-closed 诊断，不恢复旧 adapter。
 
 Per-tool 名称注入（`## Available MCP Tool Names` 段落）已移除。模型初始只通过 system prompt 中的固定 MCP Capability Usage 规则和工具列表中的 `list_mcp_tools`、`tool_search`、`list_mcp_resources` 三个内置工具发现 MCP 能力。`tool_search` 在 `toolSearchV1` 开启且 provider 支持工具调用时始终可用，不受 disclosure mode 影响；小目录直绑场景中 `tool_search` 仍保持可用，作为模型的 fallback 发现路径。规则明确禁止将 Resource 列表为空推断为 MCP Tool 不存在，并将三种用户意图路由到对应工具。
 
@@ -20,11 +20,11 @@ Per-tool 名称注入（`## Available MCP Tool Names` 段落）已移除。模�
 
 当 MCP directory 存在 unavailable Provider 时，即使可用 catalog 未超预算，也可以同时暴露 `tool_search`。query 可匹配 provider 名称或最近一次成功 discovery 的 Tool 名称；公共 provider 结果最多 4 条，稳定排序，只包含安全截断名称、`pending_approval|rejected|disabled|login_required|connecting|degraded|failed|quarantined`、有限 diagnostic code 和固定 next action。首次 discovery 前不虚构 Tool 名称。Provider 摘要不进入候选 binding，也不提供可执行 handle。
 
-当查询明确命中仍处于 `connecting` 的 Provider 且当前没有候选 Tool 时，`tool_search` 最多等待 5 秒完成该 Provider 的初始 discovery，然后基于最新 revisioned snapshot 重新搜索。等待接受 Runtime 取消信号；超时或失败仍只返回不可用 Provider 元数据，不虚构 Tool、Schema 或 binding。
+当查询明确命中仍处于 `connecting` 的 Provider 且当前没有候选 Tool 时，`tool_search` 最多等待 5 秒完成该 Provider 的初始 discovery，然后基于最新 revisioned snapshot 重新搜索。等待接受 Runtime 取消信号，取消时立即中止等待并重新抛出，不返回成功结果。单个 Provider 连接失败可容忍，不终止整个搜索；超时或失败仍只返回不可用 Provider 元数据，不虚构 Tool、Schema 或 binding。
 
 有限 binding 的模型工具声明同样不得透传远端自然语言：工具 description 使用 Runtime 固定契约，模型可见 input schema 会递归移除 `description`、`title`、`$comment`、`examples` 和 `default` 注释；Runtime 参数校验仍使用原始 revisioned schema，因此该清理不会放宽执行边界。
 
-远端 schema 在 admission 前通过单次遍历校验预算：256 KiB 序列化上限、32 层深度上限、4096 对象节点上限、1024 属性上限。超限 schema 进入 `quarantined` 诊断，不进入 catalog。Provider 状态判断（callable/unavailable/healthy）统一在 `src/core/capabilities/provider-status.ts` 中定义，inventory、search、tool controller 共享同一来源。
+远端 schema 在 admission 前通过单次遍历校验预算：256 KiB UTF-8 字节上限、32 层深度上限、4096 对象节点上限、1024 属性上限。超限 schema 进入 `quarantined` 诊断，不进入 catalog。Provider 状态判断（callable/unavailable/healthy）统一在 `src/core/capabilities/provider-status.ts` 中定义，inventory、search、tool controller 共享同一来源。
 
 搜索结果通过 `capability.search_completed` 持久化。下一次模型调用重新核对 catalog/capability revision，把命中的 MCP Tool 合并进 session-loaded set，并为全部仍有效的 loaded Tool 生成新的 turn-scoped binding；命中的 Skill 仍只生成本轮 disclosure。`capability.bindings_issued` 原子替换本轮 binding/disclosure、持久化完整 loaded set 并消费搜索结果。catalog 漂移会淘汰对应 loaded Tool，且不得回退到旧 MCP 注入。
 

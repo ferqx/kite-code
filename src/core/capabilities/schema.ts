@@ -78,9 +78,11 @@ export function compileCapabilitySchema(
     };
   }
 
-  // Schema admission budget — single traversal for depth, nodes, and properties
+  // Schema admission budget — single traversal for depth, nodes, and properties.
+  // Use byte length, not .length, so multi-byte characters (e.g. CJK tool names)
+  // are correctly counted against the KiB limit.
   const serialized = JSON.stringify(schema);
-  if (serialized.length > MAX_SCHEMA_BYTES) {
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_SCHEMA_BYTES) {
     return {
       ok: false,
       diagnostic: `MCP inputSchema exceeds the ${MAX_SCHEMA_BYTES / 1024} KiB serialized size limit.`,
