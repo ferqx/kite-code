@@ -783,11 +783,38 @@ export class SessionManager {
       const status = inspectManualContextCompaction(state, this.deps.config);
 
       // Reject early when there are genuinely no settled turns to compact.
+      // Emit a compaction_requested + _failed pair so the rejection is
+      // persisted in the transcript (not just ephemeral LOCAL_TEXT).
       if (
         !status.safeBoundary.eligible &&
         status.safeBoundary.reason === 'No settled historical turn is old enough to compact.'
       ) {
-        return { events: [], text: 'Not enough messages to compact.' };
+        const compactId = crypto.randomUUID();
+        const rejectionEvent: RuntimeEvent = {
+          type: 'context.compaction_requested',
+          compactionId: compactId,
+          reason: 'manual',
+          requestedAtRevision: state.revision,
+          requestedAtTurnId: state.turn.turnId,
+          force: false,
+          estimate: status.preflight.estimate,
+          ...(customInstructions ? { customInstructions } : {}),
+        };
+        processEvent(rejectionEvent);
+        return {
+          events: [
+            rejectionEvent,
+            {
+              type: 'context.compaction_failed',
+              compactionId: compactId,
+              sourceRevision: state.revision,
+              errorKind: 'unsafe_boundary',
+              message: 'Not enough messages to compact.',
+              retryable: false,
+            },
+          ],
+          text: 'Not enough messages to compact.',
+        };
       }
 
       const event = manualContextCompactionEvent({
