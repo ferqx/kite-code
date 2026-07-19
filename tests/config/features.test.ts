@@ -18,7 +18,7 @@ describe('feature flags', () => {
     expect(getFeatureFlags({ features: { autoReviewV2: true } }).loopMode).toBe(false);
     expect(getFeatureFlags().capabilityCatalogV1).toBe(true);
     expect(getFeatureFlags().mcpRuntimeBindingV1).toBe(true);
-    expect(getFeatureFlags().capabilitySearchV1).toBe(true);
+    expect(getFeatureFlags().toolSearchV1).toBe(true);
     expect(getFeatureFlags().verificationV1).toBe(false);
     expect(getFeatureFlags().mcpProviderActionV1).toBe(false);
     expect(getFeatureFlags({ features: { verificationV1: true } }).verificationV1).toBe(true);

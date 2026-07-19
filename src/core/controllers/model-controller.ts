@@ -8,7 +8,6 @@
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { createBinding } from '@/core/capabilities/catalog';
 import {
-  capabilityNameSummary,
   chooseCapabilityDisclosure,
   searchableCapabilitySnapshot,
 } from '@/core/capabilities/search';
@@ -239,7 +238,7 @@ export async function invokeRuntimeModel(params: {
       skills: params.skillCatalog?.capabilities,
     });
     const disclosure = chooseCapabilityDisclosure({
-      featureEnabled: flags.capabilitySearchV1,
+      featureEnabled: flags.toolSearchV1,
       providerSupportsToolCalls: params.model.supportsToolCalls !== false,
       descriptors: capabilitySnapshot.descriptors,
       contextWindowTokens: positiveConfigNumber(params.config.modelKwargs?.contextWindowTokens),
@@ -255,7 +254,7 @@ export async function invokeRuntimeModel(params: {
         ? pendingSearch
         : undefined;
     const searchedDescriptors =
-      flags.capabilitySearchV1 && currentSearch
+      flags.toolSearchV1 && currentSearch
         ? currentSearch.candidates.flatMap((candidate) => {
             const descriptor = capabilitySnapshot.descriptors.find(
               (item) =>
@@ -280,8 +279,10 @@ export async function invokeRuntimeModel(params: {
       (descriptor) => descriptor.kind === 'mcp_tool',
     );
     const disclosedMcpDescriptors = (
-      flags.capabilitySearchV1
-        ? [...loadedMcpDescriptors, ...searchedMcpDescriptors]
+      flags.toolSearchV1
+        ? disclosure.mode === 'all'
+          ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
+          : [...loadedMcpDescriptors, ...searchedMcpDescriptors]
         : capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
     ).filter(
       (descriptor, index, all) =>
@@ -294,7 +295,7 @@ export async function invokeRuntimeModel(params: {
           ? searchedDescriptors.filter((descriptor) => descriptor.kind === 'skill')
           : [];
     const disclosedDescriptors = [...disclosedMcpDescriptors, ...disclosedSkillDescriptors];
-    const loadedCapabilities = flags.capabilitySearchV1
+    const loadedCapabilities = flags.toolSearchV1
       ? disclosedMcpDescriptors.map((descriptor) => {
           const existing = state.capabilities.loadedCapabilities?.[descriptor.capabilityId];
           return {
@@ -327,7 +328,7 @@ export async function invokeRuntimeModel(params: {
               }),
             }))
         : [];
-    const capabilityDisclosures = flags.capabilitySearchV1
+    const capabilityDisclosures = flags.toolSearchV1
       ? disclosedDescriptors.map((descriptor) => ({
           capabilityId: descriptor.capabilityId,
           capabilityRevision: descriptor.revision,
@@ -354,7 +355,8 @@ export async function invokeRuntimeModel(params: {
       shellExecutor: params.shellExecutor,
       mcpManager: params.mcpManager,
       mcpBindings,
-      capabilitySearch: flags.capabilitySearchV1 && params.model.supportsToolCalls !== false,
+      toolSearch:
+        flags.toolSearchV1 && params.model.supportsToolCalls !== false && disclosure.mode !== 'all',
       skills: params.skills,
       skillOptions: params.skillOptions,
       skillCatalog: params.skillCatalog,
@@ -393,9 +395,6 @@ export async function invokeRuntimeModel(params: {
             capabilityId: descriptor.capabilityId,
             description: descriptor.description,
           })),
-        mcpCapabilityNames: flags.capabilitySearchV1
-          ? capabilityNameSummary(capabilitySnapshot.descriptors)
-          : [],
         activeSkillInstructions: activeInlineSkillInstructions(state, params.skillCatalog),
       },
       undefined,

@@ -37,8 +37,6 @@ export interface ModelContextState {
   taskId?: string;
   sideEffectsStarted?: boolean;
   workflowSkills?: Array<{ capabilityId: string; description: string }>;
-  /** Stable, untrusted-prose-free MCP names that help the model search on demand. */
-  mcpCapabilityNames?: Array<{ provider: string; tool: string }>;
 }
 
 /** 准备好的模型上下文 / Prepared model context */
@@ -279,7 +277,7 @@ export function prepareModelContext(
 
   // 构建 SystemMessage（缓存稳定前缀 + 运行时上下文）
   const systemPrompt =
-    buildStaticSystemPrompt(role, skills, state.workflowSkills, state.mcpCapabilityNames) +
+    buildStaticSystemPrompt(role, skills, state.workflowSkills) +
     '\n\n' +
     buildCacheableRuntimeContext({ workspace: state.workspace }) +
     (state.activeSkillInstructions
@@ -315,20 +313,8 @@ export function buildStaticSystemPrompt(
   _role: AgentRole,
   skills?: SkillManifest[],
   workflowSkills?: Array<{ capabilityId: string; description: string }>,
-  mcpCapabilityNames?: Array<{ provider: string; tool: string }>,
 ): string {
-  const mcpSection =
-    mcpCapabilityNames && mcpCapabilityNames.length > 0
-      ? [
-          '',
-          '## Available MCP Tool Names',
-          '',
-          'MCP schemas are loaded on demand. Use `capability_search` before calling a tool that is not already available.',
-          '',
-          ...mcpCapabilityNames.map(({ provider, tool }) => `- ${provider}/${tool}`),
-        ].join('\n')
-      : '';
-  const base = systemPrompt + mcpSection;
+  const base = systemPrompt;
   if (workflowSkills && workflowSkills.length > 0) {
     const lines = workflowSkills.map((skill) => `- ${skill.capabilityId}: ${skill.description}`);
     return [

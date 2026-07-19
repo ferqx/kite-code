@@ -282,7 +282,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
         tool_calls: [
           {
             id: 'search-mcp',
-            name: 'capability_search',
+            name: 'tool_search',
             args: { query: 'broken tool' },
           },
         ],

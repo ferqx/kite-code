@@ -1777,17 +1777,17 @@ describe('OutputArea', () => {
       {
         type: 'tool.queued',
         toolCallId: 'search-1',
-        name: 'capability_search',
+        name: 'tool_search',
         args: { query: 'LangGraph documentation' },
       },
       { type: 'tool.started', toolCallId: 'search-1' },
       {
         type: 'tool.finished',
         toolCallId: 'search-1',
-        name: 'capability_search',
+        name: 'tool_search',
         result: {
           ok: true,
-          command: 'capability_search',
+          command: 'tool_search',
           exitCode: 0,
           stdout: JSON.stringify({
             ok: true,
@@ -1825,16 +1825,16 @@ describe('OutputArea', () => {
       {
         type: 'tool.queued',
         toolCallId: 'search-empty',
-        name: 'capability_search',
+        name: 'tool_search',
         args: { query: 'missing capability' },
       },
       {
         type: 'tool.finished',
         toolCallId: 'search-empty',
-        name: 'capability_search',
+        name: 'tool_search',
         result: {
           ok: true,
-          command: 'capability_search',
+          command: 'tool_search',
           exitCode: 0,
           stdout: JSON.stringify({ ok: true, candidate_count: 0, candidates: [] }),
           stderr: '',
@@ -1857,16 +1857,16 @@ describe('OutputArea', () => {
       {
         type: 'tool.queued',
         toolCallId: 'search-transition',
-        name: 'capability_search',
+        name: 'tool_search',
         args: { query: 'available MCP tools' },
       },
       {
         type: 'tool.finished',
         toolCallId: 'search-transition',
-        name: 'capability_search',
+        name: 'tool_search',
         result: {
           ok: true,
-          command: 'capability_search',
+          command: 'tool_search',
           exitCode: 0,
           stdout: JSON.stringify({
             ok: true,
@@ -1905,7 +1905,7 @@ describe('OutputArea', () => {
       {
         type: 'tool.queued',
         toolCallId: 'search-failed',
-        name: 'capability_search',
+        name: 'tool_search',
         args: { query: 'documentation' },
       },
       {

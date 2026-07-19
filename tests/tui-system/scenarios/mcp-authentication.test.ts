@@ -241,7 +241,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
           tool_calls: [
             {
               id: 'capability-search',
-              name: 'capability_search',
+              name: 'tool_search',
               args: { query: 'recoverable echo' },
             },
           ],

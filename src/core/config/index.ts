@@ -84,7 +84,7 @@ const featuresSchema = z
     skillActivationV2: z.boolean().optional(),
     skillWorkflowV1: z.boolean().optional(),
     verificationV1: z.boolean().optional(),
-    capabilitySearchV1: z.boolean().optional(),
+    toolSearchV1: z.boolean().optional(),
   })
   .strict()
   .optional();

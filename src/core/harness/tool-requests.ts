@@ -13,7 +13,7 @@ export type PendingToolRequest =
   | {
       /** Provider-neutral metadata discovery; never an invocation request. */
       id?: string;
-      name: 'capability_search';
+      name: 'tool_search';
       args: { query: string; limit?: number };
       reason: string;
       protectedCommand: string;
@@ -155,6 +155,13 @@ export type PendingToolRequest =
       id?: string;
       name: 'list_mcp_resources';
       args: { server?: string };
+      reason: string;
+      protectedCommand: string;
+    }
+  | {
+      id?: string;
+      name: 'list_mcp_tools';
+      args: { provider?: string; limit?: number; cursor?: string };
       reason: string;
       protectedCommand: string;
     }
@@ -307,11 +314,11 @@ export function toolRequestFromCall(
     };
   }
 
-  if (call.name === 'capability_search') {
+  if (call.name === 'tool_search') {
     const args = call.args as { query?: unknown; limit?: unknown };
     return {
       id: call.id,
-      name: 'capability_search',
+      name: 'tool_search',
       args: {
         query: typeof args.query === 'string' ? args.query.trim().slice(0, 512) : '',
         ...(typeof args.limit === 'number' && Number.isFinite(args.limit)
@@ -319,7 +326,7 @@ export function toolRequestFromCall(
           : {}),
       },
       reason: 'Model requested governed capability metadata search',
-      protectedCommand: 'capability_search',
+      protectedCommand: 'tool_search',
     };
   }
 
@@ -454,6 +461,27 @@ export function toolRequestFromCall(
       args: { ...(args.server ? { server: args.server } : {}) },
       reason: 'Model requested MCP resource discovery',
       protectedCommand: `list_mcp_resources ${args.server || ''}`.trim(),
+    };
+  }
+
+  if (call.name === 'list_mcp_tools') {
+    const args = call.args as { provider?: unknown; limit?: unknown; cursor?: unknown };
+    return {
+      id: call.id,
+      name: 'list_mcp_tools',
+      args: {
+        ...(typeof args.provider === 'string' && args.provider.trim().length > 0
+          ? { provider: args.provider.trim().slice(0, 128) }
+          : {}),
+        ...(typeof args.limit === 'number' && Number.isFinite(args.limit)
+          ? { limit: Math.max(1, Math.min(100, Math.floor(args.limit))) }
+          : {}),
+        ...(typeof args.cursor === 'string' && args.cursor.length <= 2048
+          ? { cursor: args.cursor }
+          : {}),
+      },
+      reason: 'Model requested MCP tool inventory',
+      protectedCommand: 'list_mcp_tools',
     };
   }
 
@@ -725,6 +753,27 @@ export function toolRequestFromMessage(
       args: { ...(args.server ? { server: args.server } : {}) },
       reason: 'Model requested MCP resource discovery',
       protectedCommand: `list_mcp_resources ${args.server || ''}`.trim(),
+    };
+  }
+
+  if (call.name === 'list_mcp_tools') {
+    const args = call.args as { provider?: unknown; limit?: unknown; cursor?: unknown };
+    return {
+      id: call.id,
+      name: 'list_mcp_tools',
+      args: {
+        ...(typeof args.provider === 'string' && args.provider.trim().length > 0
+          ? { provider: args.provider.trim().slice(0, 128) }
+          : {}),
+        ...(typeof args.limit === 'number' && Number.isFinite(args.limit)
+          ? { limit: Math.max(1, Math.min(100, Math.floor(args.limit))) }
+          : {}),
+        ...(typeof args.cursor === 'string' && args.cursor.length <= 2048
+          ? { cursor: args.cursor }
+          : {}),
+      },
+      reason: 'Model requested MCP tool inventory',
+      protectedCommand: 'list_mcp_tools',
     };
   }
 

@@ -38,6 +38,16 @@ export {
 } from './credential-store';
 export type { McpDiagnostic, McpDiagnosticCode } from './diagnostics';
 export { diagnoseMcpError, redactDiagnosticMessage } from './diagnostics';
+export type {
+  McpInventoryFailure,
+  McpInventoryNextAction,
+  McpInventoryProviderSummary,
+  McpInventoryQuery,
+  McpInventoryResult,
+  McpInventorySuccess,
+  McpInventoryToolSummary,
+} from './inventory';
+export { buildMcpInventory, nextActionForProvider } from './inventory';
 export type { KiteMcpOAuthProviderOptions } from './oauth-provider';
 export { KiteMcpOAuthProvider } from './oauth-provider';
 export { revokeMcpOAuthToken } from './oauth-revocation';

@@ -18,7 +18,13 @@ Manager 保留完整原始 discovery，`CapabilitySnapshot` 只包含 enabled �
 
 MCP 调用保留 structured content、content blocks、错误、资源和外部引用；`_meta` 不持久化。外部写入先记录 invocation intent，并根据 `never`、effective read 对应的 `safe_read` 或可信 idempotency key 决定重试边界。
 
-MCP Resources 通过两个客户端内置只读工具使用：`list_mcp_resources` 枚举已连接 Provider 最近成功发现的静态 URI，`read_mcp_resource` 读取其中一个当前仍有效的 URI。列表不会透传远端 description，最多返回 100 条；读取前重新检查 Provider 和 URI，输出超过 128 KiB 时返回显式 partial 结果。它们不属于远端 MCP Tool，因此不进入 capability search 或 turn binding。
+MCP Tools 通过三个内置只读工具按意图使用：
+
+- `list_mcp_tools` — 确定性盘点当前配置的 MCP Provider 和可执行 Tool。列出每个 Provider 的状态、next_action、可用 Tool 名称；支持 provider 过滤和分页。是回答"有哪些 MCP 工具/服务"的权威入口。
+- `tool_search` — 按意图发现能完成特定动作的 Capability。使用简短动作查询（如 `create GitHub issue`），不用于全量枚举。
+- `list_mcp_resources` / `read_mcp_resource` — 枚举和读取 Provider 暴露的静态资源 URI。
+
+三个工具正交：Resource 为空不表示没有 MCP Tool，search 零匹配不表示 catalog 为空。
 
 ## 11.3 Health 与恢复
 
@@ -57,12 +63,12 @@ Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入�
 
 ## 11.6 Progressive disclosure
 
-启用 progressive disclosure 后，MCP Schema 默认全部延迟加载。模型初始只看到安全的 Provider/Tool 名称摘要与 provider-neutral `capability_search`；搜索返回安全元数据候选，不返回调用句柄。命中的 Tool 进入会话 loaded set，后续轮次在 revision 匹配时持续获得新的 turn binding。短暂断线只改变 Provider Health，不改变 Tool contract；HTTP 在执行时有限重连，STDIO 等待显式 Retry。
+启用 progressive disclosure 后，MCP Schema 默认全部延迟加载。模型初始通过 system prompt 中的固定 MCP Capability Usage 规则和 `list_mcp_tools`、`tool_search`、`list_mcp_resources` 三个内置工具发现 MCP 能力。搜索返回安全元数据候选，不返回调用句柄。命中的 Tool 进入会话 loaded set，后续轮次在 revision 匹配时持续获得新的 turn binding。短暂断线只改变 Provider Health，不改变 Tool contract；HTTP 在执行时有限重连，STDIO 等待显式 Retry。
 
-`capability_search` 的具体业务 query 使用相关性召回；明确询问“MCP 有哪些可用 Tools”时则稳定列出当前 Tool catalog。这个 Tool 清单与 Resource Directory 相互独立：某个 Provider 可以暴露 Tools 而没有任何 Resources，因此 `list_mcp_resources` 返回空列表不代表该 Provider 未配置或没有 Tools。
+`list_mcp_tools` 是确定性的盘点工具：列出每个 Provider 的状态（ready/degraded/login_required/pending_approval/disabled/failed 等）、next_action 和可用 Tool 名称。这解决了之前模型把 `list_mcp_resources` 返回空列表误判为”没有 MCP Server”的问题。
 
-若模型请求与 Tool Call 之间恰好发生 catalog revision 切换，清单结果可以展示 Provider Directory 中最近成功 discovery 的 names-only Tool 名称，避免把瞬时空 snapshot 误报为“未配置 MCP”。这些 last-known 名称仅用于目录说明，不会被持久化为搜索候选、loaded capability 或 Binding；真正使用某个 Tool 时仍需针对当前 revision 搜索并通过完整执行校验。
+`tool_search` 的具体业务 query 使用相关性召回。包含”有哪些 MCP 工具”等清单意图的中英文查询会被重定向到 `list_mcp_tools`，避免把搜索零匹配误解为空 catalog。
 
-Resource discovery 与 Tool discovery 分离：模型需要可执行能力时调用 `capability_search`，需要 MCP 内容 URI 时调用 `list_mcp_resources`，随后使用 `read_mcp_resource`。当前不支持 `@resource` 输入补全和 Resource Templates。
+Resource discovery 与 Tool discovery 分离：需要盘点 Provider 和 Tool 时用 `list_mcp_tools`，需要可执行能力时用 `tool_search`，需要 MCP 内容 URI 时用 `list_mcp_resources` / `read_mcp_resource`。三类 MCP 概念（Provider、Tool、Resource）正交：任何一个为空不自动推出另外两个为空。当前不支持 `@resource` 输入补全和 Resource Templates。
 
 完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md)、[`../active/mcp-authentication.md`](../active/mcp-authentication.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。

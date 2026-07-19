@@ -3,8 +3,10 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import {
+  checkInventoryRedirect,
   isMcpInventoryQuery,
   lastKnownMcpToolMetadata,
+  modelVisibleCapabilitySchema,
   publicProviderSearchMetadata,
   publicSearchMetadata,
   searchableCapabilitySnapshot,
@@ -573,9 +575,9 @@ export async function executeRuntimeTools(params: {
         continue;
       }
     }
-    if (request.name === 'capability_search') {
+    if (request.name === 'tool_search') {
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
-      if (!flags.capabilitySearchV1) {
+      if (!flags.toolSearchV1) {
         events.push({
           type: 'tool.rejected',
           toolCallId,
@@ -588,6 +590,23 @@ export async function executeRuntimeTools(params: {
           type: 'tool.failed',
           toolCallId,
           failure: classifyFailure('tool_invalid_args', 'Capability search query is too short.'),
+        });
+        continue;
+      }
+      // Redirect inventory intent to list_mcp_tools
+      const inventoryRedirect = checkInventoryRedirect(request.args.query);
+      if (inventoryRedirect) {
+        events.push({
+          type: 'tool.finished',
+          toolCallId,
+          name: request.name,
+          result: {
+            ok: true,
+            command: request.name,
+            exitCode: 0,
+            stdout: JSON.stringify(inventoryRedirect),
+            stderr: '',
+          },
         });
         continue;
       }
@@ -648,7 +667,24 @@ export async function executeRuntimeTools(params: {
               limit: request.args.limit,
             })
           : [];
-      const displayedCandidates = publicCandidates.length > 0 ? publicCandidates : lastKnownTools;
+      // Enrich candidates with model-visible schemas (stripped of prose)
+      const candidatesWithSchemas = publicCandidates.map((pc, i) => {
+        const candidate = candidates[i];
+        if (!candidate) return pc;
+        const descriptor = snapshot.descriptors.find(
+          (d) =>
+            d.capabilityId === candidate.capabilityId &&
+            d.revision === candidate.capabilityRevision,
+        );
+        return {
+          ...pc,
+          ...(descriptor?.inputSchema
+            ? { input_schema: modelVisibleCapabilitySchema(descriptor.inputSchema) }
+            : {}),
+        };
+      });
+      const displayedCandidates =
+        candidatesWithSchemas.length > 0 ? candidatesWithSchemas : lastKnownTools;
       events.push({
         type: 'capability.search_completed',
         result: {
@@ -676,6 +712,30 @@ export async function executeRuntimeTools(params: {
             executable_candidate_count: candidates.length,
             provider_count: providers.length,
             providers: publicProviderSearchMetadata(providers),
+            ...(candidates.length === 0 && lastKnownTools.length === 0 && providers.length === 0
+              ? {
+                  catalog_summary: {
+                    available_mcp_tool_count:
+                      params.mcpManager
+                        ?.getCapabilitySnapshot()
+                        .descriptors.filter(
+                          (d) => d.kind === 'mcp_tool' && d.availability === 'available',
+                        ).length ?? 0,
+                    available_skill_count:
+                      params.skillCatalog?.capabilities.descriptors.filter(
+                        (d) => d.kind === 'skill' && d.availability === 'available',
+                      ).length ?? 0,
+                    configured_provider_count:
+                      params.mcpManager?.getProviderDirectorySnapshot().entries.length ?? 0,
+                    unavailable_provider_count:
+                      params.mcpManager
+                        ?.getProviderDirectorySnapshot()
+                        .entries.filter((e) => e.status !== 'ready').length ?? 0,
+                  },
+                  message:
+                    'No capabilities matched this query. This does not mean the capability catalog is empty.',
+                }
+              : {}),
             next_step:
               candidates.length > 0
                 ? 'The Runtime will disclose current matching capabilities on the next model call.'
@@ -697,7 +757,7 @@ export async function executeRuntimeTools(params: {
       );
       const disclosure = params.state.capabilities.disclosures[request.args.skill_id];
       if (
-        flags.capabilitySearchV1 &&
+        flags.toolSearchV1 &&
         (!descriptor ||
           !disclosure ||
           disclosure.issuedForTurnId !== params.state.turn.turnId ||

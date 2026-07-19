@@ -53,6 +53,8 @@ Add Wizard 只收集 transport、name、URL/command 和 availability：Current p
 
 Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到用户任务。
 
+`tool_search` 在对话区渲染为 "Searched for tools"，搜索结果以 `Provider · Tool` 树展示。`list_mcp_tools` 渲染为 "Listed MCP tools"。
+
 ## 8.6 终端稳定性
 
 TUI 的关键质量边界包括：DEC synchronized output、无 viewport culling、静态内容引用稳定、Footer resize、输入光标和 mixed-script wrapping。Spinner 帧由 elapsed time 的纯函数确定；测试使用受控时间验证帧序列，不依赖真实事件循环恰好在 120ms 内调度。对应规则位于 `docs/active/tui-*.md`。

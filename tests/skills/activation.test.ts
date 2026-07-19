@@ -228,7 +228,7 @@ describe('Skill Workflow activation', () => {
         providerType: 'openai-compatible',
         sandbox: { enabled: false },
         features: {
-          capabilitySearchV1: true,
+          toolSearchV1: true,
           skillWorkflowV1: true,
           skillActivationV2: true,
         },

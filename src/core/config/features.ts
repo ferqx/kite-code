@@ -16,7 +16,7 @@ export interface FeatureFlags {
   skillActivationV2: boolean;
   skillWorkflowV1: boolean;
   verificationV1: boolean;
-  capabilitySearchV1: boolean;
+  toolSearchV1: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
@@ -33,7 +33,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   skillActivationV2: false,
   skillWorkflowV1: false,
   verificationV1: false,
-  capabilitySearchV1: true,
+  toolSearchV1: true,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

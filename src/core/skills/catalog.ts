@@ -39,7 +39,7 @@ const KNOWN_BUILTINS = new Set([
   ...READ_ONLY_BUILTINS,
   'apply_patch',
   'ask_user',
-  'capability_search',
+  'tool_search',
   'edit_file',
   'read_plan',
   'shell_execute',

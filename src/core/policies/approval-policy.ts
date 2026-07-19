@@ -367,6 +367,20 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
+  // MCP metadata tools — 只读取内存快照，不访问远端 / read in-memory snapshots, no remote access
+  if (toolName === 'list_mcp_tools') {
+    return allow({
+      risk: 'read',
+      reason: 'MCP tool inventory reads in-memory capability and provider snapshots.',
+      userVisibleSummary: `List MCP tools${toolArgs.provider ? ` from ${String(toolArgs.provider)}` : ''}.`,
+      expectedEffects: [
+        'Reads cached capability metadata from in-memory snapshots',
+        'Does not mutate workspace files',
+        'Does not access remote MCP servers',
+      ],
+    });
+  }
+
   // read_mcp_resource — 资源位置可能是外部服务
   // read_mcp_resource — resource locations may be externally managed
   if (toolName === 'list_mcp_resources' || toolName === 'read_mcp_resource') {

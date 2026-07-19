@@ -336,9 +336,10 @@ export const READ_MCP_RESOURCE_CONTRACT: ToolContract = {
       'Multiple resource parts are joined with newlines. ' +
       'No MCP manager: ok: false with stderr explaining configuration is needed.',
     failureHandling:
-      "If 'Unknown MCP server': verify the server name matches the configuration in kite-code.jsonc or .mcp.json. " +
+      "If 'Unknown MCP server': verify the server name in /mcp or <project>/.kite-code/mcp.json. " +
       "If 'MCP server not connected': check /mcp panel for connection status and errors. " +
-      "If 'No MCP manager available': configure mcpServers in kite-code.jsonc to enable MCP integration. " +
+      "If 'No MCP manager available': open /mcp to manage MCP providers. " +
+      'Canonical config files are <project>/.kite-code/mcp.json and ~/.kite-code/mcp.json. ' +
       'If the resource content is unexpectedly empty: verify the URI with list_mcp_resources and try again.',
   },
   description: '',
@@ -351,7 +352,7 @@ export const LIST_MCP_RESOURCES_CONTRACT: ToolContract = {
     whenToUse:
       'List static resources discovered from connected MCP servers before calling read_mcp_resource. ' +
       'Omit server to inspect all available providers, or provide an exact server name to narrow the result. ' +
-      'Use capability_search for executable MCP tools; it does not list resources.',
+      'Use tool_search for executable MCP tools; it does not list resources.',
     commonMistakes:
       'Do not invent a URI or treat a resource as an executable MCP tool. ' +
       'Avoid calling this tool repeatedly when the result is empty; the provider may expose tools but no resources.',
@@ -366,27 +367,57 @@ export const LIST_MCP_RESOURCES_CONTRACT: ToolContract = {
 };
 LIST_MCP_RESOURCES_CONTRACT.description = buildDescription(LIST_MCP_RESOURCES_CONTRACT.sections);
 
-export const CAPABILITY_SEARCH_CONTRACT: ToolContract = {
-  name: 'capability_search',
+export const LIST_MCP_TOOLS_CONTRACT: ToolContract = {
+  name: 'list_mcp_tools',
+  sections: {
+    whenToUse:
+      'List currently configured MCP providers and executable MCP tools. ' +
+      'Use this when the user asks which MCP tools, servers, providers, ' +
+      'or capabilities are currently available. ' +
+      'Use tool_search instead when looking for a tool that can perform ' +
+      'a specific action. Use list_mcp_resources only for static MCP resources.',
+    commonMistakes:
+      'Do not use list_mcp_resources to list executable tools. ' +
+      'Do not treat an empty resource list as proof that no MCP tools exist. ' +
+      'Do not treat a zero-match capability search as proof that the catalog is empty.',
+    outputFormat:
+      'JSON: configured_provider_count, callable_provider_count, ' +
+      'available_tool_count, providers, tools, truncated, and optional next_cursor.',
+    failureHandling:
+      'If the cursor is stale, restart without a cursor. ' +
+      'If a provider is unavailable, report its exact status and next_action. ' +
+      'Do not claim a provider is unconfigured unless it is absent from the provider directory.',
+  },
+  description: '',
+};
+LIST_MCP_TOOLS_CONTRACT.description = buildDescription(LIST_MCP_TOOLS_CONTRACT.sections);
+
+export const TOOL_SEARCH_CONTRACT: ToolContract = {
+  name: 'tool_search',
   sections: {
     whenToUse:
       'Search the governed MCP and Skill catalog by intent when the Runtime has not disclosed a matching capability. ' +
       'Use search_content instead for workspace text and search_files for file names. ' +
-      'This tool discovers metadata only; wait for the next model call before using a matching MCP tool or activate_skill.',
+      'This tool discovers metadata only; wait for the next model call before using a matching MCP tool or activate_skill. ' +
+      'Search once per intent or per provider — do not issue separate searches for individual tools from the same provider. ' +
+      'Use short action-oriented queries ("create GitHub issue", "query docs") rather than tool names or verbose descriptions.',
     commonMistakes:
       'Treating a candidate as authorization or trying to invoke its candidate_ref directly will fail. ' +
-      'Do not guess a hidden capability ID, request schemas, or substitute capability_search for search_content. ' +
+      'Issuing multiple searches for different tools from the SAME provider — search once with the provider name instead. ' +
+      'Using tool_search to discover tool PARAMETERS or schemas — it only returns names and kinds; ' +
+      'schemas are loaded automatically by the Runtime on the next model call. ' +
+      'Do not guess a hidden capability ID, request schemas, or substitute tool_search for search_content. ' +
       'Avoid vague one-word queries that lack the action and target needed for deterministic recall.',
     outputFormat:
       'JSON: ok, search_id, candidate_count, candidates, and next_step. ' +
       'Each candidate contains candidate_ref, kind, name, provider_type, and provider; it never contains schemas or executable IDs.',
     failureHandling:
-      'If no candidates match, refine the query with the intended action and target, then retry capability_search. ' +
+      'If no candidates match, refine the query with the intended action and target, then retry tool_search. ' +
       'If search is unavailable or the catalog revision changes, do not guess or call an old MCP name; search again on a supported model turn.',
   },
   description: '',
 };
-CAPABILITY_SEARCH_CONTRACT.description = buildDescription(CAPABILITY_SEARCH_CONTRACT.sections);
+TOOL_SEARCH_CONTRACT.description = buildDescription(TOOL_SEARCH_CONTRACT.sections);
 
 /** @reserved — apply_patch 暂未注册为 Agent 工具，待需求确认后启用 / not yet registered as an agent tool */
 export const APPLY_PATCH_CONTRACT: ToolContract = {
@@ -494,8 +525,9 @@ export const KNOWN_TOOL_NAMES = [
   'shell_execute',
   'search_content',
   'search_files',
-  'capability_search',
+  'tool_search',
   'list_mcp_resources',
+  'list_mcp_tools',
   'read_mcp_resource',
   'write_plan',
   'update_plan',
@@ -517,8 +549,9 @@ export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map([
   ['shell_execute', SHELL_EXECUTE_CONTRACT],
   ['search_content', SEARCH_CONTENT_CONTRACT],
   ['search_files', SEARCH_FILES_CONTRACT],
-  ['capability_search', CAPABILITY_SEARCH_CONTRACT],
+  ['tool_search', TOOL_SEARCH_CONTRACT],
   ['list_mcp_resources', LIST_MCP_RESOURCES_CONTRACT],
+  ['list_mcp_tools', LIST_MCP_TOOLS_CONTRACT],
   ['read_mcp_resource', READ_MCP_RESOURCE_CONTRACT],
   ['write_plan', WRITE_PLAN_CONTRACT],
   ['update_plan', UPDATE_PLAN_CONTRACT],

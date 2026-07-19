@@ -21,7 +21,7 @@ const SHELL_PREFIX = '⎿   ';
  *  (like "    ") is vulnerable to collapsing in Ink's Yoga text layout. */
 const SHELL_ALIGN = SHELL_PREFIX;
 
-interface CapabilitySearchDisplayResult {
+interface ToolSearchDisplayResult {
   candidate_count?: number;
   candidates?: Array<{
     kind?: string;
@@ -35,9 +35,9 @@ interface McpResourceListDisplayResult {
   resources?: Array<{ server?: string; uri?: string; name?: string; mime_type?: string }>;
 }
 
-function parseCapabilitySearchResult(summary: string): CapabilitySearchDisplayResult | undefined {
+function parseToolSearchResult(summary: string): ToolSearchDisplayResult | undefined {
   try {
-    const parsed = JSON.parse(summary) as CapabilitySearchDisplayResult;
+    const parsed = JSON.parse(summary) as ToolSearchDisplayResult;
     return parsed && typeof parsed === 'object' ? parsed : undefined;
   } catch {
     return undefined;
@@ -461,7 +461,7 @@ export default function ToolCardBlock({
 
   if (block.status === 'queued') {
     const displayName =
-      block.name === 'capability_search'
+      block.name === 'tool_search'
         ? 'Searching for tools…'
         : block.name === 'list_mcp_resources'
           ? 'Listing MCP resources…'
@@ -481,11 +481,13 @@ export default function ToolCardBlock({
     const isWaiting = awaitingApproval || block.name === 'ask_user';
     const spinner = isWaiting ? '○' : SPINNER[spinnerIdx];
     const displayName =
-      block.name === 'capability_search'
+      block.name === 'tool_search'
         ? 'Searching for tools…'
         : block.name === 'list_mcp_resources'
           ? 'Listing MCP resources…'
-          : mcpToolDisplayName(block.name);
+          : block.name === 'list_mcp_tools'
+            ? 'Listing MCP tools…'
+            : mcpToolDisplayName(block.name);
     // isAskUserRunning 已移除：running 状态的问题由 Footer InputBlock 渲染，scrollback 不重复
     return (
       <Box flexDirection="column">
@@ -530,9 +532,9 @@ export default function ToolCardBlock({
       block.status === 'timeout' ||
       block.status === 'exhausted');
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
-  const capabilitySearch =
-    block.name === 'capability_search' ? parseCapabilitySearchResult(block.summary) : undefined;
-  const searchCandidates = capabilitySearch?.candidates?.filter(
+  const toolSearch =
+    block.name === 'tool_search' ? parseToolSearchResult(block.summary) : undefined;
+  const searchCandidates = toolSearch?.candidates?.filter(
     (candidate) => typeof candidate.name === 'string' && candidate.name.length > 0,
   );
   const resourceList =
@@ -545,9 +547,9 @@ export default function ToolCardBlock({
       resource.uri.length > 0,
   );
   const displayName =
-    block.name === 'capability_search'
+    block.name === 'tool_search'
       ? block.status === 'done'
-        ? (capabilitySearch?.candidate_count ?? searchCandidates?.length ?? 0) > 0
+        ? (toolSearch?.candidate_count ?? searchCandidates?.length ?? 0) > 0
           ? 'Searched for tools'
           : 'No matching tools found'
         : 'Tool search failed'
@@ -555,7 +557,11 @@ export default function ToolCardBlock({
         ? block.status === 'done'
           ? 'Listed MCP resources'
           : 'MCP resource listing failed'
-        : mcpToolDisplayName(block.name);
+        : block.name === 'list_mcp_tools'
+          ? block.status === 'done'
+            ? 'Listed MCP tools'
+            : 'MCP tool listing failed'
+          : mcpToolDisplayName(block.name);
   return (
     <Box flexDirection="column">
       <Box>
@@ -566,7 +572,7 @@ export default function ToolCardBlock({
           <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
         ) : null}
       </Box>
-      {block.name === 'capability_search' &&
+      {block.name === 'tool_search' &&
         block.status === 'done' &&
         searchCandidates &&
         searchCandidates.length > 0 && (

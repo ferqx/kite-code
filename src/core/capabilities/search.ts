@@ -70,6 +70,9 @@ export function estimateCapabilityCatalogTokens(descriptors: CapabilityDescripto
   return Math.ceil(characters / 4);
 }
 
+/** Maximum number of MCP tools that are always directly bound without requiring search. */
+const MAX_DIRECT_BIND_TOOL_COUNT = 20;
+
 export function chooseCapabilityDisclosure(input: {
   featureEnabled: boolean;
   providerSupportsToolCalls: boolean;
@@ -95,7 +98,18 @@ export function chooseCapabilityDisclosure(input: {
       mode: 'fail_closed',
       estimatedTokens,
       budgetTokens,
-      reason: 'The provider cannot issue the capability_search tool call.',
+      reason: 'The provider cannot issue the tool_search tool call.',
+    };
+  }
+  // Small catalogs skip the search round-trip: tools are bound directly so the model
+  // can call them without a tool_search → bind → call two-turn delay.
+  const mcpToolCount = input.descriptors.filter((d) => d.kind === 'mcp_tool').length;
+  if (mcpToolCount <= MAX_DIRECT_BIND_TOOL_COUNT) {
+    return {
+      mode: 'all',
+      estimatedTokens,
+      budgetTokens,
+      reason: `${mcpToolCount} MCP tool(s) ≤ ${MAX_DIRECT_BIND_TOOL_COUNT}; direct binding avoids search latency.`,
     };
   }
   if (estimatedTokens <= budgetTokens) {
@@ -164,19 +178,71 @@ export function isMcpInventoryQuery(query: string): boolean {
   );
 }
 
-/** Stable names-only context; remote prose and executable identities stay hidden. */
-export function capabilityNameSummary(descriptors: CapabilityDescriptor[]) {
-  return descriptors
-    .filter((descriptor) => descriptor.kind === 'mcp_tool')
-    .map((descriptor) => ({
-      provider: safeMetadata(descriptor.provider.id),
-      tool: safeMetadata(descriptor.displayName),
-    }))
-    .filter(({ provider, tool }) => provider.length > 0 && tool.length > 0)
-    .sort(
-      (left, right) =>
-        left.provider.localeCompare(right.provider) || left.tool.localeCompare(right.tool),
-    );
+/**
+ * Detect whether a query is asking for MCP tool/provider inventory.
+ * Supports both English (set-based) and Chinese (regex-based) detection
+ * without depending on whitespace tokenization.
+ */
+export function isMcpInventoryIntent(query: string): boolean {
+  const normalized = query.trim().slice(0, 512).toLocaleLowerCase();
+
+  const containsMcp = /mcp/i.test(normalized);
+
+  // Chinese inventory patterns — do NOT depend on whitespace tokenization
+  const chineseInventory =
+    /(有哪些|有什么|列出|显示|查看|当前|可用).{0,10}(工具|服务|服务器|能力)/u.test(normalized) ||
+    /(工具|服务|服务器|能力).{0,10}(有哪些|有什么|列表|清单)/u.test(normalized);
+
+  if (!containsMcp && !chineseInventory) return false;
+
+  // English set-based detection (preserve existing logic for backward compat)
+  if (containsMcp) {
+    const queryTerms = terms(normalized);
+    if (
+      queryTerms.some((term) =>
+        [
+          'available',
+          'catalog',
+          'configured',
+          'list',
+          'server',
+          'servers',
+          'tool',
+          'tools',
+        ].includes(term),
+      )
+    ) {
+      return (
+        queryTerms.every((term) => MCP_INVENTORY_TERMS.has(term)) ||
+        /(?:what|which)\s+(?:mcp\s+)?tools?/u.test(normalized)
+      );
+    }
+  }
+
+  return chineseInventory;
+}
+
+/**
+ * Return a redirect result when the query is an inventory request.
+ * This is an error-recovery mechanism — the primary inventory path is `list_mcp_tools`.
+ */
+export interface CapabilitySearchInventoryRedirect {
+  ok: false;
+  code: 'inventory_query';
+  message: string;
+  next_tool: 'list_mcp_tools';
+}
+
+export function checkInventoryRedirect(query: string): CapabilitySearchInventoryRedirect | null {
+  if (isMcpInventoryIntent(query)) {
+    return {
+      ok: false,
+      code: 'inventory_query',
+      message: 'Use list_mcp_tools to enumerate MCP providers and tools.',
+      next_tool: 'list_mcp_tools',
+    };
+  }
+  return null;
 }
 
 export function searchCapabilities(input: {

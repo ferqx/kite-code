@@ -12,15 +12,16 @@ import { searchContent as searchContentNative, searchFiles as searchFilesNative 
 import { type ShellExecutor, shellTool } from './shell';
 import {
   ASK_USER_CONTRACT,
-  CAPABILITY_SEARCH_CONTRACT,
   EDIT_FILE_CONTRACT,
   LIST_MCP_RESOURCES_CONTRACT,
+  LIST_MCP_TOOLS_CONTRACT,
   READ_FILE_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
   READ_PLAN_CONTRACT,
   SEARCH_CONTENT_CONTRACT,
   SEARCH_FILES_CONTRACT,
   SHELL_EXECUTE_CONTRACT,
+  TOOL_SEARCH_CONTRACT,
   UPDATE_PLAN_CONTRACT,
   WEB_FETCH_CONTRACT,
   WRITE_FILE_CONTRACT,
@@ -38,7 +39,7 @@ export interface CreateAgentToolsInput {
   /** Runtime-issued MCP tool bindings for the current model call. */
   mcpBindings?: Array<{ binding: CapabilityBinding; descriptor: CapabilityDescriptor }>;
   /** Expose provider-neutral metadata discovery instead of the full catalog. */
-  capabilitySearch?: boolean;
+  toolSearch?: boolean;
   /** 可选技能清单 / Optional skill manifests */
   skills?: import('@/core/skills/types').SkillManifest[];
   /** 可选技能扫描选项 / Optional skill scan options */
@@ -104,7 +105,7 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     .map((frame) => frame.activationId)
     .sort()
     .join(',');
-  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpBindingRevision}|${input.skillCatalog?.revision ?? ''}|${activeSkillFrameKey}|${!!input.capabilitySearch}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
+  const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpBindingRevision}|${input.skillCatalog?.revision ?? ''}|${activeSkillFrameKey}|${!!input.toolSearch}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
   const readFileTool = tool({
@@ -259,6 +260,30 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     },
   });
 
+  const listMcpTools = tool({
+    description: LIST_MCP_TOOLS_CONTRACT.description,
+    inputSchema: zodSchema(
+      z.object({
+        provider: z
+          .string()
+          .trim()
+          .min(1)
+          .max(128)
+          .optional()
+          .describe('Optional provider name to filter results'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe('Maximum tools to return (default 50, max 100)'),
+        cursor: z.string().max(2048).optional().describe('Opaque cursor for pagination'),
+      }),
+    ),
+    execute: async () => JSON.stringify({ ok: false, stderr: 'Handled by tool runner.' }),
+  });
+
   const readMcpResource = tool({
     description: READ_MCP_RESOURCE_CONTRACT.description,
     inputSchema: zodSchema(
@@ -271,7 +296,7 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
       if (!input.mcpManager) {
         return JSON.stringify({
           ok: false,
-          stderr: 'No MCP manager available. Configure mcpServers in kite-code.jsonc.',
+          stderr: 'No MCP manager available. Open /mcp to manage MCP providers.',
         });
       }
       try {
@@ -372,9 +397,9 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
           ),
         })
       : null;
-  const capabilitySearchTool = input.capabilitySearch
+  const toolSearchTool = input.toolSearch
     ? dynamicTool({
-        description: CAPABILITY_SEARCH_CONTRACT.description,
+        description: TOOL_SEARCH_CONTRACT.description,
         inputSchema: zodSchema(
           z.object({
             query: z.string().trim().min(2).max(512).describe('Capability intent to search for'),
@@ -492,12 +517,13 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     search_content: searchContent,
     search_files: searchFiles,
     list_mcp_resources: listMcpResources,
+    list_mcp_tools: listMcpTools,
     read_mcp_resource: readMcpResource,
     web_fetch: webFetchTool,
     ...(activateSkillTool ? { activate_skill: activateSkillTool } : {}),
     ...(completeSkillTool ? { complete_skill: completeSkillTool } : {}),
     ...(readSkillReferenceTool ? { read_skill_reference: readSkillReferenceTool } : {}),
-    ...(capabilitySearchTool ? { capability_search: capabilitySearchTool } : {}),
+    ...(toolSearchTool ? { tool_search: toolSearchTool } : {}),
     ...(taskTool ? { task: taskTool } : {}),
     write_plan: createWritePlanTool(),
     update_plan: createProgressUpdatePlanTool(),

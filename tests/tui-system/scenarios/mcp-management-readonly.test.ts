@@ -168,7 +168,7 @@ describe('TUI PTY System — MCP Select management', () => {
           tool_calls: [
             {
               id: 'search-capabilities',
-              name: 'capability_search',
+              name: 'tool_search',
               args: { query: 'search documentation' },
             },
           ],
@@ -281,7 +281,7 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(screenContains(tui.output(), '❯')).toBe(true);
     const requests = server.getRequests();
     expect(requests).toHaveLength(3);
-    expect(JSON.stringify(requests[0]?.body)).toContain('capability_search');
+    expect(JSON.stringify(requests[0]?.body)).toContain('tool_search');
     expect(JSON.stringify(requests[0]?.body)).not.toContain(exposedToolName);
     expect(JSON.stringify(requests[1]?.body)).toContain(exposedToolName);
     expect(JSON.stringify(requests[2]?.messages)).toContain('documentation result from MCP');

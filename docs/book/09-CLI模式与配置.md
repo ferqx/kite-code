@@ -52,3 +52,5 @@ MCP server 可配置 stdio/HTTP transport、`enabled`、`required`、`cwd`、tim
 ## 9.5 Feature flags
 
 Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时按各 active 规则 fail closed 或回到当前受治理路径，不允许恢复已删除的旧 MCP adapter、Prompt Skill 或旧状态机。
+
+`toolSearchV1`（原 `capabilitySearchV1`）控制 MCP 工具渐进披露：≤20 工具时直接 binding，>20 工具时通过 `tool_search` 搜索发现。

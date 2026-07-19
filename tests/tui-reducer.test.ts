@@ -93,16 +93,16 @@ describe('eventReducer (blocks model)', () => {
       }));
       const stdout = JSON.stringify({ ok: true, candidate_count: candidates.length, candidates });
       let s = fresh();
-      s = dispatch(s, tcEvt('search-1', 'capability_search', { query: 'search docs' }));
+      s = dispatch(s, tcEvt('search-1', 'tool_search', { query: 'search docs' }));
       s = eventReducer(s, {
         type: 'RUNTIME_EVENT',
         event: {
           type: 'tool.finished',
           toolCallId: 'search-1',
-          name: 'capability_search',
+          name: 'tool_search',
           result: {
             ok: true,
-            command: 'capability_search',
+            command: 'tool_search',
             exitCode: 0,
             stdout,
             stderr: '',

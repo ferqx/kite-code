@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpRuntimeProvider } from '@/core/mcp';
-import { isMcpProviderError, normalizeMcpToolResult } from '@/core/mcp';
+import { buildMcpInventory, isMcpProviderError, normalizeMcpToolResult } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
   evaluateToolApproval,
@@ -502,6 +502,52 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
               ? 'Call read_mcp_resource with an exact server and URI.'
               : 'No static MCP resources are currently available.',
       }),
+      stderr: '',
+    });
+  }
+
+  if (request.name === 'list_mcp_tools') {
+    if (!mcpManager) {
+      return withFailureGuidance(request, {
+        ok: true,
+        command: request.protectedCommand,
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          configured_provider_count: 0,
+          callable_provider_count: 0,
+          available_tool_count: 0,
+          providers: [],
+          tools: [],
+          truncated: false,
+        }),
+        stderr: '',
+      });
+    }
+    // Wait for connecting providers to finish initial discovery before building inventory
+    const initialDir = mcpManager.getProviderDirectorySnapshot();
+    const connectingProviders = initialDir.entries.filter((e) => e.status === 'connecting');
+    if (connectingProviders.length > 0 && mcpManager.ensureProviderReady) {
+      await Promise.allSettled(
+        connectingProviders.map((p) =>
+          mcpManager.ensureProviderReady!(p.providerId, 5_000, signal),
+        ),
+      );
+    }
+    const result = buildMcpInventory({
+      capabilities: mcpManager.getCapabilitySnapshot(),
+      providers: mcpManager.getProviderDirectorySnapshot(),
+      query: {
+        provider: request.args.provider,
+        limit: request.args.limit,
+        cursor: request.args.cursor,
+      },
+    });
+    return withFailureGuidance(request, {
+      ok: result.ok,
+      command: request.protectedCommand,
+      exitCode: result.ok ? 0 : -1,
+      stdout: JSON.stringify(result),
       stderr: '',
     });
   }

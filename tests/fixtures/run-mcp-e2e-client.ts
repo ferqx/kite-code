@@ -55,7 +55,7 @@ try {
         tool_calls: [
           {
             id: 'authenticated-mcp-search',
-            name: 'capability_search',
+            name: 'tool_search',
             args: { query: 'authenticated echo' },
           },
         ],
@@ -95,7 +95,7 @@ try {
         features: {
           capabilityCatalogV1: true,
           mcpRuntimeBindingV1: true,
-          capabilitySearchV1: true,
+          toolSearchV1: true,
           mcpExecutionRecordV1: true,
         },
       },
