@@ -65,7 +65,7 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 
 显式模型条目优先于内置模型目录和兼容 `modelKwargs`。未知模型不会获得假定上下文窗口；此时 Runtime 仍可调用模型，但上下文 utilization 显示为 unknown，并对 Capability disclosure 使用保守预算。
 
-自动 M2 由 `features.contextCompactionAutoV1` 单独开启，默认关闭。`compaction` 可配置 `softRatio`、`hardRatio`、`targetRatio`、`minimumReductionRatio`、`cooldownTurns`、`recentTurns`、`maxSummaryTokens` 与 `maxSummaryInputTokens`；所有 ratio 限制在 0–1，token/turn 数必须为非负或正整数。当前 summary 请求复用主模型，但不绑定工具并使用独立的确定性输出限制。
+自动 M2 由 `features.contextCompactionAutoV1` 单独开启，默认关闭。`compaction` 可配置 `warningRatio`（默认 0.80）、`softRatio`（compact 阈值，默认 0.88）、`hardRatio`（默认 0.94）、`targetRatio`（默认 0.62）、`minimumReductionRatio`、`cooldownTurns`、`recentTurns`、`maxSummaryTokens`、`maxSummaryInputTokens`、`providerSafetyRatio`、`maxAutoCompactionsPerWindow`、`autoCompactionWindowTurns`、`maxConsecutiveLowGain`。跨字段关系由 `superRefine` 强制校验（`warningRatio < softRatio < hardRatio` 且 `targetRatio < softRatio`）。当前 summary 请求复用主模型（`tools: {}`，temperature 0），自定义指令作为数据字段传入。
 
 ## 9.4 MCP 配置
 
@@ -81,4 +81,4 @@ Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时�
 
 `toolSearchV1`（原 `capabilitySearchV1`）控制 MCP 工具渐进披露：≤20 工具时直接 binding，>20 工具时通过 `tool_search` 搜索发现。
 
-上下文压缩使用三个独立 flag：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动 soft/hard 与 overflow recovery，默认关闭；`contextCompactionManualV1` 控制 `/compact` 命令，默认开启。`/compact` 接受可选的自定义摘要指令（例如 `/compact focus on auth changes`）注入到 summary prompt。
+上下文压缩使用三个独立 flag：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制五级 pressure 自动压缩与 durable hardBlock + thrash breaker，默认关闭；`contextCompactionManualV1` 控制 `/compact` 命令，默认开启。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt）。`/context` 显示分项 token 占用和压缩状态。`/compact reset` 在预检通过后清除 active checkpoint 和 hardBlock。

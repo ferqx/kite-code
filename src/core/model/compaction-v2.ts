@@ -52,7 +52,9 @@ export function findSafeCompactionBoundary(
   protectedTurns.add(SENTINEL_NO_TURN);
   const latestUser = [...messages].reverse().find((message) => message.kind === 'user');
   if (latestUser?.turnId) protectedTurns.add(latestUser.turnId);
-  const firstProtected = messages.findIndex((message) => protectedTurns.has(message.turnId ?? ''));
+  const firstProtected = messages.findIndex((message) =>
+    protectedTurns.has(message.turnId || SENTINEL_NO_TURN),
+  );
   const coveredMessages = messages.slice(0, firstProtected < 0 ? messages.length : firstProtected);
   const protectedMessages = messages.slice(coveredMessages.length);
   if (coveredMessages.length === 0) {
@@ -140,6 +142,58 @@ export function findSafeCompactionBoundary(
     ),
     coveredMessages,
   };
+}
+
+/** Sentinel value for messages without a turnId (legacy or corrupted). */
+export const SENTINEL_NO_TURN = '__NO_TURN__';
+
+/**
+ * Recover synthetic turns from legacy transcripts (v13/v14 or older snapshots)
+ * where messages lack proper `turnId` assignments.
+ *
+ * Strategy:
+ * - Each user message starts a new synthetic turn.
+ * - Subsequent assistant/tool/runtime messages are grouped with the most recent user turn.
+ * - Messages before the first user message → `legacy-preamble` turn (protected, never compacted).
+ * - IDs use stable hash-based derivation (not random UUIDs) for deterministic replay.
+ */
+export function recoverLegacySyntheticTurns(
+  messages: TranscriptMessage[],
+  threadHash: string,
+): TranscriptMessage[] {
+  if (messages.length === 0) return messages;
+
+  const allUserless = messages.every((m) => m.kind !== 'user');
+  if (allUserless) {
+    // No user boundary at all — wrap everything in a preamble turn.
+    return messages.map((m, i) => ({
+      ...m,
+      turnId: `legacy-preamble-${threadHash}`,
+      messageId: m.messageId || `legacy-message-${threadHash}-${i}`,
+    }));
+  }
+
+  let syntheticIndex = 0;
+  let currentTurnId = '';
+  const result: TranscriptMessage[] = [];
+
+  for (const message of messages) {
+    if (message.kind === 'user') {
+      syntheticIndex++;
+      currentTurnId = `legacy-turn-${threadHash}-${syntheticIndex}`;
+    } else if (!currentTurnId) {
+      // Messages before the first user → preamble turn (always protected).
+      currentTurnId = `legacy-preamble-${threadHash}`;
+    }
+
+    result.push({
+      ...message,
+      turnId: message.turnId || currentTurnId,
+      messageId: message.messageId || `legacy-message-${threadHash}-${result.length}`,
+    });
+  }
+
+  return result;
 }
 
 export function digestCompactionSource(messages: TranscriptMessage[]): string {

@@ -24,10 +24,14 @@ export interface CompactionMetricsSnapshot {
   overflowRecoveries: number;
   resets: number;
   m1FramesFolded: number;
+  hardBlocks: number;
+  thrashPauses: number;
   samples: CompactionMetricSample[];
   /** Rolling average reduction ratio across completed compactions */
   averageReductionRatio: number;
   totalTokensSaved: number;
+  /** Latest estimation error ratio (actualEstimate / preflight estimate) */
+  estimationErrorRatio?: number;
 }
 
 const MAX_SAMPLES = 64;
@@ -39,6 +43,9 @@ class CompactionMetrics {
   private _overflowRecoveries = 0;
   private _resets = 0;
   private _m1FramesFolded = 0;
+  private _hardBlocks = 0;
+  private _thrashPauses = 0;
+  private _estimationErrorRatio?: number;
   private _samples: CompactionMetricSample[] = [];
 
   /** Increment the requested counter. */
@@ -92,6 +99,21 @@ class CompactionMetrics {
     this._m1FramesFolded = count;
   }
 
+  /** Increment the hard block counter. */
+  recordHardBlock(): void {
+    this._hardBlocks++;
+  }
+
+  /** Increment the thrash pause counter. */
+  recordThrashPause(): void {
+    this._thrashPauses++;
+  }
+
+  /** Record estimation error for calibration (actualInputTokens / estimatedInputTokens). */
+  recordEstimationError(ratio: number): void {
+    this._estimationErrorRatio = ratio;
+  }
+
   /** Return a read-only snapshot of current metrics. */
   snapshot(): CompactionMetricsSnapshot {
     const totalReduction = this._samples.reduce((sum, sample) => sum + sample.reductionRatio, 0);
@@ -102,6 +124,9 @@ class CompactionMetrics {
       overflowRecoveries: this._overflowRecoveries,
       resets: this._resets,
       m1FramesFolded: this._m1FramesFolded,
+      hardBlocks: this._hardBlocks,
+      thrashPauses: this._thrashPauses,
+      estimationErrorRatio: this._estimationErrorRatio,
       samples: [...this._samples],
       averageReductionRatio: this._samples.length > 0 ? totalReduction / this._samples.length : 0,
       totalTokensSaved: this._samples.reduce(

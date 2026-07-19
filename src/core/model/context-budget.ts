@@ -3,6 +3,9 @@ import { countTokens } from '@/core/token-counter';
 import type { ResolvedModelCapabilities } from './model-capabilities';
 import { usableInputBudget } from './model-capabilities';
 
+/** Five-level context pressure — replaces the old soft/hard binary. */
+export type ContextPressure = 'unknown' | 'normal' | 'warning' | 'compact_due' | 'hard_limit';
+
 export interface ContextTokenEstimate {
   systemTokens: number;
   toolSchemaTokens: number;
@@ -19,7 +22,9 @@ export interface ContextPreflight {
   reservedOutputTokens: number;
   providerSafetyMarginTokens: number;
   utilization?: number;
-  status: 'unknown' | 'within_budget' | 'soft' | 'hard';
+  /** Five-level pressure — see `ContextPressure`. */
+  status: ContextPressure;
+  /** Token target after compaction. */
   targetTokens?: number;
 }
 
@@ -125,6 +130,8 @@ export function preflightModelContext(input: {
   softRatio?: number;
   hardRatio?: number;
   targetRatio?: number;
+  /** Below this ratio → no action needed. Default 0.80. */
+  warningRatio?: number;
 }): ContextPreflight {
   const budget = usableInputBudget(input.capabilities, input.requestMaxOutputTokens);
   if (budget.usableInputTokens == null || budget.usableInputTokens <= 0) {
@@ -136,18 +143,28 @@ export function preflightModelContext(input: {
     };
   }
   const utilization = input.estimate.totalInputTokens / budget.usableInputTokens;
+  const warningRatio = input.warningRatio ?? 0.8;
+  const compactRatio = input.softRatio ?? 0.88; // softRatio renamed: was the old "soft" threshold
+  const hardRatio = input.hardRatio ?? 0.94;
+
+  let status: ContextPressure;
+  if (utilization >= hardRatio) {
+    status = 'hard_limit';
+  } else if (utilization >= compactRatio) {
+    status = 'compact_due';
+  } else if (utilization >= warningRatio) {
+    status = 'warning';
+  } else {
+    status = 'normal';
+  }
+
   return {
     estimate: input.estimate,
     usableInputTokens: budget.usableInputTokens,
     reservedOutputTokens: budget.reservedOutputTokens,
     providerSafetyMarginTokens: budget.providerSafetyMarginTokens,
     utilization,
-    status:
-      utilization >= (input.hardRatio ?? 0.88)
-        ? 'hard'
-        : utilization >= (input.softRatio ?? 0.72)
-          ? 'soft'
-          : 'within_budget',
-    targetTokens: Math.floor(budget.usableInputTokens * (input.targetRatio ?? 0.55)),
+    status,
+    targetTokens: Math.floor(budget.usableInputTokens * (input.targetRatio ?? 0.62)),
   };
 }

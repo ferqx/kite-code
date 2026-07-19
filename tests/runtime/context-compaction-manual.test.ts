@@ -94,7 +94,7 @@ describe('manual context compaction service', () => {
       targetTokens: 4_400,
       totalInputTokens: 6_000,
       utilization: 0.75,
-      status: 'soft',
+      status: 'compact_due',
       estimate: {
         systemTokens: 100,
         toolSchemaTokens: 100,
@@ -110,7 +110,7 @@ describe('manual context compaction service', () => {
       reservedOutputTokens: 1_000,
       providerSafetyMarginTokens: 1_000,
       targetTokens: 4_400,
-      status: 'soft',
+      status: 'compact_due',
     });
   });
 });

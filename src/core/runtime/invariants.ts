@@ -57,6 +57,7 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   assertUnique(state.tools.queue, 'tool queue');
   assertUnique(state.tools.active, 'active tools');
   assert(state.context != null, 'context runtime state is required.');
+  assert(state.context.autoGuard != null, 'context autoGuard is required.');
   assert(state.context.history.length <= 128, 'context compaction history exceeds its bound.');
   if (state.context.pendingCompaction) {
     const pending = state.context.pendingCompaction;
@@ -86,8 +87,8 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
     const checkpoint = state.context.activeCheckpoint;
     assert(checkpoint.version === 1, 'active context checkpoint version must be 1.');
     assert(
-      checkpoint.summary.version === 1,
-      'active structured context summary version must be 1.',
+      checkpoint.summary.version === 1 || checkpoint.summary.version === 2,
+      'active structured context summary version must be 1 or 2.',
     );
     assert(
       checkpoint.summary.provenance.sourceDigest === checkpoint.sourceDigest,
@@ -99,11 +100,19 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
     );
     assert(Boolean(checkpoint.compactionId), 'active context checkpoint id is required.');
     assert(Boolean(checkpoint.sourceDigest), 'active context checkpoint digest is required.');
-    assert(
-      checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
-        checkpoint.inputTokensAfter <= checkpoint.targetTokens,
-      'active context checkpoint must satisfy its token reduction target.',
-    );
+    if (checkpoint.reason === 'manual') {
+      assert(
+        checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
+          checkpoint.inputTokensBefore - checkpoint.inputTokensAfter >= 1_024,
+        'manual context checkpoint must save at least 1024 tokens.',
+      );
+    } else {
+      assert(
+        checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
+          checkpoint.inputTokensAfter <= checkpoint.targetTokens,
+        'active context checkpoint must satisfy its token reduction target.',
+      );
+    }
     const boundary = state.transcript.messages.find(
       (message) => message.messageId === checkpoint.coveredThroughMessageId,
     );

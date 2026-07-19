@@ -24,7 +24,10 @@ function estimate(totalInputTokens: number): ContextTokenEstimate {
   };
 }
 
-function preflight(status: 'soft' | 'hard', totalInputTokens = 9_000): ContextPreflight {
+function preflight(
+  status: 'compact_due' | 'hard_limit',
+  totalInputTokens = 9_000,
+): ContextPreflight {
   return {
     estimate: estimate(totalInputTokens),
     usableInputTokens: 10_000,
@@ -80,7 +83,7 @@ describe('automatic context compaction', () => {
     expect(
       decideAutomaticContextCompaction({
         state,
-        preflight: preflight('soft'),
+        preflight: preflight('compact_due'),
         enabled: true,
       }),
     ).toMatchObject({ action: 'request_compaction', reason: 'auto_soft' });
@@ -89,7 +92,7 @@ describe('automatic context compaction', () => {
     expect(
       decideAutomaticContextCompaction({
         state,
-        preflight: preflight('soft'),
+        preflight: preflight('compact_due'),
         enabled: true,
       }),
     ).toEqual({ action: 'invoke' });
@@ -101,7 +104,7 @@ describe('automatic context compaction', () => {
     expect(
       decideAutomaticContextCompaction({
         state,
-        preflight: preflight('hard'),
+        preflight: preflight('hard_limit'),
         enabled: true,
       }),
     ).toMatchObject({ action: 'request_compaction', reason: 'auto_hard' });
@@ -115,7 +118,7 @@ describe('automatic context compaction', () => {
     expect(
       decideAutomaticContextCompaction({
         state,
-        preflight: preflight('hard'),
+        preflight: preflight('hard_limit'),
         enabled: true,
       }),
     ).toMatchObject({ action: 'block' });
@@ -134,12 +137,12 @@ describe('automatic context compaction', () => {
       }),
     );
     expect(events).toContainEqual(
-      expect.objectContaining({ type: 'model.context_metrics', status: 'hard' }),
+      expect.objectContaining({ type: 'model.context_metrics', status: 'hard_limit' }),
     );
     expect(events.some((event) => event.type === 'model.requested')).toBe(false);
   });
 
-  test('hard compaction failure blocks an immediate repeat model call', () => {
+  test('hard compaction failure blocks an immediate repeat model call via durable hardBlock', () => {
     const requested = reduceRuntimeState(historicalState(), {
       type: 'context.compaction_requested',
       compactionId: 'hard',
@@ -158,10 +161,14 @@ describe('automatic context compaction', () => {
       message: 'still too large',
       retryable: true,
     });
+    // hardBlock should be set on auto_hard + insufficient_reduction
+    expect(failed.context.hardBlock).toBeDefined();
+    expect(failed.context.hardBlock!.reason).toBe('hard_limit');
+    // Even after unrelated revision changes, the block persists.
     failed.revision = 11;
     expect(decideNextEffect(failed)).toMatchObject({
       type: 'recovery_blocked',
-      reason: expect.stringContaining('still too large'),
+      reason: expect.stringContaining('hard-blocked'),
     });
   });
 
@@ -241,5 +248,131 @@ describe('automatic context compaction', () => {
       expect(metrics.estimate.transcriptTokens).toBeLessThan(8_000);
     }
     expect(mock.callCount.count).toBe(1);
+  });
+
+  describe('hard block and thrash breaker', () => {
+    test('durable hard block prevents further auto-compaction after hard-limit failure', () => {
+      const state = historicalState();
+      // Set pending then fail — simulates a real failed compaction attempt.
+      const pending: Parameters<typeof reduceRuntimeState>[1] = {
+        type: 'context.compaction_requested',
+        compactionId: 'cmp-fail',
+        reason: 'auto_hard',
+        requestedAtRevision: state.revision,
+        requestedAtTurnId: state.turn.turnId,
+        force: false,
+        estimate: estimate(10_000),
+      };
+      const withPending = reduceRuntimeState(state, pending);
+      const withHardBlock = reduceRuntimeState(withPending, {
+        type: 'context.compaction_failed',
+        compactionId: 'cmp-fail',
+        sourceRevision: state.revision,
+        errorKind: 'insufficient_reduction',
+        message: 'Not enough reduction.',
+        retryable: false,
+      });
+
+      expect(withHardBlock.context.hardBlock).toBeDefined();
+      expect(withHardBlock.context.hardBlock!.reason).toBe('hard_limit');
+
+      // Decision should block.
+      const decision = decideAutomaticContextCompaction({
+        state: withHardBlock,
+        preflight: preflight('hard_limit'),
+        enabled: true,
+      });
+      expect(decision.action).toBe('block');
+    });
+
+    test('successful compaction clears hard block', () => {
+      const state = historicalState();
+      const withPending = reduceRuntimeState(state, {
+        type: 'context.compaction_requested',
+        compactionId: 'cmp-ok',
+        reason: 'auto_hard',
+        requestedAtRevision: state.revision,
+        requestedAtTurnId: state.turn.turnId,
+        force: false,
+        estimate: estimate(10_000),
+      });
+      // Simulate failure first, then success.
+      const failed = reduceRuntimeState(withPending, {
+        type: 'context.compaction_failed',
+        compactionId: 'cmp-ok',
+        sourceRevision: state.revision,
+        errorKind: 'insufficient_reduction',
+        message: 'failed',
+        retryable: false,
+      });
+      expect(failed.context.hardBlock).toBeDefined();
+
+      // Now set up another pending and complete successfully.
+      const withPending2 = reduceRuntimeState(failed, {
+        type: 'context.compaction_requested',
+        compactionId: 'cmp-win',
+        reason: 'manual',
+        requestedAtRevision: state.revision + 1,
+        requestedAtTurnId: state.turn.turnId,
+        force: false,
+        estimate: estimate(10_000),
+      });
+      const succeeded = reduceRuntimeState(withPending2, {
+        type: 'context.compaction_completed',
+        compactionId: 'cmp-win',
+        sourceRevision: state.revision + 1,
+        checkpoint: {
+          compactionId: 'cmp-win',
+          version: 1,
+          sourceRevision: state.revision + 1,
+          sourceDigest: 'abc',
+          coveredThroughMessageId: 'msg-3',
+          coveredThroughTurnId: 'turn-3',
+          summary: { version: 2 } as never,
+          inputTokensBefore: 10_000,
+          inputTokensAfter: 5_000,
+          targetTokens: 6_000,
+          reason: 'manual',
+          createdAt: new Date().toISOString(),
+        },
+      });
+      expect(succeeded.context.hardBlock).toBeUndefined();
+    });
+
+    test('compaction_reset clears hard block', () => {
+      const state = historicalState();
+      // Set up hard block via failure.
+      const withPending = reduceRuntimeState(state, {
+        type: 'context.compaction_requested',
+        compactionId: 'cmp-fail2',
+        reason: 'auto_hard',
+        requestedAtRevision: state.revision,
+        requestedAtTurnId: state.turn.turnId,
+        force: false,
+        estimate: estimate(10_000),
+      });
+      const failed = reduceRuntimeState(withPending, {
+        type: 'context.compaction_failed',
+        compactionId: 'cmp-fail2',
+        sourceRevision: state.revision,
+        errorKind: 'insufficient_reduction',
+        message: 'failed',
+        retryable: false,
+      });
+      expect(failed.context.hardBlock).toBeDefined();
+
+      // Set active checkpoint and reset
+      const withCp = {
+        ...failed,
+        context: { ...failed.context, activeCheckpoint: { compactionId: 'old-cp' } as never },
+      };
+      const reset = reduceRuntimeState(withCp as RuntimeState, {
+        type: 'context.compaction_reset',
+        checkpointId: 'old-cp',
+        reason: 'manual',
+      });
+      expect(reset.context.hardBlock).toBeUndefined();
+      expect(reset.context.autoGuard.disabledUntilManualAction).toBe(false);
+    });
   });
 });

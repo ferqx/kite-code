@@ -7,9 +7,11 @@ import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   evaluateCircuitBreaker,
 } from '@/core/execution/circuit-breaker';
+import { THRASH_CONFIG } from '@/core/model/context-compaction-decision';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
+import type { ContextRuntimeState } from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import {
@@ -98,6 +100,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             force: event.force,
             estimate: event.estimate,
             ...(event.customInstructions ? { customInstructions: event.customInstructions } : {}),
+            ...(event.tools ? { tools: event.tools } : {}),
           },
           lastFailure: undefined,
           ...(event.reason === 'overflow_recovery'
@@ -114,6 +117,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         event.checkpoint.sourceRevision !== event.sourceRevision
       )
         return state;
+      const reductionRatio =
+        event.checkpoint.inputTokensBefore > 0
+          ? 1 - event.checkpoint.inputTokensAfter / event.checkpoint.inputTokensBefore
+          : 0;
       return {
         ...state,
         context: {
@@ -121,31 +128,72 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           activeCheckpoint: event.checkpoint,
           pendingCompaction: undefined,
           lastFailure: undefined,
+          hardBlock: undefined, // clear on successful compaction
           history: [
             ...state.context.history,
             { kind: 'completed' as const, checkpoint: event.checkpoint },
           ].slice(-128),
           lastCompactionTurnIndex: state.turn.turnIndex,
+          autoGuard: {
+            recentAutomaticCompactions: [
+              ...state.context.autoGuard.recentAutomaticCompactions,
+              {
+                turnIndex: state.turn.turnIndex,
+                reductionRatio,
+                tokensAfter: event.checkpoint.inputTokensAfter,
+              },
+            ].slice(-16),
+            consecutiveLowGain: 0,
+            disabledUntilManualAction: false, // success clears the thrash breaker
+          },
         },
       };
     }
 
     case 'context.compaction_failed': {
       if (state.context.pendingCompaction?.compactionId !== event.compactionId) return state;
+      const reason = state.context.pendingCompaction.reason;
       const failure = {
         compactionId: event.compactionId,
         sourceRevision: event.sourceRevision,
         errorKind: event.errorKind,
         message: event.message,
         retryable: event.retryable,
-        reason: state.context.pendingCompaction.reason,
+        reason,
       };
+      // Durable hard block for hard-limit failures and repeated overflow.
+      // Manual compactions never create a hard block.
+      const hardBlock: ContextRuntimeState['hardBlock'] =
+        reason !== 'manual' &&
+        (reason === 'auto_hard' ||
+          reason === 'overflow_recovery' ||
+          event.errorKind === 'insufficient_reduction')
+          ? {
+              reason: reason === 'overflow_recovery' ? 'overflow_recovery_failed' : 'hard_limit',
+              compactionId: event.compactionId,
+              sourceDigest: '',
+              failure,
+              createdAtTurnId: state.turn.turnId,
+            }
+          : undefined;
+      // Auto-guard: track low-gain failures.
+      const isLowGain = event.errorKind === 'insufficient_reduction';
+      const autoGuard = isLowGain
+        ? {
+            ...state.context.autoGuard,
+            consecutiveLowGain: state.context.autoGuard.consecutiveLowGain + 1,
+            disabledUntilManualAction:
+              state.context.autoGuard.consecutiveLowGain + 1 >= THRASH_CONFIG.maxConsecutiveLowGain,
+          }
+        : state.context.autoGuard;
       return {
         ...state,
         context: {
           ...state.context,
           pendingCompaction: undefined,
           lastFailure: failure,
+          ...(hardBlock ? { hardBlock } : {}),
+          autoGuard,
           history: [...state.context.history, { kind: 'failed' as const, failure }].slice(-128),
         },
       };
@@ -158,6 +206,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         context: {
           ...state.context,
           activeCheckpoint: undefined,
+          hardBlock: undefined,
+          autoGuard: {
+            recentAutomaticCompactions: [],
+            consecutiveLowGain: 0,
+            disabledUntilManualAction: false,
+          },
           history: [
             ...state.context.history,
             {

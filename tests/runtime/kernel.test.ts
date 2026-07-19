@@ -37,7 +37,7 @@ describe('AgentKernel durability', () => {
         storePath,
       });
       expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(restored.getState().context).toEqual({ history: [] });
+      expect(restored.getState().context).toMatchObject({ history: [] });
       restored.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

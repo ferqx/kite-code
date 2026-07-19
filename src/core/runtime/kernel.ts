@@ -585,7 +585,14 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     ...normalizeRuntimeMetadata(snapshot),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     verification: (snapshot as Partial<RuntimeState>).verification ?? { records: {} },
-    context: (snapshot as Partial<RuntimeState>).context ?? { history: [] },
+    context: (snapshot as Partial<RuntimeState>).context ?? {
+      history: [],
+      autoGuard: {
+        recentAutomaticCompactions: [],
+        consecutiveLowGain: 0,
+        disabledUntilManualAction: false,
+      },
+    },
     providerAdmission: (snapshot as Partial<RuntimeState>).providerAdmission ?? {
       pending: [],
       waivers: {},
@@ -653,7 +660,14 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     revision: Number.isInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0,
     appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
     recoveryState: raw.recoveryState ?? { kind: 'normal' },
-    context: raw.context ?? { history: [] },
+    context: raw.context ?? {
+      history: [],
+      autoGuard: {
+        recentAutomaticCompactions: [],
+        consecutiveLowGain: 0,
+        disabledUntilManualAction: false,
+      },
+    },
     transcript: {
       ...state.transcript,
       messages: (state.transcript?.messages ?? []).map((message, ordinal) => ({

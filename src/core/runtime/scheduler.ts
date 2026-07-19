@@ -20,15 +20,12 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
           : `Runtime schema ${state.recoveryState.schemaVersion} is not supported.`,
     };
   }
-  const compactionFailure = state.context.lastFailure;
-  if (
-    compactionFailure &&
-    ['auto_hard', 'overflow_recovery'].includes(compactionFailure.reason ?? '') &&
-    state.revision <= compactionFailure.sourceRevision + 1
-  ) {
+  // Durable hard block check — replaces the old revision-bounded pattern.
+  // Once set, hardBlock persists until explicit recovery (compaction success, /compact reset, or /clear).
+  if (state.context.hardBlock) {
     return {
       type: 'recovery_blocked',
-      reason: `Context compaction failed at the hard model boundary: ${compactionFailure.message}`,
+      reason: `Context is hard-blocked: ${state.context.hardBlock.reason}. Use /compact reset or start a new session.`,
     };
   }
   if (state.legacyUnrecoverableSubagentApproval) {

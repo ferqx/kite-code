@@ -5,7 +5,7 @@ describe('compactionMetrics', () => {
   test('starts with zero counts', () => {
     compactionMetrics.clear();
     const snapshot = compactionMetrics.snapshot();
-    expect(snapshot).toEqual({
+    expect(snapshot).toMatchObject({
       requested: 0,
       completed: 0,
       failed: 0,

@@ -270,6 +270,12 @@ export interface ToolResultMeta {
   contentDigest?: string;
   resourceRevision?: string;
   workspaceMutationScope?: string[];
+  /** Digest of the raw result before truncation (M1 uses this for dedup). */
+  rawResultDigest?: string;
+  /** Digest of the model-visible content (may differ from raw when truncated). */
+  modelContentDigest?: string;
+  /** Provenance of the digest fields. 'legacy_unknown' means pre-V2 data — treat conservatively. */
+  digestScope?: 'raw' | 'projected' | 'legacy_unknown';
 }
 
 export interface CapabilityRuntimeState {
@@ -559,7 +565,14 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       turnIndex: 0,
     },
     transcript: { messages: [] },
-    context: { history: [] },
+    context: {
+      history: [],
+      autoGuard: {
+        recentAutomaticCompactions: [],
+        consecutiveLowGain: 0,
+        disabledUntilManualAction: false,
+      },
+    },
     planning: initialPlanning,
     activeTaskId: null,
     tasks: {},

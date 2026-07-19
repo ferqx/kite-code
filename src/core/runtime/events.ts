@@ -72,6 +72,8 @@ export interface ContextCompactionRequestedEvent {
   estimate: ContextTokenEstimate;
   /** Optional user-supplied instructions for the summary model. */
   customInstructions?: string;
+  /** Tool definitions for candidate projection validation (PR 5). */
+  tools?: Record<string, unknown>;
 }
 
 export interface ContextCompactionCompletedEvent {
@@ -685,7 +687,7 @@ export interface ModelContextMetricsEvent {
   targetTokens?: number;
   totalInputTokens: number;
   utilization?: number;
-  status: 'unknown' | 'within_budget' | 'soft' | 'hard';
+  status: import('@/core/model/context-budget').ContextPressure;
   estimate: import('@/core/model/context-budget').ContextTokenEstimate;
 }
 

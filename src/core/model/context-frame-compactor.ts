@@ -180,6 +180,10 @@ export function compactContextFrames(
         }
       }
       if (!RESOURCE_READ_TOOLS.has(call.name) || call.effectClass !== 'read_only') continue;
+      // Legacy metadata: no reliable digest → fail closed, never fold.
+      if (call.resultMeta?.digestScope === 'legacy_unknown') {
+        continue;
+      }
       const key = resourceKey(call, globalGeneration, pathGenerations);
       if (!key) continue;
       const earlier = latestObservation.get(key);
@@ -212,7 +216,8 @@ export function compactContextFrames(
       if (
         call.effectClass === 'read_only' &&
         !RESOURCE_READ_TOOLS.has(call.name) &&
-        call.resultMeta?.contentDigest
+        call.resultMeta?.contentDigest &&
+        call.resultMeta?.digestScope !== 'legacy_unknown'
       ) {
         const signature = `${call.name}:${stableStringify(call.args)}:${normalizedDigest(
           call.resultMeta.contentDigest,

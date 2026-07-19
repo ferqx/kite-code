@@ -36,12 +36,12 @@ describe('full request context estimator', () => {
     );
   });
 
-  test('classifies utilization against soft and hard ratios', () => {
+  test('classifies utilization against five-level pressure thresholds', () => {
     const capabilities = {
       providerName: 'test',
       modelName: 'test',
-      contextWindowTokens: 10_000,
-      maxOutputTokens: 1_000,
+      contextWindowTokens: 20_000,
+      maxOutputTokens: 2_000,
       supportsUsageMetadata: false,
       supportsPromptCache: false,
     };
@@ -54,11 +54,23 @@ describe('full request context estimator', () => {
       framingTokens: 0,
       totalInputTokens,
     });
-    expect(preflightModelContext({ estimate: makeEstimate(6_000), capabilities }).status).toBe(
-      'soft',
+    // reservedOutputTokens = 2000, providerSafetyMarginTokens = max(1024, 200) = 1024
+    // usableInputTokens = 20000 - 2000 - 1024 = 16976
+    // 12000/16976 ≈ 0.707 → normal (< 0.80)
+    expect(preflightModelContext({ estimate: makeEstimate(12_000), capabilities }).status).toBe(
+      'normal',
     );
-    expect(preflightModelContext({ estimate: makeEstimate(7_500), capabilities }).status).toBe(
-      'hard',
+    // 14000/16976 ≈ 0.825 → warning (≥ 0.80)
+    expect(preflightModelContext({ estimate: makeEstimate(14_000), capabilities }).status).toBe(
+      'warning',
+    );
+    // 15200/16976 ≈ 0.895 → compact_due (≥ 0.88)
+    expect(preflightModelContext({ estimate: makeEstimate(15_200), capabilities }).status).toBe(
+      'compact_due',
+    );
+    // 16200/16976 ≈ 0.954 → hard_limit (≥ 0.94)
+    expect(preflightModelContext({ estimate: makeEstimate(16_200), capabilities }).status).toBe(
+      'hard_limit',
     );
   });
 

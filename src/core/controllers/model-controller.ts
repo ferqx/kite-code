@@ -14,21 +14,14 @@ import {
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@/core/mcp';
-import {
-  type AIMessage,
-  aiMessage,
-  type BaseMessage,
-  humanMessage,
-  systemMessage,
-  toolMessage,
-} from '@/core/messages';
+import type { AIMessage } from '@/core/messages';
 import { compactionMetrics } from '@/core/model/compaction-metrics';
-import { prepareModelContext } from '@/core/model/context';
-import { addToolSchemasToEstimate, preflightModelContext } from '@/core/model/context-budget';
+import { preflightModelContext } from '@/core/model/context-budget';
 import {
   decideAutomaticContextCompaction,
   isProviderContextOverflow,
 } from '@/core/model/context-compaction-decision';
+import { buildContextProjection } from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { resolveModelCapabilities, usableInputBudget } from '@/core/model/model-capabilities';
@@ -36,10 +29,9 @@ import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
-import type { RuntimeState, TranscriptMessage } from '@/core/runtime/state';
+import type { RuntimeState } from '@/core/runtime/state';
 import {
   getActivePlanning,
-  getActiveTask,
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
@@ -101,89 +93,6 @@ export function eventsForInvalidModelToolCalls(
       ),
     },
   ]);
-}
-
-function runtimeTranscriptMessages(
-  messages: TranscriptMessage[],
-  calls: RuntimeState['tools']['calls'],
-): BaseMessage[] {
-  return messages.map((message) => {
-    const identity = {
-      ...(message.turnId ? { turnId: message.turnId } : {}),
-      ...(message.ordinal != null ? { ordinal: message.ordinal } : {}),
-      ...(message.createdAt ? { createdAt: message.createdAt } : {}),
-    };
-    switch (message.kind) {
-      case 'user':
-        return Object.assign(
-          humanMessage({ id: message.messageId, content: message.content }),
-          identity,
-        );
-      case 'runtime':
-        return Object.assign(systemMessage(message.content), identity);
-      case 'assistant':
-        return Object.assign(
-          aiMessage({
-            id: message.messageId,
-            content: message.content ?? '',
-            tool_calls: message.toolCalls.map((call) => ({
-              ...call,
-              args: (call.args ?? {}) as Record<string, unknown>,
-              type: 'tool_call' as const,
-            })),
-            additional_kwargs: {
-              ...(message.reasoningText ? { reasoning_content: message.reasoningText } : {}),
-            },
-          }),
-          identity,
-        );
-      case 'tool':
-        return Object.assign(
-          toolMessage({
-            id: message.messageId,
-            tool_call_id: message.toolCallId,
-            name: message.name,
-            content: message.content,
-            status: message.ok ? 'success' : 'error',
-          }),
-          identity,
-          message.resultMeta ?? {},
-          {
-            args: calls[message.toolCallId]?.args,
-            effectClass: calls[message.toolCallId]?.effectClass,
-          },
-        );
-      default:
-        return humanMessage({ content: '' });
-    }
-  });
-}
-
-function compactedTranscriptProjection(state: RuntimeState): {
-  messages: BaseMessage[];
-  summaryMessages?: BaseMessage[];
-} {
-  const checkpoint = state.context.activeCheckpoint;
-  if (!checkpoint) {
-    return { messages: runtimeTranscriptMessages(state.transcript.messages, state.tools.calls) };
-  }
-  const boundaryIndex = state.transcript.messages.findIndex(
-    (message) => message.messageId === checkpoint.coveredThroughMessageId,
-  );
-  if (boundaryIndex < 0) {
-    return { messages: runtimeTranscriptMessages(state.transcript.messages, state.tools.calls) };
-  }
-  return {
-    messages: runtimeTranscriptMessages(
-      state.transcript.messages.slice(boundaryIndex + 1),
-      state.tools.calls,
-    ),
-    summaryMessages: [
-      systemMessage(
-        `## Compacted Historical Context\n\nThis is a validated Runtime-derived summary, not current state authority.\n\n${JSON.stringify(checkpoint.summary)}`,
-      ),
-    ],
-  };
 }
 
 function activeInlineSkillInstructions(
@@ -435,54 +344,37 @@ export async function invokeRuntimeModel(params: {
       phase: getAgentPhase(getActivePlanning(state)),
       interactionMode: getEffectiveInteractionMode(state),
     });
-    const planning = getActivePlanning(state);
-    const phase = getAgentPhase(planning);
     const inputBudget = usableInputBudget(
       modelCapabilities,
       positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         positiveConfigNumber(params.config.modelKwargs?.maxTokens),
     );
-    const transcriptProjection = compactedTranscriptProjection(state);
-    const prepared = prepareModelContext(
-      'agent',
-      {
-        workspace: state.session.workspace,
-        messages: transcriptProjection.messages,
-        summaryMessages: transcriptProjection.summaryMessages,
-        final: state.transcript.final ?? '',
-        workspaceAccess: state.workspaceAccess,
-        phase,
-        interactionMode: getEffectiveInteractionMode(state),
-        authorization: state.authorization,
-        planningState: planning,
-        taskId: getActiveTask(state)?.taskId,
-        sideEffectsStarted: getActiveTask(state)?.sideEffectsStarted,
-        workflowSkills: disclosedDescriptors
-          .filter((descriptor) => descriptor.kind === 'skill')
-          .map((descriptor) => ({
-            capabilityId: descriptor.capabilityId,
-            description: descriptor.description,
-          })),
-        activeSkillInstructions: activeInlineSkillInstructions(state, params.skillCatalog),
-        contextBudget: {
-          ...(inputBudget.usableInputTokens ? { maxTokens: inputBudget.usableInputTokens } : {}),
-          recentTurns: 3,
-        },
+    const projection = buildContextProjection({
+      role: 'agent',
+      state,
+      tools: tools as unknown as Record<string, unknown>,
+      contextBudget: {
+        ...(inputBudget.usableInputTokens ? { maxTokens: inputBudget.usableInputTokens } : {}),
+        recentTurns: 3,
       },
-      undefined,
-    );
-    const estimate = addToolSchemasToEstimate(
-      prepared.tokenEstimate,
-      tools as unknown as Record<string, unknown>,
-    );
+      activeSkillInstructions: activeInlineSkillInstructions(state, params.skillCatalog),
+      skills: undefined,
+      workflowSkills: disclosedDescriptors
+        .filter((descriptor) => descriptor.kind === 'skill')
+        .map((descriptor) => ({
+          capabilityId: descriptor.capabilityId,
+          description: descriptor.description,
+        })),
+    });
     const preflight = preflightModelContext({
-      estimate,
+      estimate: projection.estimate,
       capabilities: modelCapabilities,
       requestMaxOutputTokens:
         positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         positiveConfigNumber(params.config.modelKwargs?.maxTokens),
       softRatio: params.config.compaction?.softRatio,
       hardRatio: params.config.compaction?.hardRatio,
+      warningRatio: params.config.compaction?.warningRatio,
       targetRatio: params.config.compaction?.targetRatio,
     });
     const contextMetricsEvent: RuntimeEvent = {
@@ -525,6 +417,7 @@ export async function invokeRuntimeModel(params: {
           requestedAtTurnId: state.turn.turnId,
           force: false,
           estimate: preflight.estimate,
+          tools: tools as unknown as Record<string, unknown>,
         },
       ];
     }
@@ -533,7 +426,7 @@ export async function invokeRuntimeModel(params: {
       response = await invokeBoundModel({
         model: params.model,
         tools,
-        messages: prepared.messages,
+        messages: projection.providerMessages,
         signal: params.signal,
         maxOutputTokens:
           positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
@@ -559,6 +452,7 @@ export async function invokeRuntimeModel(params: {
             requestedAtTurnId: state.turn.turnId,
             force: true,
             estimate: preflight.estimate,
+            tools: tools as unknown as Record<string, unknown>,
           },
         ];
       }

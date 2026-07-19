@@ -19,6 +19,8 @@ export interface FrameToolResultMeta {
   contentDigest?: string;
   resourceRevision?: string;
   workspaceMutationScope?: string[];
+  /** Provenance of digest fields — 'legacy_unknown' means pre-V2 data, never fold. */
+  digestScope?: 'raw' | 'projected' | 'legacy_unknown';
 }
 
 // ── Frame types ──

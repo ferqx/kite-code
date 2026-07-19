@@ -1324,10 +1324,18 @@ describe('E2E: compaction with mutations', () => {
     expect(events[0]?.type).toBe('context.compaction_completed');
     if (events[0]?.type === 'context.compaction_completed') {
       const s = events[0].checkpoint.summary;
-      expect(s.completedWork).toHaveLength(1);
-      expect(s.completedWork[0]?.path).toBe('config.ts');
-      expect(s.failures).toHaveLength(1);
-      expect(s.failures[0]?.operation).toBe('build');
+      if (s.version === 1) {
+        expect(s.completedWork).toHaveLength(1);
+        expect(s.completedWork[0]?.path).toBe('config.ts');
+        expect(s.failures).toHaveLength(1);
+        expect(s.failures[0]?.operation).toBe('build');
+      } else {
+        // V2: completedEffects replaces completedWork
+        expect(s.completedEffects).toHaveLength(1);
+        expect(s.completedEffects[0]?.path).toBe('config.ts');
+        expect(s.failures).toHaveLength(1);
+        expect(s.failures[0]?.operation).toBe('build');
+      }
       expect(s.provenance.mandatoryFactIds).toContain('f3');
     }
   });
@@ -1422,13 +1430,13 @@ describe('E2E: manual inspection', () => {
       targetTokens: 55_000,
       totalInputTokens: 45_000,
       utilization: 0.45,
-      status: 'within_budget',
+      status: 'normal',
       estimate: estimate(45_000),
     });
 
     const status = inspectManualContextCompaction(withPreflight, testConfig);
     expect(status.safeBoundary?.eligible).toBe(true);
-    expect(status.preflight?.status).toBe('within_budget');
+    expect(status.preflight?.status).toBe('normal');
   });
 
   test('inspectManualContextCompaction rejects when interaction is pending', () => {
@@ -1463,7 +1471,7 @@ describe('E2E: manual inspection', () => {
       targetTokens: 55_000,
       totalInputTokens: 5_000,
       utilization: 0.05,
-      status: 'within_budget',
+      status: 'normal',
       estimate: estimate(5_000),
     });
 

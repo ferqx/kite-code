@@ -1,5 +1,8 @@
 import { compactionMetrics } from '@/core/model/compaction-metrics';
-import { structuredContextSummaryV1Schema } from '@/core/model/compaction-schema';
+import {
+  structuredContextSummaryV1Schema,
+  structuredContextSummaryV2Schema,
+} from '@/core/model/compaction-schema';
 import { ContextCompactionValidationError } from '@/core/model/compaction-summary';
 import type {
   ContextCompactionCheckpoint,
@@ -83,9 +86,13 @@ export async function executeContextCompaction(input: {
         false,
       );
     }
+    const summaryParseResult =
+      checkpoint.summary.version === 2
+        ? structuredContextSummaryV2Schema.safeParse(checkpoint.summary)
+        : structuredContextSummaryV1Schema.safeParse(checkpoint.summary);
     if (
       checkpoint.version !== 1 ||
-      !structuredContextSummaryV1Schema.safeParse(checkpoint.summary).success ||
+      !summaryParseResult.success ||
       !checkpoint.sourceDigest ||
       checkpoint.summary.provenance.sourceDigest !== checkpoint.sourceDigest ||
       checkpoint.summary.provenance.lastMessageId !== checkpoint.coveredThroughMessageId
@@ -98,16 +105,21 @@ export async function executeContextCompaction(input: {
         false,
       );
     }
-    if (
-      checkpoint.inputTokensAfter >= checkpoint.inputTokensBefore ||
-      checkpoint.inputTokensAfter > checkpoint.targetTokens
-    ) {
+    const isManual = pending.reason === 'manual';
+    const reductionFailed = isManual
+      ? checkpoint.inputTokensAfter >= checkpoint.inputTokensBefore ||
+        checkpoint.inputTokensBefore - checkpoint.inputTokensAfter < 1_024
+      : checkpoint.inputTokensAfter >= checkpoint.inputTokensBefore ||
+        checkpoint.inputTokensAfter > checkpoint.targetTokens;
+    if (reductionFailed) {
       return failure(
         pending,
         sourceRevision,
         'insufficient_reduction',
-        'The checkpoint did not reduce context below its target.',
-        true,
+        isManual
+          ? 'Manual compaction did not save enough tokens (minimum 1024).'
+          : 'The checkpoint did not reduce context below its target.',
+        !isManual, // manual failures aren't retryable
       );
     }
     compactionMetrics.recordCompleted({

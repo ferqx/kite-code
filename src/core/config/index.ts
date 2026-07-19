@@ -134,12 +134,44 @@ export const configSchema = z.object({
       maxSummaryInputTokens: z.number().int().positive().optional(),
       softRatio: z.number().positive().max(1).optional(),
       hardRatio: z.number().positive().max(1).optional(),
+      warningRatio: z.number().positive().max(1).optional(),
       targetRatio: z.number().positive().max(1).optional(),
       minimumReductionRatio: z.number().nonnegative().max(1).optional(),
       cooldownTurns: z.number().int().nonnegative().optional(),
       recentTurns: z.number().int().nonnegative().optional(),
+      providerSafetyRatio: z.number().positive().max(0.2).optional(),
+      maxAutoCompactionsPerWindow: z.number().int().positive().optional(),
+      autoCompactionWindowTurns: z.number().int().positive().optional(),
+      maxConsecutiveLowGain: z.number().int().positive().optional(),
     })
     .strict()
+    .superRefine((val, ctx) => {
+      const warning = val.warningRatio ?? 0.8;
+      const compact = val.softRatio ?? 0.88;
+      const hard = val.hardRatio ?? 0.94;
+      const target = val.targetRatio ?? 0.62;
+      if (warning >= compact) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `warningRatio (${warning}) must be less than softRatio (${compact})`,
+          path: ['warningRatio'],
+        });
+      }
+      if (compact >= hard) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `softRatio (${compact}) must be less than hardRatio (${hard})`,
+          path: ['softRatio'],
+        });
+      }
+      if (target >= compact) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `targetRatio (${target}) must be less than softRatio (${compact})`,
+          path: ['targetRatio'],
+        });
+      }
+    })
     .optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });

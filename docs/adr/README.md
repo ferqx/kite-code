@@ -23,4 +23,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0018](0018-mcp-tui-select-management-center.md) | accepted | MCP TUI 使用可见 Select 完成详情、添加、认证、审批和管理操作 |
 | [0019](0019-mcp-two-config-locations.md) | accepted | MCP 默认配置收敛为用户与项目两个规范位置 |
 | [0020](0020-mcp-stable-on-demand-tool-loading.md) | accepted | MCP Tool 使用稳定目录、会话级按需加载与执行时连接检查 |
-| [0021](0021-context-compaction-checkpoint.md) | proposed | 上下文压缩采用事件驱动 checkpoint 模型，不直接改写 transcript |
+| [0021](0021-context-compaction-checkpoint.md) | accepted | 上下文压缩采用事件驱动 checkpoint 模型，不直接改写 transcript |

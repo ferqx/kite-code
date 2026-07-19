@@ -27,6 +27,8 @@ export interface DeterministicFactLedger {
   objective: string;
   facts: CompactionFact[];
   mandatoryFactIds: string[];
+  /** All user message IDs in the covered range — used for coverage validation. */
+  coveredUserMessageIds: string[];
 }
 
 function factId(kind: CompactionFactKind, identity: string): string {
@@ -78,7 +80,17 @@ export function buildDeterministicFactLedger(
         .filter((message) => message.kind === 'tool' && message.toolCallId === call.toolCallId)
         .flatMap((message) => messageId(message)),
     ].filter(Boolean);
-    if (call.status === 'succeeded' && (call.sideEffect || call.result?.resultMeta?.path)) {
+
+    // completedEffect: only workspace_write, external_side_effect, or explicit sideEffect.
+    // read_only results (read_file, search, etc.) must NOT enter completed_work;
+    // they belong in observations only.
+    const isCompletedEffect =
+      call.status === 'succeeded' &&
+      (call.effectClass === 'workspace_write' ||
+        call.effectClass === 'external_side_effect' ||
+        call.sideEffect === true);
+
+    if (isCompletedEffect) {
       const meta = call.result?.resultMeta;
       facts.push({
         factId: factId('completed_work', call.toolCallId),
@@ -89,6 +101,9 @@ export function buildDeterministicFactLedger(
         ...(meta?.path ? { path: meta.path } : {}),
         ...(meta?.contentDigest ? { digest: meta.contentDigest } : {}),
       });
+    } else if (call.status === 'succeeded') {
+      // Read-only or unknown-effect success — do not enter completed_work.
+      // Observations are captured separately below.
     } else if (['failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status)) {
       facts.push({
         factId: factId('failure', call.toolCallId),
@@ -97,7 +112,7 @@ export function buildDeterministicFactLedger(
         mandatory: true,
         evidenceMessageIds: evidence,
       });
-    } else if (!['succeeded'].includes(call.status)) {
+    } else {
       facts.push({
         factId: factId('pending_work', call.toolCallId),
         kind: 'pending_work',
@@ -167,9 +182,14 @@ export function buildDeterministicFactLedger(
   facts.push(...latestObservations.values());
 
   const unique = [...new Map(facts.map((fact) => [fact.factId, fact])).values()];
+  const coveredUserMessageIds = coveredMessages
+    .filter((m) => m.kind === 'user')
+    .map((m) => m.messageId)
+    .filter((id): id is string => !!id);
   return {
     objective,
     facts: unique,
     mandatoryFactIds: unique.filter((fact) => fact.mandatory).map((fact) => fact.factId),
+    coveredUserMessageIds,
   };
 }

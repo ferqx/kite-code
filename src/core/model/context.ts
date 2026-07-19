@@ -265,7 +265,13 @@ export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage
   return ordered;
 }
 
-/** 准备模型上下文（组装系统提示词 + 对话消息，含压缩流水线） / Prepare model context (assemble with compaction pipeline) */
+/**
+ * 准备模型上下文（组装系统提示词 + 对话消息，含压缩流水线） / Prepare model context (assemble with compaction pipeline)
+ *
+ * Prefer `buildContextProjection()` from `context-projection.ts` for new code.
+ * It handles transcript splitting, checkpoint projection, M1/M2, and tool schema
+ * estimation in a single call and is the single entry point for all context paths.
+ */
 export function prepareModelContext(
   role: AgentRole,
   state: ModelContextState,
