@@ -19,12 +19,15 @@ function isUnsafeCodePoint(codePoint: number): boolean {
 }
 
 export function safeCapabilityMetadata(value: string, maximum = 96): string {
-  return Array.from(value, (character) => {
+  const cleaned = Array.from(value, (character) => {
     const codePoint = character.codePointAt(0) ?? 0;
     return isUnsafeCodePoint(codePoint) ? ' ' : character;
   })
     .join('')
     .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maximum);
+    .trim();
+
+  // Truncate by code points, not UTF-16 code units, so we never split a
+  // surrogate pair or break a non-BMP character (emoji, CJK extension).
+  return Array.from(cleaned).slice(0, Math.max(0, maximum)).join('');
 }

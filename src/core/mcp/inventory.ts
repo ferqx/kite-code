@@ -238,7 +238,16 @@ export function buildMcpInventory(input: {
     ...providers.entries.map((e) => e.providerId),
     ...capabilityProviderIds,
   ]).size;
-  const globalCallableCount = providers.entries.filter((e) => isProviderCallable(e.status)).length;
+  // Global callable: directory entries + defensive backfill (always 'ready')
+  const globalCallableProviderIds = new Set(
+    providers.entries.filter((e) => isProviderCallable(e.status)).map((e) => e.providerId),
+  );
+  for (const capId of capabilityProviderIds) {
+    if (!providerSet.has(capId)) {
+      globalCallableProviderIds.add(capId);
+    }
+  }
+  const globalCallableCount = globalCallableProviderIds.size;
 
   return {
     ok: true,
