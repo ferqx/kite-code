@@ -1,10 +1,27 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { humanMessage, systemMessage } from '../src/core/messages';
 import {
   addToolSchemasToEstimate,
   estimateContextTokens,
   preflightModelContext,
 } from '../src/core/model/context-budget';
+import type { SerializedToolDescriptor } from '../src/core/model/context-projection';
+
+function makeDescriptor(
+  name: string,
+  description: string,
+  inputSchema: unknown,
+): SerializedToolDescriptor {
+  return {
+    name,
+    description,
+    inputSchema,
+    schemaDigest: createHash('sha256')
+      .update(JSON.stringify({ name, description, inputSchema }))
+      .digest('hex'),
+  };
+}
 
 describe('full request context estimator', () => {
   test('returns additive component totals including tool schemas and framing', () => {
@@ -14,13 +31,12 @@ describe('full request context estimator', () => {
       summaryMessages: [humanMessage('checkpoint summary')],
       dynamicRuntimeMessages: [humanMessage('runtime mode and plan')],
     });
-    const estimate = addToolSchemasToEstimate(base, {
-      read_file: {
-        description: 'Read a file',
-        inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
-        execute: () => undefined,
-      },
-    });
+    const estimate = addToolSchemasToEstimate(base, [
+      makeDescriptor('read_file', 'Read a file', {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+      }),
+    ]);
     expect(estimate.systemTokens).toBeGreaterThan(0);
     expect(estimate.transcriptTokens).toBeGreaterThan(0);
     expect(estimate.summaryTokens).toBeGreaterThan(0);

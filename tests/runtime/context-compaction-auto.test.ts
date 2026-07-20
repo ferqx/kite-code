@@ -199,9 +199,16 @@ describe('automatic context compaction', () => {
     );
     const recovered = first.reduce(reduceRuntimeState, state);
     expect(recovered.context.overflowRecoveryTurnId).toBe(state.turn.turnId);
-    await expect(
-      invokeRuntimeModel({ model: mock, state: recovered, config: wideConfig }),
-    ).rejects.toThrow(/context overflow persisted/i);
+    // PR 6: second overflow emits context.hard_blocked event (no longer throws Error)
+    const second = await invokeRuntimeModel({ model: mock, state: recovered, config: wideConfig });
+    expect(second).toContainEqual(
+      expect.objectContaining({
+        type: 'context.hard_blocked',
+        reason: 'overflow_recovery_failed',
+      }),
+    );
+    const blocked = second.reduce(reduceRuntimeState, recovered);
+    expect(blocked.context.hardBlock?.reason).toBe('overflow_recovery_failed');
   });
 
   test('projects an active checkpoint plus live tail and accounts summary tokens separately', async () => {

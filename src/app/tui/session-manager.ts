@@ -4,6 +4,8 @@ import type { AgentConfig } from '@/core/config/index';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import { compactionMetrics } from '@/core/model/compaction-metrics';
 import {
+  buildContextStatusReport,
+  compactResetPreflight,
   inspectManualContextCompaction,
   manualContextCompactionEvent,
 } from '@/core/model/context-compaction-manual';
@@ -902,6 +904,104 @@ export class SessionManager {
           return kernel.applyEffectResult(lease, events) ? events : [];
         },
       );
+    } finally {
+      kernel.close();
+    }
+  }
+
+  /** PR 9: Handle /context — display context usage breakdown. */
+  handleContextDisplay(threadId: string): string {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return 'Session is unavailable.';
+    const kernel = createAgentKernel({
+      threadId,
+      userId: 'tui',
+      workspace: rt.workspace,
+      storePath: runtimeStorePathFor(this.deps.checkpointPath),
+      interactionMode: rt.interactionMode,
+      phase: 'building',
+    });
+    try {
+      const status = buildContextStatusReport(kernel.getState(), this.deps.config);
+      return `\n${status.text}`;
+    } finally {
+      kernel.close();
+    }
+  }
+
+  /** PR 9: Handle /compact reset — preflight check and clear the active checkpoint. */
+  async handleContextReset(threadId: string): Promise<ContextCompactionCommandResult> {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
+    const flags = getFeatureFlags(this.deps.config);
+    if (!flags.contextCompactionV2 || !flags.contextCompactionManualV1) {
+      return {
+        events: [],
+        text: 'Context compaction is disabled by feature flags.',
+        isError: true,
+      };
+    }
+
+    // REVIEW-FIX: When the model is running, route through the live kernel's
+    // processEvent to avoid kernel-racing issues (events lost on snapshot replay).
+    // Match the pattern used by handleCompact (line 865-866).
+    if (rt.runtimeControl) {
+      const state = rt.runtimeControl.getState();
+      const checkpoint = state.context.activeCheckpoint;
+      if (!checkpoint) {
+        return { events: [], text: 'No active checkpoint to reset.' };
+      }
+      const preflight = compactResetPreflight(state, this.deps.config);
+      if (!preflight.safe) {
+        return { events: [], text: `Cannot reset: ${preflight.reason}`, isError: true };
+      }
+      const resetEvent: RuntimeEvent = {
+        type: 'context.compaction_reset',
+        checkpointId: checkpoint.compactionId,
+        reason: 'manual',
+      };
+      rt.runtimeControl.processEvent(resetEvent);
+      return {
+        events: [resetEvent],
+        text: `Checkpoint ${checkpoint.compactionId.slice(0, 12)}... cleared. Context restored to full transcript.`,
+      };
+    }
+
+    // Fallback: create a standalone kernel for sessions without a running agent.
+    const kernel = createAgentKernel({
+      threadId,
+      userId: 'tui',
+      workspace: rt.workspace,
+      storePath: runtimeStorePathFor(this.deps.checkpointPath),
+      interactionMode: rt.interactionMode,
+      phase: 'building',
+    });
+    try {
+      const state = kernel.getState();
+      const checkpoint = state.context.activeCheckpoint;
+      if (!checkpoint) {
+        return { events: [], text: 'No active checkpoint to reset.' };
+      }
+
+      const preflight = compactResetPreflight(state, this.deps.config);
+      if (!preflight.safe) {
+        return {
+          events: [],
+          text: `Cannot reset: ${preflight.reason}`,
+          isError: true,
+        };
+      }
+
+      const resetEvent: RuntimeEvent = {
+        type: 'context.compaction_reset',
+        checkpointId: checkpoint.compactionId,
+        reason: 'manual',
+      };
+      kernel.processEvent(resetEvent);
+      return {
+        events: [resetEvent],
+        text: `Checkpoint ${checkpoint.compactionId.slice(0, 12)}... cleared. Context restored to full transcript.`,
+      };
     } finally {
       kernel.close();
     }

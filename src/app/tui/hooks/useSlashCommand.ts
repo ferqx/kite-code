@@ -21,7 +21,9 @@ export type SlashAction =
   | { type: 'mcp' }
   | { type: 'rewind' }
   | { type: 'export' }
+  | { type: 'context' }
   | { type: 'compact'; customInstructions?: string }
+  | { type: 'compact_reset' }
   | { type: 'unknown'; raw: string };
 
 export function parseSlashCommand(input: string): SlashAction | null {
@@ -57,7 +59,13 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'rewind' };
     case 'export':
       return { type: 'export' };
+    case 'context':
+      return { type: 'context' };
     case 'compact':
+      // PR 9: /compact reset is a distinct action, not a compaction with customInstructions="reset"
+      if (args[0] === 'reset' && args.length === 1) {
+        return { type: 'compact_reset' };
+      }
       return { type: 'compact', ...(arg ? { customInstructions: arg } : {}) };
     case 'exit':
     case 'quit':
@@ -90,6 +98,8 @@ export function useSlashCommand(
   currentInteractionMode: 'accept_edits' | 'auto' | 'full' = 'accept_edits',
   sandboxBackend: SandboxBackend = 'none',
   onCompact?: (customInstructions?: string) => void,
+  onContext?: () => void,
+  onCompactReset?: () => void,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -173,6 +183,12 @@ export function useSlashCommand(
         case 'compact':
           onCompact?.(action.customInstructions);
           break;
+        case 'compact_reset':
+          onCompactReset?.();
+          break;
+        case 'context':
+          onContext?.();
+          break;
         case 'exit':
           if (onExit) onExit();
           else process.exit(0);
@@ -222,6 +238,8 @@ export function useSlashCommand(
       currentInteractionMode,
       sandboxBackend,
       onCompact,
+      onContext,
+      onCompactReset,
     ],
   );
 }

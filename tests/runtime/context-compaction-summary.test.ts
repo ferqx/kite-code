@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { buildDeterministicFactLedger } from '../../src/core/model/compaction-fact-ledger';
+import {
+  buildDeterministicFactLedger,
+  buildLedgerFromBaseSummary,
+  mergeCompactionLedgers,
+} from '../../src/core/model/compaction-fact-ledger';
+import {
+  parseGeneratedSummaryCandidate,
+  parsePersistedCheckpointSummary,
+  type StructuredContextSummaryV2,
+} from '../../src/core/model/compaction-schema';
 import {
   type ContextSummaryGenerationRequest,
   createStructuredContextCompactor,
@@ -187,6 +196,7 @@ describe('structured context summary', () => {
     const compactor = createStructuredContextCompactor({
       recentTurns: 1,
       maxSummaryInputTokens: 100_000,
+      targetRatio: 500,
       generate: async (request) => {
         modes.push(request.mode);
         return request.mode === 'summary'
@@ -213,6 +223,7 @@ describe('structured context summary', () => {
     const compactor = createStructuredContextCompactor({
       recentTurns: 1,
       maxSummaryInputTokens: 100_000,
+      targetRatio: 500,
       generate: async (request) => {
         const summary = validSummaryFromRequest(
           request.mode === 'repair'
@@ -239,6 +250,7 @@ describe('structured context summary', () => {
     const compactor = createStructuredContextCompactor({
       recentTurns: 1,
       maxSummaryInputTokens: 2_000,
+      targetRatio: 500,
       generate: async (request) => {
         modes.push(request.mode);
         if (request.mode === 'chunk') {
@@ -274,6 +286,7 @@ describe('structured context summary', () => {
     let capturedDataPayload: Record<string, unknown> = {};
     const compactor = createStructuredContextCompactor({
       recentTurns: 1,
+      targetRatio: 500,
       generate: async (request) => {
         capturedSystemPrompt = request.systemPrompt;
         capturedDataPayload = JSON.parse(request.input) as Record<string, unknown>;
@@ -302,6 +315,7 @@ describe('structured context summary', () => {
     let repairDataPayload: Record<string, unknown> = {};
     const compactor = createStructuredContextCompactor({
       recentTurns: 1,
+      targetRatio: 500,
       generate: async (request) => {
         capturedPrompts.push(request.systemPrompt);
         if (request.mode === 'summary') {
@@ -399,6 +413,7 @@ describe('structured context summary', () => {
     let capturedDataPayload: Record<string, unknown> = {};
     const compactor = createStructuredContextCompactor({
       recentTurns: 1,
+      targetRatio: 500,
       generate: async (request) => {
         capturedSystemPrompt = request.systemPrompt;
         capturedDataPayload = JSON.parse(request.input) as Record<string, unknown>;
@@ -421,6 +436,7 @@ describe('structured context summary', () => {
       let capturedInput: Record<string, unknown> = {};
       const compactor = createStructuredContextCompactor({
         recentTurns: 1,
+        targetRatio: 500,
         generate: async (request) => {
           capturedSystemPrompt = request.systemPrompt;
           capturedInput = JSON.parse(request.input) as Record<string, unknown>;
@@ -451,6 +467,7 @@ describe('structured context summary', () => {
       const capturedPrompts: string[] = [];
       const compactor = createStructuredContextCompactor({
         recentTurns: 1,
+        targetRatio: 500,
         generate: async (request) => {
           capturedPrompts.push(request.systemPrompt);
           return validSummaryFromRequest(request);
@@ -477,6 +494,7 @@ describe('structured context summary', () => {
       let capturedSystemPrompt = '';
       const compactor = createStructuredContextCompactor({
         recentTurns: 1,
+        targetRatio: 500,
         generate: async (request) => {
           capturedSystemPrompt = request.systemPrompt;
           return validSummaryFromRequest(request);
@@ -699,8 +717,10 @@ describe('structured context summary', () => {
       expect(cp2.baseCheckpointId).toBe(cp1.compactionId);
       // Second compaction input SHOULD contain baseSummary (incremental).
       expect(capturedInputs2[0]).toContain('"baseSummary"');
-      // Verify the sourceDigest chain references the previous digest.
-      expect(cp2.sourceDigest).toContain(cp1.sourceDigest);
+      // PR 2: sourceDigest is a fixed-length SHA-256 hash chain, not string concatenation.
+      expect(cp2.sourceDigest).toHaveLength(64);
+      expect(cp1.sourceDigest).toHaveLength(64);
+      expect(cp2.sourceDigest).not.toBe(cp1.sourceDigest);
     });
 
     test('checkpoint chain preserves baseCheckpointId across three successive compactions', async () => {
@@ -885,5 +905,451 @@ describe('structured context summary', () => {
       // Message without turnId is always protected (sentinel).
       expect(boundary.protectedMessageIds).toContain('u1');
     });
+  });
+});
+
+// ── PR 2: Incremental mandatory fact inheritance ──
+
+describe('PR 2 — incremental mandatory fact inheritance', () => {
+  function makeV2Summary(
+    overrides: Partial<StructuredContextSummaryV2> = {},
+  ): StructuredContextSummaryV2 {
+    return {
+      version: 2,
+      objective: { text: 'implement auth', evidenceMessageIds: ['msg-1'] },
+      userRequests: [{ summary: 'add login page', evidenceMessageIds: ['msg-2'] }],
+      userConstraints: [
+        {
+          factId: 'constraint:aaa',
+          text: 'never modify package-lock.json',
+          evidenceMessageIds: ['msg-3'],
+        },
+      ],
+      decisions: [
+        { factId: 'decision:bbb', decision: 'use bcrypt', evidenceMessageIds: ['msg-4'] },
+      ],
+      completedEffects: [
+        {
+          factId: 'completed:ccc',
+          operation: 'write_file: src/auth.ts',
+          path: 'src/auth.ts',
+          outcome: 'created',
+          evidenceMessageIds: ['msg-5'],
+        },
+      ],
+      observations: [
+        {
+          factId: 'obs:ddd',
+          resource: 'src/auth.ts',
+          revision: 'v1',
+          keyFacts: ['exists'],
+          evidenceMessageIds: ['msg-6'],
+        },
+      ],
+      failures: [
+        {
+          factId: 'failure:eee',
+          operation: 'shell: npm test',
+          error: 'failed',
+          consequence: 'blocked',
+          evidenceMessageIds: ['msg-7'],
+        },
+      ],
+      pendingWork: [{ factId: 'pending:fff', text: 'write tests', evidenceMessageIds: ['msg-8'] }],
+      unresolvedQuestions: [{ text: 'JWT or sessions?', evidenceMessageIds: ['msg-9'] }],
+      provenance: {
+        lastMessageId: 'msg-9',
+        sourceDigest: 'sha256:old-digest',
+        coveredUserMessageIds: ['msg-1', 'msg-2', 'msg-3'],
+        mandatoryFactIds: [
+          'constraint:aaa',
+          'decision:bbb',
+          'completed:ccc',
+          'failure:eee',
+          'pending:fff',
+        ],
+        policyVersion: '1.0.0',
+      },
+      ...overrides,
+    };
+  }
+
+  test('buildLedgerFromBaseSummary maps all mandatory fact categories', () => {
+    const summary = makeV2Summary();
+    const ledger = buildLedgerFromBaseSummary(summary);
+    expect(ledger.objective).toBe('implement auth');
+    expect(ledger.mandatoryFactIds).toContain('constraint:aaa');
+    expect(ledger.mandatoryFactIds).toContain('decision:bbb');
+    expect(ledger.mandatoryFactIds).toContain('completed:ccc');
+    expect(ledger.mandatoryFactIds).toContain('failure:eee');
+    expect(ledger.mandatoryFactIds).toContain('pending:fff');
+    expect(ledger.facts.find((f) => f.factId === 'obs:ddd')?.mandatory).toBe(false);
+  });
+
+  test('mergeCompactionLedgers preserves mandatory facts from base', () => {
+    const base = buildLedgerFromBaseSummary(makeV2Summary());
+    const tail = buildDeterministicFactLedger(
+      createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' }),
+      [],
+    );
+    const merged = mergeCompactionLedgers(base, tail);
+    for (const id of base.mandatoryFactIds) expect(merged.mandatoryFactIds).toContain(id);
+  });
+
+  test('mergeCompactionLedgers returns tail when no base', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user',
+        messageId: 'u1',
+        turnId: state.turn.turnId,
+        ordinal: 0,
+        createdAt: new Date().toISOString(),
+        content: 'hello',
+      },
+    ];
+    const tail = buildDeterministicFactLedger(state, state.transcript.messages);
+    expect(mergeCompactionLedgers(undefined, tail)).toBe(tail);
+  });
+
+  test('base constraint survives incremental compaction', () => {
+    const summary = makeV2Summary({
+      userConstraints: [
+        {
+          factId: 'constraint:pkg-lock',
+          text: 'never modify package-lock.json',
+          evidenceMessageIds: ['msg-early'],
+        },
+      ],
+      provenance: { ...makeV2Summary().provenance, mandatoryFactIds: ['constraint:pkg-lock'] },
+    });
+    const base = buildLedgerFromBaseSummary(summary);
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user',
+        messageId: 'u-new',
+        turnId: state.turn.turnId,
+        ordinal: 0,
+        createdAt: new Date().toISOString(),
+        content: 'refactor',
+      },
+    ];
+    const tail = buildDeterministicFactLedger(state, state.transcript.messages);
+    const merged = mergeCompactionLedgers(base, tail);
+    expect(merged.mandatoryFactIds).toContain('constraint:pkg-lock');
+  });
+
+  test('tail fact updates base fact with same factId', () => {
+    const base = buildLedgerFromBaseSummary(makeV2Summary());
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' });
+    const tail = buildDeterministicFactLedger(state, []);
+    tail.facts.push({
+      factId: 'decision:bbb',
+      kind: 'decision',
+      text: 'use argon2',
+      mandatory: true,
+      evidenceMessageIds: ['msg-new'],
+    });
+    tail.mandatoryFactIds.push('decision:bbb');
+    const merged = mergeCompactionLedgers(base, tail);
+    expect(merged.facts.find((f) => f.factId === 'decision:bbb')?.text).toBe('use argon2');
+  });
+
+  test('sourceDigest chain has constant length across 20 compactions', () => {
+    const { createHash } = require('node:crypto');
+    const policyVersion = '1.0.0';
+    let baseDigest;
+    for (let i = 0; i < 20; i++) {
+      const tailDigest = digestCompactionSource([
+        {
+          kind: 'user',
+          messageId: 'm-' + i,
+          turnId: 't-' + i,
+          ordinal: 0,
+          createdAt: new Date().toISOString(),
+          content: 'step ' + i,
+        },
+      ]);
+      baseDigest = createHash('sha256')
+        .update(JSON.stringify({ baseDigest: baseDigest ?? null, tailDigest, policyVersion }))
+        .digest('hex');
+      expect(baseDigest).toHaveLength(64);
+    }
+  });
+
+  test('parseGeneratedSummaryCandidate rejects V1', () => {
+    expect(() =>
+      parseGeneratedSummaryCandidate({
+        version: 1,
+        objective: 'old',
+        userConstraints: [],
+        decisions: [],
+        completedWork: [],
+        observations: [],
+        failures: [],
+        pendingWork: [],
+        unresolvedQuestions: [],
+        recentUserIntent: 'old',
+        provenance: {
+          firstMessageId: 'm1',
+          lastMessageId: 'm2',
+          sourceDigest: 'abc',
+          mandatoryFactIds: [],
+        },
+      }),
+    ).toThrow();
+  });
+
+  test('parsePersistedCheckpointSummary accepts V1 and upgrades', () => {
+    const parsed = parsePersistedCheckpointSummary({
+      version: 1,
+      objective: 'old',
+      userConstraints: [],
+      decisions: [],
+      completedWork: [],
+      observations: [],
+      failures: [],
+      pendingWork: [],
+      unresolvedQuestions: [],
+      recentUserIntent: 'old',
+      provenance: {
+        firstMessageId: 'm1',
+        lastMessageId: 'm2',
+        sourceDigest: 'abc',
+        mandatoryFactIds: [],
+      },
+    });
+    expect(parsed.version).toBe(2);
+    expect(parsed.objective.text).toBe('old');
+  });
+});
+
+// ── PR 3: Ledger covered-range only ──
+
+describe('PR 3 — ledger covered-range only', () => {
+  test('objective from first user message, not active task', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' });
+    state.activeTaskId = 't1';
+    (state as any).tasks = {
+      t1: {
+        taskId: 't1',
+        userGoal: 'TASK GOAL FROM STATE',
+        status: 'active',
+        startedAtTurnId: state.turn.turnId,
+        sideEffectsStarted: false,
+        planning: { kind: 'building_without_plan' },
+        planHistory: [],
+      },
+    };
+    state.transcript.messages = [
+      {
+        kind: 'user',
+        messageId: 'u1',
+        turnId: state.turn.turnId,
+        ordinal: 0,
+        createdAt: new Date().toISOString(),
+        content: 'login page',
+      },
+    ];
+    const ledger = buildDeterministicFactLedger(state, state.transcript.messages);
+    expect(ledger.objective).toBe('login page');
+  });
+
+  test('every user message gets user_request fact', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user',
+        messageId: 'u1',
+        turnId: state.turn.turnId,
+        ordinal: 0,
+        createdAt: new Date().toISOString(),
+        content: 'a',
+      },
+      {
+        kind: 'user',
+        messageId: 'u2',
+        turnId: state.turn.turnId,
+        ordinal: 1,
+        createdAt: new Date().toISOString(),
+        content: 'b',
+      },
+    ];
+    const ledger = buildDeterministicFactLedger(state, state.transcript.messages);
+    expect(ledger.facts.filter((f) => f.kind === 'user_request')).toHaveLength(2);
+  });
+
+  test('verification records NOT scanned', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user',
+        messageId: 'u1',
+        turnId: state.turn.turnId,
+        ordinal: 0,
+        createdAt: new Date().toISOString(),
+        content: 'test',
+      },
+    ];
+    (state as any).verification = {
+      records: { v1: { verificationId: 'v1', status: 'completed' } },
+    };
+    const ledger = buildDeterministicFactLedger(state, state.transcript.messages);
+    expect(ledger.facts.filter((f) => f.kind === 'verification')).toHaveLength(0);
+  });
+
+  test('plan history NOT scanned', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user',
+        messageId: 'u1',
+        turnId: state.turn.turnId,
+        ordinal: 0,
+        createdAt: new Date().toISOString(),
+        content: 'test',
+      },
+    ];
+    (state as any).tasks = {
+      t1: {
+        taskId: 't1',
+        userGoal: 'test',
+        status: 'active',
+        startedAtTurnId: state.turn.turnId,
+        sideEffectsStarted: false,
+        planning: { kind: 'building_without_plan' },
+        planHistory: [{ version: 1, structuralDigest: 'abc' }],
+      },
+    };
+    const ledger = buildDeterministicFactLedger(state, state.transcript.messages);
+    expect(ledger.facts.filter((f) => f.kind === 'plan')).toHaveLength(0);
+  });
+
+  test('no keyword-based constraint detection', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user',
+        messageId: 'u1',
+        turnId: state.turn.turnId,
+        ordinal: 0,
+        createdAt: new Date().toISOString(),
+        content: 'normal',
+      },
+      {
+        kind: 'user',
+        messageId: 'u2',
+        turnId: state.turn.turnId,
+        ordinal: 1,
+        createdAt: new Date().toISOString(),
+        content: 'another',
+      },
+    ];
+    const ledger = buildDeterministicFactLedger(state, state.transcript.messages);
+    expect(ledger.facts.filter((f) => f.kind === 'user_constraint')).toHaveLength(0);
+  });
+});
+
+// ── PR 5: Strengthened summary validation ──
+
+describe('PR 5 — summary evidence validation', () => {
+  test('rejects summary with fabricated evidence IDs', async () => {
+    const state = createInitialRuntimeState({ threadId: 'pr5a', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user' as const,
+        messageId: 'u0',
+        turnId: 't0',
+        ordinal: 0,
+        createdAt: '2026-07-20T00:00:00.000Z',
+        content: 'hi',
+      },
+    ];
+    let digest = '';
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 0,
+      generate: async (request: any) => {
+        if (request.mode === 'summary') {
+          const payload = JSON.parse(request.input) as any;
+          digest = payload.requiredProvenance?.sourceDigest ?? '';
+        }
+        return {
+          version: 2,
+          objective: { text: 'x', evidenceMessageIds: ['fake-id'] },
+          userRequests: [],
+          userConstraints: [],
+          decisions: [],
+          completedEffects: [],
+          observations: [],
+          failures: [],
+          pendingWork: [],
+          unresolvedQuestions: [],
+          provenance: {
+            lastMessageId: 'u0',
+            sourceDigest: digest,
+            coveredUserMessageIds: ['u0'],
+            mandatoryFactIds: [],
+            policyVersion: '1.0.0',
+          },
+        };
+      },
+    });
+    await expect(
+      compactor({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toThrow();
+  });
+
+  test('rejects summary with invented factId', async () => {
+    const state = createInitialRuntimeState({ threadId: 'pr5b', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user' as const,
+        messageId: 'u0',
+        turnId: 't0',
+        ordinal: 0,
+        createdAt: '2026-07-20T00:00:00.000Z',
+        content: 'hi',
+      },
+    ];
+    let digest = '';
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 0,
+      generate: async (request: any) => {
+        if (request.mode === 'summary') {
+          const payload = JSON.parse(request.input) as any;
+          digest = payload.requiredProvenance?.sourceDigest ?? '';
+        }
+        return {
+          version: 2,
+          objective: { text: 'x', evidenceMessageIds: ['u0'] },
+          userRequests: [],
+          userConstraints: [],
+          decisions: [],
+          completedEffects: [
+            {
+              factId: 'invented:xyz',
+              operation: 'fake',
+              outcome: 'pwned',
+              evidenceMessageIds: ['u0'],
+            },
+          ],
+          observations: [],
+          failures: [],
+          pendingWork: [],
+          unresolvedQuestions: [],
+          provenance: {
+            lastMessageId: 'u0',
+            sourceDigest: digest,
+            coveredUserMessageIds: ['u0'],
+            mandatoryFactIds: ['invented:xyz'],
+            policyVersion: '1.0.0',
+          },
+        };
+      },
+    });
+    await expect(
+      compactor({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toThrow();
   });
 });

@@ -1,4 +1,5 @@
 import type { AgentConfig } from '@/core/config';
+import { getFeatureFlags } from '@/core/config/features';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeState } from '@/core/runtime/state';
 import { countTokens } from '@/core/token-counter';
@@ -40,7 +41,7 @@ export function currentContextPreflight(state: Readonly<RuntimeState>, config: A
     estimate: fallbackEstimate(state),
     capabilities: resolveModelCapabilities({ config }),
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
-    softRatio: config.compaction?.softRatio,
+    compactRatio: config.compaction?.compactRatio ?? config.compaction?.softRatio,
     hardRatio: config.compaction?.hardRatio,
     warningRatio: config.compaction?.warningRatio,
     targetRatio: config.compaction?.targetRatio,
@@ -126,7 +127,7 @@ export function buildContextStatusReport(
     estimate: projection.estimate,
     capabilities: resolveModelCapabilities({ config }),
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
-    softRatio: config.compaction?.softRatio,
+    compactRatio: config.compaction?.compactRatio ?? config.compaction?.softRatio,
     hardRatio: config.compaction?.hardRatio,
     warningRatio: config.compaction?.warningRatio,
     targetRatio: config.compaction?.targetRatio,
@@ -140,14 +141,18 @@ export function buildContextStatusReport(
   const lastCp = checkpoint
     ? `Active checkpoint: ${checkpoint.compactionId.slice(0, 12)}...  Covered through: ${checkpoint.coveredThroughTurnId}`
     : 'No active checkpoint';
-  const autoStatus = state.context.autoGuard?.disabledUntilManualAction
-    ? 'paused (thrash breaker)'
-    : state.context.hardBlock
-      ? `BLOCKED (${state.context.hardBlock.reason})`
-      : 'enabled';
+  const flags = getFeatureFlags(config);
+  const autoEnabled = flags.contextCompactionV2 && flags.contextCompactionAutoV1;
+  const autoStatus = !autoEnabled
+    ? 'disabled by feature flag'
+    : state.context.autoGuard?.disabledUntilManualAction
+      ? 'paused (thrash breaker)'
+      : state.context.hardBlock
+        ? `BLOCKED (${state.context.hardBlock.reason})`
+        : 'enabled';
   const nextThreshold =
     preflight.usableInputTokens != null
-      ? `${Math.floor(preflight.usableInputTokens * (config.compaction?.softRatio ?? 0.88))}`
+      ? `${Math.floor(preflight.usableInputTokens * (config.compaction?.compactRatio ?? config.compaction?.softRatio ?? 0.88))}`
       : 'N/A';
 
   const text = [
@@ -198,7 +203,7 @@ export function compactResetPreflight(
   const preflight = preflightModelContext({
     estimate: projection.estimate,
     capabilities: resolveModelCapabilities({ config }),
-    softRatio: config.compaction?.softRatio,
+    compactRatio: config.compaction?.compactRatio ?? config.compaction?.softRatio,
     hardRatio: config.compaction?.hardRatio,
     warningRatio: config.compaction?.warningRatio,
   });

@@ -166,6 +166,10 @@ export const structuredContextSummaryV2Schema = z
         sourceDigest: z.string().min(1),
         coveredUserMessageIds: z.array(z.string().min(1)),
         mandatoryFactIds: z.array(z.string().min(1)),
+        /** Mandatory fact IDs inherited from a base checkpoint (PR 2). */
+        inheritedMandatoryFactIds: z.array(z.string().min(1)).optional(),
+        /** Mandatory fact IDs discovered in the tail (PR 2). */
+        tailMandatoryFactIds: z.array(z.string().min(1)).optional(),
         policyVersion: z.string(),
       })
       .strict(),
@@ -189,6 +193,62 @@ export function parseStructuredContextSummaryV2(value: unknown): StructuredConte
   const candidate =
     typeof value === 'string' ? JSON.parse(value.replace(/^```(?:json)?\s*|\s*```$/g, '')) : value;
   return structuredContextSummaryV2Schema.parse(candidate);
+}
+
+/**
+ * Parse a persisted checkpoint summary for restore or migration.
+ * Accepts V1 (upgrades to V2 shape) and V2.
+ */
+export function parsePersistedCheckpointSummary(raw: unknown): StructuredContextSummaryV2 {
+  try {
+    return parseStructuredContextSummaryV2(raw);
+  } catch {
+    // V1 backfill: parse as V1, then upgrade to V2 shape for internal use.
+    const v1 = parseStructuredContextSummaryV1(raw);
+    return {
+      version: 2,
+      objective: { text: v1.objective, evidenceMessageIds: [] },
+      userRequests: [],
+      userConstraints: v1.userConstraints.map((c) => ({
+        ...c,
+        evidenceMessageIds: [] as string[],
+      })),
+      decisions: v1.decisions.map((d) => ({ ...d, evidenceMessageIds: [] as string[] })),
+      completedEffects: v1.completedWork.map((cw) => ({
+        factId: cw.factId,
+        operation: cw.summary,
+        path: cw.path,
+        outcome: cw.summary,
+        evidenceMessageIds: cw.evidenceMessageIds,
+      })),
+      observations: v1.observations.map((o) => ({ ...o, evidenceMessageIds: [] as string[] })),
+      failures: v1.failures.map((f) => ({ ...f, evidenceMessageIds: [] as string[] })),
+      pendingWork: v1.pendingWork.map((pw) => ({
+        text: pw.text,
+        blockedBy: pw.blockedBy,
+        evidenceMessageIds: [] as string[],
+      })),
+      unresolvedQuestions: v1.unresolvedQuestions.map((q) => ({
+        text: q,
+        evidenceMessageIds: [],
+      })),
+      provenance: {
+        lastMessageId: v1.provenance.lastMessageId,
+        sourceDigest: v1.provenance.sourceDigest,
+        coveredUserMessageIds: [],
+        mandatoryFactIds: v1.provenance.mandatoryFactIds,
+        policyVersion: '1.0.0',
+      },
+    };
+  }
+}
+
+/**
+ * Parse a freshly-generated summary candidate.
+ * V2 only — V1 output from the summary model is rejected.
+ */
+export function parseGeneratedSummaryCandidate(raw: unknown): StructuredContextSummaryV2 {
+  return parseStructuredContextSummaryV2(raw);
 }
 
 // ── Fact ID extraction ──

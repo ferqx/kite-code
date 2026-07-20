@@ -132,7 +132,10 @@ export const configSchema = z.object({
     .object({
       maxSummaryTokens: z.number().int().positive().optional(),
       maxSummaryInputTokens: z.number().int().positive().optional(),
+      /** @deprecated Use compactRatio instead. */
       softRatio: z.number().positive().max(1).optional(),
+      /** PR 7: Renamed from softRatio — trigger threshold for proactive compaction. */
+      compactRatio: z.number().positive().max(1).optional(),
       hardRatio: z.number().positive().max(1).optional(),
       warningRatio: z.number().positive().max(1).optional(),
       targetRatio: z.number().positive().max(1).optional(),
@@ -147,27 +150,28 @@ export const configSchema = z.object({
     .strict()
     .superRefine((val, ctx) => {
       const warning = val.warningRatio ?? 0.8;
-      const compact = val.softRatio ?? 0.88;
+      // PR 7: compactRatio first, fall back to deprecated softRatio
+      const compact = val.compactRatio ?? val.softRatio ?? 0.88;
       const hard = val.hardRatio ?? 0.94;
       const target = val.targetRatio ?? 0.62;
       if (warning >= compact) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `warningRatio (${warning}) must be less than softRatio (${compact})`,
+          message: `warningRatio (${warning}) must be less than compactRatio (${compact})`,
           path: ['warningRatio'],
         });
       }
       if (compact >= hard) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `softRatio (${compact}) must be less than hardRatio (${hard})`,
-          path: ['softRatio'],
+          message: `compactRatio (${compact}) must be less than hardRatio (${hard})`,
+          path: ['compactRatio'],
         });
       }
       if (target >= compact) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `targetRatio (${target}) must be less than softRatio (${compact})`,
+          message: `targetRatio (${target}) must be less than compactRatio (${compact})`,
           path: ['targetRatio'],
         });
       }

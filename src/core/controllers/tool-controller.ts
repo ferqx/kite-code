@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
@@ -62,6 +63,28 @@ import { verificationRequestForCapability, verificationRequestForSkill } from '@
 import type { InteractionMode, PlanArtifactRef, PlanDocument } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
+
+// ── PR 8: Tool result digest production ──
+
+function computeToolResultDigest(input: {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  status?: string;
+}): { contentDigest: string; digestScope: 'raw' | 'projected' } {
+  const contentDigest = createHash('sha256')
+    .update(
+      JSON.stringify({
+        stdout: input.stdout,
+        stderr: input.stderr,
+        exitCode: input.exitCode,
+        status: input.status,
+      }),
+    )
+    .digest('hex');
+  const digestScope = 'projected' as const; // Values may already be truncated by tool runner
+  return { contentDigest, digestScope };
+}
 
 function recoveryActionForFailure(
   failure: import('@/core/runtime/failures').ClassifiedFailure,
@@ -1872,6 +1895,12 @@ export async function executeRuntimeTools(params: {
               ...(result.path ? { path: result.path } : {}),
               ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
               ...(result.action?.intent ? { intent: result.action.intent } : {}),
+              ...computeToolResultDigest({
+                stdout: result.stdout ?? '',
+                stderr: result.stderr ?? '',
+                exitCode: result.exitCode ?? 0,
+                status: result.status,
+              }),
             },
             status:
               result.status === 'exhausted'
@@ -2042,6 +2071,12 @@ export async function executeRuntimeTools(params: {
             ...(result.path ? { path: result.path } : {}),
             ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
             ...(result.action?.intent ? { intent: result.action.intent } : {}),
+            ...computeToolResultDigest({
+              stdout: result.stdout ?? '',
+              stderr: result.stderr ?? '',
+              exitCode: result.exitCode ?? 0,
+              status: result.status,
+            }),
           },
           status:
             result.status === 'exhausted' ? 'exhausted' : result.ok === false ? 'error' : 'success',

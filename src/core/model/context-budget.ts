@@ -1,5 +1,6 @@
 import type { BaseMessage } from '@/core/messages';
 import { countTokens } from '@/core/token-counter';
+import type { SerializedToolDescriptor } from './context-projection';
 import type { ResolvedModelCapabilities } from './model-capabilities';
 import { usableInputBudget } from './model-capabilities';
 
@@ -33,27 +34,10 @@ function messageContentTokens(message: BaseMessage): number {
   return countTokens(JSON.stringify(message.content));
 }
 
-function toolSchemaTokens(tools: Record<string, unknown> | undefined): number {
-  if (!tools) return 0;
-  return Object.entries(tools).reduce((total, [name, tool]) => {
-    const serializable =
-      tool && typeof tool === 'object'
-        ? Object.fromEntries(
-            Object.entries(tool as Record<string, unknown>).filter(
-              ([, value]) => typeof value !== 'function',
-            ),
-          )
-        : tool;
-    return (
-      total +
-      countTokens(
-        JSON.stringify(
-          serializable && typeof serializable === 'object'
-            ? { name, ...(serializable as Record<string, unknown>) }
-            : { name, value: serializable },
-        ),
-      )
-    );
+function toolSchemaTokens(descriptors: SerializedToolDescriptor[] | undefined): number {
+  if (!descriptors || descriptors.length === 0) return 0;
+  return descriptors.reduce((total, { name, description, inputSchema }) => {
+    return total + countTokens(JSON.stringify({ name, description, inputSchema }));
   }, 0);
 }
 
@@ -62,7 +46,7 @@ export function estimateContextTokens(input: {
   transcriptMessages: BaseMessage[];
   summaryMessages?: BaseMessage[];
   dynamicRuntimeMessages: BaseMessage[];
-  tools?: Record<string, unknown>;
+  serializedTools?: SerializedToolDescriptor[];
 }): ContextTokenEstimate {
   const systemTokens = input.systemMessages.reduce(
     (total, message) => total + messageContentTokens(message),
@@ -80,13 +64,13 @@ export function estimateContextTokens(input: {
     (total, message) => total + messageContentTokens(message),
     0,
   );
-  const schemas = toolSchemaTokens(input.tools);
+  const schemas = toolSchemaTokens(input.serializedTools);
   const messageCount =
     input.systemMessages.length +
     input.transcriptMessages.length +
     (input.summaryMessages?.length ?? 0) +
     input.dynamicRuntimeMessages.length;
-  const framingTokens = messageCount * 4 + Object.keys(input.tools ?? {}).length * 8;
+  const framingTokens = messageCount * 4 + (input.serializedTools?.length ?? 0) * 8;
   return {
     systemTokens,
     toolSchemaTokens: schemas,
@@ -106,13 +90,13 @@ export function estimateContextTokens(input: {
 
 export function addToolSchemasToEstimate(
   estimate: ContextTokenEstimate,
-  tools: Record<string, unknown>,
+  descriptors: SerializedToolDescriptor[],
 ): ContextTokenEstimate {
   const addition = estimateContextTokens({
     systemMessages: [],
     transcriptMessages: [],
     dynamicRuntimeMessages: [],
-    tools,
+    serializedTools: descriptors,
   });
   return {
     ...estimate,
@@ -127,7 +111,7 @@ export function preflightModelContext(input: {
   estimate: ContextTokenEstimate;
   capabilities: ResolvedModelCapabilities;
   requestMaxOutputTokens?: number;
-  softRatio?: number;
+  compactRatio?: number;
   hardRatio?: number;
   targetRatio?: number;
   /** Below this ratio → no action needed. Default 0.80. */
@@ -144,7 +128,7 @@ export function preflightModelContext(input: {
   }
   const utilization = input.estimate.totalInputTokens / budget.usableInputTokens;
   const warningRatio = input.warningRatio ?? 0.8;
-  const compactRatio = input.softRatio ?? 0.88; // softRatio renamed: was the old "soft" threshold
+  const compactRatio = input.compactRatio ?? 0.88;
   const hardRatio = input.hardRatio ?? 0.94;
 
   let status: ContextPressure;

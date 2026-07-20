@@ -5,6 +5,7 @@
 //
 // No path may implement its own token calculation or transcript truncation rules.
 
+import { createHash } from 'node:crypto';
 import {
   aiMessage,
   type BaseMessage,
@@ -44,13 +45,81 @@ import {
 /** Agent role / Agent 角色 */
 export type AgentRole = 'agent';
 
+/**
+ * Pure-data descriptor for a single tool's schema.
+ * JSON-safe — no functions, closures, Zod instances, or runtime objects.
+ */
+export interface SerializedToolDescriptor {
+  name: string;
+  description?: string;
+  /** Provider-facing JSON Schema for the tool's parameters. */
+  inputSchema: unknown;
+  /** SHA-256 digest of name + description + inputSchema for dedup/fold decisions. */
+  schemaDigest: string;
+}
+
+/**
+ * Reconstructable environment for context projection.
+ * Resolved once per turn by both the model invocation and the compaction effect,
+ * ensuring before/after estimates share the same inputs.
+ */
+export interface ContextProjectionEnvironment {
+  serializedTools: SerializedToolDescriptor[];
+  activeSkillInstructions?: string;
+  workflowSkills: Array<{
+    capabilityId: string;
+    description: string;
+  }>;
+}
+
+/**
+ * Extract pure-data tool descriptors from a ToolSet.
+ * All functions, closures, and runtime objects are stripped — only
+ * name, description, and JSON Schema remain.
+ */
+export function serializeToolDescriptors(
+  tools: Record<string, unknown>,
+): SerializedToolDescriptor[] {
+  const result: SerializedToolDescriptor[] = [];
+  for (const [name, tool] of Object.entries(tools)) {
+    if (!tool || typeof tool !== 'object') continue;
+    const record = tool as Record<string, unknown>;
+    const description = typeof record.description === 'string' ? record.description : undefined;
+    // The AI SDK exposes `parameters` as the JSON Schema; also accept `inputSchema`.
+    const inputSchema = record.parameters ?? record.inputSchema ?? record.schema;
+    if (!inputSchema) continue;
+    const schemaDigest = createHash('sha256')
+      .update(JSON.stringify({ name, description, inputSchema }))
+      .digest('hex');
+    result.push({ name, description, inputSchema, schemaDigest });
+  }
+  return result;
+}
+
+/**
+ * Compute a stable digest of the projection environment for diagnostics.
+ * The digest verifies that the environment used for a compaction effect
+ * matches the one observed when the compaction was requested.
+ */
+export function digestProjectionEnvironment(env: ContextProjectionEnvironment): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        tools: env.serializedTools.map((t) => t.schemaDigest).sort(),
+        skills: env.activeSkillInstructions ?? null,
+        workflows: env.workflowSkills.map((w) => w.capabilityId).sort(),
+      }),
+    )
+    .digest('hex');
+}
+
 /** Input to the unified context projection. */
 export interface BuildContextProjectionInput {
   role: AgentRole;
   /** Full RuntimeState — the function derives all needed fields internally. */
   state: Readonly<RuntimeState>;
-  /** Tool definitions as a name→descriptor map (provider-adapter serialized form). */
-  tools?: Record<string, unknown>;
+  /** Serialized tool descriptors for token estimation (PR 1 — pure data, no runtime objects). */
+  serializedTools?: SerializedToolDescriptor[];
   /** Context budget for M1 compaction. */
   contextBudget?: ContextBudget;
   /** Override the active checkpoint for candidate validation (PR 5). */
@@ -255,7 +324,7 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
     transcriptMessages: msgs,
     summaryMessages,
     dynamicRuntimeMessages,
-    tools: input.tools,
+    serializedTools: input.serializedTools,
   });
 
   // ── 9. Assemble final provider-ready messages ──

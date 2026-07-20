@@ -659,6 +659,29 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     (customInstructions) => {
       onCompactRef.current(customInstructions);
     },
+    // PR 9: /context handler — display context usage breakdown
+    () => {
+      const targetThreadId = threadIdRef.current;
+      dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/context' });
+      const text = sessionManager.handleContextDisplay(targetThreadId);
+      dispatchSessionLoad({ type: 'LOCAL_TEXT', text });
+    },
+    // PR 9: /compact reset handler — preflight + clear active checkpoint
+    () => {
+      const targetThreadId = threadIdRef.current;
+      dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/compact reset' });
+      void sessionManager.handleContextReset(targetThreadId).then((result) => {
+        if (threadIdRef.current !== targetThreadId) return;
+        for (const event of result.events) {
+          dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+        }
+        dispatchSessionLoad({
+          type: 'LOCAL_TEXT',
+          text: `  ⎿  ${result.text}`,
+          ...(result.isError ? { isError: true } : {}),
+        });
+      });
+    },
   );
 
   // Stable reference — avoids re-creating the object on every render and causing

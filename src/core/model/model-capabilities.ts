@@ -120,6 +120,8 @@ export function resolveModelCapabilities(input: {
 export function usableInputBudget(
   capabilities: ResolvedModelCapabilities,
   requestMaxOutputTokens?: number,
+  /** PR 7: Provider safety ratio from config (default 0.02 = 2%). */
+  providerSafetyRatio?: number,
 ): {
   usableInputTokens?: number;
   reservedOutputTokens: number;
@@ -133,9 +135,10 @@ export function usableInputBudget(
       providerSafetyMarginTokens: 0,
     };
   }
+  const safetyRatio = providerSafetyRatio ?? 0.02;
   const providerSafetyMarginTokens = Math.max(
     1_024,
-    Math.floor(capabilities.contextWindowTokens * 0.01),
+    Math.floor(capabilities.contextWindowTokens * safetyRatio),
   );
   return {
     usableInputTokens: Math.max(

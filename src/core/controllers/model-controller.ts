@@ -5,6 +5,7 @@
 // Kernel-native model invocation: build context from RuntimeState → call model → return RuntimeEvent[].
 // No LangGraph state dependency, no side effects.
 
+import { createHash } from 'node:crypto';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { createBinding } from '@/core/capabilities/catalog';
 import {
@@ -21,7 +22,11 @@ import {
   decideAutomaticContextCompaction,
   isProviderContextOverflow,
 } from '@/core/model/context-compaction-decision';
-import { buildContextProjection } from '@/core/model/context-projection';
+import {
+  buildContextProjection,
+  digestProjectionEnvironment,
+  serializeToolDescriptors,
+} from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { resolveModelCapabilities, usableInputBudget } from '@/core/model/model-capabilities';
@@ -348,23 +353,28 @@ export async function invokeRuntimeModel(params: {
       modelCapabilities,
       positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         positiveConfigNumber(params.config.modelKwargs?.maxTokens),
+      params.config.compaction?.providerSafetyRatio,
     );
+    const serializedTools = serializeToolDescriptors(tools as unknown as Record<string, unknown>);
+    const activeSkillInstr = activeInlineSkillInstructions(state, params.skillCatalog);
+    const workflowSkillDescriptors = disclosedDescriptors
+      .filter((descriptor) => descriptor.kind === 'skill')
+      .map((descriptor) => ({
+        capabilityId: descriptor.capabilityId,
+        description: descriptor.description,
+      }));
+
     const projection = buildContextProjection({
       role: 'agent',
       state,
-      tools: tools as unknown as Record<string, unknown>,
+      serializedTools,
       contextBudget: {
         ...(inputBudget.usableInputTokens ? { maxTokens: inputBudget.usableInputTokens } : {}),
         recentTurns: 3,
       },
-      activeSkillInstructions: activeInlineSkillInstructions(state, params.skillCatalog),
+      activeSkillInstructions: activeSkillInstr,
       skills: undefined,
-      workflowSkills: disclosedDescriptors
-        .filter((descriptor) => descriptor.kind === 'skill')
-        .map((descriptor) => ({
-          capabilityId: descriptor.capabilityId,
-          description: descriptor.description,
-        })),
+      workflowSkills: workflowSkillDescriptors,
     });
     const preflight = preflightModelContext({
       estimate: projection.estimate,
@@ -372,7 +382,7 @@ export async function invokeRuntimeModel(params: {
       requestMaxOutputTokens:
         positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         positiveConfigNumber(params.config.modelKwargs?.maxTokens),
-      softRatio: params.config.compaction?.softRatio,
+      compactRatio: params.config.compaction?.compactRatio ?? params.config.compaction?.softRatio,
       hardRatio: params.config.compaction?.hardRatio,
       warningRatio: params.config.compaction?.warningRatio,
       targetRatio: params.config.compaction?.targetRatio,
@@ -406,6 +416,11 @@ export async function invokeRuntimeModel(params: {
     }
     if (automaticCompaction.action === 'request_compaction') {
       compactionMetrics.recordRequested();
+      const envDigest = digestProjectionEnvironment({
+        serializedTools,
+        activeSkillInstructions: activeSkillInstr,
+        workflowSkills: workflowSkillDescriptors,
+      });
       return [
         ...retryEvents,
         contextMetricsEvent,
@@ -417,7 +432,7 @@ export async function invokeRuntimeModel(params: {
           requestedAtTurnId: state.turn.turnId,
           force: false,
           estimate: preflight.estimate,
-          tools: tools as unknown as Record<string, unknown>,
+          projectionEnvironmentDigest: envDigest,
         },
       ];
     }
@@ -441,6 +456,11 @@ export async function invokeRuntimeModel(params: {
       ) {
         compactionMetrics.recordRequested();
         compactionMetrics.recordOverflowRecovery();
+        const envDigest = digestProjectionEnvironment({
+          serializedTools,
+          activeSkillInstructions: activeSkillInstr,
+          workflowSkills: workflowSkillDescriptors,
+        });
         return [
           ...retryEvents,
           contextMetricsEvent,
@@ -452,7 +472,7 @@ export async function invokeRuntimeModel(params: {
             requestedAtTurnId: state.turn.turnId,
             force: true,
             estimate: preflight.estimate,
-            tools: tools as unknown as Record<string, unknown>,
+            projectionEnvironmentDigest: envDigest,
           },
         ];
       }
@@ -462,10 +482,29 @@ export async function invokeRuntimeModel(params: {
         isProviderContextOverflow(error) &&
         state.context.overflowRecoveryTurnId === state.turn.turnId
       ) {
-        throw new Error(
-          'Provider context overflow persisted after the single compaction recovery attempt.',
-          { cause: error },
-        );
+        // PR 6: Emit a durable hard_blocked event instead of a plain Error.
+        // REVIEW-FIX: Use a proper SHA-256 content digest, not a token count.
+        const blockDigest = createHash('sha256')
+          .update(
+            JSON.stringify({
+              reason: 'overflow_recovery_failed',
+              turnId: state.turn.turnId,
+              totalInputTokens: preflight.estimate?.totalInputTokens ?? 0,
+            }),
+          )
+          .digest('hex');
+        return [
+          ...retryEvents,
+          contextMetricsEvent,
+          {
+            type: 'context.hard_blocked' as const,
+            reason: 'overflow_recovery_failed' as const,
+            sourceDigest: blockDigest,
+            message:
+              'Provider context overflow persisted after compaction recovery. Use /compact reset or start a new session.',
+            createdAtTurnId: state.turn.turnId,
+          },
+        ];
       }
       throw error;
     }

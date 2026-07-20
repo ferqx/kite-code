@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import {
@@ -17,6 +18,7 @@ import {
   createModelContextSummaryGenerator,
   createStructuredContextCompactor,
 } from '@/core/model/compaction-summary';
+import type { SerializedToolDescriptor } from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -50,6 +52,63 @@ export function resolveAutoReviewTimeout(config: AgentConfig): number {
   return getFeatureFlags(config).autoReviewV2 ? (config.autoReview?.timeoutMs ?? 15_000) : 15_000;
 }
 
+/** Extract pure-data tool descriptors from executor dependencies at effect time.
+ *  Only serializable fields (name, description, inputSchema) survive — no
+ *  functions, closures, or runtime objects enter the compactor. */
+function resolveCompactionSerializedTools(deps: {
+  mcpManager?: McpRuntimeProvider;
+  skillCatalog?: SkillCatalogSnapshot;
+}): SerializedToolDescriptor[] {
+  const descriptors: SerializedToolDescriptor[] = [];
+
+  // MCP tools from capability snapshot
+  const mcpSnapshot = deps.mcpManager?.getCapabilitySnapshot();
+  if (mcpSnapshot) {
+    for (const cap of mcpSnapshot.descriptors) {
+      if (!cap.inputSchema) continue;
+      const schemaDigest = createHash('sha256')
+        .update(
+          JSON.stringify({
+            name: cap.displayName,
+            description: cap.description,
+            inputSchema: cap.inputSchema,
+          }),
+        )
+        .digest('hex');
+      descriptors.push({
+        name: cap.displayName,
+        description: cap.description,
+        inputSchema: cap.inputSchema,
+        schemaDigest,
+      });
+    }
+  }
+
+  // Skill tools from catalog
+  if (deps.skillCatalog) {
+    for (const cap of deps.skillCatalog.capabilities.descriptors) {
+      if (!cap.inputSchema) continue;
+      const schemaDigest = createHash('sha256')
+        .update(
+          JSON.stringify({
+            name: cap.displayName,
+            description: cap.description,
+            inputSchema: cap.inputSchema,
+          }),
+        )
+        .digest('hex');
+      descriptors.push({
+        name: cap.displayName,
+        description: cap.description,
+        inputSchema: cap.inputSchema,
+        schemaDigest,
+      });
+    }
+  }
+
+  return descriptors;
+}
+
 /** Build the production executor for Kernel effects. */
 export function createRuntimeEffectExecutor(
   dependencies: RuntimeExecutorDependencies,
@@ -80,10 +139,15 @@ export function createRuntimeEffectExecutor(
     });
   return async (effect, state, emit) => {
     if (effect.type === 'compact_context') {
+      const serializedTools = resolveCompactionSerializedTools({
+        mcpManager: dependencies.mcpManager,
+        skillCatalog: currentSkillCatalog(),
+      });
       return executeContextCompaction({
         state,
         compactionId: effect.compactionId,
         compact: contextCompactor,
+        serializedTools,
       });
     }
     if (effect.type === 'call_model') {

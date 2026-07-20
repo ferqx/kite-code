@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { humanMessage, systemMessage } from '@/core/messages';
 import type {
@@ -8,11 +9,12 @@ import type { RuntimeState, TranscriptMessage } from '@/core/runtime/state';
 import { countTokens } from '@/core/token-counter';
 import {
   buildDeterministicFactLedger,
+  buildLedgerFromBaseSummary,
   type DeterministicFactLedger,
+  mergeCompactionLedgers,
 } from './compaction-fact-ledger';
 import {
-  parseStructuredContextSummaryV1,
-  parseStructuredContextSummaryV2,
+  parseGeneratedSummaryCandidate,
   type StructuredContextSummaryV2,
   structuredContextSummaryV2Schema,
   summaryFactIds,
@@ -25,6 +27,27 @@ import {
 import { buildContextProjection } from './context-projection';
 import type { SupportedChatModel } from './factory';
 import { invokeBoundModel } from './invoke';
+
+// ── PR 2: Fixed-length source digest chain ──
+
+/** Compute the next source digest without unbounded growth.
+ *  Each link is a SHA-256 hash of (base digest, tail digest, policy version),
+ *  so every incremental step produces a constant-length hex string. */
+function nextCompactionSourceDigest(input: {
+  baseDigest?: string;
+  tailDigest: string;
+  policyVersion: string;
+}): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        baseDigest: input.baseDigest ?? null,
+        tailDigest: input.tailDigest,
+        policyVersion: input.policyVersion,
+      }),
+    )
+    .digest('hex');
+}
 
 export type SummaryGenerationMode = 'summary' | 'repair' | 'chunk' | 'merge';
 
@@ -61,21 +84,158 @@ export function createModelContextSummaryGenerator(input: {
 export class ContextCompactionValidationError extends Error {
   readonly kind:
     | 'unsafe_boundary'
+    | 'summary_model_failed'
     | 'invalid_schema'
+    | 'invalid_provenance'
+    | 'invalid_evidence'
+    | 'missing_user_coverage'
     | 'missing_mandatory_facts'
-    | 'insufficient_reduction';
+    | 'insufficient_reduction'
+    | 'stale_source';
 
-  constructor(
-    kind:
-      | 'unsafe_boundary'
-      | 'invalid_schema'
-      | 'missing_mandatory_facts'
-      | 'insufficient_reduction',
-    message: string,
-  ) {
+  constructor(kind: ContextCompactionValidationError['kind'], message: string) {
     super(message);
     this.kind = kind;
     this.name = 'ContextCompactionValidationError';
+  }
+}
+
+// ── PR 5: Enhanced summary validation context ──
+
+interface SummaryValidationContext {
+  coveredMessageIds: Set<string>;
+  ledgerById: Map<string, import('./compaction-fact-ledger').CompactionFact>;
+  mandatoryFactIds: Set<string>;
+}
+
+function buildValidationContext(
+  ledger: DeterministicFactLedger,
+  coveredUserMessageIds: string[],
+): SummaryValidationContext {
+  return {
+    coveredMessageIds: new Set(coveredUserMessageIds),
+    ledgerById: new Map(ledger.facts.map((f) => [f.factId, f])),
+    mandatoryFactIds: new Set(ledger.mandatoryFactIds),
+  };
+}
+
+/** Verify every evidence message ID is within the covered range. */
+function validateEvidenceIds(
+  ids: string[],
+  entryLabel: string,
+  ctx: SummaryValidationContext,
+): void {
+  for (const id of ids) {
+    if (!ctx.coveredMessageIds.has(id)) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Evidence message ${id} in ${entryLabel} is outside the compacted source.`,
+      );
+    }
+  }
+}
+
+/**
+ * Verify a summary fact reference matches the deterministic ledger.
+ * The model must not invent fact IDs, modify immutable fields (path, digest,
+ * revision, success/failure type), or fabricate evidence.
+ *
+ * REVIEW-FIX: Now validates:
+ * - Fields SET by the model that the ledger does NOT have (fabrication).
+ * - Fact kind mismatch (completed_work placed in failures, or vice versa).
+ */
+function validateFactReference(
+  factId: string,
+  ctx: SummaryValidationContext,
+  immutableCheck?: {
+    label: string;
+    path?: string;
+    digest?: string;
+    resource?: string;
+    revision?: string;
+    /** The expected CompactionFactKind — verifies the model didn't reclassify the fact. */
+    expectedKind?: import('./compaction-fact-ledger').CompactionFactKind;
+  },
+): void {
+  const ledgerFact = ctx.ledgerById.get(factId);
+  if (!ledgerFact) {
+    throw new ContextCompactionValidationError(
+      'invalid_evidence',
+      `Summary invented fact ID ${factId} not present in the deterministic ledger.`,
+    );
+  }
+  if (!immutableCheck) return;
+
+  const detail = immutableCheck.label;
+
+  // REVIEW-FIX: Verify the model didn't reclassify the fact (e.g., failure → completed_work).
+  if (immutableCheck.expectedKind && ledgerFact.kind !== immutableCheck.expectedKind) {
+    throw new ContextCompactionValidationError(
+      'invalid_evidence',
+      `Summary reclassified fact ${factId} as ${immutableCheck.expectedKind} but ledger has ${ledgerFact.kind}.`,
+    );
+  }
+
+  // Check path: reject if model sets a path that doesn't match the ledger,
+  // OR if model invents a path the ledger doesn't have.
+  if (immutableCheck.path !== undefined) {
+    if (ledgerFact.path === undefined) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary fabricated path for ${detail} (${immutableCheck.path}) — ledger has no path.`,
+      );
+    }
+    if (immutableCheck.path !== ledgerFact.path) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary modified path for ${detail} (${immutableCheck.path} → ledger has ${ledgerFact.path}).`,
+      );
+    }
+  }
+  // Check resource
+  if (immutableCheck.resource !== undefined) {
+    if (ledgerFact.resource === undefined) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary fabricated resource for ${detail} (${immutableCheck.resource}) — ledger has no resource.`,
+      );
+    }
+    if (immutableCheck.resource !== ledgerFact.resource) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary modified resource for ${detail} (${immutableCheck.resource} → ledger has ${ledgerFact.resource}).`,
+      );
+    }
+  }
+  // Check revision
+  if (immutableCheck.revision !== undefined) {
+    if (ledgerFact.revision === undefined) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary fabricated revision for ${detail} (${immutableCheck.revision}) — ledger has no revision.`,
+      );
+    }
+    if (immutableCheck.revision !== ledgerFact.revision) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary modified revision for ${detail} (${immutableCheck.revision} → ledger has ${ledgerFact.revision}).`,
+      );
+    }
+  }
+  // Check digest
+  if (immutableCheck.digest !== undefined) {
+    if (ledgerFact.digest === undefined) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary fabricated digest for ${detail} (${immutableCheck.digest}) — ledger has no digest.`,
+      );
+    }
+    if (immutableCheck.digest !== ledgerFact.digest) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary modified digest for ${detail} (${immutableCheck.digest} → ledger has ${ledgerFact.digest}).`,
+      );
+    }
   }
 }
 
@@ -141,7 +301,12 @@ function summaryInput(input: {
   });
 }
 
-function validateSummary(
+/**
+ * Validate a freshly-generated summary candidate.
+ * V2 only — V1 model output is rejected.
+ * The persisted checkpoint path uses parsePersistedCheckpointSummary() instead.
+ */
+function validateGeneratedSummary(
   raw: unknown,
   ledger: DeterministicFactLedger,
   provenance: {
@@ -149,59 +314,19 @@ function validateSummary(
     lastMessageId: string;
     sourceDigest: string;
     coveredUserMessageIds: string[];
+    inheritedMandatoryFactIds?: string[];
+    tailMandatoryFactIds?: string[];
   },
-): { summary: StructuredContextSummaryV2; upgradedFromV1: boolean } {
+): StructuredContextSummaryV2 {
+  // V2 only for new generation — no V1 fallback
   let summary: StructuredContextSummaryV2;
-  let upgradedFromV1 = false;
-  // Parse as V2 first, fall back to V1 for backward compatibility.
   try {
-    summary = parseStructuredContextSummaryV2(raw);
-  } catch {
-    // V1 backfill: parse as V1, then upgrade to V2 shape for internal use.
-    try {
-      const v1 = parseStructuredContextSummaryV1(raw);
-      upgradedFromV1 = true;
-      summary = {
-        version: 2,
-        objective: { text: v1.objective, evidenceMessageIds: [] },
-        userRequests: [],
-        userConstraints: v1.userConstraints.map((c) => ({
-          ...c,
-          evidenceMessageIds: [] as string[],
-        })),
-        decisions: v1.decisions.map((d) => ({ ...d, evidenceMessageIds: [] as string[] })),
-        completedEffects: v1.completedWork.map((cw) => ({
-          factId: cw.factId,
-          operation: cw.summary,
-          path: cw.path,
-          outcome: cw.summary,
-          evidenceMessageIds: cw.evidenceMessageIds,
-        })),
-        observations: v1.observations.map((o) => ({ ...o, evidenceMessageIds: [] as string[] })),
-        failures: v1.failures.map((f) => ({ ...f, evidenceMessageIds: [] as string[] })),
-        pendingWork: v1.pendingWork.map((pw) => ({
-          text: pw.text,
-          blockedBy: pw.blockedBy,
-          evidenceMessageIds: [] as string[],
-        })),
-        unresolvedQuestions: v1.unresolvedQuestions.map((q) => ({
-          text: q,
-          evidenceMessageIds: [],
-        })),
-        provenance: {
-          lastMessageId: v1.provenance.lastMessageId,
-          sourceDigest: v1.provenance.sourceDigest,
-          coveredUserMessageIds: provenance.coveredUserMessageIds,
-          mandatoryFactIds: v1.provenance.mandatoryFactIds,
-          policyVersion: '1.0.0',
-        },
-      };
-    } catch (error) {
-      throw new ContextCompactionValidationError(
-        'invalid_schema',
-        error instanceof Error ? error.message : String(error),
-      );
-    }
+    summary = parseGeneratedSummaryCandidate(raw);
+  } catch (error) {
+    throw new ContextCompactionValidationError(
+      'invalid_schema',
+      error instanceof Error ? error.message : String(error),
+    );
   }
 
   if (
@@ -227,9 +352,8 @@ function validateSummary(
     );
   }
 
-  // User message coverage: only enforced for native V2 summaries.
-  // V1-upgraded summaries don't have evidence tracking (the model wasn't instructed to).
-  if (!upgradedFromV1 && provenance.coveredUserMessageIds.length > 0) {
+  // User message coverage
+  if (provenance.coveredUserMessageIds.length > 0) {
     const coveredUserIds = new Set(provenance.coveredUserMessageIds);
     const referencedUserIds = new Set([
       ...summary.objective.evidenceMessageIds,
@@ -248,7 +372,62 @@ function validateSummary(
     }
   }
 
-  return { summary, upgradedFromV1 };
+  // ── PR 5: Evidence and fact reference validation ──
+  const ctx = buildValidationContext(ledger, provenance.coveredUserMessageIds);
+
+  // Validate all evidence IDs in the summary are within covered range
+  validateEvidenceIds(summary.objective.evidenceMessageIds, 'objective', ctx);
+  for (const req of summary.userRequests) {
+    validateEvidenceIds(req.evidenceMessageIds, `userRequest:${req.summary.slice(0, 40)}`, ctx);
+  }
+  for (const c of summary.userConstraints) {
+    validateEvidenceIds(c.evidenceMessageIds, `constraint:${c.factId}`, ctx);
+  }
+  for (const d of summary.decisions) {
+    validateEvidenceIds(d.evidenceMessageIds, `decision:${d.decision.slice(0, 40)}`, ctx);
+  }
+  for (const ce of summary.completedEffects) {
+    validateEvidenceIds(ce.evidenceMessageIds, `completed:${ce.factId}`, ctx);
+    validateFactReference(ce.factId, ctx, {
+      label: `completedEffect:${ce.factId}`,
+      expectedKind: 'completed_work',
+      path: ce.path,
+      digest: ce.rawResultDigest,
+    });
+  }
+  for (const obs of summary.observations) {
+    if (obs.factId) {
+      validateEvidenceIds(obs.evidenceMessageIds, `observation:${obs.factId}`, ctx);
+      validateFactReference(obs.factId, ctx, {
+        label: `observation:${obs.factId}`,
+        expectedKind: 'observation',
+        resource: obs.resource,
+        revision: obs.revision,
+        digest: obs.digest,
+      });
+    }
+  }
+  for (const f of summary.failures) {
+    validateEvidenceIds(f.evidenceMessageIds, `failure:${f.factId}`, ctx);
+    validateFactReference(f.factId, ctx, {
+      label: `failure:${f.factId}`,
+      expectedKind: 'failure',
+    });
+  }
+  for (const pw of summary.pendingWork) {
+    if (pw.factId) {
+      validateEvidenceIds(pw.evidenceMessageIds, `pendingWork:${pw.factId}`, ctx);
+      validateFactReference(pw.factId, ctx, {
+        label: `pendingWork:${pw.factId}`,
+        expectedKind: 'pending_work',
+      });
+    }
+  }
+  for (const q of summary.unresolvedQuestions) {
+    validateEvidenceIds(q.evidenceMessageIds, `unresolvedQuestion:${q.text.slice(0, 40)}`, ctx);
+  }
+
+  return summary;
 }
 
 async function generateValidatedSummary(input: {
@@ -263,6 +442,8 @@ async function generateValidatedSummary(input: {
     sourceDigest: string;
     coveredUserMessageIds: string[];
     baseCheckpointId?: string;
+    inheritedMandatoryFactIds?: string[];
+    tailMandatoryFactIds?: string[];
   };
   maxSummaryTokens: number;
   mode: 'summary' | 'merge';
@@ -284,7 +465,7 @@ async function generateValidatedSummary(input: {
     maxOutputTokens: input.maxSummaryTokens,
   });
   try {
-    return validateSummary(first, input.ledger, input.provenance).summary;
+    return validateGeneratedSummary(first, input.ledger, input.provenance);
   } catch (firstError) {
     const repaired = await input.generate({
       mode: 'repair',
@@ -296,7 +477,7 @@ async function generateValidatedSummary(input: {
       }),
       maxOutputTokens: input.maxSummaryTokens,
     });
-    return validateSummary(repaired, input.ledger, input.provenance).summary;
+    return validateGeneratedSummary(repaired, input.ledger, input.provenance);
   }
 }
 
@@ -357,6 +538,7 @@ export function createStructuredContextCompactor(options: {
     state: Readonly<RuntimeState>;
     pending: Readonly<PendingContextCompaction>;
     sourceRevision: number;
+    serializedTools?: import('./context-projection').SerializedToolDescriptor[];
   }) => {
     const boundary = findSafeCompactionBoundary(input.state, {
       recentTurns: options.recentTurns,
@@ -398,19 +580,34 @@ export function createStructuredContextCompactor(options: {
     // When tailMessages is empty (all covered messages are already checkpointed),
     // fall back to full compaction — the source is the full coveredMessages.
     const isIncremental = tailMessages.length > 0 && baseCheckpoint != null;
+    const tailDigest = digestCompactionSource(
+      isIncremental ? tailMessages : boundary.coveredMessages,
+    );
+    const policyVersion = '1.0.0';
     const sourceDigest = isIncremental
-      ? `${baseCheckpoint!.sourceDigest}:${digestCompactionSource(tailMessages)}`
-      : digestCompactionSource(boundary.coveredMessages);
-    const ledger = buildDeterministicFactLedger(
+      ? nextCompactionSourceDigest({
+          baseDigest: baseCheckpoint!.sourceDigest,
+          tailDigest,
+          policyVersion,
+        })
+      : tailDigest;
+
+    // ── PR 2: Merge base ledger with tail ledger for incremental compaction ──
+    const tailLedger = buildDeterministicFactLedger(
       input.state,
       isIncremental ? tailMessages : boundary.coveredMessages,
     );
+    const baseLedger = baseSummary ? buildLedgerFromBaseSummary(baseSummary) : undefined;
+    const ledger = mergeCompactionLedgers(baseLedger, tailLedger);
+
     const provenance = {
       firstMessageId: baseCheckpoint?.coveredThroughMessageId ?? boundary.firstMessageId,
       lastMessageId: boundary.lastMessageId,
       sourceDigest,
       coveredUserMessageIds: ledger.coveredUserMessageIds,
       ...(baseCheckpoint ? { baseCheckpointId: baseCheckpoint.compactionId } : {}),
+      ...(baseLedger ? { inheritedMandatoryFactIds: baseLedger.mandatoryFactIds } : {}),
+      ...(isIncremental ? { tailMandatoryFactIds: tailLedger.mandatoryFactIds } : {}),
     };
     const customPreferences = input.pending.customInstructions;
     const maxSummaryTokens = options.maxSummaryTokens ?? 6_000;
@@ -496,12 +693,16 @@ export function createStructuredContextCompactor(options: {
     const candidateProjection = buildContextProjection({
       role: 'agent',
       state: input.state,
-      tools: input.pending.tools,
+      serializedTools: input.serializedTools,
       candidateCheckpoint,
       contextBudget: { recentTurns: options.recentTurns },
     });
     const inputTokensAfter = candidateProjection.estimate.totalInputTokens;
-    const targetTokens = Math.floor(inputTokensBefore * (options.targetRatio ?? 0.62));
+    // PR 7: Target is based on usable window, not raw inputTokensBefore.
+    // This accounts for output reservation and provider safety margin.
+    const preflight = input.state.context.lastPreflight;
+    const usableInput = preflight?.usableInputTokens ?? inputTokensBefore;
+    const targetTokens = Math.floor(usableInput * (options.targetRatio ?? 0.62));
 
     // Automatic: must reduce below target.
     // Manual: any positive reduction is sufficient.

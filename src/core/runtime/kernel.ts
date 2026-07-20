@@ -6,6 +6,7 @@
 // and policy decisions.  Single entry point for state, persistence, and effect dispatch.
 
 import { createHash } from 'node:crypto';
+import { recoverLegacySyntheticTurns } from '@/core/model/compaction-v2';
 import { defaultPlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
@@ -563,14 +564,29 @@ function replayPersistedTail(
 }
 
 function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
+  // PR 8: Normalize legacy transcripts so every message has a deterministic turnId.
+  // Run BEFORE schema version checks — applies to all snapshots regardless of version.
+  const threadHash = createHash('sha256')
+    .update(snapshot.session.threadId)
+    .digest('hex')
+    .slice(0, 8);
+  const normalizedSnapshot: RuntimeState = {
+    ...snapshot,
+    transcript: {
+      ...snapshot.transcript,
+      messages: recoverLegacySyntheticTurns(snapshot.transcript.messages, threadHash),
+    },
+  };
+
   if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION)
-    return normalizeRuntimeMetadata(snapshot);
+    return normalizeRuntimeMetadata(normalizedSnapshot);
   if (snapshot.schemaVersion < 2 || snapshot.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
     return null;
 
   const legacyApprovalInteraction =
-    snapshot.schemaVersion < 4 && snapshot.interactions.kind === 'awaiting_tool_approval'
-      ? snapshot.interactions
+    normalizedSnapshot.schemaVersion < 4 &&
+    normalizedSnapshot.interactions.kind === 'awaiting_tool_approval'
+      ? normalizedSnapshot.interactions
       : undefined;
   const legacyMarker = legacyApprovalInteraction?.approval.subagentId
     ? {
@@ -582,10 +598,10 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   // Build the migrated state before upgrading the version so all v2 fields are
   // preserved and the recovery marker is durable with the schema transition.
   let migratedState: RuntimeState = {
-    ...normalizeRuntimeMetadata(snapshot),
+    ...normalizeRuntimeMetadata(normalizedSnapshot),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
-    verification: (snapshot as Partial<RuntimeState>).verification ?? { records: {} },
-    context: (snapshot as Partial<RuntimeState>).context ?? {
+    verification: (normalizedSnapshot as Partial<RuntimeState>).verification ?? { records: {} },
+    context: (normalizedSnapshot as Partial<RuntimeState>).context ?? {
       history: [],
       autoGuard: {
         recentAutomaticCompactions: [],
@@ -593,7 +609,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
         disabledUntilManualAction: false,
       },
     },
-    providerAdmission: (snapshot as Partial<RuntimeState>).providerAdmission ?? {
+    providerAdmission: (normalizedSnapshot as Partial<RuntimeState>).providerAdmission ?? {
       pending: [],
       waivers: {},
     },

@@ -34,14 +34,15 @@ export interface PendingContextCompaction {
   estimate: ContextTokenEstimate;
   /** Optional user-supplied instructions for the summary model. */
   customInstructions?: string;
-  /** Tool definitions for candidate projection validation (PR 5). */
-  tools?: Record<string, unknown>;
 }
 
 export type ContextCompactionErrorKind =
   | 'unsafe_boundary'
   | 'summary_model_failed'
   | 'invalid_schema'
+  | 'invalid_provenance'
+  | 'invalid_evidence'
+  | 'missing_user_coverage'
   | 'missing_mandatory_facts'
   | 'insufficient_reduction'
   | 'stale_source';

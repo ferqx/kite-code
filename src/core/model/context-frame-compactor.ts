@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ContextBudget } from '@/core/types';
 import type { ContextFrame, FrameToolResult, ToolCallBlockFrame } from './context-frame';
+import { buildResourceObservationTracker } from './resource-observation-tracker';
 
 const DEFAULT_RECENT_TURNS = 3;
 const SEARCH_TOOLS = new Set(['search_content', 'search_files']);
@@ -65,25 +66,13 @@ function protectedFrameIndices(frames: ContextFrame[], recentTurns: number): Set
   return new Set(frameKeys.flatMap((key, index) => (protectedKeys.has(key) ? [index] : [])));
 }
 
-function mutationScopes(call: FrameToolResult): string[] | null | undefined {
-  if (call.effectClass === 'read_only' || call.effectClass === 'plan_only') return undefined;
-  const scopes = call.resultMeta?.workspaceMutationScope;
-  if (scopes?.length) return scopes;
-  const path = call.resultMeta?.path ?? stringArg(call, 'path');
-  if (path && call.effectClass === 'workspace_write') return [path];
-  return null;
-}
-
-function resourceKey(
-  call: FrameToolResult,
-  globalGeneration: number,
-  pathGenerations: Map<string, number>,
-): string | undefined {
-  const path = call.resultMeta?.path;
-  if (!path || call.resultMeta?.truncated || !call.ok) return undefined;
-  const revision =
-    call.resultMeta?.resourceRevision ?? call.resultMeta?.contentDigest ?? digest(call.content);
-  return `${call.name}:${path}:${revision}:${globalGeneration}:${pathGenerations.get(path) ?? 0}`;
+function isMutation(call: FrameToolResult): boolean {
+  if (call.effectClass === 'read_only' || call.effectClass === 'plan_only') return false;
+  return (
+    call.effectClass === 'workspace_write' ||
+    call.effectClass === 'external_side_effect' ||
+    call.effectClass === 'unknown'
+  );
 }
 
 function foldRead(call: FrameToolResult): FrameToolResult {
@@ -159,38 +148,9 @@ export function compactContextFrames(
     frames,
     budget?.recentTurns ?? DEFAULT_RECENT_TURNS,
   );
-  const foldableReads = new Set<string>();
-  const latestObservation = new Map<string, string>();
-  const pathGenerations = new Map<string, number>();
-  let globalGeneration = 0;
 
-  for (const frame of frames) {
-    if (frame.kind !== 'tool_block') continue;
-    for (const call of frame.calls) {
-      const scopes = mutationScopes(call);
-      if (scopes === null) {
-        globalGeneration++;
-        latestObservation.clear();
-      } else if (scopes) {
-        for (const path of scopes) {
-          pathGenerations.set(path, (pathGenerations.get(path) ?? 0) + 1);
-          for (const key of latestObservation.keys()) {
-            if (key.includes(`:${path}:`)) latestObservation.delete(key);
-          }
-        }
-      }
-      if (!RESOURCE_READ_TOOLS.has(call.name) || call.effectClass !== 'read_only') continue;
-      // Legacy metadata: no reliable digest → fail closed, never fold.
-      if (call.resultMeta?.digestScope === 'legacy_unknown') {
-        continue;
-      }
-      const key = resourceKey(call, globalGeneration, pathGenerations);
-      if (!key) continue;
-      const earlier = latestObservation.get(key);
-      if (earlier) foldableReads.add(earlier);
-      latestObservation.set(key, call.toolCallId);
-    }
-  }
+  // ── PR 4: Shared observation tracker replaces inline generation logic ──
+  const tracker = buildResourceObservationTracker(frames);
 
   let previousDuplicate: { signature: string; toolCallId: string } | undefined;
 
@@ -201,14 +161,14 @@ export function compactContextFrames(
     }
     const protectedFrame = protectedIndices.has(frameIndex);
     const calls = frame.calls.map((call) => {
-      const scopes = mutationScopes(call);
-      if (scopes !== undefined) previousDuplicate = undefined;
+      if (isMutation(call)) previousDuplicate = undefined;
       if (!call.ok || isCompacted(call) || protectedFrame) {
         previousDuplicate = undefined;
         return call;
       }
 
-      if (foldableReads.has(call.toolCallId)) return foldRead(call);
+      // ── Use tracker for fold decisions (PR 4) ──
+      if (tracker.isFoldable(call.toolCallId)) return foldRead(call);
 
       const query = searchQuery(call);
       if (query && call.effectClass === 'read_only') return foldSearch(call, query);

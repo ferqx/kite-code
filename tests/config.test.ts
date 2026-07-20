@@ -124,7 +124,8 @@ describe('loadAgentConfig', () => {
           "compaction": {
             "maxSummaryTokens": 5000,
             "maxSummaryInputTokens": 24000,
-            "softRatio": 0.7,
+            "warningRatio": 0.65,
+            "compactRatio": 0.7,
             "hardRatio": 0.86,
             "targetRatio": 0.52,
             "minimumReductionRatio": 0.18,
@@ -136,7 +137,8 @@ describe('loadAgentConfig', () => {
       expect(loadAgentConfig({ configPath }).compaction).toEqual({
         maxSummaryTokens: 5000,
         maxSummaryInputTokens: 24000,
-        softRatio: 0.7,
+        warningRatio: 0.65,
+        compactRatio: 0.7,
         hardRatio: 0.86,
         targetRatio: 0.52,
         minimumReductionRatio: 0.18,
@@ -189,12 +191,12 @@ describe('loadAgentConfig', () => {
       const configPath = join(dir, 'boundary-ratios.jsonc');
       writeFileSync(
         configPath,
-        `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "softRatio": 0.01, "hardRatio": 1, "minimumReductionRatio": 0, "targetRatio": 1 } }`,
+        `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "warningRatio": 0.01, "compactRatio": 0.5, "hardRatio": 1, "minimumReductionRatio": 0, "targetRatio": 0.01 } }`,
       );
       const cfg = loadAgentConfig({ configPath });
       expect(cfg.compaction?.minimumReductionRatio).toBe(0);
       expect(cfg.compaction?.hardRatio).toBe(1);
-      expect(cfg.compaction?.targetRatio).toBe(1);
+      expect(cfg.compaction?.warningRatio).toBe(0.01);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

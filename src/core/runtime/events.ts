@@ -72,8 +72,12 @@ export interface ContextCompactionRequestedEvent {
   estimate: ContextTokenEstimate;
   /** Optional user-supplied instructions for the summary model. */
   customInstructions?: string;
-  /** Tool definitions for candidate projection validation (PR 5). */
-  tools?: Record<string, unknown>;
+  /**
+   * Stable digest of the projection environment observed when this event was emitted.
+   * Used for diagnostics only — the compaction effect resolves the environment fresh
+   * and must not rely on this digest as a data source.
+   */
+  projectionEnvironmentDigest?: string;
 }
 
 export interface ContextCompactionCompletedEvent {
@@ -96,6 +100,16 @@ export interface ContextCompactionResetEvent {
   type: 'context.compaction_reset';
   checkpointId: string;
   reason: 'manual';
+}
+
+/** PR 6: Durable hard-block event for repeated overflow or hard-limit failures.
+ *  Once set, the scheduler must fail closed until explicit recovery. */
+export interface ContextHardBlockedEvent {
+  type: 'context.hard_blocked';
+  reason: 'overflow_recovery_failed' | 'hard_limit';
+  sourceDigest: string;
+  message: string;
+  createdAtTurnId: string;
 }
 
 // ── 工具生命周期事件 / Tool lifecycle events ──
@@ -829,6 +843,7 @@ export type RuntimeEvent =
   | ContextCompactionCompletedEvent
   | ContextCompactionFailedEvent
   | ContextCompactionResetEvent
+  | ContextHardBlockedEvent
   | CapabilityBindingsIssuedEvent
   | CapabilitySearchCompletedEvent
   | SkillCatalogRefreshedEvent

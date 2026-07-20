@@ -4,6 +4,7 @@ import {
   structuredContextSummaryV2Schema,
 } from '@/core/model/compaction-schema';
 import { ContextCompactionValidationError } from '@/core/model/compaction-summary';
+import type { SerializedToolDescriptor } from '@/core/model/context-projection';
 import type {
   ContextCompactionCheckpoint,
   PendingContextCompaction,
@@ -15,6 +16,9 @@ export type ContextCompactor = (input: {
   state: Readonly<RuntimeState>;
   pending: Readonly<PendingContextCompaction>;
   sourceRevision: number;
+  /** Serialized tool descriptors for candidate projection token estimation.
+   *  Resolved fresh at effect time — never from the event or pending state. */
+  serializedTools?: SerializedToolDescriptor[];
 }) => Promise<ContextCompactionCheckpoint>;
 
 function failure(
@@ -42,6 +46,8 @@ export async function executeContextCompaction(input: {
   state: Readonly<RuntimeState>;
   compactionId: string;
   compact?: ContextCompactor;
+  /** Serialized tool descriptors for candidate projection token estimation (PR 1). */
+  serializedTools?: SerializedToolDescriptor[];
 }): Promise<RuntimeEvent[]> {
   const pending = input.state.context.pendingCompaction;
   if (!pending || pending.compactionId !== input.compactionId) return [];
@@ -61,6 +67,7 @@ export async function executeContextCompaction(input: {
       state: input.state,
       pending,
       sourceRevision,
+      serializedTools: input.serializedTools,
     });
     if (
       checkpoint.compactionId !== pending.compactionId ||

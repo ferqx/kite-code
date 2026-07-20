@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { aiMessage, type BaseMessage, isAIMessage, toolMessage } from '../src/core/messages';
-import type { CompactionSummaryFrame } from '../src/core/model/context-frame';
+import type { CompactionSummaryFrame, ContextFrame } from '../src/core/model/context-frame';
 import { buildCanonicalFrames } from '../src/core/model/context-frame-builder';
 import { compactContextFrames } from '../src/core/model/context-frame-compactor';
 import { serializeFramesToMessages } from '../src/core/model/context-serializer';
 import { validateFramePairs, validateMessagePairs } from '../src/core/model/context-validator';
+import { buildResourceObservationTracker } from '../src/core/model/resource-observation-tracker';
 
 function block(input: {
   id: string;
@@ -303,6 +304,172 @@ describe('M1 V2 canonical frame compaction', () => {
       // Even with injection content, the frame is an assistant message.
       expect(msg.type).not.toBe('system');
       expect(msg.type).toBe('ai');
+    });
+  });
+
+  // ── PR 4: ResourceObservationTracker ──
+
+  describe('PR 4 — ResourceObservationTracker', () => {
+    type PartialCall = {
+      toolCallId?: string;
+      name?: string;
+      args?: Record<string, unknown>;
+      content?: string;
+      ok?: boolean;
+      effectClass?: import('../src/core/policies/tool-capabilities').ToolEffectClass;
+      resultMeta?: {
+        path?: string;
+        contentDigest?: string;
+        resourceRevision?: string;
+        truncated?: boolean;
+        digestScope?: string;
+        workspaceMutationScope?: string[];
+      };
+    };
+
+    function frame(calls: PartialCall[]): ContextFrame {
+      return {
+        kind: 'tool_block' as const,
+        turnId: 't1',
+        calls: calls.map((c, i) => ({
+          toolCallId: c.toolCallId ?? `call-${i}`,
+          name: c.name ?? 'read_file',
+          args: c.args ?? {},
+          content: c.content ?? 'content',
+          ok: c.ok ?? true,
+          effectClass: c.effectClass ?? 'read_only',
+          resultMeta: {
+            path: c.resultMeta?.path,
+            contentDigest: c.resultMeta?.contentDigest,
+            resourceRevision: c.resultMeta?.resourceRevision,
+            truncated: c.resultMeta?.truncated ?? false,
+            digestScope: c.resultMeta?.digestScope as
+              | 'raw'
+              | 'projected'
+              | 'legacy_unknown'
+              | undefined,
+            workspaceMutationScope: c.resultMeta?.workspaceMutationScope,
+          },
+        })),
+      } as ContextFrame;
+    }
+
+    test('read A → read A: first is foldable', () => {
+      const frames: ContextFrame[] = [
+        frame([{ toolCallId: 'r1', resultMeta: { path: 'src/a.ts', contentDigest: 'same' } }]),
+        frame([{ toolCallId: 'r2', resultMeta: { path: 'src/a.ts', contentDigest: 'same' } }]),
+      ];
+      const tracker = buildResourceObservationTracker(frames);
+      expect(tracker.isFoldable('r1')).toBe(true);
+      expect(tracker.isFoldable('r2')).toBe(false);
+    });
+
+    test('read A → write A → read A: write invalidates, no fold', () => {
+      const frames: ContextFrame[] = [
+        frame([{ toolCallId: 'r1', resultMeta: { path: 'src/a.ts', contentDigest: 'same' } }]),
+        frame([
+          {
+            toolCallId: 'w1',
+            name: 'write_file',
+            effectClass: 'workspace_write',
+            ok: true,
+            resultMeta: { path: 'src/a.ts', workspaceMutationScope: ['src/a.ts'] },
+          },
+        ]),
+        frame([{ toolCallId: 'r2', resultMeta: { path: 'src/a.ts', contentDigest: 'same' } }]),
+      ];
+      const tracker = buildResourceObservationTracker(frames);
+      // Write A invalidates path A → r1 observation is cleared → generation counter changes.
+      // r2 starts fresh after invalidation, no earlier observation at same generation.
+      // Neither read is foldable.
+      expect(tracker.isFoldable('r1')).toBe(false);
+      expect(tracker.isFoldable('r2')).toBe(false);
+    });
+
+    test('read A → write A (invalidates) → read A: latest observation is from third read', () => {
+      const frames: ContextFrame[] = [
+        frame([{ toolCallId: 'r1', resultMeta: { path: 'src/a.ts', contentDigest: 'v1' } }]),
+        frame([
+          {
+            toolCallId: 'w1',
+            name: 'write_file',
+            effectClass: 'workspace_write',
+            ok: true,
+            resultMeta: { path: 'src/a.ts', workspaceMutationScope: ['src/a.ts'] },
+          },
+        ]),
+        frame([{ toolCallId: 'r2', resultMeta: { path: 'src/a.ts', contentDigest: 'v1' } }]),
+      ];
+      const tracker = buildResourceObservationTracker(frames);
+      // After write → path invalidated → r2 starts fresh (no earlier at same generation)
+      expect(tracker.isFoldable('r1')).toBe(false);
+      expect(tracker.isFoldable('r2')).toBe(false);
+      expect(tracker.latestReliable('src/a.ts')?.toolCallId).toBe('r2');
+    });
+
+    test('read A truncated → read A full: first is foldable', () => {
+      const frames: ContextFrame[] = [
+        frame([
+          {
+            toolCallId: 'r1',
+            resultMeta: { path: 'src/a.ts', contentDigest: 'v1', truncated: true },
+          },
+        ]),
+        frame([
+          {
+            toolCallId: 'r2',
+            resultMeta: { path: 'src/a.ts', contentDigest: 'v1', truncated: false },
+          },
+        ]),
+      ];
+      const tracker = buildResourceObservationTracker(frames);
+      // Truncated read is NOT a reliable observation → r1 never enters the tracker
+      // r2 is the first full observation
+      expect(tracker.isFoldable('r1')).toBe(false);
+      expect(tracker.isFoldable('r2')).toBe(false);
+      expect(tracker.latestReliable('src/a.ts')?.toolCallId).toBe('r2');
+    });
+
+    test('unknown mutation invalidates workspace', () => {
+      const frames: ContextFrame[] = [
+        frame([{ toolCallId: 'r1', resultMeta: { path: 'src/a.ts', contentDigest: 'v1' } }]),
+        frame([{ toolCallId: 'u1', name: 'shell_execute', effectClass: 'unknown', ok: true }]),
+        frame([{ toolCallId: 'r2', resultMeta: { path: 'src/a.ts', contentDigest: 'v1' } }]),
+      ];
+      const tracker = buildResourceObservationTracker(frames);
+      // unknown effect → invalidateWorkspace → all cleared
+      // r2 starts fresh after invalidation
+      expect(tracker.isFoldable('r2')).toBe(false);
+      expect(tracker.latestReliable('src/a.ts')?.toolCallId).toBe('r2');
+    });
+
+    test('legacy_unknown digestScope: never reliable, never foldable', () => {
+      const frames: ContextFrame[] = [
+        frame([
+          {
+            toolCallId: 'r1',
+            resultMeta: { path: 'src/a.ts', contentDigest: 'v1', digestScope: 'legacy_unknown' },
+          },
+        ]),
+        frame([{ toolCallId: 'r2', resultMeta: { path: 'src/a.ts', contentDigest: 'v1' } }]),
+      ];
+      const tracker = buildResourceObservationTracker(frames);
+      // r1 has legacy_unknown → skip → never observed
+      // r2 is first reliable observation
+      expect(tracker.isFoldable('r1')).toBe(false);
+      expect(tracker.isFoldable('r2')).toBe(false);
+      expect(tracker.latestReliable('src/a.ts')?.toolCallId).toBe('r2');
+    });
+
+    test('allReliable returns all current observations', () => {
+      const frames: ContextFrame[] = [
+        frame([{ toolCallId: 'r1', resultMeta: { path: 'src/a.ts', contentDigest: 'v1' } }]),
+        frame([{ toolCallId: 'r2', resultMeta: { path: 'src/b.ts', contentDigest: 'v2' } }]),
+      ];
+      const tracker = buildResourceObservationTracker(frames);
+      const all = tracker.allReliable();
+      expect(all).toHaveLength(2);
+      expect(all.map((o) => o.resource).sort()).toEqual(['src/a.ts', 'src/b.ts']);
     });
   });
 });
