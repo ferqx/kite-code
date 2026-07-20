@@ -20,7 +20,7 @@ Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatib
 
 模型上下文能力必须先解析为统一的 `ResolvedModelCapabilities`。单字段优先级依次为：选中模型条目的显式配置、内置模型目录、provider adapter metadata、`modelKwargs` 兼容字段；未知自定义模型保持 unknown，不得假设 128K 或其他大窗口。`contextWindow`、`maxOutputTokens`、tokenizer family、usage metadata 和 prompt cache support 是模型条目的正式 schema。Capability disclosure、输出 token 预留、上下文 preflight 和实际模型请求必须共用同一个 resolved object。
 
-M2 summary model 通过同一 provider-neutral AI SDK 边界调用，temperature 固定为确定性设置，不绑定任何工具，并限制 max output tokens。其原始 JSON 输出不可信；只有通过 Runtime 的结构化 schema、provenance、mandatory facts、coverage 和 reduction 校验后才能写入 checkpoint。
+M2 summary model 通过同一 provider-neutral AI SDK 边界调用，temperature 固定为确定性设置，不绑定任何工具，并限制 max output tokens。其原始 JSON 输出不可信；只有通过 Runtime 的结构化 schema、provenance、mandatory facts、coverage 和 reduction 校验后才能写入 checkpoint。V2 schema 要求 `objective` 和 `userRequests` 携带 `factId` 以纳入 mandatory fact coverage；evidence 校验作用于 covered range 内全部消息 ID（user、assistant、tool），而非仅限用户消息。
 
 Provider context overflow 必须与 timeout/rate limit/server error 区分；启用自动 M2 时，每个 turn 最多转化为一次 `overflow_recovery` compaction request，恢复后再次 overflow 必须明确失败，不能进入 adapter 的普通 transient retry。
 

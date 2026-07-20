@@ -15,6 +15,7 @@ import {
 } from './compaction-fact-ledger';
 import {
   parseGeneratedSummaryCandidate,
+  parsePersistedCheckpointSummary,
   type StructuredContextSummaryV2,
   structuredContextSummaryV2Schema,
   summaryFactIds,
@@ -108,12 +109,9 @@ interface SummaryValidationContext {
   mandatoryFactIds: Set<string>;
 }
 
-function buildValidationContext(
-  ledger: DeterministicFactLedger,
-  coveredUserMessageIds: string[],
-): SummaryValidationContext {
+function buildValidationContext(ledger: DeterministicFactLedger): SummaryValidationContext {
   return {
-    coveredMessageIds: new Set(coveredUserMessageIds),
+    coveredMessageIds: new Set(ledger.coveredMessageIds),
     ledgerById: new Map(ledger.facts.map((f) => [f.factId, f])),
     mandatoryFactIds: new Set(ledger.mandatoryFactIds),
   };
@@ -373,7 +371,7 @@ function validateGeneratedSummary(
   }
 
   // ── PR 5: Evidence and fact reference validation ──
-  const ctx = buildValidationContext(ledger, provenance.coveredUserMessageIds);
+  const ctx = buildValidationContext(ledger);
 
   // Validate all evidence IDs in the summary are within covered range
   validateEvidenceIds(summary.objective.evidenceMessageIds, 'objective', ctx);
@@ -382,9 +380,19 @@ function validateGeneratedSummary(
   }
   for (const c of summary.userConstraints) {
     validateEvidenceIds(c.evidenceMessageIds, `constraint:${c.factId}`, ctx);
+    validateFactReference(c.factId, ctx, {
+      label: `constraint:${c.factId}`,
+      expectedKind: 'user_constraint',
+    });
   }
   for (const d of summary.decisions) {
     validateEvidenceIds(d.evidenceMessageIds, `decision:${d.decision.slice(0, 40)}`, ctx);
+    if (d.factId) {
+      validateFactReference(d.factId, ctx, {
+        label: `decision:${d.factId}`,
+        expectedKind: 'decision',
+      });
+    }
   }
   for (const ce of summary.completedEffects) {
     validateEvidenceIds(ce.evidenceMessageIds, `completed:${ce.factId}`, ctx);
@@ -560,10 +568,9 @@ export function createStructuredContextCompactor(options: {
     // since the last checkpoint. Pass the old summary as baseSummary for
     // structured merge — the model merges old facts with new discoveries.
     const baseCheckpoint = input.state.context.activeCheckpoint;
-    const baseSummary: StructuredContextSummaryV2 | undefined =
-      baseCheckpoint && baseCheckpoint.summary.version === 2
-        ? (baseCheckpoint.summary as StructuredContextSummaryV2)
-        : undefined;
+    const baseSummary: StructuredContextSummaryV2 | undefined = baseCheckpoint
+      ? parsePersistedCheckpointSummary(baseCheckpoint.summary)
+      : undefined;
     const tailMessages = baseCheckpoint
       ? (() => {
           const idx = input.state.transcript.messages.findIndex(

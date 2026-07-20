@@ -32,6 +32,8 @@ export interface DeterministicFactLedger {
   mandatoryFactIds: string[];
   /** All user message IDs in the covered range — used for coverage validation. */
   coveredUserMessageIds: string[];
+  /** All message IDs (user, assistant, tool) in the covered range — used for evidence validation. */
+  coveredMessageIds: string[];
 }
 
 function factId(kind: CompactionFactKind, identity: string): string {
@@ -166,11 +168,15 @@ export function buildDeterministicFactLedger(
     .filter((m) => m.kind === 'user')
     .map((m) => m.messageId)
     .filter((id): id is string => !!id);
+  const coveredMessageIds = coveredMessages
+    .map((m) => m.messageId)
+    .filter((id): id is string => !!id);
   return {
     objective,
     facts: unique,
     mandatoryFactIds: unique.filter((fact) => fact.mandatory).map((fact) => fact.factId),
     coveredUserMessageIds,
+    coveredMessageIds,
   };
 }
 
@@ -187,19 +193,19 @@ export function buildLedgerFromBaseSummary(
 ): DeterministicFactLedger {
   const facts: CompactionFact[] = [];
 
-  // objective → mandatory
+  // objective → mandatory (uses summary.objective.factId)
   facts.push({
-    factId: factId('objective', summary.objective.text),
+    factId: summary.objective.factId,
     kind: 'objective',
     text: summary.objective.text,
     mandatory: true,
     evidenceMessageIds: summary.objective.evidenceMessageIds,
   });
 
-  // userRequests → mandatory
+  // userRequests → mandatory (uses summary.userRequests[].factId)
   for (const req of summary.userRequests) {
     facts.push({
-      factId: factId('user_request', req.summary),
+      factId: req.factId,
       kind: 'user_request',
       text: req.summary,
       mandatory: true,
@@ -282,11 +288,13 @@ export function buildLedgerFromBaseSummary(
   }
 
   const unique = [...new Map(facts.map((f) => [f.factId, f])).values()];
+  const coveredMessageIds = [...new Set(unique.flatMap((f) => f.evidenceMessageIds))];
   return {
     objective: summary.objective.text,
     facts: unique,
     mandatoryFactIds: unique.filter((f) => f.mandatory).map((f) => f.factId),
     coveredUserMessageIds: summary.provenance.coveredUserMessageIds,
+    coveredMessageIds,
   };
 }
 
@@ -314,8 +322,16 @@ export function mergeCompactionLedgers(
     merged.set(fact.factId, fact);
   }
 
-  // Tail facts overwrite or add
+  // Tail facts that are singleton by kind replace ALL base facts of the same kind.
+  // objective: only one objective exists at a time — the tail's is more recent.
+  const singletonKinds = new Set<CompactionFactKind>(['objective']);
   for (const fact of tail.facts) {
+    if (singletonKinds.has(fact.kind)) {
+      // Remove all base facts of this singleton kind before inserting the tail fact.
+      for (const [id, baseFact] of merged) {
+        if (baseFact.kind === fact.kind) merged.delete(id);
+      }
+    }
     merged.set(fact.factId, fact);
   }
 
@@ -354,5 +370,6 @@ export function mergeCompactionLedgers(
     coveredUserMessageIds: [
       ...new Set([...(base.coveredUserMessageIds ?? []), ...tail.coveredUserMessageIds]),
     ],
+    coveredMessageIds: [...new Set([...(base.coveredMessageIds ?? []), ...tail.coveredMessageIds])],
   };
 }

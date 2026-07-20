@@ -1,4 +1,10 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
+
+/** Stable deterministic fact ID generator (mirrors compaction-fact-ledger). */
+function factId(kind: string, identity: string): string {
+  return `${kind}:${createHash('sha256').update(identity).digest('hex').slice(0, 16)}`;
+}
 
 const factTextSchema = z.object({ factId: z.string().min(1), text: z.string().min(1) }).strict();
 
@@ -82,6 +88,7 @@ export const structuredContextSummaryV2Schema = z
     version: z.literal(2),
     objective: z
       .object({
+        factId: z.string().min(1),
         text: z.string(),
         evidenceMessageIds: z.array(z.string().min(1)),
       })
@@ -89,6 +96,7 @@ export const structuredContextSummaryV2Schema = z
     userRequests: z.array(
       z
         .object({
+          factId: z.string().min(1),
           summary: z.string().min(1),
           evidenceMessageIds: z.array(z.string().min(1)),
         })
@@ -205,9 +213,10 @@ export function parsePersistedCheckpointSummary(raw: unknown): StructuredContext
   } catch {
     // V1 backfill: parse as V1, then upgrade to V2 shape for internal use.
     const v1 = parseStructuredContextSummaryV1(raw);
+    const objectiveFactId = factId('objective', v1.objective);
     return {
       version: 2,
-      objective: { text: v1.objective, evidenceMessageIds: [] },
+      objective: { factId: objectiveFactId, text: v1.objective, evidenceMessageIds: [] },
       userRequests: [],
       userConstraints: v1.userConstraints.map((c) => ({
         ...c,
@@ -259,6 +268,8 @@ export function summaryFactIds(
   if (summary.version === 2) {
     return new Set(
       [
+        summary.objective,
+        ...summary.userRequests,
         ...summary.userConstraints,
         ...summary.decisions,
         ...summary.completedEffects,

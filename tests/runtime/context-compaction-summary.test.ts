@@ -60,11 +60,44 @@ function historicalState(): RuntimeState {
 }
 
 function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
+  // Handle chunk mode — return a valid chunk summary
+  if (request.mode === 'chunk') {
+    const chunk = JSON.parse(request.input) as {
+      sourceDigest: string;
+      messages: unknown[];
+    };
+    return {
+      sourceDigest: chunk.sourceDigest,
+      facts: [],
+      narrative: `chunk with ${chunk.messages.length} messages`,
+    };
+  }
+
+  // Handle repair mode — unwrap to get the original source payload
+  if (request.mode === 'repair') {
+    const parsed = JSON.parse(request.input) as Record<string, unknown>;
+    // The input may already be the original summary payload (e.g. when caller
+    // extracted .source from the repair envelope). If it has a deterministicFactLedger,
+    // process it directly as a summary request.
+    if (parsed.deterministicFactLedger) {
+      return validSummaryFromRequest({ ...request, mode: 'summary', input: request.input });
+    }
+    // Otherwise, treat it as a repair envelope and extract source.
+    const source = parsed.source as string | undefined;
+    if (source) {
+      return validSummaryFromRequest({ ...request, mode: 'summary', input: source });
+    }
+    throw new Error(
+      'validSummaryFromRequest: repair payload missing both deterministicFactLedger and source',
+    );
+  }
+
   const payload = JSON.parse(request.input) as {
     deterministicFactLedger: {
       objective: string;
-      facts: Array<{ factId: string; text: string }>;
+      facts: Array<{ factId: string; text: string; kind?: string }>;
       mandatoryFactIds: string[];
+      coveredMessageIds?: string[];
     };
     requiredProvenance: {
       firstMessageId: string;
@@ -74,22 +107,42 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
       coveredUserMessageIds?: string[];
       policyVersion?: string;
     };
-  };
-  const coveredUserIds = payload.requiredProvenance.coveredUserMessageIds ?? [];
-  // Use covered user message IDs as evidence to satisfy the coverage check.
-  // In production, the summary model assigns specific evidence IDs per fact.
-  const allUserEvidence = coveredUserIds;
+  } | null;
+  if (!payload?.deterministicFactLedger) {
+    throw new Error('validSummaryFromRequest: missing deterministicFactLedger in payload');
+  }
+  const coveredUserIds = payload.requiredProvenance?.coveredUserMessageIds ?? [];
+  const coveredMessageIds = payload.deterministicFactLedger.coveredMessageIds ?? coveredUserIds;
+  // Distribute facts by kind into correct summary sections.
+  // This mirrors the real production summary structure — every fact from the
+  // deterministic ledger maps to its corresponding schema section by kind.
+  const facts = payload.deterministicFactLedger.facts;
+  const userConstraints = facts.filter((f) => f.kind === 'user_constraint');
+  const completedEffects = facts.filter((f) => f.kind === 'completed_work');
+  const failures = facts.filter((f) => f.kind === 'failure');
+  const observations = facts.filter((f) => f.kind === 'observation');
+  const pendingWork = facts.filter((f) => f.kind === 'pending_work');
+  const userRequests = facts.filter((f) => f.kind === 'user_request');
+  const objectiveFact = facts.find((f) => f.kind === 'objective');
+
   return {
     version: 2 as const,
     objective: {
+      factId:
+        objectiveFact?.factId ??
+        `objective:${payload.deterministicFactLedger.objective.slice(0, 16)}`,
       text: payload.deterministicFactLedger.objective,
-      evidenceMessageIds: allUserEvidence,
+      evidenceMessageIds: coveredMessageIds,
     },
-    userRequests: [] as Array<{ summary: string; evidenceMessageIds: string[] }>,
-    userConstraints: payload.deterministicFactLedger.facts.map((fact) => ({
+    userRequests: userRequests.map((f) => ({
+      factId: f.factId,
+      summary: f.text,
+      evidenceMessageIds: coveredMessageIds,
+    })),
+    userConstraints: userConstraints.map((fact) => ({
       factId: fact.factId,
       text: fact.text,
-      evidenceMessageIds: allUserEvidence,
+      evidenceMessageIds: fact.factId ? [fact.factId] : coveredMessageIds,
     })),
     decisions: [] as Array<{
       factId?: string;
@@ -97,35 +150,31 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
       rationale?: string;
       evidenceMessageIds: string[];
     }>,
-    completedEffects: [] as Array<{
-      factId: string;
-      operation: string;
-      path?: string;
-      outcome: string;
-      rawResultDigest?: string;
-      evidenceMessageIds: string[];
-    }>,
-    observations: [] as Array<{
-      factId?: string;
-      resource: string;
-      revision?: string;
-      digest?: string;
-      keyFacts: string[];
-      evidenceMessageIds: string[];
-    }>,
-    failures: [] as Array<{
-      factId: string;
-      operation: string;
-      error: string;
-      consequence: string;
-      evidenceMessageIds: string[];
-    }>,
-    pendingWork: [] as Array<{
-      factId?: string;
-      text: string;
-      blockedBy?: string;
-      evidenceMessageIds: string[];
-    }>,
+    completedEffects: completedEffects.map((fact) => ({
+      factId: fact.factId,
+      operation: fact.text,
+      path: (fact as Record<string, unknown>).path as string | undefined,
+      outcome: fact.text,
+      evidenceMessageIds: coveredMessageIds,
+    })),
+    observations: observations.map((fact) => ({
+      factId: fact.factId,
+      resource: ((fact as Record<string, unknown>).resource as string) ?? fact.text,
+      keyFacts: [fact.text],
+      evidenceMessageIds: coveredMessageIds,
+    })),
+    failures: failures.map((fact) => ({
+      factId: fact.factId,
+      operation: fact.text,
+      error: 'error',
+      consequence: 'blocked',
+      evidenceMessageIds: coveredMessageIds,
+    })),
+    pendingWork: pendingWork.map((fact) => ({
+      factId: fact.factId,
+      text: fact.text,
+      evidenceMessageIds: coveredMessageIds,
+    })),
     unresolvedQuestions: [] as Array<{ text: string; evidenceMessageIds: string[] }>,
     provenance: {
       lastMessageId: payload.requiredProvenance.lastMessageId,
@@ -233,7 +282,8 @@ describe('structured context summary', () => {
               }
             : request,
         );
-        summary.userConstraints = summary.userConstraints.slice(1);
+        // Non-null: mode is 'summary'/'repair' in this test — always returns V2 with userRequests
+        summary.userRequests = summary.userRequests!.slice(1);
         return summary;
       },
     });
@@ -330,8 +380,15 @@ describe('structured context summary', () => {
           >;
           const ledger = sourcePayload.deterministicFactLedger as {
             objective: string;
-            facts: Array<{ factId: string; text: string }>;
+            facts: Array<{
+              factId: string;
+              text: string;
+              kind?: string;
+              path?: string;
+              resource?: string;
+            }>;
             mandatoryFactIds: string[];
+            coveredMessageIds?: string[];
           };
           const provenance = sourcePayload.requiredProvenance as {
             firstMessageId: string;
@@ -342,41 +399,69 @@ describe('structured context summary', () => {
             policyVersion?: string;
           };
           const coveredUserIds = provenance.coveredUserMessageIds ?? [];
+          const coveredMessageIds = ledger.coveredMessageIds ?? coveredUserIds;
+          const facts = ledger.facts;
+          const objectiveFact = facts.find((f) => f.kind === 'objective');
           return {
             version: 2 as const,
-            objective: { text: ledger.objective, evidenceMessageIds: coveredUserIds },
-            userRequests: [] as Array<{ summary: string; evidenceMessageIds: string[] }>,
-            userConstraints: ledger.facts.map((f) => ({
-              factId: f.factId,
-              text: f.text,
-              evidenceMessageIds: coveredUserIds,
-            })),
+            objective: {
+              factId: objectiveFact?.factId ?? `objective:fallback`,
+              text: ledger.objective,
+              evidenceMessageIds: coveredMessageIds,
+            },
+            userRequests: facts
+              .filter((f) => f.kind === 'user_request')
+              .map((f) => ({
+                factId: f.factId,
+                summary: f.text,
+                evidenceMessageIds: coveredMessageIds,
+              })),
+            userConstraints: facts
+              .filter((f) => f.kind === 'user_constraint')
+              .map((f) => ({
+                factId: f.factId,
+                text: f.text,
+                evidenceMessageIds: coveredMessageIds,
+              })),
             decisions: [] as Array<{
               factId?: string;
               decision: string;
               rationale?: string;
               evidenceMessageIds: string[];
             }>,
-            completedEffects: [] as Array<{
-              factId: string;
-              operation: string;
-              outcome: string;
-              evidenceMessageIds: string[];
-            }>,
-            observations: [] as Array<{
-              factId?: string;
-              resource: string;
-              keyFacts: string[];
-              evidenceMessageIds: string[];
-            }>,
-            failures: [] as Array<{
-              factId: string;
-              operation: string;
-              error: string;
-              consequence: string;
-              evidenceMessageIds: string[];
-            }>,
-            pendingWork: [] as Array<{ text: string; evidenceMessageIds: string[] }>,
+            completedEffects: facts
+              .filter((f) => f.kind === 'completed_work')
+              .map((f) => ({
+                factId: f.factId,
+                operation: f.text,
+                path: f.path,
+                outcome: f.text,
+                evidenceMessageIds: coveredMessageIds,
+              })),
+            observations: facts
+              .filter((f) => f.kind === 'observation')
+              .map((f) => ({
+                factId: f.factId,
+                resource: f.resource ?? f.text,
+                keyFacts: [f.text],
+                evidenceMessageIds: coveredMessageIds,
+              })),
+            failures: facts
+              .filter((f) => f.kind === 'failure')
+              .map((f) => ({
+                factId: f.factId,
+                operation: f.text,
+                error: 'error',
+                consequence: 'blocked',
+                evidenceMessageIds: coveredMessageIds,
+              })),
+            pendingWork: facts
+              .filter((f) => f.kind === 'pending_work')
+              .map((f) => ({
+                factId: f.factId,
+                text: f.text,
+                evidenceMessageIds: coveredMessageIds,
+              })),
             unresolvedQuestions: [] as Array<{ text: string; evidenceMessageIds: string[] }>,
             provenance: {
               lastMessageId: provenance.lastMessageId,
@@ -916,8 +1001,14 @@ describe('PR 2 — incremental mandatory fact inheritance', () => {
   ): StructuredContextSummaryV2 {
     return {
       version: 2,
-      objective: { text: 'implement auth', evidenceMessageIds: ['msg-1'] },
-      userRequests: [{ summary: 'add login page', evidenceMessageIds: ['msg-2'] }],
+      objective: {
+        factId: 'objective:auth',
+        text: 'implement auth',
+        evidenceMessageIds: ['msg-1'],
+      },
+      userRequests: [
+        { factId: 'user_request:login', summary: 'add login page', evidenceMessageIds: ['msg-2'] },
+      ],
       userConstraints: [
         {
           factId: 'constraint:aaa',
@@ -1059,16 +1150,16 @@ describe('PR 2 — incremental mandatory fact inheritance', () => {
   test('sourceDigest chain has constant length across 20 compactions', () => {
     const { createHash } = require('node:crypto');
     const policyVersion = '1.0.0';
-    let baseDigest;
+    let baseDigest: string | undefined;
     for (let i = 0; i < 20; i++) {
       const tailDigest = digestCompactionSource([
         {
           kind: 'user',
-          messageId: 'm-' + i,
-          turnId: 't-' + i,
+          messageId: `m-${i}`,
+          turnId: `t-${i}`,
           ordinal: 0,
           createdAt: new Date().toISOString(),
-          content: 'step ' + i,
+          content: `step ${i}`,
         },
       ]);
       baseDigest = createHash('sha256')
@@ -1276,7 +1367,7 @@ describe('PR 5 — summary evidence validation', () => {
         }
         return {
           version: 2,
-          objective: { text: 'x', evidenceMessageIds: ['fake-id'] },
+          objective: { factId: 'objective:test1', text: 'x', evidenceMessageIds: ['fake-id'] },
           userRequests: [],
           userConstraints: [],
           decisions: [],
@@ -1322,7 +1413,7 @@ describe('PR 5 — summary evidence validation', () => {
         }
         return {
           version: 2,
-          objective: { text: 'x', evidenceMessageIds: ['u0'] },
+          objective: { factId: 'objective:test2', text: 'x', evidenceMessageIds: ['u0'] },
           userRequests: [],
           userConstraints: [],
           decisions: [],
