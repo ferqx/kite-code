@@ -106,7 +106,7 @@ export const structuredContextSummaryV2Schema = z
     decisions: z.array(
       z
         .object({
-          factId: z.string().min(1).optional(),
+          factId: z.string().min(1),
           decision: z.string().min(1),
           rationale: z.string().optional(),
           evidenceMessageIds: z.array(z.string().min(1)),
@@ -128,7 +128,7 @@ export const structuredContextSummaryV2Schema = z
     observations: z.array(
       z
         .object({
-          factId: z.string().min(1).optional(),
+          factId: z.string().min(1),
           resource: z.string().min(1),
           revision: z.string().optional(),
           digest: z.string().optional(),
@@ -151,7 +151,7 @@ export const structuredContextSummaryV2Schema = z
     pendingWork: z.array(
       z
         .object({
-          factId: z.string().min(1).optional(),
+          factId: z.string().min(1),
           text: z.string().min(1),
           blockedBy: z.string().optional(),
           evidenceMessageIds: z.array(z.string().min(1)),
@@ -203,15 +203,110 @@ export function parseStructuredContextSummaryV2(value: unknown): StructuredConte
   return structuredContextSummaryV2Schema.parse(candidate);
 }
 
+// ── Legacy V2 shape (from commit 5376d1c, before factId was required on
+//    objective / userRequests) ──
+
+/** V2 summary shape before objective.factId and userRequests[].factId were required. */
+interface LegacyStructuredContextSummaryV2 {
+  version: 2;
+  objective: { text: string; evidenceMessageIds: string[] };
+  userRequests: Array<{ summary: string; evidenceMessageIds: string[] }>;
+  userConstraints: Array<{ factId: string; text: string; evidenceMessageIds: string[] }>;
+  decisions: Array<{
+    factId?: string;
+    decision: string;
+    rationale?: string;
+    evidenceMessageIds: string[];
+  }>;
+  completedEffects: Array<{
+    factId: string;
+    operation: string;
+    path?: string;
+    outcome: string;
+    rawResultDigest?: string;
+    evidenceMessageIds: string[];
+  }>;
+  observations: Array<{
+    factId?: string;
+    resource: string;
+    revision?: string;
+    digest?: string;
+    keyFacts: string[];
+    evidenceMessageIds: string[];
+  }>;
+  failures: Array<{
+    factId: string;
+    operation: string;
+    error: string;
+    consequence: string;
+    evidenceMessageIds: string[];
+  }>;
+  pendingWork: Array<{
+    factId?: string;
+    text: string;
+    blockedBy?: string;
+    evidenceMessageIds: string[];
+  }>;
+  unresolvedQuestions: Array<{ text: string; evidenceMessageIds: string[] }>;
+  provenance: {
+    baseCheckpointId?: string;
+    firstTailMessageId?: string;
+    lastMessageId: string;
+    sourceDigest: string;
+    coveredUserMessageIds: string[];
+    mandatoryFactIds: string[];
+    inheritedMandatoryFactIds?: string[];
+    tailMandatoryFactIds?: string[];
+    policyVersion: string;
+  };
+}
+
+/** Upgrade a legacy V2 summary (without objective/userRequest factId) to current V2. */
+function migrateLegacyV2Summary(raw: LegacyStructuredContextSummaryV2): StructuredContextSummaryV2 {
+  return {
+    version: 2,
+    objective: {
+      factId: factId('objective', raw.objective.text),
+      text: raw.objective.text,
+      evidenceMessageIds: raw.objective.evidenceMessageIds,
+    },
+    userRequests: raw.userRequests.map((req, i) => ({
+      factId: factId('user_request', req.evidenceMessageIds[0] ?? req.summary ?? `legacy-${i}`),
+      summary: req.summary,
+      evidenceMessageIds: req.evidenceMessageIds,
+    })),
+    userConstraints: raw.userConstraints,
+    decisions: raw.decisions.map((d) => ({
+      ...d,
+      factId: d.factId ?? factId('decision', d.decision),
+    })),
+    completedEffects: raw.completedEffects,
+    observations: raw.observations.map((o) => ({
+      ...o,
+      factId:
+        o.factId ?? factId('observation', `${o.resource}:${o.revision ?? o.digest ?? 'legacy'}`),
+    })),
+    failures: raw.failures,
+    pendingWork: raw.pendingWork.map((pw) => ({
+      ...pw,
+      factId: pw.factId ?? factId('pending_work', pw.text),
+    })),
+    unresolvedQuestions: raw.unresolvedQuestions,
+    provenance: raw.provenance,
+  };
+}
+
 /**
  * Parse a persisted checkpoint summary for restore or migration.
- * Accepts V1 (upgrades to V2 shape) and V2.
+ * Checks version first — V1 → upgrade, V2 → parse (legacy or current).
  */
 export function parsePersistedCheckpointSummary(raw: unknown): StructuredContextSummaryV2 {
-  try {
-    return parseStructuredContextSummaryV2(raw);
-  } catch {
-    // V1 backfill: parse as V1, then upgrade to V2 shape for internal use.
+  const record = raw as Record<string, unknown> | null | undefined;
+  if (!record || typeof record.version !== 'number') {
+    throw new Error(`Unsupported checkpoint summary: missing or invalid version field.`);
+  }
+
+  if (record.version === 1) {
     const v1 = parseStructuredContextSummaryV1(raw);
     const objectiveFactId = factId('objective', v1.objective);
     return {
@@ -220,9 +315,14 @@ export function parsePersistedCheckpointSummary(raw: unknown): StructuredContext
       userRequests: [],
       userConstraints: v1.userConstraints.map((c) => ({
         ...c,
+        factId: c.factId ?? factId('user_constraint', c.text),
         evidenceMessageIds: [] as string[],
       })),
-      decisions: v1.decisions.map((d) => ({ ...d, evidenceMessageIds: [] as string[] })),
+      decisions: v1.decisions.map((d) => ({
+        ...d,
+        factId: d.factId ?? factId('decision', d.decision),
+        evidenceMessageIds: [] as string[],
+      })),
       completedEffects: v1.completedWork.map((cw) => ({
         factId: cw.factId,
         operation: cw.summary,
@@ -230,11 +330,17 @@ export function parsePersistedCheckpointSummary(raw: unknown): StructuredContext
         outcome: cw.summary,
         evidenceMessageIds: cw.evidenceMessageIds,
       })),
-      observations: v1.observations.map((o) => ({ ...o, evidenceMessageIds: [] as string[] })),
+      observations: v1.observations.map((o) => ({
+        ...o,
+        factId:
+          o.factId ?? factId('observation', `${o.resource}:${o.revision ?? o.digest ?? 'v1'}`),
+        evidenceMessageIds: [] as string[],
+      })),
       failures: v1.failures.map((f) => ({ ...f, evidenceMessageIds: [] as string[] })),
       pendingWork: v1.pendingWork.map((pw) => ({
         text: pw.text,
         blockedBy: pw.blockedBy,
+        factId: factId('pending_work', pw.text),
         evidenceMessageIds: [] as string[],
       })),
       unresolvedQuestions: v1.unresolvedQuestions.map((q) => ({
@@ -250,6 +356,19 @@ export function parsePersistedCheckpointSummary(raw: unknown): StructuredContext
       },
     };
   }
+
+  if (record.version === 2) {
+    // Try current V2 schema first.
+    try {
+      return parseStructuredContextSummaryV2(raw);
+    } catch {
+      // Legacy V2 (before objective/userRequest factId was required).
+      const legacy = raw as LegacyStructuredContextSummaryV2;
+      return migrateLegacyV2Summary(legacy);
+    }
+  }
+
+  throw new Error(`Unsupported checkpoint summary version: ${record.version}`);
 }
 
 /**
@@ -266,18 +385,16 @@ export function summaryFactIds(
   summary: StructuredContextSummaryV1 | StructuredContextSummaryV2,
 ): Set<string> {
   if (summary.version === 2) {
-    return new Set(
-      [
-        summary.objective,
-        ...summary.userRequests,
-        ...summary.userConstraints,
-        ...summary.decisions,
-        ...summary.completedEffects,
-        ...summary.observations,
-        ...summary.failures,
-        ...summary.pendingWork,
-      ].flatMap((entry) => (entry.factId ? [entry.factId] : [])),
-    );
+    return new Set([
+      summary.objective.factId,
+      ...summary.userRequests.map((r) => r.factId),
+      ...summary.userConstraints.map((c) => c.factId),
+      ...summary.decisions.map((d) => d.factId),
+      ...summary.completedEffects.map((ce) => ce.factId),
+      ...summary.observations.map((o) => o.factId),
+      ...summary.failures.map((f) => f.factId),
+      ...summary.pendingWork.map((pw) => pw.factId),
+    ]);
   }
   return new Set(
     [

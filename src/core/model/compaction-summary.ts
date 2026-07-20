@@ -139,11 +139,15 @@ function validateEvidenceIds(
  * revision, success/failure type), or fabricate evidence.
  *
  * REVIEW-FIX: Now validates:
- * - Fields SET by the model that the ledger does NOT have (fabrication).
  * - Fact kind mismatch (completed_work placed in failures, or vice versa).
+ * - Bidirectional immutable field checks — model can neither modify nor omit
+ *   fields present in the ledger.
+ * - Evidence binding — at least one evidence ID must belong to the referenced
+ *   ledger fact (non-empty intersection with ledger evidence).
  */
 function validateFactReference(
   factId: string,
+  evidenceMessageIds: string[],
   ctx: SummaryValidationContext,
   immutableCheck?: {
     label: string;
@@ -162,6 +166,19 @@ function validateFactReference(
       `Summary invented fact ID ${factId} not present in the deterministic ledger.`,
     );
   }
+
+  // ── Evidence binding (P0-2.3): at least one evidence ID must belong to the ledger fact ──
+  if (ledgerFact.evidenceMessageIds.length > 0) {
+    const allowedEvidence = new Set(ledgerFact.evidenceMessageIds);
+    if (!evidenceMessageIds.some((id) => allowedEvidence.has(id))) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary evidence for fact ${factId} does not overlap with ledger evidence. ` +
+          `Summary: [${evidenceMessageIds.join(', ')}], Ledger: [${[...allowedEvidence].join(', ')}]`,
+      );
+    }
+  }
+
   if (!immutableCheck) return;
 
   const detail = immutableCheck.label;
@@ -174,13 +191,15 @@ function validateFactReference(
     );
   }
 
-  // Check path: reject if model sets a path that doesn't match the ledger,
-  // OR if model invents a path the ledger doesn't have.
-  if (immutableCheck.path !== undefined) {
-    if (ledgerFact.path === undefined) {
+  // ── Bidirectional immutable checks (P0-2.4) ──
+  // Model must not omit fields present in the ledger, modify them, or invent new ones.
+
+  // path
+  if (ledgerFact.path !== undefined) {
+    if (immutableCheck.path === undefined) {
       throw new ContextCompactionValidationError(
         'invalid_evidence',
-        `Summary fabricated path for ${detail} (${immutableCheck.path}) — ledger has no path.`,
+        `Summary omitted path for ${detail} — ledger has ${ledgerFact.path}.`,
       );
     }
     if (immutableCheck.path !== ledgerFact.path) {
@@ -189,13 +208,19 @@ function validateFactReference(
         `Summary modified path for ${detail} (${immutableCheck.path} → ledger has ${ledgerFact.path}).`,
       );
     }
+  } else if (immutableCheck.path !== undefined) {
+    throw new ContextCompactionValidationError(
+      'invalid_evidence',
+      `Summary fabricated path for ${detail} (${immutableCheck.path}) — ledger has no path.`,
+    );
   }
-  // Check resource
-  if (immutableCheck.resource !== undefined) {
-    if (ledgerFact.resource === undefined) {
+
+  // resource
+  if (ledgerFact.resource !== undefined) {
+    if (immutableCheck.resource === undefined) {
       throw new ContextCompactionValidationError(
         'invalid_evidence',
-        `Summary fabricated resource for ${detail} (${immutableCheck.resource}) — ledger has no resource.`,
+        `Summary omitted resource for ${detail} — ledger has ${ledgerFact.resource}.`,
       );
     }
     if (immutableCheck.resource !== ledgerFact.resource) {
@@ -204,13 +229,19 @@ function validateFactReference(
         `Summary modified resource for ${detail} (${immutableCheck.resource} → ledger has ${ledgerFact.resource}).`,
       );
     }
+  } else if (immutableCheck.resource !== undefined) {
+    throw new ContextCompactionValidationError(
+      'invalid_evidence',
+      `Summary fabricated resource for ${detail} (${immutableCheck.resource}) — ledger has no resource.`,
+    );
   }
-  // Check revision
-  if (immutableCheck.revision !== undefined) {
-    if (ledgerFact.revision === undefined) {
+
+  // revision
+  if (ledgerFact.revision !== undefined) {
+    if (immutableCheck.revision === undefined) {
       throw new ContextCompactionValidationError(
         'invalid_evidence',
-        `Summary fabricated revision for ${detail} (${immutableCheck.revision}) — ledger has no revision.`,
+        `Summary omitted revision for ${detail} — ledger has ${ledgerFact.revision}.`,
       );
     }
     if (immutableCheck.revision !== ledgerFact.revision) {
@@ -219,13 +250,19 @@ function validateFactReference(
         `Summary modified revision for ${detail} (${immutableCheck.revision} → ledger has ${ledgerFact.revision}).`,
       );
     }
+  } else if (immutableCheck.revision !== undefined) {
+    throw new ContextCompactionValidationError(
+      'invalid_evidence',
+      `Summary fabricated revision for ${detail} (${immutableCheck.revision}) — ledger has no revision.`,
+    );
   }
-  // Check digest
-  if (immutableCheck.digest !== undefined) {
-    if (ledgerFact.digest === undefined) {
+
+  // digest
+  if (ledgerFact.digest !== undefined) {
+    if (immutableCheck.digest === undefined) {
       throw new ContextCompactionValidationError(
         'invalid_evidence',
-        `Summary fabricated digest for ${detail} (${immutableCheck.digest}) — ledger has no digest.`,
+        `Summary omitted digest for ${detail} — ledger has ${ledgerFact.digest}.`,
       );
     }
     if (immutableCheck.digest !== ledgerFact.digest) {
@@ -234,6 +271,11 @@ function validateFactReference(
         `Summary modified digest for ${detail} (${immutableCheck.digest} → ledger has ${ledgerFact.digest}).`,
       );
     }
+  } else if (immutableCheck.digest !== undefined) {
+    throw new ContextCompactionValidationError(
+      'invalid_evidence',
+      `Summary fabricated digest for ${detail} (${immutableCheck.digest}) — ledger has no digest.`,
+    );
   }
 }
 
@@ -375,28 +417,34 @@ function validateGeneratedSummary(
 
   // Validate all evidence IDs in the summary are within covered range
   validateEvidenceIds(summary.objective.evidenceMessageIds, 'objective', ctx);
+  validateFactReference(summary.objective.factId, summary.objective.evidenceMessageIds, ctx, {
+    label: `objective:${summary.objective.factId}`,
+    expectedKind: 'objective',
+  });
   for (const req of summary.userRequests) {
     validateEvidenceIds(req.evidenceMessageIds, `userRequest:${req.summary.slice(0, 40)}`, ctx);
+    validateFactReference(req.factId, req.evidenceMessageIds, ctx, {
+      label: `userRequest:${req.factId}`,
+      expectedKind: 'user_request',
+    });
   }
   for (const c of summary.userConstraints) {
     validateEvidenceIds(c.evidenceMessageIds, `constraint:${c.factId}`, ctx);
-    validateFactReference(c.factId, ctx, {
+    validateFactReference(c.factId, c.evidenceMessageIds, ctx, {
       label: `constraint:${c.factId}`,
       expectedKind: 'user_constraint',
     });
   }
   for (const d of summary.decisions) {
     validateEvidenceIds(d.evidenceMessageIds, `decision:${d.decision.slice(0, 40)}`, ctx);
-    if (d.factId) {
-      validateFactReference(d.factId, ctx, {
-        label: `decision:${d.factId}`,
-        expectedKind: 'decision',
-      });
-    }
+    validateFactReference(d.factId, d.evidenceMessageIds, ctx, {
+      label: `decision:${d.factId}`,
+      expectedKind: 'decision',
+    });
   }
   for (const ce of summary.completedEffects) {
     validateEvidenceIds(ce.evidenceMessageIds, `completed:${ce.factId}`, ctx);
-    validateFactReference(ce.factId, ctx, {
+    validateFactReference(ce.factId, ce.evidenceMessageIds, ctx, {
       label: `completedEffect:${ce.factId}`,
       expectedKind: 'completed_work',
       path: ce.path,
@@ -404,32 +452,28 @@ function validateGeneratedSummary(
     });
   }
   for (const obs of summary.observations) {
-    if (obs.factId) {
-      validateEvidenceIds(obs.evidenceMessageIds, `observation:${obs.factId}`, ctx);
-      validateFactReference(obs.factId, ctx, {
-        label: `observation:${obs.factId}`,
-        expectedKind: 'observation',
-        resource: obs.resource,
-        revision: obs.revision,
-        digest: obs.digest,
-      });
-    }
+    validateEvidenceIds(obs.evidenceMessageIds, `observation:${obs.factId}`, ctx);
+    validateFactReference(obs.factId, obs.evidenceMessageIds, ctx, {
+      label: `observation:${obs.factId}`,
+      expectedKind: 'observation',
+      resource: obs.resource,
+      revision: obs.revision,
+      digest: obs.digest,
+    });
   }
   for (const f of summary.failures) {
     validateEvidenceIds(f.evidenceMessageIds, `failure:${f.factId}`, ctx);
-    validateFactReference(f.factId, ctx, {
+    validateFactReference(f.factId, f.evidenceMessageIds, ctx, {
       label: `failure:${f.factId}`,
       expectedKind: 'failure',
     });
   }
   for (const pw of summary.pendingWork) {
-    if (pw.factId) {
-      validateEvidenceIds(pw.evidenceMessageIds, `pendingWork:${pw.factId}`, ctx);
-      validateFactReference(pw.factId, ctx, {
-        label: `pendingWork:${pw.factId}`,
-        expectedKind: 'pending_work',
-      });
-    }
+    validateEvidenceIds(pw.evidenceMessageIds, `pendingWork:${pw.factId}`, ctx);
+    validateFactReference(pw.factId, pw.evidenceMessageIds, ctx, {
+      label: `pendingWork:${pw.factId}`,
+      expectedKind: 'pending_work',
+    });
   }
   for (const q of summary.unresolvedQuestions) {
     validateEvidenceIds(q.evidenceMessageIds, `unresolvedQuestion:${q.text.slice(0, 40)}`, ctx);
@@ -600,9 +644,11 @@ export function createStructuredContextCompactor(options: {
       : tailDigest;
 
     // ── PR 2: Merge base ledger with tail ledger for incremental compaction ──
+    // P0-4: skip objective generation during incremental compaction — base objective survives.
     const tailLedger = buildDeterministicFactLedger(
       input.state,
       isIncremental ? tailMessages : boundary.coveredMessages,
+      { includeObjective: !isIncremental },
     );
     const baseLedger = baseSummary ? buildLedgerFromBaseSummary(baseSummary) : undefined;
     const ledger = mergeCompactionLedgers(baseLedger, tailLedger);

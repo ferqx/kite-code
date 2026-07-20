@@ -142,7 +142,7 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
     userConstraints: userConstraints.map((fact) => ({
       factId: fact.factId,
       text: fact.text,
-      evidenceMessageIds: fact.factId ? [fact.factId] : coveredMessageIds,
+      evidenceMessageIds: coveredMessageIds,
     })),
     decisions: [] as Array<{
       factId?: string;
@@ -186,7 +186,10 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
   };
 }
 
-function pending(state: RuntimeState, reason: 'auto_soft' | 'auto_hard' = 'auto_hard') {
+function pending(
+  state: RuntimeState,
+  reason: 'auto_soft' | 'auto_hard' | 'manual' | 'overflow_recovery' = 'auto_hard',
+) {
   return {
     compactionId: 'compact-summary',
     reason,
@@ -615,7 +618,9 @@ describe('structured context summary', () => {
         planning: { kind: 'building_without_plan' },
         planHistory: [],
       };
-      // User messages in covered range
+      // User messages and assistant/tool transcript in covered range.
+      // P0-5: real covered assistant/tool transcript is required — empty modelMessageId
+      // no longer bypasses the covered-range filter.
       state.transcript.messages = [
         {
           kind: 'user',
@@ -626,21 +631,80 @@ describe('structured context summary', () => {
           content: 'Please refactor the auth module',
         },
         {
+          kind: 'assistant',
+          messageId: 'asst-read',
+          turnId: 'turn-1',
+          ordinal: 1,
+          createdAt: '2026-07-20T00:00:01.000Z',
+          content: 'Reading auth.ts...',
+          toolCalls: [{ id: 'read', name: 'read_file', args: { path: 'src/auth.ts' } }],
+        },
+        {
+          kind: 'tool',
+          messageId: 'tool-read',
+          turnId: 'turn-1',
+          ordinal: 2,
+          createdAt: '2026-07-20T00:00:02.000Z',
+          toolCallId: 'read',
+          name: 'read_file',
+          content: 'file contents',
+          ok: true,
+        },
+        {
           kind: 'user',
           messageId: 'user-1',
           turnId: 'turn-2',
-          ordinal: 2,
-          createdAt: '2026-07-20T00:00:02.000Z',
+          ordinal: 3,
+          createdAt: '2026-07-20T00:00:03.000Z',
           content: 'must preserve backward compatibility',
         },
+        {
+          kind: 'assistant',
+          messageId: 'asst-write',
+          turnId: 'turn-3',
+          ordinal: 4,
+          createdAt: '2026-07-20T00:00:04.000Z',
+          content: 'Writing auth.ts...',
+          toolCalls: [{ id: 'write', name: 'write_file', args: { path: 'src/auth.ts' } }],
+        },
+        {
+          kind: 'tool',
+          messageId: 'tool-write',
+          turnId: 'turn-3',
+          ordinal: 5,
+          createdAt: '2026-07-20T00:00:05.000Z',
+          toolCallId: 'write',
+          name: 'write_file',
+          content: 'Wrote auth.ts successfully',
+          ok: true,
+          resultMeta: { path: 'src/auth.ts', contentDigest: 'abc123' },
+        },
+        {
+          kind: 'assistant',
+          messageId: 'asst-fail',
+          turnId: 'turn-4',
+          ordinal: 6,
+          createdAt: '2026-07-20T00:00:06.000Z',
+          content: 'Building...',
+          toolCalls: [{ id: 'fail', name: 'build', args: {} }],
+        },
+        {
+          kind: 'tool',
+          messageId: 'tool-fail',
+          turnId: 'turn-4',
+          ordinal: 7,
+          createdAt: '2026-07-20T00:00:07.000Z',
+          toolCallId: 'fail',
+          name: 'build',
+          content: 'strictNullChecks error',
+          ok: false,
+        },
       ];
-      // Tool calls: one read-only, one workspace_write, one failed.
-      // modelMessageId left empty so the coveredIds check passes
-      // (real calls always have this set via the assistant message).
+      // Tool calls with modelMessageId pointing to real assistant messages.
       state.tools.calls = {
         read: {
           toolCallId: 'read',
-          modelMessageId: '',
+          modelMessageId: 'asst-read',
           name: 'read_file',
           args: { path: 'src/auth.ts' },
           status: 'succeeded',
@@ -650,7 +714,7 @@ describe('structured context summary', () => {
         },
         write: {
           toolCallId: 'write',
-          modelMessageId: '',
+          modelMessageId: 'asst-write',
           name: 'write_file',
           args: { path: 'src/auth.ts' },
           status: 'succeeded',
@@ -665,7 +729,7 @@ describe('structured context summary', () => {
         },
         fail: {
           toolCallId: 'fail',
-          modelMessageId: '',
+          modelMessageId: 'asst-fail',
           name: 'build',
           args: {},
           status: 'failed',
@@ -1442,5 +1506,292 @@ describe('PR 5 — summary evidence validation', () => {
     await expect(
       compactor({ state, pending: pending(state), sourceRevision: state.revision }),
     ).rejects.toThrow();
+  });
+
+  test('rejects objective fact kind mismatch', async () => {
+    const state = createInitialRuntimeState({ threadId: 'pr5c', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user' as const,
+        messageId: 'u0',
+        turnId: 't0',
+        ordinal: 0,
+        createdAt: '2026-07-20T00:00:00.000Z',
+        content: 'original request '.repeat(10),
+      },
+      {
+        kind: 'user' as const,
+        messageId: 'u1',
+        turnId: 't1',
+        ordinal: 1,
+        createdAt: '2026-07-20T00:00:01.000Z',
+        content: 'another message '.repeat(10),
+      },
+      {
+        kind: 'user' as const,
+        messageId: 'u2',
+        turnId: 't2',
+        ordinal: 2,
+        createdAt: '2026-07-20T00:00:02.000Z',
+        content: 'protected latest '.repeat(10),
+      },
+    ];
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 1,
+      maxSummaryInputTokens: 100_000,
+      targetRatio: 500,
+      generate: async (request: any) => {
+        // Build valid summary from the ledger, then swap the objective's factId
+        // with a user_request factId. The real objective factId is moved to
+        // userRequests so mandatory coverage still passes.
+        const valid = validSummaryFromRequest(request);
+        if (valid.userRequests && valid.userRequests.length > 0 && valid.objective) {
+          const stolenId = valid.userRequests[0]!.factId;
+          const realObjectiveId = valid.objective.factId;
+          valid.objective.factId = stolenId;
+          valid.userRequests[0]!.factId = realObjectiveId;
+        }
+        return valid;
+      },
+    });
+    (state as any).context = {
+      ...state.context,
+      lastPreflight: {
+        estimate: { ...estimate, totalInputTokens: 50_000, transcriptTokens: 49_000 },
+        reservedOutputTokens: 4096,
+        providerSafetyMarginTokens: 1024,
+        status: 'normal' as const,
+      },
+    };
+    await expect(
+      compactor({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toMatchObject({ kind: 'invalid_evidence' });
+  });
+
+  test('rejects evidence that does not overlap with ledger fact evidence', async () => {
+    const state = createInitialRuntimeState({ threadId: 'pr5d', userId: 'u', workspace: '/w' });
+    // Need enough messages for the boundary to produce coveredMessages with recentTurns: 1.
+    state.transcript.messages = [
+      {
+        kind: 'user' as const,
+        messageId: 'u0',
+        turnId: 't0',
+        ordinal: 0,
+        createdAt: '2026-07-20T00:00:00.000Z',
+        content: 'refactor auth module'.repeat(10),
+      },
+      {
+        kind: 'user' as const,
+        messageId: 'u1',
+        turnId: 't1',
+        ordinal: 1,
+        createdAt: '2026-07-20T00:00:01.000Z',
+        content: 'additional context'.repeat(10),
+      },
+    ];
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 1,
+      maxSummaryInputTokens: 100_000,
+      targetRatio: 500,
+      generate: async (request: any) => {
+        // Build valid summary, then change the objective evidence to NOT overlap
+        // with the ledger's objective evidence (which is ['u0']).
+        const valid = validSummaryFromRequest(request);
+        // Replace objective evidence with only ['u1'] — it's in the covered
+        // range (so validateEvidenceIds passes) but NOT in the objective's
+        // ledger evidence set (so the intersection check fails).
+        valid.objective!.evidenceMessageIds = ['u1'];
+        return valid;
+      },
+    });
+    (state as any).context = {
+      ...state.context,
+      lastPreflight: {
+        estimate: { ...estimate, totalInputTokens: 50_000, transcriptTokens: 49_000 },
+        reservedOutputTokens: 4096,
+        providerSafetyMarginTokens: 1024,
+        status: 'normal' as const,
+      },
+    };
+    // Use 'manual' to avoid the auto_hard chunk fallback (chunk mode produces a
+    // differently-shaped payload that lacks the 'objective' field).
+    await expect(
+      compactor({ state, pending: pending(state, 'manual'), sourceRevision: state.revision }),
+    ).rejects.toMatchObject({ kind: 'invalid_evidence' });
+  });
+});
+
+// ── Review-fix: legacy V2 migration + objective preservation ──
+
+describe('review-fix — legacy V2 and objective preservation', () => {
+  test('parsePersistedCheckpointSummary migrates legacy V2 (no objective/userRequest factId)', () => {
+    const legacyV2 = {
+      version: 2,
+      objective: {
+        text: 'Implement auth',
+        evidenceMessageIds: ['msg-1'],
+      },
+      userRequests: [{ summary: 'Add login page', evidenceMessageIds: ['msg-2'] }],
+      userConstraints: [],
+      decisions: [],
+      completedEffects: [],
+      observations: [],
+      failures: [],
+      pendingWork: [],
+      unresolvedQuestions: [],
+      provenance: {
+        lastMessageId: 'msg-2',
+        sourceDigest: 'sha256:abc',
+        coveredUserMessageIds: ['msg-1', 'msg-2'],
+        mandatoryFactIds: [],
+        policyVersion: '1.0.0',
+      },
+    };
+    const parsed = parsePersistedCheckpointSummary(legacyV2);
+    expect(parsed.version).toBe(2);
+    expect(parsed.objective.factId).toBeString();
+    expect(parsed.objective.factId.length).toBeGreaterThan(0);
+    expect(parsed.objective.text).toBe('Implement auth');
+    expect(parsed.objective.evidenceMessageIds).toEqual(['msg-1']);
+    expect(parsed.userRequests).toHaveLength(1);
+    expect(parsed.userRequests[0]!.factId).toBeString();
+    expect(parsed.userRequests[0]!.factId.length).toBeGreaterThan(0);
+    expect(parsed.userRequests[0]!.summary).toBe('Add login page');
+  });
+
+  test('parsePersistedCheckpointSummary still upgrades V1', () => {
+    const v1 = {
+      version: 1,
+      objective: 'old task',
+      userConstraints: [],
+      decisions: [],
+      completedWork: [],
+      observations: [],
+      failures: [],
+      pendingWork: [],
+      unresolvedQuestions: [],
+      recentUserIntent: 'old',
+      provenance: {
+        firstMessageId: 'm1',
+        lastMessageId: 'm2',
+        sourceDigest: 'abc',
+        mandatoryFactIds: [],
+      },
+    };
+    const parsed = parsePersistedCheckpointSummary(v1);
+    expect(parsed.version).toBe(2);
+    expect(parsed.objective.text).toBe('old task');
+    expect(parsed.objective.factId).toBeString();
+  });
+
+  test('base objective survives incremental compaction (P0-4)', async () => {
+    const state = createInitialRuntimeState({ threadId: 'p04', userId: 'u', workspace: '/w' });
+    // Round 1: establish a checkpoint with "original task" as objective.
+    state.transcript.messages = [
+      {
+        kind: 'user' as const,
+        messageId: 'u0',
+        turnId: 't0',
+        ordinal: 0,
+        createdAt: '2026-07-20T00:00:00.000Z',
+        content: 'original task',
+      },
+      {
+        kind: 'user' as const,
+        messageId: 'u1',
+        turnId: 't1',
+        ordinal: 1,
+        createdAt: '2026-07-20T00:00:01.000Z',
+        content: 'extra context'.repeat(200),
+      },
+    ];
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 1,
+      maxSummaryInputTokens: 100_000,
+      targetRatio: 500,
+      generate: async (request) => validSummaryFromRequest(request),
+    });
+    (state as any).context = {
+      ...state.context,
+      lastPreflight: {
+        estimate: { ...estimate, totalInputTokens: 200_000, transcriptTokens: 190_000 },
+        reservedOutputTokens: 4096,
+        providerSafetyMarginTokens: 1024,
+        status: 'normal' as const,
+      },
+    };
+    const cp1 = await compactor({
+      state,
+      pending: pending(state),
+      sourceRevision: state.revision,
+    });
+    expect(cp1.summary.objective.text).toBe('original task');
+
+    // Round 2: incremental compaction with new tail messages.
+    // The objective should remain "original task", not the tail's first user message.
+    (state as any).context.activeCheckpoint = cp1;
+    // Add tail messages with a different first user message.
+    state.transcript.messages.push(
+      {
+        kind: 'user' as const,
+        messageId: 'u2',
+        turnId: 't2',
+        ordinal: 2,
+        createdAt: '2026-07-20T00:00:02.000Z',
+        content: 'different new task',
+      },
+      {
+        kind: 'user' as const,
+        messageId: 'u3',
+        turnId: 't3',
+        ordinal: 3,
+        createdAt: '2026-07-20T00:00:03.000Z',
+        content: 'more tail context'.repeat(200),
+      },
+    );
+    (state as any).context.lastPreflight = {
+      estimate: { ...estimate, totalInputTokens: 200_000, transcriptTokens: 190_000 },
+      reservedOutputTokens: 4096,
+      providerSafetyMarginTokens: 1024,
+      status: 'normal' as const,
+    };
+    const cp2 = await compactor({
+      state,
+      pending: { ...pending(state), compactionId: 'cmp2' },
+      sourceRevision: state.revision + 1,
+    });
+    // The incremental checkpoint must preserve the original objective, not adopt
+    // "different new task" from the tail.
+    expect(cp2.summary.objective.text).toBe('original task');
+  });
+
+  test('tool call without covered assistant or tool result does NOT enter ledger (P0-5)', () => {
+    const state = createInitialRuntimeState({ threadId: 'p05', userId: 'u', workspace: '/w' });
+    state.transcript.messages = [
+      {
+        kind: 'user' as const,
+        messageId: 'u0',
+        turnId: 't0',
+        ordinal: 0,
+        createdAt: '2026-07-20T00:00:00.000Z',
+        content: 'refactor',
+      },
+    ];
+    // Tool call with modelMessageId NOT in covered messages, and no covered tool result.
+    state.tools.calls = {
+      orphan: {
+        toolCallId: 'orphan',
+        modelMessageId: 'asst-missing', // not in transcript
+        name: 'write_file',
+        args: { path: 'src/auth.ts' },
+        status: 'succeeded',
+        createdAtTurnId: 'turn-missing',
+        effectClass: 'workspace_write',
+        sideEffect: true,
+      },
+    };
+    const ledger = buildDeterministicFactLedger(state, state.transcript.messages);
+    const completed = ledger.facts.filter((f) => f.kind === 'completed_work');
+    expect(completed).toHaveLength(0);
   });
 });

@@ -60,14 +60,17 @@ function messageId(message: TranscriptMessage | undefined): string[] {
 export function buildDeterministicFactLedger(
   state: Readonly<RuntimeState>,
   coveredMessages: TranscriptMessage[],
+  options?: { includeObjective?: boolean },
 ): DeterministicFactLedger {
+  const includeObjective = options?.includeObjective ?? true;
   const coveredIds = new Set(coveredMessages.flatMap((message) => messageId(message)));
   const facts: CompactionFact[] = [];
 
   // ── Objective: from the first user message in covered range ──
+  // P0-4: skip objective generation during incremental compaction (base already has it).
   const firstUser = coveredMessages.find((message) => message.kind === 'user');
   const objective = firstUser?.content ?? '';
-  if (objective) {
+  if (includeObjective && objective) {
     facts.push({
       factId: factId('objective', objective),
       kind: 'objective',
@@ -90,14 +93,29 @@ export function buildDeterministicFactLedger(
   }
 
   // ── Tool calls in covered range → completed_work / failure / pending_work ──
+  // P0-5: require real covered assistant or tool transcript evidence.
+  // modelMessageId may be empty in some edge cases — must also check for a covered tool result.
+  const coveredToolMessages = coveredMessages.filter(
+    (message): message is Extract<TranscriptMessage, { kind: 'tool' }> => message.kind === 'tool',
+  );
   for (const call of Object.values(state.tools.calls)) {
-    if (call.modelMessageId && !coveredIds.has(call.modelMessageId)) continue;
+    const coveredAssistant =
+      call.modelMessageId != null &&
+      call.modelMessageId !== '' &&
+      coveredIds.has(call.modelMessageId);
+
+    const coveredToolResults = coveredToolMessages.filter(
+      (message) => message.toolCallId === call.toolCallId,
+    );
+
+    if (!coveredAssistant && coveredToolResults.length === 0) continue;
+
     const evidence = [
-      call.modelMessageId,
-      ...coveredMessages
-        .filter((message) => message.kind === 'tool' && message.toolCallId === call.toolCallId)
-        .flatMap((message) => messageId(message)),
+      ...(coveredAssistant ? [call.modelMessageId!] : []),
+      ...coveredToolResults.flatMap((message) => messageId(message)),
     ].filter(Boolean);
+
+    if (evidence.length === 0) continue;
 
     // completedEffect: only workspace_write, external_side_effect, or explicit sideEffect.
     // read_only results must NOT enter completed_work (observations only).
@@ -227,7 +245,7 @@ export function buildLedgerFromBaseSummary(
   // decisions → mandatory
   for (const d of summary.decisions) {
     facts.push({
-      factId: d.factId ?? factId('decision', d.decision),
+      factId: d.factId,
       kind: 'decision',
       text: `${d.decision}${d.rationale ? ` (rationale: ${d.rationale})` : ''}`,
       mandatory: true,
@@ -262,7 +280,7 @@ export function buildLedgerFromBaseSummary(
   // pendingWork → mandatory
   for (const pw of summary.pendingWork) {
     facts.push({
-      factId: pw.factId ?? factId('pending_work', pw.text),
+      factId: pw.factId,
       kind: 'pending_work',
       text: pw.text,
       mandatory: true,
@@ -274,9 +292,7 @@ export function buildLedgerFromBaseSummary(
   // observations → conditional (can be invalidated by later writes)
   for (const obs of summary.observations) {
     facts.push({
-      factId:
-        obs.factId ??
-        factId('observation', `${obs.resource}:${obs.revision ?? obs.digest ?? 'unknown'}`),
+      factId: obs.factId,
       kind: 'observation',
       text: `Observed ${obs.resource}${obs.revision ? ` at ${obs.revision}` : ''}`,
       mandatory: false, // conditional — can be invalidated
@@ -288,7 +304,14 @@ export function buildLedgerFromBaseSummary(
   }
 
   const unique = [...new Map(facts.map((f) => [f.factId, f])).values()];
-  const coveredMessageIds = [...new Set(unique.flatMap((f) => f.evidenceMessageIds))];
+  // P0-3: include evidence from all summary sections, not just ledger facts.
+  // unresolvedQuestions evidence may reference messages not attached to any ledger fact.
+  const coveredMessageIds = [
+    ...new Set([
+      ...unique.flatMap((f) => f.evidenceMessageIds),
+      ...summary.unresolvedQuestions.flatMap((q) => q.evidenceMessageIds),
+    ]),
+  ];
   return {
     objective: summary.objective.text,
     facts: unique,
@@ -364,7 +387,7 @@ export function mergeCompactionLedgers(
   });
 
   return {
-    objective: tail.objective || base.objective || '',
+    objective: base?.objective || tail.objective || '',
     facts: finalFacts,
     mandatoryFactIds: finalMandatoryIds,
     coveredUserMessageIds: [
