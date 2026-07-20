@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { RuntimeState, TranscriptMessage } from '@/core/runtime/state';
 import type { StructuredContextSummaryV2 } from './compaction-schema';
+import { ResourceObservationTracker } from './resource-observation-tracker';
 
 export type CompactionFactKind =
   | 'objective'
@@ -20,6 +21,11 @@ export interface CompactionFact {
   text: string;
   mandatory: boolean;
   evidenceMessageIds: string[];
+  canonicalText?: string;
+  operation?: string;
+  outcome?: string;
+  error?: string;
+  consequence?: string;
   path?: string;
   resource?: string;
   revision?: string;
@@ -75,6 +81,7 @@ export function buildDeterministicFactLedger(
       factId: factId('objective', objective),
       kind: 'objective',
       text: objective,
+      canonicalText: objective,
       mandatory: true,
       evidenceMessageIds: messageId(firstUser),
     });
@@ -87,6 +94,7 @@ export function buildDeterministicFactLedger(
       factId: factId('user_request', message.messageId ?? message.content),
       kind: 'user_request',
       text: message.content.slice(0, 2_000),
+      canonicalText: message.content.slice(0, 2_000),
       mandatory: true,
       evidenceMessageIds: messageId(message),
     });
@@ -131,22 +139,30 @@ export function buildDeterministicFactLedger(
     if (isCompletedEffect) {
       const meta = call.result?.resultMeta;
       const isUncertain = !call.effectClass || call.effectClass === 'unknown';
+      const operation = call.name;
+      const outcome = `${call.result?.summary ?? 'completed'}${isUncertain ? ' (uncertain classification)' : ''}`;
       facts.push({
         factId: factId('completed_work', call.toolCallId),
         kind: 'completed_work',
-        text: `${call.name}: ${call.result?.summary ?? 'completed'}${isUncertain ? ' (uncertain classification)' : ''}`,
+        text: `${operation}: ${outcome}`,
+        operation,
+        outcome,
         mandatory: true,
         evidenceMessageIds: evidence,
         ...(meta?.path ? { path: meta.path } : {}),
-        ...(meta?.contentDigest ? { digest: meta.contentDigest } : {}),
+        ...(meta?.rawResultDigest ? { digest: meta.rawResultDigest } : {}),
       });
     } else if (call.status === 'succeeded') {
       // Read-only, unknown without sideEffect, or plan_only — not completed_work.
     } else if (['failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status)) {
+      const error = call.error ?? call.failure?.message ?? call.status;
       facts.push({
         factId: factId('failure', call.toolCallId),
         kind: 'failure',
-        text: `${call.name}: ${call.error ?? call.failure?.message ?? call.status}`,
+        text: `${call.name}: ${error}`,
+        operation: call.name,
+        error,
+        consequence: '',
         mandatory: true,
         evidenceMessageIds: evidence,
       });
@@ -155,6 +171,7 @@ export function buildDeterministicFactLedger(
         factId: factId('pending_work', call.toolCallId),
         kind: 'pending_work',
         text: `${call.name} is ${call.status}`,
+        canonicalText: `${call.name} is ${call.status}`,
         mandatory: true,
         evidenceMessageIds: evidence,
       });
@@ -162,24 +179,39 @@ export function buildDeterministicFactLedger(
   }
 
   // ── Observations: latest reliable resource state from covered tool messages ──
-  const latestObservations = new Map<string, CompactionFact>();
+  const observationTracker = new ResourceObservationTracker();
   for (const message of coveredMessages) {
-    if (message.kind !== 'tool' || !message.ok || !message.resultMeta) continue;
+    if (message.kind !== 'tool') continue;
     const meta = message.resultMeta;
-    const resource = meta.path ?? meta.command;
-    if (!resource || (!meta.resourceRevision && !meta.contentDigest)) continue;
-    latestObservations.set(resource, {
-      factId: factId('observation', `${resource}:${meta.resourceRevision ?? meta.contentDigest}`),
-      kind: 'observation',
-      text: `${message.name} observed ${resource}`,
-      mandatory: true,
-      evidenceMessageIds: messageId(message),
-      resource,
-      ...(meta.resourceRevision ? { revision: meta.resourceRevision } : {}),
-      ...(meta.contentDigest ? { digest: meta.contentDigest } : {}),
+    const call = state.tools.calls[message.toolCallId];
+    observationTracker.applyToolResult({
+      toolCallId: message.toolCallId,
+      messageId: message.messageId ?? message.toolCallId,
+      name: message.name,
+      ok: message.ok,
+      effectClass: call?.effectClass ?? 'unknown',
+      content: message.content,
+      resource: meta?.path ?? meta?.command,
+      revision: meta?.resourceRevision,
+      rawDigest: meta?.rawResultDigest,
+      modelDigest: meta?.modelContentDigest ?? meta?.contentDigest,
+      truncated: meta?.truncated,
+      mutationScope: meta?.workspaceMutationScope,
+      digestScope: meta?.digestScope,
     });
   }
-  facts.push(...latestObservations.values());
+  for (const observation of observationTracker.allReliable()) {
+    facts.push({
+      factId: factId('observation', `${observation.resource}:${observation.revision}`),
+      kind: 'observation',
+      text: `Observed ${observation.resource}`,
+      mandatory: true,
+      evidenceMessageIds: [observation.messageId],
+      resource: observation.resource,
+      revision: observation.revision,
+      ...(observation.rawDigest ? { digest: observation.rawDigest } : {}),
+    });
+  }
 
   const unique = [...new Map(facts.map((fact) => [fact.factId, fact])).values()];
   const coveredUserMessageIds = coveredMessages
@@ -216,6 +248,7 @@ export function buildLedgerFromBaseSummary(
     factId: summary.objective.factId,
     kind: 'objective',
     text: summary.objective.text,
+    canonicalText: summary.objective.text,
     mandatory: true,
     evidenceMessageIds: summary.objective.evidenceMessageIds,
   });
@@ -226,6 +259,7 @@ export function buildLedgerFromBaseSummary(
       factId: req.factId,
       kind: 'user_request',
       text: req.summary,
+      canonicalText: req.summary,
       mandatory: true,
       evidenceMessageIds: req.evidenceMessageIds,
     });
@@ -233,24 +267,31 @@ export function buildLedgerFromBaseSummary(
 
   // userConstraints → mandatory
   for (const c of summary.userConstraints) {
-    facts.push({
-      factId: c.factId,
-      kind: 'user_constraint',
-      text: c.text,
-      mandatory: true,
-      evidenceMessageIds: c.evidenceMessageIds,
-    });
+    for (const sourceFactId of c.sourceFactIds ?? [c.factId]) {
+      facts.push({
+        factId: sourceFactId,
+        kind: 'user_constraint',
+        text: c.text,
+        canonicalText: c.text,
+        mandatory: true,
+        evidenceMessageIds: c.evidenceMessageIds,
+      });
+    }
   }
 
   // decisions → mandatory
   for (const d of summary.decisions) {
-    facts.push({
-      factId: d.factId,
-      kind: 'decision',
-      text: `${d.decision}${d.rationale ? ` (rationale: ${d.rationale})` : ''}`,
-      mandatory: true,
-      evidenceMessageIds: d.evidenceMessageIds,
-    });
+    for (const sourceFactId of d.sourceFactIds ?? [d.factId]) {
+      facts.push({
+        factId: sourceFactId,
+        kind: 'decision',
+        text: `${d.decision}${d.rationale ? ` (rationale: ${d.rationale})` : ''}`,
+        canonicalText: d.decision,
+        ...(d.rationale ? { consequence: d.rationale } : {}),
+        mandatory: true,
+        evidenceMessageIds: d.evidenceMessageIds,
+      });
+    }
   }
 
   // completedEffects → mandatory
@@ -259,6 +300,8 @@ export function buildLedgerFromBaseSummary(
       factId: ce.factId,
       kind: 'completed_work',
       text: `${ce.operation}: ${ce.outcome}`,
+      operation: ce.operation,
+      outcome: ce.outcome,
       mandatory: true,
       evidenceMessageIds: ce.evidenceMessageIds,
       ...(ce.path ? { path: ce.path } : {}),
@@ -272,6 +315,9 @@ export function buildLedgerFromBaseSummary(
       factId: f.factId,
       kind: 'failure',
       text: `${f.operation}: ${f.error}${f.consequence ? ` (${f.consequence})` : ''}`,
+      operation: f.operation,
+      error: f.error,
+      consequence: f.consequence,
       mandatory: true,
       evidenceMessageIds: f.evidenceMessageIds,
     });
@@ -283,6 +329,7 @@ export function buildLedgerFromBaseSummary(
       factId: pw.factId,
       kind: 'pending_work',
       text: pw.text,
+      canonicalText: pw.text,
       mandatory: true,
       evidenceMessageIds: pw.evidenceMessageIds,
       ...(pw.blockedBy ? { resource: pw.blockedBy } : {}),
@@ -360,6 +407,9 @@ export function mergeCompactionLedgers(
 
   const mergedFacts = [...merged.values()];
 
+  const tailWrites = tail.facts.filter((fact) => fact.kind === 'completed_work');
+  const invalidatesAllObservations = tailWrites.some((fact) => !fact.path);
+
   // Pending work in base that became completed_work in tail:
   // remove the pending_work fact from merged when tail has a matching completed_work.
   const tailCompletedPaths = new Set(
@@ -376,7 +426,19 @@ export function mergeCompactionLedgers(
     })
     .map((f) => f.factId);
 
-  const finalFacts = mergedFacts.filter((f) => !basePendingToRemove.includes(f.factId));
+  const finalFacts = mergedFacts.filter((f) => {
+    if (basePendingToRemove.includes(f.factId)) return false;
+    if (f.kind !== 'observation' || !base.facts.some((baseFact) => baseFact.factId === f.factId)) {
+      return true;
+    }
+    if (invalidatesAllObservations) return false;
+    return !tailWrites.some(
+      (write) =>
+        write.path &&
+        f.resource &&
+        (f.resource === write.path || f.resource.startsWith(`${write.path}/`)),
+    );
+  });
 
   const finalMandatoryIds = [
     ...new Set([...(base.mandatoryFactIds ?? []), ...tail.mandatoryFactIds]),

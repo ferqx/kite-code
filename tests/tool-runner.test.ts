@@ -503,6 +503,7 @@ describe('runApprovedTool 鈥?search_content', () => {
       path: '.',
       matchCount: 1,
       truncated: false,
+      rawResultDigest: expect.any(String),
     });
   });
 });

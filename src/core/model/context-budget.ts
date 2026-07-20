@@ -111,13 +111,18 @@ export function preflightModelContext(input: {
   estimate: ContextTokenEstimate;
   capabilities: ResolvedModelCapabilities;
   requestMaxOutputTokens?: number;
+  providerSafetyRatio?: number;
   compactRatio?: number;
   hardRatio?: number;
   targetRatio?: number;
   /** Below this ratio → no action needed. Default 0.80. */
   warningRatio?: number;
 }): ContextPreflight {
-  const budget = usableInputBudget(input.capabilities, input.requestMaxOutputTokens);
+  const budget = usableInputBudget(
+    input.capabilities,
+    input.requestMaxOutputTokens,
+    input.providerSafetyRatio,
+  );
   if (budget.usableInputTokens == null || budget.usableInputTokens <= 0) {
     return {
       estimate: input.estimate,

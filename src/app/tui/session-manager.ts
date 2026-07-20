@@ -14,7 +14,10 @@ import type { RuntimeUserAction } from '@/core/runtime/actions';
 import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEffect } from '@/core/runtime/effects';
 import type { RuntimeEvent } from '@/core/runtime/events';
-import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
+import {
+  createRuntimeEffectExecutor,
+  resolveRuntimeContextProjectionEnvironment,
+} from '@/core/runtime/executor';
 import { createAgentKernel } from '@/core/runtime/kernel';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { decideNextEffect } from '@/core/runtime/scheduler';
@@ -922,7 +925,18 @@ export class SessionManager {
       phase: 'building',
     });
     try {
-      const status = buildContextStatusReport(kernel.getState(), this.deps.config);
+      const state = kernel.getState();
+      const environment = resolveRuntimeContextProjectionEnvironment(
+        {
+          config: this.deps.config,
+          model: createChatModel(this.deps.config),
+          mcpManager: rt.mcpManager ?? undefined,
+          skills: rt.skillManifests,
+          skillOptions: rt.skillOptions ?? undefined,
+        },
+        state,
+      );
+      const status = buildContextStatusReport(state, this.deps.config, environment);
       return `\n${status.text}`;
     } finally {
       kernel.close();
@@ -951,7 +965,17 @@ export class SessionManager {
       if (!checkpoint) {
         return { events: [], text: 'No active checkpoint to reset.' };
       }
-      const preflight = compactResetPreflight(state, this.deps.config);
+      const environment = resolveRuntimeContextProjectionEnvironment(
+        {
+          config: this.deps.config,
+          model: createChatModel(this.deps.config),
+          mcpManager: rt.mcpManager ?? undefined,
+          skills: rt.skillManifests,
+          skillOptions: rt.skillOptions ?? undefined,
+        },
+        state,
+      );
+      const preflight = compactResetPreflight(state, this.deps.config, environment);
       if (!preflight.safe) {
         return { events: [], text: `Cannot reset: ${preflight.reason}`, isError: true };
       }
@@ -983,7 +1007,17 @@ export class SessionManager {
         return { events: [], text: 'No active checkpoint to reset.' };
       }
 
-      const preflight = compactResetPreflight(state, this.deps.config);
+      const environment = resolveRuntimeContextProjectionEnvironment(
+        {
+          config: this.deps.config,
+          model: createChatModel(this.deps.config),
+          mcpManager: rt.mcpManager ?? undefined,
+          skills: rt.skillManifests,
+          skillOptions: rt.skillOptions ?? undefined,
+        },
+        state,
+      );
+      const preflight = compactResetPreflight(state, this.deps.config, environment);
       if (!preflight.safe) {
         return {
           events: [],

@@ -467,6 +467,34 @@ describe('PR 6 — hard block and thrash breaker', () => {
     expect(current.context.hardBlock).toBeDefined();
   });
 
+  test('hard block schedules only an explicit manual recovery compaction', () => {
+    const state = requestedState();
+    state.context.hardBlock = {
+      reason: 'hard_limit',
+      sourceDigest: 'source',
+      failure: {
+        compactionId: 'failed',
+        sourceRevision: state.revision,
+        errorKind: 'insufficient_reduction',
+        message: 'blocked',
+        retryable: false,
+        reason: 'auto_hard',
+      },
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.context.pendingCompaction = {
+      ...state.context.pendingCompaction!,
+      compactionId: 'recover',
+      reason: 'manual_recovery',
+    };
+    expect(decideNextEffect(state)).toEqual({
+      type: 'compact_context',
+      compactionId: 'recover',
+    });
+    state.context.pendingCompaction.reason = 'manual';
+    expect(decideNextEffect(state).type).toBe('recovery_blocked');
+  });
+
   test('thrash breaker disables proactive auto after 2 consecutive low-gain', () => {
     const state = requestedState();
     // First low gain

@@ -78,6 +78,7 @@ export type StructuredContextSummaryV1 = z.infer<typeof structuredContextSummary
 const evidenceFactSchema = z
   .object({
     factId: z.string().min(1),
+    sourceFactIds: z.array(z.string().min(1)).min(1).optional(),
     text: z.string().min(1),
     evidenceMessageIds: z.array(z.string().min(1)),
   })
@@ -107,6 +108,7 @@ export const structuredContextSummaryV2Schema = z
       z
         .object({
           factId: z.string().min(1),
+          sourceFactIds: z.array(z.string().min(1)).min(1).optional(),
           decision: z.string().min(1),
           rationale: z.string().optional(),
           evidenceMessageIds: z.array(z.string().min(1)),
@@ -261,9 +263,31 @@ interface LegacyStructuredContextSummaryV2 {
   };
 }
 
+const legacyStructuredContextSummaryV2Schema = structuredContextSummaryV2Schema.extend({
+  objective: structuredContextSummaryV2Schema.shape.objective.omit({ factId: true }),
+  userRequests: z.array(
+    structuredContextSummaryV2Schema.shape.userRequests.element.omit({ factId: true }),
+  ),
+  decisions: z.array(
+    structuredContextSummaryV2Schema.shape.decisions.element.extend({
+      factId: z.string().optional(),
+    }),
+  ),
+  observations: z.array(
+    structuredContextSummaryV2Schema.shape.observations.element.extend({
+      factId: z.string().optional(),
+    }),
+  ),
+  pendingWork: z.array(
+    structuredContextSummaryV2Schema.shape.pendingWork.element.extend({
+      factId: z.string().optional(),
+    }),
+  ),
+});
+
 /** Upgrade a legacy V2 summary (without objective/userRequest factId) to current V2. */
 function migrateLegacyV2Summary(raw: LegacyStructuredContextSummaryV2): StructuredContextSummaryV2 {
-  return {
+  const migrated = {
     version: 2,
     objective: {
       factId: factId('objective', raw.objective.text),
@@ -292,8 +316,19 @@ function migrateLegacyV2Summary(raw: LegacyStructuredContextSummaryV2): Structur
       factId: pw.factId ?? factId('pending_work', pw.text),
     })),
     unresolvedQuestions: raw.unresolvedQuestions,
-    provenance: raw.provenance,
+    provenance: { ...raw.provenance, mandatoryFactIds: [] as string[] },
   };
+  const durableIds = [
+    migrated.objective.factId,
+    ...migrated.userRequests.map((entry) => entry.factId),
+    ...migrated.userConstraints.map((entry) => entry.factId),
+    ...migrated.decisions.map((entry) => entry.factId),
+    ...migrated.completedEffects.map((entry) => entry.factId),
+    ...migrated.failures.map((entry) => entry.factId),
+    ...migrated.pendingWork.map((entry) => entry.factId),
+  ];
+  migrated.provenance.mandatoryFactIds = [...new Set(durableIds)];
+  return structuredContextSummaryV2Schema.parse(migrated);
 }
 
 /**
@@ -363,7 +398,9 @@ export function parsePersistedCheckpointSummary(raw: unknown): StructuredContext
       return parseStructuredContextSummaryV2(raw);
     } catch {
       // Legacy V2 (before objective/userRequest factId was required).
-      const legacy = raw as LegacyStructuredContextSummaryV2;
+      const legacy = legacyStructuredContextSummaryV2Schema.parse(
+        raw,
+      ) as LegacyStructuredContextSummaryV2;
       return migrateLegacyV2Summary(legacy);
     }
   }
@@ -389,7 +426,8 @@ export function summaryFactIds(
       summary.objective.factId,
       ...summary.userRequests.map((r) => r.factId),
       ...summary.userConstraints.map((c) => c.factId),
-      ...summary.decisions.map((d) => d.factId),
+      ...summary.userConstraints.flatMap((c) => c.sourceFactIds ?? []),
+      ...summary.decisions.flatMap((d) => [d.factId, ...(d.sourceFactIds ?? [])]),
       ...summary.completedEffects.map((ce) => ce.factId),
       ...summary.observations.map((o) => o.factId),
       ...summary.failures.map((f) => f.factId),

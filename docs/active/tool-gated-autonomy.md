@@ -58,4 +58,4 @@ Capability search 只负责发现。搜索候选不能作为调用句柄，也�
 
 ## 工具结果结构化元数据
 
-工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`contentDigest`、`intent`、`truncated`、`resourceRevision`）从 `harness/tool-runner.ts` 写入 `ToolCallRecord`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。上下文压缩（M1 V2 `compactContextFrames`）从 `resultMeta` 读取结构化信息进行折叠决策和资源失效判断，不再从 ToolMessage 正文反向解析 JSON。行为上不改变权限决策或审批路由。
+工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、`modelContentDigest`、兼容字段 `contentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`）从 `harness/tool-runner.ts` 写入 `ToolCallRecord`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。Runner 必须在模型可见截断前计算 raw digest；Controller 对截断后的模型内容计算 model digest，不能把 projected digest 标记成 raw。上下文压缩从这些结构化字段进行折叠决策和资源失效判断，不再从 ToolMessage 正文反向解析 JSON。行为上不改变权限决策或审批路由。

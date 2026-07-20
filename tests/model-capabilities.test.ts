@@ -63,9 +63,9 @@ describe('ResolvedModelCapabilities', () => {
       }),
     );
     expect(result).toEqual({
-      usableInputTokens: 88_976,
+      usableInputTokens: 88_000,
       reservedOutputTokens: 10_000,
-      providerSafetyMarginTokens: 1_024,
+      providerSafetyMarginTokens: 2_000,
     });
   });
 });

@@ -39,6 +39,8 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 
 `/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
 
+`/context` 是只读诊断命令，显示 system、当前工具 schema、checkpoint summary、live transcript、动态 Runtime 和 provider framing 的同源 token 投影。它与正常模型调用、compaction acceptance 和 `/compact reset` preflight 共用 Runtime 的 projection environment resolver，因此当前 MCP binding、tool search、workflow skill 与 active inline skill instructions 必须计入估算。`/compact reset` 只在移除 checkpoint 后仍低于 hard threshold 时允许执行。
+
 TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 Core 提供的统一 journal mode；Windows 为 DELETE，其他平台为 WAL。长期 stats 连接保持打开期间，RuntimeStore 仍须能够打开、持久化和关闭，不能因两个连接各自设置 journal mode 而在启动时报 `database is locked`。
 
 ## 8.5 MCP 与 Skill 交互

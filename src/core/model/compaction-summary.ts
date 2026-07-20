@@ -155,8 +155,15 @@ function validateFactReference(
     digest?: string;
     resource?: string;
     revision?: string;
-    /** The expected CompactionFactKind — verifies the model didn't reclassify the fact. */
-    expectedKind?: import('./compaction-fact-ledger').CompactionFactKind;
+    canonicalText?: string;
+    operation?: string;
+    outcome?: string;
+    error?: string;
+    consequence?: string;
+    /** Allowed source fact kinds for this summary classification. */
+    expectedKind?:
+      | import('./compaction-fact-ledger').CompactionFactKind
+      | import('./compaction-fact-ledger').CompactionFactKind[];
   },
 ): void {
   const ledgerFact = ctx.ledgerById.get(factId);
@@ -184,11 +191,31 @@ function validateFactReference(
   const detail = immutableCheck.label;
 
   // REVIEW-FIX: Verify the model didn't reclassify the fact (e.g., failure → completed_work).
-  if (immutableCheck.expectedKind && ledgerFact.kind !== immutableCheck.expectedKind) {
+  const expectedKinds = Array.isArray(immutableCheck.expectedKind)
+    ? immutableCheck.expectedKind
+    : immutableCheck.expectedKind
+      ? [immutableCheck.expectedKind]
+      : [];
+  if (expectedKinds.length > 0 && !expectedKinds.includes(ledgerFact.kind)) {
     throw new ContextCompactionValidationError(
       'invalid_evidence',
-      `Summary reclassified fact ${factId} as ${immutableCheck.expectedKind} but ledger has ${ledgerFact.kind}.`,
+      `Summary source fact ${factId} has kind ${ledgerFact.kind}; allowed kinds are ${expectedKinds.join(', ')}.`,
     );
+  }
+
+  for (const [field, actual, expected] of [
+    ['text', immutableCheck.canonicalText, ledgerFact.canonicalText],
+    ['operation', immutableCheck.operation, ledgerFact.operation],
+    ['outcome', immutableCheck.outcome, ledgerFact.outcome],
+    ['error', immutableCheck.error, ledgerFact.error],
+    ['consequence', immutableCheck.consequence, ledgerFact.consequence],
+  ] as const) {
+    if (actual !== expected) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary modified semantic field ${field} for ${detail}.`,
+      );
+    }
   }
 
   // ── Bidirectional immutable checks (P0-2.4) ──
@@ -300,6 +327,9 @@ When a baseSummary is provided, perform a structured merge:
 - Update provenance.digestChain to include the new source.
 
 The deterministic fact ledger is authoritative: preserve every mandatory fact ID.
+When a user_request is semantically a constraint or decision, it may be placed in
+userConstraints or decisions with sourceFactIds containing the original user_request factId.
+Classification never permits paraphrasing: semantic text and evidence must still match the source fact.
 Every user message in the covered range must be referenced by at least one of:
 objective.evidenceMessageIds, userRequests[].evidenceMessageIds,
 userConstraints[].evidenceMessageIds, decisions[].evidenceMessageIds,
@@ -322,6 +352,8 @@ function summaryInput(input: {
     sourceDigest: string;
     coveredUserMessageIds: string[];
     baseCheckpointId?: string;
+    inheritedMandatoryFactIds?: string[];
+    tailMandatoryFactIds?: string[];
   };
   customPreferences?: string;
 }): string {
@@ -333,8 +365,22 @@ function summaryInput(input: {
     compactableHistory: input.messages,
     chunkSummaries: input.chunks,
     requiredProvenance: {
-      ...input.provenance,
+      ...(input.provenance.baseCheckpointId
+        ? {
+            baseCheckpointId: input.provenance.baseCheckpointId,
+            firstTailMessageId: input.provenance.firstMessageId,
+          }
+        : {}),
+      lastMessageId: input.provenance.lastMessageId,
+      sourceDigest: input.provenance.sourceDigest,
+      coveredUserMessageIds: input.provenance.coveredUserMessageIds,
       mandatoryFactIds: input.ledger.mandatoryFactIds,
+      ...(input.provenance.inheritedMandatoryFactIds
+        ? { inheritedMandatoryFactIds: input.provenance.inheritedMandatoryFactIds }
+        : {}),
+      ...(input.provenance.tailMandatoryFactIds
+        ? { tailMandatoryFactIds: input.provenance.tailMandatoryFactIds }
+        : {}),
       policyVersion: '1.0.0',
     },
     ...(input.customPreferences ? { customPreferences: input.customPreferences } : {}),
@@ -354,6 +400,7 @@ function validateGeneratedSummary(
     lastMessageId: string;
     sourceDigest: string;
     coveredUserMessageIds: string[];
+    baseCheckpointId?: string;
     inheritedMandatoryFactIds?: string[];
     tailMandatoryFactIds?: string[];
   },
@@ -371,13 +418,44 @@ function validateGeneratedSummary(
 
   if (
     summary.provenance.lastMessageId !== provenance.lastMessageId ||
-    summary.provenance.sourceDigest !== provenance.sourceDigest
+    summary.provenance.sourceDigest !== provenance.sourceDigest ||
+    summary.provenance.baseCheckpointId !== provenance.baseCheckpointId ||
+    summary.provenance.firstTailMessageId !==
+      (provenance.baseCheckpointId ? provenance.firstMessageId : undefined) ||
+    summary.provenance.policyVersion !== '1.0.0'
   ) {
     throw new ContextCompactionValidationError(
       'invalid_schema',
       'Summary provenance does not match the compacted source.',
     );
   }
+
+  const assertSameSet = (label: string, actual: string[] = [], expected: string[] = []) => {
+    const left = [...new Set(actual)].sort();
+    const right = [...new Set(expected)].sort();
+    if (left.length !== right.length || left.some((value, index) => value !== right[index])) {
+      throw new ContextCompactionValidationError(
+        'invalid_schema',
+        `Summary provenance ${label} does not match the compacted source.`,
+      );
+    }
+  };
+  assertSameSet(
+    'coveredUserMessageIds',
+    summary.provenance.coveredUserMessageIds,
+    provenance.coveredUserMessageIds,
+  );
+  assertSameSet('mandatoryFactIds', summary.provenance.mandatoryFactIds, ledger.mandatoryFactIds);
+  assertSameSet(
+    'inheritedMandatoryFactIds',
+    summary.provenance.inheritedMandatoryFactIds,
+    provenance.inheritedMandatoryFactIds,
+  );
+  assertSameSet(
+    'tailMandatoryFactIds',
+    summary.provenance.tailMandatoryFactIds,
+    provenance.tailMandatoryFactIds,
+  );
 
   // Mandatory fact coverage
   const declared = new Set(summary.provenance.mandatoryFactIds);
@@ -420,33 +498,44 @@ function validateGeneratedSummary(
   validateFactReference(summary.objective.factId, summary.objective.evidenceMessageIds, ctx, {
     label: `objective:${summary.objective.factId}`,
     expectedKind: 'objective',
+    canonicalText: summary.objective.text,
   });
   for (const req of summary.userRequests) {
     validateEvidenceIds(req.evidenceMessageIds, `userRequest:${req.summary.slice(0, 40)}`, ctx);
     validateFactReference(req.factId, req.evidenceMessageIds, ctx, {
       label: `userRequest:${req.factId}`,
       expectedKind: 'user_request',
+      canonicalText: req.summary,
     });
   }
   for (const c of summary.userConstraints) {
     validateEvidenceIds(c.evidenceMessageIds, `constraint:${c.factId}`, ctx);
-    validateFactReference(c.factId, c.evidenceMessageIds, ctx, {
-      label: `constraint:${c.factId}`,
-      expectedKind: 'user_constraint',
-    });
+    for (const sourceFactId of c.sourceFactIds ?? [c.factId]) {
+      validateFactReference(sourceFactId, c.evidenceMessageIds, ctx, {
+        label: `constraint:${c.factId}`,
+        expectedKind: ['user_request', 'user_constraint'],
+        canonicalText: c.text,
+      });
+    }
   }
   for (const d of summary.decisions) {
     validateEvidenceIds(d.evidenceMessageIds, `decision:${d.decision.slice(0, 40)}`, ctx);
-    validateFactReference(d.factId, d.evidenceMessageIds, ctx, {
-      label: `decision:${d.factId}`,
-      expectedKind: 'decision',
-    });
+    for (const sourceFactId of d.sourceFactIds ?? [d.factId]) {
+      validateFactReference(sourceFactId, d.evidenceMessageIds, ctx, {
+        label: `decision:${d.factId}`,
+        expectedKind: ['user_request', 'decision'],
+        canonicalText: d.decision,
+        consequence: d.rationale,
+      });
+    }
   }
   for (const ce of summary.completedEffects) {
     validateEvidenceIds(ce.evidenceMessageIds, `completed:${ce.factId}`, ctx);
     validateFactReference(ce.factId, ce.evidenceMessageIds, ctx, {
       label: `completedEffect:${ce.factId}`,
       expectedKind: 'completed_work',
+      operation: ce.operation,
+      outcome: ce.outcome,
       path: ce.path,
       digest: ce.rawResultDigest,
     });
@@ -466,6 +555,9 @@ function validateGeneratedSummary(
     validateFactReference(f.factId, f.evidenceMessageIds, ctx, {
       label: `failure:${f.factId}`,
       expectedKind: 'failure',
+      operation: f.operation,
+      error: f.error,
+      consequence: f.consequence,
     });
   }
   for (const pw of summary.pendingWork) {
@@ -473,6 +565,7 @@ function validateGeneratedSummary(
     validateFactReference(pw.factId, pw.evidenceMessageIds, ctx, {
       label: `pendingWork:${pw.factId}`,
       expectedKind: 'pending_work',
+      canonicalText: pw.text,
     });
   }
   for (const q of summary.unresolvedQuestions) {
@@ -590,7 +683,7 @@ export function createStructuredContextCompactor(options: {
     state: Readonly<RuntimeState>;
     pending: Readonly<PendingContextCompaction>;
     sourceRevision: number;
-    serializedTools?: import('./context-projection').SerializedToolDescriptor[];
+    projectionEnvironment?: import('./context-projection').ContextProjectionEnvironment;
   }) => {
     const boundary = findSafeCompactionBoundary(input.state, {
       recentTurns: options.recentTurns,
@@ -654,7 +747,9 @@ export function createStructuredContextCompactor(options: {
     const ledger = mergeCompactionLedgers(baseLedger, tailLedger);
 
     const provenance = {
-      firstMessageId: baseCheckpoint?.coveredThroughMessageId ?? boundary.firstMessageId,
+      firstMessageId:
+        (isIncremental ? tailMessages[0]?.messageId : boundary.firstMessageId) ??
+        boundary.firstMessageId,
       lastMessageId: boundary.lastMessageId,
       sourceDigest,
       coveredUserMessageIds: ledger.coveredUserMessageIds,
@@ -719,10 +814,18 @@ export function createStructuredContextCompactor(options: {
         customPreferences,
       });
     }
-    // Use the most recent preflight estimate (set by the last model.context_metrics event)
-    // rather than the request-time estimate, which may be stale if new messages arrived.
-    const preflightEstimate = input.state.context.lastPreflight?.estimate ?? input.pending.estimate;
-    const inputTokensBefore = preflightEstimate.totalInputTokens;
+    // Compute before and after in this effect with the exact same projection inputs.
+    // A prior preflight may have been produced with a different disclosure/skill environment.
+    const projectionEnvironment = {
+      role: 'agent' as const,
+      state: input.state,
+      serializedTools: input.projectionEnvironment?.serializedTools,
+      contextBudget: { recentTurns: options.recentTurns },
+      activeSkillInstructions: input.projectionEnvironment?.activeSkillInstructions,
+      workflowSkills: input.projectionEnvironment?.workflowSkills,
+    };
+    const beforeProjection = buildContextProjection(projectionEnvironment);
+    const inputTokensBefore = beforeProjection.estimate.totalInputTokens;
 
     // ── Candidate projection: build a real checkpoint and recompute the full model context ──
     // This replaces the approximate subtraction formula with the actual projection.
@@ -744,11 +847,8 @@ export function createStructuredContextCompactor(options: {
       policyVersion: summary.provenance.policyVersion,
     };
     const candidateProjection = buildContextProjection({
-      role: 'agent',
-      state: input.state,
-      serializedTools: input.serializedTools,
+      ...projectionEnvironment,
       candidateCheckpoint,
-      contextBudget: { recentTurns: options.recentTurns },
     });
     const inputTokensAfter = candidateProjection.estimate.totalInputTokens;
     // PR 7: Target is based on usable window, not raw inputTokensBefore.

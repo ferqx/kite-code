@@ -78,6 +78,29 @@ describe('manual context compaction service', () => {
     expect(plain).not.toHaveProperty('customInstructions');
   });
 
+  test('hard-blocked sessions request manual_recovery instead of an unreachable manual compaction', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'manual-recovery',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    state.context.hardBlock = {
+      reason: 'hard_limit',
+      sourceDigest: 'source',
+      failure: {
+        compactionId: 'failed',
+        sourceRevision: state.revision,
+        errorKind: 'insufficient_reduction',
+        message: 'blocked',
+        retryable: false,
+        reason: 'auto_hard',
+      },
+      createdAtTurnId: state.turn.turnId,
+    };
+    const event = manualContextCompactionEvent({ state, config });
+    expect(event).toMatchObject({ reason: 'manual_recovery', force: true });
+  });
+
   test('persists the latest full preflight for inspection', () => {
     const state = createInitialRuntimeState({
       threadId: 'manual-metrics',

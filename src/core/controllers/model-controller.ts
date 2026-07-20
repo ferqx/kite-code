@@ -24,6 +24,7 @@ import {
 } from '@/core/model/context-compaction-decision';
 import {
   buildContextProjection,
+  type ContextProjectionEnvironment,
   digestProjectionEnvironment,
   serializeToolDescriptors,
 } from '@/core/model/context-projection';
@@ -100,7 +101,7 @@ export function eventsForInvalidModelToolCalls(
   ]);
 }
 
-function activeInlineSkillInstructions(
+export function activeInlineSkillInstructions(
   state: RuntimeState,
   catalog: SkillCatalogSnapshot | undefined,
 ): string | undefined {
@@ -133,6 +134,79 @@ function activeInlineSkillInstructions(
         : [];
     });
   return sections.length > 0 ? sections.join('\n\n') : undefined;
+}
+
+export function resolveContextProjectionEnvironment(input: {
+  state: RuntimeState;
+  config: AgentConfig;
+  model: SupportedChatModel;
+  shellExecutor?: ShellExecutor;
+  mcpManager?: McpRuntimeProvider;
+  skills?: SkillManifest[];
+  skillOptions?: SkillScanOptions;
+  skillCatalog?: SkillCatalogSnapshot;
+  subagentEventSink?: SubAgentEventSink;
+  signal?: AbortSignal;
+  mcpBindings?: Array<{
+    binding: import('@/protocol/capabilities').CapabilityBinding;
+    descriptor: import('@/protocol/capabilities').CapabilityDescriptor;
+  }>;
+  disclosedDescriptors?: import('@/protocol/capabilities').CapabilityDescriptor[];
+}): ContextProjectionEnvironment {
+  const descriptors = [
+    ...(input.mcpManager?.getCapabilitySnapshot().descriptors ?? []),
+    ...(input.skillCatalog?.capabilities.descriptors ?? []),
+  ];
+  const persistedBindings =
+    input.mcpBindings ??
+    Object.values(input.state.capabilities.bindings).flatMap((binding) => {
+      const descriptor = descriptors.find(
+        (candidate) =>
+          candidate.capabilityId === binding.capabilityId &&
+          candidate.revision === binding.capabilityRevision,
+      );
+      return descriptor ? [{ binding, descriptor }] : [];
+    });
+  const disclosedDescriptors =
+    input.disclosedDescriptors ??
+    descriptors.filter((descriptor) => {
+      const disclosure = input.state.capabilities.disclosures[descriptor.capabilityId];
+      return disclosure?.capabilityRevision === descriptor.revision;
+    });
+  const tools = createAgentTools({
+    workspace: input.state.session.workspace,
+    shellExecutor: input.shellExecutor,
+    mcpManager: input.mcpManager,
+    mcpBindings: persistedBindings,
+    toolSearch:
+      getFeatureFlags(input.config).toolSearchV1 && input.model.supportsToolCalls !== false,
+    skills: input.skills,
+    skillOptions: input.skillOptions,
+    skillCatalog: input.skillCatalog,
+    activeSkillFrames: Object.values(input.state.skills.frames).filter(
+      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    ),
+    config: input.config,
+    subagentEventSink: input.subagentEventSink,
+    subagentSignal: input.signal,
+    signal: input.signal,
+    model: input.model,
+    threadId: input.state.session.threadId,
+    authorization: input.state.authorization,
+    workspaceAccess: input.state.workspaceAccess,
+    phase: getAgentPhase(getActivePlanning(input.state)),
+    interactionMode: getEffectiveInteractionMode(input.state),
+  });
+  return {
+    serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
+    activeSkillInstructions: activeInlineSkillInstructions(input.state, input.skillCatalog),
+    workflowSkills: disclosedDescriptors
+      .filter((descriptor) => descriptor.kind === 'skill')
+      .map((descriptor) => ({
+        capabilityId: descriptor.capabilityId,
+        description: descriptor.description,
+      })),
+  };
 }
 
 function positiveConfigNumber(value: unknown): number | undefined {
@@ -355,14 +429,22 @@ export async function invokeRuntimeModel(params: {
         positiveConfigNumber(params.config.modelKwargs?.maxTokens),
       params.config.compaction?.providerSafetyRatio,
     );
-    const serializedTools = serializeToolDescriptors(tools as unknown as Record<string, unknown>);
-    const activeSkillInstr = activeInlineSkillInstructions(state, params.skillCatalog);
-    const workflowSkillDescriptors = disclosedDescriptors
-      .filter((descriptor) => descriptor.kind === 'skill')
-      .map((descriptor) => ({
-        capabilityId: descriptor.capabilityId,
-        description: descriptor.description,
-      }));
+    const projectionEnvironment = resolveContextProjectionEnvironment({
+      state,
+      config: params.config,
+      model: params.model,
+      shellExecutor: params.shellExecutor,
+      mcpManager: params.mcpManager,
+      skills: params.skills,
+      skillOptions: params.skillOptions,
+      skillCatalog: params.skillCatalog,
+      subagentEventSink: params.subagentEventSink,
+      signal: params.signal,
+      mcpBindings,
+      disclosedDescriptors,
+    });
+    const { serializedTools, activeSkillInstructions: activeSkillInstr } = projectionEnvironment;
+    const workflowSkillDescriptors = projectionEnvironment.workflowSkills;
 
     const projection = buildContextProjection({
       role: 'agent',
@@ -370,7 +452,7 @@ export async function invokeRuntimeModel(params: {
       serializedTools,
       contextBudget: {
         ...(inputBudget.usableInputTokens ? { maxTokens: inputBudget.usableInputTokens } : {}),
-        recentTurns: 3,
+        recentTurns: params.config.compaction?.recentTurns ?? 3,
       },
       activeSkillInstructions: activeSkillInstr,
       skills: undefined,
@@ -382,6 +464,7 @@ export async function invokeRuntimeModel(params: {
       requestMaxOutputTokens:
         positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         positiveConfigNumber(params.config.modelKwargs?.maxTokens),
+      providerSafetyRatio: params.config.compaction?.providerSafetyRatio,
       compactRatio: params.config.compaction?.compactRatio ?? params.config.compaction?.softRatio,
       hardRatio: params.config.compaction?.hardRatio,
       warningRatio: params.config.compaction?.warningRatio,

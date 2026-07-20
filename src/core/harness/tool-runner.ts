@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
@@ -37,6 +38,10 @@ import type {
 import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
 import type { PendingToolRequest } from './tool-requests';
 import type { ToolExecutionResult } from './tool-result';
+
+function resultContentDigest(stdout: string, stderr: string, exitCode: number): string {
+  return createHash('sha256').update(JSON.stringify({ stdout, stderr, exitCode })).digest('hex');
+}
 
 /** runApprovedTool 输入参数 / Input for runApprovedTool */
 export interface RunApprovedToolInput {
@@ -300,9 +305,24 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       // 保护 LLM 上下文：diff 超长时截断
       // Cap for LLM context: truncate overlong diff output
       stdout = parts.join('\n');
+      const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
       if (stdout.length > 2000) {
         stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
       }
+      return withFailureGuidance(request, {
+        ok: result.ok,
+        command: `edit_file ${request.args.path ?? ''}`,
+        exitCode: 0,
+        stdout,
+        stderr: '',
+        path: request.args.path,
+        resultMeta: {
+          path: editPath,
+          truncated: stdout.endsWith('... (truncated)'),
+          workspaceMutationScope: editPath ? [editPath] : [],
+          rawResultDigest,
+        },
+      });
     }
     return withFailureGuidance(request, {
       ok: result.ok,
@@ -360,10 +380,25 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         const header = `${verb} ${result.lines ?? 0} lines to ${request.args.path}`;
         stdout = formatContentOutput(request.args.content ?? '', header);
       }
+      const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
       // 保护 LLM 上下文：超长时截断 / Cap for LLM context
       if (stdout.length > 2000) {
         stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
       }
+      return withFailureGuidance(request, {
+        ok: result.ok,
+        command: `write_file ${request.args.path ?? ''}`,
+        exitCode: 0,
+        stdout,
+        stderr: '',
+        path: request.args.path,
+        resultMeta: {
+          path: filePath,
+          truncated: stdout.endsWith('... (truncated)'),
+          workspaceMutationScope: filePath ? [filePath] : [],
+          rawResultDigest,
+        },
+      });
     }
 
     return withFailureGuidance(request, {
@@ -431,15 +466,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       allowExternal,
     });
     const stdout = truncateToolOutput(result.stdout);
+    const stderr = truncateToolOutput(result.stderr);
     return withFailureGuidance(request, {
       ...result,
       stdout,
-      stderr: truncateToolOutput(result.stderr),
+      stderr,
       command: `search_content ${request.args.pattern ?? ''}`,
       resultMeta: {
         path: searchPath,
         matchCount: result.stdout.split('\n').filter(Boolean).length,
         truncated: stdout.length < result.stdout.length,
+        rawResultDigest: resultContentDigest(result.stdout, result.stderr, result.exitCode),
       },
     });
   }
@@ -455,15 +492,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       allowExternal,
     });
     const stdout = truncateToolOutput(result.stdout);
+    const stderr = truncateToolOutput(result.stderr);
     return withFailureGuidance(request, {
       ...result,
       stdout,
-      stderr: truncateToolOutput(result.stderr),
+      stderr,
       command: `search_files ${request.args.pattern ?? ''}`,
       resultMeta: {
         path: searchPath,
         matchCount: result.stdout.split('\n').filter(Boolean).length,
         truncated: stdout.length < result.stdout.length,
+        rawResultDigest: resultContentDigest(result.stdout, result.stderr, result.exitCode),
       },
     });
   }
@@ -680,12 +719,25 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       // 截断上限对齐 max_chars（含标题/元数据行的开销，+500 余量）
       // truncation limit matches max_chars (with ~500 char overhead for metadata lines)
       const contentLimit = Math.max(8000, (request.args.max_chars ?? 8000) + 500);
+      const projectedStdout = truncateToolOutput(stdout, contentLimit);
       return withFailureGuidance(request, {
         ok: result.ok,
         command: `web_fetch ${request.args.url ?? ''}`,
         exitCode: result.ok ? 0 : -1,
-        stdout: truncateToolOutput(stdout, contentLimit),
+        stdout: projectedStdout,
         stderr: result.error ?? '',
+        resultMeta: {
+          ...(result.truncated
+            ? {}
+            : {
+                rawResultDigest: resultContentDigest(
+                  stdout,
+                  result.error ?? '',
+                  result.ok ? 0 : -1,
+                ),
+              }),
+          truncated: projectedStdout !== stdout || result.truncated,
+        },
       });
     } catch (error) {
       const isAbort = error instanceof Error && error.name === 'AbortError';
@@ -724,6 +776,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     };
     return withFailureGuidance(request, {
       ...result,
+      resultMeta: {
+        rawResultDigest: resultContentDigest(raw.stdout, raw.stderr, raw.exitCode),
+        truncated: result.stdout !== raw.stdout || result.stderr !== raw.stderr,
+      },
       action: {
         intent: request.args.intent,
         objective: request.args.objective,

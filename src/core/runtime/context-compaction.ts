@@ -1,7 +1,12 @@
 import type { StructuredContextSummary } from '@/core/model/compaction-schema';
 import type { ContextPreflight, ContextTokenEstimate } from '@/core/model/context-budget';
 
-export type ContextCompactionReason = 'manual' | 'auto_soft' | 'auto_hard' | 'overflow_recovery';
+export type ContextCompactionReason =
+  | 'manual'
+  | 'manual_recovery'
+  | 'auto_soft'
+  | 'auto_hard'
+  | 'overflow_recovery';
 
 export interface ContextCompactionCheckpoint {
   compactionId: string;

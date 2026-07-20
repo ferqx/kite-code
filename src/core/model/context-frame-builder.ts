@@ -68,6 +68,14 @@ function extractResultMeta(m: Record<string, unknown>): FrameToolResult['resultM
     meta.contentDigest = m.contentDigest;
     populated = true;
   }
+  if (typeof m.rawResultDigest === 'string') {
+    meta.rawResultDigest = m.rawResultDigest;
+    populated = true;
+  }
+  if (typeof m.modelContentDigest === 'string') {
+    meta.modelContentDigest = m.modelContentDigest;
+    populated = true;
+  }
   if (typeof m.resourceRevision === 'string') {
     meta.resourceRevision = m.resourceRevision;
     populated = true;

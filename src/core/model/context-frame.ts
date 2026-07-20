@@ -17,6 +17,8 @@ export interface FrameToolResultMeta {
   matchCount?: number;
   truncated?: boolean;
   contentDigest?: string;
+  rawResultDigest?: string;
+  modelContentDigest?: string;
   resourceRevision?: string;
   workspaceMutationScope?: string[];
   /** Provenance of digest fields — 'legacy_unknown' means pre-V2 data, never fold. */

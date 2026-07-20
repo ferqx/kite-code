@@ -57,6 +57,9 @@ function toolResultMeta(
     ((effect === 'workspace_write' || (effect === 'unknown' && call.sideEffect)) && path
       ? [path]
       : undefined);
+  const fallbackModelDigest = createHash('sha256')
+    .update(event.result.stdout || event.result.stderr)
+    .digest('hex');
   return {
     ...supplied,
     ...(path ? { path } : {}),
@@ -64,11 +67,15 @@ function toolResultMeta(
     ...(event.result.command ? { command: event.result.command } : {}),
     ...(intent ? { intent } : {}),
     ...(workspaceMutationScope ? { workspaceMutationScope } : {}),
-    contentDigest:
-      supplied.contentDigest ??
-      createHash('sha256')
-        .update(event.result.stdout || event.result.stderr)
-        .digest('hex'),
+    contentDigest: supplied.contentDigest ?? supplied.modelContentDigest ?? fallbackModelDigest,
+    modelContentDigest:
+      supplied.modelContentDigest ?? supplied.contentDigest ?? fallbackModelDigest,
+    rawResultDigest:
+      supplied.rawResultDigest ??
+      (supplied.truncated ? undefined : (supplied.contentDigest ?? fallbackModelDigest)),
+    digestScope:
+      supplied.digestScope ??
+      (supplied.truncated ? 'projected' : supplied.contentDigest ? 'raw' : 'legacy_unknown'),
   };
 }
 
@@ -133,12 +140,14 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             { kind: 'completed' as const, checkpoint: event.checkpoint },
           ].slice(-128),
           lastCompactionTurnIndex: state.turn.turnIndex,
-          autoGuard: updateAutoCompactionGuard(state.context.autoGuard, {
-            kind: 'completed',
-            turnIndex: state.turn.turnIndex,
-            reductionRatio,
-            tokensAfter: event.checkpoint.inputTokensAfter,
-          }),
+          autoGuard: ['auto_soft', 'auto_hard'].includes(event.checkpoint.reason)
+            ? updateAutoCompactionGuard(state.context.autoGuard, {
+                kind: 'completed',
+                turnIndex: state.turn.turnIndex,
+                reductionRatio,
+                tokensAfter: event.checkpoint.inputTokensAfter,
+              })
+            : state.context.autoGuard,
         },
       };
     }

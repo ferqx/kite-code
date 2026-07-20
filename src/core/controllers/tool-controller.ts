@@ -71,8 +71,15 @@ function computeToolResultDigest(input: {
   stderr: string;
   exitCode: number;
   status?: string;
-}): { contentDigest: string; digestScope: 'raw' | 'projected' } {
-  const contentDigest = createHash('sha256')
+  rawResultDigest?: string;
+  truncated?: boolean;
+}): {
+  contentDigest: string;
+  rawResultDigest?: string;
+  modelContentDigest: string;
+  digestScope: 'raw' | 'projected';
+} {
+  const modelContentDigest = createHash('sha256')
     .update(
       JSON.stringify({
         stdout: input.stdout,
@@ -82,8 +89,15 @@ function computeToolResultDigest(input: {
       }),
     )
     .digest('hex');
-  const digestScope = 'projected' as const; // Values may already be truncated by tool runner
-  return { contentDigest, digestScope };
+  const rawResultDigest =
+    input.rawResultDigest ?? (input.truncated ? undefined : modelContentDigest);
+  const digestScope = input.truncated ? ('projected' as const) : ('raw' as const);
+  return {
+    contentDigest: modelContentDigest,
+    ...(rawResultDigest ? { rawResultDigest } : {}),
+    modelContentDigest,
+    digestScope,
+  };
 }
 
 function recoveryActionForFailure(
@@ -1900,6 +1914,8 @@ export async function executeRuntimeTools(params: {
                 stderr: result.stderr ?? '',
                 exitCode: result.exitCode ?? 0,
                 status: result.status,
+                rawResultDigest: result.resultMeta?.rawResultDigest,
+                truncated: result.resultMeta?.truncated,
               }),
             },
             status:
@@ -2076,6 +2092,8 @@ export async function executeRuntimeTools(params: {
               stderr: result.stderr ?? '',
               exitCode: result.exitCode ?? 0,
               status: result.status,
+              rawResultDigest: result.resultMeta?.rawResultDigest,
+              truncated: result.resultMeta?.truncated,
             }),
           },
           status:

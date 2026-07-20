@@ -23,9 +23,15 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   // Durable hard block check — replaces the old revision-bounded pattern.
   // Once set, hardBlock persists until explicit recovery (compaction success, /compact reset, or /clear).
   if (state.context.hardBlock) {
+    if (state.context.pendingCompaction?.reason === 'manual_recovery') {
+      return {
+        type: 'compact_context',
+        compactionId: state.context.pendingCompaction.compactionId,
+      };
+    }
     return {
       type: 'recovery_blocked',
-      reason: `Context is hard-blocked: ${state.context.hardBlock.reason}. Use /compact reset or start a new session.`,
+      reason: `Context is hard-blocked: ${state.context.hardBlock.reason}. Use /compact to run recovery compaction, /compact reset when a checkpoint exists, or start a new session.`,
     };
   }
   if (state.legacyUnrecoverableSubagentApproval) {

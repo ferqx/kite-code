@@ -1,11 +1,13 @@
-import { createHash } from 'node:crypto';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import {
   type ContextCompactor,
   executeContextCompaction,
 } from '@/core/controllers/compaction-controller';
-import { invokeRuntimeModel } from '@/core/controllers/model-controller';
+import {
+  invokeRuntimeModel,
+  resolveContextProjectionEnvironment,
+} from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import {
   createAutoReviewModel,
@@ -18,7 +20,6 @@ import {
   createModelContextSummaryGenerator,
   createStructuredContextCompactor,
 } from '@/core/model/compaction-summary';
-import type { SerializedToolDescriptor } from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -52,61 +53,29 @@ export function resolveAutoReviewTimeout(config: AgentConfig): number {
   return getFeatureFlags(config).autoReviewV2 ? (config.autoReview?.timeoutMs ?? 15_000) : 15_000;
 }
 
-/** Extract pure-data tool descriptors from executor dependencies at effect time.
- *  Only serializable fields (name, description, inputSchema) survive — no
- *  functions, closures, or runtime objects enter the compactor. */
-function resolveCompactionSerializedTools(deps: {
-  mcpManager?: McpRuntimeProvider;
-  skillCatalog?: SkillCatalogSnapshot;
-}): SerializedToolDescriptor[] {
-  const descriptors: SerializedToolDescriptor[] = [];
-
-  // MCP tools from capability snapshot
-  const mcpSnapshot = deps.mcpManager?.getCapabilitySnapshot();
-  if (mcpSnapshot) {
-    for (const cap of mcpSnapshot.descriptors) {
-      if (!cap.inputSchema) continue;
-      const schemaDigest = createHash('sha256')
-        .update(
-          JSON.stringify({
-            name: cap.displayName,
-            description: cap.description,
-            inputSchema: cap.inputSchema,
-          }),
-        )
-        .digest('hex');
-      descriptors.push({
-        name: cap.displayName,
-        description: cap.description,
-        inputSchema: cap.inputSchema,
-        schemaDigest,
-      });
-    }
-  }
-
-  // Skill tools from catalog
-  if (deps.skillCatalog) {
-    for (const cap of deps.skillCatalog.capabilities.descriptors) {
-      if (!cap.inputSchema) continue;
-      const schemaDigest = createHash('sha256')
-        .update(
-          JSON.stringify({
-            name: cap.displayName,
-            description: cap.description,
-            inputSchema: cap.inputSchema,
-          }),
-        )
-        .digest('hex');
-      descriptors.push({
-        name: cap.displayName,
-        description: cap.description,
-        inputSchema: cap.inputSchema,
-        schemaDigest,
-      });
-    }
-  }
-
-  return descriptors;
+export function resolveRuntimeContextProjectionEnvironment(
+  dependencies: RuntimeExecutorDependencies,
+  state: import('./state').RuntimeState,
+) {
+  const flags = getFeatureFlags(dependencies.config);
+  const skillCatalog =
+    dependencies.skillOptions && flags.skillWorkflowV1 && flags.skillActivationV2
+      ? refreshSkillCatalog(dependencies.skillOptions, {
+          resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
+        })
+      : dependencies.skillCatalog;
+  return resolveContextProjectionEnvironment({
+    state,
+    config: dependencies.config,
+    model: dependencies.model,
+    shellExecutor: dependencies.shellExecutor,
+    mcpManager: dependencies.mcpManager,
+    skills: dependencies.skills,
+    skillOptions: dependencies.skillOptions,
+    skillCatalog,
+    subagentEventSink: dependencies.subagentEventSink,
+    signal: dependencies.signal,
+  });
 }
 
 /** Build the production executor for Kernel effects. */
@@ -139,15 +108,15 @@ export function createRuntimeEffectExecutor(
     });
   return async (effect, state, emit) => {
     if (effect.type === 'compact_context') {
-      const serializedTools = resolveCompactionSerializedTools({
-        mcpManager: dependencies.mcpManager,
-        skillCatalog: currentSkillCatalog(),
-      });
+      const projectionEnvironment = resolveRuntimeContextProjectionEnvironment(
+        { ...dependencies, subagentEventSink },
+        state,
+      );
       return executeContextCompaction({
         state,
         compactionId: effect.compactionId,
         compact: contextCompactor,
-        serializedTools,
+        projectionEnvironment,
       });
     }
     if (effect.type === 'call_model') {

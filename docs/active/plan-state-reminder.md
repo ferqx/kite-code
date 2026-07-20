@@ -27,7 +27,7 @@ Runtime schema v15 起，持久 transcript 的每条消息都由 reducer 或 sna
 
 M1 V2 只在 provider-neutral canonical frame 层执行，默认完整保留最近 3 个 semantic turns。`read_file`/resource read 仅可在同一资源 revision 已有更新、完整、成功观察保留时折叠较早观察；精确 mutation scope 只失效对应资源，未知或无 scope 的副作用失效整个 workspace observation set。搜索折叠必须保留 query、scope、match count、top matches、truncated 状态与 result digest。重复只读调用即使折叠也必须为每个 tool call 保留独立 Tool Result。失败、未知 effect、写工具、plan/approval/verification、ask_user 和 subagent 结果不得由 M1 折叠。
 
-每次模型调用前必须估算完整请求的 system、tool schema、transcript、checkpoint summary、dynamic runtime 和 framing token 分项。可用输入预算由 resolved context window 减去请求/模型的 max output reservation 与 provider safety margin 得出；preflight 使用 72% soft、88% hard 和 55% target 初始阈值，并产生持久的 `model.context_metrics` telemetry。模型窗口 unknown 时 utilization 必须保持 unknown，不能用虚构默认值触发或绕过压缩。
+每次模型调用前必须估算完整请求的 system、tool schema、transcript、checkpoint summary、dynamic runtime 和 framing token 分项。可用输入预算由 resolved context window 减去请求/模型的 max output reservation 与配置的 provider safety margin 得出；preflight 默认使用 80% warning、88% compact、94% hard 和 62% target 阈值，并产生持久的 `model.context_metrics` telemetry。模型窗口 unknown 时 utilization 必须保持 unknown，不能用虚构默认值触发或绕过压缩。正常模型调用、compaction、`/context` 与 reset preflight 必须共用同一个 projection environment resolver。
 
 M2 checkpoint lifecycle 与 `StructuredContextSummaryV1` 校验已进入 Runtime。`contextCompactionV2` 默认开启基础契约，自动 M2 仍由默认关闭的 `contextCompactionAutoV1` 单独灰度。启用自动 M2 后，模型调用 preflight 在 soft/hard threshold 上返回 durable `context.compaction_requested`，再由 scheduler 产生 `compact_context`；completed/failed 结果只能通过原有 Kernel effect lease 提交。active checkpoint 替代已覆盖历史前缀并与 live tail 组成模型投影，但不删除或改写原 transcript；manual reset 只撤销当前投影。
 

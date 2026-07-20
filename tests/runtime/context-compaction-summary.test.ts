@@ -100,12 +100,15 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
       coveredMessageIds?: string[];
     };
     requiredProvenance: {
-      firstMessageId: string;
+      baseCheckpointId?: string;
+      firstTailMessageId?: string;
       lastMessageId: string;
       sourceDigest: string;
       mandatoryFactIds: string[];
       coveredUserMessageIds?: string[];
       policyVersion?: string;
+      inheritedMandatoryFactIds?: string[];
+      tailMandatoryFactIds?: string[];
     };
   } | null;
   if (!payload?.deterministicFactLedger) {
@@ -152,9 +155,10 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
     }>,
     completedEffects: completedEffects.map((fact) => ({
       factId: fact.factId,
-      operation: fact.text,
+      operation: (fact as Record<string, unknown>).operation as string,
       path: (fact as Record<string, unknown>).path as string | undefined,
-      outcome: fact.text,
+      outcome: (fact as Record<string, unknown>).outcome as string,
+      rawResultDigest: (fact as Record<string, unknown>).digest as string | undefined,
       evidenceMessageIds: coveredMessageIds,
     })),
     observations: observations.map((fact) => ({
@@ -165,9 +169,9 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
     })),
     failures: failures.map((fact) => ({
       factId: fact.factId,
-      operation: fact.text,
-      error: 'error',
-      consequence: 'blocked',
+      operation: (fact as Record<string, unknown>).operation as string,
+      error: (fact as Record<string, unknown>).error as string,
+      consequence: (fact as Record<string, unknown>).consequence as string,
       evidenceMessageIds: coveredMessageIds,
     })),
     pendingWork: pendingWork.map((fact) => ({
@@ -177,10 +181,22 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
     })),
     unresolvedQuestions: [] as Array<{ text: string; evidenceMessageIds: string[] }>,
     provenance: {
+      ...(payload.requiredProvenance.baseCheckpointId
+        ? { baseCheckpointId: payload.requiredProvenance.baseCheckpointId }
+        : {}),
+      ...(payload.requiredProvenance.firstTailMessageId
+        ? { firstTailMessageId: payload.requiredProvenance.firstTailMessageId }
+        : {}),
       lastMessageId: payload.requiredProvenance.lastMessageId,
       sourceDigest: payload.requiredProvenance.sourceDigest,
       coveredUserMessageIds: coveredUserIds,
       mandatoryFactIds: payload.requiredProvenance.mandatoryFactIds,
+      ...(payload.requiredProvenance.inheritedMandatoryFactIds
+        ? { inheritedMandatoryFactIds: payload.requiredProvenance.inheritedMandatoryFactIds }
+        : {}),
+      ...(payload.requiredProvenance.tailMandatoryFactIds
+        ? { tailMandatoryFactIds: payload.requiredProvenance.tailMandatoryFactIds }
+        : {}),
       policyVersion: payload.requiredProvenance.policyVersion ?? '1.0.0',
     },
   };
@@ -908,6 +924,22 @@ describe('structured context summary', () => {
           status: 'normal' as const,
         },
       };
+      state.transcript.messages.push({
+        kind: 'user',
+        messageId: 'chain-tail-2',
+        turnId: 'chain-turn-2',
+        ordinal: state.transcript.messages.length,
+        createdAt: '2026-07-20T00:01:00.000Z',
+        content: 'second checkpoint tail '.repeat(10_000),
+      });
+      state.transcript.messages.push({
+        kind: 'user',
+        messageId: 'chain-tail-2-protected',
+        turnId: 'chain-turn-2-protected',
+        ordinal: state.transcript.messages.length,
+        createdAt: '2026-07-20T00:01:01.000Z',
+        content: 'keep recent',
+      });
       const cp2 = await compactor({
         state,
         pending: { ...pending(state), compactionId: 'cmp2' },
@@ -925,6 +957,22 @@ describe('structured context summary', () => {
           status: 'normal' as const,
         },
       };
+      state.transcript.messages.push({
+        kind: 'user',
+        messageId: 'chain-tail-3',
+        turnId: 'chain-turn-3',
+        ordinal: state.transcript.messages.length,
+        createdAt: '2026-07-20T00:02:00.000Z',
+        content: 'third checkpoint tail '.repeat(10_000),
+      });
+      state.transcript.messages.push({
+        kind: 'user',
+        messageId: 'chain-tail-3-protected',
+        turnId: 'chain-turn-3-protected',
+        ordinal: state.transcript.messages.length,
+        createdAt: '2026-07-20T00:02:01.000Z',
+        content: 'keep recent again',
+      });
       const cp3 = await compactor({
         state,
         pending: { ...pending(state), compactionId: 'cmp3' },
@@ -1335,6 +1383,48 @@ describe('PR 3 — ledger covered-range only', () => {
     expect(ledger.facts.filter((f) => f.kind === 'user_request')).toHaveLength(2);
   });
 
+  test('a user_request source fact can be classified as a user constraint without losing provenance', async () => {
+    const state = historicalState();
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 1,
+      maxSummaryInputTokens: 100_000,
+      targetRatio: 500,
+      generate: async (request) => {
+        const candidate = validSummaryFromRequest(request);
+        if (
+          request.mode === 'chunk' ||
+          !('userRequests' in candidate) ||
+          !candidate.userRequests ||
+          !candidate.userConstraints
+        )
+          return candidate;
+        const source = candidate.userRequests[0];
+        if (!source) return candidate;
+        return {
+          ...candidate,
+          userRequests: candidate.userRequests.slice(1),
+          userConstraints: [
+            ...candidate.userConstraints,
+            {
+              factId: `constraint-summary:${source.factId}`,
+              sourceFactIds: [source.factId],
+              text: source.summary,
+              evidenceMessageIds: source.evidenceMessageIds,
+            },
+          ],
+        };
+      },
+    });
+    const checkpoint = await compactor({
+      state,
+      pending: pending(state),
+      sourceRevision: state.revision,
+    });
+    expect(checkpoint.summary.userConstraints[0]).toMatchObject({
+      sourceFactIds: [expect.stringContaining('user_request:')],
+    });
+  });
+
   test('verification records NOT scanned', () => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/w' });
     state.transcript.messages = [
@@ -1423,7 +1513,7 @@ describe('PR 5 — summary evidence validation', () => {
     ];
     let digest = '';
     const compactor = createStructuredContextCompactor({
-      recentTurns: 0,
+      recentTurns: 1,
       generate: async (request: any) => {
         if (request.mode === 'summary') {
           const payload = JSON.parse(request.input) as any;
@@ -1686,6 +1776,7 @@ describe('review-fix — legacy V2 and objective preservation', () => {
 
   test('base objective survives incremental compaction (P0-4)', async () => {
     const state = createInitialRuntimeState({ threadId: 'p04', userId: 'u', workspace: '/w' });
+    const originalObjective = 'original task';
     // Round 1: establish a checkpoint with "original task" as objective.
     state.transcript.messages = [
       {
@@ -1694,13 +1785,22 @@ describe('review-fix — legacy V2 and objective preservation', () => {
         turnId: 't0',
         ordinal: 0,
         createdAt: '2026-07-20T00:00:00.000Z',
-        content: 'original task',
+        content: originalObjective,
+      },
+      {
+        kind: 'assistant' as const,
+        messageId: 'a0',
+        turnId: 't0',
+        ordinal: 1,
+        createdAt: '2026-07-20T00:00:00.500Z',
+        content: 'historical assistant context '.repeat(10_000),
+        toolCalls: [],
       },
       {
         kind: 'user' as const,
         messageId: 'u1',
         turnId: 't1',
-        ordinal: 1,
+        ordinal: 2,
         createdAt: '2026-07-20T00:00:01.000Z',
         content: 'extra context'.repeat(200),
       },
@@ -1725,7 +1825,7 @@ describe('review-fix — legacy V2 and objective preservation', () => {
       pending: pending(state),
       sourceRevision: state.revision,
     });
-    expect(cp1.summary.objective.text).toBe('original task');
+    expect(cp1.summary.objective.text).toBe(originalObjective);
 
     // Round 2: incremental compaction with new tail messages.
     // The objective should remain "original task", not the tail's first user message.
@@ -1738,15 +1838,24 @@ describe('review-fix — legacy V2 and objective preservation', () => {
         turnId: 't2',
         ordinal: 2,
         createdAt: '2026-07-20T00:00:02.000Z',
-        content: 'different new task',
+        content: 'different new task '.repeat(10_000),
+      },
+      {
+        kind: 'assistant' as const,
+        messageId: 'a2',
+        turnId: 't2',
+        ordinal: 3,
+        createdAt: '2026-07-20T00:00:02.500Z',
+        content: 'acknowledged',
+        toolCalls: [],
       },
       {
         kind: 'user' as const,
         messageId: 'u3',
         turnId: 't3',
-        ordinal: 3,
+        ordinal: 4,
         createdAt: '2026-07-20T00:00:03.000Z',
-        content: 'more tail context'.repeat(200),
+        content: 'more tail context'.repeat(10_000),
       },
     );
     (state as any).context.lastPreflight = {
@@ -1755,14 +1864,15 @@ describe('review-fix — legacy V2 and objective preservation', () => {
       providerSafetyMarginTokens: 1024,
       status: 'normal' as const,
     };
-    const cp2 = await compactor({
-      state,
-      pending: { ...pending(state), compactionId: 'cmp2' },
-      sourceRevision: state.revision + 1,
+    const baseLedger = buildLedgerFromBaseSummary(cp1.summary);
+    const tailLedger = buildDeterministicFactLedger(state, state.transcript.messages.slice(2), {
+      includeObjective: false,
     });
-    // The incremental checkpoint must preserve the original objective, not adopt
-    // "different new task" from the tail.
-    expect(cp2.summary.objective.text).toBe('original task');
+    const merged = mergeCompactionLedgers(baseLedger, tailLedger);
+    expect(merged.objective).toBe(originalObjective);
+    expect(merged.facts.find((fact) => fact.kind === 'objective')?.canonicalText).toBe(
+      originalObjective,
+    );
   });
 
   test('tool call without covered assistant or tool result does NOT enter ledger (P0-5)', () => {
