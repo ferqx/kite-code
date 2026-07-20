@@ -1419,6 +1419,12 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         kind: 'user',
         content: event.content.replace(/^User:\s*/, ''),
       });
+    case 'user.command_invoked':
+      return appendBlock(state, {
+        id: state.nextBlockId,
+        kind: 'user',
+        content: event.command,
+      });
     case 'model.responded': {
       let next = state;
       if (event.reasoningText)
@@ -1491,6 +1497,13 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       };
     }
     case 'context.compaction_failed':
+      // Benign rejections: render as plain text (persisted across restarts).
+      if (event.errorKind === 'unsafe_boundary' && !event.retryable) {
+        return handleEventAction(state, {
+          type: 'text',
+          data: { text: `  ⎿  ${event.message}` },
+        });
+      }
       return handleEventAction(state, {
         type: 'error',
         data: {

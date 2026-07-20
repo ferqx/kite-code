@@ -596,6 +596,42 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     for (const event of events) dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
   }, [dispatchSessionLoad, sessionManager, state.status.phase]);
 
+  // Stable onCompact via refs — bypasses stale closure issues with useSlashCommand
+  // and Ink 7 useInput across session switches.
+  const onCompactRef = React.useRef<(customInstructions?: string) => void>(() => {});
+  onCompactRef.current = (customInstructions?: string) => {
+    const targetThreadId = threadIdRef.current;
+    const label = customInstructions ? `/compact ${customInstructions}` : '/compact';
+    dispatchSessionLoad({ type: 'USER_MESSAGE', text: label });
+    void sessionManager
+      .handleContextCompaction(targetThreadId, customInstructions)
+      .then((result) => {
+        // Runtime events are already durable in targetThreadId. If the user
+        // switched sessions while compaction was running, let the target
+        // session pick them up through normal replay instead of rendering
+        // them in the newly active session.
+        if (threadIdRef.current !== targetThreadId) return;
+        for (const event of result.events) {
+          dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+        }
+        if (
+          !result.events.some((event) =>
+            [
+              'context.compaction_completed',
+              'context.compaction_failed',
+              'context.compaction_reset',
+            ].includes(event.type),
+          )
+        ) {
+          dispatchSessionLoad({
+            type: 'LOCAL_TEXT',
+            text: `  ⎿  ${result.text}`,
+            ...(result.isError ? { isError: true } : {}),
+          });
+        }
+      });
+  };
+
   const handleSlashCommand = useSlashCommand(
     dispatchSessionLoad,
     handleExit,
@@ -621,30 +657,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     state.interactionMode,
     sandboxBackend,
     (customInstructions) => {
-      const label = customInstructions ? `/compact ${customInstructions}` : '/compact';
-      dispatchSessionLoad({ type: 'USER_MESSAGE', text: label });
-      void sessionManager
-        .handleContextCompaction(threadIdRef.current, customInstructions)
-        .then((result) => {
-          for (const event of result.events) {
-            dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
-          }
-          if (
-            !result.events.some((event) =>
-              [
-                'context.compaction_completed',
-                'context.compaction_failed',
-                'context.compaction_reset',
-              ].includes(event.type),
-            )
-          ) {
-            dispatchSessionLoad({
-              type: 'LOCAL_TEXT',
-              text: `  ⎿  ${result.text}`,
-              ...(result.isError ? { isError: true } : {}),
-            });
-          }
-        });
+      onCompactRef.current(customInstructions);
     },
   );
 

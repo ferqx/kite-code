@@ -780,17 +780,21 @@ export class SessionManager {
       processEvent: (event: RuntimeEvent) => void,
       execute?: (event: RuntimeEvent) => Promise<RuntimeEvent[]>,
     ): Promise<ContextCompactionCommandResult> => {
+      processEvent({
+        type: 'user.command_invoked',
+        commandId: crypto.randomUUID(),
+        command: customInstructions ? `/compact ${customInstructions}` : '/compact',
+      });
       const status = inspectManualContextCompaction(state, this.deps.config);
 
-      // Reject early when there are genuinely no settled turns to compact.
-      // Emit a compaction_requested + _failed pair so the rejection is
-      // persisted in the transcript (not just ephemeral LOCAL_TEXT).
+      // Reject early — emit events so the rejection text persists across TUI restart
+      // (replayed through handleRuntimeEventAction during session load).
       if (
         !status.safeBoundary.eligible &&
         status.safeBoundary.reason === 'No settled historical turn is old enough to compact.'
       ) {
         const compactId = crypto.randomUUID();
-        const rejectionEvent: RuntimeEvent = {
+        const reqEvent: RuntimeEvent = {
           type: 'context.compaction_requested',
           compactionId: compactId,
           reason: 'manual',
@@ -800,19 +804,18 @@ export class SessionManager {
           estimate: status.preflight.estimate,
           ...(customInstructions ? { customInstructions } : {}),
         };
-        processEvent(rejectionEvent);
+        processEvent(reqEvent);
+        const failedEvent: RuntimeEvent = {
+          type: 'context.compaction_failed',
+          compactionId: compactId,
+          sourceRevision: state.revision,
+          errorKind: 'unsafe_boundary',
+          message: 'Not enough messages to compact.',
+          retryable: false,
+        };
+        processEvent(failedEvent);
         return {
-          events: [
-            rejectionEvent,
-            {
-              type: 'context.compaction_failed',
-              compactionId: compactId,
-              sourceRevision: state.revision,
-              errorKind: 'unsafe_boundary',
-              message: 'Not enough messages to compact.',
-              retryable: false,
-            },
-          ],
+          events: [reqEvent, failedEvent],
           text: 'Not enough messages to compact.',
         };
       }

@@ -637,6 +637,13 @@ export interface UserMessageAppendedEvent {
   createdAt?: string;
 }
 
+/** 用户执行了不进入模型 transcript 的本地命令 / User invoked a local command. */
+export interface UserCommandInvokedEvent {
+  type: 'user.command_invoked';
+  commandId: string;
+  command: string;
+}
+
 // ── 模型交互事件 / Model interaction events ──
 
 /** 向模型发起请求 / Model request initiated */
@@ -883,6 +890,7 @@ export type RuntimeEvent =
   | TurnCompletedEvent
   | TurnAbortedEvent
   | UserMessageAppendedEvent
+  | UserCommandInvokedEvent
   | ModelRequestedEvent
   | ModelRespondedEvent
   | ModelRetryEvent

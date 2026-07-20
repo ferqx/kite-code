@@ -35,7 +35,7 @@ M2 checkpoint lifecycle 与 `StructuredContextSummaryV1` 校验已进入 Runtime
 
 Soft 自动压缩要求安全边界、最小收益和 turn cooldown；hard 忽略普通 cooldown，但无安全边界时禁止调用 provider。Provider context overflow 不进入普通 transient retry，而是在每个 Runtime turn 最多产生一次 `overflow_recovery`；恢复后仍 overflow 或 hard compaction 失败时 fail closed。阈值、target、minimum reduction、cooldown、recent turns 与 summary token budgets 来自受 Zod 校验的 `compaction` 配置；窗口 unknown 时仍不自动触发。
 
-`contextCompactionManualV1` 默认开启后，`/compact` 命令触发上下文压缩并接受可选的自定义摘要指令（例如 `/compact focus on auth changes`）。命令必须形成 `context.compaction_requested(reason=manual)`；不跳过安全边界、lease、schema、mandatory facts 或 reduction 校验。运行中的命令通过 live Kernel control 写入同一状态机，交互、工具或 verification 未结算时保持 pending，不能另开 Kernel 与当前 runner 竞争。没有足够历史消息时返回 `Not enough messages to compact.`。
+`contextCompactionManualV1` 默认开启后，`/compact` 命令触发上下文压缩并接受可选的自定义摘要指令（例如 `/compact focus on auth changes`）。命令必须先持久化不进入模型 transcript 的 `user.command_invoked`，再形成 `context.compaction_requested(reason=manual)`，因此退出并重新进入 TUI 后仍会显示命令，但不会把 slash command 当成用户目标发送给模型；不跳过安全边界、lease、schema、mandatory facts 或 reduction 校验。运行中的命令通过 live Kernel control 写入同一状态机，交互、工具或 verification 未结算时保持 pending，不能另开 Kernel 与当前 runner 竞争。没有足够历史消息时返回 `Not enough messages to compact.`，对应失败事件也必须持久化以供会话重放。
 
 启用 MCP progressive disclosure 时，稳定前缀只加入安全排序的 Provider/Tool 名称摘要和内置 `tool_search`；完整 Schema 仅为 session-loaded set 在当前 turn 生成。Provider health、connecting/failed 状态和短暂重连不得进入工具缓存键，也不得改变已保留 descriptor 的名称摘要；revision 或 schema digest 变化仍必须使旧缓存与 Binding 失效。Resources 通过独立内置列表/读取工具披露，不混入 Tool 名称摘要。
 

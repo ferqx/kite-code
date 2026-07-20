@@ -2817,6 +2817,24 @@ describe('eventReducer (blocks model)', () => {
       });
     });
 
+    test('replays a persisted local command as a user block', () => {
+      const state = dispatch(fresh(), {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user.command_invoked',
+          commandId: 'command-1',
+          command: '/compact focus on auth changes',
+        },
+      });
+
+      expect(flatBlocks(state)).toContainEqual(
+        expect.objectContaining({
+          kind: 'user',
+          content: '/compact focus on auth changes',
+        }),
+      );
+    });
+
     test('renders approval, user input, and plan review as distinct interaction blocks', () => {
       const approvalEvent: import('../src/core/runtime/events').RuntimeEvent = {
         type: 'approval.requested',

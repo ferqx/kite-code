@@ -1421,6 +1421,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         },
       };
     }
+    case 'user.command_invoked':
+      // Durable audit/display event only. Local commands must not enter the
+      // model transcript or alter the active task.
+      return state;
 
     // ── 模型交互 / Model interaction ──
 

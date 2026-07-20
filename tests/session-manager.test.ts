@@ -130,16 +130,17 @@ describe('SessionManager', () => {
       toolCallId: 'ask',
       request: { question: 'Continue?', options: [], allow_free_text: true },
     };
-    let persisted: unknown;
+    const persisted: unknown[] = [];
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => {
-        persisted = event;
+        persisted.push(event);
       },
     };
 
     const result = await mgr.handleContextCompaction(threadId);
-    expect(persisted).toMatchObject({
+    expect(persisted[0]).toMatchObject({ type: 'user.command_invoked', command: '/compact' });
+    expect(persisted[1]).toMatchObject({
       type: 'context.compaction_requested',
       reason: 'manual',
       force: false,
@@ -163,11 +164,62 @@ describe('SessionManager', () => {
     const runtime = mgr.getRuntime(threadId)!;
     const state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
     // transcript has only 2 messages (default initial state), not enough for safe boundary
-    runtime.runtimeControl = { getState: () => state, processEvent: () => {} };
+    const persisted: unknown[] = [];
+    runtime.runtimeControl = {
+      getState: () => state,
+      processEvent: (event) => persisted.push(event),
+    };
 
     const result = await mgr.handleContextCompaction(threadId);
-    expect(result.events).toEqual([]);
+    expect(persisted.map((event) => (event as { type: string }).type)).toEqual([
+      'user.command_invoked',
+      'context.compaction_requested',
+      'context.compaction_failed',
+    ]);
+    expect(result.events.map((event) => event.type)).toEqual([
+      'context.compaction_requested',
+      'context.compaction_failed',
+    ]);
     expect(result.text).toBe('Not enough messages to compact.');
+  });
+
+  test('persists /compact for replay without adding it to the model transcript', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-compact-replay-'));
+    const checkpointPath = join(root, 'checkpoints.sqlite');
+    const deps = makeDeps();
+    deps.checkpointPath = checkpointPath;
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+
+    try {
+      const mgr = new SessionManager(deps);
+      const threadId = mgr.createSession('/tmp/ws');
+      await mgr.handleContextCompaction(threadId, 'focus on auth changes');
+
+      const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
+      try {
+        const events = store.loadEvents(threadId).map((entry) => entry.event);
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'user.command_invoked',
+            command: '/compact focus on auth changes',
+          }),
+        );
+        const state = store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>(threadId);
+        expect(state?.transcript.messages).toHaveLength(0);
+      } finally {
+        store.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('normal compaction succeeds when session has enough messages', async () => {
@@ -203,16 +255,17 @@ describe('SessionManager', () => {
       toolCallId: 'ask',
       request: { question: 'Continue?', options: [], allow_free_text: true },
     };
-    let persisted: unknown;
+    const persisted: unknown[] = [];
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => {
-        persisted = event;
+        persisted.push(event);
       },
     };
 
     const result = await mgr.handleContextCompaction(threadId);
-    expect(persisted).toMatchObject({
+    expect(persisted[0]).toMatchObject({ type: 'user.command_invoked', command: '/compact' });
+    expect(persisted[1]).toMatchObject({
       type: 'context.compaction_requested',
       reason: 'manual',
       force: false,

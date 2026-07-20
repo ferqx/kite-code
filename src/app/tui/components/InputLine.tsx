@@ -127,6 +127,13 @@ export default function InputLine({
     const id = setTimeout(() => setMounted(true), 0);
     return () => clearTimeout(id);
   }, []);
+  // Prevent stale useInput handler from firing after unmount (session switch via key={activeSessionId})
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [value, setValue] = useState(initialValue);
   // Sync value changes to parent for resize persistence
   useEffect(() => {
@@ -369,6 +376,8 @@ export default function InputLine({
         ctrl?: boolean;
       },
     ) => {
+      // Ignore events after unmount (session switch via key={activeSessionId})
+      if (!mountedRef.current) return;
       // When an overlay is active, yield all keyboard handling to it
       if (overlayActive) return;
 
