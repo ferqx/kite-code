@@ -1,9 +1,11 @@
 # 上下文压缩精化执行计划
 
 创建日期：2026-07-20
-状态：draft
+状态：superseded
 优先级：P0
 依赖：`docs/space/plans/2026-07-19-context-compaction-v2.md`（原始 V2 设计方案）
+
+替代者：`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。本文件保留为历史设计参考，不再作为当前实施依据。
 关联 ADR：`docs/adr/0021-context-compaction-checkpoint.md`（accepted，2026-07-20 修订）
 
 ## 概要

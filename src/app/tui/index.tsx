@@ -908,7 +908,6 @@ if (import.meta.main) {
       exitOnCtrlC: false,
       kittyKeyboard: { mode: 'enabled' },
       incrementalRendering: false,
-      alternateScreen: true,
     },
   );
 
