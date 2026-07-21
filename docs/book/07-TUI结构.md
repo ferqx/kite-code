@@ -31,7 +31,7 @@ MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，
 
 `handleEvent` 和 reducer 把 AgentEvent 转为稳定 block。工具生命周期、审批、计划、Subagent、thought、错误和最终回答分别投影；事件类型不以固定数量作为文档契约。
 
-静态历史区与动态输入/状态区分离，以减少 Ink 重排和终端闪烁。软换行、宽字符、粘贴占位、resize 和同步输出均有专门测试。
+静态历史区与动态输入/状态区分离，以减少 Ink 重排和终端闪烁。交互式入口使用 Ink alternate screen，运行期间不使用终端原生 scrollback，退出后恢复进入 TUI 前的主屏内容。软换行、宽字符、粘贴占位、resize 和同步输出均有专门测试。
 
 ## 7.4 会话前后台
 

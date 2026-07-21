@@ -4,7 +4,7 @@ Kite Code 是一个基于 Bun、TypeScript 和事件化 Runtime Kernel 的多模
 
 ## 当前能力
 
-- React Ink TUI 与 Headless CLI；
+- React Ink alternate-screen TUI（退出后恢复原终端画面）与 Headless CLI；
 - AI SDK 模型边界，支持 DeepSeek、OpenAI、OpenAI-compatible 与 Ollama 配置；
 - Runtime Event/State/Effect、SQLite Event Store、Snapshot、Restore/Fork；
 - Builtin、MCP、Skill Workflow 与 Subagent 统一 Capability Catalog；

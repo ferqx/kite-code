@@ -5,6 +5,7 @@
 最后验证：2026-06-04
 范围：
 
+- `src/app/tui/index.tsx` — Ink 终端渲染选项
 - `src/app/tui/OutputArea.tsx` — 输出区域组件
 - `src/app/tui/App.tsx` — App 布局
 - `src/app/tui/reducers/helpers.ts` — block 操作 helper 函数
@@ -53,7 +54,9 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
 - 活跃消息（streaming/running/interrupt）必须留在 dynamic 树，不得进入 `<Static>`
 - `<Static>` 容器必须用 `<Box height={0} overflow="hidden">` 包裹
 - App 不得在 Footer 下方放置 `flexGrow={1}` 的 spacer（会导致 Footer 被推到终端底部，与 Static 消息之间产生空白）
-- 终端原生 scrollback 是唯一的滚动机制
+- 交互式 TUI 使用 Ink alternate screen；会话内容只保留在当前备用屏幕的
+  `<Static>` 输出中，不提供终端原生 scrollback。退出 TUI 后恢复进入前的主屏内容；
+  非 TTY/非交互式输出由 Ink 忽略该选项
 
 ## 不要做
 
@@ -68,7 +71,7 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
 
 **OutputArea 不能用视口裁剪，但 overlay 面板可以。** 区别在于：
 
-- OutputArea：消息必须保留在终端 scrollback 中，用户可以用原生滚动查看历史
+- OutputArea：消息保留在当前 alternate screen 的 `<Static>` 输出中，不做应用内视口裁剪
 - Overlay 面板（SessionSelector、ModelSelector 等）：固定高度、模态弹出、不需要 scrollback
 
 因此 overlay 面板是 `ink-virtual-list` 的理想使用场景。VirtualList 通过 `items.slice(viewportOffset, viewportOffset + visibleCount)` 只渲染可见行，将 Yoga 树从 O(N) 降为 O(visibleCount)。
