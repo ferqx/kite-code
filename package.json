@@ -7,7 +7,7 @@
   "scripts": {
     "agent": "bun run src/app/cli/index.ts",
     "test": "bun test --path-ignore-patterns='tests/tui-system/**' --path-ignore-patterns='tests/pty-spike/**'",
-    "test:mock": "bun test ./tests/mock-compaction.real.ts",
+    "test:mock": "bun test ./tests/runtime/context-compaction-e2e.test.ts",
     "test:mcp:live": "KITE_RUN_LIVE_MCP_SMOKE=1 bun run tests/e2e/live/mcp/langchain-docs.live.ts",
     "test:e2e": "bun test --parallel=1 --max-concurrency=1 tests/e2e/local/ tests/tui-system/scenarios/",
     "test:tui:integration": "bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/",

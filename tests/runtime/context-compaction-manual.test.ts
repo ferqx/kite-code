@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentConfig } from '../../src/core/config';
 import {
+  currentContextPreflight,
   inspectManualContextCompaction,
   manualContextCompactionEvent,
 } from '../../src/core/model/context-compaction-manual';
@@ -135,5 +136,24 @@ describe('manual context compaction service', () => {
       targetTokens: 4_400,
       status: 'compact_due',
     });
+  });
+
+  test('uses the live adapter capability view when config has no model window', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'adapter-capabilities',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    const configWithoutWindow = { ...config, modelCapabilities: undefined };
+    const preflight = currentContextPreflight(state, configWithoutWindow, {
+      providerName: 'manual',
+      modelName: 'manual',
+      contextWindowTokens: 32_000,
+      maxOutputTokens: 2_000,
+      supportsUsageMetadata: true,
+      supportsPromptCache: false,
+    });
+    expect(preflight.reservedOutputTokens).toBe(2_000);
+    expect(preflight.usableInputTokens).toBe(28_976);
   });
 });

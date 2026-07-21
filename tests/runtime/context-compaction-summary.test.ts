@@ -315,6 +315,32 @@ describe('structured context summary', () => {
     });
   });
 
+  test('rejects model-authored unresolved questions even with covered evidence', async () => {
+    const state = historicalState();
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 1,
+      maxSummaryInputTokens: 100_000,
+      targetRatio: 500,
+      generate: async (request) => {
+        const sourceRequest =
+          request.mode === 'repair'
+            ? {
+                ...request,
+                input: (JSON.parse(request.input) as { source: string }).source,
+              }
+            : request;
+        const candidate = validSummaryFromRequest(sourceRequest);
+        candidate.unresolvedQuestions = [
+          { text: 'Use a different authentication scheme?', evidenceMessageIds: ['message-0'] },
+        ];
+        return candidate;
+      },
+    });
+    await expect(
+      compactor({ state, pending: pending(state, 'auto_soft'), sourceRevision: state.revision }),
+    ).rejects.toMatchObject({ kind: 'invalid_evidence' });
+  });
+
   test('uses chunk summaries only as merge input and validates the final source digest', async () => {
     const state = historicalState();
     const modes: string[] = [];
@@ -1316,7 +1342,7 @@ describe('PR 2 — incremental mandatory fact inheritance', () => {
       observations: [],
       failures: [],
       pendingWork: [],
-      unresolvedQuestions: [],
+      unresolvedQuestions: ['legacy free text must not be restored'],
       recentUserIntent: 'old',
       provenance: {
         firstMessageId: 'm1',
@@ -1327,6 +1353,7 @@ describe('PR 2 — incremental mandatory fact inheritance', () => {
     });
     expect(parsed.version).toBe(2);
     expect(parsed.objective.text).toBe('old');
+    expect(parsed.unresolvedQuestions).toEqual([]);
   });
 });
 

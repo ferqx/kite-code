@@ -122,6 +122,8 @@ describe('eventized context compaction', () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('context.compaction_completed');
+    expect(events[0]).toHaveProperty('durationMs');
+    expect((events[0] as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(0);
 
     const completed = reduceRuntimeState(state, events[0]!);
     expect(completed.context.pendingCompaction).toBeUndefined();
@@ -415,6 +417,7 @@ describe('PR 6 — hard block and thrash breaker', () => {
       retryable: false,
     });
     expect(failed.context.hardBlock).toBeUndefined();
+    expect(failed.context.autoGuard.consecutiveLowGain).toBe(0);
   });
 
   test('overflow_recovery failure creates hard block', () => {
@@ -510,8 +513,12 @@ describe('PR 6 — hard block and thrash breaker', () => {
     expect(current.context.autoGuard.disabledUntilManualAction).toBe(false);
     // Second low gain
     current.context.pendingCompaction = {
-      ...current.context.pendingCompaction!,
       compactionId: 'compact-2',
+      reason: 'auto_soft',
+      requestedAtRevision: current.revision,
+      requestedAtTurnId: current.turn.turnId,
+      force: false,
+      estimate: state.context.lastPreflight?.estimate ?? state.context.pendingCompaction!.estimate,
     };
     const second = reduceRuntimeState(current, {
       type: 'context.compaction_failed',
@@ -523,6 +530,44 @@ describe('PR 6 — hard block and thrash breaker', () => {
     });
     expect(second.context.autoGuard.consecutiveLowGain).toBe(2);
     expect(second.context.autoGuard.disabledUntilManualAction).toBe(true);
+  });
+
+  test('successful manual compaction clears the automatic thrash breaker', () => {
+    const state = requestedState();
+    state.context.pendingCompaction = {
+      ...state.context.pendingCompaction!,
+      reason: 'manual',
+    };
+    state.context.autoGuard = {
+      recentAutomaticCompactions: [{ turnIndex: 1, reductionRatio: 0.05, tokensAfter: 9_000 }],
+      consecutiveLowGain: 2,
+      disabledUntilManualAction: true,
+    };
+    const checkpoint = {
+      compactionId: 'compact-1',
+      version: 1 as const,
+      sourceRevision: state.revision,
+      sourceDigest: 'sha256:source',
+      coveredThroughMessageId: 'message-1',
+      coveredThroughTurnId: state.turn.turnId,
+      summary: summary('sha256:source'),
+      inputTokensBefore: 4_000,
+      inputTokensAfter: 2_000,
+      targetTokens: 2_500,
+      reason: 'manual' as const,
+      createdAt: '2026-07-20T00:00:01.000Z',
+    };
+    const completed = reduceRuntimeState(state, {
+      type: 'context.compaction_completed',
+      compactionId: 'compact-1',
+      sourceRevision: state.revision,
+      checkpoint,
+    });
+    expect(completed.context.autoGuard).toEqual({
+      recentAutomaticCompactions: [],
+      consecutiveLowGain: 0,
+      disabledUntilManualAction: false,
+    });
   });
 
   test('context.hard_blocked event sets durable hard block', () => {

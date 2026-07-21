@@ -10,6 +10,7 @@ import {
   manualContextCompactionEvent,
 } from '@/core/model/context-compaction-manual';
 import { createChatModel } from '@/core/model/factory';
+import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
 import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEffect } from '@/core/runtime/effects';
@@ -790,7 +791,12 @@ export class SessionManager {
         commandId: crypto.randomUUID(),
         command: customInstructions ? `/compact ${customInstructions}` : '/compact',
       });
-      const status = inspectManualContextCompaction(state, this.deps.config);
+      const model = createChatModel(this.deps.config);
+      const capabilities = resolveModelCapabilities({
+        config: this.deps.config,
+        adapter: model.capabilityMetadata,
+      });
+      const status = inspectManualContextCompaction(state, this.deps.config, capabilities);
 
       // Reject early — emit events so the rejection text persists across TUI restart
       // (replayed through handleRuntimeEventAction during session load).
@@ -829,6 +835,7 @@ export class SessionManager {
         state,
         config: this.deps.config,
         customInstructions,
+        capabilities,
       });
       if (!event) {
         return {
@@ -926,17 +933,22 @@ export class SessionManager {
     });
     try {
       const state = kernel.getState();
+      const model = createChatModel(this.deps.config);
       const environment = resolveRuntimeContextProjectionEnvironment(
         {
           config: this.deps.config,
-          model: createChatModel(this.deps.config),
+          model,
           mcpManager: rt.mcpManager ?? undefined,
           skills: rt.skillManifests,
           skillOptions: rt.skillOptions ?? undefined,
         },
         state,
       );
-      const status = buildContextStatusReport(state, this.deps.config, environment);
+      const capabilities = resolveModelCapabilities({
+        config: this.deps.config,
+        adapter: model.capabilityMetadata,
+      });
+      const status = buildContextStatusReport(state, this.deps.config, environment, capabilities);
       return `\n${status.text}`;
     } finally {
       kernel.close();
@@ -965,17 +977,22 @@ export class SessionManager {
       if (!checkpoint) {
         return { events: [], text: 'No active checkpoint to reset.' };
       }
+      const model = createChatModel(this.deps.config);
       const environment = resolveRuntimeContextProjectionEnvironment(
         {
           config: this.deps.config,
-          model: createChatModel(this.deps.config),
+          model,
           mcpManager: rt.mcpManager ?? undefined,
           skills: rt.skillManifests,
           skillOptions: rt.skillOptions ?? undefined,
         },
         state,
       );
-      const preflight = compactResetPreflight(state, this.deps.config, environment);
+      const capabilities = resolveModelCapabilities({
+        config: this.deps.config,
+        adapter: model.capabilityMetadata,
+      });
+      const preflight = compactResetPreflight(state, this.deps.config, environment, capabilities);
       if (!preflight.safe) {
         return { events: [], text: `Cannot reset: ${preflight.reason}`, isError: true };
       }
@@ -1007,17 +1024,22 @@ export class SessionManager {
         return { events: [], text: 'No active checkpoint to reset.' };
       }
 
+      const model = createChatModel(this.deps.config);
       const environment = resolveRuntimeContextProjectionEnvironment(
         {
           config: this.deps.config,
-          model: createChatModel(this.deps.config),
+          model,
           mcpManager: rt.mcpManager ?? undefined,
           skills: rt.skillManifests,
           skillOptions: rt.skillOptions ?? undefined,
         },
         state,
       );
-      const preflight = compactResetPreflight(state, this.deps.config, environment);
+      const capabilities = resolveModelCapabilities({
+        config: this.deps.config,
+        adapter: model.capabilityMetadata,
+      });
+      const preflight = compactResetPreflight(state, this.deps.config, environment, capabilities);
       if (!preflight.safe) {
         return {
           events: [],

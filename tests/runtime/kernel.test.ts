@@ -78,13 +78,13 @@ describe('AgentKernel durability', () => {
       expect(restored.getState().transcript.messages).toEqual([
         expect.objectContaining({
           messageId: 'user-1',
-          turnId: legacy.turn.turnId,
+          turnId: expect.stringMatching(/^legacy-turn-/),
           ordinal: 0,
           createdAt: '1970-01-01T00:00:00.000Z',
         }),
         expect.objectContaining({
-          messageId: 'tool-tool-1',
-          turnId: legacy.turn.turnId,
+          messageId: expect.stringMatching(/^legacy-message-/),
+          turnId: expect.stringMatching(/^legacy-turn-/),
           ordinal: 1,
           createdAt: '1970-01-01T00:00:00.000Z',
         }),

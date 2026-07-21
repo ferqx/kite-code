@@ -147,7 +147,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                 reductionRatio,
                 tokensAfter: event.checkpoint.inputTokensAfter,
               })
-            : state.context.autoGuard,
+            : ['manual', 'manual_recovery'].includes(event.checkpoint.reason)
+              ? updateAutoCompactionGuard(state.context.autoGuard, { kind: 'manual_reset' })
+              : state.context.autoGuard,
         },
       };
     }
@@ -179,8 +181,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         : undefined;
 
       // PR 6: Wire updateAutoCompactionGuard for proper thrash breaker state.
-      const isLowGain = event.errorKind === 'insufficient_reduction';
-      const autoGuard = isLowGain
+      const isAutoLowGain =
+        (reason === 'auto_soft' || reason === 'auto_hard') &&
+        event.errorKind === 'insufficient_reduction';
+      const autoGuard = isAutoLowGain
         ? updateAutoCompactionGuard(state.context.autoGuard, { kind: 'low_gain' })
         : state.context.autoGuard;
 

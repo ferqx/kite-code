@@ -105,6 +105,7 @@
         "src/core/controllers/tool-controller.ts",
         "src/core/controllers/model-controller.ts",
         "src/core/controllers/compaction-controller.ts",
+        "src/core/session-logger/recorder.ts",
         "src/core/harness/tool-runner.ts",
         "src/core/runtime/context-compaction.ts"
       ],

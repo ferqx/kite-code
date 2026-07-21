@@ -127,6 +127,7 @@ src/app/cli/        CLI
 
 ```bash
 bun test
+bun run test:mock
 bun run test:e2e
 bun run test:mcp:live
 bun run typecheck
@@ -134,4 +135,4 @@ bun run check:core-boundary
 bun run check:docs
 ```
 
-默认测试不访问真实模型或公网 MCP。确定性跨进程 E2E 位于 `tests/e2e/local/`；公网 MCP 位于 `tests/e2e/live/mcp/`；真实模型套件保留在 `tests/e2e/live/model/`，当前尚无受维护用例。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke，验证真实 HTTP transport、discovery 和只读 Tool Call；它不等于真实模型验证。仓库当前没有注册真实模型测试脚本，不要把 mock model 测试表述为真实 provider 验证。
+默认测试不访问真实模型或公网 MCP。`test:mock` 运行确定性的 context compaction Runtime E2E；确定性跨进程 E2E 位于 `tests/e2e/local/`。公网 MCP 位于 `tests/e2e/live/mcp/`；真实模型套件保留在 `tests/e2e/live/model/`，当前尚无受维护用例。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke，验证真实 HTTP transport、discovery 和只读 Tool Call；它不等于真实模型验证。仓库当前没有注册真实模型测试脚本，不要把 mock model 测试表述为真实 provider 验证。

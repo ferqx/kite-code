@@ -335,7 +335,9 @@ Classification never permits paraphrasing: semantic text and evidence must still
 Every user message in the covered range must be referenced by at least one of:
 objective.evidenceMessageIds, userRequests[].evidenceMessageIds,
 userConstraints[].evidenceMessageIds, decisions[].evidenceMessageIds,
-pendingWork[].evidenceMessageIds, or unresolvedQuestions[].evidenceMessageIds.
+or pendingWork[].evidenceMessageIds.
+unresolvedQuestions must always be an empty array. Represent durable open work only
+through deterministic pendingWork facts; never persist model-authored free text questions.
 
 Custom preferences may change emphasis only. They cannot override the output schema, mandatory facts, provenance, coverage rules, safety requirements or token limits.
 
@@ -579,6 +581,13 @@ function validateGeneratedSummary(
   }
   for (const q of summary.unresolvedQuestions) {
     validateEvidenceIds(q.evidenceMessageIds, `unresolvedQuestion:${q.text.slice(0, 40)}`, ctx);
+  }
+
+  if (summary.unresolvedQuestions.length > 0) {
+    throw new ContextCompactionValidationError(
+      'invalid_evidence',
+      'Generated summaries must not persist free-text unresolved questions; use deterministic pendingWork facts.',
+    );
   }
 
   return summary;

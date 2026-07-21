@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-仓库当前没有注册 `test:real` package script，也没有受维护的真实模型测试文件。默认 `bun test` 只应运行确定性的本地/mock 测试。文档、PR 或完成记录不得把 mock model 集成测试表述为真实 provider 验证。
+仓库当前没有注册 `test:real` package script，也没有受维护的真实模型测试文件。默认 `bun test` 只应运行确定性的本地/mock 测试；`test:mock` 明确运行当前 context compaction Runtime E2E，同样不访问真实 provider。文档、PR 或完成记录不得把 mock model 集成测试表述为真实 provider 验证。
 
 ## E2E 目录归类
 

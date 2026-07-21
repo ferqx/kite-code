@@ -2,7 +2,7 @@
 // 验证 AgentEvent → TraceRecord 全量映射，包括内容记录
 
 import { describe, expect, test } from 'bun:test';
-import { recordEvent } from '@/core/session-logger/recorder';
+import { recordEvent, recordRuntimeEvent } from '@/core/session-logger/recorder';
 
 const TRACE = 'aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb';
 const PARENT = 'cccccccccccccccc';
@@ -504,5 +504,100 @@ describe('recordEvent — 全量映射', () => {
       expect(ids.has(r.spanId)).toBe(false);
       ids.add(r.spanId);
     }
+  });
+});
+
+describe('recordRuntimeEvent — compaction telemetry', () => {
+  test('persists completed token savings and real effect duration', () => {
+    const r = recordRuntimeEvent(
+      {
+        type: 'context.compaction_completed',
+        compactionId: 'compact-1',
+        sourceRevision: 3,
+        durationMs: 27,
+        checkpoint: {
+          compactionId: 'compact-1',
+          version: 1,
+          sourceRevision: 3,
+          sourceDigest: 'sha256:source',
+          coveredThroughMessageId: 'message-1',
+          coveredThroughTurnId: 'turn-1',
+          summary: {
+            version: 1,
+            objective: 'retain facts',
+            userConstraints: [],
+            decisions: [],
+            completedWork: [],
+            observations: [],
+            failures: [],
+            pendingWork: [],
+            unresolvedQuestions: [],
+            recentUserIntent: 'retain facts',
+            provenance: {
+              firstMessageId: 'message-1',
+              lastMessageId: 'message-1',
+              sourceDigest: 'sha256:source',
+              mandatoryFactIds: [],
+            },
+          },
+          inputTokensBefore: 10_000,
+          inputTokensAfter: 4_000,
+          targetTokens: 5_000,
+          reason: 'auto_soft',
+          createdAt: '2026-07-21T00:00:00.000Z',
+        },
+      },
+      TRACE,
+      PARENT,
+    );
+    expect(r.name).toBe('context.compaction.completed');
+    expect(r.attributes['kite_code.compaction.tokens_saved']).toBe(6_000);
+    expect(r.attributes['kite_code.compaction.duration_ms']).toBe(27);
+  });
+
+  test('persists validation failure and model context pressure', () => {
+    const failed = recordRuntimeEvent(
+      {
+        type: 'context.compaction_failed',
+        compactionId: 'compact-2',
+        sourceRevision: 4,
+        errorKind: 'invalid_evidence',
+        message: 'fabricated question',
+        retryable: false,
+        durationMs: 12,
+      },
+      TRACE,
+      PARENT,
+    );
+    expect(failed.attributes['kite_code.compaction.error_kind']).toBe('invalid_evidence');
+    expect(failed.status.code).toBe('ERROR');
+
+    const pressure = recordRuntimeEvent(
+      {
+        type: 'model.context_metrics',
+        modelName: 'adapter-only',
+        contextWindowTokens: 32_000,
+        usableInputTokens: 28_976,
+        reservedOutputTokens: 2_000,
+        providerSafetyMarginTokens: 1_024,
+        targetTokens: 17_965,
+        totalInputTokens: 27_000,
+        utilization: 0.9318,
+        status: 'compact_due',
+        estimate: {
+          systemTokens: 1_000,
+          toolSchemaTokens: 1_000,
+          transcriptTokens: 24_000,
+          summaryTokens: 0,
+          dynamicRuntimeTokens: 500,
+          framingTokens: 500,
+          totalInputTokens: 27_000,
+        },
+      },
+      TRACE,
+      PARENT,
+    );
+    expect(pressure.name).toBe('model.context_metrics');
+    expect(pressure.attributes['kite_code.context.utilization']).toBe(0.9318);
   });
 });

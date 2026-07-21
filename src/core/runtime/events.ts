@@ -85,6 +85,8 @@ export interface ContextCompactionCompletedEvent {
   compactionId: string;
   sourceRevision: number;
   checkpoint: ContextCompactionCheckpoint;
+  /** End-to-end compaction effect duration. Optional for restored legacy events. */
+  durationMs?: number;
 }
 
 export interface ContextCompactionFailedEvent {
@@ -94,6 +96,8 @@ export interface ContextCompactionFailedEvent {
   errorKind: ContextCompactionErrorKind;
   message: string;
   retryable: boolean;
+  /** End-to-end compaction effect duration. Optional for restored legacy events. */
+  durationMs?: number;
 }
 
 export interface ContextCompactionResetEvent {

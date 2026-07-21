@@ -378,10 +378,7 @@ export function parsePersistedCheckpointSummary(raw: unknown): StructuredContext
         factId: factId('pending_work', pw.text),
         evidenceMessageIds: [] as string[],
       })),
-      unresolvedQuestions: v1.unresolvedQuestions.map((q) => ({
-        text: q,
-        evidenceMessageIds: [],
-      })),
+      unresolvedQuestions: [],
       provenance: {
         lastMessageId: v1.provenance.lastMessageId,
         sourceDigest: v1.provenance.sourceDigest,
@@ -395,13 +392,13 @@ export function parsePersistedCheckpointSummary(raw: unknown): StructuredContext
   if (record.version === 2) {
     // Try current V2 schema first.
     try {
-      return parseStructuredContextSummaryV2(raw);
+      return { ...parseStructuredContextSummaryV2(raw), unresolvedQuestions: [] };
     } catch {
       // Legacy V2 (before objective/userRequest factId was required).
       const legacy = legacyStructuredContextSummaryV2Schema.parse(
         raw,
       ) as LegacyStructuredContextSummaryV2;
-      return migrateLegacyV2Summary(legacy);
+      return { ...migrateLegacyV2Summary(legacy), unresolvedQuestions: [] };
     }
   }
 

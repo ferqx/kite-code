@@ -11,7 +11,7 @@ import {
   type ContextProjection,
   type ContextProjectionEnvironment,
 } from './context-projection';
-import { resolveModelCapabilities } from './model-capabilities';
+import { type ResolvedModelCapabilities, resolveModelCapabilities } from './model-capabilities';
 
 // TODO(PR5): replace with buildContextProjection() when candidateCheckpoint is wired in.
 function fallbackEstimate(state: Readonly<RuntimeState>): ContextTokenEstimate {
@@ -39,11 +39,15 @@ function fallbackEstimate(state: Readonly<RuntimeState>): ContextTokenEstimate {
   };
 }
 
-export function currentContextPreflight(state: Readonly<RuntimeState>, config: AgentConfig) {
+export function currentContextPreflight(
+  state: Readonly<RuntimeState>,
+  config: AgentConfig,
+  capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
+) {
   if (state.context.lastPreflight) return state.context.lastPreflight;
   return preflightModelContext({
     estimate: fallbackEstimate(state),
-    capabilities: resolveModelCapabilities({ config }),
+    capabilities,
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
     providerSafetyRatio: config.compaction?.providerSafetyRatio,
     compactRatio: config.compaction?.compactRatio ?? config.compaction?.softRatio,
@@ -67,10 +71,11 @@ export interface ManualCompactionStatus {
 export function inspectManualContextCompaction(
   state: Readonly<RuntimeState>,
   config: AgentConfig,
+  capabilities?: ResolvedModelCapabilities,
 ): ManualCompactionStatus {
   const checkpoint = state.context.activeCheckpoint;
   return {
-    preflight: currentContextPreflight(state, config),
+    preflight: currentContextPreflight(state, config, capabilities),
     safeBoundary: findSafeCompactionBoundary(state, {
       recentTurns: config.compaction?.recentTurns,
     }),
@@ -100,6 +105,7 @@ export function manualContextCompactionEvent(input: {
   config: AgentConfig;
   /** Optional user-supplied instructions for the summary model. */
   customInstructions?: string;
+  capabilities?: ResolvedModelCapabilities;
 }): RuntimeEvent | null {
   if (input.state.context.pendingCompaction) return null;
   return {
@@ -109,7 +115,7 @@ export function manualContextCompactionEvent(input: {
     requestedAtRevision: input.state.revision,
     requestedAtTurnId: input.state.turn.turnId,
     force: Boolean(input.state.context.hardBlock),
-    estimate: currentContextPreflight(input.state, input.config).estimate,
+    estimate: currentContextPreflight(input.state, input.config, input.capabilities).estimate,
     ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
   };
 }
@@ -122,6 +128,7 @@ export function buildContextStatusReport(
   state: Readonly<RuntimeState>,
   config: AgentConfig,
   environment?: ContextProjectionEnvironment,
+  capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
 ): {
   projection: ContextProjection;
   preflight: ContextPreflight;
@@ -138,7 +145,7 @@ export function buildContextStatusReport(
   });
   const preflight = preflightModelContext({
     estimate: projection.estimate,
-    capabilities: resolveModelCapabilities({ config }),
+    capabilities,
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
     providerSafetyRatio: config.compaction?.providerSafetyRatio,
     compactRatio: config.compaction?.compactRatio ?? config.compaction?.softRatio,
@@ -203,6 +210,7 @@ export function compactResetPreflight(
   state: Readonly<RuntimeState>,
   config: AgentConfig,
   environment?: ContextProjectionEnvironment,
+  capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
 ):
   | { safe: true }
   | { safe: false; reason: string; currentUtilization: number; hardThreshold: number } {
@@ -224,7 +232,7 @@ export function compactResetPreflight(
   });
   const preflight = preflightModelContext({
     estimate: projection.estimate,
-    capabilities: resolveModelCapabilities({ config }),
+    capabilities,
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
     providerSafetyRatio: config.compaction?.providerSafetyRatio,
     compactRatio: config.compaction?.compactRatio ?? config.compaction?.softRatio,
