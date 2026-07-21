@@ -164,6 +164,8 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
     observations: observations.map((fact) => ({
       factId: fact.factId,
       resource: ((fact as Record<string, unknown>).resource as string) ?? fact.text,
+      revision: (fact as Record<string, unknown>).revision as string | undefined,
+      digest: (fact as Record<string, unknown>).digest as string | undefined,
       keyFacts: [fact.text],
       evidenceMessageIds: coveredMessageIds,
     })),
@@ -1499,6 +1501,137 @@ describe('PR 3 — ledger covered-range only', () => {
 // ── PR 5: Strengthened summary validation ──
 
 describe('PR 5 — summary evidence validation', () => {
+  test('rejects a constraint that borrows a completed-work factId for coverage', async () => {
+    const state = historicalState();
+    state.transcript.messages.splice(
+      1,
+      0,
+      {
+        kind: 'assistant',
+        messageId: 'write-model',
+        turnId: 'turn-0',
+        ordinal: 1,
+        createdAt: '2026-07-20T00:00:00.400Z',
+        content: '',
+        toolCalls: [{ id: 'write-call', name: 'write_file', args: { path: 'src/a.ts' } }],
+      },
+      {
+        kind: 'tool',
+        messageId: 'write-result',
+        turnId: 'turn-0',
+        ordinal: 1,
+        createdAt: '2026-07-20T00:00:00.500Z',
+        toolCallId: 'write-call',
+        name: 'write_file',
+        content: 'wrote file',
+        ok: true,
+        resultMeta: { path: 'src/a.ts', rawResultDigest: 'raw-write', digestScope: 'raw' },
+      },
+    );
+    state.tools.calls['write-call'] = {
+      toolCallId: 'write-call',
+      modelMessageId: 'write-model',
+      name: 'write_file',
+      args: { path: 'src/a.ts' },
+      status: 'succeeded',
+      createdAtTurnId: 'turn-0',
+      effectClass: 'workspace_write',
+      sideEffect: true,
+      result: {
+        ok: true,
+        summary: 'wrote file',
+        resultMeta: { path: 'src/a.ts', rawResultDigest: 'raw-write', digestScope: 'raw' },
+      },
+    };
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 1,
+      maxSummaryInputTokens: 100_000,
+      targetRatio: 500,
+      generate: async (request) => {
+        const candidate = validSummaryFromRequest(request);
+        if (!('completedEffects' in candidate) || !candidate.completedEffects?.[0])
+          return candidate;
+        const completed = candidate.completedEffects[0];
+        const source = candidate.userRequests[0];
+        if (!source) return candidate;
+        return {
+          ...candidate,
+          completedEffects: candidate.completedEffects.slice(1),
+          userRequests: candidate.userRequests.slice(1),
+          userConstraints: [
+            ...candidate.userConstraints,
+            {
+              factId: completed.factId,
+              sourceFactIds: [source.factId],
+              text: source.summary,
+              evidenceMessageIds: source.evidenceMessageIds,
+            },
+          ],
+        };
+      },
+    });
+    await expect(
+      compactor({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toThrow(/omitted mandatory facts/);
+  });
+
+  test('rejects fabricated observation keyFacts', async () => {
+    const state = historicalState();
+    state.transcript.messages.splice(
+      1,
+      0,
+      {
+        kind: 'assistant',
+        messageId: 'read-model',
+        turnId: 'turn-0',
+        ordinal: 1,
+        createdAt: '2026-07-20T00:00:00.400Z',
+        content: '',
+        toolCalls: [{ id: 'read-call', name: 'read_file', args: { path: 'src/a.ts' } }],
+      },
+      {
+        kind: 'tool',
+        messageId: 'read-result',
+        turnId: 'turn-0',
+        ordinal: 1,
+        createdAt: '2026-07-20T00:00:00.500Z',
+        toolCallId: 'read-call',
+        name: 'read_file',
+        content: 'file contents',
+        ok: true,
+        resultMeta: { path: 'src/a.ts', rawResultDigest: 'raw-read', digestScope: 'raw' },
+      },
+    );
+    state.tools.calls['read-call'] = {
+      toolCallId: 'read-call',
+      modelMessageId: 'read-model',
+      name: 'read_file',
+      args: { path: 'src/a.ts' },
+      status: 'succeeded',
+      createdAtTurnId: 'turn-0',
+      effectClass: 'read_only',
+      sideEffect: false,
+    };
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 1,
+      maxSummaryInputTokens: 100_000,
+      targetRatio: 500,
+      generate: async (request) => {
+        const candidate = validSummaryFromRequest(request);
+        if (!('observations' in candidate) || !candidate.observations?.[0]) return candidate;
+        return {
+          ...candidate,
+          observations: candidate.observations.map((observation, index) =>
+            index === 0 ? { ...observation, keyFacts: ['all tests passed'] } : observation,
+          ),
+        };
+      },
+    });
+    await expect(
+      compactor({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toThrow(/canonical keyFacts/);
+  });
+
   test('rejects summary with fabricated evidence IDs', async () => {
     const state = createInitialRuntimeState({ threadId: 'pr5a', userId: 'u', workspace: '/w' });
     state.transcript.messages = [

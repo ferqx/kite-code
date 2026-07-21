@@ -425,9 +425,8 @@ export function summaryFactIds(
     return new Set([
       summary.objective.factId,
       ...summary.userRequests.map((r) => r.factId),
-      ...summary.userConstraints.map((c) => c.factId),
-      ...summary.userConstraints.flatMap((c) => c.sourceFactIds ?? []),
-      ...summary.decisions.flatMap((d) => [d.factId, ...(d.sourceFactIds ?? [])]),
+      ...summary.userConstraints.flatMap((c) => c.sourceFactIds ?? [c.factId]),
+      ...summary.decisions.flatMap((d) => d.sourceFactIds ?? [d.factId]),
       ...summary.completedEffects.map((ce) => ce.factId),
       ...summary.observations.map((o) => o.factId),
       ...summary.failures.map((f) => f.factId),

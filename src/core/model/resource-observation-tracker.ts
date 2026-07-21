@@ -87,6 +87,7 @@ export class ResourceObservationTracker {
     if (input.digestScope === 'legacy_unknown') return;
     if (input.truncated) return;
     if (!input.resource) return;
+    if (input.digestScope === 'projected' && !input.rawDigest && !input.revision) return;
 
     const revision = input.revision ?? input.rawDigest ?? input.modelDigest;
     if (!revision) return;

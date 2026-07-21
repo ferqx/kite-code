@@ -76,6 +76,14 @@ function extractResultMeta(m: Record<string, unknown>): FrameToolResult['resultM
     meta.modelContentDigest = m.modelContentDigest;
     populated = true;
   }
+  if (
+    m.digestScope === 'raw' ||
+    m.digestScope === 'projected' ||
+    m.digestScope === 'legacy_unknown'
+  ) {
+    meta.digestScope = m.digestScope;
+    populated = true;
+  }
   if (typeof m.resourceRevision === 'string') {
     meta.resourceRevision = m.resourceRevision;
     populated = true;

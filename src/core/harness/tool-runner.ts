@@ -628,12 +628,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     try {
       const content = await mcpManager.readResource(server, uri, signal);
+      const serialized = serializeMcpResourceForModel(content);
       return withFailureGuidance(request, {
         ok: true,
         command: `read_mcp_resource ${server}`,
         exitCode: 0,
-        stdout: serializeMcpResourceForModel(content),
+        stdout: serialized.modelContent,
         stderr: '',
+        resultMeta: {
+          rawResultDigest: resultContentDigest(content, '', 0),
+          truncated: serialized.truncated,
+        },
       });
     } catch (err) {
       if (isMcpProviderError(err)) throw err;
@@ -674,6 +679,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         arguments: request.args as unknown as Record<string, unknown>,
         signal,
       });
+      const rawContent = JSON.stringify(raw);
       const descriptor = mcpManager.findCapability(mcpInvocation.capabilityId);
       const capabilityResult = normalizeMcpToolResult(raw, descriptor?.outputSchema);
       const output = serializeMcpResultForModel(capabilityResult);
@@ -681,9 +687,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         ok: !raw.isError,
         command: request.name,
         exitCode: 0,
-        stdout: output,
+        stdout: output.modelContent,
         stderr: '',
         capabilityResult,
+        resultMeta: {
+          rawResultDigest: resultContentDigest(rawContent, '', 0),
+          truncated: output.truncated,
+        },
       });
     } catch (err) {
       if (isMcpProviderError(err)) throw err;
@@ -802,33 +812,46 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
 const MAX_MODEL_MCP_RESULT_CHARS = 128 * 1024;
 
-function serializeMcpResourceForModel(content: string): string {
-  if (content.length <= MAX_MODEL_MCP_RESULT_CHARS) return content;
-  return JSON.stringify({
-    status: 'partial',
-    content: content.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+function serializeMcpResourceForModel(content: string): {
+  modelContent: string;
+  truncated: boolean;
+} {
+  if (content.length <= MAX_MODEL_MCP_RESULT_CHARS) {
+    return { modelContent: content, truncated: false };
+  }
+  return {
+    modelContent: JSON.stringify({
+      status: 'partial',
+      content: content.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+      truncated: true,
+      original_characters: content.length,
+      message: 'The MCP resource exceeded the model-facing output limit.',
+    }),
     truncated: true,
-    original_characters: content.length,
-    message: 'The MCP resource exceeded the model-facing output limit.',
-  });
+  };
 }
 
 function serializeMcpResultForModel(result: import('@/core/capabilities/result').CapabilityResult) {
   const serialized = JSON.stringify(result);
-  if (serialized.length <= MAX_MODEL_MCP_RESULT_CHARS) return serialized;
-  return JSON.stringify({
-    status: 'partial',
-    content: [
-      {
-        type: 'text',
-        text: serialized.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
-      },
-    ],
+  if (serialized.length <= MAX_MODEL_MCP_RESULT_CHARS) {
+    return { modelContent: serialized, truncated: false };
+  }
+  return {
+    modelContent: JSON.stringify({
+      status: 'partial',
+      content: [
+        {
+          type: 'text',
+          text: serialized.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+        },
+      ],
+      truncated: true,
+      original_characters: serialized.length,
+      message:
+        'The MCP result exceeded the model-facing output limit. The complete governed result remains available to Runtime execution records when applicable.',
+    }),
     truncated: true,
-    original_characters: serialized.length,
-    message:
-      'The MCP result exceeded the model-facing output limit. The complete governed result remains available to Runtime execution records when applicable.',
-  });
+  };
 }
 
 /** 共享截断函数：保留头部 + 尾部，中间标注省略行数。

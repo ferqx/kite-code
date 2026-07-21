@@ -177,6 +177,7 @@ export function compactContextFrames(
         call.effectClass === 'read_only' &&
         !RESOURCE_READ_TOOLS.has(call.name) &&
         call.resultMeta?.contentDigest &&
+        (call.resultMeta?.resourceRevision || call.resultMeta?.rawResultDigest) &&
         call.resultMeta?.digestScope !== 'legacy_unknown'
       ) {
         const signature = `${call.name}:${stableStringify(call.args)}:${normalizedDigest(

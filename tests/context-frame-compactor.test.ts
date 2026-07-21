@@ -224,7 +224,7 @@ describe('M1 V2 canonical frame compaction', () => {
         name: 'dynamic_read',
         args: { key: 'a' },
         content: 'same result',
-        resultMeta: { contentDigest: 'same' },
+        resultMeta: { contentDigest: 'same', rawResultDigest: 'same', digestScope: 'raw' },
       }),
       ...block({
         id: 'dynamic-2',
@@ -232,7 +232,7 @@ describe('M1 V2 canonical frame compaction', () => {
         name: 'dynamic_read',
         args: { key: 'a' },
         content: 'same result',
-        resultMeta: { contentDigest: 'same' },
+        resultMeta: { contentDigest: 'same', rawResultDigest: 'same', digestScope: 'raw' },
       }),
       ...block({
         id: 'dynamic-3',
@@ -240,7 +240,7 @@ describe('M1 V2 canonical frame compaction', () => {
         name: 'dynamic_read',
         args: { key: 'a' },
         content: 'same result',
-        resultMeta: { contentDigest: 'same' },
+        resultMeta: { contentDigest: 'same', rawResultDigest: 'same', digestScope: 'raw' },
       }),
     ];
     const frames = compact(messages);

@@ -25,9 +25,11 @@ import {
   digestCompactionSource,
   findSafeCompactionBoundary,
 } from './compaction-v2';
+import { preflightModelContext } from './context-budget';
 import { buildContextProjection } from './context-projection';
 import type { SupportedChatModel } from './factory';
 import { invokeBoundModel } from './invoke';
+import type { ResolvedModelCapabilities } from './model-capabilities';
 
 // ── PR 2: Fixed-length source digest chain ──
 
@@ -549,6 +551,13 @@ function validateGeneratedSummary(
       revision: obs.revision,
       digest: obs.digest,
     });
+    const ledgerFact = ctx.ledgerById.get(obs.factId)!;
+    if (obs.keyFacts.length !== 1 || obs.keyFacts[0] !== ledgerFact.text) {
+      throw new ContextCompactionValidationError(
+        'invalid_evidence',
+        `Summary modified canonical keyFacts for observation:${obs.factId}.`,
+      );
+    }
   }
   for (const f of summary.failures) {
     validateEvidenceIds(f.evidenceMessageIds, `failure:${f.factId}`, ctx);
@@ -678,6 +687,9 @@ export function createStructuredContextCompactor(options: {
   maxSummaryTokens?: number;
   maxSummaryInputTokens?: number;
   targetRatio?: number;
+  modelCapabilities?: ResolvedModelCapabilities;
+  requestMaxOutputTokens?: number;
+  providerSafetyRatio?: number;
 }) {
   return async (input: {
     state: Readonly<RuntimeState>;
@@ -853,9 +865,18 @@ export function createStructuredContextCompactor(options: {
     const inputTokensAfter = candidateProjection.estimate.totalInputTokens;
     // PR 7: Target is based on usable window, not raw inputTokensBefore.
     // This accounts for output reservation and provider safety margin.
-    const preflight = input.state.context.lastPreflight;
-    const usableInput = preflight?.usableInputTokens ?? inputTokensBefore;
-    const targetTokens = Math.floor(usableInput * (options.targetRatio ?? 0.62));
+    const currentPreflight = options.modelCapabilities
+      ? preflightModelContext({
+          estimate: beforeProjection.estimate,
+          capabilities: options.modelCapabilities,
+          requestMaxOutputTokens: options.requestMaxOutputTokens,
+          providerSafetyRatio: options.providerSafetyRatio,
+          targetRatio: options.targetRatio,
+        })
+      : undefined;
+    const targetTokens =
+      currentPreflight?.targetTokens ??
+      Math.floor(inputTokensBefore * (options.targetRatio ?? 0.62));
 
     // Automatic: must reduce below target.
     // Manual: any positive reduction is sufficient.

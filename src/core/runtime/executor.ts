@@ -21,6 +21,7 @@ import {
   createStructuredContextCompactor,
 } from '@/core/model/compaction-summary';
 import type { SupportedChatModel } from '@/core/model/factory';
+import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import {
@@ -105,6 +106,17 @@ export function createRuntimeEffectExecutor(
       maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
       maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
       targetRatio: dependencies.config.compaction?.targetRatio,
+      modelCapabilities: resolveModelCapabilities({
+        config: dependencies.config,
+        adapter: dependencies.model.capabilityMetadata,
+      }),
+      requestMaxOutputTokens:
+        typeof dependencies.config.modelKwargs?.maxOutputTokens === 'number'
+          ? dependencies.config.modelKwargs.maxOutputTokens
+          : typeof dependencies.config.modelKwargs?.maxTokens === 'number'
+            ? dependencies.config.modelKwargs.maxTokens
+            : undefined,
+      providerSafetyRatio: dependencies.config.compaction?.providerSafetyRatio,
     });
   return async (effect, state, emit) => {
     if (effect.type === 'compact_context') {
