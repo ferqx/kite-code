@@ -65,7 +65,7 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 
 显式模型条目优先于内置模型目录和兼容 `modelKwargs`。未知模型不会获得假定上下文窗口；此时 Runtime 仍可调用模型，但上下文 utilization 显示为 unknown，并对 Capability disclosure 使用保守预算。
 
-自动 M2 由 `features.contextCompactionAutoV1` 单独开启，默认关闭。`compaction` 可配置 `warningRatio`（默认 0.80）、`softRatio`（compact 阈值，默认 0.88）、`hardRatio`（默认 0.94）、`targetRatio`（默认 0.62）、`minimumReductionRatio`、`cooldownTurns`、`recentTurns`、`maxSummaryTokens`、`maxSummaryInputTokens`、`providerSafetyRatio`、`maxAutoCompactionsPerWindow`、`autoCompactionWindowTurns`、`maxConsecutiveLowGain`。跨字段关系由 `superRefine` 强制校验（`warningRatio < softRatio < hardRatio` 且 `targetRatio < softRatio`）。当前 summary 请求复用主模型（`tools: {}`，temperature 0），自定义指令作为数据字段传入。
+自动 M2 需要默认关闭的 `features.contextCompactionAutoV1` 与 `compaction.autoMode` 共同开启。`autoMode` 只允许 `off | shadow | live`；未配置时为 `off`。`shadow` 只计算 trigger eligibility 术语（触发资格），不调用摘要模型、不写 checkpoint 术语（检查点）；`live` 命中 `triggerRatio` 或 `triggerTokens` 后产生 `reason=auto`。`compaction` 还可配置 `warningRatio`、`compactRatio`、兼容字段 `softRatio`、`hardRatio`、`targetRatio`、`minimumReductionRatio`、`cooldownTurns`、`recentTurns`、`maxSummaryTokens`、`maxSummaryInputTokens`、`providerSafetyRatio`、`maxAutoCompactionsPerWindow`、`autoCompactionWindowTurns`、`maxConsecutiveLowGain`。其中 pressure/target ratio 术语（压力/目标比例）只作诊断或触发启发式，不构成 Provider admission 术语（模型供应商接纳）门禁。当前 summary request 术语（摘要请求）复用主模型（`tools: {}`，temperature 0），自定义指令作为数据字段传入。
 
 ## 9.4 MCP 配置
 
@@ -81,4 +81,4 @@ Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时�
 
 `toolSearchV1`（原 `capabilitySearchV1`）控制 MCP 工具渐进披露：≤20 工具时直接 binding，>20 工具时通过 `tool_search` 搜索发现。
 
-上下文压缩使用三个独立 flag：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制五级 pressure 自动压缩与 durable hardBlock + thrash breaker，默认关闭；`contextCompactionManualV1` 控制 `/compact` 命令，默认开启。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt）。`/context` 显示分项 token 占用和压缩状态。`/compact reset` 在预检通过后清除 active checkpoint 和 hardBlock。
+上下文压缩使用三个独立 flag 术语（功能开关）：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动压缩灰度且默认关闭，不会把 Provider 术语（模型供应商）错误转换为自动压缩；`contextCompactionManualV1` 控制 `/compact` 命令且默认开启。压缩原因只允许 `manual | auto`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt 术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint 术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性硬阻断）。

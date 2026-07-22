@@ -38,6 +38,7 @@ import type {
   ContextCompactionCheckpoint,
   ContextCompactionErrorKind,
   ContextCompactionReason,
+  ContextHardBlockReason,
 } from './context-compaction';
 import type { ClassifiedFailure } from './failures';
 import type { SkillActivation } from './state';
@@ -68,6 +69,7 @@ export interface ContextCompactionRequestedEvent {
   reason: ContextCompactionReason;
   requestedAtRevision: number;
   requestedAtTurnId: string;
+  /** Reserved compatibility field; all current requests use false. */
   force: boolean;
   estimate: ContextTokenEstimate;
   /** Optional user-supplied instructions for the summary model. */
@@ -106,11 +108,10 @@ export interface ContextCompactionResetEvent {
   reason: 'manual';
 }
 
-/** PR 6: Durable hard-block event for repeated overflow or hard-limit failures.
- *  Once set, the scheduler must fail closed until explicit recovery. */
+/** Durable hard-block event reserved for proven Runtime correctness failures. */
 export interface ContextHardBlockedEvent {
   type: 'context.hard_blocked';
-  reason: 'overflow_recovery_failed' | 'hard_limit';
+  reason: ContextHardBlockReason;
   sourceDigest: string;
   message: string;
   createdAtTurnId: string;

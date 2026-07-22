@@ -5,10 +5,12 @@
  * across the session lifetime; caller is responsible for flushing/exporting.
  */
 
+import type { ContextCompactionReason } from '@/core/runtime/context-compaction';
+
 export interface CompactionMetricSample {
   /** compactionId for correlation */
   compactionId: string;
-  reason: string;
+  reason: ContextCompactionReason;
   durationMs: number;
   tokensBefore: number;
   tokensAfter: number;
@@ -21,7 +23,6 @@ export interface CompactionMetricsSnapshot {
   requested: number;
   completed: number;
   failed: number;
-  overflowRecoveries: number;
   resets: number;
   m1FramesFolded: number;
   hardBlocks: number;
@@ -40,7 +41,6 @@ class CompactionMetrics {
   private _requested = 0;
   private _completed = 0;
   private _failed = 0;
-  private _overflowRecoveries = 0;
   private _resets = 0;
   private _m1FramesFolded = 0;
   private _hardBlocks = 0;
@@ -56,7 +56,7 @@ class CompactionMetrics {
   /** Record a completed compaction with timing and token stats. */
   recordCompleted(input: {
     compactionId: string;
-    reason: string;
+    reason: ContextCompactionReason;
     durationMs: number;
     tokensBefore: number;
     tokensAfter: number;
@@ -82,11 +82,6 @@ class CompactionMetrics {
   /** Increment the failed counter. */
   recordFailed(): void {
     this._failed++;
-  }
-
-  /** Increment the overflow recovery counter. */
-  recordOverflowRecovery(): void {
-    this._overflowRecoveries++;
   }
 
   /** Increment the reset counter. */
@@ -121,7 +116,6 @@ class CompactionMetrics {
       requested: this._requested,
       completed: this._completed,
       failed: this._failed,
-      overflowRecoveries: this._overflowRecoveries,
       resets: this._resets,
       m1FramesFolded: this._m1FramesFolded,
       hardBlocks: this._hardBlocks,
@@ -141,7 +135,6 @@ class CompactionMetrics {
     this._requested = 0;
     this._completed = 0;
     this._failed = 0;
-    this._overflowRecoveries = 0;
     this._resets = 0;
     this._m1FramesFolded = 0;
     this._samples = [];

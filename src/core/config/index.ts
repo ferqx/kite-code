@@ -130,6 +130,9 @@ export const configSchema = z.object({
     .optional(),
   compaction: z
     .object({
+      autoMode: z.enum(['off', 'shadow', 'live']).optional(),
+      triggerRatio: z.number().positive().max(1).optional(),
+      triggerTokens: z.number().int().positive().optional(),
       maxSummaryTokens: z.number().int().positive().optional(),
       maxSummaryInputTokens: z.number().int().positive().optional(),
       /** @deprecated Use compactRatio instead. */

@@ -7,7 +7,8 @@ import {
   digestProjectionEnvironment,
   serializeToolDescriptors,
 } from '../../src/core/model/context-projection';
-import type { ContextCompactionRequestedEvent } from '../../src/core/runtime/events';
+import { normalizeContextRuntimeState } from '../../src/core/runtime/context-compaction';
+import type { ContextCompactionRequestedEvent, RuntimeEvent } from '../../src/core/runtime/events';
 import { AgentKernel } from '../../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
@@ -64,7 +65,7 @@ function requestedState() {
   return reduceRuntimeState(initial, {
     type: 'context.compaction_requested',
     compactionId: 'compact-1',
-    reason: 'auto_soft',
+    reason: 'auto',
     requestedAtRevision: initial.revision,
     requestedAtTurnId: initial.turn.turnId,
     force: false,
@@ -77,7 +78,7 @@ describe('eventized context compaction', () => {
     const state = requestedState();
     expect(state.context.pendingCompaction).toMatchObject({
       compactionId: 'compact-1',
-      reason: 'auto_soft',
+      reason: 'auto',
     });
     expect(decideNextEffect(state)).toEqual({
       type: 'compact_context',
@@ -219,7 +220,7 @@ describe('PR 1 — durable event JSON safety', () => {
     const event: ContextCompactionRequestedEvent = {
       type: 'context.compaction_requested',
       compactionId: 'compact-1',
-      reason: 'auto_soft',
+      reason: 'auto',
       requestedAtRevision: 5,
       requestedAtTurnId: 'turn-1',
       force: false,
@@ -239,9 +240,44 @@ describe('PR 1 — durable event JSON safety', () => {
     const parsed = JSON.parse(JSON.stringify(event)) as ContextCompactionRequestedEvent;
     expect(parsed.type).toBe('context.compaction_requested');
     expect(parsed.compactionId).toBe('compact-1');
+    expect(parsed.reason).toBe('auto');
     expect(parsed.projectionEnvironmentDigest).toBe('sha256:abc123');
     // tools must not exist on the event
     expect('tools' in parsed).toBe(false);
+  });
+
+  test('Runtime correctness hard-block reason survives JSON roundtrip', () => {
+    const event: RuntimeEvent = {
+      type: 'context.hard_blocked',
+      reason: 'unrecoverable_checkpoint',
+      sourceDigest: 'sha256:checkpoint',
+      message: 'checkpoint cannot be recovered',
+      createdAtTurnId: 'turn-1',
+    };
+    const parsed = JSON.parse(JSON.stringify(event)) as RuntimeEvent;
+    expect(parsed).toEqual(event);
+  });
+
+  test('restored development state drops reasons and blocks outside the current schema', () => {
+    const state = requestedState();
+    const legacyContext = {
+      ...state.context,
+      pendingCompaction: {
+        ...state.context.pendingCompaction!,
+        reason: 'legacy-capacity-reason',
+        force: true,
+      },
+      hardBlock: {
+        reason: 'hard_limit',
+        sourceDigest: 'legacy',
+        message: 'capacity estimate',
+        createdAtTurnId: state.turn.turnId,
+      },
+    } as unknown as typeof state.context;
+
+    const normalized = normalizeContextRuntimeState(legacyContext);
+    expect(normalized.pendingCompaction).toBeUndefined();
+    expect(normalized.hardBlock).toBeUndefined();
   });
 
   test('PendingContextCompaction has no tools field', () => {
@@ -362,7 +398,7 @@ describe('PR 1 — durable event JSON safety', () => {
 // ── PR 6: Hard block + thrash state machine ──
 
 describe('PR 6 — hard block and thrash breaker', () => {
-  test('auto_soft low gain does NOT create hard block', () => {
+  test('auto low gain does NOT create hard block', () => {
     const state = requestedState();
     const failed = reduceRuntimeState(state, {
       type: 'context.compaction_failed',
@@ -377,26 +413,30 @@ describe('PR 6 — hard block and thrash breaker', () => {
     expect(failed.context.autoGuard.disabledUntilManualAction).toBe(false); // 1 < 2
   });
 
-  test('auto_hard low gain DOES create hard block', () => {
+  test('repeated auto low gain still does not create a hard block', () => {
     const state = requestedState();
-    // Change the pending reason to auto_hard
-    const hardState = {
-      ...state,
-      context: {
-        ...state.context,
-        pendingCompaction: { ...state.context.pendingCompaction!, reason: 'auto_hard' as const },
-      },
-    };
-    const failed = reduceRuntimeState(hardState, {
+    const first = reduceRuntimeState(state, {
       type: 'context.compaction_failed',
       compactionId: 'compact-1',
-      sourceRevision: hardState.revision,
+      sourceRevision: state.revision,
       errorKind: 'insufficient_reduction',
       message: 'low gain',
       retryable: false,
     });
-    expect(failed.context.hardBlock).toBeDefined();
-    expect(failed.context.hardBlock!.reason).toBe('hard_limit');
+    first.context.pendingCompaction = {
+      ...state.context.pendingCompaction!,
+      compactionId: 'compact-2',
+    };
+    const second = reduceRuntimeState(first, {
+      type: 'context.compaction_failed',
+      compactionId: 'compact-2',
+      sourceRevision: first.revision,
+      errorKind: 'insufficient_reduction',
+      message: 'low gain again',
+      retryable: false,
+    });
+    expect(second.context.hardBlock).toBeUndefined();
+    expect(second.context.autoGuard.disabledUntilManualAction).toBe(true);
   });
 
   test('manual failure does NOT create hard block', () => {
@@ -420,45 +460,13 @@ describe('PR 6 — hard block and thrash breaker', () => {
     expect(failed.context.autoGuard.consecutiveLowGain).toBe(0);
   });
 
-  test('overflow_recovery failure creates hard block', () => {
-    const state = requestedState();
-    const overflowState = {
-      ...state,
-      context: {
-        ...state.context,
-        pendingCompaction: {
-          ...state.context.pendingCompaction!,
-          reason: 'overflow_recovery' as const,
-        },
-      },
-    };
-    const failed = reduceRuntimeState(overflowState, {
-      type: 'context.compaction_failed',
-      compactionId: 'compact-1',
-      sourceRevision: overflowState.revision,
-      errorKind: 'invalid_schema',
-      message: 'bad',
-      retryable: false,
-    });
-    expect(failed.context.hardBlock!.reason).toBe('overflow_recovery_failed');
-  });
-
   test('hard block persists across unrelated events', () => {
-    const state = requestedState();
-    const hardState = {
-      ...state,
-      context: {
-        ...state.context,
-        pendingCompaction: { ...state.context.pendingCompaction!, reason: 'auto_hard' as const },
-      },
-    };
-    let current = reduceRuntimeState(hardState, {
-      type: 'context.compaction_failed',
-      compactionId: 'compact-1',
-      sourceRevision: hardState.revision,
-      errorKind: 'insufficient_reduction',
-      message: 'blocked',
-      retryable: false,
+    let current = reduceRuntimeState(requestedState(), {
+      type: 'context.hard_blocked',
+      reason: 'runtime_invariant_violation',
+      sourceDigest: 'source',
+      message: 'invariant failed',
+      createdAtTurnId: 'turn-1',
     });
     expect(current.context.hardBlock).toBeDefined();
     // Unrelated event should not clear the block
@@ -470,31 +478,21 @@ describe('PR 6 — hard block and thrash breaker', () => {
     expect(current.context.hardBlock).toBeDefined();
   });
 
-  test('hard block schedules only an explicit manual recovery compaction', () => {
+  test('correctness hard block rejects both manual and auto compaction', () => {
     const state = requestedState();
     state.context.hardBlock = {
-      reason: 'hard_limit',
+      reason: 'unsafe_context_projection',
       sourceDigest: 'source',
-      failure: {
-        compactionId: 'failed',
-        sourceRevision: state.revision,
-        errorKind: 'insufficient_reduction',
-        message: 'blocked',
-        retryable: false,
-        reason: 'auto_hard',
-      },
+      message: 'projection is unsafe',
       createdAtTurnId: state.turn.turnId,
     };
     state.context.pendingCompaction = {
       ...state.context.pendingCompaction!,
       compactionId: 'recover',
-      reason: 'manual_recovery',
+      reason: 'manual',
     };
-    expect(decideNextEffect(state)).toEqual({
-      type: 'compact_context',
-      compactionId: 'recover',
-    });
-    state.context.pendingCompaction.reason = 'manual';
+    expect(decideNextEffect(state).type).toBe('recovery_blocked');
+    state.context.pendingCompaction.reason = 'auto';
     expect(decideNextEffect(state).type).toBe('recovery_blocked');
   });
 
@@ -514,7 +512,7 @@ describe('PR 6 — hard block and thrash breaker', () => {
     // Second low gain
     current.context.pendingCompaction = {
       compactionId: 'compact-2',
-      reason: 'auto_soft',
+      reason: 'auto',
       requestedAtRevision: current.revision,
       requestedAtTurnId: current.turn.turnId,
       force: false,
@@ -574,12 +572,12 @@ describe('PR 6 — hard block and thrash breaker', () => {
     const state = requestedState();
     const result = reduceRuntimeState(state, {
       type: 'context.hard_blocked',
-      reason: 'overflow_recovery_failed',
+      reason: 'corrupted_event_tail',
       sourceDigest: 'abc',
-      message: 'overflow persisted',
+      message: 'event tail is corrupted',
       createdAtTurnId: state.turn.turnId,
     });
-    expect(result.context.hardBlock?.reason).toBe('overflow_recovery_failed');
+    expect(result.context.hardBlock?.reason).toBe('corrupted_event_tail');
     expect(result.context.hardBlock?.sourceDigest).toBe('abc');
   });
 });

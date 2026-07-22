@@ -122,6 +122,9 @@ describe('loadAgentConfig', () => {
             }
           },
           "compaction": {
+            "autoMode": "shadow",
+            "triggerRatio": 0.68,
+            "triggerTokens": 12000,
             "maxSummaryTokens": 5000,
             "maxSummaryInputTokens": 24000,
             "warningRatio": 0.65,
@@ -135,6 +138,9 @@ describe('loadAgentConfig', () => {
         }`,
       );
       expect(loadAgentConfig({ configPath }).compaction).toEqual({
+        autoMode: 'shadow',
+        triggerRatio: 0.68,
+        triggerTokens: 12000,
         maxSummaryTokens: 5000,
         maxSummaryInputTokens: 24000,
         warningRatio: 0.65,
@@ -145,6 +151,20 @@ describe('loadAgentConfig', () => {
         cooldownTurns: 4,
         recentTurns: 3,
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects unknown automatic compaction rollout modes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'bad-auto-mode.jsonc');
+      writeFileSync(
+        configPath,
+        `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "autoMode": "soft_hard" } }`,
+      );
+      expect(() => loadAgentConfig({ configPath })).toThrow();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

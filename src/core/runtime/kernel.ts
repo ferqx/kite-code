@@ -17,6 +17,7 @@ import {
   type RuntimeActionResult,
   type RuntimeUserAction,
 } from './actions';
+import { normalizeContextRuntimeState } from './context-compaction';
 import type { RuntimeEffect, RuntimeEffectLease } from './effects';
 import {
   isRuntimeEventEnvelope,
@@ -601,14 +602,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     ...normalizeRuntimeMetadata(normalizedSnapshot),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     verification: (normalizedSnapshot as Partial<RuntimeState>).verification ?? { records: {} },
-    context: (normalizedSnapshot as Partial<RuntimeState>).context ?? {
-      history: [],
-      autoGuard: {
-        recentAutomaticCompactions: [],
-        consecutiveLowGain: 0,
-        disabledUntilManualAction: false,
-      },
-    },
+    context: normalizeContextRuntimeState((normalizedSnapshot as Partial<RuntimeState>).context),
     providerAdmission: (normalizedSnapshot as Partial<RuntimeState>).providerAdmission ?? {
       pending: [],
       waivers: {},
@@ -676,14 +670,7 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     revision: Number.isInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0,
     appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
     recoveryState: raw.recoveryState ?? { kind: 'normal' },
-    context: raw.context ?? {
-      history: [],
-      autoGuard: {
-        recentAutomaticCompactions: [],
-        consecutiveLowGain: 0,
-        disabledUntilManualAction: false,
-      },
-    },
+    context: normalizeContextRuntimeState(raw.context),
     transcript: {
       ...state.transcript,
       messages: (state.transcript?.messages ?? []).map((message, ordinal) => ({

@@ -11,7 +11,7 @@ import { updateAutoCompactionGuard } from '@/core/model/context-compaction-decis
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
-import type { ContextCompactionErrorKind, ContextRuntimeState } from './context-compaction';
+import { isContextHardBlockReason, normalizeContextCompactionReason } from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import {
@@ -95,23 +95,22 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'context.compaction_requested': {
       const pending = state.context.pendingCompaction;
       if (pending && pending.compactionId !== event.compactionId) return state;
+      const reason = normalizeContextCompactionReason(event.reason);
+      if (!reason) return state;
       return {
         ...state,
         context: {
           ...state.context,
           pendingCompaction: {
             compactionId: event.compactionId,
-            reason: event.reason,
+            reason,
             requestedAtRevision: event.requestedAtRevision,
             requestedAtTurnId: event.requestedAtTurnId,
-            force: event.force,
+            force: false,
             estimate: event.estimate,
             ...(event.customInstructions ? { customInstructions: event.customInstructions } : {}),
           },
           lastFailure: undefined,
-          ...(event.reason === 'overflow_recovery'
-            ? { overflowRecoveryTurnId: event.requestedAtTurnId }
-            : {}),
         },
       };
     }
@@ -123,33 +122,35 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         event.checkpoint.sourceRevision !== event.sourceRevision
       )
         return state;
+      const reason = normalizeContextCompactionReason(event.checkpoint.reason);
+      if (!reason) return state;
+      const checkpoint = { ...event.checkpoint, reason };
       const reductionRatio =
-        event.checkpoint.inputTokensBefore > 0
-          ? 1 - event.checkpoint.inputTokensAfter / event.checkpoint.inputTokensBefore
+        checkpoint.inputTokensBefore > 0
+          ? 1 - checkpoint.inputTokensAfter / checkpoint.inputTokensBefore
           : 0;
       return {
         ...state,
         context: {
           ...state.context,
-          activeCheckpoint: event.checkpoint,
+          activeCheckpoint: checkpoint,
           pendingCompaction: undefined,
           lastFailure: undefined,
-          hardBlock: undefined, // clear on successful compaction
-          history: [
-            ...state.context.history,
-            { kind: 'completed' as const, checkpoint: event.checkpoint },
-          ].slice(-128),
+          history: [...state.context.history, { kind: 'completed' as const, checkpoint }].slice(
+            -128,
+          ),
           lastCompactionTurnIndex: state.turn.turnIndex,
-          autoGuard: ['auto_soft', 'auto_hard'].includes(event.checkpoint.reason)
-            ? updateAutoCompactionGuard(state.context.autoGuard, {
-                kind: 'completed',
-                turnIndex: state.turn.turnIndex,
-                reductionRatio,
-                tokensAfter: event.checkpoint.inputTokensAfter,
-              })
-            : ['manual', 'manual_recovery'].includes(event.checkpoint.reason)
-              ? updateAutoCompactionGuard(state.context.autoGuard, { kind: 'manual_reset' })
-              : state.context.autoGuard,
+          autoGuard:
+            checkpoint.reason === 'auto'
+              ? updateAutoCompactionGuard(state.context.autoGuard, {
+                  kind: 'completed',
+                  turnIndex: state.turn.turnIndex,
+                  reductionRatio,
+                  tokensAfter: checkpoint.inputTokensAfter,
+                })
+              : checkpoint.reason === 'manual'
+                ? updateAutoCompactionGuard(state.context.autoGuard, { kind: 'manual_reset' })
+                : state.context.autoGuard,
         },
       };
     }
@@ -165,25 +166,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         retryable: event.retryable,
         reason,
       };
-      // PR 6: Only auto_hard and overflow_recovery create durable hard blocks.
-      // auto_soft failures → cooldown + low-gain tracking (no block).
-      // manual failures → never block.
-      // insufficient_reduction alone does NOT trigger a block — the reason matters.
-      const shouldHardBlock = reason === 'auto_hard' || reason === 'overflow_recovery';
-      const hardBlock: ContextRuntimeState['hardBlock'] = shouldHardBlock
-        ? {
-            reason: reason === 'overflow_recovery' ? 'overflow_recovery_failed' : 'hard_limit',
-            compactionId: event.compactionId,
-            sourceDigest: '',
-            failure,
-            createdAtTurnId: state.turn.turnId,
-          }
-        : undefined;
-
-      // PR 6: Wire updateAutoCompactionGuard for proper thrash breaker state.
-      const isAutoLowGain =
-        (reason === 'auto_soft' || reason === 'auto_hard') &&
-        event.errorKind === 'insufficient_reduction';
+      // Automatic failures may update the breaker, but never create or refresh
+      // a durable Runtime correctness block.
+      const isAutoLowGain = reason === 'auto' && event.errorKind === 'insufficient_reduction';
       const autoGuard = isAutoLowGain
         ? updateAutoCompactionGuard(state.context.autoGuard, { kind: 'low_gain' })
         : state.context.autoGuard;
@@ -194,7 +179,6 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...state.context,
           pendingCompaction: undefined,
           lastFailure: failure,
-          ...(hardBlock ? { hardBlock } : {}),
           autoGuard,
           history: [...state.context.history, { kind: 'failed' as const, failure }].slice(-128),
         },
@@ -208,7 +192,6 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         context: {
           ...state.context,
           activeCheckpoint: undefined,
-          hardBlock: undefined,
           autoGuard: updateAutoCompactionGuard(state.context.autoGuard, { kind: 'manual_reset' }),
           history: [
             ...state.context.history,
@@ -223,9 +206,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'context.hard_blocked': {
-      // REVIEW-FIX: Use the event's reason-derived errorKind instead of hardcoded 'stale_source'.
-      const errorKind: ContextCompactionErrorKind =
-        event.reason === 'overflow_recovery_failed' ? 'insufficient_reduction' : 'unsafe_boundary';
+      if (!isContextHardBlockReason(event.reason)) return state;
       return {
         ...state,
         context: {
@@ -233,13 +214,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           hardBlock: {
             reason: event.reason,
             sourceDigest: event.sourceDigest,
-            failure: {
-              compactionId: '',
-              sourceRevision: state.revision,
-              errorKind,
-              message: event.message,
-              retryable: false,
-            },
+            message: event.message,
             createdAtTurnId: event.createdAtTurnId,
           },
         },
@@ -1384,11 +1359,6 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'turn.started':
       return {
         ...state,
-        context:
-          state.context.overflowRecoveryTurnId &&
-          state.context.overflowRecoveryTurnId !== event.turnId
-            ? { ...state.context, overflowRecoveryTurnId: undefined }
-            : state.context,
         turn: {
           turnId: event.turnId,
           turnIndex: state.turn.turnIndex + 1,

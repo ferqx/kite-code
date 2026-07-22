@@ -3,12 +3,9 @@ import type { AgentConfig } from '../../src/core/config';
 import { invokeRuntimeModel } from '../../src/core/controllers/model-controller';
 import { aiMessage } from '../../src/core/messages';
 import type { ContextPreflight, ContextTokenEstimate } from '../../src/core/model/context-budget';
-import {
-  decideAutomaticContextCompaction,
-  isProviderContextOverflow,
-} from '../../src/core/model/context-compaction-decision';
+import { decideAutomaticContextCompaction } from '../../src/core/model/context-compaction-decision';
+import { manualContextCompactionEvent } from '../../src/core/model/context-compaction-manual';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
 import { createMockModel } from '../mock-model';
 
@@ -74,41 +71,33 @@ function config(): AgentConfig {
       maxOutputTokens: 1_000,
       providerSafetyMarginTokens: 500,
     },
+    compaction: { autoMode: 'live' },
   };
 }
 
 describe('automatic context compaction', () => {
-  test('requests soft compaction only when estimated gain and cooldown allow it', () => {
+  test('requests auto compaction only when eligibility and cooldown allow it', () => {
     const state = historicalState();
     expect(
       decideAutomaticContextCompaction({
         state,
         preflight: preflight('compact_due'),
-        enabled: true,
+        mode: 'live',
       }),
-    ).toMatchObject({ action: 'request_compaction', reason: 'auto_soft' });
+    ).toMatchObject({ action: 'request_compaction', reason: 'auto' });
 
     state.context.lastCompactionTurnIndex = 5;
     expect(
       decideAutomaticContextCompaction({
         state,
-        preflight: preflight('compact_due'),
-        enabled: true,
+        preflight: preflight('hard_limit'),
+        mode: 'live',
       }),
     ).toEqual({ action: 'invoke' });
   });
 
-  test('hard preflight ignores cooldown but fails closed without a safe boundary', () => {
+  test('hard-limit diagnostics never bypass cooldown or block without a safe boundary', () => {
     const state = historicalState();
-    state.context.lastCompactionTurnIndex = state.turn.turnIndex;
-    expect(
-      decideAutomaticContextCompaction({
-        state,
-        preflight: preflight('hard_limit'),
-        enabled: true,
-      }),
-    ).toMatchObject({ action: 'request_compaction', reason: 'auto_hard' });
-
     state.interactions = {
       kind: 'awaiting_user_input',
       interactionId: 'input',
@@ -119,34 +108,59 @@ describe('automatic context compaction', () => {
       decideAutomaticContextCompaction({
         state,
         preflight: preflight('hard_limit'),
-        enabled: true,
+        mode: 'live',
       }),
-    ).toMatchObject({ action: 'block' });
+    ).toEqual({ action: 'invoke' });
   });
 
-  test('model preflight emits a durable hard request without invoking the provider', async () => {
+  test('off and shadow modes invoke the provider while live emits reason=auto', async () => {
     const state = historicalState();
-    const mock = createMockModel([{ message: aiMessage({ content: 'must not be called' }) }]);
-    const events = await invokeRuntimeModel({ model: mock, state, config: config() });
-    expect(mock.callCount.count).toBe(0);
-    expect(events).toContainEqual(
+    for (const mode of ['off', 'shadow'] as const) {
+      const currentConfig = config();
+      currentConfig.compaction = { autoMode: mode };
+      const mock = createMockModel([{ message: aiMessage({ content: `called-${mode}` }) }]);
+      const events = await invokeRuntimeModel({ model: mock, state, config: currentConfig });
+      expect(mock.callCount.count).toBe(1);
+      expect(events.some((event) => event.type === 'context.compaction_requested')).toBe(false);
+    }
+
+    const liveMock = createMockModel([{ message: aiMessage({ content: 'must not be called' }) }]);
+    const liveEvents = await invokeRuntimeModel({ model: liveMock, state, config: config() });
+    expect(liveMock.callCount.count).toBe(0);
+    expect(liveEvents).toContainEqual(
       expect.objectContaining({
         type: 'context.compaction_requested',
-        reason: 'auto_hard',
+        reason: 'auto',
         force: false,
       }),
     );
-    expect(events).toContainEqual(
+    expect(liveEvents).toContainEqual(
       expect.objectContaining({ type: 'model.context_metrics', status: 'hard_limit' }),
     );
-    expect(events.some((event) => event.type === 'model.requested')).toBe(false);
   });
 
-  test('hard compaction failure blocks an immediate repeat model call via durable hardBlock', () => {
+  test('absolute token trigger works when utilization is unknown', () => {
+    const state = historicalState();
+    const unknown = {
+      ...preflight('compact_due'),
+      utilization: undefined,
+      status: 'unknown' as const,
+    };
+    expect(
+      decideAutomaticContextCompaction({
+        state,
+        preflight: unknown,
+        mode: 'live',
+        triggerTokens: 8_000,
+      }),
+    ).toMatchObject({ action: 'request_compaction', reason: 'auto' });
+  });
+
+  test('auto compaction failure records breaker state without creating a hard block', () => {
     const requested = reduceRuntimeState(historicalState(), {
       type: 'context.compaction_requested',
-      compactionId: 'hard',
-      reason: 'auto_hard',
+      compactionId: 'auto-failure',
+      reason: 'auto',
       requestedAtRevision: 0,
       requestedAtTurnId: 'turn-5',
       force: false,
@@ -155,31 +169,17 @@ describe('automatic context compaction', () => {
     requested.revision = 10;
     const failed = reduceRuntimeState(requested, {
       type: 'context.compaction_failed',
-      compactionId: 'hard',
+      compactionId: 'auto-failure',
       sourceRevision: 10,
       errorKind: 'insufficient_reduction',
       message: 'still too large',
       retryable: true,
     });
-    // hardBlock should be set on auto_hard + insufficient_reduction
-    expect(failed.context.hardBlock).toBeDefined();
-    expect(failed.context.hardBlock!.reason).toBe('hard_limit');
-    // Even after unrelated revision changes, the block persists.
-    failed.revision = 11;
-    expect(decideNextEffect(failed)).toMatchObject({
-      type: 'recovery_blocked',
-      reason: expect.stringContaining('hard-blocked'),
-    });
+    expect(failed.context.hardBlock).toBeUndefined();
+    expect(failed.context.autoGuard.consecutiveLowGain).toBe(1);
   });
 
-  test('recognizes provider overflow without treating unrelated failures as overflow', () => {
-    expect(isProviderContextOverflow(new Error('maximum context length exceeded'))).toBe(true);
-    expect(isProviderContextOverflow({ code: 'context_length_exceeded' })).toBe(true);
-    expect(isProviderContextOverflow({ status: 413 })).toBe(true);
-    expect(isProviderContextOverflow(new Error('rate limit exceeded'))).toBe(false);
-  });
-
-  test('converts provider overflow into one recovery request per turn', async () => {
+  test('does not infer compaction or hard block from a provider 400-style failure', async () => {
     const state = historicalState();
     const mock = createMockModel([
       {
@@ -189,26 +189,15 @@ describe('automatic context compaction', () => {
     ]);
     const wideConfig = config();
     wideConfig.modelKwargs = { contextWindowTokens: 128_000, maxOutputTokens: 1_000 };
-    const first = await invokeRuntimeModel({ model: mock, state, config: wideConfig });
-    expect(first).toContainEqual(
-      expect.objectContaining({
-        type: 'context.compaction_requested',
-        reason: 'overflow_recovery',
-        force: true,
-      }),
+    await expect(invokeRuntimeModel({ model: mock, state, config: wideConfig })).rejects.toThrow(
+      'maximum context length exceeded',
     );
-    const recovered = first.reduce(reduceRuntimeState, state);
-    expect(recovered.context.overflowRecoveryTurnId).toBe(state.turn.turnId);
-    // PR 6: second overflow emits context.hard_blocked event (no longer throws Error)
-    const second = await invokeRuntimeModel({ model: mock, state: recovered, config: wideConfig });
-    expect(second).toContainEqual(
-      expect.objectContaining({
-        type: 'context.hard_blocked',
-        reason: 'overflow_recovery_failed',
-      }),
-    );
-    const blocked = second.reduce(reduceRuntimeState, recovered);
-    expect(blocked.context.hardBlock?.reason).toBe('overflow_recovery_failed');
+    expect(state.context.pendingCompaction).toBeUndefined();
+    expect(state.context.hardBlock).toBeUndefined();
+    expect(manualContextCompactionEvent({ state, config: wideConfig })).toMatchObject({
+      type: 'context.compaction_requested',
+      reason: 'manual',
+    });
   });
 
   test('projects an active checkpoint plus live tail and accounts summary tokens separately', async () => {
@@ -241,7 +230,7 @@ describe('automatic context compaction', () => {
       inputTokensBefore: 20_000,
       inputTokensAfter: 8_000,
       targetTokens: 10_000,
-      reason: 'auto_soft',
+      reason: 'auto',
       createdAt: '2026-07-20T00:00:00.000Z',
     };
     const mock = createMockModel([{ message: aiMessage({ content: 'continued' }) }]);
@@ -257,129 +246,23 @@ describe('automatic context compaction', () => {
     expect(mock.callCount.count).toBe(1);
   });
 
-  describe('hard block and thrash breaker', () => {
-    test('durable hard block prevents further auto-compaction after hard-limit failure', () => {
-      const state = historicalState();
-      // Set pending then fail — simulates a real failed compaction attempt.
-      const pending: Parameters<typeof reduceRuntimeState>[1] = {
-        type: 'context.compaction_requested',
-        compactionId: 'cmp-fail',
-        reason: 'auto_hard',
-        requestedAtRevision: state.revision,
-        requestedAtTurnId: state.turn.turnId,
-        force: false,
-        estimate: estimate(10_000),
-      };
-      const withPending = reduceRuntimeState(state, pending);
-      const withHardBlock = reduceRuntimeState(withPending, {
-        type: 'context.compaction_failed',
-        compactionId: 'cmp-fail',
-        sourceRevision: state.revision,
-        errorKind: 'insufficient_reduction',
-        message: 'Not enough reduction.',
-        retryable: false,
-      });
-
-      expect(withHardBlock.context.hardBlock).toBeDefined();
-      expect(withHardBlock.context.hardBlock!.reason).toBe('hard_limit');
-
-      // Decision should block.
-      const decision = decideAutomaticContextCompaction({
-        state: withHardBlock,
-        preflight: preflight('hard_limit'),
-        enabled: true,
-      });
-      expect(decision.action).toBe('block');
+  test('compaction and reset do not clear a Runtime correctness hard block', () => {
+    const state = reduceRuntimeState(historicalState(), {
+      type: 'context.hard_blocked',
+      reason: 'runtime_invariant_violation',
+      sourceDigest: 'source',
+      message: 'invariant failed',
+      createdAtTurnId: 'turn-5',
     });
-
-    test('successful compaction clears hard block', () => {
-      const state = historicalState();
-      const withPending = reduceRuntimeState(state, {
-        type: 'context.compaction_requested',
-        compactionId: 'cmp-ok',
-        reason: 'auto_hard',
-        requestedAtRevision: state.revision,
-        requestedAtTurnId: state.turn.turnId,
-        force: false,
-        estimate: estimate(10_000),
-      });
-      // Simulate failure first, then success.
-      const failed = reduceRuntimeState(withPending, {
-        type: 'context.compaction_failed',
-        compactionId: 'cmp-ok',
-        sourceRevision: state.revision,
-        errorKind: 'insufficient_reduction',
-        message: 'failed',
-        retryable: false,
-      });
-      expect(failed.context.hardBlock).toBeDefined();
-
-      // Now set up another pending and complete successfully.
-      const withPending2 = reduceRuntimeState(failed, {
-        type: 'context.compaction_requested',
-        compactionId: 'cmp-win',
-        reason: 'manual',
-        requestedAtRevision: state.revision + 1,
-        requestedAtTurnId: state.turn.turnId,
-        force: false,
-        estimate: estimate(10_000),
-      });
-      const succeeded = reduceRuntimeState(withPending2, {
-        type: 'context.compaction_completed',
-        compactionId: 'cmp-win',
-        sourceRevision: state.revision + 1,
-        checkpoint: {
-          compactionId: 'cmp-win',
-          version: 1,
-          sourceRevision: state.revision + 1,
-          sourceDigest: 'abc',
-          coveredThroughMessageId: 'msg-3',
-          coveredThroughTurnId: 'turn-3',
-          summary: { version: 2 } as never,
-          inputTokensBefore: 10_000,
-          inputTokensAfter: 5_000,
-          targetTokens: 6_000,
-          reason: 'manual',
-          createdAt: new Date().toISOString(),
-        },
-      });
-      expect(succeeded.context.hardBlock).toBeUndefined();
+    const withCheckpoint = {
+      ...state,
+      context: { ...state.context, activeCheckpoint: { compactionId: 'old-cp' } as never },
+    };
+    const reset = reduceRuntimeState(withCheckpoint as RuntimeState, {
+      type: 'context.compaction_reset',
+      checkpointId: 'old-cp',
+      reason: 'manual',
     });
-
-    test('compaction_reset clears hard block', () => {
-      const state = historicalState();
-      // Set up hard block via failure.
-      const withPending = reduceRuntimeState(state, {
-        type: 'context.compaction_requested',
-        compactionId: 'cmp-fail2',
-        reason: 'auto_hard',
-        requestedAtRevision: state.revision,
-        requestedAtTurnId: state.turn.turnId,
-        force: false,
-        estimate: estimate(10_000),
-      });
-      const failed = reduceRuntimeState(withPending, {
-        type: 'context.compaction_failed',
-        compactionId: 'cmp-fail2',
-        sourceRevision: state.revision,
-        errorKind: 'insufficient_reduction',
-        message: 'failed',
-        retryable: false,
-      });
-      expect(failed.context.hardBlock).toBeDefined();
-
-      // Set active checkpoint and reset
-      const withCp = {
-        ...failed,
-        context: { ...failed.context, activeCheckpoint: { compactionId: 'old-cp' } as never },
-      };
-      const reset = reduceRuntimeState(withCp as RuntimeState, {
-        type: 'context.compaction_reset',
-        checkpointId: 'old-cp',
-        reason: 'manual',
-      });
-      expect(reset.context.hardBlock).toBeUndefined();
-      expect(reset.context.autoGuard.disabledUntilManualAction).toBe(false);
-    });
+    expect(reset.context.hardBlock?.reason).toBe('runtime_invariant_violation');
   });
 });

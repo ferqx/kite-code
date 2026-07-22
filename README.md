@@ -44,7 +44,7 @@ bun install
 
 模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。自定义模型建议显式配置 `contextWindow` 和 `maxOutputTokens`；未配置且目录/adapter 无元数据时，Runtime 会将窗口视为 unknown，而不会假定一个大窗口。
 
-自动 M2 上下文压缩默认关闭，可通过 `features.contextCompactionAutoV1` 灰度开启。`compaction` 配置支持 `softRatio`、`hardRatio`、`targetRatio`、`minimumReductionRatio`、`cooldownTurns`、`recentTurns`、`maxSummaryTokens` 和 `maxSummaryInputTokens`。自动压缩保留原始 transcript；provider overflow 每个 turn 最多恢复一次，失败时不会反复重试模型请求。
+自动 M2 上下文压缩默认关闭，需要同时开启 `features.contextCompactionAutoV1` 并把 `compaction.autoMode` 配置为 `live`；`shadow` 只观察触发资格，不调用摘要模型。自动阈值可使用 `triggerRatio` 或 `triggerTokens`，压缩原因只有 `manual | auto`。本地 token ratio 术语（文本计量比例）、Provider 术语（模型供应商）错误或压缩失败都不会阻断会话；自动压缩保留原始 transcript 术语（消息记录）。
 
 启用 `features.contextCompactionManualV1`（默认开启）后可使用 `/compact` 命令，支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。运行中请求会排队到安全边界；消息不足时提示 `Not enough messages to compact.`。
 

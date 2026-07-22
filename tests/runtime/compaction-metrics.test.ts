@@ -9,7 +9,6 @@ describe('compactionMetrics', () => {
       requested: 0,
       completed: 0,
       failed: 0,
-      overflowRecoveries: 0,
       resets: 0,
       m1FramesFolded: 0,
       samples: [],
@@ -52,13 +51,10 @@ describe('compactionMetrics', () => {
     expect(compactionMetrics.snapshot().failed).toBe(3);
   });
 
-  test('recordOverflowRecovery and recordReset are independent counters', () => {
+  test('recordReset increments the reset counter', () => {
     compactionMetrics.clear();
-    compactionMetrics.recordOverflowRecovery();
-    compactionMetrics.recordOverflowRecovery();
     compactionMetrics.recordReset();
     const snapshot = compactionMetrics.snapshot();
-    expect(snapshot.overflowRecoveries).toBe(2);
     expect(snapshot.resets).toBe(1);
   });
 
@@ -91,14 +87,14 @@ describe('compactionMetrics', () => {
     compactionMetrics.clear();
     compactionMetrics.recordCompleted({
       compactionId: 'a',
-      reason: 'auto_soft',
+      reason: 'auto',
       durationMs: 100,
       tokensBefore: 10_000,
       tokensAfter: 5_000, // 0.5
     });
     compactionMetrics.recordCompleted({
       compactionId: 'b',
-      reason: 'auto_soft',
+      reason: 'auto',
       durationMs: 100,
       tokensBefore: 10_000,
       tokensAfter: 2_000, // 0.8

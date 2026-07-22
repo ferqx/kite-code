@@ -543,7 +543,7 @@ describe('recordRuntimeEvent — compaction telemetry', () => {
           inputTokensBefore: 10_000,
           inputTokensAfter: 4_000,
           targetTokens: 5_000,
-          reason: 'auto_soft',
+          reason: 'auto',
           createdAt: '2026-07-21T00:00:00.000Z',
         },
       },

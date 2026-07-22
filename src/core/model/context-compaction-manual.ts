@@ -111,10 +111,10 @@ export function manualContextCompactionEvent(input: {
   return {
     type: 'context.compaction_requested',
     compactionId: crypto.randomUUID(),
-    reason: input.state.context.hardBlock ? 'manual_recovery' : 'manual',
+    reason: 'manual',
     requestedAtRevision: input.state.revision,
     requestedAtTurnId: input.state.turn.turnId,
-    force: Boolean(input.state.context.hardBlock),
+    force: false,
     estimate: currentContextPreflight(input.state, input.config, input.capabilities).estimate,
     ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
   };
@@ -163,18 +163,26 @@ export function buildContextStatusReport(
     ? `Active checkpoint: ${checkpoint.compactionId.slice(0, 12)}...  Covered through: ${checkpoint.coveredThroughTurnId}`
     : 'No active checkpoint';
   const flags = getFeatureFlags(config);
-  const autoEnabled = flags.contextCompactionV2 && flags.contextCompactionAutoV1;
-  const autoStatus = !autoEnabled
-    ? 'disabled by feature flag'
-    : state.context.autoGuard?.disabledUntilManualAction
-      ? 'paused (thrash breaker)'
-      : state.context.hardBlock
-        ? `BLOCKED (${state.context.hardBlock.reason})`
-        : 'enabled';
+  const autoMode =
+    flags.contextCompactionV2 && flags.contextCompactionAutoV1
+      ? (config.compaction?.autoMode ?? 'off')
+      : 'off';
+  const autoStatus =
+    !flags.contextCompactionV2 || !flags.contextCompactionAutoV1
+      ? 'disabled by feature flag'
+      : autoMode === 'off'
+        ? 'off'
+        : autoMode === 'shadow'
+          ? 'shadow (observe only)'
+          : state.context.autoGuard?.disabledUntilManualAction
+            ? 'paused (thrash breaker)'
+            : 'enabled';
   const nextThreshold =
     preflight.usableInputTokens != null
-      ? `${Math.floor(preflight.usableInputTokens * (config.compaction?.compactRatio ?? config.compaction?.softRatio ?? 0.88))}`
-      : 'N/A';
+      ? `${Math.floor(preflight.usableInputTokens * (config.compaction?.triggerRatio ?? config.compaction?.compactRatio ?? config.compaction?.softRatio ?? 0.88))}`
+      : config.compaction?.triggerTokens != null
+        ? `${config.compaction.triggerTokens}`
+        : 'N/A';
 
   const text = [
     `Context usage: ${e.totalInputTokens} / ${usable} usable tokens (${utilizationPct})`,
@@ -203,52 +211,16 @@ export function buildContextStatusReport(
 }
 
 /**
- * Pre-check before `/compact reset`: computes whether resetting the active
- * checkpoint would cause hard overflow (blocking the reset).
+ * `/compact reset` is never blocked by a local capacity estimate. Provider
+ * admission is decided by the next real request.
  */
 export function compactResetPreflight(
-  state: Readonly<RuntimeState>,
-  config: AgentConfig,
-  environment?: ContextProjectionEnvironment,
-  capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
+  _state: Readonly<RuntimeState>,
+  _config: AgentConfig,
+  _environment?: ContextProjectionEnvironment,
+  _capabilities?: ResolvedModelCapabilities,
 ):
   | { safe: true }
   | { safe: false; reason: string; currentUtilization: number; hardThreshold: number } {
-  const checkpoint = state.context.activeCheckpoint;
-  if (!checkpoint) return { safe: true };
-
-  // Simulate: build projection without the checkpoint.
-  const noCpState: RuntimeState = {
-    ...state,
-    context: { ...state.context, activeCheckpoint: undefined },
-  };
-  const projection = buildContextProjection({
-    role: 'agent',
-    state: noCpState,
-    serializedTools: environment?.serializedTools,
-    activeSkillInstructions: environment?.activeSkillInstructions,
-    workflowSkills: environment?.workflowSkills,
-    contextBudget: { recentTurns: config.compaction?.recentTurns },
-  });
-  const preflight = preflightModelContext({
-    estimate: projection.estimate,
-    capabilities,
-    requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
-    providerSafetyRatio: config.compaction?.providerSafetyRatio,
-    compactRatio: config.compaction?.compactRatio ?? config.compaction?.softRatio,
-    hardRatio: config.compaction?.hardRatio,
-    warningRatio: config.compaction?.warningRatio,
-  });
-
-  const hardThreshold = config.compaction?.hardRatio ?? 0.94;
-  if (preflight.utilization != null && preflight.utilization >= hardThreshold) {
-    return {
-      safe: false,
-      reason:
-        'Resetting would exceed the hard limit and block the next model call. Clear the session or run /compact first to reduce context before resetting.',
-      currentUtilization: preflight.utilization,
-      hardThreshold,
-    };
-  }
   return { safe: true };
 }

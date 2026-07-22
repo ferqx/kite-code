@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentConfig } from '../../src/core/config';
 import {
+  compactResetPreflight,
   currentContextPreflight,
   inspectManualContextCompaction,
   manualContextCompactionEvent,
@@ -79,27 +80,20 @@ describe('manual context compaction service', () => {
     expect(plain).not.toHaveProperty('customInstructions');
   });
 
-  test('hard-blocked sessions request manual_recovery instead of an unreachable manual compaction', () => {
+  test('manual requests never gain force semantics from a correctness hard block', () => {
     const state = createInitialRuntimeState({
       threadId: 'manual-recovery',
       userId: 'user',
       workspace: '/workspace',
     });
     state.context.hardBlock = {
-      reason: 'hard_limit',
+      reason: 'runtime_invariant_violation',
       sourceDigest: 'source',
-      failure: {
-        compactionId: 'failed',
-        sourceRevision: state.revision,
-        errorKind: 'insufficient_reduction',
-        message: 'blocked',
-        retryable: false,
-        reason: 'auto_hard',
-      },
+      message: 'blocked',
       createdAtTurnId: state.turn.turnId,
     };
     const event = manualContextCompactionEvent({ state, config });
-    expect(event).toMatchObject({ reason: 'manual_recovery', force: true });
+    expect(event).toMatchObject({ reason: 'manual', force: false });
   });
 
   test('persists the latest full preflight for inspection', () => {
@@ -155,5 +149,32 @@ describe('manual context compaction service', () => {
     });
     expect(preflight.reservedOutputTokens).toBe(2_000);
     expect(preflight.usableInputTokens).toBe(28_976);
+  });
+
+  test('reset is not blocked by local token pressure', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'reset-capacity',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    state.context.activeCheckpoint = { compactionId: 'checkpoint' } as never;
+    state.context.lastPreflight = {
+      estimate: {
+        systemTokens: 100,
+        toolSchemaTokens: 100,
+        transcriptTokens: 20_000,
+        summaryTokens: 1_000,
+        dynamicRuntimeTokens: 100,
+        framingTokens: 100,
+        totalInputTokens: 21_400,
+      },
+      usableInputTokens: 8_000,
+      reservedOutputTokens: 1_000,
+      providerSafetyMarginTokens: 1_000,
+      utilization: 2.675,
+      status: 'hard_limit',
+      targetTokens: 4_400,
+    };
+    expect(compactResetPreflight(state, config)).toEqual({ safe: true });
   });
 });

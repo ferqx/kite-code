@@ -20,18 +20,11 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
           : `Runtime schema ${state.recoveryState.schemaVersion} is not supported.`,
     };
   }
-  // Durable hard block check — replaces the old revision-bounded pattern.
-  // Once set, hardBlock persists until explicit recovery (compaction success, /compact reset, or /clear).
+  // Durable hard blocks represent proven Runtime correctness failures only.
   if (state.context.hardBlock) {
-    if (state.context.pendingCompaction?.reason === 'manual_recovery') {
-      return {
-        type: 'compact_context',
-        compactionId: state.context.pendingCompaction.compactionId,
-      };
-    }
     return {
       type: 'recovery_blocked',
-      reason: `Context is hard-blocked: ${state.context.hardBlock.reason}. Use /compact to run recovery compaction, /compact reset when a checkpoint exists, or start a new session.`,
+      reason: `Runtime context is blocked by a correctness failure: ${state.context.hardBlock.reason}. Rewind, clear, or start a new session.`,
     };
   }
   if (state.legacyUnrecoverableSubagentApproval) {

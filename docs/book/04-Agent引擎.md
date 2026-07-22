@@ -56,4 +56,6 @@ MCP Provider Action 是持久化交互。旧 Tool Call 必须先失败并退出�
 
 Runtime schema v15 把 M2 checkpoint lifecycle 纳入事件循环。`context.compaction_requested` 形成 pending 状态，scheduler 在工具、交互、verification 和 final 等更高优先级工作结束后调度 `compact_context`，controller 以 completed/failed 事件收敛。压缩复用普通 Effect lease；来源 revision 变化时结果不会提交。Checkpoint 只是一种可 reset 的模型上下文投影，原始 transcript 仍保持不变。
 
+压缩原因只有 `manual | auto`。Token ratio 术语（文本计量比例）、窗口估算、Provider 术语（模型供应商）错误和压缩失败不会产生 hard block 术语（硬阻断）；`ContextHardBlock` 只表示 Runtime correctness failure 术语（运行时正确性故障），普通压缩或 reset 术语（重置）不能清除它。Core 不解释通用 Provider HTTP 400；模型请求失败不自动触发压缩或硬阻断，用户可在会话恢复交互后自行执行 `/compact`。
+
 M2 摘要不是自由文本。Runtime 先生成 mandatory fact ledger，再要求无工具的 summary model 输出 `StructuredContextSummaryV1`；结果必须通过 schema、provenance、fact coverage、message coverage 与 token gain 校验。长历史按完整 turn/tool block 分块并最终 merge，中间摘要不会写入 RuntimeState。

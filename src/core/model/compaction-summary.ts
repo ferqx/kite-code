@@ -787,36 +787,16 @@ export function createStructuredContextCompactor(options: {
     const compactMessages = tailMessages.length > 0 ? tailMessages : boundary.coveredMessages;
     let summary: StructuredContextSummaryV2;
     if (sourceTokens <= maxInputTokens) {
-      try {
-        summary = await generateValidatedSummary({
-          generate: options.generate,
-          ledger,
-          messages: compactMessages,
-          baseSummary,
-          provenance,
-          maxSummaryTokens,
-          mode: 'summary',
-          customPreferences,
-        });
-      } catch (error) {
-        if (!['auto_hard', 'overflow_recovery'].includes(input.pending.reason)) throw error;
-        const chunks = await summarizeChunks({
-          generate: options.generate,
-          messages: compactMessages,
-          maxChunkInputTokens: maxInputTokens,
-          maxSummaryTokens,
-        });
-        summary = await generateValidatedSummary({
-          generate: options.generate,
-          ledger,
-          chunks,
-          baseSummary,
-          provenance,
-          maxSummaryTokens,
-          mode: 'merge',
-          customPreferences,
-        });
-      }
+      summary = await generateValidatedSummary({
+        generate: options.generate,
+        ledger,
+        messages: compactMessages,
+        baseSummary,
+        provenance,
+        maxSummaryTokens,
+        mode: 'summary',
+        customPreferences,
+      });
     } else {
       const chunks = await summarizeChunks({
         generate: options.generate,
@@ -887,26 +867,16 @@ export function createStructuredContextCompactor(options: {
       currentPreflight?.targetTokens ??
       Math.floor(inputTokensBefore * (options.targetRatio ?? 0.62));
 
-    // Automatic: must reduce below target.
-    // Manual: any positive reduction is sufficient.
-    const isManual = input.pending.reason === 'manual';
-    const minimumManualSavedTokens = 1_024;
+    // Manual and automatic requests use the same acceptance threshold. The
+    // target ratio is diagnostic and must not decide checkpoint activation.
+    const minimumSavedTokens = 1_024;
     const savedTokens = inputTokensBefore - inputTokensAfter;
 
-    if (isManual) {
-      if (savedTokens < minimumManualSavedTokens) {
-        throw new ContextCompactionValidationError(
-          'insufficient_reduction',
-          `Manual compaction saved only ${savedTokens} tokens (minimum ${minimumManualSavedTokens}). Not enough compactable history to produce a useful reduction.`,
-        );
-      }
-    } else {
-      if (inputTokensAfter >= inputTokensBefore || inputTokensAfter > targetTokens) {
-        throw new ContextCompactionValidationError(
-          'insufficient_reduction',
-          `Summary produced ${inputTokensAfter} tokens, above target ${targetTokens}.`,
-        );
-      }
+    if (savedTokens < minimumSavedTokens) {
+      throw new ContextCompactionValidationError(
+        'insufficient_reduction',
+        `Compaction saved only ${savedTokens} tokens (minimum ${minimumSavedTokens}). Not enough compactable history to produce a useful reduction.`,
+      );
     }
     return {
       compactionId: input.pending.compactionId,

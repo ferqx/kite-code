@@ -5,7 +5,6 @@
 // Kernel-native model invocation: build context from RuntimeState → call model → return RuntimeEvent[].
 // No LangGraph state dependency, no side effects.
 
-import { createHash } from 'node:crypto';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { createBinding } from '@/core/capabilities/catalog';
 import {
@@ -18,10 +17,7 @@ import { exposedMcpToolName, type McpRuntimeProvider } from '@/core/mcp';
 import type { AIMessage } from '@/core/messages';
 import { compactionMetrics } from '@/core/model/compaction-metrics';
 import { preflightModelContext } from '@/core/model/context-budget';
-import {
-  decideAutomaticContextCompaction,
-  isProviderContextOverflow,
-} from '@/core/model/context-compaction-decision';
+import { decideAutomaticContextCompaction } from '@/core/model/context-compaction-decision';
 import {
   buildContextProjection,
   type ContextProjectionEnvironment,
@@ -488,15 +484,20 @@ export async function invokeRuntimeModel(params: {
     const automaticCompaction = decideAutomaticContextCompaction({
       state,
       preflight,
-      enabled: flags.contextCompactionV2 && flags.contextCompactionAutoV1,
+      mode:
+        flags.contextCompactionV2 && flags.contextCompactionAutoV1
+          ? (params.config.compaction?.autoMode ?? 'off')
+          : 'off',
+      triggerRatio:
+        params.config.compaction?.triggerRatio ??
+        params.config.compaction?.compactRatio ??
+        params.config.compaction?.softRatio,
+      triggerTokens: params.config.compaction?.triggerTokens,
       recentTurns: params.config.compaction?.recentTurns,
       cooldownTurns: params.config.compaction?.cooldownTurns,
       minimumReductionRatio: params.config.compaction?.minimumReductionRatio,
       maxSummaryTokens: params.config.compaction?.maxSummaryTokens,
     });
-    if (automaticCompaction.action === 'block') {
-      throw new Error(automaticCompaction.reason);
-    }
     if (automaticCompaction.action === 'request_compaction') {
       compactionMetrics.recordRequested();
       const envDigest = digestProjectionEnvironment({
@@ -519,78 +520,15 @@ export async function invokeRuntimeModel(params: {
         },
       ];
     }
-    let response: Awaited<ReturnType<typeof invokeBoundModel>>;
-    try {
-      response = await invokeBoundModel({
-        model: params.model,
-        tools,
-        messages: projection.providerMessages,
-        signal: params.signal,
-        maxOutputTokens:
-          positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
-          modelCapabilities.maxOutputTokens,
-      });
-    } catch (error) {
-      if (
-        flags.contextCompactionV2 &&
-        flags.contextCompactionAutoV1 &&
-        isProviderContextOverflow(error) &&
-        state.context.overflowRecoveryTurnId !== state.turn.turnId
-      ) {
-        compactionMetrics.recordRequested();
-        compactionMetrics.recordOverflowRecovery();
-        const envDigest = digestProjectionEnvironment({
-          serializedTools,
-          activeSkillInstructions: activeSkillInstr,
-          workflowSkills: workflowSkillDescriptors,
-        });
-        return [
-          ...retryEvents,
-          contextMetricsEvent,
-          {
-            type: 'context.compaction_requested',
-            compactionId: crypto.randomUUID(),
-            reason: 'overflow_recovery',
-            requestedAtRevision: state.revision,
-            requestedAtTurnId: state.turn.turnId,
-            force: true,
-            estimate: preflight.estimate,
-            projectionEnvironmentDigest: envDigest,
-          },
-        ];
-      }
-      if (
-        flags.contextCompactionV2 &&
-        flags.contextCompactionAutoV1 &&
-        isProviderContextOverflow(error) &&
-        state.context.overflowRecoveryTurnId === state.turn.turnId
-      ) {
-        // PR 6: Emit a durable hard_blocked event instead of a plain Error.
-        // REVIEW-FIX: Use a proper SHA-256 content digest, not a token count.
-        const blockDigest = createHash('sha256')
-          .update(
-            JSON.stringify({
-              reason: 'overflow_recovery_failed',
-              turnId: state.turn.turnId,
-              totalInputTokens: preflight.estimate?.totalInputTokens ?? 0,
-            }),
-          )
-          .digest('hex');
-        return [
-          ...retryEvents,
-          contextMetricsEvent,
-          {
-            type: 'context.hard_blocked' as const,
-            reason: 'overflow_recovery_failed' as const,
-            sourceDigest: blockDigest,
-            message:
-              'Provider context overflow persisted after compaction recovery. Use /compact reset or start a new session.',
-            createdAtTurnId: state.turn.turnId,
-          },
-        ];
-      }
-      throw error;
-    }
+    const response = await invokeBoundModel({
+      model: params.model,
+      tools,
+      messages: projection.providerMessages,
+      signal: params.signal,
+      maxOutputTokens:
+        positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
+        modelCapabilities.maxOutputTokens,
+    });
     const toolCalls =
       response.tool_calls?.map((call) => ({
         id: call.id ?? crypto.randomUUID(),

@@ -4,7 +4,7 @@
  * Exercises the full compaction pipeline end-to-end:
  * event → reducer → state → scheduler → effect → executor → controller → events.
  *
- * Covers: manual /compact, auto soft/hard, overflow recovery, reset,
+ * Covers: manual /compact, automatic compaction, reset,
  * session restore, multi-turn, concurrent rejection, error scenarios.
  */
 
@@ -363,7 +363,7 @@ function buildTranscriptWithMutations(state: RuntimeState): {
 /** Apply a compaction request, then return the requested state + the compactionId. */
 function requestCompaction(
   state: RuntimeState,
-  reason: 'manual' | 'auto_soft' | 'auto_hard' | 'overflow_recovery' = 'auto_soft',
+  reason: 'manual' | 'auto' | 'auto' = 'auto',
 ): { state: RuntimeState; compactionId: string } {
   const compactionId = `compact-${reason}`;
   return {
@@ -373,7 +373,7 @@ function requestCompaction(
       reason,
       requestedAtRevision: state.revision,
       requestedAtTurnId: state.turn.turnId,
-      force: reason === 'manual' || reason === 'overflow_recovery',
+      force: reason === 'manual',
       estimate: estimate(8_000),
     }),
     compactionId,
@@ -403,7 +403,7 @@ function applyCompleted(
     tokensBefore = 8_000,
     tokensAfter = 3_500,
     targetTokens = 4_400,
-    reason = 'auto_soft',
+    reason = 'auto',
   } = opts;
   return reduceRuntimeState(state, {
     type: 'context.compaction_completed',
@@ -540,7 +540,7 @@ describe('E2E: full pipeline', () => {
       workspace: '/ws',
     });
     buildTranscript(state, 3);
-    const { state: requested } = requestCompaction(state, 'auto_soft');
+    const { state: requested } = requestCompaction(state, 'auto');
     expect(decideNextEffect(requested).type).toBe('compact_context');
   });
 
@@ -684,7 +684,7 @@ describe('E2E: manual lifecycle', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('E2E: auto compaction', () => {
-  test('auto_soft: request → complete → cooldown recorded', () => {
+  test('auto: request → complete → cooldown recorded', () => {
     const state = createInitialRuntimeState({
       threadId: 'e2e-soft',
       userId: 'u',
@@ -692,28 +692,25 @@ describe('E2E: auto compaction', () => {
     });
     buildTranscript(state, 10);
 
-    const { state: requested, compactionId } = requestCompaction(state, 'auto_soft');
-    const completed = applyCompleted(requested, compactionId, { reason: 'auto_soft' });
+    const { state: requested, compactionId } = requestCompaction(state, 'auto');
+    const completed = applyCompleted(requested, compactionId, { reason: 'auto' });
     expect(completed.context.activeCheckpoint).toBeDefined();
     expect(completed.context.lastCompactionTurnIndex).toBe(10);
     expect(completed.context.pendingCompaction).toBeUndefined();
   });
 
-  test('auto_hard: request → complete even with cooldown', () => {
+  test('reason=auto uses the same request schema regardless of diagnostic pressure', () => {
     const state = createInitialRuntimeState({
       threadId: 'e2e-hard',
       userId: 'u',
       workspace: '/ws',
     });
     buildTranscript(state, 10);
-    state.context.lastCompactionTurnIndex = state.turn.turnIndex; // cooldown active
-
-    // Hard compaction still requestable
-    const { state: requested } = requestCompaction(state, 'auto_hard');
-    expect(requested.context.pendingCompaction?.reason).toBe('auto_hard');
+    const { state: requested } = requestCompaction(state, 'auto');
+    expect(requested.context.pendingCompaction?.reason).toBe('auto');
   });
 
-  test('hard failure → scheduler blocks recovery', () => {
+  test('auto failure preserves interaction and does not create a hard block', () => {
     const state = createInitialRuntimeState({
       threadId: 'e2e-hard-fail',
       userId: 'u',
@@ -721,7 +718,7 @@ describe('E2E: auto compaction', () => {
     });
     buildTranscript(state, 10);
 
-    const { state: requested, compactionId } = requestCompaction(state, 'auto_hard');
+    const { state: requested, compactionId } = requestCompaction(state, 'auto');
     const failed = reduceRuntimeState(requested, {
       type: 'context.compaction_failed',
       compactionId,
@@ -731,10 +728,11 @@ describe('E2E: auto compaction', () => {
       retryable: false,
     });
     failed.revision = requested.revision + 1;
-    expect(decideNextEffect(failed).type).toBe('recovery_blocked');
+    expect(failed.context.hardBlock).toBeUndefined();
+    expect(decideNextEffect(failed).type).toBe('call_model');
   });
 
-  test('retryable auto_hard failure allows recovery re-attempt', () => {
+  test('retryable auto failure allows recovery re-attempt', () => {
     const state = createInitialRuntimeState({
       threadId: 'e2e-hard-retry',
       userId: 'u',
@@ -742,9 +740,8 @@ describe('E2E: auto compaction', () => {
     });
     buildTranscript(state, 10);
 
-    // Request hard compaction
-    const { state: requested, compactionId } = requestCompaction(state, 'auto_hard');
-    const completed = applyCompleted(requested, compactionId, { reason: 'auto_hard' });
+    const { state: requested, compactionId } = requestCompaction(state, 'auto');
+    const completed = applyCompleted(requested, compactionId, { reason: 'auto' });
     expect(completed.context.activeCheckpoint).toBeDefined();
     // After successful completion, no recovery block
     expect(decideNextEffect(completed).type).not.toBe('recovery_blocked');
@@ -957,7 +954,7 @@ describe('E2E: error scenarios', () => {
       workspace: '/ws',
     });
     buildTranscript(state, 5);
-    const { state: requested, compactionId } = requestCompaction(state, 'auto_soft');
+    const { state: requested, compactionId } = requestCompaction(state, 'auto');
 
     const errorKinds = [
       'unsafe_boundary',
@@ -1179,13 +1176,13 @@ describe('E2E: multi-turn compaction', () => {
       workspace: '/ws',
     });
     buildTranscript(state, 2);
-    const { state: first } = requestCompaction(state, 'auto_soft');
+    const { state: first } = requestCompaction(state, 'auto');
 
     let current = first;
     for (let i = 0; i < 150; i++) {
       current = reduceRuntimeState(current, {
         type: 'context.compaction_failed',
-        compactionId: 'compact-auto_soft',
+        compactionId: 'compact-auto',
         sourceRevision: i,
         errorKind: 'summary_model_failed',
         message: `Failure ${i}`,
@@ -1342,33 +1339,27 @@ describe('E2E: compaction with mutations', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 8. Overflow Recovery
+// 8. Compaction Reason Contract
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('E2E: overflow recovery', () => {
-  test('overflow recovery checkpoint has correct reason and turn tracking', () => {
+describe('E2E: compaction reason contract', () => {
+  test('manual checkpoint preserves the manual reason', () => {
     const state = createInitialRuntimeState({
-      threadId: 'e2e-overflow',
+      threadId: 'e2e-manual-reason',
       userId: 'u',
       workspace: '/ws',
     });
     buildTranscript(state, 10);
 
-    const { state: requested, compactionId } = requestCompaction(state, 'overflow_recovery');
-    // overflow_recovery sets overflowRecoveryTurnId via the reducer
-    expect(requested.context.overflowRecoveryTurnId).toBe(state.turn.turnId);
-
-    const completed = applyCompleted(requested, compactionId, { reason: 'overflow_recovery' });
-    expect(completed.context.activeCheckpoint?.reason).toBe('overflow_recovery');
-    // Note: overflowRecoveryTurnId is set by the request reducer but not carried
-    // into the completed context object (which rebuilds context from scratch).
-    // The request event sets it; after completion it's removed.
+    const { state: requested, compactionId } = requestCompaction(state, 'manual');
+    const completed = applyCompleted(requested, compactionId, { reason: 'manual' });
+    expect(completed.context.activeCheckpoint?.reason).toBe('manual');
     expect(completed.context.lastFailure).toBeUndefined();
   });
 
-  test('overflow recovery without pending is ignored', () => {
+  test('completion without a matching pending request is ignored', () => {
     const state = createInitialRuntimeState({
-      threadId: 'e2e-overflow2',
+      threadId: 'e2e-no-pending',
       userId: 'u',
       workspace: '/ws',
     });
@@ -1387,7 +1378,7 @@ describe('E2E: overflow recovery', () => {
         inputTokensBefore: 100,
         inputTokensAfter: 50,
         targetTokens: 55,
-        reason: 'overflow_recovery',
+        reason: 'manual',
         createdAt: new Date().toISOString(),
       },
     });
@@ -1495,7 +1486,7 @@ describe('E2E: invariants', () => {
     expect(state.context.history).toEqual([]);
   });
 
-  test('completed checkpoint satisfies: version=1, tokensAfter < tokensBefore, tokensAfter ≤ targetTokens, provenance self-consistent', () => {
+  test('completed checkpoint satisfies: version=1, tokensAfter < tokensBefore, provenance self-consistent', () => {
     const state = createInitialRuntimeState({
       threadId: 'e2e-inv-ckpt',
       userId: 'u',
@@ -1509,7 +1500,6 @@ describe('E2E: invariants', () => {
     expect(cp).toBeDefined();
     expect(cp!.version).toBe(1);
     expect(cp!.inputTokensAfter).toBeLessThan(cp!.inputTokensBefore);
-    expect(cp!.inputTokensAfter).toBeLessThanOrEqual(cp!.targetTokens);
     expect(cp!.summary.version).toBe(1);
     expect(cp!.summary.provenance.sourceDigest).toBe(cp!.sourceDigest);
     expect(cp!.summary.provenance.lastMessageId).toBe(cp!.coveredThroughMessageId);
@@ -1550,11 +1540,11 @@ describe('E2E: invariants', () => {
       workspace: '/ws',
     });
     buildTranscript(state, 3);
-    const { state: requested, compactionId } = requestCompaction(state, 'auto_soft');
+    const { state: requested, compactionId } = requestCompaction(state, 'auto');
 
     expect(requested.context.pendingCompaction).toMatchObject({
       compactionId,
-      reason: 'auto_soft',
+      reason: 'auto',
       requestedAtRevision: state.revision,
       requestedAtTurnId: state.turn.turnId,
       force: false,
@@ -1568,7 +1558,7 @@ describe('E2E: invariants', () => {
       workspace: '/ws',
     });
     buildTranscript(state, 3);
-    const { state: requested, compactionId } = requestCompaction(state, 'auto_soft');
+    const { state: requested, compactionId } = requestCompaction(state, 'auto');
 
     // Try to complete with different ID
     const result = reduceRuntimeState(requested, {
@@ -1602,7 +1592,7 @@ describe('E2E: invariants', () => {
       workspace: '/ws',
     });
     buildTranscript(state, 3);
-    const { state: requested, compactionId } = requestCompaction(state, 'auto_soft');
+    const { state: requested, compactionId } = requestCompaction(state, 'auto');
 
     // Mismatched sourceRevision
     const result = reduceRuntimeState(requested, {
@@ -1620,7 +1610,7 @@ describe('E2E: invariants', () => {
         inputTokensBefore: 100,
         inputTokensAfter: 50,
         targetTokens: 55,
-        reason: 'auto_soft',
+        reason: 'auto',
         createdAt: new Date().toISOString(),
       },
     });

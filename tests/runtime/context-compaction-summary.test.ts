@@ -204,10 +204,7 @@ function validSummaryFromRequest(request: ContextSummaryGenerationRequest) {
   };
 }
 
-function pending(
-  state: RuntimeState,
-  reason: 'auto_soft' | 'auto_hard' | 'manual' | 'overflow_recovery' = 'auto_hard',
-) {
+function pending(state: RuntimeState, reason: 'auto' | 'auto' | 'manual' = 'auto') {
   return {
     compactionId: 'compact-summary',
     reason,
@@ -285,7 +282,27 @@ describe('structured context summary', () => {
     expect(modes).toEqual(['summary', 'repair']);
     expect(checkpoint.summary.provenance.sourceDigest).toBe(checkpoint.sourceDigest);
     expect(checkpoint.coveredThroughMessageId).toBe('message-3');
-    expect(checkpoint.inputTokensAfter).toBeLessThanOrEqual(checkpoint.targetTokens);
+    expect(checkpoint.inputTokensAfter).toBeLessThan(checkpoint.inputTokensBefore);
+  });
+
+  test('manual and auto accept the same useful reduction even above target ratio', async () => {
+    const state = historicalState();
+    const compactor = createStructuredContextCompactor({
+      recentTurns: 1,
+      maxSummaryInputTokens: 100_000,
+      targetRatio: 0.01,
+      generate: async (request) => validSummaryFromRequest(request),
+    });
+
+    for (const reason of ['manual', 'auto'] as const) {
+      const checkpoint = await compactor({
+        state,
+        pending: pending(state, reason),
+        sourceRevision: state.revision,
+      });
+      expect(checkpoint.inputTokensAfter).toBeLessThan(checkpoint.inputTokensBefore);
+      expect(checkpoint.inputTokensAfter).toBeGreaterThan(checkpoint.targetTokens);
+    }
   });
 
   test('rejects a schema-valid summary that omits a mandatory fact', async () => {
@@ -309,7 +326,7 @@ describe('structured context summary', () => {
       },
     });
     await expect(
-      compactor({ state, pending: pending(state, 'auto_soft'), sourceRevision: state.revision }),
+      compactor({ state, pending: pending(state, 'auto'), sourceRevision: state.revision }),
     ).rejects.toMatchObject({
       kind: 'missing_mandatory_facts',
     });
@@ -337,7 +354,7 @@ describe('structured context summary', () => {
       },
     });
     await expect(
-      compactor({ state, pending: pending(state, 'auto_soft'), sourceRevision: state.revision }),
+      compactor({ state, pending: pending(state, 'auto'), sourceRevision: state.revision }),
     ).rejects.toMatchObject({ kind: 'invalid_evidence' });
   });
 
@@ -1863,7 +1880,7 @@ describe('PR 5 — summary evidence validation', () => {
         status: 'normal' as const,
       },
     };
-    // Use 'manual' to avoid the auto_hard chunk fallback (chunk mode produces a
+    // Use 'manual' to avoid the auto chunk fallback (chunk mode produces a
     // differently-shaped payload that lacks the 'objective' field).
     await expect(
       compactor({ state, pending: pending(state, 'manual'), sourceRevision: state.revision }),
