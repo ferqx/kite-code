@@ -5,6 +5,25 @@ import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
 
 describe('decideNextEffect', () => {
+  test('stops the current turn after auto compaction failure and retries admission next turn', () => {
+    const state = createInitialRuntimeState({ threadId: 'compact', userId: 'u', workspace: '/' });
+    const failedTurnId = state.turn.turnId;
+    state.context.lastFailure = {
+      compactionId: 'failed-auto',
+      sourceRevision: state.revision,
+      errorKind: 'summary_model_failed',
+      message: 'provider rejected summary',
+      retryable: true,
+      reason: 'auto',
+      requestedAtTurnId: failedTurnId,
+    };
+
+    expect(decideNextEffect(state)).toEqual({ type: 'stop' });
+
+    const nextTurn = reduceRuntimeState(state, { type: 'turn.started', turnId: 'next-turn' });
+    expect(decideNextEffect(nextTurn)).toEqual({ type: 'call_model' });
+  });
+
   test('gates model execution on the first required provider admission', () => {
     const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
     const record = {

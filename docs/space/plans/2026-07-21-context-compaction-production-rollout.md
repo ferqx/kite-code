@@ -2,13 +2,15 @@
 
 创建日期：2026-07-21
 修订日期：2026-07-22
-状态：active（PR-0/PR-1/PR-1A 已于 2026-07-22 完成；下一步 PR-2）
+状态：archived（PR-0/PR-1/PR-1A/PR-2/PR-3/PR-4/PR-5/PR-6/PR-7 已于 2026-07-22 完成；验证记录见 `docs/space/execution/completed/2026-07-22-context-compaction-production-rollout.md`）
 优先级：P0
 基线分支：`compact`
 基线提交：`8b9d33a5cb039c9faf29e46a008ac27136b7c4e0`
 复核提交：`46bf50119267154c3b3ab31c71a088311c267ce4`
 替代：`2026-07-20-context-compaction-productionization.md`、`2026-07-20-context-compaction-refinement.md`
 关联：`docs/adr/0021-context-compaction-checkpoint.md`、`docs/adr/0022-context-compaction-single-narrative.md`、`docs/adr/0023-model-capabilities-no-builtin-catalog.md`、`docs/adr/0024-context-compaction-manual-auto-only.md`、`docs/active/model-provider-boundary.md`、`docs/active/plan-state-reminder.md`、`docs/active/six-concept-runtime-architecture.md`、`docs/active/tui-run-status-bar.md`、`docs/active/real-model-test-boundary.md`
+
+归档后首版定稿（2026-07-23）：最终产品行为收敛为单一会话总结机制。M1 工具结果投影折叠、固定 `recentTurns` 和 bounded safe prefix 已移除。首版假设所选模型的 `contextWindowTokens` 配置正确；live 自动压缩在完整请求达到可用输入预算的 90% 时先于普通模型调用执行，summary 直接使用当前对话的全部安全历史。自动压缩失败或取消时不得在同一 turn 回落到普通模型调用；下一用户 turn 若仍达到阈值，则重新尝试一次自动压缩。Provider 拒绝 summary（包括配置窗口大于服务商真实窗口导致的上下文超限）不触发清理、分块、重试或错误文本推断，只提示用户检查模型上下文配置或执行 `/clear`。本文后续与该定稿冲突的段落仅记录实施时的历史设计，不再代表当前行为；当前规则以关联的 `docs/active/` 文档为准。
 
 ## 1. 决策摘要
 
@@ -17,13 +19,12 @@
 ```text
 不可变 transcript
 → 选择完整的 settled turn/tool boundary
-→ 确定性折叠旧工具输出
 → 使用当前对话模型执行一次 Markdown 总结
 → 验证并持久化轻量 checkpoint
 → 后续投影 summary + live tail + 当前 RuntimeState
 ```
 
-自动压缩和手动 `/compact` 只在触发来源以及可选的用户侧重点数据上不同，执行同一套 boundary 术语（安全边界）、fold 术语（确定性折叠）、summary 术语（历史总结）、validation 术语（候选验证）、event/effect 术语（事件与副作用）和 checkpoint 术语（派生检查点）逻辑。最终原因类型只保留：
+自动压缩和手动 `/compact` 只在触发来源、当前 turn 保护以及可选的用户侧重点数据上不同，执行同一套 boundary 术语（安全边界）、summary 术语（历史总结）、validation 术语（候选验证）、event/effect 术语（事件与副作用）和 checkpoint 术语（派生检查点）逻辑。最终原因类型只保留：
 
 ```ts
 type ContextCompactionReason = "manual" | "auto";
@@ -39,6 +40,8 @@ type ContextCompactionReason = "manual" | "auto";
 4. manual 与 auto 都必须展示 preparing/summarizing/validating 进度，并对 completed/failed/cancelled 给出一次明确的用户提示；这些 UI notice 不进入 transcript 或后续模型上下文；
 5. active checkpoint 通过 Runtime event + snapshot 持久化；退出 TUI 或进程重启后无模型调用地恢复同一 summary frame 和 live tail，不重复压缩或提示；
 6. Footer 当前 context 统计来自恢复后/当前的统一 `ContextProjection`，压缩完成后立即切换到 fresh after/current 值，不能使用累计 usage 或模型名静态窗口代替。
+7. live 自动压缩默认在可用输入预算的 90% 触发；失败或取消时停止本 turn，下一用户 turn 重新 preflight，仍超阈值则再次尝试。
+8. summary Provider 请求失败直接收敛为一次失败提示；不清理工具输出、不分块、不自动重试，并提示检查 `contextWindowTokens` 或执行 `/clear`。
 
 首版明确不实现：
 
@@ -827,6 +830,8 @@ shouldCompact(
 
 ### PR-2：先固定边界、environment lease 与 correctness block
 
+状态：completed（2026-07-22）
+
 交付：
 
 - bounded safe prefix 与完整 turn/tool-pair property tests；
@@ -839,6 +844,8 @@ shouldCompact(
 退出：transcript 不变、无 orphan pair；revision/environment stale 结果不产生 RuntimeEvent 或 checkpoint；token pressure 不产生 block；只有可复现的 Runtime invariant failure 才能阻断。后续 narrative 切换直接继承已验证的 lease/boundary/correctness safety。
 
 ### PR-3：单次 Markdown summary 与轻量 checkpoint
+
+状态：completed（2026-07-22）
 
 交付：
 
@@ -856,6 +863,8 @@ shouldCompact(
 
 ### PR-4：删除内置模型能力目录
 
+状态：completed（2026-07-22）
+
 交付：
 
 - 删除 `BUILTIN_MODEL_CAPABILITIES`；
@@ -871,6 +880,8 @@ shouldCompact(
 退出：模型名称不再影响 capability；unknown window 不显示百分比、不运行 ratio auto；任何 window source 都不产生 token-driven hard block；manual `/compact` 不受影响。
 
 ### PR-5：序列化与恢复
+
+状态：completed（2026-07-22）
 
 交付：
 
@@ -888,6 +899,8 @@ shouldCompact(
 
 ### PR-6：进度、遥测与本地 debug
 
+状态：completed（2026-07-22）
+
 交付：
 
 - preparing/summarizing/validating 非持久化进度；
@@ -904,6 +917,8 @@ shouldCompact(
 
 ### PR-7：Required CI 与真实 Provider 套件
 
+状态：completed（2026-07-22）
+
 新增固定 job：
 
 ```text
@@ -916,11 +931,9 @@ tui-system: bun run test:tui:system
 
 `quality` 中的 docs 明确同时执行 `bun run check:docs` 与 `bun run check:docs-impact`。PR-7 同步把 `test:e2e` 收敛为只运行 `tests/e2e/local/`；TUI scenarios 只由 `test:tui:system` 运行，避免重复且符合真实模型测试边界。
 
-真实模型测试放在 `tests/e2e/live/model/*.live.ts`，通过显式 `bun run` wrapper 执行，不进入默认测试发现。至少覆盖：manual direct summary、400 后手动压缩、空/截断/timeout、增量压缩、stale 和 auto。
+真实模型测试放在 `tests/e2e/live/model/*.live.ts`，通过显式 `bun run` wrapper 执行，不进入默认测试发现。真实 Provider 套件覆盖 Provider 敏感的 manual direct summary 与增量压缩；400 后手动压缩、空/截断/timeout、stale 和 auto 等确定性控制语义由 `test:mock` contract 套件覆盖，避免消耗真实配额重复验证本地分支。
 
-CI 增加第 10 节的残留符号扫描；出现 structured summary、overflow recovery、builtin capability 或 legacy compaction symbol 时直接失败，不允许用 ignored/skip/deprecated wrapper 绕过。
-
-仓库外必须配置 GitHub ruleset，使最终 job 名成为 required checks。
+CI 增加第 10 节的残留符号扫描；出现 structured summary、overflow recovery、builtin capability 或 legacy compaction symbol 时直接失败，不允许用 ignored/skip/deprecated wrapper 绕过。仓库内 workflow 和固定 job 名是本计划的 CI 交付边界，不要求配置仓库外 GitHub ruleset。
 
 ## 12. 测试矩阵
 
@@ -1024,7 +1037,7 @@ CI 增加第 10 节的残留符号扫描；出现 structured summary、overflow 
 
 ### A. 代码正确性
 
-完成 PR-0、PR-1、PR-1A 和 PR-2 至 PR-7；required checks 在同一 SHA 全绿；仓库默认 auto flag=false、rollout mode=off。灰度环境只对受控 cohort 显式覆盖，不改变默认配置。
+完成 PR-0、PR-1、PR-1A 和 PR-2 至 PR-7；仓库内 Required workflow 的全部 job 在同一 SHA 全绿；仓库默认 auto flag=false、rollout mode=off。灰度环境只对受控 cohort 显式覆盖，不改变默认配置。
 
 ### B. Manual canary
 
@@ -1110,7 +1123,7 @@ Shadow evaluator 只执行本地 trigger、M1 后 source size、safe boundary �
 - `auto_soft`、`auto_hard`、`soft_hard` 或 ratio-driven hard block 重新进入最终 schema；
 - 文件预读、fact graph、chunk/merge 被重新塞回 V1 必选范围；
 - live Provider 行为未验证或指标缺少版本、窗口、分子与分母；
-- required checks/ruleset 未生效。
+- 仓库内 Required workflow 缺失或任一固定 job 未通过。
 
 ## 16. 验证命令
 

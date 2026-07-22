@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-仓库当前没有注册 `test:real` package script，也没有受维护的真实模型测试文件。默认 `bun test` 只应运行确定性的本地/mock 测试；`test:mock` 明确运行当前 context compaction Runtime E2E，同样不访问真实 provider。文档、PR 或完成记录不得把 mock model 集成测试表述为真实 provider 验证。
+仓库注册了显式 opt-in 的 `test:model:live` package script，用于真实 Provider 的 context compaction direct/incremental summary 验证。默认 `bun test` 只运行确定性的本地/mock 测试；`test:mock` 明确运行当前 context compaction Runtime E2E，同样不访问真实 provider。未实际执行 live runner 时，文档、PR 或完成记录不得表述为真实 provider 已验证。
 
 ## E2E 目录归类
 
@@ -21,6 +21,8 @@
 - `live/model/`：消耗真实模型 Provider 配额的显式 opt-in 套件，只能使用 `*.live.ts`。当前只有边界说明，没有受维护的测试文件。
 
 `test:e2e` 必须显式指向 `tests/e2e/local/`，不得以整个 `tests/e2e/` 为目标。TUI PTY 继续位于 `tests/tui-system/scenarios/`，因为它有独立的串行 harness 和测试标准。公网 MCP 验证不等于真实模型验证。
+
+Required CI 固定分为 `quality`、`unit`、`compaction-contract`、`runtime-e2e` 与 `tui-system`。其中 `runtime-e2e` 只执行 `test:e2e` 的本地隔离套件，TUI scenarios 只由 `tui-system` 执行；`quality` 同时运行文档完整性、文档影响和 compaction legacy symbol 门禁。
 
 `*.live.ts` 是独立 runner，必须由显式 package script 使用 `bun run` 调用；不能用 `bun test` 调用，因为 Bun 的测试发现只执行测试命名文件。
 

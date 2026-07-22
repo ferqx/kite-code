@@ -11,7 +11,11 @@ import { updateAutoCompactionGuard } from '@/core/model/context-compaction-decis
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
-import { isContextHardBlockReason, normalizeContextCompactionReason } from './context-compaction';
+import {
+  createContextCorrectnessBlock,
+  isContextHardBlockReason,
+  normalizeContextCompactionReason,
+} from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import {
@@ -165,6 +169,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         message: event.message,
         retryable: event.retryable,
         reason,
+        requestedAtTurnId:
+          event.requestedAtTurnId ?? state.context.pendingCompaction.requestedAtTurnId,
       };
       // Automatic failures may update the breaker, but never create or refresh
       // a durable Runtime correctness block.
@@ -211,13 +217,23 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         ...state,
         context: {
           ...state.context,
-          hardBlock: {
+          hardBlock: createContextCorrectnessBlock({
             reason: event.reason,
             sourceDigest: event.sourceDigest,
             message: event.message,
             createdAtTurnId: event.createdAtTurnId,
-          },
+          }),
         },
+      };
+    }
+
+    case 'context.hard_block_cleared': {
+      const block = state.context.hardBlock;
+      if (!block || block.reason !== event.reason || block.sourceDigest !== event.sourceDigest)
+        return state;
+      return {
+        ...state,
+        context: { ...state.context, hardBlock: undefined },
       };
     }
 
@@ -1429,21 +1445,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'model.cache_metrics':
       return state;
     case 'model.context_metrics':
-      return {
-        ...state,
-        context: {
-          ...state.context,
-          lastPreflight: {
-            estimate: event.estimate,
-            usableInputTokens: event.usableInputTokens,
-            reservedOutputTokens: event.reservedOutputTokens ?? 0,
-            providerSafetyMarginTokens: event.providerSafetyMarginTokens ?? 0,
-            utilization: event.utilization,
-            status: event.status,
-            targetTokens: event.targetTokens,
-          },
-        },
-      };
+      return state;
     case 'run.completed': {
       const active = getActiveTask(state);
       if (!active) return state;

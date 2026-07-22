@@ -16,12 +16,13 @@ import {
 } from '@/core/execution/reviewer';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { McpRuntimeProvider } from '@/core/mcp';
+import type { CompactionReporter } from '@/core/model/compaction-metrics';
 import {
   createModelContextSummaryGenerator,
-  createStructuredContextCompactor,
+  createNarrativeContextCompactor,
 } from '@/core/model/compaction-summary';
+import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import type { SupportedChatModel } from '@/core/model/factory';
-import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import {
@@ -47,6 +48,9 @@ export interface RuntimeExecutorDependencies {
   signal?: AbortSignal;
   subagentEventSink?: SubAgentEventSink;
   contextCompactor?: ContextCompactor;
+  /** Owned and flushed by the application composition root. */
+  compactionReporter?: CompactionReporter;
+  onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
 }
 
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
@@ -97,38 +101,26 @@ export function createRuntimeEffectExecutor(
       : undefined;
   const contextCompactor =
     dependencies.contextCompactor ??
-    createStructuredContextCompactor({
+    createNarrativeContextCompactor({
       generate: createModelContextSummaryGenerator({
         model: dependencies.model,
         signal: dependencies.signal,
       }),
-      recentTurns: dependencies.config.compaction?.recentTurns,
       maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
       maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
-      targetRatio: dependencies.config.compaction?.targetRatio,
-      modelCapabilities: resolveModelCapabilities({
-        config: dependencies.config,
-        adapter: dependencies.model.capabilityMetadata,
-      }),
-      requestMaxOutputTokens:
-        typeof dependencies.config.modelKwargs?.maxOutputTokens === 'number'
-          ? dependencies.config.modelKwargs.maxOutputTokens
-          : typeof dependencies.config.modelKwargs?.maxTokens === 'number'
-            ? dependencies.config.modelKwargs.maxTokens
-            : undefined,
-      providerSafetyRatio: dependencies.config.compaction?.providerSafetyRatio,
+      maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
     });
   return async (effect, state, emit) => {
     if (effect.type === 'compact_context') {
-      const projectionEnvironment = resolveRuntimeContextProjectionEnvironment(
-        { ...dependencies, subagentEventSink },
-        state,
-      );
+      const resolveProjectionEnvironment = () =>
+        resolveRuntimeContextProjectionEnvironment({ ...dependencies, subagentEventSink }, state);
       return executeContextCompaction({
         state,
         compactionId: effect.compactionId,
         compact: contextCompactor,
-        projectionEnvironment,
+        resolveProjectionEnvironment,
+        reporter: dependencies.compactionReporter,
+        onProgress: dependencies.onCompactionProgress,
       });
     }
     if (effect.type === 'call_model') {
@@ -144,6 +136,7 @@ export function createRuntimeEffectExecutor(
         subagentEventSink,
         signal: dependencies.signal,
         emitRuntimeEvent: emit,
+        compactionReporter: dependencies.compactionReporter,
       });
     }
     if (effect.type === 'run_tools') {

@@ -190,6 +190,8 @@ export interface TuiState {
   currentThoughtSummaryId?: number;
   /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
   interactionMode: 'accept_edits' | 'auto' | 'full';
+  /** Deduplicates durable terminal compaction notices during replay. */
+  terminalCompactionNotices?: Record<string, 'completed' | 'failed' | 'cancelled'>;
 }
 
 export type InterruptState =
@@ -224,9 +226,7 @@ export interface StatusState {
   modelName: string;
   thinkingMode: string;
   retryState: RetryState | null;
-  /** Context compaction info for StatsLine display */
-  compactionBefore?: number;
-  compactionAfter?: number;
+  contextSnapshot?: import('@/core/model/context-status').ContextStatusSnapshot;
 }
 
 export interface SessionSnapshot {

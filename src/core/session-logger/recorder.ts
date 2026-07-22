@@ -443,6 +443,10 @@ export function recordRuntimeEvent(
       base.attributes['gen_ai.request.model'] = event.modelName;
       base.attributes['kite_code.context.status'] = event.status;
       base.attributes['kite_code.context.input_tokens'] = event.totalInputTokens;
+      if (event.contextWindowSource)
+        base.attributes['kite_code.context.window_source'] = event.contextWindowSource;
+      if (event.tokenizerSource)
+        base.attributes['kite_code.context.tokenizer_source'] = event.tokenizerSource;
       if (event.usableInputTokens != null)
         base.attributes['kite_code.context.usable_input_tokens'] = event.usableInputTokens;
       if (event.utilization != null)

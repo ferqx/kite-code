@@ -63,9 +63,11 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 }
 ```
 
-显式模型条目优先于内置模型目录和兼容 `modelKwargs`。未知模型不会获得假定上下文窗口；此时 Runtime 仍可调用模型，但上下文 utilization 显示为 unknown，并对 Capability disclosure 使用保守预算。
+模型 capability 的每个字段只按显式模型条目、adapter runtime metadata 和兼容 `modelKwargs` 依次解析。模型名称和默认模型列表不提供能力；未知窗口仍允许 Runtime 调用模型，但上下文 utilization 显示为 unknown，并对 Capability disclosure 使用保守预算。
 
-自动 M2 需要默认关闭的 `features.contextCompactionAutoV1` 与 `compaction.autoMode` 共同开启。`autoMode` 只允许 `off | shadow | live`；未配置时为 `off`。`shadow` 只计算 trigger eligibility 术语（触发资格），不调用摘要模型、不写 checkpoint 术语（检查点）；`live` 命中 `triggerRatio` 或 `triggerTokens` 后产生 `reason=auto`。`compaction` 还可配置 `warningRatio`、`compactRatio`、兼容字段 `softRatio`、`hardRatio`、`targetRatio`、`minimumReductionRatio`、`cooldownTurns`、`recentTurns`、`maxSummaryTokens`、`maxSummaryInputTokens`、`providerSafetyRatio`、`maxAutoCompactionsPerWindow`、`autoCompactionWindowTurns`、`maxConsecutiveLowGain`。其中 pressure/target ratio 术语（压力/目标比例）只作诊断或触发启发式，不构成 Provider admission 术语（模型供应商接纳）门禁。当前 summary request 术语（摘要请求）复用主模型（`tools: {}`，temperature 0），自定义指令作为数据字段传入。
+自动会话总结需要默认关闭的 `features.contextCompactionAutoV1` 与 `compaction.autoMode` 共同开启。`autoMode` 只允许 `off | shadow | live`；未配置时为 `off`。`shadow` 只计算 trigger eligibility 术语（触发资格），不调用摘要模型、不写 checkpoint 术语（检查点）；`live` 默认在完整请求达到可用输入预算的 90% 时产生 `reason=auto`，也可由 `triggerRatio` 覆盖或使用显式 `compactAfterEstimatedTokens` 绝对策略。自动压缩失败或取消时当前用户请求不会继续调用普通模型；下一用户 turn 会重新预检并在仍超阈值时重试。Provider 拒绝 summary 时提示检查 `contextWindowTokens` 或执行 `/clear`，不自动清理、分块或重试。`compaction` 可配置 `warningRatio`、`compactRatio`、`hardRatio`、`minimumReductionRatio`、`cooldownTurns`、`maxSummaryTokens`、`maxSummaryInputTokens`、`maxNarrativeTokens` 和 `providerSafetyRatio`；`recentTurns`、`minimumIncrementalHeadroomTokens`、`softRatio`、`targetRatio` 与未消费的 breaker 配置已删除。模型 capability 只来自所选模型的显式字段、adapter runtime metadata 或 `modelKwargs` 兼容字段，并按字段记录 source；模型名称和默认列表不提供窗口、tokenizer、usage 或 cache 能力。未知窗口不显示百分比、不触发 ratio auto。当前 summary request 复用主模型（`tools: {}`，temperature 0，SDK retry 0），自定义指令作为数据字段传入。
+
+Rollout 可额外配置 `cohortSalt` 与 `livePercentage`：相同 salt/session 始终进入相同 bucket，live 百分比外按 shadow 执行，master flag 关闭恒为 off。显式 `localDebug: { enabled: true, directory }` 只写脱敏压缩元数据；未启用时不创建文件。
 
 ## 9.4 MCP 配置
 

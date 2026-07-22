@@ -10,7 +10,6 @@ import {
   type ToolMessage,
   toolMessage,
 } from '../src/core/messages';
-import { estimateTokens, shouldCompact } from '../src/core/model/compaction';
 import {
   buildModelMessages,
   buildStaticSystemPrompt,
@@ -21,7 +20,6 @@ import { buildCanonicalFrames } from '../src/core/model/context-frame-builder';
 import { serializeFramesToMessages } from '../src/core/model/context-serializer';
 import { validateFramePairs, validateMessagePairs } from '../src/core/model/context-validator';
 import type { SkillManifest } from '../src/core/skills/types';
-import type { ContextBudget } from '../src/core/types';
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
 describe('model context protocol', () => {
@@ -784,87 +782,6 @@ describe('reorderInterleavedMessages', () => {
     expect(result[0]).toBe(msgs[0]);
     expect(result[1]).toBe(msgs[1]);
     expect(result[2]).toBe(msgs[2]);
-  });
-});
-
-// ============================================================================
-// Compaction — 上下文压缩
-// ============================================================================
-describe('shouldCompact', () => {
-  const budget128k: ContextBudget = { maxTokens: 128_000 };
-
-  test('returns none when budget is undefined', () => {
-    expect(shouldCompact(100_000, undefined)).toEqual({ needed: false, reason: 'none' });
-  });
-
-  test('returns none when maxTokens is 0', () => {
-    expect(shouldCompact(100_000, { maxTokens: 0 })).toEqual({ needed: false, reason: 'none' });
-  });
-
-  test('returns none when tokens are well below threshold', () => {
-    expect(shouldCompact(50_000, budget128k)).toEqual({ needed: false, reason: 'none' });
-  });
-
-  test('returns soft when tokens exceed 75% threshold (default)', () => {
-    expect(shouldCompact(100_000, budget128k)).toEqual({ needed: true, reason: 'soft' });
-  });
-
-  test('returns hard when tokens approach window limit', () => {
-    expect(shouldCompact(122_000, budget128k)).toEqual({ needed: true, reason: 'hard' });
-  });
-
-  test('returns hard at appropriate threshold for 256K window', () => {
-    const budget: ContextBudget = { maxTokens: 256_000 };
-    expect(shouldCompact(245_000, budget)).toEqual({ needed: true, reason: 'hard' });
-  });
-
-  test('supports 1M context window', () => {
-    const budget: ContextBudget = { maxTokens: 1_000_000 };
-    expect(shouldCompact(990_000, budget)).toEqual({ needed: true, reason: 'hard' });
-    expect(shouldCompact(500_000, budget)).toEqual({ needed: false, reason: 'none' });
-  });
-
-  test('respects custom compactionThreshold', () => {
-    const budget: ContextBudget = { maxTokens: 128_000, compactionThreshold: 0.5 };
-    expect(shouldCompact(70_000, budget)).toEqual({ needed: true, reason: 'soft' });
-    expect(shouldCompact(60_000, budget)).toEqual({ needed: false, reason: 'none' });
-  });
-});
-
-describe('estimateTokens', () => {
-  test('returns 0 for empty array', () => {
-    expect(estimateTokens([])).toBe(0);
-  });
-
-  test('counts simple text messages', () => {
-    const msgs: BaseMessage[] = [humanMessage('Hello world'), aiMessage({ content: 'Hi there!' })];
-    const tokens = estimateTokens(msgs);
-    expect(tokens).toBeGreaterThan(0);
-    expect(tokens).toBeLessThan(30);
-  });
-
-  test('accounts for tool_calls overhead', () => {
-    const msgs: BaseMessage[] = [
-      aiMessage({
-        content: '',
-        tool_calls: [
-          { id: 'c1', name: 'shell_execute', args: { command: 'ls -la' } },
-          { id: 'c2', name: 'read_file', args: { path: 'test.txt' } },
-        ],
-      }),
-    ];
-    const tokens = estimateTokens(msgs);
-    expect(tokens).toBeGreaterThan(30);
-  });
-
-  test('consistently grows with increasing message count', () => {
-    const small = estimateTokens([humanMessage('a')]);
-    const medium = estimateTokens([
-      humanMessage('a'),
-      aiMessage({ content: 'b' }),
-      humanMessage('c'),
-    ]);
-    expect(medium).toBeGreaterThan(small);
   });
 });
 

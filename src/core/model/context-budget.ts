@@ -20,13 +20,12 @@ export interface ContextTokenEstimate {
 export interface ContextPreflight {
   estimate: ContextTokenEstimate;
   usableInputTokens?: number;
-  reservedOutputTokens: number;
+  reservedOutputTokens?: number;
   providerSafetyMarginTokens: number;
   utilization?: number;
   /** Five-level pressure — see `ContextPressure`. */
   status: ContextPressure;
   /** Token target after compaction. */
-  targetTokens?: number;
 }
 
 function messageContentTokens(message: BaseMessage): number {
@@ -114,7 +113,6 @@ export function preflightModelContext(input: {
   providerSafetyRatio?: number;
   compactRatio?: number;
   hardRatio?: number;
-  targetRatio?: number;
   /** Below this ratio → no action needed. Default 0.80. */
   warningRatio?: number;
 }): ContextPreflight {
@@ -133,7 +131,7 @@ export function preflightModelContext(input: {
   }
   const utilization = input.estimate.totalInputTokens / budget.usableInputTokens;
   const warningRatio = input.warningRatio ?? 0.8;
-  const compactRatio = input.compactRatio ?? 0.88;
+  const compactRatio = input.compactRatio ?? 0.9;
   const hardRatio = input.hardRatio ?? 0.94;
 
   let status: ContextPressure;
@@ -154,6 +152,5 @@ export function preflightModelContext(input: {
     providerSafetyMarginTokens: budget.providerSafetyMarginTokens,
     utilization,
     status,
-    targetTokens: Math.floor(budget.usableInputTokens * (input.targetRatio ?? 0.62)),
   };
 }

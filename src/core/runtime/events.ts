@@ -74,12 +74,6 @@ export interface ContextCompactionRequestedEvent {
   estimate: ContextTokenEstimate;
   /** Optional user-supplied instructions for the summary model. */
   customInstructions?: string;
-  /**
-   * Stable digest of the projection environment observed when this event was emitted.
-   * Used for diagnostics only — the compaction effect resolves the environment fresh
-   * and must not rely on this digest as a data source.
-   */
-  projectionEnvironmentDigest?: string;
 }
 
 export interface ContextCompactionCompletedEvent {
@@ -98,6 +92,8 @@ export interface ContextCompactionFailedEvent {
   errorKind: ContextCompactionErrorKind;
   message: string;
   retryable: boolean;
+  /** Turn whose normal model call must not run after an automatic failure. */
+  requestedAtTurnId?: string;
   /** End-to-end compaction effect duration. Optional for restored legacy events. */
   durationMs?: number;
 }
@@ -115,6 +111,13 @@ export interface ContextHardBlockedEvent {
   sourceDigest: string;
   message: string;
   createdAtTurnId: string;
+}
+
+/** Clears only the exact correctness failure that a deterministic recovery repaired. */
+export interface ContextHardBlockClearedEvent {
+  type: 'context.hard_block_cleared';
+  reason: ContextHardBlockReason;
+  sourceDigest: string;
 }
 
 // ── 工具生命周期事件 / Tool lifecycle events ──
@@ -707,10 +710,11 @@ export interface ModelContextMetricsEvent {
   type: 'model.context_metrics';
   modelName: string;
   contextWindowTokens?: number;
+  contextWindowSource?: import('@/core/model/model-capabilities').ModelCapabilitySource;
+  tokenizerSource?: import('@/core/model/model-capabilities').ModelCapabilitySource;
   usableInputTokens?: number;
   reservedOutputTokens?: number;
   providerSafetyMarginTokens?: number;
-  targetTokens?: number;
   totalInputTokens: number;
   utilization?: number;
   status: import('@/core/model/context-budget').ContextPressure;
@@ -849,6 +853,7 @@ export type RuntimeEvent =
   | ContextCompactionFailedEvent
   | ContextCompactionResetEvent
   | ContextHardBlockedEvent
+  | ContextHardBlockClearedEvent
   | CapabilityBindingsIssuedEvent
   | CapabilitySearchCompletedEvent
   | SkillCatalogRefreshedEvent

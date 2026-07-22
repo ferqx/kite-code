@@ -26,8 +26,7 @@ export function decideAutomaticContextCompaction(input: {
   preflight: ContextPreflight;
   mode: ContextCompactionAutoMode;
   triggerRatio?: number;
-  triggerTokens?: number;
-  recentTurns?: number;
+  compactAfterEstimatedTokens?: number;
   cooldownTurns?: number;
   minimumReductionRatio?: number;
   maxSummaryTokens?: number;
@@ -36,11 +35,12 @@ export function decideAutomaticContextCompaction(input: {
     return { action: 'invoke' };
   }
 
-  const ratioThreshold = input.triggerRatio ?? 0.88;
+  const ratioThreshold = input.triggerRatio ?? 0.9;
   const ratioEligible =
     input.preflight.utilization != null && input.preflight.utilization >= ratioThreshold;
   const tokenEligible =
-    input.triggerTokens != null && input.preflight.estimate.totalInputTokens >= input.triggerTokens;
+    input.compactAfterEstimatedTokens != null &&
+    input.preflight.estimate.totalInputTokens >= input.compactAfterEstimatedTokens;
   if (!ratioEligible && !tokenEligible) return { action: 'invoke' };
 
   // Shadow mode computes eligibility only; it never invokes the summary model
@@ -51,22 +51,27 @@ export function decideAutomaticContextCompaction(input: {
     return { action: 'invoke' };
   }
 
-  const boundary = findSafeCompactionBoundary(input.state, {
-    recentTurns: input.recentTurns ?? 3,
-  });
+  const boundary = findSafeCompactionBoundary(input.state, { protectLatestTurn: true });
   if (!boundary.eligible) {
     return { action: 'invoke' };
   }
 
   // ── Thrash breaker: stop proactive auto if compacting too frequently ──
   const guard = input.state.context.autoGuard;
-  if (guard.disabledUntilManualAction) {
+  const retryingPreviousTurnFailure =
+    input.state.context.lastFailure?.reason === 'auto' &&
+    input.state.context.lastFailure.requestedAtTurnId !== input.state.turn.turnId;
+  if (guard.disabledUntilManualAction && !retryingPreviousTurnFailure) {
     return { action: 'invoke' };
   }
 
   // ── Cooldown ──
   const lastTurn = input.state.context.lastCompactionTurnIndex;
-  if (lastTurn != null && input.state.turn.turnIndex - lastTurn < (input.cooldownTurns ?? 3)) {
+  if (
+    !retryingPreviousTurnFailure &&
+    lastTurn != null &&
+    input.state.turn.turnIndex - lastTurn < (input.cooldownTurns ?? 3)
+  ) {
     return { action: 'invoke' };
   }
   // ── Expected reduction check (coarse, real check runs post-generation) ──

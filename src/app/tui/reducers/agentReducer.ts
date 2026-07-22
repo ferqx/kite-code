@@ -177,6 +177,14 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
 
 export function agentReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
+    case 'SET_COMPACTION_PROGRESS':
+      return {
+        ...state,
+        status: {
+          ...state.status,
+          currentNode: action.phase ? `context_${action.phase}` : null,
+        },
+      };
     case 'SET_RUNNING':
       return {
         ...state,

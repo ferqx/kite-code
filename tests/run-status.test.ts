@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentEvent } from '@/protocol/events';
 import type { Action } from '../src/app/tui/App';
-import { createInitialState, eventReducer } from '../src/app/tui/App';
+import { createInitialState, eventReducer, shouldShowRunStatus } from '../src/app/tui/App';
 import { formatElapsed, formatToolResultForDisplay } from '../src/app/tui/components/render-utils';
 import { handleEventAction, type RenderEvent } from '../src/app/tui/reducers/handleEvent';
 import type { RunStatusTone } from '../src/app/tui/run-status';
@@ -50,6 +50,27 @@ function toolDone(callId: string, name: string, summary = 'ok'): LegacyRenderAct
 // ── phase progression ──
 
 describe('run phase progression', () => {
+  test.each([
+    ['preparing', 'Preparing context'],
+    ['summarizing', 'Summarizing context'],
+    ['validating', 'Validating context'],
+  ] as const)('shows context compaction %s progress', (progress, verb) => {
+    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = dispatch(state, { type: 'SET_COMPACTION_PROGRESS', phase: progress });
+
+    expect(deriveRunStatusSnapshot(state).verb).toBe(verb);
+    expect(shouldShowRunStatus(state)).toBe(true);
+  });
+
+  test('hides manual compaction status again when ephemeral progress clears', () => {
+    let state = createInitialState();
+    state = dispatch(state, { type: 'SET_COMPACTION_PROGRESS', phase: 'preparing' });
+    expect(state.running).toBe(false);
+    expect(shouldShowRunStatus(state)).toBe(true);
+    state = dispatch(state, { type: 'SET_COMPACTION_PROGRESS' });
+    expect(shouldShowRunStatus(state)).toBe(false);
+  });
+
   test('starts in thinking phase', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, {

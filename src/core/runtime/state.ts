@@ -405,7 +405,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 15;
+export const RUNTIME_STATE_SCHEMA_VERSION = 16;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;

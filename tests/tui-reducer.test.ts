@@ -2966,11 +2966,11 @@ describe('context compaction RuntimeEvent rendering', () => {
       type: 'context.compaction_failed',
       compactionId: 'compact',
       sourceRevision: 1,
-      errorKind: 'missing_mandatory_facts',
+      errorKind: 'invalid_candidate',
       message: 'summary omitted required facts',
       retryable: false,
     });
-    expect(JSON.stringify(flatBlocks(state))).toContain('summary omitted required facts');
+    expect(JSON.stringify(flatBlocks(state))).not.toContain('summary omitted required facts');
     expect(JSON.stringify(flatBlocks(state))).toContain('original conversation was preserved');
 
     state = handleRuntimeEventAction(state, {
@@ -2981,7 +2981,7 @@ describe('context compaction RuntimeEvent rendering', () => {
     expect(JSON.stringify(flatBlocks(state))).toContain('original transcript');
   });
 
-  test('compaction_completed updates status.compactionBefore/After for StatsLine display', () => {
+  test('compaction_completed reports token savings without persisting a StatsLine percentage', () => {
     const state = handleRuntimeEventAction(fresh(), {
       type: 'context.compaction_completed',
       compactionId: 'compact',
@@ -2993,27 +2993,9 @@ describe('context compaction RuntimeEvent rendering', () => {
         sourceDigest: 'sha256:test',
         coveredThroughMessageId: 'msg-1',
         coveredThroughTurnId: 'turn-1',
-        summary: {
-          version: 1,
-          objective: 'test',
-          userConstraints: [],
-          decisions: [],
-          completedWork: [],
-          observations: [],
-          failures: [],
-          pendingWork: [],
-          unresolvedQuestions: [],
-          recentUserIntent: 'test',
-          provenance: {
-            firstMessageId: 'msg-0',
-            lastMessageId: 'msg-1',
-            sourceDigest: 'sha256:test',
-            mandatoryFactIds: [],
-          },
-        },
+        summary: 'Test narrative.',
         inputTokensBefore: 12_345,
         inputTokensAfter: 4_567,
-        targetTokens: 6_000,
         reason: 'manual',
         createdAt: new Date().toISOString(),
       },
@@ -3021,22 +3003,102 @@ describe('context compaction RuntimeEvent rendering', () => {
     expect(JSON.stringify(flatBlocks(state))).toContain('12345');
     expect(JSON.stringify(flatBlocks(state))).toContain('4567');
     expect(JSON.stringify(flatBlocks(state))).toContain('tokens');
-    expect(state.status.compactionBefore).toBe(12_345);
-    expect(state.status.compactionAfter).toBe(4_567);
+    expect(state.status).not.toHaveProperty('compactionBefore');
+    expect(state.status).not.toHaveProperty('compactionAfter');
   });
 
-  test('compaction_reset clears compactionBefore/After on status', () => {
-    let state = fresh();
-    state = {
-      ...state,
-      status: { ...state.status, compactionBefore: 10_000, compactionAfter: 3_000 },
+  test('renders exactly one terminal notice per compaction id', () => {
+    const event = {
+      type: 'context.compaction_failed' as const,
+      compactionId: 'dedupe',
+      sourceRevision: 1,
+      errorKind: 'summary_model_failed' as const,
+      message: 'secret provider detail',
+      retryable: true,
     };
+    const once = handleRuntimeEventAction(fresh(), event);
+    const twice = handleRuntimeEventAction(once, event);
+    expect(flatBlocks(twice)).toEqual(flatBlocks(once));
+    expect(JSON.stringify(flatBlocks(twice))).not.toContain('secret provider detail');
+    expect(JSON.stringify(flatBlocks(twice))).toContain('contextWindowTokens');
+    expect(JSON.stringify(flatBlocks(twice))).toContain('/clear');
+  });
+
+  test('keeps the first terminal notice when completed, failed, and cancelled race', () => {
+    const completed = {
+      type: 'context.compaction_completed' as const,
+      compactionId: 'race',
+      sourceRevision: 0,
+      checkpoint: {
+        compactionId: 'race',
+        version: 1 as const,
+        sourceRevision: 0,
+        sourceDigest: 'sha256:race',
+        coveredThroughMessageId: 'message-1',
+        coveredThroughTurnId: 'turn-1',
+        summary: 'private narrative',
+        inputTokensBefore: 5_000,
+        inputTokensAfter: 1_000,
+        reason: 'manual' as const,
+        createdAt: '2026-07-22T00:00:00.000Z',
+      },
+    };
+    const first = handleRuntimeEventAction(fresh(), completed);
+    const failed = handleRuntimeEventAction(first, {
+      type: 'context.compaction_failed',
+      compactionId: 'race',
+      sourceRevision: 0,
+      errorKind: 'summary_model_failed',
+      message: 'secret',
+      retryable: true,
+    });
+    const cancelled = handleRuntimeEventAction(failed, {
+      type: 'context.compaction_failed',
+      compactionId: 'race',
+      sourceRevision: 0,
+      errorKind: 'summary_aborted',
+      message: 'secret',
+      retryable: false,
+    });
+    expect(flatBlocks(cancelled)).toEqual(flatBlocks(first));
+    expect(JSON.stringify(flatBlocks(cancelled))).not.toContain('private narrative');
+  });
+
+  test('replaces Footer context data with each fresh Core projection after completion and reset', () => {
+    const metrics = (totalInputTokens: number, utilization: number) => ({
+      type: 'model.context_metrics' as const,
+      modelName: 'configured-model',
+      contextWindowTokens: 10_000,
+      contextWindowSource: 'explicit_config' as const,
+      reservedOutputTokens: 1_000,
+      providerSafetyMarginTokens: 0,
+      usableInputTokens: 9_000,
+      totalInputTokens,
+      utilization,
+      status: 'normal' as const,
+      estimate: {
+        systemTokens: 100,
+        toolSchemaTokens: 100,
+        transcriptTokens: totalInputTokens - 400,
+        summaryTokens: 0,
+        dynamicRuntimeTokens: 100,
+        framingTokens: 100,
+        totalInputTokens,
+      },
+    });
+    let state = handleRuntimeEventAction(fresh(), metrics(8_000, 8 / 9));
+    expect(state.status.contextSnapshot?.estimate.totalInputTokens).toBe(8_000);
     state = handleRuntimeEventAction(state, {
       type: 'context.compaction_reset',
-      checkpointId: 'compact',
+      checkpointId: 'old',
       reason: 'manual',
     });
-    expect(state.status.compactionBefore).toBeUndefined();
-    expect(state.status.compactionAfter).toBeUndefined();
+    state = handleRuntimeEventAction(state, metrics(3_000, 1 / 3));
+    expect(state.status.contextSnapshot).toMatchObject({
+      utilization: 1 / 3,
+      estimate: { totalInputTokens: 3_000 },
+    });
+    expect(state.status.contextSnapshot?.activeCheckpointId).toBeUndefined();
+    expect(state.status.contextSnapshot?.inputTokensBefore).toBeUndefined();
   });
 });

@@ -330,7 +330,7 @@ describe('StatsLine', () => {
     expect(lastFrame()).not.toContain('[完全权限]');
   });
 
-  test('shows context percentage when model has contextWindow', () => {
+  test('does not infer context percentage from a known model name', () => {
     const status = fakeStatus({
       modelProvider: 'deepseek',
       modelName: 'deepseek-v4-flash',
@@ -338,11 +338,8 @@ describe('StatsLine', () => {
     });
     const { lastFrame } = render(<StatsLine status={status} running />);
     const frame = lastFrame() ?? '';
-    // If model config has contextWindow: show computed context percentage
-    // If no contextWindow configured: falls back to "39.3k"
-    const hasContext = /\d+% context/.test(frame);
-    const hasAbsolute = frame.includes('39.3k');
-    expect(hasContext || hasAbsolute).toBe(true);
+    expect(frame).not.toMatch(/\d+% context/);
+    expect(frame).toContain('39.3k');
   });
 
   test('falls back to absolute token count when model has no contextWindow', () => {
@@ -354,6 +351,53 @@ describe('StatsLine', () => {
     const { lastFrame } = render(<StatsLine status={status} running />);
     // claude-opus is not in default models, so no contextWindow — falls back to absolute
     expect(lastFrame()).toContain('10.0k');
+  });
+
+  test('shows context utilization only from the Core snapshot', () => {
+    const status = fakeStatus({
+      totalTokens: 10_000,
+      contextSnapshot: {
+        estimate: {
+          systemTokens: 100,
+          toolSchemaTokens: 100,
+          transcriptTokens: 7_000,
+          summaryTokens: 0,
+          dynamicRuntimeTokens: 100,
+          framingTokens: 200,
+          totalInputTokens: 7_500,
+        },
+        usableInputTokens: 10_000,
+        utilization: 0.75,
+        status: 'warning',
+      },
+    });
+    const { lastFrame } = render(<StatsLine status={status} running />);
+    expect(lastFrame()).toContain('75% context');
+    expect(lastFrame()).not.toContain('10.0k');
+  });
+
+  test('does not show a historical compaction reduction percentage', () => {
+    const status = fakeStatus({
+      totalTokens: 11_500,
+      contextSnapshot: {
+        estimate: {
+          systemTokens: 100,
+          toolSchemaTokens: 100,
+          transcriptTokens: 8_500,
+          summaryTokens: 200,
+          dynamicRuntimeTokens: 100,
+          framingTokens: 100,
+          totalInputTokens: 9_100,
+        },
+        usableInputTokens: 10_000,
+        utilization: 0.91,
+        status: 'compact_due',
+        inputTokensBefore: 100_000,
+        inputTokensAfter: 9_000,
+      },
+    });
+    const { lastFrame } = render(<StatsLine status={status} running />);
+    expect(lastFrame()).not.toContain('compacted');
   });
 
   test('does not show ro/rw indicator (workspace access always write)', () => {

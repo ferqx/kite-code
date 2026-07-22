@@ -1,6 +1,7 @@
 // ── Action 类型定义 ──
 // 从 App.tsx 中抽出，避免 reducers 和 App.tsx 之间的循环依赖
 
+import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeSnapshotEntry } from '@/core/runtime/store';
 import type { InterruptState, OutputBlock, TuiState } from '../types';
@@ -11,6 +12,7 @@ export type Action =
   | { type: 'SET_EXITED' }
   | { type: 'SET_RUNNING' }
   | { type: 'SET_IDLE' }
+  | { type: 'SET_COMPACTION_PROGRESS'; phase?: ContextCompactionProgressPhase }
   | { type: 'TOGGLE_REASON'; id: number }
   | { type: 'TOGGLE_ALL_REASON' }
   | { type: 'SET_THINKING_LEVEL'; level: string }

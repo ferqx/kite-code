@@ -32,7 +32,6 @@ function preflight(
     providerSafetyMarginTokens: 500,
     utilization: totalInputTokens / 10_000,
     status,
-    targetTokens: 5_500,
   };
 }
 
@@ -81,6 +80,13 @@ describe('automatic context compaction', () => {
     expect(
       decideAutomaticContextCompaction({
         state,
+        preflight: { ...preflight('compact_due'), utilization: 0.899 },
+        mode: 'live',
+      }),
+    ).toEqual({ action: 'invoke' });
+    expect(
+      decideAutomaticContextCompaction({
+        state,
         preflight: preflight('compact_due'),
         mode: 'live',
       }),
@@ -119,9 +125,32 @@ describe('automatic context compaction', () => {
       const currentConfig = config();
       currentConfig.compaction = { autoMode: mode };
       const mock = createMockModel([{ message: aiMessage({ content: `called-${mode}` }) }]);
-      const events = await invokeRuntimeModel({ model: mock, state, config: currentConfig });
+      let requested = 0;
+      const events = await invokeRuntimeModel({
+        model: mock,
+        state,
+        config: currentConfig,
+        compactionReporter: {
+          recordRequested: () => requested++,
+          recordCompleted() {
+            throw new Error('shadow/off must not complete compaction');
+          },
+          recordFailed() {
+            throw new Error('shadow/off must not fail compaction');
+          },
+        },
+      });
       expect(mock.callCount.count).toBe(1);
+      expect(requested).toBe(0);
       expect(events.some((event) => event.type === 'context.compaction_requested')).toBe(false);
+      expect(
+        events.some(
+          (event) =>
+            event.type === 'context.compaction_completed' ||
+            event.type === 'context.compaction_failed',
+        ),
+      ).toBe(false);
+      expect(state.context.activeCheckpoint).toBeUndefined();
     }
 
     const liveMock = createMockModel([{ message: aiMessage({ content: 'must not be called' }) }]);
@@ -151,7 +180,7 @@ describe('automatic context compaction', () => {
         state,
         preflight: unknown,
         mode: 'live',
-        triggerTokens: 8_000,
+        compactAfterEstimatedTokens: 8_000,
       }),
     ).toMatchObject({ action: 'request_compaction', reason: 'auto' });
   });
@@ -177,6 +206,30 @@ describe('automatic context compaction', () => {
     });
     expect(failed.context.hardBlock).toBeUndefined();
     expect(failed.context.autoGuard.consecutiveLowGain).toBe(1);
+    expect(failed.context.lastFailure?.requestedAtTurnId).toBe('turn-5');
+  });
+
+  test('a new turn retries a prior auto failure even when cooldown or breaker is active', () => {
+    const state = historicalState();
+    state.context.lastFailure = {
+      compactionId: 'previous-failure',
+      sourceRevision: 1,
+      errorKind: 'summary_model_failed',
+      message: 'provider rejected summary',
+      retryable: true,
+      reason: 'auto',
+      requestedAtTurnId: 'previous-turn',
+    };
+    state.context.lastCompactionTurnIndex = state.turn.turnIndex;
+    state.context.autoGuard.disabledUntilManualAction = true;
+
+    expect(
+      decideAutomaticContextCompaction({
+        state,
+        preflight: preflight('compact_due'),
+        mode: 'live',
+      }),
+    ).toMatchObject({ action: 'request_compaction', reason: 'auto' });
   });
 
   test('does not infer compaction or hard block from a provider 400-style failure', async () => {
@@ -209,27 +262,9 @@ describe('automatic context compaction', () => {
       sourceDigest: 'source-digest',
       coveredThroughMessageId: 'message-2',
       coveredThroughTurnId: 'turn-2',
-      summary: {
-        version: 1,
-        objective: 'Continue the task.',
-        userConstraints: [],
-        decisions: [],
-        completedWork: [],
-        observations: [],
-        failures: [],
-        pendingWork: [],
-        unresolvedQuestions: [],
-        recentUserIntent: 'Continue',
-        provenance: {
-          firstMessageId: 'message-0',
-          lastMessageId: 'message-2',
-          sourceDigest: 'source-digest',
-          mandatoryFactIds: [],
-        },
-      },
+      summary: 'Continue the task from the compacted historical work.',
       inputTokensBefore: 20_000,
       inputTokensAfter: 8_000,
-      targetTokens: 10_000,
       reason: 'auto',
       createdAt: '2026-07-20T00:00:00.000Z',
     };

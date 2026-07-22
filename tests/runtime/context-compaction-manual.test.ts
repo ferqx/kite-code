@@ -17,7 +17,7 @@ const config: AgentConfig = {
   providerType: 'openai-compatible',
   sandbox: { enabled: false },
   modelCapabilities: { contextWindowTokens: 10_000, maxOutputTokens: 1_000 },
-  compaction: { recentTurns: 1 },
+  compaction: {},
 };
 
 describe('manual context compaction service', () => {
@@ -40,7 +40,7 @@ describe('manual context compaction service', () => {
     expect(status.safeBoundary).toMatchObject({
       eligible: true,
       firstMessageId: 'message-0',
-      lastMessageId: 'message-1',
+      lastMessageId: 'message-2',
     });
     expect(state).toEqual(before);
   });
@@ -96,7 +96,7 @@ describe('manual context compaction service', () => {
     expect(event).toMatchObject({ reason: 'manual', force: false });
   });
 
-  test('persists the latest full preflight for inspection', () => {
+  test('keeps context metrics informational and recomputes inspection state', () => {
     const state = createInitialRuntimeState({
       threadId: 'manual-metrics',
       userId: 'user',
@@ -109,7 +109,6 @@ describe('manual context compaction service', () => {
       usableInputTokens: 8_000,
       reservedOutputTokens: 1_000,
       providerSafetyMarginTokens: 1_000,
-      targetTokens: 4_400,
       totalInputTokens: 6_000,
       utilization: 0.75,
       status: 'compact_due',
@@ -123,13 +122,10 @@ describe('manual context compaction service', () => {
         totalInputTokens: 6_000,
       },
     });
-    expect(inspectManualContextCompaction(next, config).preflight).toMatchObject({
-      usableInputTokens: 8_000,
-      reservedOutputTokens: 1_000,
-      providerSafetyMarginTokens: 1_000,
-      targetTokens: 4_400,
-      status: 'compact_due',
-    });
+    expect('lastPreflight' in next.context).toBe(false);
+    expect(
+      inspectManualContextCompaction(next, config).preflight.estimate.totalInputTokens,
+    ).not.toBe(6_000);
   });
 
   test('uses the live adapter capability view when config has no model window', () => {
@@ -158,23 +154,6 @@ describe('manual context compaction service', () => {
       workspace: '/workspace',
     });
     state.context.activeCheckpoint = { compactionId: 'checkpoint' } as never;
-    state.context.lastPreflight = {
-      estimate: {
-        systemTokens: 100,
-        toolSchemaTokens: 100,
-        transcriptTokens: 20_000,
-        summaryTokens: 1_000,
-        dynamicRuntimeTokens: 100,
-        framingTokens: 100,
-        totalInputTokens: 21_400,
-      },
-      usableInputTokens: 8_000,
-      reservedOutputTokens: 1_000,
-      providerSafetyMarginTokens: 1_000,
-      utilization: 2.675,
-      status: 'hard_limit',
-      targetTokens: 4_400,
-    };
     expect(compactResetPreflight(state, config)).toEqual({ safe: true });
   });
 });

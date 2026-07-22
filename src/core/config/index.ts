@@ -131,32 +131,40 @@ export const configSchema = z.object({
   compaction: z
     .object({
       autoMode: z.enum(['off', 'shadow', 'live']).optional(),
+      cohortSalt: z.string().min(1).optional(),
+      livePercentage: z.number().min(0).max(100).optional(),
+      localDebug: z
+        .object({ enabled: z.boolean(), directory: z.string().min(1) })
+        .strict()
+        .optional(),
       triggerRatio: z.number().positive().max(1).optional(),
-      triggerTokens: z.number().int().positive().optional(),
+      compactAfterEstimatedTokens: z.number().int().positive().optional(),
       maxSummaryTokens: z.number().int().positive().optional(),
       maxSummaryInputTokens: z.number().int().positive().optional(),
-      /** @deprecated Use compactRatio instead. */
-      softRatio: z.number().positive().max(1).optional(),
-      /** PR 7: Renamed from softRatio — trigger threshold for proactive compaction. */
+      maxNarrativeTokens: z.number().int().positive().optional(),
       compactRatio: z.number().positive().max(1).optional(),
       hardRatio: z.number().positive().max(1).optional(),
       warningRatio: z.number().positive().max(1).optional(),
-      targetRatio: z.number().positive().max(1).optional(),
       minimumReductionRatio: z.number().nonnegative().max(1).optional(),
       cooldownTurns: z.number().int().nonnegative().optional(),
-      recentTurns: z.number().int().nonnegative().optional(),
       providerSafetyRatio: z.number().positive().max(0.2).optional(),
-      maxAutoCompactionsPerWindow: z.number().int().positive().optional(),
-      autoCompactionWindowTurns: z.number().int().positive().optional(),
-      maxConsecutiveLowGain: z.number().int().positive().optional(),
     })
     .strict()
     .superRefine((val, ctx) => {
+      if (
+        val.maxSummaryTokens != null &&
+        val.maxNarrativeTokens != null &&
+        val.maxSummaryTokens > val.maxNarrativeTokens
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'maxSummaryTokens must not exceed maxNarrativeTokens',
+          path: ['maxSummaryTokens'],
+        });
+      }
       const warning = val.warningRatio ?? 0.8;
-      // PR 7: compactRatio first, fall back to deprecated softRatio
-      const compact = val.compactRatio ?? val.softRatio ?? 0.88;
+      const compact = val.compactRatio ?? 0.9;
       const hard = val.hardRatio ?? 0.94;
-      const target = val.targetRatio ?? 0.62;
       if (warning >= compact) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -169,13 +177,6 @@ export const configSchema = z.object({
           code: z.ZodIssueCode.custom,
           message: `compactRatio (${compact}) must be less than hardRatio (${hard})`,
           path: ['compactRatio'],
-        });
-      }
-      if (target >= compact) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `targetRatio (${target}) must be less than compactRatio (${compact})`,
-          path: ['targetRatio'],
         });
       }
     })
@@ -257,8 +258,8 @@ export {
 // ── Defaults (DeepSeek) ──
 
 const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
-  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true, contextWindow: 1048576 },
-  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false, contextWindow: 1048576 },
+  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
+  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false },
 ];
 
 // ── Config file loading ──
@@ -613,22 +614,20 @@ export interface SaveProviderInput {
  * Preserves existing config sections (other providers, theme, mcpServers, etc.).
  */
 /** Sensible default models per provider type (used when no models are provided). */
-function defaultModelsForProvider(
-  type: ModelProviderType,
-): { name: string; default: boolean; contextWindow?: number }[] {
+function defaultModelsForProvider(type: ModelProviderType): { name: string; default: boolean }[] {
   switch (type) {
     case 'deepseek':
       return [
-        { name: 'deepseek-v4-flash', default: true, contextWindow: 1048576 },
-        { name: 'deepseek-v4-pro', default: false, contextWindow: 1048576 },
+        { name: 'deepseek-v4-flash', default: true },
+        { name: 'deepseek-v4-pro', default: false },
       ];
     case 'openai':
       return [
-        { name: 'gpt-4o', default: true, contextWindow: 128000 },
-        { name: 'gpt-4.1', default: false, contextWindow: 1000000 },
+        { name: 'gpt-4o', default: true },
+        { name: 'gpt-4.1', default: false },
       ];
     case 'ollama':
-      return [{ name: 'llama3.2', default: true, contextWindow: 131072 }];
+      return [{ name: 'llama3.2', default: true }];
     default:
       // openai-compatible — no well-known defaults, let user type their own
       return [];

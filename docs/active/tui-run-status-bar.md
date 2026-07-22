@@ -27,9 +27,12 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 - Retry: `Retrying` + warning 色
 - Approval 等待: `Waiting` + muted 色
 - Input 等待: `Asking` + warning 色
+- Context compaction: `preparing → summarizing → validating`，由 App-only action 驱动，不写 RuntimeEvent；所有终态和 stale 路径都在 `finally` 清除
 - Idle plan mode: `Shift+Tab to exit - describe your task` + muted 色
 
 **阶段不变性规则**：一旦进入 Working，永不回退 Thinking；一旦进入 Finishing，永不回退 Working。
+
+手动 `/compact` 不属于普通 Agent run，因此即使 `state.running=false`，只要 `currentNode` 为 `context_*`，StatusBar 仍必须显示；progress 清除后立即隐藏。自动压缩继续复用同一显示规则。
 
 ## 状态推导
 
@@ -91,3 +94,7 @@ Working 阶段通过 `WORKING_GRADIENT` hex 色值在蓝→青→绿→金之间
 - retry 中 → 始终显示
 
 `shouldShowRunStatus` 在渲染前调用，为 false 时跳过 `deriveRunStatusSnapshot()`。
+
+## Context Footer 与终态提示
+
+`StatsLine` 只读取 Core `ContextStatusSnapshot` 的 utilization；模型名称和累计 usage 不能推导 context 百分比。没有可信窗口时显示绝对 token 数。状态栏不持久展示历史压缩率（例如 `91% compacted`）；压缩收益只在一次性终态提示和诊断数据中保留。Completed、failed、cancelled 统一通过 Core 脱敏映射生成提示；TUI 以 `compactionId` 去重，每个压缩恰好显示一个不进入 transcript 的终态提示。Summary Provider 失败提示用户检查所选模型的 `contextWindowTokens` 或执行 `/clear`，不得展示 Provider 原始错误正文。

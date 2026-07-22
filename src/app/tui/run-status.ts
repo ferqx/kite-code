@@ -146,6 +146,13 @@ function currentVerb(
   state: TuiState,
   phase: RunPhase,
 ): { verb: string; tone: RunStatusTone; note?: string } {
+  const compactionVerb = {
+    context_preparing: 'Preparing context',
+    context_summarizing: 'Summarizing context',
+    context_validating: 'Validating context',
+  }[state.status.currentNode ?? ''];
+  if (compactionVerb) return { verb: compactionVerb, tone: 'primary' };
+
   switch (phase) {
     case 'thinking': {
       const planActive =

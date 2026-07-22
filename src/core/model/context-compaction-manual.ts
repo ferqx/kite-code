@@ -44,16 +44,14 @@ export function currentContextPreflight(
   config: AgentConfig,
   capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
 ) {
-  if (state.context.lastPreflight) return state.context.lastPreflight;
   return preflightModelContext({
     estimate: fallbackEstimate(state),
     capabilities,
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
     providerSafetyRatio: config.compaction?.providerSafetyRatio,
-    compactRatio: config.compaction?.compactRatio ?? config.compaction?.softRatio,
+    compactRatio: config.compaction?.compactRatio,
     hardRatio: config.compaction?.hardRatio,
     warningRatio: config.compaction?.warningRatio,
-    targetRatio: config.compaction?.targetRatio,
   });
 }
 
@@ -76,9 +74,7 @@ export function inspectManualContextCompaction(
   const checkpoint = state.context.activeCheckpoint;
   return {
     preflight: currentContextPreflight(state, config, capabilities),
-    safeBoundary: findSafeCompactionBoundary(state, {
-      recentTurns: config.compaction?.recentTurns,
-    }),
+    safeBoundary: findSafeCompactionBoundary(state),
     ...(state.context.pendingCompaction
       ? { pendingCompactionId: state.context.pendingCompaction.compactionId }
       : {}),
@@ -141,17 +137,15 @@ export function buildContextStatusReport(
     serializedTools: environment?.serializedTools,
     activeSkillInstructions: environment?.activeSkillInstructions,
     workflowSkills: environment?.workflowSkills,
-    contextBudget: { recentTurns: config.compaction?.recentTurns },
   });
   const preflight = preflightModelContext({
     estimate: projection.estimate,
     capabilities,
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
     providerSafetyRatio: config.compaction?.providerSafetyRatio,
-    compactRatio: config.compaction?.compactRatio ?? config.compaction?.softRatio,
+    compactRatio: config.compaction?.compactRatio,
     hardRatio: config.compaction?.hardRatio,
     warningRatio: config.compaction?.warningRatio,
-    targetRatio: config.compaction?.targetRatio,
   });
 
   const e = projection.estimate;
@@ -179,9 +173,9 @@ export function buildContextStatusReport(
             : 'enabled';
   const nextThreshold =
     preflight.usableInputTokens != null
-      ? `${Math.floor(preflight.usableInputTokens * (config.compaction?.triggerRatio ?? config.compaction?.compactRatio ?? config.compaction?.softRatio ?? 0.88))}`
-      : config.compaction?.triggerTokens != null
-        ? `${config.compaction.triggerTokens}`
+      ? `${Math.floor(preflight.usableInputTokens * (config.compaction?.triggerRatio ?? config.compaction?.compactRatio ?? 0.9))}`
+      : config.compaction?.compactAfterEstimatedTokens != null
+        ? `${config.compaction.compactAfterEstimatedTokens}`
         : 'N/A';
 
   const text = [
@@ -194,7 +188,7 @@ export function buildContextStatusReport(
     `Dynamic runtime           ${e.dynamicRuntimeTokens}`,
     `Provider framing          ${e.framingTokens}`,
     ``,
-    `Output reservation        ${preflight.reservedOutputTokens}`,
+    `Output reservation        ${preflight.reservedOutputTokens ?? 'unknown'}`,
     `Safety margin             ${preflight.providerSafetyMarginTokens}`,
     ``,
     lastCp,

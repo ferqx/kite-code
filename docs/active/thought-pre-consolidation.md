@@ -61,6 +61,5 @@
 - `src/app/tui/render/useStaticContent.tsx` — isSettled / blockFingerprint for tool_summary
 - `src/app/tui/App.tsx` — explorationSummaryIds 初始状态
 - `src/app/tui/reducers/agentReducer.ts` — cancelRunningBlocks 处理 tool_summary
-- `src/core/model/compaction.ts` — M1 折叠引擎
 - `tests/tui-reducer.test.ts` — 预整合测试
 - `tests/context.test.ts` — 折叠测试

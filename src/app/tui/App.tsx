@@ -35,8 +35,10 @@ export { createInitialState, eventReducer };
 
 const MemoHeader = React.memo(Header);
 
-function shouldShowRunStatus(state: TuiState): boolean {
-  if (!state.running || state.interrupt) return false;
+export function shouldShowRunStatus(state: TuiState): boolean {
+  if (state.interrupt) return false;
+  if (state.status.currentNode?.startsWith('context_')) return true;
+  if (!state.running) return false;
   if (state.status.retryState) return true;
   return true;
 }

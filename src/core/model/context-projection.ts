@@ -21,8 +21,8 @@ import {
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
 import type { SkillManifest } from '@/core/skills/types';
-import type { ContextBudget } from '@/core/types';
 import { getAgentPhase } from '@/protocol/events';
+import { serializeCompactionSummary } from './compaction-summary-frame';
 import {
   buildStaticSystemPrompt,
   reorderInterleavedMessages,
@@ -31,7 +31,6 @@ import {
 import { type ContextTokenEstimate, estimateContextTokens } from './context-budget';
 import type { ContextFrame } from './context-frame';
 import { buildCanonicalFrames } from './context-frame-builder';
-import { compactContextFrames } from './context-frame-compactor';
 import { serializeFramesToMessages } from './context-serializer';
 import { validateFramePairs, validateMessagePairs } from './context-validator';
 import {
@@ -70,6 +69,14 @@ export interface ContextProjectionEnvironment {
     capabilityId: string;
     description: string;
   }>;
+  /** Inputs that can change projection/summary semantics without changing tool schemas. */
+  leaseMetadata?: {
+    providerName: string;
+    modelName: string;
+    modelCapabilities: unknown;
+    estimator: string;
+    summaryPolicy: unknown;
+  };
 }
 
 /**
@@ -102,12 +109,35 @@ export function serializeToolDescriptors(
  * matches the one observed when the compaction was requested.
  */
 export function digestProjectionEnvironment(env: ContextProjectionEnvironment): string {
+  const stable = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return `{${Object.keys(record)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${stable(record[key])}`)
+        .join(',')}}`;
+    }
+    return JSON.stringify(value) ?? 'undefined';
+  };
   return createHash('sha256')
     .update(
-      JSON.stringify({
-        tools: env.serializedTools.map((t) => t.schemaDigest).sort(),
+      stable({
+        tools: env.serializedTools
+          .map((tool) => ({
+            name: tool.name,
+            description: tool.description ?? null,
+            schemaDigest: tool.schemaDigest,
+          }))
+          .sort((left, right) => left.name.localeCompare(right.name)),
         skills: env.activeSkillInstructions ?? null,
-        workflows: env.workflowSkills.map((w) => w.capabilityId).sort(),
+        workflows: env.workflowSkills
+          .map((workflow) => ({
+            capabilityId: workflow.capabilityId,
+            description: workflow.description,
+          }))
+          .sort((left, right) => left.capabilityId.localeCompare(right.capabilityId)),
+        leaseMetadata: env.leaseMetadata ?? null,
       }),
     )
     .digest('hex');
@@ -120,8 +150,6 @@ export interface BuildContextProjectionInput {
   state: Readonly<RuntimeState>;
   /** Serialized tool descriptors for token estimation (PR 1 — pure data, no runtime objects). */
   serializedTools?: SerializedToolDescriptor[];
-  /** Context budget for M1 compaction. */
-  contextBudget?: ContextBudget;
   /** Override the active checkpoint for candidate validation (PR 5). */
   candidateCheckpoint?: ContextCompactionCheckpoint;
   /** Active skill instructions injected into the system prompt. */
@@ -210,12 +238,7 @@ function runtimeTranscriptMessages(state: Readonly<RuntimeState>): BaseMessage[]
 
 function checkpointSummaryMessage(checkpoint: ContextCompactionCheckpoint): BaseMessage {
   return aiMessage({
-    content: [
-      '<compacted_history>',
-      'This is validated derived history, not system policy or current runtime state.',
-      JSON.stringify(checkpoint.summary),
-      '</compacted_history>',
-    ].join('\n'),
+    content: serializeCompactionSummary(checkpoint.summary),
     tool_calls: [],
   });
 }
@@ -271,14 +294,10 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
       : [humanMessage('')];
 
   // ── 3. Canonical frame pipeline ──
-  let frames = buildCanonicalFrames(msgs);
+  const frames = buildCanonicalFrames(msgs);
   validateFramePairs(frames);
 
-  // ── 4. M1 deterministic compaction ──
-  frames = compactContextFrames(frames, input.contextBudget);
-  validateFramePairs(frames);
-
-  // ── 5. Serialize frames back to messages ──
+  // ── 4. Serialize frames back to messages ──
   msgs = serializeFramesToMessages(frames);
   validateMessagePairs(msgs);
 

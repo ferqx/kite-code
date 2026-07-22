@@ -1,10 +1,10 @@
-import { compactionMetrics } from '@/core/model/compaction-metrics';
-import {
-  structuredContextSummaryV1Schema,
-  structuredContextSummaryV2Schema,
-} from '@/core/model/compaction-schema';
+import type { CompactionReporter } from '@/core/model/compaction-metrics';
 import { ContextCompactionValidationError } from '@/core/model/compaction-summary';
-import type { ContextProjectionEnvironment } from '@/core/model/context-projection';
+import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
+import {
+  type ContextProjectionEnvironment,
+  digestProjectionEnvironment,
+} from '@/core/model/context-projection';
 import type {
   ContextCompactionCheckpoint,
   PendingContextCompaction,
@@ -27,9 +27,15 @@ function failure(
   errorKind: Extract<RuntimeEvent, { type: 'context.compaction_failed' }>['errorKind'],
   message: string,
   retryable: boolean,
+  reporter?: CompactionReporter,
   durationMs?: number,
 ): RuntimeEvent[] {
-  compactionMetrics.recordFailed();
+  reporter?.recordFailed({
+    compactionId: pending.compactionId,
+    reason: pending.reason,
+    durationMs,
+    errorKind,
+  });
   return [
     {
       type: 'context.compaction_failed',
@@ -38,6 +44,7 @@ function failure(
       errorKind,
       message,
       retryable,
+      requestedAtTurnId: pending.requestedAtTurnId,
       ...(durationMs != null ? { durationMs } : {}),
     },
   ];
@@ -50,42 +57,58 @@ export async function executeContextCompaction(input: {
   compact?: ContextCompactor;
   /** Serialized tool descriptors for candidate projection token estimation (PR 1). */
   projectionEnvironment?: ContextProjectionEnvironment;
+  /** Resolve again after the model call so environment changes are stale, not failures. */
+  resolveProjectionEnvironment?: () => ContextProjectionEnvironment;
+  /** Ephemeral progress only. Never persist these phases as RuntimeEvents. */
+  onProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
+  reporter?: CompactionReporter;
 }): Promise<RuntimeEvent[]> {
   const startedAt = Date.now();
   const elapsed = () => Math.max(0, Date.now() - startedAt);
   const pending = input.state.context.pendingCompaction;
   if (!pending || pending.compactionId !== input.compactionId) return [];
+  input.onProgress?.('preparing');
   const sourceRevision = input.state.revision;
+  const leasedEnvironment = input.resolveProjectionEnvironment?.() ?? input.projectionEnvironment;
+  const leasedEnvironmentDigest = leasedEnvironment
+    ? digestProjectionEnvironment(leasedEnvironment)
+    : undefined;
   if (!input.compact) {
+    input.onProgress?.(undefined);
     return failure(
       pending,
       sourceRevision,
       'summary_model_failed',
-      'No structured context compactor is configured.',
+      'No context compactor is configured.',
       false,
+      input.reporter,
       elapsed(),
     );
   }
 
   try {
+    input.onProgress?.('summarizing');
     const checkpoint = await input.compact({
       state: input.state,
       pending,
       sourceRevision,
-      projectionEnvironment: input.projectionEnvironment,
+      projectionEnvironment: leasedEnvironment,
     });
+    input.onProgress?.('validating');
+    const completedEnvironment = input.resolveProjectionEnvironment?.() ?? leasedEnvironment;
+    const completedEnvironmentDigest = completedEnvironment
+      ? digestProjectionEnvironment(completedEnvironment)
+      : undefined;
+    if (completedEnvironmentDigest !== leasedEnvironmentDigest) {
+      // Environment freshness is part of the effect lease. A stale result must
+      // not create a failure event, checkpoint, or correctness block.
+      return [];
+    }
     if (
       checkpoint.compactionId !== pending.compactionId ||
       checkpoint.sourceRevision !== sourceRevision
     ) {
-      return failure(
-        pending,
-        sourceRevision,
-        'stale_source',
-        'The compaction result does not match the leased Runtime revision.',
-        true,
-        elapsed(),
-      );
+      return [];
     }
     const coveredMessage = input.state.transcript.messages.find(
       (message) => message.messageId === checkpoint.coveredThroughMessageId,
@@ -97,48 +120,40 @@ export async function executeContextCompaction(input: {
         'unsafe_boundary',
         'The checkpoint coverage boundary is not present in the source transcript.',
         false,
+        input.reporter,
         elapsed(),
       );
     }
-    const summaryParseResult =
-      checkpoint.summary.version === 2
-        ? structuredContextSummaryV2Schema.safeParse(checkpoint.summary)
-        : structuredContextSummaryV1Schema.safeParse(checkpoint.summary);
     if (
       checkpoint.version !== 1 ||
-      !summaryParseResult.success ||
+      typeof checkpoint.summary !== 'string' ||
+      checkpoint.summary.trim().length === 0 ||
       !checkpoint.sourceDigest ||
-      checkpoint.summary.provenance.sourceDigest !== checkpoint.sourceDigest ||
-      checkpoint.summary.provenance.lastMessageId !== checkpoint.coveredThroughMessageId
+      checkpoint.inputTokensAfter >= checkpoint.inputTokensBefore
     ) {
       return failure(
         pending,
         sourceRevision,
-        'invalid_schema',
+        'invalid_candidate',
         'The compaction checkpoint envelope is invalid.',
         false,
+        input.reporter,
         elapsed(),
       );
     }
-    const isManual = pending.reason === 'manual';
-    const reductionFailed = isManual
-      ? checkpoint.inputTokensAfter >= checkpoint.inputTokensBefore ||
-        checkpoint.inputTokensBefore - checkpoint.inputTokensAfter < 1_024
-      : checkpoint.inputTokensAfter >= checkpoint.inputTokensBefore ||
-        checkpoint.inputTokensAfter > checkpoint.targetTokens;
+    const reductionFailed = checkpoint.inputTokensBefore - checkpoint.inputTokensAfter < 1_024;
     if (reductionFailed) {
       return failure(
         pending,
         sourceRevision,
         'insufficient_reduction',
-        isManual
-          ? 'Manual compaction did not save enough tokens (minimum 1024).'
-          : 'The checkpoint did not reduce context below its target.',
-        !isManual, // manual failures aren't retryable
+        'Compaction did not save enough tokens (minimum 1024).',
+        pending.reason === 'auto',
+        input.reporter,
         elapsed(),
       );
     }
-    compactionMetrics.recordCompleted({
+    input.reporter?.recordCompleted({
       compactionId: pending.compactionId,
       reason: pending.reason,
       durationMs: elapsed(),
@@ -148,6 +163,7 @@ export async function executeContextCompaction(input: {
         input.state.context.lastCompactionTurnIndex != null
           ? input.state.turn.turnIndex - input.state.context.lastCompactionTurnIndex
           : undefined,
+      completionTurnIndex: input.state.turn.turnIndex,
     });
     return [
       {
@@ -166,6 +182,7 @@ export async function executeContextCompaction(input: {
         error.kind,
         error.message,
         error.kind === 'insufficient_reduction',
+        input.reporter,
         elapsed(),
       );
     }
@@ -175,7 +192,10 @@ export async function executeContextCompaction(input: {
       'summary_model_failed',
       error instanceof Error ? error.message : String(error),
       true,
+      input.reporter,
       elapsed(),
     );
+  } finally {
+    input.onProgress?.(undefined);
   }
 }

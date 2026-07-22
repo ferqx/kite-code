@@ -2,13 +2,14 @@ import { Database } from 'bun:sqlite';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpRuntimeProvider } from '@/core/mcp';
-import { compactionMetrics } from '@/core/model/compaction-metrics';
+import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import {
   buildContextStatusReport,
   compactResetPreflight,
   inspectManualContextCompaction,
   manualContextCompactionEvent,
 } from '@/core/model/context-compaction-manual';
+import { contextCompactionTerminalNotice } from '@/core/model/context-compaction-presentation';
 import { createChatModel } from '@/core/model/factory';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
@@ -239,6 +240,9 @@ export class SessionRuntime {
       frontend: 'tui',
       onKernelControl: (control) => {
         this.runtimeControl = control;
+      },
+      onCompactionProgress: (phase) => {
+        deps.dispatch({ type: 'SET_COMPACTION_PROGRESS', phase });
       },
     };
     const runtimeProvider: RuntimeActionProvider = {
@@ -769,6 +773,11 @@ export class SessionManager {
   async handleContextCompaction(
     threadId: string,
     customInstructions?: string,
+    onProgress?: (
+      phase:
+        | import('@/core/model/context-compaction-presentation').ContextCompactionProgressPhase
+        | undefined,
+    ) => void,
   ): Promise<ContextCompactionCommandResult> {
     const rt = this.runtimes.get(threadId);
     if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
@@ -843,7 +852,6 @@ export class SessionManager {
           text: 'A context compaction request is already pending.',
         };
       }
-      compactionMetrics.recordRequested();
       processEvent(event);
       if (!execute) {
         return {
@@ -857,18 +865,22 @@ export class SessionManager {
       );
       const failed = produced.find((candidate) => candidate.type === 'context.compaction_failed');
       if (completed?.type === 'context.compaction_completed') {
+        const notice = contextCompactionTerminalNotice(completed);
         return {
           events: [event, ...produced],
-          text: `Compacted history: ${completed.checkpoint.inputTokensBefore} → ${completed.checkpoint.inputTokensAfter} tokens.`,
+          text: notice.message,
         };
       }
+      const notice =
+        failed?.type === 'context.compaction_failed'
+          ? contextCompactionTerminalNotice(failed)
+          : undefined;
       return {
         events: [event, ...produced],
         text:
-          failed?.type === 'context.compaction_failed'
-            ? `Context compaction failed: ${failed.message}. The original conversation was preserved.`
-            : 'Compaction queued; it will run when the Runtime reaches a safe boundary.',
-        ...(failed ? { isError: true } : {}),
+          notice?.message ??
+          'Compaction queued; it will run when the Runtime reaches a safe boundary.',
+        ...(notice?.isError ? { isError: true } : {}),
       };
     };
 
@@ -908,6 +920,14 @@ export class SessionManager {
             mcpManager: rt.mcpManager ?? undefined,
             skills: rt.skillManifests,
             skillOptions: rt.skillOptions ?? undefined,
+            onCompactionProgress: onProgress,
+            compactionReporter: this.deps.config.compaction?.localDebug?.enabled
+              ? createLocalCompactionDebugReporter({
+                  enabled: true,
+                  directory: this.deps.config.compaction.localDebug.directory,
+                  sessionId: threadId,
+                })
+              : undefined,
           });
           const lease = kernel.beginEffect(effect);
           const events = await executor(effect, kernel.getState());

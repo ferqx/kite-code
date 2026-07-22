@@ -522,27 +522,9 @@ describe('recordRuntimeEvent — compaction telemetry', () => {
           sourceDigest: 'sha256:source',
           coveredThroughMessageId: 'message-1',
           coveredThroughTurnId: 'turn-1',
-          summary: {
-            version: 1,
-            objective: 'retain facts',
-            userConstraints: [],
-            decisions: [],
-            completedWork: [],
-            observations: [],
-            failures: [],
-            pendingWork: [],
-            unresolvedQuestions: [],
-            recentUserIntent: 'retain facts',
-            provenance: {
-              firstMessageId: 'message-1',
-              lastMessageId: 'message-1',
-              sourceDigest: 'sha256:source',
-              mandatoryFactIds: [],
-            },
-          },
+          summary: 'Retain the important historical facts.',
           inputTokensBefore: 10_000,
           inputTokensAfter: 4_000,
-          targetTokens: 5_000,
           reason: 'auto',
           createdAt: '2026-07-21T00:00:00.000Z',
         },
@@ -561,7 +543,7 @@ describe('recordRuntimeEvent — compaction telemetry', () => {
         type: 'context.compaction_failed',
         compactionId: 'compact-2',
         sourceRevision: 4,
-        errorKind: 'invalid_evidence',
+        errorKind: 'invalid_candidate',
         message: 'fabricated question',
         retryable: false,
         durationMs: 12,
@@ -569,7 +551,7 @@ describe('recordRuntimeEvent — compaction telemetry', () => {
       TRACE,
       PARENT,
     );
-    expect(failed.attributes['kite_code.compaction.error_kind']).toBe('invalid_evidence');
+    expect(failed.attributes['kite_code.compaction.error_kind']).toBe('invalid_candidate');
     expect(failed.status.code).toBe('ERROR');
 
     const pressure = recordRuntimeEvent(
@@ -580,7 +562,6 @@ describe('recordRuntimeEvent — compaction telemetry', () => {
         usableInputTokens: 28_976,
         reservedOutputTokens: 2_000,
         providerSafetyMarginTokens: 1_024,
-        targetTokens: 17_965,
         totalInputTokens: 27_000,
         utilization: 0.9318,
         status: 'compact_due',

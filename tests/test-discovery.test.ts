@@ -52,6 +52,7 @@ describe('test discovery boundaries', () => {
     expect(liveCode.every((path) => path.endsWith('.live.ts'))).toBe(true);
     expect(e2eFiles).toContain('tests/e2e/live/mcp/langchain-docs.live.ts');
     expect(e2eFiles).toContain('tests/e2e/live/model/README.md');
+    expect(e2eFiles).toContain('tests/e2e/live/model/context-compaction.live.ts');
   });
 
   test('keeps real-agent and PTY suites out of the default test script', () => {
@@ -63,9 +64,12 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/tui-system/**'");
     expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/pty-spike/**'");
     expect(pkg.scripts?.['test:e2e']).toContain('tests/e2e/local/');
+    expect(pkg.scripts?.['test:e2e']).not.toContain('tests/tui-system/');
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/e2e/live/');
     expect(pkg.scripts?.['test:mcp:live']).toContain('tests/e2e/live/mcp/');
     expect(pkg.scripts?.['test:mcp:live']).toContain('bun run');
+    expect(pkg.scripts?.['test:model:live']).toContain('tests/e2e/live/model/');
+    expect(pkg.scripts?.['test:model:live']).toContain('bun run');
     expect(pkg.scripts?.['test:real']).toBeUndefined();
     expect(pkg.scripts?.['test:real:direct']).toBeUndefined();
   });

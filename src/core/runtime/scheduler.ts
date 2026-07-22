@@ -161,5 +161,15 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     };
   }
 
+  // An automatic compaction is an admission gate for this turn. If it failed
+  // or was cancelled, do not fall through to the oversized normal model call.
+  // A new turn gets a new id and therefore runs preflight and may try again.
+  if (
+    state.context.lastFailure?.reason === 'auto' &&
+    state.context.lastFailure.requestedAtTurnId === state.turn.turnId
+  ) {
+    return { type: 'stop' };
+  }
+
   return { type: 'call_model' };
 }

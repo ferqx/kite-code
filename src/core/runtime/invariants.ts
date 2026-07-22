@@ -72,47 +72,17 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       'pending compaction token estimate must be non-negative.',
     );
   }
-  if (state.context.lastPreflight) {
-    assert(
-      state.context.lastPreflight.estimate.totalInputTokens >= 0,
-      'last context preflight estimate must be non-negative.',
-    );
-    assert(
-      state.context.lastPreflight.utilization == null ||
-        state.context.lastPreflight.utilization >= 0,
-      'last context preflight utilization must be non-negative.',
-    );
-  }
   if (state.context.activeCheckpoint) {
     const checkpoint = state.context.activeCheckpoint;
     assert(checkpoint.version === 1, 'active context checkpoint version must be 1.');
-    assert(
-      checkpoint.summary.version === 1 || checkpoint.summary.version === 2,
-      'active structured context summary version must be 1 or 2.',
-    );
-    assert(
-      checkpoint.summary.provenance.sourceDigest === checkpoint.sourceDigest,
-      'active structured context summary provenance digest is inconsistent.',
-    );
-    assert(
-      checkpoint.summary.provenance.lastMessageId === checkpoint.coveredThroughMessageId,
-      'active structured context summary coverage is inconsistent.',
-    );
+    assert(checkpoint.summary.trim().length > 0, 'active context summary must be non-empty.');
     assert(Boolean(checkpoint.compactionId), 'active context checkpoint id is required.');
     assert(Boolean(checkpoint.sourceDigest), 'active context checkpoint digest is required.');
-    if (checkpoint.reason === 'manual') {
-      assert(
-        checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
-          checkpoint.inputTokensBefore - checkpoint.inputTokensAfter >= 1_024,
-        'manual context checkpoint must save at least 1024 tokens.',
-      );
-    } else {
-      assert(
-        checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
-          checkpoint.inputTokensAfter <= checkpoint.targetTokens,
-        'active context checkpoint must satisfy its token reduction target.',
-      );
-    }
+    assert(
+      checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
+        checkpoint.inputTokensBefore - checkpoint.inputTokensAfter >= 1_024,
+      'active context checkpoint must save at least 1024 tokens.',
+    );
     const boundary = state.transcript.messages.find(
       (message) => message.messageId === checkpoint.coveredThroughMessageId,
     );

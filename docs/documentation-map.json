@@ -160,6 +160,7 @@
       "sources": ["src/app/tui/**"],
       "documents": [
         "docs/active/mcp-control-plane.md",
+        "docs/active/tui-run-status-bar.md",
         "docs/book/07-TUI结构.md",
         "docs/book/08-TUI交互全景.md"
       ]

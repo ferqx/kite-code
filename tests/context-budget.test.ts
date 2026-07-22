@@ -80,8 +80,8 @@ describe('full request context estimator', () => {
     expect(preflightModelContext({ estimate: makeEstimate(14_000), capabilities }).status).toBe(
       'warning',
     );
-    // 15200/16976 ≈ 0.895 → compact_due (≥ 0.88)
-    expect(preflightModelContext({ estimate: makeEstimate(15_200), capabilities }).status).toBe(
+    // 15300/16976 ≈ 0.901 → compact_due (≥ 0.90)
+    expect(preflightModelContext({ estimate: makeEstimate(15_300), capabilities }).status).toBe(
       'compact_due',
     );
     // 16200/16976 ≈ 0.954 → hard_limit (≥ 0.94)

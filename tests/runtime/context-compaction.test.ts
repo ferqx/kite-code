@@ -7,7 +7,10 @@ import {
   digestProjectionEnvironment,
   serializeToolDescriptors,
 } from '../../src/core/model/context-projection';
-import { normalizeContextRuntimeState } from '../../src/core/runtime/context-compaction';
+import {
+  createContextCorrectnessBlock,
+  normalizeContextRuntimeState,
+} from '../../src/core/runtime/context-compaction';
 import type { ContextCompactionRequestedEvent, RuntimeEvent } from '../../src/core/runtime/events';
 import { AgentKernel } from '../../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
@@ -26,24 +29,7 @@ const estimate: ContextTokenEstimate = {
 };
 
 function summary(sourceDigest: string, firstMessageId = 'message-1', lastMessageId = 'message-1') {
-  return {
-    version: 1 as const,
-    objective: 'retain this fact',
-    userConstraints: [],
-    decisions: [],
-    completedWork: [],
-    observations: [],
-    failures: [],
-    pendingWork: [],
-    unresolvedQuestions: [],
-    recentUserIntent: 'retain this fact',
-    provenance: {
-      firstMessageId,
-      lastMessageId,
-      sourceDigest,
-      mandatoryFactIds: [],
-    },
-  };
+  return `Retain this fact (${sourceDigest}, ${firstMessageId}, ${lastMessageId}).`;
 }
 
 function requestedState() {
@@ -103,9 +89,11 @@ describe('eventized context compaction', () => {
 
   test('controller completes a valid leased checkpoint and reducer activates it', async () => {
     const state = requestedState();
+    const progress: Array<string | undefined> = [];
     const events = await executeContextCompaction({
       state,
       compactionId: 'compact-1',
+      onProgress: (phase) => progress.push(phase),
       compact: async ({ sourceRevision, pending }) => ({
         compactionId: pending.compactionId,
         version: 1,
@@ -114,9 +102,8 @@ describe('eventized context compaction', () => {
         coveredThroughMessageId: 'message-1',
         coveredThroughTurnId: state.turn.turnId,
         summary: summary('sha256:source'),
-        inputTokensBefore: 1_000,
+        inputTokensBefore: 2_000,
         inputTokensAfter: 400,
-        targetTokens: 550,
         reason: pending.reason,
         createdAt: '2026-07-20T00:00:01.000Z',
       }),
@@ -124,6 +111,7 @@ describe('eventized context compaction', () => {
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('context.compaction_completed');
     expect(events[0]).toHaveProperty('durationMs');
+    expect(progress).toEqual(['preparing', 'summarizing', 'validating', undefined]);
     expect((events[0] as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(0);
 
     const completed = reduceRuntimeState(state, events[0]!);
@@ -144,18 +132,100 @@ describe('eventized context compaction', () => {
     });
   });
 
+  test.each([
+    'manual',
+    'auto',
+  ] as const)('%s success emits all three ephemeral phases and clears the spinner', async (reason) => {
+    const state = requestedState();
+    state.context.pendingCompaction!.reason = reason;
+    const progress: Array<string | undefined> = [];
+    const events = await executeContextCompaction({
+      state,
+      compactionId: 'compact-1',
+      onProgress: (phase) => progress.push(phase),
+      compact: async ({ sourceRevision, pending }) => ({
+        compactionId: pending.compactionId,
+        version: 1,
+        sourceRevision,
+        sourceDigest: 'sha256:progress',
+        coveredThroughMessageId: 'message-1',
+        coveredThroughTurnId: state.turn.turnId,
+        summary: 'A compact narrative.',
+        inputTokensBefore: 2_000,
+        inputTokensAfter: 500,
+        reason: pending.reason,
+        createdAt: '2026-07-22T00:00:01.000Z',
+      }),
+    });
+    expect(events[0]?.type).toBe('context.compaction_completed');
+    expect(progress).toEqual(['preparing', 'summarizing', 'validating', undefined]);
+  });
+
+  test('environment-stale model results emit no lifecycle event', async () => {
+    const state = requestedState();
+    let generation = 0;
+    const progress: Array<string | undefined> = [];
+    const events = await executeContextCompaction({
+      state,
+      compactionId: 'compact-1',
+      resolveProjectionEnvironment: () => ({
+        serializedTools: [],
+        activeSkillInstructions: `generation-${generation++}`,
+        workflowSkills: [],
+      }),
+      onProgress: (phase) => progress.push(phase),
+      compact: async ({ sourceRevision, pending }) => {
+        return {
+          compactionId: pending.compactionId,
+          version: 1,
+          sourceRevision,
+          sourceDigest: 'sha256:source',
+          coveredThroughMessageId: 'message-1',
+          coveredThroughTurnId: state.turn.turnId,
+          summary: summary('sha256:source'),
+          inputTokensBefore: 2_000,
+          inputTokensAfter: 500,
+          reason: pending.reason,
+          createdAt: '2026-07-20T00:00:01.000Z',
+        };
+      },
+    });
+    expect(events).toEqual([]);
+    expect(progress).toEqual(['preparing', 'summarizing', 'validating', undefined]);
+  });
+
+  test.each([
+    'manual',
+    'auto',
+  ] as const)('%s failures clear ephemeral progress without persisting it', async (reason) => {
+    const state = requestedState();
+    state.context.pendingCompaction!.reason = reason;
+    const progress: Array<string | undefined> = [];
+    const events = await executeContextCompaction({
+      state,
+      compactionId: 'compact-1',
+      onProgress: (phase) => progress.push(phase),
+      compact: async () => {
+        throw new Error('provider failed');
+      },
+    });
+    expect(events).toHaveLength(1);
+    expect(progress).toEqual(['preparing', 'summarizing', undefined]);
+    expect(JSON.stringify(events)).not.toContain('preparing');
+  });
+
   test('records typed failures and rejects stale compaction results through the kernel lease', () => {
     const state = requestedState();
     const failed = reduceRuntimeState(state, {
       type: 'context.compaction_failed',
       compactionId: 'compact-1',
       sourceRevision: state.revision,
-      errorKind: 'invalid_schema',
+      errorKind: 'invalid_candidate',
       message: 'bad summary',
       retryable: false,
     });
     expect(failed.context.pendingCompaction).toBeUndefined();
-    expect(failed.context.lastFailure?.errorKind).toBe('invalid_schema');
+    expect(failed.context.lastFailure?.errorKind).toBe('invalid_candidate');
 
     const store = createRuntimeStore(':memory:');
     const kernel = new AgentKernel({
@@ -175,7 +245,7 @@ describe('eventized context compaction', () => {
           type: 'context.compaction_failed',
           compactionId: 'compact-1',
           sourceRevision: lease.expectedRevision,
-          errorKind: 'stale_source',
+          errorKind: 'invalid_candidate',
           message: 'stale',
           retryable: true,
         },
@@ -204,7 +274,6 @@ describe('eventized context compaction', () => {
           summary: summary('digest', 'missing', 'missing'),
           inputTokensBefore: 1_000,
           inputTokensAfter: 400,
-          targetTokens: 550,
           reason: pending.reason,
           createdAt: '2026-07-20T00:00:01.000Z',
         }),
@@ -216,6 +285,114 @@ describe('eventized context compaction', () => {
 // ── PR 1: Durable event JSON safety ──
 
 describe('PR 1 — durable event JSON safety', () => {
+  test('every durable context event survives an exact JSON roundtrip', () => {
+    const checkpoint = {
+      compactionId: 'compact-roundtrip',
+      version: 1 as const,
+      sourceRevision: 4,
+      sourceDigest: 'sha256:roundtrip',
+      coveredThroughMessageId: 'message-1',
+      coveredThroughTurnId: 'turn-1',
+      summary: '# Restored narrative',
+      inputTokensBefore: 4_000,
+      inputTokensAfter: 1_000,
+      reason: 'manual' as const,
+      createdAt: '2026-07-22T00:00:00.000Z',
+    };
+    const events: RuntimeEvent[] = [
+      {
+        type: 'context.compaction_requested',
+        compactionId: checkpoint.compactionId,
+        reason: 'manual',
+        requestedAtRevision: 4,
+        requestedAtTurnId: 'turn-1',
+        force: false,
+        estimate: requestedState().context.pendingCompaction!.estimate,
+      },
+      {
+        type: 'context.compaction_completed',
+        compactionId: checkpoint.compactionId,
+        sourceRevision: 4,
+        checkpoint,
+        durationMs: 25,
+      },
+      {
+        type: 'context.compaction_failed',
+        compactionId: 'compact-failed',
+        sourceRevision: 5,
+        errorKind: 'summary_model_failed',
+        message: 'provider unavailable',
+        retryable: true,
+        durationMs: 10,
+      },
+      { type: 'context.compaction_reset', checkpointId: checkpoint.compactionId, reason: 'manual' },
+      {
+        type: 'context.hard_blocked',
+        reason: 'unrecoverable_checkpoint',
+        sourceDigest: checkpoint.sourceDigest,
+        message: 'invalid checkpoint',
+        createdAtTurnId: 'turn-1',
+      },
+      {
+        type: 'context.hard_block_cleared',
+        reason: 'unrecoverable_checkpoint',
+        sourceDigest: checkpoint.sourceDigest,
+      },
+    ];
+
+    expect(JSON.parse(JSON.stringify(events))).toEqual(events);
+  });
+
+  test('context runtime state and narrative checkpoint survive JSON roundtrip', () => {
+    const state = requestedState();
+    const checkpoint = {
+      compactionId: 'compact-1',
+      version: 1 as const,
+      sourceRevision: state.revision,
+      sourceDigest: 'sha256:source',
+      coveredThroughMessageId: 'message-1',
+      coveredThroughTurnId: state.turn.turnId,
+      summary: '# Decisions\n\nContinue the rollout.',
+      inputTokensBefore: 4_000,
+      inputTokensAfter: 1_500,
+      reason: 'manual' as const,
+      createdAt: '2026-07-22T00:00:00.000Z',
+    };
+    const completed = reduceRuntimeState(state, {
+      type: 'context.compaction_completed',
+      compactionId: checkpoint.compactionId,
+      sourceRevision: state.revision,
+      checkpoint,
+    });
+    const restored = JSON.parse(JSON.stringify(completed)) as typeof completed;
+    expect(restored.context).toEqual(completed.context);
+    expect(restored.transcript).toEqual(completed.transcript);
+  });
+
+  test('corrupted persisted narrative checkpoint fails closed', () => {
+    const state = requestedState();
+    state.context.activeCheckpoint = {
+      compactionId: 'corrupt',
+      version: 1,
+      sourceRevision: state.revision,
+      sourceDigest: 'sha256:corrupt',
+      coveredThroughMessageId: 'message-1',
+      coveredThroughTurnId: state.turn.turnId,
+      summary: '   ',
+      inputTokensBefore: 1_000,
+      inputTokensAfter: 2_000,
+      reason: 'manual',
+      createdAt: '2026-07-22T00:00:00.000Z',
+    };
+
+    const normalized = normalizeContextRuntimeState(state.context);
+    expect(normalized.activeCheckpoint).toBeUndefined();
+    expect(normalized.hardBlock).toMatchObject({
+      reason: 'unrecoverable_checkpoint',
+      sourceDigest: 'sha256:corrupt',
+    });
+  });
+
   test('ContextCompactionRequestedEvent survives JSON roundtrip', () => {
     const event: ContextCompactionRequestedEvent = {
       type: 'context.compaction_requested',
@@ -233,7 +410,6 @@ describe('PR 1 — durable event JSON safety', () => {
         framingTokens: 10,
         totalInputTokens: 690,
       },
-      projectionEnvironmentDigest: 'sha256:abc123',
     };
 
     expect(() => JSON.stringify(event)).not.toThrow();
@@ -241,7 +417,6 @@ describe('PR 1 — durable event JSON safety', () => {
     expect(parsed.type).toBe('context.compaction_requested');
     expect(parsed.compactionId).toBe('compact-1');
     expect(parsed.reason).toBe('auto');
-    expect(parsed.projectionEnvironmentDigest).toBe('sha256:abc123');
     // tools must not exist on the event
     expect('tools' in parsed).toBe(false);
   });
@@ -398,6 +573,38 @@ describe('PR 1 — durable event JSON safety', () => {
 // ── PR 6: Hard block + thrash state machine ──
 
 describe('PR 6 — hard block and thrash breaker', () => {
+  test('correctness block factory requires auditable invariant evidence', () => {
+    expect(() =>
+      createContextCorrectnessBlock({
+        reason: 'runtime_invariant_violation',
+        sourceDigest: '',
+        message: 'broken',
+        createdAtTurnId: 'turn-1',
+      }),
+    ).toThrow();
+  });
+
+  test('recovery clears only the matching correctness block', () => {
+    const blocked = reduceRuntimeState(requestedState(), {
+      type: 'context.hard_blocked',
+      reason: 'unsafe_context_projection',
+      sourceDigest: 'projection-v1',
+      message: 'pairing failed',
+      createdAtTurnId: 'turn-1',
+    });
+    const mismatch = reduceRuntimeState(blocked, {
+      type: 'context.hard_block_cleared',
+      reason: 'unsafe_context_projection',
+      sourceDigest: 'projection-v2',
+    });
+    expect(mismatch.context.hardBlock).toBeDefined();
+    const recovered = reduceRuntimeState(mismatch, {
+      type: 'context.hard_block_cleared',
+      reason: 'unsafe_context_projection',
+      sourceDigest: 'projection-v1',
+    });
+    expect(recovered.context.hardBlock).toBeUndefined();
+  });
   test('auto low gain does NOT create hard block', () => {
     const state = requestedState();
     const failed = reduceRuntimeState(state, {
@@ -516,7 +723,7 @@ describe('PR 6 — hard block and thrash breaker', () => {
       requestedAtRevision: current.revision,
       requestedAtTurnId: current.turn.turnId,
       force: false,
-      estimate: state.context.lastPreflight?.estimate ?? state.context.pendingCompaction!.estimate,
+      estimate: state.context.pendingCompaction!.estimate,
     };
     const second = reduceRuntimeState(current, {
       type: 'context.compaction_failed',
@@ -551,7 +758,6 @@ describe('PR 6 — hard block and thrash breaker', () => {
       summary: summary('sha256:source'),
       inputTokensBefore: 4_000,
       inputTokensAfter: 2_000,
-      targetTokens: 2_500,
       reason: 'manual' as const,
       createdAt: '2026-07-20T00:00:01.000Z',
     };

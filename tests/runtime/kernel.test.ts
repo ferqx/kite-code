@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buildContextProjection } from '../../src/core/model/context-projection';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { createRuntimeEffectExecutor } from '../../src/core/runtime/executor';
 import { AgentKernel, createAgentKernel } from '../../src/core/runtime/kernel';
@@ -15,6 +16,131 @@ import {
 import { createRuntimeStore } from '../../src/core/runtime/store';
 
 describe('AgentKernel durability', () => {
+  test('replays the context compaction crash matrix from snapshot plus event tail', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-compaction-crash-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'compaction-crash-matrix';
+    try {
+      const base = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      base.transcript.messages = [
+        {
+          kind: 'user',
+          messageId: 'message-1',
+          turnId: base.turn.turnId,
+          ordinal: 0,
+          createdAt: '2026-07-22T00:00:00.000Z',
+          content: 'preserve this transcript',
+        },
+      ];
+      const request: RuntimeEvent = {
+        type: 'context.compaction_requested',
+        compactionId: 'compact-crash',
+        reason: 'manual',
+        requestedAtRevision: 0,
+        requestedAtTurnId: base.turn.turnId,
+        force: false,
+        estimate: {
+          systemTokens: 10,
+          toolSchemaTokens: 0,
+          transcriptTokens: 3_000,
+          summaryTokens: 0,
+          dynamicRuntimeTokens: 0,
+          framingTokens: 10,
+          totalInputTokens: 3_020,
+        },
+      };
+      const checkpoint = {
+        compactionId: 'compact-crash',
+        version: 1 as const,
+        sourceRevision: 1,
+        sourceDigest: 'sha256:crash',
+        coveredThroughMessageId: 'message-1',
+        coveredThroughTurnId: base.turn.turnId,
+        summary: '# Restored\n\nContinue safely.',
+        inputTokensBefore: 3_020,
+        inputTokensAfter: 900,
+        reason: 'manual' as const,
+        createdAt: '2026-07-22T00:00:01.000Z',
+      };
+      const completed: RuntimeEvent = {
+        type: 'context.compaction_completed',
+        compactionId: checkpoint.compactionId,
+        sourceRevision: 1,
+        checkpoint,
+      };
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, base);
+      store.appendEvents(
+        threadId,
+        [request],
+        [{ eventId: 'request-1', revision: 1, occurredAt: '2026-07-22T00:00:01.000Z' }],
+      );
+      store.close();
+
+      const afterRequest = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(afterRequest.getState().context.pendingCompaction?.compactionId).toBe('compact-crash');
+      expect(afterRequest.getState().transcript.messages).toEqual(base.transcript.messages);
+      afterRequest.close();
+
+      const tailStore = createRuntimeStore(storePath);
+      tailStore.appendEvents(
+        threadId,
+        [completed],
+        [{ eventId: 'completed-1', revision: 2, occurredAt: '2026-07-22T00:00:02.000Z' }],
+      );
+      tailStore.close();
+      const afterCompletedTail = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(afterCompletedTail.getState().context.pendingCompaction).toBeUndefined();
+      expect(afterCompletedTail.getState().context.activeCheckpoint).toEqual(checkpoint);
+      expect(afterCompletedTail.getState().context.history).toHaveLength(1);
+      afterCompletedTail.saveSnapshot();
+      afterCompletedTail.close();
+
+      const afterCompletedSnapshot = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(afterCompletedSnapshot.getState().context.activeCheckpoint).toEqual(checkpoint);
+      expect(afterCompletedSnapshot.getState().context.history).toHaveLength(1);
+      expect(afterCompletedSnapshot.getState().transcript.messages).toEqual(
+        base.transcript.messages,
+      );
+      const restoredProjection = buildContextProjection({
+        role: 'agent',
+        state: afterCompletedSnapshot.getState(),
+        serializedTools: [],
+      });
+      const serializedProjection = JSON.stringify(restoredProjection.providerMessages);
+      expect(
+        restoredProjection.providerMessages.filter(
+          (message) =>
+            typeof message.content === 'string' &&
+            message.content.startsWith('<compacted_history>\n'),
+        ),
+      ).toHaveLength(1);
+      expect(serializedProjection).toContain('Continue safely.');
+      afterCompletedSnapshot.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('migrates v14 snapshots with an empty context checkpoint runtime', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-pr6-migration-'));
     const storePath = join(dir, 'runtime.db');
@@ -44,7 +170,7 @@ describe('AgentKernel durability', () => {
     }
   });
 
-  test('migrates v13 transcript messages to stable PR 3 identities', () => {
+  test('migrates v13 transcript identities without synthetic legacy turns', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-pr3-migration-'));
     const storePath = join(dir, 'runtime.db');
     try {
@@ -75,16 +201,18 @@ describe('AgentKernel durability', () => {
         storePath,
       });
       expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(restored.getState().transcript.messages).toEqual([
+      const restoredMessages = restored.getState().transcript.messages;
+      const restoredTurnId = restoredMessages[0]?.turnId;
+      expect(restoredMessages).toEqual([
         expect.objectContaining({
           messageId: 'user-1',
-          turnId: expect.stringMatching(/^legacy-turn-/),
+          turnId: restoredTurnId,
           ordinal: 0,
           createdAt: '1970-01-01T00:00:00.000Z',
         }),
         expect.objectContaining({
-          messageId: expect.stringMatching(/^legacy-message-/),
-          turnId: expect.stringMatching(/^legacy-turn-/),
+          messageId: 'tool-tool-1',
+          turnId: restoredTurnId,
           ordinal: 1,
           createdAt: '1970-01-01T00:00:00.000Z',
         }),

@@ -1,5 +1,4 @@
-import type { StructuredContextSummary } from '@/core/model/compaction-schema';
-import type { ContextPreflight, ContextTokenEstimate } from '@/core/model/context-budget';
+import type { ContextTokenEstimate } from '@/core/model/context-budget';
 
 export type ContextCompactionReason = 'manual' | 'auto';
 
@@ -36,19 +35,14 @@ export interface ContextCompactionCheckpoint {
   sourceDigest: string;
   coveredThroughMessageId: string;
   coveredThroughTurnId: string;
-  /** V1 for backward compat, V2 for current — use `summary.version` to discriminate. */
-  summary: StructuredContextSummary;
+  /** The only model-generated content: normalized Markdown narrative. */
+  summary: string;
   inputTokensBefore: number;
   inputTokensAfter: number;
-  targetTokens: number;
   reason: ContextCompactionReason;
   createdAt: string;
   /** When this checkpoint was built on top of a previous one (incremental compaction). */
   baseCheckpointId?: string;
-  /** Summary schema version used (maps to summary.version). */
-  summaryVersion?: number;
-  /** Compaction policy version at creation time. */
-  policyVersion?: string;
 }
 
 export interface PendingContextCompaction {
@@ -65,14 +59,14 @@ export interface PendingContextCompaction {
 
 export type ContextCompactionErrorKind =
   | 'unsafe_boundary'
+  | 'oversized_turn'
   | 'summary_model_failed'
-  | 'invalid_schema'
-  | 'invalid_provenance'
-  | 'invalid_evidence'
-  | 'missing_user_coverage'
-  | 'missing_mandatory_facts'
-  | 'insufficient_reduction'
-  | 'stale_source';
+  | 'summary_aborted'
+  | 'empty_summary'
+  | 'truncated_summary'
+  | 'unexpected_tool_call'
+  | 'invalid_candidate'
+  | 'insufficient_reduction';
 
 export interface ContextCompactionFailure {
   compactionId: string;
@@ -81,6 +75,8 @@ export interface ContextCompactionFailure {
   message: string;
   retryable: boolean;
   reason?: ContextCompactionReason;
+  /** Present for current events; optional only for restored legacy failures. */
+  requestedAtTurnId?: string;
 }
 
 export type ContextCompactionHistoryEntry =
@@ -97,6 +93,26 @@ export interface ContextHardBlock {
   sourceDigest: string;
   message: string;
   createdAtTurnId: string;
+}
+
+export interface ContextCorrectnessFailure {
+  reason: ContextHardBlockReason;
+  sourceDigest: string;
+  message: string;
+  createdAtTurnId: string;
+}
+
+/** The only constructor for a durable context correctness block. */
+export function createContextCorrectnessBlock(
+  failure: ContextCorrectnessFailure,
+): ContextHardBlock {
+  if (!isContextHardBlockReason(failure.reason)) {
+    throw new Error(`Unsupported context correctness failure: ${String(failure.reason)}`);
+  }
+  if (!failure.sourceDigest || !failure.createdAtTurnId || !failure.message.trim()) {
+    throw new Error('Context correctness failures require digest, turn, and message evidence.');
+  }
+  return { ...failure, message: failure.message.trim() };
 }
 
 /**
@@ -119,7 +135,6 @@ export interface ContextRuntimeState {
   lastFailure?: ContextCompactionFailure;
   history: ContextCompactionHistoryEntry[];
   lastCompactionTurnIndex?: number;
-  lastPreflight?: ContextPreflight;
   /** Durable block reserved for proven Runtime correctness failures. */
   hardBlock?: ContextHardBlock;
   /** Thrash breaker state for auto-compaction. */
@@ -145,7 +160,25 @@ export function normalizeContextRuntimeState(
   ): ContextCompactionCheckpoint | undefined => {
     if (!checkpoint) return undefined;
     const reason = normalizeContextCompactionReason(checkpoint.reason);
-    return reason ? { ...checkpoint, reason } : undefined;
+    const validEnvelope =
+      checkpoint.version === 1 &&
+      Boolean(checkpoint.compactionId) &&
+      Number.isInteger(checkpoint.sourceRevision) &&
+      checkpoint.sourceRevision >= 0 &&
+      Boolean(checkpoint.sourceDigest) &&
+      Boolean(checkpoint.coveredThroughMessageId) &&
+      Boolean(checkpoint.coveredThroughTurnId) &&
+      Number.isFinite(checkpoint.inputTokensBefore) &&
+      Number.isFinite(checkpoint.inputTokensAfter) &&
+      checkpoint.inputTokensBefore > checkpoint.inputTokensAfter &&
+      checkpoint.inputTokensAfter >= 0 &&
+      Boolean(checkpoint.createdAt);
+    return reason &&
+      validEnvelope &&
+      typeof checkpoint.summary === 'string' &&
+      checkpoint.summary.trim()
+      ? { ...checkpoint, summary: checkpoint.summary.trim(), reason }
+      : undefined;
   };
   const normalizeFailure = (
     failure: ContextCompactionFailure | undefined,
@@ -155,10 +188,14 @@ export function normalizeContextRuntimeState(
     return { ...failure, ...(reason ? { reason } : { reason: undefined }) };
   };
   const hardBlock = context.hardBlock as ContextHardBlock | undefined;
+  const normalizedActiveCheckpoint = normalizeCheckpoint(context.activeCheckpoint);
+  const corruptedActiveCheckpoint = Boolean(
+    context.activeCheckpoint && !normalizedActiveCheckpoint,
+  );
 
   return {
     ...context,
-    activeCheckpoint: normalizeCheckpoint(context.activeCheckpoint),
+    activeCheckpoint: normalizedActiveCheckpoint,
     pendingCompaction: context.pendingCompaction
       ? (() => {
           const reason = normalizeContextCompactionReason(context.pendingCompaction.reason);
@@ -177,8 +214,18 @@ export function normalizeContextRuntimeState(
       }
       return [{ kind: 'reset', compactionId: entry.compactionId, reason: 'manual' }];
     }),
-    hardBlock:
-      hardBlock && isContextHardBlockReason(hardBlock.reason)
+    hardBlock: corruptedActiveCheckpoint
+      ? {
+          reason: 'unrecoverable_checkpoint',
+          sourceDigest:
+            typeof context.activeCheckpoint?.sourceDigest === 'string' &&
+            context.activeCheckpoint.sourceDigest
+              ? context.activeCheckpoint.sourceDigest
+              : `checkpoint:${context.activeCheckpoint?.compactionId ?? 'unknown'}`,
+          message: 'The persisted context checkpoint failed validation.',
+          createdAtTurnId: context.activeCheckpoint?.coveredThroughTurnId || 'unknown',
+        }
+      : hardBlock && isContextHardBlockReason(hardBlock.reason)
         ? {
             reason: hardBlock.reason,
             sourceDigest: hardBlock.sourceDigest,

@@ -1,5 +1,6 @@
 // ── TUI render-event handler ──
 
+import { contextCompactionTerminalNotice } from '@/core/model/context-compaction-presentation';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type * as Protocol from '@/protocol/events';
 import {
@@ -1481,44 +1482,102 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         },
       });
     case 'context.compaction_completed': {
+      const notice = contextCompactionTerminalNotice(event);
+      if (state.terminalCompactionNotices?.[notice.compactionId]) return state;
       const next = handleEventAction(state, {
         type: 'text',
-        data: {
-          text: `Compacted ${event.checkpoint.inputTokensBefore} → ${event.checkpoint.inputTokensAfter} tokens.`,
-        },
+        data: { text: notice.message },
       });
       return {
         ...next,
         status: {
           ...next.status,
-          compactionBefore: event.checkpoint.inputTokensBefore,
-          compactionAfter: event.checkpoint.inputTokensAfter,
+          contextSnapshot: {
+            ...(next.status.contextSnapshot ?? {
+              estimate: {
+                systemTokens: 0,
+                toolSchemaTokens: 0,
+                transcriptTokens: 0,
+                summaryTokens: 0,
+                dynamicRuntimeTokens: 0,
+                framingTokens: 0,
+                totalInputTokens: event.checkpoint.inputTokensAfter,
+              },
+              status: 'unknown' as const,
+            }),
+            activeCheckpointId: event.checkpoint.compactionId,
+            inputTokensBefore: event.checkpoint.inputTokensBefore,
+            inputTokensAfter: event.checkpoint.inputTokensAfter,
+          },
+        },
+        terminalCompactionNotices: {
+          ...next.terminalCompactionNotices,
+          [notice.compactionId]: notice.kind,
         },
       };
     }
-    case 'context.compaction_failed':
+    case 'context.compaction_failed': {
+      const notice = contextCompactionTerminalNotice(event);
+      if (state.terminalCompactionNotices?.[notice.compactionId]) return state;
       // Benign rejections: render as plain text (persisted across restarts).
-      if (event.errorKind === 'unsafe_boundary' && !event.retryable) {
-        return handleEventAction(state, {
+      if (!notice.isError) {
+        const next = handleEventAction(state, {
           type: 'text',
-          data: { text: `  ⎿  ${event.message}` },
+          data: { text: `  ⎿  ${notice.message}` },
         });
+        return {
+          ...next,
+          terminalCompactionNotices: {
+            ...next.terminalCompactionNotices,
+            [notice.compactionId]: notice.kind,
+          },
+        };
       }
-      return handleEventAction(state, {
+      const next = handleEventAction(state, {
         type: 'error',
         data: {
-          message: `Context compaction failed: ${event.message}. The original conversation was preserved.`,
+          message: notice.message,
           recoverable: event.retryable,
         },
       });
+      return {
+        ...next,
+        terminalCompactionNotices: {
+          ...next.terminalCompactionNotices,
+          [notice.compactionId]: notice.kind,
+        },
+      };
+    }
+    case 'model.context_metrics':
+      return {
+        ...state,
+        status: {
+          ...state.status,
+          contextSnapshot: {
+            estimate: event.estimate,
+            status: event.status,
+            usableInputTokens: event.usableInputTokens,
+            utilization: event.utilization,
+            activeCheckpointId: state.status.contextSnapshot?.activeCheckpointId,
+            inputTokensBefore: state.status.contextSnapshot?.inputTokensBefore,
+            inputTokensAfter: state.status.contextSnapshot?.inputTokensAfter,
+          },
+        },
+      };
     case 'context.compaction_reset':
       return handleEventAction(
         {
           ...state,
           status: {
             ...state.status,
-            compactionBefore: undefined,
-            compactionAfter: undefined,
+            contextSnapshot: state.status.contextSnapshot
+              ? {
+                  ...state.status.contextSnapshot,
+                  activeCheckpointId: undefined,
+                  inputTokensBefore: undefined,
+                  inputTokensAfter: undefined,
+                }
+              : undefined,
           },
         },
         {

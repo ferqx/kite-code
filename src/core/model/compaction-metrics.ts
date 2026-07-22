@@ -17,6 +17,9 @@ export interface CompactionMetricSample {
   reductionRatio: number;
   /** Elapsed turns since last checkpoint at request time */
   turnsSinceLastCheckpoint?: number;
+  completionTurnIndex?: number;
+  tokensThreeTurnsLater?: number;
+  threeTurnRefillRatio?: number;
 }
 
 export interface CompactionMetricsSnapshot {
@@ -37,7 +40,27 @@ export interface CompactionMetricsSnapshot {
 
 const MAX_SAMPLES = 64;
 
-class CompactionMetrics {
+export interface CompactionReporter {
+  recordRequested(): void;
+  recordCompleted(input: {
+    compactionId: string;
+    reason: ContextCompactionReason;
+    durationMs: number;
+    tokensBefore: number;
+    tokensAfter: number;
+    turnsSinceLastCheckpoint?: number;
+    completionTurnIndex?: number;
+  }): void;
+  recordFailed(input?: {
+    compactionId: string;
+    reason: ContextCompactionReason;
+    durationMs?: number;
+    errorKind: string;
+  }): void;
+  recordContextFollowUp?(currentTurnIndex: number, totalInputTokens: number): void;
+}
+
+export class CompactionMetrics implements CompactionReporter {
   private _requested = 0;
   private _completed = 0;
   private _failed = 0;
@@ -61,6 +84,7 @@ class CompactionMetrics {
     tokensBefore: number;
     tokensAfter: number;
     turnsSinceLastCheckpoint?: number;
+    completionTurnIndex?: number;
   }): void {
     this._completed++;
     const reductionRatio =
@@ -73,6 +97,7 @@ class CompactionMetrics {
       tokensAfter: input.tokensAfter,
       reductionRatio,
       turnsSinceLastCheckpoint: input.turnsSinceLastCheckpoint,
+      completionTurnIndex: input.completionTurnIndex,
     });
     if (this._samples.length > MAX_SAMPLES) {
       this._samples = this._samples.slice(-MAX_SAMPLES);
@@ -80,8 +105,31 @@ class CompactionMetrics {
   }
 
   /** Increment the failed counter. */
-  recordFailed(): void {
+  recordFailed(_input?: {
+    compactionId: string;
+    reason: ContextCompactionReason;
+    durationMs?: number;
+    errorKind: string;
+  }): void {
     this._failed++;
+  }
+
+  recordContextFollowUp(currentTurnIndex: number, totalInputTokens: number): void {
+    this._samples = this._samples.map((sample) => {
+      if (
+        sample.completionTurnIndex == null ||
+        sample.tokensThreeTurnsLater != null ||
+        currentTurnIndex - sample.completionTurnIndex < 3
+      ) {
+        return sample;
+      }
+      return {
+        ...sample,
+        tokensThreeTurnsLater: totalInputTokens,
+        threeTurnRefillRatio:
+          sample.tokensAfter > 0 ? totalInputTokens / sample.tokensAfter : undefined,
+      };
+    });
   }
 
   /** Increment the reset counter. */
@@ -141,5 +189,7 @@ class CompactionMetrics {
   }
 }
 
-/** Singleton for the session-level compaction metrics collector. */
-export const compactionMetrics = new CompactionMetrics();
+/** Runtime composition roots own and flush each reporter instance. */
+export function createCompactionMetrics(): CompactionMetrics {
+  return new CompactionMetrics();
+}

@@ -604,7 +604,11 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     const label = customInstructions ? `/compact ${customInstructions}` : '/compact';
     dispatchSessionLoad({ type: 'USER_MESSAGE', text: label });
     void sessionManager
-      .handleContextCompaction(targetThreadId, customInstructions)
+      .handleContextCompaction(targetThreadId, customInstructions, (phase) => {
+        if (threadIdRef.current === targetThreadId) {
+          dispatchSessionLoad({ type: 'SET_COMPACTION_PROGRESS', phase });
+        }
+      })
       .then((result) => {
         // Runtime events are already durable in targetThreadId. If the user
         // switched sessions while compaction was running, let the target

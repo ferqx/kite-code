@@ -210,9 +210,8 @@ describe('progressive capability disclosure', () => {
       expect.objectContaining({
         type: 'model.context_metrics',
         contextWindowTokens: 128_000,
-        usableInputTokens: expect.any(Number),
         totalInputTokens: expect.any(Number),
-        utilization: expect.any(Number),
+        status: 'unknown',
         estimate: expect.objectContaining({
           systemTokens: expect.any(Number),
           toolSchemaTokens: expect.any(Number),
@@ -222,6 +221,9 @@ describe('progressive capability disclosure', () => {
         }),
       }),
     );
+    const metrics = modelEvents.find((event) => event.type === 'model.context_metrics');
+    expect(metrics).not.toHaveProperty('usableInputTokens');
+    expect(metrics).not.toHaveProperty('utilization');
   });
 
   test('search persists candidates but returns metadata without descriptions or executable IDs', async () => {

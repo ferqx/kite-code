@@ -232,7 +232,7 @@ describe('SessionManager', () => {
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
       features: { contextCompactionManualV1: true },
-      compaction: { recentTurns: 1 },
+      compaction: {},
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { compactionMetrics } from '../../src/core/model/compaction-metrics';
+import { createCompactionMetrics } from '../../src/core/model/compaction-metrics';
+
+const compactionMetrics = createCompactionMetrics();
 
 describe('compactionMetrics', () => {
   test('starts with zero counts', () => {
@@ -120,6 +122,25 @@ describe('compactionMetrics', () => {
       tokensAfter: 5_000,
     });
     expect(compactionMetrics.snapshot().totalTokensSaved).toBe(12_000);
+  });
+
+  test('records the first context follow-up at least three turns later', () => {
+    compactionMetrics.clear();
+    compactionMetrics.recordCompleted({
+      compactionId: 'follow-up',
+      reason: 'auto',
+      durationMs: 10,
+      tokensBefore: 10_000,
+      tokensAfter: 4_000,
+      completionTurnIndex: 7,
+    });
+    compactionMetrics.recordContextFollowUp(9, 5_000);
+    expect(compactionMetrics.snapshot().samples[0]?.tokensThreeTurnsLater).toBeUndefined();
+    compactionMetrics.recordContextFollowUp(10, 6_000);
+    expect(compactionMetrics.snapshot().samples[0]).toMatchObject({
+      tokensThreeTurnsLater: 6_000,
+      threeTurnRefillRatio: 1.5,
+    });
   });
 
   test('clear resets all counters', () => {

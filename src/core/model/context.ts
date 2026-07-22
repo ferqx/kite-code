@@ -9,11 +9,10 @@ import {
 import systemPrompt from '@/core/prompts/system-prompt.txt';
 import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
-import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
+import type { ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, InteractionMode, PlanningState } from '@/protocol/events';
 import { type ContextTokenEstimate, estimateContextTokens } from './context-budget';
 import { buildCanonicalFrames } from './context-frame-builder';
-import { compactContextFrames } from './context-frame-compactor';
 import { serializeFramesToMessages } from './context-serializer';
 import { validateFramePairs, validateMessagePairs } from './context-validator';
 import {
@@ -37,7 +36,6 @@ export interface ModelContextState {
   authorization?: ThreadAuthorizationState;
   sandboxBackend?: SandboxBackend | 'unknown';
   activeSkillInstructions?: string;
-  contextBudget?: ContextBudget;
   /** PlanningState for dynamic runtime-state block */
   planningState?: PlanningState;
   taskId?: string;
@@ -285,13 +283,9 @@ export function prepareModelContext(
   // ── Canonical frame normalization / 规范帧归一化 ──
   // Build canonical frames to guarantee tool-call/ToolMessage block integrity
   // before the compaction pipeline runs.
-  let frames = buildCanonicalFrames(msgs);
+  const frames = buildCanonicalFrames(msgs);
 
   // ── Frame-level validation / 帧级校验 ──
-  validateFramePairs(frames);
-
-  // ── M1 V2 frame-level compaction / 帧级确定性压缩 ──
-  frames = compactContextFrames(frames, state.contextBudget);
   validateFramePairs(frames);
 
   // ── Serialize frames back to flat message list / 帧序列化为消息列表 ──

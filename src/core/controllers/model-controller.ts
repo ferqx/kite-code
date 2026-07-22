@@ -15,18 +15,18 @@ import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@/core/mcp';
 import type { AIMessage } from '@/core/messages';
-import { compactionMetrics } from '@/core/model/compaction-metrics';
+import type { CompactionReporter } from '@/core/model/compaction-metrics';
 import { preflightModelContext } from '@/core/model/context-budget';
 import { decideAutomaticContextCompaction } from '@/core/model/context-compaction-decision';
+import { resolveContextCompactionRollout } from '@/core/model/context-compaction-rollout';
 import {
   buildContextProjection,
   type ContextProjectionEnvironment,
-  digestProjectionEnvironment,
   serializeToolDescriptors,
 } from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
-import { resolveModelCapabilities, usableInputBudget } from '@/core/model/model-capabilities';
+import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -202,6 +202,16 @@ export function resolveContextProjectionEnvironment(input: {
         capabilityId: descriptor.capabilityId,
         description: descriptor.description,
       })),
+    leaseMetadata: {
+      providerName: input.config.providerName,
+      modelName: input.config.modelName,
+      modelCapabilities: resolveModelCapabilities({
+        config: input.config,
+        adapter: input.model.capabilityMetadata,
+      }),
+      estimator: 'countTokens:v1',
+      summaryPolicy: input.config.compaction ?? {},
+    },
   };
 }
 
@@ -229,6 +239,7 @@ export async function invokeRuntimeModel(params: {
   signal?: AbortSignal;
   /** Persists bindings before the model can emit a dynamic MCP tool call. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
+  compactionReporter?: CompactionReporter;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const requestId = genInteractionId();
@@ -419,12 +430,6 @@ export async function invokeRuntimeModel(params: {
       phase: getAgentPhase(getActivePlanning(state)),
       interactionMode: getEffectiveInteractionMode(state),
     });
-    const inputBudget = usableInputBudget(
-      modelCapabilities,
-      positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
-        positiveConfigNumber(params.config.modelKwargs?.maxTokens),
-      params.config.compaction?.providerSafetyRatio,
-    );
     const projectionEnvironment = resolveContextProjectionEnvironment({
       state,
       config: params.config,
@@ -446,10 +451,6 @@ export async function invokeRuntimeModel(params: {
       role: 'agent',
       state,
       serializedTools,
-      contextBudget: {
-        ...(inputBudget.usableInputTokens ? { maxTokens: inputBudget.usableInputTokens } : {}),
-        recentTurns: params.config.compaction?.recentTurns ?? 3,
-      },
       activeSkillInstructions: activeSkillInstr,
       skills: undefined,
       workflowSkills: workflowSkillDescriptors,
@@ -461,10 +462,9 @@ export async function invokeRuntimeModel(params: {
         positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         positiveConfigNumber(params.config.modelKwargs?.maxTokens),
       providerSafetyRatio: params.config.compaction?.providerSafetyRatio,
-      compactRatio: params.config.compaction?.compactRatio ?? params.config.compaction?.softRatio,
+      compactRatio: params.config.compaction?.compactRatio,
       hardRatio: params.config.compaction?.hardRatio,
       warningRatio: params.config.compaction?.warningRatio,
-      targetRatio: params.config.compaction?.targetRatio,
     });
     const contextMetricsEvent: RuntimeEvent = {
       type: 'model.context_metrics',
@@ -472,39 +472,43 @@ export async function invokeRuntimeModel(params: {
       ...(modelCapabilities.contextWindowTokens
         ? { contextWindowTokens: modelCapabilities.contextWindowTokens }
         : {}),
+      ...(modelCapabilities.contextWindowSource
+        ? { contextWindowSource: modelCapabilities.contextWindowSource }
+        : {}),
+      ...(modelCapabilities.tokenizerSource
+        ? { tokenizerSource: modelCapabilities.tokenizerSource }
+        : {}),
       ...(preflight.usableInputTokens ? { usableInputTokens: preflight.usableInputTokens } : {}),
       reservedOutputTokens: preflight.reservedOutputTokens,
       providerSafetyMarginTokens: preflight.providerSafetyMarginTokens,
-      ...(preflight.targetTokens ? { targetTokens: preflight.targetTokens } : {}),
       totalInputTokens: preflight.estimate.totalInputTokens,
       ...(preflight.utilization != null ? { utilization: preflight.utilization } : {}),
       status: preflight.status,
       estimate: preflight.estimate,
     };
+    params.compactionReporter?.recordContextFollowUp?.(
+      state.turn.turnIndex,
+      preflight.estimate.totalInputTokens,
+    );
     const automaticCompaction = decideAutomaticContextCompaction({
       state,
       preflight,
-      mode:
-        flags.contextCompactionV2 && flags.contextCompactionAutoV1
-          ? (params.config.compaction?.autoMode ?? 'off')
-          : 'off',
+      mode: resolveContextCompactionRollout({
+        masterEnabled: flags.contextCompactionV2 && flags.contextCompactionAutoV1,
+        configuredMode: params.config.compaction?.autoMode,
+        cohortSalt: params.config.compaction?.cohortSalt,
+        sessionId: state.session.threadId,
+        livePercentage: params.config.compaction?.livePercentage,
+      }),
       triggerRatio:
-        params.config.compaction?.triggerRatio ??
-        params.config.compaction?.compactRatio ??
-        params.config.compaction?.softRatio,
-      triggerTokens: params.config.compaction?.triggerTokens,
-      recentTurns: params.config.compaction?.recentTurns,
+        params.config.compaction?.triggerRatio ?? params.config.compaction?.compactRatio,
+      compactAfterEstimatedTokens: params.config.compaction?.compactAfterEstimatedTokens,
       cooldownTurns: params.config.compaction?.cooldownTurns,
       minimumReductionRatio: params.config.compaction?.minimumReductionRatio,
       maxSummaryTokens: params.config.compaction?.maxSummaryTokens,
     });
     if (automaticCompaction.action === 'request_compaction') {
-      compactionMetrics.recordRequested();
-      const envDigest = digestProjectionEnvironment({
-        serializedTools,
-        activeSkillInstructions: activeSkillInstr,
-        workflowSkills: workflowSkillDescriptors,
-      });
+      params.compactionReporter?.recordRequested();
       return [
         ...retryEvents,
         contextMetricsEvent,
@@ -516,7 +520,6 @@ export async function invokeRuntimeModel(params: {
           requestedAtTurnId: state.turn.turnId,
           force: false,
           estimate: preflight.estimate,
-          projectionEnvironmentDigest: envDigest,
         },
       ];
     }

@@ -15,7 +15,7 @@ function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
 }
 
 describe('ResolvedModelCapabilities', () => {
-  test('uses explicit model entry fields before catalog, adapter and compatibility values', () => {
+  test('resolves each explicit field with its source', () => {
     const result = resolveModelCapabilities({
       config: config({
         providerName: 'openai',
@@ -31,24 +31,55 @@ describe('ResolvedModelCapabilities', () => {
     });
     expect(result).toMatchObject({
       contextWindowTokens: 64_000,
+      contextWindowSource: 'explicit_config',
       maxOutputTokens: 2_000,
+      maxOutputTokensSource: 'explicit_config',
       supportsPromptCache: false,
+      supportsPromptCacheSource: 'explicit_config',
     });
   });
 
-  test('uses the builtin catalog before adapter metadata', () => {
+  test('uses adapter runtime metadata without consulting the model name', () => {
     const result = resolveModelCapabilities({
       config: config({ providerName: 'openai', modelName: 'gpt-4o' }),
       adapter: { contextWindowTokens: 32_000 },
     });
-    expect(result.contextWindowTokens).toBe(128_000);
+    expect(result.contextWindowTokens).toBe(32_000);
+    expect(result.contextWindowSource).toBe('adapter_runtime');
   });
 
-  test('keeps unknown custom model windows unknown instead of assuming 128K', () => {
-    const result = resolveModelCapabilities({ config: config() });
+  test('keeps known and custom model capabilities tri-state unknown without trusted metadata', () => {
+    const result = resolveModelCapabilities({
+      config: config({ providerName: 'openai', modelName: 'gpt-4o' }),
+    });
     expect(result.contextWindowTokens).toBeUndefined();
     expect(result.maxOutputTokens).toBeUndefined();
+    expect(result.supportsUsageMetadata).toBeUndefined();
+    expect(result.supportsPromptCache).toBeUndefined();
     expect(usableInputBudget(result).usableInputTokens).toBeUndefined();
+    expect(usableInputBudget(result).reservedOutputTokens).toBeUndefined();
+  });
+
+  test('compatibility fields retain compatibility_config source', () => {
+    const result = resolveModelCapabilities({
+      config: config({
+        modelKwargs: {
+          contextWindowTokens: 12_000,
+          maxTokens: 1_000,
+          tokenizerFamily: 'compatible-tokenizer',
+          supportsUsageMetadata: false,
+        },
+      }),
+    });
+    expect(result).toMatchObject({
+      contextWindowTokens: 12_000,
+      contextWindowSource: 'compatibility_config',
+      maxOutputTokens: 1_000,
+      maxOutputTokensSource: 'compatibility_config',
+      tokenizerSource: 'compatibility_config',
+      supportsUsageMetadata: false,
+      supportsUsageMetadataSource: 'compatibility_config',
+    });
   });
 
   test('computes usable input from output reservation and provider safety margin', () => {
