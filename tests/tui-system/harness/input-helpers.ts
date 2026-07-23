@@ -5,11 +5,18 @@ export async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const INPUT_SETTLE_MS = 200;
+
 export async function typeText(tui: PtyProcess, text: string, delayMs = 40): Promise<void> {
   for (const ch of text) {
     tui.write(ch);
     await sleep(delayMs);
   }
+  // Keep the final character and a following control key in separate PTY
+  // delivery/render cycles. On slower Linux CI runners, writing Enter
+  // immediately after the last character can leave the command in the input
+  // buffer, so the next test appends to it (for example `/compact/new`).
+  await sleep(INPUT_SETTLE_MS);
 }
 
 export async function clearInput(tui: PtyProcess, length: number): Promise<void> {
