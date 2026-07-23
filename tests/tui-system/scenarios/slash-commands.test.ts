@@ -313,15 +313,13 @@ describe('TUI PTY System — Slash Commands', () => {
     '/permissions toggles interaction mode',
     async () => {
       // /permissions without argument toggles between ask ↔ full
-      await typeText(tui, '/permissions full');
+      await typeText(tui, '/permissions full', 80);
+      // Let InputLine publish the final value to its suggestion refs before
+      // Enter. Sending retries while that render is pending can leave both
+      // keypresses suppressed and the command buffered for the next test.
+      await sleep(800);
       tui.write('\r');
-      // Ink's suggestion handler and TextInput submit handler observe the same
-      // Enter. On a slow PTY render boundary the first key can only dismiss the
-      // completed suggestion; a second Enter then submits the unchanged command.
-      // If the first key already submitted, this is an ignored empty submission.
-      await sleep(300);
-      tui.write('\r');
-      await sleep(500);
+      await waitForText(() => tui.output(), '完全权限', 5000);
 
       const output = tui.output();
       // full mode shows [完全权限] in the stats line

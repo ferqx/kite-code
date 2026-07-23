@@ -1,7 +1,7 @@
 import type { MockModelServer } from './fixtures';
 import { clearInput, sleep, typeText } from './input-helpers';
 import type { PtyProcess } from './pty-process';
-import { screenContains, stripAnsi } from './terminal-screen';
+import { screenContains, waitForText } from './terminal-screen';
 
 /**
  * Shared warmup for PTY E2E tests.
@@ -15,13 +15,9 @@ export async function warmupInputPipeline(tui: PtyProcess, server: MockModelServ
   // ── Validate raw-mode keystrokes reach the input line ──
   const text = 'hello';
   await typeText(tui, text, 80);
-  await sleep(400);
-
-  const output = tui.output();
-  const clean = stripAnsi(output);
-  if (!clean.includes(text)) {
-    throw new Error(`Warmup failed: typed text "${text}" not found in TUI output`);
-  }
+  // Rendering can lag behind PTY delivery on loaded CI runners. Poll for the
+  // input instead of sampling the screen once at an arbitrary boundary.
+  await waitForText(() => tui.output(), text, 3000);
 
   await clearInput(tui, text.length);
 
