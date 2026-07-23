@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import React from 'react';
+import CompactionProgress from '../src/app/tui/components/CompactionProgress';
 import Header from '../src/app/tui/Header';
 import type { RunStatusSnapshot } from '../src/app/tui/run-status';
 import StatusBar, { runStatusColor } from '../src/app/tui/StatusBar';
@@ -129,5 +130,19 @@ describe('StatusBar', () => {
     expect(output).toContain('Thinking');
     // Thinking phase shouldn't have the "Working ·" prefix
     expect(output).not.toMatch(/Working/);
+  });
+});
+
+describe('CompactionProgress', () => {
+  test('renders an animated compaction phase as inline command output', () => {
+    const { lastFrame } = render(
+      React.createElement(CompactionProgress, {
+        phase: 'summarizing',
+      }),
+    );
+    const output = lastFrame();
+    expect(output).toContain('⎿');
+    expect(output).toContain('Summarizing context');
+    expect(output).toMatch(/[●·]{4}/);
   });
 });

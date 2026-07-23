@@ -1488,12 +1488,18 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         type: 'text',
         data: { text: notice.message },
       });
+      const previousSnapshot = next.status.contextSnapshot;
+      const usableInputTokens = previousSnapshot?.usableInputTokens;
+      const utilization =
+        usableInputTokens != null && usableInputTokens > 0
+          ? event.checkpoint.inputTokensAfter / usableInputTokens
+          : undefined;
       return {
         ...next,
         status: {
           ...next.status,
           contextSnapshot: {
-            ...(next.status.contextSnapshot ?? {
+            ...(previousSnapshot ?? {
               estimate: {
                 systemTokens: 0,
                 toolSchemaTokens: 0,
@@ -1505,6 +1511,18 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
               },
               status: 'unknown' as const,
             }),
+            estimate: {
+              ...(previousSnapshot?.estimate ?? {
+                systemTokens: 0,
+                toolSchemaTokens: 0,
+                transcriptTokens: 0,
+                summaryTokens: 0,
+                dynamicRuntimeTokens: 0,
+                framingTokens: 0,
+              }),
+              totalInputTokens: event.checkpoint.inputTokensAfter,
+            },
+            utilization,
             activeCheckpointId: event.checkpoint.compactionId,
             inputTokensBefore: event.checkpoint.inputTokensBefore,
             inputTokensAfter: event.checkpoint.inputTokensAfter,

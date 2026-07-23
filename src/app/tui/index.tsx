@@ -397,6 +397,11 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
           modelName,
           thinkingLevel,
         });
+        const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
+        if (loadGenerationRef.current !== gen) return;
+        if (contextSnapshot) {
+          dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
+        }
       } catch (e: any) {
         if (loadGenerationRef.current !== gen) return;
         // Roll back SessionManager: if we switched to a different session and the
@@ -606,7 +611,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     void sessionManager
       .handleContextCompaction(targetThreadId, customInstructions, (phase) => {
         if (threadIdRef.current === targetThreadId) {
-          dispatchSessionLoad({ type: 'SET_COMPACTION_PROGRESS', phase });
+          dispatchSessionLoad({ type: 'SET_COMPACTION_PROGRESS', phase, placement: 'inline' });
         }
       })
       .then((result) => {

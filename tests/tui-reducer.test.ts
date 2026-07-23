@@ -1193,6 +1193,36 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'SET_THINKING_LEVEL', level: 'high' });
       expect(s.status.thinkingMode).toBe('high');
     });
+    test('SET_CONTEXT_SNAPSHOT refreshes context without resetting cumulative cache usage', () => {
+      const state = {
+        ...fresh(),
+        status: {
+          ...fresh().status,
+          cacheHitTokens: 750,
+          cacheMissTokens: 250,
+          totalTokens: 11_500,
+        },
+      };
+      const next = dispatch(state, {
+        type: 'SET_CONTEXT_SNAPSHOT',
+        snapshot: {
+          estimate: {
+            systemTokens: 1_000,
+            toolSchemaTokens: 500,
+            transcriptTokens: 8_000,
+            summaryTokens: 1_000,
+            dynamicRuntimeTokens: 100,
+            framingTokens: 100,
+            totalInputTokens: 10_700,
+          },
+          status: 'unknown',
+        },
+      });
+      expect(next.status.contextSnapshot?.estimate.totalInputTokens).toBe(10_700);
+      expect(next.status.cacheHitTokens).toBe(750);
+      expect(next.status.cacheMissTokens).toBe(250);
+      expect(next.status.totalTokens).toBe(11_500);
+    });
     test('CLEAR_OUTPUT clears blocks', () => {
       let s = dispatch(fresh(), textEvt('hello'));
       s = dispatch(s, { type: 'CLEAR_OUTPUT' });
@@ -3088,6 +3118,30 @@ describe('context compaction RuntimeEvent rendering', () => {
     });
     let state = handleRuntimeEventAction(fresh(), metrics(8_000, 8 / 9));
     expect(state.status.contextSnapshot?.estimate.totalInputTokens).toBe(8_000);
+    state = handleRuntimeEventAction(state, {
+      type: 'context.compaction_completed',
+      compactionId: 'compact-footer',
+      sourceRevision: 0,
+      checkpoint: {
+        compactionId: 'compact-footer',
+        version: 1,
+        sourceRevision: 0,
+        sourceDigest: 'digest-footer',
+        coveredThroughMessageId: 'message-1',
+        coveredThroughTurnId: 'turn-1',
+        summary: 'private narrative',
+        inputTokensBefore: 26_124,
+        inputTokensAfter: 11_186,
+        reason: 'manual',
+        createdAt: '2026-07-22T00:00:00.000Z',
+      },
+    });
+    expect(state.status.contextSnapshot).toMatchObject({
+      estimate: { totalInputTokens: 11_186 },
+      inputTokensBefore: 26_124,
+      inputTokensAfter: 11_186,
+      utilization: 11_186 / 9_000,
+    });
     state = handleRuntimeEventAction(state, {
       type: 'context.compaction_reset',
       checkpointId: 'old',

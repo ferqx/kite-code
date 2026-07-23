@@ -353,6 +353,27 @@ describe('StatsLine', () => {
     expect(lastFrame()).toContain('10.0k');
   });
 
+  test('uses the Core context estimate instead of cumulative usage when utilization is unknown', () => {
+    const status = fakeStatus({
+      totalTokens: 11_500,
+      contextSnapshot: {
+        estimate: {
+          systemTokens: 5_000,
+          toolSchemaTokens: 4_000,
+          transcriptTokens: 16_824,
+          summaryTokens: 0,
+          dynamicRuntimeTokens: 200,
+          framingTokens: 100,
+          totalInputTokens: 26_124,
+        },
+        status: 'unknown',
+      },
+    });
+    const { lastFrame } = render(<StatsLine status={status} running />);
+    expect(lastFrame()).toContain('26.1k');
+    expect(lastFrame()).not.toContain('11.5k');
+  });
+
   test('shows context utilization only from the Core snapshot', () => {
     const status = fakeStatus({
       totalTokens: 10_000,

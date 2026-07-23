@@ -27,12 +27,12 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 - Retry: `Retrying` + warning 色
 - Approval 等待: `Waiting` + muted 色
 - Input 等待: `Asking` + warning 色
-- Context compaction: `preparing → summarizing → validating`，由 App-only action 驱动，不写 RuntimeEvent；所有终态和 stale 路径都在 `finally` 清除
+- Context compaction: `preparing → summarizing → validating`，由 App-only action 驱动，不写 RuntimeEvent；所有终态和 stale 路径都在 `finally` 清除。手动 `/compact` 的动画紧跟命令以内联输出展示，不占用通用会话 StatusBar；自动压缩仍使用 StatusBar。
 - Idle plan mode: `Shift+Tab to exit - describe your task` + muted 色
 
 **阶段不变性规则**：一旦进入 Working，永不回退 Thinking；一旦进入 Finishing，永不回退 Working。
 
-手动 `/compact` 不属于普通 Agent run，因此即使 `state.running=false`，只要 `currentNode` 为 `context_*`，StatusBar 仍必须显示；progress 清除后立即隐藏。自动压缩继续复用同一显示规则。
+手动 `/compact` 不属于普通 Agent run。其 `compactionProgress.placement=inline` 时，`OutputArea` 在命令下方显示专用动画，`StatusBar` 保持隐藏；progress 清除后动画立即消失。自动压缩使用 `placement=status`，继续复用 StatusBar。
 
 ## 状态推导
 
@@ -90,6 +90,7 @@ Working 阶段通过 `WORKING_GRADIENT` hex 色值在蓝→青→绿→金之间
 
 `shouldShowRunStatus(state)` 决定状态行是否可见：
 - 非 running 或中断 → 隐藏
+- 手动 `/compact` 的 inline progress → 隐藏（动画由 `OutputArea` 展示）
 - 最新可见 block 为正常文本 → 隐藏（文本已有，状态行冗余）
 - retry 中 → 始终显示
 
@@ -97,4 +98,6 @@ Working 阶段通过 `WORKING_GRADIENT` hex 色值在蓝→青→绿→金之间
 
 ## Context Footer 与终态提示
 
-`StatsLine` 只读取 Core `ContextStatusSnapshot` 的 utilization；模型名称和累计 usage 不能推导 context 百分比。没有可信窗口时显示绝对 token 数。状态栏不持久展示历史压缩率（例如 `91% compacted`）；压缩收益只在一次性终态提示和诊断数据中保留。Completed、failed、cancelled 统一通过 Core 脱敏映射生成提示；TUI 以 `compactionId` 去重，每个压缩恰好显示一个不进入 transcript 的终态提示。Summary Provider 失败提示用户检查所选模型的 `contextWindowTokens` 或执行 `/clear`，不得展示 Provider 原始错误正文。
+`StatsLine` 只读取 Core `ContextStatusSnapshot` 的 utilization；模型名称和累计 usage 不能推导 context 百分比。没有可信窗口但已有 snapshot 时，绝对 token 数必须显示同一 snapshot 的 `estimate.totalInputTokens`，与 `/context` 和压缩前后估算保持同一口径；仅在尚无 snapshot 时才兼容回退到累计 usage。`context.compaction_completed` 到达 App 后必须立即用 checkpoint 的 `inputTokensAfter` 刷新 snapshot 总量，并在窗口可信时重算 utilization，不能保留压缩前的 Footer 数字等待下一次模型调用。状态栏不持久展示历史压缩率（例如 `91% compacted`）；压缩收益只在一次性终态提示和诊断数据中保留。Completed、failed、cancelled 统一通过 Core 脱敏映射生成提示；TUI 以 `compactionId` 去重，每个压缩恰好显示一个不进入 transcript 的终态提示。Summary Provider 失败提示用户检查所选模型的 `contextWindowTokens` 或执行 `/clear`，不得展示 Provider 原始错误正文。
+
+进入或切换历史会话时，App 必须从恢复后的 RuntimeState、active checkpoint 和当前 projection environment 本地重建一次 `ContextStatusSnapshot`；该过程不得调用 Provider。重建只替换 Footer 的 context snapshot，不重置或改写持久化的累计 cache hit/miss 与 usage 统计。若工具、MCP 或 Skill 环境随后变化，下一次标准 `model.context_metrics` 继续以 fresh projection 覆盖该快照。

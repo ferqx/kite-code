@@ -192,6 +192,11 @@ export interface TuiState {
   interactionMode: 'accept_edits' | 'auto' | 'full';
   /** Deduplicates durable terminal compaction notices during replay. */
   terminalCompactionNotices?: Record<string, 'completed' | 'failed' | 'cancelled'>;
+  /** Ephemeral presentation for the active context compaction. */
+  compactionProgress?: {
+    phase: import('@/core/model/context-compaction-presentation').ContextCompactionProgressPhase;
+    placement: 'status' | 'inline';
+  };
 }
 
 export type InterruptState =

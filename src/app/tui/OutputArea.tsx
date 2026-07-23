@@ -1,6 +1,8 @@
 import { Box, Static, useInput } from 'ink';
 import React, { type ReactNode, useRef } from 'react';
+import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import BlockRenderer from './components/BlockRenderer';
+import CompactionProgress from './components/CompactionProgress';
 import { blockFingerprint } from './render/useStaticContent';
 import type { OutputBlock } from './types';
 
@@ -26,6 +28,8 @@ interface OutputAreaProps {
   /** 主 agent 等待 ask_user 输入时标记 ask 工具 / Mark ask_user while waiting for input */
   awaitingInput?: boolean;
   columns: number;
+  /** Manual /compact progress rendered directly below the command. */
+  inlineCompactionPhase?: ContextCompactionProgressPhase;
 }
 
 function visibleDynamicBlocksForApproval(
@@ -72,6 +76,7 @@ export default function OutputArea({
   awaitingApproval,
   awaitingInput,
   columns,
+  inlineCompactionPhase,
 }: OutputAreaProps) {
   const onToggleReasonRef = useRef(onToggleReason);
   onToggleReasonRef.current = onToggleReason;
@@ -160,6 +165,7 @@ export default function OutputArea({
             />
           );
         })}
+        {inlineCompactionPhase && <CompactionProgress phase={inlineCompactionPhase} />}
       </Box>
     </Box>
   );

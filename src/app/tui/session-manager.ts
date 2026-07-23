@@ -10,6 +10,7 @@ import {
   manualContextCompactionEvent,
 } from '@/core/model/context-compaction-manual';
 import { contextCompactionTerminalNotice } from '@/core/model/context-compaction-presentation';
+import type { ContextStatusSnapshot } from '@/core/model/context-status';
 import { createChatModel } from '@/core/model/factory';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
@@ -840,6 +841,42 @@ export class SessionManager {
         };
       }
 
+      // A plain repeated /compact has no new source material once the active
+      // checkpoint already covers the latest safe message. Do not spend a
+      // provider request re-summarizing the same narrative only to fail the
+      // minimum-reduction check. Explicit custom instructions still opt into
+      // reworking the existing narrative.
+      if (
+        !customInstructions &&
+        status.coveredThroughMessageId &&
+        status.safeBoundary.lastMessageId === status.coveredThroughMessageId
+      ) {
+        const compactId = crypto.randomUUID();
+        const reqEvent: RuntimeEvent = {
+          type: 'context.compaction_requested',
+          compactionId: compactId,
+          reason: 'manual',
+          requestedAtRevision: state.revision,
+          requestedAtTurnId: state.turn.turnId,
+          force: false,
+          estimate: status.preflight.estimate,
+        };
+        processEvent(reqEvent);
+        const failedEvent: RuntimeEvent = {
+          type: 'context.compaction_failed',
+          compactionId: compactId,
+          sourceRevision: state.revision,
+          errorKind: 'unsafe_boundary',
+          message: 'No new messages to compact.',
+          retryable: false,
+        };
+        processEvent(failedEvent);
+        return {
+          events: [reqEvent, failedEvent],
+          text: 'No new messages to compact.',
+        };
+      }
+
       const event = manualContextCompactionEvent({
         state,
         config: this.deps.config,
@@ -972,6 +1009,71 @@ export class SessionManager {
       return `\n${status.text}`;
     } finally {
       kernel.close();
+    }
+  }
+
+  /** Rebuild the current context projection locally when a session becomes active. */
+  buildContextStatusSnapshot(threadId: string): ContextStatusSnapshot | undefined {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return undefined;
+    const kernel = rt.runtimeControl
+      ? undefined
+      : createAgentKernel({
+          threadId,
+          userId: 'tui',
+          workspace: rt.workspace,
+          storePath: runtimeStorePathFor(this.deps.checkpointPath),
+          interactionMode: rt.interactionMode,
+          phase: 'building',
+        });
+    try {
+      const state = rt.runtimeControl?.getState() ?? kernel!.getState();
+      const model = createChatModel(this.deps.config);
+      const environment = resolveRuntimeContextProjectionEnvironment(
+        {
+          config: this.deps.config,
+          model,
+          mcpManager: rt.mcpManager ?? undefined,
+          skills: rt.skillManifests,
+          skillOptions: rt.skillOptions ?? undefined,
+        },
+        state,
+      );
+      const capabilities = resolveModelCapabilities({
+        config: this.deps.config,
+        adapter: model.capabilityMetadata,
+      });
+      const { projection, preflight } = buildContextStatusReport(
+        state,
+        this.deps.config,
+        environment,
+        capabilities,
+      );
+      const checkpoint = state.context.activeCheckpoint;
+      return {
+        estimate: projection.estimate,
+        status: preflight.status,
+        ...(preflight.usableInputTokens != null
+          ? { usableInputTokens: preflight.usableInputTokens }
+          : {}),
+        ...(preflight.utilization != null ? { utilization: preflight.utilization } : {}),
+        ...(checkpoint
+          ? {
+              activeCheckpointId: checkpoint.compactionId,
+              inputTokensBefore: checkpoint.inputTokensBefore,
+              inputTokensAfter: checkpoint.inputTokensAfter,
+            }
+          : {}),
+      };
+    } catch (error) {
+      console.warn(
+        `[SessionManager] Failed to rebuild context status for ${threadId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return undefined;
+    } finally {
+      kernel?.close();
     }
   }
 

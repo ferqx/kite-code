@@ -11,6 +11,7 @@ import {
   SessionRuntime,
 } from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
+import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
 
@@ -181,6 +182,211 @@ describe('SessionManager', () => {
       'context.compaction_failed',
     ]);
     expect(result.text).toBe('Not enough messages to compact.');
+  });
+
+  test('a second consecutive /compact returns a non-error no-new-messages result', async () => {
+    const deps = makeDeps();
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+    const mgr = new SessionManager(deps);
+    const threadId = mgr.createSession('/tmp/ws');
+    const runtime = mgr.getRuntime(threadId)!;
+    let state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    state.transcript.messages = Array.from({ length: 3 }, (_, index) => ({
+      kind: 'user' as const,
+      messageId: `msg-${index}`,
+      turnId: `turn-${index}`,
+      ordinal: index,
+      createdAt: `2026-07-20T00:0${index}:00.000Z`,
+      content: `message ${index}`,
+    }));
+    state = reduceRuntimeState(state, {
+      type: 'context.compaction_requested',
+      compactionId: 'existing',
+      reason: 'manual',
+      requestedAtRevision: state.revision,
+      requestedAtTurnId: state.turn.turnId,
+      force: false,
+      estimate: {
+        systemTokens: 0,
+        toolSchemaTokens: 0,
+        transcriptTokens: 4_000,
+        summaryTokens: 0,
+        dynamicRuntimeTokens: 0,
+        framingTokens: 0,
+        totalInputTokens: 4_000,
+      },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'context.compaction_completed',
+      compactionId: 'existing',
+      sourceRevision: state.revision,
+      checkpoint: {
+        compactionId: 'existing',
+        version: 1,
+        sourceRevision: state.revision,
+        sourceDigest: 'digest',
+        coveredThroughMessageId: 'msg-2',
+        coveredThroughTurnId: 'turn-2',
+        summary: 'Existing summary.',
+        inputTokensBefore: 4_000,
+        inputTokensAfter: 1_000,
+        reason: 'manual',
+        createdAt: '2026-07-20T00:03:00.000Z',
+      },
+      durationMs: 10,
+    });
+    const persisted: unknown[] = [];
+    runtime.runtimeControl = {
+      getState: () => state,
+      processEvent: (event) => persisted.push(event),
+    };
+
+    const result = await mgr.handleContextCompaction(threadId);
+
+    expect(persisted.map((event) => (event as { type: string }).type)).toEqual([
+      'user.command_invoked',
+      'context.compaction_requested',
+      'context.compaction_failed',
+    ]);
+    expect(persisted.at(-1)).toMatchObject({
+      type: 'context.compaction_failed',
+      errorKind: 'unsafe_boundary',
+      retryable: false,
+      message: 'No new messages to compact.',
+    });
+    expect(result.text).toBe('No new messages to compact.');
+    expect(result.isError).toBeUndefined();
+  });
+
+  test('custom instructions may rework a fully covered checkpoint', async () => {
+    const deps = makeDeps();
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+    const mgr = new SessionManager(deps);
+    const threadId = mgr.createSession('/tmp/ws');
+    const runtime = mgr.getRuntime(threadId)!;
+    const state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    state.transcript.messages = [
+      {
+        kind: 'user',
+        messageId: 'msg-0',
+        turnId: 'turn-0',
+        ordinal: 0,
+        createdAt: '2026-07-20T00:00:00.000Z',
+        content: 'message 0',
+      },
+    ];
+    state.context.activeCheckpoint = {
+      compactionId: 'existing',
+      version: 1,
+      sourceRevision: 0,
+      sourceDigest: 'digest',
+      coveredThroughMessageId: 'msg-0',
+      coveredThroughTurnId: 'turn-0',
+      summary: 'Existing summary.',
+      inputTokensBefore: 4_000,
+      inputTokensAfter: 1_000,
+      reason: 'manual',
+      createdAt: '2026-07-20T00:01:00.000Z',
+    };
+    const persisted: unknown[] = [];
+    runtime.runtimeControl = {
+      getState: () => state,
+      processEvent: (event) => persisted.push(event),
+    };
+
+    const result = await mgr.handleContextCompaction(threadId, 'focus on unfinished work');
+
+    expect(persisted).toContainEqual(
+      expect.objectContaining({
+        type: 'context.compaction_requested',
+        customInstructions: 'focus on unfinished work',
+      }),
+    );
+    expect(persisted).not.toContainEqual(
+      expect.objectContaining({
+        type: 'context.compaction_failed',
+        message: 'No new messages to compact.',
+      }),
+    );
+    expect(result.text).toContain('queued');
+  });
+
+  test('rebuilds context status from the restored checkpoint when entering a session', () => {
+    const deps = makeDeps();
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+    const mgr = new SessionManager(deps);
+    const threadId = mgr.createSession('/tmp/ws');
+    const runtime = mgr.getRuntime(threadId)!;
+    const state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    state.transcript.messages = [
+      {
+        kind: 'user',
+        messageId: 'covered',
+        turnId: 'turn-covered',
+        ordinal: 0,
+        createdAt: '2026-07-20T00:00:00.000Z',
+        content: 'old history '.repeat(2_000),
+      },
+      {
+        kind: 'user',
+        messageId: 'live',
+        turnId: 'turn-live',
+        ordinal: 1,
+        createdAt: '2026-07-20T00:01:00.000Z',
+        content: 'new work',
+      },
+    ];
+    state.context.activeCheckpoint = {
+      compactionId: 'restored-checkpoint',
+      version: 1,
+      sourceRevision: 0,
+      sourceDigest: 'digest',
+      coveredThroughMessageId: 'covered',
+      coveredThroughTurnId: 'turn-covered',
+      summary: 'Condensed old history.',
+      inputTokensBefore: 20_000,
+      inputTokensAfter: 2_000,
+      reason: 'manual',
+      createdAt: '2026-07-20T00:02:00.000Z',
+    };
+    runtime.runtimeControl = {
+      getState: () => state,
+      processEvent: () => {},
+    };
+
+    const snapshot = mgr.buildContextStatusSnapshot(threadId);
+
+    expect(snapshot).toMatchObject({
+      activeCheckpointId: 'restored-checkpoint',
+      inputTokensBefore: 20_000,
+      inputTokensAfter: 2_000,
+    });
+    expect(snapshot!.estimate.summaryTokens).toBeGreaterThan(0);
+    expect(snapshot!.estimate.transcriptTokens).toBeLessThan(1_000);
   });
 
   test('persists /compact for replay without adding it to the model transcript', async () => {

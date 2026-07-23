@@ -64,10 +64,16 @@ describe('run phase progression', () => {
 
   test('hides manual compaction status again when ephemeral progress clears', () => {
     let state = createInitialState();
-    state = dispatch(state, { type: 'SET_COMPACTION_PROGRESS', phase: 'preparing' });
+    state = dispatch(state, {
+      type: 'SET_COMPACTION_PROGRESS',
+      phase: 'preparing',
+      placement: 'inline',
+    });
     expect(state.running).toBe(false);
-    expect(shouldShowRunStatus(state)).toBe(true);
+    expect(state.compactionProgress).toEqual({ phase: 'preparing', placement: 'inline' });
+    expect(shouldShowRunStatus(state)).toBe(false);
     state = dispatch(state, { type: 'SET_COMPACTION_PROGRESS' });
+    expect(state.compactionProgress).toBeUndefined();
     expect(shouldShowRunStatus(state)).toBe(false);
   });
 
