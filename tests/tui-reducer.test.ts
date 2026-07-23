@@ -1193,6 +1193,36 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'SET_THINKING_LEVEL', level: 'high' });
       expect(s.status.thinkingMode).toBe('high');
     });
+    test('SET_CONTEXT_SNAPSHOT refreshes context without resetting cumulative cache usage', () => {
+      const state = {
+        ...fresh(),
+        status: {
+          ...fresh().status,
+          cacheHitTokens: 750,
+          cacheMissTokens: 250,
+          totalTokens: 11_500,
+        },
+      };
+      const next = dispatch(state, {
+        type: 'SET_CONTEXT_SNAPSHOT',
+        snapshot: {
+          estimate: {
+            systemTokens: 1_000,
+            toolSchemaTokens: 500,
+            transcriptTokens: 8_000,
+            summaryTokens: 1_000,
+            dynamicRuntimeTokens: 100,
+            framingTokens: 100,
+            totalInputTokens: 10_700,
+          },
+          status: 'unknown',
+        },
+      });
+      expect(next.status.contextSnapshot?.estimate.totalInputTokens).toBe(10_700);
+      expect(next.status.cacheHitTokens).toBe(750);
+      expect(next.status.cacheMissTokens).toBe(250);
+      expect(next.status.totalTokens).toBe(11_500);
+    });
     test('CLEAR_OUTPUT clears blocks', () => {
       let s = dispatch(fresh(), textEvt('hello'));
       s = dispatch(s, { type: 'CLEAR_OUTPUT' });
@@ -2817,6 +2847,24 @@ describe('eventReducer (blocks model)', () => {
       });
     });
 
+    test('replays a persisted local command as a user block', () => {
+      const state = dispatch(fresh(), {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user.command_invoked',
+          commandId: 'command-1',
+          command: '/compact focus on auth changes',
+        },
+      });
+
+      expect(flatBlocks(state)).toContainEqual(
+        expect.objectContaining({
+          kind: 'user',
+          content: '/compact focus on auth changes',
+        }),
+      );
+    });
+
     test('renders approval, user input, and plan review as distinct interaction blocks', () => {
       const approvalEvent: import('../src/core/runtime/events').RuntimeEvent = {
         type: 'approval.requested',
@@ -2939,5 +2987,172 @@ describe('eventReducer (blocks model)', () => {
       expect(s.interactionMode).toBe('accept_edits');
       expect(s.status.authorization).toBe('default');
     });
+  });
+});
+
+describe('context compaction RuntimeEvent rendering', () => {
+  test('renders failure and reset feedback without exposing summary content', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'context.compaction_failed',
+      compactionId: 'compact',
+      sourceRevision: 1,
+      errorKind: 'invalid_candidate',
+      message: 'summary omitted required facts',
+      retryable: false,
+    });
+    expect(JSON.stringify(flatBlocks(state))).not.toContain('summary omitted required facts');
+    expect(JSON.stringify(flatBlocks(state))).toContain('original conversation was preserved');
+
+    state = handleRuntimeEventAction(state, {
+      type: 'context.compaction_reset',
+      checkpointId: 'compact',
+      reason: 'manual',
+    });
+    expect(JSON.stringify(flatBlocks(state))).toContain('original transcript');
+  });
+
+  test('compaction_completed reports token savings without persisting a StatsLine percentage', () => {
+    const state = handleRuntimeEventAction(fresh(), {
+      type: 'context.compaction_completed',
+      compactionId: 'compact',
+      sourceRevision: 0,
+      checkpoint: {
+        compactionId: 'compact',
+        version: 1,
+        sourceRevision: 0,
+        sourceDigest: 'sha256:test',
+        coveredThroughMessageId: 'msg-1',
+        coveredThroughTurnId: 'turn-1',
+        summary: 'Test narrative.',
+        inputTokensBefore: 12_345,
+        inputTokensAfter: 4_567,
+        reason: 'manual',
+        createdAt: new Date().toISOString(),
+      },
+    });
+    expect(JSON.stringify(flatBlocks(state))).toContain('12345');
+    expect(JSON.stringify(flatBlocks(state))).toContain('4567');
+    expect(JSON.stringify(flatBlocks(state))).toContain('tokens');
+    expect(state.status).not.toHaveProperty('compactionBefore');
+    expect(state.status).not.toHaveProperty('compactionAfter');
+  });
+
+  test('renders exactly one terminal notice per compaction id', () => {
+    const event = {
+      type: 'context.compaction_failed' as const,
+      compactionId: 'dedupe',
+      sourceRevision: 1,
+      errorKind: 'summary_model_failed' as const,
+      message: 'secret provider detail',
+      retryable: true,
+    };
+    const once = handleRuntimeEventAction(fresh(), event);
+    const twice = handleRuntimeEventAction(once, event);
+    expect(flatBlocks(twice)).toEqual(flatBlocks(once));
+    expect(JSON.stringify(flatBlocks(twice))).not.toContain('secret provider detail');
+    expect(JSON.stringify(flatBlocks(twice))).toContain('contextWindowTokens');
+    expect(JSON.stringify(flatBlocks(twice))).toContain('/clear');
+  });
+
+  test('keeps the first terminal notice when completed, failed, and cancelled race', () => {
+    const completed = {
+      type: 'context.compaction_completed' as const,
+      compactionId: 'race',
+      sourceRevision: 0,
+      checkpoint: {
+        compactionId: 'race',
+        version: 1 as const,
+        sourceRevision: 0,
+        sourceDigest: 'sha256:race',
+        coveredThroughMessageId: 'message-1',
+        coveredThroughTurnId: 'turn-1',
+        summary: 'private narrative',
+        inputTokensBefore: 5_000,
+        inputTokensAfter: 1_000,
+        reason: 'manual' as const,
+        createdAt: '2026-07-22T00:00:00.000Z',
+      },
+    };
+    const first = handleRuntimeEventAction(fresh(), completed);
+    const failed = handleRuntimeEventAction(first, {
+      type: 'context.compaction_failed',
+      compactionId: 'race',
+      sourceRevision: 0,
+      errorKind: 'summary_model_failed',
+      message: 'secret',
+      retryable: true,
+    });
+    const cancelled = handleRuntimeEventAction(failed, {
+      type: 'context.compaction_failed',
+      compactionId: 'race',
+      sourceRevision: 0,
+      errorKind: 'summary_aborted',
+      message: 'secret',
+      retryable: false,
+    });
+    expect(flatBlocks(cancelled)).toEqual(flatBlocks(first));
+    expect(JSON.stringify(flatBlocks(cancelled))).not.toContain('private narrative');
+  });
+
+  test('replaces Footer context data with each fresh Core projection after completion and reset', () => {
+    const metrics = (totalInputTokens: number, utilization: number) => ({
+      type: 'model.context_metrics' as const,
+      modelName: 'configured-model',
+      contextWindowTokens: 10_000,
+      contextWindowSource: 'explicit_config' as const,
+      reservedOutputTokens: 1_000,
+      providerSafetyMarginTokens: 0,
+      usableInputTokens: 9_000,
+      totalInputTokens,
+      utilization,
+      status: 'normal' as const,
+      estimate: {
+        systemTokens: 100,
+        toolSchemaTokens: 100,
+        transcriptTokens: totalInputTokens - 400,
+        summaryTokens: 0,
+        dynamicRuntimeTokens: 100,
+        framingTokens: 100,
+        totalInputTokens,
+      },
+    });
+    let state = handleRuntimeEventAction(fresh(), metrics(8_000, 8 / 9));
+    expect(state.status.contextSnapshot?.estimate.totalInputTokens).toBe(8_000);
+    state = handleRuntimeEventAction(state, {
+      type: 'context.compaction_completed',
+      compactionId: 'compact-footer',
+      sourceRevision: 0,
+      checkpoint: {
+        compactionId: 'compact-footer',
+        version: 1,
+        sourceRevision: 0,
+        sourceDigest: 'digest-footer',
+        coveredThroughMessageId: 'message-1',
+        coveredThroughTurnId: 'turn-1',
+        summary: 'private narrative',
+        inputTokensBefore: 26_124,
+        inputTokensAfter: 11_186,
+        reason: 'manual',
+        createdAt: '2026-07-22T00:00:00.000Z',
+      },
+    });
+    expect(state.status.contextSnapshot).toMatchObject({
+      estimate: { totalInputTokens: 11_186 },
+      inputTokensBefore: 26_124,
+      inputTokensAfter: 11_186,
+      utilization: 11_186 / 9_000,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'context.compaction_reset',
+      checkpointId: 'old',
+      reason: 'manual',
+    });
+    state = handleRuntimeEventAction(state, metrics(3_000, 1 / 3));
+    expect(state.status.contextSnapshot).toMatchObject({
+      utilization: 1 / 3,
+      estimate: { totalInputTokens: 3_000 },
+    });
+    expect(state.status.contextSnapshot?.activeCheckpointId).toBeUndefined();
+    expect(state.status.contextSnapshot?.inputTokensBefore).toBeUndefined();
   });
 });

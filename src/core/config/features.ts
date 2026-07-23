@@ -6,7 +6,6 @@ export interface FeatureFlags {
   planLifecycleV2: boolean;
   interactionControllerV2: boolean;
   autoReviewV2: boolean;
-  runtimeProjectionV2: boolean;
   nativeLoopEngine: boolean;
   loopMode: boolean;
   capabilityCatalogV1: boolean;
@@ -17,13 +16,15 @@ export interface FeatureFlags {
   skillWorkflowV1: boolean;
   verificationV1: boolean;
   toolSearchV1: boolean;
+  contextCompactionV2: boolean;
+  contextCompactionAutoV1: boolean;
+  contextCompactionManualV1: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   planLifecycleV2: true,
   interactionControllerV2: true,
   autoReviewV2: false,
-  runtimeProjectionV2: false,
   nativeLoopEngine: false,
   loopMode: false,
   capabilityCatalogV1: true,
@@ -34,6 +35,9 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   skillWorkflowV1: false,
   verificationV1: false,
   toolSearchV1: true,
+  contextCompactionV2: true,
+  contextCompactionAutoV1: false,
+  contextCompactionManualV1: true,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

@@ -189,7 +189,7 @@ describe('progressive capability disclosure', () => {
     mock.supportsToolCalls = true;
     const emitted: RuntimeEvent[] = [];
 
-    await invokeRuntimeModel({
+    const modelEvents = await invokeRuntimeModel({
       model: mock,
       state,
       config: config(),
@@ -206,6 +206,24 @@ describe('progressive capability disclosure', () => {
     expect(bindings?.bindings).toHaveLength(1);
     expect(bindings?.bindings[0]?.capabilityId).toBe('mcp:catalog/publish-release');
     expect(bindings?.disclosures).toHaveLength(1);
+    expect(modelEvents).toContainEqual(
+      expect.objectContaining({
+        type: 'model.context_metrics',
+        contextWindowTokens: 128_000,
+        totalInputTokens: expect.any(Number),
+        status: 'unknown',
+        estimate: expect.objectContaining({
+          systemTokens: expect.any(Number),
+          toolSchemaTokens: expect.any(Number),
+          transcriptTokens: expect.any(Number),
+          dynamicRuntimeTokens: expect.any(Number),
+          framingTokens: expect.any(Number),
+        }),
+      }),
+    );
+    const metrics = modelEvents.find((event) => event.type === 'model.context_metrics');
+    expect(metrics).not.toHaveProperty('usableInputTokens');
+    expect(metrics).not.toHaveProperty('utilization');
   });
 
   test('search persists candidates but returns metadata without descriptions or executable IDs', async () => {

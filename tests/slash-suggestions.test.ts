@@ -18,6 +18,7 @@ describe('slash command suggestions', () => {
 
   test('makes /mcp available to tab completion and exact-command matching', () => {
     expect(SLASH_COMMANDS).toContain('mcp');
+    expect(SLASH_COMMANDS).toContain('compact');
   });
 });
 

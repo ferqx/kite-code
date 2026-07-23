@@ -31,11 +31,13 @@ MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，
 
 `handleEvent` 和 reducer 把 AgentEvent 转为稳定 block。工具生命周期、审批、计划、Subagent、thought、错误和最终回答分别投影；事件类型不以固定数量作为文档契约。
 
-静态历史区与动态输入/状态区分离，以减少 Ink 重排和终端闪烁。软换行、宽字符、粘贴占位、resize 和同步输出均有专门测试。
+静态历史区与动态输入/状态区分离，以减少 Ink 重排和终端闪烁。交互式入口直接使用终端主屏缓冲区，不启用 Ink alternate screen；运行内容保留在终端原生 scrollback 中，退出时不恢复进入 TUI 前的旧画面。软换行、宽字符、粘贴占位、resize 和同步输出均有专门测试。
 
 ## 7.4 会话前后台
 
 前台 SessionRuntime 将事件实时 dispatch 到 UI；后台会话缓存可丢弃的展示事件和必要状态，切回时重放/重建投影。取消、切换和组件卸载必须清理 AbortController 与订阅。
+
+`SessionManager` 可持有当前运行中 Kernel 的受限控制面，只暴露读取 RuntimeState 和提交 RuntimeEvent。`/compact` 等运行时命令必须通过该入口写入持久事件，由 scheduler 按工具、交互和 verification 的安全顺序处理；App 不直接改写 Core 状态。提交新事件会推进 revision，使旧的模型或执行 effect 结果按 lease 规则失效。
 
 ## 7.5 边界规则
 

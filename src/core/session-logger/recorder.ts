@@ -405,6 +405,53 @@ export function recordRuntimeEvent(
     status: { code: 'OK', message: '' },
   };
   switch (event.type) {
+    case 'context.compaction_requested':
+      base.name = 'context.compaction.requested';
+      base.attributes['kite_code.compaction.id'] = event.compactionId;
+      base.attributes['kite_code.compaction.reason'] = event.reason;
+      base.attributes['kite_code.compaction.input_tokens'] = event.estimate.totalInputTokens;
+      break;
+    case 'context.compaction_completed':
+      base.name = 'context.compaction.completed';
+      base.attributes['kite_code.compaction.id'] = event.compactionId;
+      base.attributes['kite_code.compaction.reason'] = event.checkpoint.reason;
+      base.attributes['kite_code.compaction.input_tokens_before'] =
+        event.checkpoint.inputTokensBefore;
+      base.attributes['kite_code.compaction.input_tokens_after'] =
+        event.checkpoint.inputTokensAfter;
+      base.attributes['kite_code.compaction.tokens_saved'] =
+        event.checkpoint.inputTokensBefore - event.checkpoint.inputTokensAfter;
+      if (event.durationMs != null)
+        base.attributes['kite_code.compaction.duration_ms'] = event.durationMs;
+      break;
+    case 'context.compaction_failed':
+      base.name = 'context.compaction.failed';
+      base.attributes['kite_code.compaction.id'] = event.compactionId;
+      base.attributes['kite_code.compaction.error_kind'] = event.errorKind;
+      base.attributes['kite_code.compaction.retryable'] = event.retryable;
+      if (event.durationMs != null)
+        base.attributes['kite_code.compaction.duration_ms'] = event.durationMs;
+      base.status = { code: 'ERROR', message: trunc(event.message, TRUNC_ERROR) };
+      break;
+    case 'context.hard_blocked':
+      base.name = 'context.compaction.hard_blocked';
+      base.attributes['kite_code.compaction.block_reason'] = event.reason;
+      base.status = { code: 'ERROR', message: trunc(event.message, TRUNC_ERROR) };
+      break;
+    case 'model.context_metrics':
+      base.name = 'model.context_metrics';
+      base.attributes['gen_ai.request.model'] = event.modelName;
+      base.attributes['kite_code.context.status'] = event.status;
+      base.attributes['kite_code.context.input_tokens'] = event.totalInputTokens;
+      if (event.contextWindowSource)
+        base.attributes['kite_code.context.window_source'] = event.contextWindowSource;
+      if (event.tokenizerSource)
+        base.attributes['kite_code.context.tokenizer_source'] = event.tokenizerSource;
+      if (event.usableInputTokens != null)
+        base.attributes['kite_code.context.usable_input_tokens'] = event.usableInputTokens;
+      if (event.utilization != null)
+        base.attributes['kite_code.context.utilization'] = event.utilization;
+      break;
     case 'model.responded':
       base.kind = 3;
       base.attributes['kite_code.model.message_id'] = event.messageId;

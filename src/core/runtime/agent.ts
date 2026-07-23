@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpRuntimeProvider } from '@/core/mcp';
+import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
+import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import type { SandboxBackend } from '@/core/sandbox';
 import { SessionLogCollector } from '@/core/session-logger';
@@ -82,6 +84,14 @@ export interface RunRuntimeAgentInput {
   sandboxBackend?: SandboxBackend | 'unknown';
   signal?: AbortSignal;
   frontend?: string;
+  /** App-shell control plane for injecting durable user commands into a live Kernel. */
+  onKernelControl?: (
+    control: {
+      getState: () => Readonly<import('./state').RuntimeState>;
+      processEvent: (event: RuntimeEvent) => void;
+    } | null,
+  ) => void;
+  onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
 }
 
 /** Start a fresh RuntimeStore-backed session without LangGraph/checkpoint state. */
@@ -115,6 +125,12 @@ export async function* runRuntimeAgent(
     { provider: input.config.providerName, name: input.config.modelName },
   );
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
+  input.onKernelControl?.({
+    getState: () => kernel.getState(),
+    processEvent: (event) => {
+      kernel.processEvent(event);
+    },
+  });
   try {
     const admissionEvents = requiredProviderAdmissionEvents(
       kernel.getState(),
@@ -222,6 +238,14 @@ export async function* runRuntimeAgent(
       skills: input.skills,
       skillOptions: input.skillOptions,
       signal: input.signal,
+      onCompactionProgress: input.onCompactionProgress,
+      compactionReporter: input.config.compaction?.localDebug?.enabled
+        ? createLocalCompactionDebugReporter({
+            enabled: true,
+            directory: input.config.compaction.localDebug.directory,
+            sessionId: input.threadId,
+          })
+        : undefined,
     });
     for await (const event of runRuntimeLoop(kernel, executor, provider)) {
       collector.recordRuntime(event);
@@ -261,6 +285,7 @@ export async function* runRuntimeAgent(
     collector.recordRuntime(aborted);
     yield aborted;
   } finally {
+    input.onKernelControl?.(null);
     await collector.finalize(exitStatus);
     kernel.close();
   }

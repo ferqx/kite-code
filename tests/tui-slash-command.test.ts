@@ -70,6 +70,14 @@ describe('parseSlashCommand', () => {
     }
   });
 
+  test('parses /compact with optional custom instructions', () => {
+    expect(parseSlashCommand('/compact')).toEqual({ type: 'compact' });
+    expect(parseSlashCommand('/compact focus on auth changes')).toEqual({
+      type: 'compact',
+      customInstructions: 'focus on auth changes',
+    });
+  });
+
   // ── /clear ──
   test('parses /clear', () => {
     expect(parseSlashCommand('/clear')).toEqual({ type: 'clear' });

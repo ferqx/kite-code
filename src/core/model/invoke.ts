@@ -25,6 +25,7 @@ export async function invokeBoundModel(params: {
   tools: ToolSet;
   messages: BaseMessage[];
   signal?: AbortSignal;
+  maxOutputTokens?: number;
 }): Promise<AIMessage> {
   // Separate system messages from chat messages — generateText requires
   // system prompts via `system`/`instructions`, not in `messages`.
@@ -58,6 +59,7 @@ export async function invokeBoundModel(params: {
     abortSignal: params.signal,
     temperature: 0,
     maxRetries: 0, // retries handled by transientRetryMiddleware
+    ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
   });
 
   return toAIMessage(result);

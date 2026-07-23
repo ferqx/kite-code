@@ -8,6 +8,8 @@
 
 `capabilityCatalogV1`、`mcpRuntimeBindingV1` 与 `toolSearchV1` 已完成迁移并默认开启。MCP Tool ≤20 且 token budget 充足时直接绑定，跳过 `tool_search` 往返；Skill 使用扣除 MCP 后的剩余预算独立判断，防止各自不超预算的小目录合计撑爆上下文窗口。显式关闭任一 MCP flag 只用于 fail-closed 诊断，不恢复旧 adapter。
 
+Capability disclosure 的 token budget 使用与 context preflight 相同的 `ResolvedModelCapabilities.contextWindowTokens`。模型名称和默认模型列表不提供窗口能力；没有显式 disclosure budget 时采用保守的 1024-token catalog budget，直到模型条目、adapter runtime metadata 或兼容字段提供可验证窗口。
+
 Per-tool 名称注入（`## Available MCP Tool Names` 段落）已移除。模型初始只通过 system prompt 中的固定 MCP Capability Usage 规则和工具列表中的 `list_mcp_tools`、`tool_search`、`list_mcp_resources` 三个内置工具发现 MCP 能力。`tool_search` 在 `toolSearchV1` 开启且 provider 支持工具调用时始终可用，不受 disclosure mode 影响；小目录直绑场景中 `tool_search` 仍保持可用，作为模型的 fallback 发现路径。规则明确禁止将 Resource 列表为空推断为 MCP Tool 不存在，并将三种用户意图路由到对应工具。
 
 `list_mcp_tools` 是确定性的纯只读盘点工具，不触发网络连接或等待 Provider discovery。基于 CapabilitySnapshot 和 ProviderDirectorySnapshot 构建脱敏清单。列出每个 Provider 的状态、next_action、可用 Tool 名称，支持 provider 过滤和 cursor 分页；输出不含 capabilityId、revision、schema 或 binding。mcpManager 不存在时返回合法空清单。`configured_provider_count` 和 `available_tool_count` 为全量去重值，不受 provider 过滤影响；过滤时额外返回 `matched_provider_count` 和 `matched_tool_count`。Provider 名和 Tool 名通过 `safeCapabilityMetadata`（`src/core/capabilities/public-metadata.ts`）统一清理：过滤控制字符和 surrogates、压缩空白、以 code point 安全截断至 96 字符。

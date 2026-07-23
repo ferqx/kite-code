@@ -37,6 +37,12 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 
 会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。
 
+`/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动压缩的 preparing/summarizing/validating 动画紧跟命令显示，不占用通用会话 StatusBar；active checkpoint 已覆盖最新安全消息时，无参数连续压缩直接提示 `No new messages to compact.`，不再次调用摘要模型，显式自定义指令仍可重写已有 narrative。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
+
+`/context` 是只读诊断命令，显示 system、当前工具 schema、checkpoint summary、live transcript、动态 Runtime 和 provider framing 的同源 token 投影。它与正常模型调用和 compaction acceptance 术语（压缩验收）共用 Runtime 的 projection environment resolver 术语（投影环境解析器）及当前 adapter metadata 术语（适配器元数据）解析出的模型能力，因此当前 MCP binding、tool search、workflow skill、active inline skill instructions 和真实模型窗口必须计入估算。`/compact reset` 不以本地 hard threshold 术语（硬比例阈值）做容量门禁；重置后下一次真实调用是否被接受由 Provider 术语（模型供应商）决定。
+
+进入或切回历史会话时，TUI 从恢复的 RuntimeState、active checkpoint 和当前 projection environment 本地重建 Footer context snapshot，不调用 Provider。Footer 的绝对 token 数、`/context` 与 `/compact` 使用同一份当前请求投影；累计 cache hit/miss 与 usage 继续独立持久化，不因切换会话而重置。
+
 TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 Core 提供的统一 journal mode；Windows 为 DELETE，其他平台为 WAL。长期 stats 连接保持打开期间，RuntimeStore 仍须能够打开、持久化和关闭，不能因两个连接各自设置 journal mode 而在启动时报 `database is locked`。
 
 ## 8.5 MCP 与 Skill 交互
@@ -57,4 +63,4 @@ Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到�
 
 ## 8.6 终端稳定性
 
-TUI 的关键质量边界包括：DEC synchronized output、无 viewport culling、静态内容引用稳定、Footer resize、输入光标和 mixed-script wrapping。Spinner 帧由 elapsed time 的纯函数确定；测试使用受控时间验证帧序列，不依赖真实事件循环恰好在 120ms 内调度。对应规则位于 `docs/active/tui-*.md`。
+交互式 TUI 运行在终端主屏缓冲区中，不启用 Ink alternate screen；输出保留在终端原生 scrollback 中，退出时不恢复旧主屏。Ink 交互模式由真实的 stdin/stdout TTY 能力决定，CI 环境中的真实 PTY 仍保持输入与持续渲染；非 TTY 输入或输出不强制进入交互模式。关键质量边界还包括 DEC synchronized output、无应用内 viewport culling、静态内容引用稳定、Footer resize、输入光标和 mixed-script wrapping。Spinner 帧由 elapsed time 的纯函数确定；测试使用受控时间验证帧序列，不依赖真实事件循环恰好在 120ms 内调度。对应规则位于 `docs/active/tui-*.md`。

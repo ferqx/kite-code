@@ -35,8 +35,12 @@ export { createInitialState, eventReducer };
 
 const MemoHeader = React.memo(Header);
 
-function shouldShowRunStatus(state: TuiState): boolean {
-  if (!state.running || state.interrupt) return false;
+export function shouldShowRunStatus(state: TuiState): boolean {
+  if (state.interrupt) return false;
+  if (state.status.currentNode?.startsWith('context_')) {
+    return state.compactionProgress?.placement !== 'inline';
+  }
+  if (!state.running) return false;
   if (state.status.retryState) return true;
   return true;
 }
@@ -251,6 +255,11 @@ export default function App({
         awaitingApproval={awaitingApproval}
         awaitingInput={awaitingInput}
         columns={columns}
+        inlineCompactionPhase={
+          state.compactionProgress?.placement === 'inline'
+            ? state.compactionProgress.phase
+            : undefined
+        }
       />
 
       {/* ── Footer: 3-row interaction zone ── */}

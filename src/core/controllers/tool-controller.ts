@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
@@ -62,6 +63,42 @@ import { verificationRequestForCapability, verificationRequestForSkill } from '@
 import type { InteractionMode, PlanArtifactRef, PlanDocument } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
+
+// ── PR 8: Tool result digest production ──
+
+function computeToolResultDigest(input: {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  status?: string;
+  rawResultDigest?: string;
+  truncated?: boolean;
+}): {
+  contentDigest: string;
+  rawResultDigest?: string;
+  modelContentDigest: string;
+  digestScope: 'raw' | 'projected';
+} {
+  const modelContentDigest = createHash('sha256')
+    .update(
+      JSON.stringify({
+        stdout: input.stdout,
+        stderr: input.stderr,
+        exitCode: input.exitCode,
+        status: input.status,
+      }),
+    )
+    .digest('hex');
+  const rawResultDigest =
+    input.rawResultDigest ?? (input.truncated ? undefined : modelContentDigest);
+  const digestScope = input.truncated ? ('projected' as const) : ('raw' as const);
+  return {
+    contentDigest: modelContentDigest,
+    ...(rawResultDigest ? { rawResultDigest } : {}),
+    modelContentDigest,
+    digestScope,
+  };
+}
 
 function recoveryActionForFailure(
   failure: import('@/core/runtime/failures').ClassifiedFailure,
@@ -1867,6 +1904,20 @@ export async function executeRuntimeTools(params: {
             exitCode: result.exitCode ?? 0,
             stdout: result.stdout ?? '',
             stderr: result.stderr ?? '',
+            resultMeta: {
+              ...result.resultMeta,
+              ...(result.path ? { path: result.path } : {}),
+              ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
+              ...(result.action?.intent ? { intent: result.action.intent } : {}),
+              ...computeToolResultDigest({
+                stdout: result.stdout ?? '',
+                stderr: result.stderr ?? '',
+                exitCode: result.exitCode ?? 0,
+                status: result.status,
+                rawResultDigest: result.resultMeta?.rawResultDigest,
+                truncated: result.resultMeta?.truncated,
+              }),
+            },
             status:
               result.status === 'exhausted'
                 ? 'exhausted'
@@ -2031,6 +2082,20 @@ export async function executeRuntimeTools(params: {
           exitCode: result.exitCode ?? 0,
           stdout: result.stdout ?? '',
           stderr: result.stderr ?? '',
+          resultMeta: {
+            ...result.resultMeta,
+            ...(result.path ? { path: result.path } : {}),
+            ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
+            ...(result.action?.intent ? { intent: result.action.intent } : {}),
+            ...computeToolResultDigest({
+              stdout: result.stdout ?? '',
+              stderr: result.stderr ?? '',
+              exitCode: result.exitCode ?? 0,
+              status: result.status,
+              rawResultDigest: result.resultMeta?.rawResultDigest,
+              truncated: result.resultMeta?.truncated,
+            }),
+          },
           status:
             result.status === 'exhausted' ? 'exhausted' : result.ok === false ? 'error' : 'success',
         },

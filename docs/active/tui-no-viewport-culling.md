@@ -1,10 +1,11 @@
 # 当前规则：TUI 输出区域 Static/dynamic 分割渲染
 
 状态：active
-最后更新：2026-06-04（Turn 模型重构，简化 Static/Dynamic 分割为 slice(-1)）
-最后验证：2026-06-04
+最后更新：2026-07-23（依据真实 TTY 能力启用 Ink 交互模式）
+最后验证：2026-07-23
 范围：
 
+- `src/app/tui/index.tsx` — Ink 终端渲染选项
 - `src/app/tui/OutputArea.tsx` — 输出区域组件
 - `src/app/tui/App.tsx` — App 布局
 - `src/app/tui/reducers/helpers.ts` — block 操作 helper 函数
@@ -53,7 +54,10 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
 - 活跃消息（streaming/running/interrupt）必须留在 dynamic 树，不得进入 `<Static>`
 - `<Static>` 容器必须用 `<Box height={0} overflow="hidden">` 包裹
 - App 不得在 Footer 下方放置 `flexGrow={1}` 的 spacer（会导致 Footer 被推到终端底部，与 Static 消息之间产生空白）
-- 终端原生 scrollback 是唯一的滚动机制
+- TUI 使用终端主屏缓冲区，`<Static>` 输出保留在终端原生 scrollback 中
+- Ink 交互模式必须依据 `stdin.isTTY && stdout.isTTY` 显式决定，不得仅依赖 CI
+  环境探测；CI 中真实 PTY 仍必须启用输入、增量渲染与终端控制
+- 非 TTY 输入或输出不得强制启用 Ink 交互模式
 
 ## 不要做
 
@@ -68,7 +72,7 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
 
 **OutputArea 不能用视口裁剪，但 overlay 面板可以。** 区别在于：
 
-- OutputArea：消息必须保留在终端 scrollback 中，用户可以用原生滚动查看历史
+- OutputArea：消息通过 `<Static>` 保留在终端原生 scrollback 中，不做应用内视口裁剪
 - Overlay 面板（SessionSelector、ModelSelector 等）：固定高度、模态弹出、不需要 scrollback
 
 因此 overlay 面板是 `ink-virtual-list` 的理想使用场景。VirtualList 通过 `items.slice(viewportOffset, viewportOffset + visibleCount)` 只渲染可见行，将 Yoga 树从 O(N) 降为 O(visibleCount)。
@@ -101,3 +105,4 @@ React.memo 跳过组件函数执行，但 Ink 的 `renderNodeToOutput` 管线仍
 
 - viewport-culling.ts 中的回归测试验证所有 block 类型（user、tool_card、text）在渲染输出中可见
 - tui-layout.test.tsx 中的测试验证 blocks 渲染完整性
+- startup.test.ts 在 `CI=true` 的真实 PTY 中验证输入提示符仍可渲染

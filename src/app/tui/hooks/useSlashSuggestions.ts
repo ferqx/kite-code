@@ -22,6 +22,12 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'sessions', aliases: [], description: 'Show sessions' },
   { name: 'new', aliases: [], description: 'Start a new session' },
   { name: 'plan', aliases: [], description: 'Enter planning mode' },
+  {
+    name: 'compact',
+    aliases: [],
+    description: 'Compact conversation context for the model',
+    args: '[custom summarization instructions]',
+  },
   { name: 'permissions', aliases: [], description: 'Set permissions', args: 'ask|auto|full' },
   {
     name: 'mcp',

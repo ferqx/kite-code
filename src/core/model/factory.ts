@@ -10,6 +10,7 @@ import {
   type ModelRetryListener,
   transientRetryMiddleware,
 } from './deepseek';
+import type { ModelCapabilityMetadata } from './model-capabilities';
 
 /** 支持工具绑定的聊天模型 / Tool-bindable chat model (new shape: LanguageModel + setRetryListener) */
 export type SupportedChatModel = {
@@ -17,6 +18,7 @@ export type SupportedChatModel = {
   setRetryListener: (listener: ModelRetryListener | null) => void;
   /** Explicit false makes progressive capability disclosure fail closed. */
   supportsToolCalls?: boolean;
+  capabilityMetadata?: ModelCapabilityMetadata;
 };
 
 /** 根据配置创建 AI SDK 聊天模型 / Create an AI SDK chat model from config */

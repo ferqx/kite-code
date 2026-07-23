@@ -1,5 +1,6 @@
 // ── TUI render-event handler ──
 
+import { contextCompactionTerminalNotice } from '@/core/model/context-compaction-presentation';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type * as Protocol from '@/protocol/events';
 import {
@@ -1419,6 +1420,12 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         kind: 'user',
         content: event.content.replace(/^User:\s*/, ''),
       });
+    case 'user.command_invoked':
+      return appendBlock(state, {
+        id: state.nextBlockId,
+        kind: 'user',
+        content: event.command,
+      });
     case 'model.responded': {
       let next = state;
       if (event.reasoningText)
@@ -1474,6 +1481,128 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           },
         },
       });
+    case 'context.compaction_completed': {
+      const notice = contextCompactionTerminalNotice(event);
+      if (state.terminalCompactionNotices?.[notice.compactionId]) return state;
+      const next = handleEventAction(state, {
+        type: 'text',
+        data: { text: notice.message },
+      });
+      const previousSnapshot = next.status.contextSnapshot;
+      const usableInputTokens = previousSnapshot?.usableInputTokens;
+      const utilization =
+        usableInputTokens != null && usableInputTokens > 0
+          ? event.checkpoint.inputTokensAfter / usableInputTokens
+          : undefined;
+      return {
+        ...next,
+        status: {
+          ...next.status,
+          contextSnapshot: {
+            ...(previousSnapshot ?? {
+              estimate: {
+                systemTokens: 0,
+                toolSchemaTokens: 0,
+                transcriptTokens: 0,
+                summaryTokens: 0,
+                dynamicRuntimeTokens: 0,
+                framingTokens: 0,
+                totalInputTokens: event.checkpoint.inputTokensAfter,
+              },
+              status: 'unknown' as const,
+            }),
+            estimate: {
+              ...(previousSnapshot?.estimate ?? {
+                systemTokens: 0,
+                toolSchemaTokens: 0,
+                transcriptTokens: 0,
+                summaryTokens: 0,
+                dynamicRuntimeTokens: 0,
+                framingTokens: 0,
+              }),
+              totalInputTokens: event.checkpoint.inputTokensAfter,
+            },
+            utilization,
+            activeCheckpointId: event.checkpoint.compactionId,
+            inputTokensBefore: event.checkpoint.inputTokensBefore,
+            inputTokensAfter: event.checkpoint.inputTokensAfter,
+          },
+        },
+        terminalCompactionNotices: {
+          ...next.terminalCompactionNotices,
+          [notice.compactionId]: notice.kind,
+        },
+      };
+    }
+    case 'context.compaction_failed': {
+      const notice = contextCompactionTerminalNotice(event);
+      if (state.terminalCompactionNotices?.[notice.compactionId]) return state;
+      // Benign rejections: render as plain text (persisted across restarts).
+      if (!notice.isError) {
+        const next = handleEventAction(state, {
+          type: 'text',
+          data: { text: `  ⎿  ${notice.message}` },
+        });
+        return {
+          ...next,
+          terminalCompactionNotices: {
+            ...next.terminalCompactionNotices,
+            [notice.compactionId]: notice.kind,
+          },
+        };
+      }
+      const next = handleEventAction(state, {
+        type: 'error',
+        data: {
+          message: notice.message,
+          recoverable: event.retryable,
+        },
+      });
+      return {
+        ...next,
+        terminalCompactionNotices: {
+          ...next.terminalCompactionNotices,
+          [notice.compactionId]: notice.kind,
+        },
+      };
+    }
+    case 'model.context_metrics':
+      return {
+        ...state,
+        status: {
+          ...state.status,
+          contextSnapshot: {
+            estimate: event.estimate,
+            status: event.status,
+            usableInputTokens: event.usableInputTokens,
+            utilization: event.utilization,
+            activeCheckpointId: state.status.contextSnapshot?.activeCheckpointId,
+            inputTokensBefore: state.status.contextSnapshot?.inputTokensBefore,
+            inputTokensAfter: state.status.contextSnapshot?.inputTokensAfter,
+          },
+        },
+      };
+    case 'context.compaction_reset':
+      return handleEventAction(
+        {
+          ...state,
+          status: {
+            ...state.status,
+            contextSnapshot: state.status.contextSnapshot
+              ? {
+                  ...state.status.contextSnapshot,
+                  activeCheckpointId: undefined,
+                  inputTokensBefore: undefined,
+                  inputTokensAfter: undefined,
+                }
+              : undefined,
+          },
+        },
+        {
+          type: 'text',
+          data: { text: 'Context checkpoint reset; using the original transcript.' },
+        },
+      );
     case 'run.error':
       return handleEventAction(state, {
         type: 'error',

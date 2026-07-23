@@ -39,6 +39,23 @@ export { expandEnvVars } from './mcp-server-config';
 
 // ── Zod schemas ──
 
+const modelEntrySchema = z.union([
+  z.string().min(1),
+  z
+    .object({
+      name: z.string().min(1),
+      default: z.boolean().optional(),
+      contextWindow: z.number().int().positive().optional(),
+      /** @deprecated Use contextWindow. */
+      tokens: z.number().int().positive().optional(),
+      maxOutputTokens: z.number().int().positive().optional(),
+      tokenizerFamily: z.string().min(1).optional(),
+      supportsUsageMetadata: z.boolean().optional(),
+      supportsPromptCache: z.boolean().optional(),
+    })
+    .strict(),
+]);
+
 const providerSchema = z.object({
   type: z.enum(['deepseek', 'openai', 'openai-compatible', 'ollama']).optional(),
   apiKey: z.string().min(1).optional(),
@@ -52,7 +69,7 @@ const providerSchema = z.object({
   /** Extra kwargs passed through to the LangChain model constructor */
   modelKwargs: z.record(z.string(), z.any()).optional(),
   /** Available model names (string[]) */
-  models: z.array(z.any()).optional(),
+  models: z.array(modelEntrySchema).optional(),
 });
 
 // Deprecated: kept for backward compatibility with old top-level models array
@@ -74,7 +91,6 @@ const featuresSchema = z
     planLifecycleV2: z.boolean().optional(),
     interactionControllerV2: z.boolean().optional(),
     autoReviewV2: z.boolean().optional(),
-    runtimeProjectionV2: z.boolean().optional(),
     nativeLoopEngine: z.boolean().optional(),
     loopMode: z.boolean().optional(),
     capabilityCatalogV1: z.boolean().optional(),
@@ -85,6 +101,9 @@ const featuresSchema = z
     skillWorkflowV1: z.boolean().optional(),
     verificationV1: z.boolean().optional(),
     toolSearchV1: z.boolean().optional(),
+    contextCompactionV2: z.boolean().optional(),
+    contextCompactionAutoV1: z.boolean().optional(),
+    contextCompactionManualV1: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -107,6 +126,59 @@ export const configSchema = z.object({
       doomLoopRepeatThreshold: z.number().int().positive().optional(),
       circuitBreakerMaxRejections: z.number().int().positive().optional(),
       circuitBreakerWindowMs: z.number().int().positive().optional(),
+    })
+    .optional(),
+  compaction: z
+    .object({
+      autoMode: z.enum(['off', 'shadow', 'live']).optional(),
+      cohortSalt: z.string().min(1).optional(),
+      livePercentage: z.number().min(0).max(100).optional(),
+      localDebug: z
+        .object({ enabled: z.boolean(), directory: z.string().min(1) })
+        .strict()
+        .optional(),
+      triggerRatio: z.number().positive().max(1).optional(),
+      compactAfterEstimatedTokens: z.number().int().positive().optional(),
+      maxSummaryTokens: z.number().int().positive().optional(),
+      maxSummaryInputTokens: z.number().int().positive().optional(),
+      maxNarrativeTokens: z.number().int().positive().optional(),
+      compactRatio: z.number().positive().max(1).optional(),
+      hardRatio: z.number().positive().max(1).optional(),
+      warningRatio: z.number().positive().max(1).optional(),
+      minimumReductionRatio: z.number().nonnegative().max(1).optional(),
+      cooldownTurns: z.number().int().nonnegative().optional(),
+      providerSafetyRatio: z.number().positive().max(0.2).optional(),
+    })
+    .strict()
+    .superRefine((val, ctx) => {
+      if (
+        val.maxSummaryTokens != null &&
+        val.maxNarrativeTokens != null &&
+        val.maxSummaryTokens > val.maxNarrativeTokens
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'maxSummaryTokens must not exceed maxNarrativeTokens',
+          path: ['maxSummaryTokens'],
+        });
+      }
+      const warning = val.warningRatio ?? 0.8;
+      const compact = val.compactRatio ?? 0.9;
+      const hard = val.hardRatio ?? 0.94;
+      if (warning >= compact) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `warningRatio (${warning}) must be less than compactRatio (${compact})`,
+          path: ['warningRatio'],
+        });
+      }
+      if (compact >= hard) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `compactRatio (${compact}) must be less than hardRatio (${hard})`,
+          path: ['compactRatio'],
+        });
+      }
     })
     .optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
@@ -136,6 +208,14 @@ export interface AgentConfig {
   reasoning?: boolean;
   /** 透传给 LangChain 模型构造器的额外参数 */
   modelKwargs?: Record<string, unknown>;
+  /** Explicit capabilities from the selected model entry, before catalog fallback resolution. */
+  modelCapabilities?: {
+    contextWindowTokens?: number;
+    maxOutputTokens?: number;
+    tokenizerFamily?: string;
+    supportsUsageMetadata?: boolean;
+    supportsPromptCache?: boolean;
+  };
   interactionMode?: z.infer<typeof interactionModeSchema>;
   features?: Partial<FeatureFlags>;
   sandbox: {
@@ -150,6 +230,7 @@ export interface AgentConfig {
     circuitBreakerMaxRejections?: number;
     circuitBreakerWindowMs?: number;
   };
+  compaction?: NonNullable<KiteCodeConfig['compaction']>;
 }
 
 /** 加载配置选项 / Configuration loading options */
@@ -177,8 +258,8 @@ export {
 // ── Defaults (DeepSeek) ──
 
 const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
-  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true, contextWindow: 1048576 },
-  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false, contextWindow: 1048576 },
+  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
+  { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false },
 ];
 
 // ── Config file loading ──
@@ -201,6 +282,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     features: { ...user.features, ...project.features },
     sandbox: project.sandbox ?? user.sandbox,
     autoReview: project.autoReview ?? user.autoReview,
+    compaction: project.compaction ?? user.compaction,
     mcpServers: { ...user.mcpServers, ...project.mcpServers },
   };
 }
@@ -265,20 +347,42 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
 
   const reasoningEffort = provider.effort ?? null;
   const reasoning = provider.reasoning ?? inferReasoningDefault(providerType);
+  const modelName =
+    options.modelName ?? provider.model ?? defaultModel?.name ?? 'deepseek-v4-flash';
+  const selectedModel = provider.models?.find((entry) => modelEntryName(entry) === modelName);
+  const selected = selectedModel && typeof selectedModel === 'object' ? selectedModel : undefined;
 
   return {
     apiKey: resolveProviderApiKey(providerName, providerType, provider.apiKey),
     baseURL: resolveProviderBaseURL(providerName, providerType, provider.baseURL),
-    modelName: options.modelName ?? provider.model ?? defaultModel?.name ?? 'deepseek-v4-flash',
+    modelName,
     providerName,
     providerType,
     reasoningEffort,
     reasoning,
     modelKwargs: provider.modelKwargs as Record<string, unknown> | undefined,
+    ...(selected
+      ? {
+          modelCapabilities: {
+            ...((selected.contextWindow ?? selected.tokens)
+              ? { contextWindowTokens: selected.contextWindow ?? selected.tokens }
+              : {}),
+            ...(selected.maxOutputTokens ? { maxOutputTokens: selected.maxOutputTokens } : {}),
+            ...(selected.tokenizerFamily ? { tokenizerFamily: selected.tokenizerFamily } : {}),
+            ...(selected.supportsUsageMetadata != null
+              ? { supportsUsageMetadata: selected.supportsUsageMetadata }
+              : {}),
+            ...(selected.supportsPromptCache != null
+              ? { supportsPromptCache: selected.supportsPromptCache }
+              : {}),
+          },
+        }
+      : {}),
     interactionMode: cfg.interactionMode,
     features: cfg.features,
     sandbox: { enabled: cfg.sandbox?.enabled ?? true },
     autoReview: cfg.autoReview,
+    compaction: cfg.compaction,
   };
 }
 
@@ -318,6 +422,22 @@ function modelEntryName(entry: unknown): string | null {
   return null;
 }
 
+function modelEntryObject(entry: unknown): {
+  default?: boolean;
+  contextWindow?: number;
+  tokens?: number;
+  maxOutputTokens?: number;
+} | null {
+  return entry && typeof entry === 'object'
+    ? (entry as {
+        default?: boolean;
+        contextWindow?: number;
+        tokens?: number;
+        maxOutputTokens?: number;
+      })
+    : null;
+}
+
 /**
  * Find the default model from config.
  * Priority: provider.model > legacy default:true > first model > null
@@ -328,7 +448,7 @@ function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string
     // Legacy: model entry with default:true
     if (prov.models) {
       for (const m of prov.models) {
-        if (m && typeof m === 'object' && (m as any).default) {
+        if (modelEntryObject(m)?.default) {
           const name = modelEntryName(m);
           if (name) return { provider: provName, name };
         }
@@ -383,6 +503,7 @@ export interface AvailableModel {
   isDefault: boolean;
   /** 上下文窗口大小（token 数）/ Context window size in tokens */
   contextWindow?: number;
+  maxOutputTokens?: number;
 }
 
 let _cachedModels: AvailableModel[] | null = null;
@@ -417,11 +538,11 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
       for (const m of prov.models) {
         const name = modelEntryName(m);
         if (!name) continue;
-        const isDefault =
-          name === defaultName || (m && typeof m === 'object' && !!(m as any).default);
-        const contextWindow =
-          m && typeof m === 'object' ? ((m as any).contextWindow ?? (m as any).tokens) : undefined;
-        models.push({ provider: provName, name, isDefault, contextWindow });
+        const entry = modelEntryObject(m);
+        const isDefault = name === defaultName || Boolean(entry?.default);
+        const contextWindow = entry?.contextWindow ?? entry?.tokens;
+        const maxOutputTokens = entry?.maxOutputTokens;
+        models.push({ provider: provName, name, isDefault, contextWindow, maxOutputTokens });
       }
     }
   }
@@ -493,22 +614,20 @@ export interface SaveProviderInput {
  * Preserves existing config sections (other providers, theme, mcpServers, etc.).
  */
 /** Sensible default models per provider type (used when no models are provided). */
-function defaultModelsForProvider(
-  type: ModelProviderType,
-): { name: string; default: boolean; contextWindow?: number }[] {
+function defaultModelsForProvider(type: ModelProviderType): { name: string; default: boolean }[] {
   switch (type) {
     case 'deepseek':
       return [
-        { name: 'deepseek-v4-flash', default: true, contextWindow: 1048576 },
-        { name: 'deepseek-v4-pro', default: false, contextWindow: 1048576 },
+        { name: 'deepseek-v4-flash', default: true },
+        { name: 'deepseek-v4-pro', default: false },
       ];
     case 'openai':
       return [
-        { name: 'gpt-4o', default: true, contextWindow: 128000 },
-        { name: 'gpt-4.1', default: false, contextWindow: 1000000 },
+        { name: 'gpt-4o', default: true },
+        { name: 'gpt-4.1', default: false },
       ];
     case 'ollama':
-      return [{ name: 'llama3.2', default: true, contextWindow: 131072 }];
+      return [{ name: 'llama3.2', default: true }];
     default:
       // openai-compatible — no well-known defaults, let user type their own
       return [];

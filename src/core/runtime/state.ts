@@ -35,6 +35,7 @@ import type {
   VerificationMode,
   VerificationSpecV1,
 } from '@/protocol/verification';
+import type { ContextRuntimeState } from './context-compaction';
 import type { ClassifiedFailure } from './failures';
 
 // ── Re-export for convenience ──
@@ -240,6 +241,8 @@ export interface ToolCallRecord {
     summary: string;
     /** 进程退出码（shell 工具时可用）/ Process exit code (available for shell tools) */
     exitCode?: number;
+    /** Structured result facts used by provider-neutral context projection. */
+    resultMeta?: ToolResultMeta;
   };
   /** 错误信息（失败时填充）/ Error message (populated on failure) */
   error?: string;
@@ -254,6 +257,25 @@ export interface ToolCallRecord {
   bindingId?: string;
   capabilityId?: string;
   capabilityRevision?: string;
+}
+
+/** Structured, JSON-safe facts produced by a tool execution. */
+export interface ToolResultMeta {
+  path?: string;
+  totalLines?: number;
+  command?: string;
+  intent?: string;
+  matchCount?: number;
+  truncated?: boolean;
+  contentDigest?: string;
+  resourceRevision?: string;
+  workspaceMutationScope?: string[];
+  /** Digest of the raw result before truncation (M1 uses this for dedup). */
+  rawResultDigest?: string;
+  /** Digest of the model-visible content (may differ from raw when truncated). */
+  modelContentDigest?: string;
+  /** Provenance of the digest fields. 'legacy_unknown' means pre-V2 data — treat conservatively. */
+  digestScope?: 'raw' | 'projected' | 'legacy_unknown';
 }
 
 export interface CapabilityRuntimeState {
@@ -349,17 +371,31 @@ export interface ToolRuntimeState {
 
 /** JSON-safe transcript.  LangChain message instances are rebuilt only at the
  * model boundary and are never persisted in RuntimeStore. */
+export interface TranscriptMessageMeta {
+  /** Optional only at the legacy snapshot/type boundary; reducer and migration always materialize it. */
+  messageId?: string;
+  turnId?: string;
+  ordinal?: number;
+  createdAt?: string;
+}
+
 export type TranscriptMessage =
-  | { kind: 'user'; messageId: string; content: string }
-  | { kind: 'runtime'; messageId: string; content: string }
-  | {
+  | (TranscriptMessageMeta & { kind: 'user'; content: string })
+  | (TranscriptMessageMeta & { kind: 'runtime'; content: string })
+  | ({
       kind: 'assistant';
-      messageId: string;
       content?: string;
       reasoningText?: string;
       toolCalls: Array<{ id: string; name: string; args: unknown }>;
-    }
-  | { kind: 'tool'; toolCallId: string; name: string; content: string; ok: boolean };
+    } & TranscriptMessageMeta)
+  | (TranscriptMessageMeta & {
+      kind: 'tool';
+      toolCallId: string;
+      name: string;
+      content: string;
+      ok: boolean;
+      resultMeta?: ToolResultMeta;
+    });
 
 export interface TranscriptState {
   messages: TranscriptMessage[];
@@ -369,7 +405,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 13;
+export const RUNTIME_STATE_SCHEMA_VERSION = 16;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -440,6 +476,8 @@ export interface RuntimeState {
   };
   /** Persisted, provider-neutral transcript used to rebuild model context. */
   transcript: TranscriptState;
+  /** Durable M2 compaction checkpoint lifecycle. */
+  context: ContextRuntimeState;
   /** 方案生命周期状态（v2: PlanningState 取代 PlanLifecycleState）/ Plan lifecycle state */
   planning: PlanningState;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
@@ -527,6 +565,14 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       turnIndex: 0,
     },
     transcript: { messages: [] },
+    context: {
+      history: [],
+      autoGuard: {
+        recentAutomaticCompactions: [],
+        consecutiveLowGain: 0,
+        disabledUntilManualAction: false,
+      },
+    },
     planning: initialPlanning,
     activeTaskId: null,
     tasks: {},

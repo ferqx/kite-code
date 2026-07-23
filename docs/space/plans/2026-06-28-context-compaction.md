@@ -4,6 +4,7 @@
 重写日期：2026-06-29
 状态：archived（M0/M1 已实施，M2 延后；当前行为以 active 规则为准）
 优先级：P0
+取代者：`2026-07-19-context-compaction-v2.md` — 完整的 V2 重构方案，包含 canonical context frame、事件化 checkpoint、自动/手动压缩统一架构
 
 ## 结论
 

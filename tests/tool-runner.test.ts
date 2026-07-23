@@ -167,6 +167,10 @@ describe('runApprovedTool — read_mcp_resource', () => {
     expect(result.ok).toBe(true);
     expect(result.stdout).toBe('resource content here');
     expect(result.command).toBe('read_mcp_resource test-server');
+    expect(result.resultMeta).toMatchObject({
+      truncated: false,
+      rawResultDigest: expect.any(String),
+    });
   });
 
   it('returns error when mcpManager is not available', async () => {
@@ -229,6 +233,10 @@ describe('runApprovedTool — read_mcp_resource', () => {
     expect(output.status).toBe('partial');
     expect(output.truncated).toBe(true);
     expect(output.original_characters).toBe(128 * 1024 + 20);
+    expect(result.resultMeta).toMatchObject({
+      truncated: true,
+      rawResultDigest: expect.any(String),
+    });
   });
 
   it('allows a governed MCP resource read in auto mode without approval', async () => {
@@ -499,5 +507,11 @@ describe('runApprovedTool 鈥?search_content', () => {
     expect(result.stdout).toContain('src/alpha.ts:1:export const marker = "needle";');
     expect(result.stdout).not.toContain('beta.ts');
     expect(result.command).toBe('search_content needle');
+    expect(result.resultMeta).toEqual({
+      path: '.',
+      matchCount: 1,
+      truncated: false,
+      rawResultDigest: expect.any(String),
+    });
   });
 });

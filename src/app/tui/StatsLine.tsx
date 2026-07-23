@@ -1,5 +1,4 @@
 import { Box, Text, useStdout } from 'ink';
-import { listAvailableModels } from '@/core/config';
 import { InteractionMode } from '@/protocol/events';
 import { useTheme } from './theme';
 import type { StatusState } from './types';
@@ -24,6 +23,7 @@ function fullWidth(
   interactionMode?: string,
   planMode?: boolean,
   contextPct?: string,
+  absoluteContextTokens?: number,
 ): number {
   let w = status.modelName.length;
   const isDS = status.modelProvider === 'deepseek';
@@ -31,7 +31,8 @@ function fullWidth(
   if (isDS && status.totalTokens > 0) w += 3 + 7 + 3; // " · cache: 0%"
   if (contextPct)
     w += 3 + contextPct.length + 8; // " · 30% context"
-  else if (status.totalTokens > 0) w += 3 + 8 + formatTokens(status.totalTokens).length; // " · tokens: 78.4k"
+  else if (absoluteContextTokens != null && absoluteContextTokens > 0)
+    w += 3 + formatTokens(absoluteContextTokens).length;
   if (interactionMode) w += 3 + 6;
   // plan mode adds: "  Shift+Tab to exit" ≈ 19 chars
   if (planMode) w += 19;
@@ -62,18 +63,18 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
   const showThink = isDeepSeek && !!status.thinkingMode;
   const showCache = isDeepSeek && status.totalTokens > 0;
 
-  // Look up context window from model config; compute percentage if available
-  const models = listAvailableModels();
-  const currentModel = models.find(
-    (m) => m.provider === (status.modelProvider || 'deepseek') && m.name === status.modelName,
-  );
-  const cw = currentModel?.contextWindow;
   const contextPct =
-    cw && cw > 0 ? `${Math.round((status.totalTokens / cw) * 100)}% context` : null;
-  const showTokens = !contextPct && status.totalTokens > 0;
+    status.contextSnapshot?.utilization != null
+      ? `${Math.round(status.contextSnapshot.utilization * 100)}% context`
+      : null;
+  const absoluteContextTokens =
+    status.contextSnapshot?.estimate.totalInputTokens ?? status.totalTokens;
+  const showTokens = !contextPct && absoluteContextTokens > 0;
 
   const cols = stdout?.columns ?? 80;
-  const compact = fullWidth(status, interactionMode, planMode, contextPct ?? undefined) > cols;
+  const compact =
+    fullWidth(status, interactionMode, planMode, contextPct ?? undefined, absoluteContextTokens) >
+    cols;
 
   return (
     <Box>
@@ -101,7 +102,7 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
       {!compact && showTokens && (
         <>
           <Text color={t.dim}> · </Text>
-          <Text>{formatTokens(status.totalTokens)}</Text>
+          <Text>{formatTokens(absoluteContextTokens)}</Text>
         </>
       )}
       {interactionMode && (

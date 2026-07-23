@@ -20,6 +20,13 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
           : `Runtime schema ${state.recoveryState.schemaVersion} is not supported.`,
     };
   }
+  // Durable hard blocks represent proven Runtime correctness failures only.
+  if (state.context.hardBlock) {
+    return {
+      type: 'recovery_blocked',
+      reason: `Runtime context is blocked by a correctness failure: ${state.context.hardBlock.reason}. Rewind, clear, or start a new session.`,
+    };
+  }
   if (state.legacyUnrecoverableSubagentApproval) {
     return {
       type: 'subagent.recovery_unavailable',
@@ -145,6 +152,23 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       (frame) => frame.status === 'active',
     );
     if (!activeSkill) return { type: 'emit_final' };
+  }
+
+  if (state.context.pendingCompaction) {
+    return {
+      type: 'compact_context',
+      compactionId: state.context.pendingCompaction.compactionId,
+    };
+  }
+
+  // An automatic compaction is an admission gate for this turn. If it failed
+  // or was cancelled, do not fall through to the oversized normal model call.
+  // A new turn gets a new id and therefore runs preflight and may try again.
+  if (
+    state.context.lastFailure?.reason === 'auto' &&
+    state.context.lastFailure.requestedAtTurnId === state.turn.turnId
+  ) {
+    return { type: 'stop' };
   }
 
   return { type: 'call_model' };

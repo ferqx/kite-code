@@ -9,9 +9,12 @@ import {
 import systemPrompt from '@/core/prompts/system-prompt.txt';
 import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
-import type { ContextBudget, ThreadAuthorizationState } from '@/core/types';
+import type { ThreadAuthorizationState } from '@/core/types';
 import type { AgentPhase, InteractionMode, PlanningState } from '@/protocol/events';
-import { foldToolOutputs, microCompactToolOutputs } from './compaction';
+import { type ContextTokenEstimate, estimateContextTokens } from './context-budget';
+import { buildCanonicalFrames } from './context-frame-builder';
+import { serializeFramesToMessages } from './context-serializer';
+import { validateFramePairs, validateMessagePairs } from './context-validator';
 import {
   buildCacheableRuntimeContext,
   buildRuntimeModeSnapshot,
@@ -24,6 +27,8 @@ export type AgentRole = 'agent';
 export interface ModelContextState {
   workspace: string;
   messages: BaseMessage[];
+  /** Validated M2 checkpoint projection inserted before the live transcript tail. */
+  summaryMessages?: BaseMessage[];
   final: string;
   workspaceAccess?: 'write';
   phase?: AgentPhase;
@@ -31,7 +36,6 @@ export interface ModelContextState {
   authorization?: ThreadAuthorizationState;
   sandboxBackend?: SandboxBackend | 'unknown';
   activeSkillInstructions?: string;
-  contextBudget?: ContextBudget;
   /** PlanningState for dynamic runtime-state block */
   planningState?: PlanningState;
   taskId?: string;
@@ -43,6 +47,7 @@ export interface ModelContextState {
 export interface PreparedModelContext {
   /** 组装好的消息列表 / Assembled message list */
   messages: BaseMessage[];
+  tokenEstimate: ContextTokenEstimate;
 }
 
 /** 构建模型消息列表 / Build model message list */
@@ -258,7 +263,13 @@ export function reorderInterleavedMessages(messages: BaseMessage[]): BaseMessage
   return ordered;
 }
 
-/** 准备模型上下文（组装系统提示词 + 对话消息，含压缩流水线） / Prepare model context (assemble with compaction pipeline) */
+/**
+ * 准备模型上下文（组装系统提示词 + 对话消息，含压缩流水线） / Prepare model context (assemble with compaction pipeline)
+ *
+ * Prefer `buildContextProjection()` from `context-projection.ts` for new code.
+ * It handles transcript splitting, checkpoint projection, M1/M2, and tool schema
+ * estimation in a single call and is the single entry point for all context paths.
+ */
 export function prepareModelContext(
   role: AgentRole,
   state: ModelContextState,
@@ -269,11 +280,20 @@ export function prepareModelContext(
       ? reorderInterleavedMessages(sanitizeToolCallPairs(state.messages))
       : [humanMessage('')];
 
-  // ── M1a: 连续重复工具折叠 / Micro-compaction (≥3 consecutive same-tool) ──
-  msgs = microCompactToolOutputs(msgs);
+  // ── Canonical frame normalization / 规范帧归一化 ──
+  // Build canonical frames to guarantee tool-call/ToolMessage block integrity
+  // before the compaction pipeline runs.
+  const frames = buildCanonicalFrames(msgs);
 
-  // ── M1b: 只读工具结果折叠 / Read-only tool output folding (每轮默认) ──
-  msgs = foldToolOutputs(msgs, state.contextBudget);
+  // ── Frame-level validation / 帧级校验 ──
+  validateFramePairs(frames);
+
+  // ── Serialize frames back to flat message list / 帧序列化为消息列表 ──
+  // Provider serialization is the LAST step; compaction runs on the flat list.
+  msgs = serializeFramesToMessages(frames);
+
+  // ── Message-level pairing validation after serialization / 序列化后消息级配对校验 ──
+  validateMessagePairs(msgs);
 
   // 构建 SystemMessage（缓存稳定前缀 + 运行时上下文）
   const systemPrompt =
@@ -303,8 +323,16 @@ export function prepareModelContext(
       ? [humanMessage(formatPlanStateReminder(state.planningState))]
       : [];
 
+  const system = systemMessage(systemPrompt);
+  const dynamicRuntimeMessages = [modeSnapshot, ...planReminder];
   return {
-    messages: [systemMessage(systemPrompt), ...msgs, modeSnapshot, ...planReminder],
+    messages: [system, ...(state.summaryMessages ?? []), ...msgs, ...dynamicRuntimeMessages],
+    tokenEstimate: estimateContextTokens({
+      systemMessages: [system],
+      transcriptMessages: msgs,
+      summaryMessages: state.summaryMessages,
+      dynamicRuntimeMessages,
+    }),
   };
 }
 

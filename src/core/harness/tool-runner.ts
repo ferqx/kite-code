@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
@@ -37,6 +38,10 @@ import type {
 import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
 import type { PendingToolRequest } from './tool-requests';
 import type { ToolExecutionResult } from './tool-result';
+
+function resultContentDigest(stdout: string, stderr: string, exitCode: number): string {
+  return createHash('sha256').update(JSON.stringify({ stdout, stderr, exitCode })).digest('hex');
+}
 
 /** runApprovedTool 输入参数 / Input for runApprovedTool */
 export interface RunApprovedToolInput {
@@ -256,6 +261,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stderr: result.error ?? '',
       path: filePath,
       totalLines: result.totalLines,
+      resultMeta: { path: filePath, totalLines: result.totalLines },
     });
   }
 
@@ -299,9 +305,24 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       // 保护 LLM 上下文：diff 超长时截断
       // Cap for LLM context: truncate overlong diff output
       stdout = parts.join('\n');
+      const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
       if (stdout.length > 2000) {
         stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
       }
+      return withFailureGuidance(request, {
+        ok: result.ok,
+        command: `edit_file ${request.args.path ?? ''}`,
+        exitCode: 0,
+        stdout,
+        stderr: '',
+        path: request.args.path,
+        resultMeta: {
+          path: editPath,
+          truncated: stdout.endsWith('... (truncated)'),
+          workspaceMutationScope: editPath ? [editPath] : [],
+          rawResultDigest,
+        },
+      });
     }
     return withFailureGuidance(request, {
       ok: result.ok,
@@ -310,6 +331,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stdout,
       stderr: result.error ?? '',
       path: request.args.path,
+      resultMeta: {
+        path: editPath,
+        truncated: stdout.endsWith('... (truncated)'),
+        workspaceMutationScope: editPath ? [editPath] : [],
+      },
     });
   }
 
@@ -354,10 +380,25 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         const header = `${verb} ${result.lines ?? 0} lines to ${request.args.path}`;
         stdout = formatContentOutput(request.args.content ?? '', header);
       }
+      const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
       // 保护 LLM 上下文：超长时截断 / Cap for LLM context
       if (stdout.length > 2000) {
         stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
       }
+      return withFailureGuidance(request, {
+        ok: result.ok,
+        command: `write_file ${request.args.path ?? ''}`,
+        exitCode: 0,
+        stdout,
+        stderr: '',
+        path: request.args.path,
+        resultMeta: {
+          path: filePath,
+          truncated: stdout.endsWith('... (truncated)'),
+          workspaceMutationScope: filePath ? [filePath] : [],
+          rawResultDigest,
+        },
+      });
     }
 
     return withFailureGuidance(request, {
@@ -367,6 +408,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stdout,
       stderr: result.error ?? '',
       path: request.args.path,
+      resultMeta: {
+        path: filePath,
+        truncated: stdout.endsWith('... (truncated)'),
+        workspaceMutationScope: filePath ? [filePath] : [],
+      },
     });
   }
 
@@ -419,11 +465,19 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       glob: request.args.glob,
       allowExternal,
     });
+    const stdout = truncateToolOutput(result.stdout);
+    const stderr = truncateToolOutput(result.stderr);
     return withFailureGuidance(request, {
       ...result,
-      stdout: truncateToolOutput(result.stdout),
-      stderr: truncateToolOutput(result.stderr),
+      stdout,
+      stderr,
       command: `search_content ${request.args.pattern ?? ''}`,
+      resultMeta: {
+        path: searchPath,
+        matchCount: result.stdout.split('\n').filter(Boolean).length,
+        truncated: stdout.length < result.stdout.length,
+        rawResultDigest: resultContentDigest(result.stdout, result.stderr, result.exitCode),
+      },
     });
   }
 
@@ -437,11 +491,19 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       path: searchPath,
       allowExternal,
     });
+    const stdout = truncateToolOutput(result.stdout);
+    const stderr = truncateToolOutput(result.stderr);
     return withFailureGuidance(request, {
       ...result,
-      stdout: truncateToolOutput(result.stdout),
-      stderr: truncateToolOutput(result.stderr),
+      stdout,
+      stderr,
       command: `search_files ${request.args.pattern ?? ''}`,
+      resultMeta: {
+        path: searchPath,
+        matchCount: result.stdout.split('\n').filter(Boolean).length,
+        truncated: stdout.length < result.stdout.length,
+        rawResultDigest: resultContentDigest(result.stdout, result.stderr, result.exitCode),
+      },
     });
   }
 
@@ -566,12 +628,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     try {
       const content = await mcpManager.readResource(server, uri, signal);
+      const serialized = serializeMcpResourceForModel(content);
       return withFailureGuidance(request, {
         ok: true,
         command: `read_mcp_resource ${server}`,
         exitCode: 0,
-        stdout: serializeMcpResourceForModel(content),
+        stdout: serialized.modelContent,
         stderr: '',
+        resultMeta: {
+          rawResultDigest: resultContentDigest(content, '', 0),
+          truncated: serialized.truncated,
+        },
       });
     } catch (err) {
       if (isMcpProviderError(err)) throw err;
@@ -612,6 +679,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         arguments: request.args as unknown as Record<string, unknown>,
         signal,
       });
+      const rawContent = JSON.stringify(raw);
       const descriptor = mcpManager.findCapability(mcpInvocation.capabilityId);
       const capabilityResult = normalizeMcpToolResult(raw, descriptor?.outputSchema);
       const output = serializeMcpResultForModel(capabilityResult);
@@ -619,9 +687,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         ok: !raw.isError,
         command: request.name,
         exitCode: 0,
-        stdout: output,
+        stdout: output.modelContent,
         stderr: '',
         capabilityResult,
+        resultMeta: {
+          rawResultDigest: resultContentDigest(rawContent, '', 0),
+          truncated: output.truncated,
+        },
       });
     } catch (err) {
       if (isMcpProviderError(err)) throw err;
@@ -657,12 +729,25 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       // 截断上限对齐 max_chars（含标题/元数据行的开销，+500 余量）
       // truncation limit matches max_chars (with ~500 char overhead for metadata lines)
       const contentLimit = Math.max(8000, (request.args.max_chars ?? 8000) + 500);
+      const projectedStdout = truncateToolOutput(stdout, contentLimit);
       return withFailureGuidance(request, {
         ok: result.ok,
         command: `web_fetch ${request.args.url ?? ''}`,
         exitCode: result.ok ? 0 : -1,
-        stdout: truncateToolOutput(stdout, contentLimit),
+        stdout: projectedStdout,
         stderr: result.error ?? '',
+        resultMeta: {
+          ...(result.truncated
+            ? {}
+            : {
+                rawResultDigest: resultContentDigest(
+                  stdout,
+                  result.error ?? '',
+                  result.ok ? 0 : -1,
+                ),
+              }),
+          truncated: projectedStdout !== stdout || result.truncated,
+        },
       });
     } catch (error) {
       const isAbort = error instanceof Error && error.name === 'AbortError';
@@ -701,6 +786,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     };
     return withFailureGuidance(request, {
       ...result,
+      resultMeta: {
+        rawResultDigest: resultContentDigest(raw.stdout, raw.stderr, raw.exitCode),
+        truncated: result.stdout !== raw.stdout || result.stderr !== raw.stderr,
+      },
       action: {
         intent: request.args.intent,
         objective: request.args.objective,
@@ -723,33 +812,46 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
 const MAX_MODEL_MCP_RESULT_CHARS = 128 * 1024;
 
-function serializeMcpResourceForModel(content: string): string {
-  if (content.length <= MAX_MODEL_MCP_RESULT_CHARS) return content;
-  return JSON.stringify({
-    status: 'partial',
-    content: content.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+function serializeMcpResourceForModel(content: string): {
+  modelContent: string;
+  truncated: boolean;
+} {
+  if (content.length <= MAX_MODEL_MCP_RESULT_CHARS) {
+    return { modelContent: content, truncated: false };
+  }
+  return {
+    modelContent: JSON.stringify({
+      status: 'partial',
+      content: content.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+      truncated: true,
+      original_characters: content.length,
+      message: 'The MCP resource exceeded the model-facing output limit.',
+    }),
     truncated: true,
-    original_characters: content.length,
-    message: 'The MCP resource exceeded the model-facing output limit.',
-  });
+  };
 }
 
 function serializeMcpResultForModel(result: import('@/core/capabilities/result').CapabilityResult) {
   const serialized = JSON.stringify(result);
-  if (serialized.length <= MAX_MODEL_MCP_RESULT_CHARS) return serialized;
-  return JSON.stringify({
-    status: 'partial',
-    content: [
-      {
-        type: 'text',
-        text: serialized.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
-      },
-    ],
+  if (serialized.length <= MAX_MODEL_MCP_RESULT_CHARS) {
+    return { modelContent: serialized, truncated: false };
+  }
+  return {
+    modelContent: JSON.stringify({
+      status: 'partial',
+      content: [
+        {
+          type: 'text',
+          text: serialized.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+        },
+      ],
+      truncated: true,
+      original_characters: serialized.length,
+      message:
+        'The MCP result exceeded the model-facing output limit. The complete governed result remains available to Runtime execution records when applicable.',
+    }),
     truncated: true,
-    original_characters: serialized.length,
-    message:
-      'The MCP result exceeded the model-facing output limit. The complete governed result remains available to Runtime execution records when applicable.',
-  });
+  };
 }
 
 /** 共享截断函数：保留头部 + 尾部，中间标注省略行数。

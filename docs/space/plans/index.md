@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-17（完成 MCP Agent Provider Recovery Phase 5）
+最后更新：2026-07-22（归档上下文压缩生产化实施与灰度计划）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -37,6 +37,10 @@
 | [`2026-06-19-event-mechanism-refactor.md`](2026-06-19-event-mechanism-refactor.md) | archived | P0 | `session-logger` | — | 事件机制重构：turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一 |
 | [`2026-06-26-shell-live-output.md`](2026-06-26-shell-live-output.md) | archived | P0 | — | — | Shell 实时输出已实施；计划仅作历史参考。 |
 | [`2026-06-28-context-compaction.md`](2026-06-28-context-compaction.md) | archived | P0 | — | — | M0/M1 已实施，M2 未纳入当前执行计划。 |
+| [`2026-07-19-context-compaction-v2.md`](2026-07-19-context-compaction-v2.md) | draft | P0 | — | 后续生产化计划的架构来源 | 上下文压缩 V2 原始设计。当前实现事实以源码、ADR-0021 和 2026-07-21 计划为准。 |
+| [`2026-07-20-context-compaction-refinement.md`](2026-07-20-context-compaction-refinement.md) | superseded | P0 | 2026-07-19 V2 | 被 2026-07-21 生产化计划替代 | 历史精化方案。 |
+| [`2026-07-20-context-compaction-productionization.md`](2026-07-20-context-compaction-productionization.md) | superseded | P0 | 2026-07-20 精化 | 被 2026-07-21 生产化计划替代 | 基于旧提交的历史生产化方案。 |
+| [`2026-07-21-context-compaction-production-rollout.md`](2026-07-21-context-compaction-production-rollout.md) | archived | P0 | ADR-0021、真实模型测试边界 | 替代两份 2026-07-20 方案 | PR-0 至 PR-7 已完成；单叙事压缩、恢复、rollout、观测、Required CI 与 live Provider 验证已落地。[完成记录](../execution/completed/2026-07-22-context-compaction-production-rollout.md)。 |
 | [`2026-06-27-plan-subagent-role-design.md`](2026-06-27-plan-subagent-role-design.md) | draft | P1 | — | — | Plan 子 Agent 角色：只读架构设计专家，多视角并行设计方案，主 agent 合并后调 `update_plan` |
 | [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | archived | P0 | — | — | 目标能力已进入当前 Runtime/Policy/Execution/Sandbox。 |
 | [`2026-07-01-web-search-tool.md`](2026-07-01-web-search-tool.md) | draft | P0 | — | — | Web 网络工具：Phase 1 `web_fetch`（fetch → SSRF → readability → turndown 正文提取），Phase 2 `web_search`（搜索发现 URL） |

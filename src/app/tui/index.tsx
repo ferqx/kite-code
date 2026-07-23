@@ -397,6 +397,11 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
           modelName,
           thinkingLevel,
         });
+        const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
+        if (loadGenerationRef.current !== gen) return;
+        if (contextSnapshot) {
+          dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
+        }
       } catch (e: any) {
         if (loadGenerationRef.current !== gen) return;
         // Roll back SessionManager: if we switched to a different session and the
@@ -596,6 +601,46 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     for (const event of events) dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
   }, [dispatchSessionLoad, sessionManager, state.status.phase]);
 
+  // Stable onCompact via refs — bypasses stale closure issues with useSlashCommand
+  // and Ink 7 useInput across session switches.
+  const onCompactRef = React.useRef<(customInstructions?: string) => void>(() => {});
+  onCompactRef.current = (customInstructions?: string) => {
+    const targetThreadId = threadIdRef.current;
+    const label = customInstructions ? `/compact ${customInstructions}` : '/compact';
+    dispatchSessionLoad({ type: 'USER_MESSAGE', text: label });
+    void sessionManager
+      .handleContextCompaction(targetThreadId, customInstructions, (phase) => {
+        if (threadIdRef.current === targetThreadId) {
+          dispatchSessionLoad({ type: 'SET_COMPACTION_PROGRESS', phase, placement: 'inline' });
+        }
+      })
+      .then((result) => {
+        // Runtime events are already durable in targetThreadId. If the user
+        // switched sessions while compaction was running, let the target
+        // session pick them up through normal replay instead of rendering
+        // them in the newly active session.
+        if (threadIdRef.current !== targetThreadId) return;
+        for (const event of result.events) {
+          dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+        }
+        if (
+          !result.events.some((event) =>
+            [
+              'context.compaction_completed',
+              'context.compaction_failed',
+              'context.compaction_reset',
+            ].includes(event.type),
+          )
+        ) {
+          dispatchSessionLoad({
+            type: 'LOCAL_TEXT',
+            text: `  ⎿  ${result.text}`,
+            ...(result.isError ? { isError: true } : {}),
+          });
+        }
+      });
+  };
+
   const handleSlashCommand = useSlashCommand(
     dispatchSessionLoad,
     handleExit,
@@ -620,6 +665,32 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     },
     state.interactionMode,
     sandboxBackend,
+    (customInstructions) => {
+      onCompactRef.current(customInstructions);
+    },
+    // PR 9: /context handler — display context usage breakdown
+    () => {
+      const targetThreadId = threadIdRef.current;
+      dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/context' });
+      const text = sessionManager.handleContextDisplay(targetThreadId);
+      dispatchSessionLoad({ type: 'LOCAL_TEXT', text });
+    },
+    // PR 9: /compact reset handler — preflight + clear active checkpoint
+    () => {
+      const targetThreadId = threadIdRef.current;
+      dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/compact reset' });
+      void sessionManager.handleContextReset(targetThreadId).then((result) => {
+        if (threadIdRef.current !== targetThreadId) return;
+        for (const event of result.events) {
+          dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+        }
+        dispatchSessionLoad({
+          type: 'LOCAL_TEXT',
+          text: `  ⎿  ${result.text}`,
+          ...(result.isError ? { isError: true } : {}),
+        });
+      });
+    },
   );
 
   // Stable reference — avoids re-creating the object on every render and causing
@@ -744,11 +815,16 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   );
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;
+  // Ref to avoid Ink 7 stale closure: useInput in InputLine may fire with
+  // a captured handleInput that references an outdated handleSlashCommand
+  // from before a session switch.
+  const handleSlashCommandRef = React.useRef(handleSlashCommand);
+  handleSlashCommandRef.current = handleSlashCommand;
 
   const handleInput = React.useCallback(
     (value: string) => {
       if (value.startsWith('/')) {
-        handleSlashCommand(value);
+        handleSlashCommandRef.current(value);
         return;
       }
 
@@ -758,7 +834,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
 
       runTask(value);
     },
-    [runTask, handleSlashCommand, sessionManager],
+    [runTask, sessionManager],
   );
 
   React.useEffect(() => {
@@ -841,6 +917,10 @@ if (import.meta.main) {
       exitOnCtrlC: false,
       kittyKeyboard: { mode: 'enabled' },
       incrementalRendering: false,
+      // Ink 7.1.1 treats every CI environment as non-interactive by default,
+      // even when stdout is a real PTY. Use the actual terminal capabilities so
+      // PTY-backed sessions (including system tests) keep input and live rendering.
+      interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     },
   );
 

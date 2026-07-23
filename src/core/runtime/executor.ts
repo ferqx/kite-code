@@ -1,6 +1,13 @@
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import { invokeRuntimeModel } from '@/core/controllers/model-controller';
+import {
+  type ContextCompactor,
+  executeContextCompaction,
+} from '@/core/controllers/compaction-controller';
+import {
+  invokeRuntimeModel,
+  resolveContextProjectionEnvironment,
+} from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import {
   createAutoReviewModel,
@@ -9,6 +16,12 @@ import {
 } from '@/core/execution/reviewer';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { McpRuntimeProvider } from '@/core/mcp';
+import type { CompactionReporter } from '@/core/model/compaction-metrics';
+import {
+  createModelContextSummaryGenerator,
+  createNarrativeContextCompactor,
+} from '@/core/model/compaction-summary';
+import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -34,11 +47,40 @@ export interface RuntimeExecutorDependencies {
   skillCatalog?: SkillCatalogSnapshot;
   signal?: AbortSignal;
   subagentEventSink?: SubAgentEventSink;
+  contextCompactor?: ContextCompactor;
+  /** Owned and flushed by the application composition root. */
+  compactionReporter?: CompactionReporter;
+  onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
 }
 
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
 export function resolveAutoReviewTimeout(config: AgentConfig): number {
   return getFeatureFlags(config).autoReviewV2 ? (config.autoReview?.timeoutMs ?? 15_000) : 15_000;
+}
+
+export function resolveRuntimeContextProjectionEnvironment(
+  dependencies: RuntimeExecutorDependencies,
+  state: import('./state').RuntimeState,
+) {
+  const flags = getFeatureFlags(dependencies.config);
+  const skillCatalog =
+    dependencies.skillOptions && flags.skillWorkflowV1 && flags.skillActivationV2
+      ? refreshSkillCatalog(dependencies.skillOptions, {
+          resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
+        })
+      : dependencies.skillCatalog;
+  return resolveContextProjectionEnvironment({
+    state,
+    config: dependencies.config,
+    model: dependencies.model,
+    shellExecutor: dependencies.shellExecutor,
+    mcpManager: dependencies.mcpManager,
+    skills: dependencies.skills,
+    skillOptions: dependencies.skillOptions,
+    skillCatalog,
+    subagentEventSink: dependencies.subagentEventSink,
+    signal: dependencies.signal,
+  });
 }
 
 /** Build the production executor for Kernel effects. */
@@ -57,7 +99,30 @@ export function createRuntimeEffectExecutor(
           resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
         })
       : undefined;
+  const contextCompactor =
+    dependencies.contextCompactor ??
+    createNarrativeContextCompactor({
+      generate: createModelContextSummaryGenerator({
+        model: dependencies.model,
+        signal: dependencies.signal,
+      }),
+      maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
+      maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
+      maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
+    });
   return async (effect, state, emit) => {
+    if (effect.type === 'compact_context') {
+      const resolveProjectionEnvironment = () =>
+        resolveRuntimeContextProjectionEnvironment({ ...dependencies, subagentEventSink }, state);
+      return executeContextCompaction({
+        state,
+        compactionId: effect.compactionId,
+        compact: contextCompactor,
+        resolveProjectionEnvironment,
+        reporter: dependencies.compactionReporter,
+        onProgress: dependencies.onCompactionProgress,
+      });
+    }
     if (effect.type === 'call_model') {
       return invokeRuntimeModel({
         model: dependencies.model,
@@ -71,6 +136,7 @@ export function createRuntimeEffectExecutor(
         subagentEventSink,
         signal: dependencies.signal,
         emitRuntimeEvent: emit,
+        compactionReporter: dependencies.compactionReporter,
       });
     }
     if (effect.type === 'run_tools') {

@@ -34,12 +34,40 @@ Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者
   "interactionMode": "auto",
   "sandbox": { "enabled": true },
   "autoReview": {},
+  "compaction": {},
   "mcpServers": {},
   "features": {}
 }
 ```
 
 Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统一通过 AI SDK 模型边界调用。API key 和配置字符串支持环境变量展开。
+
+模型可使用字符串简写，也可声明正式能力字段：
+
+```jsonc
+{
+  "provider": {
+    "local": {
+      "type": "openai-compatible",
+      "model": "coder",
+      "models": [{
+        "name": "coder",
+        "contextWindow": 131072,
+        "maxOutputTokens": 8192,
+        "tokenizerFamily": "cl100k_base",
+        "supportsUsageMetadata": true,
+        "supportsPromptCache": false
+      }]
+    }
+  }
+}
+```
+
+模型 capability 的每个字段只按显式模型条目、adapter runtime metadata 和兼容 `modelKwargs` 依次解析。模型名称和默认模型列表不提供能力；未知窗口仍允许 Runtime 调用模型，但上下文 utilization 显示为 unknown，并对 Capability disclosure 使用保守预算。
+
+自动会话总结需要默认关闭的 `features.contextCompactionAutoV1` 与 `compaction.autoMode` 共同开启。`autoMode` 只允许 `off | shadow | live`；未配置时为 `off`。`shadow` 只计算 trigger eligibility 术语（触发资格），不调用摘要模型、不写 checkpoint 术语（检查点）；`live` 默认在完整请求达到可用输入预算的 90% 时产生 `reason=auto`，也可由 `triggerRatio` 覆盖或使用显式 `compactAfterEstimatedTokens` 绝对策略。自动压缩失败或取消时当前用户请求不会继续调用普通模型；下一用户 turn 会重新预检并在仍超阈值时重试。Provider 拒绝 summary 时提示检查 `contextWindowTokens` 或执行 `/clear`，不自动清理、分块或重试。`compaction` 可配置 `warningRatio`、`compactRatio`、`hardRatio`、`minimumReductionRatio`、`cooldownTurns`、`maxSummaryTokens`、`maxSummaryInputTokens`、`maxNarrativeTokens` 和 `providerSafetyRatio`；`recentTurns`、`minimumIncrementalHeadroomTokens`、`softRatio`、`targetRatio` 与未消费的 breaker 配置已删除。模型 capability 只来自所选模型的显式字段、adapter runtime metadata 或 `modelKwargs` 兼容字段，并按字段记录 source；模型名称和默认列表不提供窗口、tokenizer、usage 或 cache 能力。未知窗口不显示百分比、不触发 ratio auto。当前 summary request 复用主模型（`tools: {}`，temperature 0，SDK retry 0），自定义指令作为数据字段传入。
+
+Rollout 可额外配置 `cohortSalt` 与 `livePercentage`：相同 salt/session 始终进入相同 bucket，live 百分比外按 shadow 执行，master flag 关闭恒为 off。显式 `localDebug: { enabled: true, directory }` 只写脱敏压缩元数据；未启用时不创建文件。
 
 ## 9.4 MCP 配置
 
@@ -54,3 +82,5 @@ MCP server 可配置 stdio/HTTP transport、`enabled`、`required`、`cwd`、tim
 Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时按各 active 规则 fail closed 或回到当前受治理路径，不允许恢复已删除的旧 MCP adapter、Prompt Skill 或旧状态机。
 
 `toolSearchV1`（原 `capabilitySearchV1`）控制 MCP 工具渐进披露：≤20 工具时直接 binding，>20 工具时通过 `tool_search` 搜索发现。
+
+上下文压缩使用三个独立 flag 术语（功能开关）：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动压缩灰度且默认关闭，不会把 Provider 术语（模型供应商）错误转换为自动压缩；`contextCompactionManualV1` 控制 `/compact` 命令且默认开启。压缩原因只允许 `manual | auto`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt 术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint 术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性硬阻断）。

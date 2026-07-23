@@ -56,6 +56,42 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   assert(state.recoveryState.kind === 'normal', 'recovery state must be normal before execution.');
   assertUnique(state.tools.queue, 'tool queue');
   assertUnique(state.tools.active, 'active tools');
+  assert(state.context != null, 'context runtime state is required.');
+  assert(state.context.autoGuard != null, 'context autoGuard is required.');
+  assert(state.context.history.length <= 128, 'context compaction history exceeds its bound.');
+  if (state.context.pendingCompaction) {
+    const pending = state.context.pendingCompaction;
+    assert(Boolean(pending.compactionId), 'pending compaction id is required.');
+    assert(
+      Number.isInteger(pending.requestedAtRevision) && pending.requestedAtRevision >= 0,
+      'pending compaction source revision must be a non-negative integer.',
+    );
+    assert(Boolean(pending.requestedAtTurnId), 'pending compaction turn id is required.');
+    assert(
+      Number.isFinite(pending.estimate.totalInputTokens) && pending.estimate.totalInputTokens >= 0,
+      'pending compaction token estimate must be non-negative.',
+    );
+  }
+  if (state.context.activeCheckpoint) {
+    const checkpoint = state.context.activeCheckpoint;
+    assert(checkpoint.version === 1, 'active context checkpoint version must be 1.');
+    assert(checkpoint.summary.trim().length > 0, 'active context summary must be non-empty.');
+    assert(Boolean(checkpoint.compactionId), 'active context checkpoint id is required.');
+    assert(Boolean(checkpoint.sourceDigest), 'active context checkpoint digest is required.');
+    assert(
+      checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
+        checkpoint.inputTokensBefore - checkpoint.inputTokensAfter >= 1_024,
+      'active context checkpoint must save at least 1024 tokens.',
+    );
+    const boundary = state.transcript.messages.find(
+      (message) => message.messageId === checkpoint.coveredThroughMessageId,
+    );
+    assert(boundary != null, 'active context checkpoint boundary must exist in the transcript.');
+    assert(
+      boundary.turnId === checkpoint.coveredThroughTurnId,
+      'active context checkpoint boundary turn is inconsistent.',
+    );
+  }
 
   const activeIds = new Set(state.tools.active);
   for (const toolCallId of state.tools.queue) {

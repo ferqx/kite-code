@@ -14,25 +14,26 @@ import {
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@/core/mcp';
+import type { AIMessage } from '@/core/messages';
+import type { CompactionReporter } from '@/core/model/compaction-metrics';
+import { preflightModelContext } from '@/core/model/context-budget';
+import { decideAutomaticContextCompaction } from '@/core/model/context-compaction-decision';
+import { resolveContextCompactionRollout } from '@/core/model/context-compaction-rollout';
 import {
-  type AIMessage,
-  aiMessage,
-  type BaseMessage,
-  humanMessage,
-  systemMessage,
-  toolMessage,
-} from '@/core/messages';
-import { prepareModelContext } from '@/core/model/context';
+  buildContextProjection,
+  type ContextProjectionEnvironment,
+  serializeToolDescriptors,
+} from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
+import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
-import type { RuntimeState, TranscriptMessage } from '@/core/runtime/state';
+import type { RuntimeState } from '@/core/runtime/state';
 import {
   getActivePlanning,
-  getActiveTask,
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
@@ -96,40 +97,7 @@ export function eventsForInvalidModelToolCalls(
   ]);
 }
 
-function runtimeTranscriptMessages(messages: TranscriptMessage[]): BaseMessage[] {
-  return messages.map((message) => {
-    switch (message.kind) {
-      case 'user':
-        return humanMessage({ id: message.messageId, content: message.content });
-      case 'runtime':
-        return systemMessage(message.content);
-      case 'assistant':
-        return aiMessage({
-          id: message.messageId,
-          content: message.content ?? '',
-          tool_calls: message.toolCalls.map((call) => ({
-            ...call,
-            args: (call.args ?? {}) as Record<string, unknown>,
-            type: 'tool_call' as const,
-          })),
-          additional_kwargs: {
-            ...(message.reasoningText ? { reasoning_content: message.reasoningText } : {}),
-          },
-        });
-      case 'tool':
-        return toolMessage({
-          tool_call_id: message.toolCallId,
-          name: message.name,
-          content: message.content,
-          status: message.ok ? 'success' : 'error',
-        });
-      default:
-        return humanMessage({ content: '' });
-    }
-  });
-}
-
-function activeInlineSkillInstructions(
+export function activeInlineSkillInstructions(
   state: RuntimeState,
   catalog: SkillCatalogSnapshot | undefined,
 ): string | undefined {
@@ -164,6 +132,89 @@ function activeInlineSkillInstructions(
   return sections.length > 0 ? sections.join('\n\n') : undefined;
 }
 
+export function resolveContextProjectionEnvironment(input: {
+  state: RuntimeState;
+  config: AgentConfig;
+  model: SupportedChatModel;
+  shellExecutor?: ShellExecutor;
+  mcpManager?: McpRuntimeProvider;
+  skills?: SkillManifest[];
+  skillOptions?: SkillScanOptions;
+  skillCatalog?: SkillCatalogSnapshot;
+  subagentEventSink?: SubAgentEventSink;
+  signal?: AbortSignal;
+  mcpBindings?: Array<{
+    binding: import('@/protocol/capabilities').CapabilityBinding;
+    descriptor: import('@/protocol/capabilities').CapabilityDescriptor;
+  }>;
+  disclosedDescriptors?: import('@/protocol/capabilities').CapabilityDescriptor[];
+}): ContextProjectionEnvironment {
+  const descriptors = [
+    ...(input.mcpManager?.getCapabilitySnapshot().descriptors ?? []),
+    ...(input.skillCatalog?.capabilities.descriptors ?? []),
+  ];
+  const persistedBindings =
+    input.mcpBindings ??
+    Object.values(input.state.capabilities.bindings).flatMap((binding) => {
+      const descriptor = descriptors.find(
+        (candidate) =>
+          candidate.capabilityId === binding.capabilityId &&
+          candidate.revision === binding.capabilityRevision,
+      );
+      return descriptor ? [{ binding, descriptor }] : [];
+    });
+  const disclosedDescriptors =
+    input.disclosedDescriptors ??
+    descriptors.filter((descriptor) => {
+      const disclosure = input.state.capabilities.disclosures[descriptor.capabilityId];
+      return disclosure?.capabilityRevision === descriptor.revision;
+    });
+  const tools = createAgentTools({
+    workspace: input.state.session.workspace,
+    shellExecutor: input.shellExecutor,
+    mcpManager: input.mcpManager,
+    mcpBindings: persistedBindings,
+    toolSearch:
+      getFeatureFlags(input.config).toolSearchV1 && input.model.supportsToolCalls !== false,
+    skills: input.skills,
+    skillOptions: input.skillOptions,
+    skillCatalog: input.skillCatalog,
+    activeSkillFrames: Object.values(input.state.skills.frames).filter(
+      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    ),
+    config: input.config,
+    subagentEventSink: input.subagentEventSink,
+    subagentSignal: input.signal,
+    signal: input.signal,
+    model: input.model,
+    threadId: input.state.session.threadId,
+    authorization: input.state.authorization,
+    workspaceAccess: input.state.workspaceAccess,
+    phase: getAgentPhase(getActivePlanning(input.state)),
+    interactionMode: getEffectiveInteractionMode(input.state),
+  });
+  return {
+    serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
+    activeSkillInstructions: activeInlineSkillInstructions(input.state, input.skillCatalog),
+    workflowSkills: disclosedDescriptors
+      .filter((descriptor) => descriptor.kind === 'skill')
+      .map((descriptor) => ({
+        capabilityId: descriptor.capabilityId,
+        description: descriptor.description,
+      })),
+    leaseMetadata: {
+      providerName: input.config.providerName,
+      modelName: input.config.modelName,
+      modelCapabilities: resolveModelCapabilities({
+        config: input.config,
+        adapter: input.model.capabilityMetadata,
+      }),
+      estimator: 'countTokens:v1',
+      summaryPolicy: input.config.compaction ?? {},
+    },
+  };
+}
+
 function positiveConfigNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.floor(value)
@@ -188,6 +239,7 @@ export async function invokeRuntimeModel(params: {
   signal?: AbortSignal;
   /** Persists bindings before the model can emit a dynamic MCP tool call. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
+  compactionReporter?: CompactionReporter;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const requestId = genInteractionId();
@@ -237,11 +289,15 @@ export async function invokeRuntimeModel(params: {
       mcp: params.mcpManager?.getCapabilitySnapshot(),
       skills: params.skillCatalog?.capabilities,
     });
+    const modelCapabilities = resolveModelCapabilities({
+      config: params.config,
+      adapter: params.model.capabilityMetadata,
+    });
     const disclosure = chooseCapabilityDisclosure({
       featureEnabled: flags.toolSearchV1,
       providerSupportsToolCalls: params.model.supportsToolCalls !== false,
       descriptors: capabilitySnapshot.descriptors,
-      contextWindowTokens: positiveConfigNumber(params.config.modelKwargs?.contextWindowTokens),
+      contextWindowTokens: modelCapabilities.contextWindowTokens,
       budgetTokens: positiveConfigNumber(
         params.config.modelKwargs?.capabilityDisclosureBudgetTokens,
       ),
@@ -374,36 +430,107 @@ export async function invokeRuntimeModel(params: {
       phase: getAgentPhase(getActivePlanning(state)),
       interactionMode: getEffectiveInteractionMode(state),
     });
-    const planning = getActivePlanning(state);
-    const phase = getAgentPhase(planning);
-    const prepared = prepareModelContext(
-      'agent',
-      {
-        workspace: state.session.workspace,
-        messages: runtimeTranscriptMessages(state.transcript.messages),
-        final: state.transcript.final ?? '',
-        workspaceAccess: state.workspaceAccess,
-        phase,
-        interactionMode: getEffectiveInteractionMode(state),
-        authorization: state.authorization,
-        planningState: planning,
-        taskId: getActiveTask(state)?.taskId,
-        sideEffectsStarted: getActiveTask(state)?.sideEffectsStarted,
-        workflowSkills: disclosedDescriptors
-          .filter((descriptor) => descriptor.kind === 'skill')
-          .map((descriptor) => ({
-            capabilityId: descriptor.capabilityId,
-            description: descriptor.description,
-          })),
-        activeSkillInstructions: activeInlineSkillInstructions(state, params.skillCatalog),
-      },
-      undefined,
+    const projectionEnvironment = resolveContextProjectionEnvironment({
+      state,
+      config: params.config,
+      model: params.model,
+      shellExecutor: params.shellExecutor,
+      mcpManager: params.mcpManager,
+      skills: params.skills,
+      skillOptions: params.skillOptions,
+      skillCatalog: params.skillCatalog,
+      subagentEventSink: params.subagentEventSink,
+      signal: params.signal,
+      mcpBindings,
+      disclosedDescriptors,
+    });
+    const { serializedTools, activeSkillInstructions: activeSkillInstr } = projectionEnvironment;
+    const workflowSkillDescriptors = projectionEnvironment.workflowSkills;
+
+    const projection = buildContextProjection({
+      role: 'agent',
+      state,
+      serializedTools,
+      activeSkillInstructions: activeSkillInstr,
+      skills: undefined,
+      workflowSkills: workflowSkillDescriptors,
+    });
+    const preflight = preflightModelContext({
+      estimate: projection.estimate,
+      capabilities: modelCapabilities,
+      requestMaxOutputTokens:
+        positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
+        positiveConfigNumber(params.config.modelKwargs?.maxTokens),
+      providerSafetyRatio: params.config.compaction?.providerSafetyRatio,
+      compactRatio: params.config.compaction?.compactRatio,
+      hardRatio: params.config.compaction?.hardRatio,
+      warningRatio: params.config.compaction?.warningRatio,
+    });
+    const contextMetricsEvent: RuntimeEvent = {
+      type: 'model.context_metrics',
+      modelName: modelCapabilities.modelName,
+      ...(modelCapabilities.contextWindowTokens
+        ? { contextWindowTokens: modelCapabilities.contextWindowTokens }
+        : {}),
+      ...(modelCapabilities.contextWindowSource
+        ? { contextWindowSource: modelCapabilities.contextWindowSource }
+        : {}),
+      ...(modelCapabilities.tokenizerSource
+        ? { tokenizerSource: modelCapabilities.tokenizerSource }
+        : {}),
+      ...(preflight.usableInputTokens ? { usableInputTokens: preflight.usableInputTokens } : {}),
+      reservedOutputTokens: preflight.reservedOutputTokens,
+      providerSafetyMarginTokens: preflight.providerSafetyMarginTokens,
+      totalInputTokens: preflight.estimate.totalInputTokens,
+      ...(preflight.utilization != null ? { utilization: preflight.utilization } : {}),
+      status: preflight.status,
+      estimate: preflight.estimate,
+    };
+    params.compactionReporter?.recordContextFollowUp?.(
+      state.turn.turnIndex,
+      preflight.estimate.totalInputTokens,
     );
+    const automaticCompaction = decideAutomaticContextCompaction({
+      state,
+      preflight,
+      mode: resolveContextCompactionRollout({
+        masterEnabled: flags.contextCompactionV2 && flags.contextCompactionAutoV1,
+        configuredMode: params.config.compaction?.autoMode,
+        cohortSalt: params.config.compaction?.cohortSalt,
+        sessionId: state.session.threadId,
+        livePercentage: params.config.compaction?.livePercentage,
+      }),
+      triggerRatio:
+        params.config.compaction?.triggerRatio ?? params.config.compaction?.compactRatio,
+      compactAfterEstimatedTokens: params.config.compaction?.compactAfterEstimatedTokens,
+      cooldownTurns: params.config.compaction?.cooldownTurns,
+      minimumReductionRatio: params.config.compaction?.minimumReductionRatio,
+      maxSummaryTokens: params.config.compaction?.maxSummaryTokens,
+    });
+    if (automaticCompaction.action === 'request_compaction') {
+      params.compactionReporter?.recordRequested();
+      return [
+        ...retryEvents,
+        contextMetricsEvent,
+        {
+          type: 'context.compaction_requested',
+          compactionId: automaticCompaction.compactionId,
+          reason: automaticCompaction.reason,
+          requestedAtRevision: state.revision,
+          requestedAtTurnId: state.turn.turnId,
+          force: false,
+          estimate: preflight.estimate,
+        },
+      ];
+    }
     const response = await invokeBoundModel({
       model: params.model,
       tools,
-      messages: prepared.messages,
+      messages: projection.providerMessages,
       signal: params.signal,
+      maxOutputTokens:
+        positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
+        modelCapabilities.maxOutputTokens,
     });
     const toolCalls =
       response.tool_calls?.map((call) => ({
@@ -432,6 +559,7 @@ export async function invokeRuntimeModel(params: {
       }));
     const events: RuntimeEvent[] = [
       ...retryEvents,
+      contextMetricsEvent,
       { type: 'model.requested', requestId },
       {
         type: 'model.responded',

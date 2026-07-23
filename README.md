@@ -4,7 +4,7 @@ Kite Code 是一个基于 Bun、TypeScript 和事件化 Runtime Kernel 的多模
 
 ## 当前能力
 
-- React Ink TUI 与 Headless CLI；
+- React Ink 主屏缓冲区 TUI（保留终端 scrollback）与 Headless CLI；
 - AI SDK 模型边界，支持 DeepSeek、OpenAI、OpenAI-compatible 与 Ollama 配置；
 - Runtime Event/State/Effect、SQLite Event Store、Snapshot、Restore/Fork；
 - Builtin、MCP、Skill Workflow 与 Subagent 统一 Capability Catalog；
@@ -29,7 +29,12 @@ bun install
       "type": "openai-compatible",
       "apiKey": "${OPENAI_API_KEY}",
       "baseURL": "https://example.com/v1",
-      "model": "model-name"
+      "model": "model-name",
+      "models": [{
+        "name": "model-name",
+        "contextWindow": 131072,
+        "maxOutputTokens": 8192
+      }]
     }
   },
   "interactionMode": "auto",
@@ -37,7 +42,11 @@ bun install
 }
 ```
 
-模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。
+模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。模型建议显式配置 `contextWindow` 和 `maxOutputTokens`；未配置且 adapter 无可信元数据时，Runtime 会将窗口视为 unknown，而不会根据模型名称假定一个大窗口。
+
+自动 M2 上下文压缩默认关闭，需要同时开启 `features.contextCompactionAutoV1` 并把 `compaction.autoMode` 配置为 `live`；`shadow` 只观察触发资格，不调用摘要模型。自动阈值可使用已知可信窗口下的 `triggerRatio`，或显式的 `compactAfterEstimatedTokens` 绝对策略；压缩原因只有 `manual | auto`。本地 token ratio 术语（文本计量比例）、Provider 术语（模型供应商）错误或压缩失败都不会阻断会话；自动压缩保留原始 transcript 术语（消息记录）。
+
+启用 `features.contextCompactionManualV1`（默认开启）后可使用 `/compact` 命令，支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。运行中请求会排队到安全边界；消息不足时提示 `Not enough messages to compact.`，active checkpoint 后没有新增消息时，无参数连续压缩提示 `No new messages to compact.` 且不会再次调用摘要模型。进入历史会话时，TUI 会基于恢复的 checkpoint 和当前投影环境在本地重算 Footer context token，不产生模型请求。
 
 MCP 默认配置只有两个规范位置：项目级 `<project>/.kite-code/mcp.json` 与用户级 `~/.kite-code/mcp.json`，同名 Server 按 `project > user` 选择。`/mcp` 的 Current project 与 All projects 分别写入这两个文件；项目声明必须在 Server Detail 的 Review 页面显式批准。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 仅只读兼容与显式迁移，不再作为写入目标。
 
@@ -118,11 +127,16 @@ src/app/cli/        CLI
 
 ```bash
 bun test
+bun run test:mock
 bun run test:e2e
+bun run test:tui:system
 bun run test:mcp:live
+bun run test:model:live
 bun run typecheck
 bun run check:core-boundary
+bun run check:compaction-legacy
 bun run check:docs
+bun run check:docs-impact
 ```
 
-默认测试不访问真实模型或公网 MCP。确定性跨进程 E2E 位于 `tests/e2e/local/`；公网 MCP 位于 `tests/e2e/live/mcp/`；真实模型套件保留在 `tests/e2e/live/model/`，当前尚无受维护用例。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke，验证真实 HTTP transport、discovery 和只读 Tool Call；它不等于真实模型验证。仓库当前没有注册真实模型测试脚本，不要把 mock model 测试表述为真实 provider 验证。
+默认测试不访问真实模型或公网 MCP。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`，TUI PTY scenarios 由 `test:tui:system` 独立串行执行。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是显式 opt-in 的真实模型 context compaction direct/incremental summary 套件。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。

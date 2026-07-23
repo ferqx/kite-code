@@ -99,11 +99,25 @@
     },
     {
       "id": "model-and-context",
-      "sources": ["src/core/model/**", "src/core/prompts/**"],
+      "sources": [
+        "src/core/model/**",
+        "src/core/prompts/**",
+        "src/core/controllers/tool-controller.ts",
+        "src/core/controllers/model-controller.ts",
+        "src/core/controllers/compaction-controller.ts",
+        "src/core/session-logger/recorder.ts",
+        "src/core/harness/tool-runner.ts",
+        "src/core/runtime/context-compaction.ts"
+      ],
       "documents": [
         "docs/active/model-provider-boundary.md",
         "docs/active/plan-state-reminder.md",
-        "docs/book/04-Agent引擎.md"
+        "docs/book/04-Agent引擎.md",
+        "docs/adr/0021-context-compaction-checkpoint.md",
+        "docs/adr/0022-context-compaction-single-narrative.md",
+        "docs/adr/0023-model-capabilities-no-builtin-catalog.md",
+        "docs/adr/0024-context-compaction-manual-auto-only.md",
+        "docs/space/plans/2026-07-21-context-compaction-production-rollout.md"
       ]
     },
     {
@@ -146,6 +160,7 @@
       "sources": ["src/app/tui/**"],
       "documents": [
         "docs/active/mcp-control-plane.md",
+        "docs/active/tui-run-status-bar.md",
         "docs/book/07-TUI结构.md",
         "docs/book/08-TUI交互全景.md"
       ]
