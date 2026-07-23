@@ -312,19 +312,18 @@ describe('TUI PTY System — Slash Commands', () => {
   test(
     '/permissions toggles interaction mode',
     async () => {
-      // /permissions without argument toggles between ask ↔ full
-      await typeText(tui, '/permissions full', 80);
+      // Auto is available on every platform. Full intentionally remains
+      // disabled when the CI runner has no supported sandbox backend.
+      await typeText(tui, '/permissions auto', 80);
       // Let InputLine publish the final value to its suggestion refs before
       // Enter. Sending retries while that render is pending can leave both
       // keypresses suppressed and the command buffered for the next test.
       await sleep(800);
       tui.write('\r');
-      await waitForText(() => tui.output(), '完全权限', 5000);
+      await waitForText(() => tui.output(), '自动审批', 5000);
 
       const output = tui.output();
-      // full mode shows [完全权限] in the stats line
-      const hasFull = screenContains(output, '完全权限');
-      expect(hasFull).toBe(true);
+      expect(screenContains(output, '自动审批')).toBe(true);
 
       // Toggle back to ask (default)
       await typeText(tui, '/permissions ask');

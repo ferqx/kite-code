@@ -14,10 +14,24 @@ import { screenContains, waitForText } from './terminal-screen';
 export async function warmupInputPipeline(tui: PtyProcess, server: MockModelServer): Promise<void> {
   // ── Validate raw-mode keystrokes reach the input line ──
   const text = 'hello';
-  await typeText(tui, text, 80);
-  // Rendering can lag behind PTY delivery on loaded CI runners. Poll for the
-  // input instead of sampling the screen once at an arbitrary boundary.
-  await waitForText(() => tui.output(), text, 3000);
+  let inputReady = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await typeText(tui, text, 80);
+    try {
+      // A newly spawned Linux PTY can discard the first raw keystrokes while
+      // Ink is still attaching its input listener. Clear and retry so a failed
+      // warmup cannot leave partial input that contaminates later tests.
+      await waitForText(() => tui.output(), text, 1500);
+      inputReady = true;
+      break;
+    } catch {
+      await clearInput(tui, text.length);
+      await sleep(300);
+    }
+  }
+  if (!inputReady) {
+    throw new Error(`Warmup failed: typed text "${text}" not found after 3 attempts`);
+  }
 
   await clearInput(tui, text.length);
 
