@@ -917,6 +917,10 @@ if (import.meta.main) {
       exitOnCtrlC: false,
       kittyKeyboard: { mode: 'enabled' },
       incrementalRendering: false,
+      // Ink 7.1.1 treats every CI environment as non-interactive by default,
+      // even when stdout is a real PTY. Use the actual terminal capabilities so
+      // PTY-backed sessions (including system tests) keep input and live rendering.
+      interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     },
   );
 

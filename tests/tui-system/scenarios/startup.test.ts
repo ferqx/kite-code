@@ -21,6 +21,7 @@ describe('TUI PTY System — Startup', () => {
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
+    workspace.env.CI = 'true';
 
     server.setResponses([{ message: { content: 'Hello from PTY test!' } }]);
 
@@ -36,7 +37,7 @@ describe('TUI PTY System — Startup', () => {
   });
 
   test(
-    'TUI starts and renders prompt ❯ in PTY',
+    'TUI starts and renders prompt ❯ in a CI-backed PTY',
     async () => {
       // Wait for the TUI to fully render (prompt character)
       await waitForText(() => tui.output(), '❯', 15000);
