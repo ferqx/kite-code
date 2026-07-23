@@ -315,6 +315,12 @@ describe('TUI PTY System — Slash Commands', () => {
       // /permissions without argument toggles between ask ↔ full
       await typeText(tui, '/permissions full');
       tui.write('\r');
+      // Ink's suggestion handler and TextInput submit handler observe the same
+      // Enter. On a slow PTY render boundary the first key can only dismiss the
+      // completed suggestion; a second Enter then submits the unchanged command.
+      // If the first key already submitted, this is an ignored empty submission.
+      await sleep(300);
+      tui.write('\r');
       await sleep(500);
 
       const output = tui.output();

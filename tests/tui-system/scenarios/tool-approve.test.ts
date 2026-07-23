@@ -171,7 +171,12 @@ describe('TUI PTY System — Tool Approve', () => {
       tui.write('\x1b[B');
       await sleep(150);
       tui.write('\r');
-      await sleep(2000);
+      // Retry the idempotent confirmation after the overlay transition. If the
+      // first Enter already granted Full, the TUI is running and ignores this
+      // key; if it was lost at the render boundary, the second confirms it.
+      await sleep(300);
+      tui.write('\r');
+      await sleep(1700);
 
       // All subsequent tool calls should execute without approval
       // Wait for the final model response
