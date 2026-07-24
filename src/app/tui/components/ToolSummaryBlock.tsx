@@ -268,6 +268,9 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   };
 
   // ── 时间线渲染：按 seq 顺序交错工具步骤与思考行 ──
+  // thinking 条目仅运行态渲染；settle 后只剩工具步骤（历史不保留 thinking 预览）。
+  // Thinking entries render only while active; settled blocks keep tool steps only
+  // (thinking previews are not retained in history).
   const renderedTimeline = useMemo(() => {
     const timeline = block.timeline;
     if (!timeline || timeline.length === 0) return null; // legacy fallback
@@ -286,9 +289,10 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
     }
 
     // Expand visibility window backward to include any thinking entry
-    // that immediately precedes the first visible tool.
+    // that immediately precedes the first visible tool (running state only —
+    // settled blocks don't render thinking entries at all).
     let includeFromSeq = firstVisSeq;
-    if (firstVisSeq !== Infinity) {
+    if (block.active && firstVisSeq !== Infinity) {
       for (const e of timeline) {
         if (e.seq === firstVisSeq - 1 && e.kind === 'thinking') {
           includeFromSeq = firstVisSeq - 1;
@@ -307,12 +311,27 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
       if (e.kind === 'tool' && e.callId) {
         const i = toolIdx.get(e.callId);
         if (i != null && i >= vStart) items.push({ kind: 'tool', step: steps[i]!, idx: i });
-      } else if (e.kind === 'thinking' && e.text) {
+      } else if (e.kind === 'thinking' && e.text && block.active) {
         items.push({ kind: 'thinking', text: e.text });
       }
     }
     return items;
-  }, [block.timeline, steps, stepCount]);
+  }, [block.timeline, block.active, steps, stepCount]);
+
+  // ── 纯思考块 settle 后：单行 "● Thought for Xs"（Claude Code 风格，无步骤树/footer）──
+  // 圆点用白色（muted）而非工具块的绿色 ● —— 纯思考没有"工具完成"语义。
+  // 置于所有 hook 之后，保证 hook 调用顺序稳定（rules-of-hooks）。
+  // ── Pure-thinking block settled: single-line indicator, no step tree / footer.
+  // White dot (not the green done-dot) — no tools completed here.
+  // Placed after all hooks to keep hook call order stable.
+  if (!isRunning && stepCount === 0) {
+    return (
+      <Box>
+        <Text color={dt.muted}>● </Text>
+        <Text color={dt.dim}>{summaryLabel}</Text>
+      </Box>
+    );
+  }
 
   // ═══════════════════════════════════════════════════════════
   // 统一渲染

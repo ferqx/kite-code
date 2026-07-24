@@ -402,8 +402,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 2: content
   //
   // 预期 TUI 现象：
-  //   - summaryLine = "Thought for Xs"（无工具统计）
-  //   - 工具步骤树为空
+  //   - 单行 "● Thought for Xs"（无工具统计、无步骤树/footer）
+  //   - settle 后保留在消息列表中（纯思考块持久化，不因 text 到达而消失）
   // ═══════════════════════════════════════════════════════════════
 
   test(
@@ -434,6 +434,10 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       // ── 有 "Thought for" 但没有工具统计后缀 ──
       expect(screenContains(output, 'Thought for')).toBe(true);
+
+      // ── 纯思考块持久化：settle 后（text 到达 2s 后）最终屏幕仍含 "Thought for"
+      //    （累计 PTY 缓冲尾部 ≈ 最终画面；若块被删除则尾部不会有该标签）──
+      expect(clean.slice(-1500)).toContain('Thought for');
 
       // ── Settled footer ──
       expect(screenContains(output, '└─ 完成')).toBe(true);
