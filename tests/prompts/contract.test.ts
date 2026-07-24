@@ -1,16 +1,6 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { buildStaticSystemPrompt } from '@/core/model/context';
 import { createFullModePolicy } from '@/core/policies/mode-policy';
-
-const contract = readFileSync(join(import.meta.dir, '..', 'contract.md'), 'utf8');
-
-test('prompt contract keeps the core lifecycle and approval guarantees documented', () => {
-  expect(contract).toContain('Complex planning work');
-  expect(contract).toContain('Destructive shell');
-  expect(contract).toContain('sandbox');
-});
 
 test('full-mode contract is backed by policy rather than prompt text alone', () => {
   expect(

@@ -101,7 +101,7 @@
       "id": "model-and-context",
       "sources": [
         "src/core/model/**",
-        "src/core/prompts/**",
+        "src/core/prompts/system-prompt.txt",
         "src/core/controllers/tool-controller.ts",
         "src/core/controllers/model-controller.ts",
         "src/core/controllers/compaction-controller.ts",

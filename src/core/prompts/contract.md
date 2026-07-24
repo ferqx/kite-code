@@ -8,4 +8,4 @@ System-prompt changes must preserve these enforceable runtime constraints:
 - Destructive shell and unapproved network/VCS mutation remain policy-gated.
 - Planning cannot run non-read-only shell work, and no prompt can bypass the sandbox.
 
-Add a rule by documenting the user-observable behavior here and adding a focused test in `src/core/prompts/tests/`. Prompt prose is not a security boundary; policy tests are authoritative.
+Add a rule by documenting the user-observable behavior here and adding a focused test in `tests/prompts/`. Prompt prose is not a security boundary; policy tests are authoritative.
