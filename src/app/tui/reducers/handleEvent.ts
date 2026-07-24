@@ -288,7 +288,10 @@ function closeCurrentThought(state: TuiState): TuiState {
   if (!summary) return { ...state, currentThoughtSummaryId: undefined };
 
   const next = updateToolSummaryById(state, summary.id, (block) => {
-    if (block.tools.length === 0) return null;
+    // 纯思考块（无工具）同样保留并 settle —— 思考链 reason→text/非探索工具后
+    // 必须留下 "Thought for Xs" 指示块，不能在关闭时删除。
+    // Pure-thinking blocks (no tools) are kept and settled — the
+    // "Thought for Xs" indicator must survive closing, never deleted.
     const hasError = block.tools.some(
       (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
     );

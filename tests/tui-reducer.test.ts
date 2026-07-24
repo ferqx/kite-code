@@ -204,6 +204,56 @@ describe('eventReducer (blocks model)', () => {
         text: 'checking the repo shape',
       });
     });
+
+    test('pure-thinking Thought persists settled after assistant text closes it', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('thinking before answering'));
+      s = dispatch(s, textEvt('Here is the answer.'));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      // 纯思考块关闭后保留（"Thought for Xs" 指示块不消失）
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools).toHaveLength(0);
+      expect(summaries[0]!.active).toBe(false);
+      expect(summaries[0]!.result).toBe('done');
+      expect(summaries[0]!.latestActivity).toBeUndefined();
+      expect(summaries[0]!.hasThinking).toBe(true);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+    });
+
+    test('pure-thinking Thought persists when a non-exploration tool follows', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('thinking before writing'));
+      s = dispatch(s, tcEvt('c1', 'write_file', { path: 'a.txt' }));
+
+      const blocks = flatBlocks(s);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools).toHaveLength(0);
+      expect(summaries[0]!.active).toBe(false);
+      expect(summaries[0]!.result).toBe('done');
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c1')).toBe(true);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+    });
+
+    test('SET_IDLE settles and keeps a pure-thinking Thought', () => {
+      let s = fresh();
+      s = dispatch(s, { type: 'SET_RUNNING' });
+      s = dispatch(s, reasonEvt('thinking at interruption'));
+      s = dispatch(s, { type: 'SET_IDLE' });
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(s.running).toBe(false);
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools).toHaveLength(0);
+      expect(summaries[0]!.active).toBe(false);
+    });
   });
 
   describe('EVENT.tool_call / tool_done', () => {
@@ -1167,17 +1217,18 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, reasonEvt('first'));
       s = dispatch(s, textEvt('between'));
       s = dispatch(s, reasonEvt('second'));
-      // First block auto-expanded on non-reason event, second still folded
+      // Layout: [reason1, tool_summary(settled pure-thinking, persisted), text, reason2, tool_summary]
+      // First reason block auto-expanded on non-reason event, second still folded
       expect((flatBlocks(s)[0] as any).folded).toBe(false);
-      expect((flatBlocks(s)[2] as any).folded).toBe(true);
+      expect((flatBlocks(s)[3] as any).folded).toBe(true);
       // Toggle: collapse all (anyExpanded → fold all)
       s = dispatch(s, { type: 'TOGGLE_ALL_REASON' });
       expect((flatBlocks(s)[0] as any).folded).toBe(true);
-      expect((flatBlocks(s)[2] as any).folded).toBe(true);
+      expect((flatBlocks(s)[3] as any).folded).toBe(true);
       // Toggle: expand all (none expanded → unfold all)
       s = dispatch(s, { type: 'TOGGLE_ALL_REASON' });
       expect((flatBlocks(s)[0] as any).folded).toBe(false);
-      expect((flatBlocks(s)[2] as any).folded).toBe(false);
+      expect((flatBlocks(s)[3] as any).folded).toBe(false);
     });
     test('TOGGLE_ALL_REASON is no-op when no reason blocks', () => {
       let s = dispatch(fresh(), textEvt('hello'));

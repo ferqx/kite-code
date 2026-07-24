@@ -4,19 +4,19 @@
 范围：TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界
 读取时机：修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。
 验证：`bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/runtime/agent.integration.test.ts`
-最后更新：2026-07-03
+最后更新：2026-07-24
 
 ## 约束
 
 1. **Thought 边界**：Thought 表示一段未被可见 assistant 文本、非探索工具或人机交互等待打断的模型思考链。`reason/thinking` 不打断 Thought，只更新当前 Thought 的活动预览；可见 `text/final`、非探索工具、`need_approval`、`need_input`、`need_plan_review` 都会关闭当前 Thought。
 
-2. **探索工具不经 tool_card**：`read_file`、`search_content`、`search_files`、`read_mcp_resource` 在 `tool_call` 时直接进入 `tool_summary`，永远不创建独立 `tool_card`。`shell_execute` 即使是 `intent=inspect` 或只读搜索命令，也不进入 Thought；上游应优先使用 `search_files/search_content` 表达探索搜索。
+2. **探索工具不经 tool_card**：`read_file`、`search_content`、`search_files`、`read_mcp_resource` 在 `tool_call` 时直接进入 `tool_summary`，永远不创建独立 `tool_card`。`shell_execute` 仅在 `intent=inspect` 且命令以搜索前缀（`rg`/`grep`/`ag`/`ack`/`git grep`/`find`）开头时纳入 Thought 聚合；其他 `shell_execute`（通用 Bash）永不纳入，始终渲染为独立 tool_card。
 
 3. **非探索工具截断**：所有 `shell_execute`、写入工具、审批、`ask_user`、`update_plan`、`task` 等非探索工具与可见文本一样关闭当前 Thought，并继续按原有独立块渲染。`list_mcp_resources` 也使用独立 tool card，以 `Provider · URI` 树展示资源目录；真正读取内容的 `read_mcp_resource` 仍属于探索工具。后续探索工具会开启新的 Thought。
 
 4. **跨 thinking 合并**：同一 Thought 内，探索工具之间可以夹着 `reason/thinking`。这些 thinking 不创建新的工具聚合，只更新 `tool_summary.latestActivity`。
 
-5. **运行态思考预览**：`tool_summary.active=true` 时，`latestActivity` 优先保存最新 thinking。探索工具调用只在当前 Thought 没有 thinking 预览时作为活动占位；已经展示在工具列表中的工具不应覆盖 thinking 预览。新的 thinking 覆盖旧 thinking；Thought 关闭后清空 `latestActivity`，历史中不保留 thinking 预览。
+5. **运行态思考预览**：`tool_summary.active=true` 时，`latestActivity` 优先保存最新 thinking。探索工具调用只在当前 Thought 没有 thinking 预览时作为活动占位；已经展示在工具列表中的工具不应覆盖 thinking 预览。新的 thinking 覆盖旧 thinking；Thought 关闭后清空 `latestActivity`。timeline 中的 thinking 条目**仅在运行态（`active=true`）渲染**；settle 后只保留工具步骤，历史中不保留 thinking 预览。
 
 6. **人机交互停止计时**：进入审批、提问或方案评审等待时，当前 Thought 必须置为 `active=false` 并冻结 `totalElapsedMs`。用户阅读、审批或输入答案的耗时不计入 Thought 时间。
 
@@ -36,13 +36,17 @@
 
 14. **Static 边界**：`tool_summary` 仅在 `active=false` 且 `tools.every(t => t.status !== 'running')` 时进入 Static。
 
-15. **settledStatus 从实际状态推导**：settled 状态下 `ToolSummaryBlock` 的结算状态直接从工具状态推导（`hasError ? 'error' : hasPendingTools ? 'cancelled' : 'done'`），不使用 `block.result`。`block.result` 由 `closeCurrentThought` 在工具仍 running 时设为 `'cancelled'`，之后 `tool_done` 到达时只更新单条工具状态而不重新计算 `result`，因此可能过时。
+15. **settledStatus 从实际状态推导**：settled 状态下 `ToolSummaryBlock` 的结算状态直接从工具状态推导（`hasError ? 'error' : hasPendingTools ? 'cancelled' : 'done'`），不使用 `block.result`。工具仍 running 时 `closeCurrentThought` 留空 `block.result`（undefined）；所有工具 settled 后由 `tool_done` 路径重新计算为 `'error'` 或 `'done'`。
 
 16. **层边界**：`consolidateTools.ts` 中的合并逻辑属于 app 层，不允许导入 core 层模块。
 
 17. **工具名映射**：所有 TUI 展示使用 `ACTION_NAMES` 映射的友好名称，不允许硬编码英文工具名。
 
 18. **审批无关**：探索工具永远不需要审批，`ToolSummaryBlock` 不接受 `awaitingApproval` prop。
+
+19. **纯思考块持久化**：`tools.length === 0` 的 Thought 块（思考链 `reason → text` 或 `reason → 非探索工具` 产生）在关闭/settle 时**保留**，不删除：`closeCurrentThought`、`settleActiveThought`、`cancelRunningBlocks` 三条路径行为一致，均置 `active=false` 并冻结 `totalElapsedMs`（`closeCurrentThought` 推导 `result='done'`）。settle 后渲染为单行 `● Thought for Xs`（圆点为白色 `muted`，区别于工具块的绿色完成圆点——纯思考没有"工具完成"语义），不显示步骤树与 footer；运行态保持 spinner + thinking 预览 + 运行中 footer。
+
+20. **非思考链聚合**：探索工具的聚合不依赖 reasoning——无思考的模型（非思考链）中，连续探索工具同样聚合为 `tool_summary`（`hasThought=false`），标签为纯工具统计（如 `read 2 files`），不带 `Thought for` 前缀、无 thinking 条目。
 
 ## 设计文档
 

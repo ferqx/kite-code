@@ -75,7 +75,8 @@ function settleActiveThought(s: TuiState): TuiState {
     blocks: turn.blocks.flatMap((block) => {
       if (block.kind !== 'tool_summary' || block.id !== s.currentThoughtSummaryId) return [block];
       changed = true;
-      if (block.tools.length === 0) return [];
+      // 纯思考块（无工具）同样保留并 settle，与 closeCurrentThought 行为一致
+      // Pure-thinking blocks are kept and settled, consistent with closeCurrentThought
       return [
         {
           ...block,

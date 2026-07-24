@@ -1512,6 +1512,39 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).not.toContain('hidden after settle');
   });
 
+  test('settled pure-thinking Thought renders a single white-dot line, no tree/footer/thinking text', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: false,
+      createdAt: Date.now() - 3000,
+      totalElapsedMs: 3000,
+      summaryLine: 'thinking',
+      hasThought: true,
+      hasThinking: true,
+      result: 'done' as const,
+      tools: [],
+      timeline: [{ seq: 1, kind: 'thinking' as const, text: 'hidden after settle' }],
+      nextTimelineSeq: 2,
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    // 单行形态：只有 "Thought for 3s"，无步骤树、无 footer
+    expect(frame).toContain('Thought for 3s');
+    expect(frame).not.toContain('└─');
+    expect(frame).not.toContain('完成');
+    // thinking 文本 settle 后不渲染
+    expect(frame).not.toContain('hidden after settle');
+    // 圆点颜色为主题白色（dt.muted）而非工具块的绿色完成圆点——纯思考没有"完成"语义。
+    // ink-testing-library 会剥离 ANSI 颜色码，颜色本身不在此断言
+    // （见 ToolSummaryBlock 纯思考分支使用的 dt.muted）。
+    expect(frame).toContain('● Thought for 3s');
+    expect(frame.split('\n').filter((l) => l.trim())).toHaveLength(1);
+  });
+
   test('stops showing running Thought state after a boundary even if a tool is still pending', () => {
     const block = {
       id: 1,
