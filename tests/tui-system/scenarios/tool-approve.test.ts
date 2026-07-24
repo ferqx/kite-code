@@ -89,14 +89,14 @@ describe('TUI PTY System — Tool Approve', () => {
       await waitForRequestMessage(server, 'Run a command for me', 15000);
 
       // Wait for approval block to render
-      await waitForText(() => tui.output(), 'Approve this tool call?', 15000);
+      await waitForText(() => tui.output(), '授权执行命令', 15000);
 
       const beforeOutput = tui.output();
-      expect(screenContains(beforeOutput, 'Approve this tool call?')).toBe(true);
-      expect(screenContains(beforeOutput, 'Yes · 仅本次')).toBe(true);
-      expect(screenContains(beforeOutput, 'Deny · 拒绝')).toBe(true);
+      expect(screenContains(beforeOutput, '授权执行命令')).toBe(true);
+      expect(screenContains(beforeOutput, '允许一次')).toBe(true);
+      expect(screenContains(beforeOutput, '拒绝')).toBe(true);
 
-      // Approve the tool ("Yes · 仅本次" is default selected at index 0, press Enter)
+      // Approve the tool ("允许一次" is default selected at index 0, press Enter)
       tui.write('\r');
       // Wait for tool execution (write_file creates hello.txt) + second model response
       await sleep(3000);
@@ -122,8 +122,12 @@ describe('TUI PTY System — Tool Approve', () => {
   test(
     'full_access grant auto-approves all subsequent tool calls',
     async () => {
-      // Wait for pending fire-and-forget calls from previous test to complete
       await sleep(3000);
+
+      // Switch to full permissions mode — tool calls will auto-execute
+      await typeText(tui, '/permissions full');
+      tui.write('\r');
+      await sleep(1000);
 
       server.setResponses([
         {
@@ -159,27 +163,7 @@ describe('TUI PTY System — Tool Approve', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Full access test', 15000);
 
-      // Wait for first approval block
-      await waitForText(() => tui.output(), 'Approve this tool call?', 15000);
-      await sleep(500);
-
-      expect(screenContains(tui.output(), 'Approve this tool call?')).toBe(true);
-
-      // Navigate to "Full · 完全权限" (index 2): down arrow twice, then Enter
-      tui.write('\x1b[B');
-      await sleep(150);
-      tui.write('\x1b[B');
-      await sleep(150);
-      tui.write('\r');
-      // Retry the idempotent confirmation after the overlay transition. If the
-      // first Enter already granted Full, the TUI is running and ignores this
-      // key; if it was lost at the render boundary, the second confirms it.
-      await sleep(300);
-      tui.write('\r');
-      await sleep(1700);
-
-      // All subsequent tool calls should execute without approval
-      // Wait for the final model response
+      // In full mode, tools auto-execute — wait for the final model response
       await waitForText(() => tui.output(), 'OK, full_access confirmed.', 20000);
       await sleep(500);
 

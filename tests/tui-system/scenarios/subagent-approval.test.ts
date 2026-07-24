@@ -114,18 +114,18 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
       await waitForRequestMessage(server, 'Test subagent external file write authorization', 15000);
 
       // Wait for the sub-agent to start and the external write to trigger approval
-      await waitForText(() => tui.output(), 'Approve this tool call?', TIMEOUT);
+      await waitForText(() => tui.output(), '授权执行命令', TIMEOUT);
 
       const beforeApprove = tui.output();
       const clean = stripAnsi(beforeApprove);
       console.log('  output during approval:', clean.slice(-2000));
 
       // Verify approval dialog content
-      expect(screenContains(beforeApprove, 'Approve this tool call?')).toBe(true);
+      expect(screenContains(beforeApprove, '授权执行命令')).toBe(true);
       // The approval should reference the external file path
       expect(screenContains(beforeApprove, '/tmp/test-subagent-write.txt')).toBe(true);
 
-      // Approve the tool (default "Yes · 仅本次" at index 0, press Enter)
+      // Approve the tool (default "允许一次" at index 0, press Enter)
       tui.write('\r');
       await sleep(3000);
 
@@ -251,7 +251,7 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
       // Sub-agent should have completed without cancellation
       expect(screenContains(output, 'Sub-agent read completed successfully.')).toBe(true);
       // No approval dialog should have appeared
-      expect(screenContains(output, 'Approve this tool call?')).toBe(false);
+      expect(screenContains(output, '授权执行命令')).toBe(false);
       // TUI prompt should be visible
       expect(screenContains(output, '❯')).toBe(true);
     },

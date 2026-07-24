@@ -636,23 +636,22 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Approve this tool call?');
+    expect(frame).toContain('授权执行命令');
     expect(frame).not.toContain('● Bash');
     expect(frame).not.toContain('rm -rf /tmp/test');
     expect(frame).not.toContain('Delete temp files');
     expect(frame).not.toContain('destructive');
   });
 
-  test('shows all grant options with labels', () => {
+  test('shows three grant options', () => {
     const approval = fakeApproval();
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Yes · 仅本次');
-    expect(frame).toContain('Auto · 自动审批');
-    expect(frame).toContain('Full · 完全权限');
-    expect(frame).toContain('Deny · 拒绝');
+    expect(frame).toContain('允许一次');
+    expect(frame).toContain('本次会话允许');
+    expect(frame).toContain('拒绝');
   });
 
   test('uses a simple top divider instead of a rounded border', () => {
@@ -667,17 +666,15 @@ describe('ApprovalBlock', () => {
     expect(frame).not.toContain('│');
   });
 
-  test('non‑shell tools also show all grant options', () => {
-    // sandbox 合并后，ApprovalBlock 不再区分 shell/non‑shell 工具类型，始终展示全部 4 个选项
+  test('non‑shell tools show same three options', () => {
     const approval = fakeApproval({ tool: 'write_file', grantOptions: ['approve_once'] });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Yes · 仅本次');
-    expect(frame).toContain('Auto · 自动审批');
-    expect(frame).toContain('Full · 完全权限');
-    expect(frame).toContain('Deny · 拒绝');
+    expect(frame).toContain('允许一次');
+    expect(frame).toContain('本次会话允许');
+    expect(frame).toContain('拒绝');
   });
 
   test('recognizes raw terminal arrow sequences when selecting a grant', async () => {
@@ -692,12 +689,10 @@ describe('ApprovalBlock', () => {
 
     stdin.write('\u001b[B');
     await new Promise((resolve) => setTimeout(resolve, 10));
-    stdin.write('\u001b[B');
-    await new Promise((resolve) => setTimeout(resolve, 10));
     stdin.write('\r');
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(resolved).toEqual([{ action: 'approve', grant: 'full_access' }]);
+    expect(resolved).toEqual([{ action: 'approve', grant: 'same_command' }]);
   });
 });
 
@@ -2563,8 +2558,8 @@ describe('App', () => {
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Approve this tool call?');
-    expect(frame).toContain('Yes · 仅本次');
+    expect(frame).toContain('授权执行命令');
+    expect(frame).toContain('允许一次');
     expect(frame).not.toContain('Waiting...');
   });
 

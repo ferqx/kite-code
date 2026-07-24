@@ -261,16 +261,16 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       await waitForRequestMessage(server, 'Make a directory', 15000);
 
       // 等审批块 / Wait for approval block
-      await waitForText(() => tui.output(), 'Approve this tool call?', 15000);
+      await waitForText(() => tui.output(), '授权执行命令', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.output();
-      expect(screenContains(output, 'Approve this tool call?')).toBe(true);
+      expect(screenContains(output, '授权执行命令')).toBe(true);
       expect(screenContains(output, 'Yes')).toBe(true);
       expect(screenContains(output, 'Deny')).toBe(true);
 
       // ── 3. 验证渲染顺序：模型文字在审批块之前 / Verify order: text before approval ──
-      const order = assertOrder(output, 'I will run a command', 'Approve this tool call?');
+      const order = assertOrder(output, 'I will run a command', '授权执行命令');
       expect(order.pass).toBe(true);
 
       // ── 4. 拒绝：导航到 Deny 确认 / Deny: navigate to Deny and confirm ──
@@ -352,7 +352,7 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
       const output = tui.output();
 
       // ── 2. 验证无审批块出现 / Verify no approval block ──
-      expect(screenContains(output, 'Approve this tool call?')).toBe(false);
+      expect(screenContains(output, '授权执行命令')).toBe(false);
 
       // ── 3. 验证渲染顺序：模型文字在工具之前 / Verify order: text before tool ──
       const order = assertOrder(output, 'Let me search for files', 'Search complete');

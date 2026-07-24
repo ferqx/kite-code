@@ -95,12 +95,12 @@ describe('TUI PTY System — Approval Escape', () => {
       await waitForRequestMessage(server, 'Create a directory', 15000);
 
       // Wait for approval block to render
-      await waitForText(() => tui.output(), 'Approve this tool call?', 15000);
+      await waitForText(() => tui.output(), '授权执行命令', 15000);
 
       const beforeOutput = tui.output();
-      expect(screenContains(beforeOutput, 'Approve this tool call?')).toBe(true);
-      expect(screenContains(beforeOutput, 'Yes · 仅本次')).toBe(true);
-      expect(screenContains(beforeOutput, 'Deny · 拒绝')).toBe(true);
+      expect(screenContains(beforeOutput, '授权执行命令')).toBe(true);
+      expect(screenContains(beforeOutput, '允许一次')).toBe(true);
+      expect(screenContains(beforeOutput, '拒绝')).toBe(true);
 
       // Press Escape to cancel the approval
       tui.write('\x1b');

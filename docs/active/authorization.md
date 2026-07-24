@@ -16,7 +16,7 @@ type AuthorizationSource = 'user' | 'config' | 'test' | 'system';
 
 | Source | 含义 | 设置场景 |
 | ------ | ---- | -------- |
-| `user` | 用户通过 TUI 审批面板主动授权 | ApprovalBlock "Full" 按钮 |
+| `user` | 用户通过 TUI 审批面板主动授权 | ApprovalBlock 审批按钮 |
 | `config` | 通过 CLI `--full-access` 或配置文件预设 | `bun run agent run --full-access` |
 | `test` | 测试代码注入 | `createInitialRuntimeState({ authorizationSource: 'test' })` |
 | `system` | 系统自动授予（如 auto-review、loop-mode） | **当前被硬规则禁止** |
@@ -77,7 +77,7 @@ MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive e
 | 入口 | source 值 | 位置 |
 | ---- | --------- | ---- |
 | CLI `--full-access` | `'config'` | `src/app/cli/index.ts:121` |
-| TUI ApprovalBlock "Full" | `'user'` | `src/core/runtime/actions.ts:94` |
+| TUI `/permissions full` | `'user'` | `src/core/runtime/actions.ts:94` |
 | 测试注入 | `'test'` | `tests/policies/authorization-elevation.test.ts` |
 | System (禁止) | `'system'` | `src/core/policies/mode-policy.ts:23,26` |
 

@@ -85,7 +85,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
 
       expect(screenContains(output, 'Rejected write_file during planning phase')).toBe(true);
       expect(screenContains(output, 'Planning write attempt was blocked.')).toBe(true);
-      expect(screenContains(output, 'Approve this tool call?')).toBe(false);
+      expect(screenContains(output, '授权执行命令')).toBe(false);
       expect(existsSync(join(workspace.workspace, 'plan-created.txt'))).toBe(false);
     },
     TIMEOUT,
