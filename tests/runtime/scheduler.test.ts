@@ -232,4 +232,134 @@ describe('decideNextEffect', () => {
       toolCallIds: ['shell-tool'],
     });
   });
+
+  test('stops when all tools from the latest model response are rejected', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const modelMessageId = 'model-msg';
+    state.transcript.messages.push({
+      kind: 'assistant',
+      messageId: modelMessageId,
+      toolCalls: [
+        { id: 'shell-1', name: 'shell_execute', args: { command: 'pwd' } },
+        { id: 'shell-2', name: 'shell_execute', args: { command: 'ls' } },
+      ],
+    });
+    state.tools.calls['shell-1'] = {
+      toolCallId: 'shell-1',
+      modelMessageId,
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'rejected',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['shell-2'] = {
+      toolCallId: 'shell-2',
+      modelMessageId,
+      name: 'shell_execute',
+      args: { command: 'ls' },
+      status: 'rejected',
+      createdAtTurnId: state.turn.turnId,
+    };
+    expect(decideNextEffect(state)).toEqual({ type: 'stop' });
+  });
+
+  test('calls model when not all tools from the latest model response are rejected', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const modelMessageId = 'model-msg';
+    state.transcript.messages.push({
+      kind: 'assistant',
+      messageId: modelMessageId,
+      toolCalls: [
+        { id: 'shell-1', name: 'shell_execute', args: { command: 'pwd' } },
+        { id: 'shell-2', name: 'shell_execute', args: { command: 'ls' } },
+      ],
+    });
+    state.tools.calls['shell-1'] = {
+      toolCallId: 'shell-1',
+      modelMessageId,
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'rejected',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['shell-2'] = {
+      toolCallId: 'shell-2',
+      modelMessageId,
+      name: 'shell_execute',
+      args: { command: 'ls' },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+    };
+    expect(decideNextEffect(state)).toEqual({ type: 'call_model' });
+  });
+
+  test('stops when all tools from the latest model response are cancelled', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const modelMessageId = 'model-msg';
+    state.transcript.messages.push({
+      kind: 'assistant',
+      messageId: modelMessageId,
+      toolCalls: [
+        { id: 'shell-1', name: 'shell_execute', args: { command: 'pwd' } },
+        { id: 'shell-2', name: 'shell_execute', args: { command: 'ls' } },
+      ],
+    });
+    state.tools.calls['shell-1'] = {
+      toolCallId: 'shell-1',
+      modelMessageId,
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'cancelled',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['shell-2'] = {
+      toolCallId: 'shell-2',
+      modelMessageId,
+      name: 'shell_execute',
+      args: { command: 'ls' },
+      status: 'cancelled',
+      createdAtTurnId: state.turn.turnId,
+    };
+    expect(decideNextEffect(state)).toEqual({ type: 'stop' });
+  });
+
+  test('stops when a single tool from the latest model response is rejected', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const modelMessageId = 'model-msg';
+    state.transcript.messages.push({
+      kind: 'assistant',
+      messageId: modelMessageId,
+      toolCalls: [{ id: 'shell-1', name: 'shell_execute', args: { command: 'rm -rf /' } }],
+    });
+    state.tools.calls['shell-1'] = {
+      toolCallId: 'shell-1',
+      modelMessageId,
+      name: 'shell_execute',
+      args: { command: 'rm -rf /' },
+      status: 'rejected',
+      createdAtTurnId: state.turn.turnId,
+    };
+    expect(decideNextEffect(state)).toEqual({ type: 'stop' });
+  });
+
+  test('skips the rejection stop when the latest assistant message has no tool calls', () => {
+    // When the last assistant message is text-only, fall through to call_model.
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.transcript.messages.push({
+      kind: 'assistant',
+      messageId: 'model-msg',
+      toolCalls: [],
+    });
+    // Even with stray rejected calls from a prior message, the check only
+    // considers the *latest* assistant message with tool calls — and there is none.
+    state.tools.calls['shell-1'] = {
+      toolCallId: 'shell-1',
+      modelMessageId: 'stale',
+      name: 'shell_execute',
+      args: {},
+      status: 'rejected',
+      createdAtTurnId: state.turn.turnId,
+    };
+    expect(decideNextEffect(state)).toEqual({ type: 'call_model' });
+  });
 });

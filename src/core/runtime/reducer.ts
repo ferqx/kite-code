@@ -1132,6 +1132,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       }
       const toolCallId = state.interactions.toolCallId;
       const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
+      const failure = event.failure ?? classifyFailure('approval_rejected', event.reason);
       return {
         ...state,
         tools: {
@@ -1142,11 +1143,34 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               ...rejectedTools.calls[toolCallId]!,
               status: 'rejected',
               error: event.reason,
-              failure: event.failure ?? classifyFailure('approval_rejected', event.reason),
+              failure,
             },
           },
           queue: rejectedTools.queue.filter((id) => id !== toolCallId),
           active: rejectedTools.active.filter((id) => id !== toolCallId),
+        },
+        transcript: {
+          ...state.transcript,
+          messages: [
+            ...state.transcript.messages,
+            {
+              kind: 'tool',
+              ...transcriptMeta(state, `tool-${toolCallId}`),
+              toolCallId,
+              name: state.tools.calls[toolCallId]?.name ?? 'unknown',
+              content: JSON.stringify({
+                ok: false,
+                rejected: true,
+                error: {
+                  kind: failure.kind,
+                  message: event.reason,
+                  retryable: failure.retryable,
+                  model_fixable: failure.modelFixable,
+                },
+              }),
+              ok: false,
+            },
+          ],
         },
         interactions: { kind: 'idle' },
       };

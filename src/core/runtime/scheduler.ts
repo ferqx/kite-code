@@ -171,5 +171,24 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     return { type: 'stop' };
   }
 
+  // When every tool from the latest model response was rejected or cancelled
+  // (user actively denied approval or a sibling interaction cancelled them),
+  // stop the turn instead of calling the model.
+  const latestAssistantMsg = [...state.transcript.messages]
+    .reverse()
+    .find(
+      (m): m is Extract<(typeof state.transcript.messages)[number], { kind: 'assistant' }> =>
+        m.kind === 'assistant' && m.toolCalls.length > 0,
+    );
+  if (latestAssistantMsg) {
+    const allToolCallsRejected = latestAssistantMsg.toolCalls.every((tc) => {
+      const call = state.tools.calls[tc.id];
+      return call?.status === 'rejected' || call?.status === 'cancelled';
+    });
+    if (allToolCallsRejected && latestAssistantMsg.toolCalls.length > 0) {
+      return { type: 'stop' };
+    }
+  }
+
   return { type: 'call_model' };
 }
