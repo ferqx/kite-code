@@ -194,14 +194,25 @@ describe('hasSameCommandGrant', () => {
 describe('evaluateToolApproval', () => {
   // ── Read tools / 只读工具 ──
   describe('read tools', () => {
-    it('allows read_file', () => {
+    it('allows read_file with workspace path', () => {
       const result = evaluateToolApproval(
-        baseParams({ toolName: 'read_file', toolArgs: { path: '/f' } }),
+        baseParams({ toolName: 'read_file', toolArgs: { path: 'foo.txt' } }),
       );
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(false);
       expect(result.decision).toBe('allow');
       expect(result.risk).toBe('read');
+    });
+
+    it('requires approval for read_file with absolute path outside workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'read_file', toolArgs: { path: '/f' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.decision).toBe('ask');
+      expect(result.risk).toBe('read');
+      expect(result.effects).toEqual({ externalRead: true });
     });
 
     it('allows search_content', () => {
@@ -212,12 +223,32 @@ describe('evaluateToolApproval', () => {
       expect(result.requiresApproval).toBe(false);
     });
 
+    it('requires approval for search_content with absolute path outside workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'search_content', toolArgs: { pattern: 'foo', path: '/etc' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.decision).toBe('ask');
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+
     it('allows search_files', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'search_files', toolArgs: { pattern: '*.ts' } }),
       );
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(false);
+    });
+
+    it('requires approval for search_files with absolute path outside workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'search_files', toolArgs: { pattern: '*.txt', path: '/tmp' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.decision).toBe('ask');
+      expect(result.effects).toEqual({ externalRead: true });
     });
   });
 

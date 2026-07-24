@@ -548,9 +548,9 @@ describe('sub-agent external write approval chain', () => {
         // No approvedGrant → hasExecutionGrant = false → allowExternal = false
       });
 
-      // External read without grant should be rejected by resolvePath boundary check
+      // External read without grant should be rejected at policy level
       expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('Path is outside workspace');
+      expect(result.stderr).toContain('requires approval but was not approved');
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -666,9 +666,9 @@ describe('sub-agent external write approval chain', () => {
         // No approvedGrant → hasExecutionGrant = false → allowExternal = false
       });
 
-      // External search without grant should be rejected by walkFiles boundary check
+      // External search without grant should be rejected at policy level
       expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('Refusing search outside workspace');
+      expect(result.stderr).toContain('requires approval but was not approved');
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -729,9 +729,9 @@ describe('sub-agent external write approval chain', () => {
         authorization: null,
       });
 
-      // External search without grant should be rejected
+      // External search without grant should be rejected at policy level
       expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('Refusing search outside workspace');
+      expect(result.stderr).toContain('requires approval but was not approved');
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

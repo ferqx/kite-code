@@ -356,9 +356,45 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
-  // 只读工作区检查 — 直接放行
-  // Read-only workspace inspection — allow directly
+  // 只读工作区检查 — 直接放行（外部路径需审批）
+  // Read-only workspace inspection — allow directly (external paths require approval)
   if (toolName === 'read_file' || toolName === 'search_content' || toolName === 'search_files') {
+    const pathParam = String(toolArgs.path ?? (toolName === 'read_file' ? '<unknown>' : '.'));
+    const isOutside = (() => {
+      if (pathParam.startsWith('~')) return true;
+      if (!isAbsolute(pathParam)) return false;
+      try {
+        const rel = relative(resolve(workspace), resolve(pathParam));
+        return rel.startsWith('..') || isAbsolute(rel);
+      } catch {
+        return true;
+      }
+    })();
+    if (isOutside) {
+      const label =
+        toolName === 'read_file'
+          ? `Read external file: ${pathParam}`
+          : toolName === 'search_content'
+            ? `Search content in external path: ${pathParam}`
+            : `Search files in external path: ${pathParam}`;
+      if (effectiveMode === 'full_access') {
+        return allow({
+          risk: 'read',
+          effects: { externalRead: true },
+          reason: 'full_access is enabled for this thread.',
+          userVisibleSummary: label,
+          expectedEffects: ['Reads files outside the workspace boundary'],
+          grantUsed: 'full_access',
+        });
+      }
+      return requireApproval({
+        risk: 'read',
+        effects: { externalRead: true },
+        reason: 'This tool reads files outside the workspace.',
+        userVisibleSummary: label,
+        expectedEffects: ['Reads files outside the workspace boundary'],
+      });
+    }
     return allow({
       risk: 'read',
       reason: 'Read-only workspace inspection.',

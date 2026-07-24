@@ -24,6 +24,8 @@ export type ToolRisk =
 export interface ToolEffects {
   /** 该调用会访问网络 / The call accesses the network */
   network?: true;
+  /** 该调用会读取工作区外部 / The call reads outside the workspace */
+  externalRead?: true;
   /** 该调用会写入工作区外部 / The call writes outside the workspace */
   externalWrite?: true;
   /** 静态分析无法证明该调用不会出网或外部写入 / Static analysis cannot prove local-only effects */

@@ -36,7 +36,12 @@ function isDestructive(risk: PolicyInput['toolRisk']): boolean {
 }
 
 function hasExternalEffects(effects: PolicyInput['effects']): boolean {
-  return Boolean(effects?.network || effects?.externalWrite || effects?.uncertainEffects);
+  return Boolean(
+    effects?.network ||
+      effects?.externalRead ||
+      effects?.externalWrite ||
+      effects?.uncertainEffects,
+  );
 }
 
 /** 判断工具是否需要审批（非只读/非计划类）/ Returns true if the tool requires approval */
