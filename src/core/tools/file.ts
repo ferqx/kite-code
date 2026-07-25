@@ -6,6 +6,7 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
+import { readFile as readFileBufferAsync } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { msys2ToWindowsPath } from './path-utils';
 
@@ -117,6 +118,16 @@ function isTextByte(b: number): boolean {
 // readTextContent — 共享的文件读取边界
 // Shared file reading boundary: encoding detection, BOM stripping, binary check,
 // line-ending normalization. Exported for unit testing.
+//
+// 同步入口 readTextContent 与异步入口 readTextContentAsync 共享同一个
+// decodeTextBuffer 解码核心，保证两条路径的编码检测、二进制检测与换行正规化
+// 行为完全一致。批量读取（如 search_content 全工作区扫描）必须走异步入口，
+// 否则同步 I/O 会长时间占用事件循环，阻塞 TUI 动画渲染。
+// The sync entry (readTextContent) and async entry (readTextContentAsync) share
+// the same decodeTextBuffer core so encoding detection, binary detection and
+// line-ending normalization behave identically. Bulk reads (e.g. search_content
+// walking a whole workspace) must use the async entry so synchronous I/O does
+// not hold the event loop and block TUI animation rendering.
 // ============================================================================
 
 interface TextContent {
@@ -131,18 +142,11 @@ interface TextContentError {
   totalLines: 0;
 }
 
-export function readTextContent(
-  workspace: string,
+function decodeTextBuffer(
+  raw: Buffer,
   filePath: string,
-  opts?: { force?: boolean; allowExternal?: boolean },
+  opts?: { force?: boolean },
 ): TextContent | TextContentError {
-  const target = resolvePath(workspace, filePath, { allowExternal: opts?.allowExternal });
-  if (!existsSync(target)) {
-    return { ok: false, error: `File not found: ${filePath}`, totalLines: 0 };
-  }
-
-  const raw = readFileSync(target);
-
   // 编码检测 / Encoding detection — 在二进制检测之前执行。
   // UTF-16 文本文件中 NUL byte 比例天然高（ASCII 字符每两字节一个 NUL），
   // 必须先识别 BOM 确定编码，再决定是否做二进制检测。
@@ -201,6 +205,52 @@ export function readTextContent(
   }
 
   return { ok: true, content, totalLines: allLines.length };
+}
+
+export function readTextContent(
+  workspace: string,
+  filePath: string,
+  opts?: { force?: boolean; allowExternal?: boolean },
+): TextContent | TextContentError {
+  const target = resolvePath(workspace, filePath, { allowExternal: opts?.allowExternal });
+  if (!existsSync(target)) {
+    return { ok: false, error: `File not found: ${filePath}`, totalLines: 0 };
+  }
+
+  return decodeTextBuffer(readFileSync(target), filePath, opts);
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'ENOENT'
+  );
+}
+
+/**
+ * readTextContent 的异步入口：行为与同步版本一致（同一解码核心、同样的
+ * 错误消息），但通过 fs.promises.readFile 让出事件循环。供 search_content
+ * 等需要遍历读取大量文件的调用方使用，避免同步 I/O 长时间阻塞 TUI 渲染。
+ * Async entry for readTextContent: identical behavior (same decode core, same
+ * error messages) that yields the event loop via fs.promises.readFile. Used by
+ * callers that read many files (e.g. search_content) so synchronous I/O does
+ * not block TUI rendering for extended periods.
+ */
+export async function readTextContentAsync(
+  workspace: string,
+  filePath: string,
+  opts?: { force?: boolean; allowExternal?: boolean },
+): Promise<TextContent | TextContentError> {
+  const target = resolvePath(workspace, filePath, { allowExternal: opts?.allowExternal });
+  let raw: Buffer;
+  try {
+    raw = await readFileBufferAsync(target);
+  } catch (error) {
+    if (isNotFound(error)) {
+      return { ok: false, error: `File not found: ${filePath}`, totalLines: 0 };
+    }
+    throw error;
+  }
+  return decodeTextBuffer(raw, filePath, opts);
 }
 
 // ============================================================================

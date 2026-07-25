@@ -326,7 +326,7 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     ),
     execute: async ({ pattern, path, glob }) => {
       return JSON.stringify(
-        searchContentNative({ workspace: input.workspace, pattern, path, glob }),
+        await searchContentNative({ workspace: input.workspace, pattern, path, glob }),
       );
     },
   });
@@ -341,7 +341,7 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
       }),
     ),
     execute: async ({ pattern, path }) => {
-      return JSON.stringify(searchFilesNative({ workspace: input.workspace, pattern, path }));
+      return JSON.stringify(await searchFilesNative({ workspace: input.workspace, pattern, path }));
     },
   });
 

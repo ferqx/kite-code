@@ -2,7 +2,7 @@
 
 状态：active
 范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/tools/search.ts`、`src/core/harness/tool-runner.ts`、`src/core/model/runtime-context.ts`、`src/core/runtime/agent.ts`、`src/core/subagent/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
-读取时机：修改 `readFile`/`editFile`/`writeFile`、二进制检测、编码处理、换行正规化、MSYS2 路径转换、runtime context 路径格式时必读。
+读取时机：修改 `readFile`/`editFile`/`writeFile`、二进制检测、编码处理、换行正规化、MSYS2 路径转换、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
 验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx`
 
 ## 设计目标
@@ -43,11 +43,30 @@ Workspace: /d/work/my-project
 
 `readFile` 和 `editFile` 均通过 `readTextContent` 读取文件，禁止各自独立调用 `readFileSync`。
 
+边界提供两个入口，共享同一个 `decodeTextBuffer` 解码核心（编码检测、二进制检测、换行正规化行为完全一致）：
+
+| 入口 | I/O | 使用场景 |
+|------|-----|---------|
+| `readTextContent` | `readFileSync` | 单文件工具（read_file / edit_file / write_file 旧内容 diff） |
+| `readTextContentAsync` | `fs.promises.readFile` | 批量读取（`search_content` 遍历工作区），避免同步 I/O 长时间占用事件循环、阻塞 TUI 动画渲染 |
+
 处理顺序（不可调换）：
 
 ```
-readFileSync → 编码检测(BOM) → 解码+剥离BOM → 二进制检测(无BOM时) → normalizeEOL → 返回
+读取字节(同步或异步) → 编码检测(BOM) → 解码+剥离BOM → 二进制检测(无BOM时) → normalizeEOL → 返回
 ```
+
+同理 `search.ts` 的目录遍历全部走 `node:fs/promises`（`readdir`/`stat`），每次 `await` 让出事件循环；结果顺序与遍历语义保持与历史同步实现一致（readdir 目录序 + 深度优先递归，`search_files` 结果排序）。
+
+### 搜索遍历的 `.gitignore` 过滤（`search.ts`）
+
+`search_files` / `search_content` 的工作区内遍历遵循 `.gitignore` 忽略规则（与 ripgrep 默认语义对齐）：
+
+- **作用域为工作区根**：从工作区根到搜索根的祖先链上的 `.gitignore` 与遍历中每个子目录的 `.gitignore` 都生效；工作区之上的仓库级配置（`.git/info/exclude`、全局 excludesFile）不在范围内。
+- **支持的规则子集**：空行/注释、`!` 反选、目录专用尾斜杠（`build/` 不忽略同名文件）、前导/中段 `/` 锚定、`*`、`?`、`[abc]`/`[!abc]`、`**`（前导 `**/`、尾随 `/**`、中段 `/**/`）、反斜杠转义；规则按目录叠加，后匹配覆盖先匹配。
+- **被排除目录整体剪枝**：git 语义——父目录被排除后，其内部 `.gitignore` 不参与（无法用内部规则重新包含）。
+- **`.git` 目录永远跳过**（与 ripgrep 一致）。
+- **显式单个文件目标不做忽略过滤**（显式路径优先）；工作区外搜索（`allowExternal`）不做过滤。
 
 ### 编码检测与二进制检测的优先级
 
@@ -135,10 +154,10 @@ subagent CWD 使用 `process.cwd()` 原生格式，不再通过 `toPosixPath` �
 
 `resolvePath` 新增 `allowExternal` 可选参数。当 `true` 时跳过工作区边界检查，允许读写工作区外的路径。
 
-**调用方约束**：`allowExternal` 只能由 `tool-runner.ts` 的 `runApprovedTool` 设置为 `true`，且必须同时满足两个条件：
+**调用方约束**：`allowExternal` 只能由 `tool-runner.ts` 的 `runApprovedTool` 设置为 `true`，且必须同时满足两个条件（经 `isExternalPathArg` 计算，先做 MSYS2 归一化再判定，见 [[tool-gated-autonomy]] 自治规则 2）：
 
 ```
-isExternal = isAbsolute(path) || path.startsWith('~')
+isExternal = isExternalPathArg(path)   // msys2ToWindowsPath 归一化后再 isAbsolute / startsWith('~')
 allowExternal = hasExecutionGrant && isExternal
 ```
 
@@ -151,7 +170,7 @@ allowExternal = hasExecutionGrant && isExternal
 | `read_file` | `readTextContent` → `resolvePath` | ✅ |
 | `edit_file` | `readTextContent` → `resolvePath`（读/写各一次） | ✅ |
 | `write_file` | `readTextContent`（旧内容 diff）+ `writeFile` → `resolvePath` | ✅ |
-| `search_content` | `walkFiles`（目录边界）+ `readTextContent`（文件读取） | ✅ |
+| `search_content` | `walkFiles`（目录边界）+ `readTextContentAsync`（文件读取） | ✅ |
 | `search_files` | `walkFiles`（目录边界） | ✅ |
 
 **双层防御**：
