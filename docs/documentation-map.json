@@ -94,6 +94,7 @@
         "docs/active/tool-gated-autonomy.md",
         "docs/active/authorization.md",
         "docs/active/mcp-runtime-governance.md",
+        "docs/adr/0025-file-tool-semantics-and-write-safety.md",
         "docs/book/05-工具系统与安全策略.md"
       ]
     },
@@ -151,6 +152,7 @@
         "docs/active/tool-gated-autonomy.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/active/capability-progressive-disclosure.md",
+        "docs/adr/0025-file-tool-semantics-and-write-safety.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/11-MCP与Skills扩展.md"
       ]
@@ -162,6 +164,7 @@
         "docs/active/authorization.md",
         "docs/active/mcp-control-plane.md",
         "docs/active/tui-run-status-bar.md",
+        "docs/active/thought-pre-consolidation.md",
         "docs/book/07-TUI结构.md",
         "docs/book/08-TUI交互全景.md"
       ]

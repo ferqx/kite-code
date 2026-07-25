@@ -40,6 +40,7 @@ import { evaluateToolApproval, isReadOnlyMcpPolicy } from '@/core/policies/appro
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure, classifyMcpProviderError } from '@/core/runtime/failures';
+import type { FilePreimageRecorder } from '@/core/runtime/file-checkpoints';
 import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
@@ -340,6 +341,7 @@ async function handleSubAgentResume(params: {
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
   emitSubagentEvent: SubAgentEventSink;
+  recordFilePreimage?: FilePreimageRecorder;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   const { continuation } = params;
@@ -370,6 +372,7 @@ async function handleSubAgentResume(params: {
       authorization: params.state.authorization,
       approvedGrant: call?.approvalGrant ?? 'none',
       threadId: params.state.session.threadId,
+      recordFilePreimage: params.recordFilePreimage,
       mcpManager: params.mcpManager,
       ...(resumedBinding
         ? {
@@ -511,6 +514,8 @@ export async function executeRuntimeTools(params: {
   capabilityArtifactStore?: CapabilityArtifactStore;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
+  /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
+  recordFilePreimage?: FilePreimageRecorder;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   // Keep the direct-call API unchanged for tests and legacy callers.  The
@@ -1815,6 +1820,7 @@ export async function executeRuntimeTools(params: {
           taskConfig: params.taskConfig,
           taskModel: params.taskModel,
           emitSubagentEvent,
+          recordFilePreimage: params.recordFilePreimage,
         });
         events.push(...resumeEvents);
         continue;
@@ -1833,6 +1839,7 @@ export async function executeRuntimeTools(params: {
           authorization: params.state.authorization,
           approvedGrant: call.approvalGrant ?? 'none',
           threadId: params.state.session.threadId,
+          recordFilePreimage: params.recordFilePreimage,
           mcpManager: params.mcpManager,
           skillManifests: params.skillManifests,
           skillOptions: params.skillOptions,
@@ -2001,6 +2008,7 @@ export async function executeRuntimeTools(params: {
             authorization: params.state.authorization,
             approvedGrant: call.approvalGrant ?? 'none',
             threadId: params.state.session.threadId,
+            recordFilePreimage: params.recordFilePreimage,
             mcpManager: params.mcpManager,
             ...(mcpDescriptor
               ? {

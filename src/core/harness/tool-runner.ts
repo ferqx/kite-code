@@ -43,6 +43,24 @@ function resultContentDigest(stdout: string, stderr: string, exitCode: number): 
   return createHash('sha256').update(JSON.stringify({ stdout, stderr, exitCode })).digest('hex');
 }
 
+/**
+ * ADR-0025 §4：best-effort 原像捕获 —— 记录器抛错绝不允许中断工具执行。
+ * Best-effort pre-image capture: a throwing recorder must never fail the tool.
+ */
+function safeRecordPreimage(
+  recorder: ((path: string, content: string | null, existed: boolean) => void) | undefined,
+  path: string,
+  content: string | null,
+  existed: boolean,
+): void {
+  if (!recorder) return;
+  try {
+    recorder(path, content, existed);
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** runApprovedTool 输入参数 / Input for runApprovedTool */
 export interface RunApprovedToolInput {
   workspace: string;
@@ -71,6 +89,13 @@ export interface RunApprovedToolInput {
   subagentEventSink?: SubAgentEventSink;
   /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+  /**
+   * 写入前文件原像记录器（ADR-0025 §4），供 /rewind 恢复工作区文件。
+   * best-effort：实现自身吞错，工具层直接调用即可。
+   * File pre-image recorder invoked before workspace writes (ADR-0025 §4),
+   * enabling /rewind to restore files. Best-effort by contract.
+   */
+  recordFilePreimage?: (path: string, content: string | null, existed: boolean) => void;
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -216,6 +241,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
           eventSink: subagentEventSink,
           signal,
           model: taskModel,
+          recordFilePreimage: input.recordFilePreimage,
         },
         taskArgs,
       );
@@ -278,6 +304,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const editPath = (request.args.path ?? '') as string;
     const isExternal = isAbsolute(editPath) || editPath.startsWith('~');
     const allowExternal = hasExecutionGrant && isExternal;
+    // ADR-0025 §4：改动前捕获原像，供 /rewind 恢复（best-effort）
+    // Capture pre-image before mutating, for /rewind restore (best-effort).
+    const preEditRead = readTextContent(workspace, editPath, { allowExternal });
+    safeRecordPreimage(
+      input.recordFilePreimage,
+      editPath,
+      preEditRead.ok ? preEditRead.content : null,
+      preEditRead.ok,
+    );
     const result = editFile({
       workspace,
       path: editPath,
@@ -347,6 +382,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     // 写入前读取旧内容，用于生成 diff / Read old content before writing for diff
     const oldRead = readTextContent(workspace, filePath, { allowExternal });
     const oldExisted = oldRead.ok;
+
+    // ADR-0025 §4：覆写/追加前捕获原像（复用上面已读取的旧内容，零额外 I/O）
+    // Capture pre-image before overwrite/append (reuses oldRead, zero extra I/O).
+    safeRecordPreimage(
+      input.recordFilePreimage,
+      filePath,
+      oldRead.ok ? oldRead.content : null,
+      oldRead.ok,
+    );
 
     const result = writeFile({
       workspace,

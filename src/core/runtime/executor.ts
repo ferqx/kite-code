@@ -34,7 +34,9 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { executeVerificationEffect } from '@/core/verification';
+import { createFilePreimageRecorder } from './file-checkpoints';
 import type { RuntimeEffectExecutor } from './kernel';
+import type { RuntimeStore } from './store';
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
 export interface RuntimeExecutorDependencies {
@@ -51,6 +53,8 @@ export interface RuntimeExecutorDependencies {
   /** Owned and flushed by the application composition root. */
   compactionReporter?: CompactionReporter;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
+  /** 用于记录文件写入前原像（ADR-0025 §4），缺省时工具写入不留原像。 */
+  runtimeStore?: RuntimeStore;
 }
 
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
@@ -154,6 +158,10 @@ export function createRuntimeEffectExecutor(
           taskModel: dependencies.model,
           subagentEventSink,
           emitRuntimeEvent: emit,
+          recordFilePreimage: createFilePreimageRecorder(
+            dependencies.runtimeStore,
+            state.session.threadId,
+          ),
         });
       } catch (error) {
         const mcpCalls = effect.toolCallIds.flatMap((toolCallId) => {

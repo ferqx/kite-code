@@ -414,6 +414,14 @@ export class AgentKernel {
   // ── 生命周期 / Lifecycle ──
 
   /**
+   * 暴露运行时存储，供辅助持久化（如文件写入前原像，ADR-0025 §4）。
+   * Expose the runtime store for auxiliary persistence (e.g. file pre-images).
+   */
+  get runtimeStore(): RuntimeStore {
+    return this.store;
+  }
+
+  /**
    * 关闭 kernel（释放 store 连接等）。
    * Close the kernel (release store connections, etc.).
    */

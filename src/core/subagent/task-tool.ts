@@ -29,6 +29,8 @@ export interface TaskToolDeps {
   signal?: AbortSignal;
   model?: SupportedChatModel;
   maxDepth?: number;
+  /** 写入前文件原像记录器，透传给子 agent 的工具执行（ADR-0025 §4）。 */
+  recordFilePreimage?: import('@/core/runtime/file-checkpoints').FilePreimageRecorder;
 }
 
 const MAX_CONCURRENT = 10;
@@ -79,6 +81,7 @@ export async function runTaskSubAgent(
       model: deps.model,
       depth: 1,
       maxDepth: deps.maxDepth ?? 0,
+      recordFilePreimage: deps.recordFilePreimage,
     });
   } finally {
     const next = (activeCounts.get(key) ?? 1) - 1;

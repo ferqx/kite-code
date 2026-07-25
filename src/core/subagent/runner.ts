@@ -564,6 +564,7 @@ async function runSubAgentLoop(
             phase: input.phase ?? 'building',
             authorization: input.authorization,
             threadId: input.threadId ?? '',
+            recordFilePreimage: input.recordFilePreimage,
             mcpManager: input.mcpManager,
             ...(boundMcpDescriptor
               ? {
