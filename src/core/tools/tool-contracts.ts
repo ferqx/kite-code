@@ -15,7 +15,7 @@ export interface ToolContract {
   sections: ToolContractSection;
 }
 
-function buildDescription(sections: ToolContractSection): string {
+export function buildDescription(sections: ToolContractSection): string {
   return [
     sections.whenToUse,
     `\nCommon mistakes: ${sections.commonMistakes}`,

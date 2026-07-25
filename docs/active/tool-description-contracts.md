@@ -57,6 +57,14 @@
   Failure: [failureHandling]
   ```
 
+### Registry 迁移边界（ADR-0026）
+
+工具契约的单一事实源正从 `tool-contracts.ts` 迁移到 ToolSpec Registry（`src/core/tools/registry/`）。迁移期规则：
+
+- 未迁移工具：契约继续写在 `tool-contracts.ts`，本节规则不变。
+- 已迁移工具：契约移入 `spec.contract`，`description` 仍由 `buildDescription()` 生成，四个 section 的质量要求不变。
+- 新增工具一律直接注册到 Registry；`toolSpecRegistryV1` 灰度期间保持模型表面 description 逐字节稳定，一致性不变量由 `tests/tools/tool-registry-conformance.test.ts` 守护。
+
 ### 契约与实现的同步
 
 - 修改工具实现行为时必须同步更新对应契约的四个 section。

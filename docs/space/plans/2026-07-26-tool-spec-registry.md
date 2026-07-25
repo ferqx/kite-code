@@ -56,7 +56,7 @@
 
 ## 阶段 1：Registry 骨架 + 六个计算原语
 
-- [ ] **S1.1 Registry 基建**
+- [x] **S1.1 Registry 基建**
   - 新增：`src/core/tools/registry/spec.ts`（ToolSpec 接口、ToolKind、ToolEffects、ProjectedToolResult）、`registry.ts`（注册/查找/availableIn/toSchemaOnlyToolSet/parseToolCall/descriptorOf）、`dispatch.ts`（pre-gates 上提 + preExecute 钩子 + execute + projectResult）。
   - 新增一致性测试 `tests/tools/tool-registry-conformance.test.ts`：RFC §5 不变量 i1-i10 骨架（i1 args 透传恒等、i2 schema-only、i3/i4 名集闭合、i5 写工具 mutation scope、i6 描述纯函数、i9 revision 确定性、i10 shell 分类不读治理参数）。
   - 新增 feature flag `toolSpecRegistryV1`（`src/core/config/features.ts`，默认 false，双值测试；遵循 `docs/active/feature-flags.md`）。

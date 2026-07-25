@@ -38,6 +38,14 @@ const PLAN_ONLY_TOOLS = new Set(['write_plan', 'update_plan']);
 
 const READ_ONLY_SUBAGENTS = new Set(['explore', 'plan', 'review']);
 
+/** 分类器引用的全部工具名（ADR-0026 一致性不变量 i3：禁止 list_files 式幽灵名）。 */
+export const POLICY_CLASSIFIED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  ...READ_ONLY_TOOLS,
+  ...PLAN_ONLY_TOOLS,
+  'task',
+  'shell_execute',
+]);
+
 /**
  * 对工具调用进行一次性能力分类。
  * Classify a tool call once so policy, reducer and model context share the same result.
