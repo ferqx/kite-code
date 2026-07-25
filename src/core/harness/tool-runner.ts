@@ -20,8 +20,10 @@ import {
   formatDiffOutput,
   formatMultiHunkDiff,
 } from '@/core/tools/diff';
-import { editFile, readFile, readTextContent, writeFile } from '@/core/tools/file';
+import { editFile, readTextContent, writeFile } from '@/core/tools/file';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
+import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
+import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import {
   searchContent as searchContentNative,
   searchFiles as searchFilesNative,
@@ -288,22 +290,31 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const filePath = (request.args.path ?? '') as string;
     const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
-    const result = readFile({
-      workspace,
-      path: filePath,
-      offset: request.args.offset,
-      limit: request.args.limit,
-      allowExternal,
-    });
+    // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：执行经 dispatchRegisteredTool，
+    // 结果组装保持与旧路径字节一致（resultMeta / digest / TUI 展示不受影响）。
+    const dispatched = await dispatchRegisteredTool(
+      readFileSpec,
+      { path: filePath, offset: request.args.offset, limit: request.args.limit },
+      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+    );
+    const output = dispatched.dispatched
+      ? dispatched.output
+      : {
+          ok: false as const,
+          content: '',
+          error: dispatched.rejection.error,
+          totalLines: 0,
+          path: filePath,
+        };
     return withFailureGuidance(request, {
-      ok: result.ok,
+      ok: output.ok,
       command: `read_file ${filePath}`,
-      exitCode: result.ok ? 0 : -1,
-      stdout: result.content,
-      stderr: result.error ?? '',
+      exitCode: output.ok ? 0 : -1,
+      stdout: output.content,
+      stderr: output.error ?? '',
       path: filePath,
-      totalLines: result.totalLines,
-      resultMeta: { path: filePath, totalLines: result.totalLines },
+      totalLines: output.totalLines,
+      resultMeta: { path: filePath, totalLines: output.totalLines },
     });
   }
 

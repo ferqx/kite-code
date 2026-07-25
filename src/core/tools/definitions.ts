@@ -7,15 +7,16 @@ import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import { createTaskTool } from '@/core/subagent/task-tool';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
-import { editFile, readFile, writeFile } from './file';
+import { editFile, writeFile } from './file';
+import { readFileSpec } from './registry/builtins/read-file';
 import { searchContent as searchContentNative, searchFiles as searchFilesNative } from './search';
 import { type ShellExecutor, shellTool } from './shell';
 import {
   ASK_USER_CONTRACT,
+  buildDescription,
   EDIT_FILE_CONTRACT,
   LIST_MCP_RESOURCES_CONTRACT,
   LIST_MCP_TOOLS_CONTRACT,
-  READ_FILE_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
   READ_PLAN_CONTRACT,
   SEARCH_CONTENT_CONTRACT,
@@ -108,17 +109,11 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
   const cacheKey = `${input.workspace}|${!!input.shellExecutor}|${mcpBindingRevision}|${input.skillCatalog?.revision ?? ''}|${activeSkillFrameKey}|${!!input.toolSearch}|${!!input.subagentEventSink}|${!!input.config}|${!!input.model}|${input.threadId ?? ''}|${input.workspaceAccess ?? ''}|${input.phase ?? ''}|${input.interactionMode ?? ''}|${authorizationCacheKey}`;
   const cached = _toolCache.get(cacheKey);
   if (cached) return cached;
+  // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：schema-only 条目，
+  // 真实执行只经 Registry dispatch（tool-runner read_file 分支），模型 ToolSet 不携带 execute。
   const readFileTool = tool({
-    description: READ_FILE_CONTRACT.description,
-    inputSchema: zodSchema(
-      z.object({
-        path: z.string().describe('Path to the file, relative to workspace'),
-        offset: z.number().optional().describe('Starting line number (1-indexed, default 1)'),
-        limit: z.number().optional().describe('Maximum number of lines to read'),
-      }),
-    ),
-    execute: async ({ path, offset, limit }) =>
-      JSON.stringify(readFile({ workspace: input.workspace, path, offset, limit })),
+    description: buildDescription(readFileSpec.contract),
+    inputSchema: zodSchema(readFileSpec.inputSchema),
   });
 
   const editFileTool = tool({

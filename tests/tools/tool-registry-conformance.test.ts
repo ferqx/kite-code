@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { POLICY_CLASSIFIED_TOOL_NAMES } from '@/core/policies/tool-capabilities';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import { createToolRegistry } from '@/core/tools/registry/registry';
 import type { ToolContext, ToolSpec } from '@/core/tools/registry/spec';
@@ -214,10 +215,19 @@ describe('invariant i3 — policy-classified names form a closed set (anti-ghost
 
 describe('invariant i4 — KNOWN_TOOL_NAMES migration ratchet', () => {
   /**
-   * 尚未迁入 Registry 的静态工具名。阶段 1.2 每迁移一个工具就从这里移除；
-   * 阶段 1.3 清理完成后本集合应为空（届时删除本常量并改为全量断言）。
+   * 尚未迁入 Registry 的静态工具名 = 已知名单 − 生产 Registry 已注册名。
+   * 阶段 1.2 每迁移一个工具，它自动从待迁移集合移入 Registry；
+   * 阶段 1.3 清理完成后本集合应为空（届时改为全量断言）。
    */
-  const PENDING_MIGRATION = new Set<string>(KNOWN_TOOL_NAMES);
+  const PENDING_MIGRATION = new Set<string>(
+    [...KNOWN_TOOL_NAMES].filter((name) => !builtinToolRegistry.get(name)),
+  );
+
+  test('migrated names never remain pending (single source of truth)', () => {
+    for (const name of builtinToolRegistry.names()) {
+      expect(PENDING_MIGRATION.has(name)).toBe(false);
+    }
+  });
 
   test('pending migration set never hides unknown names', () => {
     const known = new Set<string>(KNOWN_TOOL_NAMES);
@@ -226,22 +236,47 @@ describe('invariant i4 — KNOWN_TOOL_NAMES migration ratchet', () => {
     }
   });
 
-  test('known names are covered by registry or pending migration', () => {
-    const registry = sampleRegistry();
-    const covered = new Set<string>([...registry.names(), ...PENDING_MIGRATION]);
+  test('known names are covered by production registry or pending migration', () => {
+    const covered = new Set<string>([...builtinToolRegistry.names(), ...PENDING_MIGRATION]);
     for (const name of KNOWN_TOOL_NAMES) {
       expect(covered.has(name)).toBe(true);
     }
   });
 
-  test('production registry names must be known tool names (arms in S1.2)', () => {
-    // 生产 Registry 实例在阶段 1.2 引入；届时把其 names() 并入此断言，
-    // 防止注册的规格脱离 KNOWN_TOOL_NAMES 契约集合。
-    const productionRegistryNames: string[] = [];
+  test('production registry names must be known tool names', () => {
     const known = new Set<string>(KNOWN_TOOL_NAMES);
-    for (const name of productionRegistryNames) {
+    for (const name of builtinToolRegistry.names()) {
       expect(known.has(name)).toBe(true);
     }
+  });
+});
+
+describe('read_file migration (S1.2)', () => {
+  test('registry parses read_file identically to the legacy request shape', () => {
+    const parsed = builtinToolRegistry.parseToolCall(
+      { id: 'tc1', name: 'read_file', args: { path: 'src/index.ts', offset: 10, limit: 50 } },
+      CTX,
+    );
+    expect(parsed).toEqual({
+      ok: true,
+      id: 'tc1',
+      name: 'read_file',
+      args: { path: 'src/index.ts', offset: 10, limit: 50 },
+      reason: 'Model requested read_file',
+      protectedCommand: 'read_file src/index.ts',
+    });
+  });
+
+  test('read_file spec declares read-only effects and user-visible contract', () => {
+    const spec = builtinToolRegistry.get('read_file');
+    expect(spec).toBeDefined();
+    expect(spec?.kind).toBe('computer');
+    expect(spec?.declaredEffects).toEqual({
+      filesystem: 'read',
+      network: 'none',
+      externalState: 'none',
+    });
+    expect(spec?.effects({ path: 'a' }, CTX).effectClass).toBe('read_only');
   });
 });
 

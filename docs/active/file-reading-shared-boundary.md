@@ -43,6 +43,8 @@ Workspace: /d/work/my-project
 
 `readFile` 和 `editFile` 均通过 `readTextContent` 读取文件，禁止各自独立调用 `readFileSync`。
 
+`read_file` 工具调用的编排已迁入 ToolSpec Registry dispatch（`dispatchRegisteredTool`，ADR-0026 S1.2）：`readFileSpec.execute` 仍调用 `readFile`，字节级单入口 `readTextContent` 与本边界全部规则不变；外部路径 grant 检查经 `ToolExecutionContext.allowExternalPaths` 注入。
+
 边界提供两个入口，共享同一个 `decodeTextBuffer` 解码核心（编码检测、二进制检测、换行正规化行为完全一致）：
 
 | 入口 | I/O | 使用场景 |

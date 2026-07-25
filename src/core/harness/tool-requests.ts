@@ -5,6 +5,7 @@ import {
   isAIMessage,
   isToolMessage,
 } from '@/core/messages';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import type { ShellActionEnvelope, ShellIntent } from '@/core/types';
 import type { ShellApprovalGrant, UserInputOption, UserInputRequest } from '@/protocol/events';
 
@@ -277,7 +278,7 @@ export function getAllPendingToolRequests(
 /** 从单个 tool_call 解析工具请求 / Parse tool request from a single tool_call */
 export function toolRequestFromCall(
   call: { id?: string; name: string; args: Record<string, unknown> },
-  _workspace: string,
+  workspace: string,
 ): PendingToolRequest | null {
   // 合成调用：invokeModel 在 parseToolCall 失败后注入 _raw_invalid_args 标记。
   // 跳过工具特定的 args 规范化，保留标记字段直通 runApprovedTool 生成错误反馈。
@@ -293,15 +294,18 @@ export function toolRequestFromCall(
     } as PendingToolRequest;
   }
 
-  if (call.name === 'read_file') {
-    const args = call.args as { path?: string; offset?: number; limit?: number };
+  // 已迁移到 Registry 的工具走泛型解析（ADR-0026）：args 恒等于 schema 解析结果，
+  // 不存在逐字段重映射。schema 无效返回 null，走调用方既有的 tool_not_found 路径。
+  const viaRegistry = builtinToolRegistry.parseToolCall(call, { workspace });
+  if (viaRegistry) {
+    if (!viaRegistry.ok) return null;
     return {
-      id: call.id,
-      name: 'read_file',
-      args: { path: args.path || '', offset: args.offset, limit: args.limit },
-      reason: 'Model requested read_file',
-      protectedCommand: `read_file ${args.path || ''}`,
-    };
+      id: viaRegistry.id,
+      name: viaRegistry.name,
+      args: viaRegistry.args,
+      reason: viaRegistry.reason,
+      protectedCommand: viaRegistry.protectedCommand,
+    } as PendingToolRequest;
   }
 
   if (call.name === 'tool_search') {

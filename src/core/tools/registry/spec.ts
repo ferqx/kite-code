@@ -29,6 +29,8 @@ export interface ToolContext {
 /** 执行上下文。迁移阶段按需扩展；Policy 预检暂留现有管线，阶段 1.2 上提为公共段。 */
 export interface ToolExecutionContext extends ToolContext {
   signal?: AbortSignal;
+  /** 调用方已持有执行授权且路径在工作区外（read_file 等外部路径门禁输入）。 */
+  allowExternalPaths?: boolean;
 }
 
 /**
