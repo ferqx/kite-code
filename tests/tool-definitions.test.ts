@@ -8,6 +8,9 @@ import {
   createAgentTools,
   isReadOnlyShellCommand,
 } from '../src/core/tools/definitions';
+import { searchContentSpec } from '../src/core/tools/registry/builtins/search-content';
+import { searchFilesSpec } from '../src/core/tools/registry/builtins/search-files';
+import { dispatchRegisteredTool } from '../src/core/tools/registry/dispatch';
 import { TOOL_CONTRACTS } from '../src/core/tools/tool-contracts';
 import type { CapabilityBinding, CapabilityDescriptor } from '../src/protocol/capabilities';
 
@@ -202,27 +205,29 @@ describe('code agent tool definitions', () => {
     writeFileSync(join(workspace, 'package.json'), '{}\n');
     writeFileSync(join(workspace, 'src', 'alpha.ts'), 'const marker = "needle";\n');
 
-    const tools = createAgentTools({
-      workspace,
-      shellExecutor: async () => {
-        throw new Error('search tools must not invoke shell');
-      },
-    });
-    const searchFiles = tools.search_files!;
-    const searchContent = tools.search_content!;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execute() return type
-    const filesResult = JSON.parse(
-      (await (searchFiles as any).execute({ pattern: 'package.json' })) as string,
+    // 迁移后（ADR-0026 S1.2）搜索工具的模型条目为 schema-only，
+    // 执行经 Registry dispatch 验证（原生搜索，不触碰 shell）。
+    const filesOutcome = await dispatchRegisteredTool(
+      searchFilesSpec,
+      { pattern: 'package.json' },
+      { workspace },
     );
-    const contentResult = JSON.parse(
-      (await (searchContent as any).execute({ pattern: 'needle' })) as string,
+    const contentOutcome = await dispatchRegisteredTool(
+      searchContentSpec,
+      { pattern: 'needle' },
+      { workspace },
     );
 
-    expect(filesResult.ok).toBe(true);
-    expect(filesResult.stdout).toContain('package.json');
-    expect(contentResult.ok).toBe(true);
-    expect(contentResult.stdout).toContain('src/alpha.ts:1:const marker = "needle";');
+    expect(filesOutcome.dispatched).toBe(true);
+    expect(contentOutcome.dispatched).toBe(true);
+    if (filesOutcome.dispatched) {
+      expect(filesOutcome.output.ok).toBe(true);
+      expect(filesOutcome.output.stdout).toContain('package.json');
+    }
+    if (contentOutcome.dispatched) {
+      expect(contentOutcome.output.ok).toBe(true);
+      expect(contentOutcome.output.stdout).toContain('src/alpha.ts:1:const marker = "needle";');
+    }
   });
 
   // 验证常见只读 shell 命令（ls, cat, rg, git status 等）被正确分类为只读 / Common read-only shell commands (ls, cat, rg, git status, etc.) are correctly classified as read-only

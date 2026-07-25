@@ -500,28 +500,6 @@ export function toolRequestFromCall(
     };
   }
 
-  if (call.name === 'search_content') {
-    const args = call.args as { pattern?: string; path?: string; glob?: string };
-    return {
-      id: call.id,
-      name: 'search_content',
-      args: { pattern: args.pattern || '', path: args.path, glob: args.glob },
-      reason: 'Model requested content search',
-      protectedCommand: `search_content ${args.pattern || ''}`,
-    };
-  }
-
-  if (call.name === 'search_files') {
-    const args = call.args as { pattern?: string; path?: string };
-    return {
-      id: call.id,
-      name: 'search_files',
-      args: { pattern: args.pattern || '', path: args.path },
-      reason: 'Model requested file search',
-      protectedCommand: `search_files ${args.pattern || ''}`,
-    };
-  }
-
   if (call.name === 'activate_skill') {
     const args = call.args as { skill_id?: unknown; input?: unknown };
     return {

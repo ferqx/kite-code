@@ -9,7 +9,8 @@ import { fetchAndExtract } from '@/core/web/extractor';
 import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
 import { editFile, writeFile } from './file';
 import { readFileSpec } from './registry/builtins/read-file';
-import { searchContent as searchContentNative, searchFiles as searchFilesNative } from './search';
+import { searchContentSpec } from './registry/builtins/search-content';
+import { searchFilesSpec } from './registry/builtins/search-files';
 import { type ShellExecutor, shellTool } from './shell';
 import {
   ASK_USER_CONTRACT,
@@ -19,8 +20,6 @@ import {
   LIST_MCP_TOOLS_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
   READ_PLAN_CONTRACT,
-  SEARCH_CONTENT_CONTRACT,
-  SEARCH_FILES_CONTRACT,
   SHELL_EXECUTE_CONTRACT,
   TOOL_SEARCH_CONTRACT,
   UPDATE_PLAN_CONTRACT,
@@ -300,38 +299,16 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     },
   });
 
-  // ── search_content: dedicated code search (replaces shell_execute grep/rg) ──
+  // ── search_content / search_files: 已迁入 ToolSpec Registry（ADR-0026 S1.2）──
+  // schema-only 条目，真实执行只经 Registry dispatch（tool-runner 对应分支）。
   const searchContent = tool({
-    description: SEARCH_CONTENT_CONTRACT.description,
-    inputSchema: zodSchema(
-      z.object({
-        pattern: z.string().describe('Regex pattern to search for (e.g. "function\\s+\\w+")'),
-        path: z
-          .string()
-          .optional()
-          .describe('Directory or file path to search in (default: workspace root)'),
-        glob: z.string().optional().describe('File glob filter (e.g. "*.ts", "*.{ts,tsx}")'),
-      }),
-    ),
-    execute: async ({ pattern, path, glob }) => {
-      return JSON.stringify(
-        await searchContentNative({ workspace: input.workspace, pattern, path, glob }),
-      );
-    },
+    description: buildDescription(searchContentSpec.contract),
+    inputSchema: zodSchema(searchContentSpec.inputSchema),
   });
 
-  // ── search_files: dedicated file discovery (replaces shell_execute find/ls) ──
   const searchFiles = tool({
-    description: SEARCH_FILES_CONTRACT.description,
-    inputSchema: zodSchema(
-      z.object({
-        pattern: z.string().describe('File name pattern (e.g. "*.test.ts", "config.*")'),
-        path: z.string().optional().describe('Directory to search in (default: workspace root)'),
-      }),
-    ),
-    execute: async ({ pattern, path }) => {
-      return JSON.stringify(await searchFilesNative({ workspace: input.workspace, pattern, path }));
-    },
+    description: buildDescription(searchFilesSpec.contract),
+    inputSchema: zodSchema(searchFilesSpec.inputSchema),
   });
 
   const skillActivationEnabled =

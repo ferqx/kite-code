@@ -7,6 +7,11 @@
  * `toolSpecRegistryV1` 关闭时本 Registry 只参与解析委托，不改变执行语义。
  */
 import { readFileSpec } from './builtins/read-file';
+import { searchContentSpec } from './builtins/search-content';
+import { searchFilesSpec } from './builtins/search-files';
 import { createToolRegistry } from './registry';
 
-export const builtinToolRegistry = createToolRegistry().register(readFileSpec);
+export const builtinToolRegistry = createToolRegistry()
+  .register(readFileSpec)
+  .register(searchContentSpec)
+  .register(searchFilesSpec);

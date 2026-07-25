@@ -23,11 +23,9 @@ import {
 import { editFile, readTextContent, writeFile } from '@/core/tools/file';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
+import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
+import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
-import {
-  searchContent as searchContentNative,
-  searchFiles as searchFilesNative,
-} from '@/core/tools/search';
 import { type ShellExecutor, shellTool } from '@/core/tools/shell';
 import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type {
@@ -551,13 +549,23 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const searchPath = (request.args.path ?? '.') as string;
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    const result = await searchContentNative({
-      workspace,
-      pattern: request.args.pattern,
-      path: searchPath,
-      glob: request.args.glob,
-      allowExternal,
-    });
+    // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：执行经 dispatchRegisteredTool，
+    // 截断与 resultMeta 组装保持与旧路径字节一致。
+    const dispatched = await dispatchRegisteredTool(
+      searchContentSpec,
+      { pattern: request.args.pattern, path: searchPath, glob: request.args.glob },
+      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+    );
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `search_content ${request.args.pattern ?? ''}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
+      });
+    }
+    const result = dispatched.output;
     const stdout = truncateToolOutput(result.stdout);
     const stderr = truncateToolOutput(result.stderr);
     return withFailureGuidance(request, {
@@ -578,12 +586,23 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const searchPath = (request.args.path ?? '.') as string;
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    const result = await searchFilesNative({
-      workspace,
-      pattern: request.args.pattern,
-      path: searchPath,
-      allowExternal,
-    });
+    // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：执行经 dispatchRegisteredTool，
+    // 截断与 resultMeta 组装保持与旧路径字节一致。
+    const dispatched = await dispatchRegisteredTool(
+      searchFilesSpec,
+      { pattern: request.args.pattern, path: searchPath },
+      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+    );
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `search_files ${request.args.pattern ?? ''}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
+      });
+    }
+    const result = dispatched.output;
     const stdout = truncateToolOutput(result.stdout);
     const stderr = truncateToolOutput(result.stderr);
     return withFailureGuidance(request, {
