@@ -1,5 +1,6 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import { hasSameCommandGrant, normalizeAuthorizationState } from '@/core/harness/tool-policy';
+import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 import type { AgentPhase, ShellGrantUsed } from '@/protocol/events';
@@ -360,23 +361,32 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
   // Read-only workspace inspection — allow directly (external paths require approval)
   if (toolName === 'read_file' || toolName === 'search_content' || toolName === 'search_files') {
     const pathParam = String(toolArgs.path ?? (toolName === 'read_file' ? '<unknown>' : '.'));
+    // MSYS2 路径（/c/proj/...）先归一化为 Windows 原生格式再判断外部性，
+    // 否则 resolve() 会把 '/c/...' 挂到当前盘符，工作区内路径被误判为外部。
+    // Normalize MSYS2-style paths (/c/proj/...) before the external check;
+    // otherwise resolve() roots '/c/...' at the current drive and an
+    // in-workspace path is misclassified as external. No-op outside Windows.
+    const normalizedPath = msys2ToWindowsPath(pathParam);
     const isOutside = (() => {
-      if (pathParam.startsWith('~')) return true;
-      if (!isAbsolute(pathParam)) return false;
+      if (normalizedPath.startsWith('~')) return true;
+      if (!isAbsolute(normalizedPath)) return false;
       try {
-        const rel = relative(resolve(workspace), resolve(pathParam));
+        const rel = relative(resolve(workspace), resolve(normalizedPath));
         return rel.startsWith('..') || isAbsolute(rel);
       } catch {
         return true;
       }
     })();
     if (isOutside) {
+      // 展示归一化后的路径，与 write 分支摘要口径一致（非 Windows 平台两者相同）。
+      // Show the normalized path, consistent with the write branch summaries
+      // (identical to the raw path off Windows).
       const label =
         toolName === 'read_file'
-          ? `Read external file: ${pathParam}`
+          ? `Read external file: ${normalizedPath}`
           : toolName === 'search_content'
-            ? `Search content in external path: ${pathParam}`
-            : `Search files in external path: ${pathParam}`;
+            ? `Search content in external path: ${normalizedPath}`
+            : `Search files in external path: ${normalizedPath}`;
       if (effectiveMode === 'full_access') {
         return allow({
           risk: 'read',
@@ -558,7 +568,10 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
   // write_file / edit_file — 修改文件（工作区内外分别处理）
   // write_file / edit_file — modify files (handle internal vs external paths)
   if (toolName === 'write_file' || toolName === 'edit_file') {
-    const path = String(toolArgs.path ?? '<unknown>');
+    const rawPath = String(toolArgs.path ?? '<unknown>');
+    // 与只读分支一致：先做 MSYS2 归一化再判断外部性（非 Windows 平台透传）。
+    // Same as the read branch: normalize MSYS2 paths before the external check.
+    const path = msys2ToWindowsPath(rawPath);
     // 绝对路径可能指向工作区内部——解析后再判断外部性
     // Absolute path may resolve inside workspace — check after resolution
     const isOutside = (() => {

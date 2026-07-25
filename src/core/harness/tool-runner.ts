@@ -16,6 +16,7 @@ import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '@/core/tools/file';
+import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import {
   searchContent as searchContentNative,
   searchFiles as searchFilesNative,
@@ -41,6 +42,16 @@ import type { ToolExecutionResult } from './tool-result';
 
 function resultContentDigest(stdout: string, stderr: string, exitCode: number): string {
   return createHash('sha256').update(JSON.stringify({ stdout, stderr, exitCode })).digest('hex');
+}
+
+/** 路径参数可能是 MSYS2 形式（/c/proj/...）——先归一化再判断外部性，
+ * 与策略层（approval-policy）保持一致，避免工作区内路径被误判为外部。
+ * Path args may arrive in MSYS2 form (/c/proj/...); normalize before the
+ * external check, consistent with the policy layer, so in-workspace paths
+ * are not treated as external. No-op outside Windows. */
+function isExternalPathArg(pathArg: string): boolean {
+  const normalized = msys2ToWindowsPath(pathArg);
+  return isAbsolute(normalized) || normalized.startsWith('~');
 }
 
 /** runApprovedTool 输入参数 / Input for runApprovedTool */
@@ -244,7 +255,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   if (request.name === 'read_file') {
     const filePath = (request.args.path ?? '') as string;
-    const isExternal = isAbsolute(filePath) || filePath.startsWith('~');
+    const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
     const result = readFile({
       workspace,
@@ -276,7 +287,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       });
     }
     const editPath = (request.args.path ?? '') as string;
-    const isExternal = isAbsolute(editPath) || editPath.startsWith('~');
+    const isExternal = isExternalPathArg(editPath);
     const allowExternal = hasExecutionGrant && isExternal;
     const result = editFile({
       workspace,
@@ -341,7 +352,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   if (request.name === 'write_file') {
     const filePath = (request.args.path ?? '') as string;
-    const isExternal = isAbsolute(filePath) || filePath.startsWith('~');
+    const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
 
     // 写入前读取旧内容，用于生成 diff / Read old content before writing for diff
@@ -456,9 +467,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   if (request.name === 'search_content') {
     const searchPath = (request.args.path ?? '.') as string;
-    const isExternal = isAbsolute(searchPath) || searchPath.startsWith('~');
+    const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    const result = searchContentNative({
+    const result = await searchContentNative({
       workspace,
       pattern: request.args.pattern,
       path: searchPath,
@@ -483,9 +494,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   if (request.name === 'search_files') {
     const searchPath = (request.args.path ?? '.') as string;
-    const isExternal = isAbsolute(searchPath) || searchPath.startsWith('~');
+    const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    const result = searchFilesNative({
+    const result = await searchFilesNative({
       workspace,
       pattern: request.args.pattern,
       path: searchPath,
