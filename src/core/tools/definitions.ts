@@ -136,12 +136,6 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
           .boolean()
           .optional()
           .describe('Replace all occurrences (default: false, fails if multiple matches found)'),
-        match_mode: z
-          .enum(['exact', 'trimmed'])
-          .optional()
-          .describe(
-            'Match mode: exact (default) for verbatim matching, trimmed for per-line whitespace trimming',
-          ),
       }),
     ),
     execute: async ({ path, old_string, new_string, replace_all }) =>

@@ -20,7 +20,8 @@
       ],
       "documents": [
         "docs/active/capability-progressive-disclosure.md",
-        "docs/active/six-concept-runtime-architecture.md"
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
@@ -34,7 +35,8 @@
       "documents": [
         "docs/active/mcp-runtime-governance.md",
         "docs/active/mcp-authentication.md",
-        "docs/book/11-MCP与Skills扩展.md"
+        "docs/book/11-MCP与Skills扩展.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
@@ -88,13 +90,15 @@
         "src/core/controllers/tool-controller.ts",
         "src/core/execution/**",
         "src/core/harness/tool-policy.ts",
-        "src/core/harness/tool-runner.ts"
+        "src/core/harness/tool-runner.ts",
+        "src/core/harness/tool-requests.ts"
       ],
       "documents": [
         "docs/active/tool-gated-autonomy.md",
         "docs/active/authorization.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/adr/0025-file-tool-semantics-and-write-safety.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md"
       ]
@@ -120,7 +124,8 @@
         "docs/adr/0022-context-compaction-single-narrative.md",
         "docs/adr/0023-model-capabilities-no-builtin-catalog.md",
         "docs/adr/0024-context-compaction-manual-auto-only.md",
-        "docs/space/plans/2026-07-21-context-compaction-production-rollout.md"
+        "docs/space/plans/2026-07-21-context-compaction-production-rollout.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
@@ -155,6 +160,7 @@
         "docs/active/mcp-runtime-governance.md",
         "docs/active/capability-progressive-disclosure.md",
         "docs/adr/0025-file-tool-semantics-and-write-safety.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/11-MCP与Skills扩展.md"
@@ -169,7 +175,8 @@
         "docs/active/tui-run-status-bar.md",
         "docs/active/thought-pre-consolidation.md",
         "docs/book/07-TUI结构.md",
-        "docs/book/08-TUI交互全景.md"
+        "docs/book/08-TUI交互全景.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {

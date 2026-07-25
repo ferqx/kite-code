@@ -750,18 +750,6 @@ describe('evaluateToolApproval', () => {
     });
   });
 
-  // ── Skill / 技能 ──
-  describe('Skill', () => {
-    it('allows Skill invocation directly', () => {
-      const result = evaluateToolApproval(
-        baseParams({ toolName: 'Skill', toolArgs: { skill: 'test' } }),
-      );
-      expect(result.allowed).toBe(true);
-      expect(result.requiresApproval).toBe(false);
-      expect(result.risk).toBe('read');
-    });
-  });
-
   // ── Unknown tools / 未知工具 ──
   describe('unknown tools', () => {
     it('denies unknown tool names', () => {

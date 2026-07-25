@@ -18,7 +18,6 @@ export const ACTION_NAMES: Record<string, string> = {
   update_plan: 'Progress',
   ask_user: 'Ask',
   task: 'Task',
-  Skill: 'Skill',
   web_fetch: 'Web Fetch',
   tool_search: 'Searched for tools',
   list_mcp_resources: 'Listed MCP resources',

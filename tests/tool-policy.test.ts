@@ -380,17 +380,6 @@ describe('tool policy', () => {
     expect(decision.risk).toBe('read');
   });
 
-  test('allows Skill without approval', () => {
-    const decision = evaluateToolApproval({
-      toolName: 'Skill',
-      toolArgs: { skill: 'tdd' },
-      phase: 'building',
-    });
-    expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(false);
-    expect(decision.risk).toBe('read');
-  });
-
   // MCP 工具策略测试 / MCP tool policy tests
   describe('MCP tools', () => {
     test('requires approval for mcp__* tools by default', () => {

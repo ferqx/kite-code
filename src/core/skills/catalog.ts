@@ -29,7 +29,6 @@ interface SourceRoot {
 
 const READ_ONLY_BUILTINS = new Set([
   'read_file',
-  'list_files',
   'search_content',
   'search_files',
   'list_mcp_resources',

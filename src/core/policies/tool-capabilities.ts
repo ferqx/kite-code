@@ -24,7 +24,6 @@ export interface ToolCapability {
 
 const READ_ONLY_TOOLS = new Set([
   'read_file',
-  'list_files',
   'search_content',
   'search_files',
   'tool_search',
@@ -32,7 +31,6 @@ const READ_ONLY_TOOLS = new Set([
   'list_mcp_tools',
   'read_mcp_resource',
   'web_fetch',
-  'Skill',
   'ask_user',
 ]);
 

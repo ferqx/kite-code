@@ -44,8 +44,7 @@ export const READ_FILE_CONTRACT: ToolContract = {
       'If file not found: use shell_execute intent=inspect to locate the correct path, then retry. ' +
       'If offset is beyond file length: reduce or remove offset. ' +
       'If path is unknown: explore the workspace with shell_execute first, then retry read_file. ' +
-      'If binary file detected (NUL byte): the file is rejected. Use shell_execute with file(1) or xxd for inspection. ' +
-      'Use force: true only as a last resort to read binary content as text.',
+      'If binary file detected (NUL byte): the file cannot be read as text. Tell the user the file appears binary and ask how they want to proceed; shell_execute with file(1) or xxd can inspect it after approval.',
   },
   description: '',
 };
@@ -96,10 +95,9 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
       'JSON: ok (boolean), replacements (count), fromLine/toLine (line range), error (empty on success). ' +
       "Success: 'Replaced N occurrence(s) at line L1-L2'.",
     failureHandling:
-      'If old_string not found: the tool auto-retries with 3 progressive fallback levels. ' +
-      'Level 1: trimEnd (trailing whitespace mismatch). Level 2: per-line trim (leading/trailing whitespace mismatch). ' +
+      'If old_string not found: the tool auto-retries with progressive fallbacks ' +
+      '(Level 1: trimEnd for trailing whitespace mismatch; Level 2: per-line trim for leading/trailing whitespace mismatch). ' +
       'Only if all levels fail: re-read the file with read_file, then retry with exact content. ' +
-      "For intentional whitespace-insensitive matching, set match_mode: 'trimmed' to skip straight to per-line matching. " +
       'If duplicate match: add more surrounding context to old_string (preferred) or set replace_all: true. ' +
       'Always verify the edit with read_file afterward.',
   },
@@ -141,8 +139,7 @@ export const SEARCH_CONTENT_CONTRACT: ToolContract = {
       'Use this to find references, patterns, or specific code in the workspace. ' +
       'Use `path` to scope the search to a directory or file. ' +
       'Use `glob` to filter by file extension (e.g. "*.ts", "*.{ts,tsx}"). ' +
-      'NEVER use shell_execute with grep/rg/ag — use search_content instead. ' +
-      'NEVER use shell_execute with find/ls — use search_files instead.',
+      'Prefer search_content over shell_execute with grep/rg/ag: it applies .gitignore rules and returns structured, truncated results.',
     commonMistakes:
       'Using shell_execute(grep/rg) instead of search_content. ' +
       'Using shell_execute(find/ls) instead of search_files. ' +
@@ -170,8 +167,7 @@ export const SEARCH_FILES_CONTRACT: ToolContract = {
       'Use this to locate specific files by glob pattern (e.g. "*.test.ts", "**/config.*"). ' +
       'Pattern MUST include a file extension or name fragment — do NOT use bare "*" to dump the entire file tree. ' +
       'Use `path` to scope the search to a directory. ' +
-      'NEVER use shell_execute with find/ls for file discovery — use search_files instead. ' +
-      'NEVER use shell_execute with grep/rg for content search — use search_content instead.',
+      'Prefer search_files over shell_execute with find/ls: it applies .gitignore rules and returns structured, truncated results.',
     commonMistakes:
       'Using bare "*" pattern — too broad, returns every file. Use "*.ts" or "*.test.*" instead. ' +
       'Using shell_execute(find/ls) instead of search_files. ' +
@@ -197,8 +193,7 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       'Execute a shell command in the workspace. ' +
       'On Windows the shell is bash (Git Bash / MSYS2), NOT PowerShell or cmd.exe — always use Unix/shell syntax, never PowerShell cmdlets. ' +
       'Use forward-slashed POSIX paths (e.g. /d/app/src, not D:\\app\\src) — backslashes are bash escape characters and will break paths. ' +
-      '**VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. Instead use search_content, search_files, or task to search.** ' +
-      '**ALWAYS use search_content for search tasks. NEVER invoke `grep` or `rg` as a shell_execute command.** ' +
+      'Prefer search_content and search_files over `grep`, `rg`, `find`, and `ls` — they apply .gitignore rules and return structured results; shell_execute remains available when you need shell-specific behavior. ' +
       'Do NOT use shell_execute for: searching file contents (use search_content), finding files (use search_files), reading files (use read_file), editing files (use edit_file), writing files (use write_file). ' +
       'Use shell_execute ONLY for: tests, typecheck, builds, installs, git operations, and other terminal-only tasks. ' +
       'Set intent=inspect for read-only checks, intent=verify for tests/typecheck/lint, intent=test for test runs, intent=build for compilation, intent=git for git operations. ' +
@@ -207,7 +202,7 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       'Write a short human-readable description so the user understands what the command does. ' +
       'For commands needing approval, include grant_request (approve_once | same_command | full_access).',
     commonMistakes:
-      'Using shell_execute with grep/rg/find — use search_content/search_files instead. ' +
+      'Reaching for shell_execute with grep/rg/find when search_content/search_files would give structured, .gitignore-aware results. ' +
       'Missing description field — always provide a short human-readable summary. ' +
       'Using intent=inspect for mutating commands — the harness will reject these. ' +
       'Running interactive or long-running commands like `npm run tui`, `bun run dev`, or watch mode without timeout_ms — the tool will keep running until the process exits. ' +

@@ -61,6 +61,7 @@
 - **位置**：`src/core/tools/file.ts`
 - **问题**：`old_string` 必须逐字匹配文件内容。契约文档自己写的 common mistake：「whitespace, indentation, or blank lines differ」。模型从 tool result 剪贴代码时，多一个 trailing space 就失败。
 - **建议**：提供 `match_mode` 参数：`exact`（当前行为，默认）和 `trimmed`（忽略每行首尾空白后匹配）。
+- **结论（2026-07-26）**：不采纳。ADR-0026 决定严格 Edit 语义：模型表面已删除 `match_mode`，匹配失败由模型重读后提交准确文本，而非参数化模糊匹配。
 
 ---
 
@@ -69,6 +70,7 @@
 - **位置**：`src/core/tools/file.ts`
 - **问题**：只能全量覆写。追加一行日志或配置文件项也要传整个文件内容。大文件场景下严重浪费 context window。
 - **建议**：新增 `mode: "overwrite" | "append"` 参数，默认 `"overwrite"` 保持向后兼容。
+- **结论（2026-07-26）**：已实现后逆转。append 已上线，ADR-0025 §2 决定移除该模式（追加改由 edit_file 尾部匹配或 shell 表达）。
 
 ---
 

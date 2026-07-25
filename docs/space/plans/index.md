@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-22（归档上下文压缩生产化实施与灰度计划）
+最后更新：2026-07-26（登记 ToolSpec Registry 实施计划）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -61,6 +61,7 @@
 | [`2026-07-16-mcp-tui-readonly-list.md`](2026-07-16-mcp-tui-readonly-list.md) | archived | P0 | MCP Phase 0–2、ADR-0009/0010/0011 | 纠偏 2026-07-15 总计划中的 `/mcp` 管理中心 UI | `/mcp` 无参数只读列表、project trust prompt 独立迁移、配置 mutation 退出 TUI；[完成记录](../execution/completed/2026-07-16-mcp-tui-readonly-list.md)。 |
 | [`2026-07-16-mcp-auth-phase3.md`](2026-07-16-mcp-auth-phase3.md) | archived | P1 | Phase 2、ADR-0010/0012 | 承接旧总计划 Phase 3 的 Core auth，保留 `/mcp` 只读边界 | OS vault、credential reference、HTTP OAuth、独立恢复提示与三平台 native smoke 已完成；[完成记录](../execution/completed/2026-07-16-mcp-auth-phase3.md)。 |
 | [`2026-07-17-mcp-agent-provider-recovery-phase5.md`](2026-07-17-mcp-agent-provider-recovery-phase5.md) | archived | P2 | Phase 1/3/4、ADR-0010/0012/0014 | 替代 superseded 总计划的 Phase 5 实施依据 | Provider directory、typed failure/search、Provider Action/new turn、required admission/session waiver、App/TUI handlers 与 PTY 已完成；[完成记录](../execution/completed/2026-07-17-mcp-agent-provider-recovery-phase5.md)。 |
+| [`2026-07-26-tool-spec-registry.md`](2026-07-26-tool-spec-registry.md) | active | P0 | ADR-0026 | 落实 [ToolSpec Registry RFC](../../design/2026-07-26-tool-spec-registry-rfc.md) | 工具单一事实源：阶段 0 漂移止血（match_mode/force/Skill/list_files/死代码删除、契约措辞收敛）→ 阶段 1 Registry 骨架与六个计算原语迁移（`toolSpecRegistryV1` 灰度）。 |
 
 ## 计划文件命名规范
 

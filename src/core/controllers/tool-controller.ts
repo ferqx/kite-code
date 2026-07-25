@@ -1132,15 +1132,6 @@ export async function executeRuntimeTools(params: {
       });
       continue;
     }
-    if (request.name === 'Skill') {
-      events.push({
-        type: 'tool.rejected',
-        toolCallId,
-        reason:
-          'Legacy prompt Skill loading is retired. Use a Runtime Workflow Contract activation.',
-      });
-      continue;
-    }
     if (request.name === 'ask_user') {
       const hasQuestion = request.args.question.trim().length > 0;
       const hasBatchQuestions = (request.args.questions?.length ?? 0) > 0;

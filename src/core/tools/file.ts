@@ -190,7 +190,7 @@ function decodeTextBuffer(
     if (nonText > sampleLen * 0.3) {
       return {
         ok: false,
-        error: `Binary file detected: ${filePath}. Use force: true to read anyway.`,
+        error: `Binary file detected: ${filePath}. It cannot be read as text. Tell the user the file appears binary and ask how they want to proceed.`,
         totalLines: 0,
       };
     }
