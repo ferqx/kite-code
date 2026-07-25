@@ -252,6 +252,94 @@ describe('evaluateToolApproval', () => {
     });
   });
 
+  // ── MSYS2 path normalization (Windows only) / MSYS2 路径归一化 ──
+  // Windows 上 MSYS2 形式路径（/c/proj/...）必须先归一化再判断外部性，
+  // 否则 resolve() 会把它挂到当前盘符，工作区内路径被误判为外部。
+  // On Windows, MSYS2-style paths must be normalized before the external
+  // check; otherwise resolve() roots them at the current drive and
+  // in-workspace paths are misclassified as external.
+  const describeWin32 = process.platform === 'win32' ? describe : describe.skip;
+
+  describeWin32('MSYS2-style path normalization', () => {
+    const workspace = 'C:\\proj';
+
+    it('treats in-workspace MSYS2 paths as internal for search tools', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'search_files',
+          toolArgs: { pattern: '*.ts', path: '/c/proj/src' },
+          workspace,
+        }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.effects?.externalRead).toBeUndefined();
+    });
+
+    it('requires approval for MSYS2 paths outside the workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'search_content',
+          toolArgs: { pattern: 'foo', path: '/d/elsewhere' },
+          workspace,
+        }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+
+    it('treats in-workspace MSYS2 paths as internal for write tools', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'write_file',
+          toolArgs: { path: '/c/proj/out.txt', content: 'x' },
+          workspace,
+        }),
+      );
+      // write_file 始终需要审批，但工作区内路径不应带 externalWrite effect
+      // write_file always requires approval, but in-workspace paths must not
+      // carry the externalWrite effect.
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects?.externalWrite).toBeUndefined();
+    });
+
+    it('flags MSYS2 paths outside the workspace as external writes', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'edit_file',
+          toolArgs: { path: '/d/other/file.txt' },
+          workspace,
+        }),
+      );
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalWrite: true });
+    });
+  });
+
+  // 非 Windows 平台契约：msys2ToWindowsPath 透传，'/c/proj' 是真正的外部
+  // 绝对路径，必须要求审批。该用例在 Linux CI 上运行，锁定 no-op 契约。
+  // Off-Windows contract: msys2ToWindowsPath is a no-op, so '/c/proj' is a
+  // genuine external absolute path and must require approval. Runs on Linux
+  // CI to pin the no-op contract.
+  const describeNonWin32 = process.platform !== 'win32' ? describe : describe.skip;
+
+  describeNonWin32('MSYS2 normalization is a no-op off Windows', () => {
+    it('still requires approval for /c/... paths on non-Windows platforms', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'search_files',
+          toolArgs: { pattern: '*.ts', path: '/c/proj/src' },
+          workspace: '/tmp/test',
+        }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+  });
+
   // ── Plan tools / 计划工具 ──
   describe('plan tools', () => {
     it('allows update_plan', () => {

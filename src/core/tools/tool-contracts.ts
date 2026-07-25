@@ -136,7 +136,8 @@ export const SEARCH_CONTENT_CONTRACT: ToolContract = {
   name: 'search_content',
   sections: {
     whenToUse:
-      'Search file contents by regex pattern using ripgrep (rg). ' +
+      'Search file contents by regex pattern. ' +
+      "Files and directories ignored by .gitignore rules are excluded (like ripgrep's .gitignore handling). " +
       'Use this to find references, patterns, or specific code in the workspace. ' +
       'Use `path` to scope the search to a directory or file. ' +
       'Use `glob` to filter by file extension (e.g. "*.ts", "*.{ts,tsx}"). ' +
@@ -149,10 +150,11 @@ export const SEARCH_CONTENT_CONTRACT: ToolContract = {
       'Not reading the matched files after finding them — search is discovery, not understanding.',
     outputFormat:
       'JSON: ok (boolean), command (executed), stdout (matching lines with file:line:content), stderr. ' +
-      'rg exit code 1 means NO matches — this is normal, not an error.',
+      'No matches return ok: true with empty stdout — this is normal, not an error.',
     failureHandling:
-      'rg exit code 1: no matches found. Narrow path or adjust pattern. ' +
-      'rg not installed: falls back to grep. ' +
+      'Empty stdout with ok: true: no matches. Narrow path or adjust pattern and glob. ' +
+      'ok: false with stderr: invalid regex pattern or nonexistent path — fix the pattern or check the path. ' +
+      'Expected file missing from results: it may be excluded by .gitignore — use read_file with the exact path to read it anyway. ' +
       'Empty output: try broader pattern or wider path scope.',
   },
   description: '',
@@ -164,6 +166,7 @@ export const SEARCH_FILES_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       'Find files by name pattern in the workspace. ' +
+      "Files and directories ignored by .gitignore rules are excluded (like ripgrep's .gitignore handling). " +
       'Use this to locate specific files by glob pattern (e.g. "*.test.ts", "**/config.*"). ' +
       'Pattern MUST include a file extension or name fragment — do NOT use bare "*" to dump the entire file tree. ' +
       'Use `path` to scope the search to a directory. ' +
@@ -175,9 +178,12 @@ export const SEARCH_FILES_CONTRACT: ToolContract = {
       'Using search_files to read file contents — use read_file for that. ' +
       'Pattern without wildcards — search_files is for discovery, use read_file for known paths.',
     outputFormat:
-      'JSON: ok (boolean), command (executed), stdout (file paths, one per line), stderr.',
+      'JSON: ok (boolean), command (executed), stdout (file paths, one per line, sorted), stderr. ' +
+      'No matches return ok: true with empty stdout.',
     failureHandling:
       'No files found: retry with broader pattern or different directory. ' +
+      'ok: false with stderr: nonexistent path — check the path argument. ' +
+      'Expected file missing: it may be excluded by .gitignore — use read_file with the exact path to access it anyway. ' +
       'Too many results: narrow pattern or scope to a subdirectory.',
   },
   description: '',

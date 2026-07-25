@@ -95,6 +95,7 @@
         "docs/active/authorization.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/adr/0025-file-tool-semantics-and-write-safety.md",
+        "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md"
       ]
     },
@@ -113,6 +114,7 @@
       "documents": [
         "docs/active/model-provider-boundary.md",
         "docs/active/plan-state-reminder.md",
+        "docs/active/file-reading-shared-boundary.md",
         "docs/book/04-Agent引擎.md",
         "docs/adr/0021-context-compaction-checkpoint.md",
         "docs/adr/0022-context-compaction-single-narrative.md",
@@ -153,6 +155,7 @@
         "docs/active/mcp-runtime-governance.md",
         "docs/active/capability-progressive-disclosure.md",
         "docs/adr/0025-file-tool-semantics-and-write-safety.md",
+        "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/11-MCP与Skills扩展.md"
       ]
