@@ -157,6 +157,9 @@ function mergeStructuralTextBlocks(state: TuiState): TuiState {
       content,
       streaming: lastBuf.streaming,
       isError: buffer.some((b) => b.isError === true) || undefined,
+      // ADR-0026 题头字段随行块合并保留在首行块上
+      // Preserve the ADR-0026 header field on the first line of a merged run
+      thoughtElapsedMs: first.thoughtElapsedMs,
     });
     changed = true;
     buffer = [];
@@ -194,9 +197,86 @@ function mergeStructuralTextBlocks(state: TuiState): TuiState {
   }
   flushBuffer();
 
-  if (!changed) return state;
+  // ADR-0026：文本事件出口统一执行纯思考题头并入（见 mergePureThoughtHeader）。
+  // text/final 的所有建块路径都经过本函数，故并入点收敛于此。
+  // ADR-0026: every text/final block-building path funnels through this
+  // function, so the pure-thought header merge is applied at both exits.
+  if (!changed) return mergePureThoughtHeader(state);
   const turns = state.turns.slice();
   turns[turns.length - 1] = { blocks: merged };
+  return mergePureThoughtHeader({ ...state, turns });
+}
+
+/**
+ * ADR-0026：纯思考块被文本关闭后并入该文本块的题头。
+ *
+ * 从最后一轮末尾向前扫描：跳过尾部文本组（text + 不渲染的 reason 块），
+ * 若其前紧邻的是刚关闭的纯思考块（无工具、hasThinking、inactive），删除该块
+ * 并把它冻结的 elapsed 写为文本组首个 text 块的 `thoughtElapsedMs`（渲染为
+ * 暗色 "Thought for Xs" 题头）。循环执行到收敛——并入删除块后可能暴露出
+ * 前一对新的相邻关系（多轮 reason+text 链）。
+ *
+ * 由非探索工具 / 审批关闭的纯思考块与文本之间隔着其他块类型，永远不会被
+ * 并入——裸线继续保留（规则 19）。纯空白文本不建块，无并入对象，同样保留。
+ * 跨文本不吸收：工具聚合块不继承先行纯思考块的 hasThinking/modelMs。
+ *
+ * Merge pure-thinking blocks closed by text into that text's header
+ * (ADR-0026). Scans backward past the trailing text run (text + unrendered
+ * reason blocks) of the last turn; if the block before it is a just-closed
+ * pure thought (no tools, hasThinking, inactive), removes it and stamps its
+ * frozen elapsed onto the first text block of the run. Repeats to a
+ * fixpoint — each removal can expose a further adjacent pair (multi-round
+ * reason+text chains). Blocks closed by non-exploration tools or approval
+ * are shielded by those block kinds and keep their bare line (rule 19);
+ * absorption across text never happens.
+ */
+function mergePureThoughtHeader(state: TuiState): TuiState {
+  let next = state;
+  for (;;) {
+    const merged = mergePureThoughtHeaderOnce(next);
+    if (merged === next) return next;
+    next = merged;
+  }
+}
+
+function mergePureThoughtHeaderOnce(state: TuiState): TuiState {
+  const last = lastTurn(state);
+  if (!last || last.blocks.length < 2) return state;
+  const blocks = last.blocks;
+  // 定位尾部文本组起点（reason 块不渲染但在数组中，一并跳过）
+  // Locate the trailing text run (reason blocks don't render but occupy slots)
+  let runStart = blocks.length;
+  while (runStart > 0) {
+    const kind = blocks[runStart - 1]!.kind;
+    if (kind !== 'text' && kind !== 'reason') break;
+    runStart--;
+  }
+  if (runStart === 0 || runStart === blocks.length) return state;
+  const prev = blocks[runStart - 1]!;
+  if (
+    prev.kind !== 'tool_summary' ||
+    prev.active ||
+    prev.tools.length > 0 ||
+    prev.hasThinking !== true
+  ) {
+    return state;
+  }
+  // 题头落在文本组首个 text 块上（组内可能先夹着 reason 块）
+  // The header lands on the run's first text block (reason blocks may lead)
+  let firstTextIdx = runStart;
+  while (firstTextIdx < blocks.length && blocks[firstTextIdx]!.kind !== 'text') firstTextIdx++;
+  if (firstTextIdx === blocks.length) return state;
+  const firstText = blocks[firstTextIdx]!;
+  if (firstText.kind !== 'text' || firstText.thoughtElapsedMs != null) return state;
+  const stamped: OutputBlock = { ...firstText, thoughtElapsedMs: prev.totalElapsedMs };
+  const newBlocks = [
+    ...blocks.slice(0, runStart - 1),
+    ...blocks.slice(runStart, firstTextIdx),
+    stamped,
+    ...blocks.slice(firstTextIdx + 1),
+  ];
+  const turns = state.turns.slice();
+  turns[turns.length - 1] = { blocks: newBlocks };
   return { ...state, turns };
 }
 
@@ -284,41 +364,104 @@ function findThoughtSummary(
   return block?.kind === 'tool_summary' ? block : null;
 }
 
-function closeCurrentThought(state: TuiState): TuiState {
+/** Thought 关闭原因（ADR-0027 / ADR-0030 / 规则 23-24：决定思考归属是否延续）：
+ *  - 'text' / 'tool'（非探索工具）/ 'human_wait'（审批 / 提问 / 方案评审等待）：
+ *    阶段边界但思路归属未尽——若关闭的块 hasThinking，记录延续上下文
+ *    （modelMs），边界之后新建的探索聚合继承之（ADR-0027）；
+ *  - 'boundary'（重试 / 错误 / 取消等生命周期边界）：思考归属终结，清除延续。
+ *  注意：模型调用（model.requested）不再是关闭原因——阶段块跨调用存活
+ *  （ADR-0030 / 规则 24）；文本在非流式模型下也不关闭活跃阶段块，而是作为
+ *  旁白吸收进块顶（pendingCaption），仅在流式回退路径与 final 事件走 'text' 关闭。
+ *  Cause of a Thought closure — decides whether thinking attribution carries
+ *  over (ADR-0027 / ADR-0030): text / non-exploration tools / human waits are
+ *  phase boundaries that still carry attribution forward; only lifecycle
+ *  boundaries end it. Model calls no longer close Thoughts (the phase block
+ *  survives across calls, rule 24); with a non-streaming model, visible text
+ *  is absorbed into the active phase block instead of closing it. */
+type ThoughtCloseCause = 'text' | 'tool' | 'human_wait' | 'boundary';
+
+function closeCurrentThought(state: TuiState, cause: ThoughtCloseCause = 'boundary'): TuiState {
   const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
+  // 无活跃 Thought 时不动 thoughtCarryover：先行边界（如非探索工具）记录的
+  // 延续上下文要跨过中间的空关闭存活，直到被 reason / model.requested /
+  // 生命周期边界清除（规则 23）。
+  // With no active Thought, leave thoughtCarryover untouched until a reason /
+  // model.requested / lifecycle boundary clears it (rule 23).
   if (!summary) return { ...state, currentThoughtSummaryId: undefined };
 
-  const next = updateToolSummaryById(state, summary.id, (block) => {
-    // 纯思考块（无工具）同样保留并 settle —— 思考链 reason→text/非探索工具后
-    // 必须留下 "Thought for Xs" 指示块，不能在关闭时删除。
-    // Pure-thinking blocks (no tools) are kept and settled — the
-    // "Thought for Xs" indicator must survive closing, never deleted.
-    const hasError = block.tools.some(
-      (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
-    );
-    const anyCancelled = block.tools.some((t) => t.status === 'cancelled');
-    const allSettled = block.tools.every((t) => t.status !== 'queued' && t.status !== 'running');
-    // Only assign result when all tools have actually settled.
-    // If tools are still running, leave result undefined — later tool_done
-    // events will recalculate it (lines ~633-648).
-    const result = allSettled
-      ? hasError
-        ? ('error' as const)
-        : anyCancelled
-          ? ('cancelled' as const)
-          : ('done' as const)
-      : undefined;
-    return {
-      ...block,
-      active: false,
-      latestActivity: undefined,
-      // 有模型调用时长时以其冻结（对齐 Claude Code），否则回退墙钟
-      // Freeze at model-call duration when known (CC parity), else wall clock
-      totalElapsedMs: block.modelMs ?? Date.now() - block.createdAt,
-      ...(result ? { result } : {}),
+  // 有模型调用时长时以其冻结（对齐 Claude Code），否则回退墙钟
+  // Freeze at model-call duration when known (CC parity), else wall clock
+  const frozenElapsed = summary.modelMs ?? Date.now() - summary.createdAt;
+  // ADR-0030 / 规则 24 + ADR-0026：纯思考块被文本关闭（非流式模型的最终回答
+  // 路径）时，待确认旁白就是最终回答本身——并入文本题头：删除思考块，冻结
+  // 时长写为文本块的 thoughtElapsedMs（信息不丢失）。
+  // Pure-thinking block closed by text: the pending caption IS the final
+  // answer — merge it into the text header (remove the thought block, stamp
+  // its frozen elapsed onto the text block, ADR-0026).
+  const mergeHeader =
+    summary.tools.length === 0 && cause === 'text' && summary.pendingCaption != null;
+
+  let next: TuiState;
+  if (mergeHeader) {
+    next = updateToolSummaryById(state, summary.id, () => null);
+  } else {
+    next = updateToolSummaryById(state, summary.id, (block) => {
+      // 纯思考块（无工具）同样保留并 settle —— reason→非探索工具后必须留下
+      // "Thought for Xs" 裸线（规则 19）。流式路径下由文本关闭的纯思考块随后
+      // 由 mergePureThoughtHeader 并入题头（ADR-0026：删除发生在时长转移后）。
+      // Pure-thinking blocks are kept and settled — the bare "Thought for Xs"
+      // line must survive reason→non-exploration-tool (rule 19); on the
+      // streaming path, mergePureThoughtHeader merges them into the header.
+      const hasError = block.tools.some(
+        (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
+      );
+      const anyCancelled = block.tools.some((t) => t.status === 'cancelled');
+      const allSettled = block.tools.every((t) => t.status !== 'queued' && t.status !== 'running');
+      // Only assign result when all tools have actually settled.
+      // If tools are still running, leave result undefined — later tool_done
+      // events will recalculate it.
+      const result = allSettled
+        ? hasError
+          ? ('error' as const)
+          : anyCancelled
+            ? ('cancelled' as const)
+            : ('done' as const)
+        : undefined;
+      return {
+        ...block,
+        active: false,
+        latestActivity: undefined,
+        totalElapsedMs: frozenElapsed,
+        // 待确认旁白在下方脱离为独立块——块上清除，避免字幕与文本块重复渲染
+        // Pending caption is detached below; clear it here to avoid duplicates
+        pendingCaption: undefined,
+        ...(result ? { result } : {}),
+      };
+    });
+  }
+  // ADR-0030 / 规则 24：脱离未确认的待确认旁白——阶段结束时仍无只读工具确认
+  // 的文本（最终回答 / 写入前旁白）成为块后的独立文本块（活跃块必在末尾，
+  // 追加顺序即时序）。已被工具确认的字幕（captions）留在块内不动。
+  // Detach an unconfirmed pending caption: text with no read-only tool after
+  // it (final answer / pre-write narration) becomes a standalone text block
+  // after the settled block. Confirmed captions stay inside the block.
+  if (summary.pendingCaption != null) {
+    const textBlock: OutputBlock = {
+      id: next.nextBlockId,
+      kind: 'text',
+      content: summary.pendingCaption,
+      ...(mergeHeader ? { thoughtElapsedMs: frozenElapsed } : {}),
     };
-  });
-  return { ...next, currentThoughtSummaryId: undefined };
+    next = appendBlock(next, textBlock);
+  }
+  // ADR-0027 / ADR-0030 / 规则 23：文本 / 非探索工具 / 人机等待关闭 hasThinking
+  // 的块时记录延续上下文——边界之后新建的探索聚合继承 hasThinking/modelMs；
+  // 仅生命周期边界（'boundary'）终结归属。
+  // Text / non-exploration tool / human wait closures of a hasThinking block
+  // record carryover; only lifecycle boundaries end attribution.
+  const carryover =
+    cause !== 'boundary' && summary.hasThinking === true ? { modelMs: summary.modelMs } : undefined;
+  return { ...next, currentThoughtSummaryId: undefined, thoughtCarryover: carryover };
 }
 
 function updateCurrentThoughtActivity(
@@ -386,6 +529,18 @@ function updateCurrentThoughtActivity(
   };
 }
 
+/** ADR-0030 / 规则 24：把一次无 reasoning 的模型调用时长累加进活跃阶段块。
+ *  阶段时长 = Σ 各次模型调用时长（规则 22），与思考是否存在无关。
+ *  Add a no-reasoning model call's duration to the active phase block. */
+function addThoughtDuration(state: TuiState, durationMs: number): TuiState {
+  const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
+  if (!summary?.active) return state;
+  return updateToolSummaryById(state, summary.id, (block) => {
+    const modelMs = (block.modelMs ?? 0) + durationMs;
+    return { ...block, modelMs, totalElapsedMs: modelMs };
+  });
+}
+
 export function handleEventAction(state: TuiState, event: RenderEvent): TuiState {
   // Guard: malformed events from corrupted checkpoints must not crash the TUI
   if (!event.data) return state;
@@ -422,14 +577,40 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
 
   switch (event.type) {
     case 'text': {
-      // 先关闭当前 Thought，再判断是否为 whitespace。即使文本自身不渲染（纯空白），
-      // 模型已经开始输出就代表思考周期结束，Thought 必须关闭以防后续工具无限累积。
-      // Close the current Thought BEFORE the whitespace check. Even if the text
-      // itself isn't rendered (all whitespace), the model has begun output —
-      // the thinking cycle is over and the Thought must close to prevent
-      // unbounded tool accumulation in subsequent exploration phases.
-      state = closeCurrentThought(state);
+      // ADR-0030 / 规则 24：纯空白文本整体忽略——阶段模型里它既不代表模型
+      // 开始输出（非流式调用不产生空白文本），也不应关闭 Thought 或产生空行。
+      // Blank/whitespace-only text is ignored entirely under the phase model.
       if (!/\S/u.test(event.data.text)) return state;
+
+      // ADR-0030 / 规则 24：旁白文本吸收。阶段块活跃时，文本吸收为
+      // pendingCaption（渲染于块顶），等随后到来的只读工具确认（确认 →
+      // captions，永久留在块内）；阶段结束时仍未确认的由 closeCurrentThought
+      // 脱离为独立文本块（最终回答），纯思考块被文本关闭时并入该文本块
+      // 题头（ADR-0026）。多段旁白按时间顺序累积；流式提供商的增量文本
+      // （新事件包含旧全文）以 startsWith 识别并替换，避免重复。
+      // Narration absorption (ADR-0030): while the phase block is active,
+      // text is absorbed into pendingCaption (rendered at the block top),
+      // confirmed into captions by the next read-only tool; unconfirmed text
+      // is detached at phase end (final answers) or merges into the header
+      // when it closes a pure-thinking block (ADR-0026). Multiple narrations
+      // accumulate chronologically; streaming providers resend the full text
+      // each event — startsWith detects growth and replaces instead of
+      // duplicating.
+      const activeThought = findThoughtSummary(state, state.currentThoughtSummaryId);
+      if (activeThought?.active) {
+        return updateToolSummaryById(state, activeThought.id, (block) => ({
+          ...block,
+          pendingCaption:
+            block.pendingCaption != null &&
+            (event.data.text === block.pendingCaption ||
+              event.data.text.startsWith(block.pendingCaption))
+              ? event.data.text
+              : block.pendingCaption != null
+                ? `${block.pendingCaption}\n\n${event.data.text}`
+                : event.data.text,
+        }));
+      }
+      state = closeCurrentThought(state, 'text');
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
 
@@ -545,22 +726,25 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       return mergeStructuralTextBlocks(appended);
     }
     case 'model_requested': {
-      // 新一轮模型调用开始：kernel 只在上一轮全部工具结果收齐后才会再次
-      // 调用模型，因此此时带工具的活跃 Thought 块里所有工具必然已 settled，
-      // 必须在此关闭——否则最终回复生成期间（generateText 非流式，此间无
-      // 任何事件）块会"工具全完成却持续闪烁运行中"。纯思考块（无工具）
-      // 按规则 1/19 保持思考链连续性，由 text 到达时统一关闭。
-      // A new model call begins: the kernel only re-invokes the model after
-      // collecting every tool result from the previous round, so an active
-      // Thought with tools necessarily has all tools settled and must close
-      // here — otherwise it would keep blinking through the final-answer
-      // generation. Pure-thinking blocks (no tools) keep chain continuity
-      // (rules 1/19) and close when text arrives.
-      const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
-      if (summary?.active && summary.tools.length > 0) return closeCurrentThought(state);
-      return state;
+      // ADR-0030 / 规则 24：模型调用不是阶段边界。kernel 收齐上一轮工具结果
+      // 后重新调用模型属于实现细节（分批喂工具结果），用户感知的是一段连续
+      // 探索：Thought 块跨调用存活——圆点持续闪烁、时长跨调用累加、旁白继续
+      // 吸收，直到真正的阶段边界（文本脱离 / 非探索工具 / 人机等待 / 生命
+      // 周期）统一关闭 settle。（取代 ADR-0025 在此关闭的 settle 行为；
+      // model.requested 即时发出本身保留。）
+      // 新模型调用 = 新决策：仅清除思考延续上下文（ADR-0027）。
+      // A model call is NOT a phase boundary (ADR-0030 / rule 24): the phase
+      // block survives across calls — the dot keeps blinking, elapsed keeps
+      // accumulating, narrations keep absorbing — until a real phase boundary
+      // closes it. (Supersedes the ADR-0025 settle-on-requested behavior; the
+      // immediate emission of model.requested itself is retained.) Only the
+      // thinking carryover is dropped (new call = new decision, ADR-0027).
+      return state.thoughtCarryover ? { ...state, thoughtCarryover: undefined } : state;
     }
     case 'reason': {
+      // 新思考开始：旧的思考延续上下文作废（ADR-0027）
+      // New thinking begins — any pending carryover is superseded
+      if (state.thoughtCarryover) state = { ...state, thoughtCarryover: undefined };
       if (state.currentRunReasonId != null) {
         const reasonBlock = findBlockById(state, state.currentRunReasonId);
         if (reasonBlock?.kind === 'reason') {
@@ -590,7 +774,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const isExploration = isExplorationToolEvent(event.data);
       const toolStatus = event.data.status ?? 'running';
       // task tool has its own subagent block
-      if (!isExploration) state = closeCurrentThought(state);
+      if (!isExploration) state = closeCurrentThought(state, 'tool');
       if (event.data.name === 'task') return state;
       // 已审批方案后的 update_plan 调用是进度追踪，不在消息列表中展示
       if (event.data.name === 'update_plan' && state.status.plan !== null) return state;
@@ -636,6 +820,16 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           const updated: Extract<OutputBlock, { kind: 'tool_summary' }> = {
             ...currentThought,
             tools,
+            // ADR-0030 / 规则 24：只读工具确认待确认旁白为正式块顶字幕。
+            // 纯思考块借此转为工具阶段块（开始渲染统计标签与步骤树）。
+            // A read-only tool confirms the pending caption; a pure-thinking
+            // block becomes a tool phase block here.
+            ...(currentThought.pendingCaption != null
+              ? {
+                  captions: [...(currentThought.captions ?? []), currentThought.pendingCaption],
+                  pendingCaption: undefined,
+                }
+              : {}),
             // 有模型调用时长时 elapsed 不随工具执行增长（对齐 Claude Code）
             // Elapsed stays frozen at model-call duration while tools run (CC parity)
             totalElapsedMs: currentThought.modelMs ?? now - currentThought.createdAt,
@@ -659,17 +853,28 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           };
         }
 
-        // 创建新 tool_summary（无前置 reason → 无思考）
+        // 创建新 tool_summary。思考延续（ADR-0027 / 规则 23）：被非探索工具 /
+        // 人机等待关闭的 Thought，其同一响应批次内的后续探索聚合继承
+        // hasThinking / modelMs（时长仍是同一次模型调用，规则 22 语义不变）；
+        // 无延续时才是无思考聚合（hasThought=false，规则 20）。
+        // Create a new tool_summary. With thinking carryover (ADR-0027):
+        // exploration tools following a non-exploration / human-wait boundary
+        // within the same response batch inherit hasThinking / modelMs (same
+        // model call, so rule 22 timing stays truthful); without carryover
+        // the aggregate is non-thinking (rule 20).
+        const carry = finalized.thoughtCarryover;
         const id = finalized.nextBlockId;
         const block: OutputBlock = {
           id,
           kind: 'tool_summary',
           tools: [entry],
-          totalElapsedMs: 0,
+          totalElapsedMs: carry?.modelMs ?? 0,
+          ...(carry?.modelMs != null ? { modelMs: carry.modelMs } : {}),
           createdAt: now,
           summaryLine: buildToolSummaryLine([entry]),
           active: true,
-          hasThought: false,
+          hasThought: carry != null,
+          ...(carry ? { hasThinking: true } : {}),
           latestActivity: { kind: 'tool', callId: event.data.call_id },
           timeline: [{ seq: 1, kind: 'tool' as const, callId: event.data.call_id }],
           nextTimelineSeq: 1,
@@ -981,7 +1186,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       return { ...state, status: next, interactionMode: nextInteractionMode };
     }
     case 'model_retry': {
-      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'boundary'));
       const id = finalized.nextBlockId;
       const maxAttempts = event.data.maxAttempts;
       const delayLabel =
@@ -1054,7 +1259,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
     case 'final': {
       if (event.data.length === 0) return state;
       if (!/\S/u.test(event.data)) return state;
-      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'text'));
       const last = lastTurn(finalized);
       // Reconstruct full text from all per-line text blocks in this turn,
       // since with line-by-line output each block holds only one line.
@@ -1090,7 +1295,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
     case 'need_approval': {
       // Dedup: side-channel + stream interrupt can both emit need_approval for the same request.
       if (state.interrupt?.kind === 'approval') return state;
-      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait'));
       const block: OutputBlock = {
         id: finalized.nextBlockId,
         kind: 'approval',
@@ -1151,7 +1356,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       // Dedup: side-channel + stream interrupt can both emit need_input for the same request.
       // Skip if a question block is already active (interrupt pending).
       if (state.interrupt?.kind === 'input') return state;
-      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait'));
       const block: OutputBlock = {
         id: finalized.nextBlockId,
         kind: 'question',
@@ -1179,7 +1384,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const planSummary = plan.description
         ? `${plan.description}\n\nSteps:\n${stepsText}`
         : `Steps:\n${stepsText}`;
-      let next = closeCurrentThought(state);
+      let next = closeCurrentThought(state, 'human_wait');
       if (planCard?.kind === 'tool_card') {
         next = replaceBlockById(next, planCard.id, {
           ...planCard,
@@ -1200,10 +1405,11 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       };
     }
     case 'error': {
-      // 错误打断当前思考周期——恢复/重试后模型从头开始推理，不应延续旧 Thought。
+      // 错误打断当前思考周期——恢复/重试后模型从头开始推理，不应延续旧 Thought，
+      // 思考延续上下文一并清除（'boundary'，ADR-0027）。
       // An error breaks the current thinking cycle — recovery/retry starts fresh,
-      // so the old Thought must close to avoid incorrect elapsed time accumulation.
-      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state));
+      // so the old Thought must close and the carryover is cleared.
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'boundary'));
       const prefix = event.data.recoverable ? '⟳ Recoverable error' : 'Error';
       const id = finalized.nextBlockId;
       const block: OutputBlock = {
@@ -1479,6 +1685,12 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           type: 'reason',
           data: { text: event.reasoningText, durationMs: event.durationMs },
         });
+      else if (event.durationMs != null)
+        // ADR-0030 / 规则 24：无 reasoning 的调用同样计入阶段时长（Σ 各次
+        // 模型调用，规则 22）。reason 事件已携带 durationMs，仅在无思考时补计。
+        // Non-reasoning calls also add to the phase duration (Σ model calls);
+        // reason events already carry their own durationMs.
+        next = addThoughtDuration(next, event.durationMs);
       if (event.text) next = handleEventAction(next, { type: 'text', data: { text: event.text } });
       return next;
     }

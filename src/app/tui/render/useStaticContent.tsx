@@ -90,7 +90,9 @@ export function blockFingerprint(b: OutputBlock): string {
   let extra = '';
   switch (b.kind) {
     case 'text':
-      extra = b.streaming ? `:s:${b.content.length}` : ':f';
+      extra =
+        (b.streaming ? `:s:${b.content.length}` : ':f') +
+        (b.thoughtElapsedMs != null ? `:th${b.thoughtElapsedMs}` : '');
       break;
     case 'tool_card':
       // liveOutput 头尾各 8 字符 + totalLines 做指纹：窗口滑动 → 头部变；新增行 → 尾部变 / 计数变
@@ -108,7 +110,10 @@ export function blockFingerprint(b: OutputBlock): string {
           ? b.latestActivity.kind === 'thinking'
             ? `:th:${b.latestActivity.text.length}:${b.latestActivity.text.slice(-16)}`
             : `:tc:${b.latestActivity.callId}`
-          : '');
+          : '') +
+        // ADR-0030 旁白字幕变化同样触发重算 / caption changes invalidate too
+        (b.captions?.length ? `:cap${b.captions.length}:${b.captions.join('|').length}` : '') +
+        (b.pendingCaption != null ? `:pc${b.pendingCaption.length}` : '');
       break;
     case 'subagent':
       extra =

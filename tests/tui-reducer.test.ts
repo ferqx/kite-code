@@ -38,7 +38,7 @@ function tcEvt(
 ): LegacyRenderAction {
   return {
     type: 'EVENT',
-    event: { type: 'tool_call', data: { call_id: callId, name: name as any, args, status } },
+    event: { type: 'tool_call', data: { call_id: callId, name, args, status } },
   };
 }
 function tsEvt(callId: string): LegacyRenderAction {
@@ -149,7 +149,7 @@ describe('eventReducer (blocks model)', () => {
       const s = dispatch(fresh(), textEvt('hello'));
       expect(flatBlocks(s)).toHaveLength(1);
       expect(flatBlocks(s)[0]!.kind).toBe('text');
-      expect((flatBlocks(s)[0] as any).content).toBe('hello');
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe('hello');
     });
     test('assigns unique incrementing ids to blocks', () => {
       let s = fresh();
@@ -205,22 +205,210 @@ describe('eventReducer (blocks model)', () => {
       });
     });
 
-    test('pure-thinking Thought persists settled after assistant text closes it', () => {
+    test('pure-thinking phase merges into the answer header when the final closes it (ADR-0026 via ADR-0030)', () => {
       let s = fresh();
-      s = dispatch(s, reasonEvt('thinking before answering'));
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'thinking before answering', durationMs: 2093 } },
+      });
+      // 非流式模型：文本先吸收为 pendingCaption（阶段块保持活跃）
+      // Non-streaming: text is absorbed pending confirmation; the block stays active
       s = dispatch(s, textEvt('Here is the answer.'));
+      let summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.active).toBe(true);
+      expect(summaries[0]!.pendingCaption).toBe('Here is the answer.');
+
+      // final 关闭阶段：纯思考块的 pendingCaption 即最终回答 → 并入题头
+      // final closes the phase: the pure block's caption IS the answer → header merge
+      s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: 'Here is the answer.' } });
+
+      summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(0);
+      const text = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      expect(text).toBeDefined();
+      expect(text!.content).toBe('Here is the answer.');
+      expect(text!.thoughtElapsedMs).toBe(2093);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+    });
+
+    test('reason → text → exploration tools: text becomes a confirmed caption inside one phase block (ADR-0030)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'let me look', durationMs: 2000 } },
+      });
+      s = dispatch(s, textEvt('Let me read the core files.'));
+      // 文本吸收进同一个阶段块，不创建独立文本块
+      expect(flatBlocks(s).some((b) => b.kind === 'text')).toBe(false);
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.ts' }));
+      s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.ts' }));
+
+      const blocks = flatBlocks(s);
+      // 只有一个阶段块：思考 + 旁白 + 工具同块，无独立文本块
+      expect(blocks.some((b) => b.kind === 'text')).toBe(false);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      const summary = summaries[0]!;
+      expect(summary.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
+      expect(summary.hasThinking).toBe(true);
+      expect(summary.modelMs).toBe(2000);
+      expect(summary.summaryLine).toBe('read 2 files');
+      // 只读工具确认旁白为正式块顶字幕
+      expect(summary.captions).toEqual(['Let me read the core files.']);
+      expect(summary.pendingCaption).toBeUndefined();
+      expect(summary.active).toBe(true);
+    });
+
+    test('pure thought closed by non-exploration tool keeps bare line even when text follows (ADR-0026 boundary)', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('thinking before writing'));
+      s = dispatch(s, tcEvt('c1', 'write_file', { path: 'a.txt' }));
+      s = dispatch(s, textEvt('Done writing.'));
+
+      const blocks = flatBlocks(s);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      // 被非探索工具关闭的纯思考块与后续文本隔着 tool_card，永不并入
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools).toHaveLength(0);
+      expect(summaries[0]!.active).toBe(false);
+      const text = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      expect(text?.thoughtElapsedMs).toBeUndefined();
+    });
+
+    test('whitespace text is ignored entirely — the phase block keeps accumulating (ADR-0030)', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('thinking'));
+      s = dispatch(s, textEvt('   \n  '));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.ts' }));
+
+      const blocks = flatBlocks(s);
+      expect(blocks.some((b) => b.kind === 'text')).toBe(false);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      // 空白文本不关闭 Thought：思考与工具仍是同一个活跃阶段块
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools).toHaveLength(1);
+      expect(summaries[0]!.active).toBe(true);
+      expect(summaries[0]!.hasThinking).toBe(true);
+    });
+
+    test('multi-round pure-thinking chain accumulates modelMs into the merged header (rules 19/24)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'round one', durationMs: 1000 } },
+      });
+      // model.requested 不关闭 Thought（ADR-0030），思考链跨调用延续
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'r1' },
+      });
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'round two', durationMs: 1500 } },
+      });
+      s = dispatch(s, textEvt('The answer.'));
+      s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: 'The answer.' } });
 
       const summaries = flatBlocks(s).filter(
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
-      // 纯思考块关闭后保留（"Thought for Xs" 指示块不消失）
-      expect(summaries).toHaveLength(1);
-      expect(summaries[0]!.tools).toHaveLength(0);
-      expect(summaries[0]!.active).toBe(false);
-      expect(summaries[0]!.result).toBe('done');
-      expect(summaries[0]!.latestActivity).toBeUndefined();
+      expect(summaries).toHaveLength(0);
+      const text = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      // 1000 + 1500 = 2500ms 累加后并入题头
+      expect(text?.thoughtElapsedMs).toBe(2500);
+    });
+
+    test('thinking carries over a task (sub-agent) boundary within the same batch (ADR-0027)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'exploring the module', durationMs: 3000 } },
+      });
+      s = dispatch(s, tcEvt('c1', 'search_files', { pattern: 'reducer*' }));
+      s = dispatch(s, tcEvt('c2', 'task', { description: 'deep exploration' }));
+      s = dispatch(s, tcEvt('c3', 'read_file', { path: 'a.ts' }));
+      s = dispatch(s, tcEvt('c4', 'read_file', { path: 'b.ts' }));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      // 边界前：search 块带思考标记
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1']);
       expect(summaries[0]!.hasThinking).toBe(true);
-      expect(s.currentThoughtSummaryId).toBeUndefined();
+      expect(summaries[0]!.modelMs).toBe(3000);
+      // 边界后：read 聚合继承思考标记与同一次模型调用时长（规则 22 语义不变）
+      expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c3', 'c4']);
+      expect(summaries[1]!.hasThinking).toBe(true);
+      expect(summaries[1]!.hasThought).toBe(true);
+      expect(summaries[1]!.modelMs).toBe(3000);
+      expect(summaries[1]!.totalElapsedMs).toBe(3000);
+      expect(summaries[1]!.summaryLine).toBe('read 2 files');
+    });
+
+    test('thinking carries over a write-tool boundary the same way (ADR-0027)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'read, note, keep reading', durationMs: 2000 } },
+      });
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.ts' }));
+      s = dispatch(s, tcEvt('w1', 'write_file', { path: 'notes.md' }));
+      s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.ts' }));
+
+      const blocks = flatBlocks(s);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.summaryLine).toBe('read 1 file');
+      expect(summaries[1]!.hasThinking).toBe(true);
+      expect(summaries[1]!.modelMs).toBe(2000);
+      expect(summaries[1]!.summaryLine).toBe('read 1 file');
+      // 写入卡片位于两个聚合块之间
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'w1')).toBe(true);
+    });
+
+    test('model.requested clears carryover — next call without reason stays non-thinking (ADR-0027)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'thinking', durationMs: 1000 } },
+      });
+      s = dispatch(s, tcEvt('c1', 'task', {}));
+      // 新一轮模型调用 = 新决策，延续清除
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'r1' },
+      });
+      s = dispatch(s, tcEvt('c2', 'read_file', { path: 'a.ts' }));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.hasThinking).toBe(true);
+      // 新调用无 reasoning → 非思考聚合，不继承
+      expect(summaries[1]!.hasThinking).toBeUndefined();
+      expect(summaries[1]!.hasThought).toBe(false);
+      expect(summaries[1]!.modelMs).toBeUndefined();
     });
 
     test('pure-thinking Thought persists when a non-exploration tool follows', () => {
@@ -255,12 +443,12 @@ describe('eventReducer (blocks model)', () => {
       expect(summaries[0]!.active).toBe(false);
     });
 
-    test('model.requested settles an active tool-backed Thought before the next model round', () => {
+    test('model.requested keeps an active tool-backed Thought alive across calls (ADR-0030 phase block)', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('thinking'));
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
       s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
-      // 新一轮模型调用开始（kernel 已收齐上一轮工具结果）
+      // 新一轮模型调用 = kernel 分批实现细节，不是阶段边界：块保持活跃
       s = dispatch(s, {
         type: 'RUNTIME_EVENT',
         event: { type: 'model.requested', requestId: 'req-1' },
@@ -271,11 +459,10 @@ describe('eventReducer (blocks model)', () => {
       );
       expect(summary).toBeDefined();
       expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
-      // 已 settle：最终回复生成期间不再显示运行中
-      expect(summary!.active).toBe(false);
-      expect(summary!.result).toBe('done');
-      expect(summary!.latestActivity).toBeUndefined();
-      expect(s.currentThoughtSummaryId).toBeUndefined();
+      // 阶段块跨调用存活：圆点持续闪烁，等待后续思考/工具继续流入
+      // （result 由工具状态推导，工具全完成即为 done，不影响活跃态渲染）
+      expect(summary!.active).toBe(true);
+      expect(s.currentThoughtSummaryId).toBe(summary!.id);
     });
 
     test('model.requested keeps a pure-thinking Thought active (chain continues until text)', () => {
@@ -317,11 +504,8 @@ describe('eventReducer (blocks model)', () => {
       expect(summary).toBeDefined();
       expect(summary!.totalElapsedMs).toBe(3210);
 
-      // settle 后仍以模型调用时长冻结
-      s = dispatch(s, {
-        type: 'RUNTIME_EVENT',
-        event: { type: 'model.requested', requestId: 'req-dur' },
-      });
+      // 阶段边界关闭后仍以模型调用时长冻结
+      s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: 'done' } });
       summary = flatBlocks(s).find(
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
@@ -330,27 +514,64 @@ describe('eventReducer (blocks model)', () => {
       expect(summary!.totalElapsedMs).toBe(3210);
     });
 
-    test('model.requested settle splits multi-round exploration into separate Thought blocks', () => {
+    test('multi-round exploration stays ONE phase block across model.requested (ADR-0030)', () => {
       let s = fresh();
-      s = dispatch(s, reasonEvt('round one'));
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'round one', durationMs: 3000 } },
+      });
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
       s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
       s = dispatch(s, {
         type: 'RUNTIME_EVENT',
         event: { type: 'model.requested', requestId: 'req-3' },
       });
-      s = dispatch(s, reasonEvt('round two'));
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'round two', durationMs: 3000 } },
+      });
       s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.txt' }));
 
       const summaries = flatBlocks(s).filter(
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
-      // 新一轮模型调用切分 Thought：第一轮已 settle，第二轮为新块
-      expect(summaries).toHaveLength(2);
-      expect(summaries[0]!.active).toBe(false);
-      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1']);
-      expect(summaries[1]!.active).toBe(true);
-      expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c2']);
+      // 不切分：两轮工具同块，时长跨调用累加（3000 + 3000）
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.active).toBe(true);
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
+      expect(summaries[0]!.modelMs).toBe(6000);
+      expect(summaries[0]!.totalElapsedMs).toBe(6000);
+      expect(summaries[0]!.summaryLine).toBe('read 2 files');
+    });
+
+    test('a model call without reasoning still adds its duration to the phase (ADR-0030 rule 24)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'model.responded',
+          messageId: 'm1',
+          reasoningText: 'think',
+          durationMs: 1000,
+        },
+      });
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-x' },
+      });
+      // 第二次调用无 reasoning：时长仍计入阶段 Σ
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.responded', messageId: 'm2', durationMs: 800 },
+      });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary!.modelMs).toBe(1800);
+      expect(summary!.totalElapsedMs).toBe(1800);
+      expect(summary!.hasThinking).toBe(true);
     });
   });
 
@@ -664,25 +885,27 @@ describe('eventReducer (blocks model)', () => {
       expect(t2.status).toBe('running');
     });
 
-    test('visible assistant text closes the current Thought before the next exploration tool', () => {
+    test('visible assistant text is absorbed into the phase block and confirmed by the next exploration tool (ADR-0030)', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
       s = dispatch(s, tdEvt('c1', 'read_file', true, 'a'));
       s = dispatch(s, textEvt('I checked that file.'));
+      // 文本被吸收：不关闭 Thought、不建文本块
+      expect(flatBlocks(s).some((b) => b.kind === 'text')).toBe(false);
       s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.txt' }));
 
       const summaries = flatBlocks(s).filter(
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
-      expect(summaries).toHaveLength(2);
-      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1']);
-      expect(summaries[0]!.active).toBe(false);
-      expect(summaries[0]!.latestActivity).toBeUndefined();
-      expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c2']);
-      expect(summaries[1]!.active).toBe(true);
+      // 同一个阶段块：两批工具 + 块顶旁白
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
+      expect(summaries[0]!.active).toBe(true);
+      expect(summaries[0]!.captions).toEqual(['I checked that file.']);
+      expect(summaries[0]!.pendingCaption).toBeUndefined();
     });
 
-    test('late tool_started does not reactivate a Thought closed by assistant text', () => {
+    test('non-exploration tool settles the phase and detaches the unconfirmed caption (ADR-0030)', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('checking files'));
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }, 'queued'));
@@ -690,15 +913,59 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, tsEvt('c1'));
       s = dispatch(s, tcEvt('c2', 'shell_execute', { command: 'npm test' }));
 
-      const summaries = flatBlocks(s).filter(
+      const blocks = flatBlocks(s);
+      const summaries = blocks.filter(
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
       expect(summaries).toHaveLength(1);
       expect(summaries[0]!.active).toBe(false);
       expect(summaries[0]!.latestActivity).toBeUndefined();
       expect(summaries[0]!.tools[0]!.status).toBe('running');
+      expect(summaries[0]!.pendingCaption).toBeUndefined();
+      // 未被只读工具确认的旁白脱离为独立文本块（无题头：思考时长留在块里）
+      const text = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      expect(text?.content).toBe('I checked that file.');
+      expect(text?.thoughtElapsedMs).toBeUndefined();
       expect(s.currentThoughtSummaryId).toBeUndefined();
-      expect(flatBlocks(s).some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+    });
+
+    test('final answer detaches from a tool phase block as standalone text without header (ADR-0030)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'explore', durationMs: 2000 } },
+      });
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-f' },
+      });
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'synthesize', durationMs: 1500 } },
+      });
+      s = dispatch(s, textEvt('The analysis follows.'));
+      s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: 'The analysis follows.' } });
+
+      const blocks = flatBlocks(s);
+      const summary = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      // 阶段块 settle：两次调用时长累加，最终回答前的思考已计入
+      expect(summary!.active).toBe(false);
+      expect(summary!.result).toBe('done');
+      expect(summary!.modelMs).toBe(3500);
+      expect(summary!.totalElapsedMs).toBe(3500);
+      // 最终回答脱离为独立文本块，无 Thought 题头（时长已在块内）
+      const text = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      expect(text?.content).toBe('The analysis follows.');
+      expect(text?.thoughtElapsedMs).toBeUndefined();
     });
 
     test('non-exploration tool call closes the current Thought before later exploration tools', () => {
@@ -797,7 +1064,9 @@ describe('eventReducer (blocks model)', () => {
         },
       });
       expect(flatBlocks(s)[0]!.kind).toBe('text');
-      expect((flatBlocks(s)[0] as any).content).toContain('Model retry #2/5');
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toContain(
+        'Model retry #2/5',
+      );
       expect(s.status.retryState).toEqual({
         attempt: 2,
         maxAttempts: 5,
@@ -893,7 +1162,7 @@ describe('eventReducer (blocks model)', () => {
     test('appends text block when non-empty', () => {
       const s = dispatch(fresh(), { type: 'EVENT', event: { type: 'final', data: 'done' } });
       expect(flatBlocks(s)).toHaveLength(1);
-      expect((flatBlocks(s)[0] as any).content).toBe('done');
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe('done');
     });
     test('no-ops when empty', () => {
       const s = dispatch(fresh(), { type: 'EVENT', event: { type: 'final', data: '' } });
@@ -921,8 +1190,7 @@ describe('eventReducer (blocks model)', () => {
       });
       // Should have only 1 text block with the duplicate content
       const textBlocks = flatBlocks(s).filter(
-        (b) =>
-          b.kind === 'text' && (b as any).content === '我看了你的项目环境，这是 Kite Code 项目本身',
+        (b) => b.kind === 'text' && b.content === '我看了你的项目环境，这是 Kite Code 项目本身',
       );
       expect(textBlocks).toHaveLength(1);
     });
@@ -936,9 +1204,7 @@ describe('eventReducer (blocks model)', () => {
       // final arrives, last block is tool_card (done), not text
       s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: '分析完成' } });
       // Should not create another text block for the same content
-      const textBlocks = flatBlocks(s).filter(
-        (b) => b.kind === 'text' && (b as any).content === '分析完成',
-      );
+      const textBlocks = flatBlocks(s).filter((b) => b.kind === 'text' && b.content === '分析完成');
       expect(textBlocks).toHaveLength(1);
     });
   });
@@ -950,7 +1216,9 @@ describe('eventReducer (blocks model)', () => {
       expect(flatBlocks(s)).toHaveLength(1);
       expect(flatBlocks(s)[0]!.kind).toBe('approval');
       expect(s.interrupt?.kind).toBe('approval');
-      expect((s.interrupt as any)?.blockId).toBe(flatBlocks(s)[0]!.id);
+      expect(s.interrupt && 'blockId' in s.interrupt ? s.interrupt.blockId : undefined).toBe(
+        flatBlocks(s)[0]!.id,
+      );
     });
     test('appends question block and sets interrupt', () => {
       const q = question({ question: 'Choose color' });
@@ -1258,7 +1526,9 @@ describe('eventReducer (blocks model)', () => {
         type: 'EVENT',
         event: { type: 'error', data: { message: 'boom', recoverable: true } },
       });
-      expect((flatBlocks(s)[0] as any).content).toContain('boom');
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toContain(
+        'boom',
+      );
     });
   });
 
@@ -1306,27 +1576,28 @@ describe('eventReducer (blocks model)', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('think'));
       const id = (flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).id;
-      expect((flatBlocks(s)[0] as any).folded).toBe(true);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(true);
       s = dispatch(s, { type: 'TOGGLE_REASON', id });
-      expect((flatBlocks(s)[0] as any).folded).toBe(false);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(false);
     });
     test('TOGGLE_ALL_REASON toggles all reason blocks folded', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('first'));
       s = dispatch(s, textEvt('between'));
       s = dispatch(s, reasonEvt('second'));
-      // Layout: [reason1, tool_summary(settled pure-thinking, persisted), text, reason2, tool_summary]
+      // 布局（ADR-0026 后）：[reason1, text（纯思考已并入题头）, reason2, tool_summary(活跃纯思考)]
+      // Layout: [reason1, text (pure thought merged as header), reason2, tool_summary(active pure)]
       // First reason block auto-expanded on non-reason event, second still folded
-      expect((flatBlocks(s)[0] as any).folded).toBe(false);
-      expect((flatBlocks(s)[3] as any).folded).toBe(true);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(false);
+      expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(true);
       // Toggle: collapse all (anyExpanded → fold all)
       s = dispatch(s, { type: 'TOGGLE_ALL_REASON' });
-      expect((flatBlocks(s)[0] as any).folded).toBe(true);
-      expect((flatBlocks(s)[3] as any).folded).toBe(true);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(true);
+      expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(true);
       // Toggle: expand all (none expanded → unfold all)
       s = dispatch(s, { type: 'TOGGLE_ALL_REASON' });
-      expect((flatBlocks(s)[0] as any).folded).toBe(false);
-      expect((flatBlocks(s)[3] as any).folded).toBe(false);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(false);
+      expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(false);
     });
     test('TOGGLE_ALL_REASON is no-op when no reason blocks', () => {
       let s = dispatch(fresh(), textEvt('hello'));
@@ -1463,11 +1734,12 @@ describe('eventReducer (blocks model)', () => {
       };
       const event: LegacyRenderAction = {
         type: 'EVENT',
-        event: { type: 'need_plan_review' as any, data: eventPayload },
+        event: { type: 'need_plan_review', data: eventPayload } as unknown as RenderEvent,
       };
       let s = dispatch(fresh(), event);
       // No plan_review block created (plan content shown via update_plan tool_card)
-      const block = flatBlocks(s).find((b: any) => b.kind === 'plan_review');
+      // plan_review 不是块类型（内容由 update_plan tool_card 渲染）：断言无此块
+      const block = flatBlocks(s).find((b) => (b.kind as string) === 'plan_review');
       expect(block).toBeUndefined();
       expect(s.interrupt?.kind).toBe('plan_review');
       expect(s.status.pendingPlan).toEqual(eventPayload.plan);
@@ -1488,7 +1760,7 @@ describe('eventReducer (blocks model)', () => {
       };
       let s = dispatch(fresh(), {
         type: 'EVENT',
-        event: { type: 'need_plan_review' as any, data: eventPayload },
+        event: { type: 'need_plan_review', data: eventPayload } as unknown as RenderEvent,
       });
       expect(s.interrupt?.kind).toBe('plan_review');
       s = dispatch(s, {
@@ -1593,7 +1865,7 @@ describe('eventReducer (blocks model)', () => {
       let s = dispatch(fresh(), {
         type: 'EVENT',
         event: {
-          type: 'tool_call' as any,
+          type: 'tool_call',
           data: {
             call_id: 'plan-1',
             name: 'update_plan',
@@ -1607,11 +1879,9 @@ describe('eventReducer (blocks model)', () => {
         },
       });
       // Verify tool_card created with running status
-      const cards = flatBlocks(s).filter(
-        (b: any) => b.kind === 'tool_card' && b.name === 'update_plan',
-      );
+      const cards = flatBlocks(s).filter((b) => b.kind === 'tool_card' && b.name === 'update_plan');
       expect(cards.length).toBe(1);
-      const card = cards[0] as any;
+      const card = cards[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
       expect(card.status).toBe('running');
       expect(card.summary).toBe('');
       expect(card.expanded).toBeUndefined();
@@ -1620,7 +1890,7 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, {
         type: 'EVENT',
         event: {
-          type: 'need_plan_review' as any,
+          type: 'need_plan_review',
           data: {
             plan: {
               name: 'Test Plan',
@@ -1629,13 +1899,13 @@ describe('eventReducer (blocks model)', () => {
               steps: [{ step: 'Do thing', status: 'pending' as const }],
             },
           },
-        },
+        } as unknown as RenderEvent,
       });
       const doneCards = flatBlocks(s).filter(
-        (b: any) => b.kind === 'tool_card' && b.name === 'update_plan',
+        (b) => b.kind === 'tool_card' && b.name === 'update_plan',
       );
       expect(doneCards.length).toBe(1);
-      const doneCard = doneCards[0] as any;
+      const doneCard = doneCards[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
       expect(doneCard.status).toBe('done');
       expect(doneCard.summary).toContain('A great plan');
       expect(doneCard.summary).toContain('Steps:');
@@ -1661,7 +1931,9 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'USER_MESSAGE', text: 'Hello, AI' });
       expect(flatBlocks(s)).toHaveLength(1);
       expect(flatBlocks(s)[0]!.kind).toBe('user');
-      expect((flatBlocks(s)[0] as any).content).toBe('Hello, AI');
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe(
+        'Hello, AI',
+      );
     });
     test('NEW_SESSION clears blocks, resets state, increments sessionKey', () => {
       let s = fresh();
@@ -1784,23 +2056,20 @@ describe('eventReducer (blocks model)', () => {
         'Hello, world!',
       );
     });
-    test('streaming text appends new block when last block is not streaming text', () => {
+    test('text after an active phase block is absorbed as caption, not a new block (ADR-0030)', () => {
       let s = fresh();
       s = { ...s, running: true };
-      // First text (streaming)
+      // First text: no active Thought → normal text block
       s = dispatch(s, textEvt('Hello'));
-      // Tool card interleaved
+      // Exploration tool opens a phase block
       s = dispatch(s, tcEvt('c1', 'read_file'));
-      // Next text should be a new block (last is tool_card, not streaming text)
+      // Next text is absorbed into the active phase block (pending caption)
       s = dispatch(s, textEvt('After tool'));
-      expect(flatBlocks(s)).toHaveLength(3);
+      expect(flatBlocks(s)).toHaveLength(2);
       expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe('Hello');
-      expect(
-        flatBlocks(s)[1]!.kind === 'tool_card' || flatBlocks(s)[1]!.kind === 'tool_summary',
-      ).toBe(true);
-      expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: 'text' }>).content).toBe(
-        'After tool',
-      );
+      const summary = flatBlocks(s)[1] as Extract<OutputBlock, { kind: 'tool_summary' }>;
+      expect(summary.kind).toBe('tool_summary');
+      expect(summary.pendingCaption).toBe('After tool');
     });
     test('SET_EXITED then SET_IDLE clears exited flag', () => {
       let s = fresh();

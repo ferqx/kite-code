@@ -50,7 +50,19 @@ export interface SubAgentStepRecord {
 
 export type OutputBlock =
   | { id: number; kind: 'user'; content: string }
-  | { id: number; kind: 'text'; content: string; streaming?: boolean; isError?: boolean }
+  | {
+      id: number;
+      kind: 'text';
+      content: string;
+      streaming?: boolean;
+      isError?: boolean;
+      /** 被文本关闭的纯思考块并入的时长（ms，ADR-0026）。存在时在文本块顶部
+       *  渲染暗色 "Thought for Xs" 题头行；独立思考块已删除，时长全量转移。
+       *  Elapsed (ms) of a pure-thinking block merged in when text closed it
+       *  (ADR-0026). Renders a dim "Thought for Xs" header above the content;
+       *  the standalone block was removed with its elapsed fully transferred. */
+      thoughtElapsedMs?: number;
+    }
   | { id: number; kind: 'reason'; content: string; folded: boolean }
   | {
       id: number;
@@ -96,9 +108,9 @@ export type OutputBlock =
       hasThought: boolean;
       latestActivity?: ThoughtActivity;
       /** 本 Thought 生命周期内是否出现过思考（reason 事件）。
-       *  用于渲染时区分 "Thought for 3s"（有思考）vs "read 2 files"（仅工具统计）。
+       *  用于渲染时区分 "Thought for 3s · read 2 files"（有思考）vs "read 2 files"（仅工具统计）。
        *  Whether any reasoning (reason events) occurred during this Thought's lifetime.
-       *  Controls the summary label: with thinking → "Thought for Xs", without → just tool counts. */
+       *  Controls the summary label: with thinking → "Thought for Xs · <tool stats>", without → just tool counts. */
       hasThinking?: boolean;
       /** 事件时间线：记录 reason / tool_call 的先后顺序，渲染时按序交错思考行与工具步骤。
        *  Event timeline: records reason/tool_call ordering so the render layer
@@ -108,6 +120,18 @@ export type OutputBlock =
       nextTimelineSeq?: number;
       /** 整体结果状态（仅 active=false 时有意义），替代从子 tool 状态推断 / Overall outcome (meaningful when active=false), replaces boolean inference */
       result?: 'done' | 'error' | 'cancelled';
+      /** ADR-0030 / 规则 24：阶段内已确认的旁白文本（被随后的只读工具确认），
+       *  渲染于块顶部。多段按时间顺序累积。
+       *  Confirmed narration texts (confirmed by a subsequent read-only tool),
+       *  rendered at the top of the phase block in chronological order. */
+      captions?: string[];
+      /** ADR-0030 / 规则 24：待确认的旁白文本——文本在阶段块活跃时先吸收于此，
+       *  随后到来只读工具则确认进 captions；阶段结束时仍未确认则脱离为独立
+       *  文本块（最终回答）。纯思考块被文本关闭时并入该文本块题头（ADR-0026）。
+       *  Pending narration: absorbed while the phase block is active; confirmed
+       *  into captions when a read-only tool arrives, or detached as a standalone
+       *  text block (final answer) when the phase ends unconfirmed. */
+      pendingCaption?: string;
     }
   | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
   | {
@@ -195,6 +219,14 @@ export interface TuiState {
   explorationSummaryIds: Record<string, number>;
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
   currentThoughtSummaryId?: number;
+  /** 思考延续上下文（ADR-0027 / 规则 23）：Thought 块被非探索工具或人机
+   *  等待关闭时记录，同一响应批次内后续探索工具聚合继承 hasThinking /
+   *  modelMs。由文本（ADR-0026）、model.requested、reason 事件清除。
+   *  Thinking carryover (ADR-0027 / rule 23): recorded when a Thought block
+   *  is closed by a non-exploration tool or human wait; exploration
+   *  aggregates later in the same response batch inherit hasThinking /
+   *  modelMs. Cleared by text (ADR-0026), model.requested, and reason. */
+  thoughtCarryover?: { modelMs?: number };
   /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
   interactionMode: 'accept_edits' | 'auto' | 'full';
   /** Deduplicates durable terminal compaction notices during replay. */
