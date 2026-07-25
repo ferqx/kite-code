@@ -33,7 +33,8 @@ import {
 export type RenderEvent =
   | { type: 'step_begin'; data: { node: string; spanId: string; internal?: boolean } }
   | { type: 'step_end'; data: { node: string; spanId: string } }
-  | { type: 'reason' | 'text'; data: { text: string } }
+  | { type: 'reason' | 'text'; data: { text: string; durationMs?: number } }
+  | { type: 'model_requested'; data: { requestId: string } }
   | { type: 'tool_call'; data: Protocol.ToolCallPayload }
   | { type: 'tool_started'; data: Protocol.ToolStartedPayload }
   | { type: 'tool_done'; data: Protocol.ToolResultPayload }
@@ -311,7 +312,9 @@ function closeCurrentThought(state: TuiState): TuiState {
       ...block,
       active: false,
       latestActivity: undefined,
-      totalElapsedMs: Date.now() - block.createdAt,
+      // 有模型调用时长时以其冻结（对齐 Claude Code），否则回退墙钟
+      // Freeze at model-call duration when known (CC parity), else wall clock
+      totalElapsedMs: block.modelMs ?? Date.now() - block.createdAt,
       ...(result ? { result } : {}),
     };
   });
@@ -321,6 +324,7 @@ function closeCurrentThought(state: TuiState): TuiState {
 function updateCurrentThoughtActivity(
   state: TuiState,
   latestActivity: Extract<OutputBlock, { kind: 'tool_summary' }>['latestActivity'],
+  durationMs?: number,
 ): TuiState {
   const isThinking = latestActivity?.kind === 'thinking';
   const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
@@ -330,12 +334,19 @@ function updateCurrentThoughtActivity(
       const timelineEntry = isThinking
         ? { seq, kind: 'thinking' as const, text: latestActivity!.text }
         : { seq, kind: 'tool' as const, callId: latestActivity!.callId };
+      // 计时对齐 Claude Code：elapsed = 模型调用累计时长（不含工具执行）；
+      // 无 durationMs（旧事件日志）时回退创建→现在墙钟。
+      // Claude Code parity: elapsed = accumulated model-call duration
+      // (excluding tool execution); legacy events without durationMs
+      // fall back to wall-clock since creation.
+      const modelMs = durationMs != null ? (block.modelMs ?? 0) + durationMs : block.modelMs;
       return {
         ...block,
         active: true,
         latestActivity,
         hasThinking: isThinking ? true : block.hasThinking,
-        totalElapsedMs: Date.now() - block.createdAt,
+        totalElapsedMs: modelMs ?? Date.now() - block.createdAt,
+        ...(modelMs != null ? { modelMs } : {}),
         timeline: [...(block.timeline ?? []), timelineEntry],
         nextTimelineSeq: seq,
       };
@@ -358,7 +369,8 @@ function updateCurrentThoughtActivity(
     id,
     kind: 'tool_summary',
     tools: [],
-    totalElapsedMs: 0,
+    totalElapsedMs: durationMs ?? 0,
+    ...(durationMs != null ? { modelMs: durationMs } : {}),
     createdAt: Date.now(),
     summaryLine: 'thinking',
     active: true,
@@ -532,6 +544,22 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const appended = appendBlock(state, block);
       return mergeStructuralTextBlocks(appended);
     }
+    case 'model_requested': {
+      // 新一轮模型调用开始：kernel 只在上一轮全部工具结果收齐后才会再次
+      // 调用模型，因此此时带工具的活跃 Thought 块里所有工具必然已 settled，
+      // 必须在此关闭——否则最终回复生成期间（generateText 非流式，此间无
+      // 任何事件）块会"工具全完成却持续闪烁运行中"。纯思考块（无工具）
+      // 按规则 1/19 保持思考链连续性，由 text 到达时统一关闭。
+      // A new model call begins: the kernel only re-invokes the model after
+      // collecting every tool result from the previous round, so an active
+      // Thought with tools necessarily has all tools settled and must close
+      // here — otherwise it would keep blinking through the final-answer
+      // generation. Pure-thinking blocks (no tools) keep chain continuity
+      // (rules 1/19) and close when text arrives.
+      const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
+      if (summary?.active && summary.tools.length > 0) return closeCurrentThought(state);
+      return state;
+    }
     case 'reason': {
       if (state.currentRunReasonId != null) {
         const reasonBlock = findBlockById(state, state.currentRunReasonId);
@@ -540,10 +568,11 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
             ...reasonBlock,
             content: `${reasonBlock.content}\n\n${event.data.text}`,
           };
-          return updateCurrentThoughtActivity(replaceBlockById(state, reasonBlock.id, next), {
-            kind: 'thinking',
-            text: event.data.text,
-          });
+          return updateCurrentThoughtActivity(
+            replaceBlockById(state, reasonBlock.id, next),
+            { kind: 'thinking', text: event.data.text },
+            event.data.durationMs,
+          );
         }
       }
       // Finalize streaming text so it doesn't enter <Static> with cursor
@@ -551,7 +580,11 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const id = finalized.nextBlockId;
       const block: OutputBlock = { id, kind: 'reason', content: event.data.text, folded: true };
       const withReason = { ...appendBlock(finalized, block), currentRunReasonId: id };
-      return updateCurrentThoughtActivity(withReason, { kind: 'thinking', text: event.data.text });
+      return updateCurrentThoughtActivity(
+        withReason,
+        { kind: 'thinking', text: event.data.text },
+        event.data.durationMs,
+      );
     }
     case 'tool_call': {
       const isExploration = isExplorationToolEvent(event.data);
@@ -603,7 +636,9 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           const updated: Extract<OutputBlock, { kind: 'tool_summary' }> = {
             ...currentThought,
             tools,
-            totalElapsedMs: now - currentThought.createdAt,
+            // 有模型调用时长时 elapsed 不随工具执行增长（对齐 Claude Code）
+            // Elapsed stays frozen at model-call duration while tools run (CC parity)
+            totalElapsedMs: currentThought.modelMs ?? now - currentThought.createdAt,
             summaryLine: buildToolSummaryLine(tools),
             active: true,
             latestActivity,
@@ -696,7 +731,8 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         ...summary,
         tools,
         active: summary.active,
-        totalElapsedMs: summary.active ? now - summary.createdAt : summary.totalElapsedMs,
+        totalElapsedMs:
+          summary.modelMs ?? (summary.active ? now - summary.createdAt : summary.totalElapsedMs),
         summaryLine: buildToolSummaryLine(tools),
       };
       const turnsCopy = state.turns.map((t, ti) => {
@@ -740,7 +776,9 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
                 }
               : t,
           );
-          const totalElapsedMs = Date.now() - summary.createdAt;
+          // 有模型调用时长时 elapsed 不随工具执行增长（对齐 Claude Code）
+          // Elapsed stays frozen at model-call duration while tools run (CC parity)
+          const totalElapsedMs = summary.modelMs ?? Date.now() - summary.createdAt;
           // 所有工具均 settled 时重新计算 result，修复 closeCurrentThought 提前
           // 关闭导致的 result='cancelled' 残留——后续 tool_done 到达后不再卡在 cancelled。
           // Recompute result when all tools are settled, fixing stale 'cancelled'
@@ -1429,10 +1467,18 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         kind: 'user',
         content: event.command,
       });
+    case 'model.requested':
+      return handleEventAction(state, {
+        type: 'model_requested',
+        data: { requestId: event.requestId },
+      });
     case 'model.responded': {
       let next = state;
       if (event.reasoningText)
-        next = handleEventAction(next, { type: 'reason', data: { text: event.reasoningText } });
+        next = handleEventAction(next, {
+          type: 'reason',
+          data: { text: event.reasoningText, durationMs: event.durationMs },
+        });
       if (event.text) next = handleEventAction(next, { type: 'text', data: { text: event.text } });
       return next;
     }

@@ -1343,6 +1343,7 @@ describe('BlockRenderer', () => {
       totalElapsedMs: 1000,
       summaryLine: 'read 3 files',
       hasThought: true,
+      hasThinking: true,
       tools: [
         {
           callId: 'c1',
@@ -1378,6 +1379,9 @@ describe('BlockRenderer', () => {
     // 新 timeline 渲染：思考内容在 tool_summary 中作为 ├─ Thinking 展示
     expect(frame).toContain('├─ Thinking');
     expect(frame).toContain('Read README.md');
+    // 标题对齐 Claude Code：思考块只有 "Thought for Xs"，不带工具统计后缀
+    expect(frame).toContain('Thought for 1s');
+    expect(frame).not.toContain('read 3 files');
   });
 
   test('renders running tool_summary tree without duplicating latest tool preview', () => {
@@ -1512,7 +1516,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).not.toContain('hidden after settle');
   });
 
-  test('settled pure-thinking Thought renders a single white-dot line, no tree/footer/thinking text', () => {
+  test('settled pure-thinking Thought renders a single dot-less line, no tree/footer/thinking text', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1532,17 +1536,46 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 单行形态：只有 "Thought for 3s"，无步骤树、无 footer
+    // 单行形态：只有 "Thought for 3s"，无圆点、无步骤树、无 footer
     expect(frame).toContain('Thought for 3s');
+    expect(frame).not.toContain('●');
     expect(frame).not.toContain('└─');
     expect(frame).not.toContain('完成');
     // thinking 文本 settle 后不渲染
     expect(frame).not.toContain('hidden after settle');
-    // 圆点颜色为主题白色（dt.muted）而非工具块的绿色完成圆点——纯思考没有"完成"语义。
-    // ink-testing-library 会剥离 ANSI 颜色码，颜色本身不在此断言
-    // （见 ToolSummaryBlock 纯思考分支使用的 dt.muted）。
-    expect(frame).toContain('● Thought for 3s');
+    // ● 保留给有状态的行；纯思考 settle 后无状态，不渲染圆点，
+    // 但保留两个空格列位，文字起始列与工具块名字列对齐
+    expect(frame).toContain('  Thought for 3s');
     expect(frame.split('\n').filter((l) => l.trim())).toHaveLength(1);
+  });
+
+  test('running pure-thinking Thought shows the blink dot ● with running footer', async () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: { kind: 'thinking', text: 'reviewing the layout rules' },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'thinking',
+      hasThought: true,
+      hasThinking: true,
+      tools: [],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    // 进行中首帧显示实心 ●（颜色为主题暗 dt.dim，ink-testing-library
+    // 剥离 ANSI 颜色码），与 settle 白点同位置同宽度，无列位移
+    expect(lastFrame()).toContain('● Thought for 1s');
+    expect(lastFrame()).toContain('├─ Thinking');
+    expect(lastFrame()).toContain('运行中');
+
+    // 显隐闪烁：约 500ms 后圆点隐藏（渲染为两个空格，行宽不变）
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(lastFrame()).not.toContain('●');
+    expect(lastFrame()).toContain('Thought for 1s');
   });
 
   test('stops showing running Thought state after a boundary even if a tool is still pending', () => {

@@ -523,6 +523,19 @@ export async function invokeRuntimeModel(params: {
         },
       ];
     }
+    // model.requested 必须在 await 之前即时发出，而不是响应完成后与
+    // model.responded 一起补发——消费方（TUI）需要它作为"新一轮模型调用
+    // 已开始"的时机信号（例如 settle 上一轮的 Thought 聚合块，避免最终
+    // 回复生成期间块一直显示运行中）。compaction 提前返回分支不发此事件
+    // （该分支不发起模型调用）。
+    // Emit model.requested at request time, not back-filled alongside
+    // model.responded after the response completes — consumers (the TUI)
+    // need it as the "a new model call began" timing signal (e.g. to settle
+    // the previous round's Thought block so it stops showing as running
+    // while the final answer is being generated). The compaction early-return
+    // above does not emit it (no model call happens on that path).
+    params.emitRuntimeEvent?.({ type: 'model.requested', requestId });
+    const callStartedAt = Date.now();
     const response = await invokeBoundModel({
       model: params.model,
       tools,
@@ -532,6 +545,7 @@ export async function invokeRuntimeModel(params: {
         positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         modelCapabilities.maxOutputTokens,
     });
+    const durationMs = Date.now() - callStartedAt;
     const toolCalls =
       response.tool_calls?.map((call) => ({
         id: call.id ?? crypto.randomUUID(),
@@ -560,10 +574,10 @@ export async function invokeRuntimeModel(params: {
     const events: RuntimeEvent[] = [
       ...retryEvents,
       contextMetricsEvent,
-      { type: 'model.requested', requestId },
       {
         type: 'model.responded',
         messageId: response.id ?? requestId,
+        durationMs,
         toolCalls: [...toolCalls, ...invalidToolCalls],
         reasoningText: extractReasoningText(response),
         text: extractText(response.content),

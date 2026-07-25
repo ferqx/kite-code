@@ -254,6 +254,104 @@ describe('eventReducer (blocks model)', () => {
       expect(summaries[0]!.tools).toHaveLength(0);
       expect(summaries[0]!.active).toBe(false);
     });
+
+    test('model.requested settles an active tool-backed Thought before the next model round', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('thinking'));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
+      // 新一轮模型调用开始（kernel 已收齐上一轮工具结果）
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-1' },
+      });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
+      // 已 settle：最终回复生成期间不再显示运行中
+      expect(summary!.active).toBe(false);
+      expect(summary!.result).toBe('done');
+      expect(summary!.latestActivity).toBeUndefined();
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+    });
+
+    test('model.requested keeps a pure-thinking Thought active (chain continues until text)', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('still thinking'));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-2' },
+      });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.tools).toHaveLength(0);
+      // 规则 1/19：思考链只被 text 等边界打断，不被新一轮模型调用打断
+      expect(summary!.active).toBe(true);
+      expect(s.currentThoughtSummaryId).toBe(summary!.id);
+    });
+
+    test('model.responded durationMs freezes Thought elapsed to model-call duration (CC parity)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'model.responded',
+          messageId: 'm1',
+          reasoningText: 'thinking hard',
+          durationMs: 3210,
+        },
+      });
+      // 工具执行期间 elapsed 不增长（对齐 Claude Code：Thought 计时不含工具执行）
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
+
+      let summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.totalElapsedMs).toBe(3210);
+
+      // settle 后仍以模型调用时长冻结
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-dur' },
+      });
+      summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary!.active).toBe(false);
+      expect(summary!.result).toBe('done');
+      expect(summary!.totalElapsedMs).toBe(3210);
+    });
+
+    test('model.requested settle splits multi-round exploration into separate Thought blocks', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('round one'));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-3' },
+      });
+      s = dispatch(s, reasonEvt('round two'));
+      s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.txt' }));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      // 新一轮模型调用切分 Thought：第一轮已 settle，第二轮为新块
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.active).toBe(false);
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summaries[1]!.active).toBe(true);
+      expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c2']);
+    });
   });
 
   describe('EVENT.tool_call / tool_done', () => {

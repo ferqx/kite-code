@@ -4,11 +4,11 @@
 范围：TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界
 读取时机：修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。
 验证：`bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/runtime/agent.integration.test.ts`
-最后更新：2026-07-24
+最后更新：2026-07-25
 
 ## 约束
 
-1. **Thought 边界**：Thought 表示一段未被可见 assistant 文本、非探索工具或人机交互等待打断的模型思考链。`reason/thinking` 不打断 Thought，只更新当前 Thought 的活动预览；可见 `text/final`、非探索工具、`need_approval`、`need_input`、`need_plan_review` 都会关闭当前 Thought。
+1. **Thought 边界**：Thought 表示一段未被可见 assistant 文本、非探索工具或人机交互等待打断的模型思考链。`reason/thinking` 不打断 Thought，只更新当前 Thought 的活动预览；可见 `text/final`、非探索工具、`need_approval`、`need_input`、`need_plan_review` 都会关闭当前 Thought；`model.requested`（新一轮模型调用开始）关闭**带工具**的当前 Thought，纯思考块不受影响（见规则 21）。
 
 2. **探索工具不经 tool_card**：`read_file`、`search_content`、`search_files`、`read_mcp_resource` 在 `tool_call` 时直接进入 `tool_summary`，永远不创建独立 `tool_card`。`shell_execute` 仅在 `intent=inspect` 且命令以搜索前缀（`rg`/`grep`/`ag`/`ack`/`git grep`/`find`）开头时纳入 Thought 聚合；其他 `shell_execute`（通用 Bash）永不纳入，始终渲染为独立 tool_card。
 
@@ -28,7 +28,7 @@
 
 10. **tool_done 状态更新必须使用 `.map()` 创建全新引用**：直接修改 `turns` 数组和 `blocks` 数组的引用链，确保 reducer 返回全新 state，React 能检测到变化。
 
-11. **事件驱动计时**：`totalElapsedMs` 由 reducer 在每次相关事件中更新（`Date.now() - createdAt`），不再依赖前端 `setInterval` 主动轮询。更新点：(a) `tool_done` 探索工具完成时；(b) `closeCurrentThought` 关闭 Thought 时；(c) `updateCurrentThoughtActivity` 收到 reason / tool_call 时。`ToolSummaryBlock` 直接读取 `block.totalElapsedMs`，无 live timer。
+11. **事件驱动计时**：`totalElapsedMs` 由 reducer 在每次相关事件中更新，不再依赖前端 `setInterval` 主动轮询。有 `modelMs` 时以其为准（规则 22，elapsed 冻结于模型调用时长，不随工具执行增长）；无 `modelMs`（旧事件日志）时回退 `Date.now() - createdAt`。更新点：(a) `tool_done` 探索工具完成时；(b) `closeCurrentThought` 关闭 Thought 时；(c) `updateCurrentThoughtActivity` 收到 reason / tool_call 时。`ToolSummaryBlock` 直接读取 `block.totalElapsedMs`，无 live timer。
 
 12. **最小显示 1s**：`formatDuration` 和 `buildToolSummaryLine` 中的耗时格式化，秒数最小为 1。
 
@@ -44,13 +44,18 @@
 
 18. **审批无关**：探索工具永远不需要审批，`ToolSummaryBlock` 不接受 `awaitingApproval` prop。
 
-19. **纯思考块持久化**：`tools.length === 0` 的 Thought 块（思考链 `reason → text` 或 `reason → 非探索工具` 产生）在关闭/settle 时**保留**，不删除：`closeCurrentThought`、`settleActiveThought`、`cancelRunningBlocks` 三条路径行为一致，均置 `active=false` 并冻结 `totalElapsedMs`（`closeCurrentThought` 推导 `result='done'`）。settle 后渲染为单行 `● Thought for Xs`（圆点为白色 `muted`，区别于工具块的绿色完成圆点——纯思考没有"工具完成"语义），不显示步骤树与 footer；运行态保持 spinner + thinking 预览 + 运行中 footer。
+19. **纯思考块持久化**：`tools.length === 0` 的 Thought 块（思考链 `reason → text` 或 `reason → 非探索工具` 产生）在关闭/settle 时**保留**，不删除：`closeCurrentThought`、`settleActiveThought`、`cancelRunningBlocks` 三条路径行为一致，均置 `active=false` 并冻结 `totalElapsedMs`（`closeCurrentThought` 推导 `result='done'`）。settle 后渲染为单行 `Thought for Xs`——**无圆点**（`●` 保留给"有状态"的行：运行态闪烁点 / 工具块绿红黄完成点；纯思考没有"工具完成"等状态可传达），保留两个空格列位使文字起始列与工具块名字列对齐，不显示步骤树与 footer；运行态左侧为主题暗（`dim`，不抢眼）实心圆点 `●` 显隐闪烁（500ms 切换），隐藏帧渲染为两个空格、宽度（2 字符）不变、无行位移——"运行中暗灰闪烁、完成后去点留痕"，保持 thinking 预览 + 运行中 footer。闪烁圆点同样作用于非思考链聚合（规则 20）的运行态。
 
 20. **非思考链聚合**：探索工具的聚合不依赖 reasoning——无思考的模型（非思考链）中，连续探索工具同样聚合为 `tool_summary`（`hasThought=false`），标签为纯工具统计（如 `read 2 files`），不带 `Thought for` 前缀、无 thinking 条目。
+
+21. **model.requested settle**：模型调用为非流式 `generateText`，调用期间不产生任何事件。`model.requested` 在 `await` 模型之前即时发出（ADR-0025，不再与 `model.responded` 一起补发）；TUI 收到后关闭**带工具**的活跃 Thought（kernel 只在上一轮工具结果全部收齐后才再次调用模型，块内工具必然全部 settled，走 `closeCurrentThought` 路径，`result` 由工具状态推导）——否则最终回复生成期间块会"工具全完成却持续显示运行中"。**纯思考块不在此关闭**（无工具可 settle，思考链按规则 1/19 由 `text` 到达时统一关闭）。派生行为：多轮探索被新一轮模型调用切分为多个 Thought 块（规则 4 的跨轮合并止于模型调用边界）；思考模型在工具轮之后回答时，末轮思考呈现为独立纯思考块。回放兼容：旧日志中 `model.requested` 紧邻 `model.responded`，settle 与关闭背靠背发生，最终状态一致。
+
+22. **标签与计时语义（Claude Code 对齐）**：思考块（`hasThinking=true`）标题行只有 `Thought for Xs`，**不带工具统计后缀**（工具信息在步骤树中展示——CC：`✻ Thought for Xs` 标题行 + 独立 `⏺` 工具行）；非思考聚合块（规则 20）标题保持纯工具统计（如 `read 2 files`，对应 CC 的 `⏺ Read N files` 聚合行）。`Thought for Xs` 的时长 = **该轮模型调用时长**（`model.responded.durationMs`，含思考+响应生成，不含工具执行）：TUI 建块时记录 `modelMs`，工具执行期间 elapsed 不增长（CC：标题行冻结、工具行自带 `…` 进度标记），settle 时以 `modelMs` 冻结。回退：无 `durationMs` 的旧事件日志（ADR-0025 之前）用创建→settle 墙钟。多轮思考链（纯思考块跨调用延续，规则 19）的 `modelMs` 按调用累加。
 
 ## 设计文档
 
 - `docs/space/understanding/2026-06-28-thought-pre-consolidation-design.md` — Thought 预整合设计详情
+- `docs/adr/0025-model-requested-live-emission.md` — model.requested 即时发出与 TUI settle 时机（规则 21）
 - `docs/space/plans/2026-06-28-context-compaction.md` — M0/M1/M2 三层压缩方案
 
 ## 修改时必读
