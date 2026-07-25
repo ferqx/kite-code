@@ -14,7 +14,12 @@ import { createModePolicy } from '@/core/policies/mode-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
-import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
+import {
+  computeLineDiff,
+  formatContentOutput,
+  formatDiffOutput,
+  formatMultiHunkDiff,
+} from '@/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '@/core/tools/file';
 import {
   searchContent as searchContentNative,
@@ -323,26 +328,42 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     });
     let stdout = '';
     if (result.ok) {
-      const diff = computeLineDiff(
-        request.args.old_string,
-        request.args.new_string ?? '',
-        result.fromLine ?? 1,
-      );
       const parts: string[] = [];
-      if (request.args.replace_all) {
-        const count = result.replacements ?? 1;
-        parts.push(`(replaced ${count} time${count > 1 ? 's' : ''})`);
+      if (request.args.replace_all && result.matchLines && result.matchLines.length > 1) {
+        parts.push(
+          formatMultiHunkDiff(
+            request.args.old_string as string,
+            (request.args.new_string ?? '') as string,
+            result.matchLines,
+            result.replacements ?? 1,
+          ),
+        );
+      } else {
+        const diff = computeLineDiff(
+          request.args.old_string,
+          request.args.new_string ?? '',
+          result.fromLine ?? 1,
+        );
+        if (request.args.replace_all) {
+          const count = result.replacements ?? 1;
+          parts.push(`(replaced ${count} time${count > 1 ? 's' : ''})`);
+        }
+        parts.push(formatDiffOutput(diff));
       }
-      parts.push(formatDiffOutput(diff));
       if (request.args.old_string === (request.args.new_string ?? '')) {
         parts.push('(no effective change)');
       }
-      // 保护 LLM 上下文：diff 超长时截断
-      // Cap for LLM context: truncate overlong diff output
       stdout = parts.join('\n');
       const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
+      // 保护 LLM 上下文：diff 超长时在最后一个完整行后截断，避免拆散行号
+      // Cap for LLM context: truncate at last complete line to avoid splitting line numbers
       if (stdout.length > 2000) {
-        stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
+        const totalLines = stdout.split('\n').length;
+        const cut = stdout.lastIndexOf('\n', 2000);
+        const kept = stdout.slice(0, cut > 0 ? cut : 2000);
+        const keptLines = kept.split('\n').length;
+        const omitted = totalLines - keptLines;
+        stdout = `${kept}\n... (${omitted} more line${omitted !== 1 ? 's' : ''} omitted)`;
       }
       return withFailureGuidance(request, {
         ok: result.ok,
@@ -353,7 +374,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         path: request.args.path,
         resultMeta: {
           path: editPath,
-          truncated: stdout.endsWith('... (truncated)'),
+          truncated: stdout.includes('. more line'),
           workspaceMutationScope: editPath ? [editPath] : [],
           rawResultDigest,
         },
@@ -368,7 +389,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       path: request.args.path,
       resultMeta: {
         path: editPath,
-        truncated: stdout.endsWith('... (truncated)'),
+        truncated: false,
         workspaceMutationScope: editPath ? [editPath] : [],
       },
     });
@@ -425,9 +446,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stdout = formatContentOutput(request.args.content ?? '', header);
       }
       const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
-      // 保护 LLM 上下文：超长时截断 / Cap for LLM context
+      // 保护 LLM 上下文：超长时在最后一个完整行后截断，并提示省略行数
+      // Cap at last complete line and report how many lines were omitted
       if (stdout.length > 2000) {
-        stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
+        const totalLines = stdout.split('\n').length;
+        const cut = stdout.lastIndexOf('\n', 2000);
+        const kept = stdout.slice(0, cut > 0 ? cut : 2000);
+        const keptLines = kept.split('\n').length;
+        const omitted = totalLines - keptLines;
+        stdout = `${kept}\n... (${omitted} more line${omitted !== 1 ? 's' : ''} omitted)`;
       }
       return withFailureGuidance(request, {
         ok: result.ok,
@@ -438,7 +465,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         path: request.args.path,
         resultMeta: {
           path: filePath,
-          truncated: stdout.endsWith('... (truncated)'),
+          truncated: stdout.includes('. more line'),
           workspaceMutationScope: filePath ? [filePath] : [],
           rawResultDigest,
         },
@@ -454,7 +481,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       path: request.args.path,
       resultMeta: {
         path: filePath,
-        truncated: stdout.endsWith('... (truncated)'),
+        truncated: false,
         workspaceMutationScope: filePath ? [filePath] : [],
       },
     });

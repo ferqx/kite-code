@@ -44,6 +44,8 @@
 
 18. **审批无关**：探索工具永远不需要审批，`ToolSummaryBlock` 不接受 `awaitingApproval` prop。
 
+19. **文件工具渲染**：`renderFileSummary` 自动区分 diff 格式（删除行红底 `diffRemovedBg`、新增行绿底 `diffAddedBg`、上下文行无背景）和纯内容格式。write_file 新建/追加时所有内容行视为新增全绿底，内容未变覆写保持 dim。文件内容行自动语法高亮：行号前缀（`LINE_RE`）走普通 `<Text>`，代码正文走 `<SyntaxHighlight code=... language=.../>`，语言由 `detectLanguage(path)` 从扩展名推断。`...` 分隔符不做高亮。
+
 ## 设计文档
 
 - `docs/space/understanding/2026-06-28-thought-pre-consolidation-design.md` — Thought 预整合设计详情
@@ -52,6 +54,7 @@
 ## 修改时必读
 
 修改以下文件时，必须先阅读上述设计文档：
+- `src/app/tui/components/ToolCardBlock.tsx` — 文件工具卡片渲染（diff 染色、语法高亮）
 - `src/app/tui/reducers/consolidateTools.ts` — 工具判断 + 合并逻辑
 - `src/app/tui/reducers/handleEvent.ts` — tool_call/tool_done 事件处理
 - `src/app/tui/components/ToolSummaryBlock.tsx` — Thought 块渲染

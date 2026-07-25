@@ -1,5 +1,3 @@
-import { APPLY_PATCH_DESCRIPTION } from './apply-patch';
-
 export interface ToolContractSection {
   /** When to use this tool, AND when to use an alternative tool instead */
   whenToUse: string;
@@ -418,34 +416,6 @@ export const TOOL_SEARCH_CONTRACT: ToolContract = {
   description: '',
 };
 TOOL_SEARCH_CONTRACT.description = buildDescription(TOOL_SEARCH_CONTRACT.sections);
-
-/** @reserved — apply_patch 暂未注册为 Agent 工具，待需求确认后启用 / not yet registered as an agent tool */
-export const APPLY_PATCH_CONTRACT: ToolContract = {
-  name: 'apply_patch',
-  sections: {
-    whenToUse:
-      'Apply structured file edits using the Codex-style patch format. ' +
-      'Use apply_patch for making multiple coordinated file changes in one operation — add, update, delete, and move files in a single patch. ' +
-      'Do NOT use apply_patch for single-file simple edits — use read_file + edit_file instead. ' +
-      'Do NOT use apply_patch when a single edit_file call is sufficient; the patch format adds overhead for simple changes. ' +
-      'Prefer apply_patch when you need to create new files, delete files, or restructure the project alongside code changes.',
-    commonMistakes:
-      'Not providing enough context lines (2-3 lines minimum around each change) for reliable matching — patches with no context fail on whitespace or formatting differences. ' +
-      "Creating patches with wrong old lines that don't match actual file content — always use read_file first to verify exact content. " +
-      'Forgetting to wrap patches in *** Begin Patch / *** End Patch markers. ' +
-      'Using absolute paths in file operations — all paths must be relative to the workspace. ' +
-      'Including only changed lines without surrounding context lines (marked with space prefix).',
-    outputFormat:
-      'JSON with fields: ok (boolean), path (primary affected file path), message (status message), summary (git-style list: D deleted, A added, M modified files). ' +
-      'On parse error, returns ok: false with the error line number and description.',
-    failureHandling:
-      "If the patch fails because context lines don't match, re-read the target files with read_file, then reconstruct the patch with verified context. " +
-      'If a specific file operation fails (file not found, path outside workspace), check the path is correct and relative. ' +
-      'If the patch parse is invalid (missing *** Begin Patch, malformed operations), check the patch format against the specification in the description. ' +
-      'For context-matching failures, try adding more context lines or simplifying the hunk to match only old_lines without context.',
-  },
-  description: APPLY_PATCH_DESCRIPTION,
-};
 
 export const TASK_CONTRACT: ToolContract = {
   name: 'task',

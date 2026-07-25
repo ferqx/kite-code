@@ -37,7 +37,6 @@ const READ_ONLY_BUILTINS = new Set([
 ]);
 const KNOWN_BUILTINS = new Set([
   ...READ_ONLY_BUILTINS,
-  'apply_patch',
   'ask_user',
   'tool_search',
   'edit_file',

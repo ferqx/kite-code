@@ -51,56 +51,59 @@ function collectLabeledLines(node: ReactNode, bg: unknown, out: LabeledLine[]): 
   collectLabeledLines(props.children, nextBg, out);
 }
 
-/** 返回指定行文本的生效背景色 / Effective background color for a given line text */
-function bgOfLine(summary: string, lineText: string): unknown {
+/** 返回指定文本节点的生效背景色 — 按代码正文匹配（行号前缀已被拆分） */
+function bgOfLine(summary: string, codeText: string): unknown {
   const out: LabeledLine[] = [];
   collectLabeledLines(renderFileSummary(summary, darkTheme), undefined, out);
-  return out.find((l) => l.text === lineText)?.bg;
+  return out.find((l) => l.text === codeText)?.bg;
 }
 
 describe('file tool diff summary coloring', () => {
   test('genuine removed/added lines get removed/added backgrounds', () => {
-    // formatDiffOutput: 标记紧贴正文（一个空格）/ marker glued to text (one space)
     const summary = 'Added 1 line, removed 1 line\n 1 -foo\n 1 +bar';
-
-    expect(bgOfLine(summary, ' 1 -foo')).toBe(darkTheme.diffRemovedBg);
-    expect(bgOfLine(summary, ' 1 +bar')).toBe(darkTheme.diffAddedBg);
+    expect(bgOfLine(summary, 'foo')).toBe(darkTheme.diffRemovedBg);
+    expect(bgOfLine(summary, 'bar')).toBe(darkTheme.diffAddedBg);
   });
 
   test('plain content with Markdown list items gets no diff backgrounds', () => {
-    // formatContentOutput（新建/内容未变/追加）：行号 + 两个空格 + 正文
-    // Plain content output (create/unchanged/append): lineNum + two spaces + text.
-    // 列表项 "- 嘻嘻嘻" 不是删除行，不得染色。
-    // The list item "- 嘻嘻嘻" is not a removed line and must not be painted.
     const summary = 'Wrote 2 lines to notes.md (content unchanged)\n 1  - 嘻嘻嘻\n 2  - 详细信息';
-
-    expect(bgOfLine(summary, ' 1  - 嘻嘻嘻')).toBeUndefined();
-    expect(bgOfLine(summary, ' 2  - 详细信息')).toBeUndefined();
+    expect(bgOfLine(summary, '- 嘻嘻嘻')).toBeUndefined();
+    expect(bgOfLine(summary, '- 详细信息')).toBeUndefined();
   });
 
   test('list-item context lines in a diff are not painted as removed', () => {
-    // 覆写只改末行：列表项是上下文行（两个空格），旧结尾/新结尾是真变更。
-    // 修复前两个列表上下文行会被宽松正则误判为删除行。
-    // Overwrite changes only the last line: list items are context lines (two
-    // spaces); 旧结尾/新结尾 are the genuine removed/added lines. Before the
-    // fix, the loose regex painted the two list-item context lines as removed.
     const summary =
       'Added 1 line, removed 1 line\n 1  - 嘻嘻嘻\n 2  - 详细信息\n 3 -旧结尾\n 3 +新结尾';
-
-    expect(bgOfLine(summary, ' 1  - 嘻嘻嘻')).toBeUndefined();
-    expect(bgOfLine(summary, ' 2  - 详细信息')).toBeUndefined();
-    expect(bgOfLine(summary, ' 3 -旧结尾')).toBe(darkTheme.diffRemovedBg);
-    expect(bgOfLine(summary, ' 3 +新结尾')).toBe(darkTheme.diffAddedBg);
+    expect(bgOfLine(summary, '- 嘻嘻嘻')).toBeUndefined();
+    expect(bgOfLine(summary, '- 详细信息')).toBeUndefined();
+    expect(bgOfLine(summary, '旧结尾')).toBe(darkTheme.diffRemovedBg);
+    expect(bgOfLine(summary, '新结尾')).toBe(darkTheme.diffAddedBg);
   });
 
   test('"---" frontmatter context line is not painted as removed', () => {
-    // YAML frontmatter 分隔线以 "-" 开头，同样不得误判
-    // YAML frontmatter fences start with "-", must not be misclassified either.
     const summary = 'Added 1 line, removed 1 line\n 1  ---\n 2 -a\n 2 +b';
+    expect(bgOfLine(summary, '---')).toBeUndefined();
+    expect(bgOfLine(summary, 'a')).toBe(darkTheme.diffRemovedBg);
+    expect(bgOfLine(summary, 'b')).toBe(darkTheme.diffAddedBg);
+  });
 
-    expect(bgOfLine(summary, ' 1  ---')).toBeUndefined();
-    expect(bgOfLine(summary, ' 2 -a')).toBe(darkTheme.diffRemovedBg);
-    expect(bgOfLine(summary, ' 2 +b')).toBe(darkTheme.diffAddedBg);
+  test('create (Wrote N lines) gets green background on all content lines', () => {
+    const summary = 'Wrote 3 lines to notes.md\n 1  line one\n 2  line two\n 3  line three';
+    expect(bgOfLine(summary, 'line one')).toBe(darkTheme.diffAddedBg);
+    expect(bgOfLine(summary, 'line two')).toBe(darkTheme.diffAddedBg);
+    expect(bgOfLine(summary, 'line three')).toBe(darkTheme.diffAddedBg);
+  });
+
+  test('append (Appended N lines) gets green background on all content lines', () => {
+    const summary = 'Appended 2 lines to notes.md\n 1  new entry\n 2  another entry';
+    expect(bgOfLine(summary, 'new entry')).toBe(darkTheme.diffAddedBg);
+    expect(bgOfLine(summary, 'another entry')).toBe(darkTheme.diffAddedBg);
+  });
+
+  test('content-unchanged overwrite keeps dim (no background)', () => {
+    const summary = 'Wrote 2 lines to notes.md (content unchanged)\n 1  a\n 2  b';
+    expect(bgOfLine(summary, 'a')).toBeUndefined();
+    expect(bgOfLine(summary, 'b')).toBeUndefined();
   });
 });
 

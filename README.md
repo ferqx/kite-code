@@ -1,6 +1,6 @@
 # Kite Code
 
-Kite Code 是一个基于 Bun、TypeScript 和事件化 Runtime Kernel 的多模型代码 Agent。模型、工具、审批、恢复与验收统一由 Kernel 调度；TUI 和 CLI 共享相同的 Core 行为。
+Kite Code 是一个基于 Bun、TypeScript 和事件化 Runtime Kernel 的多模型代码 Agent。模型、工具、审批、恢复与验收统一由 Kernel 调度；TUI 和 CLI 共享相同的 Core 行为。TUI 支持文件 diff 染色和代码语法高亮（`ink-syntax-highlight` / highlight.js）。
 
 ## 当前能力
 

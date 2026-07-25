@@ -43,6 +43,7 @@
     "hono": "^4.12.29",
     "ink": "^7.1.1",
     "ink-scroll-list": "^0.4.1",
+    "ink-syntax-highlight": "^2.0.2",
     "ink-text-input": "^6.0.0",
     "ink-virtual-list": "^0.2.3",
     "jsdom": "^29.1.1",

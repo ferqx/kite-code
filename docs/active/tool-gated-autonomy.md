@@ -39,7 +39,7 @@
 `write_file` / `edit_file` 改动工作区文件前，工具执行链捕获目标文件原像存入 RuntimeStore。这是 `accept_edits` 等模式自动放行工作区写入的可逆性底牌：`/rewind` 回退到恢复点时先按原像恢复文件，再截断会话。约束：
 
 1. 捕获是 best-effort：同一检查点窗口（上一次 turn 快照之后）内每个 path 只记录最早一份原像；捕获失败不得中断工具执行。
-2. 子 agent（task）的工具写入经同一条记录链捕获；`apply_patch` 尚未接线，暂不覆盖。
+2. 子 agent（task）的工具写入经同一条记录链捕获。
 3. 恢复顺序不可颠倒：`restoreNamedSnapshot` 会截断检查点之后的原像，文件恢复必须先于它执行。
 4. Fork 只复制 fork 点之前的原像行，不改动共享工作区文件。
 

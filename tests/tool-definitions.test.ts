@@ -522,14 +522,6 @@ describe('tool contracts (ACI)', () => {
     );
   });
 
-  // apply_patch 契约标记为 @reserved，待需求确认后启用 / apply_patch contract is reserved for future enablement
-  test('apply_patch contract is reserved, not wired to agent tools', () => {
-    const contract = TOOL_CONTRACTS.get('apply_patch');
-    expect(contract).toBeUndefined();
-    const tools = createAgentTools({ workspace: '/tmp' });
-    expect(tools.apply_patch).toBeUndefined();
-  });
-
   // ── Cache key stabilization ──
 
   test('returns same tool instances on cache hit (same state)', () => {

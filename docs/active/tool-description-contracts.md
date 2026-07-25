@@ -5,16 +5,15 @@
 最后验证：2026-05-06
 范围：
 
-- `src/tools/tool-contracts.ts`
-- `src/tools/definitions.ts`（description 字段）
-- `src/tools/apply-patch.ts`（APPLY_PATCH_DESCRIPTION 常量）
+- `src/core/tools/tool-contracts.ts`
+- `src/core/tools/definitions.ts`（description 字段）
 - `tests/tool-definitions.test.ts`（契约验证测试）
 
 读取时机：
 
 - 创建或修改工具定义，包括新增工具、调整 schema 或修改 description。
 - 修改 `src/tools/tool-contracts.ts` 中的契约结构或内容。
-- 修改工具的实际行为（`src/tools/file.ts`、`src/tools/shell.ts`、`src/tools/apply-patch.ts`），需要同步更新契约。
+- 修改工具的实际行为（`src/core/tools/file.ts`、`src/core/tools/shell.ts`），需要同步更新契约。
 - 修改 `src/harness/tool-runner.ts` 中的工具执行逻辑、错误处理或 `toolUsageGuidance()`。
 - 新增工具注册到 `definitions.ts` 的 `createAgentTools()`。
 
@@ -64,10 +63,6 @@
 - 修改 `tool-runner.ts` 中的执行结果格式、错误信息或 `toolUsageGuidance()` 时，必须检查契约的 `outputFormat` 和 `failureHandling` 是否一致。
 - 新增工具时必须先创建契约，再在 `definitions.ts` 中注册。
 
-### apply_patch 特殊处理
-
-`APPLY_PATCH_CONTRACT` 的 `description` 字段保留原始 `APPLY_PATCH_DESCRIPTION` 常量（Codex 风格的补丁格式规范），不经由 `buildDescription()` 生成。当 `apply_patch` 工具接入 `definitions.ts` 时，需决定是否将四个 section 合并到最终 description。
-
 ## 不要做
 
 - 不要在 `definitions.ts` 中硬编码 description 字符串；必须引用契约的 `.description`。
@@ -89,4 +84,3 @@
 - 每个工具的 `outputFormat` 提及 `ok` 字段。
 - 每个工具的 `failureHandling` 包含可执行的恢复动作。
 - `shell_execute` 契约专项覆盖 intent 枚举和审批拒绝场景。
-- `apply_patch` 契约已存在且结构完整。

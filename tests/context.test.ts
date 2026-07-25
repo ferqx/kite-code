@@ -57,7 +57,7 @@ describe('model context protocol', () => {
       tool_calls: [
         {
           id: 'call-1',
-          name: 'apply_patch',
+          name: 'write_file',
           args: { path: 'hello.txt', content: 'hi\n' },
         },
       ],
