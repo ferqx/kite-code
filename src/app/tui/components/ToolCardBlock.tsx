@@ -13,6 +13,7 @@ import {
   SPINNER_INTERVAL_MS,
   spinnerIndexForElapsed,
   toolColor,
+  writeFileActionName,
 } from './render-utils';
 
 export const MAX_TOOL_LINES = 5;
@@ -351,15 +352,22 @@ function renderToolSummary(summary: string, isError: boolean, dt: { error: strin
 
 /** 文件工具的摘要渲染 — 自动区分 diff 格式（红底/绿底）和纯文本格式（无背景）
  *  Summary renderer for file tools — auto-detects diff format (red/green bg)
- *  vs plain content format (no background) */
-function renderFileSummary(summary: string, dt: Theme) {
+ *  vs plain content format (no background)
+ *  导出供测试直接断言染色分类（exported for coloring classification tests） */
+export function renderFileSummary(summary: string, dt: Theme) {
   const lines = summary.trimEnd().split('\n');
   const statsLine = lines[0]!;
   const diffLines = lines.slice(1);
 
-  // 检测是否为 diff 格式：任意内容行以 "行号 +" 或 "行号 -" 开头
-  // Detect diff format: any content line starts with "lineNum +" or "lineNum -"
-  const isDiff = diffLines.length > 0 && diffLines.some((line) => /^\s*\d+\s+[-+]/.test(line));
+  // 检测是否为 diff 格式：任意内容行以 "行号 + 单个空格 + +/- 标记" 开头。
+  // core 的 diff 格式中删除/新增行为 `num + 一个空格 + 标记`（标记紧贴正文），
+  // 而上下文行与纯内容格式为 `num + 两个空格 + 正文`；因此必须要求恰好一个空格，
+  // 否则以 "- " / "+ " 开头的正文（如 Markdown 列表项）会被误判为删除/新增行。
+  // Detect diff format: "lineNum + exactly one space + +/- marker". Removed/added
+  // lines use one space before the marker; context and plain-content lines use two
+  // spaces before the text, so requiring exactly one space avoids misclassifying
+  // body text starting with "- " / "+ " (e.g. Markdown list items) as diff markers.
+  const isDiff = diffLines.length > 0 && diffLines.some((line) => /^\s*\d+ [-+]/.test(line));
 
   // 文件变更需要完整展示，避免用户只看到删除部分而看不到新增内容。
   // File changes are user-facing output and should be shown in full.
@@ -371,8 +379,10 @@ function renderFileSummary(summary: string, dt: Theme) {
       {diffLines.length > 0 && isDiff ? (
         <Box paddingLeft={3} flexDirection="column">
           {displayLines.map((line, i) => {
-            const isRemoved = /^\s*\d+\s+-/.test(line);
-            const isAdded = /^\s*\d+\s+\+/.test(line);
+            // 恰好一个空格 + 标记才算删除/新增行（见上方 isDiff 注释）
+            // Exactly one space + marker = removed/added (see isDiff comment above)
+            const isRemoved = /^\s*\d+ -/.test(line);
+            const isAdded = /^\s*\d+ \+/.test(line);
             // 背景色走 ANSI 调色板（diffAddedBg=slot4, diffRemovedBg=slot5），OSC 4 切换主题即时更新
             // Background colors via ANSI palette (diffAddedBg=slot4, diffRemovedBg=slot5), OSC 4 instant update on theme switch
             const bg = isRemoved ? dt.diffRemovedBg : isAdded ? dt.diffAddedBg : undefined;
@@ -465,7 +475,9 @@ export default function ToolCardBlock({
         ? 'Searching for tools…'
         : block.name === 'list_mcp_resources'
           ? 'Listing MCP resources…'
-          : mcpToolDisplayName(block.name);
+          : block.name === 'write_file'
+            ? writeFileActionName(block.summary, block.args)
+            : mcpToolDisplayName(block.name);
     return (
       <Box>
         <Text color={dt.muted}>○ </Text>
@@ -487,7 +499,9 @@ export default function ToolCardBlock({
           ? 'Listing MCP resources…'
           : block.name === 'list_mcp_tools'
             ? 'Listing MCP tools…'
-            : mcpToolDisplayName(block.name);
+            : block.name === 'write_file'
+              ? writeFileActionName(block.summary, block.args)
+              : mcpToolDisplayName(block.name);
     // isAskUserRunning 已移除：running 状态的问题由 Footer InputBlock 渲染，scrollback 不重复
     return (
       <Box flexDirection="column">
@@ -561,7 +575,9 @@ export default function ToolCardBlock({
           ? block.status === 'done'
             ? 'Listed MCP tools'
             : 'MCP tool listing failed'
-          : mcpToolDisplayName(block.name);
+          : block.name === 'write_file'
+            ? writeFileActionName(block.summary, block.args)
+            : mcpToolDisplayName(block.name);
   return (
     <Box flexDirection="column">
       <Box>

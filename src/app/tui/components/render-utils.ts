@@ -30,6 +30,33 @@ export function actionName(name: string): string {
   return ACTION_NAMES[name] ?? name;
 }
 
+/**
+ * write_file 卡片动词 — 区分新建 / 覆写 / 追加（ACTION_NAMES 的静态 'Create'
+ * 无法表达覆写与追加）。完成态从 summary 首行推断：core 对覆写已有文件
+ * 输出 diff 统计（"Added … removed …"），新建输出 "Wrote …"，追加输出
+ * "Appended …"，内容未变的覆写输出 "Wrote … (content unchanged)"。
+ * 运行/排队态调用方没有 summary 可传，只能从 args.mode 识别追加，
+ * 其余用中性 Write。
+ *
+ * Card verb for write_file — distinguishes create / overwrite / append (the
+ * static 'Create' in ACTION_NAMES cannot express overwrite or append). Done
+ * state is inferred from the summary's first line (core emits diff stats for
+ * overwrites, "Wrote …" for creates, "Appended …" for appends, and
+ * "Wrote … (content unchanged)" for no-op overwrites). Running/queued callers
+ * pass no summary; only append is knowable via args.mode, else neutral Write.
+ */
+export function writeFileActionName(
+  summary: string | undefined,
+  args: Record<string, unknown>,
+): string {
+  const s = summary ?? '';
+  if (s.startsWith('Added ')) return 'Write'; // diff 统计 → 覆写已有文件 / overwrite
+  if (s.startsWith('Appended ')) return 'Append';
+  if (s.startsWith('Wrote ')) return s.includes('(content unchanged)') ? 'Write' : 'Create';
+  // running / queued / 无 summary 的终态 / running, queued, terminal without summary
+  return args.mode === 'append' ? 'Append' : 'Write';
+}
+
 export interface ThemeColors {
   primary: string;
   success: string;
