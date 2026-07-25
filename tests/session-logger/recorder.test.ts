@@ -581,4 +581,32 @@ describe('recordRuntimeEvent — compaction telemetry', () => {
     expect(pressure.name).toBe('model.context_metrics');
     expect(pressure.attributes['kite_code.context.utilization']).toBe(0.9318);
   });
+
+  test('model.responded — 记录模型调用耗时（规则 22：Thought 计时与日志回放的依据）', () => {
+    const r = recordRuntimeEvent(
+      {
+        type: 'model.responded',
+        messageId: 'msg-1',
+        durationMs: 2093,
+        text: 'Let me read the core files systematically.',
+        reasoningText: 'The user wants to understand the TUI module.',
+      },
+      TRACE,
+      PARENT,
+    );
+    expect(r.name).toBe('runtime.model.responded');
+    expect(r.kind).toBe(3);
+    expect(r.attributes['kite_code.model.message_id']).toBe('msg-1');
+    expect(r.attributes['kite_code.model.duration_ms']).toBe(2093);
+    expect(r.attributes['kite_code.text.content']).toContain('core files');
+    expect(r.attributes['kite_code.reason.content']).toContain('TUI module');
+
+    // 旧事件无 durationMs 时不写入该属性（回放走创建→settle 墙钟回退）
+    const legacy = recordRuntimeEvent(
+      { type: 'model.responded', messageId: 'msg-2' },
+      TRACE,
+      PARENT,
+    );
+    expect(legacy.attributes['kite_code.model.duration_ms']).toBeUndefined();
+  });
 });

@@ -1309,6 +1309,54 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('search command failed');
   });
 
+  test('phase block renders confirmed captions and pending caption at the top (ADR-0030)', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      createdAt: Date.now() - 13000,
+      totalElapsedMs: 13000,
+      modelMs: 13000,
+      summaryLine: 'read 2 files',
+      hasThought: true,
+      hasThinking: true,
+      captions: ['让我系统地阅读 TUI 模块的核心文件。'],
+      pendingCaption: 'Now the remaining pieces.',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+        {
+          callId: 'c2',
+          name: 'read_file',
+          args: { path: 'src/app/tui/types.ts' },
+          ok: false,
+          summary: '',
+          status: 'running',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    // 标题行 = 累加时长 + 合并统计；旁白位于标题之下、步骤树之上
+    expect(frame).toContain('Thought for 13s · read 2 files');
+    expect(frame).toContain('让我系统地阅读 TUI 模块的核心文件。');
+    expect(frame).toContain('Now the remaining pieces.');
+    const captionIdx = frame.indexOf('让我系统地阅读');
+    const headerIdx = frame.indexOf('Thought for 13s');
+    const stepsIdx = frame.indexOf('Read App.tsx');
+    expect(captionIdx).toBeGreaterThan(headerIdx);
+    expect(captionIdx).toBeLessThan(stepsIdx);
+  });
+
   test('Thinking phase: shows thinking preview, no tool steps', () => {
     const block = {
       id: 1,
@@ -1379,9 +1427,52 @@ describe('BlockRenderer', () => {
     // 新 timeline 渲染：思考内容在 tool_summary 中作为 ├─ Thinking 展示
     expect(frame).toContain('├─ Thinking');
     expect(frame).toContain('Read README.md');
-    // 标题对齐 Claude Code：思考块只有 "Thought for Xs"，不带工具统计后缀
-    expect(frame).toContain('Thought for 1s');
-    expect(frame).not.toContain('read 3 files');
+    // 思考块标题 = "Thought for Xs · <工具统计>"（· 分隔，规则 22）
+    expect(frame).toContain('Thought for 1s · read 3 files');
+  });
+
+  test('thinking block header appends tool stats and truncates them to fit narrow terminals', () => {
+    const tools = ['README.md', 'package.json', 'CLAUDE.md'].map((path, i) => ({
+      callId: `c${i + 1}`,
+      name: 'read_file',
+      args: { path },
+      ok: true,
+      summary: 'ok',
+      status: 'done' as const,
+    }));
+    const wide = {
+      id: 1,
+      kind: 'tool_summary',
+      active: false,
+      createdAt: Date.now() - 2000,
+      totalElapsedMs: 2000,
+      summaryLine: 'read 3 files, searched for 2 patterns',
+      hasThought: true,
+      hasThinking: true,
+      result: 'done' as const,
+      tools,
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+
+    // 宽终端：完整后缀 "Thought for Xs · <统计>"
+    const wideFrame =
+      render(
+        <BlockRenderer columns={100} block={wide} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+    expect(wideFrame).toContain('● Thought for 2s · read 3 files, searched for 2 patterns');
+
+    // 窄终端：前缀完整保留，统计后缀按宽度截断（… 省略号）
+    const narrowFrame =
+      render(<BlockRenderer columns={40} block={wide} isFocused={false} index={0} />).lastFrame() ??
+      '';
+    expect(narrowFrame).toContain('Thought for 2s · read 3 files, search…');
+    expect(narrowFrame).not.toContain('searched for 2 patterns');
+
+    // 极窄终端：后缀整体省略，不留孤悬分隔符
+    const tinyFrame =
+      render(<BlockRenderer columns={18} block={wide} isFocused={false} index={0} />).lastFrame() ??
+      '';
+    expect(tinyFrame).toContain('Thought for 2s');
+    expect(tinyFrame).not.toContain('·');
   });
 
   test('renders running tool_summary tree without duplicating latest tool preview', () => {
@@ -1549,6 +1640,40 @@ describe('BlockRenderer', () => {
     expect(frame.split('\n').filter((l) => l.trim())).toHaveLength(1);
   });
 
+  test('text block with thoughtElapsedMs renders merged Thought header above content (ADR-0026)', () => {
+    const block = {
+      id: 1,
+      kind: 'text',
+      content: '── TUI 模块全面解析 ──',
+      thoughtElapsedMs: 24_000,
+    } as Extract<OutputBlock, { kind: 'text' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    // 题头 + 正文同一块：无圆点、无空行
+    expect(frame).toContain('Thought for 24s');
+    expect(frame).toContain('── TUI 模块全面解析 ──');
+    expect(frame).not.toContain('●');
+    const lines = frame.split('\n').filter((l) => l.trim());
+    expect(lines).toHaveLength(2);
+    // 题头两空格缩进，文字起始列与工具块名字列对齐
+    expect(frame).toContain('  Thought for 24s');
+  });
+
+  test('text block without thoughtElapsedMs renders no Thought header', () => {
+    const block = {
+      id: 1,
+      kind: 'text',
+      content: 'plain answer',
+    } as Extract<OutputBlock, { kind: 'text' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    expect(lastFrame() ?? '').not.toContain('Thought for');
+  });
+
   test('running pure-thinking Thought shows the blink dot ● with running footer', async () => {
     const block = {
       id: 1,
@@ -1649,15 +1774,30 @@ describe('Block spacing', () => {
 
   test('user → text', () => {
     assertGap(
-      { id: 1, kind: 'user', content: 'hello world', _marker: 'hello world' } as any,
-      { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
+      {
+        id: 1,
+        kind: 'user',
+        content: 'hello world',
+        _marker: 'hello world',
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
       1,
     );
   });
 
   test('text → tool_card', () => {
     assertGap(
-      { id: 1, kind: 'text', content: '__BLOCK_0__', _marker: '__BLOCK_0__' } as any,
+      {
+        id: 1,
+        kind: 'text',
+        content: '__BLOCK_0__',
+        _marker: '__BLOCK_0__',
+      } as unknown as OutputBlock,
       {
         id: 2,
         kind: 'tool_card',
@@ -1667,7 +1807,7 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'done',
         _marker: 'Read',
-      } as any,
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1683,7 +1823,7 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'ok',
         _marker: 'tool_a',
-      } as any,
+      } as unknown as OutputBlock,
       {
         id: 2,
         kind: 'tool_card',
@@ -1693,7 +1833,7 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'ok',
         _marker: 'tool_b',
-      } as any,
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1709,8 +1849,13 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'result',
         _marker: 'Bash',
-      } as any,
-      { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1720,7 +1865,12 @@ describe('Block spacing', () => {
   test('text → file_change is no‑op (file_change rendered by tool_card)', () => {
     // file_change 不再通过 BlockRenderer 渲染，应在 tool_card 之间验证间距
     assertGap(
-      { id: 1, kind: 'text', content: '__BLOCK_0__', _marker: '__BLOCK_0__' } as any,
+      {
+        id: 1,
+        kind: 'text',
+        content: '__BLOCK_0__',
+        _marker: '__BLOCK_0__',
+      } as unknown as OutputBlock,
       {
         id: 2,
         kind: 'tool_card',
@@ -1730,7 +1880,7 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'done',
         _marker: 'Read',
-      } as any,
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1747,8 +1897,13 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'done',
         _marker: 'Read',
-      } as any,
-      { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1767,16 +1922,31 @@ describe('Block spacing', () => {
         durationMs: 100,
         steps: [],
         _marker: 'find',
-      } as any,
-      { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
       2, // subagent status line adds one extra line between header marker and next block
     );
   });
 
   test('slash command user → text (tight)', () => {
     assertGap(
-      { id: 1, kind: 'user', content: '/theme blue', _marker: '/theme blue' } as any,
-      { id: 2, kind: 'text', content: '__SLASH_RSLT__', _marker: '__SLASH_RSLT__' } as any,
+      {
+        id: 1,
+        kind: 'user',
+        content: '/theme blue',
+        _marker: '/theme blue',
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__SLASH_RSLT__',
+        _marker: '__SLASH_RSLT__',
+      } as unknown as OutputBlock,
       0,
     );
   });

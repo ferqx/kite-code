@@ -3,6 +3,7 @@ import React from 'react';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
 import MarkdownBlock from './MarkdownBlock';
+import { formatElapsed } from './render-utils';
 import SubAgentBlock from './SubAgentBlock';
 import { wrapDisplayLines } from './soft-wrap';
 import ToolCardBlock from './ToolCardBlock';
@@ -107,7 +108,19 @@ const BlockRenderer = React.memo(function BlockRenderer({
       const hasVisible = /\S/u.test(block.content);
       if (!hasVisible) return null;
       return (
-        <Box paddingLeft={TEXT_INDENT} marginTop={gapFrom(prevBlock).marginTop} marginBottom={0}>
+        <Box
+          flexDirection="column"
+          paddingLeft={TEXT_INDENT}
+          marginTop={gapFrom(prevBlock).marginTop}
+          marginBottom={0}
+        >
+          {/* ADR-0026：并入的纯思考题头——暗色、与正文零间隔、无圆点
+              （● 保留给有状态的行）；TEXT_INDENT=2 使文字起始列与工具块名字列对齐。
+              ADR-0026: merged pure-thinking header — dim, zero gap to the
+              body, no dot; TEXT_INDENT=2 aligns it with tool-block names. */}
+          {block.thoughtElapsedMs != null && (
+            <Text color={dt.dim}>Thought for {formatElapsed(block.thoughtElapsedMs)}</Text>
+          )}
           <MarkdownBlock
             content={block.content}
             streaming={block.streaming}

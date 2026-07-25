@@ -24,22 +24,25 @@ function cancelRunningBlocks(s: TuiState): TuiState {
   if (!last) return s;
   const now = Date.now();
   let changed = false;
-  const blocks = last.blocks.map((b) => {
+  let nextBlockId = s.nextBlockId;
+  const blocks = last.blocks.flatMap((b): OutputBlock[] => {
     if (b.kind === 'subagent' && b.status === 'running') {
       changed = true;
-      return {
-        ...b,
-        status: 'cancelled' as const,
-        summary: 'Cancelled',
-        error: 'Cancelled',
-        toolCallCount: b.steps.length,
-        durationMs: s.runStartTime ? now - s.runStartTime : 0,
-        expanded: false,
-      };
+      return [
+        {
+          ...b,
+          status: 'cancelled' as const,
+          summary: 'Cancelled',
+          error: 'Cancelled',
+          toolCallCount: b.steps.length,
+          durationMs: s.runStartTime ? now - s.runStartTime : 0,
+          expanded: false,
+        },
+      ];
     }
     if (b.kind === 'tool_card' && (b.status === 'queued' || b.status === 'running')) {
       changed = true;
-      return { ...b, status: 'cancelled' as const, summary: 'Cancelled' };
+      return [{ ...b, status: 'cancelled' as const, summary: 'Cancelled' }];
     }
     if (b.kind === 'tool_summary') {
       const tools = b.tools.map((t) =>
@@ -47,47 +50,106 @@ function cancelRunningBlocks(s: TuiState): TuiState {
           ? { ...t, status: 'cancelled' as const, summary: 'Cancelled' }
           : t,
       );
-      if (tools.some((t, i) => t.status !== b.tools[i]!.status) || b.active) {
+      if (tools.some((t, i) => t.status !== b.tools[i]!.status) || b.active || b.pendingCaption) {
         changed = true;
-        return {
+        // 取消/中断 settle 时按工具状态重算 result（阶段块可能横跨多轮工具，
+        // 残留的旧 result 会误导结算状态）。规则 15。
+        // Recompute result from tool states at cancel/interrupt settle (rule 15).
+        const hasError = tools.some(
+          (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
+        );
+        const anyCancelled = tools.some(
+          (t) => t.status === 'cancelled' || t.status === 'queued' || t.status === 'running',
+        );
+        const result = hasError
+          ? ('error' as const)
+          : anyCancelled
+            ? ('cancelled' as const)
+            : ('done' as const);
+        const settled: OutputBlock = {
           ...b,
           tools,
           summaryLine: buildToolSummaryLine(tools),
           active: false,
           latestActivity: undefined,
           totalElapsedMs: b.modelMs ?? now - b.createdAt,
+          pendingCaption: undefined,
+          result,
         };
+        // ADR-0030 / 规则 24：取消/中断时未确认旁白脱离为独立文本块
+        // Unconfirmed captions detach on cancel/interrupt too
+        if (b.pendingCaption != null) {
+          return [settled, { id: nextBlockId++, kind: 'text' as const, content: b.pendingCaption }];
+        }
+        return [settled];
       }
     }
-    return b;
+    return [b];
   });
-  if (!changed) return s;
+  // 取消/中断属于调用边界：思考延续上下文一并清除（ADR-0027）
+  // Cancel/interrupt is a lifecycle boundary — drop thinking carryover too
+  if (!changed) return s.thoughtCarryover ? { ...s, thoughtCarryover: undefined } : s;
   const turns = s.turns.slice();
   turns[turns.length - 1] = { blocks };
-  return { ...s, turns, currentThoughtSummaryId: undefined };
+  return {
+    ...s,
+    turns,
+    nextBlockId,
+    currentThoughtSummaryId: undefined,
+    thoughtCarryover: undefined,
+  };
 }
 
 function settleActiveThought(s: TuiState): TuiState {
   if (s.currentThoughtSummaryId == null) return s;
   const now = Date.now();
   let changed = false;
+  let nextBlockId = s.nextBlockId;
   const turns = s.turns.map((turn) => ({
-    blocks: turn.blocks.flatMap((block) => {
+    blocks: turn.blocks.flatMap((block): OutputBlock[] => {
       if (block.kind !== 'tool_summary' || block.id !== s.currentThoughtSummaryId) return [block];
       changed = true;
       // 纯思考块（无工具）同样保留并 settle，与 closeCurrentThought 行为一致
       // Pure-thinking blocks are kept and settled, consistent with closeCurrentThought
-      return [
-        {
-          ...block,
-          active: false,
-          latestActivity: undefined,
-          totalElapsedMs: block.modelMs ?? now - block.createdAt,
-        },
-      ];
+      const hasError = block.tools.some(
+        (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
+      );
+      const anyUnsettled = block.tools.some(
+        (t) => t.status === 'cancelled' || t.status === 'queued' || t.status === 'running',
+      );
+      const result = hasError
+        ? ('error' as const)
+        : anyUnsettled
+          ? ('cancelled' as const)
+          : ('done' as const);
+      const settled: OutputBlock = {
+        ...block,
+        active: false,
+        latestActivity: undefined,
+        totalElapsedMs: block.modelMs ?? now - block.createdAt,
+        pendingCaption: undefined,
+        result,
+      };
+      // ADR-0030 / 规则 24：轮次边界 settle 时未确认旁白脱离为独立文本块
+      // （final 事件通常已先一步脱离；这里是中断/异常收尾的安全网）
+      // Unconfirmed captions detach at turn-boundary settle (final normally
+      // detaches first; this is the safety net for interrupts/error paths).
+      if (block.pendingCaption != null) {
+        return [
+          settled,
+          { id: nextBlockId++, kind: 'text' as const, content: block.pendingCaption },
+        ];
+      }
+      return [settled];
     }),
   }));
-  return changed ? { ...s, turns, currentThoughtSummaryId: undefined } : s;
+  // settle 发生在轮次边界：思考延续上下文一并清除（ADR-0027）
+  // Settling happens at turn boundaries — drop thinking carryover too
+  return changed
+    ? { ...s, turns, nextBlockId, currentThoughtSummaryId: undefined, thoughtCarryover: undefined }
+    : s.thoughtCarryover
+      ? { ...s, thoughtCarryover: undefined }
+      : s;
 }
 
 /** 取消 ask_user 问题块时同步更新关联的 tool_card 为 Cancelled
