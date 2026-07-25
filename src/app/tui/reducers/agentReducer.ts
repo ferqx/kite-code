@@ -55,7 +55,7 @@ function cancelRunningBlocks(s: TuiState): TuiState {
           summaryLine: buildToolSummaryLine(tools),
           active: false,
           latestActivity: undefined,
-          totalElapsedMs: now - b.createdAt,
+          totalElapsedMs: b.modelMs ?? now - b.createdAt,
         };
       }
     }
@@ -82,7 +82,7 @@ function settleActiveThought(s: TuiState): TuiState {
           ...block,
           active: false,
           latestActivity: undefined,
-          totalElapsedMs: now - block.createdAt,
+          totalElapsedMs: block.modelMs ?? now - block.createdAt,
         },
       ];
     }),

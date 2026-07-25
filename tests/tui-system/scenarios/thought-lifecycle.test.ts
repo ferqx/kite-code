@@ -64,14 +64,25 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 0 — 思考行时间线排序（第一个测试，避免前序 pending calls 干扰）
+  // Test 0 — 多轮探索在模型调用边界切分为顺序 Thought 块（规则 21）
   //
   // 放在 warmup 之后、其他测试之前，因为共享 PTY session 中
   // 后续测试的 mock responses 会与前面的 auxiliary calls 竞争。
+  //
+  // 消息结构：
+  //   Response 1: PHASE_ONE 思考 + read_file(CLAUDE.md)
+  //   Response 2: PHASE_TWO 思考 + search_files  ← 新一轮模型调用
+  //   Response 3: 文本输出
+  //
+  // 预期 TUI 现象（ADR-0025 / 规则 21/22）：
+  //   - 第 2 轮 model.requested settle 第 1 轮块，第 2 轮工具成为新块
+  //   - 两块标题均为 "Thought for Xs"（规则 22：不带工具统计后缀）
+  //   - 两块均 settle（└─ 完成）；thinking 行仅运行态瞬态可见，
+  //     settle 后不保留（规则 5），累计缓冲中不对其断言
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'thinking lines appear between tool steps in chronological timeline order',
+    'multi-round exploration splits into sequential settled Thought blocks at model call boundaries',
     async () => {
       server.setResponses([
         // Response 1: Phase 1 thinking + first tool
@@ -109,20 +120,19 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.output();
       const clean = stripAnsi(output);
 
-      // ── Single Thought with both tools ──
-      expect(screenContains(output, 'read 1 file')).toBe(true);
-      expect(screenContains(output, 'searched 1 file pattern')).toBe(true);
+      // ── 两个独立 Thought 块（规则 21 按模型调用边界切分），
+      //    标题均为 "Thought for Xs"（规则 22：不带工具统计后缀）──
+      expect(screenContains(output, 'Thought for')).toBe(true);
 
-      // ── Both thinking markers visible ──
-      expect(screenContains(output, 'PHASE_ONE')).toBe(true);
-      expect(screenContains(output, 'PHASE_TWO')).toBe(true);
+      // ── 两轮工具步骤各自可见 ──
+      expect(screenContains(output, 'Read CLAUDE.md')).toBe(true);
+      expect(screenContains(output, 'Find CLAUDE.md in .')).toBe(true);
 
-      // ── Chronological ordering ──
-      const phase1Idx = clean.lastIndexOf('PHASE_ONE');
-      const phase2Idx = clean.lastIndexOf('PHASE_TWO');
+      // ── 时序：第 1 轮块在第 2 轮块之前 ──
       const readIdx = clean.lastIndexOf('Read CLAUDE.md');
-      expect(phase1Idx).toBeLessThan(readIdx);
-      expect(phase1Idx).toBeLessThan(phase2Idx);
+      const searchIdx = clean.lastIndexOf('Find CLAUDE.md in .');
+      expect(readIdx).toBeGreaterThanOrEqual(0);
+      expect(searchIdx).toBeGreaterThan(readIdx);
 
       // ── Settled footer ──
       expect(screenContains(output, '└─ 完成')).toBe(true);
@@ -140,7 +150,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 2: content 文本输出（关闭 Thought）
   //
   // 预期 TUI 现象：
-  //   - Thought 块 summaryLine = "read 1 file, searched for 1 pattern"
+  //   - Thought 标题 = "Thought for Xs"（规则 22：不带工具统计后缀）
   //   - 工具步骤 tree 展开：├─ Read CLAUDE.md / ├─ Search: langgraph
   //   - settled footer = └─ 完成
   //   - 模型回复文本可见
@@ -178,9 +188,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.output();
       const clean = stripAnsi(output);
 
-      // ── Thought summary line ──
-      expect(screenContains(output, 'read 1 file')).toBe(true);
-      expect(screenContains(output, 'searched for 1 pattern')).toBe(true);
+      // ── Thought 标题只有 "Thought for Xs"（规则 22：不带工具统计后缀）──
+      expect(screenContains(output, 'Thought for')).toBe(true);
 
       // ── Tool steps visible in the Thought tree ──
       expect(screenContains(output, 'Read CLAUDE.md')).toBe(true);
@@ -202,21 +211,22 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 2 — 多阶段思考 → 同一 Thought 累积
+  // Test 2 — 多阶段思考按模型调用边界切分为顺序 Thought 块（规则 21）
   //
   // 消息结构：
   //   Response 1: reasoning + read_file(CLAUDE.md)
-  //   Response 2: reasoning + read_file(package.json)  ← 同一周期
-  //   Response 3: content 文本输出 → 关闭 Thought
+  //   Response 2: reasoning + read_file(package.json)  ← 新一轮模型调用
+  //   Response 3: content 文本输出
   //
-  // 预期 TUI 现象：
-  //   - 只有 1 个 Thought 块，summaryLine = "read 2 files"
-  //   - 两个工具步骤都在可见列表中
-  //   - 中间不会出现「完成」+「新 Thought」的分裂
+  // 预期 TUI 现象（ADR-0025 / 规则 21）：
+  //   - 第 2 轮 model.requested settle 第 1 轮块，第 2 轮成为新块
+  //   - 两个 "Thought for Xs" 块顺序排列，不再累积为 "read 2 files"
+  //     （旧规则 4 的跨轮合并已废止——模型调用边界即 Thought 边界）
+  //   - 两个工具步骤都可见
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'multi-phase reasoning accumulates in one Thought until text output',
+    'multi-phase reasoning splits into sequential Thought blocks at model call boundaries',
     async () => {
       server.setResponses([
         // Phase 1
@@ -249,19 +259,18 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.output();
       const clean = stripAnsi(output);
 
-      // ── Single Thought with 2 files ──
-      expect(screenContains(output, 'read 2 files')).toBe(true);
+      // ── 不再累积为 "read 2 files"（规则 21 切分多轮探索）──
+      expect(screenContains(output, 'read 2 files')).toBe(false);
+
+      // ── 两轮各自成为 "Thought for Xs" 块（规则 22：标题不带工具统计）──
+      expect(screenContains(output, 'Thought for')).toBe(true);
 
       // ── Both tool steps visible ──
       expect(screenContains(output, 'CLAUDE.md')).toBe(true);
       expect(screenContains(output, 'package.json')).toBe(true);
 
-      // ── Only ONE Thought summary (not two separate) ──
-      // 验证 "read 2 files" 出现而 "read 1 file" 不出现（在 Thought summary 行中）。
-      // PTY 会捕获所有渲染帧 → 数字匹配不准确，改用存在性检查。
-      // Verify "read 2 files" exists AND "read 1 file" is NOT in the final settled state.
-      // The Throught accumulated both tools, so the final summary should say "read 2 files".
-      expect(screenContains(output, 'read 2 files')).toBe(true);
+      // ── 时序：第 1 轮（CLAUDE.md）在第 2 轮（package.json）之前 ──
+      expect(clean.lastIndexOf('CLAUDE.md')).toBeLessThan(clean.lastIndexOf('package.json'));
 
       // ── Settled footer ──
       expect(screenContains(output, '└─ 完成')).toBe(true);
@@ -282,7 +291,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 2: content 文本输出 → 关闭 Thought
   //
   // 预期 TUI 现象：
-  //   - Thought summaryLine = "read 1 file, ran 1 command"
+  //   - Thought 标题 = "Thought for Xs"（规则 22：不带工具统计后缀）
   //   - shell_execute 作为工具步骤展开（Bash: find ...），而非独立 tool_card
   //   - settled footer = └─ 完成
   // ═══════════════════════════════════════════════════════════════
@@ -314,17 +323,15 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Explore with shell', 15000);
 
-      // Wait for the unique "ran 1 command" summary to appear (only Test 3 has shell_execute).
-      // The settled Thought with this summary confirms the thought lifecycle completed.
-      await waitForText(() => tui.output(), 'ran 1 command', 25000);
+      // Wait for the final text — confirms the thought lifecycle completed.
+      await waitForText(() => tui.output(), 'SHELL_THOUGHT_DONE', 25000);
       await sleep(2000);
 
       const output = tui.output();
       const clean = stripAnsi(output);
 
-      // ── Thought summary includes both tools ──
-      expect(screenContains(output, 'read 1 file')).toBe(true);
-      expect(screenContains(output, 'ran 1 command')).toBe(true);
+      // ── Thought 标题存在（"Thought for Xs"，不带工具统计后缀）──
+      expect(screenContains(output, 'Thought for')).toBe(true);
 
       // ── Both tool steps visible in Thought tree ──
       expect(screenContains(output, 'CLAUDE.md')).toBe(true);
@@ -402,7 +409,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 2: content
   //
   // 预期 TUI 现象：
-  //   - 单行 "● Thought for Xs"（无工具统计、无步骤树/footer）
+  //   - 单行 "Thought for Xs"（无圆点——● 保留给有状态的行，无步骤树/footer）
   //   - settle 后保留在消息列表中（纯思考块持久化，不因 text 到达而消失）
   // ═══════════════════════════════════════════════════════════════
 

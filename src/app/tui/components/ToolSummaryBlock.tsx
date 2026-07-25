@@ -3,50 +3,50 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import { useTheme } from '../theme';
 import type { ConsolidatedToolEntry, OutputBlock } from '../types';
-import {
-  actionName,
-  formatElapsed,
-  formatReadFileRange,
-  SPINNER,
-  SPINNER_INTERVAL_MS,
-  toolColor,
-} from './render-utils';
+import { actionName, formatElapsed, formatReadFileRange, toolColor } from './render-utils';
 
 // ══════════════════════════════════════════════════════════════════
-// SpinnerDot — 独立组件，隔离 spinner 状态更新
+// BlinkDot — 独立组件，隔离闪烁圆点状态更新
 //
-// 把 spinner 抽离为独立组件是最关键的渲染性能优化。
-// 父组件 ToolSummaryBlock 的 props（block, columns）在 spinner tick
-// 之间不变 → React 跳过父组件重渲染 → Ink 只输出变化的 spinner 字符，
+// 进行中圆点为主题暗（dim，不抢眼）实心 ● 显隐闪烁（500ms 切换）：
+// 隐藏帧渲染为两个空格，符号位置、宽度（2 字符）不变，无行位移。
+// settle 后变为纯思考白点（muted）——"运行中暗灰闪烁、完成后白色静止"。
+// 思考链与非思考链聚合共用此组件。
+//
+// 把圆点抽离为独立组件是最关键的渲染性能优化。
+// 父组件 ToolSummaryBlock 的 props（block, columns）在闪烁之间不变
+// → React 跳过父组件重渲染 → Ink 只输出变化的圆点字符，
 // 不触发整个 Thought 树（15+ Yoga 布局节点）的 diff/layout/write。
 //
-// SpinnerDot isolates spinner state so tick updates don't cascade into
-// the parent ToolSummaryBlock re-render. When parent props are stable,
-// React skips the parent tree entirely — Ink only writes the single
-// changed spinner glyph, not the full Thought tree (15+ Yoga nodes).
+// BlinkDot isolates the blink state so tick updates don't cascade
+// into the parent ToolSummaryBlock re-render. When parent props are
+// stable, React skips the parent tree entirely — Ink only writes the
+// single changed dot glyph, not the full Thought tree.
 // ══════════════════════════════════════════════════════════════════
 
-function SpinnerDot({ active }: { active: boolean }) {
-  const [idx, setIdx] = useState(0);
-  const startRef = useRef(Date.now());
+/** 闪烁间隔：500ms 显/隐切换（1s 周期）/ Blink toggle interval (1s cycle) */
+const DOT_BLINK_INTERVAL_MS = 500;
+
+function BlinkDot({ active }: { active: boolean }) {
+  const dt = useTheme();
+  const [visible, setVisible] = useState(true);
   const activeRef = useRef(active);
 
   useEffect(() => {
     activeRef.current = active;
-    if (active) startRef.current = Date.now();
-    else setIdx(0);
+    if (active) setVisible(true);
   }, [active]);
 
   useEffect(() => {
-    const tick = () => {
-      if (!activeRef.current) return;
-      setIdx(Math.floor((Date.now() - startRef.current) / 80) % SPINNER.length);
-    };
-    const timer = setInterval(tick, SPINNER_INTERVAL_MS);
+    const timer = setInterval(() => {
+      if (activeRef.current) setVisible((v) => !v);
+    }, DOT_BLINK_INTERVAL_MS);
     return () => clearInterval(timer);
   }, []);
 
-  return <Text>{SPINNER[idx]!} </Text>;
+  // 隐藏帧渲染为两个空格，与 "● " 同宽，无行位移
+  // Hidden frame renders two spaces — same width as "● ", no layout shift
+  return <Text color={dt.dim}>{visible ? '● ' : '  '}</Text>;
 }
 
 /** 工具步骤折叠阈值：超过此行数的 Thought 只展示最后 N 步，其余折叠。
@@ -229,13 +229,18 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   const skipped = Math.max(0, stepCount - MAX_VISIBLE_STEPS);
   const hasSkipped = skipped > 0;
 
-  // ── Summary label ──
+  // ── Summary label（对齐 Claude Code）──
+  // 思考块标题只有 "Thought for Xs"，不带工具统计后缀——工具信息已在
+  // 下方步骤树展示（CC：✻ Thought for Xs 标题行 + 独立 ⏺ 工具行）。
+  // 非思考聚合块（无 hasThinking）保持纯工具统计标签（对应 CC 的
+  // "⏺ Read N files" 聚合行）。elapsed 为模型调用时长（规则 22）。
+  // CC parity: thinking blocks get a bare "Thought for Xs" header (tool
+  // info lives in the step tree below); non-thinking aggregates keep the
+  // pure tool-stats label. elapsed = model-call duration (rule 22).
   const hasThink = block.hasThinking === true;
   const hasTools = block.tools.length > 0;
   const summaryLabel = hasThink
-    ? hasTools
-      ? `Thought for ${elapsedStr}, ${summaryLine}`
-      : `Thought for ${elapsedStr}`
+    ? `Thought for ${elapsedStr}`
     : hasTools
       ? summaryLine
       : `Thought for ${elapsedStr}`;
@@ -318,17 +323,19 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
     return items;
   }, [block.timeline, block.active, steps, stepCount]);
 
-  // ── 纯思考块 settle 后：单行 "● Thought for Xs"（Claude Code 风格，无步骤树/footer）──
-  // 圆点用白色（muted）而非工具块的绿色 ● —— 纯思考没有"工具完成"语义。
+  // ── 纯思考块 settle 后：单行 "Thought for Xs"（无圆点、无步骤树/footer）──
+  // ● 保留给"有状态"的行（运行态闪烁点 / 工具块绿红黄完成点）；纯思考
+  // settle 后没有状态可传达，不渲染圆点，但保留两个空格列位，使文字起始
+  // 列与工具块名字列对齐。
   // 置于所有 hook 之后，保证 hook 调用顺序稳定（rules-of-hooks）。
-  // ── Pure-thinking block settled: single-line indicator, no step tree / footer.
-  // White dot (not the green done-dot) — no tools completed here.
-  // Placed after all hooks to keep hook call order stable.
+  // ── Pure-thinking block settled: single line, no dot — ● is reserved for
+  // stateful rows (running blink / tool outcome colors); a settled pure
+  // thought carries no status. Two leading spaces keep the label aligned
+  // with tool-block names. Placed after all hooks (rules-of-hooks).
   if (!isRunning && stepCount === 0) {
     return (
       <Box>
-        <Text color={dt.muted}>● </Text>
-        <Text color={dt.dim}>{summaryLabel}</Text>
+        <Text color={dt.dim}> {summaryLabel}</Text>
       </Box>
     );
   }
@@ -339,7 +346,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   return (
     <Box flexDirection="column">
       <Box>
-        {isRunning ? <SpinnerDot active={isRunning} /> : <Text color={doneColor}>● </Text>}
+        {isRunning ? <BlinkDot active={isRunning} /> : <Text color={doneColor}>● </Text>}
         <Text color={dt.dim}>{summaryLabel}</Text>
       </Box>
       {hasSkipped && (

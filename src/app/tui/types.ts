@@ -83,15 +83,22 @@ export type OutputBlock =
       tools: ConsolidatedToolEntry[];
       totalElapsedMs: number;
       createdAt: number;
+      /** 该轮模型调用累计耗时（ms，来自 model.responded.durationMs，不含工具执行）。
+       *  存在时 totalElapsedMs 以此为准（对齐 Claude Code "Thought for Xs" 计时语义）；
+       *  旧事件日志无此字段，回退创建→settle 墙钟。
+       *  Accumulated model-call duration (ms, from model.responded.durationMs,
+       *  excluding tool execution). When present, totalElapsedMs follows it
+       *  (Claude Code "Thought for Xs" semantics); absent in old logs → wall clock. */
+      modelMs?: number;
       summaryLine: string;
       active: boolean;
       /** 是否有过 reason 思考块 — 用于三态顶行：Thought + tools / 仅 Thought / 仅 tools */
       hasThought: boolean;
       latestActivity?: ThoughtActivity;
       /** 本 Thought 生命周期内是否出现过思考（reason 事件）。
-       *  用于渲染时区分 "Thought for 3s, read 2 files" vs "read 2 files" vs "Thought for 3s"。
+       *  用于渲染时区分 "Thought for 3s"（有思考）vs "read 2 files"（仅工具统计）。
        *  Whether any reasoning (reason events) occurred during this Thought's lifetime.
-       *  Controls the summary label: with thinking → "Thought for Xs, …", without → just tool counts. */
+       *  Controls the summary label: with thinking → "Thought for Xs", without → just tool counts. */
       hasThinking?: boolean;
       /** 事件时间线：记录 reason / tool_call 的先后顺序，渲染时按序交错思考行与工具步骤。
        *  Event timeline: records reason/tool_call ordering so the render layer
