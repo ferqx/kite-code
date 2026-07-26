@@ -91,7 +91,8 @@ describe('loadAgentConfig', () => {
                 "maxOutputTokens": 2048,
                 "tokenizerFamily": "llama",
                 "supportsUsageMetadata": true,
-                "supportsPromptCache": false
+                "supportsPromptCache": false,
+                "streaming": true
               }]
             }
           }
@@ -103,6 +104,7 @@ describe('loadAgentConfig', () => {
         tokenizerFamily: 'llama',
         supportsUsageMetadata: true,
         supportsPromptCache: false,
+        streaming: true,
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });

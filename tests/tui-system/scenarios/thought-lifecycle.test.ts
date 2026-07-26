@@ -32,6 +32,18 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
+      configOverrides: {
+        provider: {
+          mock: {
+            type: 'deepseek',
+            apiKey: 'test-key',
+            baseURL: server.baseURL,
+            model: 'mock-model',
+            models: [{ name: 'mock-model', default: true, streaming: true }],
+          },
+        },
+        model: { default: { provider: 'mock', name: 'mock-model' } },
+      },
       files: {
         'CLAUDE.md': '# Test workspace\n\nFixture used by Thought Lifecycle read-tool scenarios.\n',
         'package.json': '{"name":"thought-lifecycle-fixture"}\n',
@@ -77,7 +89,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   // 预期 TUI 现象（ADR-0030）：
   //   - model.requested 不再切分：两轮工具同块，标题
   //     "Thought for Xs · read 1 file, searched 1 file pattern"
-  //   - 阶段块 settle（└─ 完成），最终回答为独立文本块
+  //   - 阶段块 settle 为单行摘要，最终回答为独立文本块
   // ═══════════════════════════════════════════════════════════════
 
   test(
@@ -133,8 +145,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(readIdx).toBeGreaterThanOrEqual(0);
       expect(searchIdx).toBeGreaterThan(readIdx);
 
-      // ── Settled footer + 最终回答独立文本块 ──
-      expect(screenContains(output, '└─ 完成')).toBe(true);
+      // ── Settled 后折叠为单行摘要，无 footer ──
+      expect(screenContains(output, '└─ 完成')).toBe(false);
       expect(screenContains(output, 'TIMELINE_DONE')).toBe(true);
 
       console.log('  [Test 0] clean output (last 3000 chars):', clean.slice(-3000));
@@ -152,7 +164,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   // 预期 TUI 现象：
   //   - Thought 标题 = "Thought for Xs · read 1 file, searched for 1 pattern"（规则 22）
   //   - 工具步骤 tree 展开：├─ Read CLAUDE.md / ├─ Search: langgraph
-  //   - settled footer = └─ 完成
+  //   - settled 后无 footer
   //   - 模型回复文本可见
   // ═══════════════════════════════════════════════════════════════
 
@@ -197,8 +209,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       // search_content renders the pattern after "Search:"
       expect(screenContains(output, 'langgraph')).toBe(true);
 
-      // ── Settled footer ──
-      expect(screenContains(output, '└─ 完成')).toBe(true);
+      // ── Settled 后无 footer ──
+      expect(screenContains(output, '└─ 完成')).toBe(false);
 
       // ── Model text response ──
       expect(screenContains(output, 'EXPLORE_DONE')).toBe(true);
@@ -270,8 +282,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       // ── 时序：第 1 轮（CLAUDE.md）在第 2 轮（package.json）之前 ──
       expect(clean.lastIndexOf('CLAUDE.md')).toBeLessThan(clean.lastIndexOf('package.json'));
 
-      // ── Settled footer ──
-      expect(screenContains(output, '└─ 完成')).toBe(true);
+      // ── Settled 后无 footer ──
+      expect(screenContains(output, '└─ 完成')).toBe(false);
 
       // ── Final text ──
       expect(screenContains(output, 'TWO_PHASE_DONE')).toBe(true);
@@ -291,7 +303,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   // 预期 TUI 现象：
   //   - Thought 标题 = "Thought for Xs · read 1 file, ran 1 command"（规则 22）
   //   - shell_execute 作为工具步骤展开（Bash: find ...），而非独立 tool_card
-  //   - settled footer = └─ 完成
+  //   - settled 后无 footer
   // ═══════════════════════════════════════════════════════════════
 
   test(
@@ -337,8 +349,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       // shell step label shows the command
       expect(screenContains(output, 'grep "name" package.json')).toBe(true);
 
-      // ── Settled footer ──
-      expect(screenContains(output, '└─ 完成')).toBe(true);
+      // ── Settled 后无 footer ──
+      expect(screenContains(output, '└─ 完成')).toBe(false);
 
       // ── TUI idle ──
       expect(screenContains(output, '❯')).toBe(true);
@@ -389,8 +401,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       // ── 关键断言：不应该有 "Thought for" 前缀 ──
       expect(screenContains(output, 'read 1 file')).toBe(true);
 
-      // ── Settled footer ──
-      expect(screenContains(output, '└─ 完成')).toBe(true);
+      // ── Settled 后无 footer ──
+      expect(screenContains(output, '└─ 完成')).toBe(false);
 
       // ── TUI idle ──
       expect(screenContains(output, '❯')).toBe(true);
@@ -445,8 +457,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       //    （累计 PTY 缓冲尾部 ≈ 最终画面；若块被删除则尾部不会有该标签）──
       expect(clean.slice(-1500)).toContain('Thought for');
 
-      // ── Settled footer ──
-      expect(screenContains(output, '└─ 完成')).toBe(true);
+      // ── Settled 后无 footer ──
+      expect(screenContains(output, '└─ 完成')).toBe(false);
 
       // ── TUI idle ──
       expect(screenContains(output, '❯')).toBe(true);

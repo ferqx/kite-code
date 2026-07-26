@@ -1,8 +1,8 @@
 // src/core/model/invoke.ts
-// Invoke a model with tools — AI SDK generateText (single-step, no tool execution).
+// Invoke a model with tools — AI SDK single-step generation, optionally streamed.
 // Message conversion from internal BaseMessage[] to AI SDK ModelMessage[] lives here.
 
-import { generateText, type ModelMessage, stepCountIs, type ToolSet } from 'ai';
+import { generateText, type ModelMessage, stepCountIs, streamText, type ToolSet } from 'ai';
 import {
   type AIMessage,
   aiMessage,
@@ -13,6 +13,11 @@ import {
   isToolMessage,
   type ToolMessage,
 } from '@/core/messages';
+import {
+  type ModelRetryListener,
+  type TransientModelRetryOptions,
+  withTransientModelRetry,
+} from './deepseek';
 import type { SupportedChatModel } from './factory';
 
 /**
@@ -26,6 +31,12 @@ export async function invokeBoundModel(params: {
   messages: BaseMessage[];
   signal?: AbortSignal;
   maxOutputTokens?: number;
+  streaming?: boolean;
+  onTextDelta?: (text: string) => void;
+  onReasoningDelta?: (text: string) => void;
+  onRetry?: ModelRetryListener;
+  /** Test seam for deterministic retry timing; production uses the bounded defaults. */
+  streamRetryOptions?: Omit<TransientModelRetryOptions, 'onRetry'>;
 }): Promise<AIMessage> {
   // Separate system messages from chat messages — generateText requires
   // system prompts via `system`/`instructions`, not in `messages`.
@@ -50,7 +61,7 @@ export async function invokeBoundModel(params: {
     }),
   ) as ToolSet;
 
-  const result = await generateText({
+  const request = {
     model: params.model.model,
     tools: Object.keys(modelTools).length > 0 ? modelTools : undefined,
     messages: chatMessages,
@@ -60,9 +71,74 @@ export async function invokeBoundModel(params: {
     temperature: 0,
     maxRetries: 0, // retries handled by transientRetryMiddleware
     ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
-  });
+  };
 
-  return toAIMessage(result);
+  if (params.streaming) {
+    let attemptNumber = 0;
+    let lastAttemptText = '';
+    let lastAttemptReasoning = '';
+    let retryBaselineText = '';
+    let retryBaselineReasoning = '';
+    return withTransientModelRetry(
+      async () => {
+        attemptNumber++;
+        let streamError: unknown;
+        const result = streamText({
+          ...request,
+          onError: ({ error }) => {
+            streamError = error;
+          },
+        });
+        let text = '';
+        let reasoning = '';
+        lastAttemptText = '';
+        lastAttemptReasoning = '';
+        for await (const part of result.fullStream) {
+          if (part.type === 'text-delta') {
+            text += part.text;
+            lastAttemptText = text;
+            const visibleText =
+              attemptNumber === 1
+                ? text
+                : retryBaselineText.startsWith(text)
+                  ? ''
+                  : text.startsWith(retryBaselineText)
+                    ? text.slice(retryBaselineText.length)
+                    : text;
+            if (visibleText) params.onTextDelta?.(visibleText);
+          } else if (part.type === 'reasoning-delta') {
+            reasoning += part.text;
+            lastAttemptReasoning = reasoning;
+            const visibleReasoning =
+              attemptNumber === 1
+                ? reasoning
+                : retryBaselineReasoning.startsWith(reasoning)
+                  ? ''
+                  : reasoning.startsWith(retryBaselineReasoning)
+                    ? reasoning.slice(retryBaselineReasoning.length)
+                    : reasoning;
+            if (visibleReasoning) params.onReasoningDelta?.(visibleReasoning);
+          } else if (part.type === 'error') {
+            throw part.error;
+          } else if (part.type === 'abort') {
+            throw new DOMException(part.reason ?? 'Model stream aborted', 'AbortError');
+          }
+        }
+        if (streamError) throw streamError;
+        return toAIMessage(await result.finalStep);
+      },
+      {
+        ...params.streamRetryOptions,
+        onRetry: (attempt, maxAttempts, error, delayMs) => {
+          retryBaselineText = lastAttemptText;
+          retryBaselineReasoning = lastAttemptReasoning;
+          params.onRetry?.(attempt, maxAttempts, error, delayMs);
+        },
+      },
+    );
+  }
+
+  return toAIMessage(await generateText(request));
 }
 
 // ── Message conversion: internal BaseMessage → AI SDK ModelMessage ──
@@ -164,7 +240,24 @@ function toToolModelMessage(msg: ToolMessage): ModelMessage {
 
 // ── Result conversion: generateText result → internal AIMessage ──
 
-function toAIMessage(result: Awaited<ReturnType<typeof generateText>>): AIMessage {
+function toAIMessage(result: {
+  text?: string;
+  toolCalls?: ReadonlyArray<{
+    toolCallId: string;
+    toolName: string;
+    input: unknown;
+  }>;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    inputTokenDetails?: { cacheReadTokens?: number };
+  };
+  rawFinishReason?: string;
+  finishReason?: string;
+  reasoningText?: string;
+  response?: { id?: string };
+}): AIMessage {
   return aiMessage({
     content: result.text ?? '',
     tool_calls: (result.toolCalls ?? []).map((tc) => ({
@@ -188,5 +281,6 @@ function toAIMessage(result: Awaited<ReturnType<typeof generateText>>): AIMessag
     additional_kwargs: {
       reasoning_content: result.reasoningText ?? '',
     },
+    id: result.response?.id,
   });
 }

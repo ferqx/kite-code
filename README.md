@@ -130,6 +130,7 @@ bun test
 bun run test:mock
 bun run test:e2e
 bun run test:tui:system
+bun run test:all
 bun run test:mcp:live
 bun run test:model:live
 bun run typecheck
@@ -139,4 +140,4 @@ bun run check:docs
 bun run check:docs-impact
 ```
 
-默认测试不访问真实模型或公网 MCP。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`，TUI PTY scenarios 由 `test:tui:system` 独立串行执行。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是显式 opt-in 的真实模型 context compaction direct/incremental summary 套件。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。
+默认测试不访问真实模型或公网 MCP。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`，TUI PTY scenarios 由 `test:tui:system` 按文件独立串行执行，并带单文件硬超时；`test:all` 依次运行默认测试和完整 PTY suite。裸 `bun test` 会误收集高成本 PTY 文件，不是仓库规范的全量入口。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是显式 opt-in 的真实模型 context compaction direct/incremental summary 套件。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。

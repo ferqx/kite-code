@@ -1230,6 +1230,90 @@ describe('SessionRuntime', () => {
     expect(rt.eventBuffer.length).toBe(MAX);
   });
 
+  test('coalesces cumulative model deltas to the latest value per frame', async () => {
+    const rt = makeRuntime();
+    const actions: any[] = [];
+    const dispatch = (action: any) => actions.push(action);
+
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'a' }, dispatch);
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'answer' }, dispatch);
+    (rt as any)._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'r' }, dispatch);
+    (rt as any)._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'reasoning' }, dispatch);
+    expect(actions).toEqual([]);
+
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(actions.map((action) => action.event)).toEqual([
+      { type: 'model.reasoning_delta', text: 'reasoning' },
+      { type: 'model.text_delta', text: 'answer' },
+    ]);
+  });
+
+  test('flushes buffered deltas before a non-delta event', () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    const dispatch = (action: any) => events.push(action.event);
+
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'answer' }, dispatch);
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.responded', messageId: 'final', text: 'answer' },
+      dispatch,
+    );
+
+    expect(events).toEqual([
+      { type: 'model.text_delta', text: 'answer' },
+      { type: 'model.responded', messageId: 'final', text: 'answer' },
+    ]);
+  });
+
+  test('clearBuffer cancels a pending delta frame', async () => {
+    const rt = makeRuntime();
+    const actions: any[] = [];
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'discarded' }, (action: any) =>
+      actions.push(action),
+    );
+
+    rt.clearBuffer();
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(actions).toEqual([]);
+    expect(rt.eventBuffer).toEqual([]);
+  });
+
+  test('abort flushes the latest delta before cancelling the run', () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.text_delta', text: 'partial answer' },
+      (action: any) => events.push(action.event),
+    );
+
+    rt.abort();
+    expect(events).toEqual([{ type: 'model.text_delta', text: 'partial answer' }]);
+  });
+
+  test('switching to background flushes a pending foreground delta first', () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.text_delta', text: 'before switch' },
+      (action: any) => events.push(action.event),
+    );
+
+    rt.setForeground(false);
+    expect(events).toEqual([{ type: 'model.text_delta', text: 'before switch' }]);
+    expect(rt.eventBuffer).toEqual([]);
+  });
+
+  test('switching to foreground preserves a background delta for replay', () => {
+    const rt = makeRuntime();
+    rt.setForeground(false);
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'background update' }, () => {
+      throw new Error('background delta must not dispatch directly');
+    });
+
+    rt.setForeground(true);
+    expect(rt.eventBuffer).toEqual([{ type: 'model.text_delta', text: 'background update' }]);
+  });
+
   // ── _createProxyProvider (via private access) ──
 
   test('proxy requestAction auto-cancels input in background', async () => {

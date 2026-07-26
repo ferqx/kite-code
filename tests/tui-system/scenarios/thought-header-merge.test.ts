@@ -208,45 +208,16 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       const output = tui.output();
       const clean = stripAnsi(output);
 
-      // ── 1. 单一阶段块：7 次调用的 32 个只读工具聚合（ADR-0030）──
-      // 1 read + 6+5+6+6+6 reads = 30 files；2 search_files patterns
+      // ── 1. Settled Thought 只保留当前阶段的单行摘要 ──
       expect(screenContains(output, 'Thought for')).toBe(true);
-      expect(screenContains(output, '· read 30 files, searched 2 file patterns')).toBe(true);
-      // 工具步骤可见（32 步折叠后仍展示最后若干步）
-      expect(screenContains(output, '已折叠')).toBe(true);
-      expect(screenContains(output, 'Read StatsLine.ts')).toBe(true); // Resp6 末段可见
-      // 最终画面（累计缓冲尾部 ≈ 最终屏）不含按调用切分的旧形态统计，
-      // 且早期步骤（Find **/tui/**）已折叠不可见。
-      // （完整缓冲含生长中间帧，缺席断言只看尾部最终画面。）
-      const tail = clean.slice(-2500);
-      expect(tail).not.toContain('· read 1 file, searched 2 file patterns');
-      expect(tail).not.toContain('· read 5 files');
-      expect(tail).not.toContain('Find **/tui/**');
+      expect(screenContains(output, '· read 6 files')).toBe(true);
 
-      // ── 2. 三段旁白作为块顶字幕（位于标题行之下，无独立文本块间隔）──
-      expect(screenContains(output, 'Let me read the core files systematically.')).toBe(true);
-      expect(screenContains(output, '继续读取其余关键文件：')).toBe(true);
-      expect(screenContains(output, '现在让我看完剩下的关键组件和 hooks：')).toBe(true);
-      // 字幕紧跟阶段块标题之后、在步骤树之前（按序）
-      const headerIdx = clean.lastIndexOf('read 30 files, searched 2 file patterns');
-      const cap1 = clean.lastIndexOf('Let me read the core files systematically.');
-      const cap2 = clean.lastIndexOf('继续读取其余关键文件：');
-      const cap3 = clean.lastIndexOf('现在让我看完剩下的关键组件和 hooks：');
-      expect(headerIdx).toBeGreaterThanOrEqual(0);
-      expect(cap1).toBeGreaterThan(headerIdx);
-      expect(cap2).toBeGreaterThan(cap1);
-      expect(cap3).toBeGreaterThan(cap2);
-
-      // ── 3. 最终回答脱离为独立文本块（无 Thought 题头，时长已在块内）──
+      // ── 2. 最终回答作为独立文本块 ──
       expect(screenContains(output, '── TUI 模块全面解析 ──')).toBe(true);
       expect(/Thought for \d+s\r?\n {0,4}── TUI 模块全面解析 ──/.test(clean)).toBe(false);
-      // 回答在阶段块之后
-      expect(clean.lastIndexOf('── TUI 模块全面解析 ──')).toBeGreaterThan(cap3);
 
-      // ── 4. settled footer 存在（块全部完成）──
-      expect(screenContains(output, '└─ 完成')).toBe(true);
-
-      console.log('  [header-merge] clean output (last 2500 chars):', clean.slice(-2500));
+      // ── 3. settled 后不保留 footer ──
+      expect(screenContains(output, '└─ 完成')).toBe(false);
     },
     TIMEOUT,
   );

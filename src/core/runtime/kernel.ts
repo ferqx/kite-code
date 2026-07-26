@@ -237,12 +237,17 @@ export class AgentKernel {
    * remains subject to the same stale-result check as a batch result.
    */
   applyEffectEvent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
-    if (lease.expectedRevision !== this.state.revision || lease.turnId !== this.state.turn.turnId) {
-      return false;
-    }
+    if (!this.isEffectLeaseCurrent(lease)) return false;
     this.processEvent(event);
     lease.expectedRevision = this.state.revision;
     return true;
+  }
+
+  /** Validate an in-flight effect without reducing or persisting an event. */
+  isEffectLeaseCurrent(lease: RuntimeEffectLease): boolean {
+    return (
+      lease.expectedRevision === this.state.revision && lease.turnId === this.state.turn.turnId
+    );
   }
 
   /**

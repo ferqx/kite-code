@@ -88,7 +88,7 @@ function createAdaptiveSkillModel() {
     },
   };
   return {
-    binding: { model, setRetryListener: () => {} },
+    binding: { model, capabilityMetadata: { streaming: false }, setRetryListener: () => {} },
     prompts,
   };
 }

@@ -1,8 +1,8 @@
 # 当前规则：TUI 输出区域 Static/dynamic 分割渲染
 
 状态：active
-最后更新：2026-07-23（依据真实 TTY 能力启用 Ink 交互模式）
-最后验证：2026-07-23
+最后更新：2026-07-26（流式 Markdown 按安全组件边界渐进冻结）
+最后验证：2026-07-26
 范围：
 
 - `src/app/tui/index.tsx` — Ink 终端渲染选项
@@ -22,6 +22,7 @@
 
 相关：
 
+- `../adr/0040-streaming-markdown-progressive-static-freeze.md`
 - `execution/completed/2026-05-16-remove-viewport-culling.md`
 - `execution/completed/2026-05-28-static-header-ordering-fix.md`
 - `understanding/2026-05-12-tui-overhaul-design.md`
@@ -43,6 +44,7 @@ OutputArea 使用 `<Static>` / dynamic 分割，基于 **Turn 模型**：
 3. `<Static>` 容器用 `<Box height={0} overflow="hidden">` 包裹，避免 Ink 布局占位产生空白
 4. **分割策略**：`running ? turns.slice(0, -1) : turns`。执行中时最后一个 turn 在 dynamic 区，其余在 Static 区；空闲时全部在 Static 区
 5. 分割点天然单调递增（settled turns 只会增多不会减少），无需 monotonic guard
+6. 长流式 Markdown 不得始终作为一个不断增高的 dynamic block：已经出现后继内容的完整顶层组件，在 fenced code 之外的空行边界冻结为 settled text block 并进入 `<Static>`；最后一个仍可能变形的 Markdown 组件继续留在 dynamic tree。这样表格、列表、代码块不会从中间拆开，同时避免 dynamic 输出超过终端高度后 Ink 每帧整屏清除并重置用户的原生滚动位置。
 
 ## 为什么不用纯 React.memo 方案
 
@@ -52,6 +54,7 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
 
 - 已完成的消息必须进入 `<Static>`，不得留在 dynamic 树
 - 活跃消息（streaming/running/interrupt）必须留在 dynamic 树，不得进入 `<Static>`
+- 流式文本只允许冻结 fenced code 之外、已有后继内容的空行边界；不得在未闭合代码块内部拆分，也不得冻结仍处于尾部的 Markdown 组件
 - `<Static>` 容器必须用 `<Box height={0} overflow="hidden">` 包裹
 - App 不得在 Footer 下方放置 `flexGrow={1}` 的 spacer（会导致 Footer 被推到终端底部，与 Static 消息之间产生空白）
 - TUI 使用终端主屏缓冲区，`<Static>` 输出保留在终端原生 scrollback 中

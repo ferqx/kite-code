@@ -674,6 +674,18 @@ export interface ModelRequestedEvent {
   requestId: string;
 }
 
+/** Ephemeral cumulative reasoning text for live consumers; never persisted. */
+export interface ModelReasoningDeltaEvent {
+  type: 'model.reasoning_delta';
+  text: string;
+}
+
+/** Ephemeral cumulative answer text for live consumers; never persisted. */
+export interface ModelTextDeltaEvent {
+  type: 'model.text_delta';
+  text: string;
+}
+
 /** 模型响应返回（含可选的 tool_calls 和文本）/ Model response returned */
 export interface ModelRespondedEvent {
   type: 'model.responded';
@@ -924,6 +936,8 @@ export type RuntimeEvent =
   | UserMessageAppendedEvent
   | UserCommandInvokedEvent
   | ModelRequestedEvent
+  | ModelReasoningDeltaEvent
+  | ModelTextDeltaEvent
   | ModelRespondedEvent
   | ModelRetryEvent
   | ModelCacheMetricsEvent

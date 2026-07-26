@@ -24,6 +24,7 @@ describe('ResolvedModelCapabilities', () => {
           contextWindowTokens: 64_000,
           maxOutputTokens: 2_000,
           supportsPromptCache: false,
+          streaming: true,
         },
         modelKwargs: { contextWindowTokens: 32_000, maxOutputTokens: 1_000 },
       }),
@@ -36,6 +37,8 @@ describe('ResolvedModelCapabilities', () => {
       maxOutputTokensSource: 'explicit_config',
       supportsPromptCache: false,
       supportsPromptCacheSource: 'explicit_config',
+      streaming: true,
+      streamingSource: 'explicit_config',
     });
   });
 
@@ -48,6 +51,24 @@ describe('ResolvedModelCapabilities', () => {
     expect(result.contextWindowSource).toBe('adapter_runtime');
   });
 
+  test('resolves streaming by explicit, adapter, then compatibility precedence', () => {
+    expect(
+      resolveModelCapabilities({
+        config: config({
+          modelCapabilities: { streaming: false },
+          modelKwargs: { streaming: true },
+        }),
+        adapter: { streaming: true },
+      }),
+    ).toMatchObject({ streaming: false, streamingSource: 'explicit_config' });
+    expect(
+      resolveModelCapabilities({
+        config: config({ modelKwargs: { streaming: false } }),
+        adapter: { streaming: true },
+      }),
+    ).toMatchObject({ streaming: true, streamingSource: 'adapter_runtime' });
+  });
+
   test('keeps known and custom model capabilities tri-state unknown without trusted metadata', () => {
     const result = resolveModelCapabilities({
       config: config({ providerName: 'openai', modelName: 'gpt-4o' }),
@@ -56,6 +77,8 @@ describe('ResolvedModelCapabilities', () => {
     expect(result.maxOutputTokens).toBeUndefined();
     expect(result.supportsUsageMetadata).toBeUndefined();
     expect(result.supportsPromptCache).toBeUndefined();
+    expect(result.streaming).toBe(true);
+    expect(result.streamingSource).toBeUndefined();
     expect(usableInputBudget(result).usableInputTokens).toBeUndefined();
     expect(usableInputBudget(result).reservedOutputTokens).toBeUndefined();
   });
@@ -68,6 +91,7 @@ describe('ResolvedModelCapabilities', () => {
           maxTokens: 1_000,
           tokenizerFamily: 'compatible-tokenizer',
           supportsUsageMetadata: false,
+          streaming: true,
         },
       }),
     });
@@ -79,6 +103,8 @@ describe('ResolvedModelCapabilities', () => {
       tokenizerSource: 'compatibility_config',
       supportsUsageMetadata: false,
       supportsUsageMetadataSource: 'compatibility_config',
+      streaming: true,
+      streamingSource: 'compatibility_config',
     });
   });
 

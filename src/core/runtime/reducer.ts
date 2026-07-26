@@ -1463,6 +1463,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // model.requested / model.responded 为信息性事件，由 TranscriptState 管理（未来）。
     // Informational — managed by TranscriptState (future).
     case 'model.requested':
+    case 'model.reasoning_delta':
+    case 'model.text_delta':
       return state;
 
     case 'model.retry':

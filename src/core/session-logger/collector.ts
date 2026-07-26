@@ -165,6 +165,7 @@ export class SessionLogCollector {
   /** Runtime-native log path; no AgentEvent projection is required. */
   recordRuntime(event: RuntimeEvent): void {
     try {
+      if (event.type === 'model.reasoning_delta' || event.type === 'model.text_delta') return;
       const rec = recordRuntimeEvent(event, this._traceId, this._currentTurnSpanId);
       this._recordRaw(rec);
       if (event.type === 'tool.finished') {

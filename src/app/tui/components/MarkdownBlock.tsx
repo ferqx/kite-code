@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink';
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useWindowSize } from '@/app/tui/hooks/useWindowSizeSig';
 import { type Theme, useTheme } from '@/app/tui/theme';
 
@@ -256,7 +256,7 @@ function tokenizeCodeLine(line: string, lang: string, t: Theme): Token[] {
   return tokens;
 }
 
-function CodeLine({ line, lang }: { line: string; lang: string }) {
+const CodeLine = React.memo(function CodeLine({ line, lang }: { line: string; lang: string }) {
   const t = useTheme();
   if (!lang) {
     return <Text color={t.muted}>{line}</Text>;
@@ -272,7 +272,7 @@ function CodeLine({ line, lang }: { line: string; lang: string }) {
       ))}
     </Text>
   );
-}
+});
 
 // ── CJK display width ──
 
@@ -322,6 +322,28 @@ function codeLineWidth(line: string): number {
   }
   return width;
 }
+
+const CodeRow = React.memo(function CodeRow({
+  line,
+  lang,
+  columns,
+  borderColor,
+}: {
+  line: string;
+  lang: string;
+  columns: number;
+  borderColor: string;
+}) {
+  const lineVisualWidth = codeLineWidth(line);
+  const padLen = Math.max(0, columns - 3 - lineVisualWidth);
+  return (
+    <Box flexDirection="row">
+      <Text color={borderColor}>│ </Text>
+      <CodeLine line={line} lang={lang} />
+      <Text color={borderColor}>{' '.repeat(padLen)}│</Text>
+    </Box>
+  );
+});
 
 // ── table detection & rendering ──
 
@@ -473,6 +495,37 @@ function dataRowLines(cells: string[], widths: number[]): string[] {
   return lines;
 }
 
+const TableTextLine = React.memo(function TableTextLine({
+  line,
+  trailingNewline = true,
+}: {
+  line: string;
+  trailingNewline?: boolean;
+}) {
+  return (
+    <>
+      {line}
+      {trailingNewline ? '\n' : ''}
+    </>
+  );
+});
+
+const TableDataRow = React.memo(
+  function TableDataRow({ cells, widths }: { cells: string[]; widths: number[] }) {
+    return (
+      <>
+        {dataRowLines(cells, widths).join('\n')}
+        {'\n'}
+      </>
+    );
+  },
+  (previous, next) =>
+    previous.cells.length === next.cells.length &&
+    previous.cells.every((cell, index) => cell === next.cells[index]) &&
+    previous.widths.length === next.widths.length &&
+    previous.widths.every((width, index) => width === next.widths[index]),
+);
+
 function TableBlock({ lines }: { lines: string[] }) {
   const { headers, rows, widths: natural } = useMemo(() => parseTable(lines), [lines]);
   const widths = useMemo(
@@ -485,11 +538,19 @@ function TableBlock({ lines }: { lines: string[] }) {
   const botBorder = borderLine('└', '┴', '┘', widths, '─');
   const headerLine = `│${headers.map((h, i) => ` ${truncateHeader(h, widths[i]!)} `).join('│')}│`;
 
-  // Single string avoids Yoga border overlap between adjacent Text nodes
-  const dataRows = rows.flatMap((row) => dataRowLines(row, widths));
-  const output = [topBorder, headerLine, sepBorder, ...dataRows, botBorder].join('\n');
-
-  return <Text>{output}</Text>;
+  // Keep one parent Text so Yoga cannot introduce gaps between borders, while
+  // memoized child rows retain their identity as the streaming table grows.
+  return (
+    <Text>
+      <TableTextLine line={topBorder} />
+      <TableTextLine line={headerLine} />
+      <TableTextLine line={sepBorder} />
+      {rows.map((row, index) => (
+        <TableDataRow key={index} cells={row} widths={widths} />
+      ))}
+      <TableTextLine line={botBorder} trailingNewline={false} />
+    </Text>
+  );
 }
 
 // ── HTML entity decoding ──
@@ -511,12 +572,71 @@ function decodeHtmlEntities(text: string): string {
 
 // ── line grouping ──
 
-type LineGroup =
+export type LineGroup =
   | { kind: 'single'; line: string; index: number }
+  | { kind: 'paragraph'; lines: string[]; startIndex: number }
+  | { kind: 'list'; lines: string[]; startIndex: number }
+  | { kind: 'quote'; lines: string[]; startIndex: number }
   | { kind: 'code'; lines: string[]; lang: string; startIndex: number }
   | { kind: 'table'; lines: string[]; startIndex: number };
 
-function groupLines(lines: string[]): LineGroup[] {
+function groupSourceIndex(group: LineGroup): number {
+  return group.kind === 'single' ? group.index : group.startIndex;
+}
+
+const groupSignatureCache = new WeakMap<LineGroup, string>();
+
+function groupSignature(group: LineGroup): string {
+  const cached = groupSignatureCache.get(group);
+  if (cached != null) return cached;
+  const signature =
+    group.kind === 'single'
+      ? `single:${group.line}`
+      : group.kind === 'paragraph'
+        ? `paragraph:${group.lines.join('\n')}`
+        : group.kind === 'list'
+          ? `list:${group.lines.join('\n')}`
+          : group.kind === 'quote'
+            ? `quote:${group.lines.join('\n')}`
+            : group.kind === 'code'
+              ? `code:${group.lang}\0${group.lines.join('\n')}`
+              : `table:${group.lines.join('\n')}`;
+  groupSignatureCache.set(group, signature);
+  return signature;
+}
+
+const MarkdownGroup = React.memo(
+  function MarkdownGroup({
+    group,
+    render,
+  }: {
+    group: LineGroup;
+    render: (group: LineGroup) => React.ReactNode;
+  }) {
+    return <>{render(group)}</>;
+  },
+  (previous, next) =>
+    previous.render === next.render &&
+    groupSignature(previous.group) === groupSignature(next.group),
+);
+
+function isParagraphLine(line: string): boolean {
+  return (
+    line.trim() !== '' &&
+    !HEADING_RE.test(line) &&
+    !isHorizontalRule(line) &&
+    !UNORDERED_LIST_RE.test(line) &&
+    !ORDERED_LIST_RE.test(line) &&
+    !line.startsWith('> ') &&
+    !line.startsWith('```')
+  );
+}
+
+function isListLine(line: string): boolean {
+  return UNORDERED_LIST_RE.test(line) || ORDERED_LIST_RE.test(line);
+}
+
+export function groupLines(lines: string[]): LineGroup[] {
   const groups: LineGroup[] = [];
   let i = 0;
 
@@ -525,6 +645,7 @@ function groupLines(lines: string[]): LineGroup[] {
 
     // Code block
     if (line.startsWith('```')) {
+      const startIndex = i;
       const lang = detectLang(line);
       const codeLines: string[] = [];
       i++;
@@ -532,20 +653,64 @@ function groupLines(lines: string[]): LineGroup[] {
         codeLines.push(lines[i]!);
         i++;
       }
-      groups.push({ kind: 'code', lines: codeLines, lang, startIndex: i });
+      groups.push({ kind: 'code', lines: codeLines, lang, startIndex });
       if (i < lines.length) i++; // skip closing ```
       continue;
     }
 
     // Table: must have header row + separator row
     if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1]!)) {
+      const startIndex = i;
       const tableLines: string[] = [line, lines[i + 1]!];
       i += 2;
       while (i < lines.length && isTableRow(lines[i]!)) {
         tableLines.push(lines[i]!);
         i++;
       }
-      groups.push({ kind: 'table', lines: tableLines, startIndex: i });
+      groups.push({ kind: 'table', lines: tableLines, startIndex });
+      continue;
+    }
+
+    if (isListLine(line)) {
+      const startIndex = i;
+      const listLines = [line];
+      i++;
+      while (i < lines.length && isListLine(lines[i]!)) {
+        listLines.push(lines[i]!);
+        i++;
+      }
+      groups.push({ kind: 'list', lines: listLines, startIndex });
+      continue;
+    }
+
+    if (line.startsWith('> ')) {
+      const startIndex = i;
+      const quoteLines = [line];
+      i++;
+      while (i < lines.length && lines[i]!.startsWith('> ')) {
+        quoteLines.push(lines[i]!);
+        i++;
+      }
+      groups.push({ kind: 'quote', lines: quoteLines, startIndex });
+      continue;
+    }
+
+    // Consecutive plain-text lines belong to one logical Markdown paragraph.
+    // A later token can extend only this component without rebuilding every
+    // completed line or paragraph before it.
+    if (isParagraphLine(line)) {
+      const startIndex = i;
+      const paragraphLines = [line];
+      i++;
+      while (
+        i < lines.length &&
+        isParagraphLine(lines[i]!) &&
+        !(isTableRow(lines[i]!) && i + 1 < lines.length && isTableSeparator(lines[i + 1]!))
+      ) {
+        paragraphLines.push(lines[i]!);
+        i++;
+      }
+      groups.push({ kind: 'paragraph', lines: paragraphLines, startIndex });
       continue;
     }
 
@@ -554,6 +719,61 @@ function groupLines(lines: string[]): LineGroup[] {
   }
 
   return groups;
+}
+
+export interface MarkdownParseCache {
+  content: string;
+  rawLines: string[];
+  groups: LineGroup[];
+}
+
+function displayedDecodedLines(rawLines: string[]): string[] {
+  const lines = rawLines.map(decodeHtmlEntities);
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+function offsetGroup(group: LineGroup, offset: number): LineGroup {
+  if (offset === 0) return group;
+  return group.kind === 'single'
+    ? { ...group, index: group.index + offset }
+    : { ...group, startIndex: group.startIndex + offset };
+}
+
+/**
+ * Incrementally parse cumulative streaming Markdown. Only the last existing
+ * group is reparsed because an appended token can extend or promote that
+ * group (for example a pipe row becoming a table); every earlier group is
+ * immutable and retains object identity for React.memo.
+ */
+export function updateMarkdownParseCache(
+  previous: MarkdownParseCache | undefined,
+  content: string,
+): MarkdownParseCache {
+  if (previous?.content === content) return previous;
+
+  if (previous && content.startsWith(previous.content)) {
+    const suffix = content.slice(previous.content.length);
+    const rawLines = previous.rawLines.slice();
+    const additions = suffix.split('\n');
+    if (rawLines.length === 0) rawLines.push('');
+    rawLines[rawLines.length - 1] = `${rawLines[rawLines.length - 1]}${additions[0] ?? ''}`;
+    rawLines.push(...additions.slice(1));
+
+    const lastGroup = previous.groups.at(-1);
+    const reparseStart = lastGroup ? groupSourceIndex(lastGroup) : 0;
+    const stableGroups = lastGroup ? previous.groups.slice(0, -1) : [];
+    const tailLines = displayedDecodedLines(rawLines.slice(reparseStart));
+    const tailGroups = groupLines(tailLines).map((group) => offsetGroup(group, reparseStart));
+    return { content, rawLines, groups: [...stableGroups, ...tailGroups] };
+  }
+
+  const rawLines = content.split('\n');
+  return {
+    content,
+    rawLines,
+    groups: groupLines(displayedDecodedLines(rawLines)),
+  };
 }
 
 function isHorizontalRule(line: string): boolean {
@@ -573,6 +793,7 @@ function isHeadingGroup(g: LineGroup | undefined): boolean {
 }
 
 function isListGroup(g: LineGroup | undefined): boolean {
+  if (g?.kind === 'list') return true;
   if (g?.kind !== 'single') return false;
   const line = g.line;
   return (
@@ -584,7 +805,10 @@ function isListGroup(g: LineGroup | undefined): boolean {
 }
 
 function isQuoteGroup(g: LineGroup | undefined): boolean {
-  return !!g && g.kind === 'single' && g.line.startsWith('> ') && !isBlankGroup(g);
+  return (
+    !!g &&
+    (g.kind === 'quote' || (g.kind === 'single' && g.line.startsWith('> ') && !isBlankGroup(g)))
+  );
 }
 
 function isStructuralGroup(g: LineGroup | undefined): boolean {
@@ -613,16 +837,57 @@ function spacingBetween(prev: LineGroup, next: LineGroup, blanks: number): numbe
   return Math.min(blanks, 1);
 }
 
+const ListRow = React.memo(function ListRow({ line, color }: { line: string; color?: string }) {
+  const t = useTheme();
+  const ulMatch = line.match(UNORDERED_LIST_RE);
+  if (ulMatch) {
+    const indent = ulMatch[1]!.length;
+    let item = ulMatch[2]!;
+    let bullet = '• ';
+    const taskMatch = item.match(/^(\[[ xX]\])\s+(.*)$/);
+    if (taskMatch) {
+      bullet = taskMatch[1]! === '[ ]' ? '☐ ' : '☑ ';
+      item = taskMatch[2]!;
+    }
+    return (
+      <Box paddingLeft={indent}>
+        <Text color={t.muted}>{bullet}</Text>
+        <MarkdownLine content={item} color={color} />
+      </Box>
+    );
+  }
+
+  const olMatch = line.match(ORDERED_LIST_RE);
+  if (!olMatch) return null;
+  return (
+    <Box paddingLeft={olMatch[1]!.length}>
+      <Text color={t.muted}>{olMatch[2]!}. </Text>
+      <MarkdownLine content={olMatch[3]!} color={color} />
+    </Box>
+  );
+});
+
+const QuoteRow = React.memo(function QuoteRow({ line, color }: { line: string; color?: string }) {
+  const t = useTheme();
+  return (
+    <Box flexDirection="row">
+      <Text color={t.dim}>▎ </Text>
+      <MarkdownLine content={line.slice(2)} color={color} />
+    </Box>
+  );
+});
+
 // ── main component ──
 
 export default React.memo(function MarkdownBlock({ content, color, maxWidth }: MarkdownBlockProps) {
   const t = useTheme();
   const { columns: termColumns } = useWindowSize();
   const columns = maxWidth ?? termColumns;
+  const parseCache = useRef<MarkdownParseCache | undefined>(undefined);
   const groups = useMemo(() => {
-    const lines = decodeHtmlEntities(content).split('\n');
-    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-    return groupLines(lines);
+    const next = updateMarkdownParseCache(parseCache.current, content);
+    parseCache.current = next;
+    return next.groups;
   }, [content]);
 
   const nonBlank = groups.reduce<{ group: LineGroup; blanksBefore: number }[]>((acc, g) => {
@@ -635,149 +900,173 @@ export default React.memo(function MarkdownBlock({ content, color, maxWidth }: M
     return acc;
   }, []);
 
-  function renderGroup(group: LineGroup): React.ReactNode {
-    if (group.kind === 'code') {
-      if (group.lines.length === 0) return null;
-      const lang = group.lang || 'code';
-      // 顶边框 / Top border — 不够放完整 label 时退化为无标签模式
-      const label = `┌─ ${lang} `;
-      const labelWidth = stringWidth(label);
-      let topBorder: string;
-      if (columns > labelWidth + 1) {
-        topBorder = `${label}${'─'.repeat(columns - labelWidth - 1)}┐`;
-      } else {
-        topBorder = `┌${'─'.repeat(Math.max(0, columns - 2))}┐`;
+  const renderGroup = React.useCallback(
+    (group: LineGroup): React.ReactNode => {
+      if (group.kind === 'code') {
+        if (group.lines.length === 0) return null;
+        const lang = group.lang || 'code';
+        // 顶边框 / Top border — 不够放完整 label 时退化为无标签模式
+        const label = `┌─ ${lang} `;
+        const labelWidth = stringWidth(label);
+        let topBorder: string;
+        if (columns > labelWidth + 1) {
+          topBorder = `${label}${'─'.repeat(columns - labelWidth - 1)}┐`;
+        } else {
+          topBorder = `┌${'─'.repeat(Math.max(0, columns - 2))}┐`;
+        }
+        // 底边框 / Bottom border
+        const bottomBorder = `└${'─'.repeat(Math.max(0, columns - 2))}┘`;
+        return (
+          <Box flexDirection="column">
+            <Text color={t.dim}>{topBorder}</Text>
+            {group.lines.map((codeLine, ci) => (
+              <CodeRow
+                key={ci}
+                line={codeLine}
+                lang={group.lang}
+                columns={columns}
+                borderColor={t.dim}
+              />
+            ))}
+            <Text color={t.dim}>{bottomBorder}</Text>
+          </Box>
+        );
       }
-      // 底边框 / Bottom border
-      const bottomBorder = `└${'─'.repeat(Math.max(0, columns - 2))}┘`;
-      return (
-        <Box flexDirection="column">
-          <Text color={t.dim}>{topBorder}</Text>
-          {group.lines.map((codeLine, ci) => {
-            // 用 tab 展开后的视觉宽度计算右填充 / Use tab-expanded visual width for right padding
-            const lineVisualWidth = codeLineWidth(codeLine);
-            const padLen = Math.max(0, columns - 3 - lineVisualWidth);
-            return (
-              <Box key={ci} flexDirection="row">
-                <Text color={t.dim}>│ </Text>
-                <CodeLine line={codeLine} lang={group.lang} />
-                <Text color={t.dim}>{' '.repeat(padLen)}│</Text>
-              </Box>
-            );
-          })}
-          <Text color={t.dim}>{bottomBorder}</Text>
-        </Box>
-      );
-    }
 
-    if (group.kind === 'table') {
-      return <TableBlock lines={group.lines} />;
-    }
-
-    const line = group.line;
-
-    if (line.startsWith('###### ')) {
-      return (
-        <Text bold color={t.dim}>
-          <MarkdownLine content={line.slice(7)} color={t.dim} />
-        </Text>
-      );
-    }
-    if (line.startsWith('##### ')) {
-      return (
-        <Text bold color={t.muted}>
-          <MarkdownLine content={line.slice(6)} color={t.muted} />
-        </Text>
-      );
-    }
-    if (line.startsWith('#### ')) {
-      return (
-        <Text bold color={t.muted}>
-          <MarkdownLine content={line.slice(5)} color={t.muted} />
-        </Text>
-      );
-    }
-    if (line.startsWith('### ')) {
-      return (
-        <Text bold color={t.primary}>
-          <MarkdownLine content={line.slice(4)} color={t.primary} />
-        </Text>
-      );
-    }
-    if (line.startsWith('## ')) {
-      return (
-        <Text bold color={t.primary}>
-          ── <MarkdownLine content={line.slice(3)} color={t.primary} /> ──
-        </Text>
-      );
-    }
-    if (line.startsWith('# ')) {
-      return (
-        <Text bold underline color={t.primary}>
-          <MarkdownLine content={line.slice(2)} color={t.primary} />
-        </Text>
-      );
-    }
-
-    if (isHorizontalRule(line)) {
-      return <Text color={t.dim}>{'─'.repeat(columns)}</Text>;
-    }
-
-    const ulMatch = line.match(UNORDERED_LIST_RE);
-    if (ulMatch) {
-      const indent = ulMatch[1]!.length;
-      let item = ulMatch[2]!;
-      let bullet = '• ';
-      const taskMatch = item.match(/^(\[[ xX]\])\s+(.*)$/);
-      if (taskMatch) {
-        bullet = taskMatch[1]! === '[ ]' ? '☐ ' : '☑ ';
-        item = taskMatch[2]!;
+      if (group.kind === 'table') {
+        return <TableBlock lines={group.lines} />;
       }
-      return (
-        <Box paddingLeft={indent}>
-          <Text color={t.muted}>{bullet}</Text>
-          <MarkdownLine content={item} color={color} />
-        </Box>
-      );
-    }
 
-    const olMatch = line.match(ORDERED_LIST_RE);
-    if (olMatch && !line.startsWith('```')) {
-      const indent = olMatch[1]!.length;
-      return (
-        <Box paddingLeft={indent}>
-          <Text color={t.muted}>{olMatch[2]!}. </Text>
-          <MarkdownLine content={olMatch[3]!} color={color} />
-        </Box>
-      );
-    }
+      if (group.kind === 'paragraph') {
+        return <MarkdownLine content={group.lines.join('\n')} color={color} />;
+      }
 
-    if (line.startsWith('> ')) {
-      return (
-        <Box flexDirection="row">
-          <Text color={t.dim}>▎ </Text>
-          <MarkdownLine content={line.slice(2)} color={color} />
-        </Box>
-      );
-    }
+      if (group.kind === 'list') {
+        return (
+          <Box flexDirection="column">
+            {group.lines.map((line, index) => (
+              <ListRow key={index} line={line} color={color} />
+            ))}
+          </Box>
+        );
+      }
 
-    return <MarkdownLine content={line} color={color} />;
-  }
+      if (group.kind === 'quote') {
+        return (
+          <Box flexDirection="column">
+            {group.lines.map((line, index) => (
+              <QuoteRow key={index} line={line} color={color} />
+            ))}
+          </Box>
+        );
+      }
+
+      const line = group.line;
+
+      if (line.startsWith('###### ')) {
+        return (
+          <Text bold color={t.dim}>
+            <MarkdownLine content={line.slice(7)} color={t.dim} />
+          </Text>
+        );
+      }
+      if (line.startsWith('##### ')) {
+        return (
+          <Text bold color={t.muted}>
+            <MarkdownLine content={line.slice(6)} color={t.muted} />
+          </Text>
+        );
+      }
+      if (line.startsWith('#### ')) {
+        return (
+          <Text bold color={t.muted}>
+            <MarkdownLine content={line.slice(5)} color={t.muted} />
+          </Text>
+        );
+      }
+      if (line.startsWith('### ')) {
+        return (
+          <Text bold color={t.primary}>
+            <MarkdownLine content={line.slice(4)} color={t.primary} />
+          </Text>
+        );
+      }
+      if (line.startsWith('## ')) {
+        return (
+          <Text bold color={t.primary}>
+            ── <MarkdownLine content={line.slice(3)} color={t.primary} /> ──
+          </Text>
+        );
+      }
+      if (line.startsWith('# ')) {
+        return (
+          <Text bold underline color={t.primary}>
+            <MarkdownLine content={line.slice(2)} color={t.primary} />
+          </Text>
+        );
+      }
+
+      if (isHorizontalRule(line)) {
+        return <Text color={t.dim}>{'─'.repeat(columns)}</Text>;
+      }
+
+      const ulMatch = line.match(UNORDERED_LIST_RE);
+      if (ulMatch) {
+        const indent = ulMatch[1]!.length;
+        let item = ulMatch[2]!;
+        let bullet = '• ';
+        const taskMatch = item.match(/^(\[[ xX]\])\s+(.*)$/);
+        if (taskMatch) {
+          bullet = taskMatch[1]! === '[ ]' ? '☐ ' : '☑ ';
+          item = taskMatch[2]!;
+        }
+        return (
+          <Box paddingLeft={indent}>
+            <Text color={t.muted}>{bullet}</Text>
+            <MarkdownLine content={item} color={color} />
+          </Box>
+        );
+      }
+
+      const olMatch = line.match(ORDERED_LIST_RE);
+      if (olMatch && !line.startsWith('```')) {
+        const indent = olMatch[1]!.length;
+        return (
+          <Box paddingLeft={indent}>
+            <Text color={t.muted}>{olMatch[2]!}. </Text>
+            <MarkdownLine content={olMatch[3]!} color={color} />
+          </Box>
+        );
+      }
+
+      if (line.startsWith('> ')) {
+        return (
+          <Box flexDirection="row">
+            <Text color={t.dim}>▎ </Text>
+            <MarkdownLine content={line.slice(2)} color={color} />
+          </Box>
+        );
+      }
+
+      return <MarkdownLine content={line} color={color} />;
+    },
+    [color, columns, t.dim, t.muted, t.primary],
+  );
 
   let prevGroup: LineGroup | undefined;
   let prevBlanks = 0;
   return (
     <Box flexDirection="column">
-      {nonBlank.map(({ group, blanksBefore }, i) => {
+      {nonBlank.map(({ group, blanksBefore }) => {
         // blanksBefore on each group is actually blanks AFTER it (accumulated from blank groups).
         // The spacing between prev and current should use prevBlanks (blanks after prev group).
         const spacing = prevGroup ? spacingBetween(prevGroup, group, prevBlanks) : 0;
         prevGroup = group;
         prevBlanks = blanksBefore;
         return (
-          <React.Fragment key={i}>
+          <React.Fragment key={`md-block:${groupSourceIndex(group)}`}>
             {spacing > 0 && <Box height={spacing} />}
-            {renderGroup(group)}
+            <MarkdownGroup group={group} render={renderGroup} />
           </React.Fragment>
         );
       })}

@@ -13,6 +13,12 @@ export interface RuntimeActionProvider {
 
 type EffectExecutionOutcome = { applied: boolean; emitted: boolean };
 
+function isEphemeralModelDelta(
+  event: RuntimeEvent,
+): event is Extract<RuntimeEvent, { type: 'model.reasoning_delta' | 'model.text_delta' }> {
+  return event.type === 'model.reasoning_delta' || event.type === 'model.text_delta';
+}
+
 /** Execute an effect while forwarding events produced during the effect. */
 async function* executeEffectWithStreaming(
   kernel: AgentKernel,
@@ -54,7 +60,11 @@ async function* executeEffectWithStreaming(
     while (pending.length > 0) {
       const event = pending.shift()!;
       emitted = true;
-      if (kernel.applyEffectEvent(lease, event)) yield event;
+      if (isEphemeralModelDelta(event)) {
+        if (kernel.isEffectLeaseCurrent(lease)) yield event;
+      } else if (kernel.applyEffectEvent(lease, event)) {
+        yield event;
+      }
     }
   }
   await execution;

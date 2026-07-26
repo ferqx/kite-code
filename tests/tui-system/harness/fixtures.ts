@@ -14,13 +14,24 @@ import { startTestHttpServer } from '../../helpers/test-http-server';
 export interface MockResponse {
   message?: {
     content?: string;
+    /** Optional SSE chunks; joined for non-streaming responses. */
+    content_chunks?: string[];
     /** 推理/思考内容（DeepSeek reasoning_content），生成 reason block */
     reasoning_content?: string;
+    /** Optional DeepSeek reasoning SSE chunks; joined for non-streaming responses. */
+    reasoning_chunks?: string[];
     tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }>;
     /** 无效工具调用：args 为原始 JSON 字符串（可包含格式错误），模拟模型输出非法 JSON 的场景 */
     invalid_tool_calls?: Array<{ id: string; name: string; args: string }>;
   };
   delay?: number;
+  /** Delay between SSE frames, used to assert progressive rendering. */
+  chunk_delay?: number;
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  /** Inject an invalid JSON SSE data frame. */
+  malformed_sse?: boolean;
+  /** Emit a provider connection error after content frames, before the terminal frame. */
+  disconnect_after_content?: boolean;
   error?: string;
 }
 
@@ -115,28 +126,29 @@ export function createMockModelServer(): MockModelServer {
           await new Promise((r) => setTimeout(r, resp.delay));
         }
 
-        const content = resp.message?.content ?? '';
+        const content = resp.message?.content ?? resp.message?.content_chunks?.join('') ?? '';
+        const reasoningContent =
+          resp.message?.reasoning_content ?? resp.message?.reasoning_chunks?.join('') ?? '';
         const toolCalls = resp.message?.tool_calls;
         const invalidToolCalls = resp.message?.invalid_tool_calls;
 
         if (stream) {
           // SSE streaming response
-          let sseBody = '';
+          const sseFrames: string[] = [];
           const write = (data: string) => {
-            sseBody += data;
+            sseFrames.push(data);
           };
+          if (resp.malformed_sse) write('data: {not-json}\n\n');
 
           // Send reasoning_content delta (DeepSeek-style thinking)
-          if (
-            typeof resp.message?.reasoning_content === 'string' &&
-            resp.message.reasoning_content
-          ) {
+          for (const reasoningChunk of resp.message?.reasoning_chunks ?? [reasoningContent]) {
+            if (!reasoningChunk) continue;
             write(
               `data: ${JSON.stringify({
                 choices: [
                   {
                     index: 0,
-                    delta: { role: 'assistant', reasoning_content: resp.message.reasoning_content },
+                    delta: { role: 'assistant', reasoning_content: reasoningChunk },
                     finish_reason: null,
                   },
                 ],
@@ -146,7 +158,7 @@ export function createMockModelServer(): MockModelServer {
 
           if (toolCalls && toolCalls.length > 0) {
             // Send tool calls as deltas
-            for (const tc of toolCalls) {
+            for (const [toolIndex, tc] of toolCalls.entries()) {
               write(
                 `data: ${JSON.stringify({
                   choices: [
@@ -156,7 +168,7 @@ export function createMockModelServer(): MockModelServer {
                         role: 'assistant',
                         tool_calls: [
                           {
-                            index: 0,
+                            index: toolIndex,
                             id: tc.id,
                             type: 'function',
                             function: { name: tc.name, arguments: JSON.stringify(tc.args) },
@@ -173,7 +185,7 @@ export function createMockModelServer(): MockModelServer {
 
           // Send invalid tool calls with raw (possibly malformed) args
           if (invalidToolCalls && invalidToolCalls.length > 0) {
-            for (const tc of invalidToolCalls) {
+            for (const [invalidIndex, tc] of invalidToolCalls.entries()) {
               write(
                 `data: ${JSON.stringify({
                   choices: [
@@ -183,7 +195,7 @@ export function createMockModelServer(): MockModelServer {
                         role: 'assistant',
                         tool_calls: [
                           {
-                            index: 0,
+                            index: (toolCalls?.length ?? 0) + invalidIndex,
                             id: tc.id,
                             type: 'function',
                             function: { name: tc.name, arguments: tc.args },
@@ -199,21 +211,48 @@ export function createMockModelServer(): MockModelServer {
           }
 
           // Content delta
-          write(
-            `data: ${JSON.stringify({
-              choices: [{ index: 0, delta: { content }, finish_reason: null }],
-            })}\n\n`,
-          );
+          for (const contentChunk of resp.message?.content_chunks ?? [content]) {
+            write(
+              `data: ${JSON.stringify({
+                choices: [{ index: 0, delta: { content: contentChunk }, finish_reason: null }],
+              })}\n\n`,
+            );
+          }
 
-          // Done
-          write(
-            `data: ${JSON.stringify({
-              choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-            })}\n\n`,
-          );
-          write('data: [DONE]\n\n');
+          if (resp.disconnect_after_content) {
+            write(
+              `data: ${JSON.stringify({
+                error: {
+                  message: 'socket ECONNRESET: model stream disconnected',
+                  type: 'server_error',
+                },
+              })}\n\n`,
+            );
+          } else {
+            // Done
+            write(
+              `data: ${JSON.stringify({
+                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                ...(resp.usage ? { usage: resp.usage } : {}),
+              })}\n\n`,
+            );
+            write('data: [DONE]\n\n');
+          }
 
-          return new Response(sseBody, {
+          const body =
+            resp.chunk_delay && resp.chunk_delay > 0
+              ? new ReadableStream<Uint8Array>({
+                  async start(controller) {
+                    const encoder = new TextEncoder();
+                    for (const frame of sseFrames) {
+                      controller.enqueue(encoder.encode(frame));
+                      await new Promise((resolve) => setTimeout(resolve, resp.chunk_delay));
+                    }
+                    controller.close();
+                  },
+                })
+              : sseFrames.join('');
+          return new Response(body, {
             headers: { 'content-type': 'text/event-stream' },
           });
         }
@@ -223,9 +262,7 @@ export function createMockModelServer(): MockModelServer {
           role: 'assistant',
           content,
         };
-        if (typeof resp.message?.reasoning_content === 'string' && resp.message.reasoning_content) {
-          message.reasoning_content = resp.message.reasoning_content;
-        }
+        if (reasoningContent) message.reasoning_content = reasoningContent;
         if (toolCalls || invalidToolCalls) {
           const allToolCalls: Array<Record<string, unknown>> = [];
           if (toolCalls) {

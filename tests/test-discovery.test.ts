@@ -63,6 +63,7 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.test).toContain('bun test');
     expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/tui-system/**'");
     expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/pty-spike/**'");
+    expect(pkg.scripts?.['test:all']).toBe('bun run test && bun run test:tui:system');
     expect(pkg.scripts?.['test:e2e']).toContain('tests/e2e/local/');
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/tui-system/');
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/e2e/live/');
@@ -70,6 +71,7 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.['test:mcp:live']).toContain('bun run');
     expect(pkg.scripts?.['test:model:live']).toContain('tests/e2e/live/model/');
     expect(pkg.scripts?.['test:model:live']).toContain('bun run');
+    expect(pkg.scripts?.['test:tui:system']).toContain('scripts/run-tui-system-tests.ts');
     expect(pkg.scripts?.['test:real']).toBeUndefined();
     expect(pkg.scripts?.['test:real:direct']).toBeUndefined();
   });

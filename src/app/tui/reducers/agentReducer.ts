@@ -271,6 +271,8 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         runTokenBaseline: state.status.totalTokens,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
+        currentModelRequestId: undefined,
+        currentModelReasoningStreamed: false,
         explorationSummaryIds: {},
         ctrlCPressed: false,
         exitRequested: false,

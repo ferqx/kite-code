@@ -1,6 +1,6 @@
 # ADR-0031: 模型响应流式化（streamText + text delta 事件）
 
-**Status**: proposed  
+**Status**: accepted
 **Date**: 2026-07-26  
 **Decision makers**: @chenchao  
 

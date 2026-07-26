@@ -31,6 +31,15 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0026](0026-thought-text-header-merge.md)              | accepted   | 纯思考块关闭时并入文本题头（文本关闭 Thought 条款被 0030 取代）                    |
 | [0027](0027-thought-carryover-non-text-boundary.md)    | accepted   | 思考延续跨过非探索工具边界，阶段边界后新建聚合继承思考标记                         |
 | [0030](0030-exploration-phase-block.md)                | accepted   | 只读探索阶段 = 单一存活块：模型调用不切分、文本吸收为块顶字幕、圆点全程动画        |
-| [0031](0031-model-streaming-text-deltas.md)            | proposed   | 模型响应流式化：streamText + text/reasoning delta 事件，回答合成期间逐字可见       |
+| [0031](0031-model-streaming-text-deltas.md)            | accepted   | 模型响应流式化：streamText + text/reasoning delta 事件，回答合成期间逐字可见       |
+| [0032](0032-model-stream-reconnect-continuity.md)      | accepted   | 流式模型断线重连保留展示连续性，partial tool call 不进入 Runtime                   |
+| [0033](0033-model-stream-reconnect-new-segment.md)     | accepted   | 模型流重连后冻结旧文本并新开一段，重放前缀只保留新增后缀                          |
+| [0034](0034-model-streaming-default-on.md)              | accepted   | 模型流式响应默认开启，显式 false 时回退 generateText                              |
+| [0035](0035-streamed-reasoning-establishes-thought.md)  | accepted   | 首个 reasoning delta 建立实时 Thought，保证 Thought 在回答之前                    |
+| [0036](0036-streamed-text-outside-thought.md)           | accepted   | 流式文本冻结当前 Thought 后作为同级消息渲染                                       |
+| [0037](0037-streaming-markdown-component-hierarchy.md)   | accepted   | 流式 Markdown 保持单一文档，并按稳定块级组件增量更新                              |
+| [0038](0038-streaming-markdown-paragraph-components.md)  | accepted   | 流式 Markdown 普通文本按逻辑段落组件更新，空行和结构块封闭段落                    |
+| [0039](0039-streaming-markdown-structural-child-components.md) | accepted | 表格、代码块、列表与引用按稳定子行组件更新                                  |
+| [0040](0040-streaming-markdown-progressive-static-freeze.md) | accepted | 流式 Markdown 在安全组件边界渐进冻结，只保留动态尾段                         |
 | [0028](0028-thought-text-boundary-attribution-carryover.md) | accepted | 文本边界并入题头且延续思考归属，取代 0026 的"文本不继承"条款                  |
 | [0029](0029-thought-run-visual-aggregation.md)         | accepted   | 连续 Thought 块渲染层视觉聚合，reducer 切分不变                                    |
