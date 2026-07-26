@@ -108,9 +108,9 @@ export interface RuntimeStore {
   /** Resolve a named recovery point entry (position + timestamp), or null when absent. */
   getNamedSnapshotEntry(threadId: string, snapshotId: string): RuntimeSnapshotEntry | null;
   /**
-   * 记录写入前文件原像（ADR-0025 §4）。best-effort：同一检查点窗口（上一次
+   * 记录写入前文件原像（ADR-0042 §4）。best-effort：同一检查点窗口（上一次
    * turn 快照之后）内按 path 去重，失败静默，绝不影响工具执行。
-   * Record a file pre-image before a write (ADR-0025 §4). Best-effort: deduped
+   * Record a file pre-image before a write (ADR-0042 §4). Best-effort: deduped
    * per path within a checkpoint window (since the last turn snapshot);
    * failures never break tool execution.
    */
@@ -257,11 +257,11 @@ export function createRuntimeStore(
       created_at INTEGER DEFAULT (unixepoch())
     )
   `);
-  // 文件写入前原像（ADR-0025 §4）：/rewind 回退检查点时用于恢复工作区文件。
+  // 文件写入前原像（ADR-0042 §4）：/rewind 回退检查点时用于恢复工作区文件。
   // event_position 记录捕获时刻的最近事件位置；回退到位置 N 时，每个 path 取
   // event_position > N 的最早一行即为检查点时刻的文件状态（existed=0 表示当时
   // 文件不存在，恢复动作为删除）。
-  // File pre-images captured before tool writes (ADR-0025 §4); used to restore
+  // File pre-images captured before tool writes (ADR-0042 §4); used to restore
   // workspace files when /rewind reverts to a recovery point.
   db.run(`
     CREATE TABLE IF NOT EXISTS runtime_file_preimages (
@@ -708,7 +708,7 @@ export function createRuntimeStore(
       db.transaction(() => {
         deleteEventsAfter.run(threadId, entry.event_position);
         deleteNamedSnapshotsAfter.run(threadId, entry.event_position);
-        // ADR-0025 §4：文件原像随恢复点一同截断（调用方应在此之前完成文件恢复）
+        // ADR-0042 §4：文件原像随恢复点一同截断（调用方应在此之前完成文件恢复）
         deleteFilePreimagesAfter.run(threadId, entry.event_position);
         const serialized = JSON.stringify(snapshot);
         const state = snapshot as { revision?: number; schemaVersion?: number };
@@ -749,7 +749,7 @@ export function createRuntimeStore(
         deleteSession.run(targetThreadId);
         upsertSession.run(targetThreadId);
         for (const event of events) insertEvent.run(targetThreadId, JSON.stringify(event));
-        // ADR-0025 §4：复制 fork 点之前的文件原像（fork 复用源事件序列，
+        // ADR-0042 §4：复制 fork 点之前的文件原像（fork 复用源事件序列，
         // 事件位置一一对应），fork 出的会话内 /rewind 同样可以恢复文件。
         copyFilePreimages.run(targetThreadId, sourceThreadId, position);
         const targetPosition = selectLastEventPosition.get(targetThreadId)?.id ?? 0;

@@ -1,13 +1,13 @@
-# ADR-0027: ToolSpec Registry 单路径收尾
+# ADR-0044: ToolSpec Registry 单路径收尾
 
 **Status**: accepted
 **Date**: 2026-07-26
 **Decision makers**: @chenchao
-**Supersedes**: ADR-0026 的双路径灰度与 flag 回滚部分
+**Supersedes**: ADR-0043 的双路径灰度与 flag 回滚部分
 
 ## Context
 
-ADR-0026 计划用 `toolSpecRegistryV1` 保留旧执行路径至少两周，再切换默认值并清理。然而六个计算原语逐步迁移后，实际代码已经无条件通过 Registry 泛型解析和 `dispatchRegisteredTool` 执行；该 flag 只存在于配置声明与测试，从未接入解析、路由或执行分支。继续保留它会虚构一个不存在的回滚能力，也无法形成真实的双值灰度证据。
+ADR-0043 计划用 `toolSpecRegistryV1` 保留旧执行路径至少两周，再切换默认值并清理。然而六个计算原语逐步迁移后，实际代码已经无条件通过 Registry 泛型解析和 `dispatchRegisteredTool` 执行；该 flag 只存在于配置声明与测试，从未接入解析、路由或执行分支。继续保留它会虚构一个不存在的回滚能力，也无法形成真实的双值灰度证据。
 
 ## Decision
 
@@ -17,11 +17,11 @@ ADR-0026 计划用 `toolSpecRegistryV1` 保留旧执行路径至少两周，再�
 - 不重建已经退役的旧执行器来制造双路径；
 - 回滚以恢复上一提交为单位，不承诺运行时 flag 回切；
 - Registry Schema、解析恒等性、effects、dispatch、Policy 决策与结果元数据由一致性和审批链路用例共同守护；
-- ADR-0026 的 Schema-only、严格 Edit、shell 治理参数收敛和命令形态审批结论保持有效。
+- ADR-0043 的 Schema-only、严格 Edit、shell 治理参数收敛和命令形态审批结论保持有效。
 
 ## Alternatives
 
-- 重新实现六套旧执行分支并补做两周灰度：拒绝。它重新引入 ADR-0026 要消除的双事实源，只为满足已经失真的迁移机制。
+- 重新实现六套旧执行分支并补做两周灰度：拒绝。它重新引入 ADR-0043 要消除的双事实源，只为满足已经失真的迁移机制。
 - 保留未接线 flag：拒绝。配置表面会暗示不存在的行为差异。
 
 ## Consequences

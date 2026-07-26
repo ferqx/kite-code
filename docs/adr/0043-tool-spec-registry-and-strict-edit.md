@@ -1,8 +1,8 @@
-# ADR-0026：工具单一事实源（ToolSpec Registry）与严格 Edit 语义
+# ADR-0043：工具单一事实源（ToolSpec Registry）与严格 Edit 语义
 
 状态：accepted
 日期：2026-07-26
-补充：ADR-0007、ADR-0020、ADR-0025
+补充：ADR-0007、ADR-0020、ADR-0042
 关联：`docs/design/2026-07-26-tool-spec-registry-rfc.md`、`docs/active/tool-description-contracts.md`、`docs/active/tool-gated-autonomy.md`
 
 ## 背景
@@ -19,7 +19,7 @@
 6. `shell_execute` 允许模型通过 `intent`/`grant_request`/`prefix_rule` 等参数自我声明副作用等级、提议持久授权规则——而副作用分类本已由命令形态分析完成，不依赖这些参数。
 7. `ask_user` 契约把 "harness 会拦截并返回 ok:false" 的内部实现泄漏给模型。
 
-ADR-0025 已决定 edit 先读后改（§1）与移除 append（§2），但其 §4（preimage）落地后，§1/§2 因缺少单一落点而未实施。同时 ADR-0025 保留了 `old_string` 的"自然校验"，而实际实现的 `findMatch()` 存在无条件降级链（exact → trimEnd → 逐行 trimming），使 Receipt 无法表达"模型意图 vs 实际匹配"的差异。
+ADR-0042 已决定 edit 先读后改（§1）与移除 append（§2），但其 §4（preimage）落地后，§1/§2 因缺少单一落点而未实施。同时 ADR-0042 保留了 `old_string` 的"自然校验"，而实际实现的 `findMatch()` 存在无条件降级链（exact → trimEnd → 逐行 trimming），使 Receipt 无法表达"模型意图 vs 实际匹配"的差异。
 
 ## 决策
 
@@ -50,7 +50,7 @@ ADR-0025 已决定 edit 先读后改（§1）与移除 append（§2），但其 
 
 - 删除模型表面的 `match_mode`（该参数今天即被丢弃，删除零行为变化）；
 - `findMatch()` 的无条件降级链（exact → trimEnd → 逐行 trimming）改为**默认仅 exact**，模糊匹配降为内部显式 opt-in 或移除。匹配失败即失败，模型重新 `read_file` 后提交准确文本；
-- 同期落地 ADR-0025 §1（先读后改 / 过期拒绝，作为 edit spec 的执行前置钩子）与 §2（删除 `write_file` 的 `mode` 参数与 append 分支），次序沿用 ADR-0025 的 §4（已落地）→ §1 → §2。
+- 同期落地 ADR-0042 §1（先读后改 / 过期拒绝，作为 edit spec 的执行前置钩子）与 §2（删除 `write_file` 的 `mode` 参数与 append 分支），次序沿用 ADR-0042 的 §4（已落地）→ §1 → §2。
 
 ### 4. 模型可见工具名保持 snake_case
 
@@ -83,7 +83,7 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 ## 后果
 
 - `definitions.ts` 降级为 Registry 生成的 schema-only 层；`tool-requests.ts`、`tool-runner.ts`、`tool-contracts.ts`、`tool-capabilities.ts` 的逐工具分支随迁移逐批删除。
-- 严格 Edit 会使模型初期 edit 失败率上升（未读即改、空白不匹配被拒），错误信息引导重读自纠——这是 ADR-0025 已预期的设计意图。
+- 严格 Edit 会使模型初期 edit 失败率上升（未读即改、空白不匹配被拒），错误信息引导重读自纠——这是 ADR-0042 已预期的设计意图。
 - shell 治理参数删除后，审批决策完全由命令形态与授权状态驱动；只读命令免审批快车道命中率应不低于迁移前（迁移前后对比验证）。
 - 迁移期每个工具的 description 保持逐字节稳定（golden 测试守护）；Schema 变更集中在明确批次，各触发一次性 prompt cache miss。
 - 直调模型 ToolSet `execute()` 的存量测试随迁移改为经 dispatch 验证生产链。

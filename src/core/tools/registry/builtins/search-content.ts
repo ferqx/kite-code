@@ -1,5 +1,5 @@
 /**
- * search_content spec — 迁入 Registry（ADR-0026 S1.2）。
+ * search_content spec — 迁入 Registry（ADR-0043 S1.2）。
  * 契约暂引用 SEARCH_CONTENT_CONTRACT.sections 保持 description 逐字节稳定。
  */
 import { z } from 'zod';

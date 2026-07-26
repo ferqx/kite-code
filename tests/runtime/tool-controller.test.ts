@@ -783,7 +783,7 @@ describe('executeRuntimeTools', () => {
         executionMode: 'accept_edits',
         approvedAtTurnId: state.turn.turnId,
       };
-      // ADR-0025 §1：先读取目标文件，使后续 edit_file 通过先读后改校验。
+      // ADR-0042 §1：先读取目标文件，使后续 edit_file 通过先读后改校验。
       state.tools.calls.rf = {
         toolCallId: 'rf',
         modelMessageId: 'model',

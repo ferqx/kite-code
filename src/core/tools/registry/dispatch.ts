@@ -1,6 +1,6 @@
 /**
- * Registry dispatch — 注册工具的唯一执行入口（ADR-0026 §1）。
- * Registry dispatch — the only execution entrypoint for registered tools (ADR-0026 §1).
+ * Registry dispatch — 注册工具的唯一执行入口（ADR-0043 §1）。
+ * Registry dispatch — the only execution entrypoint for registered tools (ADR-0043 §1).
  *
  * 阶段 1.1 只提供 spec 执行序列（preExecute → execute → projectResult）。
  * Policy 预检（evaluateToolApproval + mode policy + permit 认领）仍在现有

@@ -23,6 +23,7 @@ import {
 import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { fileContentHash, sessionReadTracker } from '@/core/tools/read-state';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import {
   listMcpResourcesSpec,
@@ -63,7 +64,7 @@ function resultContentDigest(stdout: string, stderr: string, exitCode: number): 
 }
 
 /**
- * ADR-0025 §4：best-effort 原像捕获 —— 记录器抛错绝不允许中断工具执行。
+ * ADR-0042 §4：best-effort 原像捕获 —— 记录器抛错绝不允许中断工具执行。
  * Best-effort pre-image capture: a throwing recorder must never fail the tool.
  */
 function safeRecordPreimage(
@@ -128,9 +129,9 @@ export interface RunApprovedToolInput {
   /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /**
-   * 写入前文件原像记录器（ADR-0025 §4），供 /rewind 恢复工作区文件。
+   * 写入前文件原像记录器（ADR-0042 §4），供 /rewind 恢复工作区文件。
    * best-effort：实现自身吞错，工具层直接调用即可。
-   * File pre-image recorder invoked before workspace writes (ADR-0025 §4),
+   * File pre-image recorder invoked before workspace writes (ADR-0042 §4),
    * enabling /rewind to restore files. Best-effort by contract.
    */
   recordFilePreimage?: (path: string, content: string | null, existed: boolean) => void;
@@ -189,6 +190,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     authorization: normalizeAuthorizationState(authorization),
     override,
     mcpPolicy,
+    capability: builtinToolRegistry.effectsOf(request.name, request.args, {
+      workspace,
+      threadId,
+    }),
   });
   if (!policy.allowed) {
     return withFailureGuidance(request, {
@@ -327,7 +332,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const filePath = (request.args.path ?? '') as string;
     const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：执行经 dispatchRegisteredTool，
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 结果组装保持与旧路径字节一致（resultMeta / digest / TUI 展示不受影响）。
     const dispatched = await dispatchRegisteredTool(
       readFileSpec,
@@ -344,7 +349,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
           path: filePath,
         };
     if (output.ok && output.rawContent !== undefined) {
-      // ADR-0025 §1 读取状态记录：指纹取原始文本（output.content 是带行号的
+      // ADR-0042 §1 读取状态记录：指纹取原始文本（output.content 是带行号的
       // 模型表面格式，与 edit 侧 preEditRead 指纹口径不一致，不可用于校验）。
       sessionReadTracker(threadId || workspace).record(
         canonicalFilePath(workspace, filePath, allowExternal),
@@ -376,7 +381,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const editPath = (request.args.path ?? '') as string;
     const isExternal = isExternalPathArg(editPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    // ADR-0025 §4：改动前捕获原像，供 /rewind 恢复（best-effort）
+    // ADR-0042 §4：改动前捕获原像，供 /rewind 恢复（best-effort）
     // Capture pre-image before mutating, for /rewind restore (best-effort).
     const preEditRead = readTextContent(workspace, editPath, { allowExternal });
     safeRecordPreimage(
@@ -385,8 +390,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       preEditRead.ok ? preEditRead.content : null,
       preEditRead.ok,
     );
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 §3 严格精确匹配）：
-    // 执行经 dispatchRegisteredTool；ADR-0025 §1 先读后改校验由 spec.preExecute
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2，含 §3 严格精确匹配）：
+    // 执行经 dispatchRegisteredTool；ADR-0042 §1 先读后改校验由 spec.preExecute
     // 基于会话读取状态执行（not_read / stale → 硬失败，引导重读）。
     const tracker = sessionReadTracker(threadId || workspace);
     const canonicalPath = canonicalFilePath(workspace, editPath, allowExternal);
@@ -502,7 +507,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const oldRead = readTextContent(workspace, filePath, { allowExternal });
     const oldExisted = oldRead.ok;
 
-    // ADR-0025 §4：覆写前捕获原像（复用上面已读取的旧内容，零额外 I/O）
+    // ADR-0042 §4：覆写前捕获原像（复用上面已读取的旧内容，零额外 I/O）
     // Capture pre-image before overwrite (reuses oldRead, zero extra I/O).
     safeRecordPreimage(
       input.recordFilePreimage,
@@ -511,7 +516,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       oldRead.ok,
     );
 
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 ADR-0025 §2 append 移除）：
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2，含 ADR-0042 §2 append 移除）：
     // 执行经 dispatchRegisteredTool；mode 不再存在，创建/覆写统一语义。
     const dispatched = await dispatchRegisteredTool(
       writeFileSpec,
@@ -529,7 +534,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     const result = dispatched.output;
     if (result.ok) {
-      // ADR-0025 §1 读取状态记录：写入成功后模型持有全部内容，等价于一次读取。
+      // ADR-0042 §1 读取状态记录：写入成功后模型持有全部内容，等价于一次读取。
       // 哈希取换行正规化后的文本，与后续 read_file 回读指纹一致。
       sessionReadTracker(threadId || workspace).record(
         canonicalFilePath(workspace, filePath, allowExternal),
@@ -643,7 +648,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const searchPath = (request.args.path ?? '.') as string;
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：执行经 dispatchRegisteredTool，
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
     const dispatched = await dispatchRegisteredTool(
       searchContentSpec,
@@ -680,7 +685,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const searchPath = (request.args.path ?? '.') as string;
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：执行经 dispatchRegisteredTool，
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
     const dispatched = await dispatchRegisteredTool(
       searchFilesSpec,

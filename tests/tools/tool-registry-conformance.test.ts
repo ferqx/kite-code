@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import { POLICY_CLASSIFIED_TOOL_NAMES } from '@/core/policies/tool-capabilities';
+import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { sessionReadTracker } from '@/core/tools/read-state';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
@@ -20,7 +21,7 @@ import type { ToolContext, ToolSpec } from '@/core/tools/registry/spec';
 import { buildDescription, KNOWN_TOOL_NAMES } from '@/core/tools/tool-contracts';
 
 /**
- * ToolSpec Registry 一致性测试（ADR-0026 §5 / RFC §5）。
+ * ToolSpec Registry 一致性测试（ADR-0043 §5 / RFC §5）。
  *
  * 不变量编号与 RFC §5 表格一致：i1 args 透传恒等、i2 schema-only、
  * i3 Policy 名集闭合、i4 KNOWN_TOOL_NAMES 棘轮、i5 写工具 mutation scope、
@@ -233,6 +234,24 @@ describe('invariant i2 — model ToolSet is schema-only', () => {
       expect(entry.execute).toBeUndefined();
     }
   });
+
+  test('production model surface exactly equals Registry availability', () => {
+    const input = {
+      workspace: '/tmp/sample',
+      toolSearch: true,
+    };
+    const context = toolAvailabilityContext(input);
+    const toolset = createAgentTools(input);
+    expect(Object.keys(toolset).sort()).toEqual(
+      builtinToolRegistry
+        .availableIn(context)
+        .map((spec) => spec.name)
+        .sort(),
+    );
+    for (const entry of Object.values(toolset)) {
+      expect(entry.execute).toBeUndefined();
+    }
+  });
 });
 
 describe('invariant i3 — policy-classified names form a closed set (anti-ghost-name)', () => {
@@ -245,33 +264,8 @@ describe('invariant i3 — policy-classified names form a closed set (anti-ghost
 });
 
 describe('invariant i4 — KNOWN_TOOL_NAMES migration ratchet', () => {
-  /**
-   * 尚未迁入 Registry 的静态工具名 = 已知名单 − 生产 Registry 已注册名。
-   * 阶段 1.2 每迁移一个工具，它自动从待迁移集合移入 Registry；
-   * 阶段 1.3 清理完成后本集合应为空（届时改为全量断言）。
-   */
-  const PENDING_MIGRATION = new Set<string>(
-    [...KNOWN_TOOL_NAMES].filter((name) => !builtinToolRegistry.get(name)),
-  );
-
-  test('migrated names never remain pending (single source of truth)', () => {
-    for (const name of builtinToolRegistry.names()) {
-      expect(PENDING_MIGRATION.has(name)).toBe(false);
-    }
-  });
-
-  test('pending migration set never hides unknown names', () => {
-    const known = new Set<string>(KNOWN_TOOL_NAMES);
-    for (const name of PENDING_MIGRATION) {
-      expect(known.has(name)).toBe(true);
-    }
-  });
-
-  test('known names are covered by production registry or pending migration', () => {
-    const covered = new Set<string>([...builtinToolRegistry.names(), ...PENDING_MIGRATION]);
-    for (const name of KNOWN_TOOL_NAMES) {
-      expect(covered.has(name)).toBe(true);
-    }
+  test('migration is closed: known names exactly equal production Registry names', () => {
+    expect(builtinToolRegistry.names()).toEqual([...KNOWN_TOOL_NAMES].sort());
   });
 
   test('production registry names must be known tool names', () => {
@@ -329,7 +323,7 @@ describe('read_file output passthrough', () => {
   });
 });
 
-describe('session read tracker (ADR-0025 §1)', () => {
+describe('session read tracker (ADR-0042 §1)', () => {
   test('record/check lifecycle: not_read → fresh → stale', () => {
     const tracker = sessionReadTracker('conformance-test-thread');
     expect(tracker.check('/w/a.ts', 'h1')).toBe('not_read');
@@ -340,7 +334,7 @@ describe('session read tracker (ADR-0025 §1)', () => {
   });
 });
 
-describe('edit_file read-before-write enforcement (ADR-0025 §1)', () => {
+describe('edit_file read-before-write enforcement (ADR-0042 §1)', () => {
   const EDIT_INPUT = { path: 'x.ts', old_string: 'a', new_string: 'b' };
 
   test('not_read rejects before execute', async () => {
@@ -415,6 +409,20 @@ describe('invariant i9 — descriptor projection is deterministic', () => {
         whenToUse: `${sampleReadSpec.contract.whenToUse} (edited)`,
       },
     };
+    expect(registry.descriptorOf(mutated).revision).not.toBe(first.revision);
+  });
+
+  test('schema changes alter descriptor revision', () => {
+    const registry = createToolRegistry();
+    const first = registry.descriptorOf(sampleReadSpec);
+    const mutated: typeof sampleReadSpec = {
+      ...sampleReadSpec,
+      inputSchema: z.object({
+        path: z.string(),
+        limit: z.number().int().min(1).optional(),
+      }),
+    };
+    expect(registry.descriptorOf(mutated).inputSchema).toBeDefined();
     expect(registry.descriptorOf(mutated).revision).not.toBe(first.revision);
   });
 });

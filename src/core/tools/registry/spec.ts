@@ -1,6 +1,6 @@
 /**
- * ToolSpec — 静态模型工具的单一事实源契约（ADR-0026）。
- * ToolSpec — single source of truth contract for static model tools (ADR-0026).
+ * ToolSpec — 静态模型工具的单一事实源契约（ADR-0043）。
+ * ToolSpec — single source of truth contract for static model tools (ADR-0043).
  *
  * 每个静态工具的模型表面、请求解析、副作用分类、执行器、结果投影与
  * descriptor 投影都从同一份 spec 派生，消除"一个工具定义在六处手工同步"
@@ -30,11 +30,20 @@ import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities'
  */
 export type ToolKind = 'computer' | 'coordination' | 'interrupt' | 'runtime_action';
 
-/** 可用性与静态投影所需上下文。迁移阶段按需扩展（phase、interactionMode、skill frame 等）。 */
-export interface ToolContext {
+/** 单次模型轮次的不可变工具可用性快照。模型投影与调用解析必须消费同一份快照。 */
+export interface ToolAvailabilityContext {
   workspace: string;
   threadId?: string;
+  phase?: import('@/protocol/events').AgentPhase;
+  interactionMode?: import('@/protocol/events').InteractionMode;
+  featureFlags?: Readonly<FeatureFlags>;
+  hasTaskAdapter?: boolean;
+  toolSearchEnabled?: boolean;
+  activeSkillFrameIds?: readonly string[];
+  availableSkillIds?: readonly string[];
 }
+
+export type ToolContext = ToolAvailabilityContext;
 
 /** 执行上下文。迁移阶段按需扩展；Policy 预检暂留现有管线，阶段 1.2 上提为公共段。 */
 export interface ToolExecutionContext extends ToolContext {
@@ -74,14 +83,14 @@ export interface ToolExecutionContext extends ToolContext {
   planRuntime?: PlanRuntimeContext;
   /** 调用方已持有执行授权且路径在工作区外（read_file 等外部路径门禁输入）。 */
   allowExternalPaths?: boolean;
-  /** 写工具目标路径的读取状态检查结果（调用方注入，ADR-0025 §1 先读后改校验输入）。 */
+  /** 写工具目标路径的读取状态检查结果（调用方注入，ADR-0042 §1 先读后改校验输入）。 */
   writeTarget?: { path: string; readState?: ReadStateCheck };
 }
 
 /**
  * 每次调用的动态副作用分类。消费现有 ToolEffectClass（与
  * classifyToolCapability 一致），必须是 (input, context) 的纯函数，
- * 不得信任模型自我声明的副作用字段（ADR-0026 §2）。
+ * 不得信任模型自我声明的副作用字段（ADR-0043 §2）。
  */
 export interface ToolEffects {
   effectClass: ToolEffectClass;
@@ -115,13 +124,13 @@ export interface ProjectedToolResult {
   runtimeEvents?: RuntimeEvent[];
 }
 
-/** preExecute 钩子结果：放行，或 fail-fast 拒绝（ADR-0025 §1 先读后改/过期拒绝的落点）。 */
+/** preExecute 钩子结果：放行，或 fail-fast 拒绝（ADR-0042 §1 先读后改/过期拒绝的落点）。 */
 export type PreExecuteOutcome =
   | { proceed: true }
   | { proceed: false; rejection: { ok: false; error: string; guidance?: string } };
 
 export interface ToolSpec<Input = unknown, Output = unknown> {
-  /** 模型可见名；稳定 snake_case（ADR-0026 §4 决定不改名）。 */
+  /** 模型可见名；稳定 snake_case（ADR-0043 §4 决定不改名）。 */
   readonly name: string;
   readonly kind: ToolKind;
   /** 契约文本唯一来源；description 由 buildDescription(sections) 派生，不存在第二份手写描述。 */
@@ -141,7 +150,7 @@ export interface ToolSpec<Input = unknown, Output = unknown> {
   effects(input: Input, context: ToolContext): ToolEffects;
   /** 审批展示命令（可选）。默认使用工具名，替代逐分支的 protectedCommand。 */
   approvalSummary?(input: Input, context: ToolContext): string;
-  /** 执行前置钩子（fail-fast）：ADR-0025 §1/§4 与读取登记的统一落点。 */
+  /** 执行前置钩子（fail-fast）：ADR-0042 §1/§4 与读取登记的统一落点。 */
   preExecute?(
     input: Input,
     context: ToolExecutionContext,

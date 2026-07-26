@@ -7,9 +7,11 @@
       "documents": [
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/plan-mode-implementation.md",
+        "docs/active/cancel-resume-cleanup.md",
         "docs/book/04-Agent引擎.md",
         "docs/book/10-持久化与会话管理.md",
-        "docs/adr/0025-model-requested-live-emission.md"
+        "docs/adr/0025-model-requested-live-emission.md",
+        "docs/adr/0042-file-tool-semantics-and-write-safety.md"
       ]
     },
     {
@@ -25,7 +27,7 @@
         "docs/active/tool-gated-autonomy.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/adr/0025-model-requested-live-emission.md",
-        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
+        "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
@@ -40,7 +42,7 @@
         "docs/active/mcp-runtime-governance.md",
         "docs/active/mcp-authentication.md",
         "docs/book/11-MCP与Skills扩展.md",
-        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
+        "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
@@ -99,8 +101,8 @@
         "docs/active/tool-gated-autonomy.md",
         "docs/active/authorization.md",
         "docs/active/mcp-runtime-governance.md",
-        "docs/adr/0025-file-tool-semantics-and-write-safety.md",
-        "docs/adr/0026-tool-spec-registry-and-strict-edit.md",
+        "docs/adr/0042-file-tool-semantics-and-write-safety.md",
+        "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md"
       ]
@@ -130,7 +132,7 @@
         "docs/adr/0025-model-requested-live-emission.md",
         "docs/space/plans/2026-07-21-context-compaction-production-rollout.md",
         "docs/space/plans/2026-07-26-tool-spec-registry.md",
-        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
+        "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
@@ -164,8 +166,8 @@
         "docs/active/tool-gated-autonomy.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/active/capability-progressive-disclosure.md",
-        "docs/adr/0025-file-tool-semantics-and-write-safety.md",
-        "docs/adr/0026-tool-spec-registry-and-strict-edit.md",
+        "docs/adr/0042-file-tool-semantics-and-write-safety.md",
+        "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/11-MCP与Skills扩展.md"
@@ -182,7 +184,7 @@
         "docs/active/thought-pre-consolidation.md",
         "docs/book/07-TUI结构.md",
         "docs/book/08-TUI交互全景.md",
-        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
+        "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {

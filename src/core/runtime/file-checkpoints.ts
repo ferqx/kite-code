@@ -1,6 +1,6 @@
 /**
- * 文件检查点（ADR-0025 §4）：写入前原像的记录入口与回退恢复。
- * File checkpoints (ADR-0025 §4): pre-write pre-image recording entry and
+ * 文件检查点（ADR-0042 §4）：写入前原像的记录入口与回退恢复。
+ * File checkpoints (ADR-0042 §4): pre-write pre-image recording entry and
  * rewind restore.
  *
  * 语义 / Semantics:

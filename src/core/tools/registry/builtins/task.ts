@@ -25,6 +25,7 @@ export const taskSpec: ToolSpec<TaskInput, TaskOutput> = {
   inputSchema: taskInputSchema,
   declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'none' },
   minimumApproval: 'user',
+  availability: (context) => context.hasTaskAdapter === true,
   effects: (input) =>
     input.subagent_type === 'code'
       ? {

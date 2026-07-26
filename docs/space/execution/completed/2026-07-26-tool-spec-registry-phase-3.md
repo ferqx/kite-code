@@ -3,7 +3,7 @@
 状态：completed
 日期：2026-07-26
 计划：[`2026-07-26-tool-spec-registry-phase-3.md`](../../plans/2026-07-26-tool-spec-registry-phase-3.md)
-决策：ADR-0026、ADR-0027、ADR-0028
+决策：ADR-0043、ADR-0044、ADR-0028
 
 ## 已完成
 

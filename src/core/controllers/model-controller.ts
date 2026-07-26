@@ -42,6 +42,7 @@ import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { createAgentTools } from '@/core/tools/definitions';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import type { ShellExecutor } from '@/core/tools/shell';
 
 // ── 辅助函数 / Helpers ──
@@ -611,7 +612,11 @@ export async function invokeRuntimeModel(params: {
     const messageId = response.id ?? requestId;
     let ordinal = 0;
     for (const call of toolCalls) {
-      const capability = classifyToolCapability(call.name, call.args);
+      const capability =
+        builtinToolRegistry.effectsOf(call.name, call.args, {
+          workspace: params.state.session.workspace,
+          threadId: params.state.session.threadId,
+        }) ?? classifyToolCapability(call.name, call.args);
       const binding = mcpBindings.find(
         ({ binding: candidate }) => candidate.exposedToolName === call.name,
       )?.binding;

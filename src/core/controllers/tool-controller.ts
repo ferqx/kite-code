@@ -45,6 +45,7 @@ import {
 import { resumeSubAgent } from '@/core/subagent/runner';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
+import { toolAvailabilityContext } from '@/core/tools/definitions';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { readPlanSpec } from '@/core/tools/registry/builtins/read-plan';
 import {
@@ -323,7 +324,18 @@ async function handleSubAgentResume(params: {
       name: blockedToolName,
       args: blockedToolArgs,
     },
-    params.state.session.workspace,
+    toolAvailabilityContext({
+      workspace: params.state.session.workspace,
+      threadId: params.state.session.threadId,
+      config: params.taskConfig,
+      subagentEventSink: params.emitSubagentEvent,
+      toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
+      skillCatalog: params.skillCatalog,
+      activeSkillFrames: Object.values(params.state.skills.frames).filter(
+        (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+      ),
+      phase: getAgentPhase(getActivePlanning(params.state)),
+    }),
   );
 
   let toolResult: ToolExecutionResult;
@@ -419,6 +431,10 @@ async function handleSubAgentResume(params: {
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
+      capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, {
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+      }),
     });
     const blockedApproval = buildToolApproval({
       workspace: params.state.session.workspace,
@@ -507,7 +523,18 @@ export async function executeRuntimeTools(params: {
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
     const request = toolRequestFromCall(
       { id: call.toolCallId, name: call.name, args: (call.args ?? {}) as Record<string, unknown> },
-      params.state.session.workspace,
+      toolAvailabilityContext({
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+        config: params.taskConfig,
+        subagentEventSink: params.subagentEventSink,
+        toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
+        skillCatalog: params.skillCatalog,
+        activeSkillFrames: Object.values(params.state.skills.frames).filter(
+          (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+        ),
+        phase: getAgentPhase(getActivePlanning(params.state)),
+      }),
     );
     if (!request) {
       if (builtinToolRegistry.get(call.name)) {
@@ -1006,6 +1033,10 @@ export async function executeRuntimeTools(params: {
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
       ...(mcpPolicy ? { mcpPolicy } : {}),
+      capability: builtinToolRegistry.effectsOf(request.name, request.args, {
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+      }),
     });
     if (!decision.allowed) {
       events.push({
@@ -1211,6 +1242,10 @@ export async function executeRuntimeTools(params: {
             workspace: params.state.session.workspace,
             threadId: params.state.session.threadId,
             authorization: params.state.authorization,
+            capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, {
+              workspace: params.state.session.workspace,
+              threadId: params.state.session.threadId,
+            }),
           });
           const blockedApproval = buildToolApproval({
             workspace: params.state.session.workspace,

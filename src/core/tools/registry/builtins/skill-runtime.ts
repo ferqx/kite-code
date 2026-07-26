@@ -65,6 +65,10 @@ export const activateSkillSpec: ToolSpec<z.infer<typeof activateSkillInputSchema
   inputSchema: activateSkillInputSchema,
   declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
   minimumApproval: 'user',
+  availability: (context) =>
+    context.featureFlags?.skillWorkflowV1 === true &&
+    context.featureFlags.skillActivationV2 === true &&
+    (context.availableSkillIds?.length ?? 0) > 0,
   effects: () => ({
     effectClass: 'unknown',
     sideEffect: true,
@@ -95,6 +99,7 @@ export const readSkillReferenceSpec: ToolSpec<
   inputSchema: readSkillReferenceInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
+  availability: (context) => (context.activeSkillFrameIds?.length ?? 0) > 0,
   effects,
   execute: async (input, context) => {
     if (!context.skillRuntime) {
@@ -117,6 +122,7 @@ export const completeSkillSpec: ToolSpec<z.infer<typeof completeSkillInputSchema
   inputSchema: completeSkillInputSchema,
   declaredEffects: { filesystem: 'none', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
+  availability: (context) => (context.activeSkillFrameIds?.length ?? 0) > 0,
   effects,
   execute: async (input, context) => {
     if (!context.skillRuntime) {

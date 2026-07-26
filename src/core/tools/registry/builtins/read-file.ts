@@ -1,5 +1,5 @@
 /**
- * read_file spec — 首个迁入 Registry 的工具（ADR-0026 S1.2）。
+ * read_file spec — 首个迁入 Registry 的工具（ADR-0043 S1.2）。
  *
  * 契约文本暂引用 READ_FILE_CONTRACT.sections（迁移期保持 description 逐字节
  * 稳定）；全部工具迁移完成后契约整体移入 spec、tool-contracts.ts 退役。

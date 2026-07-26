@@ -6,6 +6,7 @@ import {
   isToolMessage,
 } from '@/core/messages';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import type { ShellActionEnvelope } from '@/core/types';
 import type { ShellApprovalGrant, UserInputRequest } from '@/protocol/events';
 
@@ -278,8 +279,24 @@ export function getAllPendingToolRequests(
 /** 从单个 tool_call 解析工具请求 / Parse tool request from a single tool_call */
 export function toolRequestFromCall(
   call: { id?: string; name: string; args: Record<string, unknown> },
-  workspace: string,
+  context: string | ToolAvailabilityContext,
 ): PendingToolRequest | null {
+  const availabilityContext: ToolAvailabilityContext =
+    typeof context === 'string'
+      ? {
+          workspace: context,
+          // Compatibility for direct/legacy callers. Production model and execution
+          // controllers pass the immutable turn snapshot instead.
+          hasTaskAdapter: true,
+          toolSearchEnabled: true,
+          activeSkillFrameIds: ['legacy'],
+          availableSkillIds: ['legacy'],
+          featureFlags: {
+            skillWorkflowV1: true,
+            skillActivationV2: true,
+          } as ToolAvailabilityContext['featureFlags'],
+        }
+      : context;
   // 合成调用：invokeModel 在 parseToolCall 失败后注入 _raw_invalid_args 标记。
   // 跳过工具特定的 args 规范化，保留标记字段直通 runApprovedTool 生成错误反馈。
   // Synthetic call: injected by invokeModel after parseToolCall failure.
@@ -294,9 +311,9 @@ export function toolRequestFromCall(
     } as PendingToolRequest;
   }
 
-  // 已迁移到 Registry 的工具走泛型解析（ADR-0026）：args 恒等于 schema 解析结果，
+  // 已迁移到 Registry 的工具走泛型解析（ADR-0043）：args 恒等于 schema 解析结果，
   // 不存在逐字段重映射。schema 无效返回 null，走调用方既有的 tool_not_found 路径。
-  const viaRegistry = builtinToolRegistry.parseToolCall(call, { workspace });
+  const viaRegistry = builtinToolRegistry.parseToolCall(call, availabilityContext);
   if (viaRegistry) {
     if (!viaRegistry.ok) return null;
     return {

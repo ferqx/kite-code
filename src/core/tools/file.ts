@@ -384,7 +384,7 @@ export function editFile(input: EditFileInput): EditFileResult {
   }
 }
 
-/** 严格精确匹配（ADR-0026 §3）：包含空白；失败即报错并引导重读。
+/** 严格精确匹配（ADR-0043 §3）：包含空白；失败即报错并引导重读。
  *  模糊匹配降级为 matchMode='trimmed' 的内部显式 opt-in，不再无条件兜底——
  *  无条件降级会让 Receipt 无法表达"模型意图 vs 实际匹配"的差异。
  *  Strict exact matching: whitespace-sensitive; failures report an error that

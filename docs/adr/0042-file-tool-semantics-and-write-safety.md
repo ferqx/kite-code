@@ -1,4 +1,4 @@
-# ADR-0025：文件工具规则对齐 Claude Code 成熟模型
+# ADR-0042：文件工具规则对齐 Claude Code 成熟模型
 
 状态：accepted
 日期：2026-07-25

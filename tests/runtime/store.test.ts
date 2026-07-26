@@ -900,7 +900,7 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
-  // ── ADR-0025 §4：文件原像 / file pre-images ──
+  // ── ADR-0042 §4：文件原像 / file pre-images ──
 
   test('recordFilePreimage keeps the earliest pre-image per path within a checkpoint window', () => {
     const store = createRuntimeStore(dbPath);

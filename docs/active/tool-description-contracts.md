@@ -15,7 +15,7 @@
 - 修改 `src/tools/tool-contracts.ts` 中的契约结构或内容。
 - 修改工具的实际行为（`src/core/tools/file.ts`、`src/core/tools/shell.ts`），需要同步更新契约。
 - 修改 `src/harness/tool-runner.ts` 中的工具执行逻辑、错误处理或 `toolUsageGuidance()`。
-- 新增工具注册到 `definitions.ts` 的 `createAgentTools()`。
+- 新增工具注册到 `src/core/tools/registry/builtins.ts`。
 
 相关：
 
@@ -57,7 +57,7 @@
   Failure: [failureHandling]
   ```
 
-### Registry 迁移边界（ADR-0026）
+### Registry 迁移边界（ADR-0043）
 
 工具契约的单一事实源正从 `tool-contracts.ts` 迁移到 ToolSpec Registry（`src/core/tools/registry/`）。迁移期规则：
 
@@ -69,7 +69,7 @@
 
 - 修改工具实现行为时必须同步更新对应契约的四个 section。
 - 修改 `tool-runner.ts` 中的执行结果格式、错误信息或 `toolUsageGuidance()` 时，必须检查契约的 `outputFormat` 和 `failureHandling` 是否一致。
-- 新增工具时必须先创建契约，再在 `definitions.ts` 中注册。
+- 新增工具时必须先创建 ToolSpec 契约，再在生产 Registry 中注册；`definitions.ts` 只投影 Registry，不得再次枚举静态工具名。
 
 ## 不要做
 

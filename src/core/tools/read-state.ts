@@ -1,6 +1,6 @@
 /**
- * 会话级读取状态跟踪（ADR-0025 §1，ADR-0026 §3）。
- * Session-level read-state tracking (ADR-0025 §1, ADR-0026 §3).
+ * 会话级读取状态跟踪（ADR-0042 §1，ADR-0043 §3）。
+ * Session-level read-state tracking (ADR-0042 §1, ADR-0043 §3).
  *
  * read_file / write_file / edit_file 成功后记录内容指纹；edit_file 的
  * "先读后改 / 过期拒绝" 前置校验（后续提交启用）据此判断模型是否持有
@@ -59,7 +59,7 @@ const trackers = new Map<string, SessionReadTracker>();
 
 /**
  * 取会话的 tracker（threadId 键；缺失时退回 workspace 键）。
- * 主会话与 subagent fork 共享同一 threadId 的 tracker，与 ADR-0025 §4
+ * 主会话与 subagent fork 共享同一 threadId 的 tracker，与 ADR-0042 §4
  * 原像的记录链口径一致。
  */
 export function sessionReadTracker(sessionKey: string): SessionReadTracker {

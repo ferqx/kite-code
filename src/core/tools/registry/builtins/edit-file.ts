@@ -1,5 +1,5 @@
 /**
- * edit_file spec — 迁入 Registry（ADR-0026 S1.2，含 §3 严格精确匹配）。
+ * edit_file spec — 迁入 Registry（ADR-0043 S1.2，含 §3 严格精确匹配）。
  * 契约暂引用 EDIT_FILE_CONTRACT.sections；failureHandling 已按严格语义重写
  * （匹配失败即失败，引导重读；match_mode 已在阶段 0 从模型表面删除，
  * matchMode='trimmed' 仅为内部 opt-in）。
@@ -41,7 +41,7 @@ export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
     classificationReason: 'edit_file modifies workspace files.',
   }),
   approvalSummary: (input) => `edit_file ${input.path}`,
-  // ADR-0025 §1：先读后改 + 过期拒绝。读取状态由调用方（tool-runner）
+  // ADR-0042 §1：先读后改 + 过期拒绝。读取状态由调用方（tool-runner）
   // 基于会话指纹跟踪注入；对齐 Claude Code 的两条工具层硬失败。
   preExecute: (input, context) => {
     const readState = context.writeTarget?.readState;
