@@ -192,16 +192,8 @@ describe('writeFileActionName', () => {
     );
   });
 
-  test('append (Appended header) → Append', () => {
-    expect(writeFileActionName('Appended 2 lines to log.md\n 1  a', {})).toBe('Append');
-  });
-
   test('no summary (running/queued caller) → neutral Write', () => {
     expect(writeFileActionName(undefined, {})).toBe('Write');
     expect(writeFileActionName('', {})).toBe('Write');
-  });
-
-  test('no summary with mode append → Append', () => {
-    expect(writeFileActionName(undefined, { mode: 'append' })).toBe('Append');
   });
 });

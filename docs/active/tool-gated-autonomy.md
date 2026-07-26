@@ -27,7 +27,7 @@
 
 ## 工具名单单一事实源（ADR-0026）
 
-静态工具的 Schema、契约、副作用分类与执行器收敛到 ToolSpec Registry（`src/core/tools/registry/`），由 `toolSpecRegistryV1` 灰度切换（默认关闭，关闭时全部走现有 `definitions.ts` + `tool-runner` 路径）。迁移期不变量由 `tests/tools/tool-registry-conformance.test.ts` 棘轮守护：Policy 分类引用的工具名必须是已知名单（防 `list_files` 式幽灵名）；模型 ToolSet 不得携带 `execute`；写工具必须声明 mutation scope。模型参数的副作用自我声明与授权提议随 shell 迁移删除，审批决策只来自命令形态与授权状态。已迁移工具：`read_file`、`search_content`、`search_files`（契约暂引用对应 `*_CONTRACT.sections` 以保持 description 逐字节稳定）。
+静态工具的 Schema、契约、副作用分类与执行器收敛到 ToolSpec Registry（`src/core/tools/registry/`），由 `toolSpecRegistryV1` 灰度切换（默认关闭，关闭时全部走现有 `definitions.ts` + `tool-runner` 路径）。迁移期不变量由 `tests/tools/tool-registry-conformance.test.ts` 棘轮守护：Policy 分类引用的工具名必须是已知名单（防 `list_files` 式幽灵名）；模型 ToolSet 不得携带 `execute`；写工具必须声明 mutation scope。模型参数的副作用自我声明与授权提议随 shell 迁移删除，审批决策只来自命令形态与授权状态。已迁移工具：`read_file`、`search_content`、`search_files`、`write_file`（契约暂引用对应 `*_CONTRACT.sections`；write_file 迁移同批落地 ADR-0025 §2：`mode` 参数与 append 分支移除，创建/覆写统一语义）。
 
 ## 自治规则
 

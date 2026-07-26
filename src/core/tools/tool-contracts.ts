@@ -109,10 +109,10 @@ export const WRITE_FILE_CONTRACT: ToolContract = {
   name: 'write_file',
   sections: {
     whenToUse:
-      "Create a new file, completely overwrite an existing file, or append to a file (mode: 'append'). " +
+      'Create a new file or completely rewrite an existing file. ' +
+      'Before rewriting an existing file, call read_file first to verify its current content — every omitted line is lost. ' +
       'Do NOT use for small targeted edits — use read_file + edit_file instead. ' +
-      'In overwrite mode (default), replaces ALL content; omitted lines are lost. ' +
-      'In append mode, content is added at the end of the file.',
+      'To append content, use edit_file matching the file tail (old_string = trailing content, new_string = trailing content + the addition) or a shell redirect.',
     commonMistakes:
       'Using write_file for small changes instead of edit_file — wasteful and loses precision. ' +
       'Overwriting an existing file without first calling read_file to verify its current content. ' +

@@ -125,6 +125,7 @@
         "docs/adr/0023-model-capabilities-no-builtin-catalog.md",
         "docs/adr/0024-context-compaction-manual-auto-only.md",
         "docs/space/plans/2026-07-21-context-compaction-production-rollout.md",
+        "docs/space/plans/2026-07-26-tool-spec-registry.md",
         "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
     },

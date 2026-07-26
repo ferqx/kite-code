@@ -1,11 +1,4 @@
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { readFile as readFileBufferAsync } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { msys2ToWindowsPath } from './path-utils';
@@ -767,7 +760,6 @@ export interface WriteFileInput {
   workspace: string;
   path: string;
   content: string;
-  mode?: 'overwrite' | 'append';
   allowExternal?: boolean;
 }
 
@@ -784,11 +776,7 @@ export function writeFile(input: WriteFileInput): WriteFileResult {
     const target = resolvePath(input.workspace, input.path, { allowExternal: input.allowExternal });
     mkdirSync(dirname(target), { recursive: true });
 
-    if (input.mode === 'append') {
-      appendFileSync(target, input.content, 'utf8');
-    } else {
-      writeFileSync(target, input.content, 'utf8');
-    }
+    writeFileSync(target, input.content, 'utf8');
 
     const lineCount = input.content.split('\n').length - (input.content.endsWith('\n') ? 1 : 0);
 

@@ -7,10 +7,11 @@ import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import { createTaskTool } from '@/core/subagent/task-tool';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
-import { editFile, writeFile } from './file';
+import { editFile } from './file';
 import { readFileSpec } from './registry/builtins/read-file';
 import { searchContentSpec } from './registry/builtins/search-content';
 import { searchFilesSpec } from './registry/builtins/search-files';
+import { writeFileSpec } from './registry/builtins/write-file';
 import { type ShellExecutor, shellTool } from './shell';
 import {
   ASK_USER_CONTRACT,
@@ -24,7 +25,6 @@ import {
   TOOL_SEARCH_CONTRACT,
   UPDATE_PLAN_CONTRACT,
   WEB_FETCH_CONTRACT,
-  WRITE_FILE_CONTRACT,
   WRITE_PLAN_CONTRACT,
 } from './tool-contracts';
 
@@ -144,22 +144,11 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
       ),
   });
 
+  // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 ADR-0025 §2 append 移除）：
+  // schema-only 条目，真实执行只经 Registry dispatch；mode 参数不再存在。
   const writeFileTool = tool({
-    description: WRITE_FILE_CONTRACT.description,
-    inputSchema: zodSchema(
-      z.object({
-        path: z.string().describe('Path to the file, relative to workspace'),
-        content: z.string().describe('Complete file content to write'),
-        mode: z
-          .enum(['overwrite', 'append'])
-          .optional()
-          .describe(
-            'Write mode: overwrite (default) replaces entire file, append adds content at end',
-          ),
-      }),
-    ),
-    execute: async ({ path, content, mode }) =>
-      JSON.stringify(writeFile({ workspace: input.workspace, path, content, mode })),
+    description: buildDescription(writeFileSpec.contract),
+    inputSchema: zodSchema(writeFileSpec.inputSchema),
   });
 
   const shellExecute = tool({

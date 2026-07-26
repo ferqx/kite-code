@@ -91,7 +91,7 @@ export type PendingToolRequest =
   | {
       id?: string;
       name: 'write_file';
-      args: { path: string; content: string; mode?: 'overwrite' | 'append' };
+      args: { path: string; content: string };
       reason: string;
       protectedCommand: string;
     }
@@ -358,17 +358,6 @@ export function toolRequestFromCall(
       },
       reason: 'Model requested edit_file',
       protectedCommand: `edit_file ${args.path || ''}`,
-    };
-  }
-
-  if (call.name === 'write_file') {
-    const args = call.args as { path?: string; content?: string; mode?: 'overwrite' | 'append' };
-    return {
-      id: call.id,
-      name: 'write_file',
-      args: { path: args.path || '', content: args.content || '', mode: args.mode },
-      reason: 'Model requested write_file',
-      protectedCommand: `write_file ${args.path || ''}`,
     };
   }
 

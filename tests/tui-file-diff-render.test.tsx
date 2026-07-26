@@ -94,12 +94,6 @@ describe('file tool diff summary coloring', () => {
     expect(bgOfLine(summary, 'line three')).toBe(darkTheme.diffAddedBg);
   });
 
-  test('append (Appended N lines) gets green background on all content lines', () => {
-    const summary = 'Appended 2 lines to notes.md\n 1  new entry\n 2  another entry';
-    expect(bgOfLine(summary, 'new entry')).toBe(darkTheme.diffAddedBg);
-    expect(bgOfLine(summary, 'another entry')).toBe(darkTheme.diffAddedBg);
-  });
-
   test('content-unchanged overwrite keeps dim (no background)', () => {
     const summary = 'Wrote 2 lines to notes.md (content unchanged)\n 1  a\n 2  b';
     expect(bgOfLine(summary, 'a')).toBeUndefined();
@@ -107,7 +101,7 @@ describe('file tool diff summary coloring', () => {
   });
 });
 
-describe('write_file card title distinguishes create/overwrite/append', () => {
+describe('write_file card title distinguishes create/overwrite', () => {
   function renderCardTitle(summary: string, path = 'notes.md'): string {
     const block: OutputBlock = {
       id: 1,
@@ -136,11 +130,6 @@ describe('write_file card title distinguishes create/overwrite/append', () => {
     const frame = renderCardTitle('Wrote 3 lines to notes.md\n 1  a', 'notes.md');
     expect(frame).toContain('Create (notes.md)');
     expect(frame).not.toContain('Write (notes.md)');
-  });
-
-  test('append (Appended header) → Append (path)', () => {
-    const frame = renderCardTitle('Appended 2 lines to notes.md\n 1  a');
-    expect(frame).toContain('Append (notes.md)');
   });
 
   test('content-unchanged overwrite → Write (path)', () => {

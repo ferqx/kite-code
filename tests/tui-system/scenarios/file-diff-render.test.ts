@@ -13,10 +13,10 @@
  *    删除行）；真删除/新增标记紧贴正文。
  * 2. 新建文件 / Create of a new file (changelog.md):
  *    卡片动词 Create；纯内容摘要 "Wrote N lines to …" 与内容行。
- * 3. 追加 / Append to an existing file (notes.md, mode='append'):
- *    卡片动词 Append；"Appended N lines to …" 摘要与追加行。
- * 4. 内容未变的覆写 / No-op overwrite (changelog.md, identical content):
+ * 3. 内容未变的覆写 / No-op overwrite (changelog.md, identical content):
  *    卡片动词 Write（非 Create）；摘要含 "(content unchanged)" 标记。
+ *
+ * append 轮已由 ADR-0025 §2 移除（追加改由 edit_file 尾部匹配或 shell 表达）。
  *
  * NOTE: 默认交互模式为 accept-edits，工作区写入自动放行，无审批浮层。
  * Default interaction mode is accept-edits: workspace writes auto-approve.
@@ -53,8 +53,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
 
     // Turn 1: write_file overwrites notes.md → diff summary, verb Write
     // Turn 2: write_file creates changelog.md → plain summary, verb Create
-    // Turn 3: write_file appends to notes.md → Appended summary, verb Append
-    // Turn 4: write_file rewrites changelog.md identically → no-change, verb Write
+    // Turn 3: write_file rewrites changelog.md identically → no-change, verb Write
     // Spares for generateSessionName + potential retries
     server.setResponses([
       {
@@ -83,19 +82,6 @@ describe('TUI PTY System — File Tool Diff Render', () => {
         },
       },
       { message: { content: 'Changelog created.' } },
-      {
-        message: {
-          content: 'I will append an entry.',
-          tool_calls: [
-            {
-              id: 'call_wf3',
-              name: 'write_file',
-              args: { path: 'notes.md', mode: 'append', content: '\n- 追加条目' },
-            },
-          ],
-        },
-      },
-      { message: { content: 'Entry appended.' } },
       {
         message: {
           content: 'I will rewrite the changelog identically.',
@@ -206,34 +192,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
     TIMEOUT,
   );
 
-  // ── Turn 3: append → Append verb + Appended summary ────────
-
-  test(
-    'write_file append renders Append verb and Appended summary',
-    async () => {
-      await typeText(tui, 'Append an entry to my notes');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Append an entry to my notes', 15000);
-
-      await waitForText(() => tui.output(), 'Entry appended.', 20000);
-      await sleep(500);
-
-      const output = tui.output();
-
-      // Card verb for append mode
-      expect(screenContains(output, 'Append (notes.md)')).toBe(true);
-
-      // Appended summary header + appended content line visible
-      expect(screenContains(output, 'Appended 2 lines to notes.md')).toBe(true);
-      expect(screenContains(output, '- 追加条目')).toBe(true);
-
-      // TUI should recover — prompt visible
-      expect(screenContains(output, '❯')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  // ── Turn 4: no-op overwrite → Write verb + unchanged marker ─
+  // ── Turn 3: no-op overwrite → Write verb + unchanged marker ─
 
   test(
     'write_file no-op overwrite renders Write verb with content-unchanged marker',

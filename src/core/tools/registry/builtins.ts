@@ -9,9 +9,11 @@
 import { readFileSpec } from './builtins/read-file';
 import { searchContentSpec } from './builtins/search-content';
 import { searchFilesSpec } from './builtins/search-files';
+import { writeFileSpec } from './builtins/write-file';
 import { createToolRegistry } from './registry';
 
 export const builtinToolRegistry = createToolRegistry()
   .register(readFileSpec)
   .register(searchContentSpec)
-  .register(searchFilesSpec);
+  .register(searchFilesSpec)
+  .register(writeFileSpec);

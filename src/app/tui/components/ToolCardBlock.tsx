@@ -426,12 +426,10 @@ export function renderFileSummary(summary: string, dt: Theme, language?: string)
   // body text starting with "- " / "+ " (e.g. Markdown list items) as diff markers.
   const isDiff = diffLines.length > 0 && diffLines.some((line) => /^\s*\d+ [-+]/.test(line));
 
-  // write_file 新建/追加：所有内容行视为新增，全绿底。内容未变则保留 dim。
-  // write_file create/append: treat all lines as added (green). Unchanged → dim.
+  // write_file 新建：所有内容行视为新增，全绿底。内容未变则保留 dim。
+  // write_file create: treat all lines as added (green). Unchanged → dim.
   const isWriteFileContent =
-    !isDiff &&
-    (statsLine.startsWith('Wrote ') || statsLine.startsWith('Appended ')) &&
-    !statsLine.includes('(content unchanged)');
+    !isDiff && statsLine.startsWith('Wrote ') && !statsLine.includes('(content unchanged)');
 
   // 文件变更需要完整展示，避免用户只看到删除部分而看不到新增内容。
   // File changes are user-facing output and should be shown in full.

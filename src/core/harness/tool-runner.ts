@@ -20,11 +20,12 @@ import {
   formatDiffOutput,
   formatMultiHunkDiff,
 } from '@/core/tools/diff';
-import { editFile, readTextContent, writeFile } from '@/core/tools/file';
+import { editFile, readTextContent } from '@/core/tools/file';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
 import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
 import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
+import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import { type ShellExecutor, shellTool } from '@/core/tools/shell';
 import { formatToolParseError } from '@/core/tools/tool-parse-error';
@@ -417,6 +418,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   if (request.name === 'write_file') {
     const filePath = (request.args.path ?? '') as string;
+    const content = (request.args.content ?? '') as string;
     const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
 
@@ -424,8 +426,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const oldRead = readTextContent(workspace, filePath, { allowExternal });
     const oldExisted = oldRead.ok;
 
-    // ADR-0025 §4：覆写/追加前捕获原像（复用上面已读取的旧内容，零额外 I/O）
-    // Capture pre-image before overwrite/append (reuses oldRead, zero extra I/O).
+    // ADR-0025 §4：覆写前捕获原像（复用上面已读取的旧内容，零额外 I/O）
+    // Capture pre-image before overwrite (reuses oldRead, zero extra I/O).
     safeRecordPreimage(
       input.recordFilePreimage,
       filePath,
@@ -433,37 +435,45 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       oldRead.ok,
     );
 
-    const result = writeFile({
-      workspace,
-      path: filePath,
-      content: (request.args.content ?? '') as string,
-      mode: request.args.mode as 'overwrite' | 'append' | undefined,
-      allowExternal,
-    });
+    // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 ADR-0025 §2 append 移除）：
+    // 执行经 dispatchRegisteredTool；mode 不再存在，创建/覆写统一语义。
+    const dispatched = await dispatchRegisteredTool(
+      writeFileSpec,
+      { path: filePath, content },
+      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+    );
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `write_file ${filePath}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
+      });
+    }
+    const result = dispatched.output;
 
     let stdout = '';
     if (result.ok) {
-      if (oldExisted && request.args.mode !== 'append') {
+      if (oldExisted) {
         // 覆写已有文件：diff 旧内容 → 新内容
         // Overwrite existing file: diff old → new
-        const newContent = request.args.content ?? '';
-        const diff = computeLineDiff(oldRead.content, newContent, 1);
+        const diff = computeLineDiff(oldRead.content, content, 1);
         if (diff.addedLines === 0 && diff.removedLines === 0) {
           // 内容未变更 — 展示实际行数而非无意义的 0 diff
           // Content unchanged — show actual line count instead of meaningless 0 diff
           const actualLines = result.lines ?? 0;
           const linesWord = actualLines === 1 ? 'line' : 'lines';
-          const header = `Wrote ${actualLines} ${linesWord} to ${request.args.path} (content unchanged)`;
-          stdout = formatContentOutput(newContent, header);
+          const header = `Wrote ${actualLines} ${linesWord} to ${filePath} (content unchanged)`;
+          stdout = formatContentOutput(content, header);
         } else {
           stdout = formatDiffOutput(diff);
         }
       } else {
-        // 新建文件 / 追加模式：展示带行号的纯文本内容，无需 diff 样式
-        // New file or append: show plain content with line numbers, no diff markers
-        const verb = request.args.mode === 'append' ? 'Appended' : 'Wrote';
-        const header = `${verb} ${result.lines ?? 0} lines to ${request.args.path}`;
-        stdout = formatContentOutput(request.args.content ?? '', header);
+        // 新建文件：展示带行号的纯文本内容，无需 diff 样式
+        // New file: show plain content with line numbers, no diff markers
+        const header = `Wrote ${result.lines ?? 0} lines to ${filePath}`;
+        stdout = formatContentOutput(content, header);
       }
       const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
       // 保护 LLM 上下文：超长时在最后一个完整行后截断，并提示省略行数
@@ -478,11 +488,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       }
       return withFailureGuidance(request, {
         ok: result.ok,
-        command: `write_file ${request.args.path ?? ''}`,
+        command: `write_file ${filePath}`,
         exitCode: 0,
         stdout,
         stderr: '',
-        path: request.args.path,
+        path: filePath,
         resultMeta: {
           path: filePath,
           truncated: stdout.includes('. more line'),
@@ -494,11 +504,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
     return withFailureGuidance(request, {
       ok: result.ok,
-      command: `write_file ${request.args.path ?? ''}`,
-      exitCode: result.ok ? 0 : -1,
+      command: `write_file ${filePath}`,
+      exitCode: -1,
       stdout,
       stderr: result.error ?? '',
-      path: request.args.path,
+      path: filePath,
       resultMeta: {
         path: filePath,
         truncated: false,
