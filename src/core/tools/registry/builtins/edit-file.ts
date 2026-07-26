@@ -41,6 +41,33 @@ export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
     classificationReason: 'edit_file modifies workspace files.',
   }),
   approvalSummary: (input) => `edit_file ${input.path}`,
+  // ADR-0025 §1：先读后改 + 过期拒绝。读取状态由调用方（tool-runner）
+  // 基于会话指纹跟踪注入；对齐 Claude Code 的两条工具层硬失败。
+  preExecute: (input, context) => {
+    const readState = context.writeTarget?.readState;
+    if (readState === 'not_read') {
+      return {
+        proceed: false,
+        rejection: {
+          ok: false,
+          error: `File has not been read yet: ${input.path}. Read it with read_file first, then retry edit_file.`,
+          guidance:
+            'edit_file requires the target to have been read in this session so old_string comes from verified content.',
+        },
+      };
+    }
+    if (readState === 'stale') {
+      return {
+        proceed: false,
+        rejection: {
+          ok: false,
+          error: `File has been modified since you last read it: ${input.path}. Re-read it with read_file, then retry with the exact current content.`,
+          guidance: 'The recorded content fingerprint no longer matches the file on disk.',
+        },
+      };
+    }
+    return { proceed: true };
+  },
   execute: async (input, context) =>
     editFile({
       workspace: context.workspace,

@@ -782,6 +782,27 @@ describe('executeRuntimeTools', () => {
         executionMode: 'accept_edits',
         approvedAtTurnId: state.turn.turnId,
       };
+      // ADR-0025 §1：先读取目标文件，使后续 edit_file 通过先读后改校验。
+      state.tools.calls.rf = {
+        toolCallId: 'rf',
+        modelMessageId: 'model',
+        ordinal: 0,
+        name: 'read_file',
+        args: { path: 'test.txt' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('rf');
+      await executeRuntimeTools({
+        state,
+        toolCallIds: ['rf'],
+        shellExecutor: {
+          execute: async (_command: string, _opts?: Record<string, unknown>) => {
+            return { ok: true, command: 'read_file test.txt', exitCode: 0, stdout: '', stderr: '' };
+          },
+        } as never,
+      });
+
       state.tools.calls.ef = {
         toolCallId: 'ef',
         modelMessageId: 'model',

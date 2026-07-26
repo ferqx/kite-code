@@ -316,11 +316,12 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
           totalLines: 0,
           path: filePath,
         };
-    if (output.ok) {
-      // ADR-0025 §1 读取状态记录（当前仅记录；"先读后改"强制校验在后续提交启用）。
+    if (output.ok && output.rawContent !== undefined) {
+      // ADR-0025 §1 读取状态记录：指纹取原始文本（output.content 是带行号的
+      // 模型表面格式，与 edit 侧 preEditRead 指纹口径不一致，不可用于校验）。
       sessionReadTracker(threadId || workspace).record(
         canonicalFilePath(workspace, filePath, allowExternal),
-        fileContentHash(output.content),
+        fileContentHash(output.rawContent),
       );
     }
     return withFailureGuidance(request, {
@@ -358,8 +359,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       preEditRead.ok,
     );
     // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 §3 严格精确匹配）：
-    // 执行经 dispatchRegisteredTool；成功后记录读取指纹（ADR-0025 §1 跟踪；
-    // "先读后改"强制校验在后续提交启用）。
+    // 执行经 dispatchRegisteredTool；ADR-0025 §1 先读后改校验由 spec.preExecute
+    // 基于会话读取状态执行（not_read / stale → 硬失败，引导重读）。
+    const tracker = sessionReadTracker(threadId || workspace);
+    const canonicalPath = canonicalFilePath(workspace, editPath, allowExternal);
+    const readState = tracker.check(
+      canonicalPath,
+      preEditRead.ok ? fileContentHash(preEditRead.content) : null,
+    );
     const dispatched = await dispatchRegisteredTool(
       editFileSpec,
       {
@@ -368,7 +375,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         new_string: (request.args.new_string ?? '') as string,
         replace_all: request.args.replace_all as boolean | undefined,
       },
-      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        writeTarget: { path: editPath, readState },
+      },
     );
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -381,10 +394,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     const result = dispatched.output;
     if (result.ok && result.content !== undefined) {
-      sessionReadTracker(threadId || workspace).record(
-        canonicalFilePath(workspace, editPath, allowExternal),
-        fileContentHash(result.content),
-      );
+      tracker.record(canonicalPath, fileContentHash(result.content));
     }
     let stdout = '';
     if (result.ok) {

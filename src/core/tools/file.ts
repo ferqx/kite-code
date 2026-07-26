@@ -267,6 +267,9 @@ export interface ReadFileResult {
   fromLine?: number;
   toLine?: number;
   error?: string;
+  /** 内部字段：换行正规化后的原始文本（读取状态指纹输入，不作模型输出）。
+   *  Internal: raw normalized text (read-state fingerprint input, not model output). */
+  rawContent?: string;
 }
 
 export function readFile(input: ReadFileInput): ReadFileResult {
@@ -302,6 +305,7 @@ export function readFile(input: ReadFileInput): ReadFileResult {
       totalLines: result.totalLines,
       fromLine,
       toLine,
+      rawContent: result.content,
     };
   } catch (e) {
     return {

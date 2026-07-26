@@ -8,6 +8,7 @@
  */
 import type { ZodType } from 'zod';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
+import type { ReadStateCheck } from '@/core/tools/read-state';
 import type { ToolContractSection } from '@/core/tools/tool-contracts';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 
@@ -31,6 +32,8 @@ export interface ToolExecutionContext extends ToolContext {
   signal?: AbortSignal;
   /** 调用方已持有执行授权且路径在工作区外（read_file 等外部路径门禁输入）。 */
   allowExternalPaths?: boolean;
+  /** 写工具目标路径的读取状态检查结果（调用方注入，ADR-0025 §1 先读后改校验输入）。 */
+  writeTarget?: { path: string; readState?: ReadStateCheck };
 }
 
 /**

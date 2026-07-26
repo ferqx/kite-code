@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { POLICY_CLASSIFIED_TOOL_NAMES } from '@/core/policies/tool-capabilities';
+import { sessionReadTracker } from '@/core/tools/read-state';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
+import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import { createToolRegistry } from '@/core/tools/registry/registry';
 import type { ToolContext, ToolSpec } from '@/core/tools/registry/spec';
@@ -277,6 +283,72 @@ describe('read_file migration (S1.2)', () => {
       externalState: 'none',
     });
     expect(spec?.effects({ path: 'a' }, CTX).effectClass).toBe('read_only');
+  });
+});
+
+describe('read_file output passthrough', () => {
+  test('execute output carries rawContent (fingerprint input) alongside line-numbered model content', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-conformance-raw-'));
+    try {
+      writeFileSync(join(workspace, 'a.txt'), 'hello\n');
+      const outcome = await dispatchRegisteredTool(readFileSpec, { path: 'a.txt' }, { workspace });
+      expect(outcome.dispatched).toBe(true);
+      if (outcome.dispatched) {
+        // rawContent 是原始文本（读取状态指纹输入），content 仍是带行号的模型表面格式。
+        expect(outcome.output.rawContent).toBe('hello\n');
+        expect(outcome.output.content).toContain('1|hello');
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('session read tracker (ADR-0025 §1)', () => {
+  test('record/check lifecycle: not_read → fresh → stale', () => {
+    const tracker = sessionReadTracker('conformance-test-thread');
+    expect(tracker.check('/w/a.ts', 'h1')).toBe('not_read');
+    tracker.record('/w/a.ts', 'h1');
+    expect(tracker.check('/w/a.ts', 'h1')).toBe('fresh');
+    expect(tracker.check('/w/a.ts', 'h2')).toBe('stale');
+    expect(tracker.check('/w/a.ts', null)).toBe('stale');
+  });
+});
+
+describe('edit_file read-before-write enforcement (ADR-0025 §1)', () => {
+  const EDIT_INPUT = { path: 'x.ts', old_string: 'a', new_string: 'b' };
+
+  test('not_read rejects before execute', async () => {
+    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
+      workspace: '/tmp',
+      writeTarget: { path: 'x.ts', readState: 'not_read' },
+    });
+    expect(outcome.dispatched).toBe(false);
+    if (!outcome.dispatched) {
+      expect(outcome.rejection.error).toContain('has not been read yet');
+    }
+  });
+
+  test('stale rejects before execute', async () => {
+    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
+      workspace: '/tmp',
+      writeTarget: { path: 'x.ts', readState: 'stale' },
+    });
+    expect(outcome.dispatched).toBe(false);
+    if (!outcome.dispatched) {
+      expect(outcome.rejection.error).toContain('has been modified since');
+    }
+  });
+
+  test('fresh passes the preExecute gate (filesystem errors surface as output, not rejection)', async () => {
+    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
+      workspace: '/tmp',
+      writeTarget: { path: 'definitely-missing.ts', readState: 'fresh' },
+    });
+    expect(outcome.dispatched).toBe(true);
+    if (outcome.dispatched) {
+      expect(outcome.output.ok).toBe(false); // File not found — but the gate passed
+    }
   });
 });
 

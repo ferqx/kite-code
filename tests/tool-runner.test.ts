@@ -562,6 +562,11 @@ describe('runApprovedTool — file pre-image capture (ADR-0025 §4)', () => {
 
   it('captures the pre-image before edit_file replaces content', async () => {
     writeFileSync(join(workspace, 'code.ts'), 'const a = 1;\n', 'utf8');
+    // ADR-0025 §1：先读后改——先经 read_file 登记读取状态，edit 才能通过校验。
+    await runApprovedTool({
+      workspace,
+      request: requestOf('read_file', { path: 'code.ts' }),
+    });
     const captured: Array<[string, string | null, boolean]> = [];
     const result = await runApprovedTool({
       workspace,

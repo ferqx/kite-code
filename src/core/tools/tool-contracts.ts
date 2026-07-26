@@ -96,6 +96,8 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
       "Success: 'Replaced N occurrence(s) at line L1-L2'.",
     failureHandling:
       'If old_string not found: matching is exact including whitespace — re-read the file with read_file and retry with the exact current content. ' +
+      'If the file has not been read in this session: read_file is required before edit_file. ' +
+      'If the file changed since your last read: it was modified externally — re-read it and retry. ' +
       'If duplicate match: add more surrounding context to old_string (preferred) or set replace_all: true. ' +
       'Always verify the edit with read_file afterward.',
   },

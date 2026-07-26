@@ -22,6 +22,8 @@ export interface ReadFileOutput {
   error?: string;
   totalLines: number;
   path: string;
+  /** 原始文本（读取状态指纹输入，不作模型输出）。 */
+  rawContent?: string;
 }
 
 export const readFileSpec: ToolSpec<ReadFileInput, ReadFileOutput> = {
@@ -56,6 +58,7 @@ export const readFileSpec: ToolSpec<ReadFileInput, ReadFileOutput> = {
       error: result.error,
       totalLines: result.totalLines,
       path: input.path,
+      rawContent: result.rawContent,
     };
   },
   // 结果投影供未来统一管线消费；迁移期 runner 仍从 output 组装与旧路径
