@@ -129,6 +129,15 @@ describe('TUI PTY System — Tool Approve', () => {
       tui.write('\r');
       await sleep(1000);
 
+      // Wait for background calls (generateSessionName) to finish
+      // before resetting the server, so they use the old spare
+      // responses and don't consume responses meant for this test.
+      for (let i = 0; i < 30; i++) {
+        const before = server.getRequestCount();
+        await sleep(500);
+        if (server.getRequestCount() === before) break;
+      }
+
       server.setResponses([
         {
           message: {
@@ -159,20 +168,9 @@ describe('TUI PTY System — Tool Approve', () => {
         { message: { content: 'spare 2' }, delay: 10 },
       ]);
 
-      // agentLoopActive may still be true from background work
-      // (generateSessionName).  Retry until the message is accepted.
-      const msg = 'Full access test';
-      for (let attempt = 0; attempt < 5; attempt++) {
-        await typeText(tui, msg);
-        tui.write('\r');
-        try {
-          await waitForRequestMessage(server, msg, 3000);
-          break;
-        } catch {
-          // Input was dropped — clear the buffer and wait.
-          await sleep(500);
-        }
-      }
+      await typeText(tui, 'Full access test');
+      tui.write('\r');
+      await waitForRequestMessage(server, 'Full access test', 15000);
 
       // In full mode, tools auto-execute — wait for the final model response
       await waitForText(() => tui.output(), 'OK, full_access confirmed.', 20000);
