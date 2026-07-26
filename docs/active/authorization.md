@@ -81,6 +81,8 @@ MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive e
 | 测试注入 | `'test'` | `tests/policies/authorization-elevation.test.ts` |
 | System (禁止) | `'system'` | `src/core/policies/mode-policy.ts:23,26` |
 
+TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeAgentInput.authorizationMode` 传递到 `createAgentKernel`；`full` interaction mode 对应 `'full_access'` authorization mode。Kernel 初始化时若恢复的 snapshot 携带旧 `mode` 或 `authorization.mode`，当前请求值覆盖恢复态，确保 `/permissions full` 在新轮次立即生效。
+
 ## 测试
 
 ```bash

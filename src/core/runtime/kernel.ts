@@ -492,7 +492,25 @@ export function createAgentKernel(params: {
     !recoveryReason &&
     incompatibleSchemaVersion == null &&
     migratedState?.session.threadId === params.threadId
-      ? migratedState
+      ? (() => {
+          // A restored snapshot may carry a stale interaction mode from a
+          // previous run.  Apply the explicitly-requested params so the
+          // restored state reflects the current user intent.
+          let state = migratedState;
+          if (params.interactionMode && state.mode !== params.interactionMode) {
+            state = { ...state, mode: params.interactionMode };
+          }
+          if (
+            params.authorizationMode !== undefined &&
+            state.authorization.mode !== params.authorizationMode
+          ) {
+            state = {
+              ...state,
+              authorization: { ...state.authorization, mode: params.authorizationMode },
+            };
+          }
+          return state;
+        })()
       : incompatibleSchemaVersion != null
         ? {
             ...freshState,

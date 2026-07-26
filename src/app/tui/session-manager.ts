@@ -213,6 +213,9 @@ export class SessionRuntime {
 
     const abortController = new AbortController();
 
+    const authMode =
+      this.interactionMode === 'full' ? ('full_access' as const) : ('default' as const);
+
     const runAgentParams = buildRunAgentParams({
       task,
       threadId: this.threadId,
@@ -227,6 +230,7 @@ export class SessionRuntime {
       mcpManager: this.mcpManager,
       shellContext,
       interactionMode: this.interactionMode,
+      authorizationMode: authMode,
       phase: requestedPhase ?? 'building',
       sandboxBackend: sandboxRuntime.backend,
       model: deps.model,
@@ -248,6 +252,8 @@ export class SessionRuntime {
       skillOptions: runAgentParams.skillOptions,
       initialSkillActivations: runAgentParams.initialSkillActivations,
       interactionMode: runAgentParams.interactionMode,
+      authorizationMode: runAgentParams.authorizationMode,
+      authorizationSource: runAgentParams.authorizationSource,
       phase: runAgentParams.phase,
       thinkingLevel: runAgentParams.thinkingLevel,
       sandboxBackend: runAgentParams.sandboxBackend,
