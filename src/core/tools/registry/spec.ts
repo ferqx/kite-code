@@ -9,9 +9,9 @@
 import type { ZodType } from 'zod';
 import type { FeatureFlags } from '@/core/config/features';
 import type { McpRuntimeProvider } from '@/core/mcp';
-import type { PlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import type { PlanRuntimeContext } from '@/core/runtime/plan-facade';
 import type { RuntimeState } from '@/core/runtime/state';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SubAgentResult } from '@/core/subagent/types';
@@ -71,12 +71,7 @@ export interface ToolExecutionContext extends ToolContext {
       outputSchema: Record<string, unknown>;
     }) => Promise<SubAgentResult | null>;
   };
-  planRuntime?: {
-    state: RuntimeState;
-    artifacts: PlanArtifactStore;
-    modelMessageId?: string;
-    ordinal?: number;
-  };
+  planRuntime?: PlanRuntimeContext;
   /** 调用方已持有执行授权且路径在工作区外（read_file 等外部路径门禁输入）。 */
   allowExternalPaths?: boolean;
   /** 写工具目标路径的读取状态检查结果（调用方注入，ADR-0025 §1 先读后改校验输入）。 */

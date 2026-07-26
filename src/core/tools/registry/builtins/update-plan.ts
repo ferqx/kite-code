@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { getActivePlanning, getAgentPhase } from '@/core/runtime/state';
+import type { RuntimeActionEmission } from '@/core/runtime/action-emission';
+import { updatePlanAction } from '@/core/runtime/plan-facade';
 import { UPDATE_PLAN_CONTRACT } from '@/core/tools/tool-contracts';
 import type { ToolSpec } from '../spec';
 
@@ -19,14 +19,10 @@ export const updatePlanInputSchema = z.object({
   complete_plan: z.boolean().optional(),
 });
 
-type UpdatePlanOutput = {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  runtimeEvents?: RuntimeEvent[];
-};
-
-export const updatePlanSpec: ToolSpec<z.infer<typeof updatePlanInputSchema>, UpdatePlanOutput> = {
+export const updatePlanSpec: ToolSpec<
+  z.infer<typeof updatePlanInputSchema>,
+  RuntimeActionEmission
+> = {
   name: 'update_plan',
   kind: 'runtime_action',
   contract: UPDATE_PLAN_CONTRACT.sections,
@@ -39,78 +35,10 @@ export const updatePlanSpec: ToolSpec<z.infer<typeof updatePlanInputSchema>, Upd
     classificationReason: 'Updates progress in the active approved Plan.',
   }),
   execute: async (input, context) => {
-    const state = context.planRuntime?.state;
-    if (!state) return { ok: false, stdout: '', stderr: 'Plan Runtime is unavailable.' };
-    const planning = getActivePlanning(state);
-    if (getAgentPhase(planning) !== 'building') {
-      return {
-        ok: false,
-        stdout: '',
-        stderr: 'update_plan is only available in building phase after plan approval.',
-      };
+    if (!context.planRuntime) {
+      return { ok: false, stdout: '', stderr: 'Plan Runtime is unavailable.' };
     }
-    if (planning.kind !== 'executing') {
-      return { ok: false, stdout: '', stderr: 'No executing plan. Wait for plan approval first.' };
-    }
-    const document = planning.document;
-    if (input.plan_id !== document.planId) {
-      return {
-        ok: false,
-        stdout: '',
-        stderr: `Plan ID mismatch: expected ${input.plan_id}, current is ${document.planId}.`,
-      };
-    }
-    const unknownStep = input.updates.find(
-      (update) => !document.steps.some((step) => step.id === update.step_id),
-    );
-    if (unknownStep) {
-      return { ok: false, stdout: '', stderr: `Unknown plan step ID: ${unknownStep.step_id}.` };
-    }
-    const plan = {
-      name: document.title,
-      description: document.bodyMarkdown,
-      status: input.complete_plan ? ('completed' as const) : ('in_progress' as const),
-      steps: document.steps.map((step) => {
-        const update = input.updates.find((candidate) => candidate.step_id === step.id);
-        return {
-          step: step.title,
-          id: step.id,
-          status: update?.status ?? step.status,
-          note: update?.note ?? step.note,
-        };
-      }),
-    };
-    if (
-      input.complete_plan &&
-      plan.steps.some((step) => step.status === 'pending' || step.status === 'in_progress')
-    ) {
-      return {
-        ok: false,
-        stdout: '',
-        stderr: 'Cannot complete plan while steps are pending or in progress.',
-      };
-    }
-    const runtimeEvents: RuntimeEvent[] = [
-      { type: 'plan.progress_updated', toolCallId: context.toolCallId ?? '', plan },
-    ];
-    if (input.complete_plan) {
-      runtimeEvents.push({
-        type: 'plan.completed',
-        toolCallId: context.toolCallId ?? '',
-        plan,
-      });
-    }
-    return {
-      ok: true,
-      stdout: JSON.stringify({
-        ok: true,
-        plan_id: document.planId,
-        updated_steps: input.updates.map((update) => update.step_id),
-        plan_completed: input.complete_plan ?? false,
-      }),
-      stderr: '',
-      runtimeEvents,
-    };
+    return updatePlanAction(context.planRuntime, context.toolCallId ?? '', input);
   },
   projectResult: (output) => ({
     ok: output.ok,

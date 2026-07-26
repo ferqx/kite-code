@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -160,6 +160,25 @@ describe('ToolSpec Registry — registration behavior', () => {
         },
       ),
     ).toBeNull();
+  });
+});
+
+describe('ToolSpec Registry — Runtime Action ownership', () => {
+  test('controller does not construct Plan or Skill domain lifecycle events', () => {
+    const source = readFileSync(
+      new URL('../../src/core/controllers/tool-controller.ts', import.meta.url),
+      'utf8',
+    );
+    for (const eventType of [
+      'plan.drafted',
+      'plan.review_requested',
+      'plan.progress_updated',
+      'plan.completed',
+      'skill.activation_started',
+      'skill.frame_closed',
+    ]) {
+      expect(source).not.toContain(`type: '${eventType}'`);
+    }
   });
 });
 

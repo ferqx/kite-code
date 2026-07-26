@@ -6,6 +6,7 @@
       "sources": ["src/core/runtime/**"],
       "documents": [
         "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/plan-mode-implementation.md",
         "docs/book/04-Agent引擎.md",
         "docs/book/10-持久化与会话管理.md"
       ]
@@ -20,6 +21,7 @@
       ],
       "documents": [
         "docs/active/capability-progressive-disclosure.md",
+        "docs/active/tool-gated-autonomy.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
@@ -117,6 +119,7 @@
       ],
       "documents": [
         "docs/active/model-provider-boundary.md",
+        "docs/active/tool-gated-autonomy.md",
         "docs/active/plan-state-reminder.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/04-Agent引擎.md",

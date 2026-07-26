@@ -12,6 +12,12 @@
 
 Plan 是 Runtime Kernel 管理的版本化 Artifact，不是模型消息中的临时字段。所有生命周期变化通过 `plan.*` Runtime events 进入 reducer；Scheduler 根据计划和交互状态产生模型调用、审核请求或执行 Effect。
 
+ToolSpec Registry 阶段 3 已把 Plan 工具收口到
+`src/core/runtime/plan-facade.ts`。Runtime Action 使用统一发射协议：成功结果携带按提交顺序排列的
+`RuntimeEvent[]`，拒绝结果不得携带领域事件。`read_plan`、`write_plan` 与 `update_plan`
+均只通过该门面读取状态、访问 Artifact 并产生领域事件；各 ToolSpec 只保留 Schema、契约、
+effects 与结果投影。模型 Schema、Artifact 格式、事件 discriminant 与回放形状不变。
+
 ```text
 用户进入 planning
   → Agent 调研并写入 Plan Artifact

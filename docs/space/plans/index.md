@@ -63,6 +63,7 @@
 | [`2026-07-16-mcp-auth-phase3.md`](2026-07-16-mcp-auth-phase3.md) | archived | P1 | Phase 2、ADR-0010/0012 | 承接旧总计划 Phase 3 的 Core auth，保留 `/mcp` 只读边界 | OS vault、credential reference、HTTP OAuth、独立恢复提示与三平台 native smoke 已完成；[完成记录](../execution/completed/2026-07-16-mcp-auth-phase3.md)。 |
 | [`2026-07-17-mcp-agent-provider-recovery-phase5.md`](2026-07-17-mcp-agent-provider-recovery-phase5.md) | archived | P2 | Phase 1/3/4、ADR-0010/0012/0014 | 替代 superseded 总计划的 Phase 5 实施依据 | Provider directory、typed failure/search、Provider Action/new turn、required admission/session waiver、App/TUI handlers 与 PTY 已完成；[完成记录](../execution/completed/2026-07-17-mcp-agent-provider-recovery-phase5.md)。 |
 | [`2026-07-26-tool-spec-registry.md`](2026-07-26-tool-spec-registry.md) | archived | P0 | ADR-0026、ADR-0027 | 落实 [ToolSpec Registry RFC](../../design/2026-07-26-tool-spec-registry-rfc.md) | 阶段 0/1 与六个计算原语单路径迁移完成；[完成记录](../execution/completed/2026-07-26-tool-spec-registry.md)。 |
+| [`2026-07-26-tool-spec-registry-phase-3.md`](2026-07-26-tool-spec-registry-phase-3.md) | archived | P0 | ADR-0026、ADR-0027、ADR-0028 | ToolSpec Registry 阶段 3 控制平面收口 | Plan Runtime 门面、Skill 生命周期服务与 Controller 收尾已完成；[完成记录](../execution/completed/2026-07-26-tool-spec-registry-phase-3.md)。 |
 
 ## 计划文件命名规范
 

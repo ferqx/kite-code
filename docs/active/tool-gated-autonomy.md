@@ -31,6 +31,12 @@
 
 事件型 ToolSpec 可通过 `ProjectedToolResult.runtimeEvents` 产出 Core Runtime 事件；controller 只追加这些结构化事件，不得重新计算 capability search、Skill activation 或 Plan 状态结果。该通道只引用 Core 事件类型，不引入 App/TUI 依赖。
 
+ToolSpec Registry 阶段 3 进一步以统一 helper 原子追加这些事件并生成 terminal Tool
+Result。Controller 不得构造 `plan.drafted`、`plan.review_requested`、
+`plan.progress_updated`、`plan.completed`、`skill.activation_started` 或
+`skill.frame_closed`；该所有权由 Registry conformance 测试守护。Skill activation 的
+disclosure、approval 与 fork adapter 仍属于 Controller 的跨领域治理边界。
+
 `read_skill_reference` 与 `complete_skill` 已迁入 Registry：spec 校验当前 task 的 active frame、Skill revision 和 compiled contract；reference 读取继续限制为声明文件、非 symlink、Skill 根目录内且不超过 128 KiB；completion 在 output schema 验证后投影 `skill.frame_closed` 与可选 verification 事件。
 
 `activate_skill` 也已迁入 Registry：controller 保留 disclosure、approval 与 mode-policy 前置治理；spec 负责 activation validation、inline/fork 生命周期、fork 结构化输出校验、frame close 和 verification 投影。fork 子 Agent 仅作为受治理 provider adapter 注入。

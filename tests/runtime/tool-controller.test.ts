@@ -631,6 +631,7 @@ describe('executeRuntimeTools', () => {
     expect(finished).toBeDefined();
     if (finished?.type === 'tool.finished') {
       expect(finished.name).toBe('write_plan');
+      expect(finished.result.status).toBeUndefined();
       expect(JSON.parse(finished.result.stdout)).toMatchObject({
         ok: true,
         status: 'draft_saved',

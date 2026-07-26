@@ -56,11 +56,51 @@ import { toolSearchSpec } from '@/core/tools/registry/builtins/tool-search';
 import { updatePlanSpec } from '@/core/tools/registry/builtins/update-plan';
 import { writePlanSpec } from '@/core/tools/registry/builtins/write-plan';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
+import type { ProjectedToolResult } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { verificationRequestForCapability } from '@/core/verification';
 import type { InteractionMode } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
+
+type RegisteredRuntimeOutput = {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+};
+
+function appendProjectedRuntimeEvents(
+  events: RuntimeEvent[],
+  projected: ProjectedToolResult,
+): void {
+  events.push(...(projected.runtimeEvents ?? []));
+}
+
+function registeredToolFinishedEvent(input: {
+  toolCallId: string;
+  name: string;
+  output: RegisteredRuntimeOutput;
+  command: string;
+  includeStatus?: boolean;
+}): RuntimeEvent {
+  return {
+    type: 'tool.finished',
+    toolCallId: input.toolCallId,
+    name: input.name,
+    result: {
+      ok: input.output.ok,
+      command: input.command,
+      exitCode: input.output.ok ? 0 : -1,
+      stdout: input.output.stdout,
+      stderr: input.output.stderr,
+      ...(input.includeStatus
+        ? {
+            status: input.output.ok ? ('success' as const) : ('error' as const),
+          }
+        : {}),
+    },
+  };
+}
 
 // ── PR 8: Tool result digest production ──
 
@@ -581,7 +621,7 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      for (const event of dispatched.projected.runtimeEvents ?? []) events.push(event);
+      appendProjectedRuntimeEvents(events, dispatched.projected);
       events.push({
         type: 'tool.finished',
         toolCallId,
@@ -752,24 +792,24 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      for (const event of dispatched.projected.runtimeEvents ?? []) events.push(event);
+      appendProjectedRuntimeEvents(events, dispatched.projected);
       if (!dispatched.output.ok && !dispatched.output.stdout) {
-        events.push({ type: 'tool.rejected', toolCallId, reason: dispatched.output.stderr });
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: dispatched.output.stderr,
+        });
         continue;
       }
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: dispatched.output.ok,
+      events.push(
+        registeredToolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          output: dispatched.output,
           command: request.name,
-          exitCode: dispatched.output.ok ? 0 : -1,
-          stdout: dispatched.output.stdout,
-          stderr: dispatched.output.stderr,
-          status: dispatched.output.ok ? 'success' : 'error',
-        },
-      });
+          includeStatus: true,
+        }),
+      );
       continue;
     }
     if (request.name === 'read_skill_reference') {
@@ -791,18 +831,14 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: true,
+      events.push(
+        registeredToolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          output: dispatched.output,
           command: request.name,
-          exitCode: 0,
-          stdout: dispatched.output.stdout,
-          stderr: '',
-        },
-      });
+        }),
+      );
       continue;
     }
     if (request.name === 'complete_skill') {
@@ -825,19 +861,15 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      for (const event of dispatched.projected.runtimeEvents ?? []) events.push(event);
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: true,
+      appendProjectedRuntimeEvents(events, dispatched.projected);
+      events.push(
+        registeredToolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          output: dispatched.output,
           command: request.name,
-          exitCode: 0,
-          stdout: dispatched.output.stdout,
-          stderr: '',
-        },
-      });
+        }),
+      );
       continue;
     }
     if (request.name === 'ask_user') {
@@ -878,18 +910,14 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: true,
+      events.push(
+        registeredToolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          output: dispatched.output,
           command: '',
-          exitCode: 0,
-          stdout: dispatched.output.stdout,
-          stderr: '',
-        },
-      });
+        }),
+      );
       continue;
     }
 
@@ -916,20 +944,16 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      for (const event of dispatched.projected.runtimeEvents ?? []) events.push(event);
+      appendProjectedRuntimeEvents(events, dispatched.projected);
       if (dispatched.output.stdout) {
-        events.push({
-          type: 'tool.finished',
-          toolCallId,
-          name: request.name,
-          result: {
-            ok: true,
+        events.push(
+          registeredToolFinishedEvent({
+            toolCallId,
+            name: request.name,
+            output: dispatched.output,
             command: '',
-            exitCode: 0,
-            stdout: dispatched.output.stdout,
-            stderr: '',
-          },
-        });
+          }),
+        );
       }
       continue;
     }
@@ -950,19 +974,15 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      for (const event of dispatched.projected.runtimeEvents ?? []) events.push(event);
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: true,
+      appendProjectedRuntimeEvents(events, dispatched.projected);
+      events.push(
+        registeredToolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          output: dispatched.output,
           command: '',
-          exitCode: 0,
-          stdout: dispatched.output.stdout,
-          stderr: '',
-        },
-      });
+        }),
+      );
       continue;
     }
 
