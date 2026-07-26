@@ -58,7 +58,7 @@
 
 25. **模型流式增量（ADR-0031 / ADR-0035 / ADR-0036）**：支持流式的模型在调用期间发出累计全文语义的 `model.text_delta` / `model.reasoning_delta`。首个 reasoning delta 在没有活跃阶段时立即建立实时纯 Thought；运行态展示只提交截至最近换行或句末标点的完整 reasoning 单元，未完成尾句不逐 token 渲染，完整原文仍保留供终态结算。首个 text delta 必须先冻结当前 Thought，再作为同级 text block 渲染；后续累计值只更新该块，任何工具排在文本之后，不得把流式文本写入或回收进 Thought 的 `pendingCaption`。兼容 Provider 若跨帧先发 text、后发 reasoning，仍在变化的尾部文本迁入新 Thought 后再按 Thought → text 结算；终态 `model.responded` 只补齐最后一条 thinking 内容、duration 和权威文本，不重复 timeline/全文。TUI live 派发按 50ms 合帧，并固定 reasoning 先于 text flush，仅保留各类型最新累计值；任何非 delta 事件到达前同步 flush，确保 `model.responded`、工具事件和 settle 不越序。delta 不进入 Runtime store、events.jsonl 或回放；取消、清空和会话切换必须 flush 或清理定时器。
 
-26. **流式断线重连（ADR-0032 / ADR-0033）**：`model.retry` 冻结断线前的 Thought 和流式文本，旧内容永久保留；重连后的文本必须新开一段。新流重放相同前缀时仅派发新增后缀，发生分歧时完整的新生成进入新段，不得原位替换旧段。恢复 delta / `model.responded` 清除 retry 状态。partial tool call 不创建卡片或 summary，只有完整成功流的终态工具调用进入 Runtime。
+26. **流式断线重连（ADR-0032 / ADR-0033）**：`model.retry` 冻结断线前的 Thought 和流式文本，旧内容永久保留；重连后的文本必须新开一段。新流重放相同前缀时仅派发新增后缀，发生分歧时完整的新生成进入新段，不得原位替换旧段。`model.responded` 到达时：若已渲染的文本块（旧段 + 新段拼接）与 `event.text`（仅含重试产出的权威全文）匹配，跳过；若分歧（不匹配），丢弃该请求所有文本块，以 `event.text` 单块替代，避免 streaming handler 的 `committedLength` 截断新文本。`model.responded` 清除 retry 状态。partial tool call 不创建卡片或 summary，只有完整成功流的终态工具调用进入 Runtime。
 
 27. **流式 Markdown 组件层级（ADR-0037 / ADR-0038）**：同一次连接的累计 `model.text_delta` 始终更新同一个 streaming text block，不按换行拆成消息块。`MarkdownBlock` 在该文档内按逻辑段落、单行结构、围栏代码和表格建立块级组件，以 Markdown 源起始行作为稳定身份，并按内容签名 memoize。连续普通文本行归入同一个 paragraph；空行、标题、水平线、列表项、引用、代码和表格封闭段落。累计全文追加时，解析缓存保留全部已完成前缀组件及其签名，只重新解析最后一个可能继续增长或发生类型提升的组件（例如 pipe 行升级为表格）；非追加更新才重建全文解析结果。已完成前缀不重建、不重复计算内容签名。断线后的新段仍是独立 Markdown 文档。
 
