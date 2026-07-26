@@ -9,6 +9,7 @@ import {
   tryLoadAgentConfig,
 } from '@/core/config/index';
 import { sessionExportPath } from '@/core/config/paths';
+import { shouldPromptWorkspaceTrust } from '@/core/config/workspace-trust';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import { resolveSandboxRuntime } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
@@ -19,6 +20,7 @@ import App, { type Action, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import InputLine, { type SlashSuggestionData } from './components/InputLine';
 import SetupWizard from './components/SetupWizard';
+import WorkspaceTrustGate from './components/WorkspaceTrustGate';
 import { useMcpController } from './hooks/useMcpController';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
 import { useSkillsLoader } from './hooks/useSkillsLoader';
@@ -52,12 +54,28 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
   // Load config synchronously on first render — avoids a flash of SetupWizard
   // that would consume keystrokes before TuiApp mounts.
   const [config, setConfig] = React.useState<AgentConfig | null>(() => tryLoadAgentConfig());
+  // Workspace trust is evaluated synchronously for the same reason: the gate
+  // must mount before anything that consumes keystrokes or starts side effects
+  // (sessions, MCP, skills, model calls). Mirrors VS Code's "trust the authors
+  // of the files in this folder" prompt shown when opening a new project.
+  const workspace = process.cwd();
+  const [workspaceTrusted, setWorkspaceTrusted] = React.useState<boolean>(
+    () => !shouldPromptWorkspaceTrust(workspace),
+  );
 
   const handleSetupComplete = React.useCallback(({ modelName }: { modelName: string }) => {
     // SetupWizard saved everything (provider + models + effort) to config.
     const cfg = loadAgentConfig({ modelName });
     setConfig(cfg);
   }, []);
+
+  if (!workspaceTrusted) {
+    return (
+      <ThemeContext.Provider value={getDarkTheme('blue')}>
+        <WorkspaceTrustGate workspace={workspace} onTrusted={() => setWorkspaceTrusted(true)} />
+      </ThemeContext.Provider>
+    );
+  }
 
   if (!config) {
     return (

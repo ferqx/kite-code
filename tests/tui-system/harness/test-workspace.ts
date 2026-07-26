@@ -28,6 +28,8 @@ export interface TestWorkspace {
   configOverrides?: Record<string, unknown>;
   /** Optional project-only overrides; defaults to configOverrides for compatibility. */
   projectConfigOverrides?: Record<string, unknown>;
+  /** true 时 spawnTui 不预写信任记录，workspace trust 门禁会在启动时触发 */
+  enforceWorkspaceTrust?: boolean;
   /** Remove all temp directories */
   cleanup(): void;
 }
@@ -47,6 +49,14 @@ export function createTestWorkspace(opts?: {
   configOverrides?: Record<string, unknown>;
   projectConfigOverrides?: Record<string, unknown>;
   projectMcpServers?: Record<string, unknown>;
+  /**
+   * 默认由 spawnTui 向临时信任存储预写一条 source:'test' 记录，启动目录按
+   * 生产环境的"已信任"快速路径放行，避免每个 PTY 场景卡在启动授权界面。
+   * 设为 true 时不预写，门禁在启动时触发，用于验证门禁本身的场景。
+   * 注意：不使用环境变量旁路——Bun 会自动注入 `<cwd>/.env*`，env 开关可被
+   * workspace 内文件伪造（见 docs/active/workspace-trust.md）。
+   */
+  enforceWorkspaceTrust?: boolean;
 }): TestWorkspace {
   const tempHome = mkdtempSync(join(tmpdir(), 'kite-code-e2e-'));
   const kiteCodeDir = join(tempHome, '.kite-code');
@@ -131,6 +141,7 @@ export function createTestWorkspace(opts?: {
     env,
     configOverrides: opts?.configOverrides,
     projectConfigOverrides: opts?.projectConfigOverrides,
+    enforceWorkspaceTrust: opts?.enforceWorkspaceTrust ?? false,
     cleanup,
   };
 }

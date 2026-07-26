@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import type { FeatureFlags } from '@/core/config/features';
 import { defaultCheckpointPath, loadAgentConfig, parseFeatureOverride } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
+import { shouldPromptWorkspaceTrust, trustWorkspace } from '@/core/config/workspace-trust';
 import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
 import { runRuntimeAgent } from '@/core/runtime/agent';
@@ -27,6 +28,7 @@ export interface ParsedArgs {
   approvalHash?: string;
   replacementCommand?: string;
   answer?: string;
+  trustWorkspace: boolean;
   sandbox: boolean;
   interactionMode?: import('@/protocol/events').InteractionMode;
   skills: string[];
@@ -60,6 +62,24 @@ export async function main(): Promise<void> {
     throw new Error(
       'Legacy checkpoint sessions are not compatible with the Runtime Kernel. Start a new task.',
     );
+  }
+
+  // Workspace trust gate (docs/active/workspace-trust.md). `run` executes
+  // project-derived configuration, skills and MCP declarations, so an untrusted
+  // directory is rejected before anything loads — same fail-closed policy as the
+  // TUI gate. `trace`/`help` do not execute project code and stay ungated.
+  if (shouldPromptWorkspaceTrust(args.workspace)) {
+    if (!args.trustWorkspace) {
+      throw new Error(
+        `Workspace is not trusted: ${args.workspace}\n` +
+          'Open this folder in the TUI (bun run tui) and accept the trust prompt, ' +
+          'or pass --trust-workspace to record trust explicitly from this entry point.',
+      );
+    }
+    const decision = trustWorkspace({ workspace: args.workspace, source: 'config' });
+    if (decision.status !== 'recorded') {
+      throw new Error(`Workspace trust could not be recorded: ${decision.message}`);
+    }
   }
 
   const loadedConfig = loadAgentConfig();
@@ -382,6 +402,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     approvalHash,
     replacementCommand,
     answer,
+    trustWorkspace: argv.includes('--trust-workspace'),
     sandbox: !noSandbox,
     interactionMode,
     skills: multi('--skill'),
@@ -463,6 +484,7 @@ Options:
   --approve              Approve tool call on resume
   --approve-same-command Approve same future commands
   --full-access          Start with full authorization (requires sandbox; source=config)
+  --trust-workspace      Record trust for --workspace and continue (source=config)
   --approval-hash <hash> Approval hash
   --replace-command <cmd> Replace pending command
   --answer <text>        Answer user input interrupt

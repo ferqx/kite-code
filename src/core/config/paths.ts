@@ -31,6 +31,11 @@ export function mcpProjectApprovalPath(): string {
   return join(getKiteCodeDir(), 'mcp-project-approvals.jsonc');
 }
 
+/** Local records of workspaces the user has explicitly trusted to run the agent. */
+export function workspaceTrustPath(): string {
+  return join(getKiteCodeDir(), 'workspace-trust.jsonc');
+}
+
 /** Legacy workspace-local MCP config retained for read-only migration compatibility. */
 export function localMcpConfigPath(workspaceKey: string): string {
   return join(getKiteCodeDir(), 'projects', workspaceKey, 'mcp.jsonc');

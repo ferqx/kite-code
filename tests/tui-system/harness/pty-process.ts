@@ -10,6 +10,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { trustWorkspace } from '@/core/config/workspace-trust';
 import type { MockModelServer } from './fixtures';
 import type { TestWorkspace } from './test-workspace';
 
@@ -117,6 +118,19 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   // Execute the project entrypoint by absolute path while keeping relative
   // tool paths inside the isolated test workspace.
   const { cwd, entryPath } = resolveTuiLaunchPaths(opts);
+
+  // Pre-trust the launch directory (source:'test') so the startup gate does not
+  // block every PTY scenario. This exercises the exact production "already
+  // trusted" fast path; no env bypass exists because Bun auto-injects
+  // `<cwd>/.env*` and an env switch could be forged by workspace files.
+  // Scenarios testing the gate itself pass enforceWorkspaceTrust: true.
+  if (opts.workspace && !opts.workspace.enforceWorkspaceTrust) {
+    trustWorkspace({
+      workspace: cwd,
+      source: 'test',
+      storePath: join(opts.workspace.home, '.kite-code', 'workspace-trust.jsonc'),
+    });
+  }
 
   // If a mock server is provided, write config that points to it.
   // Config is written to BOTH the home-level (~/.kite-code/) AND the

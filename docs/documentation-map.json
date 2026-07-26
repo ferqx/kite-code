@@ -172,11 +172,27 @@
       ]
     },
     {
+      "id": "workspace-trust",
+      "sources": [
+        "src/core/config/workspace-trust.ts",
+        "src/core/config/paths.ts",
+        "src/app/cli/index.ts",
+        "src/app/tui/components/WorkspaceTrustGate.tsx",
+        "src/app/tui/index.tsx",
+        "tests/workspace-trust.test.ts",
+        "tests/cli-workspace-trust.test.ts",
+        "tests/tui-system/scenarios/workspace-trust.test.ts",
+        "tests/tui-system/harness/test-workspace.ts"
+      ],
+      "documents": ["docs/active/workspace-trust.md", "docs/book/09-CLI模式与配置.md"]
+    },
+    {
       "id": "tui",
       "sources": ["src/app/tui/**"],
       "documents": [
         "docs/active/authorization.md",
         "docs/active/mcp-control-plane.md",
+        "docs/active/workspace-trust.md",
         "docs/active/thought-pre-consolidation.md",
         "docs/active/tui-run-status-bar.md",
         "docs/active/thought-pre-consolidation.md",
