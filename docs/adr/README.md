@@ -41,5 +41,6 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0038](0038-streaming-markdown-paragraph-components.md)  | accepted   | 流式 Markdown 普通文本按逻辑段落组件更新，空行和结构块封闭段落                    |
 | [0039](0039-streaming-markdown-structural-child-components.md) | accepted | 表格、代码块、列表与引用按稳定子行组件更新                                  |
 | [0040](0040-streaming-markdown-progressive-static-freeze.md) | accepted | 流式 Markdown 在安全组件边界渐进冻结，只保留动态尾段                         |
+| [0041](0041-inspect-ls-thought-aggregation.md)        | accepted   | inspect 模式的单一只读 `ls` 纳入 Thought，复合 shell 语法保持独立工具卡          |
 | [0028](0028-thought-text-boundary-attribution-carryover.md) | accepted | 文本边界并入题头且延续思考归属，取代 0026 的"文本不继承"条款                  |
 | [0029](0029-thought-run-visual-aggregation.md)         | accepted   | 连续 Thought 块渲染层视觉聚合，reducer 切分不变                                    |

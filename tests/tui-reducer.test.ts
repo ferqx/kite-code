@@ -1011,6 +1011,63 @@ describe('eventReducer (blocks model)', () => {
       expect(s.currentThoughtSummaryId).toBe(summary!.id);
     });
 
+    test('simple inspect ls is consolidated into Thought as a directory listing', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
+      s = dispatch(
+        s,
+        tcEvt('c2', 'shell_execute', {
+          intent: 'inspect',
+          command: '  ls -la src/app/tui  ',
+        }),
+      );
+
+      const blocks = flatBlocks(s);
+      const summary = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+
+      expect(summary).toBeDefined();
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
+      expect(summary!.summaryLine).toBe('read 1 file, listed 1 directory');
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(false);
+    });
+
+    test.each([
+      ['ls -la | tee listing.txt', 'pipeline'],
+      ['ls -la > listing.txt', 'redirection'],
+      ['ls -la && rm -rf output', 'command chain'],
+      ['ls -la $(touch marker)', 'command substitution'],
+    ])('inspect ls with %s remains a barrier tool_card (%s)', (command) => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
+      s = dispatch(s, tcEvt('c2', 'shell_execute', { intent: 'inspect', command }));
+
+      const blocks = flatBlocks(s);
+      const summary = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summary!.active).toBe(false);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+    });
+
+    test('ls without inspect intent remains a barrier tool_card', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
+      s = dispatch(
+        s,
+        tcEvt('c2', 'shell_execute', {
+          intent: 'execute',
+          command: 'ls -la',
+        }),
+      );
+
+      const blocks = flatBlocks(s);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+    });
+
     test('inspect shell search without search prefix is a barrier tool_card', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));

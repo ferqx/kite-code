@@ -25,13 +25,27 @@ const EXPLORATION_TOOLS = new Set([
 /** shell_execute 搜索/查找类命令前缀，匹配后纳入 Thought 预整合 */
 const SHELL_SEARCH_PREFIXES = ['rg ', 'grep ', 'ag ', 'ack ', 'git grep ', 'find ./', 'find /'];
 
+/**
+ * `ls` is read-only only while it remains one simple command. Keep compound
+ * shell syntax out of Thought: it may execute another command or write output.
+ */
+function isPureLsCommand(command: string): boolean {
+  const normalized = command.trim();
+  if (!/^ls(?:\s|$)/.test(normalized)) return false;
+  return !/[|&;<>\n\r`]|\$\(/.test(normalized);
+}
+
 /** 判断 shell_execute 是否为搜索/查找类探索命令 */
 function isShellExploreCommand(args: Record<string, unknown>): boolean {
   const intent = args.intent;
   if (intent !== 'inspect') return false;
   const command = args.command;
   if (typeof command !== 'string') return false;
-  return SHELL_SEARCH_PREFIXES.some((prefix) => command.startsWith(prefix));
+  const normalized = command.trim();
+  return (
+    isPureLsCommand(normalized) ||
+    SHELL_SEARCH_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+  );
 }
 
 /** 从事件数据判断是否为可合并的探索工具（用于 tool_call 事件，此时还没有 block） */
@@ -77,6 +91,7 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
   let searched = 0;
   let filePatterns = 0;
   let readMcp = 0;
+  let listedDirectories = 0;
   let ranCommands = 0;
 
   for (const t of tools) {
@@ -84,6 +99,12 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
     else if (t.name === 'search_content') searched++;
     else if (t.name === 'search_files') filePatterns++;
     else if (t.name === 'read_mcp_resource') readMcp++;
+    else if (
+      t.name === 'shell_execute' &&
+      typeof t.args.command === 'string' &&
+      isPureLsCommand(t.args.command)
+    )
+      listedDirectories++;
     else if (t.name === 'shell_execute' || t.name === 'bash') ranCommands++;
     else if (EXPLORATION_TOOLS.has(t.name)) readFiles++; // fallback
   }
@@ -94,6 +115,8 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
   if (filePatterns > 0)
     parts.push(`searched ${filePatterns} file pattern${filePatterns > 1 ? 's' : ''}`);
   if (readMcp > 0) parts.push(`read ${readMcp} MCP resource${readMcp > 1 ? 's' : ''}`);
+  if (listedDirectories > 0)
+    parts.push(`listed ${listedDirectories} director${listedDirectories > 1 ? 'ies' : 'y'}`);
   if (ranCommands > 0) parts.push(`ran ${ranCommands} command${ranCommands > 1 ? 's' : ''}`);
 
   if (parts.length === 0) {

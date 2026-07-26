@@ -10,9 +10,9 @@
 
 1. **Thought 边界（阶段模型，ADR-0030）**：Thought 块 = 一段**只读探索阶段**：从首个 `reason` / 探索工具建块起，跨越任意多次模型调用保持活跃（圆点持续闪烁、时长累加、工具并入），直到阶段边界关闭。`reason/thinking` 不打断 Thought，只更新活动预览并累加调用时长；**可见文本也不关闭 Thought**——阶段块活跃时吸收为块顶字幕（确认制，见规则 24）。**阶段边界（关闭 Thought）**：`final` / 流式文本的脱离路径、非探索工具、`need_approval` / `need_input` / `need_plan_review`、生命周期边界（重试 / 错误 / 取消 / 中断 / 轮次结束）。`model.requested` **不是边界**——kernel 收齐工具结果后重新调用模型是实现细节（ADR-0030 取代 ADR-0025 的 settle 条款，见规则 21）。纯空白文本整体忽略。纯思考块（整轮无工具）被文本关闭时并入该文本块题头（ADR-0026，见规则 19）；被非探索工具 / 人机等待关闭时保留裸线。
 
-2. **探索工具不经 tool_card**：`read_file`、`search_content`、`search_files`、`read_mcp_resource` 在 `tool_call` 时直接进入 `tool_summary`，永远不创建独立 `tool_card`。`shell_execute` 仅在 `intent=inspect` 且命令以搜索前缀（`rg`/`grep`/`ag`/`ack`/`git grep`/`find`）开头时纳入 Thought 聚合；其他 `shell_execute`（通用 Bash）永不纳入，始终渲染为独立 tool_card。
+2. **探索工具不经 tool_card**：`read_file`、`search_content`、`search_files`、`read_mcp_resource` 在 `tool_call` 时直接进入 `tool_summary`，永远不创建独立 `tool_card`。`shell_execute` 仅在 `intent=inspect` 且满足以下一种情况时纳入 Thought 聚合：(a) 命令以搜索前缀（`rg`/`grep`/`ag`/`ack`/`git grep`/`find`）开头；(b) 命令是单一 `ls` 调用（含参数和目标路径）。`ls` 一旦包含管道、重定向、命令串联、换行或命令替换，就按通用 Bash 处理并渲染为独立 tool_card。其他 `shell_execute` 同样不纳入。
 
-3. **非探索工具 = 阶段边界**：所有 `shell_execute`（非搜索前缀）、写入工具、审批、`ask_user`、`update_plan`、`task` 等非探索工具关闭当前阶段块（关闭原因 `tool` / `human_wait`），按原有独立块渲染，其后开启新阶段。**阶段边界不打断思考归属**——被关闭块若 `hasThinking`，记录延续上下文（`thoughtCarryover`，含 `modelMs`），边界后新建的探索聚合继承 `hasThinking` / `modelMs`，标签为 `Thought for Xs · <统计>`（Xs 为同一次模型调用时长，规则 22/23、ADR-0027）。延续上下文的清除只发生在：新的 `reason` 事件、`model.requested`、生命周期边界。`list_mcp_resources` 也使用独立 tool card，以 `Provider · URI` 树展示资源目录；真正读取内容的 `read_mcp_resource` 仍属于探索工具。
+3. **非探索工具 = 阶段边界**：所有未满足规则 2 的 `shell_execute`、写入工具、审批、`ask_user`、`update_plan`、`task` 等非探索工具关闭当前阶段块（关闭原因 `tool` / `human_wait`），按原有独立块渲染，其后开启新阶段。**阶段边界不打断思考归属**——被关闭块若 `hasThinking`，记录延续上下文（`thoughtCarryover`，含 `modelMs`），边界后新建的探索聚合继承 `hasThinking` / `modelMs`，标签为 `Thought for Xs · <统计>`（Xs 为同一次模型调用时长，规则 22/23、ADR-0027）。延续上下文的清除只发生在：新的 `reason` 事件、`model.requested`、生命周期边界。`list_mcp_resources` 也使用独立 tool card，以 `Provider · URI` 树展示资源目录；真正读取内容的 `read_mcp_resource` 仍属于探索工具。
 
 4. **跨 thinking 合并**：同一 Thought 内，探索工具之间可以夹着 `reason/thinking`。这些 thinking 不创建新的工具聚合，只更新 `tool_summary.latestActivity`。
 
@@ -71,6 +71,7 @@
 - `docs/adr/0026-thought-text-header-merge.md` — 纯思考块并入文本题头（文本关闭 Thought 条款已被 ADR-0030 取代，规则 19）
 - `docs/adr/0027-thought-carryover-non-text-boundary.md` — 思考延续跨过阶段边界、边界后继承（规则 3/20/23）
 - `docs/adr/0030-exploration-phase-block.md` — 只读探索阶段 = 单一存活块、文本吸收为块顶字幕（规则 1/13/21/22/24）
+- `docs/adr/0041-inspect-ls-thought-aggregation.md` — 单一只读 `ls` 纳入 Thought，复合 shell 语法保持独立工具卡（规则 2/3）
 - `docs/space/plans/2026-06-28-context-compaction.md` — M0/M1/M2 三层压缩方案
 
 ## 修改时必读
