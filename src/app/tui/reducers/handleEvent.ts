@@ -1856,8 +1856,34 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         // the full response and duplicate the preserved prefix.
         const alreadyRendered =
           renderedTextParts.join('') === event.text || renderedTextParts.join('\n') === event.text;
-        if (!alreadyRendered)
-          next = handleEventAction(next, { type: 'text', data: { text: event.text } });
+        if (!alreadyRendered) {
+          // Divergent reconnect: the retry produced text that does not match
+          // the frozen prefix from the previous attempt.  Dispatching through
+          // the normal text handler would slice event.text by the prefix's
+          // committed length (currentModelResponseTextParts includes both old
+          // and new blocks) and truncate the new text.  Replace all text blocks
+          // from this request with a single block holding the authoritative
+          // final text.
+          if (renderedTextParts.length > 0) {
+            const turns = next.turns.map((turn) => ({
+              blocks: turn.blocks.flatMap((block) => {
+                if (block.kind === 'text' && block.modelRequestId === next.currentModelRequestId) {
+                  return [];
+                }
+                return [block];
+              }),
+            }));
+            const finalBlock: OutputBlock = {
+              id: next.nextBlockId,
+              kind: 'text',
+              content: event.text,
+              ...(next.currentModelRequestId ? { modelRequestId: next.currentModelRequestId } : {}),
+            };
+            next = appendBlock({ ...next, turns }, finalBlock);
+          } else {
+            next = handleEventAction(next, { type: 'text', data: { text: event.text } });
+          }
+        }
       }
       return next;
     }
