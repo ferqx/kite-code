@@ -89,6 +89,21 @@ describe('tool policy', () => {
     expect(decision.risk).toBe('read');
   });
 
+  test('preserves the read-only shell approval fast-path corpus', () => {
+    for (const command of ['ls -la', 'pwd', 'git status', 'git diff --stat', 'rg TODO src']) {
+      const decision = evaluateToolApproval({
+        toolName: 'shell_execute',
+        toolArgs: { command },
+        phase: 'planning',
+        workspace: '/tmp/project',
+        threadId: 'thread-a',
+      });
+      expect(decision.allowed, command).toBe(true);
+      expect(decision.requiresApproval, command).toBe(false);
+      expect(decision.risk, command).toBe('read');
+    }
+  });
+
   // 验证规划阶段拒绝执行类工具，即使工作区访问权限错误地为 write / Planning phase rejects execution tools even if workspace access is write
   test('rejects shell execution during planning phase', () => {
     const decision = evaluateToolApproval({
@@ -137,8 +152,8 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('same_command');
   });
 
-  // 验证 same_command 只看 command.trim()，不受模型解释字段变化影响 / same_command matching ignores objective and justification changes
-  test('same-command grant ignores shell action metadata changes', () => {
+  // 验证 same_command 只看 command.trim() / same_command matching uses the exact trimmed command
+  test('same-command grant ignores surrounding command whitespace', () => {
     const authorization = grantSameCommand(defaultAuthorizationState(), {
       workspace: '/tmp/project',
       threadId: 'thread-a',
@@ -148,9 +163,6 @@ describe('tool policy', () => {
       toolName: 'shell_execute',
       toolArgs: {
         command: '  bun test  ',
-        objective: '重新验证修改后的行为',
-        justification: '同一个命令，但解释文本不同。',
-        prefix_rule: ['bun', 'test'],
       },
       phase: 'building',
       workspace: '/tmp/project',
@@ -329,7 +341,6 @@ describe('tool policy', () => {
       summary: decision.userVisibleSummary,
       reason: decision.reason,
       expectedEffects: decision.expectedEffects,
-      suggestedPrefixRule: undefined,
       grantOptions: ['approve_once', 'same_command', 'full_access'],
       recommendedGrant: 'approve_once',
     });

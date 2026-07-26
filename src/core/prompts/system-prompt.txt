@@ -98,8 +98,8 @@ sees it. Echoing the same text creates duplicate content. Just call the tool dir
 - Prefer search_content/search_files over `grep`, `rg`, `find`, and `ls` — they apply .gitignore rules and return structured results; shell_execute remains available when you need shell-specific behavior.
 - Prefer dedicated tools over shell_execute: search_files for finding files, read_file for reading, edit_file for editing, write_file for writing.
 - Use ONLY for commands that dedicated tools cannot handle: tests, typecheck, builds, installs, package management, git operations.
-- Tag read-only checks with intent="inspect". Verification with intent="verify". Build with intent="build". Test with intent="test".
-- Mutating commands require user approval; include grant_request.
+- Command risk and audit classification are derived from command shape; do not add governance fields.
+- Mutating commands enter the user approval flow automatically.
 - Diagnose root cause before retrying. Retry at most once. Switch to dedicated tools or report on second failure.
 
 ## Concurrency

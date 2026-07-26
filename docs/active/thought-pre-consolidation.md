@@ -10,7 +10,7 @@
 
 1. **Thought 边界**：Thought 表示一段未被可见 assistant 文本、非探索工具或人机交互等待打断的模型思考链。`reason/thinking` 不打断 Thought，只更新当前 Thought 的活动预览；可见 `text/final`、非探索工具、`need_approval`、`need_input`、`need_plan_review` 都会关闭当前 Thought。
 
-2. **探索工具不经 tool_card**：`read_file`、`search_content`、`search_files`、`read_mcp_resource` 在 `tool_call` 时直接进入 `tool_summary`，永远不创建独立 `tool_card`。`shell_execute` 即使是 `intent=inspect` 或只读搜索命令，也不进入 Thought；上游应优先使用 `search_files/search_content` 表达探索搜索。
+2. **探索工具不经 tool_card**：`read_file`、`search_content`、`search_files`、`read_mcp_resource` 在 `tool_call` 时直接进入 `tool_summary`，永远不创建独立 `tool_card`。`shell_execute` 即使被命令分类器判定为只读，也不进入 Thought；上游应优先使用 `search_files/search_content` 表达探索搜索。
 
 3. **非探索工具截断**：所有 `shell_execute`、写入工具、审批、`ask_user`、`update_plan`、`task` 等非探索工具与可见文本一样关闭当前 Thought，并继续按原有独立块渲染。`list_mcp_resources` 也使用独立 tool card，以 `Provider · URI` 树展示资源目录；真正读取内容的 `read_mcp_resource` 仍属于探索工具。后续探索工具会开启新的 Thought。
 

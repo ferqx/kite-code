@@ -33,16 +33,8 @@ export type ToolExecutionResult = ShellResult & {
   path?: string;
   /** shell_execute 返回的 action envelope 元数据 / Action envelope metadata returned by shell_execute */
   action?: {
-    /** 模型表达的命令意图 / Model-declared command intent */
+    /** 从命令形态派生的命令分类 / Command classification derived from command shape */
     intent?: ShellIntent;
-    /** 当前命令要达成的目标 / Objective for this command */
-    objective?: string;
-    /** 预期观察结果 / Expected observation */
-    expectedObservation?: string;
-    /** 失败后的处理策略 / Strategy if the command fails */
-    failureStrategy?: string;
-    /** 模型建议的 prefix 授权规则 / Suggested prefix grant rule */
-    prefixRule?: string[];
     /** 实际使用的授权来源 / Actual grant source used */
     grantUsed: ShellGrantUsed;
   };

@@ -117,7 +117,7 @@
 | `plans/2026-07-15-mcp-tui-management-center-implementation.md` | superseded | MCP TUI 管理中心 Phase 0–2 保留为历史；UI 方向由只读计划替代。 |
 | `plans/2026-07-16-mcp-tui-readonly-list.md` | archived | `/mcp` 只展示 effective MCP Server 名称与连接状态；配置和 project trust 移出该命令。 |
 | `plans/2026-07-16-mcp-auth-phase3.md` | archived | MCP 原生凭据保险库、静态 credential reference、HTTP OAuth 与独立认证恢复提示。 |
-| `plans/2026-07-26-tool-spec-registry.md` | active | 工具单一事实源（ADR-0026）实施：阶段 0 漂移止血，阶段 1 Registry 骨架与六个计算原语迁移。 |
+| `plans/2026-07-26-tool-spec-registry.md` | archived | 工具单一事实源阶段 0/1 已完成；六个计算原语以 Registry 单路径运行，见完成记录。 |
 
 ## 完成执行记录
 

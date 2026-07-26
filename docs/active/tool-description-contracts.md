@@ -63,7 +63,7 @@
 
 - 未迁移工具：契约继续写在 `tool-contracts.ts`，本节规则不变。
 - 已迁移工具：契约移入 `spec.contract`，`description` 仍由 `buildDescription()` 生成，四个 section 的质量要求不变。
-- 新增工具一律直接注册到 Registry；`toolSpecRegistryV1` 灰度期间保持模型表面 description 逐字节稳定，一致性不变量由 `tests/tools/tool-registry-conformance.test.ts` 守护。
+- 新增工具一律直接注册到 Registry；模型表面 description 的确定性由 `tests/tools/tool-registry-conformance.test.ts` 守护。
 
 ### 契约与实现的同步
 
@@ -91,4 +91,4 @@
 - 每个工具的 `commonMistakes` 包含可识别的失败模式关键词。
 - 每个工具的 `outputFormat` 提及 `ok` 字段。
 - 每个工具的 `failureHandling` 包含可执行的恢复动作。
-- `shell_execute` 契约专项覆盖 intent 枚举和审批拒绝场景。
+- `shell_execute` 契约专项覆盖纯命令形态驱动的审批拒绝与恢复场景；契约不得再要求模型提交 `intent`、授权建议或 prefix rule。

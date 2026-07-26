@@ -572,13 +572,12 @@ describe('eventReducer (blocks model)', () => {
       expect(s.currentThoughtSummaryId).toBe(summaries[1]!.id);
     });
 
-    test('inspect shell search with search prefix is consolidated into Thought', () => {
+    test('read-only shell search remains an independent tool card', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
       s = dispatch(
         s,
         tcEvt('c2', 'shell_execute', {
-          intent: 'inspect',
           command: 'find /Users/chenchao/Code/ai/openpx-new/src -type f | sort',
         }),
       );
@@ -588,21 +587,20 @@ describe('eventReducer (blocks model)', () => {
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
 
-      // Both c1 and c2 are now exploration tools → consolidated into the same Thought
+      // read_file is exploration; shell_execute remains governed as a separate card.
       expect(summary).toBeDefined();
-      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
-      expect(summary!.active).toBe(true);
-      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(false);
-      expect(s.currentThoughtSummaryId).toBe(summary!.id);
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summary!.active).toBe(false);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
     });
 
-    test('inspect shell search without search prefix is a barrier tool_card', () => {
+    test('non-read shell command is also a barrier tool_card', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
       s = dispatch(
         s,
         tcEvt('c2', 'shell_execute', {
-          intent: 'inspect',
           command: 'npm test', // not a search prefix
         }),
       );

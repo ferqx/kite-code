@@ -29,14 +29,7 @@ export type ShellIntent = 'inspect' | 'verify' | 'build' | 'test' | 'git' | 'oth
 export interface ShellActionEnvelope {
   command: string;
   description?: string;
-  intent?: ShellIntent;
-  objective?: string;
-  justification?: string;
-  expected_observation?: string;
-  failure_strategy?: string;
   timeout_ms?: number;
-  prefix_rule?: string[];
-  grant_request?: ShellApprovalGrant;
 }
 
 export type AuthorizationSource = 'user' | 'config' | 'test' | 'system';

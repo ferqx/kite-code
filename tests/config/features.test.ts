@@ -19,10 +19,6 @@ describe('feature flags', () => {
     expect(getFeatureFlags().capabilityCatalogV1).toBe(true);
     expect(getFeatureFlags().mcpRuntimeBindingV1).toBe(true);
     expect(getFeatureFlags().toolSearchV1).toBe(true);
-    expect(getFeatureFlags().toolSpecRegistryV1).toBe(false);
-    expect(getFeatureFlags({ features: { toolSpecRegistryV1: true } }).toolSpecRegistryV1).toBe(
-      true,
-    );
     expect(getFeatureFlags().contextCompactionV2).toBe(true);
     expect(getFeatureFlags().contextCompactionAutoV1).toBe(false);
     expect(getFeatureFlags().contextCompactionManualV1).toBe(true);
@@ -43,7 +39,6 @@ describe('feature flags', () => {
     expect(parseFeatureOverride('contextCompactionAutoV1')).toEqual({
       contextCompactionAutoV1: true,
     });
-    expect(parseFeatureOverride('toolSpecRegistryV1')).toEqual({ toolSpecRegistryV1: true });
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');
   });
 

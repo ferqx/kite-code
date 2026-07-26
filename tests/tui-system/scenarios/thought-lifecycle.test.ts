@@ -275,20 +275,20 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 3 — shell_execute（intent=inspect + 搜索前缀）纳入 Thought
+  // Test 3 — shell_execute 只读搜索命令仍使用独立工具块
   //
   // 消息结构：
-  //   Response 1: reasoning + read_file + shell_execute(inspect, search cmd)
+  //   Response 1: reasoning + read_file + shell_execute(read-only search cmd)
   //   Response 2: content 文本输出 → 关闭 Thought
   //
   // 预期 TUI 现象：
-  //   - Thought summaryLine = "read 1 file, ran 1 command"
-  //   - shell_execute 作为工具步骤展开（Bash: find ...），而非独立 tool_card
-  //   - settled footer = └─ 完成
+  //   - read_file 保持探索摘要
+  //   - shell_execute 使用独立 tool_card，不纳入 Thought
+  //   - 最终文本正常出现
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'shell_execute with intent=inspect + search prefix is consolidated into Thought',
+    'read-only shell_execute search command keeps its governed tool lifecycle',
     async () => {
       server.setResponses([
         {
@@ -299,7 +299,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
               {
                 id: 's2',
                 name: 'shell_execute',
-                args: { command: 'grep "name" package.json', intent: 'inspect' },
+                args: { command: 'grep "name" package.json' },
               },
             ],
           },
@@ -314,25 +314,20 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Explore with shell', 15000);
 
-      // Wait for the unique "ran 1 command" summary to appear (only Test 3 has shell_execute).
-      // The settled Thought with this summary confirms the thought lifecycle completed.
-      await waitForText(() => tui.output(), 'ran 1 command', 25000);
+      await waitForText(() => tui.output(), 'SHELL_THOUGHT_DONE', 25000);
       await sleep(2000);
 
       const output = tui.output();
       const clean = stripAnsi(output);
 
-      // ── Thought summary includes both tools ──
+      // ── read_file remains in the exploration summary ──
       expect(screenContains(output, 'read 1 file')).toBe(true);
-      expect(screenContains(output, 'ran 1 command')).toBe(true);
+      expect(screenContains(output, 'ran 1 command')).toBe(false);
 
-      // ── Both tool steps visible in Thought tree ──
+      // ── Shell command remains visible in its independent tool card ──
       expect(screenContains(output, 'CLAUDE.md')).toBe(true);
-      // shell step label shows the command
       expect(screenContains(output, 'grep "name" package.json')).toBe(true);
-
-      // ── Settled footer ──
-      expect(screenContains(output, '└─ 完成')).toBe(true);
+      expect(screenContains(output, 'SHELL_THOUGHT_DONE')).toBe(true);
 
       // ── TUI idle ──
       expect(screenContains(output, '❯')).toBe(true);

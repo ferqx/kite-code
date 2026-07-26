@@ -403,11 +403,6 @@ export interface ToolApprovalPayload {
   expectedEffects: string[];
   grantOptions: ShellApprovalGrant[];
   recommendedGrant: ShellApprovalGrant;
-  modelJustification?: string;
-  objective?: string;
-  expectedObservation?: string;
-  failureStrategy?: string;
-  suggestedPrefixRule?: string[];
   /** update_plan 的方案数据（审批时嵌入） */
   plan?: AgentPlan;
   /** 子 agent ID，当审批来自子 agent 的工具调用时填充 / Sub-agent ID when approval originates from a sub-agent's tool call */

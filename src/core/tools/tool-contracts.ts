@@ -31,7 +31,7 @@ export const READ_FILE_CONTRACT: ToolContract = {
       'Read a file from the workspace with line numbers. ' +
       'Use this to inspect file contents, verify changes, or understand code structure. ' +
       'Use offset/limit for long files. ' +
-      'Do NOT use this to list directories or search across files — use shell_execute intent=inspect for that.',
+      'Do NOT use this to list directories or search across files — use search_files or search_content for that.',
     commonMistakes:
       "Editing a file without reading it first — edit_file will fail because old_string won't match. " +
       'Assuming file content without verifying — always read first. ' +
@@ -41,7 +41,7 @@ export const READ_FILE_CONTRACT: ToolContract = {
       "JSON: ok (boolean), content (line-numbered text: '  1|line content'), error (empty on success). " +
       'File not found: ok: false with error message.',
     failureHandling:
-      'If file not found: use shell_execute intent=inspect to locate the correct path, then retry. ' +
+      'If file not found: use search_files to locate the correct path, then retry. ' +
       'If offset is beyond file length: reduce or remove offset. ' +
       'If path is unknown: explore the workspace with shell_execute first, then retry read_file. ' +
       'If binary file detected (NUL byte): the file cannot be read as text. Tell the user the file appears binary and ask how they want to proceed; shell_execute with file(1) or xxd can inspect it after approval.',
@@ -196,15 +196,12 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       'Prefer search_content and search_files over `grep`, `rg`, `find`, and `ls` — they apply .gitignore rules and return structured results; shell_execute remains available when you need shell-specific behavior. ' +
       'Do NOT use shell_execute for: searching file contents (use search_content), finding files (use search_files), reading files (use read_file), editing files (use edit_file), writing files (use write_file). ' +
       'Use shell_execute ONLY for: tests, typecheck, builds, installs, git operations, and other terminal-only tasks. ' +
-      'Set intent=inspect for read-only checks, intent=verify for tests/typecheck/lint, intent=test for test runs, intent=build for compilation, intent=git for git operations. ' +
       'For commands that start a TUI, dev server, watcher, or other long-running process, set timeout_ms (for example 10000) so the command returns after collecting startup output. ' +
       'Do not set timeout_ms for finite commands such as builds, installs, or test suites unless the user explicitly asks for a bounded smoke check. ' +
-      'Write a short human-readable description so the user understands what the command does. ' +
-      'For commands needing approval, include grant_request (approve_once | same_command | full_access).',
+      'Write a short human-readable description so the user understands what the command does.',
     commonMistakes:
       'Reaching for shell_execute with grep/rg/find when search_content/search_files would give structured, .gitignore-aware results. ' +
       'Missing description field — always provide a short human-readable summary. ' +
-      'Using intent=inspect for mutating commands — the harness will reject these. ' +
       'Running interactive or long-running commands like `npm run tui`, `bun run dev`, or watch mode without timeout_ms — the tool will keep running until the process exits. ' +
       'Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R) — denied by default.',
     outputFormat:
@@ -215,8 +212,8 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       'If exitCode nonzero: read stderr, adjust command, retry. ' +
       'rg (ripgrep) exit code 1 means NO matches found — this is NOT an error, do not retry. ' +
       'grep exit code 1 likewise means no matches. ' +
-      'If tests fail (intent=verify): read failure output, fix code, re-run. ' +
-      'If rejected by policy: check intent matches command type; add grant_request for approval. ' +
+      'If tests fail: read failure output, fix code, re-run. ' +
+      'If rejected by policy: explain why the command is needed and wait for the user approval flow. ' +
       'If output empty but exitCode 0: try different flags or path.',
   },
   description: '',
@@ -497,6 +494,9 @@ export const KNOWN_TOOL_NAMES = [
   'search_content',
   'search_files',
   'tool_search',
+  'activate_skill',
+  'complete_skill',
+  'read_skill_reference',
   'list_mcp_resources',
   'list_mcp_tools',
   'read_mcp_resource',

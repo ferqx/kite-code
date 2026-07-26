@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-07-26-tool-spec-registry-phase-2.md`](2026-07-26-tool-spec-registry-phase-2.md) | archived | P0 | ADR-0026、ADR-0027 | 延续已归档阶段 0/1 | coordination、interrupt、runtime_action 工具全部迁入 Registry |
 | [`2026-05-20-tui-production-roadmap.md`](2026-05-20-tui-production-roadmap.md) | archived | P0 | — | — | Step2 感知闭环：流式指示器 + Plan 连线 + Phase 确认<br>Step3 防御纵深：Error Boundary + Checkpoint 关闭 + Temp 清理<br>Step4 功能补齐：手动 Compaction |<!-- replaced by 2026-05-22-production-gaps-closure.md for remaining gaps -->|
 | [`2026-05-22-production-gaps-closure.md`](2026-05-22-production-gaps-closure.md) | archived | P0 | — | 替代 2026-05-20 路线图中未完成项 | Phase1 ✅ MCP + 事件闭环<br>Phase2 ✅ Rewind + MCP Resources<br>Phase3 ✅ Skills 系统<br>Hooks + 自定义命令延后 |
 | [`2026-05-22-production-gaps-phase1.md`](2026-05-22-production-gaps-phase1.md) | archived | P0 | — | — | Phase 1 详细实施计划（8 tasks, 8 commits）。 |
@@ -61,7 +62,7 @@
 | [`2026-07-16-mcp-tui-readonly-list.md`](2026-07-16-mcp-tui-readonly-list.md) | archived | P0 | MCP Phase 0–2、ADR-0009/0010/0011 | 纠偏 2026-07-15 总计划中的 `/mcp` 管理中心 UI | `/mcp` 无参数只读列表、project trust prompt 独立迁移、配置 mutation 退出 TUI；[完成记录](../execution/completed/2026-07-16-mcp-tui-readonly-list.md)。 |
 | [`2026-07-16-mcp-auth-phase3.md`](2026-07-16-mcp-auth-phase3.md) | archived | P1 | Phase 2、ADR-0010/0012 | 承接旧总计划 Phase 3 的 Core auth，保留 `/mcp` 只读边界 | OS vault、credential reference、HTTP OAuth、独立恢复提示与三平台 native smoke 已完成；[完成记录](../execution/completed/2026-07-16-mcp-auth-phase3.md)。 |
 | [`2026-07-17-mcp-agent-provider-recovery-phase5.md`](2026-07-17-mcp-agent-provider-recovery-phase5.md) | archived | P2 | Phase 1/3/4、ADR-0010/0012/0014 | 替代 superseded 总计划的 Phase 5 实施依据 | Provider directory、typed failure/search、Provider Action/new turn、required admission/session waiver、App/TUI handlers 与 PTY 已完成；[完成记录](../execution/completed/2026-07-17-mcp-agent-provider-recovery-phase5.md)。 |
-| [`2026-07-26-tool-spec-registry.md`](2026-07-26-tool-spec-registry.md) | active | P0 | ADR-0026 | 落实 [ToolSpec Registry RFC](../../design/2026-07-26-tool-spec-registry-rfc.md) | 工具单一事实源：阶段 0 漂移止血（match_mode/force/Skill/list_files/死代码删除、契约措辞收敛）→ 阶段 1 Registry 骨架与六个计算原语迁移（`toolSpecRegistryV1` 灰度）。 |
+| [`2026-07-26-tool-spec-registry.md`](2026-07-26-tool-spec-registry.md) | archived | P0 | ADR-0026、ADR-0027 | 落实 [ToolSpec Registry RFC](../../design/2026-07-26-tool-spec-registry-rfc.md) | 阶段 0/1 与六个计算原语单路径迁移完成；[完成记录](../execution/completed/2026-07-26-tool-spec-registry.md)。 |
 
 ## 计划文件命名规范
 

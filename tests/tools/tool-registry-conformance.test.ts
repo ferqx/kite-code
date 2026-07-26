@@ -3,11 +3,17 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { runApprovedTool } from '@/core/harness/tool-runner';
 import { POLICY_CLASSIFIED_TOOL_NAMES } from '@/core/policies/tool-capabilities';
 import { sessionReadTracker } from '@/core/tools/read-state';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
+import {
+  classifyShellActionIntent,
+  shellActionEnvelopeSchema,
+  shellExecuteSpec,
+} from '@/core/tools/registry/builtins/shell-execute';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import { createToolRegistry } from '@/core/tools/registry/registry';
 import type { ToolContext, ToolSpec } from '@/core/tools/registry/spec';
@@ -391,6 +397,75 @@ describe('invariant i9 — descriptor projection is deterministic', () => {
       },
     };
     expect(registry.descriptorOf(mutated).revision).not.toBe(first.revision);
+  });
+});
+
+describe('invariant i10 — shell governance is derived from command shape', () => {
+  test('model-visible schema exposes exactly the three approved fields', () => {
+    expect(shellActionEnvelopeSchema.keyof().options.sort()).toEqual([
+      'command',
+      'description',
+      'timeout_ms',
+    ]);
+  });
+
+  test('schema strips all former model-declared governance fields', () => {
+    const parsed = shellExecuteSpec.inputSchema.parse({
+      command: 'git status',
+      description: 'Inspect repository',
+      timeout_ms: 1000,
+      intent: 'other',
+      objective: 'mutate',
+      justification: 'trust me',
+      expected_observation: 'changed',
+      failure_strategy: 'retry',
+      prefix_rule: ['git'],
+      grant_request: 'full_access',
+    });
+    expect(parsed).toEqual({
+      command: 'git status',
+      description: 'Inspect repository',
+      timeout_ms: 1000,
+    });
+    expect(shellExecuteSpec.effects(parsed, CTX).effectClass).toBe('read_only');
+    expect(classifyShellActionIntent(parsed.command)).toBe('git');
+  });
+
+  test('read-only fast-path corpus remains command-driven', () => {
+    for (const command of ['ls -la', 'pwd', 'git status', 'git diff --stat', 'rg TODO src']) {
+      const effects = shellExecuteSpec.effects({ command }, CTX);
+      expect(effects.effectClass, command).toBe('read_only');
+      expect(effects.sideEffect, command).toBe(false);
+    }
+  });
+
+  test('dispatch preserves execution context and runner derives action metadata', async () => {
+    const progress: string[] = [];
+    const result = await runApprovedTool({
+      workspace: '/tmp/sample',
+      request: {
+        id: 'shell-read',
+        name: 'shell_execute',
+        args: { command: 'git status', description: 'Inspect repository', timeout_ms: 3210 },
+        reason: 'inspect',
+        protectedCommand: 'git status',
+      },
+      onShellProgress: (chunk) => progress.push(chunk),
+      shellExecutor: async (input) => {
+        expect(input.timeoutMs).toBe(3210);
+        input.onProgress?.('status', 'stdout');
+        return {
+          ok: true,
+          command: input.command,
+          exitCode: 0,
+          stdout: 'clean',
+          stderr: '',
+        };
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.action).toEqual({ intent: 'git', grantUsed: 'none' });
+    expect(progress).toEqual(['status']);
   });
 });
 

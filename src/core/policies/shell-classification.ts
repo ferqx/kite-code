@@ -275,3 +275,91 @@ export function classifyShellRisk(command: string): ToolRisk {
   if (isNetworkCommand(command)) return 'network';
   return 'execute_code';
 }
+
+const READ_ONLY_COMMANDS = new Set([
+  'awk',
+  'cat',
+  'cut',
+  'du',
+  'echo',
+  'file',
+  'find',
+  'grep',
+  'head',
+  'ls',
+  'nl',
+  'pwd',
+  'rg',
+  'sed',
+  'sort',
+  'stat',
+  'tail',
+  'test',
+  'tr',
+  'uniq',
+  'wc',
+]);
+
+const READ_ONLY_GIT_SUBCOMMANDS = new Set([
+  'branch',
+  'diff',
+  'grep',
+  'log',
+  'ls-files',
+  'show',
+  'status',
+]);
+
+/** Conservative command-shape classifier used by shell approval and ToolSpec effects. */
+export function isReadOnlyShellCommand(command: string): boolean {
+  const trimmed = (command ?? '').trim();
+  if (!trimmed || /(^|[^>])>{1,2}(?!&[12]|\s*\/dev\/null)(?:$|[^>])/.test(trimmed)) {
+    return false;
+  }
+  if (/\$\(/.test(trimmed) || /`/.test(trimmed)) return false;
+  const stripped = trimmed.replace(/&&/g, '').replace(/\d?>&\d?/g, '');
+  if (stripped.includes('&')) return false;
+  return splitReadOnlySegments(trimmed).every(isReadOnlySegment);
+}
+
+function splitReadOnlySegments(command: string): string[] {
+  return command
+    .split(/\s*(?:\|\||&&|[|;])\s*/g)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function isReadOnlySegment(segment: string): boolean {
+  const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  const command = stripShellQuotes(tokens[0] ?? '').toLowerCase();
+  if (!command) return false;
+  if (command === 'git') {
+    return READ_ONLY_GIT_SUBCOMMANDS.has(stripShellQuotes(tokens[1] ?? '').toLowerCase());
+  }
+  if (command === 'sed') {
+    return (
+      READ_ONLY_COMMANDS.has(command) &&
+      !tokens.some((token) => /^-.*i/.test(stripShellQuotes(token)))
+    );
+  }
+  if (command === 'find') {
+    return (
+      READ_ONLY_COMMANDS.has(command) &&
+      !tokens.some((token) => ['-exec', '-execdir', '-delete'].includes(stripShellQuotes(token)))
+    );
+  }
+  if (command === 'awk') {
+    return READ_ONLY_COMMANDS.has(command) && !/\bsystem\s*\(/.test(segment);
+  }
+  if (command === 'xargs') {
+    const invokedIndex = tokens.findIndex((token, index) => index > 0 && !token.startsWith('-'));
+    const invoked =
+      invokedIndex > 0 ? stripShellQuotes(tokens[invokedIndex] ?? '').toLowerCase() : '';
+    return Boolean(invoked) && READ_ONLY_COMMANDS.has(invoked);
+  }
+  return READ_ONLY_COMMANDS.has(command);
+}
+
+function stripShellQuotes(value: string): string {
+  return value.replace(/^["']|["']$/g, '');
+}

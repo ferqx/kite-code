@@ -27,7 +27,21 @@
 
 ## 工具名单单一事实源（ADR-0026）
 
-静态工具的 Schema、契约、副作用分类与执行器收敛到 ToolSpec Registry（`src/core/tools/registry/`），由 `toolSpecRegistryV1` 灰度切换（默认关闭，关闭时全部走现有 `definitions.ts` + `tool-runner` 路径）。迁移期不变量由 `tests/tools/tool-registry-conformance.test.ts` 棘轮守护：Policy 分类引用的工具名必须是已知名单（防 `list_files` 式幽灵名）；模型 ToolSet 不得携带 `execute`；写工具必须声明 mutation scope。模型参数的副作用自我声明与授权提议随 shell 迁移删除，审批决策只来自命令形态与授权状态。已迁移工具：`read_file`、`search_content`、`search_files`、`write_file`、`edit_file`（契约暂引用对应 `*_CONTRACT.sections`；write_file 迁移同批落地 ADR-0025 §2：`mode` 参数与 append 分支移除；edit_file 迁移同批落地 ADR-0026 §3 严格精确匹配与 ADR-0025 §1 先读后改 / 过期拒绝硬校验——未读或被外部修改的文件拒绝编辑并引导重读，模型初期 edit 失败率上升为设计意图）。
+阶段 2 的 computer、coordination、interrupt 与 runtime action 静态工具也已完成 Registry 单路径切换。`task` 的 role-based effects、子 Agent 依赖和结果传播由 spec 驱动；`tool_search` 在 spec 内完成 feature gate、inventory redirect、provider readiness 重试、候选裁剪和 `capability.search_completed` 事件投影；`ask_user` 以 `kind: interrupt` 注册并仍由 controller 产生 `user_input.requested`。
+
+事件型 ToolSpec 可通过 `ProjectedToolResult.runtimeEvents` 产出 Core Runtime 事件；controller 只追加这些结构化事件，不得重新计算 capability search、Skill activation 或 Plan 状态结果。该通道只引用 Core 事件类型，不引入 App/TUI 依赖。
+
+`read_skill_reference` 与 `complete_skill` 已迁入 Registry：spec 校验当前 task 的 active frame、Skill revision 和 compiled contract；reference 读取继续限制为声明文件、非 symlink、Skill 根目录内且不超过 128 KiB；completion 在 output schema 验证后投影 `skill.frame_closed` 与可选 verification 事件。
+
+`activate_skill` 也已迁入 Registry：controller 保留 disclosure、approval 与 mode-policy 前置治理；spec 负责 activation validation、inline/fork 生命周期、fork 结构化输出校验、frame close 和 verification 投影。fork 子 Agent 仅作为受治理 provider adapter 注入。
+
+`read_plan` 已作为 `runtime_action` 接入 Registry：spec 只接受当前 Task 的 active plan identity 与版本，可选 structural digest 必须匹配，并从不可变 Plan Artifact 返回完整文档；controller 不再重复解析或读取 Artifact。
+
+`update_plan` 也已作为 `runtime_action` 接入 Registry：spec 限定 building/executing 状态，校验 plan identity 与稳定 step ID，拒绝在仍有 pending/in-progress 步骤时完成计划，并投影 `plan.progress_updated`、可选 `plan.completed` 与模型结果。
+
+`write_plan` 已作为 `runtime_action` 接入 Registry：spec 保持 save→submit 两阶段 Artifact 协议、幂等保存、版本冲突、replan 元数据、review interrupt 和同批后续调用取消；模型表面不再携带 execute，controller 只追加 spec 投影事件，并仅在 save 立即完成时写入 `tool.finished`。
+
+静态工具的 Schema、契约、副作用分类与执行器收敛到 ToolSpec Registry（`src/core/tools/registry/`）。六个计算原语 `read_file`、`search_content`、`search_files`、`write_file`、`edit_file`、`shell_execute` 已完成切换，迁移 flag 与旧执行器不再保留。一致性不变量由 `tests/tools/tool-registry-conformance.test.ts` 棘轮守护：Policy 分类引用的工具名必须是已知名单；模型 ToolSet 不得携带 `execute`；写工具必须声明 mutation scope。write_file 同批落地 ADR-0025 §2；edit_file 同批落地 ADR-0026 §3 与 ADR-0025 §1。shell_execute 的模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；副作用、只读免审和审计 `action.intent` 全部由命令形态派生，审批 payload 不接受模型建议授权或 prefix rule。i10 以 `ls`、`pwd`、`git status`、`git diff --stat`、`rg` 语料守护真实 Approval Policy 的免审命中率。
 
 ## 自治规则
 

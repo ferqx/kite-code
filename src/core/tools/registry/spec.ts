@@ -7,9 +7,18 @@
  * 造成的漂移。见 `docs/design/2026-07-26-tool-spec-registry-rfc.md`。
  */
 import type { ZodType } from 'zod';
+import type { FeatureFlags } from '@/core/config/features';
+import type { McpRuntimeProvider } from '@/core/mcp';
+import type { PlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import type { RuntimeState } from '@/core/runtime/state';
+import type { SkillCatalogSnapshot } from '@/core/skills';
+import type { SubAgentResult } from '@/core/subagent/types';
 import type { ReadStateCheck } from '@/core/tools/read-state';
+import type { ShellExecutor } from '@/core/tools/shell';
 import type { ToolContractSection } from '@/core/tools/tool-contracts';
+import type { ShellNetworkMode } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 
 /**
@@ -29,7 +38,45 @@ export interface ToolContext {
 
 /** 执行上下文。迁移阶段按需扩展；Policy 预检暂留现有管线，阶段 1.2 上提为公共段。 */
 export interface ToolExecutionContext extends ToolContext {
+  toolCallId?: string;
   signal?: AbortSignal;
+  shellExecutor?: ShellExecutor;
+  shellNetworkMode?: ShellNetworkMode;
+  onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+  /** MCP inventory/resource specs consume the already-governed Runtime provider. */
+  mcpManager?: McpRuntimeProvider;
+  /** Governed sub-agent adapter injected by the harness to avoid Registry→runner cycles. */
+  runTask?: (input: {
+    subagent_type: 'explore' | 'plan' | 'code' | 'review';
+    task: string;
+  }) => Promise<SubAgentResult>;
+  /** Runtime search inputs captured at the current turn. */
+  toolSearch?: {
+    enabled: boolean;
+    mcpManager?: McpRuntimeProvider;
+    skillCatalog?: SkillCatalogSnapshot;
+    turnId: string;
+    toolCallId: string;
+  };
+  skillRuntime?: {
+    state: RuntimeState;
+    catalog?: SkillCatalogSnapshot;
+    verificationEnabled: boolean;
+    flags?: Readonly<FeatureFlags>;
+    runFork?: (input: {
+      agent: string;
+      capabilityCeiling: string[];
+      instructions: string;
+      workflowInput: Record<string, unknown>;
+      outputSchema: Record<string, unknown>;
+    }) => Promise<SubAgentResult | null>;
+  };
+  planRuntime?: {
+    state: RuntimeState;
+    artifacts: PlanArtifactStore;
+    modelMessageId?: string;
+    ordinal?: number;
+  };
   /** 调用方已持有执行授权且路径在工作区外（read_file 等外部路径门禁输入）。 */
   allowExternalPaths?: boolean;
   /** 写工具目标路径的读取状态检查结果（调用方注入，ADR-0025 §1 先读后改校验输入）。 */
@@ -65,6 +112,12 @@ export interface ProjectedToolResult {
     truncated?: boolean;
   };
   display: ToolDisplayHint;
+  /**
+   * Coordination/runtime-action specs may emit governed Core events alongside
+   * the model result. The controller persists these events; specs never depend
+   * on App/TUI types.
+   */
+  runtimeEvents?: RuntimeEvent[];
 }
 
 /** preExecute 钩子结果：放行，或 fail-fast 拒绝（ADR-0025 §1 先读后改/过期拒绝的落点）。 */

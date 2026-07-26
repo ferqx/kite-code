@@ -161,19 +161,7 @@ export function recordEvent(
           TRUNC_SUMMARY,
         );
       }
-      if (event.data.modelJustification) {
-        base.attributes['kite_code.approval.model_justification'] = trunc(
-          event.data.modelJustification,
-          TRUNC_SUMMARY,
-        );
-      }
       if (event.data.subagentId) base.attributes['kite_code.subagent.id'] = event.data.subagentId;
-      if (event.data.objective) {
-        base.attributes['kite_code.approval.objective'] = trunc(
-          event.data.objective,
-          TRUNC_SUMMARY,
-        );
-      }
       break;
 
     case 'need_input':

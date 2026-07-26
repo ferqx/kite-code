@@ -16,7 +16,6 @@ export interface FeatureFlags {
   skillWorkflowV1: boolean;
   verificationV1: boolean;
   toolSearchV1: boolean;
-  toolSpecRegistryV1: boolean;
   contextCompactionV2: boolean;
   contextCompactionAutoV1: boolean;
   contextCompactionManualV1: boolean;
@@ -36,7 +35,6 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   skillWorkflowV1: false,
   verificationV1: false,
   toolSearchV1: true,
-  toolSpecRegistryV1: false,
   contextCompactionV2: true,
   contextCompactionAutoV1: false,
   contextCompactionManualV1: true,
