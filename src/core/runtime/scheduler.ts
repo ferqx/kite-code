@@ -171,10 +171,13 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     return { type: 'stop' };
   }
 
-  // When every tool from the latest model response was rejected or cancelled
-  // (user actively denied approval or a sibling interaction cancelled them),
-  // stop the turn instead of calling the model — unless a new user message
-  // arrived after the rejection, which starts a new turn that must be processed.
+  // When every tool from the latest model response was explicitly rejected
+  // by the user (approval_rejected), stop the turn without calling the model
+  // again — the user already said no.  Policy denials (policy_denied) and
+  // other automatic failures still need a model call so the model can adjust.
+  //
+  // A new user message after the rejection starts a new turn that must be
+  // processed regardless of failure kind.
   const assistantEntries = state.transcript.messages.map((m, idx) => ({ m, idx })).reverse();
   const latestAssistantEntry = assistantEntries.find(
     (
@@ -186,16 +189,24 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   );
   if (latestAssistantEntry) {
     const { m: latestAssistantMsg, idx: latestAssistantIdx } = latestAssistantEntry;
-    const allToolCallsRejected = latestAssistantMsg.toolCalls.every((tc) => {
+    const allRejectedOrCancelled = latestAssistantMsg.toolCalls.every((tc) => {
       const call = state.tools.calls[tc.id];
       return call?.status === 'rejected' || call?.status === 'cancelled';
     });
-    if (allToolCallsRejected && latestAssistantMsg.toolCalls.length > 0) {
+    if (allRejectedOrCancelled && latestAssistantMsg.toolCalls.length > 0) {
       const hasNewUserMessageAfter = state.transcript.messages
         .slice(latestAssistantIdx + 1)
         .some((m) => m.kind === 'user');
       if (!hasNewUserMessageAfter) {
-        return { type: 'stop' };
+        // Only stop for user-driven rejection; policy denials and automatic
+        // failures still need a model call so the model can adjust.
+        const allUserRejected = latestAssistantMsg.toolCalls.every((tc) => {
+          const call = state.tools.calls[tc.id];
+          return call?.failure?.kind === 'approval_rejected';
+        });
+        if (allUserRejected) {
+          return { type: 'stop' };
+        }
       }
     }
   }
