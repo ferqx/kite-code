@@ -171,7 +171,7 @@ describe('eventReducer (blocks model)', () => {
       expect(r.folded).toBe(true);
     });
 
-    test('updates the active Thought preview without ending the current exploration summary', () => {
+    test('switches the active Thought window between reasoning and tool activity', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('first thought'));
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
@@ -186,8 +186,8 @@ describe('eventReducer (blocks model)', () => {
       expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
       expect(summaries[0]!.active).toBe(true);
       expect(summaries[0]!.latestActivity).toEqual({
-        kind: 'thinking',
-        text: 'second thought',
+        kind: 'tool',
+        callId: 'c2',
       });
     });
 
@@ -1055,7 +1055,7 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('EVENT.model_retry', () => {
-    test('appends text block for model_retry', () => {
+    test('sets retry status without appending output or closing the live stream', () => {
       const s = dispatch(fresh(), {
         type: 'EVENT',
         event: {
@@ -1063,10 +1063,7 @@ describe('eventReducer (blocks model)', () => {
           data: { attempt: 2, maxAttempts: 5, error: 'rate limit', delayMs: 1000 },
         },
       });
-      expect(flatBlocks(s)[0]!.kind).toBe('text');
-      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toContain(
-        'Model retry #2/5',
-      );
+      expect(flatBlocks(s)).toEqual([]);
       expect(s.status.retryState).toEqual({
         attempt: 2,
         maxAttempts: 5,
@@ -3405,6 +3402,478 @@ describe('eventReducer (blocks model)', () => {
       expect(s.interactionMode).toBe('accept_edits');
       expect(s.status.authorization).toBe('default');
     });
+  });
+});
+
+describe('model streaming RuntimeEvent rendering', () => {
+  test('renders cumulative text below the active Thought instead of inside it', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: 'Hel' });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: 'Hello' });
+
+    const blocks = flatBlocks(state);
+    const thoughtIndex = blocks.findIndex(
+      (block) =>
+        block.kind === 'reason' || (block.kind === 'text' && block.thoughtElapsedMs != null),
+    );
+    const textIndex = blocks.findIndex((block) => block.kind === 'text');
+    expect(thoughtIndex).toBeGreaterThanOrEqual(0);
+    expect(textIndex).toBeGreaterThan(thoughtIndex);
+    expect(blocks[textIndex]).toMatchObject({ content: 'Hello', streaming: true });
+    expect(blocks[textIndex]).not.toHaveProperty('pendingCaption');
+  });
+
+  test('updates only the live thinking preview for reasoning deltas', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'initial',
+    });
+    const reasonCount = flatBlocks(state).filter((block) => block.kind === 'reason').length;
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'cumulative preview.',
+    });
+
+    expect(flatBlocks(state).find((block) => block.kind === 'tool_summary')).toMatchObject({
+      latestActivity: { kind: 'thinking', text: 'cumulative preview.' },
+    });
+    expect(flatBlocks(state).filter((block) => block.kind === 'reason')).toHaveLength(reasonCount);
+  });
+
+  test('does not expose an incomplete reasoning tail until a sentence completes', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.reasoning_delta',
+      text: 'First complete sentence. partial',
+    });
+    let summary = flatBlocks(state).find(
+      (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+        block.kind === 'tool_summary',
+    );
+    expect(summary?.latestActivity).toEqual({
+      kind: 'thinking',
+      text: 'First complete sentence.',
+    });
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'First complete sentence. partial now complete!',
+    });
+    summary = flatBlocks(state).find(
+      (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+        block.kind === 'tool_summary',
+    );
+    expect(summary?.latestActivity).toEqual({
+      kind: 'thinking',
+      text: 'First complete sentence. partial now complete!',
+    });
+  });
+
+  test('creates Thought before streamed answer text when reasoning arrives first', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Hello from the model.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'streamed',
+      reasoningText: 'thinking',
+      text: 'Hello from the model.',
+      durationMs: 1_000,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'run.completed',
+      turnId: 'turn-1',
+      output: 'Hello from the model.',
+    });
+
+    const blocks = flatBlocks(state);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toMatchObject({
+      kind: 'reason',
+      content: 'thinking',
+    });
+    expect(blocks[1]).toMatchObject({
+      kind: 'text',
+      content: 'Hello from the model.',
+      thoughtElapsedMs: 1_000,
+    });
+  });
+
+  test('moves already streamed text behind Thought when reasoning arrives in a later frame', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Text arrived first.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'late thinking',
+    });
+    const intermediate = flatBlocks(state);
+    expect(intermediate.map((block) => block.kind)).toEqual(['reason', 'tool_summary', 'text']);
+    expect(intermediate[2]).toMatchObject({
+      kind: 'text',
+      content: 'Text arrived first.',
+      streaming: true,
+    });
+    expect(
+      intermediate.some((block) => block.kind === 'tool_summary' && block.pendingCaption != null),
+    ).toBe(false);
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'late-reasoning',
+      reasoningText: 'late thinking',
+      text: 'Text arrived first.',
+      durationMs: 800,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'run.completed',
+      turnId: 'turn-1',
+      output: 'Text arrived first.',
+    });
+
+    const blocks = flatBlocks(state);
+    expect(blocks.map((block) => block.kind)).toEqual(['reason', 'tool_summary', 'text']);
+    expect(blocks[2]).toMatchObject({
+      content: 'Text arrived first.',
+      streaming: false,
+    });
+    expect(blocks[1]).toMatchObject({ kind: 'tool_summary', modelMs: 800 });
+  });
+
+  test('preserves the frozen reconnect segment when late reasoning reorders the live tail', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'request-1',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'frozen prefix',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.retry',
+      attempt: 1,
+      maxAttempts: 5,
+      error: 'socket disconnected',
+      delayMs: 10,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: ' recovered suffix',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'late recovered reasoning',
+    });
+
+    const textBlocks = flatBlocks(state).filter(
+      (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+    );
+    expect(textBlocks.map((block) => block.content)).toEqual([
+      'frozen prefix',
+      ' recovered suffix',
+    ]);
+    expect(textBlocks.map((block) => block.streaming)).toEqual([false, true]);
+  });
+
+  test('settles terminal reasoning against only the current model response text', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'request-1',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'I will inspect it.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.queued',
+      toolCallId: 'read-1',
+      name: 'read_file',
+      args: { path: 'README.md' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.finished',
+      toolCallId: 'read-1',
+      name: 'read_file',
+      result: { ok: true, command: '', exitCode: 0, stdout: 'done', stderr: '' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'request-2',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'final reasoning',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Final answer.',
+    });
+    const currentReasoningCount = (blocks: OutputBlock[]) =>
+      blocks.filter(
+        (block) =>
+          (block.kind === 'reason' && block.content === 'final reasoning') ||
+          (block.kind === 'tool_summary' &&
+            block.hasThinking === true &&
+            block.modelRequestId === 'request-2'),
+      ).length;
+    const reasonCountBeforeTerminal = currentReasoningCount(flatBlocks(state));
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'answer-2',
+      reasoningText: 'final reasoning',
+      text: 'Final answer.',
+      durationMs: 500,
+    });
+
+    expect(currentReasoningCount(flatBlocks(state))).toBe(reasonCountBeforeTerminal);
+    expect(
+      flatBlocks(state).filter(
+        (block) => block.kind === 'text' && block.content === 'Final answer.',
+      ),
+    ).toHaveLength(1);
+  });
+
+  test('does not duplicate streamed reasoning when the terminal response settles it', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'same thought',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'reasoning-only',
+      reasoningText: 'same thought',
+      durationMs: 500,
+    });
+
+    const summary = flatBlocks(state).find((block) => block.kind === 'tool_summary');
+    expect(summary).toMatchObject({
+      timeline: [{ kind: 'thinking', text: 'same thought' }],
+      totalElapsedMs: 500,
+    });
+  });
+
+  test('uses the existing streaming text path when no phase block is active', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: 'first' });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: 'first line' });
+    expect(flatBlocks(state).at(-1)).toMatchObject({
+      kind: 'text',
+      content: 'first line',
+      streaming: true,
+    });
+  });
+
+  test('freezes complete Markdown chunks and keeps only the final component live', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    const markdown =
+      '# Result\n\nA paragraph.\n\n- one\n- two\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```ts\nconst x = 1\n```';
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: '# Result' });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: markdown });
+
+    const textBlocks = flatBlocks(state).filter(
+      (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+    );
+    expect(textBlocks).toHaveLength(2);
+    expect(textBlocks[0]?.streaming).not.toBe(true);
+    expect(textBlocks[1]).toMatchObject({
+      content: '```ts\nconst x = 1\n```',
+      streaming: true,
+    });
+    expect(textBlocks.map((block) => block.content).join('')).toBe(markdown);
+  });
+
+  test('does not freeze at blank lines inside a streaming fenced code block', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    const markdown = '```ts\nconst first = 1\n\nconst second = 2';
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: markdown });
+
+    const textBlocks = flatBlocks(state).filter(
+      (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+    );
+    expect(textBlocks).toHaveLength(1);
+    expect(textBlocks[0]).toMatchObject({ content: markdown, streaming: true });
+  });
+
+  test('deduplicates the legacy final event against paragraph-frozen streaming segments', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, { type: 'model.requested', requestId: 'req-1' });
+    const markdown = 'First paragraph.\n\nSecond paragraph.';
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: markdown });
+    const blockCount = flatBlocks(state).length;
+
+    state = dispatch(state, { type: 'EVENT', event: { type: 'final', data: markdown } });
+
+    const textBlocks = flatBlocks(state).filter(
+      (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+    );
+    expect(flatBlocks(state)).toHaveLength(blockCount);
+    expect(textBlocks.map((block) => block.content).join('')).toBe(markdown);
+  });
+
+  test('keeps streamed text between the settled Thought and a later exploration tool', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'I will inspect it.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.queued',
+      toolCallId: 'read-1',
+      name: 'read_file',
+      args: { path: 'README.md' },
+    });
+
+    const blocks = flatBlocks(state);
+    expect(blocks.map((block) => block.kind)).toEqual(['reason', 'text', 'tool_summary']);
+    expect(blocks[1]).toMatchObject({ kind: 'text', content: 'I will inspect it.' });
+    expect(
+      blocks
+        .filter((block) => block.kind === 'tool_summary')
+        .every((block) => !block.captions && !block.pendingCaption),
+    ).toBe(true);
+  });
+
+  test('detaches a streamed caption before a non-exploration tool', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'I will change it.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.queued',
+      toolCallId: 'write-1',
+      name: 'write_file',
+      args: { path: 'output.txt', content: 'done' },
+    });
+
+    expect(
+      flatBlocks(state).some(
+        (block) => block.kind === 'text' && block.content === 'I will change it.',
+      ),
+    ).toBe(true);
+  });
+
+  test('settles a streamed final answer without duplicating the terminal text', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Final answer.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'answer',
+      text: 'Final answer.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'run.completed',
+      turnId: 'turn-1',
+      output: 'Final answer.',
+    });
+
+    expect(
+      flatBlocks(state).filter(
+        (block) => block.kind === 'text' && block.content === 'Final answer.',
+      ),
+    ).toHaveLength(1);
+  });
+
+  test('freezes interrupted text and opens a new segment when deltas resume', () => {
+    let state = eventReducer(fresh(), { type: 'SET_RUNNING' });
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
+      event: { type: 'model.text_delta', text: 'partial answer' },
+    });
+    const streamingId = state.turns.at(-1)?.blocks.at(-1)?.id;
+
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'model.retry',
+        attempt: 1,
+        maxAttempts: 5,
+        error: 'socket disconnected',
+        delayMs: 10,
+      },
+    });
+
+    expect(state.status.retryState?.attempt).toBe(1);
+    expect(state.turns.at(-1)?.blocks.at(-1)).toMatchObject({
+      id: streamingId,
+      content: 'partial answer',
+      streaming: false,
+    });
+
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
+      event: { type: 'model.text_delta', text: ' continued' },
+    });
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'model.responded',
+        messageId: 'recovered',
+        text: 'partial answer continued',
+      },
+    });
+    expect(state.status.retryState).toBeNull();
+    expect(state.turns.at(-1)?.blocks.at(-1)).toMatchObject({
+      content: ' continued',
+      streaming: true,
+    });
+    expect(state.turns.at(-1)?.blocks.at(-1)?.id).not.toBe(streamingId);
+  });
+
+  test('preserves interrupted lines and renders divergent regeneration in a new segment', () => {
+    let state = eventReducer(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'old line one\nold line two',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.retry',
+      attempt: 1,
+      maxAttempts: 5,
+      error: 'socket disconnected',
+      delayMs: 10,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'new line one\nnew line two',
+    });
+
+    expect(
+      flatBlocks(state)
+        .filter((block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text')
+        .map((block) => block.content),
+    ).toEqual(['old line one\nold line two', 'new line one\nnew line two']);
   });
 });
 

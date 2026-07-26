@@ -114,19 +114,21 @@ const BlockRenderer = React.memo(function BlockRenderer({
           marginTop={gapFrom(prevBlock).marginTop}
           marginBottom={0}
         >
-          {/* ADR-0026：并入的纯思考题头——暗色、与正文零间隔、无圆点
+          {/* ADR-0026：并入的纯思考题头——暗色、与正文间隔一行、无圆点
               （● 保留给有状态的行）；TEXT_INDENT=2 使文字起始列与工具块名字列对齐。
-              ADR-0026: merged pure-thinking header — dim, zero gap to the
+              ADR-0026: merged pure-thinking header — dim, one-line gap to the
               body, no dot; TEXT_INDENT=2 aligns it with tool-block names. */}
           {block.thoughtElapsedMs != null && (
             <Text color={dt.dim}>Thought for {formatElapsed(block.thoughtElapsedMs)}</Text>
           )}
-          <MarkdownBlock
-            content={block.content}
-            streaming={block.streaming}
-            color={block.isError ? dt.error : undefined}
-            maxWidth={columns - TEXT_INDENT}
-          />
+          <Box marginTop={block.thoughtElapsedMs != null ? 1 : 0}>
+            <MarkdownBlock
+              content={block.content}
+              streaming={block.streaming}
+              color={block.isError ? dt.error : undefined}
+              maxWidth={columns - TEXT_INDENT}
+            />
+          </Box>
         </Box>
       );
     }

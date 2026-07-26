@@ -60,7 +60,12 @@ export {
 } from './interaction-mode';
 
 /** 可丢弃的缓冲事件类型（text/reason 为非关键信息，丢弃时不丢失用户可见状态） */
-const DISPOSABLE_EVENT_TYPES = new Set(['text', 'reason']);
+const DISPOSABLE_EVENT_TYPES = new Set([
+  'text',
+  'reason',
+  'model.text_delta',
+  'model.reasoning_delta',
+]);
 
 /** 工厂依赖：注入到每个 SessionRuntime */
 export interface SessionDeps {
@@ -119,6 +124,12 @@ export class SessionRuntime {
   /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
   private _pendingInterrupt: InterruptPayload | null = null;
   private _pendingResolve: ((action: UserAction) => void) | null = null;
+  private _deltaBuffer: {
+    dispatch: ((action: Action) => void) | null;
+    text?: Extract<RuntimeEvent, { type: 'model.text_delta' }>;
+    reasoning?: Extract<RuntimeEvent, { type: 'model.reasoning_delta' }>;
+    timer: ReturnType<typeof setTimeout> | null;
+  } = { dispatch: null, timer: null };
 
   constructor(threadId: string, workspace: string, deps: SessionDeps) {
     this.threadId = threadId;
@@ -136,6 +147,7 @@ export class SessionRuntime {
   // ── 公开 API ──
 
   abort(): void {
+    this._flushModelDeltas();
     // 必须先 resolve 挂起的中断，否则 generator 永远卡在 requestAction 的 Promise 上，
     // runAgent 的 finally 块无法执行，checkpointer.close() 永远不会被调用，导致 DB 句柄泄漏
     this.resolveInterrupt({ type: 'cancel' as const });
@@ -149,6 +161,7 @@ export class SessionRuntime {
   }
 
   clearBuffer(): void {
+    this._clearModelDeltas();
     this.eventBuffer = [];
     this.conversationHistory = [];
     this.pendingInterrupt = false;
@@ -156,6 +169,7 @@ export class SessionRuntime {
 
   /** 切换到前台：新事件路由到 provider.onEvent，唤醒挂起的后台中断 */
   setForeground(foreground: boolean): void {
+    this._flushModelDeltas();
     this._foreground = foreground;
     if (foreground) {
       this._foregroundWake?.();
@@ -342,6 +356,11 @@ export class SessionRuntime {
 
   /** Route the public RuntimeEvent stream directly to the foreground or buffer. */
   private _routeRuntimeEvent(event: RuntimeEvent, dispatch: (action: Action) => void): void {
+    if (event.type === 'model.text_delta' || event.type === 'model.reasoning_delta') {
+      this._bufferModelDelta(event, dispatch);
+      return;
+    }
+    this._flushModelDeltas();
     if (this._foreground) {
       dispatch({ type: 'RUNTIME_EVENT', event });
       return;
@@ -354,6 +373,36 @@ export class SessionRuntime {
       this.pendingInterrupt = true;
       this.notifyInterrupt?.();
     }
+  }
+
+  private _bufferModelDelta(
+    event: Extract<RuntimeEvent, { type: 'model.text_delta' | 'model.reasoning_delta' }>,
+    dispatch: (action: Action) => void,
+  ): void {
+    this._deltaBuffer.dispatch = dispatch;
+    if (event.type === 'model.text_delta') this._deltaBuffer.text = event;
+    else this._deltaBuffer.reasoning = event;
+    if (this._deltaBuffer.timer) return;
+    this._deltaBuffer.timer = setTimeout(() => this._flushModelDeltas(), 50);
+  }
+
+  private _flushModelDeltas(): void {
+    const buffered = this._deltaBuffer;
+    if (buffered.timer) clearTimeout(buffered.timer);
+    this._deltaBuffer = { dispatch: null, timer: null };
+    for (const event of [buffered.reasoning, buffered.text]) {
+      if (!event) continue;
+      if (this._foreground && buffered.dispatch) {
+        buffered.dispatch({ type: 'RUNTIME_EVENT', event });
+      } else {
+        this._pushToBuffer(event);
+      }
+    }
+  }
+
+  private _clearModelDeltas(): void {
+    if (this._deltaBuffer.timer) clearTimeout(this._deltaBuffer.timer);
+    this._deltaBuffer = { dispatch: null, timer: null };
   }
 
   /** Adapt existing Ink button actions at the UI edge and bind the persisted interaction id. */

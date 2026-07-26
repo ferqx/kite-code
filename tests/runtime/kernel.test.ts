@@ -878,6 +878,92 @@ test('runRuntimeLoop applies streamed tool events before the effect completes', 
   kernel.close();
 });
 
+test('runRuntimeLoop yields model deltas without persisting or reducing them', async () => {
+  const store = createRuntimeStore(':memory:');
+  const kernel = new AgentKernel({
+    store,
+    initialState: createInitialRuntimeState({
+      threadId: 'ephemeral-model-deltas',
+      userId: 'u',
+      workspace: '/',
+    }),
+    interactionMode: 'accept_edits',
+  });
+  const revisionBeforeDelta = kernel.getState().revision;
+  const events: RuntimeEvent[] = [];
+
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async (effect, _state, emit) => {
+      if (effect.type !== 'call_model') return [];
+      emit?.({ type: 'model.reasoning_delta', text: 'thinking' });
+      emit?.({ type: 'model.text_delta', text: 'partial' });
+      expect(kernel.getState().revision).toBe(revisionBeforeDelta);
+      return [{ type: 'model.responded', messageId: 'answer', text: 'complete' }];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+  )) {
+    events.push(event);
+  }
+
+  expect(events.slice(0, 3).map((event) => event.type)).toEqual([
+    'model.reasoning_delta',
+    'model.text_delta',
+    'model.responded',
+  ]);
+  expect(
+    store
+      .loadEvents('ephemeral-model-deltas')
+      .map(({ event }) => event.type)
+      .filter((type) => type.endsWith('_delta')),
+  ).toEqual([]);
+  expect(kernel.getState().transcript.final).toBe('complete');
+  kernel.close();
+});
+
+test('runRuntimeLoop drops ephemeral model deltas from a stale effect lease', async () => {
+  const store = createRuntimeStore(':memory:');
+  const kernel = new AgentKernel({
+    store,
+    initialState: createInitialRuntimeState({
+      threadId: 'stale-ephemeral-model-delta',
+      userId: 'u',
+      workspace: '/',
+    }),
+    interactionMode: 'accept_edits',
+  });
+  const events: RuntimeEvent[] = [];
+  let calls = 0;
+
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async (effect, _state, emit) => {
+      if (effect.type !== 'call_model') return [];
+      calls += 1;
+      if (calls === 1) {
+        kernel.processEvent({
+          type: 'model.retry',
+          attempt: 1,
+          maxAttempts: 5,
+          error: 'external revision change',
+          delayMs: 0,
+        });
+        emit?.({ type: 'model.text_delta', text: 'stale text' });
+        return [{ type: 'model.responded', messageId: 'stale', text: 'stale text' }];
+      }
+      return [{ type: 'model.responded', messageId: 'fresh', text: 'fresh text' }];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    4,
+  )) {
+    events.push(event);
+  }
+
+  expect(events.some((event) => event.type === 'model.text_delta')).toBe(false);
+  expect(kernel.getState().transcript.final).toBe('fresh text');
+  kernel.close();
+});
+
 function legacySubagentApprovalState(threadId: string): RuntimeState {
   const state = createInitialRuntimeState({ threadId, userId: 'u', workspace: '/workspace' });
   state.tools.calls['task-call'] = {

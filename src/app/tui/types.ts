@@ -56,6 +56,8 @@ export type OutputBlock =
       content: string;
       streaming?: boolean;
       isError?: boolean;
+      /** Model invocation that owns this live/reconnected response segment. */
+      modelRequestId?: string;
       /** 被文本关闭的纯思考块并入的时长（ms，ADR-0026）。存在时在文本块顶部
        *  渲染暗色 "Thought for Xs" 题头行；独立思考块已删除，时长全量转移。
        *  Elapsed (ms) of a pure-thinking block merged in when text closed it
@@ -104,6 +106,8 @@ export type OutputBlock =
       modelMs?: number;
       summaryLine: string;
       active: boolean;
+      /** Model invocation that most recently contributed reasoning to this phase. */
+      modelRequestId?: string;
       /** 是否有过 reason 思考块 — 用于三态顶行：Thought + tools / 仅 Thought / 仅 tools */
       hasThought: boolean;
       latestActivity?: ThoughtActivity;
@@ -219,6 +223,10 @@ export interface TuiState {
   explorationSummaryIds: Record<string, number>;
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
   currentThoughtSummaryId?: number;
+  /** Current model invocation, used to scope streamed terminal reconciliation. */
+  currentModelRequestId?: string;
+  /** Whether the current model invocation has emitted at least one reasoning delta. */
+  currentModelReasoningStreamed?: boolean;
   /** 思考延续上下文（ADR-0027 / 规则 23）：Thought 块被非探索工具或人机
    *  等待关闭时记录，同一响应批次内后续探索工具聚合继承 hasThinking /
    *  modelMs。由文本（ADR-0026）、model.requested、reason 事件清除。

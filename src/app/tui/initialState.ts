@@ -47,6 +47,8 @@ export const initialState: TuiState = {
   loadingSessionId: null,
   explorationSummaryIds: {},
   currentThoughtSummaryId: undefined,
+  currentModelRequestId: undefined,
+  currentModelReasoningStreamed: false,
   interactionMode: 'accept_edits',
   skillManifests: [],
 };

@@ -544,6 +544,19 @@ export async function invokeRuntimeModel(params: {
       maxOutputTokens:
         positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         modelCapabilities.maxOutputTokens,
+      streaming: modelCapabilities.streaming,
+      onTextDelta: (text) => params.emitRuntimeEvent?.({ type: 'model.text_delta', text }),
+      onReasoningDelta: (text) =>
+        params.emitRuntimeEvent?.({ type: 'model.reasoning_delta', text }),
+      onRetry: (attempt, maxAttempts, error, delayMs) => {
+        params.emitRuntimeEvent?.({
+          type: 'model.retry',
+          attempt,
+          maxAttempts,
+          error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+          delayMs,
+        });
+      },
     });
     const durationMs = Date.now() - callStartedAt;
     const toolCalls =

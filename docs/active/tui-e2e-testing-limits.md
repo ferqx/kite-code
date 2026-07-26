@@ -4,7 +4,7 @@
 
 读取时机：评估 TUI 测试可覆盖性、处理平台差异、PTY flaky、终端 resize、跨进程会话恢复或选择组件测试与系统测试边界时。
 
-验证：`bun run test:e2e`、`bun test tests/tui-layout.test.tsx tests/tui-reducer.test.ts tests/tui-system/harness/pty-process.test.ts`。
+验证：`bun run test:tui:system`、`bun test tests/tui-layout.test.tsx tests/tui-reducer.test.ts tests/tui-system/harness/pty-process.test.ts`。
 
 ## 当前能力
 
@@ -18,6 +18,8 @@
 4. Screen parser 不能证明所有 ANSI 状态正确；DEC synchronized output、光标和 wrapping 仍需专门测试。
 5. 外部编辑器、真实 MCP、真实模型和平台 sandbox 不属于默认 PTY suite，应使用边界测试或显式环境测试。
 6. PTY 测试成本高，不应用来穷举纯 reducer、policy 或 schema 分支。
+7. 完整 PTY suite 按文件隔离执行并设置单文件硬超时；因此失败会定位到具体
+   scenario，且不会因一个遗留 TUI 子进程无限占用整套测试。
 
 ## 分层选择
 

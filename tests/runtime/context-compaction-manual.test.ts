@@ -142,6 +142,7 @@ describe('manual context compaction service', () => {
       maxOutputTokens: 2_000,
       supportsUsageMetadata: true,
       supportsPromptCache: false,
+      streaming: false,
     });
     expect(preflight.reservedOutputTokens).toBe(2_000);
     expect(preflight.usableInputTokens).toBe(28_976);

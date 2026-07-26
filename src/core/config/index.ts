@@ -52,6 +52,7 @@ const modelEntrySchema = z.union([
       tokenizerFamily: z.string().min(1).optional(),
       supportsUsageMetadata: z.boolean().optional(),
       supportsPromptCache: z.boolean().optional(),
+      streaming: z.boolean().optional(),
     })
     .strict(),
 ]);
@@ -215,6 +216,7 @@ export interface AgentConfig {
     tokenizerFamily?: string;
     supportsUsageMetadata?: boolean;
     supportsPromptCache?: boolean;
+    streaming?: boolean;
   };
   interactionMode?: z.infer<typeof interactionModeSchema>;
   features?: Partial<FeatureFlags>;
@@ -375,6 +377,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
             ...(selected.supportsPromptCache != null
               ? { supportsPromptCache: selected.supportsPromptCache }
               : {}),
+            ...(selected.streaming != null ? { streaming: selected.streaming } : {}),
           },
         }
       : {}),
