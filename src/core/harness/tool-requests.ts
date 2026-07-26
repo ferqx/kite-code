@@ -340,27 +340,6 @@ export function toolRequestFromCall(
     };
   }
 
-  if (call.name === 'edit_file') {
-    const args = call.args as {
-      path?: string;
-      old_string?: string;
-      new_string?: string;
-      replace_all?: boolean;
-    };
-    return {
-      id: call.id,
-      name: 'edit_file',
-      args: {
-        path: args.path || '',
-        old_string: args.old_string || '',
-        new_string: args.new_string || '',
-        replace_all: args.replace_all,
-      },
-      reason: 'Model requested edit_file',
-      protectedCommand: `edit_file ${args.path || ''}`,
-    };
-  }
-
   if (call.name === 'shell_execute') {
     const args = normalizeShellActionEnvelope(call.args);
     return {

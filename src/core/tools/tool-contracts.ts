@@ -95,9 +95,7 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
       'JSON: ok (boolean), replacements (count), fromLine/toLine (line range), error (empty on success). ' +
       "Success: 'Replaced N occurrence(s) at line L1-L2'.",
     failureHandling:
-      'If old_string not found: the tool auto-retries with progressive fallbacks ' +
-      '(Level 1: trimEnd for trailing whitespace mismatch; Level 2: per-line trim for leading/trailing whitespace mismatch). ' +
-      'Only if all levels fail: re-read the file with read_file, then retry with exact content. ' +
+      'If old_string not found: matching is exact including whitespace — re-read the file with read_file and retry with the exact current content. ' +
       'If duplicate match: add more surrounding context to old_string (preferred) or set replace_all: true. ' +
       'Always verify the edit with read_file afterward.',
   },

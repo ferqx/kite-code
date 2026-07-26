@@ -6,6 +6,7 @@
  * 收敛到 spec；未迁移工具继续走 definitions.ts + tool-runner 旧路径。
  * `toolSpecRegistryV1` 关闭时本 Registry 只参与解析委托，不改变执行语义。
  */
+import { editFileSpec } from './builtins/edit-file';
 import { readFileSpec } from './builtins/read-file';
 import { searchContentSpec } from './builtins/search-content';
 import { searchFilesSpec } from './builtins/search-files';
@@ -16,4 +17,5 @@ export const builtinToolRegistry = createToolRegistry()
   .register(readFileSpec)
   .register(searchContentSpec)
   .register(searchFilesSpec)
-  .register(writeFileSpec);
+  .register(writeFileSpec)
+  .register(editFileSpec);

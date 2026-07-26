@@ -66,6 +66,7 @@
   - 已迁移：`read_file`（2026-07-26：spec + Registry 泛型解析委托 + runner dispatch 收敛 + schema-only 模型条目）。
   - 已迁移：`search_content`、`search_files`（2026-07-26：同模式；直调 execute 的测试改为经 dispatch 验证）。
   - 已迁移：`write_file`（2026-07-26：同批落地 ADR-0025 §2 —— `mode` 参数与 append 分支移除、契约重写、TUI Append 动词分支退役、file.ts appendFileSync 移除、tui-system 场景删除 append 轮）。
+  - 已迁移：`edit_file`（2026-07-26 A：spec + dispatch + ADR-0026 §3 严格精确匹配（无条件降级链与 tryMultiLineTrimmedMatch 移除，matchMode='trimmed' 内部 opt-in 保留）+ ADR-0025 §1 读取状态记录（read-state.ts，三类工具成功后记录指纹；强制校验在下一提交启用））。
   - 顺序：`read_file` → `search_files` → `search_content` → `write_file` → `edit_file` → `shell_execute`。
   - 每个工具：执行器从 runner 分支搬入 `spec.execute`（不改语义）→ 删除 definitions.ts 的带 execute 条目与 tool-requests/tool-contracts/tool-capabilities 对应分支 → description 逐字节稳定（golden 守护）→ 直调 execute 的测试改为经 dispatch。
   - `shell_execute` 迁移**含** ADR-0026 §2 参数收敛：`ShellActionEnvelope` 删七个治理字段；inspect 快车道纯命令形态化（审计 approval-policy 对 intent 的依赖）；`action` 元数据改为分类派生。

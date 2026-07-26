@@ -7,7 +7,7 @@ import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import { createTaskTool } from '@/core/subagent/task-tool';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
-import { editFile } from './file';
+import { editFileSpec } from './registry/builtins/edit-file';
 import { readFileSpec } from './registry/builtins/read-file';
 import { searchContentSpec } from './registry/builtins/search-content';
 import { searchFilesSpec } from './registry/builtins/search-files';
@@ -16,7 +16,6 @@ import { type ShellExecutor, shellTool } from './shell';
 import {
   ASK_USER_CONTRACT,
   buildDescription,
-  EDIT_FILE_CONTRACT,
   LIST_MCP_RESOURCES_CONTRACT,
   LIST_MCP_TOOLS_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
@@ -115,33 +114,11 @@ export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
     inputSchema: zodSchema(readFileSpec.inputSchema),
   });
 
+  // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 §3 严格精确匹配）：
+  // schema-only 条目，真实执行只经 Registry dispatch。
   const editFileTool = tool({
-    description: EDIT_FILE_CONTRACT.description,
-    inputSchema: zodSchema(
-      z.object({
-        path: z.string().describe('Path to the file to edit, relative to workspace'),
-        old_string: z
-          .string()
-          .describe(
-            'The exact text to replace. Must match the file content exactly, including whitespace.',
-          ),
-        new_string: z.string().describe('The new text to replace old_string with'),
-        replace_all: z
-          .boolean()
-          .optional()
-          .describe('Replace all occurrences (default: false, fails if multiple matches found)'),
-      }),
-    ),
-    execute: async ({ path, old_string, new_string, replace_all }) =>
-      JSON.stringify(
-        editFile({
-          workspace: input.workspace,
-          path,
-          oldString: old_string,
-          newString: new_string,
-          replaceAll: replace_all,
-        }),
-      ),
+    description: buildDescription(editFileSpec.contract),
+    inputSchema: zodSchema(editFileSpec.inputSchema),
   });
 
   // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 ADR-0025 §2 append 移除）：

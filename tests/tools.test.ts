@@ -140,7 +140,7 @@ describe('tool safety', () => {
     expect(readFileSync(join(workspace, 'config.ts'), 'utf8')).toContain('debug: false');
   });
 
-  test('edit_file auto-retry trimEnd: trailing whitespace mismatch succeeds', () => {
+  test('edit_file strict exact: trailing whitespace mismatch fails with re-read guidance', () => {
     const workspace = join(tmpdir(), 'kite-code-tools-autofix');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
@@ -148,7 +148,7 @@ describe('tool safety', () => {
     // File content has no trailing spaces
     writeFile({ workspace, path: 'cfg.ts', content: '  debug: true,\n  env: prod,\n' });
 
-    // oldString has trailing spaces — exact match fails, trimEnd rescues
+    // ADR-0026 §3: oldString has trailing spaces — matching is exact, no fallback
     const result = editFile({
       workspace,
       path: 'cfg.ts',
@@ -156,20 +156,21 @@ describe('tool safety', () => {
       newString: '  debug: false,',
     });
 
-    expect(result.ok).toBe(true);
-    expect(result.replacements).toBe(1);
-    const content = readFileSync(join(workspace, 'cfg.ts'), 'utf8');
-    expect(content).toContain('debug: false');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('not found');
+    expect(result.error).toContain('read_file');
+    // File untouched
+    expect(readFileSync(join(workspace, 'cfg.ts'), 'utf8')).toContain('debug: true');
   });
 
-  test('edit_file auto-retry per-line: leading whitespace mismatch succeeds', () => {
+  test('edit_file strict exact: leading whitespace mismatch fails', () => {
     const workspace = join(tmpdir(), 'kite-code-tools-autofix-ml');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
     writeFile({ workspace, path: 'f.ts', content: '  const x = 1;\n  const y = 2;\n' });
 
-    // oldString stripped of indent — exact + trimEnd fail, per-line trim rescues
+    // ADR-0026 §3: oldString stripped of indent — exact match fails, no per-line fallback
     const result = editFile({
       workspace,
       path: 'f.ts',
@@ -177,10 +178,10 @@ describe('tool safety', () => {
       newString: 'const x = 10;\nconst y = 20;',
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('not found');
     const content = readFileSync(join(workspace, 'f.ts'), 'utf8');
-    expect(content).toContain('const x = 10;');
-    expect(content).toContain('const y = 20;');
+    expect(content).toContain('const x = 1;');
   });
 
   test('edit_file fails when old_string not found', () => {

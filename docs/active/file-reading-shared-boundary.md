@@ -45,6 +45,8 @@ Workspace: /d/work/my-project
 
 `read_file` / `search_content` / `search_files` 工具调用的编排已迁入 ToolSpec Registry dispatch（`dispatchRegisteredTool`，ADR-0026 S1.2）：各 spec 的 `execute` 仍调用 `readFile` / 原生搜索，字节级单入口 `readTextContent` 与本边界全部规则不变；外部路径 grant 检查经 `ToolExecutionContext.allowExternalPaths` 注入。
 
+会话级读取状态跟踪（`src/core/tools/read-state.ts`，ADR-0025 §1）：`read_file` / `write_file` / `edit_file` 成功后按规范化路径记录内容指纹（sha256，换行正规化后文本），tracker 以 threadId 为键（主会话与 subagent fork 共享）。当前仅记录，供随后启用的 edit"先读后改 / 过期拒绝"前置校验消费；记录本身不改变工具语义，且 best-effort——不得因跟踪失败中断工具执行。
+
 边界提供两个入口，共享同一个 `decodeTextBuffer` 解码核心（编码检测、二进制检测、换行正规化行为完全一致）：
 
 | 入口 | I/O | 使用场景 |

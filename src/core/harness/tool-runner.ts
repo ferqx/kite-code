@@ -20,8 +20,10 @@ import {
   formatDiffOutput,
   formatMultiHunkDiff,
 } from '@/core/tools/diff';
-import { editFile, readTextContent } from '@/core/tools/file';
+import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
+import { fileContentHash, sessionReadTracker } from '@/core/tools/read-state';
+import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
 import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
 import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
@@ -76,6 +78,15 @@ function safeRecordPreimage(
 function isExternalPathArg(pathArg: string): boolean {
   const normalized = msys2ToWindowsPath(pathArg);
   return isAbsolute(normalized) || normalized.startsWith('~');
+}
+
+/** 规范化路径参数（读取状态跟踪的键，与 readTextContent 的解析一致）。 */
+function canonicalFilePath(workspace: string, pathArg: string, allowExternal: boolean): string {
+  try {
+    return resolvePath(workspace, pathArg, { allowExternal });
+  } catch {
+    return pathArg;
+  }
 }
 
 /** runApprovedTool 输入参数 / Input for runApprovedTool */
@@ -305,6 +316,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
           totalLines: 0,
           path: filePath,
         };
+    if (output.ok) {
+      // ADR-0025 §1 读取状态记录（当前仅记录；"先读后改"强制校验在后续提交启用）。
+      sessionReadTracker(threadId || workspace).record(
+        canonicalFilePath(workspace, filePath, allowExternal),
+        fileContentHash(output.content),
+      );
+    }
     return withFailureGuidance(request, {
       ok: output.ok,
       command: `read_file ${filePath}`,
@@ -339,14 +357,35 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       preEditRead.ok ? preEditRead.content : null,
       preEditRead.ok,
     );
-    const result = editFile({
-      workspace,
-      path: editPath,
-      oldString: request.args.old_string as string,
-      newString: (request.args.new_string ?? '') as string,
-      replaceAll: request.args.replace_all as boolean | undefined,
-      allowExternal,
-    });
+    // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 §3 严格精确匹配）：
+    // 执行经 dispatchRegisteredTool；成功后记录读取指纹（ADR-0025 §1 跟踪；
+    // "先读后改"强制校验在后续提交启用）。
+    const dispatched = await dispatchRegisteredTool(
+      editFileSpec,
+      {
+        path: editPath,
+        old_string: request.args.old_string as string,
+        new_string: (request.args.new_string ?? '') as string,
+        replace_all: request.args.replace_all as boolean | undefined,
+      },
+      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+    );
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `edit_file ${editPath}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
+      });
+    }
+    const result = dispatched.output;
+    if (result.ok && result.content !== undefined) {
+      sessionReadTracker(threadId || workspace).record(
+        canonicalFilePath(workspace, editPath, allowExternal),
+        fileContentHash(result.content),
+      );
+    }
     let stdout = '';
     if (result.ok) {
       const parts: string[] = [];
@@ -452,6 +491,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       });
     }
     const result = dispatched.output;
+    if (result.ok) {
+      // ADR-0025 §1 读取状态记录：写入成功后模型持有全部内容，等价于一次读取。
+      // 哈希取换行正规化后的文本，与后续 read_file 回读指纹一致。
+      sessionReadTracker(threadId || workspace).record(
+        canonicalFilePath(workspace, filePath, allowExternal),
+        fileContentHash(normalizeEOL(content)),
+      );
+    }
 
     let stdout = '';
     if (result.ok) {
