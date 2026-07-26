@@ -31,5 +31,6 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0026](0026-thought-text-header-merge.md)              | accepted   | 纯思考块关闭时并入文本题头（文本关闭 Thought 条款被 0030 取代）                    |
 | [0027](0027-thought-carryover-non-text-boundary.md)    | accepted   | 思考延续跨过非探索工具边界，阶段边界后新建聚合继承思考标记                         |
 | [0030](0030-exploration-phase-block.md)                | accepted   | 只读探索阶段 = 单一存活块：模型调用不切分、文本吸收为块顶字幕、圆点全程动画        |
+| [0031](0031-model-streaming-text-deltas.md)            | proposed   | 模型响应流式化：streamText + text/reasoning delta 事件，回答合成期间逐字可见       |
 | [0028](0028-thought-text-boundary-attribution-carryover.md) | accepted | 文本边界并入题头且延续思考归属，取代 0026 的"文本不继承"条款                  |
 | [0029](0029-thought-run-visual-aggregation.md)         | accepted   | 连续 Thought 块渲染层视觉聚合，reducer 切分不变                                    |
