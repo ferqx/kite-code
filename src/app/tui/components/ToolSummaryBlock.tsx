@@ -306,9 +306,16 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   // with tool-block names. Placed after all hooks (rules-of-hooks).
   if (!isRunning) {
     return (
-      <Box>
-        {/* 两个空格列位 = 圆点列宽（"● "），避免 settle 时标题横向跳动 */}
-        <Text color={dt.dim}>{`  ${summaryLabel}`}</Text>
+      <Box flexDirection="column">
+        <Box>
+          {/* 两个空格列位 = 圆点列宽（"● "），避免 settle 时标题横向跳动 */}
+          <Text color={dt.dim}>{`  ${summaryLabel}`}</Text>
+        </Box>
+        {captionContent !== '' && (
+          <Box paddingLeft={2}>
+            <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
+          </Box>
+        )}
       </Box>
     );
   }
