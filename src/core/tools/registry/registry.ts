@@ -12,10 +12,10 @@ import { descriptorRevision } from '@/core/capabilities/catalog';
 import type { ToolCapability } from '@/core/policies/tool-capabilities';
 import { buildDescription } from '@/core/tools/tool-contracts';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
-import type { ToolContext, ToolSpec } from './spec';
+import type { ExecutableToolSpec, InterruptToolSpec, ToolContext } from './spec';
 
 // biome-ignore lint/suspicious/noExplicitAny: 异构 spec 存储需要双变参数位置
-type AnyToolSpec = ToolSpec<any, any>;
+type AnyToolSpec = ExecutableToolSpec<any, any> | InterruptToolSpec<any>;
 
 /** schema-only 模型工具条目。execute 必须不存在（一致性不变量 i2）。 */
 export interface SchemaOnlyModelTool {

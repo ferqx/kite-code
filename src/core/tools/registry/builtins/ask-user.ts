@@ -53,7 +53,7 @@ export const askUserInputSchema = z
     }),
   );
 
-export const askUserSpec: ToolSpec<UserInputRequest, { ok: false; error: string }> = {
+export const askUserSpec: ToolSpec<UserInputRequest> = {
   name: 'ask_user',
   kind: 'interrupt',
   contract: ASK_USER_CONTRACT.sections,
@@ -65,14 +65,5 @@ export const askUserSpec: ToolSpec<UserInputRequest, { ok: false; error: string 
     sideEffect: false,
     classificationReason: 'Pauses execution for explicit user input.',
   }),
-  execute: async () => ({
-    ok: false,
-    error: 'ask_user must be handled by the user_input interrupt node.',
-  }),
-  projectResult: (output) => ({
-    ok: false,
-    modelContent: output.error,
-    resultMeta: {},
-    display: { verb: 'Ask' },
-  }),
+  createInterrupt: (input) => input,
 };

@@ -69,6 +69,7 @@
 
 - 修改工具实现行为时必须同步更新对应契约的四个 section。
 - 修改 `tool-runner.ts` 中的执行结果格式、错误信息或 `toolUsageGuidance()` 时，必须检查契约的 `outputFormat` 和 `failureHandling` 是否一致。
+- 修改静态工具的模型结果、截断、diff 或结构化元数据时，必须在对应 `spec.projectResult()` 中完成；Runner/Controller 只消费投影。
 - 新增工具时必须先创建 ToolSpec 契约，再在生产 Registry 中注册；`definitions.ts` 只投影 Registry，不得再次枚举静态工具名。
 
 ## 不要做

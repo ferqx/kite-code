@@ -47,12 +47,14 @@ import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
 import { readPlanSpec } from '@/core/tools/registry/builtins/read-plan';
 import {
   activateSkillSpec,
   completeSkillSpec,
   readSkillReferenceSpec,
 } from '@/core/tools/registry/builtins/skill-runtime';
+import { taskSpec } from '@/core/tools/registry/builtins/task';
 import { toolSearchSpec } from '@/core/tools/registry/builtins/tool-search';
 import { updatePlanSpec } from '@/core/tools/registry/builtins/update-plan';
 import { writePlanSpec } from '@/core/tools/registry/builtins/write-plan';
@@ -64,12 +66,6 @@ import type { InteractionMode } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
 
-type RegisteredRuntimeOutput = {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-};
-
 function appendProjectedRuntimeEvents(
   events: RuntimeEvent[],
   projected: ProjectedToolResult,
@@ -80,23 +76,25 @@ function appendProjectedRuntimeEvents(
 function registeredToolFinishedEvent(input: {
   toolCallId: string;
   name: string;
-  output: RegisteredRuntimeOutput;
+  projected: ProjectedToolResult;
   command: string;
   includeStatus?: boolean;
 }): RuntimeEvent {
+  const { projected } = input;
   return {
     type: 'tool.finished',
     toolCallId: input.toolCallId,
     name: input.name,
     result: {
-      ok: input.output.ok,
+      ok: projected.ok,
       command: input.command,
-      exitCode: input.output.ok ? 0 : -1,
-      stdout: input.output.stdout,
-      stderr: input.output.stderr,
+      exitCode: projected.ok ? 0 : -1,
+      stdout: projected.ok ? projected.modelContent : '',
+      stderr: projected.ok ? '' : projected.modelContent,
+      resultMeta: projected.resultMeta,
       ...(input.includeStatus
         ? {
-            status: input.output.ok ? ('success' as const) : ('error' as const),
+            status: projected.ok ? ('success' as const) : ('error' as const),
           }
         : {}),
     },
@@ -457,22 +455,29 @@ async function handleSubAgentResume(params: {
     return events;
   }
 
-  // Emit tool.finished for the task tool — the sub-agent has produced its final result
-  const output = JSON.stringify(result);
-  const ok = result.ok !== false;
-  events.push({
-    type: 'tool.finished',
-    toolCallId: params.toolCallId,
-    name: 'task',
-    result: {
-      ok,
-      command: 'task',
-      exitCode: ok ? 0 : -1,
-      stdout: output,
-      stderr: ok ? '' : output,
-      status: ok ? ('success' as const) : ('error' as const),
+  // Emit tool.finished for the task tool — the sub-agent has produced its final
+  // result.  The payload is taskSpec's projection, the same source the runner's
+  // task branch consumes (ADR-0043 §1); the controller no longer hand-builds
+  // a second task result format.
+  const projected = taskSpec.projectResult(
+    { available: true, result },
+    {
+      workspace: params.state.session.workspace,
+      invocationInput: {
+        subagent_type: forkRole(continuation.role.role),
+        task: continuation.task,
+      },
     },
-  });
+  );
+  events.push(
+    registeredToolFinishedEvent({
+      toolCallId: params.toolCallId,
+      name: 'task',
+      projected,
+      command: 'task',
+      includeStatus: true,
+    }),
+  );
 
   return events;
 }
@@ -649,18 +654,14 @@ export async function executeRuntimeTools(params: {
         continue;
       }
       appendProjectedRuntimeEvents(events, dispatched.projected);
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: true,
+      events.push(
+        registeredToolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          projected: dispatched.projected,
           command: request.name,
-          exitCode: 0,
-          stdout: dispatched.output.stdout,
-          stderr: dispatched.output.stderr,
-        },
-      });
+        }),
+      );
       continue;
     }
     if (request.name === 'activate_skill') {
@@ -832,7 +833,7 @@ export async function executeRuntimeTools(params: {
         registeredToolFinishedEvent({
           toolCallId,
           name: request.name,
-          output: dispatched.output,
+          projected: dispatched.projected,
           command: request.name,
           includeStatus: true,
         }),
@@ -862,7 +863,7 @@ export async function executeRuntimeTools(params: {
         registeredToolFinishedEvent({
           toolCallId,
           name: request.name,
-          output: dispatched.output,
+          projected: dispatched.projected,
           command: request.name,
         }),
       );
@@ -893,7 +894,7 @@ export async function executeRuntimeTools(params: {
         registeredToolFinishedEvent({
           toolCallId,
           name: request.name,
-          output: dispatched.output,
+          projected: dispatched.projected,
           command: request.name,
         }),
       );
@@ -913,11 +914,20 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
+      // 中断契约在 spec 闭环：事件载荷经 askUserSpec.createInterrupt 生成
+      // （Schema 规范化结果），Controller 不再手工组装中断内容。
+      // The interrupt contract closes in the spec: the event payload is built
+      // by askUserSpec.createInterrupt; the controller does not hand-assemble
+      // interrupt content.
       events.push({
         type: 'user_input.requested',
         interactionId: genInteractionId(),
         toolCallId,
-        request: request.args,
+        request: askUserSpec.createInterrupt(request.args, {
+          workspace: params.state.session.workspace,
+          threadId: params.state.session.threadId,
+          phase: getAgentPhase(getActivePlanning(params.state)),
+        }),
       });
       continue;
     }
@@ -941,7 +951,7 @@ export async function executeRuntimeTools(params: {
         registeredToolFinishedEvent({
           toolCallId,
           name: request.name,
-          output: dispatched.output,
+          projected: dispatched.projected,
           command: '',
         }),
       );
@@ -977,7 +987,7 @@ export async function executeRuntimeTools(params: {
           registeredToolFinishedEvent({
             toolCallId,
             name: request.name,
-            output: dispatched.output,
+            projected: dispatched.projected,
             command: '',
           }),
         );
@@ -1006,7 +1016,7 @@ export async function executeRuntimeTools(params: {
         registeredToolFinishedEvent({
           toolCallId,
           name: request.name,
-          output: dispatched.output,
+          projected: dispatched.projected,
           command: '',
         }),
       );

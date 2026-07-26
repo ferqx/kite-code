@@ -61,12 +61,10 @@ export const readFileSpec: ToolSpec<ReadFileInput, ReadFileOutput> = {
       rawContent: result.rawContent,
     };
   },
-  // 结果投影供未来统一管线消费；迁移期 runner 仍从 output 组装与旧路径
-  // 字节一致的 ToolExecutionResult（见 tool-runner.ts read_file 分支）。
   projectResult: (output) => ({
     ok: output.ok,
     modelContent: output.ok ? (output.content ?? '') : (output.error ?? ''),
-    resultMeta: {},
+    resultMeta: { path: output.path, totalLines: output.totalLines },
     display: { verb: 'Read', preview: output.path },
   }),
 };

@@ -12,7 +12,7 @@ import type { McpRuntimeProvider } from '@/core/mcp';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { PlanRuntimeContext } from '@/core/runtime/plan-facade';
-import type { RuntimeState } from '@/core/runtime/state';
+import type { RuntimeState, ToolResultMeta } from '@/core/runtime/state';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SubAgentResult } from '@/core/subagent/types';
 import type { ReadStateCheck } from '@/core/tools/read-state';
@@ -84,7 +84,14 @@ export interface ToolExecutionContext extends ToolContext {
   /** 调用方已持有执行授权且路径在工作区外（read_file 等外部路径门禁输入）。 */
   allowExternalPaths?: boolean;
   /** 写工具目标路径的读取状态检查结果（调用方注入，ADR-0042 §1 先读后改校验输入）。 */
-  writeTarget?: { path: string; readState?: ReadStateCheck };
+  writeTarget?: {
+    path: string;
+    readState?: ReadStateCheck;
+    previousContent?: string;
+    existed?: boolean;
+  };
+  /** Registry dispatch 注入的已解析参数，仅供 projectResult 生成规范结果。 */
+  invocationInput?: unknown;
 }
 
 /**
@@ -110,11 +117,17 @@ export interface ProjectedToolResult {
   ok: boolean;
   /** 模型可见内容（统一截断与失败引导后的文本）。 */
   modelContent: string;
-  resultMeta: {
-    /** 写工具必须声明受影响的工作区路径（一致性不变量 i5）。 */
-    workspaceMutationScope?: string[];
-    truncated?: boolean;
-  };
+  /**
+   * 双输出流工具（shell_execute、search_*）的逐流投影：stdout/stderr 分别
+   * 截断并在失败时两路保留。Runner 消费该字段重建双输出流；单流工具省略，
+   * 此时 modelContent 是唯一模型通道。
+   * Per-stream projection for dual-stream tools: stdout/stderr are truncated
+   * independently and both survive failure. The runner consumes this field to
+   * rebuild the two streams; single-stream tools omit it and modelContent is
+   * the sole model channel.
+   */
+  streams?: { stdout: string; stderr: string };
+  resultMeta: ToolResultMeta;
   display: ToolDisplayHint;
   /**
    * Coordination/runtime-action specs may emit governed Core events alongside
@@ -129,7 +142,7 @@ export type PreExecuteOutcome =
   | { proceed: true }
   | { proceed: false; rejection: { ok: false; error: string; guidance?: string } };
 
-export interface ToolSpec<Input = unknown, Output = unknown> {
+interface BaseToolSpec<Input = unknown> {
   /** 模型可见名；稳定 snake_case（ADR-0043 §4 决定不改名）。 */
   readonly name: string;
   readonly kind: ToolKind;
@@ -155,8 +168,30 @@ export interface ToolSpec<Input = unknown, Output = unknown> {
     input: Input,
     context: ToolExecutionContext,
   ): PreExecuteOutcome | Promise<PreExecuteOutcome>;
+}
+
+export interface ExecutableToolSpec<Input = unknown, Output = unknown> extends BaseToolSpec<Input> {
+  readonly kind: Exclude<ToolKind, 'interrupt'>;
   /** 唯一执行器。只有 Registry dispatch 可以调用它。 */
   execute(input: Input, context: ToolExecutionContext): Promise<Output>;
-  /** 结果投影：模型内容 + resultMeta + display 提示。 */
-  projectResult(output: Output, context: ToolExecutionContext): ProjectedToolResult;
+  /**
+   * 结果投影：模型内容 + resultMeta + display 提示。
+   * 上下文携带 `invocationInput`——由 Registry dispatch 注入、恒等于
+   * inputSchema 解析结果（一致性不变量 i1）；实现直接消费该类型化字段，
+   * 不得再做强转或逐字段重映射。
+   */
+  projectResult(
+    output: Output,
+    context: ToolExecutionContext & { invocationInput: Input },
+  ): ProjectedToolResult;
 }
+
+export interface InterruptToolSpec<Input = unknown> extends BaseToolSpec<Input> {
+  readonly kind: 'interrupt';
+  /** 构造中断协议；interrupt 不存在 execute/projectResult。 */
+  createInterrupt(input: Input, context: ToolContext): Input;
+}
+
+export type ToolSpec<Input = unknown, Output = never> = [Output] extends [never]
+  ? InterruptToolSpec<Input>
+  : ExecutableToolSpec<Input, Output>;

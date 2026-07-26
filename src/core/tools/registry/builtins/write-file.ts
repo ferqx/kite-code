@@ -4,8 +4,10 @@
  * whenToUse（创建或整文件重写，追加由 edit_file 尾部匹配或 shell 表达）。
  */
 import { z } from 'zod';
+import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
 import { type WriteFileResult, writeFile } from '@/core/tools/file';
 import { WRITE_FILE_CONTRACT } from '@/core/tools/tool-contracts';
+import { projectionDigest, truncateProjectedLines } from '../projection';
 import type { ToolSpec } from '../spec';
 
 export interface WriteFileToolInput {
@@ -37,14 +39,48 @@ export const writeFileSpec: ToolSpec<WriteFileToolInput, WriteFileResult> = {
       content: input.content,
       allowExternal: context.allowExternalPaths === true,
     }),
-  // 迁移期 runner 仍组装 diff 展示、截断与 resultMeta（与旧路径字节一致）；
-  // projectResult 供未来统一管线消费。
-  projectResult: (output) => ({
-    ok: output.ok,
-    modelContent: output.ok
-      ? `Wrote ${output.lines ?? 0} lines to ${output.path}`
-      : (output.error ?? ''),
-    resultMeta: { workspaceMutationScope: output.path ? [output.path] : [] },
-    display: { verb: 'Write', preview: output.path },
-  }),
+  projectResult: (output, context) => {
+    // invocationInput 由 Registry dispatch 注入且类型化（i1），无需强转。
+    const input = context.invocationInput;
+    if (!output.ok) {
+      return {
+        ok: false,
+        modelContent: output.error ?? '',
+        resultMeta: {
+          path: input.path,
+          truncated: false,
+          workspaceMutationScope: input.path ? [input.path] : [],
+        },
+        display: { verb: 'Write', preview: input.path },
+      };
+    }
+    let rawContent: string;
+    if (context.writeTarget?.existed && context.writeTarget.previousContent !== undefined) {
+      const diff = computeLineDiff(context.writeTarget.previousContent, input.content, 1);
+      rawContent =
+        diff.addedLines === 0 && diff.removedLines === 0
+          ? formatContentOutput(
+              input.content,
+              `Wrote ${output.lines ?? 0} ${output.lines === 1 ? 'line' : 'lines'} to ${input.path} (content unchanged)`,
+            )
+          : formatDiffOutput(diff);
+    } else {
+      rawContent = formatContentOutput(
+        input.content,
+        `Wrote ${output.lines ?? 0} lines to ${input.path}`,
+      );
+    }
+    const projected = truncateProjectedLines(rawContent);
+    return {
+      ok: true,
+      modelContent: projected.content,
+      resultMeta: {
+        path: input.path,
+        truncated: projected.truncated,
+        workspaceMutationScope: input.path ? [input.path] : [],
+        rawResultDigest: projectionDigest(rawContent, '', 0),
+      },
+      display: { verb: 'Write', preview: input.path },
+    };
+  },
 };

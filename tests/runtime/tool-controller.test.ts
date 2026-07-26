@@ -101,6 +101,47 @@ describe('executeRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
+  test('ask_user emits user_input.requested with the interrupt spec payload', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-ask-user-interrupt',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.ask = {
+      toolCallId: 'ask',
+      modelMessageId: 'model',
+      name: 'ask_user',
+      args: { questions: [{ question: 'Continue with the migration?' }] },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('ask');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['ask'] });
+
+    const requested = events.find(
+      (event): event is Extract<RuntimeEvent, { type: 'user_input.requested' }> =>
+        event.type === 'user_input.requested',
+    );
+    expect(requested).toBeDefined();
+    // 载荷是 Schema 规范化的中断内容：question 从 questions[0] 派生，
+    // options/allow_free_text 补齐默认值——模型原始 args 不直通事件。
+    expect(requested?.request).toEqual({
+      question: 'Continue with the migration?',
+      options: [],
+      allow_free_text: true,
+      questions: [{ question: 'Continue with the migration?', options: [], allow_free_text: true }],
+    });
+  });
+
+  test('controller routes the ask_user payload through askUserSpec.createInterrupt', () => {
+    const source = readFileSync(
+      new URL('../../src/core/controllers/tool-controller.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain('askUserSpec.createInterrupt(');
+  });
+
   test('fails closed when a provider reconnect changes the bound descriptor revision', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-provider-revision-drift',

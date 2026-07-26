@@ -117,9 +117,9 @@ Workspace: /d/work/my-project
 
 模型不再需要显式 `matchMode: 'trimmed'` 来处理常见空白不匹配。仅在多行且多命中时返回模糊错误。
 
-### shell_execute 输出截断（`tool-runner.ts:353-363`，2026-06-23）
+### 工具输出截断（`src/core/tools/registry/projection.ts`）
 
-`truncateToolOutput` 对超过 4000 字符的 stdout/stderr 做 head+tail 截断，中间标注省略行数。仅截断不改写（零幻觉），保留首尾信息。
+`truncateProjectedOutput` 对单路超过 4000 字符的输出做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。仅截断不改写（零幻觉），保留首尾信息。失败时两路输出都保留，Runner 只消费投影，不再自带第二份截断实现。
 
 ### rg exit code 1 ≠ error（`tool-contracts.ts`、`system-prompt.txt`）
 

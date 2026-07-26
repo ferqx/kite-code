@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { WEB_FETCH_CONTRACT } from '@/core/tools/tool-contracts';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { WebFetchResult } from '@/core/web/types';
+import { projectionDigest, truncateProjectedOutput } from '../projection';
 import type { ToolSpec } from '../spec';
 
 export const webFetchInputSchema = z.object({
@@ -66,10 +67,34 @@ export const webFetchSpec: ToolSpec<WebFetchInput, WebFetchOutput> = {
       };
     }
   },
-  projectResult: (output) => ({
-    ok: output.ok,
-    modelContent: output.ok ? (output.content ?? '') : (output.error ?? 'unknown error'),
-    resultMeta: { truncated: output.ok ? output.truncated : false },
-    display: { verb: 'Fetch' },
-  }),
+  projectResult: (output, context) => {
+    // invocationInput 由 Registry dispatch 注入且类型化（i1），无需强转。
+    const input = context.invocationInput;
+    const rawContent = output.ok
+      ? [
+          `Fetched: ${output.title ?? output.finalUrl ?? input.url}`,
+          output.contentType ? `Type: ${output.contentType}` : '',
+          output.truncated ? '(content truncated)' : '',
+          '',
+          output.content ?? '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : `Failed to fetch ${input.url}: ${output.error ?? 'unknown error'}`;
+    const modelContent = truncateProjectedOutput(
+      rawContent,
+      Math.max(8000, (input.max_chars ?? 8000) + 500),
+    );
+    return {
+      ok: output.ok,
+      modelContent,
+      resultMeta: {
+        ...(output.ok && !output.truncated
+          ? { rawResultDigest: projectionDigest(rawContent, '', 0) }
+          : {}),
+        truncated: modelContent !== rawContent || (output.ok && output.truncated),
+      },
+      display: { verb: 'Fetch' },
+    };
+  },
 };
